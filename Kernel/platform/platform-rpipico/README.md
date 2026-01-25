@@ -76,17 +76,22 @@ You do not need to install the [Raspberry Pi Pico
 SDK](https://www.raspberrypi.org/documentation/pico/getting-started/), up to
 date version will be pulled automatically from git.
 
-To build Pico and Pico W image, run: `make TARGET=rpipico SUBTARGET=pico_w
-diskimage` To build Pico 2 and Pico 2 W, run: `make TARGET=rpipico
-SUBTARGET=pico2 diskimage`
+In the **root folder** of the FUZIX repository run:
 
-Go to `Kernel/platform/platform-rpipico`. You will see `build/fuzix.uf2` and
-`filesystem.uf2`.
+* For original Pi Pico `make TARGET=rpipico SUBTARGET=pico`
+* For Pi Pico W `make TARGET=rpipico SUBTARGET=pico`
+* For Pi Pico 2 and Pico 2 W `make TARGET=rpipico SUBTARGET=pico2 diskimage`
+
+SD card image (32MB) is located at `Images/rpipico/filesys.img`.
+
+Flash image (if not using SD card) is at `Kernel/platform/platform-rpipico/filesystem.uf2`
+
+FUZIX kernel firmware is build in `Kernel/platform/platform-rpipico/build/fuzix.uf2`.
 
 ### Installing Kernel
 
 - Push and hold the BOOTSEL button as you plug usb into your computer.
-- Copy `build/fuzix.uf2` onto the storage device. After copying is done, Pico
+- Copy `Kernel/platform/platform-rpipico/filesystem.uf2` onto the storage device. After copying is done, Pico
   will restart into FUZIX.
 - To update the kernel, repeat the same procedure.
 
@@ -102,9 +107,9 @@ collection.
 
 To flash the image either:
 
-- Follow the same steps as for the kernel using `filesystem.uf2` file.
-- Using picotool
-  - Connect a terminal to UART 0 on the Pico.
+- Follow the same steps as for the kernel using `Kernel/platform/platform-rpipico/filesystem.uf2` file.
+- **OR** Using picotool
+  - Connect computer to UART 0 on the Pico using USB to UART adapter.
   - Copy `filesystem.ftl` to the board by executing `picotool load
     filesystem.ftl -t bin -o 0x10018000`.
 
@@ -113,11 +118,10 @@ To flash the image either:
 If you want to use an SD card, note that only filesystems up to 32MB are
 supported.
 
-Filesystem image files are located in `FUZIX/Images/rpipico`.
+Filesystem image files are located in `Images/rpipico/filesys.img`.
 
 Partition SD card on your computer using MBR partition scheme then create 32MB
-partition. If using Linux or MacOS you can then copy `filesys.img` or
-`filesys8.img` onto the SD card using `dd` command.
+partition. If using Linux or MacOS you can then copy `filesys.img` onto the SD card using `dd` command.
 
 ``` dd if=filesystem.img of=/dev/sdXn oflag=direct bs=8192 ```
 
