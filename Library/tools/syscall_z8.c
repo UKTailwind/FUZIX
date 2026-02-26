@@ -1,7 +1,7 @@
 /*
  *	Generate the syscall functions
  *
- *	z80 - Nice and simple as we use the compiler calling convention
+ *	z8 - Nice and simple as we use the compiler calling convention
  *	with an offset for the syscall stub
  */
 
