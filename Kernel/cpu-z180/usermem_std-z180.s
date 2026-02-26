@@ -115,19 +115,25 @@ __uput:
 	push ix
 	ld ix, #0
 	add ix, sp
+	ld a,i
+	push af
 	call uputget			; source in HL dest in DE, count in BC
 	; Z means nothing to copy
 	call nz, dma_from_kernel
 upop:
-	ei
+	pop af
 	pop ix
 	ld hl, #0
+	ret po
+	ei
 	ret
 
 __uget:
 	push ix
 	ld ix, #0
 	add ix, sp
+	ld a,i
+	push af
 	call uputget
 	call nz, dma_to_kernel		; source in HL dest in DE, count in BC
 	jr upop
@@ -150,8 +156,11 @@ __uzero:
 	jr z,zerowipe
 	ld hl,#zerowipe+1	; just need a random zero byte
 	ld a,#0x0A		; memory const to memory inc
-	di
+	ld a,i
+	push af
 	call dma_user_fixed
+	pop af
+	jp po,zerowipe
 	ei
 zerowipe:
 	ld hl,#0
