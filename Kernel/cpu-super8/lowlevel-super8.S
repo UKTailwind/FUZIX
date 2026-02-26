@@ -383,12 +383,7 @@ trap_signal:
 	ldw	rr2,#U_DATA__U_PTAB
 	push	r3
 	push	r2
-	call	_ssig
-	incw	216
-	incw	216
-	incw	216
-	incw	216
-	ret
+	jmp	_ssig
 
 ;
 ;	Now the scary stuff - preempting
@@ -456,7 +451,7 @@ not_running:
 
 	lde	r3,U_DATA__U_CURSIG
 	or	r3,r3
-	jr	nz, nosigcall
+	jr	z, nosigcall
 	call	deliver_signals_2
 nosigcall:
 	jp interrupt_pop

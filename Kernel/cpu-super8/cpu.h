@@ -31,8 +31,8 @@ typedef unsigned long clock_t;
 typedef union {            /* this structure is endian dependent */
     clock_t  full;         /* 32-bit count of ticks since boot */
     struct {
-      uint16_t low;         /* 16-bit count of ticks since boot */
-      uint16_t high;
+      uint16_t high;         /* 16-bit count of ticks since boot */
+      uint16_t low;
     } h;
 } ticks_t;
 

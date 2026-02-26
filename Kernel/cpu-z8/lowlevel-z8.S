@@ -456,10 +456,7 @@ trap_signal:
 	ld	r3,#<U_DATA__U_PTAB
 	push	r3
 	push	r2
-	call	_ssig
-	adc	255,#4
-	adc	254,#0
-	ret
+	jmp	_ssig
 
 ;
 ;	Now the scary stuff - preempting
@@ -545,7 +542,7 @@ not_running:
 	ld	r15,#<U_DATA__U_CURSIG
 	lde	r3,@rr14
 	or	r3,r3
-	jr	nz, nosigcall
+	jr	z, nosigcall
 	call	deliver_signals_2
 nosigcall:
 	jp interrupt_pop
