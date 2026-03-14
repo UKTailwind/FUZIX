@@ -123,7 +123,7 @@ static uint16_t clocks[] = {
 	8,  /* B57600 */
 	/* baud 115200 divider 4 result 115200 error 0% */
 	4,  /* B115200 */
-#elif CONFIG_SYCLK==8000000
+#elif CONFIG_SYSCLK==8000000
 	13,
 	/* baud 50 divider 10000 result 50 error 0% */
 	10000,  /* B50 */
@@ -220,7 +220,7 @@ static uint16_t clocks[] = {
 	/* baud 115200 divider 6 result 125000 error 8% */
 	0, /* B115200 not available. */
 #else
-#error "Unknown clock
+#error "Unknown clock"
 #endif
 };
 
