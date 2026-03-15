@@ -123,7 +123,7 @@ static uint16_t clocks[] = {
 	8,  /* B57600 */
 	/* baud 115200 divider 4 result 115200 error 0% */
 	4,  /* B115200 */
-#elif CONFIG_SYCLK==8000000
+#elif CONFIG_SYSCLK==8000000
 	13,
 	/* baud 50 divider 10000 result 50 error 0% */
 	10000,  /* B50 */
@@ -155,6 +155,38 @@ static uint16_t clocks[] = {
 	0, /* B57600 not available. */
 	/* baud 115200 divider 4 result 125000 error 8% */
 	0, /* B115200 not available. */
+#elif CONFIG_SYSCLK==9216000
+	15,
+	/* baud 50 divider 11520 result 50 error 0% */
+	11520,  /* B50 */
+	/* baud 75 divider 7680 result 75 error 0% */
+	7680,  /* B75 */
+	/* baud 110 divider 5236 result 110 error 0% */
+	5236,  /* B110 */
+	/* baud 134 divider 4298 result 134 error 0% */
+	4298,  /* B134 */
+	/* baud 150 divider 3840 result 150 error 0% */
+	3840,  /* B150 */
+	/* baud 300 divider 1920 result 300 error 0% */
+	1920,  /* B300 */
+	/* baud 600 divider 960 result 600 error 0% */
+	960,  /* B600 */
+	/* baud 1200 divider 480 result 1200 error 0% */
+	480,  /* B1200 */
+	/* baud 2400 divider 240 result 2400 error 0% */
+	240,  /* B2400 */
+	/* baud 4800 divider 120 result 4800 error 0% */
+	120,  /* B4800 */
+	/* baud 9600 divider 60 result 9600 error 0% */
+	60,  /* B9600 */
+	/* baud 19200 divider 30 result 19200 error 0% */
+	30,  /* B19200 */
+	/* baud 38400 divider 15 result 38400 error 0% */
+	15,  /* B38400 */
+	/* baud 57600 divider 10 result 57600 error 0% */
+	10,  /* B57600 */
+	/* baud 115200 divider 5 result 115200 error 0% */
+	5,  /* B115200 */
 #elif CONFIG_SYSCLK==10000000
 	16,
 	/* baud 50 divider 12500 result 50 error 0% */
@@ -220,7 +252,7 @@ static uint16_t clocks[] = {
 	/* baud 115200 divider 6 result 125000 error 8% */
 	0, /* B115200 not available. */
 #else
-#error "Unknown clock
+#error "Unknown clock"
 #endif
 };
 
