@@ -100,6 +100,9 @@ int sd_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t * dptr)
 	tinysd_busy = 0;
 	return 1;
 error:
+	/* Ensure the device is no longer selected */
+	sd_spi_raise_cs();
+	sd_spi_rx_byte();
 	tinysd_busy = 0;
 	return 0;
 }
