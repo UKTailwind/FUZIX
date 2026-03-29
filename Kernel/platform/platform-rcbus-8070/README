@@ -42,3 +42,13 @@ To run on the emulator
 
 rc2014-8070 -b -i /tmp/emu-ide.img
 
+Bugs at this point (probably compiler but may be other things too)
+- df produces nonsense
+FIXED - setdate errors with confusing reports
+- doing a shutdown crashes
+FIXED - fprintf on cp -i is not flushing immediately
+PART - ls -l formatting is broken and missing dates
+	(date missing still)
+FIXED - reports liberror.txt is missing on errors with rmdir etc
+FIXED - uptime reports are nonsense
+FIXED - date seems off
