@@ -450,7 +450,7 @@ __sfr __at 0xED z512_ctrl;
 static char *sysname(void)
 {
 	if (systype == 7)
-		return "n RC2014";
+		return "n RCBUS Z80";
 	if (systype == 8)
 		return "n RCBUS Z180";
 	if (systype == 9) {
@@ -458,6 +458,8 @@ static char *sysname(void)
 			return " TinyZ80";
 		return "n EasyZ80";
 	}
+	if (systype == 27)
+		return "n RC2014";
 	return "n unknown device";
 }
 /*
