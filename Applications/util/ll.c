@@ -36,6 +36,9 @@ int ls(char *path)
     static DIR dp;
     struct stat statbuf;
     static char dname[512];
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    unsigned year = t->tm_year;
 
     if (stat(path, &statbuf) != 0 || !S_ISDIR(statbuf.st_mode)) {
         printf("ls: can't stat %s\n", path);
@@ -47,7 +50,6 @@ int ls(char *path)
         return -1;
     }
 
-    /* FIXME: use readdir etc */
     while ((d = readdir(&dp)) != NULL) {
         if (d->d_name[0] == '\0')
             continue;
@@ -92,25 +94,25 @@ int ls(char *path)
             strlcat(dname, "*", sizeof(dname));
 
         printf("%12lu ",
-                (S_ISBLK(statbuf.st_mode) || S_ISCHR(statbuf.st_mode)) ?
-                    statbuf.st_rdev :
-                    statbuf.st_size);
+                (S_ISBLK(statbuf.st_mode) || S_ISCHR(statbuf.st_mode)) ? 
+                    1235/*statbuf.st_rdev */: (unsigned
+                    long)statbuf.st_size);
 
         if (statbuf.st_mtime == 0) {  /* st_mtime? */
             printf("                   ");
         } else {
-            struct tm *t = localtime(&statbuf.st_mtime);
-            printf("%2s %02d %4d   ",
-                   month[t->tm_mon], 
-                   t->tm_mday,
-                   t->tm_year);
-
-            printf("%2d:%02d",
-                   t->tm_hour,
-                   t->tm_min);
+            t = localtime(&statbuf.st_mtime);
+            printf("%s %02d ", month[t->tm_mon], t->tm_mday);
+            if (t->tm_year != year) {
+                printf( " %4d",
+                       t->tm_year + 1900);
+            } else 
+                printf("%2d:%02d",
+                       t->tm_hour,
+                       t->tm_min);
         }
 
-        printf("  %-30s\n", dname);
+        printf("  %s\n", dname);
     }
     closedir_r(&dp);
     return 0;
