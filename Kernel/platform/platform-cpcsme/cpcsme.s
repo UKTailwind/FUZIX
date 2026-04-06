@@ -304,7 +304,7 @@ copy_common_end:
 
 init_hardware:
         ; set system RAM size
-        ld hl, #128				;reserved for kernel and video
+        ld hl,#128				;reserved for kernel and video
 		ld a, (#_n_valid_maps)
 		ld b, a
 		ld de, #64				;bank size
@@ -319,7 +319,7 @@ ramsize_loop:
 		exx
 		djnz ramsize_loop
         ld (_ramsize), hl
-		ld de, #128
+		ld de,#128
 		or a
 		sbc hl, de
 		.db 0xdd ; undoc ld e,ixl
