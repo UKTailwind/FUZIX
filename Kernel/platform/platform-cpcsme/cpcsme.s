@@ -857,12 +857,11 @@ copyct:		;this is read from target bank
 ;	for general usage but is ok for reading)
 ;
 interrupt_high:
-	push af
+			; af and bc are pushed in the low stubfs
 	push de
 	push hl
 	ex af,af'
 	push af
-	push bc
 	exx
 	push bc
 	push de
@@ -917,11 +916,11 @@ pops:
 	pop de
 	pop bc
 	exx
-	pop bc
 	pop af
 	ex af,af'
 	pop hl
 	pop de
+	pop bc
 	pop af
 	ei
 	ret
