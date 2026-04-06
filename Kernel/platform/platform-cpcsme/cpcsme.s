@@ -89,35 +89,36 @@ _plt_monitor:
 	;	Not so much a monitor, waits for space key pressed - could change border to warn
 	;	Part of this code is borrowed from https://github.com/lronaldo/cpctelera
 
-	ld bc,#0x7fc2
-	out (c),c		; keep us mapped
-	ld  bc,  #0xF782         ;; [3] Configure PPI 8255: Set Both Port A and Port C as Output. 
-	out (c), c               ;; [4] 82 = 1000 0010 : (B7=1)=> I/O Mode,       (B6-5=00)=> Mode 1,          
-								;;                       (B4=0)=> Port A=Output,  (B3=0)=> Port Cu=Output, 
-								;;                       (B2=0)=> Group B, Mode 0,(B1=1)=> Port B=Input, (B0=0)=> Port Cl=Output
-	ld  bc,  #0xF40E         ;; [3] Write (0Eh = 14) on PPI 8255 Port A (F4h): the register we want to select on AY-3-8912
-	ld  e, b                 ;; [1] Save F4h into E to use it later in the loop
-	out (c), c               ;; [4]
-
-	ld  bc,  #0xF6C0         ;; [3] Write (C0h = 11 000000b) on PPI Port C (F6h): operation > select register 
-	ld  d, b                 ;; [1] Save F6h into D to use it later in the loop
-	out (c), c               ;; [4]
-	.dw #0x71ED ; out (c), 0 ;; [4] out (C), 0 => Write 0 on PPI's Port C to put PSG's in inactive mode 
-								;; .... (required in between different operations)
-	ld  bc,  #0xF792         ;; [3] Configure PPI 8255: Set Port A = Input, Port C = Output. 
-	out (c), c               ;; [4] 92h= 1001 0010 : (B7=1)=> I/O Mode,        (B6-5=00)=> Mode 1,          
-								;;                       (B4=1)=> Port A=Input,    (B3=0)=> Port Cu=Output, 
-								;;                       (B2=0)=> Group B, Mode 0, (B1=1)=> Port B=Input, (B0=0)=> Port Cl=Output
-	ld a, #0x45					;; SPACE
-	ld    b, d               ;; [1] B = F6h => Write the value of A to PPI's Port C to select next Matrix Line
-	out (c), a               ;; [4] 
-	ld    b, e               ;; [1] B = F4h => Read from PPI's Port A: Pressed/Not Pressed Values from PSG
-	in a,(c)                 
-	rla
-	jr c, _plt_monitor
+;	ld bc,#0x7fc2
+;	out (c),c		; keep us mapped
+;	ld  bc,  #0xF782         ;; [3] Configure PPI 8255: Set Both Port A and Port C as Output. 
+;	out (c), c               ;; [4] 82 = 1000 0010 : (B7=1)=> I/O Mode,       (B6-5=00)=> Mode 1,          
+;								;;                       (B4=0)=> Port A=Output,  (B3=0)=> Port Cu=Output, 
+;								;;                       (B2=0)=> Group B, Mode 0,(B1=1)=> Port B=Input, (B0=0)=> Port Cl=Output
+;	ld  bc,  #0xF40E         ;; [3] Write (0Eh = 14) on PPI 8255 Port A (F4h): the register we want to select on AY-3-8912
+;	ld  e, b                 ;; [1] Save F4h into E to use it later in the loop
+;	out (c), c               ;; [4]
+;
+;	ld  bc,  #0xF6C0         ;; [3] Write (C0h = 11 000000b) on PPI Port C (F6h): operation > select register 
+;	ld  d, b                 ;; [1] Save F6h into D to use it later in the loop
+;	out (c), c               ;; [4]
+;	.dw #0x71ED ; out (c), 0 ;; [4] out (C), 0 => Write 0 on PPI's Port C to put PSG's in inactive mode 
+;								;; .... (required in between different operations)
+;	ld  bc,  #0xF792         ;; [3] Configure PPI 8255: Set Port A = Input, Port C = Output. 
+;	out (c), c               ;; [4] 92h= 1001 0010 : (B7=1)=> I/O Mode,        (B6-5=00)=> Mode 1,          
+;								;;                       (B4=1)=> Port A=Input,    (B3=0)=> Port Cu=Output, 
+;								;;                       (B2=0)=> Group B, Mode 0, (B1=1)=> Port B=Input, (B0=0)=> Port Cl=Output
+;	ld a, #0x45					;; SPACE
+;	ld    b, d               ;; [1] B = F6h => Write the value of A to PPI's Port C to select next Matrix Line
+;	out (c), a               ;; [4] 
+;	ld    b, e               ;; [1] B = F4h => Read from PPI's Port A: Pressed/Not Pressed Values from PSG
+;	in a,(c)                 
+;	rla
+;	jr c, _plt_monitor
 
 _plt_reboot:
 	di
+	halt
 	ld bc, #0x7f89 	;this would set the firmware ready for boot into firmware with (out (c),c ; rst0)
 					;work with the 6128 firmware, fails with the 464 & the 664 firmware, need to investigate.
 	out (c), c
