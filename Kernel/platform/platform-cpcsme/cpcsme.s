@@ -373,23 +373,23 @@ write_l_stubs_loop:
 	;https://www.cpcwiki.eu/index.php/CRTC
 	;pros: max number of characters on screen and easy hardware scroll
 	;cons: 80x25 is more standard => TODO list (with mode change)
-	ld bc,#0xbc01
-	out (c),c
-	ld bc,#0xbd20
-	out (c),c
-	ld bc,#0xbc02
-	out (c),c
-	ld bc,#0xbd2A
-	out (c),c
-	ld bc,#0xbc06
-	out (c),c
-	ld bc,#0xbd20
-	out (c),c
-	ld bc,#0xbc07
-	out (c),c
-	ld bc,#0xbd22
-	out (c),c
-	ld bc,#0xbc0c           ;
+	;ld bc,#0xbc01
+	;out (c),c
+	;ld bc,#0xbd20
+	;out (c),c
+	;ld bc,#0xbc02
+	;out (c),c
+	;ld bc,#0xbd2A
+	;out (c),c
+	;ld bc,#0xbc06
+	;out (c),c
+	;ld bc,#0xbd19
+	;out (c),c
+	;ld bc,#0xbc07
+	;out (c),c
+	;ld bc,#0xbd22
+	;out (c),c
+	ld bc,#0xbc0c
 	out (c),c
 	ld bc,#0xbd10
 	out (c),c
