@@ -38,7 +38,7 @@
 #define CONFIG_VT_MULTI
 #define MAX_VT	2 /*We start supporting 2*/
 
-#define TICKSPERSEC 300   /* Ticks per second */
+#define TICKSPERSEC 50   /* Ticks per second */
 #define PROGBASE    0x0000  /* also data base */
 #define PROGLOAD    0x0100  /* also data base */
 #define PROGTOP     0xF000  /* Top of program, base of U_DATA copy */
