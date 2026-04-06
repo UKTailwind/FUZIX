@@ -473,13 +473,18 @@ rst30:	jp syscall_high
 ;
 ;	We only have 38-4F available for this in low space
 ;
-rst38:	jp interrupt_high		; Interrupt handling stub
-	nop
-	nop
-	nop
-	nop
-	nop
-	.ds 0x26
+rst38:	
+	push af
+	push bc
+	ld b,#0xf5
+	in a,(c)		;we check for vsync signal so we only process one interrupt per frame
+	rra				;to avoid re-entrancy issues
+	jp c,interrupt_high
+	pop bc
+	pop af
+	ei
+	ret
+	.ds 0x20
 my_nmi_handler:	jp nmi_handler
 stubs_low_end:
 ;------------------------------------------------------------------------------
