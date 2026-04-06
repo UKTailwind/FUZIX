@@ -580,11 +580,56 @@ _plt_doexec	.equ	0x28
 ;	This needs some properly optimized versions!
 ;	hl->source address, d->source bank, ix->destination address, e->destination bank
 ;
+ldir_from_user:
+	ld a,(_udata + U_DATA__U_PAGE)
+	ld e,#0xc2
+	ld d,a
+	jr ldir_far
 ldir_to_user:
 	ld a,(_udata + U_DATA__U_PAGE)	;
 	ld e,a
 	ld d,#0xc2			; Kernel is in 0xc2
-ldir_far:				;hl->source address, d->source bank, ix->destination address, e->destination bank
+;ldir_far:				;hl->source address, d->source bank, ix->destination address, e->destination bank
+;	exx
+;	push bc				;store bc'
+;	exx
+;	push bc				;bc->byte count
+;	ld bc,#0x7f10
+;	out (c),c
+;	ld c,#0x4b   ;Bright white
+;	out (c),c
+;	ld a,d
+;	call a_map_to_bc;bc source bank
+;	ld a,e
+;	exx
+;	call a_map_to_bc	;bc' target bank
+;	exx
+;	pop de			;de byte count
+;far_ldir_1:
+;	out (c),c			; Select source
+;	ld a,(hl)
+;	inc hl
+;	exx
+;	out (c),c			; Select target
+;	ld (ix),a
+;	inc ix
+;	exx
+;	dec de
+;	ld a,d
+;	or e
+;	jr nz, far_ldir_1
+;	ld bc,#0x7fc2
+;	out (c),c		; Select kernel
+;	ld bc,#0x7f10
+;	out (c),c                                    
+;	ld a,(_vtborder)
+;	out (c),a
+;	exx
+;	pop bc		;restore bc'
+;	exx
+;	ret
+ldir_far:				;hl->source address, d->source bank, ix->destination address, e->destination bank, bc -> byte count
+	di
 	exx
 	push bc				;store bc'
 	exx
@@ -600,6 +645,11 @@ ldir_far:				;hl->source address, d->source bank, ix->destination address, e->de
 	call a_map_to_bc	;bc' target bank
 	exx
 	pop de			;de byte count
+	push de
+	ld a,e
+	and #0xf		;remainder of byte_count\16 are copied one by one
+	jr z, far_ldir_2
+	ld e,a
 far_ldir_1:
 	out (c),c			; Select source
 	ld a,(hl)
@@ -609,25 +659,198 @@ far_ldir_1:
 	ld (ix),a
 	inc ix
 	exx
-	dec de
-	ld a,d
-	or e
+	dec e
 	jr nz, far_ldir_1
+	ld d,b
+	ld e,c
 	ld bc,#0x7fc2
 	out (c),c		; Select kernel
+	ld b,d
+	ld c,e
+far_ldir_2:
+	pop de
+	ld a,e
+	and #0xf0
+	ld e,a			;rest of byte count in e
+	or d
+	jp z, ldir_far_ret ; work is done
+	exx				;preserve registers not used
+	push de
+	push hl
+	push iy
+	ex af,af'
+	push af
+	ex af,af'
+	out (c),c			; Select target
+	exx
+	ld (cpatch2 + 1),bc	; patch source into loops ->target bank
+	ld (spcache),sp		;->target bank
+  	; Input at this point:
+    ;   D = bytecount high
+    ;   E = (bytecount low) & 0xF0   (low nibble already handled)
+
+    ; Compute blocks_lo = ((D & 0x0F) << 4) | (E >> 4)  into E
+    ld a,e
+    srl a
+    srl a
+    srl a
+    srl a
+    ld e,a                  ; E = E >> 4  (0..15)
+
+	ld a,d
+    and #0x0f
+    rlca
+    rlca
+    rlca
+    rlca                    ; A = (D & 0x0F) << 4
+    or e
+    ld e,a                  ; E = blocks_lo (0..255, 0 means 256)
+
+    ; Compute blocks_hi = D >> 4 into D
+    ld a,d
+    srl a
+    srl a
+    srl a
+    srl a
+    ld d,a                  ; D = blocks_hi (0..15)
+
+    ; Subsequent passes always run 256 blocks
+    xor a
+    ld (inner_count_patch+1),a
+
+    ; Decide copyct and initial inner counter (leave it in A for the upcoming ex af,af')
+    ld a,d
+    or a
+    jr z, .one_pass
+
+    ld a,e
+    or a
+    jr z, .full_pages
+
+    ; blocks_hi > 0 and blocks_lo != 0  => copyct = blocks_hi + 1, initial = blocks_lo
+    ld a,d
+    inc a
+    ld (copyct),a
+    ld a,e
+    jr .done
+
+.full_pages:
+    ; blocks_hi > 0 and blocks_lo == 0  => copyct = blocks_hi, initial = 0 (meaning 256)
+    ld a,d
+    ld (copyct),a
+    xor a
+    jr .done
+
+.one_pass:
+    ; blocks_hi == 0 => single pass, initial = blocks_lo
+    ld a,#1
+    ld (copyct),a
+    ld a,e
+
+.done:
+    ; A = initial inner counter for the upcoming 'ex af,af''
+
+	ex af,af'	; Save A as we need A for data transfer
+	ld sp,hl	; Base of memory to copy
+    ld de,#16	;
+    add ix,de	; 
+    ld (sp_patch_target + 1),ix ; patch target SP
+	;
+	;	Set up ready for the copy
+	;
+	; Stack pointer at the target buffer
+	out(c),c	;->switch to source bank
+	exx
+	ld (cpatch1 + 1),bc	; patch target into loop ->source bank
+copyloop:
+	pop bc		; copy 16 bytes out of source
+	pop de
+	pop hl
+	exx
+	pop de
+	pop hl
+	pop ix
+	pop iy
+	pop af
+	; We patch in source bank we must therefore read in source bank
+	ld (sp_patch_source+1),sp 
+cpatch1:		;this is executed from source bank
+	ld bc,#0		; target bank (also patched in for speed)
+	out (c),c
+sp_patch_target:	;this is executed from target bank
+	ld sp,#0
+	push af		; and put them back into the target
+	push iy	
+	push ix
+	push hl
+	push de
+	exx
+	push hl
+	push de
+	push bc
+	ex af,af'	; Get counter back
+	dec a
+	jr z, setdone	; inner loop end ?
+copy_cont:
+	; Switch back to source bank so that we get the right sp_patch
+    ld hl,#32
+    add hl,sp
+    ld (sp_patch_target+1),hl ; patch target SP
+	ex af,af'
+cpatch2:	;this is executed from target bank
+	ld bc,#0
+	out (c),c
+sp_patch_source:	;this is executed from source bank
+	ld sp,#0
+	jp copyloop
+
+;	This outer loop only runs less times so isn't quite so performance
+;	critical
+
+setdone:
+	; We count down in the target bank context
+	ld hl,#copyct
+	dec (hl)	
+	jr z, copy_over
+inner_count_patch:
+	ld a,#0
+	jr copy_cont
+copy_over:
+;
+;	Get the stack back
+;
+	ld sp,(spcache)
+	;
+	;	And the correct kernel bank.
+	;
+	ld bc,#0x7fc2
+	out (c),c		; Select kernel
+	ex af,af'		;preserve registers not used
+	pop af
+	ex af,af'
+	exx	
+	pop iy
+	pop hl
+	pop de
+	exx
+ldir_far_ret:
 	ld bc,#0x7f10
 	out (c),c                                    
 	ld a,(_vtborder)
 	out (c),a
 	exx
-	pop bc		;restore bc'
+	pop bc			;restore bc'
 	exx
+	ld a, (_int_disabled)
+	or a
+	ret nz
+	ei
 	ret
-ldir_from_user:
-	ld a,(_udata + U_DATA__U_PAGE)
-	ld e,#0xc2
-	ld d,a
-	jr ldir_far
+spcache:	;this is read from target bank
+	.word 0
+copyct:		;this is read from target bank
+	.byte 0
+
 ;
 ;	High stubs. Present in each bank in the top 256 bytes
 ;	of the available space (remembering F000-FFFF is not available
