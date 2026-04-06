@@ -167,6 +167,13 @@ init_early:
 		ld de, #0x100
 		ld bc, #copy_common_end-#copy_common
 		ldir
+								; Write the stubs for video map
+		ld hl,#stubs_low
+		ld de,#0x0000
+		ld bc,#stubs_low_end-stubs_low
+		ldir
+;		ld a,#0xc9				;temp solution, could we mark c1 map and let it be interrupted by kernel as common is maped in?
+;		ld (0x38),a				;for now ignore interrupts in this map
 		jp 0x100
 early_ret:
 		ld bc, #0x7fc2 			;Kernel map
@@ -258,14 +265,6 @@ not_valid:
 		ld bc, #0x3fff
 		ld (hl), #0
 		ldir
-			; Write the stubs for video map
-		ld hl,#stubs_low
-		ld de,#0x0000
-		ld bc,#stubs_low_end-stubs_low
-		ldir
-;		ld a,#0xc9				;temp solution, could we mark c1 map and let it be interrupted by kernel as common is maped in?
-;		ld (0x38),a				;for now ignore interrupts in this map
-		
 		jp early_ret
 nmaps:
         .db 15
@@ -330,11 +329,30 @@ ramsize_loop:
 		sbc hl, de
         ld (_procmem), hl
 
-	; Write the stubs for our bank
+	; Write the stubs for kernel bank
 	ld hl,#stubs_low
 	ld de,#0x0000
 	ld bc,#stubs_low_end-stubs_low
 	ldir
+	
+	; Write the stubs for the rest of banks
+	ld a, (#_n_valid_maps)
+	ld hl,#MMR_array_for_user_bank
+write_l_stubs_loop:
+	; From kernel to user bank
+	ld d,#0xc2
+	ld e,(hl)
+	push hl
+	ld hl,#stubs_low
+	ld ix,#0x0000
+	ld bc,#stubs_low_end-stubs_low
+	push af
+	call ldir_far
+	pop af
+	pop hl
+	inc hl
+	dec a
+	jr nz, write_l_stubs_loop
 
 	ld bc,#0x7f10
 	out (c),c
@@ -383,91 +401,14 @@ ramsize_loop:
 
         ret
 
-;------------------------------------------------------------------------------
-; COMMON MEMORY PROCEDURES FOLLOW
 
-	.area _COMMONMEM
-
-;
-;	We switch in one go so we don't have these helpers. This means
-;	we need custom I/O wrappers and custom usercopy functions.
-
-
-map_save_low:
-map_kernel_low:
-map_restore_low:
-map_user_low:
-map_page_low:
-	ret
-
-_program_vectors:
-	; Write the stubs for our bank
-	; From kernel to user bank
-	pop de
-	pop hl
-	push hl
-	push de
-	push ix
-	; From kernel to user bank
-	ld d,#0xc2
-	ld e,(hl)
-	; Write the stubs for our bank
-	ld hl,#stubs_low
-	ld ix,#0x0000
-	ld bc,#stubs_low_end-stubs_low
-	call ldir_far
-	pop ix
-	ret
-
-
-; outchar: Print the char in A
-outchar:
-	di
-	push bc
-	ld bc,#0xfbd0
-	out(c),a
-	ld (_tmpout), a
-	push de
-	push hl
-	push ix
-	ld hl, #1
-	push hl
-	ld hl, #_tmpout
-	push hl
-	call _vtoutput
-	pop af
-	pop af
-	pop ix
-	pop hl
-	pop de
-	pop bc
-	ld a,(_int_disabled)
-	or a
-	jr nz,cont_no_int_oc
-	ei
-cont_no_int_oc:
-   ret
-
-_tmpout:
-	.db 1
-
-;
-; Don't be tempted to put the symbol in the code below ..it's relocated
-; to zero. Instead define where it ends up.
-;
-
-_plt_doexec	.equ	0x28
-
-        .area _COMMONMEM
-
-	.globl rst38
-	.globl stubs_low
+;	.globl rst38
+;	.globl stubs_low
 	.globl ___sdcc_enter_ix
 ;
 ;	This exists at the bottom of each bank. We move these into place
 ;	from discard.
 ;
-
 stubs_low:
 	.byte 0xC9	; FIXME changed from c3 to keep going!!
 	.word 0		; cp/m emu changes this
@@ -541,7 +482,83 @@ rst38:	jp interrupt_high		; Interrupt handling stub
 	.ds 0x26
 my_nmi_handler:	jp nmi_handler
 stubs_low_end:
+;------------------------------------------------------------------------------
+; COMMON MEMORY PROCEDURES FOLLOW
 
+	.area _COMMONMEM
+
+;
+;	We switch in one go so we don't have these helpers. This means
+;	we need custom I/O wrappers and custom usercopy functions.
+
+
+map_save_low:
+map_kernel_low:
+map_restore_low:
+map_user_low:
+map_page_low:
+	ret
+
+_program_vectors:
+	; Write the stubs for our bank
+	; From kernel to user bank
+	ret
+;	pop de
+;	pop hl
+;	push hl
+;	push de
+;	push ix
+;	; From kernel to user bank
+;	ld d,#0xc2
+;	ld e,(hl)
+;	; Write the stubs for our bank
+;	ld hl,#stubs_low
+;	ld ix,#0x0000
+;	ld bc,#stubs_low_end-stubs_low
+;	call ldir_far
+;	pop ix
+;	ret
+
+
+; outchar: Print the char in A
+outchar:
+	di
+	push bc
+	ld bc,#0xfbd0
+	out(c),a
+	ld (_tmpout), a
+	push de
+	push hl
+	push ix
+	ld hl, #1
+	push hl
+	ld hl, #_tmpout
+	push hl
+	call _vtoutput
+	pop af
+	pop af
+	pop ix
+	pop hl
+	pop de
+	pop bc
+	ld a,(_int_disabled)
+	or a
+	jr nz,cont_no_int_oc
+	ei
+cont_no_int_oc:
+   ret
+
+_tmpout:
+	.db 1
+
+;
+; Don't be tempted to put the symbol in the code below ..it's relocated
+; to zero. Instead define where it ends up.
+;
+
+_plt_doexec	.equ	0x28
+
+        .area _COMMONMEM
 
 ;
 ;	This stuff needs to live somewhere, anywhere out of the way (so we
