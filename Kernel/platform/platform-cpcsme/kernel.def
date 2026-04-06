@@ -6,6 +6,7 @@ U_DATA_STASH		    .equ 0xF000	      ; F000-F200
 
 PROGBASE		    .equ 0x0000
 PROGLOAD		    .equ 0x0100
+PROGTOP				.equ 0xF000
 
 Z80_TYPE		    .equ 1
 
