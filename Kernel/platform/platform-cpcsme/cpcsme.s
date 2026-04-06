@@ -1035,24 +1035,18 @@ ld_ca_and_ret_2:
 	; and leap into user space
 	jp (hl)
 
-map_kernel:
+map_kernel:	; stack must be in common memory of c1 and c2 maps
 	push bc
 	ld bc,#0x7fc2
-	out (c),c
-	push af
-	ld a,c
-	ld (#_MMR_for_this_bank),a ; mark kernel bank with its MMR value
-	pop af
-	pop bc
-	ret
-
-map_video:
+	jr map_v_or_k
+map_video: ; stack must be in common memory of c1 and c2 maps
 	push bc	
 	ld bc,#0x7fc1
+map_v_or_k:
 	out (c),c	
 	push af
 	ld a,c
-	ld (#_MMR_for_this_bank),a ; mark kernel bank with video map MMR value
+	ld (#_MMR_for_this_bank),a ; mark bank with map MMR value
 	pop af
 	pop bc
 	ret
