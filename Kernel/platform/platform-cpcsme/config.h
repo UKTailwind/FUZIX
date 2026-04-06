@@ -31,10 +31,10 @@
 #define MAP_TRANS_16TO8(M)	(uint8_t)(((M) - (((M) & 0x7F00) == 0x7F00) ? 0x7F00 : 0x7E40))
 */
 /* Vt definitions */
-#define VT_WIDTH	64
-#define VT_HEIGHT	32
-#define VT_RIGHT	63
-#define VT_BOTTOM	31
+#define VT_WIDTH	80
+#define VT_HEIGHT	25
+#define VT_RIGHT	79
+#define VT_BOTTOM	24
 #define CONFIG_VT_MULTI
 #define MAX_VT	2 /*We start supporting 2*/
 
