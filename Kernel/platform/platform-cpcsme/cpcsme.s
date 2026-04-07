@@ -89,35 +89,36 @@ _plt_monitor:
 	;	Not so much a monitor, waits for space key pressed - could change border to warn
 	;	Part of this code is borrowed from https://github.com/lronaldo/cpctelera
 
-	ld bc,#0x7fc2
-	out (c),c		; keep us mapped
-	ld  bc,  #0xF782         ;; [3] Configure PPI 8255: Set Both Port A and Port C as Output. 
-	out (c), c               ;; [4] 82 = 1000 0010 : (B7=1)=> I/O Mode,       (B6-5=00)=> Mode 1,          
-								;;                       (B4=0)=> Port A=Output,  (B3=0)=> Port Cu=Output, 
-								;;                       (B2=0)=> Group B, Mode 0,(B1=1)=> Port B=Input, (B0=0)=> Port Cl=Output
-	ld  bc,  #0xF40E         ;; [3] Write (0Eh = 14) on PPI 8255 Port A (F4h): the register we want to select on AY-3-8912
-	ld  e, b                 ;; [1] Save F4h into E to use it later in the loop
-	out (c), c               ;; [4]
-
-	ld  bc,  #0xF6C0         ;; [3] Write (C0h = 11 000000b) on PPI Port C (F6h): operation > select register 
-	ld  d, b                 ;; [1] Save F6h into D to use it later in the loop
-	out (c), c               ;; [4]
-	.dw #0x71ED ; out (c), 0 ;; [4] out (C), 0 => Write 0 on PPI's Port C to put PSG's in inactive mode 
-								;; .... (required in between different operations)
-	ld  bc,  #0xF792         ;; [3] Configure PPI 8255: Set Port A = Input, Port C = Output. 
-	out (c), c               ;; [4] 92h= 1001 0010 : (B7=1)=> I/O Mode,        (B6-5=00)=> Mode 1,          
-								;;                       (B4=1)=> Port A=Input,    (B3=0)=> Port Cu=Output, 
-								;;                       (B2=0)=> Group B, Mode 0, (B1=1)=> Port B=Input, (B0=0)=> Port Cl=Output
-	ld a, #0x45					;; SPACE
-	ld    b, d               ;; [1] B = F6h => Write the value of A to PPI's Port C to select next Matrix Line
-	out (c), a               ;; [4] 
-	ld    b, e               ;; [1] B = F4h => Read from PPI's Port A: Pressed/Not Pressed Values from PSG
-	in a,(c)                 
-	rla
-	jr c, _plt_monitor
+;	ld bc,#0x7fc2
+;	out (c),c		; keep us mapped
+;	ld  bc,  #0xF782         ;; [3] Configure PPI 8255: Set Both Port A and Port C as Output. 
+;	out (c), c               ;; [4] 82 = 1000 0010 : (B7=1)=> I/O Mode,       (B6-5=00)=> Mode 1,          
+;								;;                       (B4=0)=> Port A=Output,  (B3=0)=> Port Cu=Output, 
+;								;;                       (B2=0)=> Group B, Mode 0,(B1=1)=> Port B=Input, (B0=0)=> Port Cl=Output
+;	ld  bc,  #0xF40E         ;; [3] Write (0Eh = 14) on PPI 8255 Port A (F4h): the register we want to select on AY-3-8912
+;	ld  e, b                 ;; [1] Save F4h into E to use it later in the loop
+;	out (c), c               ;; [4]
+;
+;	ld  bc,  #0xF6C0         ;; [3] Write (C0h = 11 000000b) on PPI Port C (F6h): operation > select register 
+;	ld  d, b                 ;; [1] Save F6h into D to use it later in the loop
+;	out (c), c               ;; [4]
+;	.dw #0x71ED ; out (c), 0 ;; [4] out (C), 0 => Write 0 on PPI's Port C to put PSG's in inactive mode 
+;								;; .... (required in between different operations)
+;	ld  bc,  #0xF792         ;; [3] Configure PPI 8255: Set Port A = Input, Port C = Output. 
+;	out (c), c               ;; [4] 92h= 1001 0010 : (B7=1)=> I/O Mode,        (B6-5=00)=> Mode 1,          
+;								;;                       (B4=1)=> Port A=Input,    (B3=0)=> Port Cu=Output, 
+;								;;                       (B2=0)=> Group B, Mode 0, (B1=1)=> Port B=Input, (B0=0)=> Port Cl=Output
+;	ld a, #0x45					;; SPACE
+;	ld    b, d               ;; [1] B = F6h => Write the value of A to PPI's Port C to select next Matrix Line
+;	out (c), a               ;; [4] 
+;	ld    b, e               ;; [1] B = F4h => Read from PPI's Port A: Pressed/Not Pressed Values from PSG
+;	in a,(c)                 
+;	rla
+;	jr c, _plt_monitor
 
 _plt_reboot:
 	di
+	halt
 	ld bc, #0x7f89 	;this would set the firmware ready for boot into firmware with (out (c),c ; rst0)
 					;work with the 6128 firmware, fails with the 464 & the 664 firmware, need to investigate.
 	out (c), c
@@ -166,6 +167,13 @@ init_early:
 		ld de, #0x100
 		ld bc, #copy_common_end-#copy_common
 		ldir
+								; Write the stubs for video map
+		ld hl,#stubs_low
+		ld de,#0x0000
+		ld bc,#stubs_low_end-stubs_low
+		ldir
+;		ld a,#0xc9				;temp solution, could we mark c1 map and let it be interrupted by kernel as common is maped in?
+;		ld (0x38),a				;for now ignore interrupts in this map
 		jp 0x100
 early_ret:
 		ld bc, #0x7fc2 			;Kernel map
@@ -257,14 +265,6 @@ not_valid:
 		ld bc, #0x3fff
 		ld (hl), #0
 		ldir
-			; Write the stubs for video map
-		ld hl,#stubs_low
-		ld de,#0x0000
-		ld bc,#stubs_low_end-stubs_low
-		ldir
-;		ld a,#0xc9				;temp solution, could we mark c1 map and let it be interrupted by kernel as common is maped in?
-;		ld (0x38),a				;for now ignore interrupts in this map
-		
 		jp early_ret
 nmaps:
         .db 15
@@ -304,7 +304,7 @@ copy_common_end:
 
 init_hardware:
         ; set system RAM size
-        ld hl, #128				;reserved for kernel and video
+        ld hl,#128				;reserved for kernel and video
 		ld a, (#_n_valid_maps)
 		ld b, a
 		ld de, #64				;bank size
@@ -319,7 +319,7 @@ ramsize_loop:
 		exx
 		djnz ramsize_loop
         ld (_ramsize), hl
-		ld de, #128
+		ld de,#128
 		or a
 		sbc hl, de
 		.db 0xdd ; undoc ld e,ixl
@@ -329,11 +329,30 @@ ramsize_loop:
 		sbc hl, de
         ld (_procmem), hl
 
-	; Write the stubs for our bank
+	; Write the stubs for kernel bank
 	ld hl,#stubs_low
 	ld de,#0x0000
 	ld bc,#stubs_low_end-stubs_low
 	ldir
+	
+	; Write the stubs for the rest of banks
+	ld a, (#_n_valid_maps)
+	ld hl,#MMR_array_for_user_bank
+write_l_stubs_loop:
+	; From kernel to user bank
+	ld d,#0xc2
+	ld e,(hl)
+	push hl
+	ld hl,#stubs_low
+	ld ix,#0x0000
+	ld bc,#stubs_low_end-stubs_low
+	push af
+	call ldir_far
+	pop af
+	pop hl
+	inc hl
+	dec a
+	jr nz, write_l_stubs_loop
 
 	ld bc,#0x7f10
 	out (c),c
@@ -354,23 +373,23 @@ ramsize_loop:
 	;https://www.cpcwiki.eu/index.php/CRTC
 	;pros: max number of characters on screen and easy hardware scroll
 	;cons: 80x25 is more standard => TODO list (with mode change)
-	ld bc,#0xbc01
-	out (c),c
-	ld bc,#0xbd20
-	out (c),c
-	ld bc,#0xbc02
-	out (c),c
-	ld bc,#0xbd2A
-	out (c),c
-	ld bc,#0xbc06
-	out (c),c
-	ld bc,#0xbd20
-	out (c),c
-	ld bc,#0xbc07
-	out (c),c
-	ld bc,#0xbd22
-	out (c),c
-	ld bc,#0xbc0c           ;
+	;ld bc,#0xbc01
+	;out (c),c
+	;ld bc,#0xbd20
+	;out (c),c
+	;ld bc,#0xbc02
+	;out (c),c
+	;ld bc,#0xbd2A
+	;out (c),c
+	;ld bc,#0xbc06
+	;out (c),c
+	;ld bc,#0xbd19
+	;out (c),c
+	;ld bc,#0xbc07
+	;out (c),c
+	;ld bc,#0xbd22
+	;out (c),c
+	ld bc,#0xbc0c
 	out (c),c
 	ld bc,#0xbd10
 	out (c),c
@@ -382,91 +401,14 @@ ramsize_loop:
 
         ret
 
-;------------------------------------------------------------------------------
-; COMMON MEMORY PROCEDURES FOLLOW
 
-	.area _COMMONMEM
-
-;
-;	We switch in one go so we don't have these helpers. This means
-;	we need custom I/O wrappers and custom usercopy functions.
-
-
-map_save_low:
-map_kernel_low:
-map_restore_low:
-map_user_low:
-map_page_low:
-	ret
-
-_program_vectors:
-	; Write the stubs for our bank
-	; From kernel to user bank
-	pop de
-	pop hl
-	push hl
-	push de
-	push ix
-	; From kernel to user bank
-	ld d,#0xc2
-	ld e,(hl)
-	; Write the stubs for our bank
-	ld hl,#stubs_low
-	ld ix,#0x0000
-	ld bc,#stubs_low_end-stubs_low
-	call ldir_far
-	pop ix
-	ret
-
-
-; outchar: Print the char in A
-outchar:
-	di
-	push bc
-	ld bc,#0xfbd0
-	out(c),a
-	ld (_tmpout), a
-	push de
-	push hl
-	push ix
-	ld hl, #1
-	push hl
-	ld hl, #_tmpout
-	push hl
-	call _vtoutput
-	pop af
-	pop af
-	pop ix
-	pop hl
-	pop de
-	pop bc
-	ld a,(_int_disabled)
-	or a
-	jr nz,cont_no_int_oc
-	ei
-cont_no_int_oc:
-   ret
-
-_tmpout:
-	.db 1
-
-;
-; Don't be tempted to put the symbol in the code below ..it's relocated
-; to zero. Instead define where it ends up.
-;
-
-_plt_doexec	.equ	0x28
-
-        .area _COMMONMEM
-
-	.globl rst38
-	.globl stubs_low
+;	.globl rst38
+;	.globl stubs_low
 	.globl ___sdcc_enter_ix
 ;
 ;	This exists at the bottom of each bank. We move these into place
 ;	from discard.
 ;
-
 stubs_low:
 	.byte 0xC9	; FIXME changed from c3 to keep going!!
 	.word 0		; cp/m emu changes this
@@ -531,16 +473,97 @@ rst30:	jp syscall_high
 ;
 ;	We only have 38-4F available for this in low space
 ;
-rst38:	jp interrupt_high		; Interrupt handling stub
-	nop
-	nop
-	nop
-	nop
-	nop
-	.ds 0x26
+rst38:	
+	push af
+	push bc
+	ld b,#0xf5
+	in a,(c)		;we check for vsync signal so we only process one interrupt per frame
+	rra				;to avoid re-entrancy issues
+	jp c,interrupt_high
+	pop bc
+	pop af
+	ei
+	ret
+	.ds 0x20
 my_nmi_handler:	jp nmi_handler
 stubs_low_end:
+;------------------------------------------------------------------------------
+; COMMON MEMORY PROCEDURES FOLLOW
 
+	.area _COMMONMEM
+
+;
+;	We switch in one go so we don't have these helpers. This means
+;	we need custom I/O wrappers and custom usercopy functions.
+
+
+map_save_low:
+map_kernel_low:
+map_restore_low:
+map_user_low:
+map_page_low:
+	ret
+
+_program_vectors:
+	; Write the stubs for our bank
+	; From kernel to user bank
+	ret
+;	pop de
+;	pop hl
+;	push hl
+;	push de
+;	push ix
+;	; From kernel to user bank
+;	ld d,#0xc2
+;	ld e,(hl)
+;	; Write the stubs for our bank
+;	ld hl,#stubs_low
+;	ld ix,#0x0000
+;	ld bc,#stubs_low_end-stubs_low
+;	call ldir_far
+;	pop ix
+;	ret
+
+
+; outchar: Print the char in A
+outchar:
+	di
+	push bc
+	ld bc,#0xfbd0
+	out(c),a
+	ld (_tmpout), a
+	push de
+	push hl
+	push ix
+	ld hl, #1
+	push hl
+	ld hl, #_tmpout
+	push hl
+	call _vtoutput
+	pop af
+	pop af
+	pop ix
+	pop hl
+	pop de
+	pop bc
+	ld a,(_int_disabled)
+	or a
+	jr nz,cont_no_int_oc
+	ei
+cont_no_int_oc:
+   ret
+
+_tmpout:
+	.db 1
+
+;
+; Don't be tempted to put the symbol in the code below ..it's relocated
+; to zero. Instead define where it ends up.
+;
+
+_plt_doexec	.equ	0x28
+
+        .area _COMMONMEM
 
 ;
 ;	This stuff needs to live somewhere, anywhere out of the way (so we
@@ -557,11 +580,56 @@ stubs_low_end:
 ;	This needs some properly optimized versions!
 ;	hl->source address, d->source bank, ix->destination address, e->destination bank
 ;
+ldir_from_user:
+	ld a,(_udata + U_DATA__U_PAGE)
+	ld e,#0xc2
+	ld d,a
+	jr ldir_far
 ldir_to_user:
 	ld a,(_udata + U_DATA__U_PAGE)	;
 	ld e,a
 	ld d,#0xc2			; Kernel is in 0xc2
-ldir_far:				;hl->source address, d->source bank, ix->destination address, e->destination bank
+;ldir_far:				;hl->source address, d->source bank, ix->destination address, e->destination bank
+;	exx
+;	push bc				;store bc'
+;	exx
+;	push bc				;bc->byte count
+;	ld bc,#0x7f10
+;	out (c),c
+;	ld c,#0x4b   ;Bright white
+;	out (c),c
+;	ld a,d
+;	call a_map_to_bc;bc source bank
+;	ld a,e
+;	exx
+;	call a_map_to_bc	;bc' target bank
+;	exx
+;	pop de			;de byte count
+;far_ldir_1:
+;	out (c),c			; Select source
+;	ld a,(hl)
+;	inc hl
+;	exx
+;	out (c),c			; Select target
+;	ld (ix),a
+;	inc ix
+;	exx
+;	dec de
+;	ld a,d
+;	or e
+;	jr nz, far_ldir_1
+;	ld bc,#0x7fc2
+;	out (c),c		; Select kernel
+;	ld bc,#0x7f10
+;	out (c),c                                    
+;	ld a,(_vtborder)
+;	out (c),a
+;	exx
+;	pop bc		;restore bc'
+;	exx
+;	ret
+ldir_far:				;hl->source address, d->source bank, ix->destination address, e->destination bank, bc -> byte count
+	di
 	exx
 	push bc				;store bc'
 	exx
@@ -577,6 +645,11 @@ ldir_far:				;hl->source address, d->source bank, ix->destination address, e->de
 	call a_map_to_bc	;bc' target bank
 	exx
 	pop de			;de byte count
+	push de
+	ld a,e
+	and #0xf		;remainder of byte_count\16 are copied one by one
+	jr z, far_ldir_2
+	ld e,a
 far_ldir_1:
 	out (c),c			; Select source
 	ld a,(hl)
@@ -586,37 +659,209 @@ far_ldir_1:
 	ld (ix),a
 	inc ix
 	exx
-	dec de
-	ld a,d
-	or e
+	dec e
 	jr nz, far_ldir_1
+	ld d,b
+	ld e,c
 	ld bc,#0x7fc2
 	out (c),c		; Select kernel
+	ld b,d
+	ld c,e
+far_ldir_2:
+	pop de
+	ld a,e
+	and #0xf0
+	ld e,a			;rest of byte count in e
+	or d
+	jp z, ldir_far_ret ; work is done
+	exx				;preserve registers not used
+	push de
+	push hl
+	push iy
+	ex af,af'
+	push af
+	ex af,af'
+	out (c),c			; Select target
+	exx
+	ld (cpatch2 + 1),bc	; patch source into loops ->target bank
+	ld (spcache),sp		;->target bank
+  	; Input at this point:
+    ;   D = bytecount high
+    ;   E = (bytecount low) & 0xF0   (low nibble already handled)
+
+    ; Compute blocks_lo = ((D & 0x0F) << 4) | (E >> 4)  into E
+    ld a,e
+    srl a
+    srl a
+    srl a
+    srl a
+    ld e,a                  ; E = E >> 4  (0..15)
+
+	ld a,d
+    and #0x0f
+    rlca
+    rlca
+    rlca
+    rlca                    ; A = (D & 0x0F) << 4
+    or e
+    ld e,a                  ; E = blocks_lo (0..255, 0 means 256)
+
+    ; Compute blocks_hi = D >> 4 into D
+    ld a,d
+    srl a
+    srl a
+    srl a
+    srl a
+    ld d,a                  ; D = blocks_hi (0..15)
+
+    ; Subsequent passes always run 256 blocks
+    xor a
+    ld (inner_count_patch+1),a
+
+    ; Decide copyct and initial inner counter (leave it in A for the upcoming ex af,af')
+    ld a,d
+    or a
+    jr z, .one_pass
+
+    ld a,e
+    or a
+    jr z, .full_pages
+
+    ; blocks_hi > 0 and blocks_lo != 0  => copyct = blocks_hi + 1, initial = blocks_lo
+    ld a,d
+    inc a
+    ld (copyct),a
+    ld a,e
+    jr .done
+
+.full_pages:
+    ; blocks_hi > 0 and blocks_lo == 0  => copyct = blocks_hi, initial = 0 (meaning 256)
+    ld a,d
+    ld (copyct),a
+    xor a
+    jr .done
+
+.one_pass:
+    ; blocks_hi == 0 => single pass, initial = blocks_lo
+    ld a,#1
+    ld (copyct),a
+    ld a,e
+
+.done:
+    ; A = initial inner counter for the upcoming 'ex af,af''
+
+	ex af,af'	; Save A as we need A for data transfer
+	ld sp,hl	; Base of memory to copy
+    ld de,#16	;
+    add ix,de	; 
+    ld (sp_patch_target + 1),ix ; patch target SP
+	;
+	;	Set up ready for the copy
+	;
+	; Stack pointer at the target buffer
+	out(c),c	;->switch to source bank
+	exx
+	ld (cpatch1 + 1),bc	; patch target into loop ->source bank
+copyloop:
+	pop bc		; copy 16 bytes out of source
+	pop de
+	pop hl
+	exx
+	pop de
+	pop hl
+	pop ix
+	pop iy
+	pop af
+	; We patch in source bank we must therefore read in source bank
+	ld (sp_patch_source+1),sp 
+cpatch1:		;this is executed from source bank
+	ld bc,#0		; target bank (also patched in for speed)
+	out (c),c
+sp_patch_target:	;this is executed from target bank
+	ld sp,#0
+	push af		; and put them back into the target
+	push iy	
+	push ix
+	push hl
+	push de
+	exx
+	push hl
+	push de
+	push bc
+	ex af,af'	; Get counter back
+	dec a
+	jr z, setdone	; inner loop end ?
+copy_cont:
+	; Switch back to source bank so that we get the right sp_patch
+    ld hl,#32
+    add hl,sp
+    ld (sp_patch_target+1),hl ; patch target SP
+	ex af,af'
+cpatch2:	;this is executed from target bank
+	ld bc,#0
+	out (c),c
+sp_patch_source:	;this is executed from source bank
+	ld sp,#0
+	jp copyloop
+
+;	This outer loop only runs less times so isn't quite so performance
+;	critical
+
+setdone:
+	; We count down in the target bank context
+	ld hl,#copyct
+	dec (hl)	
+	jr z, copy_over
+inner_count_patch:
+	ld a,#0
+	jr copy_cont
+copy_over:
+;
+;	Get the stack back
+;
+	ld sp,(spcache)
+	;
+	;	And the correct kernel bank.
+	;
+	ld bc,#0x7fc2
+	out (c),c		; Select kernel
+	ex af,af'		;preserve registers not used
+	pop af
+	ex af,af'
+	exx	
+	pop iy
+	pop hl
+	pop de
+	exx
+ldir_far_ret:
 	ld bc,#0x7f10
 	out (c),c                                    
 	ld a,(_vtborder)
 	out (c),a
 	exx
-	pop bc		;restore bc'
+	pop bc			;restore bc'
 	exx
+	ld a, (_int_disabled)
+	or a
+	ret nz
+	ei
 	ret
-ldir_from_user:
-	ld a,(_udata + U_DATA__U_PAGE)
-	ld e,#0xc2
-	ld d,a
-	jr ldir_far
+spcache:	;this is read from target bank
+	.word 0
+copyct:		;this is read from target bank
+	.byte 0
+
 ;
 ;	High stubs. Present in each bank in the top 256 bytes
 ;	of the available space (remembering F000-FFFF is not available
 ;	for general usage but is ok for reading)
 ;
 interrupt_high:
-	push af
+			; af and bc are pushed in the low stubfs
 	push de
 	push hl
 	ex af,af'
 	push af
-	push bc
 	exx
 	push bc
 	push de
@@ -671,11 +916,11 @@ pops:
 	pop de
 	pop bc
 	exx
-	pop bc
 	pop af
 	ex af,af'
 	pop hl
 	pop de
+	pop bc
 	pop af
 	ei
 	ret
@@ -790,24 +1035,18 @@ ld_ca_and_ret_2:
 	; and leap into user space
 	jp (hl)
 
-map_kernel:
+map_kernel:	; stack must be in common memory of c1 and c2 maps
 	push bc
 	ld bc,#0x7fc2
-	out (c),c
-	push af
-	ld a,c
-	ld (#_MMR_for_this_bank),a ; mark kernel bank with its MMR value
-	pop af
-	pop bc
-	ret
-
-map_video:
+	jr map_v_or_k
+map_video: ; stack must be in common memory of c1 and c2 maps
 	push bc	
 	ld bc,#0x7fc1
+map_v_or_k:
 	out (c),c	
 	push af
 	ld a,c
-	ld (#_MMR_for_this_bank),a ; mark kernel bank with video map MMR value
+	ld (#_MMR_for_this_bank),a ; mark bank with map MMR value
 	pop af
 	pop bc
 	ret

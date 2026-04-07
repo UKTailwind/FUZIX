@@ -28,7 +28,7 @@ uint8_t plt_param(char *p)
 
 void plt_copyright(void)
 {
-	kprintf("Amstrad CPC with standard memory expansion platform\nCopyright (c) 2024-2025 Antonio J. Casado Alias\n");
+	kprintf("Amstrad CPC with standard memory expansion platform\nCopyright (c) 2024-2026 Antonio J. Casado Alias\n");
 }
 
 #if (defined CONFIG_USIFAC_SERIAL || defined CONFIG_USIFAC_CH376)

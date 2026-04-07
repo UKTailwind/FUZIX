@@ -17,7 +17,6 @@
         .globl cpc_clear_across
         .globl cpc_do_beep
 	.globl _fontdata_8x8
-	.globl _curattr
 	.globl _vtattr
 
 
@@ -32,9 +31,7 @@ cpc_plot_char:
         push de
         push hl
 	push de
-        push bc
         call videopos
-        pop bc
         ld h, #0            ; calculating offset in font table
         ld l, c
         add hl,hl
@@ -45,7 +42,7 @@ cpc_plot_char:
         di
         ld bc, #0x7faa ;RMR ->UROM disable LROM enable
         out (c),c
-        ld b,#7
+        ld b,#6
         ld a,(hl)
         VIDEO_MAP
         ld (de),a
@@ -57,6 +54,11 @@ plot_char_line:
         ld a,(hl)
         ld (de),a
         djnz plot_char_line
+        ld a,d
+        add a,#8             
+        ld  d,a              
+        inc hl
+        ld a,(hl)
         ld bc, #0x7fae ;RMR ->UROM disable LROM disable
         out (c),c
         ex af,af'
@@ -96,7 +98,7 @@ clear_next_line:
         push de
         ld d, #0            ; from the column #0
         ld b, d             ; b = 0
-        ld c, #64           ; clear 64 cols
+        ld c, #80           ; clear 80 cols
         push bc
         push de
         call _clear_across
@@ -124,9 +126,7 @@ cpc_clear_across:
 	or a
 	ret z		    ; No work to do - bail out
 	push de
-	push bc
         call videopos       ; first pixel line of first character in DE
-        pop bc
         push de
         pop hl              ; copy to hl
         ld b,#8
@@ -134,11 +134,20 @@ cpc_clear_across:
 clear_line:
         ld a, b
         push af
-        xor a
         push bc
-clear_scanline:        
+clear_scanline:        ;see firmware SCR_NEXT_BYTE
+        xor a
         ld (de),a
-        inc de
+        inc e
+        jr nz,clear_scanline_cont
+        inc d
+        ld a,d
+        and #7
+        jr nz,clear_scanline_cont
+        ld a,d
+        sub #8
+        ld d,a
+clear_scanline_cont:
         dec c
         jr nz, clear_scanline
         ex de, hl
@@ -192,8 +201,6 @@ cpc_cursor_off:
         VIDEO_UNMAP
 	ret
 
-_curattr:
-	.db 7
 cursorpos:
         .dw 0
 saved_cursor_byte:
@@ -206,7 +213,7 @@ _scroll_up:
 	.endif
 cpc_scroll_up:
         ld hl, (CRTC_offset)
-        ld bc, #32           ; one crtc character are two bytes
+        ld bc, #40           ; one crtc character are two bytes
         add hl,bc
 
 set_hardware_scroll:
@@ -230,13 +237,13 @@ check_tty1:
 do_crtc_scroll:
         ld bc,#0xbc0c           ;select CRTC R12
         out (c),c
-        ld b,#0xbd                
+        inc b                
         ld hl,(CRTC_offset)
         or h
         out (c),a
         ld bc,#0xbc0d           ;select CRTC R13
         out (c),c
-        ld b,#0xbd
+        inc b
         out (c),l
         ret 
 
@@ -245,38 +252,39 @@ _scroll_down:
 	.endif
 cpc_scroll_down:
         ld hl, (CRTC_offset)
-        ld bc, #32           ; one crtc character are two bytes
+        ld bc, #40           ; one crtc character are two bytes
         or a
         sbc hl,bc
         jr set_hardware_scroll
 
 videopos: ;get x->d, y->e => set de address for top byte of char
-        ld l,e
-        ld h,#0
+        ;from firmware function SCR_CHAR_POSITION
+        ex de,hl
+        ld e,h
+        ld d,#0
+        ld h,d
+        push de
+        ld d,h
+        ld e,l
+        add hl,hl
+        add hl,hl
+        add hl,de
         add hl,hl
         add hl,hl
         add hl,hl
         add hl,hl
-        add hl,hl
-        add hl,hl
-        ld e,d
-        ld a,(#screenbase)
-        ld d,a
+        pop de
         add hl,de
         ld de,(#scroll_offset)
         add hl,de
-        cp #0x80
-        jr z,tty2
-        res 7,h
-        set 6,h
-        jr last_fix
-tty2:        
-        set 7,h
-        res 6,h
-last_fix:
-        res 3,h
+        ld a,h
+        and #0x7
+        ld h,a
+        ld a,(#screenbase)
+        add a,h
+        ld h,a
         ex de,hl
-	ret 
+        ret
 
 _ga_set_active_vt:
 	ld a,(_outputtty)
@@ -303,12 +311,12 @@ switch_vt_values:
         push hl
         ld a,(#saved_cursor_byte)
         push af
-        ld a,(#_curattr)
+        ld a,(#_vtattr)
         push af
-        ld a,(#curattr_old)
-        ld (#_curattr),a
+        ld a,(#vtattr_old)
+        ld (#_vtattr),a
         pop af 
-        ld (#curattr_old),a
+        ld (#vtattr_old),a
         ld a,(#saved_cursor_byte_old)
         ld (#saved_cursor_byte),a
         pop af
@@ -373,8 +381,8 @@ CRTC_offset:
         .dw 0
 CRTC_offset_old:
         .dw 0
-curattr_old:
-	.db 7
+vtattr_old:
+	.db 0
 cursorpos_old:
         .dw 0
 saved_cursor_byte_old:

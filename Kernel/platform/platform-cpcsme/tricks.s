@@ -259,19 +259,25 @@ _dofork:
         add hl, de
         ; load p_page
         ld a, (hl)
-		call a_map_to_bc	;BC->child bank for bankfork
+		ld e,a
+		;exx
+		;push bc			;store BC'
+		;call a_map_to_bc	;BC'->child bank for bankfork
 	; load existing page ptr
 	ld a, (_udata + U_DATA__U_PAGE)
-	push bc
-	exx
-	push bc			;store BC'
-	call a_map_to_bc ;BC'->parent bank for bankfork
-	exx
-	call bankfork			;	do the bank to bank copy
-	exx
-	pop bc			;restore BC'
-	exx
-	pop bc
+	ld d,a
+	;exx
+	;push bc		;store BC
+	;call a_map_to_bc ;BC->parent bank for bankfork
+	;call bankfork			;	do the bank to bank copy
+	;exx
+	;pop bc			;restore BC'
+	;exx
+	;pop bc		;restore BC
+	ld bc, #PROGTOP-#PROGBASE
+	ld hl, #PROGBASE
+	ld ix, #PROGBASE
+	call ldir_far
 	; Copy done
 
 	; We are going to copy the uarea into the parents uarea stash
@@ -325,32 +331,45 @@ _need_resched:	.db 0
 ;	We are swapping the full address space so we must be really careful
 ;	that we save and restore globals in the same bank!
 ;
-bankfork:	;BC parent, BC' child
-
-	push bc
-	ld bc,#0x7f10
-	out (c),c
-	ld c,#0x4e  ;orange
-	out (c),c
-	pop bc
-	out (c),c		;->switch to child bank
-	exx
-	ld (cpatch2 + 1),bc	; patch parent into loops ->child bank
-	ld (spcache),sp		;->child bank
-		; 15 outer loops
-	ld a,#15
-	ld (copyct),a	;->child bank
+;bankfork:	;BC parent, BC' child
+;	push bc
+;	ld bc,#0x7f10
+;	out (c),c
+;	ld c,#0x4e  ;orange
+;	out (c),c
+;	pop bc
+;	ld hl, #PROGTOP-#PROGBASE-#4096	; FIXME, ldir_far is bugged, temporary workaround.
+;	push hl							; FIXME, ldir_far is bugged, temporary workaround.
+;	push hl
+;	ld hl, #PROGBASE
+;	ld ix, #PROGBASE
+;	jp ldir_for_bankfork
+;bankfork2:	;BC parent, BC' child
+;	push bc
+;	ld bc,#0x7f10
+;	out (c),c
+;	ld c,#0x4e  ;orange
+;	out (c),c
+;	pop bc
+;	exx		
+;	out (c),c		;->switch to child bank
+;	exx
+;	ld (cpatch2 + 1),bc	; patch parent into loops ->child bank
+;	ld (spcache),sp		;->child bank
+;		; 15 outer loops
+;	ld a,#15
+;	ld (copyct),a	;->child bank
 	;
 	;	Set up ready for the copy
 	;
 	; F000 bytes to copy.
 	; Stack pointer at the target buffer
-	out(c),c	;->switch to parent bank
-	exx
-	ld (cpatch1 + 1),bc	; patch child into loop ->parent bank
-	ld sp,#PROGBASE	; Base of memory to fork
-	xor a
-	ex af,af'	; Save A as we need A for data transfer
+;	out(c),c	;->switch to parent bank
+;	exx
+;	ld (cpatch1 + 1),bc	; patch child into loop ->parent bank
+;	ld sp,#PROGBASE	; Base of memory to fork
+;	xor a
+;	ex af,af'	; Save A as we need A for data transfer
 	
 	; Each loop takes 112 cycles to read 16 bytes and save sp
 	; 117 cycles to switch bank and write them
@@ -359,70 +378,71 @@ bankfork:	;BC parent, BC' child
 	;
 	; That comes in at 17 cycles/byte which is only one clock/byte
 	; slower than a non banking LDIR
-copyloop:
-	pop bc		; copy 16 bytes out of parent
-	pop de
-	pop hl
-	exx
-	pop de
-	pop hl
-	pop ix
-	pop iy
-	pop af
+;copyloop:
+;	pop bc		; copy 16 bytes out of parent
+;	pop de
+;	pop hl
+;	exx
+;	pop de
+;	pop hl
+;	pop ix
+;	pop iy
+;	pop af
 	; We patch in parent bank we must therefore read in parent bank
-	ld (sp_patch+1),sp 
-cpatch1:		;this is executed from parent bank
-	ld bc,#0		; child bank (also patched in for speed)
-	out (c),c
-	push af		; and put them back into the child
-	push iy	
-	push ix
-	push hl
-	push de
-	exx
-	push hl
-	push de
-	push bc
-	ex af,af'	; Get counter back
-	dec a
-	jr z, setdone	; 256 loops ?
-copy_cont:
+;	ld (sp_patch+1),sp 
+;cpatch1:		;this is executed from parent bank
+;	ld bc,#0		; child bank (also patched in for speed)
+;	out (c),c
+;	push af		; and put them back into the child
+;	push iy	
+;	push ix
+;	push hl
+;	push de
+;	exx
+;	push hl
+;	push de
+;	push bc
+;	ex af,af'	; Get counter back
+;	dec a
+;	jr z, setdone	; 256 loops ?
+;copy_cont:
 	; Switch back to parent bank so that we get the right sp_patch
-	ex af,af'
-cpatch2:	;this is executed from child bank
-	ld bc,#0
-	out (c),c
-sp_patch:	;this is executed from parent bank
-	ld sp,#0
-	jp copyloop
+;	ex af,af'
+;cpatch2:	;this is executed from child bank
+;	ld bc,#0
+;	out (c),c
+;sp_patch:	;this is executed from parent bank
+;	ld sp,#0
+;	jp copyloop
 ;
-;	This outer loop only runs 8 times so isn't quite so performance
+;	This outer loop only runs 15 times so isn't quite so performance
 ;	critical
 ;
-setdone:
-	; We count down in the child bank context
-	ld hl,#copyct
-	dec (hl)	
-	jr z, copy_over
-	ld a,#0
-	jr copy_cont
-copy_over:
+;setdone:
+;	; We count down in the child bank context
+;	ld hl,#copyct
+;	dec (hl)	
+;	jr z, copy_over
+;	ld a,#0
+;	jr copy_cont
+;copy_over:
 	;
 	;	Get the stack back
 	;
-	ld sp,(spcache)
+;	ld sp,(spcache)
 	;
 	;	And the correct kernel bank.
 	;
-	ld bc,#0x7fc2
-	out (c),c
-	ld bc,#0x7f10
-	out (c),c                                    
-	ld a,(_vtborder)
-	out (c),a
-	ret
+;	ld bc,#0x7fc2
+;	out (c),c
+;	ld bc,#0x7f10
+;	out (c),c                                    
+;	ld a,(_vtborder)
+;	out (c),a
+;	exx
+;	ret
 
-spcache:	;this is read from child bank
-	.word 0
-copyct:		;this is read from child bank
-	.byte 0
+;spcache:	;this is read from child bank
+;	.word 0
+;copyct:		;this is read from child bank
+;	.byte 0
