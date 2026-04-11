@@ -174,14 +174,19 @@ int setterm(char *type)
   bl = tgetstr("bl", &arp);
   vb = tgetstr("vb", &arp);
 
-  if (ac) {
-	while (*ac) {
-		i = 0;
-		while (*ac != _cursident[i]) i++;
-		_cursgraftable[i] = *++ac | A_ALTCHARSET;
-		ac++;
-	}
-  }
+if (ac) {
+    while (*ac) {
+        i = 0;
+        while (i < 27 && *ac != _cursident[i]) i++;
+        if (i >= 27) {
+            /* unknown identifier, skip pair */
+            ac += 2;
+            continue;
+        }
+        _cursgraftable[i] = *++ac | A_ALTCHARSET;
+        ac++;
+    }
+}
 
   ACS_ULCORNER = _cursgraftable[UPLEFT];
   ACS_LLCORNER = _cursgraftable[DOWNLEFT];
