@@ -2,3 +2,7 @@ package  cursesgames
 if-file  invaders
 
 f 0755 /usr/games/invaders      invaders
+
+if-file yuk
+
+f 0755 /usr/games/yuk      yuk
