@@ -40,7 +40,10 @@
  *	very sure you inspect the asm output for calls to compiler helpers
  *	and don't add any.
  *
- *	Extensions in use
+ *	Extensions in use (we mostly follow Atari ST)
+ *
+ *	^V quotes next code even if control code (so can print symbols 0-31)
+ *
  *	- Esc a c	Set vtattr bits (inverse, etc)
  *
  *	- Esc b c	Set ink colour
@@ -59,6 +62,10 @@
  *	Bit 5 indicates bit 4-0 are platform specific colour
  *	Bit 6 should be set to keep it in the ascii range
  *	Bit 7 should be clear
+ *	- Esc e		Hide cursor
+ *	- Esc f		Show cursor
+ *	- Esc p		Inverse on
+ *	- Esc q		Inverse off
  *
  *	Possible VT extensions to look at
  *	- Esc-L		Insert blank line, move lines below down
@@ -103,7 +110,7 @@ static void cursor_fix(void)
 	}
 }
 
-static void charout(unsigned char c)
+static void charout(register unsigned char c)
 {
 	/* Fast path printable symbols */
 	if (c <= 0x1b) {
@@ -133,6 +140,10 @@ static void charout(unsigned char c)
 			vtmode = 1;
 			return;
 		}
+		if (c == 22) {
+			vtmode = 7;
+			return;
+		}
 	}
 	plot_char(cursory, cursorx, c);
 	cursorx++;
@@ -141,7 +152,7 @@ fix:
 }
 
 
-static int escout(unsigned char c)
+static int escout(register unsigned char c)
 {
 	if (c == 'A') {
 		if (cursory)
@@ -199,6 +210,16 @@ static int escout(unsigned char c)
 		cursor_disable();
 		return 0;
 	}
+	if (c == 'p') {
+		vtattr |= VTA_INVERSE;
+		vtattr_notify();
+		return 0;
+	}
+	if (c == 'q') {
+		vtattr &= ~VTA_INVERSE;
+		vtattr_notify();
+		return 0;
+	}
 	if (c == 'Y')
 		return 2;
 	if (c == 'a')
@@ -223,7 +244,7 @@ void vt_cursor_on(void)
 }
 
 /* VT52 alike functionality */
-void vtoutput(unsigned char *p, unsigned int len)
+void vtoutput(register unsigned char *p, register unsigned int len)
 {
 	irqflags_t irq;
 	uint8_t cq;
@@ -249,7 +270,7 @@ void vtoutput(unsigned char *p, unsigned int len)
 	   this right down */
 	do {
 		while (len--) {
-			unsigned char c = *p++;
+			register unsigned char c = *p++;
 			if (vtmode == 0) {
 				charout(c);
 				continue;
@@ -284,6 +305,10 @@ void vtoutput(unsigned char *p, unsigned int len)
 				vtmode = 0;
 				vtattr_notify();
 				continue;
+			} else if (vtmode == 7) {
+				charout(c);
+				vtmode = 0;
+				continue;
 			}
 		}
 		/* Copy the pending symbol and clear the buffer */
@@ -299,7 +324,7 @@ void vtoutput(unsigned char *p, unsigned int len)
 }
 
 /* Note: multiple vt switching handled by platform wrapper */
-int vt_ioctl(uint_fast8_t minor, uarg_t request, char *data)
+int vt_ioctl(uint_fast8_t minor, uarg_t request, register char *data)
 {
 	if (minor <= MAX_VT) {
 		switch(request) {
@@ -330,7 +355,7 @@ int vt_ioctl(uint_fast8_t minor, uarg_t request, char *data)
 	return tty_ioctl(minor, request, data);
 }
 
-int vt_inproc(uint_fast8_t minor, uint_fast8_t c)
+int vt_inproc(register uint_fast8_t minor, register uint_fast8_t c)
 {
 #ifdef CONFIG_UNIKEY
 	if (c == KEY_POUND) {
@@ -376,7 +401,7 @@ void vtinit(void)
 
 #ifdef CONFIG_VT_MULTI
 
-void vt_save(struct vt_switch *vt)
+void vt_save(register struct vt_switch *vt)
 {
 	vt->vtmode = vtmode;
 	vt->vtattr = vtattr;
@@ -388,7 +413,7 @@ void vt_save(struct vt_switch *vt)
 	vt->paper = vtpaper;
 }
 
-void vt_load(struct vt_switch *vt)
+void vt_load(register struct vt_switch *vt)
 {
 	vtmode = vt->vtmode;
 	vtattr = vt->vtattr;
