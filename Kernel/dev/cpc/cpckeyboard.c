@@ -14,7 +14,7 @@ uint8_t keybuf[10];
 /* Previous state */
 uint8_t keymap[10];
 
-struct vt_repeat keyrepeat = { 150, 25 };
+struct vt_repeat keyrepeat = { 30, 5 };
 
 static uint8_t kbd_timer;
 
