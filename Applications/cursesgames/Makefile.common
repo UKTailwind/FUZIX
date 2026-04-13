@@ -1,6 +1,6 @@
 include $(FUZIX_ROOT)/Target/rules.$(USERCPU)
 
-SRCS  = invaders.c
+SRCS  = invaders.c yuk.c
 OBJS = $(SRCS:.c=.o)
 APPS = $(OBJS:.o=)
 
