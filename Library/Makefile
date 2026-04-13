@@ -9,7 +9,8 @@ all: tools/syscall tools/binman tools/syscall_6303 \
      tools/liberror tools/relocbin tools/relocbin65 tools/fuzixlib \
      tools/relocbinhc11 tools/relocbin6303 tools/relocbin8080 tools/shlibgen \
      tools/relocbin6809 tools/ns32ktoaout tools/syscall_riscv32 \
-     tools/riscv32toaout tools/syscall_8086 tools/syscall_8070
+     tools/riscv32toaout tools/syscall_8086 tools/syscall_8070 \
+     tools/syscall_tms7000
 
 clean:
 	rm -f tools/syscall tools/binman tools/fsize tools/liberror
@@ -21,7 +22,7 @@ clean:
 	rm -f tools/syscall_super8 tools/syscall_tms9995 tools/syscall_wrx6 tools/syscall_z8
 	rm -f tools/relocbin65 tools/relocbinhc11 tools/relocbin8080 tools/syscall_armm4
 	rm -f tools/ns32ktoaout tools/syscall_riscv32 tools/riscv32toaout
-	rm -f tools/syscall_8070
+	rm -f tools/syscall_8070 tools/syscall_tms7000
 
 tools/syscall: tools/syscall.c ../Kernel/include/syscall_name.h
 	$(CC) $(CFLAGS) -o $@ $<
@@ -75,6 +76,9 @@ tools/syscall_super8: tools/syscall_super8.c ../Kernel/include/syscall_name.h
 	$(CC) $(CFLAGS) -o $@ $<
 
 tools/syscall_z8: tools/syscall_z8.c ../Kernel/include/syscall_name.h
+	$(CC) $(CFLAGS) -o $@ $<
+
+tools/syscall_tms7000: tools/syscall_tms7000.c ../Kernel/include/syscall_name.h
 	$(CC) $(CFLAGS) -o $@ $<
 
 tools/binman: tools/binman.c
@@ -245,6 +249,10 @@ ifeq ($(USERCPU),armm4)
 	install -m 0644 ../Kernel/include/drivewire.h include/sys/
 endif
 ifeq ($(USERCPU),esp8266)
+	install -m 0644 ../Kernel/include/userstructs.h include/sys/
+	install -m 0644 ../Kernel/include/drivewire.h include/sys/
+endif
+ifeq ($(USERCPU),tms7000)
 	install -m 0644 ../Kernel/include/userstructs.h include/sys/
 	install -m 0644 ../Kernel/include/drivewire.h include/sys/
 endif

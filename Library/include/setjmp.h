@@ -142,6 +142,12 @@
 	extern int _setjmp(jmp_buf __env);
 	#define setjmp(x) _setjmp(x)
 
+#elif defined(__tms7000__)
+
+	typedef uint8_t jmp_buf[9];	/*  4 bytes reg vars, C stack, ret addr, cpu sp */
+	extern int _setjmp(jmp_buf __env);
+	#define setjmp(x) _setjmp(x)
+
 #else
 	#error jmp_buf definition not set for this architecture
 #endif
