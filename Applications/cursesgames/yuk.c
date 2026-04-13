@@ -4,15 +4,24 @@
  *
  * Ported to FUZIX.
  * FUZIX-specific changes (c) 2026 Antonio Casado.
+ * Some further FUZIX squashing (c) 2026 Alan Cox.
  */
 
 #include <curses.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <locale.h>
 #include <time.h>
 
 #include "yuk.h"
+
+#ifdef CURSES_NO_COLOUR
+/* FUZIX curses lacks attron */
+#define start_color()
+#define init_pair(a,b,c)
+#define COLOR_PAIR(a) 0
+#endif
 
 #define HEART 2
 #define DIAMOND 10
@@ -32,6 +41,7 @@
 #define KING 13
 
 const char suits[] = {HEART, DIAMOND, SPADE, CLUB};
+
 unsigned int EMPTY_STACK_TOP[7];
 unsigned int EMPTY_STACK_MID[7];
 unsigned int EMPTY_STACK_BOT[7];
@@ -95,19 +105,16 @@ void init_templates(void)
     memcpy(CARD_FRONT_BOT, EMPTY_STACK_BOT, sizeof(EMPTY_STACK_BOT));
 
     memcpy(CARD_BACK_TOP, EMPTY_STACK_TOP, sizeof(EMPTY_STACK_TOP));
+    memcpy(CARD_BACK_MID, EMPTY_STACK_MID, sizeof(EMPTY_STACK_MID));
     memcpy(CARD_BACK_BOT, EMPTY_STACK_BOT, sizeof(EMPTY_STACK_BOT));
-
-    CARD_BACK_MID[0] = ACS_VLINE;
-    CARD_BACK_MID[1] = ' ';
-    CARD_BACK_MID[2] = ' ';
-    CARD_BACK_MID[3] = ' ';
-    CARD_BACK_MID[4] = ' ';
-    CARD_BACK_MID[5] = ACS_VLINE;
-    CARD_BACK_MID[6] = 0;
 }
 
 Card *new_card(char suit, char rank) {
-  Card *card = malloc(sizeof(Card));
+  register Card *card = malloc(sizeof(Card));
+  if (card == NULL) {
+    fprintf(stderr, "Out of memory.\n");
+    exit(1);
+  }
   card->prev = NULL;
   card->next = NULL;
   card->up = 1;
@@ -116,10 +123,10 @@ Card *new_card(char suit, char rank) {
   return card;
 }
 
-Card *new_deck() {
-  int suit,rank;
-  Card *deck = new_card(BOTTOM, 0);
-  Card *prev = deck;
+Card *new_deck(void) {
+  register int suit,rank;
+  register Card *deck = new_card(BOTTOM, 0);
+  register Card *prev = deck;
   for (suit = 0; suit < 4; suit++) {
     for (rank = 1; rank <= 13; rank++) {
       Card *card = new_card(suits[suit], rank);
@@ -131,7 +138,7 @@ Card *new_deck() {
   return deck;
 }
 
-unsigned char card_suit(Card *card) {
+unsigned char card_suit(register Card *card) {
     switch (card->suit) {
     case HEART:
         return S_HEART;
@@ -145,51 +152,39 @@ unsigned char card_suit(Card *card) {
     return ' ';
 }
 
-void prn_card_name_l(int y, int x, Card *card) {
+static const char *card_str(register Card *card) {
+    static char buf[6];
     switch (card->rank) {
     case ACE:
-        mvprintw(y, x, "A");
-        break;
+        return "A";
     case KING:
-        mvprintw(y, x, "K");
-        break;
+        return "K";
     case QUEEN:
-        mvprintw(y, x, "Q");
-        break;
+        return "Q";
     case JACK:
-        mvprintw(y, x, "J");
-        break;
+        return "J";
     default:
-        mvprintw(y, x, "%d", card->rank);
+        snprintf(buf, 6, "%d", card->rank);
+        return buf;
     }
-    addch(card_suit(card));
+    *buf = card_suit(card);
+    buf[1] = 0;
+    return buf;
 }
 
-void prn_card_name_r(int y, int x, Card *card) {
+void prn_card_name_l(int y, int x, Card *card) {
+    mvprintw(y, x, card_str(card));
+}
+
+void prn_card_name_r(int y, int x, register Card *card) {
     move(y, x - 1 - (card->rank == 10));
     addch(card_suit(card));
-    switch (card->rank) {
-    case ACE:
-        printw("A");
-        break;
-    case KING:
-        printw("K");
-        break;
-    case QUEEN:
-        printw("Q");
-        break;
-    case JACK:
-        printw("J");
-        break;
-    default:
-        printw("%d", card->rank);
-    }
+    printw("%s", card_str(card));
 }
 
-
-Card *shuffle_stack(Card *stack) {
+Card *shuffle_stack(register Card *stack) {
   int n = 2;
-  Card *new;
+  register Card *new;
   Card *next;
   if (!stack->next) {
     return stack;
@@ -225,7 +220,7 @@ Card *shuffle_stack(Card *stack) {
   return new;
 }
 
-Card *take_card(Card *card) {
+Card *take_card(register Card *card) {
   if (card->prev) {
     card->prev->next = card->next;
   }
@@ -237,7 +232,7 @@ Card *take_card(Card *card) {
   return card;
 }
 
-Card *take_stack(Card *stack) {
+Card *take_stack(register Card *stack) {
   if (stack->prev) {
     stack->prev->next = NULL;
   }
@@ -245,7 +240,7 @@ Card *take_stack(Card *stack) {
   return stack;
 }
 
-void move_stack(Card *dest, Card *src) {
+void move_stack(register Card *dest, register Card *src) {
   if (dest->next) {
     move_stack(dest->next, src);
   } else {
@@ -255,7 +250,7 @@ void move_stack(Card *dest, Card *src) {
   }
 }
 
-Card *get_bottom(Card *stack) {
+Card *get_bottom(register Card *stack) {
   if (stack->prev)
     return get_bottom(stack->prev);
   return stack;
@@ -265,7 +260,7 @@ char get_stack_type(Card *stack) {
   return get_bottom(stack)->suit;
 }
 
-int move_to_tableau(Card *dest, Card *src) {
+int move_to_tableau(register Card *dest, register Card *src) {
   if (dest->next)
     return move_to_tableau(dest->next, src);
   if ((dest->suit & BOTTOM && src->rank == KING) || ((dest->suit & RED) != (src->suit & RED) && src->rank == dest->rank - 1)) {
@@ -277,7 +272,7 @@ int move_to_tableau(Card *dest, Card *src) {
   return 0;
 }
 
-int move_to_foundation(Card *dest, Card *src) {
+int move_to_foundation(register Card *dest, register Card *src) {
   if (src->next)
     return 0;
   if (dest->next)
@@ -291,7 +286,7 @@ int move_to_foundation(Card *dest, Card *src) {
   return 0;
 }
 
-int legal_move_stack(Card *dest, Card *src) {
+int legal_move_stack(register Card *dest, register Card *src) {
   if (get_bottom(src) == get_bottom(dest)) {
     return 0;
   }
@@ -304,17 +299,19 @@ int legal_move_stack(Card *dest, Card *src) {
   return 0;
 }
 static void draw_tpl(int y, int x, const unsigned int *tpl) {
-    int i;
     move(y, x);
-    for (i = 0; tpl[i]; i++)
-        addch(tpl[i]);
+    while(*tpl)
+        addch(*tpl++);
 }
+
 static void draw_selected_mark(int y, int x)
 {
     mvaddch(y, x - 1, ACS_RARROW);
     mvaddch(y, x + 6, ACS_LARROW);
 }
-void print_card(int y, int x, Card *card, int full) {
+
+void print_card(int y, int x, register Card *card, int full) {
+  register int i;
   int y2 = y + full * (CARD_HEIGHT - 1);
   if (y2 > max_y) max_y = y2;
   if (x > max_x) max_x = x;
@@ -325,10 +322,9 @@ void print_card(int y, int x, Card *card, int full) {
     draw_selected_mark(y, x);
   }
   if (card->suit & BOTTOM) {
-    /*attron(COLOR_PAIR(1));*/
+    attron(COLOR_PAIR(1));
     draw_tpl(y, x, EMPTY_STACK_TOP);
     if (full && CARD_HEIGHT > 1) {
-      int i;
       for (i = 1; i < CARD_HEIGHT - 1; i++) {
         draw_tpl(y + i, x, EMPTY_STACK_MID);
       }
@@ -338,10 +334,9 @@ void print_card(int y, int x, Card *card, int full) {
       prn_card_name_l(y, x + 1, card);
     }
   } else if (!card->up) {
-    /*attron(COLOR_PAIR(2));*/
+    attron(COLOR_PAIR(2));
     draw_tpl(y, x, CARD_BACK_TOP);
     if (full && CARD_HEIGHT > 1) {
-      int i;
       for (i = 1; i < CARD_HEIGHT - 1; i++) {
         draw_tpl(y + i, x, CARD_BACK_MID);
       }
@@ -349,13 +344,12 @@ void print_card(int y, int x, Card *card, int full) {
     }
   } else {
     if (card->suit & RED) {
-      /*attron(COLOR_PAIR(3));*/
+      attron(COLOR_PAIR(3));
     } else {
-      /*attron(COLOR_PAIR(4));*/
+      attron(COLOR_PAIR(4));
     }
     draw_tpl(y, x, CARD_FRONT_TOP);
     if (full && CARD_HEIGHT > 1) {
-      int i;
       for (i = 1; i < CARD_HEIGHT - 1; i++) {
         draw_tpl(y + i, x, CARD_FRONT_MID);
       }
@@ -375,7 +369,7 @@ void print_card_full(int y, int x, Card *card) {
   print_card(y, x, card, 1);
 }
 
-void print_stack(int y, int x, Card *bottom) {
+void print_stack(int y, int x, register Card *bottom) {
   if (bottom->next) {
     print_stack(y, x, bottom->next);
   } else {
@@ -383,7 +377,7 @@ void print_stack(int y, int x, Card *bottom) {
   }
 }
 
-void print_tableau(int y, int x, Card *bottom) {
+void print_tableau(int y, int x, register Card *bottom) {
   if (bottom->next && bottom->suit & BOTTOM) {
     print_tableau(y, x, bottom->next);
   } else {
@@ -397,7 +391,7 @@ void print_tableau(int y, int x, Card *bottom) {
 }
 static void scan_card(int y, int x, Card *card, int full)
 {
-    int y2 = y + full * (CARD_HEIGHT - 1);
+    register int y2 = y + full * (CARD_HEIGHT - 1);
 
     if (y2 > max_y)
         max_y = y2;
@@ -407,7 +401,7 @@ static void scan_card(int y, int x, Card *card, int full)
         under_cursor = card;
 }
 
-static void scan_stack(int y, int x, Card *bottom)
+static void scan_stack(int y, int x, register Card *bottom)
 {
     if (bottom->next)
         scan_stack(y, x, bottom->next);
@@ -415,7 +409,7 @@ static void scan_stack(int y, int x, Card *bottom)
         scan_card(y, x, bottom, 1);
 }
 
-static void scan_tableau(int y, int x, Card *bottom)
+static void scan_tableau(int y, int x, register Card *bottom)
 {
     if (bottom->next && (bottom->suit & BOTTOM)) {
         scan_tableau(y, x, bottom->next);
@@ -431,7 +425,7 @@ static void scan_tableau(int y, int x, Card *bottom)
 
 static void update_cursor_state(Card *foundations[4], Card *tableaux[7])
 {
-    int i;
+    register int i;
 
     under_cursor = NULL;
     max_x = max_y = 0;
@@ -445,7 +439,7 @@ static void update_cursor_state(Card *foundations[4], Card *tableaux[7])
 
 static void redraw_board(Card *foundations[4], Card *tableaux[7])
 {
-    int i;
+    register int i;
 
     clear();
     under_cursor = NULL;
@@ -460,9 +454,17 @@ static void redraw_board(Card *foundations[4], Card *tableaux[7])
     move(1 + cur_y, 2 + cur_x * 8);
     refresh();
 }
+
+static void cleanup(void)
+{
+  endwin();
+}
+
 int main(int argc, char *argv[]) {
   int ch;
-  uint_fast8_t i, j, run = 1, enable_colors = 1, dirty = 1;
+  register uint_fast8_t i;
+  uint_fast8_t j, run = 1, enable_colors = 1, dirty = 1;
+  int x,y;
   Card *deck;
   Card *foundations[4];
   Card *tableaux[7];
@@ -483,14 +485,16 @@ int main(int argc, char *argv[]) {
         enable_colors = 0;
         break;
       case 'v':
-        printf("yuk 1.0\n");
+        printf("yuk 1.0-fz1\n");
         return 0;
       default:
         printf("usage: %s [option]\n", argv[0]);
         printf("options:\n");
         printf("  -v Version\n");
         printf("  -h Usage\n");
+#ifndef CURSES_NO_COLOR
         printf("  -m Disable colors\n");
+#endif        
         printf("keys:\n");
         printf("  hjkl  Move cursor\n");
         printf("  space Select card\n");
@@ -501,15 +505,26 @@ int main(int argc, char *argv[]) {
   }
   setlocale(LC_ALL, "");
   srand(time(NULL));
-  initscr();
+  if (initscr() == NULL) {
+    fprintf(stderr, "%s: unable to init curses.\n", argv[0]);
+    exit(1);
+  }
+  atexit(cleanup);
+
+  getmaxyx(stdscr, y, x);
+  if (y < 20 || x < 64) {
+    fprintf(stderr, "%s: screen size of %u x %u is too small.\n",
+      argv[0], y, x);
+    exit(1);
+  }
   init_templates();
-  /*if (enable_colors) {
+  if (enable_colors) {
     start_color();
     init_pair(1, 7, 0);
     init_pair(2, 7, 4);
     init_pair(3, 1, 7);
     init_pair(4, 0, 7);
-  }*/
+  }
   raw();
   clear();
   curs_set(1);
@@ -541,7 +556,6 @@ int main(int argc, char *argv[]) {
       move_stack(tableaux[i], take_card(deck->next));
     }
   }
-
 
   while (run) {
     if (dirty) {
@@ -673,10 +687,9 @@ int main(int argc, char *argv[]) {
             break;
 
         default:
-            mvprintw(0, 0, "%d", ch);
+/*            mvprintw(0, 0, "%d", ch); */
             break;
     }
   }
-  endwin();
-  return 0;
+  exit(0);
 }
