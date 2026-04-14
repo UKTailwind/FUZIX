@@ -167,9 +167,6 @@ static const char *card_str(register Card *card) {
         snprintf(buf, 6, "%d", card->rank);
         return buf;
     }
-    *buf = card_suit(card);
-    buf[1] = 0;
-    return buf;
 }
 
 void prn_card_name_l(int y, int x, Card *card) {

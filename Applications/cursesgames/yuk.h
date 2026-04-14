@@ -17,6 +17,4 @@
 
 #ifndef NCURSES_VERSION
 #define CURSES_NO_COLOUR
-#else
-#error "eek"
 #endif
