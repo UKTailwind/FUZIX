@@ -8,7 +8,7 @@
  *	even avoid forking on a level 2 system until the tty is used (maybe
  *	even to the point of login completion ?)
  *
- *	TODO: (once we have SIGCLD)
+ *	TODO:
  *	- Give serious consideration to hiding cron/at in the daemon
  *	  to keep our background daemon count as low as we can
  *	- Ditto for syslogd
@@ -823,7 +823,7 @@ static pid_t getty(const char **argv, const char *id)
 				   set the terminal type if not forced by
 				   the user */
 				if (!argv[1] || !argv[2])
-					envset("TERM", "vt52");
+					envset("TERM", "fuzix");
 			}
 
 			if (argv[1]) {

@@ -1,10 +1,19 @@
+fuzix:\
+        :bs:\
+        :co#80:it#8:li#24:\
+        :ac=``a\261f\370g\361j\331k\277l\332m\300n\305o\356ppq\304rrs_t\303u\264v\301w\305x\263yyzz{{||}}~\364:\
+        :ae=\EG:as=\EF:bl=^G:cd=\EJ:ce=\EK:cl=\EH\EJ:cm=\EY%+ %+ :\
+        :cr=^M:do=\EB:ho=\EH:kb=^H:kd=\EB:kl=\ED:kr=\EC:ku=\EA:\
+        :le=\ED:nd=\EC:nw=^M^J:sf=^J:sr=\EI:ta=^I:up=\EA:ve=\Ee:vi=\Ef:\
+	:mr=\Ep:\me=\Ea@:
+
 vt52|dec vt52:\
         :bs:\
         :co#80:it#8:li#24:\
         :ac=``aaffggjjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~:\
         :ae=\EG:as=\EF:bl=^G:cd=\EJ:ce=\EK:cl=\EH\EJ:cm=\EY%+ %+ :\
         :cr=^M:do=\EB:ho=\EH:kb=^H:kd=\EB:kl=\ED:kr=\EC:ku=\EA:\
-        :le=\ED:nd=\EC:nw=^M^J:sf=^J:sr=\EI:ta=^I:up=\EA:ve=\Ee:vi=\Ef:
+        :le=\ED:nd=\EC:nw=^M^J:sf=^J:sr=\EI:ta=^I:up=\EA:
 
 xterm|X11 terminal emulator:\
 	:am:bs:km:mi:ms:xn:\
