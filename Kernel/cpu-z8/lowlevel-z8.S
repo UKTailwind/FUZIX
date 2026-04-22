@@ -456,7 +456,7 @@ trap_signal:
 	ld	r3,#<U_DATA__U_PTAB
 	push	r3
 	push	r2
-	jmp	_ssig
+	jp	_ssig
 
 ;
 ;	Now the scary stuff - preempting
