@@ -369,20 +369,22 @@ int main(int argc, char *argval[])
                     path = getenv("PATH");  /* Get base of path string, or NULL */
                     eline[0] = '\0';
                     sp = strchr(cmd, '/') ? "" : path;
-                    asis = *sp == '\0';
-                    while (asis || *sp != '\0') {
-                        asis = 0;
-                        tp = eline;
-                        for (; *sp != '\0'; tp++)
-                            if ((*tp = *sp++) == ':') {
-                                asis = *sp == '\0';
-                                break;
-                            }
-                        if (tp != eline)
-                            *tp++ = '/';
-                        for (i = 0; (*tp++ = cmd[i++]) != '\0'; )
-                            ;
-                        execve(eline, (char**) argv, (char**) environ);
+                    if (sp) {
+                        asis = *sp == '\0';
+                        while (asis || *sp != '\0') {
+                            asis = 0;
+                            tp = eline;
+                            for (; *sp != '\0'; tp++)
+                                if ((*tp = *sp++) == ':') {
+                                    asis = *sp == '\0';
+                                    break;
+                                }
+                            if (tp != eline)
+                                *tp++ = '/';
+                            for (i = 0; (*tp++ = cmd[i++]) != '\0'; )
+                                ;
+                            execve(eline, (char**) argv, (char**) environ);
+                        }
                     }
                     write(2, "ssh: ", 5);
                     writes(2, cmd);
