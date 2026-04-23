@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <arpa/inet.h>
 #include <fcntl.h>
 
 #include "fuzix_fs.h"
@@ -18,6 +19,12 @@ int swapped;
 int swizzling;
 
 extern int swizzling;
+
+const char *swizname[3] = {
+	"little endian",
+	"big endian",
+	"pdp endian"
+};
 
 int fd_open(char *name, int addflags)
 {
@@ -45,19 +52,42 @@ uint16_t swizzle16(uint32_t v)
 		fprintf(stderr, "swizzle16 given a 32bit input\n");
 		exit(1);
 	}
-	if (swizzling)
+	switch(swizzling) {
+	case 0:
+	case 2:
+		/* There's no trivial portable "make little endian" so
+		   instead we make it portably big endian then reverse
+		   it */
+		v = htons(v);
 		return (v & 0xFF) << 8 | ((v & 0xFF00) >> 8);
-	else
-		return v;
+	case 1:
+		return htons(v);
+	default:
+		fprintf(stderr, "bad swizzle %d\n", swizzling);
+		exit(1);
+	}
 }
 
 uint32_t swizzle32(uint32_t v)
 {
-	if (!swizzling)
+	v = htonl(v);
+	switch(swizzling) {
+	case 0:
+		/* Turn little endian */
+		return (v & 0xFF) << 24 | (v & 0xFF00) << 8 | (v & 0xFF0000) >> 8 |
+		    (v & 0xFF000000) >> 24;
+	case 1:
+		/* Already big endian */
 		return v;
-
-	return (v & 0xFF) << 24 | (v & 0xFF00) << 8 | (v & 0xFF0000) >> 8 |
-	    (v & 0xFF000000) >> 24;
+	case 2:
+		/* Turn PDP endian */
+		/* 4321(be) to 3412 */
+		return (v & 0xFF000000) >> 8 | (v & 0xFF0000) << 8 |
+			(v & 0xFF00) >> 8 | (v & 0xFF) << 8;
+	default:
+		fprintf(stderr, "bad swizzle %d\n", swizzling);
+		exit(1);
+	}
 }
 
 /*********************************************************************

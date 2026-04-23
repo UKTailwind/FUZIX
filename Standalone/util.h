@@ -11,3 +11,5 @@ extern int swizzling;
 extern int swizzling;
 extern int swapped;
 
+extern const char *swizname[];
+

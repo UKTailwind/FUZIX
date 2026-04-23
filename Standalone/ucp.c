@@ -65,7 +65,7 @@ static int interactive = 0;
 
 static void cmdusage(void)
 {
-	fprintf(stderr, "Usage: ucp [-b] FILE [COMMAND]\n");
+	fprintf(stderr, "Usage: ucp FILE [COMMAND]\n");
 	exit(1);
 }
 
@@ -80,11 +80,8 @@ int main(int argc, char *argval[])
 	int j, retc = 0;
 	int opt;
 
-	while ((opt = getopt(argc, argval, "b")) != -1) {
+	while ((opt = getopt(argc, argval, "")) != -1) {
 		switch (opt) {
-		case 'b':
-			swapped = 1;
-			break;
 		default:
 			cmdusage();
 		}
@@ -1323,8 +1320,7 @@ static void fuzix_sync(void)
 	/* This fills the rest of the super block with garbage. */
 
 	for (j = 0; j < NDEVS; ++j) {
-		if (swizzle16(fs_tab[j].s_mounted) == SMOUNTED
-		    && fs_tab[j].s_fmod) {
+		if (fs_tab[j].s_mounted && fs_tab[j].s_fmod) {
 			fs_tab[j].s_fmod = 0;
 			buf = bread(j, 1, 1);
 			memcpy(buf, (char *) &fs_tab[j],
@@ -1416,10 +1412,9 @@ static void stcpy(inoptr ino, struct uzi_stat *buf)
 static int fuzix_getfsys(int dev, char *buf)
 {
 	udata.u_error = 0;
-	if (dev < 0 || dev >= NDEVS
-	    || swizzle16(fs_tab[dev].s_mounted) != SMOUNTED) {
+	if (dev < 0 || dev >= NDEVS || !fs_tab[dev].s_mounted) {
 		udata.u_error = ENXIO;
-		return (-1);
+		return -1;
 	}
 
 	/* FIXME: endian swapping here */
@@ -1594,8 +1589,7 @@ static inoptr srch_mt(inoptr ino)
 	register int j;
 
 	for (j = 0; j < NDEVS; ++j)
-		if (swizzle16(fs_tab[j].s_mounted) == SMOUNTED
-		    && fs_tab[j].s_mntpt == ino) {
+		if (fs_tab[j].s_mounted && fs_tab[j].s_mntpt == ino) {
 			i_deref(ino);
 			return (i_open(j, ROOTINODE));
 		}
@@ -1869,13 +1863,9 @@ static fsptr getdev(int devno)
 	return (dev);
 }
 
-
-/* Returns true if the magic number of a superblock is corrupt.
- */
-
 static int baddev(fsptr dev)
 {
-	return (swizzle16(dev->s_mounted) != SMOUNTED);
+	return !dev->s_mounted;
 }
 
 
@@ -2409,9 +2399,12 @@ static int fmount(int dev, inoptr ino)
 	/* See if there really is a filesystem on the device */
 	if (fp->s_mounted == SMOUNTED_WRONGENDIAN)
 		swizzling = 1;
-	if (swizzle16(fp->s_mounted) != SMOUNTED ||
-	    swizzle16(fp->s_isize) >= swizzle16(fp->s_fsize))
-		return (-1);
+	if (fp->s_mounted == SMOUNTED + 1)
+		swizzling = 2;
+	else if (swizzle16(fp->s_mounted) != SMOUNTED)
+		return -1;
+	if (swizzle16(fp->s_isize) >= swizzle16(fp->s_fsize))
+		return -1;
 
 	fp->s_mntpt = ino;
 	if (ino)

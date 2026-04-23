@@ -22,7 +22,13 @@ UZI (Unix Z80 Implementation) Utilities:  mkfs.c
  *   ./mkfs ./blankfs.img 64 4096
  * (this will write a 2MB filesystem with 64 blocks of inodes to ./blankfs.img)
  *
- * */
+ * Options
+ *	-X big endian
+ *	-P PDP endian
+ *	-b set block size (work in progress)
+ *
+ *
+ */
 
 char zero512[512];
 
@@ -43,7 +49,7 @@ union disk {
 
 static void usage(void)
 {
-	printf("Usage: mkfs [-X] [-b blocksize] device isize fsize\n");
+	printf("Usage: mkfs [-X] [-P] [-b blocksize] device isize fsize\n");
 	exit(1);
 }
 
@@ -76,10 +82,13 @@ int main(int argc, char **argv)
 	int opt;
 	time_t t = time(NULL);
 
-	while((opt = getopt(argc, argv, "Xb:")) != -1) {
+	while((opt = getopt(argc, argv, "PXb:")) != -1) {
 		switch(opt) {
 			case 'X':	
 				swizzling = 1;
+				break;
+			case 'P':
+				swizzling = 2;
 				break;
 			case 'b':
 				bsize = atoi(optarg);
@@ -108,7 +117,7 @@ int main(int argc, char **argv)
 	memset(zero512, 0, 512);
 
 	printf("Making %d byte/block filesystem with %s byte order on device %s with fsize = %u and isize = %u.\n",
-	       bsize, swizzling==0 ? "normal" : "reversed", argv[optind], fsize, isize);
+	       bsize, swizname[swizzling], argv[optind], fsize, isize);
 
 	if (fd_open(argv[optind], O_CREAT)) {
 		printf("Can't open device");
@@ -123,7 +132,12 @@ int main(int argc, char **argv)
 
 	/* Initialize the super-block */
 
-	fs_super.fs.s_mounted = swizzle16(SMOUNTED);	/* Magic number */
+	/* We can't rely on the magic to correctly identify a PDP endian
+	   file system so handle this directly */
+	if (swizzling == 2)
+		fs_super.fs.s_mounted = SMOUNTED + 1;	/* Special magic for PDP endian */
+	else
+		fs_super.fs.s_mounted = swizzle16(SMOUNTED);	/* Magic number */
 	fs_super.fs.s_isize = swizzle16(isize);
 	fs_super.fs.s_fsize = swizzle16(fsize);
 	fs_super.fs.s_nfree = swizzle16(1);
