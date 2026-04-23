@@ -8,7 +8,7 @@
  */
 COMMON_MEMORY
 
-void divide_read_data(uint8_t *p) __naked
+void devide_read_data(uint8_t *p) __naked
 {
     __asm
             pop bc
@@ -37,7 +37,7 @@ void divide_read_data(uint8_t *p) __naked
     __endasm;
 }
 
-void divide_write_data(uint8_t *p) __naked
+void devide_write_data(uint8_t *p) __naked
 {
     __asm
             pop bc

@@ -1,6 +1,6 @@
 #define CONFIG_TD_NUM		1
 #define CONFIG_TD_IDE
-#define CONFIG_TINYIDE_INDIRECT
+#define CONFIG_TINYIDE_SDCCPIO
 #define IDE_IS_8BIT(x)	0
 
 #define CONFIG_LARGE_IO_DIRECT(x)	1  /* We support direct to user I/O */

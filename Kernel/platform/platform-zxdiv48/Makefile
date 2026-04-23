@@ -1,4 +1,4 @@
-CSRCS = devtty.c devices.c main.c buffers.c divide.c zxcf.c devrd.c ide.c
+CSRCS = devtty.c devices.c main.c buffers.c divide.c devrd.c
 CDSRCS = discard.c
 DSRCS = ../../dev/tinydisk.c ../../dev/tinyide.c
 DDSRCS = ../../dev/tinydisk_discard.c ../../dev/tinyide_discard.c

@@ -49,9 +49,7 @@ devinput.rel
 platform/platform-zxdiv48/devtty.rel
 platform/platform-zxdiv48/tinyide.rel
 platform/platform-zxdiv48/tinyide_discard.rel
-platform/platform-zxdiv48/ide.rel
 platform/platform-zxdiv48/divide.rel
-platform/platform-zxdiv48/zxcf.rel
 platform/platform-zxdiv48/tinydisk.rel
 platform/platform-zxdiv48/tinydisk_discard.rel
 platform/platform-zxdiv48/devrd.rel
