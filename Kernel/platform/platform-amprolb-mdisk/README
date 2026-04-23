@@ -1,0 +1,54 @@
+Fuzix for the Ampro Z80 Littleboard with MDISK
+
+This builds a version of Fuzix for the LB with the n/Systems (TCJ 29/30)
+MDISK interface fitted. On this setup there is a lot more memory, and tasks
+can be hardware switched but with a 32K size limit.
+
+As the OS doesn't need to be burned into ROM it's built as both a bootstrap
+(boot.com) that loads the OS from the SCSI disk, and fuzix.com which is a CP/M
+boot of the Fuzix kernel which then takes over the hardware.
+
+Memory Map
+0000-7FFF	Switchable EPROM/RAM/Banked RAM
+8000-FFFF	Fixed as the second 32K block of memory in the bankable RAM
+
+Kernel
+
+0000-7FFF	Kernel
+8000-FFFF	Kernel, Data, Buffers, Common
+		IM2 page is start of common
+
+User
+
+0000-7FFF	Process
+8000-FFFF	Kernel, Data, Buffers, Common
+		IM2 page is start of common
+
+Hardware
+-	Z80 DART
+-	Z80 CTC. Channels 0 & 1 drive the DART, 2 & 3 free
+-	1772 Floppy Disk
+-	NCR5380 SCSI
+-	Printer port (output/strobe/busy only)
+-	MDISK
+
+
+TODO
+-	SCSI pseudo DMA
+-	Floppy formatting, floppy disk media setting ioctls 
+-	In general needs soft interrupts implementing so
+	that our entry for timer is something like
+
+	push	af
+	ld	a,(_irqdisable)
+	or	a
+	jr	nz, holdoff
+	pop	af
+	jp	interrupt_handler
+holdoff:
+	call	plt_clear_timer
+	ld	a,(_irqmiss)
+	inc	a
+	ld	(_irqmiss),a
+	ei
+	ret

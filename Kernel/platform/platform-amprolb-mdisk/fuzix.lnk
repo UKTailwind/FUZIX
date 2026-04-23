@@ -1,0 +1,49 @@
+-mwxuy
+-i fuzix.ihx
+-b _CODE=0x0100
+-b _COMMONMEM=0xF000
+-b _SERIAL=0xFE00
+-l z80
+platform/platform-amprolb-mdisk/crt0.rel
+platform/platform-amprolb-mdisk/commonmem.rel
+platform/platform-amprolb-mdisk/lb.rel
+start.rel
+version.rel
+cpu-z80/lowlevel-z80.rel
+platform/platform-amprolb-mdisk/tricks.rel
+platform/platform-amprolb-mdisk/main.rel
+timer.rel
+kdata.rel
+platform/platform-amprolb-mdisk/devices.rel
+devio.rel
+filesys.rel
+blk512.rel
+process.rel
+inode.rel
+syscall_exec.rel
+syscall_exec16.rel
+syscall_fs.rel
+syscall_proc.rel
+syscall_fs2.rel
+syscall_fs3.rel
+syscall_other.rel
+mm.rel
+memalloc_none.rel
+swap.rel
+bankfixed.rel
+tty.rel
+devsys.rel
+usermem.rel
+platform/platform-amprolb-mdisk/discard.rel
+platform/platform-amprolb-mdisk/devtty.rel
+platform/platform-amprolb-mdisk/dart.rel
+platform/platform-amprolb-mdisk/devlpr.rel
+platform/platform-amprolb-mdisk/devfd.rel
+platform/platform-amprolb-mdisk/floppy.rel
+platform/platform-amprolb-mdisk/tinydisk.rel
+platform/platform-amprolb-mdisk/tinydisk_discard.rel
+platform/platform-amprolb-mdisk/tinyscsi.rel
+platform/platform-amprolb-mdisk/tinyscsi_discard.rel
+platform/platform-amprolb-mdisk/devscsi.rel
+platform/platform-amprolb-mdisk/ncr5380.rel
+-e
