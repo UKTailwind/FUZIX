@@ -136,14 +136,14 @@ static void dump_map(const char *p)
 			kputchar('S');
 		else
 			kputchar('P');
-		kprintf("%2x ", *mp++);
+		kprintf("%x ", *mp++);
 	}
 	kprintf(" ]\n");
 	kprintf("phys map [ ");
 	for (i = 0; i < top_bank; i++) {
-		kprintf("%2x ", mem[i].page);
+		kprintf("%x ", mem[i].page);
 		if (mem[i].page != NO_PAGE && rmap[P_PAGE(mem + i)] != i)
-			kprintf("\nRMAP bad %2x\n",
+			kprintf("\nRMAP bad %x\n",
 				rmap[P_PAGE(mem + i)]);
 	}
 	kprintf(" ]\n");
@@ -223,6 +223,7 @@ static void free_page(pgnum_t *pp, unsigned slot, unsigned unshared)
 		panic("pgfree");
 	if (rmap[*pp] != slot)
 		panic("pgfree2");
+/*	mem[slot].page &= ~P_LOCK; */
 	mp->page = NO_PAGE;
 	rmap[*pp] = FREE;
 	*pp = NO_PAGE;
@@ -440,6 +441,8 @@ static void map_pages(ptptr p, unsigned pagein)
 	for (i = 0; i < top_bank; i++) {
 		if (*mp != NO_PAGE)
 			make_present(*mp, i, pagein);
+		else if (mem[i].page != NO_PAGE)
+			mem[i].page &= ~P_LOCK;
 		mp++;
 	}
 	m = mem;
@@ -606,6 +609,7 @@ int pagemap_alloc(ptptr p)
 	pgnum_t *pt;
 	int r;
 	pgnum_t pg;
+	pgnum_t *up = &pagemap[udata.u_ptab->p_page][0];
 
 	p->p_page = p - ptab;
 
@@ -639,11 +643,17 @@ int pagemap_alloc(ptptr p)
 	if (r < 0)
 		return r;
 	pg = pagemap[p->p_page][top_bank - 1];
-	/* Ensure the page didn't end up on disk
-	   FIXME: do we need to lock this ? Also do we need to ensure the
-	   page map for the current task is still correct */
+	/* Some gymnastics are needed so that we can use all the pages and
+	   also temporarily map the udata */
+	/* Unlock our page 0 to ensure there is room */
+	*up &= ~P_LOCK;
+	/* Map in the temporary udata */
 	pg = make_present(pg, SLOT_ANY, 0);
+	pagemap[udata.u_ptab->p_page][pg] |= P_LOCK;
 	p->p_udata = (struct u_data *)(PAGE_ADDR(pg) + PAGE_SIZE - sizeof(struct u_block));
+	/* When we have done the udata work dofork will call pagemap_switch
+	   to sort the results out and put back the correct page 0 and fix
+	   any locks */
 	return 0;
 }
 

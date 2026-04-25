@@ -116,6 +116,11 @@ dofork:
 	move.l a0,-(sp)
 	jsr makeproc
 	addq #8,sp
+	; Now put the temporary udata to bed and fix the mappings
+	clr.l -(sp)
+	move.l U_DATA__U_PTAB(a5),-(sp)
+	jsr pagemap_switch
+	addq #8,sp
 	;
 	;	The memory map is clone by ptab_alloc (we might want to
 	;	adjust that bit)
