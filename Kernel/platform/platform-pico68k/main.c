@@ -65,6 +65,8 @@ void pagemap_init(void)
 /* We need an initial kernel stack and udata so the slot for init is
    set up at compile time */
 u_block udata_block[PTABSIZE];
+/* Fake udata and stack used for swapping stuff in and out etc */
+u_block udata_swap;
 
 /* This will belong in the core 68K code once finalized */
 
