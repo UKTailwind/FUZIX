@@ -40,7 +40,6 @@
 #include <flat_small.h>
 
 #if (NPAGE > 126)
-#error "untested"
 typedef uint16_t	pgnum_t;
 #define P_LOCK		0x8000
 #define P_PAGE(x)	(((x)->page) & 0x7FFF)
@@ -421,7 +420,7 @@ static void age_pages(void)
  */
 static void map_pages(ptptr p, unsigned pagein)
 {
-	uint8_t *mp = &pagemap[p->p_page][0];
+	pgnum_t *mp = &pagemap[p->p_page][0];
 	struct mem *m = mem;
 	unsigned i;
 
@@ -657,9 +656,9 @@ void pagemap_switch(ptptr p, int death)
 void pagemap_free(ptptr p)
 {
 	/* Actually always called with p as the current process */
-	uint8_t *mp = &pagemap[udata.u_page][0];
-	uint8_t ttop = meminfo[p->p_page].texttop;
-	uint_fast8_t i;
+	pgnum_t *mp = &pagemap[udata.u_page][0];
+	unsigned ttop = meminfo[p->p_page].texttop;
+	unsigned i;
 
 	for (i = 0; i < top_bank; i++) {
 		if (*mp != NO_PAGE) {
