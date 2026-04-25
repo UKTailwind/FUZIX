@@ -57,8 +57,8 @@ void pagemap_init(void)
 	   SPI while clock counting the instructions has a certain appeal */
 	via->t1c_l = (uint8_t) 40000;	/* 200Hz */
 	via->t1c_h = 40000 >> 8;
-	via->acr = 0x40;	/* Timer continous */
-	via->ier = 0x40;	/* Timer interrupt */
+	via->acr = 0x40;	/* Timer continuous */
+	via->ier = 0xC0;	/* Timer interrupt */
 }
 
 /* Fake udata and stack used for swapping stuff in and out etc */
