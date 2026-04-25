@@ -746,7 +746,7 @@ static pid_t getty(const char **argv, const char *id)
 	char *p, buf[50], salt[3];
 	char hn[64];
 	uint8_t console = 0;
-	uint16_t vtsize;
+	int vtsize;
 
 	gethostname(hn, sizeof(hn));
 
@@ -818,7 +818,7 @@ static pid_t getty(const char **argv, const char *id)
 			vtsize = ioctl(fdtty, VTSIZE, &winsz);
 			if (vtsize != -1) {
 				winsz.ws_col = vtsize & 0xFF;
-				winsz.ws_row = vtsize >> 8;
+				winsz.ws_row = (vtsize >> 8) & 0xFF;
 				/* Physical consoles are extended VT52 so
 				   set the terminal type if not forced by
 				   the user */
