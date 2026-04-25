@@ -44,7 +44,7 @@ switchin:
 	move.b #P_RUNNING,P_TAB__P_STATUS_OFFSET(a0)
 	;
 	;	Get the user pages back. We do this on the swap udata
-	;	so that we can operate 
+	;	so that our stack won't vanish or be moved under us
 	;
 	move.l a0,-(sp)
 	clr.l -(sp)
@@ -104,18 +104,6 @@ dofork:
 	move.l 4(sp),a0			;	child p_tab
 	move.l a2,-(sp)
 
-	move.l P_TAB__P_UDATA_OFFSET(a0),a1	; child udata
-
-	; Copy the udata
-	; FIXME: we don't need to copy the stack too!
-
-	move.l a5,a2
-	move.w #255,d0
-loop:
-	move.l (a2)+,(a1)+
-	dbra d0,loop
-
-
 	;
 	; Save the child PID for later and the udata offset
 	;
@@ -173,12 +161,22 @@ pushret:
 	;
 	; USP has to be in a0
 	;
+
+
 	move.l usp,a0
 	;
 	; And a frame as if we did a switchout
 	;
 	movem.l a0/a2-a4/a6/d2-d7,-(a1)
-	move.l a1,U_DATA__U_SP(a2)	; Set the stack pointer
+
+	; Tricky - we built the stack on the current udata but it'll appear
+	; at the of memory when used so we need sp to be corrected
+
+	move.l a1,-(sp)
+	jsr remap_sp
+	addq #4,sp
+
+	move.l d0,U_DATA__U_SP(a2)	; Set the stack pointer
 	clr.b U_DATA__U_INSYS(a2)	; set child not in a syscall
 	; And carry on as the parent
 	move.w (sp)+,d0		; child pid

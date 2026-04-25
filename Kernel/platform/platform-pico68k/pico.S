@@ -25,7 +25,7 @@ plt_reboot:
 	    jmp (a0)
 
 init_early:
-	    lea.l udata_block,a5	; udata ptr
+	    lea.l udata_swap,a5		; udata ptr
 	    move.l a5,udata_shadow	; shadow copy for entry/exit
             rts
 

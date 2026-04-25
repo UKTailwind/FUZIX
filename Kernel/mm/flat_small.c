@@ -338,7 +338,7 @@ static void move_page(pgnum_t to, pgnum_t from)
  *	Do the hard work of making a page present. We may be required
  *	to swap it in or maybe not.
  */
-static uint_fast8_t make_present(pgnum_t page, pgnum_t s, unsigned swap)
+static pgnum_t make_present(pgnum_t page, pgnum_t s, unsigned swap)
 {
 	unsigned n = is_present(page, s);
 	struct mem *m = mem + n;
@@ -604,11 +604,10 @@ int pagemap_alloc(ptptr p)
 {
 	struct meminfo *mi, *pmi;
 	pgnum_t *pt;
+	int r;
+	pgnum_t pg;
 
 	p->p_page = p - ptab;
-
-	if (plt_udata_set(p))
-		return ENOMEM;
 
 	mi = meminfo + p->p_page;
 
@@ -616,9 +615,6 @@ int pagemap_alloc(ptptr p)
 	 *	Create init. This happens early and is a bit special
 	 */
 	if (p->p_pid == 1) {
-#ifdef udata
-		udata_shadow = p->p_udata;
-#endif
 		/* Manufacturing init */
 		pt = &pagemap[p->p_page][0];
 		mi->low = 0;
@@ -626,17 +622,29 @@ int pagemap_alloc(ptptr p)
 		mi->high = top_bank;
 		set_range(pt, NO_PAGE, NBANK);
 		/* This is hairy as we don't have any swap backing set
-		   up so we fake it on the basis we'll have at least one
-		   page */
+		   up so we fake it on the basis we'll have at least two
+		   pages */
 		pt[0] = 0;
+		pt[top_bank - 1] = 1;
 		udata.u_codebase = page_base;
 		udata.u_break = page_base + PAGE_SIZE;
+		/* Top of our live space is our udata */
+		p->p_udata = (struct u_data *)(PAGE_ADDR(top_bank) - sizeof(struct u_block));
 		return 0;
 	}
 	/* Forking a copy */
 	pmi = meminfo + udata.u_page;
 	memcpy(mi, pmi, sizeof(*mi));
-	return map_copy(udata.u_ptab, p);
+	r =  map_copy(udata.u_ptab, p);
+	if (r < 0)
+		return r;
+	pg = pagemap[p->p_page][top_bank - 1];
+	/* Ensure the page didn't end up on disk
+	   FIXME: do we need to lock this ? Also do we need to ensure the
+	   page map for the current task is still correct */
+	pg = make_present(pg, SLOT_ANY, 0);
+	p->p_udata = (struct u_data *)(PAGE_ADDR(pg) + PAGE_SIZE - sizeof(struct u_block));
+	return 0;
 }
 
 /* Switch the map to p. Death case is unimportant
@@ -650,6 +658,8 @@ void pagemap_switch(ptptr p, int death)
 	unlock_pages();
 	map_pages(p, 1);
 	dump_map("post switch");
+	/* Our udata is now live so in the standard spot */
+	p->p_udata = (struct u_data *)(PAGE_ADDR(top_bank) - sizeof(struct u_block));
 }
 
 /* Called on exit */
@@ -681,7 +691,8 @@ int pagemap_realloc(struct exec *hdr, usize_t size)
 
 	/* Get sizes in bytes */
 	nl = hdr->a_text + hdr->a_data + hdr->a_bss;
-	nh = hdr->stacksize;
+	/* Udata sits at the top */
+	nh = hdr->stacksize + sizeof(struct u_block);
 
 	/* Turn them into inclusive pages to cover all the memory */
 	nl += PAGE_SIZE - 1;
@@ -716,9 +727,22 @@ int pagemap_realloc(struct exec *hdr, usize_t size)
 	
 	/* Tell the execve() code to build the stack in the top of
 	   our memory space we allocated */
-	udata.u_top = PAGE_ADDR(top_bank);
+	udata.u_top = PAGE_ADDR(top_bank) - sizeof(struct u_block);
+	udata.u_ptab->p_udata = (struct u_data *)udata.u_top;
+	udata_shadow = udata.u_ptab->p_udata;
 
 	return 0;
+}
+
+/* Turn the stack pointer relative to current working udata into one
+   versus top page udata where it wil be used */
+
+unsigned remap_sp(unsigned sp)
+{
+	sp -= PAGE_ADDR(0);		/* Turn into an offset */
+	sp &= (PAGE_SIZE - 1);		/* Low bits */
+	sp += PAGE_ADDR(top_bank - 1);	/* Page we will appear at */
+	return sp;
 }
 
 /*
@@ -796,8 +820,8 @@ void pagefile_add_blocks(unsigned long blocks)
 	sysinfo.swapk = size << (PAGE_SHIFT - 10);
 
 	/* Fill the allocation stack */
-	freepages = size - 1 ;
-	set_range(rmap + 1, FREE, freepages);
+	freepages = size - 2 ;
+	set_range(rmap + 2, FREE, freepages);
 }
 
 /*
@@ -822,8 +846,14 @@ void pagemap_setup(uaddr_t base, unsigned len)
 		mem[i].page = NO_PAGE;
 	/* Magic for init setup */
 	rmap[0] = 0;
+	rmap[1] = top_bank - 1;
+#ifdef udata
+	/* Set up the udata pointer ready */
+	udata_ptr = (struct u_data *)(PAGE_ADDR(top_bank) - sizeof(struct u_block));
+	udata_shadow = udata_ptr;
+#endif	
 	/* Mark rest of the map used */
-	set_range(rmap + 1, SWAPPED, NPAGE - 1);
+	set_range(rmap + 2, SWAPPED, NPAGE - 2);
 	/* The one page already in use */
 	sysinfo.swapusedk = PAGE_SIZE >> 10;
 }

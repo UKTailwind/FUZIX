@@ -47,7 +47,7 @@ vectors:
 		jmp	e_trap15
 
 start:
-		lea.l udata_block+UBLOCK_SIZE,a7
+		lea.l udata_swap+UBLOCK_SIZE,a7
 		or #$0700,sr
 
 		move.l #__bss_start,a0
