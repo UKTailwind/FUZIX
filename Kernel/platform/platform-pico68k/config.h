@@ -23,13 +23,9 @@ extern uint16_t page_dev;
 #define PAGE_SIZE	2048	/* More would be more efficient but we want */
 #define PAGE_SHIFT	11	/* to scrape everything together we can */
 #define NBANK		40
-#define NPAGE		512
+#define NPAGE		256	/* Allow 512K of swappable RAM */
 
 #define CONFIG_BANKS 	(65536/PAGE_SIZE)
-
-#define CONFIG_SPLIT_UDATA
-#define UDATA_SIZE	1024
-#define UDATA_BLKS	2
 
 #define TICKSPERSEC	200		/* Ticks per second */
 
@@ -46,7 +42,7 @@ extern uint16_t page_dev;
 
 /* Keep our sizes low as we are very resource constrained so all memory
    is valuable */
-#define PTABSIZE 	8
+//#define PTABSIZE 	8
 #define NBUFS    	5	/* Number of block buffers */
 #define NMOUNTS	 	2	/* Number of mounts at a time */
 
@@ -60,4 +56,4 @@ extern uint16_t page_dev;
 
 #define TTY_INIT_BAUD	B38400
 
-#define CONFIG_SMALL
+//#define CONFIG_SMALL
