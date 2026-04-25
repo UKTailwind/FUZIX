@@ -1118,6 +1118,8 @@ extern void swapper(ptptr p);
 extern void swapper2(ptptr p, uint16_t map);
 extern uint8_t get_common(void);
 extern void swap_finish(uint_fast8_t page, ptptr p);
+extern void swaptask(void);
+extern ptptr swapproc;
 /* These two are provided by the bank code selected for the port */
 extern int swapout(ptptr p);
 extern void swapin(ptptr p, uint16_t map);

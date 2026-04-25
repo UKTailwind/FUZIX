@@ -200,6 +200,8 @@ void swapper2(register ptptr p, uint16_t map)
 	p->p_flags &= ~PFL_BATCH;
 }
 
+#ifndef CONFIG_SWAPPER
+
 /*
  *	Called from switchin when we discover that we want to run
  *	a swapped process. We let pagemap_alloc cause any needed swap
@@ -212,5 +214,67 @@ void swapper(register ptptr p)
                                    the old value of p->page2 */
 	swapper2(p, map);
 }
+
+#else
+
+/*
+ *	On smaller ports we do swapping in the context of the tasks. That
+ *	does get a bit exciting in some cases and isn't great for interrupt
+ *	response but it does save us a load of memory and special magic for
+ *	udata blocks in banked memory.
+ *
+ *	On bigger systems (eg 68K) there's a real advanage to having a
+ *	separate swapper task that does the swapping work for us.
+ */
+
+ptptr swapproc;
+
+/* We are always run as the next task if swapout is needed and we are never
+   paged out */
+void swaptask(void)
+{
+    irqflags_t irqf;
+    ptptr p;
+
+    swapproc = udata.u_ptab;
+    kprintf("Starting swap daemon.\n");
+    /* TODO: hook to discard the mm mappings we inherited of kernel init
+       page */
+
+    /* No signals except kill */
+    swapproc->p_sig[0].s_ignored = 0xFDFF;
+    swapproc->p_sig[1].s_ignored = 0xFFFF;
+
+    /* Dump our inherited mappings */
+    pagemap_free(swapproc);
+
+    while(1) {
+        irqf = di();
+        p = swapnext;
+        if (p == NULL) {
+            switchout();
+            /* Interrupts now enabled */
+            continue;
+        }
+        swapnext = NULL;
+        irqrestore(irqf);
+        /* Swap in the task we need. If needed it'll also swap out
+           a task to make room */
+        swapper(p);
+    }
+}
+
+/* On a system with a swap task this triggers an asynchronous swap in. When
+   we take this path the scheduler will schedule the swapper whenever
+   swapnext is true */
+void swapper(ptptr p)
+{
+	if (swapnext)
+		panic("2swap");
+	swapnext = p;
+	pwake(swapproc);
+}
+
+#endif
 
 #endif
