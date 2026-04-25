@@ -108,7 +108,13 @@ map_save:
 
 outchar:
 outcharw:
-	; FIXME
+	movem.l d0/d1,-(sp)
+wait:
+	move.b (0x30001),d1
+	and.b #2,d1
+	beq wait
+	move.b d0,(0x30000)
+	movem.l (sp)+,d0/d1
 	rts
 
 ;
