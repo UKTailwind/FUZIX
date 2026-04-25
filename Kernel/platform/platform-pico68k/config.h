@@ -23,7 +23,7 @@ extern uint16_t page_dev;
 #define PAGE_SIZE	2048	/* More would be more efficient but we want */
 #define PAGE_SHIFT	11	/* to scrape everything together we can */
 #define NBANK		40
-#define NPAGE		127	/* The max will be fine */
+#define NPAGE		512
 
 #define CONFIG_BANKS 	(65536/PAGE_SIZE)
 
