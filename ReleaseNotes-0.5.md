@@ -1,63 +1,27 @@
-# Fuzix 0.4 Release Notes
+# Fuzix 0.5 Release Notes
 
 ** Work in progress as we move towards a release candidate **
 
+The main purpose of this release is to mark a point before shifting more
+processor targets to the native compiler (fcc) which in some cases will also
+be an ABI break.
+
 ## Overview Of Changes
 
-The core of the Fuzix kernel remains much the same for this release. A
-number of bugs have been fixed and some interfaces improved. The networking
-layer has been completely reworked to be more modular so that in future it
-can run in a different address space to the kenel on 8bit machines.
+The core kernel code has changed little for this release, only bug fixes. It
+remains pretty stable.
 
-Executable formats have changed. The 8080, 8085 and Z80 binary formats are
-now properly unified so that 8085 and Z80 can run 8080 binaries directly.
-The 68HC11 and 6803 formats are somewhat different but the syscall ABI is
-arranged so that the 68HC11 can run 6803 binaries.
+At the driver level CH375/6 support has been added.
 
-The 32bit binaries that were using a bodged Linux binflt format are now
-using a.out with some small extensions to handle the relocation maps. This
-should hopefully now become a stable executable format for the future.
+C23 compliance has mostly been dealth with. We don't use C23 but it's useful
+to clean up some of the things it turned up.
 
-Building has, where possible, been made easier. The tool chains remain a bit
-of pain because of the fact many are somewhat obscure, and those that are
-not tend to get broken on a regular basis forcing specific releases to be
-used. The actual system build however now has a "make diskimage" target that
-puts together all the pieces for a bootable system in one go rather than
-requiring the builder understands the finer details of the system in
-question and how to merge all the pieces together.
+The libraries and applications have received various fixes, notably for 32bit
+and big endian systems. Other problems with %X formatting in vfprintf have
+been addressed.
 
-The make environment is much better than it was. It is still terrible
-however so a "make clean" is needed when switching processors and a "make
-kclean" is strongly recommended when tweaking any kernel config options or
-switching target. A lot of the make rules have been merged which should make
-the problem of sorting out all the rules and dependencies more tractable for
-0.5.
-
-## Naming Changes
-
-The N8VEM project rebranded as 'Retrobrew' at the request of its founder who
-had ceased to be so involved. The 0.3 release fixed most N8VEM naming, 0.4
-completes this.
-
-There is now a distinction between RC2014 (the product line) and RCbus (the
-bus standard). In particular the bus has been extended beyond the original
-concept and now has its own standard document and keepers. Fuzix should now
-only use the 'RC2014' nomenclature for official RC2014 products but there
-may be a few that have been missed. Systems that were previously rc2014-xyz
-are now rcbus-xyz.
-
-## Dropped Systems For Now
-
-- Pentagon
-- Pentagon 1024
-- Scorpion
-
-None of the testers for this work are currently available.
-
-## Not Tested (even on emulator)
-
-- P112 (no working emulator, no access to machine)
-- SocZ80 (no emulator, need to fix system)
+Some new applications have been added - cu, yuk, 2048. Various fixing and
+portability work has been done. SLIP has been added to the net drivers.
 
 ## Supported Processors
 
@@ -69,18 +33,29 @@ Fuzxi. Currently the only target board is the rcbus 6803/6303 processor
 card. Floating point is not supported, but adding it would only require
 someone writes the basic underlying soft fp routines (add, subtract etc).
 
-Other targets should not be hard to add.
+After the 0.5 release this target will be switched to the fcc compiler and
+this will allow floating point.
 
 ### 6502 / 65C02 / 65C816
 
 These are supported by cc65 (v2.18 or later). Due to compiler limits floating
 point is not supported. 65C816 is treated as a 65C02 with extras because of
-the lack of an open 65C816 compiler.
+the previous lack of an open 65C816 compiler.
 
 Currently this port targets the RCbus 65C02/65C816 cards and the PZ1. Most
 of the "classic" 6502 systems have neither the memory or the I/O, and in
 most cases even when they are upgraded with some of the late era processor
 upgrades still lack decent I/O.
+
+After this release the plan is to switch to the fcc compiler and this will
+give us a 65C816 16bit option as well.
+
+### 6800
+
+The classic 6800/6802/6808 processor is now supported using a new target
+to the fcc compiler kit. Note that the 6800 and 6803 ABI are different.
+Getting 6800 apps running on all targets is a goal for when the 6803 and
+HC11 have changed compiler.
 
 ### 6809
 
@@ -108,18 +83,17 @@ unsupported instructions. See the README for 68000.
 
 ### 8080
 
-The 8080 is supported using the Fuziz C compiler. This is a new compiler so
-there may be a few bugs left to shake out.
+The 8080 is supported using the Fuziz C compiler. This target should be
+stable. Floating point is now available.
 
 ### 8085
 
 This port now uses the full 8085 instruction set (including the stuff Intel
 decided to not to document). It uses a new compiler built specifically for
-Fuzix. This port is thus currently a little bit flaky and there are tool and
-system bugs to nail down. Performance is several times faster than the pure
-8080 build as the extra instructions make a huge difference when executing
-high level languages. Floating point is not yet supported as it needs the
-base low level FP routines for 8085 writing
+Fuzix. Performance is several times faster than the pure 8080 build as the
+extra instructions make a huge difference when executing high level languages.
+
+Floating point is now available.
 
 The supported target is the rcbus 8085 card with onboard bank MMU.
 
@@ -139,9 +113,9 @@ targets the in-progress RCbus NS32FX16 processor card design.
 
 ## Z80 / Z180 / 64180 / Z84C1X
 
-These processors are all supported by the main tree using a fork of SDCC
-3.8. The newer SDCC changes a lot of calling conventions so no move to it
-has been made at this point. That may change in the future.
+User space and some ports are now built using the fcc compiler. Some kernels
+still require the fork of SDCC 3.8. The newer SDCC changes a lot of calling
+conventions so no move to it has been made.
 
 Supporting code libraries make most flat Z180 systems trivial and provide
 all the mapping and peripheral support.
@@ -152,10 +126,10 @@ These are processors which are in the tree but not yet fully functional. In
 some cases this is merely used to help catch portability problems in the
 libraries.
 
-### 6800
+### 8070
 
-Work in progress to extend CC68 and Fuzix to the original 6800/6808
-processor line. Not yet usable
+This target is close to working but requires some compiler fixes for all
+the user space to function.
 
 ### 8086/8088/80C188/80C186
 
@@ -174,23 +148,27 @@ other ez80 platform, but none have been enabled yet.
 
 ### MSP430X
 
-Retired
+Retired (the port was always a hack and a tight squeeze). Could probably be
+resurrected in a slightly different form on the newer MSP430X boards with
+more memory.
 
 ### PDP11
 
 Tracking the state of the GCC PDP11 compiler and binutils. Not yet at a
-point the toolchain works well enough.
+point the toolchain works well enough. Sadly this continues to be the case.
 
 ### Rabbit 2000/3000
 
 At this point used as a build check on the user space. Hopefully some Rabbit
-board enabling will happen during the 0.5 work.
+board enabling will happen during the 0.6 work.
 
 ### RiscV 32
 
 Tool chain testing and portability work. At the moment this is another
 compiler chain that we break. In theory Fuzix should be able to run on some
 of the upcoming and recent RiscV micro-controllers with 128K or so of SRAM.
+
+Currently deferred as the compiler and linker keep breaking.
 
 ### TMS9995
 
@@ -235,6 +213,13 @@ The Ampro Littleboard was a classic Z80 CP/M board designed to be the same
 size as a floppy disk. This port requires the Plus version of the board with
 SCSI controller.
 
+A second version of the build for this target supports the MDISK memory
+banking interface as of 0.5
+
+### Amstrad CPC
+
+Support for the CPC series machines.
+
 ### Amstrad NC100
 
 An pre-laptop portable word processing machine with PCMCIA slot.
@@ -242,6 +227,13 @@ An pre-laptop portable word processing machine with PCMCIA slot.
 ### Amstrad NC200
 
 The sequel to the NC100 with a floppy drive and much nicer display.
+
+### Challenger III
+
+Ohio Scientific produced a machine that could run both 6502 and Z80 programs
+and flip between processors. This port supports the machine in Z80 mode
+with limited hard disk support. The floppy disks are very strange and not
+currently supported.
 
 ### CPM22
 
@@ -315,6 +307,15 @@ the Genie EG64/3 CP/M adapter or the equivalent TRS80 Lubomir soft banker.
 Robotron KC87, KC85/1 and Z9001. Not the KC85/4. East German systems
 produced by Robotron-Meßelektronik.
 
+## LINC 80
+
+A system from the same period as early RC2014, similar in style but with a
+different set of memory and architectural choices.
+
+### LOBO MAX
+
+An early "super TRS80" style system.
+
 ### MB020
 
 A simple flat memory 68020 board by Bill Shen
@@ -338,6 +339,8 @@ Low chip count 68HC11 SBC with 512K of RAM driven directly off a 68HC11, and
 the upper address pins driven by the 68HC11 GPIO lines.
 
 https://github.com/EtchedPixels/Mini11
+
+Now has supported for the MiniM8.
 
 ### MSX
 
@@ -364,6 +367,11 @@ The N8 is a fusion of Z180 retrocomputer and sort of not quite MSXish
 things.
 
 https://www.retrobrewcomputers.org/doku.php?id=boards:sbc:n8:n8
+
+### NASCOM
+
+Nascom series machines with a CF adapter on the PIO and banked memory cards
+installed.
 
 ### P112
 
@@ -428,6 +436,7 @@ elsewhere in this document.
 - RIZ180
 - SC108
 - SC111
+- SC720
 - Simple80
 - T68KRC
 - ZRC
@@ -444,8 +453,8 @@ modification sometimes used to allow for 1MB RAM.
 ### RCBus (Other)
 
 There are specific ports for RCbus systems with the following processors:
-6303 (and 6803), 6502, 6809, 8085, 68008, NS32K. The card requirements vary
-by port. Please consult the port documentation for detail.
+6303 (and 6803), 6502, 6809, 8070, 8085, 68008, NS32K. The card requirements
+vary by port. Please consult the port documentation for detail.
 
 ### Rhyophyre
 
@@ -464,10 +473,19 @@ https://www.retrobrewcomputers.org/doku.php?id=builderpages:plasmo:riz180:riz180
 
 Support for the Pi Pico embedded ARM board
 
+### ROSCO r2
+
+Yet another retro 68K system.
+
 ### Sam Coupe
 
 A "super ZX Spectrum" machine that proved to be too little, too late to
 survive the shift away from 8bit home computers.
+
+### SBC08K
+
+A classic period 68K development board very similar to the Motorola dev
+boards.
 
 ### SBC 2G
 
@@ -493,6 +511,11 @@ the ability to boot from SCM firmware. With RomWBW firmware the SC111 can
 run either.
 
 https://smallcomputercentral.com/sc111-z180-cpu-module-rc2014/
+
+### SC720
+
+Small Computer Central SC720. Related to the standard rcbus designs but with
+a cruder 32K/32K memory mapping scheme.
 
 ### Scorpion
 
@@ -578,6 +601,11 @@ supported along with the Model 4. The 128K model 4 is supported without a
 memory extender although the Dave Huffman style mod is supported. The XLR8R
 is not directly supported at this time.
 
+### V8080
+
+An emulation 8080 target this is used to check the code is 8080 clean when
+building 8080 stuff.
+
 ### VZ200
 
 VTech Laser 200 with the SDDrive adapter.
@@ -638,3 +666,7 @@ clear what you need 2MB for on a small Z80 system with no graphics.
 
 https://www.retrobrewcomputers.org/doku.php?id=builderpages:plasmo:zrc
 
+### ZXUno
+
+A ZX Uno specific port that supports the Uno feature set including the 2068
+style MMU and the double video resolution.
