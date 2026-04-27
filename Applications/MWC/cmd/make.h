@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -14,6 +15,8 @@
 #include <ar.h>
 #include <time.h>
 #include <err.h>
+
+#define MAKEPATH	"/opt/fcc/lib:/lib:/usr/lib"
 
 /* Exit codes. */
 #define	ALLOK	0	/* all ok, if -q option then all uptodate */
@@ -86,7 +89,7 @@ extern void define(char *, char *, int);
 extern int ismacro(int);
 extern int nextc(void);
 extern char *extend(char *, int, char *, int);
-extern int delim(char , char *);
+extern int delim(int , char *);
 extern void starttoken(void);
 extern void addtoken(int);
 extern void endtoken(void);

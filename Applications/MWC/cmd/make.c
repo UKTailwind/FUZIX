@@ -77,8 +77,7 @@ void die(const char *s, ...)
 	va_list args;
 	va_start(args, s);
 	fflush(stdout);
-	verrx(ERROR, "make: ", args);
-	exit(ERROR);
+	verrx(ERROR, s, args);
 }
 
 /* print lineno, cry and die */
@@ -89,6 +88,7 @@ void doerr(const char *s, ...)
 	va_start(args, s);
 	fprintf(stderr, "make: %d: ", lineno);
 	vfprintf(stderr, s, args);
+	fputs(".\n", stderr);
 	exit(ERROR);
 }
 
@@ -287,7 +287,7 @@ char *extend(char *s0, int l0, char *s1, int l1)
 }
 
 /* Return 1 if c is EOS, EOF, or one of the characters in s */
-int delim(char c, char *s)
+int delim(int c, char *s)
 {
 	return (c == EOS || c == EOF || index(s, c) != NULL);
 }
@@ -353,6 +353,28 @@ TOKEN *freetoken(register TOKEN *t)
 	return t;
 }
 
+/* Check for Make directives */
+int command(TOKEN *tp)
+{
+	const char *p = tp->value;
+
+	if (strcmp(p, "include") == 0) {
+		tp = tp->next;
+		if (tp == NULL) {
+			doerr("include requires filename");
+			return 0;
+		}
+		do {
+			int oldline = lineno;
+			input(tp->value);
+			lineno = oldline;
+			tp = tp->next;
+		} while(tp);
+		return 1;
+	}
+	return 0;
+}
+
 /* Read macros, dependencies, and actions from the file with name file, or
  * from whatever file is already open. The first string of tokens is saved
  * in a list pointed to by tp; if it was a macro, the definition goes in
@@ -396,6 +418,9 @@ void input(const char *file)
 			if (tp==NULL)
 				break;
 		case '\n':
+			/* Check first for . commands */
+			if (command(tp))
+				break;
 			doerr("newline after target or macroname");
 		case ';':
 			doerr("; after target or macroname");
@@ -484,7 +509,7 @@ void inlib(const char *file)
 {
 	const char *p, *cp;
 	if ((p = getenv("LIBPATH")) == NULL)
-		p = "/lib:/usr/lib";
+		p = MAKEPATH;
 	cp = path(p, file, R_OK);
 	input(cp ? cp : file);
 }
@@ -493,21 +518,21 @@ void inlib(const char *file)
 /* Look in current directory first */
 void inpath(char *file, ...)
 {
-	register char **vp, *cp;
+	register char *vp, *cp;
 	va_list ap;
 	va_start(ap, file);
 
 	cp = NULL;
-	for (vp = va_arg(ap, char **); *vp != NULL;)
-		if (access(*vp, R_OK) >= 0) {
-			cp = *vp;
+	for (vp = va_arg(ap, char *); vp != NULL;)
+		if (access(vp, R_OK) >= 0) {
+			cp = vp;
 			break;
 		}
 	va_end(ap);
 	if ( ! cp) {
 		va_start(ap, file);
-		for (vp = va_arg(ap, char **); *vp != NULL; vp += 1)
-			if ((cp = path(srcpath, *vp, R_OK)) != NULL)
+		for (vp = va_arg(ap, char *); vp != NULL; vp ++)
+			if ((cp = path(srcpath, vp, R_OK)) != NULL)
 				break;
 		va_end(ap);
 	}
@@ -774,9 +799,11 @@ void make(SYM *s)
 	int update;
 	int type;
 
+	name = s->filename;
+
 	if (s->type==T_DONE)
 		return;
-	name = s->filename;
+
 	if (dflag) {
 		if (s->name == name)
 			printf("Making %s\n", name);
@@ -788,10 +815,10 @@ void make(SYM *s)
 	s->moddate=getmdate(name);
 	for(dep=s->deplist;dep!=NULL;dep=dep->next)		
 		make(dep->symbol);
-	if (type==T_DETAIL){
+	if (type==T_DETAIL) {
 		implicit(s, "", 0);
 		for(dep=s->deplist;dep!=NULL;dep=dep->next)
-			if (dep->symbol->moddate>s->moddate)
+			if (dep->symbol->moddate > s->moddate)
 				docmd0(s, dep->action, name, dep->symbol->filename);
 	} else {
 		update=0;
