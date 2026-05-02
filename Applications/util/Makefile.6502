@@ -1,5 +1,7 @@
+include $(FUZIX_ROOT)/Target/rules.$(USERCPU)
+
 APPOTHER = cpuinfo
 include Makefile.common
 
-cpuinfo: cpuinfo.o cpuinfo-6502.o
+cpuinfo: cpuinfo.o cpuinfo-6502.s
 	$(LINKER) -o $@ $(LINKER_OPT) $(CRT0) $^ $(LINKER_TAIL)

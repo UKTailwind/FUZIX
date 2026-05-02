@@ -161,7 +161,7 @@ static void cpu_ident(void)
         cpu_bugs = "iff";
 }
 
-#elif defined(__CC65__)
+#elif defined(__6502__)
 
 extern uint8_t cpu_identify(void);
 extern uint8_t cpu_bcdtest(void);
