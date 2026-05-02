@@ -1,42 +1,30 @@
-;
-; 1998-06-06, Ullrich von Bassewitz
-; 2015-09-11, Greg King
-;
-; void __fastcall__ longjmp (jmp_buf buf, int retval);
-;
-; Modified for the Fuzix 65C816 setup
-;
-
         .export         _longjmp
-        .import         popax
-        .importzp       sp, ptr1, ptr2
-	.importzp	tmp1,tmp2
-
-	.p816
 	.a8
 	.i8
+	.6502
 
 _longjmp:
-        sta     ptr2            ; Save retval
-        stx     ptr2+1
-        ora     ptr2+1          ; Check for 0
-        bne     @L1
-        inc     ptr2            ; 0 is illegal, according to the standard ...
-                                ; ... and, must be replaced by 1
-@L1:    jsr     popax           ; get buf
-        sta     ptr1
-        stx     ptr1+1
-        ldy     #0
-
-; Get the old parameter stack
-
-        lda     (ptr1),y
-        iny
-        sta     sp
-        lda     (ptr1),y
-        iny
-        sta     sp+1
-
+	ldy	#1
+	jsr	__gloytmp	; pointer into @tmp
+	ldy	#3
+	lda	(@sp),y
+	sta	@tmp2
+	iny
+	lda	(@sp),y
+	sta	@tmp2+1
+	ora	@tmp2
+	bne	retok		; Non zero
+	inc	@tmp2		; Make it 1
+retok:
+	; Restore the old @sp
+	ldy	#0
+	lda	(@tmp),y
+	sta	@sp
+	iny
+	lda	(@tmp),y
+	sta	@sp+1
+	iny
+	; Ok next is S but that's complicated
 ;
 ; Detection code based on an idea by Jody Bruchon
 ;
@@ -48,15 +36,19 @@ _longjmp:
 ;				  8 with the current high 8 with IRQs off
 ;				  due to the sucky CPU design
 ;
+	.65c02
+
 	lda #$00
-	inc			; 65C02 or later will add one
+	inc a			; 65C02 or later will add one
 	cmp #$01
 	bmi is_8bit		; 6502so skip
+
+	.65c816
 ;
 ;	We can now safely play with xba to see if it's an 816.
 ; 
 	xba			; 65c02 the xba's do nothing		
-	dec			; so a goes to 0
+	dec a			; so a goes to 0
 	xba			; while 65C816 keeps it as one
 	cmp #$01
 	bmi is_8bit
@@ -79,7 +71,7 @@ _longjmp:
 	txa
 	sep #$20
 	.a8
-        lda     (ptr1),y	; Restore low 8bits of SP only
+        lda     (@tmp),y	; Restore low 8bits of SP only
 	rep #$20
 	.a16
 
@@ -95,30 +87,28 @@ _longjmp:
 	cli			; Interrupts back on
 	bra pop_out
 
+	.6502
 ;
 ; 8bit is nice and simple
 ;
 is_8bit:	
 ; Get the old stack pointer
-
-        lda     (ptr1),y
+        lda     (@tmp),y
         iny
         tax
-
         txs
 
 pop_out:
-
 ; Get the return address and push it on the stack
-
-        lda     (ptr1),y
+        lda     (@tmp),y
+	pha
         iny
-        pha
-        lda     (ptr1),y
-        pha
+        lda     (@tmp),y
+	pha
 
 ; Load the return value and return to the caller
 
-        lda     ptr2
-        ldx     ptr2+1
-        rts
+        lda     @tmp2
+        ldx     @tmp2+1
+	ldy	#4
+	jmp	__addysp

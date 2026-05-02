@@ -1,8 +1,7 @@
 	.export __syscall
-	.import _errno
-	.import __syscall_hook
+	.code
 
-.proc __syscall
+__syscall:
 	jsr	__syscall_hook
 	bne	error
 	tya		; x,a form the return code
@@ -14,5 +13,3 @@ error:
 	dex	;	Return $FFFF (-1)
 	txa
 	rts
-
-.endproc
