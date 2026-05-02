@@ -1,7 +1,5 @@
 # Fuzix 0.5 Release Notes
 
-** Work in progress as we move towards a release candidate **
-
 The main purpose of this release is to mark a point before shifting more
 processor targets to the native compiler (fcc) which in some cases will also
 be an ABI break.
