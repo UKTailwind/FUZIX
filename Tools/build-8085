@@ -2,6 +2,6 @@
 
 X=`which fcc`
 if [ "$X" = "" ]; then
-	echo "fcc is required: see https://github.com/EtchedPixels/FuzixCompilerKit/"
+	echo "fcc is required: see https://codeberg.org/EtchedPixels/FuzixCompilerKit/"
 	exit 1
 fi
