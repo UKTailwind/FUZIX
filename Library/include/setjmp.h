@@ -40,9 +40,9 @@
 	extern int _setjmp(jmp_buf __env);
 	#define setjmp(x) _setjmp(x)
 
-#elif defined(__CC65__)
+#elif defined(__6502__)
 
-	typedef char jmp_buf[5];
+	typedef char jmp_buf[5];	/* SP S (SP) */
 	extern int _setjmp(jmp_buf __env);
 	#define setjmp(x) _setjmp(x)
 

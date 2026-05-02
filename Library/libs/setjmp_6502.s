@@ -4,9 +4,9 @@
 ;
 	.code
 
-	.export _setjmp
+	.export __setjmp
 
-_setjmp:
+__setjmp:
 	ldy	#1
 	jsr	__gloytmp
 	; @tmp is now the pointer
