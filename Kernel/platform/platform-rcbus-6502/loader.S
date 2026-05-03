@@ -77,17 +77,17 @@ bytes2:
 	jmp dread
 
 load_done:
-	lda $4000
+	lda $0400
 	cmp #$02
 	bne bad_load
-	lda $4001
+	lda $0401
 	cmp #$65
 	bne bad_load
 
 	ldx #>running
 	lda #<running
 	jsr outstring
-	jmp $4002
+	jmp $0402
 
 bad_load:
 	ldx #>badimg

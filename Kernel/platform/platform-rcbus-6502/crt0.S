@@ -1,15 +1,20 @@
 ;
 ;	So we end up first in the image
 ;
-		.code
+; Layered over the BSS
+;
+
+		.common
 
 		.byte $02
 		.byte $65
 
+		; Entered at 0x0402
 entry:
-;
-;	We are entered at $C002 just after the required magic number
-;
+		jmp go
+
+		.code
+go:
 		sei			; interrupts off
 		cld			; decimal off
 		ldx #$FF
