@@ -1,37 +1,37 @@
 ; Keep these in sync with struct u_data!!
-U_DATA__U_PTAB              .set (0)   ; struct p_tab*
-U_DATA__U_PAGE              .set (2)   ; uint16_t
-U_DATA__U_PAGE2             .set (4)   ; uint16_t
-U_DATA__U_INSYS             .set (6)   ; bool
-U_DATA__U_CALLNO            .set (7)   ; uint8_t
-U_DATA__U_SYSCALL_SP        .set (8)   ; void *
-U_DATA__U_RETVAL            .set (10)   ; int16_t
-U_DATA__U_ERROR             .set (12)  ; int16_t
-U_DATA__U_SP                .set (14)  ; void *
-U_DATA__U_ININTERRUPT       .set (16)  ; bool
-U_DATA__U_CURSIG            .set (17)  ; int8_t
-U_DATA__U_ARGN              .set (18)  ; uint16_t
-U_DATA__U_ARGN1             .set (20)  ; uint16_t
-U_DATA__U_ARGN2             .set (22)  ; uint16_t
-U_DATA__U_ARGN3             .set (24)  ; uint16_t
-U_DATA__U_ISP               .set (26)  ; void * (initial stack pointer when _exec()ing)
-U_DATA__U_TOP               .set (28)  ; uint16_t
-U_DATA__U_BREAK             .set (30)  ; uint16_t
-U_DATA__U_CODEBASE          .set (32)  ; uint16_t
-U_DATA__U_SIGVEC            .set (34)  ; table of function pointers (void *)
+U_DATA__U_PTAB              .equ 0   ; struct p_tab*
+U_DATA__U_PAGE              .equ 2   ; uint16_t
+U_DATA__U_PAGE2             .equ 4   ; uint16_t
+U_DATA__U_INSYS             .equ 6   ; bool
+U_DATA__U_CALLNO            .equ 7   ; uint8_t
+U_DATA__U_SYSCALL_SP        .equ 8   ; void *
+U_DATA__U_RETVAL            .equ 10   ; int16_t
+U_DATA__U_ERROR             .equ 12  ; int16_t
+U_DATA__U_SP                .equ 14  ; void *
+U_DATA__U_ININTERRUPT       .equ 16  ; bool
+U_DATA__U_CURSIG            .equ 17  ; int8_t
+U_DATA__U_ARGN              .equ 18  ; uint16_t
+U_DATA__U_ARGN1             .equ 20  ; uint16_t
+U_DATA__U_ARGN2             .equ 22  ; uint16_t
+U_DATA__U_ARGN3             .equ 24  ; uint16_t
+U_DATA__U_ISP               .equ 26  ; void * (initial stack pointer when _exec()ing)
+U_DATA__U_TOP               .equ 28  ; uint16_t
+U_DATA__U_BREAK             .equ 30  ; uint16_t
+U_DATA__U_CODEBASE          .equ 32  ; uint16_t
+U_DATA__U_SIGVEC            .equ 34  ; table of function pointers (void *)
 
 ; Keep these in sync with struct p_tab!!
-P_TAB__P_STATUS_OFFSET      .set 0
-P_TAB__P_FLAGS_OFFSET       .set 1
-P_TAB__P_TTY_OFFSET         .set 2
-P_TAB__P_PID_OFFSET         .set 3
-P_TAB__P_PAGE_OFFSET        .set 15
+P_TAB__P_STATUS_OFFSET      .equ 0
+P_TAB__P_FLAGS_OFFSET       .equ 1
+P_TAB__P_TTY_OFFSET         .equ 2
+P_TAB__P_PID_OFFSET         .equ 3
+P_TAB__P_PAGE_OFFSET        .equ 15
 
-P_RUNNING                   .set 1            ; value from include/kernel.h
-P_READY                     .set 2            ; value from include/kernel.h
+P_RUNNING                   .equ 1            ; value from include/kernel.h
+P_READY                     .equ 2            ; value from include/kernel.h
 
-PFL_BATCH		    .set 4            ; value from include/kernel.h
+PFL_BATCH		    .equ 4            ; value from include/kernel.h
 
-OS_BANK                     .set 0            ; value from include/kernel.h
+OS_BANK                     .equ 0            ; value from include/kernel.h
 
-EAGAIN                      .set 11           ; value from include/kernel.h
+EAGAIN                      .equ 11           ; value from include/kernel.h

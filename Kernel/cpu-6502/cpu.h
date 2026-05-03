@@ -4,9 +4,9 @@
 #define uputi  uputw			/* Copy user int type */
 #define ugeti  ugetw			/* between user and kernel */
 
-extern void * __fastcall__ memcpy(void *, void *, size_t);
-extern void * __fastcall__ memset(void *, int, size_t);
-extern size_t __fastcall__ strlen(const char *);
+extern void *memcpy(void *, void *, size_t);
+extern void *memset(void *, int, size_t);
+extern size_t strlen(const char *);
 
 /* High byte is saved, low byte is a mystery so take worst case. Also allow
    a bit less as C stack is not return stack */
@@ -38,10 +38,11 @@ typedef union {            /* this structure is endian dependent */
 
 #define ntohs(x)	((((x) & 0xFF) << 8) | (((x) & 0xFF00) >> 8))
 
-/* cc65 really wants register tags on struct pointers used repeatedly */
-#define regptr	register
+/* We need to look at this once the compiler is a bit more mature and see
+   if adding register pointer vars is a win - probably it will be */
+#define regptr register
 
-/* CC65 is bright enough to partly optimise this but not fully so do it
+/* fcc is bright enough to partly optimise this but not fully so do it
    by hand */
 #define HIBYTE32(x)	(((uint8_t *)&(x))[3])
 
