@@ -11,7 +11,7 @@ many Linux distributions is just fine).
 - RCBUS 65C816 processor card with I/O at $FExx
 - 512K/512K banked memory card
 - 16C550A compatible UART at $FEC0
-- 6522 VIA at $%FE60
+- 6522 VIA at $FE60
 - RC2014 IDE adapter at $FE10
 
 At the moment the support is fairly basic. Other devices could easily be

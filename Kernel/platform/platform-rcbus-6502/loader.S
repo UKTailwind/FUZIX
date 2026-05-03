@@ -6,11 +6,11 @@
 ;	and then jump to 4002 if the marker is right
 ;
 
-	.zeropage
-ptr1:	.res	2
-sector:	.res	1
+	.zp
+ptr1:	.word	0
+sector:	.byte	0
 
-	.segment "CODE"
+	.code
 
 	.byte $65
 	.byte $02
@@ -23,12 +23,12 @@ start:
 	; Our map is now 32 33 34 35
 
 	lda #$00
-	sta ptr1
+	sta @ptr1
 	lda #$04
-	sta ptr1+1
+	sta @ptr1+1
 
 	lda #$01	; 0 is the partition/boot block
-	sta sector
+	sta @sector
 
 	lda #'['
 	jsr outchar
@@ -41,10 +41,10 @@ dread:
 	jsr waitready
 	lda #'.'
 	jsr outchar
-	lda sector
+	lda @sector
 	cmp #$7D	; loaded all of the image ?
 	beq load_done
-	inc sector
+	inc @sector
 	sta $FE13
 	lda #$01
 	sta $FE12	; num sectors (drives may clear this each I/O)
@@ -58,20 +58,20 @@ dread:
 	lda #'d'
 	jsr outchar
 
-	lda ptr1+1	; skip the I/O page
+	lda @ptr1+1	; skip the I/O page
 	ldy #0
 bytes1:
 	lda $FE10
-	sta (ptr1),y
+	sta (@ptr1),y
 	iny
 	bne bytes1
-	inc ptr1+1
+	inc @ptr1+1
 bytes2:
 	lda $FE10
-	sta (ptr1),y
+	sta (@ptr1),y
 	iny
 	bne bytes2
-	inc ptr1+1
+	inc @ptr1+1
 	lda #'X'
 	jsr outchar
 	jmp dread
@@ -124,12 +124,11 @@ wait_drq_done:
 	rts
 
 outstring:
-	sta ptr1
-	stx ptr1+1
+	sta @ptr1
+	stx @ptr1+1
 	ldy #0
 outstringl:
-	lda (ptr1),y
-	cmp #0
+	lda (@ptr1),y
 	beq outdone1
 	jsr outchar
 	iny

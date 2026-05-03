@@ -7,30 +7,11 @@
 	.export _ramtop
 	.export _create_init_common
 
-	.import _chksigs
-	.import _plt_monitor
+#include "kernel.def"
+#include "../../cpu-6502/kernel02.def"
+#include "zeropage.inc"
 
-	.import map_kernel
-
-	.import	_makeproc
-	.import _getproc
-	.import _runticks
-	.import _inint
-	.import outstring
-	.import outxa
-	.import outcharhex
-
-	.import _udata
-	.import _use_mvn
-
-	.import pushax
-	.import incsp2
-
-        .include "kernel.def"
-        .include "../../cpu-6502/kernel02.def"
-	.include "zeropage.inc"
-
-        .segment "COMMONMEM"
+	.common
 
 ; ramtop must be in common for single process swapping cases
 ; and its a constant for the others from before init forks so it'll be fine
@@ -48,33 +29,34 @@ _plt_switchout:
 ;
 ;	Put the C stack on the CPU stack, and store that in U_SP
 ;
-	lda #0		; return code
+	lda	#0		; return code
 	pha
 	pha
-	lda sp		; C stack
+	lda	@sp		; C stack
 	pha
-	lda sp+1
+	lda	@sp+1
 	pha
 	tsx
-	stx _udata + U_DATA__U_SP	; Save it
+	stx	_udata + U_DATA__U_SP	; Save it
 
         ; find another process to run (may select this one again) returns it
         ; in x,a
-        jsr _getproc
-        jsr _switchin
+        jsr	_getproc
+        jsr	_switchin
         ; we should never get here
-        jsr _plt_monitor
+        jsr	_plt_monitor
 
-badswitchmsg: .byte "_switchin: FAIL"
-	.byte 13, 10, 0
+badswitchmsg:
+	.byte	"_switchin: FAIL"
+	.byte	13, 10, 0
 
 ;
 ;	On entry x,a holds the process to switch in
 ;
 _switchin:
 	sei
-	sta	ptr1
-	stx	ptr1+1
+	sta	@tmp2
+	stx	@tmp2+1
 	; Take a second saved set as we are going to swap stacks and ZP
 	; with a CPU that hasn't got sufficient registers to keep it on
 	; CPU
@@ -82,36 +64,36 @@ _switchin:
 	stx	switch_proc_ptr+1
 ;	jsr	outxa
 	ldy	#P_TAB__P_PAGE_OFFSET
-	lda	(ptr1),y
+	lda	(@tmp2),y
 ;	jsr	outcharhex
 	sta	$FE78		; switches zero page, stack memory area
 	; ------- No valid stack, new ZP ----- stack must not be used
 
-	; Set ptr1 back up (the old ptr1 was on the other ZP)
+	; Set @tmp2 back up (the old @tmp2 was on the other ZP)
 	lda	switch_proc_ptr
-	sta	ptr1
+	sta	@tmp2
 	lda	switch_proc_ptr+1
-	sta	ptr1+1
+	sta	@tmp2+1
 
         ; check u_data->u_ptab matches what we wanted
 	lda	_udata + U_DATA__U_PTAB
-	cmp	ptr1
+	cmp	@tmp2
 	bne	switchinfail
 	lda	_udata + U_DATA__U_PTAB+1
-	cmp	ptr1+1
+	cmp	@tmp2+1
 	bne	switchinfail
 
 	lda	#P_RUNNING
 	ldy	#P_TAB__P_STATUS_OFFSET
-	sta	(ptr1),y
+	sta	(@tmp2),y
 
 	lda #0
-	sta _runticks
-	sta _runticks+1
+	sta	_runticks
+	sta	_runticks+1
 
         ; restore machine state -- note we may be returning from either
         ; _switchout or _dofork
-        ldx _udata + U_DATA__U_SP
+        ldx	_udata + U_DATA__U_SP
 	txs
 
 	; ------- Stack now valid again
@@ -130,16 +112,15 @@ swtchdone:
         rts
 
 switchinfail:
-	lda	ptr1+1
+	lda	@tmp2+1
 	jsr	outcharhex
-	lda	ptr1
+	lda	@tmp2
 	jsr	outcharhex
         lda	#<badswitchmsg
 	ldx	#>badswitchmsg
-        jsr outstring
+        jsr	outstring
 	; something went wrong and we didn't switch in what we asked for
-        jmp _plt_monitor
-
+        jmp	_plt_monitor
 
 ;
 ;	Called from _fork. We are in a syscall, the uarea is live as the
@@ -150,52 +131,53 @@ _dofork:
         sei	 ; should already be the case ... belt and braces.
 
 	; new process in X, get parent pid into y
+	call	__pop
 
-	sta fork_proc_ptr
-	stx fork_proc_ptr+1
+	sta	fork_proc_ptr
+	stx	fork_proc_ptr+1
 
-	ldy #P_TAB__P_PID_OFFSET
-	sta ptr1
-	stx ptr1+1
+	ldy	#P_TAB__P_PID_OFFSET
+	sta	@tmp2
+	stx	@tmp2+1
 
         ; Save the stack pointer and critical registers.
 	; 6502 at least doesn't have too many of those 8)
 
         ; When this process (the parent) is switched back in, it will be as if
         ; it returns with the value of the child's pid.
-	lda (ptr1),y
+	lda	(@tmp2),y
 	pha
 	iny
-	lda (ptr1),y
+	lda	(@tmp2),y
 	pha
 
         ; save kernel stack pointer -- when it comes back in the parent we'll be in
         ; _switchin which will immediately return (appearing to be _dofork()
 	; returning) the child PID.
-	lda sp
+	lda	@sp
 	pha
-	lda sp+1
+	lda	@sp+1
 	pha
 	tsx
-	stx _udata + U_DATA__U_SP
+	stx	_udata + U_DATA__U_SP
 
         ; now we're in a safe state for _switchin to return in the parent
 	; process.
 
 	;
-	;	Assumes ptr1 still holds the new process ptr
+	;	Assumes @tmp2 still holds the new process ptr
 	;
 
-	jsr fork_copy
+	jsr	fork_copy
 
 	; --------- we switch stack copies here -----------
-        lda fork_proc_ptr
-	ldx fork_proc_ptr+1
-	sta ptr1
-	stx ptr1+1
-	ldy #P_TAB__P_PAGE_OFFSET
-	lda (ptr1),y
-	sta $FE78			; switch to child and child stack
+        lda	fork_proc_ptr
+	ldx	fork_proc_ptr+1
+	sta	@tmp2
+	stx	@tmp2+1
+	ldy	#P_TAB__P_PAGE_OFFSET
+	lda	(@tmp2),y
+	sta	$FE78			; switch to child and child stack
 					; and zero page etc
 	; We are now in the kernel child context
 
@@ -206,22 +188,25 @@ _dofork:
 	pla
 	pla
 
-        lda fork_proc_ptr
-	ldx fork_proc_ptr+1
 
-	jsr pushax
+TODO args reversed and both pushed
 
-	lda #<_udata
-	ldx #>_udata
+        lda	fork_proc_ptr
+	ldx	fork_proc_ptr+1
 
-        jsr _makeproc
+	jsr	pushax
+
+	lda	#<_udata
+	ldx	#>_udata
+
+        jsr	_makeproc
 
 	; any calls to map process will now map the childs memory
 
         ; runticks = 0;
-	lda #0
-	sta _runticks
-	sta _runticks+1
+	lda	#0
+	sta	_runticks
+	sta	_runticks+1
 
         ; in the child process, fork() returns zero.
 	tax
@@ -232,49 +217,49 @@ _dofork:
         rts
 
 ;
-;	On entry ptr1 points to the process table of the child, and
+;	On entry @tmp2 points to the process table of the child, and
 ;	the U_DATA is still not fully modified so holds the parents bank
 ;	number. This wants optimising to avoid copying all the unused
 ;	space!
 ;
 fork_copy:
-	ldy #P_TAB__P_PAGE_OFFSET
-	lda (ptr1),y		; child->p_pag[0]
-	sta $FE7A		; 8000
-	sta tmp1
-	lda _udata + U_DATA__U_PAGE
-	sta $FE79		; 4000
-	sta tmp2
+	ldy	#P_TAB__P_PAGE_OFFSET
+	lda	(@tmp2),y		; child->p_pag[0]
+	sta	$FE7A		; 8000
+	sta	@tmp
+	lda	_udata + U_DATA__U_PAGE
+	sta	$FE79		; 4000
+	sta	@tmp1
 
 	; Now use that window to copy 48K from 0000-BFFF
 
-	jsr bank2bank		; copies 16K
+	jsr	bank2bank		; copies 16K
 
-	inc tmp1
-	inc tmp2
-	lda tmp1
-	sta $FE7A
-	lda tmp2
-	sta $FE79
-	jsr bank2bank		; second 16K
+	inc	@tmp
+	inc	@tmp1
+	lda	@tmp
+	sta	$FE7A
+	lda	@tmp1
+	sta	$FE79
+	jsr	bank2bank		; second 16K
 
-	inc tmp1
-	inc tmp2
-	lda tmp1
-	sta $FE7A
-	lda tmp2
-	sta $FE79
-	jsr bank2bank		; third 16K
+	inc	@tmp
+	inc	@tmp1
+	lda	@tmp
+	sta	$FE7A
+	lda	@tmp1
+	sta	$FE79
+	jsr	bank2bank		; third 16K
 
-	inc tmp1
-	inc tmp2
-	lda tmp1
-	sta $FE7A
-	lda tmp2
-	sta $FE79
-	jsr bank2bank		; final block
+	inc	@tmp
+	inc	@tmp1
+	lda	@tmp
+	sta	$FE7A
+	lda	@tmp1
+	sta	$FE79
+	jsr	bank2bank		; final block
 
-	jmp map_kernel		; put the kernel mapping back as it should be
+	jmp	map_kernel		; put the kernel mapping back as it should be
 	
 bank2bank:			; copy 16K from the block mapped
 				; at 4000 to the block at 8000
@@ -284,59 +269,59 @@ bank2bank:			; copy 16K from the block mapped
 				; interrupt save/restore logic
 				; For 65C816 we'd need a 16bit mode IRQ
 				; wrapper which would be scary code
-	lda _use_mvn
-	beq bank2bank_6502
+	lda	_use_mvn
+	beq	bank2bank_6502
 
 
-	.p816
+	.65c816
 
 	clc
 	xce
-	rep #$30
+	rep	#$30
 	; Stack is now insane so good job interrupts are off
 	.a16
 	.i16
-	ldx #$4000
-	ldy #$8000
-	lda #$4000
-	mvn #0,#0		; Bank is irrelevant as A16-A23 are unwired
-	sep #$30
+	ldx	#$4000
+	ldy	#$8000
+	lda	#$4000
+	mvn	#0,#0		; Bank is irrelevant as A16-A23 are unwired
+	sep	#$30
 	.a8
 	.i8
 	sec
 	xce
 	rts
 
-	.p02
+	.6502
 
 bank2bank_6502:
-	lda #$40
-	sta ptr3+1
-	lda #$80
-	sta ptr4+1
-	lda #0
-	sta ptr3
-	sta ptr4
+	lda	#$40
+	sta	@tmp3+1
+	lda	#$80
+	sta	@tmp4+1
+	lda	#0
+	sta	@tmp3
+	sta	@tmp4
 	tay
-	ldx #$40		;	64 x 256 bytes  = 16K
+	ldx	#$40		;	64 x 256 bytes  = 16K
 copy1:
-	lda (ptr3),y
-	sta (ptr4),y
+	lda	(@tmp3),y
+	sta	(@tmp4),y
 	iny
-	bne copy1
-	inc ptr3+1
-	inc ptr4+1
+	bne	copy1
+	inc	@tmp3+1
+	inc	@tmp4+1
 	dex
-	bne copy1
+	bne	copy1
 	rts
 
 _create_init_common:
-	lda #32
-	sta $FE79		;	set the map for 0x4000
-	lda #36
-	sta $FE7A		;	and 0x8000
-	jsr bank2bank
-	jmp map_kernel
+	lda	#32
+	sta	$FE79		;	set the map for 0x4000
+	lda	#36
+	sta	$FE7A		;	and 0x8000
+	jsr	bank2bank
+	jmp	map_kernel
 ;
 ;	The switch proc pointer cannot live anywhere in common as we switch
 ;	common on process switch, and we need it to live about 0x4000
@@ -346,5 +331,7 @@ _create_init_common:
 ;
 	.bss
 
-switch_proc_ptr: .word 0
-fork_proc_ptr: .word 0 ; (C type is struct p_tab *) -- address of child process p_tab entry
+switch_proc_ptr:
+	.word	0
+fork_proc_ptr:
+	.word	0 ; (C type is struct p_tab *) -- address of child process p_tab entry

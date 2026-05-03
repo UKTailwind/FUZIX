@@ -10,9 +10,9 @@
         .export istack_switched_sp
 	.export CTemp
 
-        .segment "COMMONDATA"
-	.include "zeropage.inc"
+#include "zeropage.inc"
 
+	.common
 ;
 ;	In 6502 land these are the C stacks, we will need to handle the
 ;	hardware stack separately, and also to save sp,sp+1 etc on irqs
@@ -24,21 +24,27 @@
 _ub:    ; first 512 bytes: starts with struct u_block, with the kernel stack working down from above
 _udata:
 kstack_base:
-	.res 512,0
+	.ds 512
 kstack_top:
 
 ;
 ;	Finally we tack the ZP save area for interrupts on the end
 ;
-; Swap space for the the C temporaries (FIXME - we stash sp twice right now)
+; Swap space for the the C temporaries
 ;
 CTemp:
-	.res    2               ; sp
-	.res    2               ; sreg
-        .res    (zpsavespace-4) ; Other stuff
+	.word	0               ; working value for save (SP is kept elsewhere)
+	.word   0               ; hireg
+	.word	0		; tmp
+	.word	0		; tmp1
+	.word	0		; tmp2
+	.word	0		; tmp3
+	.word	0		; tmp4
+	.word	0		; tmp5
 
         ; next 256 bytes: 254 byte interrupt stack, then 2 byte saved stack pointer
 istack_base:
-	.res 254,0
+	.ds	254
 istack_top:
-istack_switched_sp: .word 0
+istack_switched_sp:
+	.word	0

@@ -1,26 +1,21 @@
-;
-; zeropage.inc
-;
-; (C) Copyright 2002-2012, Ullrich von Bassewitz (uz@cc65.org)
-;
 
-; Assembler include file that imports the runtime zero page locations used
-; by the compiler, ready for usage in asm code.
+	.export	sp
+	.export hireg
+	.export tmp
+	.export tmp1
+	.export tmp2
+	.export tmp3
+	.export tmp4
+	.export tmp5
 
+	.zp
 
-        .globalzp       sp, sreg, regsave
-        .globalzp       ptr1, ptr2, ptr3, ptr4
-        .globalzp       tmp1, tmp2, tmp3, tmp4
-        .globalzp       regbank
-  
-; The size of the register bank
-regbanksize     = 6
-
-; The total amount of zero page space used
-zpspace         = 26
-
-; The amount of space that needs to be saved by an interrupt handler that
-; calls C code (does not include the register bank, which is saved by the
-; generated C code if required).
-zpsavespace     = zpspace - regbanksize
+sp:	.word	0		; must be first
+hireg:	.word	0		; Save these 14 bytes on an irq switch
+tmp:	.word	0
+tmp1:	.word	0
+tmp2:	.word	0
+tmp3:	.word	0
+tmp4:	.word	0
+tmp5:	.word	0
 
