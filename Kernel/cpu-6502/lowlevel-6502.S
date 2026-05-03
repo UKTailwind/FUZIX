@@ -120,7 +120,7 @@ nmi_handler:
 nmi_stop:
 	jmp	_plt_monitor
 nmi_trap:
-	.byte	"NMI!"
+	.ascii	"NMI!"
 	.byte	0
 
 outstring:
