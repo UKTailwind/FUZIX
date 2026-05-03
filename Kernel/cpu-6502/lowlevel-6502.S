@@ -19,7 +19,6 @@
 
 	.export _relocator
 
-#include "../build/zeropage.inc"
 #include "../build/kernel.def"
 #include "kernel02.def"
 

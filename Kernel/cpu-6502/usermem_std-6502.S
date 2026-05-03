@@ -1,6 +1,5 @@
 #include "../build/kernel.def"
 #include "kernel02.def"
-#include "../build/zeropage.inc"
 
 		.export __uget
 		.export __ugetc
