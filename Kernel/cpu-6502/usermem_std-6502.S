@@ -195,15 +195,15 @@ __uputw:	ldy	#4
 __uzero:	ldy	#3
 		lda	(@sp),y
 		dey
-		sta	@tmp3+1
-		lda	(@sp),y
-		dey
-		sta	@tmp3
-		lda	(@sp),y
-		dey
 		sta	@tmp2+1
 		lda	(@sp),y
+		dey
 		sta	@tmp2
+		lda	(@sp),y
+		dey
+		sta	@tmp3+1
+		lda	(@sp),y
+		sta	@tmp3
 
 		; Our C stack vanishes at this point
 		jsr map_proc_always
