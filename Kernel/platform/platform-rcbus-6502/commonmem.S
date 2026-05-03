@@ -10,8 +10,6 @@
         .export istack_switched_sp
 	.export CTemp
 
-#include "zeropage.inc"
-
 	.common
 ;
 ;	In 6502 land these are the C stacks, we will need to handle the

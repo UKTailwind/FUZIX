@@ -2,14 +2,14 @@
 CSRCS = devtty.c
 CSRCS += devices.c main.c
 
-ASRCS = rcbus-6502.s crt0.s
-ASRCS += tricks.s commonmem.s
+ASRCS = rcbus-6502.S crt0.S
+ASRCS += tricks.S commonmem.S
 
-DSRCS = ../../dev/devide.c ../../dev/blkdev.c
-DISCARD_DSRCS = ../../dev/mbr.c ../../dev/devide_discard.c
+DSRCS = ../../dev/tinyide.c ../../dev/tinydisk.c
+DISCARD_DSRCS = ../../dev/tinyide_discard.c ../../dev/tinydisk_discard.c
 
 COBJS = $(CSRCS:.c=$(BINEXT))
-AOBJS = $(ASRCS:.s=$(BINEXT))
+AOBJS = $(ASRCS:.S=$(BINEXT))
 DOBJS = $(patsubst ../../dev/%.c,%.o, $(DSRCS))
 DISCARD_DOBJS = $(patsubst ../../dev/%.c,%.o, $(DISCARD_DSRCS))
 
@@ -22,7 +22,7 @@ all:	$(OBJS)
 $(COBJS): %$(BINEXT): %.c
 	$(CROSS_CC) $(CROSS_CCOPTS) $(CROSS_CC_SEG1) $<
 
-$(AOBJS): %$(BINEXT): %.s
+$(AOBJS): %$(BINEXT): %.S
 	$(CROSS_AS) $(ASOPTS) $< -o $*$(BINEXT)
 
 $(DOBJS): %$(BINEXT): ../../dev/%.c
@@ -36,25 +36,26 @@ $(DISCARD_DOBJS): %$(BINEXT): ../../dev/%.c
 clean:
 	rm -f $(OBJS) *.o core *~ fuzix.img fuzix.bin
 
-image:
-	$(CROSS_LD) -o ../../fuzix.bin --mapfile ../../fuzix.map -C ld65.cfg crt0.o commonmem.o \
+image:	loader
+	$(CROSS_LD) -b -C 0x100 -S 0xF200 -Z 0x00 -o ../../fuzix.bin -m fuzix.tmpmap crt0.o commonmem.o \
 	rcbus-6502.o ../../start.o ../../version.o ../../cpu-6502/lowlevel-6502.o \
 	tricks.o main.o ../../timer.o ../../kdata.o devices.o \
-	blkdev.o mbr.o devide.o devide_discard.o ../../mm/memalloc_none.o \
+	tinydisk.o tinydisk_discard.o tinyide.o tinyide_discard.o ../../mm/memalloc_none.o \
 	../../devio.o ../../filesys.o ../../process.o ../../inode.o ../../syscall_fs.o \
-	../../syscall_proc.o ../../syscall_other.o ../../mm.o ../../mm/bankfixed.o \
+	../../syscall_proc.o ../../syscall_other.o ../../mm.o ../../swap.o ../../mm/bankfixed.o \
 	../../tty.o ../../devsys.o ../../syscall_fs2.o ../../syscall_fs3.o \
 	../../syscall_exec16.o ../../syscall_exec.o ../../blk512.o \
-	../../usermem.o ../../cpu-6502/usermem_std-6502.o devtty.o
-	dd if=../../fuzix.bin of=fuzix.img bs=256 skip=4 
+	../../usermem.o ../../cpu-6502/usermem_std-6502.o devtty.o /opt/fcc/lib/6502/lib6502.a
+	perl -lpe '$$_=hex' fuzix.tmpmap | paste -d" " - fuzix.tmpmap  |  sort -n |  cut -d" " -f 2- >../../fuzix.map
+	dd if=../../fuzix.bin of=fuzix.img bs=256 skip=1
 
 loader: loader.o
 	# Turn the loader into just the bytes for the bootstrap
-	ld65 -C loader.cfg loader.o -o loader.tmp
+	ld6502 -b loader.o -o loader.tmp
 	dd if=loader.tmp bs=256 skip=2 | dd of=loader.bin bs=350 count=1
 
-loader.o: loader.s
-	ca65 loader.s
+loader.o: loader.S
+	fcc -m6502 loader.S -c
 	
 IMAGES = $(FUZIX_ROOT)/Images/$(TARGET)
 

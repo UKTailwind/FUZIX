@@ -1,5 +1,3 @@
-#include "zeropage.inc"
-
 ;
 ;	So we end up first in the image
 ;

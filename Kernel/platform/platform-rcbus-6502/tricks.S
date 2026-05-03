@@ -9,7 +9,6 @@
 
 #include "kernel.def"
 #include "../../cpu-6502/kernel02.def"
-#include "zeropage.inc"
 
 	.common
 
@@ -47,7 +46,7 @@ _plt_switchout:
         jsr	_plt_monitor
 
 badswitchmsg:
-	.byte	"_switchin: FAIL"
+	.ascii	"_switchin: FAIL"
 	.byte	13, 10, 0
 
 ;
@@ -131,7 +130,7 @@ _dofork:
         sei	 ; should already be the case ... belt and braces.
 
 	; new process in X, get parent pid into y
-	call	__pop
+	jsr	__pop
 
 	sta	fork_proc_ptr
 	stx	fork_proc_ptr+1
@@ -188,16 +187,13 @@ _dofork:
 	pla
 	pla
 
-
-TODO args reversed and both pushed
+	lda	#<_udata
+	ldx	#>_udata
+	jsr	__push
 
         lda	fork_proc_ptr
 	ldx	fork_proc_ptr+1
-
-	jsr	pushax
-
-	lda	#<_udata
-	ldx	#>_udata
+	jsr	__push
 
         jsr	_makeproc
 

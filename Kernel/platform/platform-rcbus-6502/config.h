@@ -13,8 +13,6 @@
 /* Permit large I/O requests to bypass cache and go direct to userspace */
 #define CONFIG_LARGE_IO_DIRECT(x)	1
 
-#define CONFIG_CALL_R2L		/* Runtime stacks arguments backwards */
-
 /*
  *	512K RAM (swap yet to do )
  *	Question: is common better top or bottom ?
@@ -33,8 +31,10 @@
 #define PROGLOAD    0x2000
 #define PROGTOP     0xFE00
 
-#define CONFIG_IDE
-#define MAX_BLKDEV 1
+#define CONFIG_TD_NUM	2
+#define CONFIG_TD_IDE
+#define CONFIG_TINYIDE_8BIT
+#define IDE_IS_8BIT(x)	1
 
 /* FIXME: swap */
 

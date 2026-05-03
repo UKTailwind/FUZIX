@@ -27,7 +27,25 @@
 
 #include "kernel.def"
 #include "../../cpu-6502/kernel02.def"
-#include "zeropage.inc"
+
+	.export sp
+	.export hireg
+	.export tmp
+	.export tmp1
+	.export tmp2
+	.export tmp3
+	.export tmp4
+	.export	tmp5
+
+	.zp
+sp:	.word	0
+hireg:	.word	0
+tmp:	.word	0
+tmp1:	.word	0
+tmp2:	.word	0
+tmp3:	.word	0
+tmp4:	.word	0
+tmp5:	.word	0
 
 ; -----------------------------------------------------------------------------
 ; COMMON MEMORY BANK (0x0200 upwards after the common data blocks)
@@ -383,9 +401,9 @@ no_preempt:
 
 	; Right now the stack holds Y X A P rti addr
 	; Push a helper to clean up and restore the register state
-	lda	#>(irqout-1)
+	lda	#>irqout-1
 	pha	
-	lda	#<(irqout-1)
+	lda	#<irqout-1
 	pha					; stack a return vector
 	tya
 	pha					; stack signal number
@@ -400,9 +418,9 @@ no_preempt:
 	txa
 	sta	_udata+U_DATA__U_SIGVEC,y	; Wipe the vector
 	sta	_udata+U_DATA__U_SIGVEC+1,y
-	lda	#>(PROGLOAD + 16)
+	lda	#>PROGLOAD + 16
 	pha
-	lda	#<(PROGLOAD + 16)
+	lda	#<PROGLOAD + 16
 	pha
 	lda	#0
 	pha					; dummy flags, with irq enable
@@ -419,8 +437,7 @@ kirqout:
 	ldx	istack_switched_sp
 	txs					; recover 6502 stack
 ; FIXME: check stashing is ok with user v kernel v irq and nothing is ever
-; lost 
-TODO
+; lost  TODO
 	jsr	stash_zp			; recover 6502 zp bits
 
 irqout:
@@ -440,7 +457,7 @@ syscall_entry:
 	sei
 	cld
 
-	stx _udata+U_DATA__U_CALLNO
+	stx	_udata+U_DATA__U_CALLNO
 
 	; 	@sp points to the user argments
 
@@ -454,7 +471,7 @@ syscall_entry:
 	ldx	#0
 copy_args:
 	lda	(@sp),y
-	sta	_udata + U_DATA__ARGN,x
+	sta	_udata+U_DATA__U_ARGN,x
 	inx
 	iny
 	cpy	#8
@@ -473,7 +490,7 @@ copy_args:
 ;	We save a copy of the high byte of sp here as we may need it to get
 ;	the brk() syscall right.
 ;
-	sta	_udata+U_DATA__U_SYSCALL_SP + 1
+	sta	_udata+U_DATA__U_SYSCALL_SP+1
 ;
 ;	FIXME: we should check here if there is enough 6502 stack left
 ;	and if so either copy and switch stacks or kill the process
@@ -522,9 +539,9 @@ copy_args:
 	pha
 	lda	_udata+U_DATA__U_RETVAL+1
 	pha
-	lda	#>(sigret-1)			; Return address
+	lda	#>sigret-1			; Return address
 	pha
-	lda	#<(sigret-1)
+	lda	#<sigret-1
 	pha
 
 	tya
@@ -573,7 +590,7 @@ syscout:
 
 plt_doexec:
 ;
-	jsr	pop
+	jsr	__pop
 	stx	@tmp3+1
 	sta	@tmp3		; Save execution address in @tmp3
 	stx	tmp2+1		; Point tmp2 at base page + 16
@@ -629,7 +646,9 @@ _plt_interrupt_i:
 ;	have more work to do here to support swap.
 ;
 
-	.export _hd_read_data,_hd_write_data,_hd_map
+	.export _hd_read_data
+	.export _hd_write_data
+	.export	_hd_map
 
 _hd_read_data:
 	jsr	__pop

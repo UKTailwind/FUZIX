@@ -2,7 +2,7 @@
 #include <version.h>
 #include <kdata.h>
 #include <devsys.h>
-#include <blkdev.h>
+#include <tinydisk.h>
 #include <tty.h>
 #include <devtty.h>
 
@@ -11,8 +11,8 @@ struct devsw dev_tab[] =  /* The device driver switch table */
 // minor    open         close        read      write       ioctl
 // -----------------------------------------------------------------
   /* 0: /dev/hd - block device interface */
-#ifdef CONFIG_IDE
-  {  blkdev_open,   no_close,   blkdev_read,    blkdev_write,	blkdev_ioctl},
+#ifdef CONFIG_TD
+  {  td_open,	    no_close,   td_read,        td_write,	td_ioctl},
 #else
   {  no_open,	    no_close,	no_rdwr,	no_rdwr,	no_ioctl},
 #endif

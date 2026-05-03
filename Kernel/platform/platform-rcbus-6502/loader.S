@@ -136,10 +136,10 @@ outstringl:
 
 outcharhex:
 	tax
-	ror
-	ror
-	ror
-	ror
+	ror a
+	ror a
+	ror a
+	ror a
 	jsr outcharhex1
 	txa
 outcharhex1:
@@ -160,6 +160,7 @@ outcharw:
 outdone1:
 	rts
 badimg:
-	.byte 13,10,"Image not bootable."
+	.byte 13,10
+	.ascii "Image not bootable."
 running:
 	.byte 13,10,0
