@@ -75,7 +75,7 @@ ___hard_irqrestore:
 
 irq_on:
 	sei
-	rts
+	jmp	__add1sp
 
 ; -----------------------------------------------------------------------------
 ; KERNEL MEMORY BANK (only accessible when the kernel is mapped)
