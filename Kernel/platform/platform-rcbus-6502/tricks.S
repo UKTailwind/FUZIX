@@ -41,6 +41,7 @@ _plt_switchout:
         ; find another process to run (may select this one again) returns it
         ; in x,a
         jsr	_getproc
+	jsr	__push
         jsr	_switchin
         ; we should never get here
         jsr	_plt_monitor
@@ -49,11 +50,10 @@ badswitchmsg:
 	.ascii	"_switchin: FAIL"
 	.byte	13, 10, 0
 
-;
-;	On entry x,a holds the process to switch in
-;
 _switchin:
 	sei
+	jsr	__pop
+	; XA holds the process to switch in
 	sta	@tmp2
 	stx	@tmp2+1
 	; Take a second saved set as we are going to swap stacks and ZP
@@ -86,7 +86,7 @@ _switchin:
 	ldy	#P_TAB__P_STATUS_OFFSET
 	sta	(@tmp2),y
 
-	lda #0
+	lda	#0
 	sta	_runticks
 	sta	_runticks+1
 
@@ -98,11 +98,11 @@ _switchin:
 	; ------- Stack now valid again
 
 	pla
-	sta sp+1
+	sta	sp+1
 	pla
-	sta sp
-	lda _udata + U_DATA__U_ININTERRUPT
-        beq swtchdone		; in ISR, leave interrupts off
+	sta	sp
+	lda	_udata + U_DATA__U_ININTERRUPT
+        beq	swtchdone		; in ISR, leave interrupts off
 	cli
 swtchdone:
 	pla		; Return code

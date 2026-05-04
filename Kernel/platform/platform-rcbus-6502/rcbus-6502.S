@@ -71,7 +71,8 @@ ___hard_irqrestore:
 	and	#4		; IRQ flag
 	bne	irq_on
 	cli
-	rts
+	jmp	__add1sp
+
 irq_on:
 	sei
 	rts
@@ -123,8 +124,8 @@ _program_vectors:
 	; will exit with interrupts off
 	sei
 	;
-	; our C caller will invoke us with the pointer in x,a
-	; just pass it on
+	jsr	__pop
+	; C argument into XA - just pass it on
 	jsr	map_proc
 program_vectors_k:
 	lda	#<vector
