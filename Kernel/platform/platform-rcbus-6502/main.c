@@ -57,8 +57,8 @@ void device_init(void)
 	via[11] = 0x40;
 	via[4] = 0x40;	/* 100Hz at 4MHz */
 	via[5] = 0x9C;
-	via[14] = 0x7F;	/* Clear IER */
-	via[14] = 0xC0;	/* Enable Timer 1 */
+//	via[14] = 0x7F;	/* Clear IER */
+//	via[14] = 0xC0;	/* Enable Timer 1 */
 }
 
 void plt_interrupt(void)

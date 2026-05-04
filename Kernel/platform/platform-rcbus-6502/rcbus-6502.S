@@ -590,15 +590,21 @@ syscout:
 	rts
 
 plt_doexec:
-;
-	jsr	__pop
+	;	Can't use pop directly and we don't actually care
+	;	about the kstack anwyay
+	ldy	#1
+	lda	(@sp),y
+	dey
+	tax
+	lda	(@sp),y
+	;	Set up for the loader
 	stx	@tmp3+1
 	sta	@tmp3		; Save execution address in @tmp3
-	stx	tmp2+1		; Point tmp2 at base page + 16
+	stx	@tmp2+1		; Point tmp2 at base page + 16
 	lda	#16
-	sta	tmp2
+	sta	@tmp2
 	ldy	#0
-	lda	(tmp2),y	; Get the signal vector pointer
+	lda	(@tmp2),y	; Get the signal vector pointer
 	sta	PROGLOAD+16	; if we loaded high put the vector in
 	iny
 	lda	(tmp2),y

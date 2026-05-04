@@ -21,7 +21,7 @@
  */
 #define CONFIG_BANK_FIXED
 #define MAX_MAPS 	7   /* 9 x 64K */
-#define MAP_SIZE    0xDE00
+#define MAP_SIZE    0xBE00	/* 0x4000-0xFDFF I/O is at FExx */
 
 #define TICKSPERSEC 100	    /* Ticks per second */
 

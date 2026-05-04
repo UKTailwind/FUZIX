@@ -55,8 +55,7 @@ unix_sig_exit:
 ;
 ;	doexec is a special case syscall exit path. As we may have no
 ;	common we have to hand the last bits off to the platform code
-;	x,a holds the target address. This routine is in common and is the
-;	one case we can and do want to have fastcall.
+;	TOS holds the target address.
 ;
 _doexec:
 	ldy	#0
