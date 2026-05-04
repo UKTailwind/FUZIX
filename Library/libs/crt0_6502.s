@@ -15,15 +15,15 @@ head:
 	.word 	$80A8
 	.byte	3			; 6502 family
 	.byte	0			; 6502 (we don't yet use 65C02 ops)
-	.byte	1			; Load address page
+	.byte	0			; Load address page
 	.byte	0			; No hint bits
-	.word	__data-0x0100
+	.word	__data
 	.word	__data_size
 	.word	__bss_size
 	.byte 	<start			; Offset from load page as entry
 	.byte	0			; No size hint
 	.byte	0			; No stack hint
-	.byte	0			; TODO - ZP size
+	.byte	__zp_size		; ZP size
 
 	.word	__sighandler		; IRQ path signal handling helper
 	.word	0			; Relocations

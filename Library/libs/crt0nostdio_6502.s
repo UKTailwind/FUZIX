@@ -15,9 +15,9 @@ head:
 	.word 	$80A8
 	.byte	3			; 6502 family
 	.byte	0			; 6502 (we don't yet use 65C02 ops)
-	.byte	1			; Load address page
+	.byte	0			; Load address page
 	.byte	0			; No hint bits
-	.word	__data-0x0100
+	.word	__data
 	.word	__data_size
 	.word	__bss_size
 	.byte 	<start			; Offset from load page as entry
