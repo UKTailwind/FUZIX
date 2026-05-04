@@ -11,7 +11,7 @@ struct devsw dev_tab[] =  /* The device driver switch table */
 // minor    open         close        read      write       ioctl
 // -----------------------------------------------------------------
   /* 0: /dev/hd - block device interface */
-#ifdef CONFIG_TD
+#ifdef CONFIG_TD_IDE
   {  td_open,	    no_close,   td_read,        td_write,	td_ioctl},
 #else
   {  no_open,	    no_close,	no_rdwr,	no_rdwr,	no_ioctl},
