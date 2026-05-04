@@ -103,10 +103,10 @@ __uget_done:
 __ugetc:	jsr	__pop
 		sta	@tmp3
 		stx	@tmp3+1
-		jsr map_proc_always
-		ldy #0
-		lda (@tmp3),y
-		jmp map_kernel
+		jsr	map_proc_always
+		ldy	#0
+		lda	(@tmp3),y
+		jmp	map_kernel
 
 __ugetw:	jsr	__pop
 		sta	@tmp3
@@ -123,34 +123,29 @@ __uput:		jsr	ugparg
 
 		; Y is 0 for counter
 
-		ldx @tmp2+1
-		beq __uput_tail
+		ldx	@tmp2+1
+		beq	__uput_tail
 __uput_blk:
-		jsr map_kernel
-		lda (@tmp4), y
-		jsr map_proc_always
-		sta (@tmp3), y
+		lda	(@tmp4), y
+		jsr	map_proc_always
+		sta	(@tmp3), y
+		jsr	map_kernel
 		iny
-		bne __uput_blk
-		inc @tmp3+1
-		inc @tmp4+1
+		bne	__uput_blk
+		inc	@tmp3+1
+		inc	@tmp4+1
 		dex
-		bne __uput_blk
+		bne	__uput_blk
 
-__uput_tail:	cpy @tmp2
-		beq __uput_done
-		jsr map_kernel
-		lda (@tmp4),y
-		jsr map_proc_always
-		sta (@tmp3),y
+__uput_tail:	cpy	@tmp2
+		beq	__uget_done
+		lda	(@tmp4),y
+		jsr	map_proc_always
+		sta	(@tmp3),y
+		jsr	map_kernel
 		iny
-		bne __uput_tail
-
-__uput_done:
-		jsr map_kernel
-		lda #0
-		tax
-		rts
+		bne	__uput_tail
+		beq	__uget_done
 
 __uputc:	ldy	#3
 		lda	(@sp),y
