@@ -46,6 +46,8 @@ static volatile uint8_t *via = (volatile uint8_t *)0xFE60;
 
 void device_init(void)
 {
+	*((volatile uint8_t *)0xFE00) = 0x80;
+
 #ifdef CONFIG_TD_IDE
 	ide_probe();
 #endif
@@ -68,30 +70,6 @@ void plt_interrupt(void)
 		dummy = via[4]; /* Reset interrupt */
 		timer_interrupt();
 	}
-}
-
-/* For now this and the supporting logic don't handle swap */
-
-extern uint8_t hd_map;
-extern void hd_read_data(uint8_t *p);
-extern void hd_write_data(uint8_t *p);
-
-void devide_read_data(uint8_t *p)
-{
-	if (td_raw)
-		hd_map = 1;
-	else
-		hd_map = 0;
-	hd_read_data(p);
-}
-
-void devide_write_data(uint8_t *p)
-{
-	if (td_raw)
-		hd_map = 1;
-	else
-		hd_map = 0;
-	hd_write_data(p);
 }
 
 /* TODO: put these into the asm bits */

@@ -27,8 +27,8 @@
 
 /* We've not yet made the rest of the code - eg tricks match this ! */
 #define MAPBASE	    0x0000  /* We map from 0 */
-#define PROGBASE    0x2000  /* also data base */
-#define PROGLOAD    0x2000
+#define PROGBASE    0x4000  /* also data base */
+#define PROGLOAD    0x4000
 #define PROGTOP     0xFE00
 
 #define CONFIG_TD_NUM	2

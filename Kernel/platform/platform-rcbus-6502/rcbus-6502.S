@@ -643,14 +643,16 @@ _plt_interrupt_i:
 ;	Uses @tmp3/4 as 1/2 are reserved for the mappers
 ;
 ;	FIXME: map_proc_always doesn't map the low 16K for 6502 so we
-;	have more work to do here to support swap.
+;	have more work to do here to support swap if we want to start
+;	user space below 0x4000
+;
+;	TODO: swap support
 ;
 
-	.export _hd_read_data
-	.export _hd_write_data
-	.export	_hd_map
+	.export _devide_read_data
+	.export _devide_write_data
 
-_hd_read_data:
+_devide_read_data:
 	jsr	__pop
 	sta	@tmp3
 	stx	@tmp3+1		; Save the target
@@ -659,7 +661,7 @@ _hd_read_data:
 	;	We must flip banks before we play mmu pokery, or it will
 	; undo all our work. This means our variables must be commondata
 	;
-	lda	_hd_map
+	lda	_td_raw
 	beq	hd_kmap
 	jsr	map_proc_always
 hd_kmap:
@@ -667,8 +669,7 @@ hd_kmap:
 	jsr	hd_read256
 	inc	@tmp3+1
 	jsr	hd_read256
-	jsr	map_kernel
-	rts
+	jmp	map_kernel
 
 hd_read256:
 	lda	$FE10
@@ -677,16 +678,15 @@ hd_read256:
 	bne	hd_read256
 	rts
 
-_hd_write_data:
+_devide_write_data:
 	jsr	__pop
 	sta	@tmp3
 	stx	@tmp3+1		; Save the target
-
 	;
-	;	We must flip banks before we play mmu pokery, or it will
+	; We must flip banks before we play mmu pokery, or it will
 	; undo all our work. This means our variables must be commondata
 	;
-	lda	_hd_map
+	lda	_td_raw
 	beq	hd_kmapw
 	jsr	map_proc_always
 hd_kmapw:
@@ -694,8 +694,7 @@ hd_kmapw:
 	jsr	hd_write256
 	inc	@tmp3+1
 	jsr	hd_write256
-	jsr	map_kernel
-	rts
+	jmp	map_kernel
 
 hd_write256:
 	lda	(@tmp3),y
@@ -703,7 +702,3 @@ hd_write256:
 	iny
 	bne	hd_write256
 	rts
-
-	.common
-_hd_map:
-	.byte	1

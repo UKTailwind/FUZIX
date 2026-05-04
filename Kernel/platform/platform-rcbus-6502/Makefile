@@ -37,7 +37,7 @@ clean:
 	rm -f $(OBJS) *.o core *~ fuzix.img fuzix.bin
 
 image:	loader
-	$(CROSS_LD) -b -f SsLDBbCX -S 0x0400 -Z 0x00 -o ../../fuzix.bin -m fuzix.tmpmap crt0.o commonmem.o \
+	$(CROSS_LD) -b -f SsCLDBbX -S 0x0400 -Z 0x00 -o ../../fuzix.bin -m fuzix.tmpmap crt0.o commonmem.o \
 	rcbus-6502.o ../../start.o ../../version.o ../../cpu-6502/lowlevel-6502.o \
 	tricks.o main.o ../../timer.o ../../kdata.o devices.o \
 	tinydisk.o tinydisk_discard.o tinyide.o tinyide_discard.o ../../mm/memalloc_none.o \
