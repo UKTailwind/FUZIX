@@ -28,25 +28,6 @@
 #include "kernel.def"
 #include "../../cpu-6502/kernel02.def"
 
-	.export sp
-	.export hireg
-	.export tmp
-	.export tmp1
-	.export tmp2
-	.export tmp3
-	.export tmp4
-	.export	tmp5
-
-	.zp
-sp:	.word	0
-hireg:	.word	0
-tmp:	.word	0
-tmp1:	.word	0
-tmp2:	.word	0
-tmp3:	.word	0
-tmp4:	.word	0
-tmp5:	.word	0
-
 ; -----------------------------------------------------------------------------
 ; COMMON MEMORY BANK (0x0200 upwards after the common data blocks)
 ; -----------------------------------------------------------------------------
