@@ -101,7 +101,7 @@ interrupt_k:
 ; Swap the C temporaries  (TODO we copy sp and also stack it)
 ;
 stash_zp:
-        ldy     #13
+        ldy     #20
 swap1:  ldx     CTemp,y
         lda     sp,y
         sta     CTemp,y
