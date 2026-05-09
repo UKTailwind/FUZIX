@@ -23,7 +23,7 @@ head:
 	.byte 	<start			; Offset from load page as entry
 	.byte	0			; No size hint
 	.byte	0			; No stack hint
-	.byte	0			; TODO - ZP size
+	.byte	<__zp_size		; ZP size
 
 	.word	__sighandler		; IRQ path signal handling helper
 	.word	0			; Relocations

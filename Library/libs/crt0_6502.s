@@ -23,7 +23,7 @@ head:
 	.byte 	<start			; Offset from load page as entry
 	.byte	0			; No size hint
 	.byte	0			; No stack hint
-	.byte	__zp_size		; ZP size
+	.byte	<__zp_size		; ZP size
 
 	.word	__sighandler		; IRQ path signal handling helper
 	.word	0			; Relocations
@@ -107,6 +107,8 @@ l1:	sta	_environ
 ;
 ; Swap the C temporaries - smaller than separate save/loaders
 ;
+; TODO review and test
+;
 stash_zp:
 	ldy	#0
 stash_loop:
@@ -119,7 +121,7 @@ stash_loop:
 	tax
 	stx	@sp+2,y
 	iny
-	cpy	#14		; 14 bytes of save area
+	cpy	#20		; 20 bytes of save area
 	bne	stash_loop
 	rts
 
