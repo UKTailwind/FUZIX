@@ -99,6 +99,30 @@ is_8bit:
         txs
 
 pop_out:
+	lda	(@tmp),y
+	sta	@reg1
+	iny
+	lda	(@tmp),y
+	sta	@reg1+1
+	iny
+	lda	(@tmp),y
+	sta	@reg2
+	iny
+	lda	(@tmp),y
+	sta	@reg2+1
+	iny
+	lda	(@tmp),y
+	sta	@reg3
+	iny
+	lda	(@tmp),y
+	sta	@reg3+1
+	iny
+	lda	(@tmp),y
+	sta	@reg4
+	iny
+	lda	(@tmp),y
+	sta	@reg4+1
+	iny
 ; Get the return address and push it on the stack
         lda     (@tmp),y
 	pha

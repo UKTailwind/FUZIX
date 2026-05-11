@@ -42,7 +42,7 @@
 
 #elif defined(__6502__)
 
-	typedef char jmp_buf[5];	/* SP S (SP) */
+	typedef char jmp_buf[13];	/* SP S regs[8] (SP) */
 	extern int _setjmp(jmp_buf __env);
 	#define setjmp(x) _setjmp(x)
 
