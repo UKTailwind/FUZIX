@@ -306,7 +306,7 @@ _relocator:
 	sta	@tmp1		; always page aligned
 	lda	@tmp3+1
 	sta	@tmp1+1		; upper byte of address
-	lda	#ZPBASE
+	lda	#usp		; USP is always start of user stack
 	sta	@tmp
 	ldy	#18		; offset of relocation offset
 	lda	(@tmp1),y

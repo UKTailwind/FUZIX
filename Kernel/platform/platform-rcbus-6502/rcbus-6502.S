@@ -28,8 +28,44 @@
 #include "kernel.def"
 #include "../../cpu-6502/kernel02.def"
 
+;
+;	Standard compiler zero page then anything private to the port
+;	then @usp needs to match the start of the userspace ZP range
+;
+	.zp
+
+	.export sp
+	.export hireg
+	.export tmp
+	.export tmp1
+	.export tmp2
+	.export tmp3
+	.export tmp4
+	.export	tmp5
+	.export reg1
+	.export reg2
+	.export reg3
+	.export reg4
+
+	.export usp
+
+sp:	.word	0
+hireg:	.word	0
+tmp:	.word	0
+tmp1:	.word	0
+tmp2:	.word	0
+tmp3:	.word	0
+tmp4:	.word	0
+tmp5:	.word	0
+reg1:	.word	0
+reg2:	.word	0
+reg3:	.word	0
+reg4:	.word	0
+
+usp:	.word	0
+
 ; -----------------------------------------------------------------------------
-; COMMON MEMORY BANK (0x0200 upwards after the common data blocks)
+; COMMON MEMORY BANK (0x0200 upwards after ZP and stack)
 ; -----------------------------------------------------------------------------
 		.common
 
@@ -430,7 +466,7 @@ irqout:
 	pla
 	rti
 ;
-;	sp/sp+1 are the C stack of the userspace
+;	@usp/usp+1 are the C stack of the userspace
 ;	with the syscall number in X
 ;	Y indicates the number of bytes of argument
 ;
@@ -452,7 +488,7 @@ syscall_entry:
 	ldy	#0
 	ldx	#0
 copy_args:
-	lda	(@sp),y
+	lda	(@usp),y
 	sta	_udata+U_DATA__U_ARGN,x
 	inx
 	iny
@@ -462,9 +498,9 @@ copy_args:
 	; Now we need to stack switch. Save the adjusted stack we want
 	; for return
 	;
-	lda	@sp
+	lda	@usp
 	pha
-	lda	@sp+1
+	lda	@usp+1
 	pha
 	tsx
 	stx	_udata+U_DATA__U_SYSCALL_SP
@@ -504,9 +540,9 @@ copy_args:
 ;	From that recover the C stack and the syscall buf ptr
 ;
 	pla
-	sta	@sp+1
+	sta	@usp+1
 	pla
-	sta	@sp
+	sta	@usp
 	lda	_udata+U_DATA__U_CURSIG
 	beq	syscout
 	tay
@@ -592,12 +628,12 @@ plt_doexec:
 	sta	PROGLOAD+17	; the low space where it is expected
 
 ;
-;	Set up the C stack. Assumes our sp in ZP matches it
+;	Set up the C stack
 ;
 	lda	_udata+U_DATA__U_ISP
-	sta	@sp
+	sta	@usp
 	ldx	_udata+U_DATA__U_ISP+1
-	stx	@sp+1
+	stx	@usp+1
 
 ;
 ;	Set up the 6502 stack
