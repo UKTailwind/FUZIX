@@ -165,7 +165,7 @@ __uputc:	ldy	#3
 		ldy	#3
 		jmp	__addysp
 
-__uputw:	ldy	#4
+__uputw:	ldy	#3
 		lda	(@sp),y
 		sta	@tmp3+1
 		dey
