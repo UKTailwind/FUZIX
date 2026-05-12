@@ -40,7 +40,6 @@ int tty_read(uint_fast8_t minor, uint_fast8_t rawflag, uint_fast8_t flag)
 
 	/* FIXME: fix race of timer versus the ptimer_insert to psleep_flags_io */
 	used(rawflag);
-	used(flag);			/* shut up compiler */
 
 	q = &ttyinq[minor];
 	t = &ttydata[minor];
