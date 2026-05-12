@@ -157,7 +157,7 @@ void draw_setup(bool enable) {
 		}
 		dptr = tc_data = malloc(strlen(tc_entry)+1);
 		if (!opt_mono) {
-			if (strcmp(term, "vt52") == 0) {
+			if (strcmp(term, "fuzix") == 0) {
 				colours = fuzix_colours;
 			} else if (strncmp(term, "xterm", 5) == 0) {
 				colours = ansi_colours;
