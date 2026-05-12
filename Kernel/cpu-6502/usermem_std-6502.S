@@ -162,7 +162,9 @@ __uputc:	ldy	#3
 		ldy	#0		; Needed ??? Y is 0 before MPA
 		sta	(@tmp3),y
 		jsr	map_kernel
-		ldy	#3
+		tya
+		tax
+		ldy	#4
 		jmp	__addysp
 
 __uputw:	ldy	#3
@@ -183,6 +185,8 @@ __uputw:	ldy	#3
 		txa
 		sta	(@tmp3),y
 		jsr	map_kernel
+		lda	#0
+		tax
 		ldy	#4
 		jmp	__addysp
 
