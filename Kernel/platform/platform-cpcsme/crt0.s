@@ -49,7 +49,7 @@
         .area _CODE
 init:
         di
-        ld bc, #0x7fae ;RMR ->UROM disable LROM disable
+        ld bc, #0x7f8e ;RMR ->UROM disable LROM disable
         out (c),c
         ld bc, #0x7fc2 	;MMR ->Kernel map
         out (c),c
