@@ -29,3 +29,8 @@ HIGHPAGE		    .equ 0
 NBUFS			    .equ 8
 
 DYNAMIC_BUFPOOL		.equ 1
+
+CONFIG_M4BOARD		.equ 1
+CONFIG_FDC765		.equ 1
+
+EOPNOTSUPP			.equ 44		;keep the same as in kernel.h

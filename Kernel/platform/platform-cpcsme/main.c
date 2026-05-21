@@ -4,8 +4,38 @@
 #include <printf.h>
 #include <devtty.h>
 #include <devinput.h>
+#include "../../dev/cpc/ds12885.h"
+#include "devm4board.h"
 
 uaddr_t ramtop = PROGTOP;
+
+#ifdef CONFIG_RTC_DS12885
+uint8_t plt_rtc_secs(void){
+	if (ds12885_present)
+		return sf_plt_rtc_secs();
+#ifdef CONFIG_M4BOARD		
+	else if (m4_present)
+		return m4_plt_rtc_secs();
+#endif
+	return 0xff;
+}
+int plt_rtc_read(void){
+	if (ds12885_present)
+		return sf_plt_rtc_read();
+#ifdef CONFIG_M4BOARD		
+	else if (m4_present)
+		return m4_plt_rtc_read();
+#endif
+	udata.u_error = EOPNOTSUPP;
+	return -1;
+}
+int plt_rtc_write(void){
+	if (ds12885_present)
+		return sf_plt_rtc_write();
+	udata.u_error = EOPNOTSUPP;
+	return -1;
+}
+#endif
 
 void plt_idle(void)
 {
