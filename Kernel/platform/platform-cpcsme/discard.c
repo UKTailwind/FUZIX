@@ -1,6 +1,10 @@
 #include <kernel.h>
 #include <devtty.h>
 #include <printf.h>
+#include <tinydisk.h>
+#include "m4board.h"
+#include "devm4board.h"
+#include "../../dev/cpc/ds12885.h"
 #include "plt_ch375.h"
 #include <vt.h>
 #include "devtty.h"
@@ -85,6 +89,16 @@ void usifac_init()
 
 void device_init(void)
 {
+#ifdef CONFIG_M4BOARD
+	m4_init();
+	if (m4_present)
+        td_register(1, m4_sd_xfer, td_ioctl_none, 1);
+#endif
+#ifdef CONFIG_RTC_DS12885
+	ds12885_init();
+	if (ds12885_present) 
+		kprintf("DS12885 detected\n");
+#endif
 #if (defined CONFIG_USIFAC_SERIAL || defined CONFIG_USIFAC_CH376)
 	usifac_init();
 #endif

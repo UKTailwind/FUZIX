@@ -129,4 +129,20 @@
     #define CONFIG_NET_W5100
 #endif
 
+#define CONFIG_SYMBIFACE_RTC
+#ifdef CONFIG_SYMBIFACE_RTC
+    #define CONFIG_RTC_DS12885
+    #define CONFIG_RTC_EXTENDED
+    #define RTC_ADDR	0xFD15	/* register address */
+    #define RTC_DATA	0xFD14	/* register data */
+#endif
+#define CONFIG_M4BOARD
+#if ((defined CONFIG_M4BOARD) || (defined CONFIG_SYMBIFACE_RTC))
+    #define CONFIG_RTC
+    #define CONFIG_RTC_INTERVAL 10
+    #define CONFIG_RTC_FULL
+#endif
+
+
+
 #define BOOTDEVICENAMES "hd#,fd"

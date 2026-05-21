@@ -41,6 +41,10 @@ bankfixed.rel
 devsys.rel
 devinput.rel
 network.rel
+platform/platform-cpcsme/m4board.rel
+platform/platform-cpcsme/devm4board.rel
+platform/platform-cpcsme/ds12885.rel
+platform/platform-cpcsme/ds12885_z80.rel
 platform/platform-cpcsme/devtty.rel
 platform/platform-cpcsme/td_block_io.rel
 platform/platform-cpcsme/tinyide.rel

@@ -74,6 +74,7 @@
 	.globl outstringhex
 
 	.globl nmi_handler
+	.globl m4_sd_read_return
 
 	.include "kernel.def"
 	.include "../../cpu-z80/kernel-z80.def"
@@ -458,7 +459,16 @@ rst38:
 	ei
 	ret
 	.ds 0x20
-my_nmi_handler:	jp nmi_handler
+my_nmi_handler:
+	jp nmi_handler
+m4_sd_read_transfer_stub:
+	exx
+	out (c),c
+	exx
+	ldir
+	ld bc,#0x7fc2
+    out (c),c
+	jp m4_sd_read_return
 stubs_low_end:
 ;------------------------------------------------------------------------------
 ; COMMON MEMORY PROCEDURES FOLLOW

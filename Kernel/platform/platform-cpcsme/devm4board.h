@@ -1,0 +1,11 @@
+extern void m4_gettime(void);
+extern uint8_t m4_sd_read_block(void);
+extern uint8_t m4_sd_write_block(void);
+extern unsigned char m4_time_str[20];
+extern uint8_t m4_present;
+extern uint32_t read_lba;
+extern uint32_t write_lba;
+extern uint8_t * block_data_ptr;
+int m4_plt_rtc_read(void);
+int m4_plt_rtc_write(void);
+int m4_sd_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr);

@@ -2,6 +2,8 @@ package platform-cpcsme
 
 disable-pkg platform-cpcsme
 
+f 0644 /root/.profile /userspace/.profile
+
 l /bin/sh /bin/sh.orig
 r /bin/sh
 l /bin/fsh /bin/sh
