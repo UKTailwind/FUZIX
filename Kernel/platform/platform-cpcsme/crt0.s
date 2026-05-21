@@ -62,20 +62,16 @@ init:
 	ld bc, #l__COMMONMEM
 	ldir
 
-	; copy the discard to the kernel with an ugly workaround to avoid
+        ; copy the discard area to the kernel map with lddr to avoid
         ; overwriting packaged discard data before copy completion
-        ld bc,#0x400
-        push hl
-        push bc
-        add hl,bc
-	ld de, #s__DISCARD+#0x400
-	ld bc, #l__DISCARD-#0x400
-	ldir
-        pop bc
-        pop hl
         ld de, #s__DISCARD
-        ldir
-        
+        ld bc, #l__DISCARD - 1
+        ex de,hl
+        add hl,bc
+        ex de,hl
+        add hl,bc
+        lddr
+        ldd
 
         ; Configure memory map
         call init_early ;this also copies common to all banks
