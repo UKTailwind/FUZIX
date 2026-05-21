@@ -13,6 +13,7 @@
 
 extern uint8_t ch_rd;
 extern uint8_t ch_wd;
+const char* image_name = "/FUZIX.IMG";
 
 
 void ch375_cmd2(uint_fast8_t dev, uint8_t cmd, uint8_t data)
@@ -30,6 +31,8 @@ void ch375_cmd2(uint_fast8_t dev, uint8_t cmd, uint8_t data)
      uint_fast8_t chip = 5;
      uint_fast8_t r;
      uint8_t ch_ver;
+     char* n = image_name;
+     irqflags_t irq = di();
      for (uint_fast8_t dev = 0; dev < CH375_DEVICES; dev++){
 
         kprintf("Probing ch375/ch376 device #%u\n", dev); 
@@ -76,7 +79,35 @@ void ch375_cmd2(uint_fast8_t dev, uint8_t cmd, uint8_t data)
     
         /* And done */
         td_register(dev, ch375_xfer, td_ioctl_none, 1);
+
+        /*Now we try to resgister an image file as tinydisk device*/
+        kprintf("Looking for /fuzix.img on CH375 device #%u\n", dev); 
+        ch375_wcmd(dev, CH375_SET_FILE_NAME);	
+        for(i=0;i<10;i++){
+            /*kputchar(*n);*/
+            ch375_wdata(dev, *n++);
+        }
+        ch375_wdata(dev, 0);
+        /*kputchar(':');*/
+        ch375_wcmd(dev, CH375_CMD_FILE_OPEN);
+        nap20();
+        r = ch375_rpoll(dev);
+        /*kprintf("%x\n",r);*/
+        if (r == CH375_ERR_MISS_FILE){
+            kprintf("/fuzix.img not found on CH375 device #%u\n", dev); 
+            continue;
+        }
+        kprintf("Found /fuzix.img on CH375 device #%u\n", dev);
+        /*ch375_wcmd(dev, CH375_CMD_FILE_CLOSE);
+        ch375_wdata(dev, 0);
+        r = ch375_rpoll(dev);
+        if (r != CH375_USB_INT_SUCCESS) {
+            kprintf("ch375: error %d\n", r);
+            continue;
+        }    */      
+        td_register(dev, ch375_img_xfer, td_ioctl_none, 1);
     }
+    irqrestore(irq);
     return 1;
  }
  

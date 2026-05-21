@@ -112,8 +112,8 @@ int ch375_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr)
      uint_fast8_t r;
     
     td_io_data_reg = ch375_dports[dev];
-    td_io_data_count = 8;
-    /*kprintf("dr:%x\n",ch375_data_reg);*/
+    td_io_data_count = 8; /*this device transfers are 64 bytes long, td_block_io*/
+                         /*implements 8 byte transfers in unrolled loops*/
     if (is_read)
          ch375_wcmd(dev, CH375_CMD_DISK_READ);
      else
@@ -124,28 +124,31 @@ int ch375_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr)
      ch375_wdata(dev, lba >> 16);
      ch375_wdata(dev, lba >> 24);
      ch375_wdata(dev, 1);
-     for (n = 0; n < 8; n++) {
+     for (n = 0; n < 8; n++) {/*8*64 bytes blocks = 512 bytes*/
          r = ch375_rpoll(dev);
          if (is_read) {
             /*kprintf("rd %u\n", n);*/
              if (r != CH375_USB_INT_DISK_READ){
-                /*kprintf("r != CH375_USB_INT_DISK_READ = %2x\n", r);*/
-                continue;
+                kprintf("r != CH375_USB_INT_DISK_READ, r = %2x\n", r);
+                return 0;
              }
              ch375_wcmd(dev, ch_rd);
              nap2();
-             r = ch375_rdata(dev);	/* Throw byte count away - always 64 */
+             r = ch375_rdata(dev);	/* Throw byte count away - always 64 
              if (r != 64) {
                  kprintf("weird rd len %d\n", r);
-                 continue;
+                 return 0;
              }
+             */
              /*kprintf("rblock(%x)\n", dptr);*/
              td_io_rblock(dptr);
              ch375_wcmd(dev, CH375_CMD_DISK_RD_GO);
          } else {
             /*kprintf("wr\n");*/
-             if (r != CH375_USB_INT_DISK_WRITE)
-                 continue;
+             if (r != CH375_USB_INT_DISK_WRITE){
+                kprintf("r != CH375_USB_INT_DISK_WRITE, r = %2x\n", r);
+                return 0;
+             }
              ch375_wcmd(dev, ch_wd);
              nap2();
              ch375_wdata(dev, 0x40);	/* Send write count */
@@ -160,6 +163,31 @@ int ch375_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr)
          return 0;
      }
      return 1;        
+ }
+ int ch375_img_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr)
+ {
+    uint_fast8_t r,i;
+    uint32_t sector_address;
+    ch375_wcmd(dev, CH375_CMD_SEC_LOCATE);
+    ch375_wdata(dev, lba);
+    ch375_wdata(dev, lba >> 8);
+    ch375_wdata(dev, lba >> 16);
+    ch375_wdata(dev, lba >> 24);
+    nap2();
+    r = ch375_rpoll(dev);
+    if (r != CH375_USB_INT_SUCCESS) {
+        kprintf("ch375: error %d\n", r);
+        return 0;
+    }    
+    ch375_wcmd(dev, ch_rd);
+    nap2();
+    ch375_rdata(dev);/*Response length should be always 4 (bytes), we drop it*/
+    sector_address = ((uint32_t)ch375_rdata(dev));
+    sector_address |= ((uint32_t)ch375_rdata(dev))<<8;
+    sector_address |= ((uint32_t)ch375_rdata(dev))<<16;
+    sector_address |= ((uint32_t)ch375_rdata(dev))<<24;
+
+    return ch375_xfer(dev, is_read, sector_address, dptr);        
  }
  
  
