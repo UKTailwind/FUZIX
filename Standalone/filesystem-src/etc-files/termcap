@@ -15,6 +15,14 @@ vt52|dec vt52:\
         :cr=^M:do=\EB:ho=\EH:kb=^H:kd=\EB:kl=\ED:kr=\EC:ku=\EA:\
         :le=\ED:nd=\EC:nw=^M^J:sf=^J:sr=\EI:ta=^I:up=\EA:
 
+cpc|Amstrad CPC fuzix terminal:\
+        :bs:\
+        :co#80:it#8:li#25:\
+        :ac=+\363,\362.\361-\3600\217a\317h\350I\347`\343f\346g\253j\231k\234l\226m\223n\237o\224p\222q\232r\230s\221t\235u\227v\236w\233x\225~\245:\
+        :ae=\EG:as=\EF:bl=^G:cd=\EJ:ce=\EK:cl=\EH\EJ:cm=\EY%+ %+ :\
+        :cr=^M:do=\EB:ho=\EH:kb=^H:kd=\EB:kl=\ED:kr=\EC:ku=\EA:\
+        :le=\ED:nd=\EC:nw=^M^J:sf=^J:sr=\EI:ta=^I:up=\EA:ve=\Ee:vi=\Ef:
+
 xterm|X11 terminal emulator:\
 	:am:bs:km:mi:ms:xn:\
 	:co#80:it#8:li#24:\
