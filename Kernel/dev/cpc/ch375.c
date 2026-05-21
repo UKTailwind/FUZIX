@@ -159,7 +159,7 @@ int ch375_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr)
      }
      r = ch375_rpoll(dev);
      if (r != CH375_USB_INT_SUCCESS) {
-         kprintf("ch375: error %d\n", r);
+         kprintf("ch375: raw transfer error %x\n", r);
          return 0;
      }
      return 1;        
@@ -176,7 +176,7 @@ int ch375_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr)
     nap2();
     r = ch375_rpoll(dev);
     if (r != CH375_USB_INT_SUCCESS) {
-        kprintf("ch375: error %d\n", r);
+        kprintf("ch375: image file transfer error %x\n", r);
         return 0;
     }    
     ch375_wcmd(dev, ch_rd);
