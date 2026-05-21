@@ -35,6 +35,7 @@
 
 	.globl _td_io_data_reg
 	.globl _td_io_data_count
+	.globl _td_page
 
 
 	; exported debugging tools

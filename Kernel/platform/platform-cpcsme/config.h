@@ -20,7 +20,7 @@
 #define CONFIG_VT
 /* Keyboard contains non-ascii symbols */
 #define CONFIG_UNIKEY
-/* 16 64K banks, 1 is kernel */
+/* maximum supported is 1088KiB -> 17 64KiB pages, one is kernel, one is video, 15 for user*/
 #define MAX_MAPS	15
 #define MAP_SIZE	0xF000U
 
@@ -43,6 +43,21 @@
 #define PROGLOAD    0x0100  /* also data base */
 #define PROGTOP     0xF000  /* Top of program, base of U_DATA copy */
 #define PROC_SIZE   60	    /* Memory needed per process */
+
+#define CONFIG_SWAP
+#ifdef CONFIG_SWAP
+    #define SWAPBASE 0x0000
+    #define SWAPTOP  0xF400UL
+    #define SWAP_SIZE 0x7A		/*process 60K + udata + udata copy*/
+    #define MAX_SWAPS	13 
+    #define PTABSIZE    16
+    #define CONFIG_DYNAMIC_SWAP
+    #define SWAPDEV  (swap_dev)  /* Device for swapping (dynamic). */
+#endif
+
+
+/* We swap by hitting the user map */
+#define swap_map(x)		((uint8_t *)(x))
 
 #define BOOT_TTY (512 + 1)/* Set this to default device for stdio, stderr */
                           /* In this case, the default is the first TTY device */
