@@ -73,7 +73,7 @@
 #endif
 
 #define TTYDEV   BOOT_TTY /* Device used by kernel for messages, panics */
-#define NBUFS    8	  /* Number of block buffers MUST be big enough to push discard above 0xC000*/
+#define NBUFS    4	  /* Number of block buffers MUST be big enough to push discard above 0xC000*/
                         /*Remember to set it also in kernel.def*/
 #define NMOUNTS	 4	  /* Number of mounts at a time */
 
@@ -82,7 +82,7 @@
 
 #define CONFIG_FDC765
 #define CONFIG_TD
-#define CONFIG_TD_NUM	4
+#define CONFIG_TD_NUM	7
 /* IDE/CF support */
 #define CONFIG_TD_IDE
 #ifdef CONFIG_TD_IDE
