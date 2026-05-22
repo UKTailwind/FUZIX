@@ -5,6 +5,7 @@
 #include <devtty.h>
 #include <devinput.h>
 
+uint16_t swap_dev = 0xFFFF;
 uaddr_t ramtop = PROGTOP;
 
 void plt_idle(void)

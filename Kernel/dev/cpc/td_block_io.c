@@ -34,16 +34,8 @@ void td_io_rblock(uint8_t *p) __naked
             ld a, (_td_io_data_count)
             ex af,af'                       ;'            
             ld a, (_td_raw) 			    ; I/O type ?
-#ifdef SWAPDEV
-	        cp #2
-            jr nz, not_swapin
-            ld a, (_td_page)	 		   ; swap page
-            call map_for_swap
-            jr doread
-not_swapin:
-#endif
-            or a                                ; test is_user
-            jr z, doread		                ; map user memory first if required
+            or a                                ; test is user or swap
+            jr z, doread		                ; map user memory first or swapped process if required
             ld a, (_td_page)
             exx
             call a_map_to_bc
@@ -52,7 +44,7 @@ not_swapin:
 doread:
 
                     ; and count
-                    ; transfer 64 bytes
+                    ; transfer 8 bytes unrolled
             ex af,af'                       ;'
 doread1:                    
             ini
@@ -111,16 +103,9 @@ void td_io_wblock(uint8_t *p) __naked
             ex af,af'                       ;'
             ld a, (_td_raw) ;			    ; I/O type
                                                     ; and count
-#ifdef SWAPDEV
-	        cp #2
-            jr nz, not_swapout
-            ld a, (_td_page)			    ; page to swap
-            call map_for_swap
-            jr dowrite
-not_swapout:
-#endif
-            or a                                ; test is_user
-            jr z, dowrite		                ; map user memory first if required
+
+            or a                                ; test is_user or swap
+            jr z, dowrite		                ; map user memory first or swapped process if required
             ld a, (_td_page)
             exx
             call a_map_to_bc
@@ -129,7 +114,7 @@ not_swapout:
 
 dowrite:
                         ; and count
-                        ; transfer 64 bytes
+                        ; transfer  8 bytes unrolled
             ex af,af'                       ;'
 dowrite1:
             inc b

@@ -12,7 +12,7 @@ Z80_TYPE		    .equ 1
 
 Z80_MMU_HOOKS		    .equ 0
 
-CONFIG_SWAP		    .equ 0
+CONFIG_SWAP		    .equ 1
 
 ;
 ;	Select where to put the high code - in our case we need this
