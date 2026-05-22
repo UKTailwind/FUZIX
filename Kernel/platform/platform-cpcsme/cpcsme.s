@@ -114,10 +114,11 @@ _plt_monitor:
 ;	in a,(c)                 
 ;	rla
 ;	jr c, _plt_monitor
+	di
+	halt
 
 _plt_reboot:
 	di
-	halt
 	ld bc, #0x7f89 	;this would set the firmware ready for boot into firmware with (out (c),c ; rst0)
 					;work with the 6128 firmware, fails with the 464 & the 664 firmware, need to investigate.
 	out (c), c
@@ -518,12 +519,11 @@ outchar:
 	pop hl
 	pop de
 	pop bc
-	ld a,(_int_disabled)
+	ld a, (_int_disabled)
 	or a
-	jr nz,cont_no_int_oc
+	ret nz
 	ei
-cont_no_int_oc:
-   ret
+	ret
 
 _tmpout:
 	.db 1

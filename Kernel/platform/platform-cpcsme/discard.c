@@ -45,9 +45,11 @@ void usifac_flush(){
 }
 void usifac_init()
 {
+	irqflags_t irq = di();
 	kprintf("Configuring Usifac\n");
 	if (usifexists == 255){
 		kprintf("Usifac not present\n");
+		irqrestore(irq);
 		return;
 	}
 #if (defined CONFIG_USIFAC_SERIAL && !(defined CONFIG_USIFAC_CH376))
@@ -75,8 +77,11 @@ void usifac_init()
 	default:
 		kprintf("Error configuring Usifac, baudcode:%u\n",usifgetbaud);
 	}
+	irqrestore(irq);
 }
 #endif
+
+
 
 void device_init(void)
 {

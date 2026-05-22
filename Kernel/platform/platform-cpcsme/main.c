@@ -20,7 +20,7 @@ uint8_t timer_wait;
 void plt_interrupt(void)
 {
 	tty_pollirq();
-#if defined CONFIG_USIFAC_SERIAL
+#ifdef CONFIG_USIFAC_SERIAL
 	tty_pollirq_usifac();
 #endif
 #ifdef CONFIG_NET_WIZNET
@@ -77,5 +77,5 @@ void plt_discard(void)
 		bp->bf_dev = NO_DEVICE;
 		bp->bf_busy = BF_FREE;
 	}
-#endif	
+#endif
 }

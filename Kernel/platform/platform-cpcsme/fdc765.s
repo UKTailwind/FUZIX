@@ -32,6 +32,7 @@
 		.include "kernel.def"
 		.include "../../cpu-z80/kernel-z80.def"
 
+.if CONFIG_FDC765
 
 	.globl _fd765_do_nudge_tc
 	.globl _fd765_do_recalibrate
@@ -398,3 +399,5 @@ fd765_tx:
 
 	diskmotor:
 	 .db 0
+
+.endif
