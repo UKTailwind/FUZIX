@@ -16,8 +16,6 @@
 	.globl map_user_low
 	.globl map_page_low
 
-	.globl map_kernel
-	.globl map_video
 	.globl a_map_to_bc
 
 
@@ -168,13 +166,6 @@ init_early:
 		ld de, #0x100
 		ld bc, #copy_common_end-#copy_common
 		ldir
-								; Write the stubs for video map
-		ld hl,#stubs_low
-		ld de,#0x0000
-		ld bc,#stubs_low_end-stubs_low
-		ldir
-;		ld a,#0xc9				;temp solution, could we mark c1 map and let it be interrupted by kernel as common is maped in?
-;		ld (0x38),a				;for now ignore interrupts in this map
 		jp 0x100
 early_ret:
 		ld bc, #0x7fc2 			;Kernel map
@@ -355,44 +346,24 @@ write_l_stubs_loop:
 	dec a
 	jr nz, write_l_stubs_loop
 
-	ld bc,#0x7f10
+	ld bc,#0x7f10		;we start the traditional cpc colours
 	out (c),c
-	ld a,#0x54		;
+	ld a,#0x44		;
 	ld (_vtborder), a
-	out (c),a		; black border
+	out (c),a		; blue border
 	ld bc,#0x7f00
 	out (c),c
 	ld a,#0x44
 	out (c),a		; blue paper
 	ld bc,#0x7f01
 	out (c),c
-	ld a,#0x4b
-	out (c),a		; white ink
+	ld a,#0x4a
+	out (c),a		; bright yellow ink
 
 
-	;we set the crtc for a screen with 64x32 colsxrows, video page at 0x4000
-	;https://www.cpcwiki.eu/index.php/CRTC
-	;pros: max number of characters on screen and easy hardware scroll
-	;cons: 80x25 is more standard => TODO list (with mode change)
-	;ld bc,#0xbc01
-	;out (c),c
-	;ld bc,#0xbd20
-	;out (c),c
-	;ld bc,#0xbc02
-	;out (c),c
-	;ld bc,#0xbd2A
-	;out (c),c
-	;ld bc,#0xbc06
-	;out (c),c
-	;ld bc,#0xbd19
-	;out (c),c
-	;ld bc,#0xbc07
-	;out (c),c
-	;ld bc,#0xbd22
-	;out (c),c
 	ld bc,#0xbc0c
 	out (c),c
-	ld bc,#0xbd10
+	ld bc,#0xbd00
 	out (c),c
 
 	call _do_beep
@@ -1036,21 +1007,6 @@ ld_ca_and_ret_2:
 	; and leap into user space
 	jp (hl)
 
-map_kernel:	; stack must be in common memory of c1 and c2 maps
-	push bc
-	ld bc,#0x7fc2
-	jr map_v_or_k
-map_video: ; stack must be in common memory of c1 and c2 maps
-	push bc	
-	ld bc,#0x7fc1
-map_v_or_k:
-	out (c),c	
-	push af
-	ld a,c
-	ld (#_MMR_for_this_bank),a ; mark bank with map MMR value
-	pop af
-	pop bc
-	ret
 
 a_map_to_bc:		;to map page in a, call this => out (c),c
 	bit 6,a

@@ -18,6 +18,9 @@
         .globl cpc_do_beep
 	.globl _fontdata_8x8
 	.globl _vtattr
+        .globl _screenbase
+        .globl _screenpage
+        .globl _CRTC_offset
 
 
 	.if CPCVID_ONLY
@@ -40,7 +43,7 @@ cpc_plot_char:
         ld bc, #_fontdata_8x8
         add hl, bc          ; hl points to first byte of char data
         di
-        ld bc, #0x7faa ;RMR ->UROM disable LROM enable
+        ld bc, #0x7f8a ;RMR ->UROM disable LROM enable
         out (c),c
         ld b,#6
         ld a,(hl)
@@ -59,7 +62,7 @@ plot_char_line:
         ld  d,a              
         inc hl
         ld a,(hl)
-        ld bc, #0x7fae ;RMR ->UROM disable LROM disable
+        ld bc, #0x7f8e ;RMR ->UROM disable LROM disable
         out (c),c
         ex af,af'
         ld a,(_int_disabled)
@@ -168,43 +171,81 @@ clear_scanline_cont:
 _cursor_on:
 	.endif
 cpc_cursor_on:
+        ld a,(_inputtty)
+        ld b,a
+        ld a,(_outputtty)
+        cp b
+        ret nz        
         pop hl
         pop de
         push de
         push hl
         call videopos
-        ld a,d               
-        add a,#0x38             
-        ld d,a
         VIDEO_MAP
-        ld a,(de)
-        ld (saved_cursor_byte),a
         ld (cursorpos), de
-        ld a,#0xFF
-        ld (de),a
-
+xor_cursor:
+        ld b,#8
+        push de
+        pop hl
+        ld de,#0x800
+next_cursor_byte:        
+        ld a,(hl)
+        cpl
+        ld (hl),a
+        add hl,de
+        djnz next_cursor_byte
 	VIDEO_UNMAP
         ret
 
 	.if CPCVID_ONLY
-_cursor_disable:
 _cursor_off:
+_cursor_disable:
 	.endif
-cpc_cursor_disable:
+cpc_cursor_disable:        
 cpc_cursor_off:
+        ld a,(_inputtty)
+        ld b,a
+        ld a,(_outputtty)
+        cp b
+        ret nz
         VIDEO_MAP
-
         ld de, (cursorpos)              
-        ld a,(saved_cursor_byte)
-        ld (de),a
-	
-        VIDEO_UNMAP
-	ret
+        jr xor_cursor
+
 
 cursorpos:
         .dw 0
-saved_cursor_byte:
-        .db 0        
+
+
+map_kernel:
+        push bc
+	ld bc,#0x7fc2
+	out (c),c
+        pop bc
+	push af
+        ld a, (_int_disabled)
+	or a
+	jp z,no_int
+	ei
+no_int:
+        pop af
+	ret
+
+map_video:
+        push bc
+        push af
+        ld bc,#0x7fc3
+        ld a,(_outputtty)
+        cp #4
+        jr z,tty4
+	ld bc,#0x7fc1
+tty4:        
+	di
+        out (c),c
+        pop af
+        pop bc
+	ret
+    
 
 .area _VIDEO
 
@@ -212,7 +253,7 @@ saved_cursor_byte:
 _scroll_up:
 	.endif
 cpc_scroll_up:
-        ld hl, (CRTC_offset)
+        ld hl, (_CRTC_offset)
         ld bc, #40           ; one crtc character are two bytes
         add hl,bc
 
@@ -220,25 +261,18 @@ set_hardware_scroll:
         ld a,h
         and #3
         ld h,a
-        ld (CRTC_offset),hl
-        add hl,hl
-        ld (scroll_offset),hl   ;prepare scroll_offset for videopos
-        ld a,(_inputtty)        ;maybe its simpler check if inputtty == outputtty?
-        dec a
-        jr z,check_tty1
-        ld a,(#screenpage)
-        cp #0x20
-        jp z,do_crtc_scroll
-        ret
-check_tty1:
-        ld a,(#screenpage)
-        cp #0x10
+        ld (_CRTC_offset),hl
+        ld a,(_inputtty)
+        ld b,a
+        ld a,(_outputtty)
+        cp b
         ret nz
-do_crtc_scroll:
+_ga_set_visible_vt:        
+        ld a,(#_screenpage)
         ld bc,#0xbc0c           ;select CRTC R12
         out (c),c
         inc b                
-        ld hl,(CRTC_offset)
+        ld hl,(_CRTC_offset)
         or h
         out (c),a
         ld bc,#0xbc0d           ;select CRTC R13
@@ -251,7 +285,7 @@ do_crtc_scroll:
 _scroll_down:
 	.endif
 cpc_scroll_down:
-        ld hl, (CRTC_offset)
+        ld hl, (_CRTC_offset)
         ld bc, #40           ; one crtc character are two bytes
         or a
         sbc hl,bc
@@ -275,118 +309,25 @@ videopos: ;get x->d, y->e => set de address for top byte of char
         add hl,hl
         pop de
         add hl,de
-        ld de,(#scroll_offset)
+        ld de,(_CRTC_offset)
+        add hl,de
         add hl,de
         ld a,h
         and #0x7
         ld h,a
-        ld a,(#screenbase)
+        ld a,(_screenbase)
         add a,h
         ld h,a
         ex de,hl
         ret
+      
 
-_ga_set_active_vt:
-	ld a,(_outputtty)
-        dec a
-        jr z,tty1
-        ld a,#0x80
-        ld (#screenbase),a
-        ld a,#0x20
-        ld (#screenpage),a
-        jr switch_vt_values
-
-tty1:
-        ld a,#0x40
-        ld (#screenbase),a
-        ld a,#0x10
-        ld (#screenpage),a
-
-switch_vt_values:
-        ld hl,(#CRTC_offset)
-        push hl
-        ld hl,(#scroll_offset)
-        push hl
-        ld hl,(#cursorpos)
-        push hl
-        ld a,(#saved_cursor_byte)
-        push af
-        ld a,(#_vtattr)
-        push af
-        ld a,(#vtattr_old)
-        ld (#_vtattr),a
-        pop af 
-        ld (#vtattr_old),a
-        ld a,(#saved_cursor_byte_old)
-        ld (#saved_cursor_byte),a
-        pop af
-        ld (#saved_cursor_byte_old),a
-        ld hl,(#cursorpos_old)
-        ld (#cursorpos),hl
-        pop hl
-        ld (#cursorpos_old),hl
-        ld hl,(#scroll_offset_old)
-        ld (#scroll_offset),hl
-        pop hl
-        ld (#scroll_offset_old),hl
-        ld hl,(#CRTC_offset_old)
-        ld (#CRTC_offset),hl
-        pop hl
-        ld (#CRTC_offset_old),hl
-        ret    
-
-_ga_set_visible_vt:
-        ld a,(_inputtty)
-        dec a
-        jr z,vtty1
-        ld a,#0x20
-        jr select_offset
-vtty1:
-        ld a,#0x10
-select_offset:
-        push af
-        ld a,(_inputtty)
-        ld b,a
-        ld a,(_outputtty)
-        cp b
-        jr z, same_offset
-        ld hl,(CRTC_offset_old)
-        jr out_offset
-same_offset:
-        ld hl,(CRTC_offset)
-out_offset:                     ;can this be shared with hardware scrolling?
-        ld bc,#0xbc0c           ;select CRTC R12
-        out (c),c
-        ld b,#0xbd
-        pop af               
-        or h
-        out (c),a
-        ld bc,#0xbc0d           ;select CRTC R13
-        out (c),c
-        ld b,#0xbd
-        out (c),l
-	ret
-
-        
-
-screenbase:
-	.db 0x40
-screenpage:
-        .db 0x10
-scroll_offset:
+_screenbase:
+	.db 0x0
+_screenpage:
+        .db 0x0
+_CRTC_offset:
         .dw 0
-scroll_offset_old:
-        .dw 0
-CRTC_offset:
-        .dw 0
-CRTC_offset_old:
-        .dw 0
-vtattr_old:
-	.db 0
-cursorpos_old:
-        .dw 0
-saved_cursor_byte_old:
-        .db 0
 
 	.if CPCVID_ONLY
 _do_beep:

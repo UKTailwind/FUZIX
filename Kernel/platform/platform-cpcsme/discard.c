@@ -2,9 +2,12 @@
 #include <devtty.h>
 #include <printf.h>
 #include "plt_ch375.h"
+#include <vt.h>
+#include "devtty.h"
 
 extern int8_t n_valid_maps;
 extern uint8_t valid_maps_array[MAX_MAPS];
+extern struct vt_switch ttysave[4];
 
 /* TODO: probe banks */
 void pagemap_init(void)
@@ -90,4 +93,6 @@ void device_init(void)
 #ifdef CONFIG_NET
 	sock_init();
 #endif
+devtty_init();
+
 }

@@ -77,12 +77,8 @@ static void keydecode(void)
 	
 	if (ct) {
 #ifdef CONFIG_VT_MULTI
-		if (c == KEY_F1){
-			cpckbd_conswitch(1);
-			return;
-		}
-		if (c == KEY_F2){
-			cpckbd_conswitch(2);
+		if ((c >= KEY_F1) && (c <= KEY_F4)){
+			cpckbd_conswitch(c - KEY_F1 + 1);
 			return;
 		}
 #endif

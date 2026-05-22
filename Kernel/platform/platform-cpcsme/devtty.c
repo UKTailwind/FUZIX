@@ -10,16 +10,26 @@
 #include <input.h>
 #include <devinput.h>
 
+
+#define VT_CON	4
+
+uint8_t screenbases[VT_CON] = {0x00, 0x40, 0x80, 0x40};
+uint8_t screenpages[VT_CON] = {0x00, 0x10, 0x20, 0x30};
+uint16_t CRTC_offsets[VT_CON] = {0, 0, 0, 0};
+uint8_t vtborders[VT_CON] = {1, 9, 7, 7};
+static struct vt_switch ttysave[VT_CON];
+
 uint8_t outputtty = 1;
 uint8_t inputtty = 1;
-#define VT_CON	2
-static struct vt_switch ttysave[VT_CON];
+
 static uint8_t syscon = 1;	/* system console output */
 
 static char tbuf1[TTYSIZ];
 static char tbuf2[TTYSIZ];
+static char tbuf3[TTYSIZ];
+static char tbuf4[TTYSIZ];
 #ifdef CONFIG_USIFAC_SERIAL
- static char tbuf3[TTYSIZ];
+ static char tbuf5[TTYSIZ];
 #endif
 
 uint8_t vtattr_cap = VTA_UNDERLINE;
@@ -39,8 +49,10 @@ struct s_queue ttyinq[NUM_DEV_TTY + 1] = {	/* ttyinq[0] is never used */
 	{NULL, NULL, NULL, 0, 0, 0},
 	{tbuf1, tbuf1, tbuf1, TTYSIZ, 0, TTYSIZ / 2},
 	{tbuf2, tbuf2, tbuf2, TTYSIZ, 0, TTYSIZ / 2},
-#ifdef CONFIG_USIFAC_SERIAL
 	{tbuf3, tbuf3, tbuf3, TTYSIZ, 0, TTYSIZ / 2},
+	{tbuf4, tbuf4, tbuf4, TTYSIZ, 0, TTYSIZ / 2},	
+#ifdef CONFIG_USIFAC_SERIAL
+	{tbuf5, tbuf5, tbuf5, TTYSIZ, 0, TTYSIZ / 2},
 #endif
 };
 #ifdef CONFIG_USIFAC_SERIAL
@@ -65,32 +77,74 @@ static const uint8_t baudtable[] = { /*Usifac baudrate commands*/
 #endif
 
 
+static uint8_t igrbcpc[16] = {
+	0x54,	/* 0000 to Black 0 */
+	0x44,	/* 000B to blue 1 */
+	0x5c,	/* 00R0 to red 2 */
+	0x58,	/* 00RB to magenta 3 */
+	0x56,	/* 0G00 to green 4 */
+	0x46,	/* 0G0B to cyan 5 */
+	0x5e,	/* 0GR0 to yellow 6 */
+	0x40,	/* 0GRB to white 7 */
+	0x40,	/* I000 to white 8 */
+	0x55,	/* I00B to bright blue 9 */
+	0x4c,	/* 10R0 to bright red 10 */
+	0x4d,	/* 10RB to bright magenta 11 */
+	0x52,	/* 1G00 to bright green 12 */
+	0x53,	/* 1G0B to bright cyan 13 */
+	0x4a,	/* 1GR0 to bright yellow 14 */
+	0x4b	/* 1GRB to bright white 15 */
+};
+
+void devtty_init(void){
+	ttysave[0].paper = 1;
+	ttysave[1].paper = 1;
+	ttysave[2].paper = 0;
+	ttysave[3].paper = 15;
+	ttysave[0].ink = 14;
+	ttysave[1].ink = 15;
+	ttysave[2].ink = 12;
+	ttysave[3].ink = 1;
+	cpctty_set_color(1, VTPAPER, ttysave[0].paper);
+	cpctty_set_color(1, VTINK, ttysave[0].ink);
+	cpctty_set_color(1, VTBORDER, vtborders[0]);
+}
+
 void cpckbd_conswitch(uint8_t console)
 {
-	if (console > VT_CON || console == inputtty)
+	if (console > VT_CON || console == inputtty){
 		return;
-	vt_save(&ttysave[outputtty - 1]);
-	cursor_off();
+	}
+    vt_cursor_off();
+	switch_outputtty(console);
 	inputtty = console;
 	ga_set_visible_vt();
-	cursor_on(ttysave[console - 1].cursory, ttysave[console - 1].cursorx);
+	cpctty_set_color(console, VTPAPER, ttysave[console -1].paper);
+	cpctty_set_color(console, VTINK, ttysave[console -1].ink);
+	cpctty_set_color(console, VTBORDER, vtborders[console -1]);
+    vt_cursor_on();
 }
 
 static void ga_putc(uint_fast8_t minor, uint_fast8_t c)
 {
 	irqflags_t irq = di();
 
-	if (outputtty != minor){
-		vt_save(&ttysave[outputtty - 1]);
-		outputtty = minor;
-		vt_load(&ttysave[outputtty - 1]);
-		ga_set_active_vt();
-	}
+	if (outputtty != minor)
+		switch_outputtty(minor);
 	vtoutput(&c, 1);
 	irqrestore(irq);
 }
 
-
+static void switch_outputtty(uint8_t tty)
+{
+    vt_save(&ttysave[outputtty - 1]);
+    CRTC_offsets[outputtty - 1] = CRTC_offset;
+    outputtty = tty;
+    vt_load(&ttysave[outputtty - 1]);
+    screenbase  = screenbases[outputtty - 1];
+    screenpage  = screenpages[outputtty - 1];
+    CRTC_offset = CRTC_offsets[outputtty - 1];
+}
 /* Output for the system console (kprintf etc) */
 void kputchar(char c)
 {
@@ -98,14 +152,14 @@ void kputchar(char c)
 		tty_putc(syscon, '\r');
 #ifndef CONFIG_USIFAC_SLIP
  #ifdef CONFIG_USIFAC_SERIAL
-		tty_putc(3, '\r');
+		tty_putc(5, '\r');
  #endif
 #endif 
 	}
 	tty_putc(syscon, c);
 #ifndef CONFIG_USIFAC_SLIP
  #ifdef CONFIG_USIFAC_SERIAL
-	tty_putc(3, c);
+	tty_putc(5, c);
  #endif
 #endif 	
 }
@@ -122,10 +176,12 @@ void tty_putc(uint8_t minor, unsigned char c)
 	switch (minor){
 		case 1:
 		case 2:
+		case 3:
+		case 4:		
 			ga_putc(minor, c);
 			break;
 #ifdef CONFIG_USIFAC_SERIAL			
-		case 3:
+		case 5:
 			usifdata = c;
 			break;
 #endif
@@ -146,7 +202,7 @@ void tty_setup(uint8_t minor, uint8_t flags)
 	uint8_t baud;
 	used(flags);
 
-	if (minor == 3){
+	if (minor == 5){
 		baud = cflag & CBAUD;
 		if (baudtable[baud] == 0xFF){
 			usifctrl = USIFAC_SET_115200B_COMMAND; /*Default 115200 for not supported baudrate request*/
@@ -162,8 +218,8 @@ void tty_setup(uint8_t minor, uint8_t flags)
 void tty_pollirq_usifac(void)
 {		
 	while (usifctrl == 0xff)
-		tty_inproc(3, usifdata);
-	tty_outproc(3);
+		tty_inproc(5, usifdata);
+	tty_outproc(5);
 }
 #endif
 void tty_sleeping(uint8_t minor)
@@ -179,62 +235,56 @@ void tty_data_consumed(uint8_t minor)
 /* This is used by the vt asm code, but needs to live in the kernel */
 uint16_t cursorpos;
 
-//Inherited from spectrum zx+3. For now ignore attributes, try later to implement inverse and underline touching char output directly
 void vtattr_notify(void)
 {
-	// Attribute byte fixups: not hard as the colours map directly
-	//   to the spectrum ones 
-/*	if (vtattr & VTA_INVERSE)
-		curattr =  ((vtink & 7) << 3) | (vtpaper & 7);
-	else
-		curattr = (vtink & 7) | ((vtpaper & 7) << 3);
-
-	if (vtattr & VTA_FLASH)
-		curattr |= 0x80;
-	// How to map the bright bit - we go by either
-	if ((vtink | vtpaper) & 0x10)
-		curattr |= 0x40;
-*/
-	//we are now debugging other things
-	//vtink = 26;
-	//vtpaper = 1;
-	//cpcvt_ioctl(1, VTINK, &vtink);
-	//cpcvt_ioctl(1, VTPAPER, &vtpaper);
+/*For now we are only in mode 2, so two colours per tty, not much to do here*/
 
 }
 
 
+void cpctty_set_color(uint8_t tty, uint8_t cmd, uint8_t col)
+{
+	uint8_t c = igrbcpc[col & 0xf];
+	switch(cmd){
+		case VTBORDER:
+			vtborders[tty-1] = col;
+			vtborder = c;
+			gatearray = PENR_BORDER_SELECT;
+			gatearray = c;
+			break;
+		case VTINK:
+			ttysave[tty-1].ink = col;
+			if (outputtty == tty)
+				vtink = col;
+			gatearray = PENR_INK_SELECT;
+			gatearray = c;
+			break;
+		case VTPAPER:
+			ttysave[tty-1].paper = col;
+			if (outputtty == tty)
+				vtpaper = col;
+			gatearray = PENR_PAPER_SELECT;
+			gatearray = c;
+			break;
+	}
+}
+
 int cpctty_ioctl(uint8_t minor, uarg_t arg, char *ptr)
 {
-	uint8_t c;
 	switch (minor){
 		case 1:
 		case 2:
+		case 3:
+		case 4:		
 			switch(arg){
-/*				case VTBORDER:
-					c = ugetc(ptr);
-					gatearray = PENR_BORDER_SELECT;
-					vtborder &= INKR_COLOR_SET;
-					vtborder |= c & 0x1F;
-					gatearray = vtborder;
-					return 0;
+				case VTBORDER:
 				case VTINK:
-					c = ugetc(ptr);
-					gatearray = PENR_INK_SELECT;
-					vtink &= INKR_COLOR_SET;
-					vtink |= c & 0x1F;
-					gatearray = vtink;
-					return 0;
 				case VTPAPER:
-					c = ugetc(ptr);
-					gatearray = PENR_PAPER_SELECT;
-					vtpaper &= INKR_COLOR_SET;
-					vtpaper |= c & 0x1F;
-					gatearray = vtpaper;
-					return 0;
-*/				default:
+					cpctty_set_color(udata.u_ptab->p_tty, arg, ugetc(ptr));
+                    return 0;
+				default:
 					return vt_ioctl(minor, arg, ptr);
-				}
+			}
 			break;
 #ifdef CONFIG_USIFAC_SERIAL
 		default:

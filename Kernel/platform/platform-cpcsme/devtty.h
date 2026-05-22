@@ -6,7 +6,7 @@ static void keydecode(void);
 
 #define KEY_ROWS	10
 #define KEY_COLS	8
-#define PENR_BORDER_SELECT 0x10*/
+#define PENR_BORDER_SELECT 0x10
 /*For now We are in mode 2 with pen 0 for paper and pen 1 for ink*/
 #define PENR_PAPER_SELECT 0x00 
 #define PENR_INK_SELECT 0x01
@@ -26,9 +26,31 @@ extern uint8_t vtborder;
 extern uint8_t inputtty;
 extern uint8_t outputtty;
 
+extern uint8_t screenbase;
+extern uint8_t screenpage;
+extern uint16_t CRTC_offset;
+extern uint16_t input_CRTC_offset;
+
 extern void cpckbd_conswitch(uint8_t console);
+
+extern void devtty_init(void);
+
+void cpctty_set_color(uint8_t tty, uint8_t cmd, uint8_t col);
+static void switch_outputtty(uint8_t tty);
+
 
 __sfr __banked __at 0x7F00 gatearray;
 /* see: https://www.cpcwiki.eu/index.php/Gate_Array */
 
+#ifdef CONFIG_USIFAC_SERIAL
+__sfr __banked __at 0xFBD0 usifdata;
+__sfr __banked __at 0xFBD1 usifctrl;
+__sfr __banked __at 0xFBDD usifspr;
+
+#define USIFAC_RESET_COMMAND  0
+#define USIFAC_CLEAR_RECEIVE_BUFFER_COMMAND 1
+#define USIFAC_DISABLE_BURST_MODE_COMMAND 3
+#define USIFAC_DISABLE_DIRECT_MODE_COMMAND 4
+#define USIFAC_SET_115200B_COMMAND 16
+#endif
 #endif

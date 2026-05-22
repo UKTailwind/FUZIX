@@ -36,7 +36,7 @@
 #define VT_RIGHT	79
 #define VT_BOTTOM	24
 #define CONFIG_VT_MULTI
-#define MAX_VT	2 /*We start supporting 2*/
+#define MAX_VT	4
 
 #define TICKSPERSEC 50   /* Ticks per second */
 #define PROGBASE    0x0000  /* also data base */
@@ -68,10 +68,10 @@
 /* Device parameters */
 #undef CONFIG_USIFAC_SERIAL
 #ifdef CONFIG_USIFAC_SERIAL
-    #define NUM_DEV_TTY 3
+    #define NUM_DEV_TTY 5
     #define TTY_INIT_BAUD B115200	/*USIFAC*/
 #else
-    #define NUM_DEV_TTY 2
+    #define NUM_DEV_TTY 4
 #endif
 
 
