@@ -15,8 +15,11 @@
 #define CH375_CMD_RD_USB_DATA           0x28
 #define CH375_CMD_WR_USB_DATA7          0x2B
 #define CH376_CMD_WR_HOST_DATA          0x2C
+#define CH375_SET_FILE_NAME             0x2F
 #define CH375_CMD_DISK_CONNECT          0x30
 #define CH375_CMD_DISK_MOUNT            0x31
+#define CH375_CMD_FILE_OPEN             0x32
+#define CH375_CMD_FILE_CLOSE            0x36
 #define CH375_CMD_CLR_STALL             0x41
 #define CH375_CMD_DISK_INIT             0x51
 #define CH375_CMD_DISK_RESET            0x52
@@ -25,11 +28,17 @@
 #define CH375_CMD_DISK_WRITE            0x56
 #define CH375_CMD_DISK_WR_GO            0x57
 #define CH375_CMD_DISK_R_SENSE          0x5A
+#define CH375_CMD_SEC_LOCATE            0x4A
+#define CH375_CMD_SEC_READ              0x4B
+#define CH375_CMD_SEC_WRITE             0x4C
+
+
 
 #define CH375_USB_INT_SUCCESS           0x14
 #define CH375_USB_INT_CONNECT           0x15
 #define CH375_USB_INT_DISK_READ         0x1D
 #define CH375_USB_INT_DISK_WRITE        0x1E
+#define CH375_ERR_MISS_FILE             0x42
 
 #ifndef nap2()
 #define nap2() nap20()
@@ -43,4 +52,5 @@ extern void ch375_wdata(uint8_t dev, uint8_t data);
 extern uint8_t ch375_rdata(uint8_t dev);
 extern uint8_t ch375_rpoll(uint_fast8_t dev);
 extern int ch375_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr);
+extern int ch375_img_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr);
 #endif
