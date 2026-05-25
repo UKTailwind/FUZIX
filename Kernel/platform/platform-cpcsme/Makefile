@@ -1,11 +1,11 @@
-CSRCS = devtty.c devices.c main.c devfdc765.c wiznet.c
+CSRCS = devtty.c devices.c main.c devfdc765.c wiznet.c devm4board.c
 CDSRCS = discard.c
-DSRCS = ../../dev/tinyide.c ../../dev/tinydisk.c 
+DSRCS = ../../dev/tinyide.c ../../dev/tinydisk.c ../../dev/ds12885_z80.c
 DDSRCS = ../../dev/tinyide_discard.c ../../dev/tinydisk_discard.c 
 DZSRCS = ../../dev/cpc/cpcidesme.c ../../dev/cpc/cpckeyboard.c ../../dev/cpc/devinput.c
-DZSRCS += ../../dev/cpc/ch375.c ../../dev/cpc/td_block_io.c
+DZSRCS += ../../dev/cpc/ch375.c ../../dev/cpc/td_block_io.c ../../dev/cpc/ds12885.c 
 DDZSRCS = ../../dev/cpc/ch375_discard.c
-ASRCS = crt0.s cpcsme.s cpcvideo.s fdc765.s
+ASRCS = crt0.s cpcsme.s cpcvideo.s fdc765.s m4board.s
 ASRCS += usermem.s tricks.s commonmem.s
 NSRCS = ../../dev/net/net_w5x00.c ../../dev/net/net_native.c
 
