@@ -13,8 +13,8 @@ retok:
 	ld	ea,2,p1		; get the setjmp buffer
 	ld	p2,ea		; pointer to buffer
 	ld	ea,2,p2		; stack pointer recovery
-	ld	p1,ea		; stack fixedx
+	ld	p1,ea		; stack fixed
 	ld	ea,0,p2		; return address
-	push	ea
+	st	ea,0,p1		; put it back on the stack top
 	ld	ea,t		; get return value to use
 	ret
