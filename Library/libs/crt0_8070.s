@@ -51,10 +51,11 @@ __sighandler:
 	ld	ea,8,p1		; signal number
 	push	ea
 
-	ld	ea,=sigret
+	ld	ea,=sigret-1
 	push	ea		; return ptr
 
 	ld	ea,t
+	sub	ea,=1		; allow for ret
 	push	ea		; vector to call
 
 	ret			; call the handler
