@@ -95,7 +95,7 @@ int ls(char *path)
 
         printf("%12lu ",
                 (S_ISBLK(statbuf.st_mode) || S_ISCHR(statbuf.st_mode)) ? 
-                    1235/*statbuf.st_rdev */: (unsigned
+                    statbuf.st_rdev : (unsigned
                     long)statbuf.st_size);
 
         if (statbuf.st_mtime == 0) {  /* st_mtime? */
