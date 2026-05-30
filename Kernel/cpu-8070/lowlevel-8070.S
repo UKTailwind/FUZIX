@@ -166,12 +166,19 @@ do_signal:
 	ld	ea,=0
 	ld	a,U_DATA__U_CURSIG,p3
 	bz	no_signal
+	ld	t,ea
+	ld	ea,U_DATA__U_ERROR,p3
+	push	ea
+	ld	ea,U_DATA__U_RETVAL,p3
+	push	ea
+	ld	ea,t
 	sl	ea
 	add	ea,=_udata+U_DATA__U_SIGVEC
 	ld	p2,ea
 	ld	ea,0,p2			; vector
-	bz	no_signal
 	ld	t,ea			; vector safed in T
+	or	a,e
+	bz	no_signal
 	ld	ea,=0
 	st	ea,0,p2			; clear vector
 
@@ -184,15 +191,23 @@ do_signal:
 	; Arguments to signal handler
 	push	ea			; signal number
 	; Return
-	ld	ea,=unwind
+	ld	ea,=unwind-1		; return will add one
 	push	ea
 	; Unwind for signal handlers
 	ld	p3,=PROGLOAD+16
 	ld	ea,0,p3
+	sub	ea,=1			; because return adds 1
 	push	ea
 	ret
 unwind:
-	pop	ea
+	ld	p3,=0xFEFD
+	ld	a,=0x40
+	st	a,0,p3
+	pop	ea			; Discard argument
+	pop	p2			; U_RETVAL
+	pop	ea			; U_ERROR
+	ret
+
 no_signal:
 	ld	p3,=_udata
 	ld	ea,U_DATA__U_RETVAL,p3
