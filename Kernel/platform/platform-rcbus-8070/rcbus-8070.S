@@ -62,7 +62,7 @@ ___hard_di:
 ;	Enable interrupts
 ;
 ___hard_ei:
-	or	a,=1
+	or	s,=1
 	ret
 
 ___hard_irqrestore:

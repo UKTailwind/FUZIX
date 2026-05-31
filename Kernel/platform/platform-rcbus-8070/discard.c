@@ -26,5 +26,6 @@ uint8_t plt_param(char *p)
 void device_init(void)
 {
 	ide_probe();
-        /* TODO: timer */
+	*((volatile uint8_t *)0xFE0F) = 0x00;
+	*((volatile uint8_t *)0xFE0F) = 0x80;
 }
