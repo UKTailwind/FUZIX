@@ -287,7 +287,7 @@ interrupt_handler:
 
 	ld	p1,=istack_top
 
-	jsr map_save_kernel
+	jsr	map_save_kernel
 
 	ld	a,=1
 	ld	p3,=_udata
@@ -333,6 +333,47 @@ interrupt_handler:
 	;	TODO stack a signal frame that unwinds into no_signals
 	;	if needed
 	;	can we use do_return somehow ??
+	ld	a,U_DATA__U_CURSIG,p3
+	bz	no_signals
+	;	Ok we have a signal. We are on the user stack, our interrupt
+	;	work is done so just exit via a signal handler.
+	and	s,=0xfe		; interrupts back on
+	;
+	;	FIXME: could really do with de-depulicating this and the
+	;	syscall path variant
+	;
+	ld	ea,=0
+	ld	a,U_DATA__U_CURSIG,p3
+	bz	no_signals
+	sl	ea
+	add	ea,=_udata+U_DATA__U_SIGVEC
+	ld	p2,ea
+	ld	ea,0,p2			; vector
+	ld	t,ea			; vector safed in T
+	or	a,e
+	bz	no_signals
+	ld	ea,=0
+	st	ea,0,p2			; clear vector
+
+	ld	a, U_DATA__U_CURSIG,p3
+	ld	e,a			; save signal number in e
+	ld	a,=0
+	st	a,U_DATA__U_CURSIG,p3	; clear it
+	xch	a,e
+	; Arguments to signal handler
+	push	ea			; signal number
+	; Return
+	ld	ea,=irqunwind-1		; return will add one
+	push	ea
+	; Unwind for signal handlers
+	ld	p3,=PROGLOAD+16
+	ld	ea,0,p3
+	sub	ea,=1			; because return adds 1
+	push	ea
+	ret
+	or	s,=1			; not clear we need to do this
+irqunwind:
+	pop	ea			; remove signal number
 no_signals:
 	pop	p3
 	pop	p2
