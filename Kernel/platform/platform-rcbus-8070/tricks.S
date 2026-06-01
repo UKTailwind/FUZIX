@@ -29,6 +29,9 @@ _ramtop:
 ; from switchout().
 _plt_switchout:
 	and	s,=0xFE			; interrupts off
+	push	p3			; and save p3
+	ld	ea,=0
+	push	ea			; return
 	; This processor is unusual in that it has an internal RAM
 	; area at FFC0-FFFF we use for fast access to a few things
 	; We reserve FFF0-FFFF to the user, but we need to save/restore
@@ -49,8 +52,6 @@ _plt_switchout:
 	push	ea
 	ld	ea,:0xFFFE
 	push	ea
-	ld	ea,=0
-	push	ea			; return
 	ld	ea,p1
 	ld	p3,=_udata
 	st	ea,U_DATA__U_SP,p3	; Save old SP
@@ -190,6 +191,7 @@ swtchdone:
 	pop	ea
 	st	ea,:0xFFF0
 	pop	ea
+	pop	p3
         ret
 
 switchinfail:
@@ -209,7 +211,8 @@ _dofork:
 
 	ld	ea,2,p1
 	ld	p2,ea
-	ld	p3,=_udata
+
+	pli	p3,=_udata
 
 	ld	ea,P_TAB__P_PID_OFFSET,p2
 	push	ea		; Push the PID
@@ -248,7 +251,7 @@ _dofork:
         ; now the copy operation is complete we can get rid of the stuff
 	; _switchin will be expecting from our copy of the stack.
 
-	pop	ea		; pod the direct page fraeme
+	pop	ea		; pop the direct page fraeme
 	pop	ea
 	pop	ea
 	pop	ea
@@ -257,6 +260,7 @@ _dofork:
 	pop	ea
 	pop	ea
 	pop	ea		; and the pid
+	pop	ea		; and the p3 save
 
 	ld	ea,=_udata
 	push	ea
