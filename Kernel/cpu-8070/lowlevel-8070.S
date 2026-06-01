@@ -135,17 +135,18 @@ outea:
 ;	Returns P2 = result, EA = error (must be < 256)
 ;
 unix_syscall_entry:
+	push	p3
 	ld	p3,=_udata
 	st	a,U_DATA__U_CALLNO,p3
 	ld	ea,p1
 	st	ea,U_DATA__U_SYSCALL_SP,p3
-	ld	ea,4,p1
-	st	ea,U_DATA__U_ARGN,p3
 	ld	ea,6,p1
-	st	ea,U_DATA__U_ARGN+2,p3
+	st	ea,U_DATA__U_ARGN,p3
 	ld	ea,8,p1
-	st	ea,U_DATA__U_ARGN+4,p3
+	st	ea,U_DATA__U_ARGN+2,p3
 	ld	ea,10,p1
+	st	ea,U_DATA__U_ARGN+4,p3
+	ld	ea,12,p1
 	st	ea,U_DATA__U_ARGN+6,p3
 
 	ld	a,=1
@@ -200,12 +201,10 @@ do_signal:
 	push	ea
 	ret
 unwind:
-	ld	p3,=0xFEFD
-	ld	a,=0x40
-	st	a,0,p3
 	pop	ea			; Discard argument
 	pop	p2			; U_RETVAL
 	pop	ea			; U_ERROR
+	pop	p3			; Restore p3
 	ret
 
 no_signal:
@@ -213,6 +212,7 @@ no_signal:
 	ld	ea,U_DATA__U_RETVAL,p3
 	ld	p2,ea
 	ld	ea,U_DATA__U_ERROR,p3
+	pop	p3			; Restore p3
 	ret
 
 _doexec:
@@ -505,11 +505,12 @@ next:
 	.export _memcpy
 
 _memcpy:
-	ld	ea,2,p1
-	ld	p2,ea		; dest
+	push	p3
 	ld	ea,4,p1
+	ld	p2,ea		; dest
+	ld	ea,6,p1
 	ld	p3,ea		; src
-	ld	ea,6,p1		; len
+	ld	ea,8,p1		; len
 	add	ea,=0x0100
 	add	a,=0x01
 	st	ea,:__tmp
@@ -522,6 +523,7 @@ mcnext:
 	bnz	mcloop
 	dld	a,:__tmp+1
 	bnz	mcloop
+	pop	p3
 	ld	ea,2,p1
 	ret
 

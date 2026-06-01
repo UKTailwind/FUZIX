@@ -10,38 +10,38 @@
 
 __uputc:
 	ld	ea,4,p1
-	ld	p3,ea
+	ld	p2,ea
 	ld	a,2,p1
 	jsr	map_proc_always
-	st	a,0,p3
+	st	a,0,p2
 	jmp	map_kernel
 
 __uputw:
 	ld	ea,4,p1
-	ld	p3,ea
+	ld	p2,ea
 	ld	ea,2,p1
 	jsr	map_proc_always
-	st	ea,0,p3
+	st	ea,0,p2
 	jmp	map_kernel
 
 __ugetc:
 	ld	ea,2,p1
-	ld	p3,ea
+	ld	p2,ea
 	jsr	map_proc_always
 	ld	ea,=0
-	ld	a,0,p3
+	ld	a,0,p2
 	jmp	map_kernel
 
 __ugetw:
 	ld	ea,2,p1
-	ld	p3,ea
+	ld	p2,ea
 	jsr	map_proc_always
-	ld	ea,0,p3
+	ld	ea,0,p2
 	jmp	map_kernel
 
 __uzero:
 	ld	ea,2,p1
-	ld	p3,ea
+	ld	p2,ea
 	ld	ea,4,p1
 	add	ea,=0x0100	; inc high half
 	add	a,=0x01		; inc low half
@@ -54,7 +54,7 @@ __uzero:
 	; Optimize, unroll etc- certainly do word at a time!
 uzerolp:
 	ld	ea,t
-	st	a,@1,p3
+	st	a,@1,p2
 zloop:
 	dld	a,:__tmp
 	bnz	uzerolp
@@ -68,11 +68,12 @@ zloop:
 ;	if so anyway!
 ;
 __uget:
-	ld	ea,4,p1
+	push	p3
+	ld	ea,6,p1
 	ld	p2,ea		; copy to p2
-	ld	ea,2,p1
+	ld	ea,4,p1
 	ld	p3,ea		; from p3
-	ld	ea,6,p1		; for ea bytes
+	ld	ea,8,p1		; for ea bytes
 	add	ea,=0x0100
 	add	a,=0x01
 	st	ea,:__tmp
@@ -90,14 +91,16 @@ ugnext:
 	bnz	ugloop
 
 	ld	ea,=0
+	pop	p3
 	ret
 
 __uput:
-	ld	ea,4,p1
+	push	p3
+	ld	ea,6,p1
 	ld	p2,ea		; copy to p2
-	ld	ea,2,p1
+	ld	ea,4,p1
 	ld	p3,ea		; from p3
-	ld	ea,6,p1		; for ea bytes
+	ld	ea,8,p1		; for ea bytes
 	add	ea,=0x0100
 	add	a,=0x01
 	st	ea,:__tmp
@@ -115,5 +118,5 @@ upnext:
 	bnz	uploop
 
 	ld	ea,=0
+	pop	p3
 	ret
-
