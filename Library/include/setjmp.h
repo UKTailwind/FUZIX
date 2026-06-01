@@ -138,7 +138,7 @@
 
 #elif defined(__8070__)
 
-	typedef unsigned jmp_buf[2];	/*  (sp) and sp */
+	typedef unsigned jmp_buf[3];	/*  p3 (sp) and sp */
 	extern int _setjmp(jmp_buf __env);
 	#define setjmp(x) _setjmp(x)
 
