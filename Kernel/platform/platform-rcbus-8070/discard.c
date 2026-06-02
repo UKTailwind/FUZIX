@@ -1,6 +1,6 @@
 #include <kernel.h>
 #include <tinyide.h>
-
+#include <ds12885.h>
 /*
  * Map handling: allocate 3 banks per process
  */
@@ -28,4 +28,5 @@ void device_init(void)
 	ide_probe();
 	*((volatile uint8_t *)0xFE0F) = 0x00;
 	*((volatile uint8_t *)0xFE0F) = 0x80;
+	ds12885_init();
 }

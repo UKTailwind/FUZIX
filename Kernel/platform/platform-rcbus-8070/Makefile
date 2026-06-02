@@ -7,7 +7,7 @@ ASRCS += tricks.S commonmem.S
 
 CDSRCS = discard.c
 
-DSRCS = ../../dev/tinydisk.c ../../dev/tinyide.c
+DSRCS = ../../dev/tinydisk.c ../../dev/tinyide.c ../../dev/ds12885.c
 DISCARD_DSRCS = ../../dev/tinydisk_discard.c ../../dev/tinyide_discard.c
 
 COBJS = $(CSRCS:.c=$(BINEXT))
@@ -49,7 +49,7 @@ image:
 	rcbus-8070.o ../../start.o ../../version.o ../../cpu-8070/lowlevel-8070.o \
 	tricks.o main.o discard.o ../../timer.o ../../kdata.o devices.o \
 	tinydisk.o tinydisk_discard.o tinyide.o tinyide_discard.o \
-	../../mm/memalloc_none.o \
+	ds12885.o ../../mm/memalloc_none.o \
 	../../devio.o ../../filesys.o ../../process.o ../../inode.o ../../syscall_fs.o \
 	../../syscall_proc.o ../../syscall_other.o ../../mm.o ../../swap.o ../../mm/bank16kfc.o \
 	../../tty.o ../../devsys.o ../../syscall_fs2.o ../../syscall_fs3.o \

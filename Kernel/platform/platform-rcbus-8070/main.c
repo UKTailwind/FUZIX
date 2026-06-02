@@ -3,6 +3,7 @@
 #include <kdata.h>
 #include <printf.h>
 #include <devtty.h>
+#include <ds12885.h>
 
 uint8_t kernel_flag = 1;
 uint8_t need_resched;
@@ -38,4 +39,21 @@ void plt_interrupt(void)
 			count -= 5;
 		}
 	}
+}
+
+/* DS12885 glue */
+#define RTC	((volatile uint8_t *)0xFE00)
+
+/* Callers deal with interrupt protection */
+
+uint_fast8_t ds12885_read(uint_fast8_t reg)
+{
+	RTC[0] = reg;
+	return RTC[1];
+}
+
+void ds12885_write(uint_fast8_t reg, uint_fast8_t val)
+{
+	RTC[0] = reg;
+	RTC[1] = val;
 }
