@@ -117,7 +117,7 @@ void db_state_format_line(const state_t *in, char *line)
 
     strncpy(line + STATE_ID_OFF,
             in->state_id,
-            safe_strlen(in->state_id, STATE_ID_LEN));
+            strnlen(in->state_id, STATE_ID_LEN));
 
     char tmp[5];
     sprintf(tmp, "%04d", in->sort_order);
@@ -125,7 +125,7 @@ void db_state_format_line(const state_t *in, char *line)
 
     strncpy(line + STATE_NAME_OFF,
             in->name,
-            safe_strlen(in->name, STATE_NAME_LEN));
+            strnlen(in->name, STATE_NAME_LEN));
 
     line[STATE_RECORD_LEN] = '\n';
 }

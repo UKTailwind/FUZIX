@@ -6,18 +6,6 @@
 #include "debug.h"      /* debug_log macro                  */
 #include "db_common.h"
 
-size_t safe_strlen(const char *s, size_t maxlen)
-{
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter: ");
-
-    size_t i = 0;
-    if (!s)
-        return 0;
-    while (i < maxlen && s[i])
-        i++;
-    return i;
-}
-
 int db_validate_fixed_records(int fd, size_t record_len, const char *dbname)
 {
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter: ");

@@ -125,14 +125,14 @@ void db_booking_format_line(const booking_t *in, char *line)
     /* Fields */
     line[BOOKING_STATUS_OFF] = (in->booking_status[0] != '\0') ? in->booking_status[0] : BOOKING_STATUS_ACTIVE;
 
-    strncpy(line + BOOKING_ID_OFF,          in->booking_id,          safe_strlen(in->booking_id,          BOOKING_ID_LEN));
-    strncpy(line + BOOKING_CUSTOMER_ID_OFF, in->booking_customer_id, safe_strlen(in->booking_customer_id, BOOKING_CUSTOMER_ID_LEN));
-    strncpy(line + BOOKING_DATE_OFF,        in->booking_date,        safe_strlen(in->booking_date,        BOOKING_DATE_LEN));
-    strncpy(line + BOOKING_START_TIME_OFF,  in->booking_start_time,  safe_strlen(in->booking_start_time,  BOOKING_START_TIME_LEN));
-    strncpy(line + BOOKING_END_TIME_OFF,    in->booking_end_time,    safe_strlen(in->booking_end_time,    BOOKING_END_TIME_LEN));
-    strncpy(line + BOOKING_STAFF_ID_OFF,    in->booking_staff_id,    safe_strlen(in->booking_staff_id,    BOOKING_STAFF_ID_LEN));
-    strncpy(line + BOOKING_STATE_ID_OFF,    in->booking_state_id,    safe_strlen(in->booking_state_id,    BOOKING_STATE_ID_LEN));
-    strncpy(line + BOOKING_JOB_OFF,         in->booking_job,         safe_strlen(in->booking_job,         BOOKING_JOB_LEN));
+    strncpy(line + BOOKING_ID_OFF,          in->booking_id,          strnlen(in->booking_id,          BOOKING_ID_LEN));
+    strncpy(line + BOOKING_CUSTOMER_ID_OFF, in->booking_customer_id, strnlen(in->booking_customer_id, BOOKING_CUSTOMER_ID_LEN));
+    strncpy(line + BOOKING_DATE_OFF,        in->booking_date,        strnlen(in->booking_date,        BOOKING_DATE_LEN));
+    strncpy(line + BOOKING_START_TIME_OFF,  in->booking_start_time,  strnlen(in->booking_start_time,  BOOKING_START_TIME_LEN));
+    strncpy(line + BOOKING_END_TIME_OFF,    in->booking_end_time,    strnlen(in->booking_end_time,    BOOKING_END_TIME_LEN));
+    strncpy(line + BOOKING_STAFF_ID_OFF,    in->booking_staff_id,    strnlen(in->booking_staff_id,    BOOKING_STAFF_ID_LEN));
+    strncpy(line + BOOKING_STATE_ID_OFF,    in->booking_state_id,    strnlen(in->booking_state_id,    BOOKING_STATE_ID_LEN));
+    strncpy(line + BOOKING_JOB_OFF,         in->booking_job,         strnlen(in->booking_job,         BOOKING_JOB_LEN));
 
     /* Record terminator */
     line[BOOKING_RECORD_LEN] = '\n';

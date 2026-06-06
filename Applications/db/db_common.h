@@ -4,8 +4,6 @@
 
 #include <stddef.h>
 
-size_t safe_strlen(const char *s, size_t maxlen);
-
 int db_validate_fixed_records(int fd, size_t record_len, const char *dbname);
 
 /* Safe fixed-field copy */

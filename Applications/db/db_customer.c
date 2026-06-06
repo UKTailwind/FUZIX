@@ -298,47 +298,47 @@ void db_customer_format_line(const customer_t *in, char *line)
     /* Fields */
     strncpy(line + CUSTOMER_STATUS_OFF,
             in->customer_status,
-            safe_strlen(in->customer_id, CUSTOMER_STATUS_LEN));
+            strnlen(in->customer_id, CUSTOMER_STATUS_LEN));
 
     strncpy(line + CUSTOMER_ID_OFF,
             in->customer_id,
-            safe_strlen(in->customer_id, CUSTOMER_ID_LEN));
+            strnlen(in->customer_id, CUSTOMER_ID_LEN));
 
     strncpy(line + CUSTOMER_NAME_OFF,
             in->customer_name,
-            safe_strlen(in->customer_name, CUSTOMER_NAME_LEN));
+            strnlen(in->customer_name, CUSTOMER_NAME_LEN));
 
     strncpy(line + CUSTOMER_PHONE1_OFF,
             in->customer_phone1,
-            safe_strlen(in->customer_phone1, CUSTOMER_PHONE1_LEN));
+            strnlen(in->customer_phone1, CUSTOMER_PHONE1_LEN));
 
     strncpy(line + CUSTOMER_PHONE2_OFF,
             in->customer_phone2,
-            safe_strlen(in->customer_phone2, CUSTOMER_PHONE2_LEN));
+            strnlen(in->customer_phone2, CUSTOMER_PHONE2_LEN));
 
     strncpy(line + CUSTOMER_ADDRESS1_OFF,
             in->customer_address1,
-            safe_strlen(in->customer_address1, CUSTOMER_ADDRESS1_LEN));
+            strnlen(in->customer_address1, CUSTOMER_ADDRESS1_LEN));
 
     strncpy(line + CUSTOMER_ADDRESS2_OFF,
             in->customer_address2,
-            safe_strlen(in->customer_address2, CUSTOMER_ADDRESS2_LEN));
+            strnlen(in->customer_address2, CUSTOMER_ADDRESS2_LEN));
 
     strncpy(line + CUSTOMER_SUBURB_OFF,
             in->customer_suburb,
-            safe_strlen(in->customer_suburb, CUSTOMER_SUBURB_LEN));
+            strnlen(in->customer_suburb, CUSTOMER_SUBURB_LEN));
 
     strncpy(line + CUSTOMER_STATE_OFF,
             in->customer_state,
-            safe_strlen(in->customer_state, CUSTOMER_STATE_LEN));
+            strnlen(in->customer_state, CUSTOMER_STATE_LEN));
 
     strncpy(line + CUSTOMER_POSTCODE_OFF,
             in->customer_postcode,
-            safe_strlen(in->customer_postcode, CUSTOMER_POSTCODE_LEN));
+            strnlen(in->customer_postcode, CUSTOMER_POSTCODE_LEN));
 
     strncpy(line + CUSTOMER_NOTES_OFF,
             in->customer_notes,
-            safe_strlen(in->customer_notes, CUSTOMER_NOTES_LEN));
+            strnlen(in->customer_notes, CUSTOMER_NOTES_LEN));
 
 
     line[CUSTOMER_RECORD_LEN] = '\n';

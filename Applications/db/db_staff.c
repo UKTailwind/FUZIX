@@ -289,11 +289,11 @@ void db_staff_format_line(const staff_t *in, char *line)
     /* notes is last – no FIELD_SEP */
 
     /* Fields */
-    strncpy(line + STAFF_STATUS_OFF, in->staff_status,   safe_strlen(in->staff_id, STAFF_STATUS_LEN));
-    strncpy(line + STAFF_ID_OFF,     in->staff_id,       safe_strlen(in->staff_id, STAFF_ID_LEN));
-    strncpy(line + STAFF_NAME_OFF,   in->staff_name,     safe_strlen(in->staff_name, STAFF_NAME_LEN));
-    strncpy(line + STAFF_PHONE_OFF,  in->staff_phone,    safe_strlen(in->staff_phone, STAFF_PHONE_LEN));
-    strncpy(line + STAFF_NOTES_OFF,  in->staff_notes, safe_strlen(in->staff_notes, STAFF_NOTES_LEN));
+    strncpy(line + STAFF_STATUS_OFF, in->staff_status,   strnlen(in->staff_id, STAFF_STATUS_LEN));
+    strncpy(line + STAFF_ID_OFF,     in->staff_id,       strnlen(in->staff_id, STAFF_ID_LEN));
+    strncpy(line + STAFF_NAME_OFF,   in->staff_name,     strnlen(in->staff_name, STAFF_NAME_LEN));
+    strncpy(line + STAFF_PHONE_OFF,  in->staff_phone,    strnlen(in->staff_phone, STAFF_PHONE_LEN));
+    strncpy(line + STAFF_NOTES_OFF,  in->staff_notes,	 strnlen(in->staff_notes, STAFF_NOTES_LEN));
 
     line[STAFF_RECORD_LEN] = '\n';
 }
