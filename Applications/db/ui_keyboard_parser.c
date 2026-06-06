@@ -7,8 +7,8 @@
 
 int kb_decode_sequence(kb_parser_t *kb, const char *seq)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     int i;
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     for (i = 0; kb->backend->seq_table[i].seq != NULL; i++) {
         if (strcmp(seq, kb->backend->seq_table[i].seq) == 0)
         return kb->backend->seq_table[i].key;
@@ -68,9 +68,9 @@ int kb_feed(kb_parser_t *kb, uint8_t byte)
 
     case KB_STATE_ESC:
     {
+        int ret = kb->backend->handle_esc(kb, byte);
         debug_log(DEBUG_TRACE, FUNC_NAME, "case KB_STATE_ESC");
 
-        int ret = kb->backend->handle_esc(kb, byte);
         /* IMPORTANT: if backend produced a final key, reset state */
         if (ret != 0) {
             kb->state = KB_STATE_IDLE;
@@ -92,8 +92,8 @@ int kb_feed(kb_parser_t *kb, uint8_t byte)
         }
 
         if (kb->backend->is_terminator(byte)){
-            debug_log(DEBUG_TRACE, FUNC_NAME, "SEQ='%s'", kb->seq_buf);
             int key = kb_decode_sequence(kb, kb->seq_buf);
+            debug_log(DEBUG_TRACE, FUNC_NAME, "SEQ='%s'", kb->seq_buf);
             kb->state = KB_STATE_IDLE;
             kb->len = 0;
             return key;

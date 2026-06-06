@@ -3,17 +3,23 @@
 #include <unistd.h>
 #include <stdio.h>      /* for printf / debug_log if needed */
 #include <stdlib.h>     /* just in case                     */
+#include <string.h>
 #include "debug.h"      /* debug_log macro                  */
 #include "db_common.h"
 
 int db_validate_fixed_records(int fd, size_t record_len, const char *dbname)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter: ");
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Expected record_len=%d", record_len);
-
-    unsigned char buf[record_len];
+    unsigned char buf[512];
     off_t offset = 0;
     long recno = 1;
+
+    if (record_len > 512) {
+        debug_log(DEBUG_ERROR, FUNC_NAME, "record too long");
+        return -1;
+    }
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter: ");
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Expected record_len=%d", record_len);
 
     while (1) {
         ssize_t n = read(fd, buf, record_len);
@@ -36,7 +42,6 @@ int db_validate_fixed_records(int fd, size_t record_len, const char *dbname)
                 "%s: short record or missing newline at or near record %ld (offset=%ld)", dbname, recno, (long)offset);
             return -1;
         }
-        (void)dbname;  /*dbname is only used with debugging. This causes a compile time error when debugging is disabled */
 
         recno++;
         offset += record_len;

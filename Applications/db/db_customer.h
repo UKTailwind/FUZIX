@@ -22,31 +22,31 @@
 #define CUSTOMER_POSTCODE_MAX   6
 #define CUSTOMER_NOTES_MAX      60
 
-/* customer_status values */
+/* cs_status values */
 #define CUSTOMER_STATUS_ACTIVE   'A'  /* Active */
 #define CUSTOMER_STATUS_DELETED  'D'  /* Soft Delete */
 
 typedef struct {
-    char customer_status[CUSTOMER_STATUS_MAX + 1];
-    char customer_id[CUSTOMER_ID_MAX + 1];
-    char customer_name[CUSTOMER_NAME_MAX + 1];
-    char customer_phone1[CUSTOMER_PHONE1_MAX + 1];
-    char customer_phone2[CUSTOMER_PHONE2_MAX + 1];
-    char customer_address1[CUSTOMER_ADDRESS1_MAX + 1];
-    char customer_address2[CUSTOMER_ADDRESS2_MAX + 1];
-    char customer_suburb[CUSTOMER_ADDRESS2_MAX +1 ];
-    char customer_state[CUSTOMER_STATE_MAX + 1];
-    char customer_postcode[CUSTOMER_POSTCODE_MAX + 1];
-    char customer_notes[CUSTOMER_NOTES_MAX + 1];
+    char cs_status[CUSTOMER_STATUS_MAX + 1];
+    char cs_id[CUSTOMER_ID_MAX + 1];
+    char cs_name[CUSTOMER_NAME_MAX + 1];
+    char cs_phone1[CUSTOMER_PHONE1_MAX + 1];
+    char cs_phone2[CUSTOMER_PHONE2_MAX + 1];
+    char cs_address1[CUSTOMER_ADDRESS1_MAX + 1];
+    char cs_address2[CUSTOMER_ADDRESS2_MAX + 1];
+    char cs_suburb[CUSTOMER_ADDRESS2_MAX +1 ];
+    char cs_state[CUSTOMER_STATE_MAX + 1];
+    char cs_postcode[CUSTOMER_POSTCODE_MAX + 1];
+    char cs_notes[CUSTOMER_NOTES_MAX + 1];
 } customer_t;
 
 
 typedef struct {
-    char customer_status[CUSTOMER_STATUS_MAX + 1];
-    char customer_id[CUSTOMER_ID_MAX + 1];
-    char customer_name[CUSTOMER_NAME_MAX + 1];
-    char customer_phone1[CUSTOMER_PHONE1_MAX + 1];
-    char customer_phone2[CUSTOMER_PHONE2_MAX + 1];
+    char cs_status[CUSTOMER_STATUS_MAX + 1];
+    char cs_id[CUSTOMER_ID_MAX + 1];
+    char cs_name[CUSTOMER_NAME_MAX + 1];
+    char cs_phone1[CUSTOMER_PHONE1_MAX + 1];
+    char cs_phone2[CUSTOMER_PHONE2_MAX + 1];
 } customer_list_rec_t;
 
 
@@ -58,23 +58,23 @@ typedef struct {
 
 
 /* parsing / formatting */
-int db_customer_parse_line(const char *line, customer_t *out);
-void db_customer_format_line(const customer_t *in, char *line);
+int db_cs_parse_line(const char *line, customer_t *out);
+void db_cs_format_line(const customer_t *in, char *line);
 
 /* record-level I/O */
-int db_customer_read(int fd, long recno, customer_t *out);
-int db_customer_write(int fd, long *recno, const customer_t *in);
+int db_cs_read(int fd, long recno, customer_t *out);
+int db_cs_write(int fd, long *recno, const customer_t *in);
 
 /* Helpers */
-int db_customer_load_page(int fd, long start_rec, CustomerList *list, long *next_rec);
-int db_customer_read_by_id(int fd, const char *customer_id, customer_t *out, long *out_recno);
-int db_customer_generate_next_id(int fd, char *out_id);
-int db_customer_lookup_display(int customer_fd, const char *customer_id, char *out, size_t outlen);
+int db_cs_load_page(int fd, long start_rec, CustomerList *list, long *next_rec);
+int db_cs_read_by_id(int fd, const char *customer_id, customer_t *out, long *out_recno);
+int db_cs_generate_next_id(int fd, char *out_id);
+int db_cs_lookup_display(int customer_fd, const char *customer_id, char *out, size_t outlen);
 
 /* db_open and close */
-int db_customer_open_read(void);
-int db_customer_open_write(void);
-int db_customer_close_read(int fd);
-int db_customer_close_write(int fd);
+int db_cs_op_read(void);
+int db_cs_op_write(void);
+int db_cs_cl_read(int fd);
+int db_cs_cl_write(int fd);
 
 #endif

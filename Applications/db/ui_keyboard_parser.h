@@ -39,13 +39,13 @@ extern const kb_backend_t kb_backend_vt52;
 extern const kb_backend_t kb_backend_ansi;
 
 /* parser */
-typedef struct kb_parser_t {
+struct kb_parser_t {
     uint8_t state;
     uint8_t len;
     uint8_t esc_countdown;
     char    seq_buf[KB_SEQ_BUF_SIZE];
     const kb_backend_t *backend;
-} kb_parser_t;
+};
 /* removed  uint8_t esc_timer; */
 /* removed  int     pending;*/
 

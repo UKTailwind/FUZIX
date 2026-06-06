@@ -20,17 +20,17 @@
 #include "ui.h"
 #include "debug.h"
 
-int db_customer_lookup_display(int customer_fd, const char *customer_id, char *out, size_t outlen)
+int db_cs_lookup_display(int customer_fd, const char *customer_id, char *out, size_t outlen)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     customer_t st;
     long rec = 0;
 
-    while (db_customer_read(customer_fd, rec, &st) == 0) {
-        if (strcmp(st.customer_id, customer_id) == 0) {
-            ui_rtrim(st.customer_name);
-            ui_rtrim(st.customer_address1);
-            snprintf(out, outlen, "%s: %s", st.customer_name, st.customer_address1);
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    while (db_cs_read(customer_fd, rec, &st) == 0) {
+        if (strcmp(st.cs_id, customer_id) == 0) {
+            ui_rtrim(st.cs_name);
+            ui_rtrim(st.cs_address1);
+            snprintf(out, outlen, "%s: %s", st.cs_name, st.cs_address1);
             return 0;
         }
 
@@ -41,15 +41,17 @@ int db_customer_lookup_display(int customer_fd, const char *customer_id, char *o
 }
 
 
-int db_customer_read(int fd, long recno, customer_t *out)
+int db_cs_read(int fd, long recno, customer_t *out)
 {
+    char line[CUSTOMER_DISK_LEN];
+    off_t off = (off_t)recno * CUSTOMER_DISK_LEN;
+    ssize_t n;
+
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter: fd=%d recno=%ld out=%p", fd, recno, out);
     if (fd < 0 || recno < 0 || !out) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Invalid args: fd=%d recno=%ld out=%p", fd, recno, out);
         return -1;
     }
-    char line[CUSTOMER_DISK_LEN];
-    off_t off = (off_t)recno * CUSTOMER_DISK_LEN;
     debug_log(DEBUG_TRACE, FUNC_NAME, "offset=%ld (recno=%ld * %d)", (long)off, recno, CUSTOMER_DISK_LEN);
 
     if (lseek(fd, off, SEEK_SET) == (off_t)-1) {
@@ -58,7 +60,7 @@ int db_customer_read(int fd, long recno, customer_t *out)
         return CUSTOMER_DB_EOF;
     }
 
-    ssize_t n = read(fd, line, CUSTOMER_DISK_LEN);
+    n = read(fd, line, CUSTOMER_DISK_LEN);
     if (n == 0) {
         debug_log(DEBUG_TRACE, FUNC_NAME, "EOF reached at recno=%ld offset=%ld", recno, (long)off);
         return CUSTOMER_DB_EOF;
@@ -67,18 +69,19 @@ int db_customer_read(int fd, long recno, customer_t *out)
         debug_log(DEBUG_ERROR, FUNC_NAME, "ERROR: Customer File Length (read %zd, expected %d)", n, CUSTOMER_DISK_LEN);
         return CUSTOMER_DB_ERROR;
     }
-    return db_customer_parse_line(line, out);
+    return db_cs_parse_line(line, out);
 }
 
-int db_customer_read_by_id( int fd, const char *customer_id, customer_t *out, long *out_recno)
+int db_cs_by_id( int fd, const char *customer_id, customer_t *out, long *out_recno)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     customer_t tmp;
     long recno = 0;
 
-    while (db_customer_read(fd, recno, &tmp) == 0) {
-        if (strcmp(tmp.customer_id, customer_id) == 0) {
-            *out = tmp;   /* struct copy */
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+
+    while (db_cs_read(fd, recno, &tmp) == 0) {
+        if (strcmp(tmp.cs_id, customer_id) == 0) {
+            memcpy(out, &tmp, sizeof(tmp));   /* struct copy */
             if (out_recno)
                 *out_recno = recno;
 
@@ -91,22 +94,24 @@ int db_customer_read_by_id( int fd, const char *customer_id, customer_t *out, lo
     return -1;   /* not found */
 }
 
-int db_customer_generate_next_id(int fd, char *out_id)
+int db_cs_generate_next_id(int fd, char *out_id)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     customer_t tmp;
     long recno = 0;
     long max_id = 0;
+    long next_id;
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
     if (!out_id) {
         return -1;
     }
 
-    while (db_customer_read(fd, recno, &tmp) == 0) {
+    while (db_cs_read(fd, recno, &tmp) == 0) {
 
-        if (tmp.customer_id[0] != '\0') {
+        if (tmp.cs_id[0] != '\0') {
             char *endp;
-            long id = strtol(tmp.customer_id, &endp, 10);
+            long id = strtol(tmp.cs_id, &endp, 10);
 
             /* accept only fully numeric IDs */
             if (*endp == '\0' && id > max_id) {
@@ -117,7 +122,7 @@ int db_customer_generate_next_id(int fd, char *out_id)
         recno++;
     }
 
-    long next_id = max_id + 1;
+    next_id = max_id + 1;
 
     if (next_id >= ID_MAX_VALUE) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Customer ID space exhausted (max %d)", ID_LEN);
@@ -129,20 +134,20 @@ int db_customer_generate_next_id(int fd, char *out_id)
     return 0;
 }
 
-long db_customer_record_count(int fd)
+long db_cs_record_count(int fd)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
-
     customer_t tmp;
     long recno = 0;
     long count = 0;
 
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+
     if (fd < 0)
         return -1;
 
-    while (db_customer_read(fd, recno, &tmp) == 0) {
+    while (db_cs_read(fd, recno, &tmp) == 0) {
         /* Skip deleted records */
-        if (tmp.customer_status[0] == CUSTOMER_STATUS_DELETED) {
+        if (tmp.cs_status[0] == CUSTOMER_STATUS_DELETED) {
             recno++;
             continue;
         }
@@ -155,17 +160,18 @@ long db_customer_record_count(int fd)
 }
 
 
-int db_customer_write(int fd, long *recno, const customer_t *in)
+int db_cs_write(int fd, long *recno, const customer_t *in)
 {
+    char line[CUSTOMER_DISK_LEN];
+    off_t off;
+    ssize_t rc;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter: recno=%ld", recno ? *recno : -1);
 
-    if (in->customer_id[0] == '\0') {
+    if (in->cs_id[0] == '\0') {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Unable to write customer with empty ID ");
         return -1;
     }
-
-    char line[CUSTOMER_DISK_LEN];
-    off_t off;
 
     if (fd < 0 || !recno || !in) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d recno=%p in=%p", fd, recno, in);
@@ -173,11 +179,11 @@ int db_customer_write(int fd, long *recno, const customer_t *in)
     }
 
     /* Format record into on-disk layout */
-    db_customer_format_line(in, line);
+    db_cs_format_line(in, line);
 
     /* NEW record: append */
     if (*recno < 0) {
-        long count = db_customer_record_count(fd);
+        long count = db_cs_record_count(fd);
         if (count < 0) {
             debug_log(DEBUG_ERROR, FUNC_NAME, "Unable to determine customer count");
             return -1;
@@ -207,7 +213,7 @@ int db_customer_write(int fd, long *recno, const customer_t *in)
         }
     }
 
-    ssize_t rc = write(fd, line, CUSTOMER_DISK_LEN);
+    rc = write(fd, line, CUSTOMER_DISK_LEN);
     if (rc != CUSTOMER_DISK_LEN) {
         debug_log(DEBUG_ERROR, FUNC_NAME,
                   "write failed: wanted=%d wrote=%ld errno=%d",
@@ -222,59 +228,60 @@ int db_customer_write(int fd, long *recno, const customer_t *in)
     return 0;
 }
 
-int db_customer_load_page(int fd, long start_rec, CustomerList *list, long *next_rec)
+int db_cs_load_page(int fd, long start_rec, CustomerList *list, long *next_rec)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     customer_t c;
     long rec = start_rec;
+    customer_list_rec_t *dst;
 
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     list->count = 0;
 
     while (list->count < CUSTOMER_PAGE_SIZE) {
 
-        if (db_customer_read(fd, rec, &c) != 0)
+        if (db_cs_read(fd, rec, &c) != 0)
             break;
 
         rec++;
 
-        if (c.customer_status[0] == CUSTOMER_STATUS_DELETED)
+        if (c.cs_status[0] == CUSTOMER_STATUS_DELETED)
             continue;
 
-        customer_list_rec_t *dst = &list->slots[list->count++];
+        dst = &list->slots[list->count++];
 
-        strcpy(dst->customer_id,     c.customer_id);
-        strcpy(dst->customer_name,   c.customer_name);
-        strcpy(dst->customer_phone1, c.customer_phone1);
-        strcpy(dst->customer_phone2, c.customer_phone2);
+        strcpy(dst->cs_id,     c.cs_id);
+        strcpy(dst->cs_name,   c.cs_name);
+        strcpy(dst->cs_phone1, c.cs_phone1);
+        strcpy(dst->cs_phone2, c.cs_phone2);
     }
     *next_rec = rec;
     return 0;
 }
 
-int db_customer_parse_line(const char *line, customer_t *out)
+int db_cs_parse_line(const char *line, customer_t *out)
 {
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
     if (!line || !out)
         return -1;
 
-    copy_record(out->customer_status,   line + CUSTOMER_STATUS_OFF,   CUSTOMER_STATUS_LEN);
-    copy_record(out->customer_id,       line + CUSTOMER_ID_OFF,       CUSTOMER_ID_LEN);
-    copy_record(out->customer_name,     line + CUSTOMER_NAME_OFF,     CUSTOMER_NAME_LEN);
-    copy_record(out->customer_phone1,   line + CUSTOMER_PHONE1_OFF,   CUSTOMER_PHONE1_LEN);
-    copy_record(out->customer_phone2,   line + CUSTOMER_PHONE2_OFF,   CUSTOMER_PHONE2_LEN);
-    copy_record(out->customer_address1, line + CUSTOMER_ADDRESS1_OFF, CUSTOMER_ADDRESS1_LEN);
-    copy_record(out->customer_address2, line + CUSTOMER_ADDRESS2_OFF, CUSTOMER_ADDRESS2_LEN);
-    copy_record(out->customer_suburb,   line + CUSTOMER_SUBURB_OFF,   CUSTOMER_SUBURB_LEN);
-    copy_record(out->customer_state,    line + CUSTOMER_STATE_OFF,    CUSTOMER_STATE_LEN);
-    copy_record(out->customer_postcode, line + CUSTOMER_POSTCODE_OFF, CUSTOMER_POSTCODE_LEN);
-    copy_record(out->customer_notes,    line + CUSTOMER_NOTES_OFF,    CUSTOMER_NOTES_LEN);
+    copy_record(out->cs_status,   line + CUSTOMER_STATUS_OFF,   CUSTOMER_STATUS_LEN);
+    copy_record(out->cs_id,       line + CUSTOMER_ID_OFF,       CUSTOMER_ID_LEN);
+    copy_record(out->cs_name,     line + CUSTOMER_NAME_OFF,     CUSTOMER_NAME_LEN);
+    copy_record(out->cs_phone1,   line + CUSTOMER_PHONE1_OFF,   CUSTOMER_PHONE1_LEN);
+    copy_record(out->cs_phone2,   line + CUSTOMER_PHONE2_OFF,   CUSTOMER_PHONE2_LEN);
+    copy_record(out->cs_address1, line + CUSTOMER_ADDRESS1_OFF, CUSTOMER_ADDRESS1_LEN);
+    copy_record(out->cs_address2, line + CUSTOMER_ADDRESS2_OFF, CUSTOMER_ADDRESS2_LEN);
+    copy_record(out->cs_suburb,   line + CUSTOMER_SUBURB_OFF,   CUSTOMER_SUBURB_LEN);
+    copy_record(out->cs_state,    line + CUSTOMER_STATE_OFF,    CUSTOMER_STATE_LEN);
+    copy_record(out->cs_postcode, line + CUSTOMER_POSTCODE_OFF, CUSTOMER_POSTCODE_LEN);
+    copy_record(out->cs_notes,    line + CUSTOMER_NOTES_OFF,    CUSTOMER_NOTES_LEN);
 
     return 0;
 }
 
 
-void db_customer_format_line(const customer_t *in, char *line)
+void db_cs_format_line(const customer_t *in, char *line)
 {
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     if (!in || !line)
@@ -297,65 +304,66 @@ void db_customer_format_line(const customer_t *in, char *line)
 
     /* Fields */
     strncpy(line + CUSTOMER_STATUS_OFF,
-            in->customer_status,
-            strnlen(in->customer_id, CUSTOMER_STATUS_LEN));
+            in->cs_status,
+            strnlen(in->cs_id, CUSTOMER_STATUS_LEN));
 
     strncpy(line + CUSTOMER_ID_OFF,
-            in->customer_id,
-            strnlen(in->customer_id, CUSTOMER_ID_LEN));
+            in->cs_id,
+            strnlen(in->cs_id, CUSTOMER_ID_LEN));
 
     strncpy(line + CUSTOMER_NAME_OFF,
-            in->customer_name,
-            strnlen(in->customer_name, CUSTOMER_NAME_LEN));
+            in->cs_name,
+            strnlen(in->cs_name, CUSTOMER_NAME_LEN));
 
     strncpy(line + CUSTOMER_PHONE1_OFF,
-            in->customer_phone1,
-            strnlen(in->customer_phone1, CUSTOMER_PHONE1_LEN));
+            in->cs_phone1,
+            strnlen(in->cs_phone1, CUSTOMER_PHONE1_LEN));
 
     strncpy(line + CUSTOMER_PHONE2_OFF,
-            in->customer_phone2,
-            strnlen(in->customer_phone2, CUSTOMER_PHONE2_LEN));
+            in->cs_phone2,
+            strnlen(in->cs_phone2, CUSTOMER_PHONE2_LEN));
 
     strncpy(line + CUSTOMER_ADDRESS1_OFF,
-            in->customer_address1,
-            strnlen(in->customer_address1, CUSTOMER_ADDRESS1_LEN));
+            in->cs_address1,
+            strnlen(in->cs_address1, CUSTOMER_ADDRESS1_LEN));
 
     strncpy(line + CUSTOMER_ADDRESS2_OFF,
-            in->customer_address2,
-            strnlen(in->customer_address2, CUSTOMER_ADDRESS2_LEN));
+            in->cs_address2,
+            strnlen(in->cs_address2, CUSTOMER_ADDRESS2_LEN));
 
     strncpy(line + CUSTOMER_SUBURB_OFF,
-            in->customer_suburb,
-            strnlen(in->customer_suburb, CUSTOMER_SUBURB_LEN));
+            in->cs_suburb,
+            strnlen(in->cs_suburb, CUSTOMER_SUBURB_LEN));
 
     strncpy(line + CUSTOMER_STATE_OFF,
-            in->customer_state,
-            strnlen(in->customer_state, CUSTOMER_STATE_LEN));
+            in->cs_state,
+            strnlen(in->cs_state, CUSTOMER_STATE_LEN));
 
     strncpy(line + CUSTOMER_POSTCODE_OFF,
-            in->customer_postcode,
-            strnlen(in->customer_postcode, CUSTOMER_POSTCODE_LEN));
+            in->cs_postcode,
+            strnlen(in->cs_postcode, CUSTOMER_POSTCODE_LEN));
 
     strncpy(line + CUSTOMER_NOTES_OFF,
-            in->customer_notes,
-            strnlen(in->customer_notes, CUSTOMER_NOTES_LEN));
+            in->cs_notes,
+            strnlen(in->cs_notes, CUSTOMER_NOTES_LEN));
 
 
     line[CUSTOMER_RECORD_LEN] = '\n';
 }
 
-int db_customer_open_read(void)
+int db_cs_op_read(void)
 {
+    int fd = open(CUSTOMER_DB_FILE, O_RDONLY);  /* Read Only */
+    struct stat st;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter: ");
 
-    int fd = open(CUSTOMER_DB_FILE, O_RDONLY);  /* Read Only */
     if (fd < 0) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Failed to open customer db in Read Only mode");
         return -1;
     }
 
     /* Check customer file */
-    struct stat st;
     if (fstat(fd, &st) != 0) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Cannot stat customer database");
         close(fd);
@@ -377,8 +385,11 @@ int db_customer_open_read(void)
     return fd;
 }
 
-int db_customer_open_write(void)
+int db_cs_op_write(void)
 {
+    int fd;
+    struct stat st;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter: ");
 
     /* Create Lock File */
@@ -388,14 +399,13 @@ int db_customer_open_write(void)
     }
 
     /* Open for Writing */
-    int fd = open(CUSTOMER_DB_FILE, O_RDWR);  /* Read Write */
+    fd = open(CUSTOMER_DB_FILE, O_RDWR);  /* Read Write */
     if (fd < 0) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Failed to open customer");
         db_unlock(CUSTOMER_DB_FILE);
         return -1;
     }
     /* Check customer file */
-    struct stat st;
     if (fstat(fd, &st) != 0) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Cannot stat customer database");
         close(fd);
@@ -419,7 +429,7 @@ int db_customer_open_write(void)
 }
 
 /* Close database */
-int db_customer_close_read(int fd)
+int db_cs_cl_read(int fd)
 {
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter: ");
     if (fd < 0)
@@ -431,7 +441,7 @@ int db_customer_close_read(int fd)
     return 0;
 }
 
-int db_customer_close_write(int fd)
+int db_cs_cl_write(int fd)
 {
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter: ");
     if (fd >= 0){

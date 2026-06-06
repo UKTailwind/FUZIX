@@ -17,14 +17,15 @@ static int staff_count = 0;
 /* Load staffs from database into staff[] */
 static int load_staff(void)
 {
+    int fd = db_staff_open();
+    long rec = 0;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
-    int fd = db_staff_open();
     if (fd < 0)
         return -1;
 
     staff_count = 0;
-    long rec = 0;
 
     while (staff_count < MAX_STAFF_ENTRIES) {
 
@@ -62,9 +63,10 @@ static int load_staff(void)
 
 /* Draw popup frame and border */
 static void draw_popup(int start_row, int start_col, int rows, int cols) {
+    int r;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
-    int r;
     for (r = 0; r < rows; r++) {
         int c;
         for (c = 0; c < cols; c++) {
@@ -75,24 +77,29 @@ static void draw_popup(int start_row, int start_col, int rows, int cols) {
 
 /* Draw the list of staff */
 static void draw_staff(int start_row, int start_col, int selected) {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     int i;
+
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+
     for (i = 0; i < staff_count; i++) {
-        if (i == selected) ui_attr_reverse_on();
+        if (i == selected) ui_attr_rv_on();
         ui_puts(start_row + i, start_col, staff[i].staff_name);
-        if (i == selected) ui_attr_reverse_off();
+        if (i == selected) ui_attr_rv_off();
     }
 }
 
 /* Main staff selection function */
 int staff_select(char *out_staff_id) {
+    int selected = 0;
+    int i;
+    int start_row;
+    int start_col;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
     if (load_staff() <= 0) return -1;
 
-    int selected = 0;
     /* Find current staff so popup opens on it */
-    int i;
     for (i = 0; i < staff_count; i++) {
         if (strcmp(staff[i].staff_id, out_staff_id) == 0) {
             selected = i;
@@ -100,7 +107,8 @@ int staff_select(char *out_staff_id) {
         }
     }
 
-    int start_row = 7, start_col = 14;
+    start_row = 7;
+    start_col = 14;
 
     draw_popup(start_row-1, start_col-1, staff_count+2, STAFF_POPUP_WIDTH);
     draw_staff(start_row, start_col, selected);

@@ -65,9 +65,10 @@ void debug_close(void)
 void dump_bytes(debug_level_t level, const char *label, const void *p, size_t n)
 {
     const unsigned char *b = p;
+    size_t i;
+
     debug_log(level, FUNC_NAME, "%s:", label);
 
-    size_t i;
     for (i = 0; i < n; i++)
         debug_log(level, FUNC_NAME, " %02X", b[i]);
 }
@@ -77,21 +78,22 @@ void debug_log(debug_level_t level,
                const char *func,
                const char *fmt, ...)
 {
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    va_list ap;
+
     if (level > current_debug_level)
         return;
 
     if (!dbg_fp)
         return;
 
-    time_t now = time(NULL);
-    struct tm *tm = localtime(&now);
 
     fprintf(dbg_fp, "%02d:%02d:%02d [%s]",
             tm->tm_hour, tm->tm_min, tm->tm_sec, func);
 
     fprintf(dbg_fp, " ");
 
-    va_list ap;
     va_start(ap, fmt);
     vfprintf(dbg_fp, fmt, ap);
     va_end(ap);

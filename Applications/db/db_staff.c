@@ -23,9 +23,10 @@
 
 int db_staff_lookup_display(int staff_fd, const char *staff_id, char *out, size_t outlen)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     staff_t st;
     long rec = 0;
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
     while (db_staff_read(staff_fd, rec, &st) == 0) {
         if (strcmp(st.staff_id, staff_id) == 0) {
@@ -43,13 +44,15 @@ int db_staff_lookup_display(int staff_fd, const char *staff_id, char *out, size_
 
 int db_staff_read(int fd, long recno, staff_t *out)
 {
+    char line[STAFF_DISK_LEN];
+    off_t off = (off_t)recno * STAFF_DISK_LEN;
+    ssize_t n;
+
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter: fd=%d recno=%ld out=%p", fd, recno, out);
     if (fd < 0 || recno < 0 || !out) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Invalid args: fd=%d recno=%ld out=%p", fd, recno, out);
         return -1;
     }
-    char line[STAFF_DISK_LEN];
-    off_t off = (off_t)recno * STAFF_DISK_LEN;
     debug_log(DEBUG_TRACE, FUNC_NAME, "offset=%ld (recno=%ld * %d)", (long)off, recno, STAFF_DISK_LEN);
 
     if (lseek(fd, off, SEEK_SET) == (off_t)-1) {
@@ -58,7 +61,7 @@ int db_staff_read(int fd, long recno, staff_t *out)
         return -1;
     }
 
-    ssize_t n = read(fd, line, STAFF_DISK_LEN);
+    n = read(fd, line, STAFF_DISK_LEN);
     if (n == 0) {
         debug_log(DEBUG_TRACE, FUNC_NAME, "EOF reached at recno=%ld offset=%ld", recno, (long)off);
         return -1;
@@ -73,13 +76,13 @@ int db_staff_read(int fd, long recno, staff_t *out)
 
 int db_staff_read_by_id( int fd, const char *staff_id, staff_t *out, long *out_recno)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     staff_t tmp;
     long recno = 0;
 
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     while (db_staff_read(fd, recno, &tmp) == 0) {
         if (strcmp(tmp.staff_id, staff_id) == 0) {
-            *out = tmp;   /* struct copy */
+            memcpy(out, &tmp, sizeof(tmp));   /* struct copy */
             if (out_recno)
                 *out_recno = recno;
 
@@ -93,10 +96,12 @@ int db_staff_read_by_id( int fd, const char *staff_id, staff_t *out, long *out_r
 
 int db_staff_generate_next_id(int fd, char *out_id)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     staff_t tmp;
     long recno = 0;
     long max_id = 0;
+    long next_id;
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
     if (!out_id) {
         return -1;
@@ -117,7 +122,7 @@ int db_staff_generate_next_id(int fd, char *out_id)
         recno++;
     }
 
-    long next_id = max_id + 1;
+    next_id = max_id + 1;
 
     if (next_id >= ID_MAX_VALUE) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Staff ID space exhausted (max %d)", ID_LEN);
@@ -131,11 +136,11 @@ int db_staff_generate_next_id(int fd, char *out_id)
 
 long db_staff_record_count(int fd)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
-
     staff_t tmp;
     long recno = 0;
     long count = 0;
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
     if (fd < 0)
         return -1;
@@ -156,15 +161,16 @@ long db_staff_record_count(int fd)
 
 int db_staff_write(int fd, long *recno, const staff_t *in)
 {
+    char line[STAFF_DISK_LEN];
+    off_t off;
+    ssize_t rc;
+
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter: recno=%ld", recno ? *recno : -1);
 
     if (in->staff_id[0] == '\0') {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Unable to write staff with empty ID ");
         return -1;
     }
-
-    char line[STAFF_DISK_LEN];
-    off_t off;
 
     if (fd < 0 || !recno || !in) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d recno=%p in=%p", fd, recno, in);
@@ -206,7 +212,7 @@ int db_staff_write(int fd, long *recno, const staff_t *in)
         }
     }
 
-    ssize_t rc = write(fd, line, STAFF_DISK_LEN);
+    rc = write(fd, line, STAFF_DISK_LEN);
     if (rc != STAFF_DISK_LEN) {
         debug_log(DEBUG_ERROR, FUNC_NAME,
                   "write failed: wanted=%d wrote=%ld errno=%d",
@@ -223,16 +229,17 @@ int db_staff_write(int fd, long *recno, const staff_t *in)
 
 int db_staff_load_all(int fd, StaffList *list)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME,"Enter: Loading all staff fd=%d", fd);
     long rec = 0;
     staff_t c;
 
+    debug_log(DEBUG_TRACE, FUNC_NAME,"Enter: Loading all staff fd=%d", fd);
     if (!list)
         return -1;
 
     list->count = 0;
 
     while (list->count < MAX_STAFF_ENTRIES) {
+        staff_list_rec_t *dst;
 
         if (db_staff_read(fd, rec, &c) != 0)
             break;
@@ -243,7 +250,8 @@ int db_staff_load_all(int fd, StaffList *list)
         if (c.staff_status[0] == STAFF_STATUS_DELETED)
             continue;
 
-        staff_list_rec_t *dst = &list->slots[list->count++];
+        dst = &list->slots[list->count++];
+
         strcpy(dst->staff_id,     c.staff_id);
         strcpy(dst->staff_name,   c.staff_name);
         strcpy(dst->staff_phone, c.staff_phone);
@@ -300,9 +308,11 @@ void db_staff_format_line(const staff_t *in, char *line)
 
 int db_staff_open(void)
 {
+    int fd = open("data/staff.db", O_RDWR);
+    struct stat st;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter: ");
 
-    int fd = open("data/staff.db", O_RDWR);
     if (fd < 0) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Failed to open staff");
         ui_status("Failed to open staff file");
@@ -311,7 +321,6 @@ int db_staff_open(void)
     }
 
     /* Check staff file */
-    struct stat st;
     if (fstat(fd, &st) != 0) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Cannot stat staff database");
         ui_status("Cannot stat staff database");
@@ -337,11 +346,13 @@ int db_staff_open(void)
 /* Close database */
 int db_staff_close(int fd)
 {
+    int rc;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter: ");
 
     if (fd < 0)
         return 0;
-    int rc = close(fd);
+    rc = close(fd);
     if (rc == 0) {
         g_open_files--;
         debug_log(DEBUG_INFO, FUNC_NAME, "CLOSE READ fd=%d total=%d", fd, g_open_files);

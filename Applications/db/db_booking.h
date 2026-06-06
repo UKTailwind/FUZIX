@@ -29,12 +29,12 @@ typedef struct {
     char customer_id[ID_LEN +1];
     char booking_date[BOOKING_DATE_MAX +1];
     char booking_start_time[BOOKING_START_TIME_MAX +1];
-    char  booking_end_time[BOOKING_END_TIME_MAX +1];
+    char booking_end_time[BOOKING_END_TIME_MAX +1];
     char booking_customer_id[BOOKING_CUSTOMER_ID_MAX +1];
     char booking_staff_id[ID_LEN +1];
     char booking_state_id[ID_LEN + 1];
 
-    char booking_job[JOB_LEN +1];
+    char booking_job[BOOKING_JOB_LEN +1];
 } booking_t;
 
 
@@ -45,25 +45,25 @@ typedef struct {
 } DayBookings;
 
 /* parsing / formatting */
-int  db_booking_parse_line(const char *line, booking_t *out);
-void db_booking_format_line(const booking_t *in, char *line);
-void db_booking_sort_day_by_time(int fd, DayBookings *day);
+int  db_bk_parse_line(const char *line, booking_t *out);
+void db_bk_format_line(const booking_t *in, char *line);
+void db_bk_sort_day_by_time(int fd, DayBookings *day);
 
 /* record-level I/O */
-int db_booking_read(int fd, long recno, booking_t *out);
-int db_booking_write(int fd, long recno, const booking_t *in);
-int db_booking_read_by_id(int fd, const char *booking_id, booking_t *out, long *recno);
-int db_booking_generate_next_id(int fd, char *booking_id);
-int db_booking_append(int fd, const booking_t *in);
-int db_booking_read_by_index(int fd, const DayBookings *day, int index, booking_t *out);
+int db_bk_read(int fd, long recno, booking_t *out);
+int db_bk_write(int fd, long recno, const booking_t *in);
+int db_bk_by_id(int fd, const char *booking_id, booking_t *out, long *recno);
+int db_bk_generate_next_id(int fd, char *booking_id);
+int db_bk_append(int fd, const booking_t *in);
+int db_bk_by_index(int fd, const DayBookings *day, int index, booking_t *out);
 
-int db_booking_build_day_index(int fd, int target_date, DayBookings *day);
+int db_bk_build_day_index(int fd, int target_date, DayBookings *day);
 
 /* db_open and close */
-int db_booking_open_read();
-int db_booking_open_write();
-int db_booking_close_read(int fd);
-int db_booking_close_write(int fd);
+int db_bk_op_read(void);
+int db_bk_op_write(void);
+int db_bk_cl_read(int fd);
+int db_bk_cl_write(int fd);
 int db_load_day(int fd, int ymd, DayBookings *day);
 
 #endif

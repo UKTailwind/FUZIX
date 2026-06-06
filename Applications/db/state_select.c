@@ -17,14 +17,16 @@ static int state_count = 0;
 /* Load states from database into states[] */
 static int load_states(void)
 {
+    int fd = db_state_open();
+    long rec = 0;
+    int i;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
-    int fd = db_state_open();
     if (fd < 0)
         return -1;
 
     state_count = 0;
-    long rec = 0;
 
     while (state_count < MAX_STATE_ENTRIES) {
 
@@ -38,16 +40,15 @@ static int load_states(void)
     db_state_close(fd);
 
     /* Sort by workflow order */
-    int i;
     for (i = 0; i < state_count - 1; i++) {
         int j;
         for (j = i + 1; j < state_count; j++) {
 
             if (states[i].sort_order > states[j].sort_order) {
-
-                state_t tmp = states[i];
-                states[i] = states[j];
-                states[j] = tmp;
+                state_t tmp;
+                memcpy(&tmp, states + i, sizeof(state_t));
+                memcpy(states + i, states + j, sizeof(state_t));
+                memcpy(states + j, &tmp, sizeof(state_t));
             }
         }
     }
@@ -60,9 +61,9 @@ static int load_states(void)
 
 /* Draw popup frame and border */
 static void draw_popup(int start_row, int start_col, int rows, int cols) {
+    int r;
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
-    int r;
     for (r = 0; r < rows; r++) {
         int c;
         for (c = 0; c < cols; c++) {
@@ -73,25 +74,27 @@ static void draw_popup(int start_row, int start_col, int rows, int cols) {
 
 /* Draw the list of states */
 static void draw_states(int start_row, int start_col, int selected) {
+    int i;
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
-    int i;
     for (i = 0; i < state_count; i++) {
-        if (i == selected) ui_attr_reverse_on();
+        if (i == selected) ui_attr_rv_on();
         ui_puts(start_row + i, start_col, states[i].name);
-        if (i == selected) ui_attr_reverse_off();
+        if (i == selected) ui_attr_rv_off();
     }
 }
 
 /* Main state selection function */
 int state_select(char *out_state_id) {
+    int selected = 0;
+    int i;
+    int start_row, start_col;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
     if (load_states() <= 0) return -1;
 
-    int selected = 0;
     /* Find current state so popup opens on it */
-    int i;
     for (i = 0; i < state_count; i++) {
         if (strcmp(states[i].state_id, out_state_id) == 0) {
             selected = i;
@@ -99,7 +102,8 @@ int state_select(char *out_state_id) {
         }
     }
 
-    int start_row = 7, start_col = 14;
+    start_row = 7;
+    start_col = 14;
 
     draw_popup(start_row-1, start_col-1, state_count+2, STATE_POPUP_WIDTH);
     draw_states(start_row, start_col, selected);

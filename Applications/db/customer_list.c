@@ -16,11 +16,11 @@
 #define ROW_NORMAL    0
 #define ROW_SELECTED  1
 
-static void rebuild_visible_customers(CustomerList *customer);
+static void rebuild_vis_customers(CustomerList *customer);
 static int build_search_results(int fd, const char *text);
 static void load_search_page(int fd, int start_idx, CustomerList *list);
-static void rebuild_visible_page(CustomerList *customer);
-static int customer_name_matches_disk(const customer_t *c, const char *text);
+static void rebuild_vis_page(CustomerList *customer);
+static int cs_nmatch_disk(const customer_t *c, const char *text);
 static const char *strcasestr_simple(const char *haystack, const char *needle);
 
 /* File-local, not global */
@@ -48,13 +48,14 @@ static int selected_idx = 0;   /* index into visible_indexes[] */
 /* ---------- Customer Screen drawing with dynamic scrolling ---------- */
 static void draw_screen(int mode, const CustomerList *customer, int start_idx, const int *visible_indexes, int visible_count)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     char line[100];
-    line[0] = '\0';
     int i, row = 5;
     int max_rows = MAX_CUSTOMER_ROWS;  /* rows available for customer on screen */
 
-    ui_attr_reverse_off();
+    line[0] = '\0';
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    ui_attr_rv_off();
     ui_cls();
     ui_puts(1, 1, " Booking Customer Management System                                By D.Pollard");
 
@@ -69,19 +70,19 @@ static void draw_screen(int mode, const CustomerList *customer, int start_idx, c
         const customer_list_rec_t *s = &customer->slots[vi];
 
         if (start_idx + i == selected_idx) {
-            ui_attr_reverse_on();
+            ui_attr_rv_on();
         }
         snprintf(line, sizeof(line),
             " %-6.6s %-25.25s %-12.12s %-12.12s",
-            s->customer_id,
-            s->customer_name,
-            s->customer_phone1,
-            s->customer_phone2);
+            s->cs_id,
+            s->cs_name,
+            s->cs_phone1,
+            s->cs_phone2);
 
         ui_puts(row + i, 1, line);
 
         if (start_idx + i == selected_idx) {
-            ui_attr_reverse_off();
+            ui_attr_rv_off();
         }
     }
     /* Clear remaining rows (important for last page) */
@@ -107,10 +108,13 @@ static void draw_screen(int mode, const CustomerList *customer, int start_idx, c
 
 static void run_customer_search(int mode, int customer_fd, CustomerList *customer, int *start_idx)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
-
     char buf[CUSTOMER_NAME_MAX + 1];
     int start_col = 19;  /* after "Command: Search: " */
+    int overflow;
+    int rc;
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+
     ui_puts(22, 1, "                                                            ");
     ui_puts(22, 1, "Enter search text, blank line exits search mode");
     fflush(stdout);
@@ -123,7 +127,7 @@ static void run_customer_search(int mode, int customer_fd, CustomerList *custome
     ui_puts(UI_COMMAND_ROW, 1, "Command: Search: ");
     fflush(stdout);
 
-    int rc = ui_read_line(UI_COMMAND_ROW, start_col, buf, sizeof(buf));
+    rc = ui_read_line(UI_COMMAND_ROW, start_col, buf, sizeof(buf));
 
     /* Search mode ALWAYS ends after Enter */
     customer_search.search_active = 0;
@@ -132,7 +136,7 @@ static void run_customer_search(int mode, int customer_fd, CustomerList *custome
     /* ESC or blank line both exit search */
     if (rc < 0 || buf[0] == '\0') {
         customer_search.filter_active = 0;
-        rebuild_visible_customers(customer);
+        rebuild_vis_customers(customer);
 
         /* redraw command + status lines */
         ui_puts(UI_COMMAND_ROW, 1, "Command:                                                             ");
@@ -143,7 +147,7 @@ static void run_customer_search(int mode, int customer_fd, CustomerList *custome
     strncpy(customer_search.text, buf, CUSTOMER_NAME_MAX);
     customer_search.text[CUSTOMER_NAME_MAX] = '\0';
 
-    int overflow = build_search_results(customer_fd, customer_search.text);
+    overflow = build_search_results(customer_fd, customer_search.text);
 
     if (match_count == 0) {
         ui_status("No matches found");
@@ -162,7 +166,7 @@ static void run_customer_search(int mode, int customer_fd, CustomerList *custome
     load_search_page(customer_fd, search_start_idx, customer);
 
     /* rebuild visible */
-    rebuild_visible_page(customer);
+    rebuild_vis_page(customer);
     selected_idx = 0;
     *start_idx = 0;
     draw_screen(mode, customer, *start_idx, visible_indexes, visible_count);
@@ -170,14 +174,15 @@ static void run_customer_search(int mode, int customer_fd, CustomerList *custome
 
 static int build_search_results(int fd, const char *text)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     customer_t c;
     long rec = 0;
     match_count = 0;
 
-    while (db_customer_read(fd, rec, &c) == 0) {
-        if (c.customer_status[0] != CUSTOMER_STATUS_DELETED &&
-            customer_name_matches_disk(&c, text)) {
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+
+    while (db_cs_read(fd, rec, &c) == 0) {
+        if (c.cs_status[0] != CUSTOMER_STATUS_DELETED &&
+            cs_nmatch_disk(&c, text)) {
 
             if (match_count < MAX_SEARCH_MATCHES) {
                 matched_recnos[match_count++] = rec;
@@ -190,20 +195,22 @@ static int build_search_results(int fd, const char *text)
     return 0;
 }
 
-static int customer_name_matches_disk(const customer_t *c, const char *text)
+static int cs_nmatch_disk(const customer_t *c, const char *text)
 {
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     if (text[0] == '\0')
         return 1;
-    return strcasestr_simple(c->customer_name, text) != NULL;
+    return strcasestr_simple(c->cs_name, text) != NULL;
 }
 
 static void load_search_page(int fd, int start_idx, CustomerList *list)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     customer_t c;
     int i;
+    long recno;
+    customer_list_rec_t *dst;
 
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     list->count = 0;
 
     for (i = 0; i < CUSTOMER_PAGE_SIZE; i++) {
@@ -212,17 +219,17 @@ static void load_search_page(int fd, int start_idx, CustomerList *list)
         if (idx >= match_count)
             break;
 
-        long recno = matched_recnos[idx];
+        recno = matched_recnos[idx];
 
-        if (db_customer_read(fd, recno, &c) != 0)
+        if (db_cs_read(fd, recno, &c) != 0)
             break;
 
-        customer_list_rec_t *dst = &list->slots[list->count++];
+        dst = &list->slots[list->count++];
 
-        strcpy(dst->customer_id,     c.customer_id);
-        strcpy(dst->customer_name,   c.customer_name);
-        strcpy(dst->customer_phone1, c.customer_phone1);
-        strcpy(dst->customer_phone2, c.customer_phone2);
+        strcpy(dst->cs_id,     c.cs_id);
+        strcpy(dst->cs_name,   c.cs_name);
+        strcpy(dst->cs_phone1, c.cs_phone1);
+        strcpy(dst->cs_phone2, c.cs_phone2);
     }
 }
 
@@ -250,26 +257,26 @@ static const char *strcasestr_simple(const char *haystack, const char *needle)
     return NULL;
 }
 
-static int customer_name_matches(const customer_list_rec_t *c, const char *search)
+static int cs_nmatch(const customer_list_rec_t *c, const char *search)
 {
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     if (search[0] == '\0')
         return 1;
 
-    return strcasestr_simple(c->customer_name, search) != NULL;
+    return strcasestr_simple(c->cs_name, search) != NULL;
 }
 
-static void rebuild_visible_customers(CustomerList *customer)
+static void rebuild_vis_customers(CustomerList *customer)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
-
     int i;
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
     visible_count = 0;
 
     for (i = 0; i < customer->count; i++) {
         if (!customer_search.filter_active ||
-            customer_name_matches(&customer->slots[i],
+            cs_nmatch(&customer->slots[i],
                                   customer_search.text)) {
 
             visible_indexes[visible_count++] = i;
@@ -286,11 +293,13 @@ static void rebuild_visible_customers(CustomerList *customer)
     }
 }
 
-static void rebuild_visible_page(CustomerList *customer)
+static void rebuild_vis_page(CustomerList *customer)
 {
+    int i;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     visible_count = customer->count;
-    int i;
+
     for (i = 0; i < visible_count; i++) {
         visible_indexes[i] = i;
     }
@@ -298,31 +307,32 @@ static void rebuild_visible_page(CustomerList *customer)
 
 static void draw_customer_row(const CustomerList *customer, int screen_row, int visible_idx, int is_selected)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     char line[100];
     int vi = visible_indexes[visible_idx];
     const customer_list_rec_t *s = &customer->slots[vi];
 
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+
     if (is_selected)
-        ui_attr_reverse_on();
+        ui_attr_rv_on();
 
     snprintf(line, sizeof(line),
         " %-6.6s %-25.25s %-12.12s %-12.12s",
-        s->customer_id,
-        s->customer_name,
-        s->customer_phone1,
-        s->customer_phone2);
+        s->cs_id,
+        s->cs_name,
+        s->cs_phone1,
+        s->cs_phone2);
 
     ui_puts(screen_row, 1, line);
 
     if (is_selected)
-        ui_attr_reverse_off();
+        ui_attr_rv_off();
 }
 
 static void apply_loaded_page(CustomerList *customer, int *start_idx, int *selected_idx, int *page_changed, int new_selected_idx)
 {
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
-    rebuild_visible_page(customer);
+    rebuild_vis_page(customer);
 
     if (new_selected_idx < 0) {
         *selected_idx = visible_count - 1;
@@ -342,17 +352,19 @@ static void apply_loaded_page(CustomerList *customer, int *start_idx, int *selec
 /*================ Customer list screen main loop ======================*/
 int run_customer_list(int mode, const char *initial_customer_id, char *selected_customer_id)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     int customer_fd  = -1;
     static CustomerList customer_storage;
     CustomerList *customer = &customer_storage;
-
-    customer->count = 0;
     int selection_moved = 0;
     int start_idx = 0;
     int page_changed = 0;
     long start_recno = 0;  /* which page we are on in file */
+    int running;
+    int rc;
 
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+
+    customer->count = 0;
     selected_idx = 0;
 
     if (selected_customer_id)
@@ -361,7 +373,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
     /* NOTE customer.c owns customer_fd
     * Do not return from this function once the file is open.
     */
-    customer_fd = db_customer_open_read();
+    customer_fd = db_cs_op_read();
 
     if (customer_fd == CUSTOMER_DB_EOF) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "ERROR: Unable to open Customer database");
@@ -371,22 +383,22 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
     }
 
     /* Load one screens worth of customers */
-    if (db_customer_load_page(customer_fd, start_recno, customer, &next_recno) < 0) {
+    if (db_cs_load_page(customer_fd, start_recno, customer, &next_recno) < 0) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "ERROR: Failed to load customers");
         ui_status("Failed to load customers");
         sleep(4);
         goto cleanup;
     }
-    rebuild_visible_page(customer);
+    rebuild_vis_page(customer);
 
     /* Position list on requested customer if provided */
     if (initial_customer_id && initial_customer_id[0] != '\0') {
-        debug_log(DEBUG_INFO, FUNC_NAME, "Position list on requested customer");
         int i;
+        debug_log(DEBUG_INFO, FUNC_NAME, "Position list on requested customer");
         for (i = 0; i < visible_count; i++) {
             int idx = visible_indexes[i];
 
-            if (strncmp(customer->slots[idx].customer_id, initial_customer_id, 6) == 0)
+            if (strncmp(customer->slots[idx].cs_id, initial_customer_id, 6) == 0)
             {
                 selected_idx = i;
                 /* Ensure selected row is visible */
@@ -399,36 +411,37 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
         }
     }
 
-    int running = 1;
-    int rc;   /*Customer detail return code. */
+    running = 1;
 
     debug_log(DEBUG_TRACE, FUNC_NAME, "Before draw_screen: customer->count=%d", customer->count);
     draw_screen(mode, customer, start_idx, visible_indexes, visible_count);
 
     while (running) {
-
+        int ch;
         int prev_selected_idx = selected_idx;
+        char status[80];
+
         selection_moved = 0;
 
         /* Status bar (depends on what is visible right now) */
-        char status[80];
         if (customer->count == 0)
         {
             snprintf(status, sizeof(status), "No Customers Found");
         }
         else
         {
+            int from,to;
             int shown = visible_count - start_idx;
             if (shown > MAX_CUSTOMER_ROWS)
             {
                 shown = MAX_CUSTOMER_ROWS;
             }
-            int from = start_recno + 1;
-            int to   = start_recno + customer->count;
+            from = start_recno + 1;
+            to   = start_recno + customer->count;
             snprintf(status, sizeof(status), "Showing records %d to %d", from, to);
         }
         ui_status(status);
-        int ch = ui_read_key();
+        ch = ui_read_key();
 
         debug_log(DEBUG_TRACE, FUNC_NAME, "key=%d '%c'", ch, (ch >= 32 && ch < 127) ? ch : '?');
         debug_log(DEBUG_TRACE, FUNC_NAME, "RAW key value=%d", ch);
@@ -445,7 +458,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                     /* Exit search mode ONLY */
                     search_mode = 0;
                     customer_search.filter_active = 0;
-                    db_customer_load_page(customer_fd, start_recno, customer, &next_recno);
+                    db_cs_load_page(customer_fd, start_recno, customer, &next_recno);
                     apply_loaded_page(customer, &start_idx, &selected_idx, &page_changed, 0);
                     selection_moved = 1;
                     break;  /* Do NOT exit screen */
@@ -464,7 +477,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                     debug_log(DEBUG_INFO, FUNC_NAME, "Mode = CUSTOMER_MODE_SELECT (loop 2)");
                     /* Copy the selected ID to the shared memory location */
                     if (selected_customer_id){
-                        strncpy(selected_customer_id, customer->slots[visible_indexes[selected_idx]].customer_id, 6);
+                        strncpy(selected_customer_id, customer->slots[visible_indexes[selected_idx]].cs_id, 6);
                         selected_customer_id[CUSTOMER_ID_MAX] = '\0';
                         debug_log(DEBUG_INFO, FUNC_NAME, "Customer selected id=%s", selected_customer_id);
                     }
@@ -488,10 +501,10 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                     CustomerList temp;
                     long temp_next;
 
-                    db_customer_load_page(customer_fd, next_recno, &temp, &temp_next);
+                    db_cs_load_page(customer_fd, next_recno, &temp, &temp_next);
 
                     if (temp.count > 0) {
-                        *customer = temp;
+                        memcpy(customer, &temp, sizeof(temp));
                         start_recno = next_recno;
                         next_recno = temp_next;
                         apply_loaded_page(customer, &start_idx, &selected_idx, &page_changed, 0);
@@ -503,7 +516,11 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
             }
             case UI_KEY_PGUP:
             {
-                 debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_PGUP");
+                CustomerList temp;
+                long temp_next;
+
+                debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_PGUP");
+
                 if (search_mode) {
                     int new_start = search_start_idx - CUSTOMER_PAGE_SIZE;
                     if (new_start < 0)
@@ -520,12 +537,10 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                         new_start = start_recno - CUSTOMER_PAGE_SIZE;
                     else
                         new_start = 0;
-                    CustomerList temp;
-                    long temp_next;
-                    db_customer_load_page(customer_fd, new_start, &temp, &temp_next);
+                    db_cs_load_page(customer_fd, new_start, &temp, &temp_next);
 
                     if (temp.count > 0) {
-                        *customer = temp;
+                        memcpy(customer, &temp, sizeof(temp));
                         start_recno = new_start;
                         next_recno = temp_next;
                         apply_loaded_page(customer, &start_idx, &selected_idx, &page_changed, 0);
@@ -562,9 +577,9 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                         /* existing normal paging logic */
                         CustomerList temp;
                         long temp_next;
-                        db_customer_load_page(customer_fd, next_recno, &temp, &temp_next);
+                        db_cs_load_page(customer_fd, next_recno, &temp, &temp_next);
                         if (temp.count > 0) {
-                            *customer = temp;
+                            memcpy(customer, &temp, sizeof(temp));
                             start_recno = next_recno;
                             next_recno = temp_next;
                             apply_loaded_page(customer, &start_idx, &selected_idx, &page_changed, 0);
@@ -592,20 +607,21 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                             selection_moved = 1;
                         }
                     } else {
+                        long new_start;
+                        CustomerList temp;
+                        long temp_next;
+
                         if(start_recno == 0) {
                             break;         /* We are already on page one so no up from here. */
                         }
                         /* existing normal paging logic (page up) */
-                        long new_start;
                         if (start_recno >= CUSTOMER_PAGE_SIZE)
                             new_start = start_recno - CUSTOMER_PAGE_SIZE;
                         else
                             new_start = 0;
-                        CustomerList temp;
-                        long temp_next;
-                        db_customer_load_page(customer_fd, new_start, &temp, &temp_next);
+                        db_cs_load_page(customer_fd, new_start, &temp, &temp_next);
                         if (temp.count > 0) {
-                            *customer = temp;
+                            memcpy(customer, &temp, sizeof(temp));
                             start_recno = new_start;
                             next_recno = temp_next;
                             apply_loaded_page(customer, &start_idx, &selected_idx, &page_changed, -1);
@@ -619,7 +635,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
             case 'V':   /* View selected customer */
                 debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed V for View Mode");
                 debug_log(DEBUG_TRACE, FUNC_NAME, "Before customer_detail screen View");
-                rc = run_customer_detail(customer->slots[visible_indexes[selected_idx]].customer_id, CUST_VIEW);
+                rc = run_customer_detail(customer->slots[visible_indexes[selected_idx]].cs_id, CUST_VIEW);
                 draw_screen(mode, customer, start_idx, visible_indexes, visible_count);
                 debug_log(DEBUG_TRACE, FUNC_NAME, "After customer_detail screen View");
                 break;
@@ -628,27 +644,27 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
             case 'E':   /* Edit selected customer */
                  debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed E for Edit Mode");
                 debug_log(DEBUG_TRACE, FUNC_NAME, "Before customer_detail screen Edit");
-                rc = run_customer_detail(customer->slots[visible_indexes[selected_idx]].customer_id, CUST_EDIT);
+                rc = run_customer_detail(customer->slots[visible_indexes[selected_idx]].cs_id, CUST_EDIT);
 
                 if(rc==CUST_DETAIL_SAVED){
                     char id[7];
-                    strncpy(id, customer->slots[visible_indexes[selected_idx]].customer_id, 6);
+                    int i;
+                    strncpy(id, customer->slots[visible_indexes[selected_idx]].cs_id, 6);
                     id[6] = '\0';
 
-                    db_customer_load_page(customer_fd, start_recno, customer, &next_recno);
+                    db_cs_load_page(customer_fd, start_recno, customer, &next_recno);
                     customer_search.filter_active = 0;
 
                     /* paging mode → no filtering */
-                    rebuild_visible_page(customer);
+                    rebuild_vis_page(customer);
 
                     selected_idx = 0;
                     start_idx = 0;
 
                     /* reselect the same customer */
-                    int i;
                     for (i = 0; i < visible_count; i++) {
                         int idx = visible_indexes[i];
-                        if (strncmp(customer->slots[idx].customer_id, id, 6) == 0) {
+                        if (strncmp(customer->slots[idx].cs_id, id, 6) == 0) {
                           selected_idx = i;
                           break;
                         }
@@ -667,10 +683,10 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                 debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed C for Create Mode");
                 rc = run_customer_detail(NULL, CUST_CREATE);
                 if (rc == CUST_DETAIL_SAVED) {
-                    db_customer_load_page(customer_fd, start_recno, customer, &next_recno);
+                    db_cs_load_page(customer_fd, start_recno, customer, &next_recno);
                     customer_search.filter_active = 0;
                 }
-                rebuild_visible_page(customer);
+                rebuild_vis_page(customer);
                 selected_idx = 0;
                 start_idx = 0;
                 draw_screen(mode, customer, start_idx, visible_indexes, visible_count);
@@ -702,7 +718,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
 
 cleanup:
     if (customer_fd >=0) {
-        db_customer_close_read(customer_fd);
+        db_cs_cl_rd(customer_fd);
     }
 
     if (selected_customer_id && selected_customer_id[0] != '\0'){

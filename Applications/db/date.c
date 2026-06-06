@@ -19,13 +19,14 @@ void date_today_str(char *datestr)
 /* Return 0=Sunday ... 6=Saturday */
 static int weekday(int y, int m, int d)
 {
+    int k, j, w;
     if (m < 3) {
         m += 12;
         y -= 1;
     }
-    int k = y % 100;
-    int j = y / 100;
-    int w = (d + 13*(m + 1)/5 + k + k/4 + j/4 + 5*j) % 7;
+    k = y % 100;
+    j = y / 100;
+    w = (d + 13*(m + 1)/5 + k + k/4 + j/4 + 5*j) % 7;
     return ((w + 6) % 7);  /* adjust to 0=Sunday */
 }
 

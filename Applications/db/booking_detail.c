@@ -65,8 +65,8 @@ typedef struct {
 #ifdef DEBUG_ENABLED
 static void debug_check_field_overlap(ui_field_t *fields, int count)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     int i;
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     for (i = 0; i < count - 1; i++) {
         char *end = fields[i].ptr + fields[i].maxlen;
         char *next = fields[i + 1].ptr;
@@ -95,25 +95,25 @@ static ui_field_t fields[FIELD_COUNT];
 
 static int lookup_customer_display(const char *id, char *out, size_t outlen)
 {
-    int fd = db_customer_open_read();
+    int fd = db_cs_op_read();
+    int rc;
     if (fd < 0)
         return -1;
 
-    int rc = db_customer_lookup_display(fd, id, out, outlen);
+    rc = db_cs_lookup_display(fd, id, out, outlen);
 
-    db_customer_close_read(fd);
+    db_cs_cl_read(fd);
     return rc;
 }
 
 static int lookup_state_display(const char *id, char *out, size_t outlen)
 {
-    (void)outlen;   /* Unused */
-
+    int rc;
     int fd = db_state_open();
     if (fd < 0)
         return -1;
 
-    int rc = db_state_name_from_id(fd, id, out);
+    rc = db_state_name_from_id(fd, id, out);
 
     db_state_close(fd);
     return rc;
@@ -121,11 +121,12 @@ static int lookup_state_display(const char *id, char *out, size_t outlen)
 
 static int lookup_staff_display(const char *id, char *out, size_t outlen)
 {
+    int rc;
     int fd = db_staff_open();
     if (fd < 0)
         return -1;
 
-    int rc = db_staff_lookup_display(fd, id, out, outlen);
+    rc = db_staff_lookup_display(fd, id, out, outlen);
 
     db_staff_close(fd);
     return rc;
@@ -149,6 +150,8 @@ static void bind_fields(book_form_t *f)
        UI_FIELD_SELECT = selectable popup field (F2 etc)
     */
 
+#if 0
+    /* FIXME TODO: this needs looking at because you can't just do block initializers in C89 like this */
     fields[FIELD_ID] = (ui_field_t){ "ID",                f->work.booking_id,  BOOKING_ID_MAX,          2, 15, UI_FIELD_SKIP };
     fields[FIELD_DATE] = (ui_field_t){ "Date",            f->edit_date,        BOOKING_DATE_MAX,        3, 15, UI_FIELD_EDIT };
     fields[FIELD_START] = (ui_field_t){ "Start Time",     f->edit_start,       BOOKING_START_TIME_MAX,  4, 15, UI_FIELD_EDIT };
@@ -157,6 +160,7 @@ static void bind_fields(book_form_t *f)
     fields[FIELD_STAFF] = (ui_field_t){ "Staff",          f->edit_staff_id,    BOOKING_STAFF_ID_MAX,    7, 15, UI_FIELD_SELECT};
     fields[FIELD_STATE] = (ui_field_t){ "State",          f->edit_state_id,    BOOKING_STATE_ID_MAX,    8, 15, UI_FIELD_SELECT};
     fields[FIELD_JOB] = (ui_field_t){ "Job",              f->edit_job,         BOOKING_JOB_MAX,         9, 15, UI_FIELD_EDIT };
+#endif
 #ifdef DEBUG_ENABLED
     debug_check_field_overlap(fields, FIELD_COUNT);
 #endif
@@ -232,8 +236,8 @@ static void booking_edit_to_work(book_form_t *f)
 
 static int first_selectable_field(void)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     int i;
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     for (i = 0; i < FIELD_COUNT; i++) {
         if (fields[i].mode == UI_FIELD_EDIT)
             return i;
@@ -272,8 +276,11 @@ static void draw_footer(const book_form_t *f)
 
 static void draw_form(const book_form_t *f)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     char buf[128];
+    int i;
+    const char *val;
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
     ui_cls();
     ui_puts(1, 1, "Booking Details                                                    By D.Pollard");
@@ -281,7 +288,6 @@ static void draw_form(const book_form_t *f)
     ui_puts(4, 1, "---------1---------2---------3---------4---------5---------6---------7---------8");
 */
     ui_puts(4, 1, "--------------------------------------------------------------------------------");
-    int i;
     for (i = 0; i < FIELD_COUNT; i++) {
         int row = FIRST_ROW + i;
 
@@ -290,8 +296,6 @@ static void draw_form(const book_form_t *f)
         ui_puts(row, LABEL_COL, buf);
 
         /* Value */
-        const char *val;
-
         if (i == FIELD_STATE) {
            if (f->state_display[0] != '\0')
                 val = f->state_display;
@@ -319,9 +323,9 @@ static void draw_form(const book_form_t *f)
 
         if (i == f->field && f->mode != BOOK_VIEW && fields[i].mode != UI_FIELD_SKIP)
         {
-            ui_attr_reverse_on();
+            ui_attr_rv_on();
             ui_puts_padded(row, VALUE_COL, val, FIELD_WIDTH);
-            ui_attr_reverse_off();
+            ui_attr_rv_off();
         }
         else
         {
@@ -336,8 +340,9 @@ static void draw_form(const book_form_t *f)
 
 static void move_field(book_form_t *f, int delta)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     int i = f->field;
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
     for (;;) {
         i += delta;
@@ -353,9 +358,12 @@ static void move_field(book_form_t *f, int delta)
 
 static int edit_current_field(book_form_t *form)
 {
+    ui_field_t *fld = &fields[form->field];
+    edit_state_t es;
+    int rc;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
-    ui_field_t *fld = &fields[form->field];
     if (fld->mode != UI_FIELD_EDIT)
         return ui_read_key();
 
@@ -367,18 +375,16 @@ static int edit_current_field(book_form_t *form)
     debug_log(DEBUG_TRACE, FUNC_NAME, "Editing field %d: row=%d col=%d maxlen=%zu",
         form->field, fld->row, fld->col, fld->maxlen);
 
-    edit_state_t es = {
-        .buf         = fld->ptr,
-        .maxlen      = fld->maxlen,
-        .cursor_pos  = 0,
-        .insert_mode = 1
-    };
+    es.buf = fld->ptr;
+    es.maxlen = fld->maxlen;
+    es.cursor_pos  = 0;
+    es.insert_mode = 1;
 
     debug_log(DEBUG_TRACE, FUNC_NAME, "BEFORE edit: field=%d buf=%p maxlen=%zu", form->field, es.buf, es.maxlen);
 
     dump_bytes(DEBUG_TRACE,"STATUS BEFORE EDIT", form->work.booking_status, sizeof(form->work.booking_status));
 
-    int rc = ui_edit_field(&es, FIRST_ROW + form->field, VALUE_COL);
+    rc = ui_edit_field(&es, FIRST_ROW + form->field, VALUE_COL);
     ui_force_terminate(&es);
 
     debug_log(DEBUG_INFO, FUNC_NAME, "AFTER edit: field=%d buf=%p maxlen=%zu", form->field, es.buf, es.maxlen);
@@ -404,17 +410,17 @@ static int edit_current_field(book_form_t *form)
 
 static int booking_detail_handle_exit(book_form_t *form, int fd)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Output 1: status='%c' (0x%02X)", form->work.booking_status[0],
-        (unsigned char)form->work.booking_status[0]);
-
-    dump_bytes(DEBUG_TRACE, "status AT ENTRY", form->work.booking_status, sizeof(form->work.booking_status) + 2);
-
     int changed = 0;
 
     char tmp_date[BOOKING_DATE_LEN +1];
     char tmp_start[BOOKING_START_TIME_LEN +1];
     char tmp_end[BOOKING_END_TIME_LEN +1];
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Output 1: status='%c' (0x%02X)", form->work.booking_status[0],
+        (unsigned char)form->work.booking_status[0]);
+
+    dump_bytes(DEBUG_TRACE, "status AT ENTRY", form->work.booking_status, sizeof(form->work.booking_status) + 2);
 
     debug_log(DEBUG_TRACE, FUNC_NAME,
         "edit_date raw bytes: [%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X]",
@@ -479,12 +485,13 @@ static int booking_detail_handle_exit(book_form_t *form, int fd)
 
     for (;;) {
         int key = ui_read_key();
+        int write_fd;
 
         switch (key) {
         case 'Y':
         case 'y':
             /* Open Booking DB Read Write mode */
-            int write_fd = db_booking_open_write();
+            write_fd = db_bk_op_write();
             if (write_fd <0){
                 ui_status("Failed to Open Booking DB in RW mode");
                 sleep(2);
@@ -519,39 +526,39 @@ static int booking_detail_handle_exit(book_form_t *form, int fd)
 
             /* New Record generate ID*/
             if (form->recno == -1) {
-                if (db_booking_generate_next_id(write_fd, form->work.booking_id) != 0) {
+                if (db_bk_generate_next_id(write_fd, form->work.booking_id) != 0) {
                     /* Unable to generate booking ID */
-                    db_booking_close_write(write_fd);
+                    db_bk_cl_write(write_fd);
                     ui_status("ERROR: Booking Not Saved, Unable to generate booking ID");
                      sleep(4);
                     return BOOK_DETAIL_ERROR;
                 }
 
-                if (db_booking_append(write_fd, &form->work) != 0) {
+                if (db_bk_append(write_fd, &form->work) != 0) {
                     /* Unable to append new booking to file */
-                    db_booking_close_write(write_fd);
+                    db_bk_cl_write(write_fd);
                     ui_status("ERROR: Booking Not Saved, Unable to append new record to data base");
                     sleep(4);
                     return -1;
                 }
            } else {
                /* Existing record: overwrite */
-               if (db_booking_write(write_fd, form->recno, &form->work) != 0) {
+               if (db_bk_write(write_fd, form->recno, &form->work) != 0) {
                     /* Unable to  overwrite existing record */
-                    db_booking_close_write(write_fd);
+                    db_bk_cl_write(write_fd);
                     ui_status("ERROR: Booking Not Saved, Unable to overwrite existing record");
                     sleep(4);
                     return -1;
                }
            }
-            db_booking_close_write(write_fd);
+            db_bk_cl_write(write_fd);
             ui_status("Booking saved");
             sleep(1);
             return BOOK_DETAIL_SAVED;
 
         case 'N':
         case 'n':
-            db_booking_close_read(fd);
+            db_bk_cl_read(fd);
             ui_status("Changes discarded");
             return BOOK_DETAIL_NO_CHANGE;
 
@@ -572,13 +579,13 @@ static void draw_single_field(const book_form_t *f, int i, int highlight)
 {
     char buf[128];
     int row = FIRST_ROW + i;
+    const char *val;
 
     /* Label */
     snprintf(buf, sizeof(buf), "%-16s:", fields[i].label);
     ui_puts(row, LABEL_COL, buf);
 
     /* Value selection (same logic as draw_form) */
-    const char *val;
 
     if (i == FIELD_STATE) {
         val = (f->state_display[0] != '\0') ? f->state_display : f->edit_state_id;
@@ -595,9 +602,9 @@ static void draw_single_field(const book_form_t *f, int i, int highlight)
 
     /* Draw */
     if (highlight && f->mode != BOOK_VIEW && fields[i].mode != UI_FIELD_SKIP) {
-        ui_attr_reverse_on();
+        ui_attr_rv_on();
         ui_puts_padded(row, VALUE_COL, val, FIELD_WIDTH);
-        ui_attr_reverse_off();
+        ui_attr_rv_off();
     } else {
         ui_puts_padded(row, VALUE_COL, val, FIELD_WIDTH);
     }
@@ -617,15 +624,17 @@ static void update_field_highlight(const book_form_t *f, int prev)
 /* -------------------- Entry Point -------------------- */
 int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     book_form_t form;
     booking_t   book;
     long        recno = -1;
+    int fd = booking_fd;  /* File descriptor passed in from booking_list. */
+    int i;
+
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
     memset(&form, 0, sizeof(form));
     form.guard_before_work = 0xAA;   /* <-- Debug Code */
     memset(&book, 0, sizeof(book));
-    int fd = booking_fd;  /* File descriptor passed in from booking_list. */
 
     /* ---------------- Load / Create booking ---------------- */
     switch (mode) {
@@ -639,8 +648,8 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
             return -1;
         }
 
-        if (db_booking_read_by_id(fd, booking_id, &book, &recno) != 0) {
-            db_booking_close_read(fd);
+        if (db_bk_by_id(fd, booking_id, &book, &recno) != 0) {
+            db_bk_cl_read(fd);
             debug_log(DEBUG_ERROR, FUNC_NAME, "*** Error: *** Booking Not Found");
             ui_status("ERROR: Booking not found");
             sleep(4);
@@ -659,7 +668,7 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
 
     /* ---------------- Initialise form ---------------- */
 
-    form.work  = book;
+    memcpy(&form.work, &book, sizeof(book));
 
     /* DEBUG TESTING Preserve booking status explicitly */
     form.work.booking_status[0] = book.booking_status[0];
@@ -667,7 +676,7 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
     debug_log(DEBUG_TRACE, FUNC_NAME, "INIT status after read = '%c' (0x%02X)", form.work.booking_status[0], (unsigned char)form.work.booking_status[0]);
     /*==================================================*/
 
-    form.orig  = book;
+    memcpy(&form.orig, &book, sizeof(book));
     form.recno = recno;
     form.mode  = mode;
 
@@ -689,7 +698,6 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
     debug_log(DEBUG_TRACE, FUNC_NAME, "ADDR edit_state_id      = %p",  form.edit_state_id);
     debug_log(DEBUG_TRACE, FUNC_NAME, "ADDR edit_job           = %p",  form.edit_job);
 
-    int i;
     for (i = 0; i < FIELD_COUNT; i++) {
         debug_log(DEBUG_TRACE, FUNC_NAME,
             "After call to bind_fields :- fields[%d]: ptr=%p maxlen=%zu editable=%d",
@@ -704,6 +712,7 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
     /* ---------------- Main loop ---------------- */
 
     for (;;) {
+        int prev;
 
         /*draw_form(&form); */
 
@@ -717,7 +726,7 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
             switch (key) {
                 case UI_KEY_UP:
                 case UI_KEY_SHIFT_TAB: {
-                    int prev = form.field;
+                    prev = form.field;
                     move_field(&form, -1);
                     update_field_highlight(&form, prev);
                     break;
@@ -726,8 +735,8 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
                 case UI_KEY_DOWN:
                 case UI_KEY_TAB:
                 case UI_KEY_ENTER: {
-                    int prev = form.field;
-                    move_field(&form, +1);
+                    prev = form.field;
+                    move_field(&form, 1);
                     update_field_highlight(&form, prev);
                     break;
                 }

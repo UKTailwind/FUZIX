@@ -65,7 +65,7 @@ void term_raw_on(void)
         return;
     }
 
-    t = old_termios;
+    memcpy(&t, &old_termios, sizeof(struct termios));
 
     /* disable canonical mode and echo; keep ISIG enabled for Ctrl+C/Ctrl+X */
     t.c_lflag &= ~(ICANON | ECHO);

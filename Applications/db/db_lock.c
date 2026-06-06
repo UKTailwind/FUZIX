@@ -6,16 +6,16 @@
 
 int db_lock_shared(const char *filename)
 {
-    (void)filename;
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     return 0;
 }
 
 int db_lock_exclusive(const char *filename)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter");
     char lockname[128];
+    char msg[80];
 
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter");
     snprintf(lockname, sizeof(lockname), "%s.lock", filename);
 
     for (;;) {
@@ -26,7 +26,6 @@ int db_lock_exclusive(const char *filename)
         }
 
         /* someone else holds lock */
-        char msg[80];
         snprintf(msg, sizeof(msg), "Database File %s Locked, Retrying...", filename);
         ui_status(msg);
         sleep(1);
@@ -35,8 +34,8 @@ int db_lock_exclusive(const char *filename)
 
 int db_unlock(const char *filename)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter");
     char lockname[128];
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter");
 
     snprintf(lockname, sizeof(lockname), "%s.lock", filename);
 

@@ -21,6 +21,7 @@ int keyboard_test_run(void)
     int key;
     int y = 13;
     int x = 10;
+    char buf[64];
 
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter: ");
 
@@ -49,7 +50,6 @@ int keyboard_test_run(void)
 
         /* Display detected key */
         if (key >= 32 && key < 127) {
-            char buf[64];
             snprintf(buf, sizeof(buf), "ASCII '%c' (0x%02X)", key, key);
             ui_puts(y, x, buf);
         }
@@ -144,7 +144,6 @@ int keyboard_test_run(void)
                 break;
 
             default:
-                char buf[64];
                 snprintf(buf, sizeof(buf), "UNKNOWN key: %d (0x%04X)", key, key);
                 ui_puts(y, x, buf);
                 break;
@@ -231,6 +230,7 @@ static void run_test_case(const char *name, const char *input, int expected, con
     kb_parser_t kb;
     int i;
     int key;
+    int ticks = 0;
 
     kb_init(&kb, backend);
 
@@ -244,7 +244,6 @@ static void run_test_case(const char *name, const char *input, int expected, con
             break;
     }
 
-    int ticks = 0;
     while (key == 0 && ticks < kb.backend->esc_timeout + 1) {
         key = kb_tick(&kb);
         ticks++;

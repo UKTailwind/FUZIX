@@ -40,25 +40,29 @@ static ui_field_t fields[FIELD_COUNT];
 
 static void bind_fields(cust_form_t *f)
 {
-    fields[0] = (ui_field_t){ "ID",        f->work.customer_id,       CUSTOMER_ID_MAX,        2, 15, 0 };
-    fields[1] = (ui_field_t){ "Name",      f->work.customer_name,     CUSTOMER_NAME_MAX,      3, 15, 1 };
-    fields[2] = (ui_field_t){ "Phone 1",   f->work.customer_phone1,   CUSTOMER_PHONE1_MAX,    4, 15, 1 };
-    fields[3] = (ui_field_t){ "Phone 2",   f->work.customer_phone2,   CUSTOMER_PHONE2_MAX,    5, 15, 1 };
-    fields[4] = (ui_field_t){ "Address 1", f->work.customer_address1, CUSTOMER_ADDRESS1_MAX,  6, 15, 1 };
-    fields[5] = (ui_field_t){ "Address 2", f->work.customer_address2, CUSTOMER_ADDRESS2_MAX,  7, 15, 1 };
-    fields[6] = (ui_field_t){ "Suburb",    f->work.customer_suburb,   CUSTOMER_SUBURB_MAX,    8, 15, 1 };
-    fields[7] = (ui_field_t){ "State",     f->work.customer_state,    CUSTOMER_STATE_MAX,     9, 15, 1 };
-    fields[8] = (ui_field_t){ "Postcode",  f->work.customer_postcode, CUSTOMER_POSTCODE_MAX, 10, 15, 1 };
-    fields[9] = (ui_field_t){ "Notes",     f->work.customer_notes,    CUSTOMER_NOTES_MAX,    12, 15, 1 };
+    /* TODO: need to sort out initialization */
+#if 0
+    fields[0] = (ui_field_t){ "ID",        f->work.cs_id,       CUSTOMER_ID_MAX,        2, 15, 0 };
+    fields[1] = (ui_field_t){ "Name",      f->work.cs_name,     CUSTOMER_NAME_MAX,      3, 15, 1 };
+    fields[2] = (ui_field_t){ "Phone 1",   f->work.cs_phone1,   CUSTOMER_PHONE1_MAX,    4, 15, 1 };
+    fields[3] = (ui_field_t){ "Phone 2",   f->work.cs_phone2,   CUSTOMER_PHONE2_MAX,    5, 15, 1 };
+    fields[4] = (ui_field_t){ "Address 1", f->work.cs_address1, CUSTOMER_ADDRESS1_MAX,  6, 15, 1 };
+    fields[5] = (ui_field_t){ "Address 2", f->work.cs_address2, CUSTOMER_ADDRESS2_MAX,  7, 15, 1 };
+    fields[6] = (ui_field_t){ "Suburb",    f->work.cs_suburb,   CUSTOMER_SUBURB_MAX,    8, 15, 1 };
+    fields[7] = (ui_field_t){ "State",     f->work.cs_state,    CUSTOMER_STATE_MAX,     9, 15, 1 };
+    fields[8] = (ui_field_t){ "Postcode",  f->work.cs_postcode, CUSTOMER_POSTCODE_MAX, 10, 15, 1 };
+    fields[9] = (ui_field_t){ "Notes",     f->work.cs_notes,    CUSTOMER_NOTES_MAX,    12, 15, 1 };
+#endif
 }
 
 /* -------------------- Drawing -------------------- */
 
 static int first_selectable_field(void)
 {
+    int i;
+
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
-   int i;
     for (i = 0; i < FIELD_COUNT; i++) {
         if (fields[i].mode)
             return i;
@@ -97,8 +101,10 @@ static void draw_footer(const cust_form_t *f)
 
 static void draw_form(const cust_form_t *f)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     char  buf[128];
+    int i;
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
     ui_cls();
     ui_puts(1, 1, " Mechanic Workshop Customer Details                                By D.Pollard");
@@ -107,22 +113,22 @@ static void draw_form(const cust_form_t *f)
 */
     ui_puts(4, 1, "--------------------------------------------------------------------------------");
 
-    int i;
     for (i = 0; i < FIELD_COUNT; i++) {
         int row = FIRST_ROW + i;
+        const char *val;
 
         /* Label */
         snprintf(buf, sizeof(buf), "%-16s:", fields[i].label);
         ui_puts(row, LABEL_COL, buf);
 
         /* Value */
-        const char *val = fields[i].ptr;
+        val = fields[i].ptr;
         debug_log(DEBUG_INFO, FUNC_NAME, "field=%d len=%d width=%d val='%s'", i, strlen(val), FIELD_WIDTH, val);
 
         if (i == f->field && f->mode != CUST_VIEW && fields[i].mode) {
-            ui_attr_reverse_on();
+            ui_attr_rv_on();
             ui_puts_padded(row, VALUE_COL, val, FIELD_WIDTH);
-            ui_attr_reverse_off();
+            ui_attr_rv_off();
         } else {
             ui_puts_padded(row, VALUE_COL, val, FIELD_WIDTH);
         }
@@ -135,9 +141,9 @@ static void draw_form(const cust_form_t *f)
 
 static void move_field(cust_form_t *f, int delta)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     int i = f->field;
 
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     for (;;) {
         i += delta;
         if (i < 0 || i >= FIELD_COUNT)
@@ -153,14 +159,14 @@ static void move_field(cust_form_t *f, int delta)
 static int edit_current_field(cust_form_t *form)
 {
     ui_field_t *fld = &fields[form->field];
+    edit_state_t es;
+
     debug_log(DEBUG_INFO, FUNC_NAME, "Editing field %d: row=%d, col=%d, maxlen=%zu", form->field, fld->row, fld->col, fld->maxlen);
 
-    edit_state_t es = {
-        .buf        = fld->ptr,
-        .maxlen     = fld->maxlen,
-        .cursor_pos = 0,
-        .insert_mode = 1
-    };
+    es.buf = fld->ptr;
+    es.maxlen = fld->maxlen;
+    es.cursor_pos = 0;
+    es.insert_mode = 1;
 
     return ui_edit_field(&es, FIRST_ROW + form->field, VALUE_COL);
 }
@@ -175,7 +181,7 @@ static int customer_detail_handle_exit(cust_form_t *form, int fd)
         sleep(1);
 
         /* Close Read Only File */
-        db_customer_close_read(fd);
+        db_cs_cl_read(fd);
         return 0;
     }
 
@@ -189,10 +195,10 @@ static int customer_detail_handle_exit(cust_form_t *form, int fd)
         case 'Y':
         case 'y':
             /* Close Customer DB Read Only mode */
-            db_customer_close_read(fd);
+            db_cs_cl_read(fd);
 
             /* Open Customer DB Read Write mode */
-            fd = db_customer_open_write();
+            fd = db_cs_op_write();
             if (fd <0){
                 /* Failed to open Customer DB in RW mode */
                 ui_status("ERROR: Customer Not Saved, Unable to open Customer File in RW mode");
@@ -201,30 +207,30 @@ static int customer_detail_handle_exit(cust_form_t *form, int fd)
             }
             /* Assign ID for new customer */
             if (form->recno < 0) {
-                if (db_customer_generate_next_id(fd, form->work.customer_id) != 0) {
+                if (db_cs_generate_next_id(fd, form->work.cs_id) != 0) {
                     /* unable to generate new customer id */
-                    db_customer_close_write(fd);
+                    db_cs_cl_write(fd);
                     ui_status("ERROR: Customer Not Saved, Unable to generate new customer ID");
                     sleep(2);
                     return -1;
                 }
             }
             /* Save the Customer */
-            if (db_customer_write(fd, &form->recno, &form->work) != 0) {
+            if (db_cs_write(fd, &form->recno, &form->work) != 0) {
                 /* Unable to create customer */
-                db_customer_close_write(fd);
+                db_cs_cl_write(fd);
                 ui_status("ERROR: Customer Not Saved, Unable to save customer record");
                 sleep(2);
                 return -1;   /* stay in editor */
             }
-            db_customer_close_write(fd);
+            db_cs_cl_write(fd);
             ui_status("Customer saved");
             sleep(1);
             return CUST_DETAIL_SAVED;
 
         case 'N':
         case 'n':
-            db_customer_close_read(fd);
+            db_cs_cl_read(fd);
             ui_status("Changes discarded");
             return CUST_DETAIL_NO_CHANGE;
 
@@ -244,21 +250,20 @@ static void draw_single_field(const cust_form_t *f, int i, int highlight)
 {
     char buf[128];
     int row = FIRST_ROW + i;
+    const char *val;
 
     /* Label */
     snprintf(buf, sizeof(buf), "%-16s:", fields[i].label);
     ui_puts(row, LABEL_COL, buf);
 
     /* Value selection (same logic as draw_form) */
-    const char *val;
-
     val = fields[i].ptr;
 
     /* Draw */
     if (highlight && f->mode != CUST_VIEW && fields[i].mode != UI_FIELD_SKIP) {
-        ui_attr_reverse_on();
+        ui_attr_rv_on();
         ui_puts_padded(row, VALUE_COL, val, FIELD_WIDTH);
-        ui_attr_reverse_off();
+        ui_attr_rv_off();
     } else {
         ui_puts_padded(row, VALUE_COL, val, FIELD_WIDTH);
     }
@@ -279,14 +284,16 @@ static void update_field_highlight(const cust_form_t *f, int prev)
 
 int run_customer_detail(const char *customer_id, cust_mode_t mode)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
-    cust_form_t form;
-    memset(&form, 0, sizeof(form));
+    int fd = db_cs_op_read();
+    long recno = -1;
 
-    int fd = db_customer_open_read();
+    cust_form_t form;
     customer_t cust;
 
     memset(&cust, 0, sizeof(cust));
+    memset(&form, 0, sizeof(form));
+
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
     if (fd < 0) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Error: Unalbe to open Cuatomer DB");
@@ -294,8 +301,6 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
         sleep(4);
         return -1;
     }
-
-    long recno = -1;
 
     /* ---- Load customer only for EDIT / VIEW ---- */
     if (mode == CUST_EDIT || mode == CUST_VIEW) {
@@ -305,8 +310,8 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
             return -1;
         }
 
-        if (db_customer_read_by_id(fd, customer_id, &cust, &recno) != 0) {
-            db_customer_close_read(fd);
+        if (db_cs_read_by_id(fd, customer_id, &cust, &recno) != 0) {
+            db_cs_cl_read(fd);
             debug_log(DEBUG_ERROR, FUNC_NAME, "Error: Customer Not Found");
             ui_status("ERROR: Customer not found");
             sleep(2);
@@ -320,13 +325,13 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
         debug_log(DEBUG_INFO, FUNC_NAME, "Create new customer");
 
         memset(&cust, 0, sizeof(cust));
-        cust.customer_id[0] = '\0';     /* not assigned yet */
-        cust.customer_status[0] = CUSTOMER_STATUS_ACTIVE;
-        cust.customer_status[1] = '\0';
+        cust.cs_id[0] = '\0';     /* not assigned yet */
+        cust.cs_status[0] = CUSTOMER_STATUS_ACTIVE;
+        cust.cs_status[1] = '\0';
         recno = -1;                     /* no record number yet */
     }
-    form.orig = cust;
-    form.work = cust;
+    memcpy(&form.orig, &cust, sizeof(cust));
+    memcpy(&form.work, &cust, sizeof(cust));
     form.recno = recno;
     form.mode = mode;
 
@@ -334,7 +339,7 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
     memcpy(&form.work, &cust, sizeof(customer_t));
 
     /* Keep original for cancel/revert logic later */
-    form.orig = form.work;
+    memcpy(&form.orig, &form.work, sizeof(form.work));
 
     bind_fields(&form);
 
@@ -347,17 +352,18 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
 
     for (;;)
     {
-       /* ---------- EDIT / CREATE -------  */
-       if (form.mode == CUST_EDIT || form.mode == CUST_CREATE)
+        int key, prev;
+        /* ---------- EDIT / CREATE -------  */
+        if (form.mode == CUST_EDIT || form.mode == CUST_CREATE)
         {
+            key = edit_current_field(&form);
             debug_log(DEBUG_TRACE, FUNC_NAME, "CUST_EDIT=%i CUST_CREATE=%i", CUST_EDIT, CUST_CREATE);
-            int key = edit_current_field(&form);
 
             switch (key)
             {
                 case UI_KEY_UP:
                 case UI_KEY_SHIFT_TAB: {
-                    int prev = form.field;
+                    prev = form.field;
                     move_field(&form, -1);
                     update_field_highlight(&form, prev);
                     break;
@@ -366,8 +372,8 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
                 case UI_KEY_DOWN:
                 case UI_KEY_TAB:
                 case UI_KEY_ENTER: {
-                   int prev = form.field;
-                   move_field(&form, +1);
+                   prev = form.field;
+                   move_field(&form, 1);
                    update_field_highlight(&form, prev);
                    break;
                 }
@@ -377,8 +383,8 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
 
                 case UI_KEY_SHIFT_DELETE:
                     debug_log(DEBUG_INFO, FUNC_NAME, "Shift Delete Detected");
-                    form.work.customer_status[0] = CUSTOMER_STATUS_DELETED;
-                    form.work.customer_status[1] = '\0';
+                    form.work.cs_status[0] = CUSTOMER_STATUS_DELETED;
+                    form.work.cs_status[1] = '\0';
 
                     ui_status("Customer marked as deleted");
                     sleep(1);
@@ -388,7 +394,7 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
         }
 
         /* VIEW MODE */
-        int key = ui_read_key();
+        key = ui_read_key();
 
         switch (key) {
             case UI_KEY_ESC:

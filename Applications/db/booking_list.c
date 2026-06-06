@@ -37,15 +37,15 @@ static void draw_screen(const char *date, const DayBookings *day,
                         int start_idx, int selected_idx,
                         int booking_fd, int state_fd, int customer_fd)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     char line[100];
     int i, row = 6;
     int max_rows = MAX_BOOKING_ROWS;
     int yyyymmdd = atoi(date);
+    char date_disp[11];
 
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     ui_cls();
     ui_puts(1, 1, "Booking Management System                                             By D.Pollard");
-    char date_disp[11];
     yyyymmdd_to_dd_mm_yyyy(date, date_disp, sizeof(date_disp));
 
     snprintf(line, sizeof(line),
@@ -77,23 +77,23 @@ static void draw_booking_row(const DayBookings *day,
                              int state_fd,
                              int customer_fd)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     booking_t s;
+    char startbuf[6];
+    char endbuf[6];
+    char line[100];
+    char state_name[STATE_NAME_MAX +1];
+    char customer_name[CUSTOMER_NAME_MAX + 1];
 
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     if (idx < 0 || idx >= day->count)
         return;
 
-    if (db_booking_read_by_index(booking_fd, day, idx, &s) != 0)
+    if (db_bk_by_index(booking_fd, day, idx, &s) != 0)
         return;
-
-    char startbuf[6];
-    char endbuf[6];
 
     hhmm_to_hhmm_colon(s.booking_start_time, startbuf, sizeof(startbuf));
     hhmm_to_hhmm_colon(s.booking_end_time,   endbuf,   sizeof(endbuf));
 
-    char state_name[STATE_NAME_MAX +1];
-    char customer_name[CUSTOMER_NAME_MAX + 1];
 
     if (state_lookup_name(state_fd, s.booking_state_id, state_name, sizeof(state_name)) != 0) {
         strncpy(state_name, s.booking_state_id, sizeof(state_name) - 1);
@@ -105,7 +105,6 @@ static void draw_booking_row(const DayBookings *day,
         customer_name[sizeof(customer_name) - 1] = '\0';
     }
 
-    char line[100];
 
     if (highlight)
         ui_attr_reverse_on();
@@ -135,7 +134,7 @@ static void goto_date(int booking_fd, int new_date, int *current_date,
     snprintf(datestr, 9, "%08u", (unsigned)new_date);
 
     /* Build index instead of loading full records */
-    if (db_booking_build_day_index(booking_fd, new_date, day) < 0) {
+    if (db_bk_build_day_index(booking_fd, new_date, day) < 0) {
         debug_log(DEBUG_WARN, FUNC_NAME, "No bookings for %08u", (unsigned)new_date);
         day->count = 0;
     }
@@ -145,13 +144,13 @@ static void goto_date(int booking_fd, int new_date, int *current_date,
 
 static int days_in_month(int month, int year)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
-
     static const int days[] =
     {
         31,28,31,30,31,30,
         31,31,30,31,30,31
     };
+
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
     if (month == 2)
     {
@@ -168,10 +167,11 @@ static int days_in_month(int month, int year)
 
 static int parse_ddmmyyyy(const char *str, int *out_date)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
     int day, month, year;
     int maxday;
+
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
     /* Basic format validation */
     if (strlen(str) != 10)
@@ -205,11 +205,12 @@ static int parse_ddmmyyyy(const char *str, int *out_date)
     return 0;
 }
 
-int state_lookup_name(int state_fd, const char *state_id, char *out, size_t outlen)
+static int state_lookup_name(int state_fd, const char *state_id, char *out, size_t outlen)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     state_t st;
     long rec = 0;
+
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
     while (db_state_read(state_fd, rec, &st) == 0) {
         if (strcmp(st.state_id, state_id) == 0) {
@@ -222,15 +223,16 @@ int state_lookup_name(int state_fd, const char *state_id, char *out, size_t outl
     return -1;
 }
 
-int customer_lookup_name(int customer_fd, const char *customer_id, char *out, size_t outlen)
+static int customer_lookup_name(int customer_fd, const char *customer_id, char *out, size_t outlen)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     customer_t st;
     long rec = 0;
 
-    while (db_customer_read(customer_fd, rec, &st) == 0) {
-        if (strcmp(st.customer_id, customer_id) == 0) {
-            strncpy(out, st.customer_name, outlen - 1);
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+
+    while (db_cs_read(customer_fd, rec, &st) == 0) {
+        if (strcmp(st.cs_id, customer_id) == 0) {
+            strncpy(out, st.cs_name, outlen - 1);
             out[outlen - 1] = '\0';
             return 0;
         }
@@ -242,7 +244,6 @@ int customer_lookup_name(int customer_fd, const char *customer_id, char *out, si
 /*================ Booking screen main loop ======================*/
 void run_booking_list(void)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     int booking_fd  = -1;
     int state_fd   = -1;
     int customer_fd = -1;
@@ -252,18 +253,20 @@ void run_booking_list(void)
     static DayBookings day;
 
     int start_idx = 0;
+
+    int running = 1;
+    int selection_moved = 0;
+
+    int rc;
+
     selected_idx = 0;
-
-    int selection_moved;
-    selection_moved = 0;
-
-   int rc;
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
     /* NOTE booking.c owns booking_fd, state_fd and customer_fd.
     * Do not return from this function once they are open.
     */
 
-    booking_fd = db_booking_open_read();
+    booking_fd = db_bk_op_read();
 
     if (booking_fd <= BOOKING_DB_ERROR) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Unable to open Booking database");
@@ -280,7 +283,7 @@ void run_booking_list(void)
         goto cleanup;
     }
 
-    customer_fd =  db_customer_open_read();
+    customer_fd =  db_cs_op_read();
     if (customer_fd <= CUSTOMER_DB_ERROR) {
         debug_log(DEBUG_ERROR, FUNC_NAME, "Unable to open Customer database");
         ui_status("Unable to open customer database");
@@ -291,7 +294,8 @@ void run_booking_list(void)
     date_today_str(datestr);
     current_date = atoi(datestr);
     goto_date(booking_fd, current_date, &current_date, datestr, &day, &start_idx);
-    int running = 1;
+
+    running = 1;
 
     draw_screen(datestr, &day, start_idx, selected_idx, booking_fd, state_fd, customer_fd);
 
@@ -299,10 +303,12 @@ void run_booking_list(void)
         int prev_selected_idx = selected_idx;
         int prev_start_idx = start_idx;
         int page_changed = 0;
+        char status[80];
+        int ch;
+
         selection_moved = 0;
 
         /*Status bar (depends on what is visible right now) */
-        char status[80];
         if (day.count == 0)
         {
             snprintf(status, sizeof(status), "No bookings for this day");
@@ -317,7 +323,7 @@ void run_booking_list(void)
             snprintf(status, sizeof(status), "Showing %d-%d of %d bookings", start_idx + 1,start_idx + shown, day.count);
         }
         ui_status(status);
-        int ch = ui_read_key();
+        ch = ui_read_key();
 
         debug_log(DEBUG_TRACE, FUNC_NAME, "key=%d '%c'", ch, (ch >= 32 && ch < 127) ? ch : '?');
 
@@ -406,7 +412,7 @@ void run_booking_list(void)
                 debug_log(DEBUG_INFO, FUNC_NAME, "Key: V Pressed for view mode");
                 if (day.count > 0) {
                     booking_t b;
-                    if (db_booking_read_by_index(booking_fd, &day, selected_idx, &b) == 0) {
+                    if (db_bk_by_index(booking_fd, &day, selected_idx, &b) == 0) {
                         run_booking_detail(booking_fd, b.booking_id, BOOK_VIEW);
                         page_changed = 1;
                     }
@@ -419,7 +425,7 @@ void run_booking_list(void)
                 debug_log(DEBUG_INFO, FUNC_NAME, "Key: E for edit or F2 Pressed for edit mode");
                 if (day.count > 0) {
                     booking_t b;
-                    if (db_booking_read_by_index(booking_fd, &day, selected_idx, &b) == 0) {
+                    if (db_bk_by_index(booking_fd, &day, selected_idx, &b) == 0) {
                         run_booking_detail(booking_fd, b.booking_id, BOOK_EDIT);
                     }
                     /* Reload day after edit */
@@ -510,12 +516,12 @@ void run_booking_list(void)
 
 cleanup:
     if (customer_fd >=0) {
-        db_customer_close_read(customer_fd);
+        db_cs_cl_read(customer_fd);
     }
     if (state_fd >=0) {
         db_state_close(state_fd);
     }
     if (booking_fd >=0) {
-        db_booking_close_read(booking_fd);
+        db_bk_cl_read(booking_fd);
     }
 }

@@ -25,8 +25,8 @@ void ui_save_cursor(void);
 void ui_restore_cursor(void);
 
 /* Text attributes */
-void ui_attr_reverse_on(void);
-void ui_attr_reverse_off(void);
+void ui_attr_rv_on(void);
+void ui_attr_rv_off(void);
 
 /* Time formatting helpers */
 void hhmm_to_hhmm_colon(const char *in, char *out, size_t outsz);

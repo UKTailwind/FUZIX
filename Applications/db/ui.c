@@ -25,11 +25,12 @@ void ui_set_keyboard_backend(const kb_backend_t *backend)
 
 int ui_read_line(int row, int col, char *buf, int maxlen)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
-
     int len = 0;
     int key;
     int cur_col = col;
+    char tmp[2];
+
+    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
 
     buf[0] = '\0';
 
@@ -40,7 +41,8 @@ int ui_read_line(int row, int col, char *buf, int maxlen)
         if (key >= 32 && key < 127 && len < maxlen - 1) {
             buf[len++] = key;
             buf[len] = '\0';
-            char tmp[2] = { key, '\0' };
+            tmp[0] = key;
+            tmp[1] = 0;
             ui_puts(row, cur_col, tmp);
             cur_col++;
         }
@@ -178,11 +180,9 @@ static void draw_field_reverse(int row, int col, const char *buf, int cursor_pos
 {
     debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
     debug_log(DEBUG_INFO, FUNC_NAME, "row=%d, col=%d cusor_pos=%d", row, col, cursor_pos);
-    ui_attr_reverse_on();
+    ui_attr_rv_on();
     ui_puts(row, col, buf);               /* Output Full Line */
-    ui_attr_reverse_off();
-
-    (void) cursor_pos;        /* cursor_pos causes compiler error when debug disabled Consider removing */
+    ui_attr_rv_off();
 }
 
 void ui_force_terminate(edit_state_t *es)
@@ -203,9 +203,9 @@ void ui_move_cursor(int row, int col)
 
 int ui_edit_field(edit_state_t *e, int row, int col)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
-
     int key;
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
     /* Initial full draw */
     draw_field_reverse(row, col, e->buf, e->cursor_pos);
@@ -335,13 +335,13 @@ int ui_edit_field(edit_state_t *e, int row, int col)
 
 int ui_read_key(void)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
-
     static kb_parser_t kb;
     static int initialised = 0;
     uint8_t b;
     int key;
     int n;
+
+    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
 
     if (!initialised) {
         kb_init(&kb, ui_kb_backend);
@@ -446,10 +446,11 @@ void dd_mm_yyyy_to_yyyymmdd(const char *in, char *out, size_t outsz)
 /* Right trim spaces from string */
 void ui_rtrim(char *s)
 {
+    char *p;
     if (!s || !*s)
         return;
 
-    char *p = s + strlen(s) - 1;
+    p = s + strlen(s) - 1;
 
     while (p >= s && *p == ' ') {
         *p-- = '\0';
@@ -505,33 +506,34 @@ void ui_restore_cursor(void)
 
 /* ----------------- Attribute helpers ----------------- */
 /* Revers Text On / Off */
-void ui_attr_reverse_on(void)
+void ui_attr_rv_on(void)
 {
-    term_reverse_on();
+    term_rv_on();
 }
 
-void ui_attr_reverse_off(void)
+void ui_attr_rv_off(void)
 {
-    term_reverse_off();
+    term_rv_off();
 }
 
 /* ----------------- Status bar ----------------- */
 
 void ui_status(const char *msg)
 {
+    char line[81];
+
     debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
     debug_log(DEBUG_TRACE, FUNC_NAME,"msg: %s", msg);
     ui_save_cursor();
-    char line[81];
     if (!msg)
         msg = "";
 
     /* pad/truncate to 78 characters (status bar width) */
     snprintf(line, sizeof(line), " %-78.78s ", msg);
 
-    ui_attr_reverse_on();
+    ui_attr_rv_on();
     ui_puts(24, 1, line);
-    ui_attr_reverse_off();
+    ui_attr_rv_off();
 
     ui_restore_cursor();
     fflush(stdout);
