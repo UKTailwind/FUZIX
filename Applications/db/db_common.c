@@ -43,3 +43,12 @@ int db_validate_fixed_records(int fd, size_t record_len, const char *dbname)
     }
 }
 
+/* Copy a record ensuring it ends zero terminated and any space
+   unused in the record is clear, Note that the record buffer is 1 byte
+   longer than the size given. */
+void copy_record(void *to, const void *from, size_t length)
+{
+    char *tp = to;	/* Be strict about void * and char * */
+    strncpy(to, from, length);
+    tp[length] = 0;
+}

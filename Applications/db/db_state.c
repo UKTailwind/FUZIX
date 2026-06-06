@@ -85,19 +85,19 @@ int db_state_parse_line(const char *line, state_t *out)
         return -1;
 
     /* State ID */
-    SAFE_COPY(out->state_id,
+    copy_record(out->state_id,
               line + STATE_ID_OFF,
               STATE_ID_LEN);
 
     /* Sort order */
-    SAFE_COPY(buf,
+    copy_record(buf,
               line + STATE_SORT_OFF,
               STATE_SORT_LEN);
     buf[STATE_SORT_LEN] = '\0';
     out->sort_order = atoi(buf);
 
     /* State name */
-    SAFE_COPY(out->name,
+    copy_record(out->name,
               line + STATE_NAME_OFF,
               STATE_NAME_LEN);
 

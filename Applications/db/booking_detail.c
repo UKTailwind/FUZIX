@@ -180,10 +180,10 @@ static void booking_work_to_edit(book_form_t *f)
     hhmm_to_hhmm_colon( f->work.booking_end_time, f->edit_end, sizeof(f->edit_end) );
 
     /* Plain string copies */
-    SAFE_COPY(f->edit_customer_id, f->work.booking_customer_id, BOOKING_CUSTOMER_ID_MAX);
-    SAFE_COPY(f->edit_staff_id, f->work.booking_staff_id,       BOOKING_STAFF_ID_MAX);
-    SAFE_COPY(f->edit_state_id,    f->work.booking_state_id,    BOOKING_STATE_ID_MAX);
-    SAFE_COPY(f->edit_job,         f->work.booking_job,         BOOKING_JOB_MAX);
+    copy_record(f->edit_customer_id, f->work.booking_customer_id, BOOKING_CUSTOMER_ID_MAX);
+    copy_record(f->edit_staff_id, f->work.booking_staff_id,       BOOKING_STAFF_ID_MAX);
+    copy_record(f->edit_state_id,    f->work.booking_state_id,    BOOKING_STATE_ID_MAX);
+    copy_record(f->edit_job,         f->work.booking_job,         BOOKING_JOB_MAX);
 
     debug_log(DEBUG_TRACE, FUNC_NAME,
         "MECH edit=[%s] len=%zu term=%02x",
@@ -220,12 +220,12 @@ static void booking_edit_to_work(book_form_t *f)
     /* Plain string copies */
 
     debug_log(DEBUG_INFO, FUNC_NAME, "edit_customer_id BEFORE copy = '%s'", f->edit_customer_id);
-    SAFE_COPY(f->work.booking_customer_id, f->edit_customer_id,   BOOKING_CUSTOMER_ID_MAX);
+    copy_record(f->work.booking_customer_id, f->edit_customer_id,   BOOKING_CUSTOMER_ID_MAX);
     debug_log(DEBUG_INFO, FUNC_NAME, "work_customer_id AFTER copy = '%s'", f->work.booking_customer_id);
 
-    SAFE_COPY(f->work.booking_staff_id,    f->edit_staff_id,      BOOKING_STAFF_ID_MAX);
-    SAFE_COPY(f->work.booking_state_id,    f->edit_state_id,      BOOKING_STATE_ID_MAX);
-    SAFE_COPY(f->work.booking_job,         f->edit_job,           BOOKING_JOB_MAX);
+    copy_record(f->work.booking_staff_id,    f->edit_staff_id,      BOOKING_STAFF_ID_MAX);
+    copy_record(f->work.booking_state_id,    f->edit_state_id,      BOOKING_STATE_ID_MAX);
+    copy_record(f->work.booking_job,         f->edit_job,           BOOKING_JOB_MAX);
 }
 
 /* -------------------- Drawing -------------------- */
@@ -752,7 +752,7 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
                     else if (form.mode != BOOK_VIEW && form.field == FIELD_CUSTOMER) {
                         char selected_id[BOOKING_CUSTOMER_ID_MAX +1];
                         if (run_customer_list(CUSTOMER_MODE_SELECT, form.edit_customer_id, selected_id) == 0) {
-                            SAFE_COPY(form.edit_customer_id, selected_id, BOOKING_CUSTOMER_ID_MAX);
+                            copy_record(form.edit_customer_id, selected_id, BOOKING_CUSTOMER_ID_MAX);
                             lookup_customer_display(form.edit_customer_id, form.customer_display, sizeof(form.customer_display));
                         }
                         draw_form(&form);

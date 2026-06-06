@@ -258,17 +258,17 @@ int db_customer_parse_line(const char *line, customer_t *out)
     if (!line || !out)
         return -1;
 
-    SAFE_COPY(out->customer_status,   line + CUSTOMER_STATUS_OFF,   CUSTOMER_STATUS_LEN);
-    SAFE_COPY(out->customer_id,       line + CUSTOMER_ID_OFF,       CUSTOMER_ID_LEN);
-    SAFE_COPY(out->customer_name,     line + CUSTOMER_NAME_OFF,     CUSTOMER_NAME_LEN);
-    SAFE_COPY(out->customer_phone1,   line + CUSTOMER_PHONE1_OFF,   CUSTOMER_PHONE1_LEN);
-    SAFE_COPY(out->customer_phone2,   line + CUSTOMER_PHONE2_OFF,   CUSTOMER_PHONE2_LEN);
-    SAFE_COPY(out->customer_address1, line + CUSTOMER_ADDRESS1_OFF, CUSTOMER_ADDRESS1_LEN);
-    SAFE_COPY(out->customer_address2, line + CUSTOMER_ADDRESS2_OFF, CUSTOMER_ADDRESS2_LEN);
-    SAFE_COPY(out->customer_suburb,   line + CUSTOMER_SUBURB_OFF,   CUSTOMER_SUBURB_LEN);
-    SAFE_COPY(out->customer_state,    line + CUSTOMER_STATE_OFF,    CUSTOMER_STATE_LEN);
-    SAFE_COPY(out->customer_postcode, line + CUSTOMER_POSTCODE_OFF, CUSTOMER_POSTCODE_LEN);
-    SAFE_COPY(out->customer_notes,    line + CUSTOMER_NOTES_OFF,    CUSTOMER_NOTES_LEN);
+    copy_record(out->customer_status,   line + CUSTOMER_STATUS_OFF,   CUSTOMER_STATUS_LEN);
+    copy_record(out->customer_id,       line + CUSTOMER_ID_OFF,       CUSTOMER_ID_LEN);
+    copy_record(out->customer_name,     line + CUSTOMER_NAME_OFF,     CUSTOMER_NAME_LEN);
+    copy_record(out->customer_phone1,   line + CUSTOMER_PHONE1_OFF,   CUSTOMER_PHONE1_LEN);
+    copy_record(out->customer_phone2,   line + CUSTOMER_PHONE2_OFF,   CUSTOMER_PHONE2_LEN);
+    copy_record(out->customer_address1, line + CUSTOMER_ADDRESS1_OFF, CUSTOMER_ADDRESS1_LEN);
+    copy_record(out->customer_address2, line + CUSTOMER_ADDRESS2_OFF, CUSTOMER_ADDRESS2_LEN);
+    copy_record(out->customer_suburb,   line + CUSTOMER_SUBURB_OFF,   CUSTOMER_SUBURB_LEN);
+    copy_record(out->customer_state,    line + CUSTOMER_STATE_OFF,    CUSTOMER_STATE_LEN);
+    copy_record(out->customer_postcode, line + CUSTOMER_POSTCODE_OFF, CUSTOMER_POSTCODE_LEN);
+    copy_record(out->customer_notes,    line + CUSTOMER_NOTES_OFF,    CUSTOMER_NOTES_LEN);
 
     return 0;
 }

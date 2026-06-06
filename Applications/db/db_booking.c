@@ -49,50 +49,50 @@ int db_booking_parse_line(const char *line, booking_t *out){
     memset(out, 0, sizeof(*out));
 
     /* Booking status */
-    SAFE_COPY(out->booking_status, line + BOOKING_STATUS_OFF, BOOKING_STATUS_LEN);
+    copy_record(out->booking_status, line + BOOKING_STATUS_OFF, BOOKING_STATUS_LEN);
     out->booking_status[BOOKING_STATUS_LEN] = '\0';
 
     debug_log(DEBUG_TRACE, FUNC_NAME, "PARSED status='%c' (0x%02X)", out->booking_status[0], (unsigned char)out->booking_status[0]);
 
     /* Booking ID */
-    SAFE_COPY(out->booking_id, line + BOOKING_ID_OFF, BOOKING_ID_LEN);
+    copy_record(out->booking_id, line + BOOKING_ID_OFF, BOOKING_ID_LEN);
     out->booking_id[BOOKING_ID_LEN] = '\0';
 
     /* Customer ID */
-    SAFE_COPY(out->booking_customer_id, line + BOOKING_CUSTOMER_ID_OFF, BOOKING_CUSTOMER_ID_LEN);
+    copy_record(out->booking_customer_id, line + BOOKING_CUSTOMER_ID_OFF, BOOKING_CUSTOMER_ID_LEN);
     out->booking_customer_id[BOOKING_CUSTOMER_ID_LEN] ='\0';
 
     /* Date YYYYMMDD */
-    SAFE_COPY(buf, line + BOOKING_DATE_OFF, BOOKING_DATE_LEN);
+    copy_record(buf, line + BOOKING_DATE_OFF, BOOKING_DATE_LEN);
     buf[BOOKING_DATE_LEN] = '\0';
 
-    SAFE_COPY(out->booking_date, buf,BOOKING_DATE_LEN);
+    copy_record(out->booking_date, buf,BOOKING_DATE_LEN);
     out->booking_date[BOOKING_DATE_LEN] = '\0';
 
     /* Start time HHMM */
-    SAFE_COPY(buf, line + BOOKING_START_TIME_OFF, BOOKING_START_TIME_LEN);
+    copy_record(buf, line + BOOKING_START_TIME_OFF, BOOKING_START_TIME_LEN);
     buf[BOOKING_START_TIME_LEN] = '\0';
 
-    SAFE_COPY(out->booking_start_time, buf,BOOKING_START_TIME_LEN);
+    copy_record(out->booking_start_time, buf,BOOKING_START_TIME_LEN);
     out->booking_start_time[BOOKING_START_TIME_LEN] = '\0';
 
     /* End time HHMM */
-    SAFE_COPY(buf, line + BOOKING_END_TIME_OFF, BOOKING_END_TIME_LEN);
+    copy_record(buf, line + BOOKING_END_TIME_OFF, BOOKING_END_TIME_LEN);
     buf[BOOKING_END_TIME_LEN] = '\0';
 
-    SAFE_COPY(out->booking_end_time, buf,BOOKING_END_TIME_LEN);
+    copy_record(out->booking_end_time, buf,BOOKING_END_TIME_LEN);
     out->booking_end_time[BOOKING_END_TIME_LEN] = '\0';
 
     /* Staff ID */
-    SAFE_COPY(out->booking_staff_id, line + BOOKING_STAFF_ID_OFF, BOOKING_STAFF_ID_LEN);
+    copy_record(out->booking_staff_id, line + BOOKING_STAFF_ID_OFF, BOOKING_STAFF_ID_LEN);
     out->booking_staff_id[BOOKING_STAFF_ID_LEN] = '\0';
 
     /* State ID */
-    SAFE_COPY(out->booking_state_id, line + BOOKING_STATE_ID_OFF, BOOKING_STATE_ID_LEN);
+    copy_record(out->booking_state_id, line + BOOKING_STATE_ID_OFF, BOOKING_STATE_ID_LEN);
     out->booking_state_id[BOOKING_STATE_ID_LEN] = '\0';
 
     /* Job description */
-    SAFE_COPY(out->booking_job, line + BOOKING_JOB_OFF, BOOKING_JOB_LEN);
+    copy_record(out->booking_job, line + BOOKING_JOB_OFF, BOOKING_JOB_LEN);
     out->booking_job[BOOKING_JOB_LEN] = '\0';
 
     return 0;

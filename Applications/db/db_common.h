@@ -7,10 +7,8 @@
 int db_validate_fixed_records(int fd, size_t record_len, const char *dbname);
 
 /* Safe fixed-field copy */
-#define SAFE_COPY(dest, src, len)       \
-    do {                               \
-        strncpy((dest), (src), (len)); \
-        (dest)[(len)] = '\0';          \
-    } while (0)
+/* The passed len is one less than the actual in memory size. This is
+   possibly something that should change */
+void copy_record(void *to, const void *from, size_t len);
 
 #endif

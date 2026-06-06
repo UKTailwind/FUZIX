@@ -264,11 +264,11 @@ int db_staff_parse_line(const char *line, staff_t *out)
     if (!line || !out)
         return -1;
 
-    SAFE_COPY(out->staff_status,  line + STAFF_STATUS_OFF, STAFF_STATUS_LEN);
-    SAFE_COPY(out->staff_id,      line + STAFF_ID_OFF,     STAFF_ID_LEN);
-    SAFE_COPY(out->staff_name,    line + STAFF_NAME_OFF,   STAFF_NAME_LEN);
-    SAFE_COPY(out->staff_phone,   line + STAFF_PHONE_OFF,  STAFF_PHONE_LEN);
-    SAFE_COPY(out->staff_notes,   line + STAFF_NOTES_OFF,  STAFF_NOTES_LEN);
+    copy_record(out->staff_status,  line + STAFF_STATUS_OFF, STAFF_STATUS_LEN);
+    copy_record(out->staff_id,      line + STAFF_ID_OFF,     STAFF_ID_LEN);
+    copy_record(out->staff_name,    line + STAFF_NAME_OFF,   STAFF_NAME_LEN);
+    copy_record(out->staff_phone,   line + STAFF_PHONE_OFF,  STAFF_PHONE_LEN);
+    copy_record(out->staff_notes,   line + STAFF_NOTES_OFF,  STAFF_NOTES_LEN);
 
     return 0;
 }
