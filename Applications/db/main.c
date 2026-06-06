@@ -54,6 +54,11 @@ static void draw_main_menu(void)
 
 int main(int argc, char *argv[])
 {
+#ifdef DEBUG_ENABLED
+    /* Set the debug log folder */
+    char log_path[128];
+    char *home = getenv("HOME");
+#endif
     int exit_code = 0;
     int menu_choice;
 
@@ -104,11 +109,7 @@ int main(int argc, char *argv[])
             return 1;
         }
     }
-
 #ifdef DEBUG_ENABLED
-    /* Set the debug log folder */
-    char log_path[128];
-    char *home = getenv("HOME");
     if (!home) {
         home = ".";   /* fallback if HOME not set */
     }
