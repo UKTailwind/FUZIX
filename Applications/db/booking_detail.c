@@ -93,6 +93,17 @@ enum {
 
 static ui_field_t fields[FIELD_COUNT];
 
+static void field_init(unsigned n, const char *label, char *ptr, size_t maxlen, int row, int col, int mode)
+{
+    ui_field_t *f = fields + n;
+    f->label = label;
+    f->ptr = ptr;
+    f->maxlen = maxlen;
+    f->row = row;
+    f->col = col;
+    f->mode = mode;
+}
+
 static int lookup_customer_display(const char *id, char *out, size_t outlen)
 {
     int fd = db_cs_op_read();
@@ -143,24 +154,21 @@ static void populate_display_cache(book_form_t *f)
 static void bind_fields(book_form_t *f)
 {
     memset(fields, 0, sizeof(fields));
-
+    
     /* Field behaviour:
        UI_FIELD_SKIP   = not selectable
        UI_FIELD_EDIT   = selectable + editable
        UI_FIELD_SELECT = selectable popup field (F2 etc)
     */
+    field_init(FIELD_ID,	"ID",          f->work.booking_id,  BOOKING_ID_MAX,          2, 15, UI_FIELD_SKIP );
+    field_init(FIELD_DATE,	"Date",        f->edit_date,        BOOKING_DATE_MAX,        3, 15, UI_FIELD_EDIT );
+    field_init(FIELD_START,	"Start Time",  f->edit_start,       BOOKING_START_TIME_MAX,  4, 15, UI_FIELD_EDIT );
+    field_init(FIELD_END,	"End Time",    f->edit_end,         BOOKING_END_TIME_MAX,    5, 15, UI_FIELD_EDIT );
+    field_init(FIELD_CUSTOMER,	"Customer",    f->edit_customer_id, BOOKING_CUSTOMER_ID_MAX, 6, 15, UI_FIELD_SELECT);
+    field_init(FIELD_STAFF,	"Staff",       f->edit_staff_id,    BOOKING_STAFF_ID_MAX,    7, 15, UI_FIELD_SELECT);
+    field_init(FIELD_STATE,	"State",       f->edit_state_id,    BOOKING_STATE_ID_MAX,    8, 15, UI_FIELD_SELECT);
+    field_init(FIELD_JOB,	"Job",         f->edit_job,         BOOKING_JOB_MAX,         9, 15, UI_FIELD_EDIT );
 
-#if 0
-    /* FIXME TODO: this needs looking at because you can't just do block initializers in C89 like this */
-    fields[FIELD_ID] = (ui_field_t){ "ID",                f->work.booking_id,  BOOKING_ID_MAX,          2, 15, UI_FIELD_SKIP };
-    fields[FIELD_DATE] = (ui_field_t){ "Date",            f->edit_date,        BOOKING_DATE_MAX,        3, 15, UI_FIELD_EDIT };
-    fields[FIELD_START] = (ui_field_t){ "Start Time",     f->edit_start,       BOOKING_START_TIME_MAX,  4, 15, UI_FIELD_EDIT };
-    fields[FIELD_END] = (ui_field_t){ "End Time",         f->edit_end,         BOOKING_END_TIME_MAX,    5, 15, UI_FIELD_EDIT };
-    fields[FIELD_CUSTOMER] = (ui_field_t){ "Customer",    f->edit_customer_id, BOOKING_CUSTOMER_ID_MAX, 6, 15, UI_FIELD_SELECT};
-    fields[FIELD_STAFF] = (ui_field_t){ "Staff",          f->edit_staff_id,    BOOKING_STAFF_ID_MAX,    7, 15, UI_FIELD_SELECT};
-    fields[FIELD_STATE] = (ui_field_t){ "State",          f->edit_state_id,    BOOKING_STATE_ID_MAX,    8, 15, UI_FIELD_SELECT};
-    fields[FIELD_JOB] = (ui_field_t){ "Job",              f->edit_job,         BOOKING_JOB_MAX,         9, 15, UI_FIELD_EDIT };
-#endif
 #ifdef DEBUG_ENABLED
     debug_check_field_overlap(fields, FIELD_COUNT);
 #endif
