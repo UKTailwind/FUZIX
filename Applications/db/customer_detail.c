@@ -40,7 +40,7 @@ static ui_field_t fields[FIELD_COUNT];
 
 static void bind_field(unsigned n, const char *label, char *ptr, size_t maxlen, int row, int col, int mode)
 {
-    ui_field_t *f = fields + n;
+    register ui_field_t *f = fields + n;
     f->label = label;
     f->ptr = ptr;
     f->maxlen = maxlen;
@@ -49,7 +49,7 @@ static void bind_field(unsigned n, const char *label, char *ptr, size_t maxlen, 
     f->mode = mode;
 }
 
-static void bind_fields(cust_form_t *f)
+static void bind_fields(register cust_form_t *f)
 {
     bind_field(0,  "ID",        f->work.cs_id,       CUSTOMER_ID_MAX,        2, 15, 0 );
     bind_field(1,  "Name",      f->work.cs_name,     CUSTOMER_NAME_MAX,      3, 15, 1 );
@@ -79,7 +79,7 @@ static int first_selectable_field(void)
     return 0;  /* fallback (should never happen) */
 }
 
-static void draw_footer(const cust_form_t *f)
+static void draw_footer(register const cust_form_t *f)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     /* Help line */
@@ -107,7 +107,7 @@ static void draw_footer(const cust_form_t *f)
     }
 }
 
-static void draw_form(const cust_form_t *f)
+static void draw_form(register const cust_form_t *f)
 {
     char  buf[128];
     int i;
@@ -164,7 +164,7 @@ static void move_field(cust_form_t *f, int delta)
     }
 }
 
-static int edit_current_field(cust_form_t *form)
+static int edit_current_field(register cust_form_t *form)
 {
     ui_field_t *fld = &fields[form->field];
     edit_state_t es;
@@ -179,7 +179,7 @@ static int edit_current_field(cust_form_t *form)
     return ui_edit_field(&es, FIRST_ROW + form->field, VALUE_COL);
 }
 
-static int customer_detail_handle_exit(cust_form_t *form, int fd)
+static int customer_detail_handle_exit(register cust_form_t *form, int fd)
 {
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
@@ -277,7 +277,7 @@ static void draw_single_field(const cust_form_t *f, int i, int highlight)
     }
 }
 
-static void update_field_highlight(const cust_form_t *f, int prev)
+static void update_field_highlight(register const cust_form_t *f, int prev)
 {
     if (prev == f->field)
         return;

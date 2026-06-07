@@ -5,20 +5,20 @@
 
 #define KB_ESC_TIMEOUT 3
 
-int kb_decode_sequence(kb_parser_t *kb, const char *seq)
+int kb_decode_sequence(register kb_parser_t *kb, const char *seq)
 {
     int i;
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     for (i = 0; kb->backend->seq_table[i].seq != NULL; i++) {
         if (strcmp(seq, kb->backend->seq_table[i].seq) == 0)
-        return kb->backend->seq_table[i].key;
+            return kb->backend->seq_table[i].key;
     }
     return UI_KEY_INVALID;
 }
 
 /* --- Public API --- */
 
-void kb_init(kb_parser_t *kb, const kb_backend_t *backend)
+void kb_init(register kb_parser_t *kb, const kb_backend_t *backend)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     kb->backend = backend;
@@ -27,7 +27,7 @@ void kb_init(kb_parser_t *kb, const kb_backend_t *backend)
 }
 
 /* Core parser */
-int kb_feed(kb_parser_t *kb, uint8_t byte)
+int kb_feed(register kb_parser_t *kb, uint8_t byte)
 {
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
     debug_log((DEBUG_TRACE, FUNC_NAME, "byte=%d (0x%02X) '%c'", byte, byte, (byte >= 32 && byte < 127) ? byte : '.'));
@@ -120,7 +120,7 @@ int kb_feed(kb_parser_t *kb, uint8_t byte)
     return UI_KEY_INVALID;
 }
 
-int kb_tick(kb_parser_t *kb)
+int kb_tick(register kb_parser_t *kb)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 

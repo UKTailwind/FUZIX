@@ -227,7 +227,7 @@ int db_staff_write(int fd, long *recno, const staff_t *in)
     return 0;
 }
 
-int db_staff_load_all(int fd, StaffList *list)
+int db_staff_load_all(int fd, register StaffList *list)
 {
     long rec = 0;
     staff_t c;
@@ -265,7 +265,7 @@ int db_staff_load_all(int fd, StaffList *list)
     return 0;
 }
 
-int db_staff_parse_line(const char *line, staff_t *out)
+int db_staff_parse_line(const char *line, register staff_t *out)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
@@ -281,7 +281,7 @@ int db_staff_parse_line(const char *line, staff_t *out)
     return 0;
 }
 
-void db_staff_format_line(const staff_t *in, char *line)
+void db_staff_format_line(register const staff_t *in, char *line)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     if (!in || !line)

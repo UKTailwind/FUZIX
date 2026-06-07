@@ -228,7 +228,7 @@ int db_cs_write(int fd, long *recno, const customer_t *in)
     return 0;
 }
 
-int db_cs_load_page(int fd, long start_rec, CustomerList *list, long *next_rec)
+int db_cs_load_page(int fd, long start_rec, register CustomerList *list, long *next_rec)
 {
     customer_t c;
     long rec = start_rec;
@@ -258,7 +258,7 @@ int db_cs_load_page(int fd, long start_rec, CustomerList *list, long *next_rec)
     return 0;
 }
 
-int db_cs_parse_line(const char *line, customer_t *out)
+int db_cs_parse_line(const char *line, register customer_t *out)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
@@ -281,7 +281,7 @@ int db_cs_parse_line(const char *line, customer_t *out)
 }
 
 
-void db_cs_format_line(const customer_t *in, char *line)
+void db_cs_format_line(register const customer_t *in, char *line)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     if (!in || !line)

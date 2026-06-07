@@ -26,6 +26,7 @@ int db_validate_fixed_records(int fd, size_t record_len, const char *dbname)
 
         if (n == 0) {
             /* clean EOF */
+            debug_log((DEBUG_TRACE, FUNC_NAME, "%d records.\n", recno));
             return 0;
         }
 

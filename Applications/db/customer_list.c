@@ -46,7 +46,7 @@ static int visible_count;
 static int selected_idx = 0;   /* index into visible_indexes[] */
 
 /* ---------- Customer Screen drawing with dynamic scrolling ---------- */
-static void draw_screen(int mode, const CustomerList *customer, int start_idx, const int *visible_indexes, int visible_count)
+static void draw_screen(int mode, register const CustomerList *customer, int start_idx, const int *visible_indexes, int visible_count)
 {
     char line[100];
     int i, row = 5;
@@ -106,7 +106,7 @@ static void draw_screen(int mode, const CustomerList *customer, int start_idx, c
     fflush(stdout);
 }
 
-static void run_customer_search(int mode, int customer_fd, CustomerList *customer, int *start_idx)
+static void run_customer_search(int mode, int customer_fd, register CustomerList *customer, int *start_idx)
 {
     char buf[CUSTOMER_NAME_MAX + 1];
     int start_col = 19;  /* after "Command: Search: " */
@@ -208,7 +208,7 @@ static void load_search_page(int fd, int start_idx, CustomerList *list)
     customer_t c;
     int i;
     long recno;
-    customer_list_rec_t *dst;
+    register customer_list_rec_t *dst;
 
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     list->count = 0;
@@ -309,7 +309,7 @@ static void draw_customer_row(const CustomerList *customer, int screen_row, int 
 {
     char line[100];
     int vi = visible_indexes[visible_idx];
-    const customer_list_rec_t *s = &customer->slots[vi];
+    register const customer_list_rec_t *s = &customer->slots[vi];
 
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
@@ -354,7 +354,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
 {
     int customer_fd  = -1;
     static CustomerList customer_storage;
-    CustomerList *customer = &customer_storage;
+    register CustomerList *customer = &customer_storage;
     int selection_moved = 0;
     int start_idx = 0;
     int page_changed = 0;

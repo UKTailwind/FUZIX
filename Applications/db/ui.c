@@ -78,7 +78,7 @@ int ui_read_line(int row, int col, char *buf, int maxlen)
     }
 }
 
-int decode_escape_sequence(const unsigned char *buf, int len)
+int decode_escape_sequence(register const unsigned char *buf, int len)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     if (len >= 6){
@@ -201,7 +201,7 @@ void ui_move_cursor(int row, int col)
     fflush(stdout);
 }
 
-int ui_edit_field(edit_state_t *e, int row, int col)
+int ui_edit_field(register edit_state_t *e, int row, int col)
 {
     int key;
 
@@ -446,7 +446,7 @@ void dd_mm_yyyy_to_yyyymmdd(const char *in, char *out, size_t outsz)
 /* Right trim spaces from string */
 void ui_rtrim(char *s)
 {
-    char *p;
+    register char *p;
     if (!s || !*s)
         return;
 

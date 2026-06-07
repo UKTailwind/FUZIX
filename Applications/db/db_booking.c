@@ -22,7 +22,7 @@
 #include "db_common_layout.h"
 
 /* Parse a single record into booking_t */
-int db_bk_parse_line(const char *line, booking_t *out){
+int db_bk_parse_line(const char *line, register booking_t *out){
     char buf[16];
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
 
@@ -99,7 +99,7 @@ int db_bk_parse_line(const char *line, booking_t *out){
 }
 
 /* Clears the line, Inserts separators deterministically, Guarantees fixed record length*/
-void db_bk_format_line(const booking_t *in, char *line)
+void db_bk_format_line(register const booking_t *in, char *line)
 {
     int i;
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: in=%p line=%p BOOKING_RECORD_LEN=%d", in, line, BOOKING_RECORD_LEN));
@@ -145,7 +145,7 @@ void db_bk_format_line(const booking_t *in, char *line)
     }
 }
 
-int db_bk_read(int fd, long recno, booking_t *out)
+int db_bk_read(int fd, long recno, register booking_t *out)
 {
     char line[BOOKING_DISK_LEN];
     off_t off = (off_t)recno * BOOKING_DISK_LEN;
@@ -191,7 +191,7 @@ int db_bk_read(int fd, long recno, booking_t *out)
     return db_bk_parse_line(line, out);
 }
 
-int db_bk_by_id( int fd, const char *booking_id, booking_t *out, long *out_recno)
+int db_bk_by_id( int fd, const char *booking_id, register booking_t *out, long *out_recno)
 {
     booking_t tmp;
     long recno = 0;
@@ -253,7 +253,7 @@ int db_bk_write(int fd, long recno, const booking_t *in)
     return 0;
 }
 
-void db_bk_sort_day_by_time(int fd, DayBookings *day)
+void db_bk_sort_day_by_time(int fd, register DayBookings *day)
 {
     int i;
     booking_t a, b;

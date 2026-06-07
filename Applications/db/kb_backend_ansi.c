@@ -11,7 +11,7 @@ static int kb_ansi_is_terminator(char c)
     return (c >= '@' && c <= '~');
 }
 
-static int kb_ansi_handle_esc(kb_parser_t *kb, uint8_t byte)
+static int kb_ansi_handle_esc(register kb_parser_t *kb, uint8_t byte)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "ANSI ESC handler byte=%c", byte));
 

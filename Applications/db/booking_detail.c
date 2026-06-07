@@ -95,7 +95,7 @@ static ui_field_t fields[FIELD_COUNT];
 
 static void field_init(unsigned n, const char *label, char *ptr, size_t maxlen, int row, int col, int mode)
 {
-    ui_field_t *f = fields + n;
+    register ui_field_t *f = fields + n;
     f->label = label;
     f->ptr = ptr;
     f->maxlen = maxlen;
@@ -143,7 +143,7 @@ static int lookup_staff_display(const char *id, char *out, size_t outlen)
     return rc;
 }
 
-static void populate_display_cache(book_form_t *f)
+static void populate_display_cache(register book_form_t *f)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
     lookup_customer_display(f->edit_customer_id, f->customer_display, sizeof(f->customer_display));
@@ -151,7 +151,7 @@ static void populate_display_cache(book_form_t *f)
     lookup_staff_display(f->edit_staff_id,       f->staff_display,    sizeof(f->staff_display));
 }
 
-static void bind_fields(book_form_t *f)
+static void bind_fields(register book_form_t *f)
 {
     memset(fields, 0, sizeof(fields));
     
@@ -174,7 +174,7 @@ static void bind_fields(book_form_t *f)
 #endif
 }
 
-static void booking_work_to_edit(book_form_t *f)
+static void booking_work_to_edit(register book_form_t *f)
 {
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
     debug_log((DEBUG_INFO, FUNC_NAME, "work.booking_customer_id='%s'", f->work.booking_customer_id));
@@ -216,7 +216,7 @@ static void booking_work_to_edit(book_form_t *f)
         (unsigned char)f->edit_job[BOOKING_JOB_MAX]));
 }
 
-static void booking_edit_to_work(book_form_t *f)
+static void booking_edit_to_work(register book_form_t *f)
 {
     f->work.booking_status[0] = f->edit_status[0];
 
@@ -282,11 +282,11 @@ static void draw_footer(const book_form_t *f)
     }
 }
 
-static void draw_form(const book_form_t *f)
+static void draw_form(register const book_form_t *f)
 {
     char buf[128];
-    int i;
-    const char *val;
+    register int i;
+    register const char *val;
 
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
@@ -346,7 +346,7 @@ static void draw_form(const book_form_t *f)
 
 /* -------------------- Navigation -------------------- */
 
-static void move_field(book_form_t *f, int delta)
+static void move_field(register book_form_t *f, int delta)
 {
     int i = f->field;
 
@@ -364,9 +364,9 @@ static void move_field(book_form_t *f, int delta)
     }
 }
 
-static int edit_current_field(book_form_t *form)
+static int edit_current_field(register book_form_t *form)
 {
-    ui_field_t *fld = &fields[form->field];
+    register ui_field_t *fld = &fields[form->field];
     edit_state_t es;
     int rc;
 
@@ -416,7 +416,7 @@ static int edit_current_field(book_form_t *form)
     return rc;
 }
 
-static int booking_detail_handle_exit(book_form_t *form, int fd)
+static int booking_detail_handle_exit(register book_form_t *form, int fd)
 {
     int changed = 0;
 
@@ -583,7 +583,7 @@ static int booking_detail_handle_exit(book_form_t *form, int fd)
     }
 }
 
-static void draw_single_field(const book_form_t *f, int i, int highlight)
+static void draw_single_field(register const book_form_t *f, int i, int highlight)
 {
     char buf[128];
     int row = FIRST_ROW + i;
