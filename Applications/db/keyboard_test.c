@@ -23,7 +23,7 @@ int keyboard_test_run(void)
     int x = 10;
     char buf[64];
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter: ");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
 
     draw_keyboard_test_screen();
 
@@ -40,7 +40,7 @@ int keyboard_test_run(void)
         }
 
         if (key == 0x18) {   /* Ctrl-X */
-            debug_log(DEBUG_INFO, FUNC_NAME, "Exit Keyboard Test");
+            debug_log((DEBUG_INFO, FUNC_NAME, "Exit Keyboard Test"));
             exit_code = 0;
             goto cleanup;
         }

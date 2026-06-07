@@ -15,7 +15,7 @@ int db_lock_exclusive(const char *filename)
     char lockname[128];
     char msg[80];
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter"));
     snprintf(lockname, sizeof(lockname), "%s.lock", filename);
 
     for (;;) {
@@ -35,7 +35,7 @@ int db_lock_exclusive(const char *filename)
 int db_unlock(const char *filename)
 {
     char lockname[128];
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter"));
 
     snprintf(lockname, sizeof(lockname), "%s.lock", filename);
 

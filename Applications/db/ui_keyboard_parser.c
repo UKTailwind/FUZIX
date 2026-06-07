@@ -8,7 +8,7 @@
 int kb_decode_sequence(kb_parser_t *kb, const char *seq)
 {
     int i;
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     for (i = 0; kb->backend->seq_table[i].seq != NULL; i++) {
         if (strcmp(seq, kb->backend->seq_table[i].seq) == 0)
         return kb->backend->seq_table[i].key;
@@ -20,7 +20,7 @@ int kb_decode_sequence(kb_parser_t *kb, const char *seq)
 
 void kb_init(kb_parser_t *kb, const kb_backend_t *backend)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     kb->backend = backend;
     kb->state = KB_STATE_IDLE;
     kb->len = 0;
@@ -29,15 +29,15 @@ void kb_init(kb_parser_t *kb, const kb_backend_t *backend)
 /* Core parser */
 int kb_feed(kb_parser_t *kb, uint8_t byte)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
-    debug_log(DEBUG_TRACE, FUNC_NAME, "byte=%d (0x%02X) '%c'", byte, byte, (byte >= 32 && byte < 127) ? byte : '.');
-    debug_log(DEBUG_INFO, FUNC_NAME, "state=%d byte=0x%02X '%c'", kb->state, byte, (byte >= 32 && byte < 127) ? byte : '.');
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "byte=%d (0x%02X) '%c'", byte, byte, (byte >= 32 && byte < 127) ? byte : '.'));
+    debug_log((DEBUG_INFO, FUNC_NAME, "state=%d byte=0x%02X '%c'", kb->state, byte, (byte >= 32 && byte < 127) ? byte : '.'));
 
     switch (kb->state) {
 
     case KB_STATE_IDLE:
-        debug_log(DEBUG_TRACE, FUNC_NAME, "case KB_STATE_IDLE");
-        debug_log(DEBUG_TRACE, FUNC_NAME, "byte=0x%02X '%c'", byte, byte);
+        debug_log((DEBUG_TRACE, FUNC_NAME, "case KB_STATE_IDLE"));
+        debug_log((DEBUG_TRACE, FUNC_NAME, "byte=0x%02X '%c'", byte, byte));
 
         if (byte == 0x1B) {
             kb->state = KB_STATE_ESC;
@@ -55,11 +55,11 @@ int kb_feed(kb_parser_t *kb, uint8_t byte)
                 return UI_KEY_TAB;
 
             case 127:    /* DEL (most terminals send this for backspace) */
-                debug_log(DEBUG_TRACE, FUNC_NAME, "case 127");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "case 127"));
                 return UI_KEY_BACKSPACE;
 
             case 8:      /* BS (some systems send this instead) */
-                debug_log(DEBUG_TRACE, FUNC_NAME, "case 8");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "case 8"));
                 return UI_KEY_BACKSPACE;
         }
 
@@ -69,7 +69,7 @@ int kb_feed(kb_parser_t *kb, uint8_t byte)
     case KB_STATE_ESC:
     {
         int ret = kb->backend->handle_esc(kb, byte);
-        debug_log(DEBUG_TRACE, FUNC_NAME, "case KB_STATE_ESC");
+        debug_log((DEBUG_TRACE, FUNC_NAME, "case KB_STATE_ESC"));
 
         /* IMPORTANT: if backend produced a final key, reset state */
         if (ret != 0) {
@@ -78,13 +78,13 @@ int kb_feed(kb_parser_t *kb, uint8_t byte)
         return ret;
     }
     case KB_STATE_CSI:
-        debug_log(DEBUG_TRACE, FUNC_NAME, "case KB_STATE_CSI ");
+        debug_log((DEBUG_TRACE, FUNC_NAME, "case KB_STATE_CSI "));
         if (kb->len < sizeof(kb->seq_buf) - 1) {
             kb->seq_buf[kb->len++] = byte;
             kb->seq_buf[kb->len] = '\0';
         } else {
             /* Overflow → reset */
-            debug_log(DEBUG_TRACE, FUNC_NAME, "Overflow Reset");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "Overflow Reset"));
             kb->state = KB_STATE_IDLE;
             kb->len = 0;
             /*kb->pending = -1;*/
@@ -93,7 +93,7 @@ int kb_feed(kb_parser_t *kb, uint8_t byte)
 
         if (kb->backend->is_terminator(byte)){
             int key = kb_decode_sequence(kb, kb->seq_buf);
-            debug_log(DEBUG_TRACE, FUNC_NAME, "SEQ='%s'", kb->seq_buf);
+            debug_log((DEBUG_TRACE, FUNC_NAME, "SEQ='%s'", kb->seq_buf));
             kb->state = KB_STATE_IDLE;
             kb->len = 0;
             return key;
@@ -101,7 +101,7 @@ int kb_feed(kb_parser_t *kb, uint8_t byte)
         return 0;
 
     case KB_STATE_SS3:
-        debug_log(DEBUG_TRACE, FUNC_NAME, "case KB_STATE_SS3");
+        debug_log((DEBUG_TRACE, FUNC_NAME, "case KB_STATE_SS3"));
 
         kb->state = KB_STATE_IDLE;
 
@@ -115,20 +115,20 @@ int kb_feed(kb_parser_t *kb, uint8_t byte)
         }
     }
     /* Should never happen */
-    debug_log(DEBUG_ERROR, FUNC_NAME, "SHOULD NEVER HAPPEN");
+    debug_log((DEBUG_ERROR, FUNC_NAME, "SHOULD NEVER HAPPEN"));
     kb->state = KB_STATE_IDLE;
     return UI_KEY_INVALID;
 }
 
 int kb_tick(kb_parser_t *kb)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     if (kb->state == KB_STATE_ESC) {
 
         if (kb->esc_countdown > 0) {
             kb->esc_countdown--;
-            debug_log(DEBUG_TRACE, FUNC_NAME, "kb countdown=%d", kb->esc_countdown);
+            debug_log((DEBUG_TRACE, FUNC_NAME, "kb countdown=%d", kb->esc_countdown));
             if (kb->esc_countdown == 0) {
                 kb->state = KB_STATE_IDLE;
                 kb->len = 0;

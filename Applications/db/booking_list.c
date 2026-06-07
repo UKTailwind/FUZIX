@@ -43,7 +43,7 @@ static void draw_screen(const char *date, const DayBookings *day,
     int yyyymmdd = atoi(date);
     char date_disp[11];
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
     ui_cls();
     ui_puts(1, 1, "Booking Management System                                             By D.Pollard");
     yyyymmdd_to_dd_mm_yyyy(date, date_disp, sizeof(date_disp));
@@ -84,7 +84,7 @@ static void draw_booking_row(const DayBookings *day,
     char state_name[STATE_NAME_MAX +1];
     char customer_name[CUSTOMER_NAME_MAX + 1];
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     if (idx < 0 || idx >= day->count)
         return;
 
@@ -107,7 +107,7 @@ static void draw_booking_row(const DayBookings *day,
 
 
     if (highlight)
-        ui_attr_reverse_on();
+        ui_attr_rv_on();
 
     sprintf(line,
         "%5s %5s  %-16.16s %-20.20s %-20.20s",
@@ -120,14 +120,14 @@ static void draw_booking_row(const DayBookings *day,
     ui_puts(screen_row, 1, line);
 
     if (highlight)
-        ui_attr_reverse_off();
+        ui_attr_rv_off();
 }
 
 /* Select a new date for booking */
 static void goto_date(int booking_fd, int new_date, int *current_date,
                       char *datestr, DayBookings *day, int *start_idx)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     *start_idx = 0;
     selected_idx = 0;
     *current_date = new_date;
@@ -135,7 +135,7 @@ static void goto_date(int booking_fd, int new_date, int *current_date,
 
     /* Build index instead of loading full records */
     if (db_bk_build_day_index(booking_fd, new_date, day) < 0) {
-        debug_log(DEBUG_WARN, FUNC_NAME, "No bookings for %08u", (unsigned)new_date);
+        debug_log((DEBUG_WARN, FUNC_NAME, "No bookings for %08u", (unsigned)new_date));
         day->count = 0;
     }
 
@@ -150,7 +150,7 @@ static int days_in_month(int month, int year)
         31,31,30,31,30,31
     };
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     if (month == 2)
     {
@@ -171,7 +171,7 @@ static int parse_ddmmyyyy(const char *str, int *out_date)
     int day, month, year;
     int maxday;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     /* Basic format validation */
     if (strlen(str) != 10)
@@ -210,7 +210,7 @@ static int state_lookup_name(int state_fd, const char *state_id, char *out, size
     state_t st;
     long rec = 0;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     while (db_state_read(state_fd, rec, &st) == 0) {
         if (strcmp(st.state_id, state_id) == 0) {
@@ -228,7 +228,7 @@ static int customer_lookup_name(int customer_fd, const char *customer_id, char *
     customer_t st;
     long rec = 0;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     while (db_cs_read(customer_fd, rec, &st) == 0) {
         if (strcmp(st.cs_id, customer_id) == 0) {
@@ -260,7 +260,7 @@ void run_booking_list(void)
     int rc;
 
     selected_idx = 0;
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     /* NOTE booking.c owns booking_fd, state_fd and customer_fd.
     * Do not return from this function once they are open.
@@ -269,7 +269,7 @@ void run_booking_list(void)
     booking_fd = db_bk_op_read();
 
     if (booking_fd <= BOOKING_DB_ERROR) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "Unable to open Booking database");
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Unable to open Booking database"));
         ui_status("Unable to open booking database");
         sleep(2);
         goto cleanup;
@@ -277,7 +277,7 @@ void run_booking_list(void)
 
     state_fd =  db_state_open();
     if (state_fd <= BOOKING_DB_ERROR) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "Unable to open State database");
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Unable to open State database"));
         ui_status("Unable to open state database");
         sleep(2);
         goto cleanup;
@@ -285,7 +285,7 @@ void run_booking_list(void)
 
     customer_fd =  db_cs_op_read();
     if (customer_fd <= CUSTOMER_DB_ERROR) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "Unable to open Customer database");
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Unable to open Customer database"));
         ui_status("Unable to open customer database");
         sleep(2);
         goto cleanup;
@@ -325,51 +325,51 @@ void run_booking_list(void)
         ui_status(status);
         ch = ui_read_key();
 
-        debug_log(DEBUG_TRACE, FUNC_NAME, "key=%d '%c'", ch, (ch >= 32 && ch < 127) ? ch : '?');
+        debug_log((DEBUG_TRACE, FUNC_NAME, "key=%d '%c'", ch, (ch >= 32 && ch < 127) ? ch : '?'));
 
         if (ch == UI_KEY_NONE){
-            debug_log(DEBUG_INFO, FUNC_NAME, "Invalid key UI_KEY_NONE received");
+            debug_log((DEBUG_INFO, FUNC_NAME, "Invalid key UI_KEY_NONE received"));
             continue;
         }
         if (ch < 0) {
-            debug_log(DEBUG_INFO, FUNC_NAME, "Invalid key ignored: %d", ch);
+            debug_log((DEBUG_INFO, FUNC_NAME, "Invalid key ignored: %d", ch));
             continue;
         }
 
         switch (ch) {
             case UI_KEY_ESC:
                 running=0;  /* Exit */
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key: Esc Pressed");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key: Esc Pressed"));
                 continue;  /* exit the while loop */
 
             /* Day navigation */
             case UI_KEY_RIGHT: /* Right Arrow / Next Day */
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key: Right Pressed");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key: Right Pressed"));
                 goto_date(booking_fd, add_days(current_date, 1), &current_date, datestr, &day, &start_idx);
                 page_changed = 1;
                 break;
             case UI_KEY_LEFT: /* Left Arrow / Previous Day */
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key: Left Pressed");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key: Left Pressed"));
                 goto_date(booking_fd, add_days(current_date, -1), &current_date, datestr, &day, &start_idx);
                 page_changed = 1;
                 break;
 
             /* Week navigation */
             case UI_KEY_SHIFT_RIGHT: /* Shift Right = next week */
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key:Shift Right Pressed");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key:Shift Right Pressed"));
                 goto_date(booking_fd, add_days(current_date, 7), &current_date, datestr, &day, &start_idx);
                 page_changed = 1;
                 break;
 
             case UI_KEY_SHIFT_LEFT: /* Shift Left = previous week */
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key: Shift Left Pressed");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key: Shift Left Pressed"));
                 goto_date(booking_fd, add_days(current_date, -7), &current_date, datestr, &day, &start_idx);
                 page_changed = 1;
                 break;
 
             /* Paging within a day */
             case UI_KEY_PGDN:    /* Page Down /  Scroll Down */
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key: Page Down Pressed");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key: Page Down Pressed"));
                 if (start_idx + MAX_BOOKING_ROWS < day.count){
                     start_idx += MAX_BOOKING_ROWS;
                     selected_idx = start_idx;
@@ -378,7 +378,7 @@ void run_booking_list(void)
                 break;
 
             case UI_KEY_PGUP:    /* Page Up  / Scroll Up */
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key: Key Page Up Pressed");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key: Key Page Up Pressed"));
                 if (start_idx >= MAX_BOOKING_ROWS){
                     start_idx -= MAX_BOOKING_ROWS;
                     selected_idx = start_idx;
@@ -392,7 +392,7 @@ void run_booking_list(void)
                 break;
 
             case UI_KEY_UP:
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key: Up Pressed");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key: Up Pressed"));
                 if (selected_idx > 0) {
                     selected_idx--;
                     selection_moved = 1;
@@ -400,7 +400,7 @@ void run_booking_list(void)
                 break;
 
             case UI_KEY_DOWN:
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key: Down Pressed");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key: Down Pressed"));
                 if (selected_idx + 1 < day.count) {
                     selected_idx++;
                     selection_moved = 1;
@@ -409,7 +409,7 @@ void run_booking_list(void)
 
             case 'V':
             case 'v':
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key: V Pressed for view mode");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key: V Pressed for view mode"));
                 if (day.count > 0) {
                     booking_t b;
                     if (db_bk_by_index(booking_fd, &day, selected_idx, &b) == 0) {
@@ -422,7 +422,7 @@ void run_booking_list(void)
             case 'e':
             case 'E':
             case UI_KEY_F2:
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key: E for edit or F2 Pressed for edit mode");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key: E for edit or F2 Pressed for edit mode"));
                 if (day.count > 0) {
                     booking_t b;
                     if (db_bk_by_index(booking_fd, &day, selected_idx, &b) == 0) {
@@ -436,7 +436,7 @@ void run_booking_list(void)
 
             case 'c':
             case 'C':
-                debug_log(DEBUG_INFO, FUNC_NAME, "Key: C pressed for create mode");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Key: C pressed for create mode"));
                 rc = run_booking_detail(booking_fd, NULL, BOOK_CREATE);
                 if (rc == BOOK_DETAIL_SAVED) {
                     /* Reload current day after create */
@@ -444,7 +444,7 @@ void run_booking_list(void)
                     page_changed = 1;
                     selected_idx = 0;
                 }
-                debug_log(DEBUG_TRACE, FUNC_NAME, "After booking_detail screen New");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "After booking_detail screen New"));
                 page_changed = 1;
                 break;
 
@@ -491,7 +491,7 @@ void run_booking_list(void)
                 page_changed = 1;
             }
             if (page_changed) {
-                debug_log(DEBUG_TRACE, FUNC_NAME, "paged_changed TRUE.");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "paged_changed TRUE."));
                 draw_screen(datestr, &day, start_idx, selected_idx, booking_fd, state_fd, customer_fd);
                 page_changed = 0;
             }

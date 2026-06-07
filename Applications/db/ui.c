@@ -30,7 +30,7 @@ int ui_read_line(int row, int col, char *buf, int maxlen)
     int cur_col = col;
     char tmp[2];
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     buf[0] = '\0';
 
@@ -50,12 +50,12 @@ int ui_read_line(int row, int col, char *buf, int maxlen)
         switch (key)
         {
             case UI_KEY_ENTER:
-                debug_log(DEBUG_INFO, FUNC_NAME, "Pressed UI_KEY_ENTER (loop 1)");
+                debug_log((DEBUG_INFO, FUNC_NAME, "Pressed UI_KEY_ENTER (loop 1)"));
                 buf[len] = '\0';
                 return len;   /* finished */
 
             case UI_KEY_BACKSPACE:
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_BACKSPACE");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_BACKSPACE"));
                 if (len > 0 && cur_col > col) {
                     len--;
                     cur_col--;
@@ -67,12 +67,12 @@ int ui_read_line(int row, int col, char *buf, int maxlen)
                 break;
 
             case UI_KEY_ESC:
-                debug_log(DEBUG_TRACE, FUNC_NAME,"EXIT triggered by key=%d", key);
+                debug_log((DEBUG_TRACE, FUNC_NAME,"EXIT triggered by key=%d", key));
                 buf[0] = '\0';
                 return -1;   /* aborted */
 
             default:
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Unknown key = %d", key);
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Unknown key = %d", key));
                 break;
         }
     }
@@ -80,16 +80,16 @@ int ui_read_line(int row, int col, char *buf, int maxlen)
 
 int decode_escape_sequence(const unsigned char *buf, int len)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     if (len >= 6){
-        debug_log(DEBUG_TRACE, FUNC_NAME, "INVALID Length >=6");
+        debug_log((DEBUG_TRACE, FUNC_NAME, "INVALID Length >=6"));
         return UI_KEY_INVALID;
     }
     /* ===== Detect incomplete sequences FIRST ===== */
     if (buf[0] == 0x1B) {
         if (len == 2 && buf[1] == '['){
             /* ESC [  (definitely incomplete) */
-            debug_log(DEBUG_TRACE, FUNC_NAME, "Escape Sequence to short");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "Escape Sequence to short"));
             return UI_KEY_INCOMPLETE;
         }
         if (len >= 3 && buf[1] == '[') {
@@ -105,7 +105,7 @@ int decode_escape_sequence(const unsigned char *buf, int len)
             }
             else{
                 /* Otherwise, still incomplete */
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Escape Sequence does not match known format");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Escape Sequence does not match known format"));
                 return UI_KEY_INCOMPLETE;
             }
         }
@@ -178,8 +178,8 @@ int decode_escape_sequence(const unsigned char *buf, int len)
 
 static void draw_field_reverse(int row, int col, const char *buf, int cursor_pos)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
-    debug_log(DEBUG_INFO, FUNC_NAME, "row=%d, col=%d cusor_pos=%d", row, col, cursor_pos);
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
+    debug_log((DEBUG_INFO, FUNC_NAME, "row=%d, col=%d cusor_pos=%d", row, col, cursor_pos));
     ui_attr_rv_on();
     ui_puts(row, col, buf);               /* Output Full Line */
     ui_attr_rv_off();
@@ -195,8 +195,8 @@ void ui_force_terminate(edit_state_t *es)
 
 void ui_move_cursor(int row, int col)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
-    debug_log(DEBUG_INFO, FUNC_NAME, "Position Cursor row=%d col=%d", row, col);
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
+    debug_log((DEBUG_INFO, FUNC_NAME, "Position Cursor row=%d col=%d", row, col));
     term_set_cursor(row, col);
     fflush(stdout);
 }
@@ -205,47 +205,47 @@ int ui_edit_field(edit_state_t *e, int row, int col)
 {
     int key;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     /* Initial full draw */
     draw_field_reverse(row, col, e->buf, e->cursor_pos);
     e->cursor_pos = 0;
     ui_move_cursor(row, col);
-    debug_log(DEBUG_INFO, FUNC_NAME, "Cursor forced to start");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Cursor forced to start"));
 
     while (1)
     {
-        debug_log(DEBUG_INFO, FUNC_NAME, "Top of While Loop: cursor_pos=%d buf='%.25s'", e->cursor_pos, e->buf);
-        debug_log(DEBUG_INFO, FUNC_NAME,"Top of While Loop: row=%d", row);
+        debug_log((DEBUG_INFO, FUNC_NAME, "Top of While Loop: cursor_pos=%d buf='%.25s'", e->cursor_pos, e->buf));
+        debug_log((DEBUG_INFO, FUNC_NAME,"Top of While Loop: row=%d", row));
 
         if (e->cursor_pos < 0){
             e->cursor_pos = 0;
         }
         if (e->cursor_pos >= e->maxlen){
             e->cursor_pos = e->maxlen - 1;
-            debug_log(DEBUG_INFO, FUNC_NAME, "maxlen check: cursor_pos=%d", e->cursor_pos);
+            debug_log((DEBUG_INFO, FUNC_NAME, "maxlen check: cursor_pos=%d", e->cursor_pos));
         }
 
         /* Wait for user input (terminal cursor blinks here) */
         key = ui_read_key();
-        debug_log(DEBUG_TRACE, FUNC_NAME, "Decoded key = %d (cursor=%d)", key, e->cursor_pos);
+        debug_log((DEBUG_TRACE, FUNC_NAME, "Decoded key = %d (cursor=%d)", key, e->cursor_pos));
 
         if (key == UI_KEY_NONE) {
-            debug_log(DEBUG_TRACE, FUNC_NAME, "Ignoring unknown key");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "Ignoring unknown key"));
             continue;
         }
 
         switch (key)
         {
             case UI_KEY_LEFT:
-                debug_log(DEBUG_INFO, FUNC_NAME, "case UI_KEY_LEFT:");
+                debug_log((DEBUG_INFO, FUNC_NAME, "case UI_KEY_LEFT:"));
                 if (e->cursor_pos > 0)
                     e->cursor_pos--;
                 ui_move_cursor(row, col + e->cursor_pos);
                 break;
 
            case UI_KEY_RIGHT:
-                debug_log(DEBUG_INFO, FUNC_NAME, "case UI_KEY_RIGHT:");
+                debug_log((DEBUG_INFO, FUNC_NAME, "case UI_KEY_RIGHT:"));
 
                 if (e->cursor_pos < e->maxlen - 1)
                     e->cursor_pos++;
@@ -254,7 +254,7 @@ int ui_edit_field(edit_state_t *e, int row, int col)
                 break;
 
             case UI_KEY_BACKSPACE:
-                debug_log(DEBUG_TRACE, FUNC_NAME, "case UI_KEY_BACKSPACE:");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "case UI_KEY_BACKSPACE:"));
                 if (e->cursor_pos > 0)
                 {
                     memmove(&e->buf[e->cursor_pos - 1], &e->buf[e->cursor_pos], e->maxlen - e->cursor_pos);
@@ -266,7 +266,7 @@ int ui_edit_field(edit_state_t *e, int row, int col)
                 break;
 
             case UI_KEY_DELETE:
-                debug_log(DEBUG_TRACE, FUNC_NAME, "case UI_KEY_DELETE:");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "case UI_KEY_DELETE:"));
 
                 if (e->cursor_pos < e->maxlen - 1)
                 {
@@ -278,7 +278,7 @@ int ui_edit_field(edit_state_t *e, int row, int col)
                 break;
 
             case UI_KEY_INSERT:
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Insert mode %s", e->insert_mode ? "ON" : "OFF");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Insert mode %s", e->insert_mode ? "ON" : "OFF"));
 
                 e->insert_mode = !e->insert_mode;    /* Toggle Insert / Over Type mode */
                 ui_status(e->insert_mode ? "Insert mode" : "Overwrite mode");
@@ -293,13 +293,13 @@ int ui_edit_field(edit_state_t *e, int row, int col)
             case UI_KEY_F1:
             case UI_KEY_F2:
             case UI_KEY_ESC:
-                debug_log(DEBUG_TRACE, FUNC_NAME, "case: Field change or Function Key pressed");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "case: Field change or Function Key pressed"));
                 return key; /* do NOT consume these key presses */
 
             default:
                 if (key >= 32 && key <= 126 && e->cursor_pos < e->maxlen)
                 {
-                    debug_log(DEBUG_TRACE, FUNC_NAME, "case default:");
+                    debug_log((DEBUG_TRACE, FUNC_NAME, "case default:"));
 
                     if (e->insert_mode)
                     {
@@ -324,7 +324,7 @@ int ui_edit_field(edit_state_t *e, int row, int col)
                     }
 
                     /* Redraw entire field */
-                    debug_log(DEBUG_TRACE, FUNC_NAME, "Position Cursor row=%d col=%d", row, e->cursor_pos);
+                    debug_log((DEBUG_TRACE, FUNC_NAME, "Position Cursor row=%d col=%d", row, e->cursor_pos));
                     draw_field_reverse(row, col, e->buf, e->cursor_pos);
                     ui_move_cursor(row, col + e->cursor_pos);
                 }
@@ -341,7 +341,7 @@ int ui_read_key(void)
     int key;
     int n;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     if (!initialised) {
         kb_init(&kb, ui_kb_backend);
@@ -356,9 +356,9 @@ int ui_read_key(void)
                 return key;
         } else {
             /* timeout:  advance parser */
-            debug_log(DEBUG_TRACE, FUNC_NAME, "TICK CALLED");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "TICK CALLED"));
             key = kb_tick(&kb);
-            debug_log(DEBUG_TRACE, FUNC_NAME, "TICK RESULT=%d", key);
+            debug_log((DEBUG_TRACE, FUNC_NAME, "TICK RESULT=%d", key));
             if (key > 0)
                 return key;
         }
@@ -427,7 +427,7 @@ void dd_mm_yyyy_to_yyyymmdd(const char *in, char *out, size_t outsz)
 
     /* Need 8 chars + NUL */
     if (!in || strlen(in) < 10 || outsz < (YYYYMMDD_LEN + 1)) {
-        debug_log(DEBUG_WARN, FUNC_NAME, "reject: in='%s' len=%zu outsz=%zu", in ? in : "(null)", in ? strlen(in) : 0, outsz);
+        debug_log((DEBUG_WARN, FUNC_NAME, "reject: in='%s' len=%zu outsz=%zu", in ? in : "(null)", in ? strlen(in) : 0, outsz));
         if (outsz > 0) out[0] = '\0';
         return;
     }
@@ -522,8 +522,8 @@ void ui_status(const char *msg)
 {
     char line[81];
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
-    debug_log(DEBUG_TRACE, FUNC_NAME,"msg: %s", msg);
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
+    debug_log((DEBUG_TRACE, FUNC_NAME,"msg: %s", msg));
     ui_save_cursor();
     if (!msg)
         msg = "";

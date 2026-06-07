@@ -66,14 +66,14 @@ typedef struct {
 static void debug_check_field_overlap(ui_field_t *fields, int count)
 {
     int i;
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     for (i = 0; i < count - 1; i++) {
         char *end = fields[i].ptr + fields[i].maxlen;
         char *next = fields[i + 1].ptr;
 
-        debug_log(DEBUG_TRACE, "field_check",
+        debug_log((DEBUG_TRACE, "field_check",
             "field %d end=%p next_start=%p gap=%ld",
-            i, end, next, (long)(next - end));
+            i, end, next, (long)(next - end)));
     }
 }
 #endif
@@ -145,7 +145,7 @@ static int lookup_staff_display(const char *id, char *out, size_t outlen)
 
 static void populate_display_cache(book_form_t *f)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter: ");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
     lookup_customer_display(f->edit_customer_id, f->customer_display, sizeof(f->customer_display));
     lookup_state_display(f->edit_state_id,       f->state_display,    sizeof(f->state_display));
     lookup_staff_display(f->edit_staff_id,       f->staff_display,    sizeof(f->staff_display));
@@ -176,8 +176,8 @@ static void bind_fields(book_form_t *f)
 
 static void booking_work_to_edit(book_form_t *f)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
-    debug_log(DEBUG_INFO, FUNC_NAME, "work.booking_customer_id='%s'", f->work.booking_customer_id);
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
+    debug_log((DEBUG_INFO, FUNC_NAME, "work.booking_customer_id='%s'", f->work.booking_customer_id));
 
     f->edit_status[0] = f->work.booking_status[0];  /* copy actual status char */
     f->edit_status[1] = '\0';                       /* add null terminator safely */
@@ -197,23 +197,23 @@ static void booking_work_to_edit(book_form_t *f)
     copy_record(f->edit_state_id,    f->work.booking_state_id,    BOOKING_STATE_ID_MAX);
     copy_record(f->edit_job,         f->work.booking_job,         BOOKING_JOB_MAX);
 
-    debug_log(DEBUG_TRACE, FUNC_NAME,
+    debug_log((DEBUG_TRACE, FUNC_NAME,
         "MECH edit=[%s] len=%zu term=%02x",
         f->edit_staff_id,
         strlen(f->edit_staff_id),
-        (unsigned char)f->edit_staff_id[BOOKING_STAFF_ID_MAX]);
+        (unsigned char)f->edit_staff_id[BOOKING_STAFF_ID_MAX]));
 
-    debug_log(DEBUG_TRACE, FUNC_NAME,
+    debug_log((DEBUG_TRACE, FUNC_NAME,
         "STATE edit=[%s] len=%zu term=%02x",
         f->edit_state_id,
         strlen(f->edit_state_id),
-        (unsigned char)f->edit_state_id[BOOKING_STATE_ID_MAX]);
+        (unsigned char)f->edit_state_id[BOOKING_STATE_ID_MAX]));
 
-    debug_log(DEBUG_TRACE, FUNC_NAME,
+    debug_log((DEBUG_TRACE, FUNC_NAME,
         "JOB edit=[%s] len=%zu term=%02x",
         f->edit_job,
         strlen(f->edit_job),
-        (unsigned char)f->edit_job[BOOKING_JOB_MAX]);
+        (unsigned char)f->edit_job[BOOKING_JOB_MAX]));
 }
 
 static void booking_edit_to_work(book_form_t *f)
@@ -231,9 +231,9 @@ static void booking_edit_to_work(book_form_t *f)
 
     /* Plain string copies */
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "edit_customer_id BEFORE copy = '%s'", f->edit_customer_id);
+    debug_log((DEBUG_INFO, FUNC_NAME, "edit_customer_id BEFORE copy = '%s'", f->edit_customer_id));
     copy_record(f->work.booking_customer_id, f->edit_customer_id,   BOOKING_CUSTOMER_ID_MAX);
-    debug_log(DEBUG_INFO, FUNC_NAME, "work_customer_id AFTER copy = '%s'", f->work.booking_customer_id);
+    debug_log((DEBUG_INFO, FUNC_NAME, "work_customer_id AFTER copy = '%s'", f->work.booking_customer_id));
 
     copy_record(f->work.booking_staff_id,    f->edit_staff_id,      BOOKING_STAFF_ID_MAX);
     copy_record(f->work.booking_state_id,    f->edit_state_id,      BOOKING_STATE_ID_MAX);
@@ -245,7 +245,7 @@ static void booking_edit_to_work(book_form_t *f)
 static int first_selectable_field(void)
 {
     int i;
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     for (i = 0; i < FIELD_COUNT; i++) {
         if (fields[i].mode == UI_FIELD_EDIT)
             return i;
@@ -255,7 +255,7 @@ static int first_selectable_field(void)
 
 static void draw_footer(const book_form_t *f)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     /* Help line */
     if (f->mode == BOOK_VIEW) {
@@ -288,7 +288,7 @@ static void draw_form(const book_form_t *f)
     int i;
     const char *val;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     ui_cls();
     ui_puts(1, 1, "Booking Details                                                    By D.Pollard");
@@ -350,7 +350,7 @@ static void move_field(book_form_t *f, int delta)
 {
     int i = f->field;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     for (;;) {
         i += delta;
@@ -370,32 +370,32 @@ static int edit_current_field(book_form_t *form)
     edit_state_t es;
     int rc;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     if (fld->mode != UI_FIELD_EDIT)
         return ui_read_key();
 
     if (form->field < 0 || form->field >= FIELD_COUNT) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "Field index out of range: %d", form->field);
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Field index out of range: %d", form->field));
         return 0;
     }
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Editing field %d: row=%d col=%d maxlen=%zu",
-        form->field, fld->row, fld->col, fld->maxlen);
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Editing field %d: row=%d col=%d maxlen=%zu",
+        form->field, fld->row, fld->col, fld->maxlen));
 
     es.buf = fld->ptr;
     es.maxlen = fld->maxlen;
     es.cursor_pos  = 0;
     es.insert_mode = 1;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "BEFORE edit: field=%d buf=%p maxlen=%zu", form->field, es.buf, es.maxlen);
+    debug_log((DEBUG_TRACE, FUNC_NAME, "BEFORE edit: field=%d buf=%p maxlen=%zu", form->field, es.buf, es.maxlen));
 
     dump_bytes(DEBUG_TRACE,"STATUS BEFORE EDIT", form->work.booking_status, sizeof(form->work.booking_status));
 
     rc = ui_edit_field(&es, FIRST_ROW + form->field, VALUE_COL);
     ui_force_terminate(&es);
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "AFTER edit: field=%d buf=%p maxlen=%zu", form->field, es.buf, es.maxlen);
+    debug_log((DEBUG_INFO, FUNC_NAME, "AFTER edit: field=%d buf=%p maxlen=%zu", form->field, es.buf, es.maxlen));
 
     /* ---- force termination ---- */
     es.buf[es.maxlen] = '\0';
@@ -424,18 +424,18 @@ static int booking_detail_handle_exit(book_form_t *form, int fd)
     char tmp_start[BOOKING_START_TIME_LEN +1];
     char tmp_end[BOOKING_END_TIME_LEN +1];
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Output 1: status='%c' (0x%02X)", form->work.booking_status[0],
-        (unsigned char)form->work.booking_status[0]);
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Output 1: status='%c' (0x%02X)", form->work.booking_status[0],
+        (unsigned char)form->work.booking_status[0]));
 
     dump_bytes(DEBUG_TRACE, "status AT ENTRY", form->work.booking_status, sizeof(form->work.booking_status) + 2);
 
-    debug_log(DEBUG_TRACE, FUNC_NAME,
+    debug_log((DEBUG_TRACE, FUNC_NAME,
         "edit_date raw bytes: [%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X]",
         form->edit_date[0], form->edit_date[1], form->edit_date[2],
         form->edit_date[3], form->edit_date[4], form->edit_date[5],
         form->edit_date[6], form->edit_date[7], form->edit_date[8],
-        form->edit_date[9], form->edit_date[10]);
+        form->edit_date[9], form->edit_date[10]));
 
     /* Convert UI buffers → DB format */
     dd_mm_yyyy_to_yyyymmdd(form->edit_date, tmp_date, sizeof(tmp_date));
@@ -445,10 +445,10 @@ static int booking_detail_handle_exit(book_form_t *form, int fd)
     /* Sync UI edits into work buffer for change detection */
     booking_edit_to_work(form);
 
-    debug_log(DEBUG_TRACE, FUNC_NAME,
+    debug_log((DEBUG_TRACE, FUNC_NAME,
         "Output 2: status='%c' (0x%02X)",
         form->work.booking_status[0],
-        (unsigned char)form->work.booking_status[0]);
+        (unsigned char)form->work.booking_status[0]));
 
     if (form->work.booking_status[0] != form->orig.booking_status[0])
         changed = 1;
@@ -467,16 +467,16 @@ static int booking_detail_handle_exit(book_form_t *form, int fd)
     if (strncmp(form->work.booking_customer_id, form->orig.booking_customer_id, BOOKING_CUSTOMER_ID_MAX) != 0)
         changed = 1;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME,
+    debug_log((DEBUG_TRACE, FUNC_NAME,
         "Output 3: status='%c' (0x%02X)",
         form->work.booking_status[0],
-        (unsigned char)form->work.booking_status[0]);
+        (unsigned char)form->work.booking_status[0]));
 
-    debug_log(DEBUG_TRACE, FUNC_NAME,
+    debug_log((DEBUG_TRACE, FUNC_NAME,
         "cmp: orig date='%s' tmp='%s' | orig start='%s' tmp='%s' | orig end='%s' tmp='%s'",
         form->orig.booking_date, tmp_date,
         form->orig.booking_start_time, tmp_start,
-        form->orig.booking_end_time, tmp_end);
+        form->orig.booking_end_time, tmp_end));
 
     if (!changed) {
         ui_status("No changes");
@@ -487,9 +487,9 @@ static int booking_detail_handle_exit(book_form_t *form, int fd)
     ui_status("Save Changes (Y/N)");
     ui_puts(UI_COMMAND_ROW, 1, "Command: ");
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Output 4: status='%c' (0x%02X)",
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Output 4: status='%c' (0x%02X)",
         form->work.booking_status[0],
-        (unsigned char)form->work.booking_status[0]);
+        (unsigned char)form->work.booking_status[0]));
 
     for (;;) {
         int key = ui_read_key();
@@ -507,12 +507,12 @@ static int booking_detail_handle_exit(book_form_t *form, int fd)
             }
 
             /* Rebuild DB record from UI buffers */
-            debug_log(DEBUG_TRACE, FUNC_NAME, "Output 5: status='%c' (0x%02X)", form->work.booking_status[0], (unsigned char)form->work.booking_status[0]);
+            debug_log((DEBUG_TRACE, FUNC_NAME, "Output 5: status='%c' (0x%02X)", form->work.booking_status[0], (unsigned char)form->work.booking_status[0]));
 
             /* booking_date: DD/MM/YYYY → YYYYMMDD */
             dd_mm_yyyy_to_yyyymmdd(form->edit_date, form->work.booking_date, sizeof(form->work.booking_date));
 
-            debug_log(DEBUG_TRACE, FUNC_NAME, "Output 6: status='%c' (0x%02X)", form->work.booking_status[0], (unsigned char)form->work.booking_status[0]);
+            debug_log((DEBUG_TRACE, FUNC_NAME, "Output 6: status='%c' (0x%02X)", form->work.booking_status[0], (unsigned char)form->work.booking_status[0]));
 
             /* times: HH:MM → HHMM */
             hhmm_colon_to_hhmm(form->edit_start, form->work.booking_start_time, sizeof(form->work.booking_start_time));
@@ -525,12 +525,12 @@ static int booking_detail_handle_exit(book_form_t *form, int fd)
 
 
             /* Write to DB */
-            debug_log(DEBUG_TRACE, FUNC_NAME,  "writing record: status='%s' date='%s' start='%s' end='%s'",
-               form->work.booking_status, form->work.booking_date, form->work.booking_start_time, form->work.booking_end_time);
+            debug_log((DEBUG_TRACE, FUNC_NAME,  "writing record: status='%s' date='%s' start='%s' end='%s'",
+               form->work.booking_status, form->work.booking_date, form->work.booking_start_time, form->work.booking_end_time));
 
-            debug_log(DEBUG_TRACE, FUNC_NAME,
+            debug_log((DEBUG_TRACE, FUNC_NAME,
             "booking_t dump: status='%s' id='%s' start='%s' end='%s'",
-                form->work.booking_status, form->work.booking_id, form->work.booking_start_time, form->work.booking_end_time);
+                form->work.booking_status, form->work.booking_id, form->work.booking_start_time, form->work.booking_end_time));
 
             /* New Record generate ID*/
             if (form->recno == -1) {
@@ -638,7 +638,7 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
     int fd = booking_fd;  /* File descriptor passed in from booking_list. */
     int i;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     memset(&form, 0, sizeof(form));
     form.guard_before_work = 0xAA;   /* <-- Debug Code */
@@ -650,7 +650,7 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
     case BOOK_VIEW:
     case BOOK_EDIT:
         if (!booking_id) {
-            debug_log(DEBUG_ERROR, FUNC_NAME, "*** ERROR: *** NULL booking_id in VIEW/EDIT mode");
+            debug_log((DEBUG_ERROR, FUNC_NAME, "*** ERROR: *** NULL booking_id in VIEW/EDIT mode"));
             ui_status("ERROR: NULL booking_id in VIEW/EDIT mode");
             sleep(4);
             return -1;
@@ -658,13 +658,13 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
 
         if (db_bk_by_id(fd, booking_id, &book, &recno) != 0) {
             db_bk_cl_read(fd);
-            debug_log(DEBUG_ERROR, FUNC_NAME, "*** Error: *** Booking Not Found");
+            debug_log((DEBUG_ERROR, FUNC_NAME, "*** Error: *** Booking Not Found"));
             ui_status("ERROR: Booking not found");
             sleep(4);
             return -1;
         }
-        debug_log(DEBUG_TRACE, FUNC_NAME, "AFTER READ: status='%c' (0x%02X)", form.orig.booking_status[0], (unsigned char)form.orig.booking_status[0]);
-        debug_log(DEBUG_TRACE, FUNC_NAME, "sizeof booking_status=%zu booking_id=%zu", sizeof(form.orig.booking_status), sizeof(form.orig.booking_id));
+        debug_log((DEBUG_TRACE, FUNC_NAME, "AFTER READ: status='%c' (0x%02X)", form.orig.booking_status[0], (unsigned char)form.orig.booking_status[0]));
+        debug_log((DEBUG_TRACE, FUNC_NAME, "sizeof booking_status=%zu booking_id=%zu", sizeof(form.orig.booking_status), sizeof(form.orig.booking_id)));
         dump_bytes(DEBUG_TRACE, "orig booking_status+id", (unsigned char *)form.orig.booking_status, sizeof(form.orig.booking_status) + sizeof(form.orig.booking_id) + 1);
         break;
 
@@ -681,7 +681,7 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
     /* DEBUG TESTING Preserve booking status explicitly */
     form.work.booking_status[0] = book.booking_status[0];
     form.work.booking_status[1] = '\0';
-    debug_log(DEBUG_TRACE, FUNC_NAME, "INIT status after read = '%c' (0x%02X)", form.work.booking_status[0], (unsigned char)form.work.booking_status[0]);
+    debug_log((DEBUG_TRACE, FUNC_NAME, "INIT status after read = '%c' (0x%02X)", form.work.booking_status[0], (unsigned char)form.work.booking_status[0]));
     /*==================================================*/
 
     memcpy(&form.orig, &book, sizeof(book));
@@ -697,19 +697,19 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
     booking_work_to_edit(&form);
     bind_fields(&form);
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "ADDR work.booking_status = %p", form.work.booking_status);
-    debug_log(DEBUG_TRACE, FUNC_NAME, "ADDR edit_status        = %p",  form.edit_status);
-    debug_log(DEBUG_TRACE, FUNC_NAME, "ADDR edit_date          = %p",  form.edit_date);
-    debug_log(DEBUG_TRACE, FUNC_NAME, "ADDR edit_start         = %p",  form.edit_start);
-    debug_log(DEBUG_TRACE, FUNC_NAME, "ADDR edit_end           = %p",  form.edit_end);
-    debug_log(DEBUG_TRACE, FUNC_NAME, "ADDR edit_staff_id   = %p",     form.edit_staff_id);
-    debug_log(DEBUG_TRACE, FUNC_NAME, "ADDR edit_state_id      = %p",  form.edit_state_id);
-    debug_log(DEBUG_TRACE, FUNC_NAME, "ADDR edit_job           = %p",  form.edit_job);
+    debug_log((DEBUG_TRACE, FUNC_NAME, "ADDR work.booking_status = %p", form.work.booking_status));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "ADDR edit_status        = %p",  form.edit_status));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "ADDR edit_date          = %p",  form.edit_date));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "ADDR edit_start         = %p",  form.edit_start));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "ADDR edit_end           = %p",  form.edit_end));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "ADDR edit_staff_id   = %p",     form.edit_staff_id));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "ADDR edit_state_id      = %p",  form.edit_state_id));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "ADDR edit_job           = %p",  form.edit_job));
 
     for (i = 0; i < FIELD_COUNT; i++) {
-        debug_log(DEBUG_TRACE, FUNC_NAME,
+        debug_log((DEBUG_TRACE, FUNC_NAME,
             "After call to bind_fields :- fields[%d]: ptr=%p maxlen=%zu editable=%d",
-            i, fields[i].ptr, fields[i].maxlen, fields[i].mode);
+            i, fields[i].ptr, fields[i].maxlen, fields[i].mode));
     }
 
     /* Set first selectable field */
@@ -728,8 +728,8 @@ int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode)
         if (mode == BOOK_EDIT || mode == BOOK_CREATE) {
 
             int key = edit_current_field(&form);
-            debug_log(DEBUG_INFO, FUNC_NAME, "Key read = 0x%04X", key);
-            debug_log(DEBUG_TRACE, FUNC_NAME, "GUARD before work = 0x%02X", form.guard_before_work);
+            debug_log((DEBUG_INFO, FUNC_NAME, "Key read = 0x%04X", key));
+            debug_log((DEBUG_TRACE, FUNC_NAME, "GUARD before work = 0x%02X", form.guard_before_work));
 
             switch (key) {
                 case UI_KEY_UP:

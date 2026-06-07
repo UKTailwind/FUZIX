@@ -31,7 +31,7 @@ static int first_draw = 1;
 
 static void draw_main_menu(void)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
     ui_cls();         /* Clear the screen */
     ui_status("");    /* Draw the blank status bar */
 /*
@@ -123,7 +123,7 @@ int main(int argc, char *argv[])
 #endif
 
     /* If debug enabled always show the Program Start Message */
-    debug_log(DEBUG_ERROR, FUNC_NAME, "Enter: ******** Program Start *********");
+    debug_log((DEBUG_ERROR, FUNC_NAME, "Enter: ******** Program Start *********"));
 
     /* Set the keyboard type read from the command line */
     ui_set_keyboard_backend(active_backend);
@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
 
     /* Main menu */
     for (;;) {
-        debug_log(DEBUG_INFO, FUNC_NAME, "Menu for loop begin");
+        debug_log((DEBUG_INFO, FUNC_NAME, "Menu for loop begin"));
 
         if (!first_draw)
         {
@@ -155,66 +155,66 @@ int main(int argc, char *argv[])
         if (menu_choice == '\n' || menu_choice == '\r')
             continue;
 
-        debug_log(DEBUG_TRACE, FUNC_NAME, "Main menu key=%d '%c'", menu_choice, (menu_choice >= 32 && menu_choice < 127) ? menu_choice : '?');
+        debug_log((DEBUG_TRACE, FUNC_NAME, "Main menu key=%d '%c'", menu_choice, (menu_choice >= 32 && menu_choice < 127) ? menu_choice : '?'));
 
         if (menu_choice == '1')
         {
-            debug_log(DEBUG_TRACE, FUNC_NAME, "About to call booking_run()");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "About to call booking_run()"));
             run_booking_list();
-            debug_log(DEBUG_TRACE, FUNC_NAME, "Returned from booking_run()");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "Returned from booking_run()"));
         }
 
         else if (menu_choice == '2')
         {
-            debug_log(DEBUG_INFO, FUNC_NAME, "About to call customer_run()");
+            debug_log((DEBUG_INFO, FUNC_NAME, "About to call customer_run()"));
             run_customer_list(CUSTOMER_MODE_MANAGE, NULL, NULL);
-            debug_log(DEBUG_INFO, FUNC_NAME, "Returned from customer_run()");
+            debug_log((DEBUG_INFO, FUNC_NAME, "Returned from customer_run()"));
         }
 
         else if (menu_choice == '3')
         {
-            debug_log(DEBUG_TRACE, FUNC_NAME, "About to call invoice_run()");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "About to call invoice_run()"));
             ui_status("TODO");
             sleep(2);
-            debug_log(DEBUG_TRACE, FUNC_NAME, "Returned from invoice_run()");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "Returned from invoice_run()"));
         }
         else if (menu_choice == '4')
         {
-            debug_log(DEBUG_TRACE, FUNC_NAME, "About to call staff_roster_run()");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "About to call staff_roster_run()"));
             ui_status("TODO");
             sleep(2);
-            debug_log(DEBUG_TRACE, FUNC_NAME, "Returned from staff_roster_run()");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "Returned from staff_roster_run()"));
         }
 
         else if (menu_choice == '5')
         {
-            debug_log(DEBUG_TRACE, FUNC_NAME, "About to call staff_setup_run()");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "About to call staff_setup_run()"));
             ui_status("TODO");
             sleep(2);
-            debug_log(DEBUG_TRACE, FUNC_NAME, "Returned from staff_setup_run()");
+            debug_log((DEBUG_TRACE, FUNC_NAME, "Returned from staff_setup_run()"));
         }
         else if (menu_choice == '6')
         {
-            debug_log(DEBUG_INFO, FUNC_NAME, "About to call keyboard_test_run()");
+            debug_log((DEBUG_INFO, FUNC_NAME, "About to call keyboard_test_run()"));
             keyboard_test_run();
-            debug_log(DEBUG_INFO, FUNC_NAME, "Returned from keyboard_run()");
+            debug_log((DEBUG_INFO, FUNC_NAME, "Returned from keyboard_run()"));
         }
 
         else if (menu_choice == UI_KEY_ESC)
         {
-            debug_log(DEBUG_INFO, FUNC_NAME, "Exiting menu loop");
+            debug_log((DEBUG_INFO, FUNC_NAME, "Exiting menu loop"));
             exit_code = 0;
             break; /* Do cleanup */
         }
 
         else {
-            debug_log(DEBUG_INFO, FUNC_NAME, "Unknown key pressed");
+            debug_log((DEBUG_INFO, FUNC_NAME, "Unknown key pressed"));
         }
-        debug_log(DEBUG_INFO, FUNC_NAME, "Menu for loop end");
+        debug_log((DEBUG_INFO, FUNC_NAME, "Menu for loop end"));
     }
 
     /* cleanup */
-    debug_log(DEBUG_INFO, FUNC_NAME, "Cleanup Run");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Cleanup Run"));
     term_raw_off();
     ui_cls();
     sleep(1);

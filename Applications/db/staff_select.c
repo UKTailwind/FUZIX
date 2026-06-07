@@ -20,7 +20,7 @@ static int load_staff(void)
     int fd = db_staff_open();
     long rec = 0;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     if (fd < 0)
         return -1;
@@ -56,7 +56,7 @@ static int load_staff(void)
     }
 
 */
-    debug_log(DEBUG_INFO, FUNC_NAME, "Loaded %d staff", staff_count);
+    debug_log((DEBUG_INFO, FUNC_NAME, "Loaded %d staff", staff_count));
     return staff_count;
 }
 
@@ -65,7 +65,7 @@ static int load_staff(void)
 static void draw_popup(int start_row, int start_col, int rows, int cols) {
     int r;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     for (r = 0; r < rows; r++) {
         int c;
@@ -79,7 +79,7 @@ static void draw_popup(int start_row, int start_col, int rows, int cols) {
 static void draw_staff(int start_row, int start_col, int selected) {
     int i;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     for (i = 0; i < staff_count; i++) {
         if (i == selected) ui_attr_rv_on();
@@ -95,7 +95,7 @@ int staff_select(char *out_staff_id) {
     int start_row;
     int start_col;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     if (load_staff() <= 0) return -1;
 

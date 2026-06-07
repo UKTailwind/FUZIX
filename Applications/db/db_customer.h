@@ -67,7 +67,7 @@ int db_cs_write(int fd, long *recno, const customer_t *in);
 
 /* Helpers */
 int db_cs_load_page(int fd, long start_rec, CustomerList *list, long *next_rec);
-int db_cs_read_by_id(int fd, const char *customer_id, customer_t *out, long *out_recno);
+int db_cs_by_id(int fd, const char *customer_id, customer_t *out, long *out_recno);
 int db_cs_generate_next_id(int fd, char *out_id);
 int db_cs_lookup_display(int customer_fd, const char *customer_id, char *out, size_t outlen);
 

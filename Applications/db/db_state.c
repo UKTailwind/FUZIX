@@ -24,24 +24,24 @@ int db_state_read(int fd, long recno, state_t *out)
     off_t off;
 
     /* Log entry + arguments */
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter: fd=%d recno=%ld out=%p", fd, recno, out);
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: fd=%d recno=%ld out=%p", fd, recno, out));
     if (fd < 0 || recno < 0 || !out){
-        debug_log(DEBUG_ERROR, FUNC_NAME, "Invalid args: fd=%d recno=%ld out=%p", fd, recno, out);
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid args: fd=%d recno=%ld out=%p", fd, recno, out));
         return -1;
     }
     /* Computed File Offset */
     off = (off_t)recno * STATE_DISK_LEN;
-    debug_log(DEBUG_INFO, FUNC_NAME, "offset=%ld (recno=%ld * %d)", (long)off, recno, STATE_DISK_LEN);
+    debug_log((DEBUG_INFO, FUNC_NAME, "offset=%ld (recno=%ld * %d)", (long)off, recno, STATE_DISK_LEN));
 
     if (lseek(fd, off, SEEK_SET) != off){
-        debug_log(DEBUG_ERROR, FUNC_NAME, "Error: Reading State");
-        debug_log(DEBUG_ERROR, FUNC_NAME, "EOF: offset=%ld", (long)off);
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Error: Reading State"));
+        debug_log((DEBUG_ERROR, FUNC_NAME, "EOF: offset=%ld", (long)off));
         return -1;
     }
 
     if (read(fd, line, STATE_DISK_LEN) != STATE_DISK_LEN){
-        debug_log(DEBUG_ERROR, FUNC_NAME, "ERROR: State File Length ");
-        debug_log(DEBUG_ERROR, FUNC_NAME, "EOF: offset=%ld", (long)off);
+        debug_log((DEBUG_ERROR, FUNC_NAME, "ERROR: State File Length "));
+        debug_log((DEBUG_ERROR, FUNC_NAME, "EOF: offset=%ld", (long)off));
         return -1;
     }
 
@@ -54,10 +54,10 @@ int db_state_write(int fd, long recno, const state_t *in)
     off_t off;
     ssize_t rc;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter: record number=%ld", recno);
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: record number=%ld", recno));
 
     if (fd < 0 || recno < 0 || !in){
-        debug_log(DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d recno=%ld in=%p", fd, recno, in);
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d recno=%ld in=%p", fd, recno, in));
         return -1;
     }
     off = (off_t)recno * STATE_DISK_LEN;
@@ -65,12 +65,12 @@ int db_state_write(int fd, long recno, const state_t *in)
     db_state_format_line(in, line);
 
     if (lseek(fd, off, SEEK_SET) == (off_t)-1) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "lseek failed: fd=%d off=%ld errno=%d", fd, (long)off, errno);
+        debug_log((DEBUG_ERROR, FUNC_NAME, "lseek failed: fd=%d off=%ld errno=%d", fd, (long)off, errno));
         return -1;
     }
     rc = write(fd, line, STATE_DISK_LEN);
     if (rc != STATE_DISK_LEN) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "write failed: fd=%d wanted=%d wrote=%ld errno=%d", fd, STATE_DISK_LEN, (long)rc, errno);
+        debug_log((DEBUG_ERROR, FUNC_NAME, "write failed: fd=%d wanted=%d wrote=%ld errno=%d", fd, STATE_DISK_LEN, (long)rc, errno));
         return -1;
     }
     return 0;
@@ -81,7 +81,7 @@ int db_state_parse_line(const char *line, state_t *out)
 {
     char buf[8];
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     if (!line || !out)
         return -1;
 
@@ -109,7 +109,7 @@ void db_state_format_line(const state_t *in, char *line)
 {
     char tmp[5];
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     if (!in || !line)
         return;
 
@@ -137,10 +137,10 @@ int db_state_open(void)
     int fd = open("data/state.db", O_RDWR);
     struct stat st;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter: ");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
 
     if (fd < 0) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "Failed to open state");
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Failed to open state"));
         ui_status("Failed to open state file");
         sleep(2);
         return -1;
@@ -148,7 +148,7 @@ int db_state_open(void)
 
     /* Check state file */
     if (fstat(fd, &st) != 0) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "Cannot stat state database");
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Cannot stat state database"));
         ui_status("Cannot stat state database");
         close(fd);
         sleep(2);
@@ -156,8 +156,8 @@ int db_state_open(void)
     }
 
     if (st.st_size % STATE_DISK_LEN != 0) {
-        debug_log(DEBUG_ERROR, FUNC_NAME,
-                  "State DB corrupt (bad record length)");
+        debug_log((DEBUG_ERROR, FUNC_NAME,
+                  "State DB corrupt (bad record length)"));
         ui_status("State DB corrupt (bad record length)");
         close(fd);
         sleep(2);
@@ -168,7 +168,7 @@ int db_state_open(void)
 
     if (g_open_files > g_peak_open_files)
         g_peak_open_files = g_open_files;
-    debug_log(DEBUG_INFO, FUNC_NAME, "OPEN READ fd=%d total=%d peak=%d", fd, g_open_files, g_peak_open_files);
+    debug_log((DEBUG_INFO, FUNC_NAME, "OPEN READ fd=%d total=%d peak=%d", fd, g_open_files, g_peak_open_files));
 
     return fd;
 }
@@ -178,7 +178,7 @@ int db_state_name_from_id(int fd, const char *state_id, char *state_name)
     char line[STATE_DISK_LEN];
     ssize_t n;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     /* start at beginning of file */
     lseek(fd, 0, SEEK_SET);
 
@@ -206,14 +206,14 @@ int db_state_close(int fd)
 {
     int rc;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter: ");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
 
     if (fd < 0)
         return 0;
     rc = close(fd);
     if (rc == 0) {
         g_open_files--;
-        debug_log(DEBUG_INFO, FUNC_NAME, "CLOSE READ fd=%d total=%d", fd, g_open_files);
+        debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE READ fd=%d total=%d", fd, g_open_files));
     }
     return rc;
 }

@@ -21,7 +21,7 @@ static int load_states(void)
     long rec = 0;
     int i;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     if (fd < 0)
         return -1;
@@ -53,7 +53,7 @@ static int load_states(void)
         }
     }
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Loaded %d states", state_count);
+    debug_log((DEBUG_INFO, FUNC_NAME, "Loaded %d states", state_count));
 
     return state_count;
 }
@@ -62,7 +62,7 @@ static int load_states(void)
 /* Draw popup frame and border */
 static void draw_popup(int start_row, int start_col, int rows, int cols) {
     int r;
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     for (r = 0; r < rows; r++) {
         int c;
@@ -75,7 +75,7 @@ static void draw_popup(int start_row, int start_col, int rows, int cols) {
 /* Draw the list of states */
 static void draw_states(int start_row, int start_col, int selected) {
     int i;
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     for (i = 0; i < state_count; i++) {
         if (i == selected) ui_attr_rv_on();
@@ -90,7 +90,7 @@ int state_select(char *out_state_id) {
     int i;
     int start_row, start_col;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     if (load_states() <= 0) return -1;
 

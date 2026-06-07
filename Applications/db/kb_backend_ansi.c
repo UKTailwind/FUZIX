@@ -7,13 +7,13 @@
 
 static int kb_ansi_is_terminator(char c)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     return (c >= '@' && c <= '~');
 }
 
 static int kb_ansi_handle_esc(kb_parser_t *kb, uint8_t byte)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "ANSI ESC handler byte=%c", byte);
+    debug_log((DEBUG_TRACE, FUNC_NAME, "ANSI ESC handler byte=%c", byte));
 
     if (byte == kb->backend->csi_intro) {
         kb->state = KB_STATE_CSI;

@@ -61,19 +61,19 @@ static int first_selectable_field(void)
 {
     int i;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     for (i = 0; i < FIELD_COUNT; i++) {
         if (fields[i].mode)
             return i;
     }
-    debug_log(DEBUG_ERROR, FUNC_NAME, "Fallback: Should Never Happen");
+    debug_log((DEBUG_ERROR, FUNC_NAME, "Fallback: Should Never Happen"));
     return 0;  /* fallback (should never happen) */
 }
 
 static void draw_footer(const cust_form_t *f)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     /* Help line */
     if (f->mode == CUST_VIEW) {
         ui_puts(UI_HELP_ROW, 1, "Esc=Back");
@@ -104,7 +104,7 @@ static void draw_form(const cust_form_t *f)
     char  buf[128];
     int i;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     ui_cls();
     ui_puts(1, 1, " Mechanic Workshop Customer Details                                By D.Pollard");
@@ -123,7 +123,7 @@ static void draw_form(const cust_form_t *f)
 
         /* Value */
         val = fields[i].ptr;
-        debug_log(DEBUG_INFO, FUNC_NAME, "field=%d len=%d width=%d val='%s'", i, strlen(val), FIELD_WIDTH, val);
+        debug_log((DEBUG_INFO, FUNC_NAME, "field=%d len=%d width=%d val='%s'", i, strlen(val), FIELD_WIDTH, val));
 
         if (i == f->field && f->mode != CUST_VIEW && fields[i].mode) {
             ui_attr_rv_on();
@@ -143,7 +143,7 @@ static void move_field(cust_form_t *f, int delta)
 {
     int i = f->field;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     for (;;) {
         i += delta;
         if (i < 0 || i >= FIELD_COUNT)
@@ -161,7 +161,7 @@ static int edit_current_field(cust_form_t *form)
     ui_field_t *fld = &fields[form->field];
     edit_state_t es;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Editing field %d: row=%d, col=%d, maxlen=%zu", form->field, fld->row, fld->col, fld->maxlen);
+    debug_log((DEBUG_INFO, FUNC_NAME, "Editing field %d: row=%d, col=%d, maxlen=%zu", form->field, fld->row, fld->col, fld->maxlen));
 
     es.buf = fld->ptr;
     es.maxlen = fld->maxlen;
@@ -173,7 +173,7 @@ static int edit_current_field(cust_form_t *form)
 
 static int customer_detail_handle_exit(cust_form_t *form, int fd)
 {
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     /* No changes → just exit */
     if (memcmp(&form->orig, &form->work, sizeof(customer_t)) == 0) {
@@ -293,10 +293,10 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
     memset(&cust, 0, sizeof(cust));
     memset(&form, 0, sizeof(form));
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     if (fd < 0) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "Error: Unalbe to open Cuatomer DB");
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Error: Unalbe to open Cuatomer DB"));
         ui_status("ERROR: Unable to open customer DB");
         sleep(4);
         return -1;
@@ -306,13 +306,13 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
     if (mode == CUST_EDIT || mode == CUST_VIEW) {
 
         if (!customer_id) {
-            debug_log(DEBUG_ERROR, FUNC_NAME, "NULL customer_id in EDIT/VIEW mode");
+            debug_log((DEBUG_ERROR, FUNC_NAME, "NULL customer_id in EDIT/VIEW mode"));
             return -1;
         }
 
-        if (db_cs_read_by_id(fd, customer_id, &cust, &recno) != 0) {
+        if (db_cs_by_id(fd, customer_id, &cust, &recno) != 0) {
             db_cs_cl_read(fd);
-            debug_log(DEBUG_ERROR, FUNC_NAME, "Error: Customer Not Found");
+            debug_log((DEBUG_ERROR, FUNC_NAME, "Error: Customer Not Found"));
             ui_status("ERROR: Customer not found");
             sleep(2);
             return -1;
@@ -322,7 +322,7 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
     /* ---- CREATE mode ---- */
     else if (mode == CUST_CREATE)
     {
-        debug_log(DEBUG_INFO, FUNC_NAME, "Create new customer");
+        debug_log((DEBUG_INFO, FUNC_NAME, "Create new customer"));
 
         memset(&cust, 0, sizeof(cust));
         cust.cs_id[0] = '\0';     /* not assigned yet */
@@ -357,7 +357,7 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
         if (form.mode == CUST_EDIT || form.mode == CUST_CREATE)
         {
             key = edit_current_field(&form);
-            debug_log(DEBUG_TRACE, FUNC_NAME, "CUST_EDIT=%i CUST_CREATE=%i", CUST_EDIT, CUST_CREATE);
+            debug_log((DEBUG_TRACE, FUNC_NAME, "CUST_EDIT=%i CUST_CREATE=%i", CUST_EDIT, CUST_CREATE));
 
             switch (key)
             {
@@ -382,7 +382,7 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
                     return customer_detail_handle_exit(&form, fd);
 
                 case UI_KEY_SHIFT_DELETE:
-                    debug_log(DEBUG_INFO, FUNC_NAME, "Shift Delete Detected");
+                    debug_log((DEBUG_INFO, FUNC_NAME, "Shift Delete Detected"));
                     form.work.cs_status[0] = CUSTOMER_STATUS_DELETED;
                     form.work.cs_status[1] = '\0';
 

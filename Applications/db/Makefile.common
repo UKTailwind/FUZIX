@@ -18,7 +18,7 @@ booking: $(OBJ)
 $(OBJ): dbgen db_booking_layout.h db_customer_layout.h db_staff_layout.h db_state_layout.h
 
 .c.o:
-	$(CC) $(CFLAGS) -DDEBUG_ENABLED $(CCOPTS) -c $<
+	$(CC) $(CFLAGS) $(CCOPTS) -c $<
 
 db_booking_layout.h: dbgen booking-layout.def
 	./dbgen BOOKING <booking-layout.def >db_booking_layout.h

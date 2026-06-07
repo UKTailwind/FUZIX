@@ -54,7 +54,7 @@ static void draw_screen(int mode, const CustomerList *customer, int start_idx, c
 
     line[0] = '\0';
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     ui_attr_rv_off();
     ui_cls();
     ui_puts(1, 1, " Booking Customer Management System                                By D.Pollard");
@@ -113,7 +113,7 @@ static void run_customer_search(int mode, int customer_fd, CustomerList *custome
     int overflow;
     int rc;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     ui_puts(22, 1, "                                                            ");
     ui_puts(22, 1, "Enter search text, blank line exits search mode");
@@ -178,7 +178,7 @@ static int build_search_results(int fd, const char *text)
     long rec = 0;
     match_count = 0;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     while (db_cs_read(fd, rec, &c) == 0) {
         if (c.cs_status[0] != CUSTOMER_STATUS_DELETED &&
@@ -197,7 +197,7 @@ static int build_search_results(int fd, const char *text)
 
 static int cs_nmatch_disk(const customer_t *c, const char *text)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     if (text[0] == '\0')
         return 1;
     return strcasestr_simple(c->cs_name, text) != NULL;
@@ -210,7 +210,7 @@ static void load_search_page(int fd, int start_idx, CustomerList *list)
     long recno;
     customer_list_rec_t *dst;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     list->count = 0;
 
     for (i = 0; i < CUSTOMER_PAGE_SIZE; i++) {
@@ -235,7 +235,7 @@ static void load_search_page(int fd, int start_idx, CustomerList *list)
 
 static const char *strcasestr_simple(const char *haystack, const char *needle)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME , "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME , "Enter:"));
     if (*needle == '\0')
         return haystack;
 
@@ -259,7 +259,7 @@ static const char *strcasestr_simple(const char *haystack, const char *needle)
 
 static int cs_nmatch(const customer_list_rec_t *c, const char *search)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     if (search[0] == '\0')
         return 1;
 
@@ -270,7 +270,7 @@ static void rebuild_vis_customers(CustomerList *customer)
 {
     int i;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     visible_count = 0;
 
@@ -297,7 +297,7 @@ static void rebuild_vis_page(CustomerList *customer)
 {
     int i;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
     visible_count = customer->count;
 
     for (i = 0; i < visible_count; i++) {
@@ -311,7 +311,7 @@ static void draw_customer_row(const CustomerList *customer, int screen_row, int 
     int vi = visible_indexes[visible_idx];
     const customer_list_rec_t *s = &customer->slots[vi];
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     if (is_selected)
         ui_attr_rv_on();
@@ -331,7 +331,7 @@ static void draw_customer_row(const CustomerList *customer, int screen_row, int 
 
 static void apply_loaded_page(CustomerList *customer, int *start_idx, int *selected_idx, int *page_changed, int new_selected_idx)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     rebuild_vis_page(customer);
 
     if (new_selected_idx < 0) {
@@ -362,7 +362,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
     int running;
     int rc;
 
-    debug_log(DEBUG_INFO, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     customer->count = 0;
     selected_idx = 0;
@@ -376,7 +376,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
     customer_fd = db_cs_op_read();
 
     if (customer_fd == CUSTOMER_DB_EOF) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "ERROR: Unable to open Customer database");
+        debug_log((DEBUG_ERROR, FUNC_NAME, "ERROR: Unable to open Customer database"));
         ui_status("Unable to open Customer database");
         sleep(4);
         goto cleanup;
@@ -384,7 +384,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
 
     /* Load one screens worth of customers */
     if (db_cs_load_page(customer_fd, start_recno, customer, &next_recno) < 0) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "ERROR: Failed to load customers");
+        debug_log((DEBUG_ERROR, FUNC_NAME, "ERROR: Failed to load customers"));
         ui_status("Failed to load customers");
         sleep(4);
         goto cleanup;
@@ -394,7 +394,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
     /* Position list on requested customer if provided */
     if (initial_customer_id && initial_customer_id[0] != '\0') {
         int i;
-        debug_log(DEBUG_INFO, FUNC_NAME, "Position list on requested customer");
+        debug_log((DEBUG_INFO, FUNC_NAME, "Position list on requested customer"));
         for (i = 0; i < visible_count; i++) {
             int idx = visible_indexes[i];
 
@@ -413,7 +413,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
 
     running = 1;
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Before draw_screen: customer->count=%d", customer->count);
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Before draw_screen: customer->count=%d", customer->count));
     draw_screen(mode, customer, start_idx, visible_indexes, visible_count);
 
     while (running) {
@@ -443,16 +443,16 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
         ui_status(status);
         ch = ui_read_key();
 
-        debug_log(DEBUG_TRACE, FUNC_NAME, "key=%d '%c'", ch, (ch >= 32 && ch < 127) ? ch : '?');
-        debug_log(DEBUG_TRACE, FUNC_NAME, "RAW key value=%d", ch);
+        debug_log((DEBUG_TRACE, FUNC_NAME, "key=%d '%c'", ch, (ch >= 32 && ch < 127) ? ch : '?'));
+        debug_log((DEBUG_TRACE, FUNC_NAME, "RAW key value=%d", ch));
         if (ch == EOF)
             break;
 
         switch (ch) {
 
             case UI_KEY_ESC:
-                debug_log(DEBUG_TRACE, FUNC_NAME, "ESC pressed");
-                debug_log(DEBUG_TRACE, FUNC_NAME, "ESC handler triggered by key=%d", ch);
+                debug_log((DEBUG_TRACE, FUNC_NAME, "ESC pressed"));
+                debug_log((DEBUG_TRACE, FUNC_NAME, "ESC handler triggered by key=%d", ch));
 
                 if (search_mode) {
                     /* Exit search mode ONLY */
@@ -471,15 +471,15 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                 break;
 
             case UI_KEY_ENTER:
-                 debug_log(DEBUG_INFO, FUNC_NAME, "Pressed UI_KEY_ENTER (loop 2)");
+                 debug_log((DEBUG_INFO, FUNC_NAME, "Pressed UI_KEY_ENTER (loop 2)"));
                 if (mode == CUSTOMER_MODE_SELECT)
                 {
-                    debug_log(DEBUG_INFO, FUNC_NAME, "Mode = CUSTOMER_MODE_SELECT (loop 2)");
+                    debug_log((DEBUG_INFO, FUNC_NAME, "Mode = CUSTOMER_MODE_SELECT (loop 2)"));
                     /* Copy the selected ID to the shared memory location */
                     if (selected_customer_id){
                         strncpy(selected_customer_id, customer->slots[visible_indexes[selected_idx]].cs_id, 6);
                         selected_customer_id[CUSTOMER_ID_MAX] = '\0';
-                        debug_log(DEBUG_INFO, FUNC_NAME, "Customer selected id=%s", selected_customer_id);
+                        debug_log((DEBUG_INFO, FUNC_NAME, "Customer selected id=%s", selected_customer_id));
                     }
                     running = 0;  /* exit the list loop */
                 }
@@ -487,7 +487,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
 
             case UI_KEY_PGDN:
             {
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_PGDN");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_PGDN"));
                 if (search_mode) {
                     int new_start = search_start_idx + CUSTOMER_PAGE_SIZE;
                     if (new_start < match_count) {
@@ -519,7 +519,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                 CustomerList temp;
                 long temp_next;
 
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_PGUP");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_PGUP"));
 
                 if (search_mode) {
                     int new_start = search_start_idx - CUSTOMER_PAGE_SIZE;
@@ -553,13 +553,13 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
             case 's':
             case 'S':      /* Search Customer */
             {
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed S for Search");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Pressed S for Search"));
                 run_customer_search(mode, customer_fd, customer, &start_idx);
                 break;
             }
 
             case UI_KEY_DOWN:
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_DOWN");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_DOWN"));
                 if (selected_idx + 1 < visible_count) {
                     selected_idx++;
                     selection_moved = 1;
@@ -590,7 +590,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                 break;
 
             case UI_KEY_UP:
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_UP");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Pressed UI_KEY_UP"));
                 if (selected_idx > 0) {
                     selected_idx--;
                     selection_moved = 1;
@@ -633,17 +633,17 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
 
             case 'v':
             case 'V':   /* View selected customer */
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed V for View Mode");
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Before customer_detail screen View");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Pressed V for View Mode"));
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Before customer_detail screen View"));
                 rc = run_customer_detail(customer->slots[visible_indexes[selected_idx]].cs_id, CUST_VIEW);
                 draw_screen(mode, customer, start_idx, visible_indexes, visible_count);
-                debug_log(DEBUG_TRACE, FUNC_NAME, "After customer_detail screen View");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "After customer_detail screen View"));
                 break;
 
             case 'e':
             case 'E':   /* Edit selected customer */
-                 debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed E for Edit Mode");
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Before customer_detail screen Edit");
+                 debug_log((DEBUG_TRACE, FUNC_NAME, "Pressed E for Edit Mode"));
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Before customer_detail screen Edit"));
                 rc = run_customer_detail(customer->slots[visible_indexes[selected_idx]].cs_id, CUST_EDIT);
 
                 if(rc==CUST_DETAIL_SAVED){
@@ -675,12 +675,12 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                         start_idx = 0;
                 }
                 draw_screen(mode, customer, start_idx, visible_indexes, visible_count);
-                debug_log(DEBUG_TRACE, FUNC_NAME, "After customer_detail screen Edit");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "After customer_detail screen Edit"));
                 break;
 
             case 'c':
             case 'C':   /* Create new customer */
-                debug_log(DEBUG_TRACE, FUNC_NAME, "Pressed C for Create Mode");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "Pressed C for Create Mode"));
                 rc = run_customer_detail(NULL, CUST_CREATE);
                 if (rc == CUST_DETAIL_SAVED) {
                     db_cs_load_page(customer_fd, start_recno, customer, &next_recno);
@@ -690,7 +690,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
                 selected_idx = 0;
                 start_idx = 0;
                 draw_screen(mode, customer, start_idx, visible_indexes, visible_count);
-                debug_log(DEBUG_TRACE, FUNC_NAME, "After customer_detail screen New");
+                debug_log((DEBUG_TRACE, FUNC_NAME, "After customer_detail screen New"));
                 break;
 
             default:
@@ -718,7 +718,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
 
 cleanup:
     if (customer_fd >=0) {
-        db_cs_cl_rd(customer_fd);
+        db_cs_cl_read(customer_fd);
     }
 
     if (selected_customer_id && selected_customer_id[0] != '\0'){

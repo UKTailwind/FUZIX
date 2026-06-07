@@ -34,15 +34,16 @@ extern int g_peak_open_files;
 /* Debug code is included */
 void debug_init(const char *path, debug_level_t level);
 void debug_close(void);
-void debug_log(debug_level_t level, const char *func, const char *fmt, ...);
+void do_debug_log(debug_level_t level, const char *func, const char *fmt, ...);
 void dump_bytes(debug_level_t level, const char *label, const void *p, size_t n);
 
+#define debug_log(x) do_debug_log x
 #else
 
 /* When DEBUG_ENABLED is absent calls become empty macros: */
 #define debug_init(path, level)
 #define debug_close()
-#define debug_log(level, func, fmt, ...)
+#define debug_log(x)
 #define dump_bytes(level, label, p, n)
 #endif
 

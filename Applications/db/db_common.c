@@ -14,12 +14,12 @@ int db_validate_fixed_records(int fd, size_t record_len, const char *dbname)
     long recno = 1;
 
     if (record_len > 512) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "record too long");
+        debug_log((DEBUG_ERROR, FUNC_NAME, "record too long"));
         return -1;
     }
 
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter: ");
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Expected record_len=%d", record_len);
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Expected record_len=%d", record_len));
 
     while (1) {
         ssize_t n = read(fd, buf, record_len);
@@ -30,16 +30,16 @@ int db_validate_fixed_records(int fd, size_t record_len, const char *dbname)
         }
 
         if (n != (ssize_t)record_len) {
-            debug_log(DEBUG_ERROR, FUNC_NAME,
+            debug_log((DEBUG_ERROR, FUNC_NAME,
                 "%s: short record at record %ld "
                 "(read %zd bytes, expected %zu, offset=%ld)",
-                dbname, recno, n, record_len, (long)offset);
+                dbname, recno, n, record_len, (long)offset));
             return -1;
         }
 
         if (buf[record_len - 1] != '\n') {
-            debug_log(DEBUG_ERROR, FUNC_NAME,
-                "%s: short record or missing newline at or near record %ld (offset=%ld)", dbname, recno, (long)offset);
+            debug_log((DEBUG_ERROR, FUNC_NAME,
+                "%s: short record or missing newline at or near record %ld (offset=%ld)", dbname, recno, (long)offset));
             return -1;
         }
 

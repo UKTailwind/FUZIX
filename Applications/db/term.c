@@ -1,6 +1,7 @@
 #include <unistd.h>
 #include <termios.h>
 #include <stdio.h>
+#include <string.h>
 #include "debug.h"
 #include "term_ansi.h"
 #include "errno.h"
@@ -10,7 +11,7 @@ static struct termios old_termios;
 
 void term_cls(void)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     printf("\033[0m");
     printf("\033[2J\033[H");
     fflush(stdout);
@@ -18,7 +19,7 @@ void term_cls(void)
 
 void term_set_cursor(int y, int x)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     printf("\033[%d;%dH", y, x);
     fflush(stdout);
 }
@@ -41,13 +42,13 @@ void term_restore_cursor(void)
     fflush(stdout);
 }
 
-void term_reverse_on(void)
+void term_rv_on(void)
 {
     printf("\033[7m");
     fflush(stdout);
 }
 
-void term_reverse_off(void)
+void term_rv_off(void)
 {
     printf("\033[27m");
     fflush(stdout);
@@ -61,7 +62,7 @@ void term_raw_on(void)
     /* save current terminal settings */
     rc = tcgetattr(STDIN_FILENO, &old_termios);
     if (rc != 0) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "tcgetattr failed errno=%d", errno);
+        debug_log((DEBUG_ERROR, FUNC_NAME, "tcgetattr failed errno=%d", errno));
         return;
     }
 
@@ -74,9 +75,9 @@ void term_raw_on(void)
 
     rc = tcsetattr(STDIN_FILENO, TCSANOW, &t);
     if (rc != 0) {
-        debug_log(DEBUG_ERROR, FUNC_NAME, "tcsetattr failed errno=%d", errno);
+        debug_log((DEBUG_ERROR, FUNC_NAME, "tcsetattr failed errno=%d", errno));
     } else {
-        debug_log(DEBUG_TRACE, FUNC_NAME, "Terminal raw mode enabled");
+        debug_log((DEBUG_TRACE, FUNC_NAME, "Terminal raw mode enabled"));
     }
 }
 
