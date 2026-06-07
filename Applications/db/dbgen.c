@@ -44,7 +44,7 @@ int main(int argc, char *argv[])
         printf("#define %s_%s_LEN %d\n", argv[1], n, v);
         total += v + FIELD_SEP_LEN;
     }
-    printf("#define %s_RECORD_LEN %u\n", argv[1], total);
-    printf("#define %s_DISK_LEN %u\n", argv[1], total + 1);
+    printf("#define %s_RECORD_LEN %u\n", argv[1], total - FIELD_SEP_LEN);
+    printf("#define %s_DISK_LEN %u\n", argv[1], total);
     return 0;
 }
