@@ -38,21 +38,29 @@ typedef struct {
 
 static ui_field_t fields[FIELD_COUNT];
 
+static void bind_field(unsigned n, const char *label, char *ptr, size_t maxlen, int row, int col, int mode)
+{
+    ui_field_t *f = fields + n;
+    f->label = label;
+    f->ptr = ptr;
+    f->maxlen = maxlen;
+    f->row = row;
+    f->col = col;
+    f->mode = mode;
+}
+
 static void bind_fields(cust_form_t *f)
 {
-    /* TODO: need to sort out initialization */
-#if 0
-    fields[0] = (ui_field_t){ "ID",        f->work.cs_id,       CUSTOMER_ID_MAX,        2, 15, 0 };
-    fields[1] = (ui_field_t){ "Name",      f->work.cs_name,     CUSTOMER_NAME_MAX,      3, 15, 1 };
-    fields[2] = (ui_field_t){ "Phone 1",   f->work.cs_phone1,   CUSTOMER_PHONE1_MAX,    4, 15, 1 };
-    fields[3] = (ui_field_t){ "Phone 2",   f->work.cs_phone2,   CUSTOMER_PHONE2_MAX,    5, 15, 1 };
-    fields[4] = (ui_field_t){ "Address 1", f->work.cs_address1, CUSTOMER_ADDRESS1_MAX,  6, 15, 1 };
-    fields[5] = (ui_field_t){ "Address 2", f->work.cs_address2, CUSTOMER_ADDRESS2_MAX,  7, 15, 1 };
-    fields[6] = (ui_field_t){ "Suburb",    f->work.cs_suburb,   CUSTOMER_SUBURB_MAX,    8, 15, 1 };
-    fields[7] = (ui_field_t){ "State",     f->work.cs_state,    CUSTOMER_STATE_MAX,     9, 15, 1 };
-    fields[8] = (ui_field_t){ "Postcode",  f->work.cs_postcode, CUSTOMER_POSTCODE_MAX, 10, 15, 1 };
-    fields[9] = (ui_field_t){ "Notes",     f->work.cs_notes,    CUSTOMER_NOTES_MAX,    12, 15, 1 };
-#endif
+    bind_field(0,  "ID",        f->work.cs_id,       CUSTOMER_ID_MAX,        2, 15, 0 );
+    bind_field(1,  "Name",      f->work.cs_name,     CUSTOMER_NAME_MAX,      3, 15, 1 );
+    bind_field(2,  "Phone 1",   f->work.cs_phone1,   CUSTOMER_PHONE1_MAX,    4, 15, 1 );
+    bind_field(3,  "Phone 2",   f->work.cs_phone2,   CUSTOMER_PHONE2_MAX,    5, 15, 1 );
+    bind_field(4,  "Address 1", f->work.cs_address1, CUSTOMER_ADDRESS1_MAX,  6, 15, 1 );
+    bind_field(5,  "Address 2", f->work.cs_address2, CUSTOMER_ADDRESS2_MAX,  7, 15, 1 );
+    bind_field(6,  "Suburb",    f->work.cs_suburb,   CUSTOMER_SUBURB_MAX,    8, 15, 1 );
+    bind_field(7,  "State",     f->work.cs_state,    CUSTOMER_STATE_MAX,     9, 15, 1 );
+    bind_field(8,  "Postcode",  f->work.cs_postcode, CUSTOMER_POSTCODE_MAX, 10, 15, 1 );
+    bind_field(9,  "Notes",     f->work.cs_notes,    CUSTOMER_NOTES_MAX,    12, 15, 1 );
 }
 
 /* -------------------- Drawing -------------------- */
