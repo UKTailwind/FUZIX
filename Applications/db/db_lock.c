@@ -6,7 +6,7 @@
 
 int db_lock_shared(const char *filename)
 {
-    debug_log(DEBUG_TRACE, FUNC_NAME, "Enter:");
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     return 0;
 }
 
