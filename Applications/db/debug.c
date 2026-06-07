@@ -40,7 +40,7 @@ void debug_init(const char *path, debug_level_t level)
         g_open_files++;
         if (g_open_files > g_peak_open_files)
             g_peak_open_files = g_open_files;
-        debug_log(DEBUG_INFO, FUNC_NAME, "OPEN DEBUG FILE total=%d peak=%d", g_open_files, g_peak_open_files);
+        debug_log((DEBUG_INFO, FUNC_NAME, "OPEN DEBUG FILE total=%d peak=%d", g_open_files, g_peak_open_files));
     }
 
 #ifdef FUZIX
@@ -52,7 +52,7 @@ void debug_close(void)
 {
     if (dbg_fp) {
         g_open_files--;
-        debug_log(DEBUG_INFO, FUNC_NAME, "FINAL OPEN FILE COUNT: total=%d peak=%d", g_open_files, g_peak_open_files);
+        debug_log((DEBUG_INFO, FUNC_NAME, "FINAL OPEN FILE COUNT: total=%d peak=%d", g_open_files, g_peak_open_files));
 
         if (fclose(dbg_fp)){
             dbg_fp = NULL;
@@ -67,14 +67,14 @@ void dump_bytes(debug_level_t level, const char *label, const void *p, size_t n)
     const unsigned char *b = p;
     size_t i;
 
-    debug_log(level, FUNC_NAME, "%s:", label);
+    debug_log((level, FUNC_NAME, "%s:", label));
 
     for (i = 0; i < n; i++)
-        debug_log(level, FUNC_NAME, " %02X", b[i]);
+        debug_log((level, FUNC_NAME, " %02X", b[i]));
 }
 
 /* ---- Logging ---- */
-void debug_log(debug_level_t level,
+void do_debug_log(debug_level_t level,
                const char *func,
                const char *fmt, ...)
 {
