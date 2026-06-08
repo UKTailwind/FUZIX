@@ -54,22 +54,14 @@ int db_staff_read(long recno, staff_t *out)
 
 int db_staff_read_by_id(const char *staff_id, staff_t *out, long *out_recno)
 {
-    staff_t tmp;
-    long recno = 0;
-
+    int rc;
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
-    while (db_staff_read(recno, &tmp) == 0) {
-        if (strcmp(tmp.staff_id, staff_id) == 0) {
-            memcpy(out, &tmp, sizeof(tmp));   /* struct copy */
-            if (out_recno)
-                *out_recno = recno;
-
-            debug_log((DEBUG_TRACE, FUNC_NAME, "Staff found id=%s recno=%ld", staff_id, recno));
-            return 0;
-        }
-        recno++;
-    }
-    return -1;   /* not found */
+    rc = db_find(staff_db, staff_id, STAFF_ID_OFF, STAFF_ID_LEN);
+    if (rc <= 0)
+        return -1;
+    if (out_recno)
+        *out_recno = staff_db->pos;
+    return db_staff_parse_line(staff_db->buf, out);
 }
 
 int db_staff_generate_next_id(char *out_id)

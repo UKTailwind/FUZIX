@@ -38,7 +38,6 @@ int db_cs_lookup_display(const char *customer_id, char *out, size_t outlen)
     return -1;
 }
 
-
 int db_cs_read(long recno, customer_t *out)
 {
     int rc;
@@ -57,24 +56,19 @@ int db_cs_read(long recno, customer_t *out)
 
 int db_cs_by_id( const char *customer_id, customer_t *out, long *out_recno)
 {
-    customer_t tmp;
     long recno = 0;
+    int rc;
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
-    while (db_cs_read(recno, &tmp) == 0) {
-        if (strcmp(tmp.cs_id, customer_id) == 0) {
-            memcpy(out, &tmp, sizeof(tmp));   /* struct copy */
-            if (out_recno)
-                *out_recno = recno;
+    rc = db_find(customer_db, customer_id, CUSTOMER_ID_OFF, CUSTOMER_ID_LEN);
+    if (rc <= 0)
+        return -1;
 
-            debug_log((
-                DEBUG_INFO, FUNC_NAME, "Customer found id=%s recno=%ld", customer_id, recno));
-            return 0;
-        }
-        recno++;
-    }
-    return -1;   /* not found */
+    if (out_recno)
+        *out_recno = recno;
+
+    return db_cs_parse_line(customer_db->buf, out);
 }
 
 int db_cs_generate_next_id(char *out_id)

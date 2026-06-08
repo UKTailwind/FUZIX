@@ -157,26 +157,16 @@ int db_bk_read(long recno, register booking_t *out)
 int db_bk_by_id(const char *booking_id, register booking_t *out, long *out_recno)
 {
     booking_t tmp;
-    long recno = 0;
+    int rc;
 
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
-    while (db_bk_read(recno, &tmp) == 0) {
-        if (strcmp(tmp.booking_id, booking_id) == 0) {
-
-            debug_log((DEBUG_TRACE, FUNC_NAME, "TMP status before copy = '%c' (0x%02X)", tmp.booking_status[0], (unsigned char)tmp.booking_status[0]));
-            memcpy(out, &tmp, sizeof(tmp));   /* struct copy */
-            debug_log((DEBUG_TRACE, FUNC_NAME, "OUT status after copy  = '%c' (0x%02X)", out->booking_status[0], (unsigned char)out->booking_status[0]));
-
-            if (out_recno)
-                *out_recno = recno;
-
-            debug_log(( DEBUG_TRACE, FUNC_NAME, "Booking found id=%s recno=%ld", booking_id, recno));
-            return 0;
-        }
-        recno++;
-    }
-    return -1;   /* not found */
+    rc = db_find(booking_db, booking_id, BOOKING_ID_OFF, BOOKING_ID_LEN);
+    if (rc <= 0)
+        return -1;
+    if (out_recno)
+        *out_recno = booking_db->pos;
+    return db_bk_parse_line(booking_db->buf, out);
 }
 
 int db_bk_by_index(const DayBookings *day, int index, booking_t *out)

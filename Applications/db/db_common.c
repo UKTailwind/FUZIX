@@ -126,6 +126,24 @@ int db_append(struct dbase *db)
 	return 0;
 }
 
+/* Pass the offset of the record and the record length to match with the
+   match string and it will return 1 if found with db->pos and db->buf
+   valid */
+int db_find(struct dbase *db, const char *match, unsigned off, unsigned len)
+{
+	/* Walk a database finding a match for a given field/offset. We
+	   can make this far more generic in future but for this use
+	   we just need a simple match */
+	unsigned rec = 0;
+	int rc;
+	while((rc = db_read(db, rec)) == 1) {
+		if (strncmp(match, db->buf + off, len) == 0)
+			return 1;
+		rec++;
+	}
+	return rc;
+}
+
 /* Copy a record ensuring it ends zero terminated and any space
    unused in the record is clear, Note that the record buffer is 1 byte
    longer than the size given. */

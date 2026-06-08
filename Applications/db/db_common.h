@@ -27,6 +27,8 @@ int db_read(struct dbase *db, unsigned record);
 int db_write(struct dbase *db, unsigned record);
 /* Append a record from the internal buffer */
 int db_append(struct dbase *db);
+/* Find a record by a key */
+int db_find(struct dbase *db, const char *match, unsigned off, unsigned len);
 
 /* Safe fixed-field copy */
 /* The passed len is one less than the actual in memory size. This is
