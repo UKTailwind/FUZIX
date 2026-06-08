@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include "debug.h"
+#include "db_common.h"
 #include "ui.h"
 #include "ui_common.h"
 #include "customer_detail.h"
@@ -190,7 +191,7 @@ static int customer_detail_handle_exit(register cust_form_t *form)
         sleep(1);
 
         /* Close Read Only File */
-        db_cs_cl_read();
+        db_close(customer_db);
         return 0;
     }
 
@@ -206,10 +207,10 @@ static int customer_detail_handle_exit(register cust_form_t *form)
             /* Close Customer DB Read Only mode */
             /* TODO FIXME: we want to be able to promote our lock
                but without deadlocking if other dbs are opened */
-            db_cs_cl_read();
+            db_close(customer_db);
 
             /* Open Customer DB Read Write mode */
-            rc = db_cs_op_write();
+            rc = db_open(customer_db, 1);
             if (rc < 0){
                 /* Failed to open Customer DB in RW mode */
                 ui_status("ERROR: Customer Not Saved, Unable to open Customer File in RW mode");
@@ -220,7 +221,7 @@ static int customer_detail_handle_exit(register cust_form_t *form)
             if (form->recno < 0) {
                 if (db_cs_generate_next_id(form->work.cs_id) != 0) {
                     /* unable to generate new customer id */
-                    db_cs_cl_write();
+                    db_close(customer_db);
                     ui_status("ERROR: Customer Not Saved, Unable to generate new customer ID");
                     sleep(2);
                     return -1;
@@ -229,19 +230,19 @@ static int customer_detail_handle_exit(register cust_form_t *form)
             /* Save the Customer */
             if (db_cs_write(&form->recno, &form->work) != 0) {
                 /* Unable to create customer */
-                db_cs_cl_write();
+                db_close(customer_db);
                 ui_status("ERROR: Customer Not Saved, Unable to save customer record");
                 sleep(2);
                 return -1;   /* stay in editor */
             }
-            db_cs_cl_write();
+            db_close(customer_db);
             ui_status("Customer saved");
             sleep(1);
             return CUST_DETAIL_SAVED;
 
         case 'N':
         case 'n':
-            db_cs_cl_read();
+            db_close(customer_db);
             ui_status("Changes discarded");
             return CUST_DETAIL_NO_CHANGE;
 
@@ -295,7 +296,7 @@ static void update_field_highlight(register const cust_form_t *f, int prev)
 
 int run_customer_detail(const char *customer_id, cust_mode_t mode)
 {
-    int rc = db_cs_op_read();
+    int rc = db_open(customer_db, 0);
     long recno = -1;
 
     cust_form_t form;
@@ -322,7 +323,7 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
         }
 
         if (db_cs_by_id(customer_id, &cust, &recno) != 0) {
-            db_cs_cl_read();
+            db_close(customer_db);
             debug_log((DEBUG_ERROR, FUNC_NAME, "Error: Customer Not Found"));
             ui_status("ERROR: Customer not found");
             sleep(2);

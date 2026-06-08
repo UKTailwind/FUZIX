@@ -23,8 +23,10 @@ int db_open(struct dbase *db, unsigned rw);
 int db_close(struct dbase *d);
 /* Read a record into the internal buffer */
 int db_read(struct dbase *db, unsigned record);
-/* Write a record to the internal buffer */
+/* Write a record fropm the internal buffer */
 int db_write(struct dbase *db, unsigned record);
+/* Append a record from the internal buffer */
+int db_append(struct dbase *db);
 
 /* Safe fixed-field copy */
 /* The passed len is one less than the actual in memory size. This is

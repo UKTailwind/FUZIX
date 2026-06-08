@@ -26,9 +26,4 @@ int db_state_read(long recno, state_t *out);
 int db_state_write(long recno, const state_t *in);
 int db_state_name_from_id(const char *state_id, char *state_name);
 
-
-/* db_open and close */
-int db_state_open(void);
-int db_state_close(void);
-
 #endif

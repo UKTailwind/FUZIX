@@ -60,12 +60,6 @@ int db_bk_append(const booking_t *in);
 int db_bk_by_index(const DayBookings *day, int index, booking_t *out);
 
 int db_bk_build_day_index(int target_date, DayBookings *day);
-
-/* db_open and close */
-int db_bk_op_read(void);
-int db_bk_op_write(void);
-int db_bk_cl_read(void);
-int db_bk_cl_write(void);
 int db_load_day(int ymd, DayBookings *day);
 
 #endif

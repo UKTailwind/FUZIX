@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include "db_common.h"
 #include "booking_list.h"
 #include "booking_detail.h"
 #include "db_booking.h"
@@ -254,7 +255,7 @@ void run_booking_list(void)
     selected_idx = 0;
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
-    rc = db_bk_op_read();
+    rc = db_open(booking_db, 0);
 
     if (rc < 0) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Unable to open Booking database"));
@@ -263,7 +264,7 @@ void run_booking_list(void)
         goto cleanup;
     }
 
-    rc =  db_state_open();
+    rc =  db_open(state_db, 0);
     if (rc < 0) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Unable to open State database"));
         ui_status("Unable to open state database");
@@ -271,7 +272,7 @@ void run_booking_list(void)
         goto cleanup;
     }
 
-    rc =  db_cs_op_read();
+    rc =  db_open(customer_db, 0);
     if (rc < 0) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Unable to open Customer database"));
         ui_status("Unable to open customer database");
@@ -500,7 +501,7 @@ void run_booking_list(void)
     }
 
 cleanup:
-    db_cs_cl_read();
-    db_state_close();
-    db_bk_cl_read();
+    db_close(customer_db);
+    db_close(state_db);
+    db_close(booking_db);
 }

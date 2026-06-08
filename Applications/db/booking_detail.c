@@ -106,37 +106,37 @@ static void field_init(unsigned n, const char *label, char *ptr, size_t maxlen, 
 
 static int lookup_customer_display(const char *id, char *out, size_t outlen)
 {
-    int rc = db_cs_op_read();
+    int rc = db_open(customer_db, 0);
     if (rc < 0)
         return -1;
 
     rc = db_cs_lookup_display(id, out, outlen);
 
-    db_cs_cl_read();
+    db_close(customer_db);
     return rc;
 }
 
 static int lookup_state_display(const char *id, char *out, size_t outlen)
 {
-    int rc = db_state_open();
+    int rc = db_open(state_db, 0);
     if (rc < 0)
         return -1;
 
     rc = db_state_name_from_id(id, out);
 
-    db_state_close();
+    db_close(state_db);
     return rc;
 }
 
 static int lookup_staff_display(const char *id, char *out, size_t outlen)
 {
-    int rc = db_staff_open();
+    int rc = db_open(staff_db, 0);
     if (rc < 0)
         return -1;
 
     rc = db_staff_lookup_display(id, out, outlen);
 
-    db_staff_close();
+    db_close(staff_db);
     return rc;
 }
 
@@ -498,8 +498,8 @@ static int booking_detail_handle_exit(register book_form_t *form)
             /* Open Booking DB Read Write mode */
             /* This will break stuff a bit for now but we'll deal with it
                later TODO FIXME */
-            rc = db_bk_op_write();
-            if (rc <0){
+            rc = db_open(booking_db, 1);
+            if (rc < 0){
                 ui_status("Failed to Open Booking DB in RW mode");
                 sleep(2);
                 return -1;
@@ -535,7 +535,7 @@ static int booking_detail_handle_exit(register book_form_t *form)
             if (form->recno == -1) {
                 if (db_bk_generate_next_id(form->work.booking_id) != 0) {
                     /* Unable to generate booking ID */
-                    db_bk_cl_write();
+                    db_close(booking_db);
                     ui_status("ERROR: Booking Not Saved, Unable to generate booking ID");
                      sleep(4);
                     return BOOK_DETAIL_ERROR;
@@ -543,7 +543,7 @@ static int booking_detail_handle_exit(register book_form_t *form)
 
                 if (db_bk_append(&form->work) != 0) {
                     /* Unable to append new booking to file */
-                    db_bk_cl_write();
+                    db_close(booking_db);
                     ui_status("ERROR: Booking Not Saved, Unable to append new record to data base");
                     sleep(4);
                     return -1;
@@ -552,20 +552,20 @@ static int booking_detail_handle_exit(register book_form_t *form)
                /* Existing record: overwrite */
                if (db_bk_write(form->recno, &form->work) != 0) {
                     /* Unable to  overwrite existing record */
-                    db_bk_cl_write();
+                    db_close(booking_db);
                     ui_status("ERROR: Booking Not Saved, Unable to overwrite existing record");
                     sleep(4);
                     return -1;
                }
            }
-            db_bk_cl_write();
+            db_close(booking_db);
             ui_status("Booking saved");
             sleep(1);
             return BOOK_DETAIL_SAVED;
 
         case 'N':
         case 'n':
-            db_bk_cl_read();
+            db_close(booking_db);
             ui_status("Changes discarded");
             return BOOK_DETAIL_NO_CHANGE;
 
@@ -655,7 +655,7 @@ int run_booking_detail(const char *booking_id, book_mode_t mode)
         }
 
         if (db_bk_by_id(booking_id, &book, &recno) != 0) {
-            db_bk_cl_read();
+            db_close(booking_db);
             debug_log((DEBUG_ERROR, FUNC_NAME, "*** Error: *** Booking Not Found"));
             ui_status("ERROR: Booking not found");
             sleep(4);

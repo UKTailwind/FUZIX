@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include "db_common.h"
 #include "customer_list.h"
 #include "db_customer.h"
 #include "customer_detail.h"
@@ -372,7 +373,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
     /* NOTE customer.c owns customer_fd
     * Do not return from this function once the file is open.
     */
-    rc = db_cs_op_read();
+    rc = db_open(customer_db, 0);
 
     if (rc < 0) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "ERROR: Unable to open Customer database"));
@@ -716,7 +717,7 @@ int run_customer_list(int mode, const char *initial_customer_id, char *selected_
     }
 
 cleanup:
-    db_cs_cl_read();
+    db_close(customer_db);
 
     if (selected_customer_id && selected_customer_id[0] != '\0'){
         return 0;

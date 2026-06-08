@@ -2,6 +2,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "db_common.h"
 #include "state_select.h"
 #include "ui_common.h"
 #include "ui.h"
@@ -17,7 +18,7 @@ static int state_count = 0;
 /* Load states from database into states[] */
 static int load_states(void)
 {
-    int rc = db_state_open();
+    int rc = db_open(state_db, 0);
     long rec = 0;
     int i;
 
@@ -37,7 +38,7 @@ static int load_states(void)
         rec++;
     }
 
-    db_state_close();
+    db_close(state_db);
 
     /* Sort by workflow order */
     for (i = 0; i < state_count - 1; i++) {

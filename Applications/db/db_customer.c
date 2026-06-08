@@ -1,6 +1,6 @@
 /*
-* All database writes must go through db_*_write()
-*/
+ * All database writes must go through db_*_write()
+ */
 
 #include <errno.h>
 #include <string.h>
@@ -41,33 +41,18 @@ int db_cs_lookup_display(const char *customer_id, char *out, size_t outlen)
 
 int db_cs_read(long recno, customer_t *out)
 {
-    char line[CUSTOMER_DISK_LEN];
-    off_t off = (off_t)recno * CUSTOMER_DISK_LEN;
-    ssize_t n;
-
+    int rc;
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: fd=%d recno=%ld out=%p", customer_db->fd, recno, out));
     if (customer_db->fd < 0 || recno < 0 || !out) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid args: fd=%d recno=%ld out=%p", customer_db->fd, recno, out));
         return -1;
     }
-    debug_log((DEBUG_TRACE, FUNC_NAME, "offset=%ld (recno=%ld * %d)", (long)off, recno, CUSTOMER_DISK_LEN));
-
-    if (lseek(customer_db->fd, off, SEEK_SET) == (off_t)-1) {
-        debug_log((DEBUG_WARN, FUNC_NAME, "Warning: lseek failed for customer read"));
-        debug_log((DEBUG_WARN, FUNC_NAME, "Warning: offset=%ld", (long)off));
+    rc = db_read(customer_db, recno);
+    if (rc <= 0) {
+        debug_log((DEBUG_TRACE, FUNC_NAME, "EOF reached at recno=%ld", recno));
         return CUSTOMER_DB_EOF;
     }
-
-    n = read(customer_db->fd, line, CUSTOMER_DISK_LEN);
-    if (n == 0) {
-        debug_log((DEBUG_TRACE, FUNC_NAME, "EOF reached at recno=%ld offset=%ld", recno, (long)off));
-        return CUSTOMER_DB_EOF;
-    }
-    if (n != CUSTOMER_DISK_LEN) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "ERROR: Customer File Length (read %zd, expected %d)", n, CUSTOMER_DISK_LEN));
-        return CUSTOMER_DB_ERROR;
-    }
-    return db_cs_parse_line(line, out);
+    return db_cs_parse_line(customer_db->buf, out);
 }
 
 int db_cs_by_id( const char *customer_id, customer_t *out, long *out_recno)
@@ -160,10 +145,7 @@ long db_cs_record_count(void)
 
 int db_cs_write(long *recno, const customer_t *in)
 {
-    char line[CUSTOMER_DISK_LEN];
-    off_t off;
-    ssize_t rc;
-
+    int rc;
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter: recno=%ld", recno ? *recno : -1));
 
     if (in->cs_id[0] == '\0') {
@@ -175,9 +157,6 @@ int db_cs_write(long *recno, const customer_t *in)
         debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d recno=%p in=%p", customer_db->fd, recno, in));
         return -1;
     }
-
-    /* Format record into on-disk layout */
-    db_cs_format_line(in, line);
 
     /* NEW record: append */
     if (*recno < 0) {
@@ -192,36 +171,20 @@ int db_cs_write(long *recno, const customer_t *in)
             errno = ENOSPC;   /* optional but nice */
             return -1;
         }
-
-        off = lseek(customer_db->fd, 0, SEEK_END);
-        if (off == (off_t)-1) {
-            debug_log((DEBUG_ERROR, FUNC_NAME, "lseek(SEEK_END) failed errno=%d", errno));
-            return -1;
-        }
-
-        *recno = off / CUSTOMER_DISK_LEN;
+        /* Format record into on-disk layout */
+        db_cs_format_line(in, customer_db->buf);
+        rc = db_append(customer_db);
+        *recno = customer_db->pos;
+    } else {
+        /* Format record into on-disk layout */
+        db_cs_format_line(in, customer_db->buf);
+        rc = db_write(customer_db, *recno);
     }
-    else {
-        /* UPDATE existing record */
-        off = (off_t)(*recno) * CUSTOMER_DISK_LEN;
-        if (lseek(customer_db->fd, off, SEEK_SET) == (off_t)-1) {
-            debug_log((DEBUG_ERROR, FUNC_NAME, "lseek failed: Unable to update existing record  off=%ld errno=%d",
-                      (long)off, errno));
-            return -1;
-        }
-    }
-
-    rc = write(customer_db->fd, line, CUSTOMER_DISK_LEN);
-    if (rc != CUSTOMER_DISK_LEN) {
+    if (rc < 0) {
         debug_log((DEBUG_ERROR, FUNC_NAME,
-                  "write failed: wanted=%d wrote=%ld errno=%d",
-                  CUSTOMER_DISK_LEN, (long)rc, errno));
+                  "write failed: %d", errno));
         return -1;
     }
-
-    /* Ensure data reaches disk */
-    fsync(customer_db->fd);
-
     debug_log((DEBUG_TRACE, FUNC_NAME, "Customer written recno=%ld", *recno));
     return 0;
 }
@@ -347,56 +310,4 @@ void db_cs_format_line(register const customer_t *in, char *line)
 
 
     line[CUSTOMER_RECORD_LEN] = '\n';
-}
-
-int db_cs_op_read(void)
-{
-    int rc = db_open(customer_db, 0);
-
-    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
-
-    if (rc < 0)
-        return rc;
-    /* Count open files */
-    g_open_files++;
-    if (g_open_files > g_peak_open_files)
-        g_peak_open_files = g_open_files;
-    debug_log((DEBUG_INFO, FUNC_NAME, "OPEN READ fd=%d total=%d peak=%d", customer_db->fd, g_open_files, g_peak_open_files));
-    return rc;
-}
-
-int db_cs_op_write(void)
-{
-    int rc = db_open(customer_db, 0);
-
-    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
-
-    if (rc < 0)
-        return rc;
-    /* Count open files */
-    g_open_files++;
-    if (g_open_files > g_peak_open_files)
-        g_peak_open_files = g_open_files;
-    debug_log((DEBUG_INFO, FUNC_NAME, "OPEN WRITE fd=%d total=%d peak=%d", customer_db->fd, g_open_files, g_peak_open_files));
-    return rc;
-}
-
-/* Close database */
-int db_cs_cl_read(void)
-{
-    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
-    if (db_close(customer_db) == 0) {
-        g_open_files--;
-        debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE READ total=%d", g_open_files));
-    }
-}
-
-int db_cs_cl_write(void)
-{
-    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
-    if (db_close(customer_db) == 0) {
-        g_open_files--;
-        debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE WRITE total=%d", g_open_files));
-    }
-    return 0;
 }

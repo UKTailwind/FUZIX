@@ -55,9 +55,4 @@ int db_staff_read_by_id(const char *staff_id, staff_t *out, long *out_recno);
 int db_staff_generate_next_id(char *out_id);
 int db_staff_lookup_display(const char *staff_id, char *out, size_t outlen);
 
-
-/* db_open and close */
-int db_staff_open(void);
-int db_staff_close(void);
-
 #endif

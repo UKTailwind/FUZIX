@@ -132,68 +132,26 @@ void db_state_format_line(const state_t *in, char *line)
     line[STATE_RECORD_LEN] = '\n';
 }
 
-int db_state_open(void)
-{
-    int rc = db_open(state_db, 1);
-
-    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
-
-    if (rc < 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Failed to open state"));
-        ui_status("Failed to open state file");
-        sleep(2);
-        return -1;
-    }
-
-    g_open_files++;
-
-    if (g_open_files > g_peak_open_files)
-        g_peak_open_files = g_open_files;
-    debug_log((DEBUG_INFO, FUNC_NAME, "OPEN READ fd=%d total=%d peak=%d", state_db->fd, g_open_files, g_peak_open_files));
-
-    return 0;
-}
-
 int db_state_name_from_id(const char *state_id, char *state_name)
 {
-    char line[STATE_DISK_LEN];
-    ssize_t n;
-
+    unsigned recno = 0;
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
-    /* start at beginning of file */
-    lseek(state_db->fd, 0, SEEK_SET);
 
-    while ((n = read(state_db->fd, line, STATE_DISK_LEN)) == STATE_DISK_LEN) {
-
+    while (db_read(state_db, recno) > 0) {
         char sid[STATE_ID_MAX + 1];
 
-        strncpy(sid, line + STATE_ID_OFF, STATE_ID_LEN);
+        strncpy(sid, state_db->buf + STATE_ID_OFF, STATE_ID_LEN);
         sid[STATE_ID_LEN] = '\0';
 
         if (strcmp(sid, state_id) == 0) {
 
-            strncpy(state_name, line + STATE_NAME_OFF, STATE_NAME_LEN);
+            strncpy(state_name, state_db->buf + STATE_NAME_OFF, STATE_NAME_LEN);
             state_name[STATE_NAME_LEN] = '\0';
 
             return 0;   /* found */
         }
+        recno++;
     }
 
     return -1;  /* not found */
-}
-
-/* Close database */
-int db_state_close(void)
-{
-    int rc;
-
-    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
-
-    rc = db_close(state_db);
-    if (rc < 0)
-        return rc;
-
-    g_open_files--;
-    debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE READ total=%d", g_open_files));
-    return 0;
 }

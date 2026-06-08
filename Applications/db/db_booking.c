@@ -145,48 +145,13 @@ void db_bk_format_line(register const booking_t *in, char *line)
 
 int db_bk_read(long recno, register booking_t *out)
 {
-    char line[BOOKING_DISK_LEN];
     off_t off = (off_t)recno * BOOKING_DISK_LEN;
-    ssize_t n;
+    char *line = booking_db->buf;
 
-    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: fd=%d recno=%ld out=%p", booking_db->fd, recno, out));
-    if (booking_db->fd < 0 || recno < 0 || !out) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid args: fd=%d recno=%ld out=%p", booking_db->fd, recno, out));
+    /* -ve error, 0 EOF. Really ought to make callers distinguish! */
+    if (db_read(booking_db, recno) <= 0)
         return -1;
-    }
-
-    debug_log((DEBUG_TRACE, FUNC_NAME, "offset=%ld (recno=%ld * %d)", (long)off, recno, BOOKING_DISK_LEN));
-
-    if (lseek(booking_db->fd, off, SEEK_SET) == (off_t)-1) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Error: lseek failed for booking read"));
-        debug_log((DEBUG_ERROR, FUNC_NAME, "EOF: offset=%ld", (long)off));
-        return -1;
-    }
-
-    n = read(booking_db->fd, line, BOOKING_DISK_LEN);
-
-    debug_log((DEBUG_TRACE, FUNC_NAME, "Read %zd bytes from offset %ld: first 8 bytes = %02X %02X %02X %02X %02X %02X %02X %02X",
-        n, (long)off,
-        (unsigned char)line[0],
-        (unsigned char)line[1],
-        (unsigned char)line[2],
-        (unsigned char)line[3],
-        (unsigned char)line[4],
-        (unsigned char)line[5],
-        (unsigned char)line[6],
-        (unsigned char)line[7]));
-
-    if (n == 0) {
-        debug_log((DEBUG_TRACE, FUNC_NAME, "EOF reached at recno=%ld offset=%ld", recno, (long)off));
-        return -1;
-    }
-    if (n != BOOKING_DISK_LEN) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "ERROR: Booking File Length (read %zd, expected %d)", n, BOOKING_DISK_LEN));
-        debug_log((DEBUG_ERROR, FUNC_NAME, "EOF: offset=%ld", (long)off));
-        return -1;
-    }
-
-    return db_bk_parse_line(line, out);
+    return db_bk_parse_line(booking_db->buf, out);
 }
 
 int db_bk_by_id(const char *booking_id, register booking_t *out, long *out_recno)
@@ -225,30 +190,14 @@ int db_bk_by_index(const DayBookings *day, int index, booking_t *out)
 
 int db_bk_write(long recno, const booking_t *in)
 {
-    char line[BOOKING_DISK_LEN];
-    off_t off;
-    ssize_t rc;
-
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter: record number=%ld", recno));
 
-    if (booking_db->fd < 0 || recno < 0 || !in){
+    if (recno < 0 || !in) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d recno=%ld in=%p", booking_db->fd, recno, (void *)in));
         return -1;
     }
-    off = (off_t)recno * BOOKING_DISK_LEN;
-
-    db_bk_format_line(in, line);
-
-    if (lseek(booking_db->fd, off, SEEK_SET) == (off_t)-1) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "lseek failed: fd=%d off=%ld errno=%d", booking_db->fd, (long)off, errno));
-        return -1;
-    }
-    rc = write(booking_db->fd, line, BOOKING_DISK_LEN);
-    if (rc != BOOKING_DISK_LEN) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "write failed: fd=%d wanted=%d wrote=%ld errno=%d", booking_db->fd, BOOKING_DISK_LEN, (long)rc, errno));
-        return -1;
-    }
-    return 0;
+    db_bk_format_line(in, booking_db->buf);
+    return db_write(booking_db, recno);
 }
 
 void db_bk_sort_day_by_time(register DayBookings *day)
@@ -388,68 +337,4 @@ int db_bk_build_day_index(int target_date, DayBookings *day)
     db_bk_sort_day_by_time(day);
 
     return 0;
-}
-
-
-int db_bk_op_read(void)
-{
-    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
-
-    if (db_open(booking_db, 0) < 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Failed to open booking database"));
-        return -1;
-    }
-
-    /* Count Open Files */
-    g_open_files++;
-    if (g_open_files > g_peak_open_files)
-        g_peak_open_files = g_open_files;
-
-    debug_log((DEBUG_TRACE, FUNC_NAME, "OPEN READ fd=%d total=%d peak=%d", booking_db->fd, g_open_files, g_peak_open_files));
-    return 0;
-}
-
-int db_bk_op_write(void)
-{
-    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
-
-    if (db_open(booking_db, 1) < 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME,
-        "Failed to open booking database")); return -1;
-    }
-
-    /* Count Open Files */
-    g_open_files++;
-    if (g_open_files > g_peak_open_files)
-        g_peak_open_files = g_open_files;
-
-    debug_log((DEBUG_TRACE, FUNC_NAME, "OPEN READ fd=%d total=%d peak=%d", booking_db->fd, g_open_files, g_peak_open_files));
-    return 0;
-}
-
-/* Close database */
-int db_bk_cl_read(void)
-{
-    int rc;
-    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
-    rc = db_close(booking_db);
-    if (rc == 0) {
-        /* Count Open Files */
-        g_open_files--;
-        debug_log((DEBUG_INFO, FUNC_NAME,"CLOSE READ fd=%d total=%d", booking_db->fd, g_open_files));
-    }
-    return rc;
-}
-
-int db_bk_cl_write(void)
-{
-    int rc;
-    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
-    rc = db_close(booking_db);
-    if (rc == 0) {
-        /* Count Open Files */
-        g_open_files--;
-        debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE WRITE fd=%d total=%d", booking_db->fd, g_open_files));
-    }
-    return rc;
 }

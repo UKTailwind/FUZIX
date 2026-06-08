@@ -2,6 +2,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "db_common.h"
 #include "staff_select.h"
 #include "ui_common.h"
 #include "ui.h"
@@ -17,7 +18,7 @@ static int staff_count = 0;
 /* Load staffs from database into staff[] */
 static int load_staff(void)
 {
-    int rc = db_staff_open();
+    int rc = db_open(staff_db, 0);
     long rec = 0;
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
@@ -36,7 +37,7 @@ static int load_staff(void)
         rec++;
     }
 
-    db_staff_close();
+    db_close(staff_db);
 
 /*
 * TODO Sort by staff name

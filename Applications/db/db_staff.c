@@ -42,34 +42,14 @@ int db_staff_lookup_display(const char *staff_id, char *out, size_t outlen)
 
 int db_staff_read(long recno, staff_t *out)
 {
-    char line[STAFF_DISK_LEN];
-    off_t off = (off_t)recno * STAFF_DISK_LEN;
-    ssize_t n;
-
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: fd=%d recno=%ld out=%p", staff_db->fd, recno, out));
     if (staff_db->fd < 0 || recno < 0 || !out) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid args: fd=%d recno=%ld out=%p", staff_db->fd, recno, out));
         return -1;
     }
-    debug_log((DEBUG_TRACE, FUNC_NAME, "offset=%ld (recno=%ld * %d)", (long)off, recno, STAFF_DISK_LEN));
-
-    if (lseek(staff_db->fd, off, SEEK_SET) == (off_t)-1) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Error: lseek failed for staff read"));
-        debug_log((DEBUG_ERROR, FUNC_NAME, "EOF: offset=%ld", (long)off));
+    if (db_read(staff_db, recno) <= 0)
         return -1;
-    }
-
-    n = read(staff_db->fd, line, STAFF_DISK_LEN);
-    if (n == 0) {
-        debug_log((DEBUG_TRACE, FUNC_NAME, "EOF reached at recno=%ld offset=%ld", recno, (long)off));
-        return -1;
-    }
-    if (n != STAFF_DISK_LEN) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "ERROR: Staff File Length (read %zd, expected %d)", n, STAFF_DISK_LEN));
-        debug_log((DEBUG_ERROR, FUNC_NAME, "EOF: offset=%ld", (long)off));
-        return -1;
-    }
-    return db_staff_parse_line(line, out);
+    return db_staff_parse_line(staff_db->buf, out);
 }
 
 int db_staff_read_by_id(const char *staff_id, staff_t *out, long *out_recno)
@@ -172,9 +152,6 @@ int db_staff_write(long *recno, const staff_t *in)
         return -1;
     }
 
-    /* Format record into on-disk layout */
-    db_staff_format_line(in, line);
-
     /* NEW record: append */
     if (*recno < 0) {
         long count = db_staff_record_count();
@@ -188,36 +165,22 @@ int db_staff_write(long *recno, const staff_t *in)
             errno = ENOSPC;   /* optional */
             return -1;
         }
+        /* Format record into on-disk layout */
+        db_staff_format_line(in, line);
 
-        off = lseek(staff_db->fd, 0, SEEK_END);
-        if (off == (off_t)-1) {
-            debug_log((DEBUG_ERROR, FUNC_NAME, "lseek(SEEK_END) failed errno=%d", errno));
-            return -1;
-        }
-
-        *recno = off / STAFF_DISK_LEN;
-    }
-    else {
+        rc = db_append(staff_db);
+        *recno = staff_db->pos;
+    } else {
         /* UPDATE existing record */
-        off = (off_t)(*recno) * STAFF_DISK_LEN;
-        if (lseek(staff_db->fd, off, SEEK_SET) == (off_t)-1) {
-            debug_log((DEBUG_ERROR, FUNC_NAME, "lseek failed: Unable to update existing record  off=%ld errno=%d",
-                      (long)off, errno));
-            return -1;
-        }
+        /* Format record into on-disk layout */
+        db_staff_format_line(in, line);
+        rc = db_write(staff_db, *recno);
     }
-
-    rc = write(staff_db->fd, line, STAFF_DISK_LEN);
-    if (rc != STAFF_DISK_LEN) {
+    if (rc < 0) {
         debug_log((DEBUG_ERROR, FUNC_NAME,
-                  "write failed: wanted=%d wrote=%ld errno=%d",
-                  STAFF_DISK_LEN, (long)rc, errno));
+                  "write failed: errno=%d", errno));
         return -1;
     }
-
-    /* Ensure data reaches disk */
-    fsync(staff_db->fd);
-
     debug_log((DEBUG_TRACE, FUNC_NAME, "STAFF written recno=%ld", *recno));
     return 0;
 }
@@ -299,40 +262,4 @@ void db_staff_format_line(register const staff_t *in, char *line)
     strncpy(line + STAFF_NOTES_OFF,  in->staff_notes,	 strnlen(in->staff_notes, STAFF_NOTES_LEN));
 
     line[STAFF_RECORD_LEN] = '\n';
-}
-
-int db_staff_open(void)
-{
-    int rc = db_open(staff_db, 0);
-
-    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
-
-    if (rc < 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Failed to open staff"));
-        ui_status("Failed to open staff file");
-        sleep(2);
-        return -1;
-    }
-
-    /* Count open files */
-    g_open_files++;
-    if (g_open_files > g_peak_open_files)
-        g_peak_open_files = g_open_files;
-    debug_log((DEBUG_INFO, FUNC_NAME,"OPEN READ fd=%d total=%d peak=%d", staff_db->fd, g_open_files, g_peak_open_files));
-    return rc;
-}
-
-/* Close database */
-int db_staff_close(void)
-{
-    int rc;
-
-    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
-
-    rc = db_close(staff_db);
-    if (rc == 0) {
-        g_open_files--;
-        debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE READ total=%d", g_open_files));
-    }
-    return rc;
 }

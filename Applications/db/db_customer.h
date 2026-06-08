@@ -73,10 +73,4 @@ int db_cs_by_id(const char *customer_id, customer_t *out, long *out_recno);
 int db_cs_generate_next_id(char *out_id);
 int db_cs_lookup_display(const char *customer_id, char *out, size_t outlen);
 
-/* db_open and close */
-int db_cs_op_read(void);
-int db_cs_op_write(void);
-int db_cs_cl_read(void);
-int db_cs_cl_write(void);
-
 #endif
