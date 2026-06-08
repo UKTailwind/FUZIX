@@ -15,6 +15,16 @@
 #include <string.h>
 #include "debug.h"
 #include <unistd.h>
+#include "db_common.h"
+#include "db_booking.h"
+#include "db_customer.h"
+#include "db_staff.h"
+#include "db_state.h"
+/* Until we put the structure into the disk header */
+#include "db_booking_layout.h"
+#include "db_customer_layout.h"
+#include "db_staff_layout.h"
+#include "db_state_layout.h"
 #include "booking_list.h"
 #include "customer_list.h"
 #include "ui.h"
@@ -23,6 +33,11 @@
 /*#include "ui_common.h"                    Note: ui.h already includes ui_common.h */
 #include "term.h"
 #include "ui_keyboard_parser.h"
+
+struct dbase *booking_db;
+struct dbase *customer_db;
+struct dbase *staff_db;
+struct dbase *state_db;
 
 /* main.c - Program entry and menu dispatcher */
 /* -------------------------------------------*/
@@ -50,6 +65,20 @@ static void draw_main_menu(void)
     ui_puts(12, 10, "Select option: ");
     fflush(stdout);
 }
+
+/* ------ Setup up and report errors */
+
+static struct dbase *do_db_setup(const char *path, unsigned reclen)
+{
+    struct dbase *db = db_setup(path, reclen);
+    if (db == NULL) {
+        fprintf(stderr, "Unable to set up database '%s'.\n", path);
+        /* TODO: error reporting */
+        exit(EXIT_FAILURE);
+    }
+    return db;
+}
+
 /* ---------- Main ---------- */
 
 int main(int argc, char *argv[])
@@ -124,6 +153,12 @@ int main(int argc, char *argv[])
 
     /* If debug enabled always show the Program Start Message */
     debug_log((DEBUG_ERROR, FUNC_NAME, "Enter: ******** Program Start *********"));
+
+    /* Set up the database access */
+    customer_db = do_db_setup(CUSTOMER_DB_FILE, CUSTOMER_DISK_LEN);
+    booking_db = do_db_setup(BOOKING_DB_FILE, BOOKING_DISK_LEN);
+    staff_db = do_db_setup(STAFF_DB_FILE, STAFF_DISK_LEN);
+    state_db = do_db_setup(STATE_DB_FILE, STATE_DISK_LEN);
 
     /* Set the keyboard type read from the command line */
     ui_set_keyboard_backend(active_backend);

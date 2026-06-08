@@ -25,17 +25,16 @@ typedef struct {
 } booking_input_state_t;
 
 /* Internal helpers forward declaration */
-static int state_lookup_name(int state_fd, const char *state_id, char *out, size_t outlen);
-static int customer_lookup_name(int customer_fd, const char *customer_id, char *out, size_t outlen);
-static void draw_booking_row(const DayBookings *day, int screen_row, int idx, int highlight, int booking_fd, int state_fd, int customer_fd);
+static int state_lookup_name(const char *state_id, char *out, size_t outlen);
+static int customer_lookup_name(const char *customer_id, char *out, size_t outlen);
+static void draw_booking_row(const DayBookings *day, int screen_row, int idx, int highlight);
 
 /* Selection */
 static int selected_idx = 0;   /* index into day->slots[] */
 
 /* ---------- Booking Screen drawing with dynamic scrolling ---------- */
 static void draw_screen(const char *date, const DayBookings *day,
-                        int start_idx, int selected_idx,
-                        int booking_fd, int state_fd, int customer_fd)
+                        int start_idx, int selected_idx)
 {
     char line[100];
     int i, row = 6;
@@ -62,7 +61,7 @@ static void draw_screen(const char *date, const DayBookings *day,
 
     for (i = 0; i < max_rows && start_idx + i < day->count; i++) {
         int idx = start_idx + i;
-        draw_booking_row(day, row + i, idx, (idx == selected_idx), booking_fd, state_fd, customer_fd);
+        draw_booking_row(day, row + i, idx, (idx == selected_idx));
     }
     ui_puts(22, 1,  "->Next Day <-Prev Day, Shift-> Next Week, C=Create E=Edit G=Goto Date Esc=Quit");
     ui_puts(UI_COMMAND_ROW, 1, "Command: ");
@@ -72,10 +71,7 @@ static void draw_screen(const char *date, const DayBookings *day,
 static void draw_booking_row(const DayBookings *day,
                              int screen_row,
                              int idx,
-                             int highlight,
-                             int booking_fd,
-                             int state_fd,
-                             int customer_fd)
+                             int highlight)
 {
     booking_t s;
     char startbuf[6];
@@ -88,19 +84,19 @@ static void draw_booking_row(const DayBookings *day,
     if (idx < 0 || idx >= day->count)
         return;
 
-    if (db_bk_by_index(booking_fd, day, idx, &s) != 0)
+    if (db_bk_by_index(day, idx, &s) != 0)
         return;
 
     hhmm_to_hhmm_colon(s.booking_start_time, startbuf, sizeof(startbuf));
     hhmm_to_hhmm_colon(s.booking_end_time,   endbuf,   sizeof(endbuf));
 
 
-    if (state_lookup_name(state_fd, s.booking_state_id, state_name, sizeof(state_name)) != 0) {
+    if (state_lookup_name(s.booking_state_id, state_name, sizeof(state_name)) != 0) {
         strncpy(state_name, s.booking_state_id, sizeof(state_name) - 1);
         state_name[sizeof(state_name) - 1] = '\0';
     }
 
-    if (customer_lookup_name(customer_fd, s.booking_customer_id, customer_name, sizeof(customer_name)) != 0) {
+    if (customer_lookup_name(s.booking_customer_id, customer_name, sizeof(customer_name)) != 0) {
         strncpy(customer_name, s.booking_customer_id, sizeof(customer_name) - 1);
         customer_name[sizeof(customer_name) - 1] = '\0';
     }
@@ -124,7 +120,7 @@ static void draw_booking_row(const DayBookings *day,
 }
 
 /* Select a new date for booking */
-static void goto_date(int booking_fd, int new_date, int *current_date,
+static void goto_date(int new_date, int *current_date,
                       char *datestr, DayBookings *day, int *start_idx)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
@@ -134,7 +130,7 @@ static void goto_date(int booking_fd, int new_date, int *current_date,
     snprintf(datestr, 9, "%08u", (unsigned)new_date);
 
     /* Build index instead of loading full records */
-    if (db_bk_build_day_index(booking_fd, new_date, day) < 0) {
+    if (db_bk_build_day_index(new_date, day) < 0) {
         debug_log((DEBUG_WARN, FUNC_NAME, "No bookings for %08u", (unsigned)new_date));
         day->count = 0;
     }
@@ -205,14 +201,14 @@ static int parse_ddmmyyyy(const char *str, int *out_date)
     return 0;
 }
 
-static int state_lookup_name(int state_fd, const char *state_id, char *out, size_t outlen)
+static int state_lookup_name(const char *state_id, char *out, size_t outlen)
 {
     state_t st;
     long rec = 0;
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
-    while (db_state_read(state_fd, rec, &st) == 0) {
+    while (db_state_read(rec, &st) == 0) {
         if (strcmp(st.state_id, state_id) == 0) {
             strncpy(out, st.name, outlen - 1);
             out[outlen - 1] = '\0';
@@ -223,14 +219,14 @@ static int state_lookup_name(int state_fd, const char *state_id, char *out, size
     return -1;
 }
 
-static int customer_lookup_name(int customer_fd, const char *customer_id, char *out, size_t outlen)
+static int customer_lookup_name(const char *customer_id, char *out, size_t outlen)
 {
     customer_t st;
     long rec = 0;
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
-    while (db_cs_read(customer_fd, rec, &st) == 0) {
+    while (db_cs_read(rec, &st) == 0) {
         if (strcmp(st.cs_id, customer_id) == 0) {
             strncpy(out, st.cs_name, outlen - 1);
             out[outlen - 1] = '\0';
@@ -244,10 +240,6 @@ static int customer_lookup_name(int customer_fd, const char *customer_id, char *
 /*================ Booking screen main loop ======================*/
 void run_booking_list(void)
 {
-    int booking_fd  = -1;
-    int state_fd   = -1;
-    int customer_fd = -1;
-
     char datestr[9];
     int current_date;
     static DayBookings day;
@@ -262,29 +254,25 @@ void run_booking_list(void)
     selected_idx = 0;
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
-    /* NOTE booking.c owns booking_fd, state_fd and customer_fd.
-    * Do not return from this function once they are open.
-    */
+    rc = db_bk_op_read();
 
-    booking_fd = db_bk_op_read();
-
-    if (booking_fd <= BOOKING_DB_ERROR) {
+    if (rc < 0) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Unable to open Booking database"));
         ui_status("Unable to open booking database");
         sleep(2);
         goto cleanup;
     }
 
-    state_fd =  db_state_open();
-    if (state_fd <= BOOKING_DB_ERROR) {
+    rc =  db_state_open();
+    if (rc < 0) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Unable to open State database"));
         ui_status("Unable to open state database");
         sleep(2);
         goto cleanup;
     }
 
-    customer_fd =  db_cs_op_read();
-    if (customer_fd <= CUSTOMER_DB_ERROR) {
+    rc =  db_cs_op_read();
+    if (rc < 0) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Unable to open Customer database"));
         ui_status("Unable to open customer database");
         sleep(2);
@@ -293,11 +281,11 @@ void run_booking_list(void)
 
     date_today_str(datestr);
     current_date = atoi(datestr);
-    goto_date(booking_fd, current_date, &current_date, datestr, &day, &start_idx);
+    goto_date(current_date, &current_date, datestr, &day, &start_idx);
 
     running = 1;
 
-    draw_screen(datestr, &day, start_idx, selected_idx, booking_fd, state_fd, customer_fd);
+    draw_screen(datestr, &day, start_idx, selected_idx);
 
     while (running) {
         int prev_selected_idx = selected_idx;
@@ -345,25 +333,25 @@ void run_booking_list(void)
             /* Day navigation */
             case UI_KEY_RIGHT: /* Right Arrow / Next Day */
                 debug_log((DEBUG_INFO, FUNC_NAME, "Key: Right Pressed"));
-                goto_date(booking_fd, add_days(current_date, 1), &current_date, datestr, &day, &start_idx);
+                goto_date(add_days(current_date, 1), &current_date, datestr, &day, &start_idx);
                 page_changed = 1;
                 break;
             case UI_KEY_LEFT: /* Left Arrow / Previous Day */
                 debug_log((DEBUG_INFO, FUNC_NAME, "Key: Left Pressed"));
-                goto_date(booking_fd, add_days(current_date, -1), &current_date, datestr, &day, &start_idx);
+                goto_date(add_days(current_date, -1), &current_date, datestr, &day, &start_idx);
                 page_changed = 1;
                 break;
 
             /* Week navigation */
             case UI_KEY_SHIFT_RIGHT: /* Shift Right = next week */
                 debug_log((DEBUG_INFO, FUNC_NAME, "Key:Shift Right Pressed"));
-                goto_date(booking_fd, add_days(current_date, 7), &current_date, datestr, &day, &start_idx);
+                goto_date(add_days(current_date, 7), &current_date, datestr, &day, &start_idx);
                 page_changed = 1;
                 break;
 
             case UI_KEY_SHIFT_LEFT: /* Shift Left = previous week */
                 debug_log((DEBUG_INFO, FUNC_NAME, "Key: Shift Left Pressed"));
-                goto_date(booking_fd, add_days(current_date, -7), &current_date, datestr, &day, &start_idx);
+                goto_date(add_days(current_date, -7), &current_date, datestr, &day, &start_idx);
                 page_changed = 1;
                 break;
 
@@ -412,8 +400,8 @@ void run_booking_list(void)
                 debug_log((DEBUG_INFO, FUNC_NAME, "Key: V Pressed for view mode"));
                 if (day.count > 0) {
                     booking_t b;
-                    if (db_bk_by_index(booking_fd, &day, selected_idx, &b) == 0) {
-                        run_booking_detail(booking_fd, b.booking_id, BOOK_VIEW);
+                    if (db_bk_by_index(&day, selected_idx, &b) == 0) {
+                        run_booking_detail(b.booking_id, BOOK_VIEW);
                         page_changed = 1;
                     }
                 }
@@ -425,11 +413,11 @@ void run_booking_list(void)
                 debug_log((DEBUG_INFO, FUNC_NAME, "Key: E for edit or F2 Pressed for edit mode"));
                 if (day.count > 0) {
                     booking_t b;
-                    if (db_bk_by_index(booking_fd, &day, selected_idx, &b) == 0) {
-                        run_booking_detail(booking_fd, b.booking_id, BOOK_EDIT);
+                    if (db_bk_by_index(&day, selected_idx, &b) == 0) {
+                        run_booking_detail(b.booking_id, BOOK_EDIT);
                     }
                     /* Reload day after edit */
-                    goto_date(booking_fd, current_date, &current_date, datestr, &day, &start_idx);
+                    goto_date(current_date, &current_date, datestr, &day, &start_idx);
                     page_changed = 1;
                 }
                 break;
@@ -437,10 +425,10 @@ void run_booking_list(void)
             case 'c':
             case 'C':
                 debug_log((DEBUG_INFO, FUNC_NAME, "Key: C pressed for create mode"));
-                rc = run_booking_detail(booking_fd, NULL, BOOK_CREATE);
+                rc = run_booking_detail(NULL, BOOK_CREATE);
                 if (rc == BOOK_DETAIL_SAVED) {
                     /* Reload current day after create */
-                    goto_date(booking_fd, current_date, &current_date, datestr, &day, &start_idx);
+                    goto_date(current_date, &current_date, datestr, &day, &start_idx);
                     page_changed = 1;
                     selected_idx = 0;
                 }
@@ -459,7 +447,7 @@ void run_booking_list(void)
                 {
                     if (parse_ddmmyyyy(buf, &new_date) == 0)
                     {
-                        goto_date(booking_fd, new_date, &current_date, datestr, &day, &start_idx);
+                        goto_date(new_date, &current_date, datestr, &day, &start_idx);
                         page_changed = 1;
                     }
                     else
@@ -476,7 +464,7 @@ void run_booking_list(void)
                break;
         }
         if (page_changed) {
-            draw_screen(datestr, &day, start_idx, selected_idx, booking_fd, state_fd, customer_fd);
+            draw_screen(datestr, &day, start_idx, selected_idx);
             page_changed = 0;
         }
         else
@@ -492,7 +480,7 @@ void run_booking_list(void)
             }
             if (page_changed) {
                 debug_log((DEBUG_TRACE, FUNC_NAME, "paged_changed TRUE."));
-                draw_screen(datestr, &day, start_idx, selected_idx, booking_fd, state_fd, customer_fd);
+                draw_screen(datestr, &day, start_idx, selected_idx);
                 page_changed = 0;
             }
             else {
@@ -501,27 +489,18 @@ void run_booking_list(void)
                 draw_booking_row(&day,
                     base_row + (prev_selected_idx - prev_start_idx),
                     prev_selected_idx,
-                    0,
-                    booking_fd, state_fd, customer_fd);
+                    0);
                 /* redraw new row (add highlight) */
                 draw_booking_row(&day,
                     base_row + (selected_idx - start_idx),
-                    selected_idx,
-                    1,
-                    booking_fd, state_fd, customer_fd);
+                    selected_idx, 1);
                 fflush(stdout);
             }
         }
     }
 
 cleanup:
-    if (customer_fd >=0) {
-        db_cs_cl_read(customer_fd);
-    }
-    if (state_fd >=0) {
-        db_state_close(state_fd);
-    }
-    if (booking_fd >=0) {
-        db_bk_cl_read(booking_fd);
-    }
+    db_cs_cl_read();
+    db_state_close();
+    db_bk_cl_read();
 }

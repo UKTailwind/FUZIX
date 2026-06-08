@@ -1,7 +1,5 @@
 /*
 * All database writes must go through db_*_write()
-* Records are fixed-length; the trailing '\n' is part of the on-disk format
-* and is validated to detect corruption early.
 */
 
 #include <errno.h>
@@ -20,13 +18,13 @@
 #include "ui.h"
 #include "debug.h"
 
-int db_cs_lookup_display(int customer_fd, const char *customer_id, char *out, size_t outlen)
+int db_cs_lookup_display(const char *customer_id, char *out, size_t outlen)
 {
     customer_t st;
     long rec = 0;
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
-    while (db_cs_read(customer_fd, rec, &st) == 0) {
+    while (db_cs_read(rec, &st) == 0) {
         if (strcmp(st.cs_id, customer_id) == 0) {
             ui_rtrim(st.cs_name);
             ui_rtrim(st.cs_address1);
@@ -41,26 +39,26 @@ int db_cs_lookup_display(int customer_fd, const char *customer_id, char *out, si
 }
 
 
-int db_cs_read(int fd, long recno, customer_t *out)
+int db_cs_read(long recno, customer_t *out)
 {
     char line[CUSTOMER_DISK_LEN];
     off_t off = (off_t)recno * CUSTOMER_DISK_LEN;
     ssize_t n;
 
-    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: fd=%d recno=%ld out=%p", fd, recno, out));
-    if (fd < 0 || recno < 0 || !out) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid args: fd=%d recno=%ld out=%p", fd, recno, out));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: fd=%d recno=%ld out=%p", customer_db->fd, recno, out));
+    if (customer_db->fd < 0 || recno < 0 || !out) {
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid args: fd=%d recno=%ld out=%p", customer_db->fd, recno, out));
         return -1;
     }
     debug_log((DEBUG_TRACE, FUNC_NAME, "offset=%ld (recno=%ld * %d)", (long)off, recno, CUSTOMER_DISK_LEN));
 
-    if (lseek(fd, off, SEEK_SET) == (off_t)-1) {
+    if (lseek(customer_db->fd, off, SEEK_SET) == (off_t)-1) {
         debug_log((DEBUG_WARN, FUNC_NAME, "Warning: lseek failed for customer read"));
         debug_log((DEBUG_WARN, FUNC_NAME, "Warning: offset=%ld", (long)off));
         return CUSTOMER_DB_EOF;
     }
 
-    n = read(fd, line, CUSTOMER_DISK_LEN);
+    n = read(customer_db->fd, line, CUSTOMER_DISK_LEN);
     if (n == 0) {
         debug_log((DEBUG_TRACE, FUNC_NAME, "EOF reached at recno=%ld offset=%ld", recno, (long)off));
         return CUSTOMER_DB_EOF;
@@ -72,14 +70,14 @@ int db_cs_read(int fd, long recno, customer_t *out)
     return db_cs_parse_line(line, out);
 }
 
-int db_cs_by_id( int fd, const char *customer_id, customer_t *out, long *out_recno)
+int db_cs_by_id( const char *customer_id, customer_t *out, long *out_recno)
 {
     customer_t tmp;
     long recno = 0;
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
-    while (db_cs_read(fd, recno, &tmp) == 0) {
+    while (db_cs_read(recno, &tmp) == 0) {
         if (strcmp(tmp.cs_id, customer_id) == 0) {
             memcpy(out, &tmp, sizeof(tmp));   /* struct copy */
             if (out_recno)
@@ -94,7 +92,7 @@ int db_cs_by_id( int fd, const char *customer_id, customer_t *out, long *out_rec
     return -1;   /* not found */
 }
 
-int db_cs_generate_next_id(int fd, char *out_id)
+int db_cs_generate_next_id(char *out_id)
 {
     customer_t tmp;
     long recno = 0;
@@ -107,7 +105,7 @@ int db_cs_generate_next_id(int fd, char *out_id)
         return -1;
     }
 
-    while (db_cs_read(fd, recno, &tmp) == 0) {
+    while (db_cs_read(recno, &tmp) == 0) {
 
         if (tmp.cs_id[0] != '\0') {
             char *endp;
@@ -134,7 +132,7 @@ int db_cs_generate_next_id(int fd, char *out_id)
     return 0;
 }
 
-long db_cs_record_count(int fd)
+long db_cs_record_count(void)
 {
     customer_t tmp;
     long recno = 0;
@@ -142,10 +140,10 @@ long db_cs_record_count(int fd)
 
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
-    if (fd < 0)
+    if (customer_db->fd < 0)
         return -1;
 
-    while (db_cs_read(fd, recno, &tmp) == 0) {
+    while (db_cs_read(recno, &tmp) == 0) {
         /* Skip deleted records */
         if (tmp.cs_status[0] == CUSTOMER_STATUS_DELETED) {
             recno++;
@@ -160,7 +158,7 @@ long db_cs_record_count(int fd)
 }
 
 
-int db_cs_write(int fd, long *recno, const customer_t *in)
+int db_cs_write(long *recno, const customer_t *in)
 {
     char line[CUSTOMER_DISK_LEN];
     off_t off;
@@ -173,8 +171,8 @@ int db_cs_write(int fd, long *recno, const customer_t *in)
         return -1;
     }
 
-    if (fd < 0 || !recno || !in) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d recno=%p in=%p", fd, recno, in));
+    if (customer_db->fd < 0 || !recno || !in) {
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d recno=%p in=%p", customer_db->fd, recno, in));
         return -1;
     }
 
@@ -183,7 +181,7 @@ int db_cs_write(int fd, long *recno, const customer_t *in)
 
     /* NEW record: append */
     if (*recno < 0) {
-        long count = db_cs_record_count(fd);
+        long count = db_cs_record_count();
         if (count < 0) {
             debug_log((DEBUG_ERROR, FUNC_NAME, "Unable to determine customer count"));
             return -1;
@@ -195,7 +193,7 @@ int db_cs_write(int fd, long *recno, const customer_t *in)
             return -1;
         }
 
-        off = lseek(fd, 0, SEEK_END);
+        off = lseek(customer_db->fd, 0, SEEK_END);
         if (off == (off_t)-1) {
             debug_log((DEBUG_ERROR, FUNC_NAME, "lseek(SEEK_END) failed errno=%d", errno));
             return -1;
@@ -206,14 +204,14 @@ int db_cs_write(int fd, long *recno, const customer_t *in)
     else {
         /* UPDATE existing record */
         off = (off_t)(*recno) * CUSTOMER_DISK_LEN;
-        if (lseek(fd, off, SEEK_SET) == (off_t)-1) {
+        if (lseek(customer_db->fd, off, SEEK_SET) == (off_t)-1) {
             debug_log((DEBUG_ERROR, FUNC_NAME, "lseek failed: Unable to update existing record  off=%ld errno=%d",
                       (long)off, errno));
             return -1;
         }
     }
 
-    rc = write(fd, line, CUSTOMER_DISK_LEN);
+    rc = write(customer_db->fd, line, CUSTOMER_DISK_LEN);
     if (rc != CUSTOMER_DISK_LEN) {
         debug_log((DEBUG_ERROR, FUNC_NAME,
                   "write failed: wanted=%d wrote=%ld errno=%d",
@@ -222,13 +220,13 @@ int db_cs_write(int fd, long *recno, const customer_t *in)
     }
 
     /* Ensure data reaches disk */
-    fsync(fd);
+    fsync(customer_db->fd);
 
     debug_log((DEBUG_TRACE, FUNC_NAME, "Customer written recno=%ld", *recno));
     return 0;
 }
 
-int db_cs_load_page(int fd, long start_rec, register CustomerList *list, long *next_rec)
+int db_cs_load_page(long start_rec, register CustomerList *list, long *next_rec)
 {
     customer_t c;
     long rec = start_rec;
@@ -239,7 +237,7 @@ int db_cs_load_page(int fd, long start_rec, register CustomerList *list, long *n
 
     while (list->count < CUSTOMER_PAGE_SIZE) {
 
-        if (db_cs_read(fd, rec, &c) != 0)
+        if (db_cs_read(rec, &c) != 0)
             break;
 
         rec++;
@@ -353,103 +351,52 @@ void db_cs_format_line(register const customer_t *in, char *line)
 
 int db_cs_op_read(void)
 {
-    int fd = open(CUSTOMER_DB_FILE, O_RDONLY);  /* Read Only */
-    struct stat st;
+    int rc = db_open(customer_db, 0);
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
 
-    if (fd < 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Failed to open customer db in Read Only mode"));
-        return -1;
-    }
-
-    /* Check customer file */
-    if (fstat(fd, &st) != 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Cannot stat customer database"));
-        close(fd);
-        return -1;
-    }
-
-    if (db_validate_fixed_records(fd, CUSTOMER_DISK_LEN, CUSTOMER_DB_FILE) != 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Customer DB corrupt"));
-        close(fd);
-        return -1;
-    }
-
+    if (rc < 0)
+        return rc;
     /* Count open files */
     g_open_files++;
     if (g_open_files > g_peak_open_files)
         g_peak_open_files = g_open_files;
-
-    debug_log((DEBUG_INFO, FUNC_NAME, "OPEN READ fd=%d total=%d peak=%d", fd, g_open_files, g_peak_open_files));
-    return fd;
+    debug_log((DEBUG_INFO, FUNC_NAME, "OPEN READ fd=%d total=%d peak=%d", customer_db->fd, g_open_files, g_peak_open_files));
+    return rc;
 }
 
 int db_cs_op_write(void)
 {
-    int fd;
-    struct stat st;
+    int rc = db_open(customer_db, 0);
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
 
-    /* Create Lock File */
-    if (db_lock_exclusive(CUSTOMER_DB_FILE) != 0){
-       debug_log((DEBUG_ERROR, FUNC_NAME, "Failed to create customer db lock file"));
-       return -1;
-    }
-
-    /* Open for Writing */
-    fd = open(CUSTOMER_DB_FILE, O_RDWR);  /* Read Write */
-    if (fd < 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Failed to open customer"));
-        db_unlock(CUSTOMER_DB_FILE);
-        return -1;
-    }
-    /* Check customer file */
-    if (fstat(fd, &st) != 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Cannot stat customer database"));
-        close(fd);
-        db_unlock(CUSTOMER_DB_FILE);
-        return -1;
-    }
-    if (db_validate_fixed_records(fd, CUSTOMER_DISK_LEN, CUSTOMER_DB_FILE) != 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Customer database corrupt"));
-        close(fd);
-        db_unlock(CUSTOMER_DB_FILE);
-        return -1;
-    }
+    if (rc < 0)
+        return rc;
     /* Count open files */
     g_open_files++;
     if (g_open_files > g_peak_open_files)
         g_peak_open_files = g_open_files;
-
-    debug_log((DEBUG_INFO, FUNC_NAME, "OPEN WRITE fd=%d total=%d peak=%d", fd, g_open_files, g_peak_open_files));
-
-    return fd;
+    debug_log((DEBUG_INFO, FUNC_NAME, "OPEN WRITE fd=%d total=%d peak=%d", customer_db->fd, g_open_files, g_peak_open_files));
+    return rc;
 }
 
 /* Close database */
-int db_cs_cl_read(int fd)
+int db_cs_cl_read(void)
 {
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
-    if (fd < 0)
-        return 0;
-    if (close(fd) == 0) {
+    if (db_close(customer_db) == 0) {
         g_open_files--;
-        debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE READ fd=%d total=%d", fd, g_open_files));
+        debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE READ total=%d", g_open_files));
     }
-    return 0;
 }
 
-int db_cs_cl_write(int fd)
+int db_cs_cl_write(void)
 {
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
-    if (fd >= 0){
-        if (close(fd) == 0) {
-            g_open_files--;
-            debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE WRITE fd=%d total=%d", fd, g_open_files));
-        }
+    if (db_close(customer_db) == 0) {
+        g_open_files--;
+        debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE WRITE total=%d", g_open_files));
     }
-    db_unlock(CUSTOMER_DB_FILE);
     return 0;
 }

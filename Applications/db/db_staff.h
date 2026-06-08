@@ -2,6 +2,10 @@
 #define DB_STAFF_H
 #include <stddef.h>
 
+#define STAFF_DB_FILE	"data/staff.db"
+
+extern struct dbase *staff_db;
+
 #define MAX_STAFF_ENTRIES 15
 
 #define STAFF_STATUS_MAX     1
@@ -37,24 +41,23 @@ typedef struct {
     staff_list_rec_t slots[MAX_STAFF_ENTRIES];
 } StaffList;
 
-
 /* parsing / formatting */
 int db_staff_parse_line(const char *line, staff_t *out);
 void db_staff_format_line(const staff_t *in, char *line);
 
 /* record-level I/O */
-int db_staff_read(int fd, long recno, staff_t *out);
-int db_staff_write(int fd, long *recno, const staff_t *in);
+int db_staff_read(long recno, staff_t *out);
+int db_staff_write(long *recno, const staff_t *in);
 
 /* Helpers */
-int db_staff_load_all(int fd, StaffList *list);
-int db_staff_read_by_id(int fd, const char *staff_id, staff_t *out, long *out_recno);
-int db_staff_generate_next_id(int fd, char *out_id);
-int db_staff_lookup_display(int staff_fd, const char *staff_id, char *out, size_t outlen);
+int db_staff_load_all(StaffList *list);
+int db_staff_read_by_id(const char *staff_id, staff_t *out, long *out_recno);
+int db_staff_generate_next_id(char *out_id);
+int db_staff_lookup_display(const char *staff_id, char *out, size_t outlen);
 
 
 /* db_open and close */
 int db_staff_open(void);
-int db_staff_close(int fd);
+int db_staff_close(void);
 
 #endif

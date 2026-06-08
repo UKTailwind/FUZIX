@@ -2,6 +2,10 @@
 #define DB_STATE_H
 #include <stddef.h>
 
+extern struct dbase *state_db;
+
+#define STATE_DB_FILE	"data/state.db"
+
 #define MAX_STATE_ENTRIES 8
 
 #define STATE_ID_MAX      6
@@ -18,13 +22,13 @@ int db_state_parse_line(const char *line, state_t *out);
 void db_state_format_line(const state_t *in, char *line);
 
 /* record-level I/O */
-int db_state_read(int fd, long recno, state_t *out);
-int db_state_write(int fd, long recno, const state_t *in);
-int db_state_name_from_id(int fd, const char *state_id, char *state_name);
+int db_state_read(long recno, state_t *out);
+int db_state_write(long recno, const state_t *in);
+int db_state_name_from_id(const char *state_id, char *state_name);
 
 
 /* db_open and close */
 int db_state_open(void);
-int db_state_close(int fd);
+int db_state_close(void);
 
 #endif

@@ -18,6 +18,6 @@ typedef enum {
 } book_detail_result_t;
 
 /* Public API */
-int run_booking_detail(int booking_fd, const char *booking_id, book_mode_t mode);
+int run_booking_detail(const char *booking_id, book_mode_t mode);
 
 #endif

@@ -17,27 +17,27 @@ static int state_count = 0;
 /* Load states from database into states[] */
 static int load_states(void)
 {
-    int fd = db_state_open();
+    int rc = db_state_open();
     long rec = 0;
     int i;
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
-    if (fd < 0)
+    if (rc < 0)
         return -1;
 
     state_count = 0;
 
     while (state_count < MAX_STATE_ENTRIES) {
 
-        if (db_state_read(fd, rec, &states[state_count]) != 0)
+        if (db_state_read(rec, &states[state_count]) != 0)
             break;
 
         state_count++;
         rec++;
     }
 
-    db_state_close(fd);
+    db_state_close();
 
     /* Sort by workflow order */
     for (i = 0; i < state_count - 1; i++) {

@@ -1,7 +1,5 @@
 /*
 * All database writes must go through db_*_write()
-* Records are fixed-length; the trailing '\n' is part of the on-disk format
-* and is validated to detect corruption early.
 */
 
 #include "db_booking.h"
@@ -145,27 +143,27 @@ void db_bk_format_line(register const booking_t *in, char *line)
     }
 }
 
-int db_bk_read(int fd, long recno, register booking_t *out)
+int db_bk_read(long recno, register booking_t *out)
 {
     char line[BOOKING_DISK_LEN];
     off_t off = (off_t)recno * BOOKING_DISK_LEN;
     ssize_t n;
 
-    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: fd=%d recno=%ld out=%p", fd, recno, out));
-    if (fd < 0 || recno < 0 || !out) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid args: fd=%d recno=%ld out=%p", fd, recno, out));
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: fd=%d recno=%ld out=%p", booking_db->fd, recno, out));
+    if (booking_db->fd < 0 || recno < 0 || !out) {
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid args: fd=%d recno=%ld out=%p", booking_db->fd, recno, out));
         return -1;
     }
 
     debug_log((DEBUG_TRACE, FUNC_NAME, "offset=%ld (recno=%ld * %d)", (long)off, recno, BOOKING_DISK_LEN));
 
-    if (lseek(fd, off, SEEK_SET) == (off_t)-1) {
+    if (lseek(booking_db->fd, off, SEEK_SET) == (off_t)-1) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Error: lseek failed for booking read"));
         debug_log((DEBUG_ERROR, FUNC_NAME, "EOF: offset=%ld", (long)off));
         return -1;
     }
 
-    n = read(fd, line, BOOKING_DISK_LEN);
+    n = read(booking_db->fd, line, BOOKING_DISK_LEN);
 
     debug_log((DEBUG_TRACE, FUNC_NAME, "Read %zd bytes from offset %ld: first 8 bytes = %02X %02X %02X %02X %02X %02X %02X %02X",
         n, (long)off,
@@ -191,14 +189,14 @@ int db_bk_read(int fd, long recno, register booking_t *out)
     return db_bk_parse_line(line, out);
 }
 
-int db_bk_by_id( int fd, const char *booking_id, register booking_t *out, long *out_recno)
+int db_bk_by_id(const char *booking_id, register booking_t *out, long *out_recno)
 {
     booking_t tmp;
     long recno = 0;
 
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
-    while (db_bk_read(fd, recno, &tmp) == 0) {
+    while (db_bk_read(recno, &tmp) == 0) {
         if (strcmp(tmp.booking_id, booking_id) == 0) {
 
             debug_log((DEBUG_TRACE, FUNC_NAME, "TMP status before copy = '%c' (0x%02X)", tmp.booking_status[0], (unsigned char)tmp.booking_status[0]));
@@ -216,16 +214,16 @@ int db_bk_by_id( int fd, const char *booking_id, register booking_t *out, long *
     return -1;   /* not found */
 }
 
-int db_bk_by_index(int fd, const DayBookings *day, int index, booking_t *out)
+int db_bk_by_index(const DayBookings *day, int index, booking_t *out)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
     if (index < 0 || index >= day->count)
         return -1;
 
-    return db_bk_read(fd, day->recnos[index], out);
+    return db_bk_read(day->recnos[index], out);
 }
 
-int db_bk_write(int fd, long recno, const booking_t *in)
+int db_bk_write(long recno, const booking_t *in)
 {
     char line[BOOKING_DISK_LEN];
     off_t off;
@@ -233,27 +231,27 @@ int db_bk_write(int fd, long recno, const booking_t *in)
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter: record number=%ld", recno));
 
-    if (fd < 0 || recno < 0 || !in){
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d recno=%ld in=%p", fd, recno, (void *)in));
+    if (booking_db->fd < 0 || recno < 0 || !in){
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d recno=%ld in=%p", booking_db->fd, recno, (void *)in));
         return -1;
     }
     off = (off_t)recno * BOOKING_DISK_LEN;
 
     db_bk_format_line(in, line);
 
-    if (lseek(fd, off, SEEK_SET) == (off_t)-1) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "lseek failed: fd=%d off=%ld errno=%d", fd, (long)off, errno));
+    if (lseek(booking_db->fd, off, SEEK_SET) == (off_t)-1) {
+        debug_log((DEBUG_ERROR, FUNC_NAME, "lseek failed: fd=%d off=%ld errno=%d", booking_db->fd, (long)off, errno));
         return -1;
     }
-    rc = write(fd, line, BOOKING_DISK_LEN);
+    rc = write(booking_db->fd, line, BOOKING_DISK_LEN);
     if (rc != BOOKING_DISK_LEN) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "write failed: fd=%d wanted=%d wrote=%ld errno=%d", fd, BOOKING_DISK_LEN, (long)rc, errno));
+        debug_log((DEBUG_ERROR, FUNC_NAME, "write failed: fd=%d wanted=%d wrote=%ld errno=%d", booking_db->fd, BOOKING_DISK_LEN, (long)rc, errno));
         return -1;
     }
     return 0;
 }
 
-void db_bk_sort_day_by_time(int fd, register DayBookings *day)
+void db_bk_sort_day_by_time(register DayBookings *day)
 {
     int i;
     booking_t a, b;
@@ -264,8 +262,8 @@ void db_bk_sort_day_by_time(int fd, register DayBookings *day)
         int j;
         for (j = i + 1; j < day->count; j++) {
 
-            db_bk_read(fd, day->recnos[i], &a);
-            db_bk_read(fd, day->recnos[j], &b);
+            db_bk_read(day->recnos[i], &a);
+            db_bk_read(day->recnos[j], &b);
 
             if (strcmp(a.booking_start_time, b.booking_start_time) > 0) {
                 long tmp = day->recnos[i];
@@ -276,26 +274,26 @@ void db_bk_sort_day_by_time(int fd, register DayBookings *day)
     }
 }
 
-int db_bk_append(int fd, const booking_t *in)
+int db_bk_append(const booking_t *in)
 {
     char line[BOOKING_DISK_LEN];
     ssize_t rc;
 
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
-    if (fd < 0 || !in) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d in=%p", fd, (void *)in));
+    if (booking_db->fd < 0 || !in) {
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Invalid arguments: fd=%d in=%p", booking_db->fd, (void *)in));
         return -1;
     }
 
     db_bk_format_line(in, line);
 
-    if (lseek(fd, 0, SEEK_END) == (off_t)-1) {
+    if (lseek(booking_db->fd, 0, SEEK_END) == (off_t)-1) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "lseek(SEEK_END) failed errno=%d", errno));
         return -1;
     }
 
-    rc = write(fd, line, BOOKING_DISK_LEN);
+    rc = write(booking_db->fd, line, BOOKING_DISK_LEN);
     if (rc != BOOKING_DISK_LEN) {
         debug_log((DEBUG_ERROR, FUNC_NAME,
                   "append write failed wanted=%d wrote=%ld errno=%d",
@@ -306,7 +304,7 @@ int db_bk_append(int fd, const booking_t *in)
     return 0;
 }
 
-int db_bk_generate_next_id(int fd, char *out_id)
+int db_bk_generate_next_id(char *out_id)
 {
     booking_t tmp;
     long recno = 0;
@@ -320,7 +318,7 @@ int db_bk_generate_next_id(int fd, char *out_id)
         return -1;
     }
 
-    while (db_bk_read(fd, recno, &tmp) == 0) {
+    while (db_bk_read(recno, &tmp) == 0) {
 
         if (tmp.booking_id[0] != '\0') {
             char *endp;
@@ -360,19 +358,19 @@ int cmp_booking_time(const void *a, const void *b)
                   bb->booking_start_time);
 }
 
-int db_bk_build_day_index(int fd, int target_date, DayBookings *day)
+int db_bk_build_day_index(int target_date, DayBookings *day)
 {
     booking_t b;
     long recno = 0;
 
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
-    if (fd < 0 || !day)
+    if (booking_db->fd < 0 || !day)
         return -1;
 
     day->count = 0;
 
-    while (db_bk_read(fd, recno, &b) == 0) {
+    while (db_bk_read(recno, &b) == 0) {
 
         /* Match date and skip deleted bookings */
         if (atoi(b.booking_date) == target_date &&
@@ -387,7 +385,7 @@ int db_bk_build_day_index(int fd, int target_date, DayBookings *day)
     }
 
     /* Always return sorted results */
-    db_bk_sort_day_by_time(fd, day);
+    db_bk_sort_day_by_time(day);
 
     return 0;
 }
@@ -395,109 +393,63 @@ int db_bk_build_day_index(int fd, int target_date, DayBookings *day)
 
 int db_bk_op_read(void)
 {
-    struct stat st;
-    int fd;
-
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
 
-    fd = open(BOOKING_DB_FILE, O_RDONLY); /* Read Only */
-    if (fd < 0) {
+    if (db_open(booking_db, 0) < 0) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Failed to open booking database"));
         return -1;
     }
 
-    /* Check booking file */
-    if (fstat(fd, &st) != 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Cannot stat booking database"));
-        close(fd);
-        return -1;
-    }
-
-    if (db_validate_fixed_records(fd, BOOKING_DISK_LEN, "booking.db") != 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Booking DB corrupt"));
-        close(fd);
-        return -1;
-    }
     /* Count Open Files */
     g_open_files++;
     if (g_open_files > g_peak_open_files)
         g_peak_open_files = g_open_files;
 
-    debug_log((DEBUG_TRACE, FUNC_NAME, "OPEN READ fd=%d total=%d peak=%d", fd, g_open_files, g_peak_open_files));
-
-    return fd;
+    debug_log((DEBUG_TRACE, FUNC_NAME, "OPEN READ fd=%d total=%d peak=%d", booking_db->fd, g_open_files, g_peak_open_files));
+    return 0;
 }
 
 int db_bk_op_write(void)
 {
-    int fd;
-    struct stat st;
+    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
 
-    debug_log((DEBUG_INFO, FUNC_NAME, "Enter: "));
-
-    /* Create Lock File */
-    if (db_lock_exclusive(BOOKING_DB_FILE) != 0){
-       debug_log((DEBUG_ERROR, FUNC_NAME, "Failed to create booking db lock file"));
-       return -1;
+    if (db_open(booking_db, 1) < 0) {
+        debug_log((DEBUG_ERROR, FUNC_NAME,
+        "Failed to open booking database")); return -1;
     }
 
-    /* Open for Writing */
-    fd = open(BOOKING_DB_FILE, O_RDWR);  /* Read Write */
-    if (fd < 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Failed to open booking database"));
-        db_unlock(BOOKING_DB_FILE);
-        return -1;
-    }
-
-    /* Check booking file */
-    if (fstat(fd, &st) != 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Cannot stat booking database"));
-        close(fd);
-        db_unlock(BOOKING_DB_FILE);
-        return -1;
-    }
-
-    if (db_validate_fixed_records(fd, BOOKING_DISK_LEN, "booking.db") != 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Booking database corrupt"));
-        close(fd);
-        db_unlock(BOOKING_DB_FILE);
-        return -1;
-    }
     /* Count Open Files */
     g_open_files++;
     if (g_open_files > g_peak_open_files)
         g_peak_open_files = g_open_files;
-    debug_log((DEBUG_INFO, FUNC_NAME, "OPEN WRITE fd=%d total=%d peak=%d", fd, g_open_files, g_peak_open_files));
-    return fd;
+
+    debug_log((DEBUG_TRACE, FUNC_NAME, "OPEN READ fd=%d total=%d peak=%d", booking_db->fd, g_open_files, g_peak_open_files));
+    return 0;
 }
 
 /* Close database */
-int db_bk_cl_read(int fd)
+int db_bk_cl_read(void)
 {
     int rc;
-
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
-    if (fd < 0)
-        return 0;
-    rc = close(fd);
+    rc = db_close(booking_db);
     if (rc == 0) {
         /* Count Open Files */
         g_open_files--;
-        debug_log((DEBUG_INFO, FUNC_NAME,"CLOSE READ fd=%d total=%d", fd, g_open_files));
+        debug_log((DEBUG_INFO, FUNC_NAME,"CLOSE READ fd=%d total=%d", booking_db->fd, g_open_files));
     }
     return rc;
 }
 
-int db_bk_cl_write(int fd)
+int db_bk_cl_write(void)
 {
+    int rc;
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
-    if (fd >= 0){
-        if (close(fd) == 0) {
-            /* Count open files */
-            g_open_files--;
-            debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE WRITE fd=%d total=%d", fd, g_open_files));
-        }
+    rc = db_close(booking_db);
+    if (rc == 0) {
+        /* Count Open Files */
+        g_open_files--;
+        debug_log((DEBUG_INFO, FUNC_NAME, "CLOSE WRITE fd=%d total=%d", booking_db->fd, g_open_files));
     }
-    db_unlock(BOOKING_DB_FILE);
-    return 0;
+    return rc;
 }

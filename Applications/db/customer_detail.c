@@ -179,8 +179,9 @@ static int edit_current_field(register cust_form_t *form)
     return ui_edit_field(&es, FIRST_ROW + form->field, VALUE_COL);
 }
 
-static int customer_detail_handle_exit(register cust_form_t *form, int fd)
+static int customer_detail_handle_exit(register cust_form_t *form)
 {
+    int rc;
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     /* No changes → just exit */
@@ -189,7 +190,7 @@ static int customer_detail_handle_exit(register cust_form_t *form, int fd)
         sleep(1);
 
         /* Close Read Only File */
-        db_cs_cl_read(fd);
+        db_cs_cl_read();
         return 0;
     }
 
@@ -203,11 +204,13 @@ static int customer_detail_handle_exit(register cust_form_t *form, int fd)
         case 'Y':
         case 'y':
             /* Close Customer DB Read Only mode */
-            db_cs_cl_read(fd);
+            /* TODO FIXME: we want to be able to promote our lock
+               but without deadlocking if other dbs are opened */
+            db_cs_cl_read();
 
             /* Open Customer DB Read Write mode */
-            fd = db_cs_op_write();
-            if (fd <0){
+            rc = db_cs_op_write();
+            if (rc < 0){
                 /* Failed to open Customer DB in RW mode */
                 ui_status("ERROR: Customer Not Saved, Unable to open Customer File in RW mode");
                 sleep(2);
@@ -215,30 +218,30 @@ static int customer_detail_handle_exit(register cust_form_t *form, int fd)
             }
             /* Assign ID for new customer */
             if (form->recno < 0) {
-                if (db_cs_generate_next_id(fd, form->work.cs_id) != 0) {
+                if (db_cs_generate_next_id(form->work.cs_id) != 0) {
                     /* unable to generate new customer id */
-                    db_cs_cl_write(fd);
+                    db_cs_cl_write();
                     ui_status("ERROR: Customer Not Saved, Unable to generate new customer ID");
                     sleep(2);
                     return -1;
                 }
             }
             /* Save the Customer */
-            if (db_cs_write(fd, &form->recno, &form->work) != 0) {
+            if (db_cs_write(&form->recno, &form->work) != 0) {
                 /* Unable to create customer */
-                db_cs_cl_write(fd);
+                db_cs_cl_write();
                 ui_status("ERROR: Customer Not Saved, Unable to save customer record");
                 sleep(2);
                 return -1;   /* stay in editor */
             }
-            db_cs_cl_write(fd);
+            db_cs_cl_write();
             ui_status("Customer saved");
             sleep(1);
             return CUST_DETAIL_SAVED;
 
         case 'N':
         case 'n':
-            db_cs_cl_read(fd);
+            db_cs_cl_read();
             ui_status("Changes discarded");
             return CUST_DETAIL_NO_CHANGE;
 
@@ -292,7 +295,7 @@ static void update_field_highlight(register const cust_form_t *f, int prev)
 
 int run_customer_detail(const char *customer_id, cust_mode_t mode)
 {
-    int fd = db_cs_op_read();
+    int rc = db_cs_op_read();
     long recno = -1;
 
     cust_form_t form;
@@ -303,7 +306,7 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
-    if (fd < 0) {
+    if (rc < 0) {
         debug_log((DEBUG_ERROR, FUNC_NAME, "Error: Unalbe to open Cuatomer DB"));
         ui_status("ERROR: Unable to open customer DB");
         sleep(4);
@@ -318,8 +321,8 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
             return -1;
         }
 
-        if (db_cs_by_id(fd, customer_id, &cust, &recno) != 0) {
-            db_cs_cl_read(fd);
+        if (db_cs_by_id(customer_id, &cust, &recno) != 0) {
+            db_cs_cl_read();
             debug_log((DEBUG_ERROR, FUNC_NAME, "Error: Customer Not Found"));
             ui_status("ERROR: Customer not found");
             sleep(2);
@@ -387,7 +390,7 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
                 }
 
                 case UI_KEY_ESC:
-                    return customer_detail_handle_exit(&form, fd);
+                    return customer_detail_handle_exit(&form);
 
                 case UI_KEY_SHIFT_DELETE:
                     debug_log((DEBUG_INFO, FUNC_NAME, "Shift Delete Detected"));

@@ -17,26 +17,26 @@ static int staff_count = 0;
 /* Load staffs from database into staff[] */
 static int load_staff(void)
 {
-    int fd = db_staff_open();
+    int rc = db_staff_open();
     long rec = 0;
 
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
-    if (fd < 0)
+    if (rc < 0)
         return -1;
 
     staff_count = 0;
 
     while (staff_count < MAX_STAFF_ENTRIES) {
 
-        if (db_staff_read(fd, rec, &staff[staff_count]) != 0)
+        if (db_staff_read(rec, &staff[staff_count]) != 0)
             break;
 
         staff_count++;
         rec++;
     }
 
-    db_staff_close(fd);
+    db_staff_close();
 
 /*
 * TODO Sort by staff name

@@ -4,49 +4,71 @@
 #include <stdio.h>      /* for printf / debug_log if needed */
 #include <stdlib.h>     /* just in case                     */
 #include <string.h>
+#include <fcntl.h>
+#include <sys/file.h>
 #include "debug.h"      /* debug_log macro                  */
 #include "db_common.h"
 
-int db_validate_fixed_records(int fd, size_t record_len, const char *dbname)
+/* Really we need some kind of error codes here */
+struct dbase *db_setup(const char *name, unsigned reclen)
 {
-    unsigned char buf[512];
-    off_t offset = 0;
-    long recno = 1;
+    struct stat st;
+    struct dbase *db;
+    /* Allocate the dbase, the name and a record buffer */
+    db = malloc(sizeof(struct dbase) + strlen(name) + 1 + reclen);
+    if (db == NULL)
+        return NULL;
+    db->buf = (char *)(db + 1);
+    db->name = db->buf + reclen;
+    strcpy(db->name, name);
+    db->lock = 0;
+    db->base = 0;	/* No headers yet */
+    db->pos = 0;
+    db->reclen = reclen;
+    db->fd = open(name, O_RDONLY);
+    if (db->fd == -1)
+        goto fail;
+    if (fstat(db->fd, &st) == -1)
+        goto fail2;
+    if (st.st_size % reclen) {
+         fprintf(stderr, "Length error %u v %u\n", st.st_size, reclen);
+         goto fail2;
+    }
+    /* We will one day read the headers and do stuff here */
+    close(db->fd);
+    db->fd = -1;
+    return db;
+    /* Errors */
+fail2:
+    close(db->fd);
+fail:
+    free(db);
+    return NULL;
+}
 
-    if (record_len > 512) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "record too long"));
+int db_open(struct dbase *db, unsigned rw)
+{
+    if (db->fd != -1)
+        close(db->fd);
+    db->fd = open(db->name, rw ? O_RDWR : O_RDONLY);
+    if (db->fd == -1) {
+        fprintf(stderr, "open fail '%s'\n", db->name);
         return -1;
     }
-
-    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
-    debug_log((DEBUG_TRACE, FUNC_NAME, "Expected record_len=%d", record_len));
-
-    while (1) {
-        ssize_t n = read(fd, buf, record_len);
-
-        if (n == 0) {
-            /* clean EOF */
-            debug_log((DEBUG_TRACE, FUNC_NAME, "%d records.\n", recno));
-            return 0;
-        }
-
-        if (n != (ssize_t)record_len) {
-            debug_log((DEBUG_ERROR, FUNC_NAME,
-                "%s: short record at record %ld "
-                "(read %zd bytes, expected %zu, offset=%ld)",
-                dbname, recno, n, record_len, (long)offset));
-            return -1;
-        }
-
-        if (buf[record_len - 1] != '\n') {
-            debug_log((DEBUG_ERROR, FUNC_NAME,
-                "%s: short record or missing newline at or near record %ld (offset=%ld)", dbname, recno, (long)offset));
-            return -1;
-        }
-
-        recno++;
-        offset += record_len;
+    if (flock(db->fd, rw ? LOCK_EX : LOCK_SH) == -1) {
+        perror("flock");
+        close(db->fd);
+        db->fd = -1;
+        return -1;
     }
+    return 0;
+}
+
+int db_close(struct dbase *db)
+{
+    fsync(db->fd);
+    close(db->fd);
+    db->fd = -1;
 }
 
 /* Copy a record ensuring it ends zero terminated and any space

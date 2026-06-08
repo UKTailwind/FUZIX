@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include "db_booking_layout.h"
 
+extern struct dbase *booking_db;
+
 #define BOOKING_DB_FILE "data/booking.db"
 #define MAX_DAY_BOOKINGS 20
 #define BOOKING_STATUS_MAX        1
@@ -47,23 +49,23 @@ typedef struct {
 /* parsing / formatting */
 int  db_bk_parse_line(const char *line, booking_t *out);
 void db_bk_format_line(const booking_t *in, char *line);
-void db_bk_sort_day_by_time(int fd, DayBookings *day);
+void db_bk_sort_day_by_time(DayBookings *day);
 
 /* record-level I/O */
-int db_bk_read(int fd, long recno, booking_t *out);
-int db_bk_write(int fd, long recno, const booking_t *in);
-int db_bk_by_id(int fd, const char *booking_id, booking_t *out, long *recno);
-int db_bk_generate_next_id(int fd, char *booking_id);
-int db_bk_append(int fd, const booking_t *in);
-int db_bk_by_index(int fd, const DayBookings *day, int index, booking_t *out);
+int db_bk_read(long recno, booking_t *out);
+int db_bk_write(long recno, const booking_t *in);
+int db_bk_by_id(const char *booking_id, booking_t *out, long *recno);
+int db_bk_generate_next_id(char *booking_id);
+int db_bk_append(const booking_t *in);
+int db_bk_by_index(const DayBookings *day, int index, booking_t *out);
 
-int db_bk_build_day_index(int fd, int target_date, DayBookings *day);
+int db_bk_build_day_index(int target_date, DayBookings *day);
 
 /* db_open and close */
 int db_bk_op_read(void);
 int db_bk_op_write(void);
-int db_bk_cl_read(int fd);
-int db_bk_cl_write(int fd);
-int db_load_day(int fd, int ymd, DayBookings *day);
+int db_bk_cl_read(void);
+int db_bk_cl_write(void);
+int db_load_day(int ymd, DayBookings *day);
 
 #endif
