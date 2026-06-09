@@ -27,32 +27,7 @@ static void write_call(int n)
   fprintf(fp, "\t.setcpu 6803\n\n");
   fprintf(fp, "\t.code\n\n");
   fprintf(fp, "\t.export _%s\n\n", syscall_name[n]);
-  fprintf(fp, "_%s:\n\tldd #%d\n", syscall_name[n], (2 * syscall_args[n]) | (n << 8));
-  fprintf(fp, "\tswi\n");
-  fprintf(fp, "\tcpx @zero\n");
-  fprintf(fp, "\tbeq noerror\n");
-  fprintf(fp, "\tstx _errno\n");
-  fprintf(fp, "noerror:\n");
-  fprintf(fp, "\trts\n");
-  fclose(fp);
-}
-
-/* In the varargs case B already holds the argument count info */
-static void write_vacall(int n)
-{
-  FILE *fp;
-  snprintf(namebuf, 128, "fuzix6303/syscall_%s.s",syscall_name[n]);
-  fp = fopen(namebuf, "w");
-  if (fp == NULL) {
-    perror(namebuf);
-    exit(1);
-  }
-  fprintf(fp, "\t.setcpu 6803\n\n");
-  fprintf(fp, "\t.code\n\n");
-  fprintf(fp, "\t.export _%s\n\n", syscall_name[n]);
   fprintf(fp, "_%s:\n\tldaa #%d\n", syscall_name[n], n);
-  /* This works because all varargs syscalls have 2 fixed arguments */
-  fprintf(fp, "\taddb #4\n");
   fprintf(fp, "\tswi\n");
   fprintf(fp, "\tcpx @zero\n");
   fprintf(fp, "\tbeq noerror\n");
@@ -66,9 +41,6 @@ static void write_call_table(void)
 {
   int i;
   for (i = 0; i < NR_SYSCALL; i++)
-    if (syscall_args[i] == VARARGS)
-      write_vacall(i);
-    else
       write_call(i);
 }
 
@@ -93,7 +65,7 @@ static void write_makefile(void)
   fprintf(fp, "\techo $(AOBJS) >syslib.l\n");
   fprintf(fp, "\tar rc ../syslib.lib $(AOBJS)\n\n");
   fprintf(fp, "$(AOBJS): %%.o: %%.s\n");
-  fprintf(fp, "\tas68 $<\n\n");
+  fprintf(fp, "\tfcc -m6803 -c -o $*.o $<\n\n");
   fprintf(fp, "clean:\n");
   fprintf(fp, "\trm -f $(AOBJS) $(ASRCS) *~\n\n");
   fclose(fp);

@@ -32,4 +32,4 @@ done
 set -e
 #
 # With
-fcc -s -m6303 $ARGS -o "$TARGET" -M
+fcc -s -m6803 $ARGS -o "$TARGET" -M
