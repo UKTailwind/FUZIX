@@ -308,7 +308,7 @@ int run_customer_detail(const char *customer_id, cust_mode_t mode)
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
 
     if (rc < 0) {
-        debug_log((DEBUG_ERROR, FUNC_NAME, "Error: Unalbe to open Cuatomer DB"));
+        debug_log((DEBUG_ERROR, FUNC_NAME, "Error: Unable to open Customer DB"));
         ui_status("ERROR: Unable to open customer DB");
         sleep(4);
         return -1;
