@@ -4,3 +4,5 @@ include Makefile.common
 cpuinfo: cpuinfo.o cpuinfo-6303.o
 	$(LINKER) $(CRT0) $^ -o $@ $(LINKER_OPT) $(LINKER_TAIL)
 
+cpuinfo-6303.o: cpuinfo-6303.s
+	$(CC) -m6303 -c $^
