@@ -1,7 +1,7 @@
 CC = fcc -m6803
 AS = fcc -m6803
 LINKER = $(FUZIX_ROOT)/Library/link/ld6803
-CFLAGS = -X -m6803 -D__STDC__ -c -I$(FUZIX_ROOT)/Library/include -I$(FUZIX_ROOT)/Library/include/6803
+CFLAGS = -O -X -m6803 -D__STDC__ -c -I$(FUZIX_ROOT)/Library/include -I$(FUZIX_ROOT)/Library/include/6803
 LINKER_OPT =
 LINKER_TAIL = -L $(FUZIX_ROOT)/Library/libs -lc6803 -M
 AS_OPT = -o
