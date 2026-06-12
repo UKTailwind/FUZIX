@@ -4,7 +4,7 @@ include $(FUZIX_ROOT)/Target/rules.$(USERCPU)
 
 all: dbgen booking
 
-OBJ = main.o db_booking.o booking_list.o debug.o ui.o date.o db_lock.o db_state.o db_common.o \
+OBJ = main.o db_booking.o booking_list.o debug.o ui.o date.o db_state.o db_common.o \
       db_customer.o customer_list.o keyboard_test.o booking_detail.o customer_detail.o state_select.o \
       staff_select.o db_staff.o ui_keyboard_parser.o term.o kb_definition_ansi.o kb_definition_vt52.o \
       kb_backend_ansi.o kb_backend_vt52.o

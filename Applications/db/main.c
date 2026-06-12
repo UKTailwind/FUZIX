@@ -54,7 +54,7 @@ static void draw_main_menu(void)
                   1234567890123456789012345678901234567890123456789012345678901234567890
 */
     ui_puts(2, 10, "Booking Management System                             By D. Pollard");
-    ui_puts(3, 10, "                                                          ver 0.902");
+    ui_puts(3, 10, "                                                         ver 0.903a");
     ui_puts(4, 10, "1.  Bookings");
     ui_puts(5, 10, "2.  Customers");
     ui_puts(6, 10, "3.  Invoices");

@@ -14,7 +14,6 @@
 #include "db_staff.h"
 #include "db_staff_layout.h"
 #include "db_common.h"
-#include "db_lock.h"
 #include "ui.h"
 #include "debug.h"
 

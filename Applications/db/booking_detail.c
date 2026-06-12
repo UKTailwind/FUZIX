@@ -62,22 +62,6 @@ typedef struct {
 #define Y_OFFSET 5
 #define X_OFFSET 20
 
-#ifdef DEBUG_ENABLED
-static void debug_check_field_overlap(ui_field_t *fields, int count)
-{
-    int i;
-    debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
-    for (i = 0; i < count - 1; i++) {
-        char *end = fields[i].ptr + fields[i].maxlen;
-        char *next = fields[i + 1].ptr;
-
-        debug_log((DEBUG_TRACE, "field_check",
-            "field %d end=%p next_start=%p gap=%ld",
-            i, end, next, (long)(next - end)));
-    }
-}
-#endif
-
 /* Field indexes for booking detail form (must match bind_fields() order) */
 enum {
     FIELD_ID = 0,
@@ -116,7 +100,7 @@ static int lookup_customer_display(const char *id, char *out, size_t outlen)
     return rc;
 }
 
-static int lookup_state_display(const char *id, char *out, size_t outlen)
+static int lookup_state_display(const char *id, char *out)
 {
     int rc = db_open(state_db, 0);
     if (rc < 0)
@@ -144,7 +128,7 @@ static void populate_display_cache(register book_form_t *f)
 {
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter: "));
     lookup_customer_display(f->edit_customer_id, f->customer_display, sizeof(f->customer_display));
-    lookup_state_display(f->edit_state_id,       f->state_display,    sizeof(f->state_display));
+    lookup_state_display(f->edit_state_id,       f->state_display);
     lookup_staff_display(f->edit_staff_id,       f->staff_display,    sizeof(f->staff_display));
 }
 
@@ -165,10 +149,6 @@ static void bind_fields(register book_form_t *f)
     field_init(FIELD_STAFF,	"Staff",       f->edit_staff_id,    BOOKING_STAFF_ID_MAX,    7, 15, UI_FIELD_SELECT);
     field_init(FIELD_STATE,	"State",       f->edit_state_id,    BOOKING_STATE_ID_MAX,    8, 15, UI_FIELD_SELECT);
     field_init(FIELD_JOB,	"Job",         f->edit_job,         BOOKING_JOB_MAX,         9, 15, UI_FIELD_EDIT );
-
-#ifdef DEBUG_ENABLED
-    debug_check_field_overlap(fields, FIELD_COUNT);
-#endif
 }
 
 static void booking_work_to_edit(register book_form_t *f)
@@ -760,7 +740,7 @@ int run_booking_detail(const char *booking_id, book_mode_t mode)
                     /* State Field Popup */
                     if (form.mode != BOOK_VIEW && form.field == FIELD_STATE) {
                         state_select(form.edit_state_id);  /* handles updating edit & work buffers */
-                        lookup_state_display(form.edit_state_id, form.state_display, sizeof(form.state_display));
+                        lookup_state_display(form.edit_state_id, form.state_display);
                         draw_form(&form);
                     }
                     /* Customer Lookup */

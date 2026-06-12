@@ -15,7 +15,6 @@
 #include <sys/types.h>
 #include "ui.h"
 #include "debug.h"
-#include "db_lock.h"
 #include "db_common.h"
 #include "db_common_layout.h"
 

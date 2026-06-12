@@ -14,7 +14,6 @@
 #include "db_state.h"
 #include "db_state_layout.h"
 #include "db_common.h"
-#include "db_lock.h"
 #include "ui.h"
 #include "debug.h"
 

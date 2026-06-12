@@ -9,7 +9,6 @@
 #include "ui_common.h"
 #include "customer_detail.h"
 #include "db_customer.h"
-#include "db_lock.h"
 
 /* -------------------- Internal Types -------------------- */
 typedef struct {
@@ -31,15 +30,28 @@ typedef struct {
 /* -------------------- Field Definitions -------------------- */
 #define LABEL_COL  1
 #define VALUE_COL  20
-#define FIELD_COUNT 10
 #define FIRST_ROW  5
 #define FIELD_WIDTH 60
 #define Y_OFFSET 5
 #define X_OFFSET 20
 
+enum {
+    FIELD_ID,
+    FIELD_NAME,
+    FIELD_PHONE1,
+    FIELD_PHONE2,
+    FIELD_ADDRESS1,
+    FIELD_ADDRESS2,
+    FIELD_SUBURB,
+    FIELD_STATE,
+    FIELD_POSTCODE,
+    FIELD_NOTES,
+    FIELD_COUNT
+};
+
 static ui_field_t fields[FIELD_COUNT];
 
-static void bind_field(unsigned n, const char *label, char *ptr, size_t maxlen, int row, int col, int mode)
+static void field_init(unsigned n, const char *label, char *ptr, size_t maxlen, int row, int col, int mode)
 {
     register ui_field_t *f = fields + n;
     f->label = label;
@@ -52,17 +64,23 @@ static void bind_field(unsigned n, const char *label, char *ptr, size_t maxlen, 
 
 static void bind_fields(register cust_form_t *f)
 {
-    bind_field(0,  "ID",        f->work.cs_id,       CUSTOMER_ID_MAX,        2, 15, 0 );
-    bind_field(1,  "Name",      f->work.cs_name,     CUSTOMER_NAME_MAX,      3, 15, 1 );
-    bind_field(2,  "Phone 1",   f->work.cs_phone1,   CUSTOMER_PHONE1_MAX,    4, 15, 1 );
-    bind_field(3,  "Phone 2",   f->work.cs_phone2,   CUSTOMER_PHONE2_MAX,    5, 15, 1 );
-    bind_field(4,  "Address 1", f->work.cs_address1, CUSTOMER_ADDRESS1_MAX,  6, 15, 1 );
-    bind_field(5,  "Address 2", f->work.cs_address2, CUSTOMER_ADDRESS2_MAX,  7, 15, 1 );
-    bind_field(6,  "Suburb",    f->work.cs_suburb,   CUSTOMER_SUBURB_MAX,    8, 15, 1 );
-    bind_field(7,  "State",     f->work.cs_state,    CUSTOMER_STATE_MAX,     9, 15, 1 );
-    bind_field(8,  "Postcode",  f->work.cs_postcode, CUSTOMER_POSTCODE_MAX, 10, 15, 1 );
-    bind_field(9,  "Notes",     f->work.cs_notes,    CUSTOMER_NOTES_MAX,    12, 15, 1 );
-}
+    /*
+     * Field behaviour:
+     * UI_FIELD_SKIP   = not selectable
+     * UI_FIELD_EDIT   = selectable + editable
+     * UI_FIELD_SELECT = selectable popup field (F2 etc)
+     */
+
+    field_init(FIELD_ID,       "ID",        f->work.cs_id,       CUSTOMER_ID_MAX,       2, 15,  UI_FIELD_SKIP);
+    field_init(FIELD_NAME,     "Name",      f->work.cs_name,     CUSTOMER_NAME_MAX,     3, 15,  UI_FIELD_EDIT);
+    field_init(FIELD_PHONE1,   "Phone 1",   f->work.cs_phone1,   CUSTOMER_PHONE1_MAX,   4, 15,  UI_FIELD_EDIT);
+    field_init(FIELD_PHONE2,   "Phone 2",   f->work.cs_phone2,   CUSTOMER_PHONE2_MAX,   5, 15,  UI_FIELD_EDIT);
+    field_init(FIELD_ADDRESS1, "Address 1", f->work.cs_address1, CUSTOMER_ADDRESS1_MAX, 6, 15,  UI_FIELD_EDIT);
+    field_init(FIELD_ADDRESS2, "Address 2", f->work.cs_address2, CUSTOMER_ADDRESS2_MAX, 7, 15,  UI_FIELD_EDIT);
+    field_init(FIELD_SUBURB,   "Suburb",    f->work.cs_suburb,   CUSTOMER_SUBURB_MAX,   8, 15,  UI_FIELD_EDIT);
+    field_init(FIELD_STATE,    "State",     f->work.cs_state,    CUSTOMER_STATE_MAX,    9, 15,  UI_FIELD_SELECT);
+    field_init(FIELD_POSTCODE, "Postcode",  f->work.cs_postcode, CUSTOMER_POSTCODE_MAX, 10, 15, UI_FIELD_EDIT);
+    field_init(FIELD_NOTES,    "Notes",     f->work.cs_notes,    CUSTOMER_NOTES_MAX,    12, 15, UI_FIELD_EDIT);}
 
 /* -------------------- Drawing -------------------- */
 

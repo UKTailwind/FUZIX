@@ -176,10 +176,10 @@ int decode_escape_sequence(register const unsigned char *buf, int len)
     return UI_KEY_INVALID;
 }
 
-static void draw_field_reverse(int row, int col, const char *buf, int cursor_pos)
+static void draw_field_reverse(int row, int col, const char *buf)
 {
     debug_log((DEBUG_INFO, FUNC_NAME, "Enter:"));
-    debug_log((DEBUG_INFO, FUNC_NAME, "row=%d, col=%d cusor_pos=%d", row, col, cursor_pos));
+    debug_log((DEBUG_INFO, FUNC_NAME, "row=%d, col=%d", row, col));
     ui_attr_rv_on();
     ui_puts(row, col, buf);               /* Output Full Line */
     ui_attr_rv_off();
@@ -208,7 +208,7 @@ int ui_edit_field(register edit_state_t *e, int row, int col)
     debug_log((DEBUG_TRACE, FUNC_NAME, "Enter:"));
 
     /* Initial full draw */
-    draw_field_reverse(row, col, e->buf, e->cursor_pos);
+    draw_field_reverse(row, col, e->buf);
     e->cursor_pos = 0;
     ui_move_cursor(row, col);
     debug_log((DEBUG_INFO, FUNC_NAME, "Cursor forced to start"));
@@ -260,7 +260,7 @@ int ui_edit_field(register edit_state_t *e, int row, int col)
                     memmove(&e->buf[e->cursor_pos - 1], &e->buf[e->cursor_pos], e->maxlen - e->cursor_pos);
                     e->buf[e->maxlen - 1] = ' ';
                     e->cursor_pos--;
-                    draw_field_reverse(row, col, e->buf, e->cursor_pos);
+                    draw_field_reverse(row, col, e->buf);
                     ui_move_cursor(row, col + e->cursor_pos);
                 }
                 break;
@@ -272,7 +272,7 @@ int ui_edit_field(register edit_state_t *e, int row, int col)
                 {
                     memmove(&e->buf[e->cursor_pos], &e->buf[e->cursor_pos + 1], e->maxlen - e->cursor_pos - 1);
                     e->buf[e->maxlen - 1] = ' ';
-                    draw_field_reverse(row, col, e->buf, e->cursor_pos);
+                    draw_field_reverse(row, col, e->buf);
                     ui_move_cursor(row, col + e->cursor_pos);
                 }
                 break;
@@ -325,7 +325,7 @@ int ui_edit_field(register edit_state_t *e, int row, int col)
 
                     /* Redraw entire field */
                     debug_log((DEBUG_TRACE, FUNC_NAME, "Position Cursor row=%d col=%d", row, e->cursor_pos));
-                    draw_field_reverse(row, col, e->buf, e->cursor_pos);
+                    draw_field_reverse(row, col, e->buf);
                     ui_move_cursor(row, col + e->cursor_pos);
                 }
                 break;

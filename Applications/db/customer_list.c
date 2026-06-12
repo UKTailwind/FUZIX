@@ -8,7 +8,6 @@
 #include "customer_list.h"
 #include "db_customer.h"
 #include "customer_detail.h"
-#include "db_lock.h"
 #include "ui.h"
 #include "debug.h"
 

@@ -10,7 +10,6 @@
 #include "db_booking.h"
 #include "db_state.h"
 #include "db_customer.h"
-#include "db_lock.h"
 #include "ui.h"
 #include "ui_common.h"
 #include "debug.h"
