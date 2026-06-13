@@ -1,4 +1,4 @@
-	/* UNIX V7 source code: see /COPYRIGHT or www.tuhs.org for details. */
+/* UNIX V7 source code: see /COPYRIGHT or www.tuhs.org for details. */
 /* ANSIfield for FUZIX */
 
 #include <stdio.h>
@@ -37,12 +37,14 @@
 #define zero(p)	for(pp=(p)->beg;pp<(p)->last;)*pp++='\0'
 #define OUTC(x) {printf("%c",x); if(--count == 0){printf("\\\n"); count=ll;} }
 #define TEST2	{if((count -= 2) <=0){printf("\\\n");count=ll;}}
-#define EMPTY if(stkerr != 0){printf("stack empty\n"); continue; }
-#define EMPTYR(x) if(stkerr!=0){pushp(x);printf("stack empty\n");continue;}
-#define EMPTYS if(stkerr != 0){printf("stack empty\n"); return(1);}
-#define EMPTYSR(x) if(stkerr !=0){printf("stack empty\n");pushp(x);return(1);}
+#define EMPTY if(stkerr != 0){printf(stackempty); continue; }
+#define EMPTYR(x) if(stkerr!=0){pushp(x);printf(stackempty);continue;}
+#define EMPTYS if(stkerr != 0){printf(stackempty); return(1);}
+#define EMPTYSR(x) if(stkerr !=0){printf(stackempty);pushp(x);return(1);}
 #define error(p)	{printf(p); continue; }
 #define errorrt(p)	{printf(p); return NULL; }
+
+static const char stackempty[] = "stack empty\n";
 
 struct blk {
 	signed char *rd;
