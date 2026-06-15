@@ -134,7 +134,7 @@ int bfree(regptr bufptr bp, uint_fast8_t dirty)
 	int ret = 0;
 	if (dirty)
 		bp->bf_dirty = true;
-	
+
 	if (dirty > 1) {	/* immediate writeback */
 		if (bdwrite(bp) != BLKSIZE) {
 			udata.u_error = EIO;
@@ -770,7 +770,7 @@ void idump(void)
 		kprintf("%d\t%d\t0x%x\t%d\t",
 			pp - ptab, pp->p_status, pp->p_wait, pp->p_pid);
 		kprintf("%d\t%d\t0x%x%x\t0x%x%x\n",
-			pp->p_pptr - ptab, pp->p_alarm, 
+			pp->p_pptr - ptab, pp->p_alarm,
 			/* kprintf has no %lx so we write out 32-bit
 			 * values as two 16-bit values instead */
 			pp->p_sig[0].s_pending, pp->p_sig[1].s_pending,
