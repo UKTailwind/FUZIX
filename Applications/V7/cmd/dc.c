@@ -7,6 +7,8 @@
 #include <string.h>
 #include <signal.h>
 
+#define SMALL
+
 #define FATAL 0
 #define NFATAL 1
 #define BLK sizeof(struct blk)
@@ -28,12 +30,14 @@
 #define sfeof(p)	(((p)->rd==(p)->wt)?1:0)
 #define sfbeg(p)	(((p)->rd==(p)->beg)?1:0)
 #define sungetc(p,c)	*(--(p)->rd)=c
+#ifndef SMALL
 #define sgetc(p)	(((p)->rd==(p)->wt)?EOF:*(p)->rd++)
 #define slookc(p)	(((p)->rd==(p)->wt)?EOF:*(p)->rd)
 #define sbackc(p)	(((p)->rd==(p)->beg)?EOF:*(--(p)->rd))
 #define sputc(p,c)	{if((p)->wt==(p)->last)more(p); *(p)->wt++ = c; }
 #define salterc(p,c)	{if((p)->rd==(p)->last)more(p); *(p)->rd++ = c; if((p)->rd>(p)->wt)(p)->wt=(p)->rd;}
 #define sunputc(p)	(*( (p)->rd = --(p)->wt))
+#endif
 #define zero(p)	for(pp=(p)->beg;pp<(p)->last;)*pp++='\0'
 #define OUTC(x) {printf("%c",x); if(--count == 0){printf("\\\n"); count=ll;} }
 #define TEST2	{if((count -= 2) <=0){printf("\\\n");count=ll;}}
@@ -45,6 +49,7 @@
 #define errorrt(p)	{printf(p); return NULL; }
 
 static const char stackempty[] = "stack empty\n";
+
 
 struct blk {
 	signed char *rd;
@@ -62,6 +67,7 @@ struct wblk {
 	struct blk **begw;
 	struct blk **lastw;
 };
+
 
 struct blk *hfree;
 struct blk *getwd(struct blk *p);
@@ -149,6 +155,46 @@ int intlog10;
 int count;
 signed char *pp;
 signed char *dummy;
+
+#ifdef SMALL
+
+static int sunputc(register struct blk *p)
+{
+	return *(p->rd = --p->wt);
+}
+
+static int sgetc(register struct blk *p)
+{
+	return (p->rd == p->wt)?EOF:*(p)->rd++;
+}
+
+static int slookc(register struct blk *p)
+{
+	return (p->rd == p->wt)?EOF:*(p)->rd;
+}
+
+static int sbackc(register struct blk *p)
+{
+	return (p->rd == p->beg)? EOF : *(--p->rd);
+}
+
+static void sputc(register struct blk *p, int c)
+{
+	if (p->wt == p->last)
+		more(p);
+	*p->wt++ = c;
+}
+
+static void salterc(register struct blk *p, int c)
+{
+	if (p->rd == p->last)
+		more(p);
+	*p->rd++ = c;
+	if(p->rd > p->wt)
+		p->wt=p->rd;
+}
+
+#endif
 
 int main(int argc, char *argv[])
 {
