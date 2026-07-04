@@ -248,7 +248,7 @@ uartspi_rx:
 
 uartspi_tx:
 	movem.l	d2-d3,-(sp)
-	move.w	12(sp),d0
+	move.w	14(sp),d0
 	bsr	uartspi_tx_byte
 	movem.l	(sp)+,d2-d3
 	rts
