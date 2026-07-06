@@ -10,29 +10,37 @@
 uint16_t swap_dev = 0xFFFF;
 uaddr_t ramtop = PROGTOP;
 
-#ifdef CONFIG_RTC_DS12885
+#if ((defined CONFIG_M4BOARD) || (defined CONFIG_SYMBIFACE_RTC))
 uint8_t plt_rtc_secs(void){
+#ifdef CONFIG_SYMBIFACE_RTC
 	if (ds12885_present)
 		return sf_plt_rtc_secs();
-#ifdef CONFIG_M4BOARD		
-	else if (m4_present)
-		return m4_plt_rtc_secs();
+	else 
+#endif
+#ifdef CONFIG_M4BOARD
+		if (m4_present)
+			return m4_plt_rtc_secs();
 #endif
 	return 0xff;
 }
 int plt_rtc_read(void){
+#ifdef CONFIG_SYMBIFACE_RTC
 	if (ds12885_present)
 		return sf_plt_rtc_read();
+	else
+#endif
 #ifdef CONFIG_M4BOARD		
-	else if (m4_present)
-		return m4_plt_rtc_read();
+		if (m4_present)
+			return m4_plt_rtc_read();
 #endif
 	udata.u_error = EOPNOTSUPP;
 	return -1;
 }
 int plt_rtc_write(void){
+#ifdef CONFIG_SYMBIFACE_RTC
 	if (ds12885_present)
 		return sf_plt_rtc_write();
+#endif
 	udata.u_error = EOPNOTSUPP;
 	return -1;
 }
