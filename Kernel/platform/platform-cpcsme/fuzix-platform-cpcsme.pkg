@@ -20,6 +20,3 @@ l /etc/resolv.conf /etc/resolv.conf.orig
 r /etc/resolv.conf
 f 0644 /etc/resolv.conf /userspace/resolv.conf
 
-l /etc/termcap /etc/termcap.orig
-r /etc/termcap
-f 0644 /etc/termcap /userspace/termcap
