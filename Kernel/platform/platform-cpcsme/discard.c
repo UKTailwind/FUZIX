@@ -21,7 +21,6 @@ void pagemap_init(void)
 		pagemap_add(valid_maps_array[i]);
 }
 
-/* Nothing to do for the map of init but we do set our vectors up here */
 void map_init(void)
 {
 
@@ -90,9 +89,25 @@ void usifac_init()
 void device_init(void)
 {
 #ifdef CONFIG_M4BOARD
+	uint8_t m4_open_err;
 	m4_init();
-	if (m4_present)
-        td_register(1, m4_sd_xfer, td_ioctl_none, 1);
+	if (m4_present){
+		kprintf("Registering M4 SD card raw acces device:\n");
+        if (td_register(1, m4_sd_xfer, td_ioctl_none, 1) < 0)
+			kprintf("FAIL\n");
+		else{
+			kprintf("Registering M4 SD card image file device:\n");
+			m4_open_mode = FA_REALMODE | FA_READ;
+			m4_open_err = m4_img_open();
+			if (!m4_open_err){
+				kputs("Found /FUZIX.IMG\n");
+				td_register(1, m4_img_xfer, td_ioctl_none, 1);
+			}
+			else
+				kprintf("Error %u opening FUZIX.IMG for read\n", m4_open_err);
+
+		}
+	}	
 #endif
 #ifdef CONFIG_RTC_DS12885
 	ds12885_init();
