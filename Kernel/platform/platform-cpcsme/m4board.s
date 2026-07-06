@@ -14,6 +14,11 @@ C_TIME			            .equ 0x4324
 C_VERSION			        .equ 0x4326
 C_SDREAD			        .equ 0x4314			
 C_SDWRITE			        .equ 0x4315
+C_OPEN                      .equ 0x4301
+C_CLOSE                     .equ 0x4304
+C_SEEK                      .equ 0x4305
+C_READ                      .equ 0x4302
+C_WRITE2                    .equ 0x431B
 C_NMI                       .equ 0x431D
 C_SETNETWORK		        .equ 0x4321
 C_NETSTAT			        .equ 0x4323
@@ -38,8 +43,16 @@ sock_info_ptr               .equ 0xFF06
 DATAPORT					.equ 0xFE00
 ACKPORT						.equ 0xFC00
 
-m4_sd_read_transfer_stub    .equ 0x0069
+FA_READ 					.equ 1
+FA_WRITE					.equ 2
+FA_CREATE_NEW				.equ 4
+FA_CREATE_ALWAYS			.equ 8
+FA_OPEN_ALWAYS				.equ 16
+FA_REALMODE					.equ 128
 
+m4_read_transfer_stub       .equ 0x0069 ;FIXME, make it not hardcoded if possible
+
+;imported
     .globl _int_disabled
     .globl _td_raw
     .globl _td_page
@@ -57,6 +70,7 @@ m4_sd_read_transfer_stub    .equ 0x0069
 
     .globl m4_sd_read_return
 
+;exported
     .globl _m4_time_str
     .globl _m4_present
     .globl _m4_gettime
@@ -67,9 +81,21 @@ m4_sd_read_transfer_stub    .equ 0x0069
     .globl _m4_sd_read_block
     .globl _m4_sd_write_block
     .globl _block_data_ptr
+    .globl _m4_open_mode
+    .globl _m4_img_fd
+    .globl _m4_img_lba
+    .globl _m4_img_write_fd
+    .globl _m4_img_read_fd
+    .globl _m4_is_img
+    .globl _m4_img_open
+    .globl _m4_img_seek
+    .globl _m4_img_close    
+    .globl _m4_img_close_fd
+   
 
 
-.area _CODE2        ;discard is shadowed by upper rom
+
+.area _VIDEO        ; avoid being shadowed by rom
 
 _m4_init:			; M4 detection via C_ROMLOW command (only from FW v2.0.7 )
 
@@ -144,7 +170,13 @@ sendloop:	inc		b
 			ld		bc,#ACKPORT
 			out		(c),c
 			ret         
-      
+
+m4_retvalue:
+            ld      hl,(rom_response_ptr)
+            inc     hl
+            inc     hl
+            inc     hl
+            ld      l,(hl)
 m4rom_disable:
             ld      bc, #0x7f8e             ;RMR ->UROM disable LROM disable
             out     (c),c
@@ -165,20 +197,25 @@ m4rom_enable:			; select M4 upperrom
             jp      (hl)
 
 _m4_gettime:
+            ld      bc,#19      ;time str len
+            ld      de,#_m4_time_str
+            ld      h,d
+            ld      l,e
+            inc     hl
+            ld      (hl),#0     ;null terminated
+            exx
             ld      hl,#cmd_m4_get_time
+m4_getdata:
             call    m4_send_command
-            ld      hl,#ret_to_gettime0
+            ld      hl,#ret_to_getdata0
             jr      m4rom_enable
-ret_to_gettime0: 
+ret_to_getdata0:
+            exx
             ld      hl,(rom_response_ptr)
             inc     hl
             inc     hl
             inc     hl
-            ld      bc,#19
-            ld      de,#_m4_time_str
             ldir
-            xor     a
-            ld      (de),a
             jr      m4rom_disable
 
 _m4_plt_rtc_secs:                      
@@ -212,25 +249,27 @@ has_m4:
             add     d                   ;x10            
             add     e                   ;+ones
             ld      l,a
-            ld      bc, #0x7f8e             ;RMR ->UROM disable LROM disable
-            out     (c),c
-            ld      a,(_int_disabled)
-            or      a
-            ret     nz
-            ei
-            ret 
+            jr      m4rom_disable
 
 _m4_sd_read_block:
             di
+            ld      hl,#cmd_m4_read_sd_block
+            ld      a,(_m4_is_img)
+            or      a
+            jr      z,read_sd_raw
+            ld      hl,#cmd_m4_img_read
+read_sd_raw:
             ld      a, (_td_page)
             exx
             call    a_map_to_bc
             exx
+            ex      af,af'
+            ld      a,(_td_raw)
+            ex      af,af'
             ld      bc,#0x7f10
             out     (c),c
             ld      c,#0x51 ; Sea Green
             out     (c),c
-            ld      hl,#cmd_m4_read_sd_block
             ld		bc,#DATAPORT
   			ld		d,(hl)
 			inc		d
@@ -257,12 +296,15 @@ read_command_loop:
             inc     hl
             ld      de,(_block_data_ptr)
             ld      bc,#512
-            ld      a, (_td_raw) 			    ; I/O type ?            
+            ex      af,af' 			    ; I/O type ?            
             or      a                          ; test is user or not
-            jp      nz,#m4_sd_read_transfer_stub   ; to copy out of kernel page we need common code
-                                                   ; and only low stubs are not shadowed by rom here
+            jr      z,m4_sd_read_k             ; to copy out of kernel page we need common code
+            ld      iy,#m4_sd_read_return       ; and only low stubs are not shadowed by rom here
+            jp      m4_read_transfer_stub
+m4_sd_read_k:            
             ldir
 m4_sd_read_return:
+            ex      af,af'
             ld      bc, #0x7f8e             ;RMR ->UROM disable LROM disable
             out     (c),c
 patch_err:
@@ -280,6 +322,11 @@ patch_err:
 _m4_sd_write_block:
             di
             ld      hl,#cmd_m4_write_sd_block
+            ld      a,(_m4_is_img)
+            or      a
+            jr      z,write_sd_raw
+            ld      hl,#cmd_m4_img_write
+write_sd_raw:            
             ld		bc,#DATAPORT
   			ld		d,(hl)
 			inc		d
@@ -297,6 +344,47 @@ write_command_loop:
             pop     hl
             ld      bc,#ACKPORT
             out     (c),c
+            ld      hl,#m4_retvalue
+            jp      m4rom_enable
+
+_m4_img_open:
+            ld      hl,#cmd_m4_img_open
+            call    m4_send_command
+            ld      hl,#ret_to_m4_img_open
+            jp      m4rom_enable
+ret_to_m4_img_open: 
+            ld      hl,(rom_response_ptr)
+            inc     hl
+            inc     hl
+            inc     hl
+            ld      e,(hl)
+            inc     hl
+            ld      l,(hl)
+            ld      a,l
+            or      a
+            jp      nz,m4rom_disable
+            ld      a,e
+            ld      (_m4_img_fd),a
+            ld      (_m4_img_close_fd),a
+            ld      (_m4_img_read_fd),a
+            ld      (_m4_img_write_fd),a
+            jp      m4rom_disable
+
+_m4_img_close:
+            ld      a,#0xff
+            ld      (_m4_open_mode),a
+            ld      hl,#cmd_m4_img_close
+            jr      m4_cmd
+
+_m4_img_seek:
+            ld      hl,#cmd_m4_img_seek
+
+m4_cmd:
+            call    m4_send_command
+            ld      hl,#m4_retvalue
+            jp      m4rom_enable
+
+
             ld		bc,#0xdf00
 			ld      a,(m4rom_number)
 			out		(c),a
@@ -319,25 +407,71 @@ cmd_select_hack_low_rom:
     .db 3
     .dw C_ROMLOW
     .db 2
+
 cmd_select_default_low_rom:
     .db 3
     .dw C_ROMLOW
     .db 1
+
 cmd_m4_get_time:
     .db 2
     .dw C_TIME
+
 cmd_m4_read_sd_block:
     .db 7
     .dw C_SDREAD
 _read_lba:    
     .ds 4
     .db 1       ;num sectors
+
 cmd_m4_write_sd_block:
     .db 7
     .dw C_SDWRITE
 _write_lba:
     .ds 4
     .db 1       ;num sectors
+
+cmd_m4_img_open:
+    .db 14
+    .dw C_OPEN
+_m4_open_mode:
+    .db 0xff
+    .ascii "/FUZIX.IMG"
+    .db 0
+
+cmd_m4_img_close:
+    .db 3
+    .dw C_CLOSE
+_m4_img_close_fd:
+    .ds 1
+
+cmd_m4_img_seek:
+    .db 8
+    .dw C_SEEK
+_m4_img_fd:
+    .ds 1
+    .db 0       ;seek offset is LBA<<9 as BLOCKSIZE=512, low byte is always 0
+_m4_img_lba:    ;here we store LBA<<1, as fuzix disk size is small we never overflow MSB
+    .ds 4
+
+cmd_m4_img_write:
+    .db 5
+    .dw C_WRITE2
+_m4_img_write_fd:
+    .ds 1
+    .db 0x00  ;size (0x200) low byte
+    .db 0x2   ;size (0x200) high byte
+
+cmd_m4_img_read:
+    .db 5
+    .dw C_READ
+_m4_img_read_fd:
+    .ds 1   
+    .db 0   ;size (0x200) low byte
+    .db 2   ;size (0x200) high byte
+
+_m4_is_img:
+    .db 0
 _block_data_ptr:
     .dw 0
 m4rom_number:
