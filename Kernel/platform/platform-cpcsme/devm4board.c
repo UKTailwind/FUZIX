@@ -40,13 +40,11 @@ int m4_plt_rtc_write(void)
 	return -1;
 }
 
-
-int m4_sd_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr){
+int m4_xfer(bool is_read, uint8_t *dptr){
 	uint8_t res;
 	block_data_ptr = dptr;
 	/*kprintf("R/W:%u,p:%x,lba:%lx,raw:%u,page:%x-",is_read,dptr,lba,td_raw,td_page);*/
 	if (is_read){
-		read_lba = lba;
 		/*kputs("M4 SD READ\n");*/
 		res = m4_sd_read_block();
 		switch (res){
@@ -54,9 +52,6 @@ int m4_sd_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr){
 			return 1;
 		case 1:
 			kputs("M4 SD R Error\n");
-			return 0;
-		case 2:
-			kputs("M4 SD R Write Protected\n");
 			return 0;
 		case 3:
 			kputs("M4 SD R Not Ready\n");
@@ -70,7 +65,6 @@ int m4_sd_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr){
 		}
 	}
 	else{
-		write_lba = lba;
 		/*kputs("M4 SD WRITE\n");*/
 		res = m4_sd_write_block();
 		switch (res){
@@ -94,4 +88,53 @@ int m4_sd_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr){
 		}
 	}
 }
+int m4_sd_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr){
+	m4_is_img=0;
+	if (is_read)
+		read_lba = lba;
+	else
+		write_lba = lba;
+	return m4_xfer(is_read, dptr);
+}
+
+int m4_img_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr){
+	irqflags_t irq = di();
+	uint8_t err = 0;
+	m4_is_img=1;
+	m4_img_lba = (lba << 1);
+	if (is_read){
+		if (m4_open_mode != (FA_REALMODE | FA_READ)){
+			if (m4_open_mode != 0xff) {
+				m4_img_close();
+			}
+			m4_open_mode = FA_REALMODE | FA_READ;
+			if (m4_img_open()){
+				m4_open_mode = 0xff;
+				kputs("Error opening FUZIX.IMG for read\n");
+				goto end;
+			}
+		}
+	}
+	else{
+		if (m4_open_mode != (FA_REALMODE | FA_WRITE)){
+			if (m4_open_mode != 0xff) {
+				m4_img_close();
+			}			
+			m4_open_mode = FA_REALMODE | FA_WRITE;
+			if (m4_img_open()){
+				m4_open_mode = 0xff;
+				kputs("Error opening FUZIX.IMG for write\n");
+				goto end;
+			}
+		}
+	}
+	if (!m4_img_seek())
+		err = m4_xfer(is_read, dptr);
+	else
+		kputs("M4 file seek error\n");
+end:
+    irqrestore(irq);
+	return err;
+}
+
 #endif
