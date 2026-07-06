@@ -60,4 +60,5 @@ platform/platform-cpcsme/fdc765.rel
 platform/platform-cpcsme/net_native.rel
 platform/platform-cpcsme/net_w5x00.rel
 platform/platform-cpcsme/wiznet.rel
+platform/platform-cpcsme/net_m4board.rel
 -e

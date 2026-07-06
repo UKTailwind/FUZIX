@@ -31,6 +31,7 @@ NBUFS			    .equ 4
 DYNAMIC_BUFPOOL		.equ 1
 
 CONFIG_M4BOARD		.equ 1
-CONFIG_FDC765		.equ 1
+CONFIG_NET_M4BOARD	.equ 1
+CONFIG_FDC765		.equ 0
 
 EOPNOTSUPP			.equ 44		;keep the same as in kernel.h
