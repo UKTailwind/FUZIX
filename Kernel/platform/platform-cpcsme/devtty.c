@@ -32,7 +32,7 @@ static char tbuf4[TTYSIZ];
  static char tbuf5[TTYSIZ];
 #endif
 
-uint8_t vtattr_cap = VTA_UNDERLINE;
+uint8_t vtattr_cap = VTA_UNDERLINE | VTA_INVERSE;
 extern uint8_t curattr;
 
 tcflag_t termios_mask[NUM_DEV_TTY + 1] = {
