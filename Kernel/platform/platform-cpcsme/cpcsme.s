@@ -152,29 +152,32 @@ _MMR_for_this_bank:
 ; -----------------------------------------------------------------------------
 	.area _DISCARD
 
-_n_valid_maps:
-		.db 0
-_valid_maps_array:
-		.ds 15
 
 init_early: 
-		ld bc, #0x7fc1 			;convenient map to copy common to a visible area for copy routine
-		out (c),c				;also used for video output
+		ld d,#0xc2
+		ld e,#0xc1
 		ld hl, #s__COMMONMEM
-		ld de, #0x8000			;temporary buffer to hold common copy
+		ld ix, #0x8000			;temporary buffer to hold common copy
 		ld bc, #l__COMMONMEM
-		ldir
+		call ldir_far
+		ld d,#0xc2
+		ld e,#0xc1		
 		ld hl, #copy_common
-		ld de, #0x100
+		ld ix, #0x100
 		ld bc, #copy_common_end-#copy_common
-		ldir
-		jp 0x100
-early_ret:
-		ld bc, #0x7fc2 			;Kernel map
-		out (c),c
-		ret
+		call ldir_far
+						;we need to jump to 0x100 in map 0x7fc1
+		ld hl,#0x49ed 	;out (c),c opcodes
+		ld (#0xFE),hl	;patch them just before 0x100
+		ld bc,#0x7fc1	;store map on bc
+		jp 0xFE			;jump there
+
+early_ret:				;we need to return with 0x7fc2 mapped as we were called from there
+		.ds 2			;reserved space to patch in previous map out (c),c opcodes
+		ret				;and reach this ret with the right PC and map. 
 copy_common:		;Copy common to each user bank top 16K mapped at 0x4000, mark banks
-					;and setup available ram
+					;and setup available ram, we move this to 0x100 in map 0xc1 to get
+					;ready for setting common memory for all banks using ldir
 		ld de, #0
 erase_marks_loop:
 		ld hl, #0x100+#MMR_array_for_copy_common-#copy_common
@@ -254,12 +257,15 @@ not_valid:
 		jr nz,cc_loop
 		ld bc, #0x7fc1
 		out (c),c
-		ld hl, #0x8000		;clear VRAM for tty2
-		ld de, #0x8000 + 1
-		ld bc, #0x3fff
+		ld hl, #0x4000		;clear VRAM for tty2 and tty3
+		ld de, #0x4000 + 1
+		ld bc, #0x7fff
 		ld (hl), #0
 		ldir
-		jp early_ret
+		ld hl,#0x49ed		;out (c),c opcodes
+		ld (#early_ret),hl	;patch them
+		ld bc,#0x7fc2		;store desired map on bc
+		jp early_ret		;jump to return point
 nmaps:
         .db 15
 MMR_array_for_copy_common:
@@ -331,7 +337,7 @@ ramsize_loop:
 	
 	; Write the stubs for the rest of banks
 	ld a, (#_n_valid_maps)
-	ld hl,#MMR_array_for_user_bank
+	ld hl,#_valid_maps_array
 write_l_stubs_loop:
 	; From kernel to user bank
 	ld d,#0xc2
@@ -475,6 +481,10 @@ stubs_low_end:
 
 	.area _COMMONMEM
 
+_n_valid_maps:
+		.db 0
+_valid_maps_array:
+		.ds 15
 ;
 ;	We switch in one go so we don't have these helpers. This means
 ;	we need custom I/O wrappers and custom usercopy functions.
