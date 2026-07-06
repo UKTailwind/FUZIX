@@ -159,7 +159,7 @@ int ch375_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr)
      }
      r = ch375_rpoll(dev);
      if (r != CH375_USB_INT_SUCCESS) {
-         kprintf("ch375: raw transfer error %x\n", r);
+         kprintf("ch375: raw transfer error %2x\n", r);
          return 0;
      }
      return 1;        
@@ -168,6 +168,8 @@ int ch375_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr)
  {
     uint_fast8_t r,i;
     uint32_t sector_address;
+    uint8_t *p;
+    p = &sector_address;
     ch375_wcmd(dev, CH375_CMD_SEC_LOCATE);
     ch375_wdata(dev, lba);
     ch375_wdata(dev, lba >> 8);
@@ -176,17 +178,22 @@ int ch375_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr)
     nap2();
     r = ch375_rpoll(dev);
     if (r != CH375_USB_INT_SUCCESS) {
-        kprintf("ch375: image file transfer error %x\n", r);
+        kprintf("ch375: image file transfer error %2x\n", r);
         return 0;
     }    
     ch375_wcmd(dev, ch_rd);
     nap2();
     ch375_rdata(dev);/*Response length should be always 4 (bytes), we drop it*/
+    *p++ = ch375_rdata(dev);
+    *p++ = ch375_rdata(dev);
+    *p++ = ch375_rdata(dev);
+    *p = ch375_rdata(dev);
+    /*
     sector_address = ((uint32_t)ch375_rdata(dev));
     sector_address |= ((uint32_t)ch375_rdata(dev))<<8;
     sector_address |= ((uint32_t)ch375_rdata(dev))<<16;
     sector_address |= ((uint32_t)ch375_rdata(dev))<<24;
-
+    */
     return ch375_xfer(dev, is_read, sector_address, dptr);        
  }
  
