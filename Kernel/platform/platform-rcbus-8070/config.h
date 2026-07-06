@@ -8,7 +8,6 @@
 #undef CONFIG_ACCT
 /* Multiple processes in memory at once */
 #define CONFIG_MULTI
-
 /*
  *	Currently we are using the 512K/512K RAM card. We could ue the 8085
  *	style MMU card and linear RAM and that might be better
@@ -20,10 +19,15 @@
 #define CONFIG_BANKS	4	/* 4 banks 16K page size */
 #define MAX_MAPS	32
 
+#define CONFIG_RTC_DS12885
+#define CONFIG_RTC
+#define CONFIG_RTC_INTERVAL	10
+#define CONFIG_RTC_FULL
+
 /* Permit large I/O requests to bypass cache and go direct to userspace */
 #define CONFIG_LARGE_IO_DIRECT(x)	1
 
-#define TICKSPERSEC 20	    /* Ticks per second */
+#define TICKSPERSEC 10	    /* Ticks per second */
 
 #define MAPBASE	    0x0000  /* We map from 0 */
 #define PROGBASE    0x0000  /* also data base */

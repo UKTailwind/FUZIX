@@ -27,9 +27,8 @@ head:
 	.byte	0		;	No stack hint
 	.byte	0		;	No hint bits
 
-	.word   __sighandler	;	signals
+	.word   __sighandler	;	signal handler
 	.word	0		;	relocations
-
 
 ;
 ;	This function is called when we need to deliver a signal. We can't
@@ -45,60 +44,42 @@ head:
 ;
 __sighandler:
 	; Save compiler temporaries and dp register variables
-	ldx	@tmp
+	ldx @tmp
 	pshx
-	ldx	@tmp1
+	ldx @tmp1
 	pshx
-	ldx	@tmp2
+	ldx @tmp2
 	pshx
-	ldx	@tmp3
+	ldx @hireg
 	pshx
-	ldx	@tmp4
+	ldx @tmp3
 	pshx
-	ldx	@fp
+	ldx @tmp4
 	pshx
-	ldx	@reg
-	pshx
-	ldx	@reg+2
-	pshx
-	ldx	@reg+4
-	pshx
-	ldx	@sreg
-	pshx
+	pshb		; signal number
+	clra
+	psha		; extended to 16bits
 
-	; Arguments signal number and frame pointer
-	pshb	; Save the signal number
-	psha
-	pshx
+	;
+	;	Fishing time. Our vector is up the stack above all the
+	;	stuff we pushed
+
 	tsx
-	ldx	26,x	; vector
-	jsr	,x
-	; Discard arguments
+	ldx 16,x
+	jsr ,x
+	pulx		; signal number
 	pulx
+	stx @tmp4
 	pulx
-
-	; Restore temporaries
+	stx @tmp3
 	pulx
-	stx	@sreg
+	stx @hireg
 	pulx
-	stx	@reg+4
+	stx @tmp2
 	pulx
-	stx	@reg+2
+	stx @tmp1
 	pulx
-	stx	@reg
-	pulx
-	stx	@fp
-	pulx
-	stx	@tmp4
-	pulx
-	stx	@tmp3
-	pulx
-	stx	@tmp2
-	pulx
-	stx	@tmp1
-	pulx
-	stx	@tmp
-	; Back to kernel provided address
+	stx @tmp
 	rts
 ;
 ;	On the 6803 this is a bit messy as we don't have two memory
@@ -172,7 +153,7 @@ start:
 	aba
 	ldab	19,x	; low byte does not need relocating
 patch5:
-	std	@2	; relocation table ptr into @2 (plus patch shift)
+	std	@2	; relocation table ptr into @2
 	pula	; Recover the DP relocation value
 	pshx	; save base
 	bsr	reloc
@@ -197,7 +178,6 @@ patch5:
 	abx
 	stx	_environ
 	; Now call main
-	decb		; In case someone defines it vararg! (4 bytes of arg)
 	jsr	_main
 	pshb
 	psha

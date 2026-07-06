@@ -44,8 +44,11 @@ cur_map:		; Memory bank reg copies
 _plt_monitor:
 _plt_reboot:
 	jsr map_kernel
-	jmp rebootit
-
+rebootit:
+	ld	a,=0
+	ld	p2,=0xFE78
+	st	a,0,p2		; ROM low
+	jmp	0x0000
 
 ;
 ;	For now do hard interrupt masking. We will want to change this to
@@ -62,7 +65,7 @@ ___hard_di:
 ;	Enable interrupts
 ;
 ___hard_ei:
-	or	a,=1
+	or	s,=1
 	ret
 
 ___hard_irqrestore:
@@ -74,12 +77,6 @@ ___hard_irqrestore:
 ; KERNEL MEMORY BANK (only accessible when the kernel is mapped)
 ; -----------------------------------------------------------------------------
         .code
-
-rebootit:
-	ld	a,=0
-	ld	p2,=0xFE78
-	st	a,0,p2		; ROM low
-	jmp	0x0000
 
 init_early:
         ret			; stack was copied so this is ok
@@ -110,6 +107,7 @@ _program_vectors:
 	ld	p2,ea
 	jsr	map_proc_p2
 program_vectors_k:
+	push	p3
 	ld	p2,=0
 	ld	p3,=lowbuf
 	ld	ea,@2,p3
@@ -126,6 +124,7 @@ program_vectors_k:
 	ld	ea,=unix_syscall_entry-1
 	ld	p2,=0x20
 	st	ea,0,p2
+	pop	p3
 	jmp	map_kernel
 
 lowbuf:
@@ -282,7 +281,7 @@ justret:
 map_and_setup:
 	ld	a,=0
 	st	a,:__tmp		; counter
-	ld	ea,4,p1			; data pointer
+	ld	ea,6,p1			; data pointer
 	ld	p3,ea
 	ld	p2,=_td_raw
 	ld	a,0,p2
@@ -297,6 +296,7 @@ is_swap:
 
 
 _devide_read_data:
+	push	p3
 	jsr	map_and_setup
 	ld	p2,=0xFE10
 hd_read:
@@ -306,9 +306,11 @@ hd_read:
 	st	a,@1,p3
 	dld	a,:__tmp
 	bnz	hd_read
+	pop	p3
 	jmp	map_kernel
 
 _devide_write_data:
+	push	p3
 	jsr	map_and_setup
 	ld	p2,=0xFE10
 hd_write:
@@ -318,4 +320,5 @@ hd_write:
 	st	a,0,p2
 	dld	a,:__tmp
 	bnz	hd_write
+	pop	p3
 	jmp	map_kernel

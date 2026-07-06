@@ -3,6 +3,7 @@
 #include <kdata.h>
 #include <printf.h>
 #include <devtty.h>
+#include <ds12885.h>
 
 uint8_t kernel_flag = 1;
 uint8_t need_resched;
@@ -10,19 +11,49 @@ uint16_t swap_dev = 0xFFFF;
 
 void plt_idle(void)
 {
-    irqflags_t flags = di();
-    tty_poll();
-    irqrestore(flags);
+	irqflags_t flags = di();
+	tty_poll();
+	irqrestore(flags);
 }
 
 void do_beep(void)
 {
 }
 
+#define timer *((volatile uint8_t *)0xFE0F)
+
 void plt_interrupt(void)
 {
-	tty_poll();
+	static uint8_t count;
+	uint8_t r;
 
-	/* TODO */
-	timer_interrupt();
+	tty_poll();
+	r = timer;
+	if (!(r & 0x80)) {
+		count += r & 3;
+		timer = 0x00;
+		timer = 0x80;
+		/* Now handle any ticks we've accumulated */
+		if (count >= 5) {
+			timer_interrupt();
+			count -= 5;
+		}
+	}
+}
+
+/* DS12885 glue */
+#define RTC	((volatile uint8_t *)0xFE00)
+
+/* Callers deal with interrupt protection */
+
+uint_fast8_t ds12885_read(uint_fast8_t reg)
+{
+	RTC[0] = reg;
+	return RTC[1];
+}
+
+void ds12885_write(uint_fast8_t reg, uint_fast8_t val)
+{
+	RTC[0] = reg;
+	RTC[1] = val;
 }

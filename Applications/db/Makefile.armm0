@@ -1,0 +1,43 @@
+ROOT = ../..
+include $(ROOT)/Target/rules.armm0
+
+STRIP_OPT += --strip-unneeded
+
+# Build for booking Targets
+APPS = booking
+SRCS_MECH = main.c db_booking.c booking_list.c debug.c ui.c date.c db_lock.c db_state.c db_common.c\
+            db_customer.c customer_list.c keyboard_test.c booking_detail.c customer_detail.c state_select.c\
+            staff_select.c db_staff.c ui_keyboard_parser.c term.c kb_definition_ansi.c kb_definition_vt52.c\
+            kb_backend_ansi.c kb_backend_vt52.c
+
+OBJS_MECH = $(SRCS_MECH:.c=.o)
+
+# Define FUZIX macro automatically for FUZIX builds
+CFLAGS +=  -Os 
+
+# TODO Try withiout -D_DEFAULT_SOURCE and see if anything breaks.
+CPPFLAGS += -DFUZIX -D_DEFAULT_SOURCE
+
+# Enable / Disable debug to reduce file size.
+#CFLAGS += -DDEBUG_ENABLED
+
+# Default target
+all: $(APPS) size.report
+
+# Booking build
+booking: $(CRT0) $(OBJS_MECH)
+	$(LINKER) $^ -o $@.debug -ltermcap$(PLATFORM) $(LINKER_OPT)
+ifdef ELF2FUZIX
+	$(STRIP) -o $@.bin $(STRIP_OPT) $@.debug
+	$(ELF2FUZIX) -o $@ $@.bin
+else
+	$(STRIP) -o $@ $(STRIP_OPT) $@.debug
+endif
+
+# Report size
+size.report: $(APPS)
+	ls -l $< > $@
+
+# Clean
+clean:
+	rm -f $(OBJS_MECH) $(OBJS_KB) $(APPS) $(SRCS_MECH:.c=) $(SRCS_KB:.c=) *.lst *.map size.report *.o *.rel *.bin *.data *.text *.debug

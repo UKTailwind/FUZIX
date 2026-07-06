@@ -1,6 +1,6 @@
 ;
 ;	p1 is the stack pointer
-;	p2/p3/ea are scratch so simples
+;	p2/ea are scratch so simples
 ;	(:__tmp etc are also scratch)
 ;
 	.export __setjmp
@@ -13,5 +13,7 @@ __setjmp:
 	st	ea,0,p2
 	ld	ea,p1		; stack pointer
 	st	ea,2,p2
+	ld	ea,p3
+	st	ea,4,p2		; register var
 	ld	ea,=0
 	ret

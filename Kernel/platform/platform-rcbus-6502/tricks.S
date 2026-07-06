@@ -227,7 +227,7 @@ fork_copy:
 	sta	$FE79		; 4000
 	sta	@tmp1
 
-	; Now use that window to copy 48K from 0000-BFFF
+	; Now use that window to copy 48K from 0000-FFFF
 
 	jsr	bank2bank		; copies 16K
 

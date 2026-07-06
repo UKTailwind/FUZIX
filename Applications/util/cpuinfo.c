@@ -244,7 +244,7 @@ static void cpu_ident(void)
     }
 }
 
-#elif defined(__CC68__)
+#elif defined(__6800__) || defined(__6803__) || defined(__6303__) || defined(__68hc11__)
 
 extern uint8_t identify_cpu(void);
 
@@ -372,7 +372,7 @@ static void usage(void)
 int main(int argc, char *argv[])
 {
     int opt;
-    
+
     while((opt = getopt(argc, argv, "p:")) != -1) {
         switch(opt) {
         case 'p':
@@ -392,5 +392,4 @@ int main(int argc, char *argv[])
     do_identify();
     return 0;
 }
-            
-            
+

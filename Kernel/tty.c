@@ -40,17 +40,16 @@ int tty_read(uint_fast8_t minor, uint_fast8_t rawflag, uint_fast8_t flag)
 
 	/* FIXME: fix race of timer versus the ptimer_insert to psleep_flags_io */
 	used(rawflag);
-	used(flag);			/* shut up compiler */
 
 	q = &ttyinq[minor];
 	t = &ttydata[minor];
 
 	while (udata.u_done < udata.u_count) {
 		for (;;) {
-#ifdef CONFIG_LEVEL_2		
+#ifdef CONFIG_LEVEL_2
                         if (jobcontrol_in(minor, t))
 				return udata.u_done;
-#endif				
+#endif
 		        if ((t->flag & TTYF_DEAD) && (!q->q_count))
 				goto dead;
 			if (remq(q, &c)) {
@@ -116,10 +115,10 @@ int tty_write(uint_fast8_t minor, uint_fast8_t rawflag, uint_fast8_t flag)
 
 	while (udata.u_done != udata.u_count) {
 		for (;;) {	/* Wait on the ^S/^Q flag */
-#ifdef CONFIG_LEVEL_2		
+#ifdef CONFIG_LEVEL_2
 	                if (jobcontrol_out(minor, t))
 				return udata.u_done;
-#endif				
+#endif
 		        if (t->flag & TTYF_DEAD) {
 			        udata.u_error = ENXIO;
 			        return -1;
@@ -129,7 +128,7 @@ int tty_write(uint_fast8_t minor, uint_fast8_t rawflag, uint_fast8_t flag)
 			if (psleep_flags_io(&t->flag, flag))
 				return udata.u_done;
 		}
-		/* We could optimize this significantly by 
+		/* We could optimize this significantly by
 		   a) looping here if not sleeping rather than repeating all
 		   the checks except for STOP/DISCARD
 		   b) possibly batching for the case where tty never blocks
@@ -280,7 +279,7 @@ int tty_ioctl(uint_fast8_t minor, uarg_t request, char *data)
 	}
         if (jobcontrol_ioctl(minor, t, request))
 		return -1;
-#endif		
+#endif
 	if (t->flag & TTYF_DEAD) {
 	        udata.u_error = ENXIO;
 	        return -1;

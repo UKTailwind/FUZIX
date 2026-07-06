@@ -137,15 +137,14 @@ outd:
 unix_syscall_entry:
 	tsx
 	sts _udata+U_DATA__U_SYSCALL_SP
-	abx
 	staa _udata+U_DATA__U_CALLNO
-	ldd 7,x
+	ldd 9,x
 	std _udata+U_DATA__U_ARGN
-	ldd 5,x
+	ldd 11,x
 	std _udata+U_DATA__U_ARGN+2
-	ldd 3,x
+	ldd 13,x
 	std _udata+U_DATA__U_ARGN+4
-	ldd 1,x
+	ldd 15,x
 	std _udata+U_DATA__U_ARGN+6
 	ldaa #1
 	staa _udata+U_DATA__U_INSYS	; we may want to use udata-> tricks ?
@@ -259,16 +258,20 @@ interrupt_handler:
 	pshx
 	ldx @tmp2
 	pshx
-	ldx @sreg
+	ldx @hireg
 	pshx
-	ldx @fp
+	ldx @tmp3
+	pshx
+	ldx @tmp4
 	pshx
 	jsr _plt_interrupt
 	; Restore the C direct page
 	pulx
-	stx @fp
+	stx @tmp4
 	pulx
-	stx @sreg
+	stx @tmp3
+	pulx
+	stx @hireg
 	pulx
 	stx @tmp2
 	pulx
@@ -394,3 +397,116 @@ _sys_stubs:
 	nop
 	nop
 	nop
+
+;
+;	Support routines
+;
+
+
+	.code
+	.export _strlen
+
+	.setcpu 6803
+
+_strlen:
+	tsx
+	ldx 2,x
+	ldd @zero
+cl:	tst ,x
+	beq to_rts
+	inx
+	addd #1
+	bra cl
+to_rts:
+	rts
+
+	.export _memset
+
+	.code
+
+_memset:
+	tsx
+	ldab	5,x
+	stab	@tmp		; pattern
+	ldd	6,x		; length
+	ldx	2,x		; destination
+	bsr	snextblock
+	tsx
+	ldd	2,x
+	rts
+
+snextblock:
+	tsta
+	bne	blocks
+	tstb
+	bne	tailset
+	rts
+
+blocks:
+	; Set 256 bytes
+	pshb
+	psha
+	clrb
+	bsr	tailset
+	pula
+	pulb
+	deca
+	bra	snextblock
+
+tailset:
+	ldaa	@tmp
+clearloop:
+	staa	,x
+	inx
+	decb
+	bne	clearloop
+	rts
+
+;
+;	There isn't a nice way to do this on 680x/630x.
+;
+;
+	.export _memcpy
+
+	.code
+
+_memcpy:
+	tsx
+	ldd	2,x
+	std	@tmp		; destination
+	ldaa	6,x		; length
+	oraa	7,x
+	beq	nocopy
+	ldd	6,x
+	ldx	4,x		; src
+	bsr	nextblock
+	tsx
+nocopy:
+	ldd	2,x
+	rts
+
+nextblock:
+	tsta
+	beq	tailcopy
+	; Copy 256 bytes repeatedly until we get to the leftovers
+	pshb
+	psha
+	clrb
+	bsr	tailcopy
+	pula
+	pulb
+	deca
+	bra	nextblock
+
+tailcopy:
+	ldaa	,x
+	inx
+	stx	@tmp2
+	ldx	@tmp
+	staa	,x
+	inx
+	stx	@tmp
+	ldx	@tmp2
+	decb
+	bne	tailcopy
+	rts

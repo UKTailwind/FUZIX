@@ -35,7 +35,7 @@ int main(int argc, char *argv[])
     exit(1);
   }
   
-  if (read(fd, &buf, 2) != 2) {
+  if (read(fd, buf, 2) != 2) {
     perror("read");
     exit(1);
   }

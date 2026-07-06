@@ -12,16 +12,16 @@
 
 __uputc:
 	tsx
-	ldab 5,x
-	ldx 2,x
+	ldab 3,x
+	ldx 4,x
 	jsr map_proc_always
 	stab 0,x
 	jmp map_kernel
 
 __uputw:
 	tsx
-	ldd 4,x
-	ldx 2,x
+	ldd 2,x
+	ldx 4,x
 	jsr map_proc_always
 	std 0,x
 	jmp map_kernel
@@ -43,8 +43,8 @@ __ugetw:
 
 __uzero:
 	tsx
-	ldd 2,x
-	ldx 4,x
+	ldd 4,x
+	ldx 2,x
 	jsr map_proc_always
 	; Optimize, unroll etc ?
 uzerolp:
@@ -59,11 +59,11 @@ __uget:
 	; We can optimize this a lot by abusing the stack etc but
 	; start simple. Take care as tmp/to/from are kernel mapped
 	tsx
-	ldd 2,x		; len
+	ldd 6,x		; len
 	std @tmp
 	ldd 4,x		; to
 	std @to
-	ldx 6,x		; from
+	ldx 2,x		; from
 	stx @from
 ugetl:
 	ldx @from
@@ -89,11 +89,11 @@ __uput:
 	; We can optimize this a lot by abusing the stack etc but
 	; start simple. Take care as tmp/to/from are kernel mapped
 	tsx
-	ldd 2,x		; len
+	ldd 6,x		; len
 	std @tmp
 	ldd 4,x		; to
 	std @to
-	ldx 6,x		; from
+	ldx 2,x		; from
 	stx @from
 uputl:
 	ldx @from

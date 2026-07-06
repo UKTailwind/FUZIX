@@ -198,9 +198,9 @@ _dofork:
 	; _switchin will be expecting from our copy of the stack.
 	pulx
 
-	ldx fork_proc_ptr
-	pshx
 	ldx #_udata
+	pshx
+	ldx fork_proc_ptr
 	pshx
         jsr _makeproc
 	pulx

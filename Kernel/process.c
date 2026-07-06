@@ -593,9 +593,9 @@ void unix_syscall(void)
 		(udata.u_callno != 32 /* fork */ || !udata.u_retval) &&
 #endif
 		runticks >= udata.u_ptab->p_priority && nready > 1) {
-#ifdef DEBUG_PREEMPT	
+#ifdef DEBUG_PREEMPT
 		kprintf("P: %d %x %d\n", runticks, udata.u_ptab, udata.u_ptab->p_priority);
-#endif		
+#endif
 		/* Time to switch out? - we may have overstayed our welcome inside
 		   a syscall so swtch straight afterwards */
 		udata.u_ptab->p_status = P_READY;
@@ -631,7 +631,7 @@ uint_fast8_t dump_core(uint_fast8_t sig)
 	}
 	return sig;
 }
-#endif                                    
+#endif
 
 
 /* FIXME: we should keep a dirty flag so we know if we need to check for

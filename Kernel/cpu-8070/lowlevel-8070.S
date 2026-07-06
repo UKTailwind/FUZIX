@@ -135,17 +135,18 @@ outea:
 ;	Returns P2 = result, EA = error (must be < 256)
 ;
 unix_syscall_entry:
+	push	p3
 	ld	p3,=_udata
 	st	a,U_DATA__U_CALLNO,p3
 	ld	ea,p1
 	st	ea,U_DATA__U_SYSCALL_SP,p3
-	ld	ea,4,p1
-	st	ea,U_DATA__U_ARGN,p3
 	ld	ea,6,p1
-	st	ea,U_DATA__U_ARGN+2,p3
+	st	ea,U_DATA__U_ARGN,p3
 	ld	ea,8,p1
-	st	ea,U_DATA__U_ARGN+4,p3
+	st	ea,U_DATA__U_ARGN+2,p3
 	ld	ea,10,p1
+	st	ea,U_DATA__U_ARGN+4,p3
+	ld	ea,12,p1
 	st	ea,U_DATA__U_ARGN+6,p3
 
 	ld	a,=1
@@ -166,12 +167,19 @@ do_signal:
 	ld	ea,=0
 	ld	a,U_DATA__U_CURSIG,p3
 	bz	no_signal
+	ld	t,ea
+	ld	ea,U_DATA__U_ERROR,p3
+	push	ea
+	ld	ea,U_DATA__U_RETVAL,p3
+	push	ea
+	ld	ea,t
 	sl	ea
 	add	ea,=_udata+U_DATA__U_SIGVEC
 	ld	p2,ea
 	ld	ea,0,p2			; vector
-	bz	no_signal
 	ld	t,ea			; vector safed in T
+	or	a,e
+	bz	no_signal
 	ld	ea,=0
 	st	ea,0,p2			; clear vector
 
@@ -184,20 +192,27 @@ do_signal:
 	; Arguments to signal handler
 	push	ea			; signal number
 	; Return
-	ld	ea,=unwind
+	ld	ea,=unwind-1		; return will add one
 	push	ea
 	; Unwind for signal handlers
 	ld	p3,=PROGLOAD+16
 	ld	ea,0,p3
+	sub	ea,=1			; because return adds 1
 	push	ea
 	ret
 unwind:
-	pop	ea
+	pop	ea			; Discard argument
+	pop	p2			; U_RETVAL
+	pop	ea			; U_ERROR
+	pop	p3			; Restore p3
+	ret
+
 no_signal:
 	ld	p3,=_udata
 	ld	ea,U_DATA__U_RETVAL,p3
 	ld	p2,ea
 	ld	ea,U_DATA__U_ERROR,p3
+	pop	p3			; Restore p3
 	ret
 
 _doexec:
@@ -272,7 +287,7 @@ interrupt_handler:
 
 	ld	p1,=istack_top
 
-	jsr map_save_kernel
+	jsr	map_save_kernel
 
 	ld	a,=1
 	ld	p3,=_udata
@@ -318,6 +333,47 @@ interrupt_handler:
 	;	TODO stack a signal frame that unwinds into no_signals
 	;	if needed
 	;	can we use do_return somehow ??
+	ld	a,U_DATA__U_CURSIG,p3
+	bz	no_signals
+	;	Ok we have a signal. We are on the user stack, our interrupt
+	;	work is done so just exit via a signal handler.
+	and	s,=0xfe		; interrupts back on
+	;
+	;	FIXME: could really do with de-depulicating this and the
+	;	syscall path variant
+	;
+	ld	ea,=0
+	ld	a,U_DATA__U_CURSIG,p3
+	bz	no_signals
+	sl	ea
+	add	ea,=_udata+U_DATA__U_SIGVEC
+	ld	p2,ea
+	ld	ea,0,p2			; vector
+	ld	t,ea			; vector safed in T
+	or	a,e
+	bz	no_signals
+	ld	ea,=0
+	st	ea,0,p2			; clear vector
+
+	ld	a, U_DATA__U_CURSIG,p3
+	ld	e,a			; save signal number in e
+	ld	a,=0
+	st	a,U_DATA__U_CURSIG,p3	; clear it
+	xch	a,e
+	; Arguments to signal handler
+	push	ea			; signal number
+	; Return
+	ld	ea,=irqunwind-1		; return will add one
+	push	ea
+	; Unwind for signal handlers
+	ld	p3,=PROGLOAD+16
+	ld	ea,0,p3
+	sub	ea,=1			; because return adds 1
+	push	ea
+	ret
+	or	s,=1			; not clear we need to do this
+irqunwind:
+	pop	ea			; remove signal number
 no_signals:
 	pop	p3
 	pop	p2
@@ -449,11 +505,12 @@ next:
 	.export _memcpy
 
 _memcpy:
-	ld	ea,2,p1
-	ld	p2,ea		; dest
+	push	p3
 	ld	ea,4,p1
+	ld	p2,ea		; dest
+	ld	ea,6,p1
 	ld	p3,ea		; src
-	ld	ea,6,p1		; len
+	ld	ea,8,p1		; len
 	add	ea,=0x0100
 	add	a,=0x01
 	st	ea,:__tmp
@@ -466,6 +523,7 @@ mcnext:
 	bnz	mcloop
 	dld	a,:__tmp+1
 	bnz	mcloop
+	pop	p3
 	ld	ea,2,p1
 	ret
 

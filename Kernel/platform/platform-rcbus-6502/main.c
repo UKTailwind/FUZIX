@@ -46,8 +46,6 @@ static volatile uint8_t *via = (volatile uint8_t *)0xFE60;
 
 void device_init(void)
 {
-	*((volatile uint8_t *)0xFE00) = 0x80;
-
 #ifdef CONFIG_TD_IDE
 	ide_probe();
 #endif

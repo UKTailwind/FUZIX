@@ -39,6 +39,9 @@ Internal UART
 
 Things to address
 - Dynamic buffer allocation
+- Finish compiler switchover
+- Unify the API code a bit so that 6800 binaries run on 6803/6303 kernels
+- Use tinydisk
 - SPI bitbang port
 - Making the UART driver properly IRQ driven for input with its own buffer
   and separate to the Fuzix level interrupts
@@ -49,8 +52,6 @@ Things to address
 
 Put the loader on sector 0
 Put the kernel on sector 1+
-
-What would cc68 ld68 banking support take ?
 
 To run on the emulator
 

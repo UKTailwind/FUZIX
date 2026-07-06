@@ -1,0 +1,41 @@
+include $(FUZIX_ROOT)/Target/rules.$(USERCPU)
+
+.SUFFIXES: .c .o
+
+all: dbgen booking
+
+OBJ = main.o db_booking.o booking_list.o debug.o ui.o date.o db_state.o db_common.o \
+      db_customer.o customer_list.o keyboard_test.o booking_detail.o customer_detail.o state_select.o \
+      staff_select.o db_staff.o ui_keyboard_parser.o term.o kb_definition_ansi.o kb_definition_vt52.o \
+      kb_backend_ansi.o kb_backend_vt52.o
+
+dbgen: dbgen.c
+	cc dbgen.c -o ./dbgen
+
+booking: $(OBJ)
+	$(LINKER) $(CRT0) $^ -o $@ $(LINKER_OPT) $(LINKER_TAIL)
+
+$(OBJ): dbgen db_booking_layout.h db_customer_layout.h db_staff_layout.h db_state_layout.h
+
+.c.o:
+	$(CC) $(CFLAGS) $(CCOPTS) -c $<
+
+db_booking_layout.h: dbgen booking-layout.def
+	./dbgen BOOKING <booking-layout.def >db_booking_layout.h
+
+db_customer_layout.h: dbgen customer-layout.def
+	./dbgen CUSTOMER <customer-layout.def >db_customer_layout.h
+
+db_staff_layout.h: dbgen staff-layout.def
+	./dbgen STAFF <staff-layout.def >db_staff_layout.h
+
+db_state_layout.h: dbgen state-layout.def
+	./dbgen STATE <state-layout.def >db_state_layout.h
+
+clean:
+	rm -f  $(OBJ) booking core *~
+
+rmbak:
+	rm -f *~ core
+
+

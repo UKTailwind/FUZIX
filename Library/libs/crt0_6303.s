@@ -1,9 +1,9 @@
 ;
-;	Initial 6303 crt0. We need to add self relocation etc to it
+;	Initial 6303/6803 crt0.
 ;
 
-	.setcpu 6303
 	.code
+	.setcpu 6803
 
 	.export _environ
 	.export head
@@ -11,11 +11,11 @@
 head:
 	.word	$80A8
 	.byte	2		;	6800 series
-	.byte	3		;	Needs 6803 and 6303 features
-	.byte   >head		;	Load page
+	.byte	0		;	Needs only 6800 features
+	.byte   1		;	Load at 0x100
 	.byte	0		;	No hints
-	.word	__code_size
-	.word	__data_size
+	.word	__data-0x0100	;	Code
+	.word	__data_size	;	Data
 	.word	__bss_size
 	.byte	<start		;	Offset to execute from
 	.byte	0		;	No size hint
@@ -30,74 +30,56 @@ head:
 ;	non-reentrancy issues in the compiler temporary and regvar usage
 ;
 ;	On entry
-;	D = signal number
+;	B = signal number
 ;	X = undefined
 ;
 ;	Return address is the correct route back to the kernel. Above it is
-;	a copy of the vector, the signal number and an RTI frame.
+;	a copy of the vector and an RTI frame.
 ;
 __sighandler:
 	; Save compiler temporaries and dp register variables
-	ldx	@tmp
+	ldx @tmp
 	pshx
-	ldx	@tmp1
+	ldx @tmp1
 	pshx
-	ldx	@tmp2
+	ldx @tmp2
 	pshx
-	ldx	@tmp3
+	ldx @hireg
 	pshx
-	ldx	@tmp4
+	ldx @tmp3
 	pshx
-	ldx	@fp
+	ldx @tmp4
 	pshx
-	ldx	@reg
-	pshx
-	ldx	@reg+2
-	pshx
-	ldx	@reg+4
-	pshx
-	ldx	@sreg
-	pshx
+	pshb		; signal number
+	clra
+	psha		; extended to 16bits
 
-	; Arguments signal number and frame pointer
-	pshb	; Save the signal number
-	psha
-	pshx
+	;
+	;	Fishing time. Our vector is up the stack above all the
+	;	stuff we pushed
+
 	tsx
-	ldx	26,x	; vector
-	jsr	,x
-	; Discard arguments
+	ldx 16,x
+	jsr ,x
+	pulx		; signal number
 	pulx
+	stx @tmp4
 	pulx
-
-	; Restore temporaries
+	stx @tmp3
 	pulx
-	stx	@sreg
+	stx @hireg
 	pulx
-	stx	@reg+4
+	stx @tmp2
 	pulx
-	stx	@reg+2
+	stx @tmp1
 	pulx
-	stx	@reg
-	pulx
-	stx	@fp
-	pulx
-	stx	@tmp4
-	pulx
-	stx	@tmp3
-	pulx
-	stx	@tmp2
-	pulx
-	stx	@tmp1
-	pulx
-	stx	@tmp
-	; Back to kernel provided address
+	stx @tmp
 	rts
 
 start:
-	clra
 	clrb
-	std	@zero
+	stab	@zero
+	stab	@zero+1
 	incb
 	stab	@one+1
 	jsr	___stdio_init_vars
@@ -106,7 +88,6 @@ start:
 	abx
 	stx	_environ
 	; Now call main
-	decb		; In case someone defines it vararg! (4 bytes of arg)
 	jsr	_main
 	pshb
 	psha

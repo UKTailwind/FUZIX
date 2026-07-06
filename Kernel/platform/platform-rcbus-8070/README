@@ -28,10 +28,8 @@ RCBUS bus
 16x50 UART (TODO)
 
 Things to address
-- Timer
-- Interrupt handling properly
 - Dynamic buffer allocation
-- Don't disable all interrupts in the Fuzix paths
+- Don't disable all interrupts in the Fuzix paths ?
 - Add device support for some of the RCBUS external devices
 - Minimal 8073 support (can't do interrupts properly)
 
@@ -42,13 +40,12 @@ To run on the emulator
 
 rc2014-8070 -b -i /tmp/emu-ide.img
 
-Bugs at this point (probably compiler but may be other things too)
-FIXED - df produces nonsense
-FIXED - setdate errors with confusing reports
-- doing a shutdown crashes
-FIXED - fprintf on cp -i is not flushing immediately
-PART - ls -l formatting is broken and missing dates
-	(date missing still)
-FIXED - reports liberror.txt is missing on errors with rmdir etc
-FIXED - uptime reports are nonsense
-FIXED - date seems off
+Things to do at this point
+- Relocatable 8070 binaries
+- Look at compiler opportunities for register variables
+- Can the compiler make sensible use of autoinc/dec at all ?
+- In general lots of terrible codegen needs cleaning up in the compiler
+- Test signals off interrupts
+- Kernel pre-emption testing (written but unlikely to work on the first attempt)
+- Proper serial driver (current 16x50 is a quick testing hack)
+- TMS9918A
