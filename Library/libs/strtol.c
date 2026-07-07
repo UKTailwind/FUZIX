@@ -114,12 +114,12 @@ done:
 
 long strtol(const char *nptr, char **endptr, int base)
 {
-	return (long)do_conv(nptr, endptr, base, 1);
+	return (long)do_conv(nptr, endptr, base, 0);
 }
 
 unsigned long strtoul(const char *nptr, char **endptr, int base)
 {
-	return do_conv(nptr, endptr, base, 0);
+	return do_conv(nptr, endptr, base, 1);
 }
 
 
