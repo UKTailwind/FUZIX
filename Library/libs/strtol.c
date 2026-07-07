@@ -74,7 +74,7 @@ static unsigned long do_conv(const char *nptr, char **endptr, int base, int uns)
 	while (isascii(*nptr) && isalnum(*nptr)) {
 		uint8_t ch = toupper(*nptr);
 		ch -= (ch <= '9' ? '0' : 'A' - 10);
-		if (ch > base)
+		if (ch >= base)
 			break;
 		/* Check for unsigned overflow */
 		newv = (number * base) + ch;
