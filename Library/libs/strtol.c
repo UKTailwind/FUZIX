@@ -32,7 +32,8 @@ static unsigned long do_conv(const char *nptr, char **endptr, int base, int uns)
 {
 	const char *start = nptr;
 	unsigned long int number = 0;
-	unsigned long int newv;
+	unsigned long int cutoff;
+	uint8_t cutlim;
 	uint8_t negative = 0;
 	uint8_t overflow = 0;
 	uint8_t any = 0;
@@ -72,6 +73,12 @@ static unsigned long do_conv(const char *nptr, char **endptr, int base, int uns)
 	if (base == 0)
 		base = 10;
 
+	/* Highest value we can hold before the next digit overflows. Comparing
+	   against these catches a multiply that wraps the whole range, which the
+	   simple "did the result shrink" test misses for non-decimal bases. */
+	cutoff = ULONG_MAX / base;
+	cutlim = ULONG_MAX % base;
+
 	/* Now walk through the characters converting */
 	while (isascii(*nptr) && isalnum(*nptr)) {
 		uint8_t ch = toupper(*nptr);
@@ -79,10 +86,9 @@ static unsigned long do_conv(const char *nptr, char **endptr, int base, int uns)
 		if (ch >= base)
 			break;
 		/* Check for unsigned overflow */
-		newv = (number * base) + ch;
-		if (newv < number)
+		if (number > cutoff || (number == cutoff && ch > cutlim))
 			overflow = 1;
-		number = newv; 
+		number = number * base + ch;
 		any = 1;
 		nptr++;
 	}
