@@ -30,10 +30,12 @@
 
 static unsigned long do_conv(const char *nptr, char **endptr, int base, int uns)
 {
+	const char *start = nptr;
 	unsigned long int number = 0;
 	unsigned long int newv;
 	uint8_t negative = 0;
 	uint8_t overflow = 0;
+	uint8_t any = 0;
 
 	/* Sanity check the arguments */
 	if (base == 1 || base > 36 || base < 0) {
@@ -56,14 +58,14 @@ static unsigned long do_conv(const char *nptr, char **endptr, int base, int uns)
 	   base = 0 means 0x is hex 0nnn is octal
 	   base = 16 means 0x is allowed but does nothing */
 	if (*nptr == '0') {
-		if ((base == 0 || base == 16) && (nptr[1] == 'X' || nptr[1] == 'x')) {
+		/* Only skip "0x" when a hex digit follows; otherwise the '0' is an
+		   ordinary digit and the 'x' terminates the number */
+		if ((base == 0 || base == 16) && (nptr[1] == 'X' || nptr[1] == 'x')
+			&& isxdigit(nptr[2])) {
 			base = 16;
 			nptr += 2;
-		}
-		if (base == 0) {
+		} else if (base == 0)
 			base = 8;
-			nptr++;
-		}
 	}
 	/* If base is still 0 (it was 0 to begin with and the string didn't begin
 	   with "0"), then we are supposed to assume that it's base 10 */
@@ -81,8 +83,14 @@ static unsigned long do_conv(const char *nptr, char **endptr, int base, int uns)
 		if (newv < number)
 			overflow = 1;
 		number = newv; 
+		any = 1;
 		nptr++;
 	}
+	/* If no digits were consumed then the string had no number; the standard
+	   requires endptr to point at the original string, not past the skipped
+	   whitespace, sign, or "0x" prefix */
+	if (!any)
+		nptr = start;
 done:
 	/* Some code is simply _impossible_ to write with -Wcast-qual .. :-\ */
 	if (endptr != NULL)
