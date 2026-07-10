@@ -608,6 +608,8 @@ m4_net_recv_command_loop:
             out     (c),c
             push    iy
             pop     de
+            ld      a,(_udata + U_DATA__U_PAGE) ;we need to read this before enabling ROM
+            ld      patch_U_DATA__U_PAGE,a
             ld		bc,#0xdf00
 			ld      a,(m4rom_number)
 			out		(c),a
@@ -626,7 +628,8 @@ m4_net_recv_command_loop:
             ld      a,(_m4_net_raw)
             or      a
             jr      z,m4_net_recv_data_k
-            ld      a,(_udata + U_DATA__U_PAGE)
+patch_U_DATA__U_PAGE:
+            ld      a,#0
             exx
             bit     6,a
             jr      nz,lower_512
