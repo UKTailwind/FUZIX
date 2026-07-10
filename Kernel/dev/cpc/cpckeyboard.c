@@ -20,7 +20,7 @@ static uint8_t kbd_timer;
 
 static uint8_t keybyte, keybit;
 static uint8_t newkey;
-static int keysdown = 0;
+static int8_t keysdown = 0;
 
 uint8_t keyboard[10][8] = {
 	{KEY_UP, KEY_RIGHT, KEY_DOWN, '9', '6', '3',13, '.'},
@@ -124,7 +124,7 @@ static void keydecode(void)
 
 void tty_pollirq(void)
 {
-	int i;
+	int8_t i;
 
 	newkey = 0;
 
@@ -133,7 +133,7 @@ void tty_pollirq(void)
 		return;
 
 	for (i = 0; i < 10; i++) {
-		int n;
+		int8_t n;
 		uint8_t key = (~keybuf[i]) ^ keymap[i];
 		if (key) {
 			uint8_t m = 0x80;
