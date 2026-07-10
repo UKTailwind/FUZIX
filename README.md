@@ -1,9 +1,20 @@
 ** ENGINEERING WORK IN PROGRESS **
 
-The Z80 side of the tree is currently moving to the new compiler including
-work on the compiler, linker and kernel. Thus some bits of it require you
-have absolutely bleeding edge pieces all around. I would suggest avoiding
-working on this tree for Z80 stuff right now. Non Z80 should be just fine.
+Z80 is now mostly migrated to new compiler (all user space most kernels), 
+6800, 8070, 8080, 8085, are migrated and should be reasonably stable again.
+
+6502 is migrated but there are a few compiler bugs left to nail it seems.
+6303 and 6803 are currently being migrated to the new compiler so are broken
+for the moment.
+
+To follow: migrating 6809, 68HC11.
+
+68000, NS32K, ESP8266, ARM use gcc and will continue to do so at least for
+the near term. NS32K we may be forced to change compiler eventually.
+
+TMS7000 and Z8 experiments will use the new compiler from the start if they
+prove viable at all. TMS9995 is still to be decided between re-targetting
+fcc or finishing the ANSI PCC work.
 
 **FuzixOS**: Because Small Is Beautiful
 
