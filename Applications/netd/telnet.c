@@ -583,8 +583,14 @@ int main(int argc, char *argv[])
 		   at a go so that big bursts of data feel fast. We don't
 		   go forever though as the poor user might be trying to
 		   stop the output */
-		while(ct++ < 20  && (len = read(fddw, ibuf, 128)) > 0)
+		while(ct++ < 20)
 		{
+			len = read(fddw, ibuf, 128);
+			if (!len) {			/* EOF: remote closed */
+				printd("\nConnection closed.");
+				quit(0);
+			}
+			if (len < 0) break;
 			pos = ibuf;
 			while (len > 0) {
 				int ret = mywrite(pos, len);
@@ -598,11 +604,7 @@ int main(int argc, char *argv[])
 				pos += ret;
 			}
 		}
-		/* EOF: remote closed */
-		if (!len) {
-			printd("\nConnection closed.");
-			quit(0);
-		}
+
 		/* Error. EAGAIN is ok - it means we've run out of data,
 		   anything else is bad */
 		if (len < 0) {
