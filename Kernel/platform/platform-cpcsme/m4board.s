@@ -20,7 +20,6 @@ C_SEEK                      .equ 0x4305
 C_READ                      .equ 0x4302
 C_WRITE2                    .equ 0x431B
 C_NMI                       .equ 0x431D
-C_SETNETWORK		        .equ 0x4321
 C_NETSTAT			        .equ 0x4323
 C_UPGRADE			        .equ 0x4327
 C_NETSOCKET		            .equ 0x4331
@@ -34,6 +33,7 @@ C_NETBIND			        .equ 0x4338
 C_NETLISTEN                 .equ 0x4339
 C_NETACCEPT		            .equ 0x433A
 C_GETNETWORK		        .equ 0x433B
+C_SETNETWORK		        .equ 0x4321
 
 rom_version                 .equ 0xFF00
 rom_response_ptr            .equ 0xFF02
@@ -60,6 +60,7 @@ m4_read_transfer_stub       .equ 0x0069 ;FIXME, make it not hardcoded if possibl
     .globl _td_io_data_reg
     .globl _td_io_data_count
     .globl _td_io_wblock
+    .globl __ugetc
 
     .globl outstring
     .globl outcharhex
@@ -385,6 +386,230 @@ m4_cmd:
             jp      m4rom_enable
 
 
+.if CONFIG_NET_M4BOARD 
+
+    .globl _m4_net_socket
+    .globl _m4_net_connect
+    .globl _m4_net_connect_socket
+    .globl _m4_net_connect_ip
+    .globl _m4_net_connect_port
+    .globl _m4_net_close
+    .globl _m4_net_close_socket
+    .globl _m4_net_bind
+    .globl _m4_net_bind_ip
+    .globl _m4_net_bind_port
+    .globl _m4_net_bind_socket
+    .globl _m4_net_listen
+    .globl _m4_net_listen_socket
+    .globl _m4_net_accept
+    .globl _m4_net_accept_socket
+    .globl _m4_net_send
+    .globl _m4_net_send_socket
+    .globl _m4_net_send_len
+    .globl _m4_net_recv
+    .globl _m4_net_recv_socket
+    .globl _m4_net_recv_len
+    .globl _m4_net_raw
+    .globl _m4_net_hostip_start
+    .globl _m4_net_sock_info
+    .globl _m4_net_sock_info_socket
+    .globl _m4_net_getnetwork
+    .globl _m4_network_config
+    .globl _m4_net_setnetwork
+
+
+_m4_net_socket:
+            ld hl,#cmd_m4_net_socket
+            jr m4_cmd
+
+_m4_net_connect:
+            ld hl,#cmd_m4_net_connect
+            jr m4_cmd
+
+_m4_net_close:
+            ld hl,#cmd_m4_net_close
+            jr m4_cmd
+
+_m4_net_bind:
+            ld hl,#cmd_m4_net_bind
+            jr m4_cmd
+
+_m4_net_listen:
+            ld hl,#cmd_m4_net_listen
+            jr m4_cmd
+
+_m4_net_accept:
+            ld hl,#cmd_m4_net_accept
+            jr m4_cmd
+
+_m4_net_getnetwork:
+            ld      bc,#196      ;net config data struct len
+            ld      de,#_m4_network_config
+            exx
+            ld      hl,#cmd_m4_net_getnetwork
+            jp      m4_getdata
+
+_m4_net_hostip_start:
+            pop     de
+            pop     hl 
+            push    hl
+            push    de
+            ld      de,#C_NETHOSTIP
+            call    m4_send_cmd_str
+            ld      hl,#m4_retvalue
+            jp      m4rom_enable
+
+_m4_net_setnetwork:
+            pop     de
+            pop     hl
+            push    hl
+            push    de
+            ld      de,#C_SETNETWORK
+
+m4_send_cmd_str:    ;de=m4 command, hl=pointer to null terminated str
+            ld		bc,#DATAPORT
+  			ld		a,#2 ; this value is neglected by the M4Board
+			out     (c),a
+            out     (c),e
+            out     (c),d
+send_str_loop:            
+            ld      a,(hl)
+            out     (c),a
+            inc     hl
+            or      a
+            jr      nz,send_str_loop
+			ld		bc,#ACKPORT
+			out		(c),c
+            ret
+
+_m4_net_sock_info_socket:
+    .db 0
+_m4_net_sock_info:
+            pop     hl
+            pop     de
+            push    de
+            push    hl
+            ld      hl,#ret_to_net_sock_info
+            jp      m4rom_enable
+ret_to_net_sock_info: 
+            ld      hl,(sock_info_ptr)
+            ld      bc,#16
+            ld      a,(_m4_net_sock_info_socket)
+calc_socket_info_ptr:            
+            or      a
+            jr      z,net_sock_info_read
+            add     hl,bc
+            dec     a
+            jr      calc_socket_info_ptr
+net_sock_info_read:            
+            ld      bc,#10
+            ldir
+            jp      m4rom_disable            
+
+_m4_net_raw:
+    .db 0
+_m4_net_send:           ;first we send len mod 8 and then we send remaining (multiple of 8)
+            di
+            pop     hl
+            pop     iy
+            push    iy
+            push    hl
+            ld      hl,#cmd_m4_net_send
+            ld		bc,#DATAPORT
+  			ld		d,(hl)
+			inc		d
+m4_net_send_command_loop:
+            inc		b
+			outi
+			dec		d
+			jr		nz,m4_net_send_command_loop
+            inc     b
+            push    iy
+            pop     hl
+            ld      de,(_m4_net_send_len)
+            ld      a,e
+            and     #7  ;a=de mod 8
+            or      a
+            jr      z,m4_net_send_check_remaining_data
+            ex      af,af'
+            ld      a,(_m4_net_raw)
+            or      a
+            jr      z,m4_net_send_data_k
+            ex      af,af'
+m4_net_send_data_loop_u:
+            ex      af,af'
+            call    __ugetc
+            out     (c),l
+            inc     iy
+            push    iy
+            pop     hl
+            ex      af,af'
+            dec     a
+            jr      nz,m4_net_send_data_loop_u
+            jr      m4_net_send_check_remaining_data
+m4_net_send_data_k:
+            ex      af,af'
+m4_net_send_data_loop_k:
+            inc     b
+            outi
+            dec     a
+            jr      nz,m4_net_send_data_loop_k
+            inc     b
+m4_net_send_check_remaining_data:
+            srl     e
+            srl     e
+            srl     e
+            sla     d
+            sla     d
+            sla     d
+            sla     d
+            sla     d
+            jr      nc,m4_net_send_lt_2048            
+            xor     a       ;len was 2048 so call to _td_io_wblock
+                            ;with a=0 loops 256 times sending 256*8=2048 bytes
+            jr      m4_net_send_remaining_data
+m4_net_send_lt_2048:
+            xor     a            
+            or      e
+            or      d   ;now a = de/8
+            jr      z,m4_net_send_end
+m4_net_send_remaining_data:
+            ld      (_td_io_data_reg),bc
+            ld      (_td_io_data_count),a
+            ld      a,(_m4_net_raw)
+            ld      (_td_raw),a
+            ld      a,(_udata + U_DATA__U_PAGE)
+            ld      (_td_page),a
+            push    hl
+            call    _td_io_wblock
+            pop     hl
+m4_net_send_end:            
+            ld      bc,#ACKPORT
+            out     (c),c
+            ld      hl,#m4_retvalue
+            jp      m4rom_enable
+
+_m4_net_recv:
+            di
+            pop     hl
+            pop     iy
+            push    iy
+            push    hl
+            ld      hl,#cmd_m4_net_recv
+            ld		bc,#DATAPORT
+  			ld		d,(hl)
+			inc		d
+m4_net_recv_command_loop:
+            inc		b
+			outi
+			dec		d
+			jr		nz,m4_net_recv_command_loop
+            ld      bc,#ACKPORT
+            out     (c),c
+            push    iy
+            pop     de
+            ld      a,(_udata + U_DATA__U_PAGE) ;we need to read this before enabling ROM
+            ld      (patch_U_DATA__U_PAGE + 1),a
             ld		bc,#0xdf00
 			ld      a,(m4rom_number)
 			out		(c),a
@@ -394,14 +619,103 @@ m4_cmd:
             inc     hl
             inc     hl
             inc     hl
-            ld      l,(hl)
-            ld      bc, #0x7f8e             ;RMR ->UROM disable LROM disable
-            out     (c),c
-            ld      a,(_int_disabled)
+            inc     hl
+            ld      c,(hl)
+            inc     hl
+            ld      b,(hl)
+            inc     hl
+            push    bc          ;we have upper rom mapped, we can write to but not read from the stack
+            ld      a,(_m4_net_raw)
             or      a
-            ret     nz
-            ei
-            ret   
+            jr      z,m4_net_recv_data_k
+patch_U_DATA__U_PAGE:
+            ld      a,#0
+            exx
+            bit     6,a
+            jr      nz,lower_512
+            set     6,a
+            ld      b,#0x7e
+            jr      ld_ca
+lower_512:
+            ld      b,#0x7f
+ld_ca:
+            ld      c,a
+            exx
+            ld      iy,#m4rom_disable
+            jp      m4_read_transfer_stub
+m4_net_recv_data_k:
+            ldir
+            jp      m4rom_disable
+
+cmd_m4_net_socket:
+    .db 5
+    .dw C_NETSOCKET
+    .db 0       ;domain not used
+    .db 0       ;type not used
+    .db 6       ;protocol TCP only
+
+cmd_m4_net_connect:
+    .db 9
+    .dw C_NETCONNECT
+_m4_net_connect_socket:
+    .ds 1
+_m4_net_connect_ip:
+    .ds 4
+_m4_net_connect_port:
+    .ds 2
+
+cmd_m4_net_close:
+    .db 3
+    .dw C_NETCLOSE
+_m4_net_close_socket:
+    .ds 1
+
+cmd_m4_net_bind:
+    .db 9
+    .dw C_NETBIND
+_m4_net_bind_socket:
+    .ds 1
+_m4_net_bind_ip:
+    .ds 4
+_m4_net_bind_port:
+    .ds 2
+
+cmd_m4_net_listen:
+    .db 3
+    .dw C_NETLISTEN
+_m4_net_listen_socket:
+    .ds 1
+
+cmd_m4_net_accept:
+    .db 3
+    .dw C_NETACCEPT
+_m4_net_accept_socket:
+    .ds 1
+
+cmd_m4_net_send:
+    .db 5
+    .dw C_NETSEND
+_m4_net_send_socket:
+    .ds 1
+_m4_net_send_len:
+    .ds 2
+
+cmd_m4_net_recv:
+    .db 5
+    .dw C_NETRECV
+_m4_net_recv_socket:
+    .ds 1
+_m4_net_recv_len:
+    .ds 2
+
+cmd_m4_net_getnetwork:
+    .db 2
+    .dw C_GETNETWORK
+
+_m4_network_config:
+    .ds 196
+
+.endif
 
 cmd_select_hack_low_rom:
     .db 3

@@ -136,7 +136,15 @@
     #define RTC_ADDR	0xFD15	/* register address */
     #define RTC_DATA	0xFD14	/* register data */
 #endif
+
 #define CONFIG_M4BOARD
+#define CONFIG_NET_M4BOARD
+#ifndef CONFIG_M4BOARD
+    #undef CONFIG_NET_M4BOARD
+#endif
+#ifdef CONFIG_NET_M4BOARD
+    #define CONFIG_NET
+#endif
 #if ((defined CONFIG_M4BOARD) || (defined CONFIG_SYMBIFACE_RTC))
     #define CONFIG_RTC
     #define CONFIG_RTC_INTERVAL 10
