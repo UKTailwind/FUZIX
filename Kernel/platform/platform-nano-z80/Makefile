@@ -5,7 +5,7 @@ CSRCS += devices.c main.c
 
 DISCSRCS = discard.c
 
-ASRCS = nano-z80.S crt0.S
+ASRCS = nano-z80.S vt.S crt0.S
 ASRCS += tricks.S commonmem.S
 
 #DISCARD_DSRCS = ../../dev/tinydisk_discard.c ../../dev/tinyide_discard.c
@@ -57,7 +57,8 @@ clean:
 #
 image:
 	$(CROSS_LD) -b -C 0x0088 -S 0xF400 -f CLDBbXSs -o fuzix.bin \
-	crt0.o commonmem.o nano-z80.o tricks.o devtty.o devfd.o main.o discard.o \
+	crt0.o commonmem.o nano-z80.o vt.o tricks.o devtty.o devfd.o main.o \
+	discard.o \
 	../../start.o \
 	../../version.o ../../cpu-z80u/lowlevel-z80u.o ../../usermem.o \
 	../../timer.o ../../devsys.o ../../kdata.o devices.o ../../devio.o \
@@ -66,7 +67,7 @@ image:
 	../../syscall_fs.o ../../syscall_fs2.o ../../syscall_fs3.o \
 	../../syscall_proc.o ../../syscall_other.o \
 	../../tty.o ../../mm.o ../../mm/memalloc_none.o \
-	../../swap.o ../../mm/bankfixed.o \
+	../../swap.o ../../mm/bankfixed.o ../../vt.o \
 	/opt/fcc/lib/z80/libz80.a -m fuzix.tmpmap
 	perl -lpe '$$_=hex' fuzix.tmpmap | paste -d" " - fuzix.tmpmap  |  sort -n |  cut -d" " -f 2- >../../fuzix.map
 	../../tools/pack85 <../../fuzix.map fuzix.bin ../../fuzix.bin

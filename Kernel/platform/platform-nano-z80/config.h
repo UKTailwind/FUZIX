@@ -16,6 +16,13 @@
 /* How many banks do we have in our address space */
 #define CONFIG_BANKS	2	/* 4 x 16K */
 
+/* Video terminal support */
+#define CONFIG_VT
+#define VT_WIDTH    80
+#define VT_HEIGHT   30
+#define VT_RIGHT    79
+#define VT_BOTTOM   29
+
 /*
  *	Define the program loading area (needs to match kernel.def)
  */
@@ -23,6 +30,7 @@
 #define PROGLOAD    0x0100  /* Load and run here */
 #define PROGTOP     0x7E00  /* Top of program, base of U_DATA stash */
 #define PROC_SIZE   32 	    /* Memory needed per process including stash */
+
 /*
  *	Definitions for swapping.
  */

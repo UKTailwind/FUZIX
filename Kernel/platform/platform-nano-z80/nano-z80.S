@@ -111,14 +111,16 @@ init_hardware:
     ld(_procmem), hl
 
     ; Enable hardware TTY for now, until VT52 support is implemented
-    ld a, 0x04
-    out (0x7f), a
-    ld a, 0x01
-    out (0x0d), a
+    ;ld a, 0x04
+    ;out (0x7f), a
+    ;ld a, 0x01
+    ;out (0x0d), a
     ; And enable autoscroll
-    out (0x0e), a
+    ;out (0x0e), a
     ; And clear screen
-    out (0x09), a	
+    ;out (0x09), a	
+
+    call _vtinit
 
     ld hl, 0
 	push hl
@@ -409,6 +411,48 @@ sd_read_loop_inner:
 
 
 _sd_write_block:
+    push af
+    push bc
+    push de
+    push hl
+
+    ld a, (_disk_map)
+    call map_proc_a
+
+    call sd_init
+
+    ; Copy data from buffer to FPGA SD-buffer
+    ld hl, (_sd_ptr)
+    ld d, 0
+sd_write_loop:
+    ld a, d
+    out (0x07), a
+    
+    ld c, 0x80
+    ld b, 0x80
+sd_write_loop_inner:
+    ld a, (hl)
+    out (c), a
+    inc hl
+    inc c
+    djnz sd_write_loop_inner
+
+    inc d
+    ld a, 4
+    cp d
+    jr nz, sd_write_loop
+    
+    ; Perform write
+    ld a, 1
+    out (0x06), a
+
+    call sd_wait
+    
+    pop hl
+    pop de
+    pop bc
+    pop af
+ 
     ret
 
 

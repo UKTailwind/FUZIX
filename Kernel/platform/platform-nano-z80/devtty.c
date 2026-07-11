@@ -116,7 +116,7 @@ ttyready_t tty_writeready(uint_fast8_t minor)
 void tty_putc(uint_fast8_t minor ,uint_fast8_t c)
 {
 	if (ttymap[minor] == 1)
-		out(vid_tty_data, c);
+		vtoutput(&c, 1);
 	//else
 	//	prop_tty_write(c);
 }
