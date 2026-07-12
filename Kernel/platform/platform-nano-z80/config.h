@@ -14,7 +14,7 @@
 /* How big is each bank - in our case 16 K*/
 #define MAP_SIZE	0x8000
 /* How many banks do we have in our address space */
-#define CONFIG_BANKS	2	/* 4 x 16K */
+#define CONFIG_BANKS	2	/* 4 x 16K */ //1 x 48k
 
 /* Video terminal support */
 #define CONFIG_VT
@@ -37,7 +37,7 @@
  #define SWAPDEV     (swap_dev)	/* A variable for dynamic, or a device major/minor */
 extern uint16_t swap_dev;
 //#undef SWAPDEV
-#define SWAP_SIZE   0x40 	/* 32K in 512 byte blocks */
+#define SWAP_SIZE   0x60 	/* 32K in 512 byte blocks */
 #define SWAPBASE    0x0000	/* We swap the lot in one, include the */
 #define SWAPTOP	    0x8000	/* vectors so its a round number of sectors */
 
@@ -126,7 +126,7 @@ extern uint16_t swap_dev;
  *	If the configuration is fixed then this can be a string holding the
  *	configuration. NULL means 'prompt the user'.
  */
-#define CMDLINE	NULL	  /* Location of root dev name */
+#define CMDLINE	0x81	  /* CP/M commandline */
 
 /* Device parameters */
 #define NUM_DEV_TTY 1	  /* How many tty devices does the platform support */

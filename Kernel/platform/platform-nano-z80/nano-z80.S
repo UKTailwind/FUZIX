@@ -110,15 +110,16 @@ init_hardware:
     ld hl, 8128
     ld(_procmem), hl
 
-    ; Enable hardware TTY for now, until VT52 support is implemented
-    ;ld a, 0x04
-    ;out (0x7f), a
-    ;ld a, 0x01
-    ;out (0x0d), a
-    ; And enable autoscroll
-    ;out (0x0e), a
-    ; And clear screen
-    ;out (0x09), a	
+    ; Enable hardware TTY
+    ld a, 0x04
+    out (0x7f), a
+    ld a, 0x01
+    out (0x0d), a
+    ;And disable autoscroll
+    ld a, 0x00
+    out (0x0e), a
+    ;And clear screen
+    out (0x09), a	
 
     call _vtinit
 
@@ -240,7 +241,9 @@ map_kernel:
 	out (0x60), a
     inc a
     out (0x62), a
-	pop af
+	;inc a
+    ;out (0x64), a
+    pop af
 	ret
 	; map_proc is called with HL either NULL or pointing to the
 	; page mapping. Unlike the other calls it's allowed to trash AF
@@ -272,7 +275,7 @@ map_proc_a:			; used by bankfork
     or a
     jr z, map_kernel ; page 0 is kernel
     push af
- 
+    ;push bc
     ;add a,0x30
     ;call outchar
     ;pop af
@@ -280,12 +283,17 @@ map_proc_a:			; used by bankfork
    
     ld (mapreg), a	; bank
 	; Calculate physical page
+    ;ld  b,a
     add a,a
+    ;add a,b
     add a,2
     ; Set page register
     out (0x60), a
     inc a
     out (0x62), a
+    ;inc a
+    ;out (0x64), a
+    ;pop bc
 	pop af
     ret
 
