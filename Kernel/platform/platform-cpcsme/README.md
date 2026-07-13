@@ -75,10 +75,6 @@ The Symbiface RTC module is supported.
 
 An image file named `FUZIX.IMG`, placed in the root directory of the FAT filesystem on an Albireo/USIfACII/ULIfAC USB device or an M4 Board SD card, is supported as a block device.
 
-The Makefile generates a DSK image (`fuzix.dsk`) that can be loaded from BASIC with the `RUN"FUZIX"` command. A snapshot is also generated as an alternative loading method.
-
-To test it, write `disk.img` to your mass storage device. Then load and run the snapshot, or use the `fuzix.dsk` image to start it from BASIC.
-
 Support has been added for the USIFAC serial port. If `CONFIG_USIFAC_SERIAL` is defined in `config.h`, the `tty5` device is added. To use the console on this device, modify the following line in `/etc/inittab`:
 
 ```text
@@ -127,7 +123,21 @@ make TARGET=cpcsme diskimage
 
 The `.sna` snapshot, `.dsk` boot disk image, and mass storage filesystem images are generated in the `Images` folder.
 
-The mass storage filesystem image `disk.img` can be transferred to a real device using `dd` or a similar utility, or copied as `FUZIX.IMG` to the root of the FAT filesystem managed by the M4 Board or by the CH376 on Albireo/USIfAC/ULIfAC devices.
+The mass storage image `disk.img` generated in the `Images` folder can be copied as `FUZIX.IMG` to the root of the FAT filesystem on devices such as the M4 Board or Albireo/USIfAC/ULIfAC, where it is accessed as a block device through their native FAT support.
+
+Alternatively, `disk.img` can be written directly to a storage device with `dd` or a similar tool. Be aware that this will overwrite the existing contents of the target device.
+
+If you prefer not to erase the whole device, you can repartition it and use `filesys.img` (32 MiB) or `filesys8.img` (8 MiB) as the root filesystem image for a primary partition of type `7E` (hexadecimal). FUZIX only sees primary partitions.
+
+If swap is required, create a separate primary partition of type `7F` with at least 1024 KiB.
+
+If the same device should also be used by another system that understands FAT16, you can add a final primary partition of type `04` and format it with:
+
+```bash
+mkfs.fat -F 16 -r 128 -v FAT16.img
+```
+
+The contents of this partition can then be accessed from FUZIX using DOS tools such as `doswrite`, `dosread`, and related utilities.
 
 To boot from floppy, or from the DSK image on M4/Albireo/USIfACII/ULIfAC, execute `RUN"FUZIX"` at the BASIC prompt.
 
