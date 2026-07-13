@@ -139,6 +139,8 @@ mkfs.fat -F 16 -r 128 -v FAT16.img
 
 The contents of this partition can then be accessed from FUZIX using DOS tools such as `doswrite`, `dosread`, and related utilities.
 
+If you want to prepare a custom block device layout, refer to diskimage.sfdisk and the Makefile in the platform folder.
+
 To boot from floppy, or from the DSK image on M4/Albireo/USIfACII/ULIfAC, execute `RUN"FUZIX"` at the BASIC prompt.
 
 To run in an emulator, use ACE-DL or the 1984 emulator and configure `disk.img` as the emulated mass storage image.
