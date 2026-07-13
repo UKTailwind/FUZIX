@@ -32,6 +32,9 @@ Things to address
 - Don't disable all interrupts in the Fuzix paths ?
 - Add device support for some of the RCBUS external devices
 - Minimal 8073 support (can't do interrupts properly)
+- Support the other flat memory hack with 256K using the S bits and
+  switch from the 16K x 4 card to the much simpler (and better suited)
+  56K/8K card.
 
 Put the loader on sector 0
 Put the kernel on sector 1+
@@ -42,9 +45,7 @@ rc2014-8070 -b -i /tmp/emu-ide.img
 
 Things to do at this point
 - Relocatable 8070 binaries
-- Look at compiler opportunities for register variables
 - Can the compiler make sensible use of autoinc/dec at all ?
-- In general lots of terrible codegen needs cleaning up in the compiler
 - Test signals off interrupts
 - Kernel pre-emption testing (written but unlikely to work on the first attempt)
 - Proper serial driver (current 16x50 is a quick testing hack)
