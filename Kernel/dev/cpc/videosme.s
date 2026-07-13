@@ -57,6 +57,9 @@ cpc_plot_char:
 plot_char_line:
         ex af,af'
         ld a,(de)
+        jr nc,not_inverted
+        cpl
+not_inverted:          
         ld (hl),a
         ex af,af'
         add hl,bc
@@ -71,9 +74,9 @@ plot_char_line:
 	; with the font we have.
 	jr nz, last_ul
 plot_ll:
-        jr nc,not_inverted
+        jr nc,not_inverted_ll
         cpl
-not_inverted:    
+not_inverted_ll:    
         ld (hl),a
         ex af,af'
 	pop de
