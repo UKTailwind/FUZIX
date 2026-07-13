@@ -7,8 +7,6 @@
 extern unsigned char irqvector;
 uint16_t swap_dev = 0xFFFF;
 
-uint16_t ramtop = PROGTOP;   
-
 uint8_t plt_tick_present;
 
 uint_fast8_t plt_rtc_secs(void) {
@@ -27,7 +25,7 @@ struct blkbuf *bufpool_end = bufpool + NBUFS;
 */                                                                           
 void plt_discard(void)                                                        
 {                                                                             
-    uint16_t discard_size = (uint16_t)&udata - (uint16_t)bufpool_end;         
+    uint16_t discard_size = 0xC000 - (uint16_t)bufpool_end;         
     bufptr bp = bufpool_end;                                                  
                                                                                 
     discard_size /= sizeof(struct blkbuf);                                    

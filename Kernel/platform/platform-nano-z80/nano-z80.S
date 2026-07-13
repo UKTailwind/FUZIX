@@ -10,13 +10,18 @@
 	.export map_kernel
 	.export map_kernel_di
 	.export map_proc
-	.export map_proc_a
+	.export map_proc_di
+    ;.export map_proc_a
 	.export map_proc_always
 	.export map_proc_always_di
 	.export map_save_kernel
 	.export map_restore
-	.export map_for_swap
-	.export plt_interrupt_all
+	.export map_kernel_restore
+    .export map_for_swap
+	.export mpgsel_cache
+    .export top_bank
+    .export _copy_common 
+    .export plt_interrupt_all
 	.export _kernel_flag
 	.export _int_disabled
     .export _disk_map
@@ -35,7 +40,7 @@
 
 
 
-#include "kernel.def"
+#include "kernelu.def"
 #include "../../cpu-z80u/kernel-z80.def"
 
 ;
@@ -67,6 +72,11 @@ _int_disabled:
 plt_interrupt_all:
 	ret
 
+; -----------------------------------------------------------------------------
+; KERNEL MEMORY BANK (may be below 0x8000, only accessible when the kernel is
+; mapped)
+; -----------------------------------------------------------------------------
+	.code
 ;
 ;	If you have a ROM monitor you can get back to then do so, if not
 ;	fall into reboot.
@@ -80,14 +90,11 @@ _plt_monitor:
 ;
 _plt_reboot:
 	di
-	; Map ROM back into lower part of memory?
+	; Map ROM back into lower part of memory
+    ld a,0
+    out (0x7e),a
     rst 0
 
-; -----------------------------------------------------------------------------
-; KERNEL MEMORY BANK (may be below 0x8000, only accessible when the kernel is
-; mapped)
-; -----------------------------------------------------------------------------
-	.code
 
 ; -----------------------------------------------------------------------------
 ; DISCARD is memory that will be recycled when we exec init
@@ -107,7 +114,7 @@ init_hardware:
     ; set system RAM size
     ld hl, 8192
     ld(_ramsize), hl
-    ld hl, 8128
+    ld hl, 4032
     ld(_procmem), hl
 
     ; Enable hardware TTY
@@ -160,11 +167,6 @@ init_hardware:
 ;spurious:
 ;        reti
 
-mapreg:
-	.byte 0	; Our map register is write only so keep a copy
-mapsave:
-	.byte 0	; Saved copy of the previous map (see map_save)
-
 _kernel_flag:
 	.byte 1	; We start in kernel mode
 
@@ -199,144 +201,149 @@ _program_vectors:
     ld hl, null_handler   ;   to Our Trap Handler
     ld (0x0001), hl
 
+    jr map_kernel
 
 
+;=========================================================================      
+; Memory management                                                             
+; - kernel pages:     32 - 34                                                   
+; - common page:      35 (also init top page)                                   
+; - user space pages: 36 - 63                                                   
+;=========================================================================      
+                                                                                
+;=========================================================================      
+; map_proc_always - map process pages                                           
+; Inputs: page table address in U_DATA__U_PAGE                                  
+; Outputs: none; all registers preserved                                        
+;=========================================================================      
+map_proc_always:                                                                
+map_proc_always_di:                                                             
+    push hl                                                                     
+    ld hl,_udata + U_DATA__U_PAGE                                               
+    jr map_proc_2_pophl_ret   
 
-    ;ld (0x0067),hl
+;=========================================================================      
+; map_proc - map process or kernel pages                                        
+; Inputs: page table address in HL, map kernel if HL == 0                       
+; Outputs: none; A and HL destroyed                                             
+;=========================================================================      
+map_proc:                                                                       
+map_proc_di:                                                                    
+    ld a,h                                                                      
+    or l                ; HL == 0?                                              
+    jr nz,map_proc_2        ; HL == 0 - map the kernel                          
+                                                                                
+;=========================================================================      
+; map_kernel - map kernel pages                                                 
+; Inputs: none                                                                  
+; Outputs: none; all registers preserved                                        
+;=========================================================================      
+map_kernel:                                                                     
+map_kernel_di:                                                                  
+map_kernel_restore:                                                             
+map_buffers:                                                                    
+    push hl                                                                     
+    ld hl,_kernel_pages                                                         
+    jr map_proc_2_pophl_ret     
 
-    ; IM2 vector for the CTC
-    ;ld hl, #spurious
-    ;ld (0x80),hl                    ; CTC vectors
-    ;ld (0x82),hl
-    ;ld (0x84),hl
-    ;ld hl, #interrupt_handler       ; Standard tick handler
-    ;ld (0x86),hl
+;=========================================================================      
+; map_proc_2 - map process or kernel pages                                      
+; Inputs: page table address in HL                                              
+; Outputs: none, HL destroyed                                                   
+;=========================================================================      
+map_proc_2:                                                                     
+    push de                                                                     
+    push af                                                                     
+                                                                                
+    ld de,mpgsel_cache      ; paging registers are write only                   
+                    ; so cache their content in RAM                             
+    ld a,(hl)           ; memory page number for bank 0                         
+    ld (de),a                                                                   
+    out (MPGSEL_0),a        ; set bank 0                                        
+    inc hl                                                                      
+    inc de                                                                      
+    ld a,(hl)           ; memory page number for bank 1                         
+    ld (de),a                                                                   
+    out (MPGSEL_1),a        ; set bank 1                                        
+    inc hl                                                                      
+    inc de                                                                      
+    ld a,(hl)           ; memory page number for bank 2                         
+    ld (de),a                                                                   
+    out (MPGSEL_2),a        ; set bank 2                                        
+                                                                                
+    pop af                                                                      
+    pop de                                                                      
+    ret                
 
-	; and fall into map_kernel
+;=========================================================================      
+; map_restore - restore a saved page mapping                                    
+; Inputs: none                                                                  
+; Outputs: none, all registers preserved                                        
+;=========================================================================      
+map_restore:                                                                    
+    push hl                                                                     
+    ld hl,map_savearea                                                          
+map_proc_2_pophl_ret:                                                           
+    call map_proc_2                                                             
+    pop hl                                                                      
+    ret                                                                         
+                                                                                
+;=========================================================================      
+; map_save_kernel - save the current page mapping to map_savearea and           
+; switch to kernel maps                                                         
+; Inputs: none                                                                  
+; Outputs: none                                                                 
+;=========================================================================      
+map_save_kernel:                                                                
+    push hl                                                                     
+    ld hl,(mpgsel_cache)                                                        
+    ld (map_savearea),hl                                                        
+    ld hl,(mpgsel_cache+2)                                                      
+    ld (map_savearea+2),hl                                                      
+    ld hl,_kernel_pages                                                         
+    jr map_proc_2_pophl_ret    
 
-;
-;	Mapping set up for the SBCv2
-;
-;	The top 32K bank holds kernel code and pieces of common memory
-;	The lower 32K is switched between the various user banks.
-;
-;	We know the ROM mapping is already off
-;
-;	The _di versions of the functions are called when we know interrupts
-;	are definitely off. In our case it's not useful information so both
-;	symbols end up at the same code.
-;
-map_buffers:
-	; for us no difference. We could potentially use a low 32K bank
-	; for buffers but it's not clear it would gain us much value
-map_kernel_di:
-map_kernel:
-	push af
-    ;ld a, 'k'
-    ;call outchar
-	; ROMWBW TPA is last but one bank (last bank is high space)
-	; so for now we hardcode this. We should ask ROMWBW at boot
-	ld a,0x00
-	ld (mapreg),a
-	out (0x60), a
-    inc a
-    out (0x62), a
-	;inc a
-    ;out (0x64), a
-    pop af
-	ret
-	; map_proc is called with HL either NULL or pointing to the
-	; page mapping. Unlike the other calls it's allowed to trash AF
-map_proc:
-	ld a, h
-	or l
-	jr z, map_kernel
-map_proc_hl:
-	ld a, (hl)			; and fall through
-	;
-	; With a simple bank switching system you need to provide a
-	; method to switch to the bank in A without corrupting any
-	; other registers. The stack is safe in common memory.
-	; For swap you need to provide what for simple banking is an
-	; identical routine.
-map_for_swap:
-map_proc_a:			; used by bankfork
-	;dec a		; We bias by 1 because 0 is a valid user
+;=========================================================================      
+; map_for_swap - map a page into a bank for swap I/O                            
+; Inputs: none                                                                  
+; Outputs: none                                                                 
+;                                                                               
+; The caller will later map_kernel to restore normality                         
+;                                                                               
+; We use 0x4000-0x7FFF so that all the interrupt stuff is mapped.               
+;                                                                               
+;=========================================================================      
+map_for_swap:                                                                   
+    ld (mpgsel_cache + 1),a                                                     
+    out (MPGSEL_1),a                                                            
+    ret                                                                         
+                                                                                
+_copy_common:                                                                   
+    pop hl                                                                      
+    pop de                                                                      
+    push de                                                                     
+    push hl                                                                     
+    ld a,e                                                                      
+    call map_for_swap                                                           
+    ld hl,0xEA00                                                                
+    ld de,0x2A00                                                                
+    ld bc,0x1600                                                                
+    ldir                                                                        
+    jr map_kernel  
 
-	;push af
-    ;ld a, 'm'
-    ;call outchar
-    ;pop af
-;    push af
-;    add a,0x30
-;    call outchar
-;    pop af
-
-    or a
-    jr z, map_kernel ; page 0 is kernel
-    push af
-    ;push bc
-    ;add a,0x30
-    ;call outchar
-    ;pop af
-    ;push af
-   
-    ld (mapreg), a	; bank
-	; Calculate physical page
-    ;ld  b,a
-    add a,a
-    ;add a,b
-    add a,2
-    ; Set page register
-    out (0x60), a
-    inc a
-    out (0x62), a
-    ;inc a
-    ;out (0x64), a
-    ;pop bc
-	pop af
-    ret
-
-	;
-	; Map the current process into memory. We do this by extracting
-	; the bank value from u_page.
-	;
-map_proc_always_di:
-map_proc_always:
-	push af
-	push hl
-	ld hl, _udata + U_DATA__U_PAGE
-	call map_proc_hl
-	pop hl
-	pop af
-	ret
-
-	;
-	; Save the existing mapping and switch to the kernel.
-	; The place you save it to needs to be in common memory as you
-	; have no idea what bank is live. Alternatively defer the save
-	; until you switch to the kernel mapping
-	;
-map_save_kernel:
-	push af
-    ld a, (mapreg)
-	ld (mapsave), a
-    call map_kernel
-	pop af
-	ret
-	;
-	; Restore the saved bank. Note that you don't need to deal with
-	; stacking of banks (we never recursively use save/restore), and
-	; that we may well call save and decide not to call restore.
-	;
-map_restore:
-	push af
-	ld a, (mapsave)
-	ld (mapreg), a
-    call map_proc_a
-	pop af
-	ret
-
+; MPGSEL registers are write only, so their content is cached here              
+mpgsel_cache:                                                                   
+    .byte   0x00, 0x01, 0x02                                                  
+top_bank:   ; the shared tricks code needs this name for cache+3                
+    .byte   0x03                                                                
+                                                                                
+; kernel page mapping                                                           
+_kernel_pages:                                                                  
+    .byte   0x00,0x01,0x02,0x03                                                 
+                                                                                
+; memory page mapping save area for map_save/map_restore                        
+map_savearea:                                                                   
+    .byte   0,0,0,0      
 
     ; SD-card low level code
 
@@ -362,8 +369,10 @@ _sd_read_block:
     push de
     push hl
 
-    ld a, (_disk_map)
-    call map_proc_a
+    ;ld a, (_disk_map)
+    ;call map_proc_a
+    ; Fix later for mapping user pages
+    call map_kernel
 
     ;ld a, 'a'
     ;call outchar
@@ -424,8 +433,10 @@ _sd_write_block:
     push de
     push hl
 
-    ld a, (_disk_map)
-    call map_proc_a
+    ;ld a, (_disk_map)
+    ;call map_proc_a
+    ; Fix later for user map
+    call map_kernel
 
     call sd_init
 

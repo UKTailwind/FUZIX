@@ -18,7 +18,7 @@
 #include <printf.h>
 #include <tty.h>
 #include <devtty.h>
-#include <propio2.h>
+#include <vt.h>
 
 /* Video TTY ports */
 #define vid_tty_data    0x76
@@ -27,11 +27,19 @@
 #define keyb_data_avail 0x74
 #define keyb_data       0x75
 
+/* 3V3 UART header ports */
+#define io_page_reg     0x7f
+#define io_page_uart    0x05
+#define uart_b_tx_data  0x04
+#define uart_b_tx_ready 0x05
+#define uart_b_rx_data  0x06
+#define uart_b_rx_avail 0x07
+
 /*
  *	One buffer for each tty
  */
 static uint8_t tbuf1[TTYSIZ];
-//static uint8_t tbuf2[TTYSIZ];
+static uint8_t tbuf2[TTYSIZ];
 
 static uint8_t sleeping;
 
@@ -39,7 +47,11 @@ static uint8_t sleeping;
  *	TTY masks - define which bits can be changed for each port
  */
 
-tcflag_t termios_mask[NUM_DEV_TTY + 1] = {0};
+tcflag_t termios_mask[NUM_DEV_TTY + 1] = {
+    0,
+    _CSYS,
+    _CSYS,
+};
 
 
 /*
@@ -50,7 +62,7 @@ tcflag_t termios_mask[NUM_DEV_TTY + 1] = {0};
 struct s_queue ttyinq[NUM_DEV_TTY + 1] = {	/* ttyinq[0] is never used */
 	{NULL, NULL, NULL, 0, 0, 0},
 	{tbuf1, tbuf1, tbuf1, TTYSIZ, 0, TTYSIZ / 2},
-//	{tbuf2, tbuf2, tbuf2, TTYSIZ, 0, TTYSIZ / 2},
+	{tbuf2, tbuf2, tbuf2, TTYSIZ, 0, TTYSIZ / 2},
 };
 
 
@@ -59,7 +71,7 @@ struct s_queue ttyinq[NUM_DEV_TTY + 1] = {	/* ttyinq[0] is never used */
    a forward and backward table. Most platforms have a fixed idea of the console
    so don't need this remapping layer */
 uint8_t ttymap[NUM_DEV_TTY + 1] = {
-	0, 1
+	0, 1, 2
 };
 
 /* Write to system console. This is the backend to all the kernel messages,
@@ -96,10 +108,13 @@ void kputchar(uint_fast8_t c)
  */
 ttyready_t tty_writeready(uint_fast8_t minor)
 {
-	/* FIXME: add UARTs */
 	if (ttymap[minor] == 1)
 		return (in(vid_tty_busy) & 0x01) ? TTY_READY_SOON : TTY_READY_NOW;
-	    //return TTY_READY_NOW;
+    else if(ttymap[minor] == 2) {
+        out(io_page_reg, io_page_uart);
+        return (in(uart_b_tx_ready) & 0x01) ? TTY_READY_NOW : TTY_READY_SOON;  
+    }    
+    //return TTY_READY_NOW;
     //return prop_tty_writeready();
     return TTY_READY_NOW;
 }
@@ -113,10 +128,16 @@ ttyready_t tty_writeready(uint_fast8_t minor)
  *	If the character echo doesn't fit just drop it. It should pretty much
  *	never occur and there is nothing else to do.
  */
-void tty_putc(uint_fast8_t minor ,uint_fast8_t c)
+void tty_putc(uint_fast8_t minor, uint_fast8_t c)
 {
-	if (ttymap[minor] == 1)
-		vtoutput(&c, 1);
+	uint8_t ch = c;
+    if (ttymap[minor] == 1)
+		vtoutput(&ch, 1);
+    else if(ttymap[minor] == 2) {
+        //kprintf("\nSending %c on TTY2\n",c);
+        out(io_page_reg, io_page_uart);
+        out(uart_b_tx_data, c);
+    }
 	//else
 	//	prop_tty_write(c);
 }
@@ -223,9 +244,19 @@ void tty_poll(void)
 	/* Should be IRQ driven but we might not be so poll anyway if
 	   pending. IRQs are off here so this is safe */
 	if (in(keyb_data_avail) & 0x01) {
-	    uint8_t key = in(keyb_data);
+	    //uint8_t key = in(keyb_data);
         // DEBUG - put key on LEDs
-        tty_inproc(minor, key);
+        tty_inproc(minor, in(keyb_data));
+    }
+    
+    
+	minor = ttymap[2];	/* UART minor number */
+
+    out(io_page_reg, io_page_uart);
+    if (in(uart_b_rx_avail) & 0x01) {
+        uint8_t data = in(uart_b_rx_data);
+        tty_inproc(minor, data);
+        //kprintf("Got data from TTY2\n");
     }
 	//msr = in(uart_msr);
 	/* If we have a 10Hz clock wired to DSR then do timer interrupts */

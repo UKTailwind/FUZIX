@@ -65,8 +65,10 @@ void pagemap_init(void)
 	//	imax = 3;
 	//for (i = 1; i < imax; i++)
 	//	pagemap_add(i | 0x80);
-    for(i = 1; i<MAX_MAPS; i++)
+    for(i = 4; i<255; i++)
         pagemap_add(i);
+    // Add common area
+    pagemap_add(3);
 }
 
 /*

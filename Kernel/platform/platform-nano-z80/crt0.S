@@ -1,6 +1,7 @@
 	.code
-
-	; Load at 0x0100
+    ;.abs
+    ;.org 0x0088
+	; Load at 0x0088
 	; Assume execution from CP/M for now
 	; Banks 0x000, 0x001, 0x002 and 0x003 active and in order
 start:
@@ -13,22 +14,14 @@ start:
 	ld de, __common
 	ld bc, __common_size
 	ldir
-	ld de, __commondata
-	ld bc, __commondata_size
-	ldir
 
 	; then the discard
 	; Discard can just be linked in but is next to the buffers
 	ld de, __discard
-	ld bc, __discard_size-1
-	add hl,bc
-	ex de,hl
-	add hl,bc
-	ex de,hl
-	lddr
-	ldd
-
-	; then zero the data area
+	ld bc, __discard_size;-1
+	ldir
+    
+    ; then zero the data area
 	ld hl, __bss
 	ld de, __bss + 1
 	ld bc, __bss_size - 1
@@ -42,7 +35,7 @@ start:
 	ld (hl), 0
 	ldir
 
-	call init_hardware
+   	call init_hardware
     call _fuzix_main
 	
     di
