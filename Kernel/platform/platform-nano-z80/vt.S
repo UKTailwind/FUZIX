@@ -91,21 +91,17 @@ _clear_across:
 
     or a
     ret z
-
+    ld b, a ;
     ; Y in E, X in D, count in B 
     call vt_set_pos
- 
-    
-    ld hl, #6
-    add hl, sp
-    ld b,(hl)
 
 clear_across_loop:
     call vt_wait
     ld a, #' '
-    call vt_charout
+    out (0x76), a ; output space
     inc d
-    call vt_set_pos
+    ld a, d
+    out (0x01), a ; increase X
     djnz clear_across_loop
 clear_across_done:
     ret

@@ -11,8 +11,8 @@ uint16_t ramtop = PROGTOP;
 
 uint8_t plt_tick_present;
 
-uint16_t plt_rtc_secs(void) {
-    return 0;
+uint_fast8_t plt_rtc_secs(void) {
+    return in(0x78);
 }
 
 /* This points to the last buffer in the disk buffers. There must be at least four 
@@ -46,7 +46,7 @@ void plt_discard(void)
 
 void plt_idle(void)
 {
-    timer_interrupt();
+    sync_clock();
 }
 
 void plt_interrupt(void)
