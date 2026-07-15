@@ -16,6 +16,7 @@
 
 /* Video terminal support */
 #define CONFIG_VT
+#define CONFIG_VT_MULTI
 #define VT_WIDTH    80
 #define VT_HEIGHT   30
 #define VT_RIGHT    79
@@ -28,19 +29,21 @@
 #define PROGLOAD    0x0100  /* Load and run here */
 #define PROGTOP     0xF000  /* Top of program, base of U_DATA stash */
 #define KERNTOP     0xC000  /* Top of kernel, first 3 banks */
-#define PROC_SIZE   32 	    /* Memory needed per process including stash */
+#define PROC_SIZE   64 	    /* Memory needed per process including stash */
+
+#define PTABSIZE    48
 
 /*
  *	Definitions for swapping.
  */
- #define SWAPDEV     (swap_dev)	/* A variable for dynamic, or a device major/minor */
-extern uint16_t swap_dev;
-//#undef SWAPDEV
-#define SWAP_SIZE   0x78 	/* Program +udata in blocks */
-#define SWAPBASE    0x0000	/* We swap the lot in one, include the */
-#define SWAPTOP	    0xF000	/* vectors so its a round number of sectors */
+/* #define SWAPDEV     (swap_dev)*/	/* A variable for dynamic, or a device major/minor */
+//extern uint16_t swap_dev;
+#undef SWAPDEV
+//#define SWAP_SIZE   0x78 	/* Program +udata in blocks */
+//#define SWAPBASE    0x0000	/* We swap the lot in one, include the */
+//#define SWAPTOP	    0xF000	/* vectors so its a round number of sectors */
 
-#define MAX_SWAPS	16	/* Maximum number of swapped out processes.
+//#define MAX_SWAPS	16	/* Maximum number of swapped out processes.
  //                                  As we use the default 15 process max this
   //                                 is definitely sufficient (14 would do) */
 /*
@@ -67,7 +70,7 @@ extern uint16_t swap_dev;
 /* We will resize the buffers available after boot. This is the normal setting */
 #define CONFIG_DYNAMIC_BUFPOOL
 /* Swap will be set up when a suitably labelled partition is seen */
-#define CONFIG_DYNAMIC_SWAP
+//#define CONFIG_DYNAMIC_SWAP
 /* Larger transfers (including process execution) should go directly not via
    the buffer cache. For all small (eg bit) systems this is the right setting
    as it avoids polluting the small cache with data when it needs to be full
@@ -128,7 +131,7 @@ extern uint16_t swap_dev;
 #define CMDLINE	0x81	  /* CP/M commandline */
 
 /* Device parameters */
-#define NUM_DEV_TTY 2	  /* How many tty devices does the platform support */
+#define NUM_DEV_TTY 6	  /* How many tty devices does the platform support */
 #define TTYDEV   BOOT_TTY /* Device used by kernel for messages, panics */
 #define NBUFS    5        /* Number of block buffers. Must be 4+ and must match
                              kernel.def */

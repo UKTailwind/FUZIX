@@ -90,10 +90,15 @@ _plt_monitor:
 ;
 _plt_reboot:
 	di
+    ; Restore memory map
+    call map_kernel
+
 	; Map ROM back into lower part of memory
     ld a,0
     out (0x7e),a
-    rst 0
+    
+    ; Reboot form ROM
+    jp 0
 
 
 ; -----------------------------------------------------------------------------
@@ -125,8 +130,12 @@ init_hardware:
     ;And disable autoscroll
     ld a, 0x00
     out (0x0e), a
-    ;And clear screen
-    out (0x09), a	
+
+    ; Configure keyboard arrow keys for VT52
+    ld a,0x02
+    out (0x7f), a
+    ld a,0x03
+    out (0x0b), a
 
     call _vtinit
 

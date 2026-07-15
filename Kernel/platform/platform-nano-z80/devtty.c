@@ -1,15 +1,5 @@
 /*
- *	We have a 16x50 UART at 0x68 and maybe a PropIO2 at A8
- *
- *	TODO:
- *	- Hardware flow control
- *	- Support for abuse of 16x50 as interrupt controller
- *	- Support for timer hack
- *
- *	This file implements the serial ports for the platform. Fuzix implements
- *	a reasonable subset of the System 5 termios. Certain things that are
- *	rarely relevant like XCASE, delay fills and parity are left to the
- *	driver if desired.
+ *	TTY driver for nano-z80
  *
  */
 
@@ -20,12 +10,26 @@
 #include <devtty.h>
 #include <vt.h>
 
+
+#define TTY_SERA    5
+
 /* Video TTY ports */
 #define vid_tty_data    0x76
 #define vid_tty_busy    0x77
+#define vid_tty_act_buf 0x30
+#define vid_tty_vis_buf 0x31
+#define vid_tty_cls     0x09
+#define io_page_vid     0x04
+
 /* USB keyboard ports */
 #define keyb_data_avail 0x74
 #define keyb_data       0x75
+
+/* USB-C port UART ports */
+#define uart_a_tx_data  0x70
+#define uart_a_tx_ready 0x71
+#define uart_a_rx_data  0x72
+#define uart_a_rx_avail 0x72
 
 /* 3V3 UART header ports */
 #define io_page_reg     0x7f
@@ -40,15 +44,27 @@
  */
 static uint8_t tbuf1[TTYSIZ];
 static uint8_t tbuf2[TTYSIZ];
+static uint8_t tbuf3[TTYSIZ];
+static uint8_t tbuf4[TTYSIZ];
+static uint8_t tbuf5[TTYSIZ];
+static uint8_t tbuf6[TTYSIZ];
 
 static uint8_t sleeping;
 
+static uint8_t active_vt=0;
+static uint8_t visible_vt=0;
+
+static struct vt_switch ttysave[4];
 /*
  *	TTY masks - define which bits can be changed for each port
  */
 
 tcflag_t termios_mask[NUM_DEV_TTY + 1] = {
     0,
+    _CSYS,
+    _CSYS,
+    _CSYS,
+    _CSYS,
     _CSYS,
     _CSYS,
 };
@@ -63,6 +79,10 @@ struct s_queue ttyinq[NUM_DEV_TTY + 1] = {	/* ttyinq[0] is never used */
 	{NULL, NULL, NULL, 0, 0, 0},
 	{tbuf1, tbuf1, tbuf1, TTYSIZ, 0, TTYSIZ / 2},
 	{tbuf2, tbuf2, tbuf2, TTYSIZ, 0, TTYSIZ / 2},
+	{tbuf3, tbuf3, tbuf3, TTYSIZ, 0, TTYSIZ / 2},
+	{tbuf4, tbuf4, tbuf4, TTYSIZ, 0, TTYSIZ / 2},
+	{tbuf5, tbuf5, tbuf5, TTYSIZ, 0, TTYSIZ / 2},
+	{tbuf6, tbuf6, tbuf6, TTYSIZ, 0, TTYSIZ / 2},
 };
 
 
@@ -70,9 +90,9 @@ struct s_queue ttyinq[NUM_DEV_TTY + 1] = {	/* ttyinq[0] is never used */
    ways purely because of the possible mappings. If that changes we'll need
    a forward and backward table. Most platforms have a fixed idea of the console
    so don't need this remapping layer */
-uint8_t ttymap[NUM_DEV_TTY + 1] = {
-	0, 1, 2
-};
+//uint8_t ttymap[NUM_DEV_TTY + 1] = {
+//	0, 1, 2, 3, 4, 5, 6
+//};
 
 /* Write to system console. This is the backend to all the kernel messages,
    kprintf(), panic() etc. */
@@ -108,12 +128,17 @@ void kputchar(uint_fast8_t c)
  */
 ttyready_t tty_writeready(uint_fast8_t minor)
 {
-	if (ttymap[minor] == 1)
+	if (minor < TTY_SERA)
 		return (in(vid_tty_busy) & 0x01) ? TTY_READY_SOON : TTY_READY_NOW;
-    else if(ttymap[minor] == 2) {
+    else if(minor == TTY_SERA) {
         out(io_page_reg, io_page_uart);
-        return (in(uart_b_tx_ready) & 0x01) ? TTY_READY_NOW : TTY_READY_SOON;  
-    }    
+        return (in(uart_b_tx_ready) & 0x01) ? TTY_READY_NOW : 
+                                              TTY_READY_SOON;  
+    }
+    else if(minor == TTY_SERA + 1) {
+        return (in(uart_a_tx_ready) & 0x01) ? TTY_READY_NOW : 
+                                              TTY_READY_SOON; 
+    }
     //return TTY_READY_NOW;
     //return prop_tty_writeready();
     return TTY_READY_NOW;
@@ -128,42 +153,41 @@ ttyready_t tty_writeready(uint_fast8_t minor)
  *	If the character echo doesn't fit just drop it. It should pretty much
  *	never occur and there is nothing else to do.
  */
+
+void change_vt(uint8_t new_vt) {
+    //kprintf("change_vt - new_vt: %d, active_vt: %d\n", new_vt, active_vt);
+    if(new_vt != active_vt && new_vt < (TTY_SERA - 1)) {
+        vt_save(&ttysave[active_vt]);
+        //out(io_page_reg, io_page_vid);
+        //out(vid_tty_vis_buf, new_vt);
+        vt_load(&ttysave[new_vt]);
+        active_vt = new_vt;
+    }
+}
+
+
+
 void tty_putc(uint_fast8_t minor, uint_fast8_t c)
 {
 	uint8_t ch = c;
-    if (ttymap[minor] == 1)
-		vtoutput(&ch, 1);
-    else if(ttymap[minor] == 2) {
+    if (minor < TTY_SERA) {
+	    out(io_page_reg, io_page_vid);
+        out(vid_tty_act_buf, minor-1);
+        change_vt(minor - 1);
+        vtoutput(&ch, 1);
+    }
+    else if(minor == TTY_SERA) {
         //kprintf("\nSending %c on TTY2\n",c);
         out(io_page_reg, io_page_uart);
         out(uart_b_tx_data, c);
+    }
+    else if(minor == TTY_SERA + 1) {
+        out(uart_a_tx_data, c);
     }
 	//else
 	//	prop_tty_write(c);
 }
 
-/*
- *	16x50 conversion betwen a Bxxxx speed rate (see tty.h) and the values
- *	to stuff into the chip.
- */
-/*static uint16_t clocks[] = {
-	12,
-	2304,
-	1536,
-	1047,
-	857,
-	768,
-	384,
-	192,
-	96,
-	48,
-	24,
-	12,
-	6,
-	3,
-	2,
-	1
-};*/
 
 /*
  *	This function is called whenever the terminal interface is opened
@@ -176,29 +200,13 @@ void tty_putc(uint_fast8_t minor, uint_fast8_t c)
  */
 void tty_setup(uint_fast8_t minor, uint_fast8_t flags)
 {
-	//uint8_t d;
-	//uint16_t w;
-	//struct termios *t = &ttydata[minor].termios;
-	//if (ttymap[minor] == 1) {
-		/* 16x50. Can actually be configured */
-	//	d = 0x80;	/* DLAB (so we can write the speed) */
-	//	d |= (t->c_cflag & CSIZE) >> 4;
-	//	if(t->c_cflag & CSTOPB)
-	//		d |= 0x04;
-	//	if (t->c_cflag & PARENB)
-	//		d |= 0x08;
-	//	if (!(t->c_cflag & PARODD))
-	//		d |= 0x10;
-	//	out(uart_lcr, d);
-	//	w = clocks[t->c_cflag & CBAUD];
-	//	out(uart_ls, w);
-	//	out(uart_ms, w >> 8);
-	//	out(uart_lcr, d & 0x7F);
-		/* FIXME: CTS/RTS support */
-	//	d = 0x03;	/* DTR RTS */
-	//	out(uart_mcr, d);
-	//	out(uart_ier, 0x0D);	/* We don't use tx ints */
-	//}
+    // Clear screen on video terminals, except for boot TTY
+    if((minor > 1) && (minor < TTY_SERA)) {
+        out(io_page_reg, io_page_vid);
+        out(vid_tty_act_buf, minor - 1); // Select active buffer
+        while(in(vid_tty_busy));         // Wait for tty to be free
+        out(vid_tty_cls, 1);                 // Hardware clear screen
+    }
     return;
 }
 
@@ -232,45 +240,59 @@ void tty_data_consumed(uint_fast8_t minor)
 	used(minor);
 }
 
+
 /*
  *	Our platform specific code so we have a function to call to poll the
  *	serial ports for activity.
  */
 void tty_poll(void)
 {	
-	//uint8_t msr;
-	uint8_t minor = ttymap[1];	/* UART minor number */
+	uint8_t minor = visible_vt+1;	/* VT minor number */
 
-	/* Should be IRQ driven but we might not be so poll anyway if
-	   pending. IRQs are off here so this is safe */
 	if (in(keyb_data_avail) & 0x01) {
-	    //uint8_t key = in(keyb_data);
-        // DEBUG - put key on LEDs
-        tty_inproc(minor, in(keyb_data));
+        // Check for F-keys to change visible vt
+        uint8_t data = in(keyb_data);
+        //kprintf("Keyboard input data: 0x%x", data);
+        if (data >= 0xf0) {
+            visible_vt = data - 0xf0;
+            out(io_page_reg, io_page_vid);
+            out(vid_tty_vis_buf, visible_vt);
+            change_vt(visible_vt);
+        }
+        else
+            vt_inproc(minor, data);
     }
-    
-    
-	minor = ttymap[2];	/* UART minor number */
+
+	minor = TTY_SERA;	/* UART minor number */
 
     out(io_page_reg, io_page_uart);
     if (in(uart_b_rx_avail) & 0x01) {
         uint8_t data = in(uart_b_rx_data);
         tty_inproc(minor, data);
-        //kprintf("Got data from TTY2\n");
     }
-	//msr = in(uart_msr);
-	/* If we have a 10Hz clock wired to DSR then do timer interrupts */
-	//if (timermsr && (msr & 0x02))
-	//	timer_interrupt();
-	/* DCD changed - tell the kernel so it can hangup or open ports */
-	//if (msr & 0x08) {
-	//	if (msr & 0x80)
-	//		tty_carrier_raise(minor);
-	//	else
-	//		tty_carrier_drop(minor);
-	//}
-	/* TODO: CTS/RTS */
 
-	/* Now as the PropIO driver to poll its input */
-	//prop_tty_poll(ttymap[2]);
+    minor = TTY_SERA + 1;
+    if (in(uart_a_rx_avail) & 0x01) {
+        uint8_t data = in(uart_a_rx_data);
+        tty_inproc(minor, data);
+    }
+
+
 }
+
+int nz80_tty_ioctl(uint_fast8_t minor, uarg_t request, char *data)
+{
+    uint8_t dev = minor;
+
+    // Use standard ioctl for serial ports
+    if(minor >= TTY_SERA)
+        return tty_ioctl(minor, request, data);
+
+    // Otherwise VT - only support reporting size for now
+    if(request == VTSIZE)
+        return (30 << 8) | 80;
+
+    // Use built in for other requests for now 
+    return vt_ioctl(minor, request, data);
+}
+
