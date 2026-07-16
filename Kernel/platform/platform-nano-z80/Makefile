@@ -53,7 +53,7 @@ $(DAOBJS): %.o: ../../dev/%.S
 	$(CROSS_AS) $(ASOPTS) $<
 
 clean:
-	rm -f $(OBJS) $(JUNK)  core *~ fuzix.romwbw fuzix.bin fusix.tmpmap
+	rm -f $(OBJS) $(JUNK)  core *~ fuzix.com fuzix.bin fusix.tmpmap
 
 #
 #	Attach the kernel to the boot block
@@ -75,7 +75,7 @@ image:
 	/opt/fcc/lib/z80/libz80.a -m fuzix.tmpmap
 	perl -lpe '$$_=hex' fuzix.tmpmap | paste -d" " - fuzix.tmpmap  |  sort -n |  cut -d" " -f 2- >../../fuzix.map
 	../../tools/pack85 <../../fuzix.map fuzix.bin ../../fuzix.bin
-	dd if=../../fuzix.bin of=../../fuzix.strip bs=1 skip=136
+	../../cpm-loader-fcc/makecpmloader ../../cpm-loader-fcc/cpmload.bin ../../fuzix.bin 0x88 fuzix.com
 
 #
 #	Compile up the boot block
