@@ -147,10 +147,10 @@ init_hardware:
     ; Start timer and enable interrupt output
     ld a, 0x06      ; Select interrupt controler
     out (0x7f), a
-    ld a, 0x01      ; Enable channel 1
+    ld a, 0x0F      ; Enable channels 1,2,3,4 (timer, keyboard, uarts)
     out (0x00), a
-    ld a, 0x86      ; Program IM2 vector
-    out (0x10), a
+    //ld a, 0x86      ; Program IM2 vector
+    //out (0x10), a
 
     ld a, 0x07      ; Select timer
     out (0x7f), a

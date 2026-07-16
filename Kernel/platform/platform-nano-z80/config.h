@@ -33,6 +33,10 @@
 
 #define PTABSIZE    48
 
+/* Networking */
+/*#define CONFIG_NET
+#define CONFIG_NET_NATIVE*/
+
 /*
  *	Definitions for swapping.
  */

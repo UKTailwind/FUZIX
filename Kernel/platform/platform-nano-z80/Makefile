@@ -1,4 +1,4 @@
-CROSS_CCOPTS += -I../../dev/
+CROSS_CCOPTS += -I../../dev/ 
 
 CSRCS = devfd.c devtty.c
 CSRCS += devices.c main.c
@@ -13,7 +13,7 @@ ASRCS += tricks.S commonmem.S
 #DSRCS = ../../dev/tinydisk.c ../../dev/tinyide.c ../../dev/mbr.c
 #DSRCS += ../../dev/propio2.c ../../dev/ds1302.c
 #DSRCS += ../../dev/devfd.c
-#NSRCS = ../../dev/net/net_w5x00.c ../../dev/net/net_native.c
+#NSRCS = ../../dev/net/net_native.c
 
 #DASRCS = ../../dev/rbcfd9266_hw.S ../../dev/ds1302_rbc.S ../../dev/tinyide_ppide_rbc.S
 
@@ -43,6 +43,9 @@ $(DOBJS): %.o: ../../dev/%.c
 $(DISCARD_DOBJS): %.o: ../../dev/%.c
 	$(CROSS_CC) $(CROSS_CCOPTS) $(CROSS_CC_SEGDISC) -c $<
 
+$(NOBJS): %.o: ../../dev/net/%.c                                                
+	$(CROSS_CC) $(CROSS_CCOPTS) -c $<   
+
 $(AOBJS): %.o: %.S
 	$(CROSS_AS) $(ASOPTS) $<
 
@@ -68,7 +71,7 @@ image:
 	../../syscall_fs.o ../../syscall_fs2.o ../../syscall_fs3.o \
 	../../syscall_proc.o ../../syscall_other.o \
 	../../tty.o ../../mm.o ../../mm/memalloc_none.o \
-	../../swap.o ../../mm/bank16k.o ../../vt.o \
+	../../mm/bank16k.o ../../vt.o \
 	/opt/fcc/lib/z80/libz80.a -m fuzix.tmpmap
 	perl -lpe '$$_=hex' fuzix.tmpmap | paste -d" " - fuzix.tmpmap  |  sort -n |  cut -d" " -f 2- >../../fuzix.map
 	../../tools/pack85 <../../fuzix.map fuzix.bin ../../fuzix.bin

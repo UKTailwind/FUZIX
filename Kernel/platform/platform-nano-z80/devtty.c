@@ -29,7 +29,7 @@
 #define uart_a_tx_data  0x70
 #define uart_a_tx_ready 0x71
 #define uart_a_rx_data  0x72
-#define uart_a_rx_avail 0x72
+#define uart_a_rx_avail 0x73
 
 /* 3V3 UART header ports */
 #define io_page_reg     0x7f
@@ -178,11 +178,12 @@ void tty_putc(uint_fast8_t minor, uint_fast8_t c)
     }
     else if(minor == TTY_SERA) {
         //kprintf("\nSending %c on TTY2\n",c);
-        out(io_page_reg, io_page_uart);
-        out(uart_b_tx_data, c);
+        //out(io_page_reg, io_page_uart);
+        out(uart_a_tx_data, c);
     }
     else if(minor == TTY_SERA + 1) {
-        out(uart_a_tx_data, c);
+        out(io_page_reg, io_page_uart);
+        out(uart_b_tx_data, c);
     }
 	//else
 	//	prop_tty_write(c);
@@ -240,16 +241,58 @@ void tty_data_consumed(uint_fast8_t minor)
 	used(minor);
 }
 
+/*
+ * Read keyboard data on interrupt
+ */
+void read_kb(void) 
+{
+	uint8_t minor = visible_vt+1;	/* VT minor number */
+    uint8_t data = in(keyb_data);
+    // Switch video terminal with F1-F4
+    if (data >= 0xf0 && data < 0xf4) {
+        visible_vt = data - 0xf0;
+        out(io_page_reg, io_page_vid);
+        out(vid_tty_vis_buf, visible_vt);
+        change_vt(visible_vt);
+    }
+    else
+        vt_inproc(minor, data);
+}
+
+/*
+ * Read UART A on interrupt
+ */
+void read_uart_a(void) 
+{
+    while(in(uart_a_rx_avail)) {
+        tty_inproc(TTY_SERA, in(uart_a_rx_data));
+    }
+}
+
+/*
+ * Read UART B on interrupt
+ */
+void read_uart_b(void) 
+{
+    out(io_page_reg, io_page_uart);
+    while(in(uart_b_rx_avail)) {
+        tty_inproc(TTY_SERA+1, in(uart_b_rx_data));
+    }
+}
+
+
+
 
 /*
  *	Our platform specific code so we have a function to call to poll the
  *	serial ports for activity.
  */
-void tty_poll(void)
-{	
-	uint8_t minor = visible_vt+1;	/* VT minor number */
 
-	if (in(keyb_data_avail) & 0x01) {
+//void tty_poll(void)
+//{	
+	/*uint8_t minor = visible_vt+1;	/* VT minor number */
+
+	/*if (in(keyb_data_avail) & 0x01) {
         // Check for F-keys to change visible vt
         uint8_t data = in(keyb_data);
         //kprintf("Keyboard input data: 0x%x", data);
@@ -261,24 +304,24 @@ void tty_poll(void)
         }
         else
             vt_inproc(minor, data);
-    }
+    }*/
 
-	minor = TTY_SERA;	/* UART minor number */
+//	uint8_t minor = TTY_SERA;	/* UART minor number */
 
-    out(io_page_reg, io_page_uart);
-    if (in(uart_b_rx_avail) & 0x01) {
-        uint8_t data = in(uart_b_rx_data);
-        tty_inproc(minor, data);
-    }
+ //   out(io_page_reg, io_page_uart);
+ //   if (in(uart_b_rx_avail) & 0x01) {
+ //       uint8_t data = in(uart_b_rx_data);
+ //       tty_inproc(minor, data);
+ //   }
 
-    minor = TTY_SERA + 1;
-    if (in(uart_a_rx_avail) & 0x01) {
-        uint8_t data = in(uart_a_rx_data);
-        tty_inproc(minor, data);
-    }
+ //   minor = TTY_SERA + 1;
+ //   if (in(uart_a_rx_avail) & 0x01) {
+ //       uint8_t data = in(uart_a_rx_data);
+ //       tty_inproc(minor, data);
+ //   }
 
 
-}
+//}
 
 int nz80_tty_ioctl(uint_fast8_t minor, uarg_t request, char *data)
 {

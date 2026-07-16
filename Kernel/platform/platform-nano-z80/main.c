@@ -49,7 +49,22 @@ void plt_idle(void)
 
 void plt_interrupt(void)
 {
-	//tty_drain_sio();
-	tty_poll();
-    timer_interrupt();
+	uint8_t irq_flags = in(0x79);
+
+    switch(irq_flags) {
+        case 0x00:
+            timer_interrupt();
+            break;
+        case 0x02:
+            read_kb();
+            break;
+        case 0x04:
+            read_uart_a();
+            break;
+        case 0x08:
+            read_uart_b();
+            break;
+        default:
+            break;    
+    }
 }
