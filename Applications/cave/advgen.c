@@ -1726,7 +1726,7 @@ int main(int argc, char *argv[])
 		dp += len;
 	}
 	game.odesc[i] = dp;
-	for (i = 0; i < 64; i++) {
+	for (i = 0; i < 147; i++) {
 		len = strlen(pLongRmDesc[i]);
 		game.loclong[i] = endianize(dp);
 		write(out, pLongRmDesc[i], len);
