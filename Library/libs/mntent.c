@@ -46,7 +46,7 @@ static int mntparse(char *p, char **t, char *def)
 	char *d = strtok(p, " \t\n");
 	char *ds = d;
 	if (d == NULL) {
-		ds = def
+		ds = def;
 		d = def;
 	} else {
 		/* Dequote */
