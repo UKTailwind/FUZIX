@@ -4,6 +4,7 @@
 #include <timer.h>
 #include <devtty.h>
 
+#define rtc_secs_reg 0x78
 #define irq_flag_reg 0x79
 
 extern unsigned char irqvector;
@@ -12,7 +13,7 @@ uint16_t swap_dev = 0xFFFF;
 uint8_t plt_tick_present;
 
 uint_fast8_t plt_rtc_secs(void) {
-    return in(0x78);
+    return in(rtc_secs_reg);
 }
 
 /* This points to the last buffer in the disk buffers. There must be at least four 
