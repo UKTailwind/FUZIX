@@ -4,6 +4,8 @@
 #include <timer.h>
 #include <devtty.h>
 
+#define irq_flag_reg 0x79
+
 extern unsigned char irqvector;
 uint16_t swap_dev = 0xFFFF;
 
@@ -49,7 +51,7 @@ void plt_idle(void)
 
 void plt_interrupt(void)
 {
-	uint8_t irq_flags = in(0x79);
+	uint8_t irq_flags = in(irq_flag_reg);
 
     switch(irq_flags) {
         case 0x00:

@@ -1,29 +1,30 @@
     .common
     
-    export _plot_char
-    export _scroll_down
-    export _scroll_up
-    export _cursor_on
-    export _cursor_off
-    export _cursor_disable
-    export _clear_lines
-    export _clear_across
-    export _do_beep
-    export _vtattr_notify
-    export _vtattr_cap
+    .export _plot_char
+    .export _scroll_down
+    .export _scroll_up
+    .export _cursor_on
+    .export _cursor_off
+    .export _cursor_disable
+    .export _clear_lines
+    .export _clear_across
+    .export _do_beep
+    .export _vtattr_notify
+    .export _vtattr_cap
 
+#include "kernelu.def"
 
 vt_start:
     push af
-    ld a, 0x04
-    out (0x7f), a
+    ld a, IO_SEL_TTY
+    out (IO_SEL_REG), a
     pop af
     ret
 
 vt_wait:
     push af
 vt_wait_loop:
-    in a, (0x77)
+    in a, (TTY_BUSY)
     cp 1
     jr z, vt_wait_loop
     pop af
@@ -42,7 +43,7 @@ vt_charout:
 vt_charout_noinv:
     pop af
 vt_charout_out:
-    out (0x76), a
+    out (TTY_OUT), a
 
     ; Expects X in D, Y in E
 vt_set_pos:
@@ -50,11 +51,11 @@ vt_set_pos:
     ; Set X
     call vt_wait
     ld a, d
-    out (0x01), a
+    out (TTY_XPOS), a
     ; Set Y
     call vt_wait
     ld a, e
-    out (0x02), a
+    out (TTY_YPOS), a
     pop af
     ret
 
@@ -97,10 +98,10 @@ _clear_across:
 clear_across_loop:
     call vt_wait
     ld a, #' '
-    out (0x76), a ; output space
+    out (TTY_OUT), a ; output space
     inc d
     ld a, d
-    out (0x01), a ; increase X
+    out (TTY_XPOS), a ; increase X
     djnz clear_across_loop
 clear_across_done:
     ret
@@ -125,11 +126,11 @@ clear_lines_loop:
     call vt_wait
     ; Clear to EOL
     ld a, 1
-    out (0x08), a
+    out (TTY_CL_EOL), a
     ; Next line
     inc e
     ld a, e
-    out (0x02), a
+    out (TTY_YPOS), a
     djnz clear_lines_loop
     
     pop bc 
@@ -140,14 +141,14 @@ _scroll_down:
     call vt_start
     call vt_wait
     ld a, 0x01
-    out (0x05), a
+    out (TTY_SCR_D), a
     ret    
 
 _scroll_up:
     call vt_start
     call vt_wait
     ld a, 0x01
-    out (0x04), a
+    out (TTY_SCR_U), a
     ret    
 
 
@@ -165,7 +166,7 @@ _cursor_on:
 
     call vt_wait
     ld a, 0x01
-    out (0x03), a
+    out (TTY_CUR_VIS), a
     ret
 
 
@@ -174,7 +175,7 @@ _cursor_disable:
     call vt_start
     call vt_wait
     ld a, 0x00
-    out (0x03), a
+    out (TTY_CUR_VIS), a
     ret
 
 _plot_char:

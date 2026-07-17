@@ -113,19 +113,19 @@ init_hardware:
     ld(_procmem), hl
 
     ; Enable hardware TTY
-    ld a, 0x04
-    out (0x7f), a
+    ld a, IO_SEL_TTY
+    out (IO_SEL_REG), a
     ld a, 0x01
-    out (0x0d), a
+    out (TTY_ENABLED), a
     ;And disable autoscroll
     ld a, 0x00
-    out (0x0e), a
+    out (TTY_AUTOSCR), a
 
     ; Configure keyboard arrow keys for VT52
-    ld a,0x02
-    out (0x7f), a
+    ld a,IO_SEL_USB
+    out (IO_SEL_REG), a
     ld a,0x03
-    out (0x0b), a
+    out (USB_ARROWKEY), a
 
     call _vtinit
 
@@ -135,17 +135,15 @@ init_hardware:
 	pop hl
 	
     ; Start timer and enable interrupt output
-    ld a, 0x06      ; Select interrupt controler
-    out (0x7f), a
+    ld a, IO_SEL_PIC      ; Select interrupt controler
+    out (IO_SEL_REG), a
     ld a, 0x0F      ; Enable channels 1,2,3,4 (timer, keyboard, uarts)
-    out (0x00), a
-    //ld a, 0x86      ; Program IM2 vector
-    //out (0x10), a
+    out (PIC_IRQ_EN), a
 
-    ld a, 0x07      ; Select timer
-    out (0x7f), a
+    ld a, IO_SEL_TMR      ; Select timer
+    out (IO_SEL_REG), a
     ld a, 0x01      ; Start timer, default setting is 100 Hz
-    out (0x00), a
+    out (TMR_ENABLE), a
     
     im 1
 	
@@ -340,16 +338,16 @@ map_savearea:
 ;
 _sd_set_sector_regs:
     push af
-    ld a, 0x03
-    out (0x7f), a
+    ld a, IO_SEL_SD
+    out (IO_SEL_REG), a
     ld a, (_sd_sector0)
-    out (0x00), a
+    out (SD_SEC_0), a
     ld a, (_sd_sector1)
-    out (0x01), a
+    out (SD_SEC_1), a
     ld a, (_sd_sector2)
-    out (0x02), a
+    out (SD_SEC_2), a
     ld a, (_sd_sector3)
-    out (0x03), a
+    out (SD_SEC_3), a
 
     pop af
     ret
@@ -368,7 +366,7 @@ _sd_read_block:
     call sd_init
 
     ld a, 1
-    out (0x05), a   ; Perform read
+    out (SD_RD_STR), a   ; Perform read
 
     call sd_init
 
@@ -378,7 +376,7 @@ _sd_read_block:
 
 sd_read_loop:
     ld a, d
-    out (0x07), a
+    out (SD_PAGE), a
    
     ld c, 0x80
     ld b, 0x80
@@ -420,7 +418,7 @@ _sd_write_block:
     ld d, 0
 sd_write_loop:
     ld a, d
-    out (0x07), a
+    out (SD_PAGE), a
     
     ld c, 0x80
     ld b, 0x80
@@ -438,7 +436,7 @@ sd_write_loop_inner:
     
     ; Perform write
     ld a, 1
-    out (0x06), a
+    out (SD_WR_STR), a
 
     call sd_wait
     
@@ -451,11 +449,11 @@ sd_write_loop_inner:
 
 
 sd_init:
-    ld a, 0x03
-    out (0x7f), a
+    ld a, IO_SEL_SD
+    out (IO_SEL_REG), a
     ; Fall through
 sd_wait:
-    in a, (0x04)
+    in a, (SD_BUSY)
     cp 0
     jr nz, sd_wait
     ret
@@ -473,11 +471,12 @@ _disk_map: .byte 0
 	;
 outchar:
 	push af
-twait:	in a,(0x77)
+twait:	
+    in a,(TTY_BUSY)
 	or a
 	jr nz, twait
 	pop af
-	out (0x76),a
+	out (TTY_OUT),a
 	ret
 
 

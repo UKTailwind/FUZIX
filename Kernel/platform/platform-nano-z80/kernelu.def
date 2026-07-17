@@ -54,3 +54,43 @@ MPGSEL_2    .equ    0x64
 MPGSEL_3    .equ    0x66
 
 
+; Global IO ports
+TTY_OUT     .equ    0x76
+TTY_BUSY    .equ    0x77
+IO_SEL_REG  .equ    0x7f
+
+; IO selection values
+IO_SEL_USB  .equ    0x02
+IO_SEL_SD   .equ    0x03
+IO_SEL_TTY  .equ    0x04
+IO_SEL_PIC  .equ    0x06
+IO_SEL_TMR  .equ    0x07
+
+; USB registers
+USB_ARROWKEY .equ   0x0b
+
+; SD controller registers
+SD_SEC_0    .equ    0x00
+SD_SEC_1    .equ    0x01
+SD_SEC_2    .equ    0x02
+SD_SEC_3    .equ    0x03
+SD_BUSY     .equ    0x04
+SD_RD_STR   .equ    0x05
+SD_WR_STR   .equ    0x06
+SD_PAGE     .equ    0x07
+
+; TTY registers
+TTY_XPOS    .equ    0x01
+TTY_YPOS    .equ    0x02
+TTY_CUR_VIS .equ    0x03
+TTY_SCR_U   .equ    0x04
+TTY_SCR_D   .equ    0x05
+TTY_CL_EOL  .equ    0x08
+TTY_ENABLED .equ    0x0d
+TTY_AUTOSCR .equ    0x0e
+
+; PIC registers
+PIC_IRQ_EN  .equ    0x00 
+
+; Timer registers
+TMR_ENABLE  .equ    0x00
