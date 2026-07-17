@@ -15,6 +15,7 @@ Implement support for direct transfers
 More complete IOCTL for VTs and UARTs  
 Swap to non-pageable RAM  
 SLIP networking  
+Automatic copying of custom userspace files to disk image  
 
 ## Install
 See the [nano-z80 github page](https://github.com/venomix666/nano-z80) for details on how to setup both the FPGA board and SD-card.
