@@ -6,7 +6,7 @@
 #include <kernel.h>
 #include <kdata.h>
 #include <printf.h>
-#include <devfd.h>
+#include <devhd.h>
 #include <nano-z80.h>
 
 static int hd_transfer(bool is_read, uint8_t minor, uint8_t rawflag);
@@ -35,12 +35,10 @@ int hd_write(uint_fast8_t minor, uint_fast8_t rawflag, uint_fast8_t flag)
 }
 
 static void sd_set_addr(uint32_t address) {
-    //kprintf("Setting SD address 0x");
     sd_sector0 = address & 0xff;
     sd_sector1 = (address >> 8) & 0xff;
     sd_sector2 = (address >> 16) & 0xff;
     sd_sector3 = (address >> 24) & 0xff;
-    //kprintf(" %x%x%x%x\n", sd_sector3, sd_sector2, sd_sector1, sd_sector0);
     sd_set_sector_regs();
 }
 
@@ -72,11 +70,7 @@ static int hd_transfer(bool is_read, uint8_t type, uint8_t rawflag)
     }
 
     block = udata.u_block + sd_offset + 0x800; // 0x800 skips MBR etc. 
-    //sd_ptr = (uint16_t) udata.u_dptr;
     nblock = udata.u_nblock;
-    //kprintf("Access to SD-card - rawflag %d, map %d, buf 0x%x\n", 
-    //        rawflag, disk_map, sd_ptr); 
-    //kprintf("u_base: 0x%x", (uint16_t) udata.u_base); 
     ct = 0;
 
     while (ct < nblock) {
@@ -84,7 +78,6 @@ static int hd_transfer(bool is_read, uint8_t type, uint8_t rawflag)
         irq = di();
         sd_set_addr(block);
         if (is_read) {
-            //kprintf("Calling read function\n");
             sd_read_block();
         } else {
             sd_write_block();
@@ -96,7 +89,6 @@ static int hd_transfer(bool is_read, uint8_t type, uint8_t rawflag)
         ct++;
         block++;
     }
-    //kprintf("SD access finished, read %d bytes", ct<<9);
     return ct << 9;
 }
 

@@ -1,8 +1,6 @@
 	.code
-    ;.abs
-    ;.org 0x0088
-	; Load at 0x0088
-	; Assume execution from CP/M for now
+	; Loads at 0x0088
+	; Assume execution from CP/M
 	; Banks 0x000, 0x001, 0x002 and 0x003 active and in order
 start:
 	di

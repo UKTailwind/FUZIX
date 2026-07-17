@@ -11,7 +11,6 @@
 	.export map_kernel_di
 	.export map_proc
 	.export map_proc_di
-    ;.export map_proc_a
 	.export map_proc_always
 	.export map_proc_always_di
 	.export map_save_kernel
@@ -90,17 +89,8 @@ _plt_monitor:
 ;
 _plt_reboot:
 	di
-    ; Restore memory map
-    call map_kernel
-
-	; Map ROM back into lower part of memory
-    ld a,0
-    out (0x7e),a
-    
-    ; Reboot form ROM
-    jp 0
-
-
+    halt
+ 
 ; -----------------------------------------------------------------------------
 ; DISCARD is memory that will be recycled when we exec init
 ; -----------------------------------------------------------------------------
@@ -157,9 +147,6 @@ init_hardware:
     ld a, 0x01      ; Start timer, default setting is 100 Hz
     out (0x00), a
     
-    ;xor a
-    ;ld i, a
-	;im 2 ; set CPU interrupt mode
     im 1
 	
     ret
@@ -169,12 +156,6 @@ init_hardware:
 ;	always available.
 ;
 	.common
-
-;_int_disabled:
-;        .byte 1
-
-;spurious:
-;        reti
 
 _kernel_flag:
 	.byte 1	; We start in kernel mode
@@ -354,8 +335,9 @@ _kernel_pages:
 map_savearea:                                                                   
     .byte   0,0,0,0      
 
-    ; SD-card low level code
-
+;
+; SD-card low level code
+;
 _sd_set_sector_regs:
     push af
     ld a, 0x03
@@ -383,24 +365,14 @@ _sd_read_block:
     ; Fix later for mapping user pages
     call map_kernel
 
-    ;ld a, 'a'
-    ;call outchar
-
     call sd_init
-
-    ;ld a, 'b'
-    ;call outchar
 
     ld a, 1
     out (0x05), a   ; Perform read
 
     call sd_init
 
-    ;ld a, 'c'
-    ;call outchar
-
     ; Copy data to correct address
-    ;ld hl, _udata + U_DATA__U_ARGN1
     ld hl, (_sd_ptr)
     ld d, 0
 
@@ -418,17 +390,11 @@ sd_read_loop_inner:
     inc c
     djnz sd_read_loop_inner
 
-    ;ld a, 'd'
-    ;call outchar
-
     inc d 
     ld a,4
     cp d
     jr nz, sd_read_loop
     
-    ;ld a, 'e'
-    ;call outchar
-
     pop hl
     pop de
     pop bc

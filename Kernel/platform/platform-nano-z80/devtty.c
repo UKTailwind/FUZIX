@@ -57,6 +57,7 @@ static uint8_t visible_vt=0;
 static struct vt_switch ttysave[4];
 /*
  *	TTY masks - define which bits can be changed for each port
+ *	BAUD rate settings for TTY6 to be added
  */
 
 tcflag_t termios_mask[NUM_DEV_TTY + 1] = {
@@ -84,15 +85,6 @@ struct s_queue ttyinq[NUM_DEV_TTY + 1] = {	/* ttyinq[0] is never used */
 	{tbuf5, tbuf5, tbuf5, TTYSIZ, 0, TTYSIZ / 2},
 	{tbuf6, tbuf6, tbuf6, TTYSIZ, 0, TTYSIZ / 2},
 };
-
-
-/* Updated early in boot to 0,2,1 if PropIO present. This table works both
-   ways purely because of the possible mappings. If that changes we'll need
-   a forward and backward table. Most platforms have a fixed idea of the console
-   so don't need this remapping layer */
-//uint8_t ttymap[NUM_DEV_TTY + 1] = {
-//	0, 1, 2, 3, 4, 5, 6
-//};
 
 /* Write to system console. This is the backend to all the kernel messages,
    kprintf(), panic() etc. */
@@ -139,8 +131,6 @@ ttyready_t tty_writeready(uint_fast8_t minor)
         return (in(uart_a_tx_ready) & 0x01) ? TTY_READY_NOW : 
                                               TTY_READY_SOON; 
     }
-    //return TTY_READY_NOW;
-    //return prop_tty_writeready();
     return TTY_READY_NOW;
 }
 
@@ -155,11 +145,8 @@ ttyready_t tty_writeready(uint_fast8_t minor)
  */
 
 void change_vt(uint8_t new_vt) {
-    //kprintf("change_vt - new_vt: %d, active_vt: %d\n", new_vt, active_vt);
     if(new_vt != active_vt && new_vt < (TTY_SERA - 1)) {
         vt_save(&ttysave[active_vt]);
-        //out(io_page_reg, io_page_vid);
-        //out(vid_tty_vis_buf, new_vt);
         vt_load(&ttysave[new_vt]);
         active_vt = new_vt;
     }
@@ -177,16 +164,12 @@ void tty_putc(uint_fast8_t minor, uint_fast8_t c)
         vtoutput(&ch, 1);
     }
     else if(minor == TTY_SERA) {
-        //kprintf("\nSending %c on TTY2\n",c);
-        //out(io_page_reg, io_page_uart);
         out(uart_a_tx_data, c);
     }
     else if(minor == TTY_SERA + 1) {
         out(io_page_reg, io_page_uart);
         out(uart_b_tx_data, c);
     }
-	//else
-	//	prop_tty_write(c);
 }
 
 
@@ -206,7 +189,7 @@ void tty_setup(uint_fast8_t minor, uint_fast8_t flags)
         out(io_page_reg, io_page_vid);
         out(vid_tty_act_buf, minor - 1); // Select active buffer
         while(in(vid_tty_busy));         // Wait for tty to be free
-        out(vid_tty_cls, 1);                 // Hardware clear screen
+        out(vid_tty_cls, 1);             // Hardware clear screen
     }
     return;
 }
@@ -227,8 +210,6 @@ void tty_sleeping(uint_fast8_t minor)
  */
 int tty_carrier(uint_fast8_t minor)
 {
-        //if (ttymap[minor] == 1)
-		//return in(uart_msr) & 0x80;
 	return 1;
 }
 
@@ -279,49 +260,6 @@ void read_uart_b(void)
         tty_inproc(TTY_SERA+1, in(uart_b_rx_data));
     }
 }
-
-
-
-
-/*
- *	Our platform specific code so we have a function to call to poll the
- *	serial ports for activity.
- */
-
-//void tty_poll(void)
-//{	
-	/*uint8_t minor = visible_vt+1;	/* VT minor number */
-
-	/*if (in(keyb_data_avail) & 0x01) {
-        // Check for F-keys to change visible vt
-        uint8_t data = in(keyb_data);
-        //kprintf("Keyboard input data: 0x%x", data);
-        if (data >= 0xf0) {
-            visible_vt = data - 0xf0;
-            out(io_page_reg, io_page_vid);
-            out(vid_tty_vis_buf, visible_vt);
-            change_vt(visible_vt);
-        }
-        else
-            vt_inproc(minor, data);
-    }*/
-
-//	uint8_t minor = TTY_SERA;	/* UART minor number */
-
- //   out(io_page_reg, io_page_uart);
- //   if (in(uart_b_rx_avail) & 0x01) {
- //       uint8_t data = in(uart_b_rx_data);
- //       tty_inproc(minor, data);
- //   }
-
- //   minor = TTY_SERA + 1;
- //   if (in(uart_a_rx_avail) & 0x01) {
- //       uint8_t data = in(uart_a_rx_data);
- //       tty_inproc(minor, data);
- //   }
-
-
-//}
 
 int nz80_tty_ioctl(uint_fast8_t minor, uarg_t request, char *data)
 {

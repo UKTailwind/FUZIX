@@ -1,6 +1,6 @@
 CROSS_CCOPTS += -I../../dev/ 
 
-CSRCS = devfd.c devtty.c
+CSRCS = devhd.c devtty.c
 CSRCS += devices.c main.c
 
 DISCSRCS = discard.c
@@ -11,8 +11,6 @@ ASRCS += tricks.S commonmem.S
 #DISCARD_DSRCS = ../../dev/tinydisk_discard.c ../../dev/tinyide_discard.c
 #DISCARD_DSRCS += ../../dev/ds1302_discard.c
 #DSRCS = ../../dev/tinydisk.c ../../dev/tinyide.c ../../dev/mbr.c
-#DSRCS += ../../dev/propio2.c ../../dev/ds1302.c
-#DSRCS += ../../dev/devfd.c
 #NSRCS = ../../dev/net/net_native.c
 
 #DASRCS = ../../dev/rbcfd9266_hw.S ../../dev/ds1302_rbc.S ../../dev/tinyide_ppide_rbc.S
@@ -53,14 +51,14 @@ $(DAOBJS): %.o: ../../dev/%.S
 	$(CROSS_AS) $(ASOPTS) $<
 
 clean:
-	rm -f $(OBJS) $(JUNK)  core *~ fuzix.com fuzix.bin fusix.tmpmap
+	rm -f $(OBJS) $(JUNK)  core *~ fuzix.com fuzix.bin fuzix.tmpmap
 
 #
 #	Attach the kernel to the boot block
 #
 image:
 	$(CROSS_LD) -b -C 0x0088 -X 0xC800 -S 0xF000 -f CLDBbXSs -o fuzix.bin \
-	crt0.o commonmem.o nano-z80.o vt.o tricks.o devtty.o devfd.o main.o \
+	crt0.o commonmem.o nano-z80.o vt.o tricks.o devtty.o devhd.o main.o \
 	discard.o \
 	../../start.o \
 	../../version.o ../../cpu-z80u/lowlevel-z80u.o \

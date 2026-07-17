@@ -31,7 +31,6 @@ vt_wait_loop:
 
     ; Expects character in A
 vt_charout:
-    ;call vt_wait
     push af
     ; Check inverse
     ld a, (inverse)

@@ -17,10 +17,4 @@ Swap to non-pageable RAM
 SLIP networking  
 
 ## Install
-Write the filesystem image to the SD-card at an offset of 0x100000:  
-```console
-dd if=./disk.img of=/dev/sdX bs=512 seek=$((0x00100000)
-```
-Copy fuzix.com to the CP/M using cpmcp or xmodem.  
-Start fuzix from CP/M by running fuzix.com and boot from device 0.  
-
+See the [nano-z80 github page](https://github.com/venomix666/nano-z80) for details on how to setup both the FPGA board and SD-card.

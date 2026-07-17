@@ -19,12 +19,7 @@ extern int strcmp(const char *, const char *);
  */
 uint_fast8_t plt_param(unsigned char *p)
 {
-/*	if (strcmp(p, "msr") == 0) {
-		timermsr = 1;
-		plt_tick_present = 1;
-		return 1;
-        }
-	return 0;*/
+	return 0;
 }
 
 /*
@@ -48,45 +43,17 @@ void map_init(void)
  *	might need to just dec/inc before using it in an I/O port or similar
  *	to avoid confusion.
  *
- *	Kernel in bank 0, user in banks 1-14, high 32K is bank 15
- *	With 128K the high is bank 3. The main code continues using 14/15 for
- *	the kernel and high pages but they wrap so there is no problem.
- *
- *	The pages are actually 0-15, but the top bit does nothing on the
- *	SBCv2. However by setting this bit we magically just work on the
- *	RB-MBC platform as well.
  */
+
 void pagemap_init(void)
 {
 	uint8_t i;
-	//uint8_t imax = 15;
-	/* On a 128K system only pages 1 and 2 are free for user */
-	//if (ramsize == 128)
-	//	imax = 3;
-	//for (i = 1; i < imax; i++)
-	//	pagemap_add(i | 0x80);
     for(i = 4; i<255; i++)
         pagemap_add(i);
     // Add common area
     pagemap_add(3);
 }
 
-/*
- *	Called after interrupts are enabled in order to enumerate and set up
- *	any devices. In our case we set up the 16550A UART and then probe the
- *	IDE and SD card.
- */
-
-#define uart_ier 0x69
-
 void device_init(void)
 {
-	//extern uint8_t ttymap[];
-	//out(uart_ier, 0x0D);	/* This may be our timer so do it first */
-	//ide_probe();
-	/* If we have a prop it will be console, if so check for SD */
-	//if (ttymap[1] == 2)
-	//	prop_sd_probe();
-	//ds1302_init();
-	//sock_init();
 }

@@ -5,6 +5,8 @@
 
 #include "../../lib/z80ubank16.S"
 
+; This file is reused from platform-z80retor
+
 	.common
 
 fork_copy:

@@ -4,7 +4,7 @@
 #include <kdata.h>
 #include <devsys.h>
 #include <devtty.h>
-#include <devfd.h>
+#include <devhd.h>
 #include <printf.h>
 
 /*
