@@ -90,8 +90,8 @@ m4_read_transfer_stub       .equ 0x0069 ;FIXME, make it not hardcoded if possibl
     .globl _m4_is_img
     .globl _m4_img_open
     .globl _m4_img_seek
-    .globl _m4_img_close    
-    .globl _m4_img_close_fd
+;    .globl _m4_img_close    
+;    .globl _m4_img_close_fd
    
 
 
@@ -366,16 +366,16 @@ ret_to_m4_img_open:
             jp      nz,m4rom_disable
             ld      a,e
             ld      (_m4_img_fd),a
-            ld      (_m4_img_close_fd),a
+;            ld      (_m4_img_close_fd),a
             ld      (_m4_img_read_fd),a
             ld      (_m4_img_write_fd),a
             jp      m4rom_disable
 
-_m4_img_close:
-            ld      a,#0xff
-            ld      (_m4_open_mode),a
-            ld      hl,#cmd_m4_img_close
-            jr      m4_cmd
+;_m4_img_close:
+;            ld      a,#0xff
+;            ld      (_m4_open_mode),a
+;            ld      hl,#cmd_m4_img_close
+;            jr      m4_cmd
 
 _m4_img_seek:
             ld      hl,#cmd_m4_img_seek

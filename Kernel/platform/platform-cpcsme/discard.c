@@ -97,14 +97,14 @@ void device_init(void)
 			kprintf("FAIL\n");
 		else{
 			kprintf("Registering M4 SD card image file device:\n");
-			m4_open_mode = FA_REALMODE | FA_READ;
+			m4_open_mode = FA_REALMODE | FA_READ | FA_WRITE;
 			m4_open_err = m4_img_open();
 			if (!m4_open_err){
 				kputs("Found /FUZIX.IMG\n");
 				td_register(1, m4_img_xfer, td_ioctl_none, 1);
 			}
 			else
-				kprintf("Error %u opening FUZIX.IMG for read\n", m4_open_err);
+				kprintf("Error %u opening FUZIX.IMG for R/W\n", m4_open_err);
 
 		}
 	}	
