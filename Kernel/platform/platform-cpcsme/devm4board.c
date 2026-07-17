@@ -98,42 +98,14 @@ int m4_sd_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr){
 }
 
 int m4_img_xfer(uint_fast8_t dev, bool is_read, uint32_t lba, uint8_t *dptr){
-	irqflags_t irq = di();
-	uint8_t err = 0;
+	int err = 0;
 	m4_is_img=1;
 	m4_img_lba = (lba << 1);
-	if (is_read){
-		if (m4_open_mode != (FA_REALMODE | FA_READ)){
-			if (m4_open_mode != 0xff) {
-				m4_img_close();
-			}
-			m4_open_mode = FA_REALMODE | FA_READ;
-			if (m4_img_open()){
-				m4_open_mode = 0xff;
-				kputs("Error opening FUZIX.IMG for read\n");
-				goto end;
-			}
-		}
-	}
-	else{
-		if (m4_open_mode != (FA_REALMODE | FA_WRITE)){
-			if (m4_open_mode != 0xff) {
-				m4_img_close();
-			}			
-			m4_open_mode = FA_REALMODE | FA_WRITE;
-			if (m4_img_open()){
-				m4_open_mode = 0xff;
-				kputs("Error opening FUZIX.IMG for write\n");
-				goto end;
-			}
-		}
-	}
 	if (!m4_img_seek())
 		err = m4_xfer(is_read, dptr);
 	else
 		kputs("M4 file seek error\n");
 end:
-    irqrestore(irq);
 	return err;
 }
 

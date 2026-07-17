@@ -11,7 +11,7 @@ extern uint8_t m4_sd_read_block(void);
 extern uint8_t m4_sd_write_block(void);
 extern uint8_t m4_img_seek(void);
 extern uint8_t m4_img_open(void);
-extern uint8_t m4_img_close(void);
+/*extern uint8_t m4_img_close(void);*/
 extern unsigned char m4_time_str[20];
 extern uint8_t m4_present;
 extern uint32_t read_lba;
@@ -23,7 +23,7 @@ extern uint32_t m4_img_lba;
 extern uint8_t m4_img_write_fd;
 extern uint8_t m4_img_read_fd;
 extern uint8_t m4_is_img;
-extern uint8_t m4_img_close_fd;
+/*extern uint8_t m4_img_close_fd;*/
 
 int m4_plt_rtc_read(void);
 int m4_plt_rtc_write(void);
