@@ -1,0 +1,2 @@
+TERM=fuzix; export TERM
+

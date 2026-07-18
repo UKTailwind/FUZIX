@@ -201,6 +201,7 @@ clean:
 	+$(MAKE) -C platform/platform-$(TARGET) clean
 	+$(MAKE) -C tools/bankld clean
 	+$(MAKE) -C cpm-loader clean
+	+$(MAKE) -C cpm-loader-fcc clean
 	+$(MAKE) -C cpu-$(CPU) clean
 
 clean-all: clean

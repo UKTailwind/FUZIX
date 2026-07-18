@@ -31,6 +31,7 @@
 # mtx:		Memotech MTX512 with SDX or SD (or MEMU emulator)
 # multicomp09:	Extended multicomp 6809
 # n8:		Retrobrew N8 home computer
+# nano-z80: Z80 SoC for the Tang Nano 20K FPGA board
 # nascom:	Nascom 2 or 3 with page mode RAM and CF on PIO
 # nc100:	Amstrad NC100 (or emulator)
 # nc200:	Amstrad NC200 (or emulator)
