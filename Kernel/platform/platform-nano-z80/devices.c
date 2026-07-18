@@ -4,8 +4,8 @@
 #include <kdata.h>
 #include <devsys.h>
 #include <devtty.h>
-#include <devhd.h>
 #include <printf.h>
+#include <tinydisk.h>
 
 /*
  *	This table is the glue that holds all the kernel device driver
@@ -20,7 +20,7 @@
 struct devsw dev_tab[] =  /* The device driver switch table */
 {
   /* 0: /dev/hd		Hard disc block devices */
-  {  hd_open,	  hd_close,	    hd_read,       hd_write,       no_ioctl  },
+  {  td_open,	  no_close,	    td_read,       td_write,       td_ioctl  },
   /* 1: /dev/fd		Floppy disc block devices */
   {  no_open,     no_close,     no_rdwr,       no_rdwr,       no_ioctl  },
   /* 2: /dev/tty	TTY devices */

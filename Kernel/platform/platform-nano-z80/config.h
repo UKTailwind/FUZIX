@@ -22,6 +22,11 @@
 #define VT_RIGHT    79
 #define VT_BOTTOM   29
 
+
+/* Tinydisk */
+#define CONFIG_TD_NUM 1
+
+
 /*
  *	Define the program loading area (needs to match kernel.def)
  */
@@ -31,7 +36,7 @@
 #define KERNTOP     0xC000  /* Top of kernel, first 3 banks */
 #define PROC_SIZE   64 	    /* Memory needed per process including stash */
 
-#define PTABSIZE    48
+#define PTABSIZE    32
 
 /* Networking - disabled for now */
 /*#define CONFIG_NET
@@ -69,7 +74,7 @@
    the buffer cache. For all small (eg bit) systems this is the right setting
    as it avoids polluting the small cache with data when it needs to be full
    of directory and inode information */
-/*#define CONFIG_LARGE_IO_DIRECT(x)	1*/
+#define CONFIG_LARGE_IO_DIRECT(x)	1
 
 #define CONFIG_RTC
 #define CONFIG_RTC_INTERVAL	1

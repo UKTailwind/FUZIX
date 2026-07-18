@@ -242,21 +242,36 @@ map_buffers:
 map_proc_2:                                                                     
     push de                                                                     
     push af                                                                     
-                                                                                
+    ;ld a,'m'
+    ;call outchar                                                                                
     ld de,mpgsel_cache      ; paging registers are write only                   
                     ; so cache their content in RAM                             
     ld a,(hl)           ; memory page number for bank 0                         
-    ld (de),a                                                                   
+    ld (de),a 
+    ;push af
+    ;add a, 0x30
+    ;call outchar
+    ;pop af                                                                 
     out (MPGSEL_0),a        ; set bank 0                                        
     inc hl                                                                      
     inc de                                                                      
     ld a,(hl)           ; memory page number for bank 1                         
     ld (de),a                                                                   
+    ;push af
+    ;add a, 0x30
+    ;call outchar
+    ;pop af                                                                 
+ 
     out (MPGSEL_1),a        ; set bank 1                                        
     inc hl                                                                      
     inc de                                                                      
     ld a,(hl)           ; memory page number for bank 2                         
     ld (de),a                                                                   
+    ;push af
+    ;add a, 0x30
+    ;call outchar
+    ;pop af                                                                 
+ 
     out (MPGSEL_2),a        ; set bank 2                                        
                                                                                 
     pop af                                                                      
@@ -352,16 +367,26 @@ _sd_set_sector_regs:
     pop af
     ret
 
+sd_map:
+    ld a, (_td_raw)
+    or a
+    jp z, map_buffers
+    dec a
+    jp z, map_proc_always
+    ld a, (_td_page)
+    jp map_for_swap
+
 _sd_read_block:
     push af
     push bc
     push de
     push hl
 
+    call sd_map
     ;ld a, (_disk_map)
     ;call map_proc_a
     ; Fix later for mapping user pages
-    call map_kernel
+    ;call map_kernel
 
     call sd_init
 
@@ -392,7 +417,9 @@ sd_read_loop_inner:
     ld a,4
     cp d
     jr nz, sd_read_loop
-    
+   
+    call map_kernel
+ 
     pop hl
     pop de
     pop bc
@@ -406,10 +433,11 @@ _sd_write_block:
     push de
     push hl
 
+    call sd_map
     ;ld a, (_disk_map)
     ;call map_proc_a
     ; Fix later for user map
-    call map_kernel
+    ;call map_kernel
 
     call sd_init
 
@@ -439,6 +467,8 @@ sd_write_loop_inner:
     out (SD_WR_STR), a
 
     call sd_wait
+
+    call map_kernel
     
     pop hl
     pop de

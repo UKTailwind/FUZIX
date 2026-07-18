@@ -3,6 +3,8 @@
 #include <kdata.h>
 #include <printf.h>
 #include <devtty.h>
+#include <tinydisk.h>
+#include <sdxfer.h>
 
 extern int strcmp(const char *, const char *);
 
@@ -56,4 +58,6 @@ void pagemap_init(void)
 
 void device_init(void)
 {
+    // Register drive with tinydisk
+    td_register(0, nz80_sd_xfer, td_ioctl_none, 1);
 }

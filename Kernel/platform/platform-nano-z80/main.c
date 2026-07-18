@@ -30,7 +30,7 @@ void plt_discard(void)
 {                                                                             
     uint16_t discard_size = 0xC000 - (uint16_t)bufpool_end;         
     bufptr bp = bufpool_end;                                                  
-                                                                                
+    int r;                                                                             
     discard_size /= sizeof(struct blkbuf);                                    
                                                                                     
     kprintf("%d buffers added\n", discard_size);                              
@@ -42,7 +42,8 @@ void plt_discard(void)
     for( bp = bufpool + NBUFS; bp < bufpool_end; ++bp ){                      
         bp->bf_dev = NO_DEVICE;                                               
         bp->bf_busy = BF_FREE;                                                
-    }                                                                            
+    }
+
 }  
 
 void plt_idle(void)

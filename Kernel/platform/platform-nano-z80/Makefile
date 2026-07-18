@@ -1,6 +1,6 @@
 CROSS_CCOPTS += -I../../dev/ 
 
-CSRCS = devhd.c devtty.c
+CSRCS = sdxfer.c devtty.c
 CSRCS += devices.c main.c
 
 DISCSRCS = discard.c
@@ -8,9 +8,9 @@ DISCSRCS = discard.c
 ASRCS = nano-z80.S vt.S crt0.S
 ASRCS += tricks.S commonmem.S
 
-#DISCARD_DSRCS = ../../dev/tinydisk_discard.c ../../dev/tinyide_discard.c
+DISCARD_DSRCS = ../../dev/tinydisk_discard.c
 #DISCARD_DSRCS += ../../dev/ds1302_discard.c
-#DSRCS = ../../dev/tinydisk.c ../../dev/tinyide.c ../../dev/mbr.c
+DSRCS = ../../dev/tinydisk.c ../../dev/mbr.c
 #NSRCS = ../../dev/net/net_native.c
 
 #DASRCS = ../../dev/rbcfd9266_hw.S ../../dev/ds1302_rbc.S ../../dev/tinyide_ppide_rbc.S
@@ -20,10 +20,10 @@ AOBJS = $(ASRCS:.S=.o)
 #NOBJS = $(patsubst ../../dev/net/%.c,%.o, $(NSRCS))
 DISCOBJS = $(DISCSRCS:.c=.o)
 DISCARD_DOBJS = $(patsubst ../../dev/%.c,%.o, $(DISCARD_DSRCS))
-#DOBJS = $(patsubst ../../dev/%.c,%.o, $(DSRCS))
+DOBJS = $(patsubst ../../dev/%.c,%.o, $(DSRCS))
 #DAOBJS = $(patsubst ../../dev/%.S,%.o, $(DASRCS))
 
-OBJS  = $(COBJS) $(AOBJS) $(DISCOBJS) $(DISCARD_DOBJS)
+OBJS  = $(COBJS) $(AOBJS) $(DISCOBJS) $(DOBJS) $(DISCARD_DOBJS)
 
 JUNK =  *.lst *.asm *.Sym *.rst *.lnk *.s *.\^ *.\# *.\% *.\@
 
@@ -58,7 +58,7 @@ clean:
 #
 image:
 	$(CROSS_LD) -b -C 0x0088 -X 0xC800 -S 0xF000 -f CLDBbXSs -o fuzix.bin \
-	crt0.o commonmem.o nano-z80.o vt.o tricks.o devtty.o devhd.o main.o \
+	crt0.o commonmem.o nano-z80.o vt.o tricks.o devtty.o sdxfer.o main.o \
 	discard.o \
 	../../start.o \
 	../../version.o ../../cpu-z80u/lowlevel-z80u.o \
@@ -68,6 +68,7 @@ image:
 	../../inode.o ../../syscall_exec.o ../../syscall_exec16.o \
 	../../syscall_fs.o ../../syscall_fs2.o ../../syscall_fs3.o \
 	../../syscall_proc.o ../../syscall_other.o \
+	../../dev/tinydisk.o ../../dev/tinydisk_discard.o \
 	../../tty.o ../../mm.o ../../mm/memalloc_none.o \
 	../../mm/bank16k.o ../../vt.o \
 	/opt/fcc/lib/z80/libz80.a -m fuzix.tmpmap
