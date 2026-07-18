@@ -10,10 +10,7 @@ Timer interrupt (100 Hz) + seconds from a psuedo RTC
 SD card storage, only one hardcoded partition at the moment  
 
 ## TODO
-Use tinydisk instead of completely hardcoded partition locations  
-Implement support for direct transfers  
 More complete IOCTL for VTs and UARTs  
-Swap to non-pageable RAM  
 SLIP networking  
 Automatic copying of custom userspace files to disk image  
 
