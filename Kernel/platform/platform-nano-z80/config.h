@@ -36,7 +36,7 @@
 #define KERNTOP     0xC000  /* Top of kernel, first 3 banks */
 #define PROC_SIZE   64 	    /* Memory needed per process including stash */
 
-#define PTABSIZE    32
+#define PTABSIZE    63
 
 /* Networking - disabled for now */
 /*#define CONFIG_NET
@@ -104,9 +104,9 @@
 /* Device parameters */
 #define NUM_DEV_TTY 6	  /* How many tty devices does the platform support */
 #define TTYDEV   BOOT_TTY /* Device used by kernel for messages, panics */
-#define NBUFS    5        /* Number of block buffers. Must be 4+ and must match
+#define NBUFS    4        /* Number of block buffers. Must be 4+ and must match
                              kernel.def */
-#define NMOUNTS	 4	  /* Number of mounts at a time */
+#define NMOUNTS	 2	  /* Number of mounts at a time */
 
 #define CONFIG_SMALL
 

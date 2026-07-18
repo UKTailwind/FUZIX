@@ -242,36 +242,22 @@ map_buffers:
 map_proc_2:                                                                     
     push de                                                                     
     push af                                                                     
-    ;ld a,'m'
-    ;call outchar                                                                                
     ld de,mpgsel_cache      ; paging registers are write only                   
                     ; so cache their content in RAM                             
     ld a,(hl)           ; memory page number for bank 0                         
     ld (de),a 
-    ;push af
-    ;add a, 0x30
-    ;call outchar
-    ;pop af                                                                 
     out (MPGSEL_0),a        ; set bank 0                                        
+    
     inc hl                                                                      
     inc de                                                                      
     ld a,(hl)           ; memory page number for bank 1                         
     ld (de),a                                                                   
-    ;push af
-    ;add a, 0x30
-    ;call outchar
-    ;pop af                                                                 
- 
     out (MPGSEL_1),a        ; set bank 1                                        
+
     inc hl                                                                      
     inc de                                                                      
     ld a,(hl)           ; memory page number for bank 2                         
     ld (de),a                                                                   
-    ;push af
-    ;add a, 0x30
-    ;call outchar
-    ;pop af                                                                 
- 
     out (MPGSEL_2),a        ; set bank 2                                        
                                                                                 
     pop af                                                                      
@@ -383,10 +369,6 @@ _sd_read_block:
     push hl
 
     call sd_map
-    ;ld a, (_disk_map)
-    ;call map_proc_a
-    ; Fix later for mapping user pages
-    ;call map_kernel
 
     call sd_init
 
@@ -434,10 +416,6 @@ _sd_write_block:
     push hl
 
     call sd_map
-    ;ld a, (_disk_map)
-    ;call map_proc_a
-    ; Fix later for user map
-    ;call map_kernel
 
     call sd_init
 
