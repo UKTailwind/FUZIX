@@ -102,6 +102,7 @@ l /bin/od /bin/hd
 f 0755 /bin/pagesize    pagesize
 f 0755 /bin/passwd      passwd
 f 0755 /bin/printenv    printenv
+f 0755 /bin/rx          rx
 f 0755 /bin/sed         sed
 f 0755 /bin/setboot     setboot
 f 0755 /bin/seq         seq
