@@ -1,3 +1,24 @@
+/* rx.c - Simple xmodem file receiver
+ *
+ * Copyright (C) 2026 Henrik Löfgren, All rights reserved.
+ *
+ * This file is part of FUZIX Operating System.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2, or (at your option)
+ * any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -81,6 +102,9 @@ static int xmodem_receive(void) {
     uint_fast8_t inp;
     uint_fast8_t outp;
     uint_fast8_t checksum;
+    uint_fast8_t outt;
+
+    outt='W';
     
     outp = NAK;
     while(1) {
@@ -90,15 +114,18 @@ static int xmodem_receive(void) {
             /* Transmission done */
             outp = ACK;
             write(ttyfd, &outp, 1);
+            if(disp) fputc('\n', stderr); 
             return 0;
         }
         else if(inp == CAN) {
             /* Transmission cancelled */
+            if(disp) fputc('\n', stderr);
             return -1;
         }
         else if(inp == SOH) {
             /* Got header, get package */
             outp = NAK;
+            outt = 'T';
             checksum = 0;
             read(ttyfd, &inp, 1);
             block_cnt = inp;
@@ -118,11 +145,12 @@ static int xmodem_receive(void) {
                 }
                 block_exp++;
             }
-        } else if(inp!=0)  {
-            /* Unexpected character - abort */
+        } else if(inp!=0 && !disp)  {
+            /* Unexpected character - assume user input and abort */
             return -1;
         }
-        if(disp) fputc('.',stderr);        
+        /* Progress indicator if STDIN is not used */
+        if(disp) fputc(outt,stderr);
     }
 
 }
