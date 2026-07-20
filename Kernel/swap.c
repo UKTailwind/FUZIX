@@ -123,19 +123,19 @@ static ptptr swapvictim(ptptr p, int notself)
 	do {
 		if (c->p_page && c != udata.u_ptab) {	/* No point swapping someone in swap! */
 			/* We swapped it in but have not run it yet. Avoid thrashing */
-			if (c->p_flags & PFL_SWAPIN)
-				continue;
-			/* Find the last entry before us */
-			if (c->p_status == P_READY)
-				r = c;
-			if (c->p_status > P_READY
-			    && c->p_status <= P_FORKING) {
-				/* relative position in order of waits, bigger is longer, can wrap but
-				   shouldn't really matter to us much if it does */
-				s = (waitno - c->p_waitno);
-				if (s >= sc) {
-					sc = s;
-					f = c;
+			if (!(c->p_flags & PFL_SWAPIN)) {
+				/* Find the last entry before us */
+				if (c->p_status == P_READY)
+					r = c;
+				if (c->p_status > P_READY
+				    && c->p_status <= P_FORKING) {
+					/* relative position in order of waits, bigger is longer, can wrap but
+					   shouldn't really matter to us much if it does */
+					s = (waitno - c->p_waitno);
+					if (s >= sc) {
+						sc = s;
+						f = c;
+					}
 				}
 			}
 		}
