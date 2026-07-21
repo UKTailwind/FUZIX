@@ -143,14 +143,14 @@ static int xmodem_send(void) {
     uint_fast8_t nak_cnt = 0;
     uint_fast8_t last_ack = 0;
     int bytecnt;
+    ssize_t n;
 
     /* Read 128 bytes into send buffer */
     bytecnt = fill_buffer();
 
-    //read(ttyfd, &inp, 1);
-    
     while(1) {
-        read(ttyfd, &inp, 1);
+        n = read(ttyfd, &inp, 1);
+        if(n != 1) return -1;
         if(inp == NAK) {
             /* Resend block*/
             xmodem_send_block(block_cnt);
@@ -163,25 +163,24 @@ static int xmodem_send(void) {
                 return -1;
             }
         } else if(inp == ACK) {
-            /* Load next block */
-            bytecnt = fill_buffer();
-            block_cnt++;
+            nak_cnt=0;
+            /* Transfer finished */
             if(last_ack) {
                 if(disp) fputc('\n', stderr);
                 return 0;
             }
-            if(bytecnt < 128) {
-                if(bytecnt > 0) {
-                    /* Last block */
-                    xmodem_send_block(block_cnt);
-                } else {
-                    /* End of transmission */
-                    outp = EOT;
-                    write(ttyfd, &outp, 1);
-                    last_ack = 1;
-                }
-            }
-            xmodem_send_block(block_cnt);
+            
+            /* Load next block */
+            bytecnt = fill_buffer();
+            block_cnt++;
+
+            if(bytecnt == 0) {
+                /* End of transmission */
+                outp = EOT;
+                write(ttyfd, &outp, 1);
+                last_ack = 1;
+            } else 
+                xmodem_send_block(block_cnt);
         } else if(inp!=0 && !disp) {
             /* Unexpected character - assume user input and abort */
             return -1;
