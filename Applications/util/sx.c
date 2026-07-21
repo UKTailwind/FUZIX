@@ -79,7 +79,6 @@ static speed_t speed[] = {
 
 static void term_raw(int fd)  
 {
-    tcgetattr(fd, &termsave);
     memcpy(&termcur, &termsave, sizeof(struct termios));
     cfmakeraw(&termcur);                                                
     termcur.c_cc[VMIN] = 0;
@@ -262,10 +261,11 @@ int main(int argc, char *argv[])
     if(ttyfd == STDIN_FILENO)
         fputs("Press any key to cancel\n",stderr);
     
-    term_raw(ttyfd);
+    
+    tcgetattr(ttyfd, &termsave);
     if(speedval > 0) {
-        if(cfsetospeed(&termcur, (speed_t)speedval) < 0 ||
-           tcsetattr(ttyfd, TCSAFLUSH, &termcur) < 0) {
+        if(cfsetospeed(&termsave, (speed_t)speedval) < 0 ||
+           tcsetattr(ttyfd, TCSAFLUSH, &termsave) < 0) {
             
             restore(ttyfd);
             perror("baudrate");
@@ -273,6 +273,8 @@ int main(int argc, char *argv[])
         }
     }
  
+    term_raw(ttyfd);
+    
     ret = xmodem_send();
     fclose(send_fp);
     restore(ttyfd);
