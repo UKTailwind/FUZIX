@@ -2,7 +2,6 @@ include $(FUZIX_ROOT)/Target/rules.$(USERCPU)
 
 SRCSNS = \
 	basename.c \
-	baudrate.c \
 	border.c \
 	cat.c \
 	chgrp.c \
