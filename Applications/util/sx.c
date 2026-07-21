@@ -96,7 +96,7 @@ static void restore(int fd)
     }
 }
 
-static void xmodem_send_bock(uint_fast8_t block_cnt) 
+static void xmodem_send_block(uint_fast8_t block_cnt) 
 {
     uint_fast8_t i;
     uint_fast8_t checksum;
@@ -123,42 +123,52 @@ static void xmodem_send_bock(uint_fast8_t block_cnt)
     write(ttyfd, &checksum, 1);
 }
 
+static int fill_buffer(void) {
+    int bytecnt;
+    uint_fast8_t i;
+
+    bytecnt = fread(&xmodem_buffer, sizeof(uint8_t), 128, send_fp);
+    /* If bytecnt < 128, pad with CP/M EOFs */
+    if(bytecnt < 128) {
+        for(i=bytecnt; i<128; i++)
+            xmodem_buffer[i] = CPMEOF;
+    }
+    return bytecnt;
+}
+
 static int xmodem_send(void) {
     uint_fast8_t block_cnt = 1;
     uint_fast8_t pos = 0;
     uint_fast8_t inp;
     uint_fast8_t outp;
     uint_fast8_t nak_cnt = 0;
-    uint_fast8_t bytecnt;
-    uint_fast8_t i; 
+    int bytecnt;
 
     // Read 128 bytes into send bufferi
-    // TODO - handle case with files < 128 bytes
-    fread(&xmodem_buffer, sizeof(uint8_t), 128, send_fp);
+    bytecnt = fill_buffer();
 
     while(1) {
-        read(tty_fd, &inp, 1);
+        read(ttyfd, &inp, 1);
         if(inp == NAK) {
             /* Resend block*/
             xmodem_send_block(block_cnt);
             nak_cnt++;
             if(nak_cnt == 11) {
                 /* Too many NAKs */
-                if(disp) fputs('\n', stderr);
+                outp = CAN;
+                write(ttyfd, &outp, 1);
+                if(disp) fputc('\n', stderr);
                 return -1;
             }
         }
         if(inp == ACK) {
             /* Load next block */
-            bytecnt = fread(&xmodem_buffer, sizeof(uint8_t), 128, send_fp);
+            bytecnt = fill_buffer();
             if(bytecnt < 128) {
-                /* Last block - pad with CP/M EOFs if needed*/
-                if(bytecnt > 0) {
-                    for(i=bytecnt; i<128; i++)
-                        xmodem_buffer[i] = CPMEOF;
-                    block_cnt++;
-                    xmodem_send(block_cnt);
-                }
+                /* Last block */
+                if(bytecnt > 0) xmodem_send_block(block_cnt);
+                outp = EOT;
+                write(ttyfd, &outp, 1);
                 return 0;
             }
             block_cnt++;
@@ -181,8 +191,8 @@ static int parsespeed(char *str, speed_t *s) {
     
 static void usage(void)
 {
-    fputs("rx - receive a file using X-modem\n", stderr);
-    fputs("Usage: rx [-t tty] [-b baudrate] [-f] filename\n", stderr);
+    fputs("sx - send a file using X-modem\n", stderr);
+    fputs("Usage: rx [-t tty] [-b baudrate] filename\n", stderr);
 }
 
 
@@ -195,10 +205,9 @@ int main(int argc, char *argv[])
     int flags;
     int fd;
     uint_fast8_t ext_tty=0;
-    uint_fast8_t overwrite=0;
     speed_t speedval = 0;
 
-    while((opt = getopt(argc, argv, "t:b:f")) != -1) {
+    while((opt = getopt(argc, argv, "t:b:")) != -1) {
         switch(opt) {
             case 't':
                 /* Use specified TTY instead of STDIN */
@@ -211,10 +220,6 @@ int main(int argc, char *argv[])
                     fprintf(stderr, "Invalid baudrate: %s\n", optarg);
                     return 1;
                 }
-                break;
-            case 'f':
-                /* Force overwrite of existing file */
-                overwrite = 1;
                 break;
             default:
                 break;
@@ -246,23 +251,14 @@ int main(int argc, char *argv[])
         disp = 1;
     } 
 
-    /* Open file to receive */
-    flags = O_WRONLY | O_CREAT;
-    
-    if(overwrite)
-        flags |=O_TRUNC;
-    else
-        flags |=O_EXCL;
-
-    fd = open(filename, flags, 0644);
-    receive_fp = fdopen(fd, "wb");
-    if(!receive_fp) {
+    send_fp = fopen(filename, "rb"); 
+    if(!send_fp) {
         perror(filename);
         close(fd);
         return 1;
     }
     
-    fputs("Waiting for sender to initiate X-modem transfer\n",stderr);
+    fputs("Waiting for reveiver\n",stderr);
     if(ttyfd == STDIN_FILENO)
         fputs("Press any key to cancel\n",stderr);
     
@@ -277,8 +273,8 @@ int main(int argc, char *argv[])
         }
     }
  
-    ret = xmodem_receive();
-    fclose(receive_fp);
+    ret = xmodem_send();
+    fclose(send_fp);
     restore(ttyfd);
     if(ret<0) fputs("Transfer cancelled\n", stderr);
     else fputs("Transfer complete\n",stderr);
