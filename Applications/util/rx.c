@@ -268,7 +268,7 @@ int main(int argc, char *argv[])
         }
     }
     term_raw(ttyfd);
-
+    tcflush(ttyfd, TCIOFLUSH);
     ret = xmodem_receive();
     fclose(receive_fp);
     restore(ttyfd);
