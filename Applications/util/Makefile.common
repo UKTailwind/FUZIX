@@ -27,11 +27,9 @@ SRCSNS = \
 	reboot.c \
 	rm.c \
 	rmdir.c \
-	rx.c \
 	substroot.c \
 	sum.c \
 	sync.c \
-	sx.c \
 	tee.c \
 	telinit.c \
 	touch.c \
@@ -86,6 +84,7 @@ SRCS  = \
 	passwd.c \
 	ps.c \
 	remount.c \
+	rx.c \
 	sed.c \
 	seq.c \
 	setboot.c \
@@ -98,6 +97,7 @@ SRCS  = \
 	stty.c \
 	su.c \
 	swapon.c \
+	sx.c \
 	tar.c \
 	tail.c \
 	termcap.c \
