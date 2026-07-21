@@ -170,6 +170,10 @@ static void usage(void)
 {
     fputs("rx - receive a file using X-modem\n", stderr);
     fputs("Usage: rx [-t tty] [-b baudrate] [-f] filename\n", stderr);
+    fputs("-t\tUse the specified TTY device instead of STDIN.\n", stderr);
+    fputs("-b\tSet the TTY baudrate. The baudrate is not reset on exit\n",
+            stderr);
+    fputs("-f\tForce overwrite if received file exists\n", stderr);
 }
 
 

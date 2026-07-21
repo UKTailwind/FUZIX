@@ -143,7 +143,7 @@ static int xmodem_send(void) {
     uint_fast8_t nak_cnt = 0;
     int bytecnt;
 
-    // Read 128 bytes into send bufferi
+    /* Read 128 bytes into send buffer */
     bytecnt = fill_buffer();
 
     while(1) {
@@ -159,8 +159,7 @@ static int xmodem_send(void) {
                 if(disp) fputc('\n', stderr);
                 return -1;
             }
-        }
-        if(inp == ACK) {
+        } else if(inp == ACK) {
             /* Load next block */
             bytecnt = fill_buffer();
             if(bytecnt < 128) {
@@ -168,10 +167,14 @@ static int xmodem_send(void) {
                 if(bytecnt > 0) xmodem_send_block(block_cnt);
                 outp = EOT;
                 write(ttyfd, &outp, 1);
+                if(disp) fputc('\n', stderr);
                 return 0;
             }
             block_cnt++;
             xmodem_send_block(block_cnt);
+        } else if(inp!=0 && !disp) {
+            /* Unexpected character - assume user input and abort */
+            return -1;
         }
     }
 }
@@ -191,7 +194,10 @@ static int parsespeed(char *str, speed_t *s) {
 static void usage(void)
 {
     fputs("sx - send a file using X-modem\n", stderr);
-    fputs("Usage: rx [-t tty] [-b baudrate] filename\n", stderr);
+    fputs("Usage: sx [-t tty] [-b baudrate] filename\n", stderr);
+    fputs("-t\tUse the specified TTY device instead of STDIN.\n", stderr);
+    fputs("-b\tSet the TTY baudrate. The baudrate is not reset on exit.\n",
+            stderr);
 }
 
 
