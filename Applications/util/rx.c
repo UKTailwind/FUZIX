@@ -142,8 +142,8 @@ static int xmodem_receive(void) {
                 if(checksum == inp) {
                     outp = ACK;
                     fwrite(&xmodem_buffer, 1, 128, receive_fp);
+                    block_exp++;
                 }
-                block_exp++;
             }
         } else if(inp!=0 && !disp)  {
             /* Unexpected character - assume user input and abort */
