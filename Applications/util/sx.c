@@ -81,8 +81,8 @@ static void term_raw(int fd)
 {
     memcpy(&termcur, &termsave, sizeof(struct termios));
     cfmakeraw(&termcur);                                                
-    termcur.c_cc[VMIN] = 0;
-    termcur.c_cc[VTIME] = 10;
+    termcur.c_cc[VMIN] = 1;
+    termcur.c_cc[VTIME] = 0;
     tcsetattr(fd, TCSAFLUSH, &termcur);                                 
 }                                                                             
 
@@ -141,11 +141,14 @@ static int xmodem_send(void) {
     uint_fast8_t inp;
     uint_fast8_t outp;
     uint_fast8_t nak_cnt = 0;
+    uint_fast8_t last_ack = 0;
     int bytecnt;
 
     /* Read 128 bytes into send buffer */
     bytecnt = fill_buffer();
 
+    //read(ttyfd, &inp, 1);
+    
     while(1) {
         read(ttyfd, &inp, 1);
         if(inp == NAK) {
@@ -162,15 +165,22 @@ static int xmodem_send(void) {
         } else if(inp == ACK) {
             /* Load next block */
             bytecnt = fill_buffer();
-            if(bytecnt < 128) {
-                /* Last block */
-                if(bytecnt > 0) xmodem_send_block(block_cnt);
-                outp = EOT;
-                write(ttyfd, &outp, 1);
+            block_cnt++;
+            if(last_ack) {
                 if(disp) fputc('\n', stderr);
                 return 0;
             }
-            block_cnt++;
+            if(bytecnt < 128) {
+                if(bytecnt > 0) {
+                    /* Last block */
+                    xmodem_send_block(block_cnt);
+                } else {
+                    /* End of transmission */
+                    outp = EOT;
+                    write(ttyfd, &outp, 1);
+                    last_ack = 1;
+                }
+            }
             xmodem_send_block(block_cnt);
         } else if(inp!=0 && !disp) {
             /* Unexpected character - assume user input and abort */
@@ -280,7 +290,7 @@ int main(int argc, char *argv[])
     }
  
     term_raw(ttyfd);
-    
+    tcflush(ttyfd, TCIOFLUSH); 
     ret = xmodem_send();
     fclose(send_fp);
     restore(ttyfd);
