@@ -8,7 +8,7 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2, or (at your option)
  * any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -27,10 +27,10 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#define SOH         0x01 
+#define SOH         0x01
 #define EOT         0x04
-#define ACK         0x06 
-#define NAK         0x15 
+#define ACK         0x06
+#define NAK         0x15
 #define CAN         0x18
 #define CPMEOF      0x1A
 
@@ -58,7 +58,7 @@ static int baud[] = {
     57600,  /* B57600 */
     115200, /* B115200 */
 };
-  
+
 static speed_t speed[] = {
     B50,
     B75,
@@ -77,25 +77,24 @@ static speed_t speed[] = {
     B115200,
 };
 
-static void term_raw(int fd)  
+static void term_raw(int fd)
 {
     memcpy(&termcur, &termsave, sizeof(struct termios));
-    cfmakeraw(&termcur);                                                
+    cfmakeraw(&termcur);
     termcur.c_cc[VMIN] = 1;
     termcur.c_cc[VTIME] = 0;
-    tcsetattr(fd, TCSAFLUSH, &termcur);                                 
-}                                                                             
+    tcsetattr(fd, TCSAFLUSH, &termcur);
+}
 
 static void restore(int fd)
 {
-    tcsetattr(fd, TCSAFLUSH, &termsave);                                  
     if (fd >= 0) {
         tcsetattr(fd, TCSAFLUSH, &termsave);
         close(fd);
     }
 }
 
-static void xmodem_send_block(uint_fast8_t block_cnt) 
+static void xmodem_send_block(uint_fast8_t block_cnt)
 {
     uint_fast8_t i;
     uint_fast8_t checksum;
@@ -115,7 +114,7 @@ static void xmodem_send_block(uint_fast8_t block_cnt)
     for(i=0; i<128; i++) {
         data = xmodem_buffer[i];
         checksum += data;
-        write(ttyfd, &data, 1); 
+        write(ttyfd, &data, 1);
     }
 
     /* Send checksum */
@@ -169,7 +168,7 @@ static int xmodem_send(void) {
                 if(disp) fputc('\n', stderr);
                 return 0;
             }
-            
+
             /* Load next block */
             bytecnt = fill_buffer();
             block_cnt++;
@@ -179,7 +178,7 @@ static int xmodem_send(void) {
                 outp = EOT;
                 write(ttyfd, &outp, 1);
                 last_ack = 1;
-            } else 
+            } else
                 xmodem_send_block(block_cnt);
         } else if(inp!=0 && !disp) {
             /* Unexpected character - assume user input and abort */
@@ -198,8 +197,8 @@ static int parsespeed(char *str, speed_t *s) {
         }
     }
     return 0;
-}   
-    
+}
+
 static void usage(void)
 {
     fputs("sx - send a file using X-modem\n", stderr);
@@ -210,7 +209,7 @@ static void usage(void)
 }
 
 
-int main(int argc, char *argv[]) 
+int main(int argc, char *argv[])
 {
     const char *filename;
     const char *ext_tty_filename;
@@ -218,14 +217,12 @@ int main(int argc, char *argv[])
     int opt;
     int flags;
     int fd;
-    uint_fast8_t ext_tty=0;
     speed_t speedval = 0;
 
     while((opt = getopt(argc, argv, "t:b:")) != -1) {
         switch(opt) {
             case 't':
                 /* Use specified TTY instead of STDIN */
-                ext_tty = 1;
                 ext_tty_filename = optarg;
                 break;
             case 'b':
@@ -246,15 +243,15 @@ int main(int argc, char *argv[])
         usage();
         return 1;
     }
-        
+
     /* Setup TTY */
-    if (!ext_tty) {
+    if (!ext_tty_filename) {
         ttyfd = STDIN_FILENO;
         disp = 0;
         if (!isatty(ttyfd)) {
             fprintf(stderr, "stdin is not a terminal\n");
             return 1;
-        } 
+        }
     } else {
         /* open specified port */
         ttyfd = open(ext_tty_filename, O_RDWR | O_NOCTTY);
@@ -263,33 +260,33 @@ int main(int argc, char *argv[])
             return 1;
         }
         disp = 1;
-    } 
+    }
 
-    send_fp = fopen(filename, "rb"); 
+    send_fp = fopen(filename, "rb");
     if(!send_fp) {
         perror(filename);
         close(fd);
         return 1;
     }
-    
+
     fputs("Waiting for reveiver\n",stderr);
     if(ttyfd == STDIN_FILENO)
         fputs("Press any key to cancel\n",stderr);
-    
-    
+
+
     tcgetattr(ttyfd, &termsave);
     if(speedval > 0) {
         if(cfsetospeed(&termsave, (speed_t)speedval) < 0 ||
            tcsetattr(ttyfd, TCSAFLUSH, &termsave) < 0) {
-            
+
             restore(ttyfd);
             perror("baudrate");
             exit(1);
         }
     }
- 
+
     term_raw(ttyfd);
-    tcflush(ttyfd, TCIOFLUSH); 
+    tcflush(ttyfd, TCIOFLUSH);
     ret = xmodem_send();
     fclose(send_fp);
     restore(ttyfd);
