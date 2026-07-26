@@ -251,40 +251,6 @@ static void __not_in_flash_func(disp_core1_entry)(void)
     disp_fill_loop();
 }
 
-/* --- Test pattern -------------------------------------------------------- */
-static void disp_test_pattern(void)
-{
-    /* Bitmap: four horizontal bands proving pixel-level detail */
-    for (int y = 0; y < DISP_HEIGHT; y++) {
-        uint8_t *row = &disp_fb[y * DISP_STRIDE];
-        uint8_t v;
-        if (y < 120)
-            v = 0xAA;                      /* 1px vertical stripes */
-        else if (y < 240)
-            v = (y & 1) ? 0xFF : 0x00;     /* 1px horizontal lines */
-        else if (y < 360)
-            v = ((y >> 3) & 1) ? 0x0F : 0xF0; /* 4px checkerboard */
-        else
-            v = 0xFF;                      /* solid foreground */
-        memset(row, v, DISP_STRIDE);
-    }
-
-    /* Cell colours: rainbow foreground cycling by column+row so every
-     * band shows the tile machinery; background dark, with a soft blue
-     * wash every 8th row to prove bg works too. */
-    static const uint8_t rainbow[8] = {
-        0xE0, /* red */    0xF0, /* orange */ 0xFC, /* yellow */
-        0x1C, /* green */  0x1F, /* cyan */   0x03, /* blue */
-        0xE3, /* magenta */ 0xFF /* white */
-    };
-    for (int r = 0; r < DISP_ROWS; r++) {
-        for (int col = 0; col < DISP_COLS; col++) {
-            disp_tile_fg[r * DISP_COLS + col] = rainbow[(col + r) & 7];
-            disp_tile_bg[r * DISP_COLS + col] = ((r & 7) == 4) ? 0x02 : 0x00;
-        }
-    }
-}
-
 /* --- Public -------------------------------------------------------------- */
 bool display_in_blanking(void)
 {
@@ -300,8 +266,6 @@ void display_init(void)
 {
     dmach_ping = dma_claim_unused_channel(true);
     dmach_pong = dma_claim_unused_channel(true);
-
-    disp_test_pattern();
 
     v_scanline = 2;
     dma_pong = false;

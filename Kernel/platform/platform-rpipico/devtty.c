@@ -24,9 +24,17 @@ void no_setup(uint_fast8_t minor, uint_fast8_t devn, uint_fast8_t flags)
     used(flags);
 }
 
+#ifdef CONFIG_PC3_DISPLAY
+/* Mirror the console uart onto the video display (console.c) */
+extern void console_putc(uint8_t devn, uint8_t c);
+#define UART_PUTC console_putc
+#else
+#define UART_PUTC rawuart_putc
+#endif
+
 struct ttydriver ttydrivers[2] =
     {
-        {rawuart_putc, rawuart_ready, rawuart_sleeping, rawuart_getc, rawuart_setup},
+        {UART_PUTC, rawuart_ready, rawuart_sleeping, rawuart_getc, rawuart_setup},
         {usbconsole_putc, usbconsole_ready, usbconsole_sleeping, usbconsole_getc, no_setup},
 };
 
@@ -54,6 +62,12 @@ void devtty_early_init(void)
 {
     rawuart_early_init();
     core1_init();
+#ifdef CONFIG_PC3_DISPLAY
+    {
+        extern void console_init(void);
+        console_init();
+    }
+#endif
     devtty_init();
 }
 
