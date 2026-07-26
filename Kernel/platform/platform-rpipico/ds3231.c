@@ -95,6 +95,14 @@ int plt_rtc_read(void)
     if (udata.u_count < len)
         len = udata.u_count;
 
+    /* While the oscillator-stop flag is set the registers are stale:
+     * fail the read so setdate falls back to asking, rather than
+     * silently setting a wrong clock. setdate -w clears the flag. */
+    if (ds3231_read_regs(REG_STATUS, r, 1) || (r[0] & 0x80)) {
+        udata.u_error = EIO;
+        return -1;
+    }
+
     if (ds3231_read_regs(REG_TIME, r, 7)) {
         udata.u_error = EIO;
         return -1;
