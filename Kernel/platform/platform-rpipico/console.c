@@ -51,10 +51,14 @@ static const uint8_t concolours[16] = {
 };
 
 /* Terminal state */
-static int8_t cx, cy;
+/* 16-bit: CSI parameters can be huge (BBC BASIC probes the width with
+ * CSI 999 G-style moves) and the clamping must happen before anything
+ * narrows - an int8_t here wrapped 998 to -26, slipped past the >= 80
+ * clamp, and made the DSR reply unparseable garbage. */
+static int16_t cx, cy;
 static uint8_t con_ink = 7, con_paper = 0;
 static uint8_t con_bright, con_inverse;
-static int8_t saved_x, saved_y;
+static int16_t saved_x, saved_y;
 static uint8_t saved_ink, saved_paper, saved_bright, saved_inverse;
 static uint8_t cursorhide;
 
@@ -527,9 +531,16 @@ static void con_output(uint8_t c)
  * corrupts progressively.  Everything else is forwarded intact. */
 void console_putc(uint8_t devn, uint8_t c)
 {
+    /* Holdback state: shared between process context and the tick IRQ
+     * (tty echo), so every touch happens under di() and the flush
+     * works on a snapshot.  An unprotected version of this let a
+     * concurrent nheld++ step past the buffer-full test and scribble
+     * over the console state - a silent output wedge. */
     static uint8_t held[24];
-    static uint8_t nheld;
-    uint8_t i;
+    static volatile uint8_t nheld;
+    uint8_t copy[24];
+    uint8_t i, n;
+    irqflags_t irq;
 
     if (devn != 1) {
         rawuart_putc(devn, c);
@@ -538,26 +549,38 @@ void console_putc(uint8_t devn, uint8_t c)
 
     con_output(c);      /* the screen sees every byte, in order */
 
-    if (nheld) {
-        held[nheld++] = c;
-        if ((nheld == 2 && c != '[') ||
-            (nheld > 2 && c >= 0x40 && c <= 0x7E) ||
-            (nheld == sizeof held)) {
-            /* sequence complete, non-CSI, or implausibly long */
-            if (!(nheld > 2 && c == 'n')) {     /* DSR query: drop */
-                for (i = 0; i < nheld; i++)
-                    rawuart_putc(1, held[i]);
-            }
-            nheld = 0;
+    irq = di();
+    if (nheld == 0) {
+        if (c == 0x1B) {
+            held[0] = 0x1B;
+            nheld = 1;
+            irqrestore(irq);
+            return;
         }
+        irqrestore(irq);
+        rawuart_putc(1, c);
         return;
     }
-    if (c == 0x1B) {
-        held[0] = 0x1B;
-        nheld = 1;
+
+    n = nheld;
+    held[n++] = c;
+    nheld = n;
+    if ((n == 2 && c != '[') ||
+        (n > 2 && c >= 0x40 && c <= 0x7E) ||
+        (n >= sizeof held)) {
+        /* sequence complete, non-CSI, or implausibly long */
+        nheld = 0;
+        if (n > 2 && c == 'n') {        /* DSR query: drop */
+            irqrestore(irq);
+            return;
+        }
+        memcpy(copy, (void *)held, n);  /* flush from a snapshot */
+        irqrestore(irq);
+        for (i = 0; i < n; i++)
+            rawuart_putc(1, copy[i]);
         return;
     }
-    rawuart_putc(1, c);
+    irqrestore(irq);
 }
 
 void console_init(void)
