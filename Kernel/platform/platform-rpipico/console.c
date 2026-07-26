@@ -32,6 +32,10 @@
 #include "rawuart.h"
 #include "console_font.h"
 
+#ifdef CONFIG_PC3_USB_KBD
+extern void kbd_push(uint8_t c);    /* usbkbd.c input ring */
+#endif
+
 #ifdef CONFIG_PC3_DISPLAY
 
 #define FONT_FIRST 32
@@ -78,7 +82,7 @@ static int cursor_px = -1, cursor_py;
 static void cell_colours(uint8_t *fg, uint8_t *bg)
 {
     uint8_t f = concolours[(con_ink & 7) | (con_bright ? 8 : 0)];
-    uint8_t p = concolours[con_paper & 7];
+    uint8_t p = concolours[con_paper & 15]; /* 8-15: bright backgrounds */
     if (con_inverse) {
         *fg = p;
         *bg = f;
@@ -226,6 +230,8 @@ static void do_sgr(void)
             con_ink = v - 90;
             con_bright = 1;
         }
+        else if (v >= 100 && v <= 107)
+            con_paper = v - 100 + 8;    /* bright background */
         /* 4/24 underline, 5, etc: accepted, not rendered */
     }
 }
@@ -335,8 +341,33 @@ static void do_csi(uint8_t c)
         cx = saved_x;
         cy = saved_y;
         break;
+#ifdef CONFIG_PC3_USB_KBD
+    case 'n':
+        /* Device status report: answer on the merged keyboard/uart
+         * input ring so cursor queries work standalone (a serial
+         * terminal may answer too; duplicates are benign). */
+        if (parm[0] == 6) {
+            uint8_t row = cy + 1, col = cx + 1;
+            kbd_push(0x1B);
+            kbd_push('[');
+            if (row >= 10)
+                kbd_push('0' + row / 10);
+            kbd_push('0' + row % 10);
+            kbd_push(';');
+            if (col >= 10)
+                kbd_push('0' + col / 10);
+            kbd_push('0' + col % 10);
+            kbd_push('R');
+        } else if (parm[0] == 5) {
+            kbd_push(0x1B);
+            kbd_push('[');
+            kbd_push('0');
+            kbd_push('n');
+        }
+        break;
+#endif
     default:
-        /* r, L, M, S, T, t, n, h, l, ... : accepted, ignored */
+        /* r, L, M, S, T, t, h, l, ... : accepted, ignored */
         break;
     }
 }

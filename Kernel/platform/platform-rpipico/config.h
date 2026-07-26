@@ -149,7 +149,10 @@
 extern uint8_t progbase[USERMEM];
 #define udata (*(struct u_data*)progbase)
 
-#define USERSTACK (4*1024) /* 4kB */
+/* 8K: the C stack is a fixed window between BSS and heap; BBC BASIC's
+ * recursive expression evaluator needs the headroom (it guards its own
+ * depth against this figure minus a margin). */
+#define USERSTACK (8*1024)
 
 #define CONFIG_CUSTOM_VALADDR
 #define PROGBASE ((uaddr_t)&progbase[0])

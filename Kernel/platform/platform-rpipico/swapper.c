@@ -159,6 +159,12 @@ int pagemap_realloc(struct exec *hdr, usize_t size)
     uaddr_t oldblocks = get_proc_size_blocks(p);
     int blocks = (int)alignup(size + UDATA_SIZE, BLOCKSIZE) / BLOCKSIZE;
     int slot = get_slot(p);
+
+    /* The whole process must fit its fixed-size swap slot: growing past
+     * PROGSIZE would make swapout overwrite the neighbouring slot. */
+    if (blocks * BLOCKSIZE > PROGSIZE + UDATA_SIZE)
+        return ENOMEM;
+
     #ifdef DEBUG
         kprintf("realloc %d from %d to %d blocks\n", get_slot(udata.u_ptab), oldblocks, blocks);
     #endif
@@ -377,13 +383,11 @@ arg_t brk_extend(uaddr_t addr)
     if (addr < PROGBASE)
         return EINVAL;
     if (addr >= brk_limit()) {
-        /* Claim more memory for this process. */
+        /* Claim more memory for this process.  Fail quietly: ENOMEM is
+         * a normal answer (BBC BASIC probes for its workspace this way)
+         * and the process will report it if it matters. */
         if (pagemap_realloc(NULL, addr - PROGBASE))
-		{
-			kprintf("%d: out of memory by %d\n", udata.u_ptab->p_pid,
-				addr - brk_limit());
             return ENOMEM;
-		}
         return 0;
     }
     return 0;
