@@ -370,6 +370,28 @@ static int kbchk (void)
 	return (inpqr != inpqw) ;
 }
 
+#ifdef FUZIX
+// Block for at most one decisecond waiting for input.  VTIME=1 makes
+// the read return the moment a byte arrives (the tty wakes us) or
+// after ~0.1s if none does: instant typing response without a busy
+// spin.  The kernel cannot sleep for less than a decisecond, so this
+// replaces the usleep() calls in the wait loops.
+static void kbwait1 (void)
+{
+	struct termios t ;
+	unsigned char ch ;
+	if (kbchk ())
+		return ;
+	tcgetattr (STDIN_FILENO, &t) ;
+	t.c_cc[VTIME] = 1 ;
+	tcsetattr (STDIN_FILENO, TCSANOW, &t) ;
+	if (read (STDIN_FILENO, &ch, 1) == 1)
+		putinp (ch) ;
+	t.c_cc[VTIME] = 0 ;
+	tcsetattr (STDIN_FILENO, TCSANOW, &t) ;
+}
+#endif
+
 static unsigned char kbget (void)
 {
 	unsigned char ch = 0 ;
@@ -382,7 +404,11 @@ static int kwait (unsigned int timeout)
 	int ready ;
 	timeout += GetTicks () ;
 	while (!(ready = kbchk ()) && (GetTicks() < timeout))
+#ifdef FUZIX
+		kbwait1 () ;
+#else
 		usleep (1) ;
+#endif
 	return ready ;
 }
 
@@ -761,7 +787,11 @@ int oskey (int wait)
 				return (int) key ;
 			if ((unsigned int)(GetTicks () - start) >= wait * 10)
 				return -1 ;
+#ifdef FUZIX
+			kbwait1 () ;
+#else
 			usleep (5000) ;
+#endif
 		    }
 	    }
 
@@ -788,10 +818,12 @@ unsigned char osrdch (void)
 
 	while (!rdkey (&key))
 	{
-		usleep (5000) ;
 #ifdef FUZIX
+		kbwait1 () ;
 		stdin_handler (NULL, NULL) ;
 		polltimer () ;
+#else
+		usleep (5000) ;
 #endif
 		trap () ;
 	}
@@ -1141,9 +1173,12 @@ void oswait (int cs)
 #ifdef FUZIX
 		stdin_handler (NULL, NULL) ;
 		polltimer () ;
-#endif
+		trap () ;
+		kbwait1 () ;
+#else
 		trap () ;
 		usleep (1000) ;
+#endif
 	    }
 	while ((unsigned int)(GetTicks () - start) < cs) ;
 }

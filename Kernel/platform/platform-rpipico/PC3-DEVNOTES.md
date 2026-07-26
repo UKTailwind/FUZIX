@@ -84,6 +84,15 @@ live document.
 11. Shell quoting for commit messages: apostrophes break the wsl bash -c
    chains — write /tmp/cmsg with a heredoc and `git commit -F`.
    And don't chain `&& git commit` after a build that can fail.
+12. Kernel sleeps are DECISECONDS: the timer wheel (p_timeout, _pause,
+   the monotonic counter behind CLOCK_MONOTONIC) runs at 10Hz on every
+   Fuzix platform, whatever TICKSPERSEC is.  libc usleep() used to
+   round sub-100ms periods to _pause(0) = sleep FOREVER (bbcbasic hung
+   at startup on its first cursor query; invaders/2048 were broken the
+   same way), and clock_gettime(MONOTONIC) had tv_nsec off by 1000x
+   (fixed).  There is NO sub-decisecond sleep: for responsive input,
+   block in read() with VMIN=0/VTIME=1 (the tty wakes you the moment a
+   byte arrives) - see kbwait1() in bbccon.c.
 
 ## BBC BASIC (built; awaiting hardware test)
 
