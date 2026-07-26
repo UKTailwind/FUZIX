@@ -82,6 +82,11 @@ void fatal_exception_handler(struct extended_exception_frame* eh)
     kprintf("UDATA=%p KSTACK=%p-%p\n", &udata, &udata+1, ((uint32_t)&udata) + UDATA_SIZE);
     kprintf("user mode relative: lr=%p pc=%p isp=%p brk=%p\n",
         eh->lr-PROGLOAD, eh->pc-PROGLOAD, udata.u_isp, udata.u_break);
+    /* Why: CFSR decodes usage/bus/mem faults, HFSR says if escalated,
+     * MMFAR/BFAR give the faulting address when valid */
+    kprintf("CFSR=%p HFSR=%p MMFAR=%p BFAR=%p\n",
+        *(volatile uint32_t *)0xE000ED28, *(volatile uint32_t *)0xE000ED2C,
+        *(volatile uint32_t *)0xE000ED34, *(volatile uint32_t *)0xE000ED38);
     panic("fatal exception");
 }
 
