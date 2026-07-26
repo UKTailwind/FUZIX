@@ -18,3 +18,12 @@ package  levee-termcap
 if-file  levee-termcap
 
 f 0755 /bin/levee-termcap    levee-termcap
+
+
+# arm (and other flat ELF) builds produce a plain "levee" binary
+package  levee
+if-file  levee
+
+f 0755 /bin/levee            levee
+f 0644 /usr/man/man1/levee.1 levee.1
+l      /usr/man/man1/levee.1 /usr/man/man1/vi.1
