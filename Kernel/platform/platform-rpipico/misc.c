@@ -56,6 +56,14 @@ void preempt_init(void)
 void preempt_handler(void)
 {
     udata.u_insys = 1;
+#ifdef CONFIG_PC3_DISPLAY
+    {
+        /* Thread context on a fresh kernel stack: the safe place to pump
+         * the USB host stack when a spinning process has starved it */
+        extern void usbkbd_task(void);
+        usbkbd_task();
+    }
+#endif
     di();
     need_resched = 0;
     if (nready > 1 && runticks >= udata.u_ptab->p_priority) {

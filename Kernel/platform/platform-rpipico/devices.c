@@ -62,12 +62,22 @@ static void timer_tick_cb(unsigned alarm)
     /* Pre-empt / signal a running user process: pend PendSV, whose
        handler redirects user-mode PCs through the preempt trampoline
        (tricks.S). Without this a spinning process could neither be
-       rescheduled nor killed from the keyboard. */
-    if (!udata.u_insys && udata.u_ptab &&
-        (need_resched ||
-         (udata.u_ptab->p_sig[0].s_pending & ~udata.u_ptab->p_sig[0].s_held) ||
-         (udata.u_ptab->p_sig[1].s_pending & ~udata.u_ptab->p_sig[1].s_held))) {
-        scb_hw->icsr = 1u << 28; /* PENDSVSET */
+       rescheduled nor killed from the keyboard. The trampoline also
+       pumps the USB host stack when it has been starved by a spinning
+       process (usbkbd_starved) - never from interrupt context. */
+    {
+#ifdef CONFIG_PC3_DISPLAY
+        extern int usbkbd_starved(void);
+        int starved = usbkbd_starved();
+#else
+        int starved = 0;
+#endif
+        if (!udata.u_insys && udata.u_ptab &&
+            (starved || need_resched ||
+             (udata.u_ptab->p_sig[0].s_pending & ~udata.u_ptab->p_sig[0].s_held) ||
+             (udata.u_ptab->p_sig[1].s_pending & ~udata.u_ptab->p_sig[1].s_held))) {
+            scb_hw->icsr = 1u << 28; /* PENDSVSET */
+        }
     }
 
     if (hardware_alarm_set_target(0, next))

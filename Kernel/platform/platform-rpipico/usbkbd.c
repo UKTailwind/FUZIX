@@ -117,10 +117,13 @@ static volatile uint32_t last_pump_ms;
 static void usb_pump(void);
 
 /* Advance the report timers: called from the 200 Hz kernel tick (IRQ
- * context - plain counters only, as MMBasic's 1 ms timer does). If the
- * thread-context pump has been starved (a spinning process: no idle, no
- * tty sleep), pump from here so keystrokes - and thus ^C - still arrive.
- * OPT_OS_PICO gives TinyUSB IRQ-safe critical sections. */
+ * context - plain counters only, as MMBasic's 1 ms timer does). The
+ * pump itself NEVER runs in interrupt context: tuh_task's stack depth
+ * on top of a deep syscall overflows the ~1.2K kernel stack straight
+ * into udata. When the thread-context pump is starved (a spinning
+ * process: no idle, no tty sleep), the tick pends PendSV instead
+ * (devices.c) and the preempt trampoline - thread mode, empty kernel
+ * stack - pumps from preempt_handler. */
 void usbkbd_tick(void)
 {
     for (int i = 0; i < HID_NSLOTS; i++) {
@@ -128,10 +131,13 @@ void usbkbd_tick(void)
             hid_slots[i].report_timer += 1000 / TICKSPERSEC;
         }
     }
-    if (usbh_inited &&
-        (uint32_t)(time_us_64() / 1000) - last_pump_ms > 20) {
-        usb_pump();
-    }
+}
+
+/* Has the thread-context pump been starved? (tick-side PendSV trigger) */
+int usbkbd_starved(void)
+{
+    return usbh_inited &&
+        (uint32_t)(time_us_64() / 1000) - last_pump_ms > 20;
 }
 
 /* Push the LED bitmap to a keyboard's physical LEDs: 1-byte OUTPUT
