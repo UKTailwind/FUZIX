@@ -1,3 +1,10 @@
-all:
+# Stage 1 experiment: the compiler passes hosted on the ARM Fuzix
+# machine, generating Z80 code (no thumb backend exists yet). Proves
+# the passes fit and run in the 64K process; the thumb backend turns
+# this into a self-hosted native compiler.
+SRC_C1 = target-z80.c
+SRC_C2 = backend-z80.c
 
-clean:
+FLOAT = -DNO_FLOAT
+
+include Makefile.common

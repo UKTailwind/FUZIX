@@ -70,6 +70,11 @@ char *cpu = "8080";
 #define CPUINCPATH	"/usr/include/8085/"
 const char *cpudef = "__8085__";
 char *cpu = "8085";
+#elif defined(CPU_armm0)
+/* ARM host, currently generating Z80 code (no thumb backend yet) */
+#define CPUINCPATH	"/usr/include/z80/"
+const char *cpudef = "__z80__";
+char *cpu = "z80";
 #else
 #error "Unknown target"
 #endif
