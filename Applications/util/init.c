@@ -719,7 +719,7 @@ static int baudmatch(int fd, const char *p)
 	static struct termios ttmp;
 
 	if (p) {
-		for(i = 1; i < 15; i++) {
+		for(i = 1; i <= 15; i++) {
 			if (strcmp(p, *str++) == 0)
 				return i;
 		}
