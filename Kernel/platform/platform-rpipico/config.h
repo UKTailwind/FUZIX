@@ -70,7 +70,7 @@
  * crashes: with this off there is no TinyUSB activity at all (no init,
  * no pump), input is serial-only, and the PendSV preemption machinery
  * still runs - so spinner/kill tests over serial isolate the core. */
-/* #define CONFIG_PC3_USB_KBD */
+#define CONFIG_PC3_USB_KBD
 #endif
 
 #include "tusb_config.h"
