@@ -516,12 +516,48 @@ static void con_output(uint8_t c)
 
 /* --- glue ---------------------------------------------------------------- */
 
-/* Console tty: every byte to the uart and the screen */
+/* Console tty: every byte to the uart and the screen.
+ *
+ * Escape sequences are held back from the uart until their final byte
+ * so that cursor-position queries (CSI ... n) never reach the serial
+ * terminal: the screen engine answers those itself, and a second,
+ * stale answer from a terminal emulator lands in the program's input
+ * queue where it reads as junk keys and a spurious Escape - each
+ * query then consumes the previous stale reply and the session
+ * corrupts progressively.  Everything else is forwarded intact. */
 void console_putc(uint8_t devn, uint8_t c)
 {
-    rawuart_putc(devn, c);
-    if (devn == 1)
-        con_output(c);
+    static uint8_t held[24];
+    static uint8_t nheld;
+    uint8_t i;
+
+    if (devn != 1) {
+        rawuart_putc(devn, c);
+        return;
+    }
+
+    con_output(c);      /* the screen sees every byte, in order */
+
+    if (nheld) {
+        held[nheld++] = c;
+        if ((nheld == 2 && c != '[') ||
+            (nheld > 2 && c >= 0x40 && c <= 0x7E) ||
+            (nheld == sizeof held)) {
+            /* sequence complete, non-CSI, or implausibly long */
+            if (!(nheld > 2 && c == 'n')) {     /* DSR query: drop */
+                for (i = 0; i < nheld; i++)
+                    rawuart_putc(1, held[i]);
+            }
+            nheld = 0;
+        }
+        return;
+    }
+    if (c == 0x1B) {
+        held[0] = 0x1B;
+        nheld = 1;
+        return;
+    }
+    rawuart_putc(1, c);
 }
 
 void console_init(void)
