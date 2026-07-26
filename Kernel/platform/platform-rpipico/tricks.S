@@ -122,6 +122,15 @@ isr_pendsv:
     ldr r2, [sp, #7*4]          /* stacked xPSR */
     ldr r0, =dbg_redir_xpsr
     str r2, [r0]
+    /* If we interrupted a load/store-multiple mid-way, the stacked xPSR
+       carries ICI continuation state. Resuming "mid-LDM" at the
+       trampoline (not an LDM) is an INVSTATE hard fault. Clear ICI/IT
+       (bits 26:25 and 15:10): the interrupted instruction simply
+       restarts when we resume it - idempotent for LDM/STM, and exactly
+       what an ICI-less M0 does on every interrupted LDM. */
+    ldr r0, =0x0600FC00
+    bic r2, r0
+    str r2, [sp, #7*4]
     ldr r0, =dbg_redirs
     ldr r2, [r0]
     add r2, #1
