@@ -28,6 +28,15 @@
 #define DEV_UART_1_RTS_PIN 0
 #endif
 
+/* Which hardware uart instance each tty uart uses. The pins given above
+ * must be routable to that instance. */
+#ifndef DEV_UART_0_INSTANCE
+#define DEV_UART_0_INSTANCE 0
+#endif
+#ifndef DEV_UART_1_INSTANCE
+#define DEV_UART_1_INSTANCE 1
+#endif
+
 static uint clocks[] = {
     0,      /* B0 */
     50,     /* B50 */
@@ -57,11 +66,11 @@ static uart_inst_t * rawuart_init_one(int num, int tx, int rx, int cts, int rts)
     uart_set_fifo_enabled(uart, true);
     if (cts > 0)
     {
-        gpio_set_function(DEV_UART_0_CTS_PIN, GPIO_FUNC_UART);
+        gpio_set_function(cts, GPIO_FUNC_UART);
     }
     if (rts > 0)
     {
-        gpio_set_function(DEV_UART_0_RTS_PIN, GPIO_FUNC_UART);
+        gpio_set_function(rts, GPIO_FUNC_UART);
     }
     uart_set_hw_flow(uart, cts > 0, rts > 0);
     return uart;
@@ -71,7 +80,7 @@ static uart_inst_t * rawuart_init(uint_fast8_t uart)
 {
     if (uart == 0)
     {
-        return rawuart_init_one(0,
+        return rawuart_init_one(DEV_UART_0_INSTANCE,
                                 DEV_UART_0_TX_PIN,
                                 DEV_UART_0_RX_PIN,
                                 DEV_UART_0_CTS_PIN,
@@ -79,7 +88,7 @@ static uart_inst_t * rawuart_init(uint_fast8_t uart)
     }
     else
     {
-        return rawuart_init_one(1,
+        return rawuart_init_one(DEV_UART_1_INSTANCE,
                                 DEV_UART_1_TX_PIN,
                                 DEV_UART_1_RX_PIN,
                                 DEV_UART_1_CTS_PIN,
@@ -97,9 +106,15 @@ void rawuart_early_init(void)
     rawuart_init(0);
 }
 
+/* devn is 1-based; map the logical uart to its hardware instance */
+static inline uart_inst_t *rawuart_instance(uint_fast8_t num)
+{
+    return uart_get_instance(num == 0 ? DEV_UART_0_INSTANCE : DEV_UART_1_INSTANCE);
+}
+
 void rawuart_putc(uint8_t devn, uint8_t c)
 {
-    uart_inst_t *uart = uart_get_instance(devn - 1);
+    uart_inst_t *uart = rawuart_instance(devn - 1);
     while (!uart_is_writable(uart))
     {
         tight_loop_contents();
@@ -111,13 +126,13 @@ void rawuart_sleeping(uint8_t devn) {}
 
 ttyready_t rawuart_ready(uint8_t devn)
 {
-    uart_inst_t *uart = uart_get_instance(devn - 1);
+    uart_inst_t *uart = rawuart_instance(devn - 1);
     return uart_is_writable(uart) ? TTY_READY_NOW : TTY_READY_SOON;
 }
 
 int rawuart_getc(uint8_t devn)
 {
-    uart_inst_t *uart = uart_get_instance(devn - 1);
+    uart_inst_t *uart = rawuart_instance(devn - 1);
     if (uart_is_readable(uart))
     {
         return (int)uart_get_hw(uart)->dr;
