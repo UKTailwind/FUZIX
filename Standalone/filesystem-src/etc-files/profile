@@ -1,0 +1,6 @@
+# Default terminal type: the serial console is a vt100-class terminal
+# (TeraTerm etc.). Programs like ue and levee need TERM + /etc/termcap.
+if [ "$TERM" = "" ]; then
+	TERM=vt100
+	export TERM
+fi
