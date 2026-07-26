@@ -125,8 +125,11 @@ extern uint8_t progbase[USERMEM];
 
 /* Device parameters */
 #define NUM_DEV_TTY_UART 1 /* min 1 max 2*/
-#define DEV_UART_0_TX_PIN PICO_DEFAULT_UART_TX_PIN
-#define DEV_UART_0_RX_PIN PICO_DEFAULT_UART_RX_PIN
+/* Pico Computer 3: the console is the CH340 (USB-C serial) wired to the
+ * uart1 peripheral, GP8=TX / GP9=RX. */
+#define DEV_UART_0_INSTANCE 1
+#define DEV_UART_0_TX_PIN 8
+#define DEV_UART_0_RX_PIN 9
 #define DEV_UART_1_TX_PIN 6
 #define DEV_UART_1_RX_PIN 7
 #define DEV_UART_1_CTS_PIN 8
