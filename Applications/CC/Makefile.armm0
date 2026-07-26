@@ -8,3 +8,7 @@ SRC_C2 = backend-z80.c
 FLOAT = -DNO_FLOAT
 
 include Makefile.common
+
+# Stage 1: no on-target Z80 runtime libs; the passes are the experiment
+support:
+	@:
