@@ -165,9 +165,11 @@ preempt_user:
 .thumb_func
 plt_switchout:
 	/* Save the callee-saved registers onto the stack in the same order
-	 * that switchout will do it, so switchin will restore it correctly. */
+	 * that switchout will do it, so switchin will restore it correctly.
+	 * r4 included: switchin clobbers it (ptab scratch), and a preempted
+	 * context's r4 is live user state - AAPCS requires it preserved. */
 
-    push {r5, r6, r7, lr}
+    push {r4, r5, r6, r7, lr}
     mov r1, r8
     mov r2, r9
     mov r3, r10
@@ -223,7 +225,7 @@ switchin:
     mov r10, r3
     mov r11, r4
     mov r12, r5
-    pop {r5, r6, r7, pc}
+    pop {r4, r5, r6, r7, pc}
 
 .global dofork
 .text
@@ -231,9 +233,10 @@ switchin:
 # r0 = ptab of the new child process
 dofork:
 	/* Save the callee-saved registers onto the stack in the same order
-	 * that switchout will do it, so switchin will restore it correctly. */
+	 * that switchout will do it, so switchin will restore it correctly
+	 * (r4 included, see plt_switchout). */
 
-    push {r5, r6, r7, lr}
+    push {r4, r5, r6, r7, lr}
     mov r1, r8
     mov r2, r9
     mov r3, r10
