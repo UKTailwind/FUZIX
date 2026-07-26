@@ -113,14 +113,24 @@ typedef struct {
 static hid_slot_t hid_slots[HID_NSLOTS];
 static bool usbh_inited;
 
+static volatile uint32_t last_pump_ms;
+static void usb_pump(void);
+
 /* Advance the report timers: called from the 200 Hz kernel tick (IRQ
- * context - plain counters only, as MMBasic's 1 ms timer does). */
+ * context - plain counters only, as MMBasic's 1 ms timer does). If the
+ * thread-context pump has been starved (a spinning process: no idle, no
+ * tty sleep), pump from here so keystrokes - and thus ^C - still arrive.
+ * OPT_OS_PICO gives TinyUSB IRQ-safe critical sections. */
 void usbkbd_tick(void)
 {
     for (int i = 0; i < HID_NSLOTS; i++) {
         if (hid_slots[i].type != HID_NONE && hid_slots[i].report_timer < 10000) {
             hid_slots[i].report_timer += 1000 / TICKSPERSEC;
         }
+    }
+    if (usbh_inited &&
+        (uint32_t)(time_us_64() / 1000) - last_pump_ms > 20) {
+        usb_pump();
     }
 }
 
@@ -180,16 +190,24 @@ static void hid_poll(void)
 
 /* --- task pump ----------------------------------------------------------- */
 
-void usbkbd_task(void)
+static void usb_pump(void)
 {
     /* tuh_task is not reentrant; guard against nested pumping */
     static volatile bool in_task;
-    if (usbh_inited && !in_task && !udata.u_ininterrupt) {
+    if (usbh_inited && !in_task) {
         in_task = true;
         tuh_task();
         hid_poll();
         kbd_repeat_check();
+        last_pump_ms = (uint32_t)(time_us_64() / 1000);
         in_task = false;
+    }
+}
+
+void usbkbd_task(void)
+{
+    if (!udata.u_ininterrupt) {
+        usb_pump();
     }
 }
 

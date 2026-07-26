@@ -81,6 +81,80 @@ isr_svcall_user:
 
 .comm svc_pc_stash, 4
 
+# ---------------------------------------------------------------------------
+# Pre-emption. The timer tick pends PendSV when the running user process is
+# due for a reschedule or has a pending signal. As with isr_svcall we cannot
+# do kernel work in handler mode, so - if and only if the interrupted PC is
+# in user space (preempt_lo..preempt_hi, set by preempt_init) - we redirect
+# the stacked PC to the preempt_user trampoline, which runs the same
+# switchout / chksigs / deliver_signals path a syscall would, then resumes
+# the interrupted code with all registers and flags intact. The user-space
+# PC check also protects every kernel window (the svc stash, the idle loop,
+# this trampoline itself) from being re-entered.
+
+.global isr_pendsv
+.text
+.thumb_func
+isr_pendsv:
+    ldr r0, =preempt_armed
+    ldrb r1, [r0]
+    cmp r1, #0
+    bne 1f
+    ldr r1, [sp, #6*4]          /* stacked PC */
+    ldr r2, =preempt_lo
+    ldr r2, [r2]
+    cmp r1, r2
+    blo 1f
+    ldr r2, =preempt_hi
+    ldr r2, [r2]
+    cmp r1, r2
+    bhs 1f
+    movs r2, #1                 /* arm the trampoline */
+    strb r2, [r0]
+    ldr r0, =pendsv_pc_stash
+    str r1, [r0]
+    ldr r0, =preempt_user
+    str r0, [sp, #6*4]
+1:
+    bx lr
+
+.thumb_func
+preempt_user:
+    /* Thread mode, on the process stack, at an arbitrary interrupted
+       instruction: preserve everything, including the flags. */
+    sub sp, #4                  /* reserved slot for the resume PC */
+    push {r0, r1, r2, r3}
+    mrs r0, apsr
+    mov r1, r12
+    mov r2, lr
+    push {r0, r1, r2}
+    ldr r0, =pendsv_pc_stash
+    ldr r0, [r0]
+    movs r1, #1
+    orr r0, r1                  /* thumb bit for the final pop {pc} */
+    push {r0}
+    mov r0, sp
+    ldr r1, =(udata + UDATA_SIZE_ASM)
+    mov sp, r1                  /* kernel stack, as for a syscall */
+    push {r0}
+    bl preempt_handler
+    pop {r0}
+    mov sp, r0                  /* back onto the process stack */
+    bl deliver_signals          /* may not return if a handler longjmps */
+    pop {r3}                    /* resume PC (thumb bit set) */
+    pop {r0, r1, r2}            /* apsr, r12, lr */
+    mov r12, r1
+    mov lr, r2
+    ldr r1, =preempt_armed      /* disarm: a new PendSV between here and */
+    movs r2, #0                 /* the pop sees a kernel PC and bails */
+    strb r2, [r1]
+    msr apsr_nzcvq, r0
+    str r3, [sp, #16]           /* resume PC into the reserved slot */
+    pop {r0, r1, r2, r3, pc}
+
+.comm pendsv_pc_stash, 4
+.comm preempt_armed, 4
+
 .global plt_switchout
 .global switchin
 .text

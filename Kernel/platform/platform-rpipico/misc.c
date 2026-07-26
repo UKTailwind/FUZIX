@@ -7,6 +7,7 @@
 #include <pico/multicore.h>
 #include <pico/bootrom.h>
 #include <hardware/watchdog.h>
+#include <hardware/exception.h>
 
 uint8_t sys_cpu = A_ARM;
 uint8_t sys_cpu_feat = AF_CORTEX_M0;
@@ -33,6 +34,37 @@ void plt_monitor(void)
     sleep_ms(1); // wait to print any remaining messages
     multicore_reset_core1();
     for(;;) { sleep_until(at_the_end_of_time); }
+}
+
+/* Pre-emption support (see tricks.S): user-space PC bounds for the
+ * PendSV redirect check. */
+uint32_t preempt_lo, preempt_hi;
+
+void preempt_init(void)
+{
+    preempt_lo = (uint32_t)PROGBASE;
+    preempt_hi = (uint32_t)PROGBASE + USERMEM;
+    /* PendSV must be the lowest priority exception so it runs only when
+     * all other interrupt work is done */
+    exception_set_priority(PENDSV_EXCEPTION, PICO_LOWEST_IRQ_PRIORITY);
+}
+
+/* Called from the PendSV trampoline (tricks.S) in thread mode on the
+ * kernel stack: the pre-emption twin of unix_syscall's tail. The
+ * trampoline only fires for user-mode PCs, so we cannot be here inside
+ * a syscall or kernel code. */
+void preempt_handler(void)
+{
+    udata.u_insys = 1;
+    di();
+    need_resched = 0;
+    if (nready > 1 && runticks >= udata.u_ptab->p_priority) {
+        udata.u_ptab->p_status = P_READY;
+        plt_switchout();
+    }
+    ei();
+    chksigs();
+    udata.u_insys = 0;
 }
 
 int plt_dev_ioctl(uarg_t request, char *data)

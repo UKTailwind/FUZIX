@@ -10,6 +10,7 @@
 #include "globals.h"
 #include "picosdk.h"
 #include <hardware/irq.h>
+#include <hardware/structs/scb.h>
 #include "core1.h"
 
 struct devsw dev_tab[] =  /* The device driver switch table */
@@ -58,6 +59,17 @@ static void timer_tick_cb(unsigned alarm)
     tty_interrupt();
     timer_interrupt();
 
+    /* Pre-empt / signal a running user process: pend PendSV, whose
+       handler redirects user-mode PCs through the preempt trampoline
+       (tricks.S). Without this a spinning process could neither be
+       rescheduled nor killed from the keyboard. */
+    if (!udata.u_insys && udata.u_ptab &&
+        (need_resched ||
+         (udata.u_ptab->p_sig[0].s_pending & ~udata.u_ptab->p_sig[0].s_held) ||
+         (udata.u_ptab->p_sig[1].s_pending & ~udata.u_ptab->p_sig[1].s_held))) {
+        scb_hw->icsr = 1u << 28; /* PENDSVSET */
+    }
+
     if (hardware_alarm_set_target(0, next))
     {
         update_us_since_boot(&next, time_us_64() + (1000000 / TICKSPERSEC));
@@ -76,6 +88,9 @@ void device_init(void)
 {
     extern void ds3231_init(void);
     extern void psram_disc_init(void);
+    extern void preempt_init(void);
+
+    preempt_init();
     /* Timer interrup must be initialized before blcok devices.
        set_boot_line uses pause syscall which will not be operational otherwise. */
     hardware_alarm_claim(0);
