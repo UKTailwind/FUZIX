@@ -112,6 +112,7 @@ plt_switchout:
 	/* Fall through into switchin */
 
     /* On entry, r0 is the ptab ptr of the process to run */
+.thumb_func
 switchin:
     ldr r1, =__StackTop     /* switch to swapper stack */
     mov sp, r1
