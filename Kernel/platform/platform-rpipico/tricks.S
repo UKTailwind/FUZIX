@@ -113,6 +113,19 @@ isr_pendsv:
     strb r2, [r0]
     ldr r0, =pendsv_pc_stash
     str r1, [r0]
+    /* forensics: record the redirected frame */
+    ldr r0, =dbg_redir_sp
+    mov r2, sp
+    str r2, [r0]
+    ldr r0, =dbg_redir_pc
+    str r1, [r0]
+    ldr r2, [sp, #7*4]          /* stacked xPSR */
+    ldr r0, =dbg_redir_xpsr
+    str r2, [r0]
+    ldr r0, =dbg_redirs
+    ldr r2, [r0]
+    adds r2, #1
+    str r2, [r0]
     ldr r0, =preempt_user
     movs r2, #1                 /* the .thumb_func symbol has bit 0 set, but a
                                    stacked exception-return PC must have it
@@ -137,6 +150,17 @@ preempt_user:
     movs r1, #1
     orr r0, r1                  /* thumb bit for the final pop {pc} */
     push {r0}
+    /* Stash consumed: disarm NOW. Keeping it armed through
+       deliver_signals wedged preemption off forever if a handler
+       longjmped, and blocked other processes' preemption while this
+       one was switched out mid-trampoline. */
+    ldr r0, =preempt_armed
+    movs r1, #0
+    strb r1, [r0]
+    ldr r0, =dbg_entries        /* forensics */
+    ldr r1, [r0]
+    adds r1, #1
+    str r1, [r0]
     mov r0, sp
     ldr r1, =(udata + UDATA_SIZE_ASM)
     mov sp, r1                  /* kernel stack, as for a syscall */
@@ -149,15 +173,28 @@ preempt_user:
     pop {r0, r1, r2}            /* apsr, r12, lr */
     mov r12, r1
     mov lr, r2
-    ldr r1, =preempt_armed      /* disarm: a new PendSV between here and */
-    movs r2, #0                 /* the pop sees a kernel PC and bails */
-    strb r2, [r1]
+    ldr r1, =dbg_exits          /* forensics */
+    ldr r2, [r1]
+    adds r2, #1
+    str r2, [r1]
     msr apsr_nzcvq, r0
     str r3, [sp, #16]           /* resume PC into the reserved slot */
     pop {r0, r1, r2, r3, pc}
 
 .comm pendsv_pc_stash, 4
 .comm preempt_armed, 4
+.global dbg_redirs
+.global dbg_entries
+.global dbg_exits
+.global dbg_redir_sp
+.global dbg_redir_pc
+.global dbg_redir_xpsr
+.comm dbg_redirs, 4
+.comm dbg_entries, 4
+.comm dbg_exits, 4
+.comm dbg_redir_sp, 4
+.comm dbg_redir_pc, 4
+.comm dbg_redir_xpsr, 4
 
 # ---------------------------------------------------------------------------
 # Run the TinyUSB host pump on its own dedicated stack. tuh_task's call

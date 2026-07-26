@@ -87,6 +87,14 @@ void fatal_exception_handler(struct extended_exception_frame* eh)
     kprintf("CFSR=%p HFSR=%p MMFAR=%p BFAR=%p\n",
         *(volatile uint32_t *)0xE000ED28, *(volatile uint32_t *)0xE000ED2C,
         *(volatile uint32_t *)0xE000ED34, *(volatile uint32_t *)0xE000ED38);
+    {
+        extern uint32_t dbg_redirs, dbg_entries, dbg_exits;
+        extern uint32_t dbg_redir_sp, dbg_redir_pc, dbg_redir_xpsr;
+        kprintf("preempt: redirs=%p entries=%p exits=%p\n",
+            dbg_redirs, dbg_entries, dbg_exits);
+        kprintf("last redirect: sp=%p pc=%p xpsr=%p\n",
+            dbg_redir_sp, dbg_redir_pc, dbg_redir_xpsr);
+    }
     panic("fatal exception");
 }
 
