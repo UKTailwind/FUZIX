@@ -50,8 +50,12 @@
 
 /* With 8 MiB of PSRAM swap behind /dev/hdc the process ceiling is swap
  * slots, not RAM: raise the table from the default 15 (MAX_SWAPS is 31,
- * so 30 processes always fit). */
+ * so 30 processes always fit). The companion tables scale with it:
+ * every background job holds open-file and inode slots (the stock 15/20
+ * ran dry a few processes past the old limit). */
 #define PTABSIZE 30
+#define OFTSIZE 48
+#define ITABSIZE 40
 #endif
 
 /* We have a GPIO interface */
