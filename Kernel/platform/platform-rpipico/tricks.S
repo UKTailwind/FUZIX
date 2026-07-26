@@ -109,6 +109,17 @@ isr_pendsv:
     ldr r2, [r2]
     cmp r1, r2
     bhs 1f
+    /* Mid load/store-multiple? The stacked xPSR then carries ICI state
+       and - unlike an ICI-less M0, which abandons the instruction
+       without base writeback - the M33 has ALREADY written back the
+       base register. Redirecting (which must clear ICI and restart the
+       instruction) would decrement sp a second time and corrupt the
+       process stack. Leave the frame alone; the tick re-pends us and
+       the next attempt lands on an ordinary instruction. */
+    ldr r2, [sp, #7*4]          /* stacked xPSR */
+    ldr r3, =0x0600FC00         /* EPSR ICI/IT bits (26:25, 15:10) */
+    and r3, r2
+    bne 1f
     movs r2, #1                 /* arm the trampoline */
     strb r2, [r0]
     ldr r0, =pendsv_pc_stash
@@ -119,18 +130,9 @@ isr_pendsv:
     str r2, [r0]
     ldr r0, =dbg_redir_pc
     str r1, [r0]
-    ldr r2, [sp, #7*4]          /* stacked xPSR */
+    ldr r2, [sp, #7*4]
     ldr r0, =dbg_redir_xpsr
     str r2, [r0]
-    /* If we interrupted a load/store-multiple mid-way, the stacked xPSR
-       carries ICI continuation state. Resuming "mid-LDM" at the
-       trampoline (not an LDM) is an INVSTATE hard fault. Clear ICI/IT
-       (bits 26:25 and 15:10): the interrupted instruction simply
-       restarts when we resume it - idempotent for LDM/STM, and exactly
-       what an ICI-less M0 does on every interrupted LDM. */
-    ldr r0, =0x0600FC00
-    bic r2, r0
-    str r2, [sp, #7*4]
     ldr r0, =dbg_redirs
     ldr r2, [r0]
     add r2, #1
