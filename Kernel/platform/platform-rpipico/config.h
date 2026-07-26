@@ -56,6 +56,11 @@
 #define PTABSIZE 30
 #define OFTSIZE 48
 #define ITABSIZE 40
+
+/* HDMI display on HSTX: core1 is owned by the scanout, so the USB-device
+ * console loop it used to run is disabled (the PC3's USB port faces the
+ * on-board hub and is destined for host mode anyway). */
+#define CONFIG_PC3_DISPLAY
 #endif
 
 /* We have a GPIO interface */
@@ -171,7 +176,11 @@ extern uint8_t progbase[USERMEM];
 #define DEV_UART_1_RTS_PIN 9
 #define NUM_DEV_TTY_USB 4 /* min 1 max 4. */
 #define NUM_DEV_TTY (NUM_DEV_TTY_UART + NUM_DEV_TTY_USB)
+#ifdef CONFIG_PC3_DISPLAY
+#define DEV_USB_DETECT_TIMEOUT 0 /* USB device stack never runs: don't wait */
+#else
 #define DEV_USB_DETECT_TIMEOUT 5000 /* (ms) Total timeout time to detect USB host connection*/
+#endif
 #define DEV_USB_INIT_TIMEOUT 2000 /* (ms) Total timeout to try not swallow messages */
 
 #define TTYDEV   BOOT_TTY /* Device used by kernel for messages, panics */

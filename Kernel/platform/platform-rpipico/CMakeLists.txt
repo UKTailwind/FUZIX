@@ -36,6 +36,7 @@ add_executable(fuzix
 	misc.c
 	rawflash.c
 	devpsram.c
+	display.c
 	ds3231.c
 	psram.c
 	rawuart.c
@@ -84,6 +85,7 @@ add_executable(fuzix
 target_link_libraries(fuzix
 	pico_stdlib
 	pico_multicore
+	hardware_dma
 	hardware_flash
 	hardware_i2c
 	hardware_spi

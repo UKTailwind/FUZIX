@@ -70,6 +70,7 @@ void device_init(void)
 {
     extern void ds3231_init(void);
     extern void psram_disc_init(void);
+    extern void display_init(void);
     /* Timer interrup must be initialized before blcok devices.
        set_boot_line uses pause syscall which will not be operational otherwise. */
     hardware_alarm_claim(0);
@@ -91,6 +92,10 @@ void device_init(void)
     devsd_init();
 
     psram_disc_init();
+
+#ifdef CONFIG_PC3_DISPLAY
+    display_init();
+#endif
 }
 
 /* vim: sw=4 ts=4 et: */

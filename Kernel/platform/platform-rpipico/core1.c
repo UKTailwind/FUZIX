@@ -171,7 +171,9 @@ void core1_init(void)
 {
 	//multicore_reset_core1();
 	critical_section_init(&critical_section);
-#if NUM_DEV_TTY_USB > 0
+	/* With the display enabled core1 belongs to the HSTX scanout and the
+	 * USB device consoles are dead weight - never start them. */
+#if NUM_DEV_TTY_USB > 0 && !defined(CONFIG_PC3_DISPLAY)
 	multicore_launch_core1(core1_main);
 #endif
 }
