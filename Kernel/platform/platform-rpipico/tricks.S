@@ -124,7 +124,7 @@ isr_pendsv:
     str r2, [r0]
     ldr r0, =dbg_redirs
     ldr r2, [r0]
-    adds r2, #1
+    add r2, #1
     str r2, [r0]
     ldr r0, =preempt_user
     movs r2, #1                 /* the .thumb_func symbol has bit 0 set, but a
@@ -159,7 +159,7 @@ preempt_user:
     strb r1, [r0]
     ldr r0, =dbg_entries        /* forensics */
     ldr r1, [r0]
-    adds r1, #1
+    add r1, #1
     str r1, [r0]
     mov r0, sp
     ldr r1, =(udata + UDATA_SIZE_ASM)
@@ -175,7 +175,7 @@ preempt_user:
     mov lr, r2
     ldr r1, =dbg_exits          /* forensics */
     ldr r2, [r1]
-    adds r2, #1
+    add r2, #1
     str r2, [r1]
     msr apsr_nzcvq, r0
     str r3, [sp, #16]           /* resume PC into the reserved slot */
