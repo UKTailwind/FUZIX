@@ -94,6 +94,21 @@ live document.
    block in read() with VMIN=0/VTIME=1 (the tty wakes you the moment a
    byte arrives) - see kbwait1() in bbccon.c.
 
+## Session status (2026-07-26 evening)
+
+BBC BASIC RUNS on hardware: banner, immediate mode, PRINT 1/3 =
+0.333333333, *dir, ESCape handling all confirmed.  Debug trail that
+got there: usleep-forever libc bug (landmine 12), duplicate DSR
+replies (holdback added), int8 cursor wrap (console.c commit
+8d1c37c9f - CSI 999 H turned cx negative and poisoned every reply).
+The kernel the user has as fuzix-D.uf2 == build/fuzix.uf2 @8d1c37c9f.
+
+Cleanup queue for next session: strip the [bb:*] startup markers from
+bbccon.c (MARK macro + write() calls), rebuild app + diskimage +
+pc3-sd.img, delete Images/rpipico/fuzix-{A,B,C,D}.uf2 test kernels,
+then resume the test list below (TIME$, file I/O, editor keys,
+assembler, recursion guard, multi-process).
+
 ## BBC BASIC (built; awaiting hardware test)
 
 `Applications/bbcbasic/` = vendored BBCSDL console edition (zlib
