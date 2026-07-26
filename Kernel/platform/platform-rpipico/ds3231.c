@@ -27,6 +27,18 @@
 #define REG_TIME   0x00 /* sec min hour wday mday month year, BCD */
 #define REG_STATUS 0x0F /* bit 7 = oscillator stop flag */
 
+/* What userland's struct cmos_rtc actually looks like on ARM: its time_t
+ * is int64_t, so the data union is 8-aligned (offset 8, total 16 bytes).
+ * The kernel's time_t is a pair of 32-bit words, giving offset 4 / size
+ * 12 - so the kernel struct cannot be used on the wire. Byte-aligned
+ * 8-bit targets never see the difference; this is a latent ABI issue for
+ * every aligned target. */
+struct cmos_rtc_wire {
+    uint8_t type;
+    uint8_t pad[7];
+    uint8_t bytes[8];
+};
+
 static uint8_t frombcd(uint8_t v)
 {
     return (v >> 4) * 10 + (v & 0x0F);
@@ -73,12 +85,13 @@ uint_fast8_t plt_rtc_secs(void)
 
 int plt_rtc_read(void)
 {
-    struct cmos_rtc cmos;
-    register uint8_t *p = cmos.data.bytes;
+    struct cmos_rtc_wire cmos;
+    register uint8_t *p = cmos.bytes;
     uint8_t r[7];
     uint16_t year;
-    uint16_t len = sizeof(struct cmos_rtc);
+    uint16_t len = sizeof(struct cmos_rtc_wire);
 
+    memset(&cmos, 0, sizeof(cmos));
     if (udata.u_count < len)
         len = udata.u_count;
 
@@ -104,17 +117,17 @@ int plt_rtc_read(void)
 
 int plt_rtc_write(void)
 {
-    struct cmos_rtc cmos;
-    register uint8_t *p = cmos.data.bytes;
+    struct cmos_rtc_wire cmos;
+    register uint8_t *p = cmos.bytes;
     uint8_t r[7];
     uint8_t st;
     uint16_t year;
 
-    if (udata.u_count != sizeof(struct cmos_rtc)) {
+    if (udata.u_count != sizeof(struct cmos_rtc_wire)) {
         udata.u_error = EINVAL;
         return -1;
     }
-    if (uget(udata.u_base, &cmos, sizeof(struct cmos_rtc)) == -1)
+    if (uget(udata.u_base, &cmos, sizeof(struct cmos_rtc_wire)) == -1)
         return -1;
     if (cmos.type != CMOS_RTC_DEC) {
         udata.u_error = EINVAL;
@@ -140,7 +153,7 @@ int plt_rtc_write(void)
         st &= 0x7F;
         ds3231_write_regs(REG_STATUS, &st, 1);
     }
-    return sizeof(struct cmos_rtc);
+    return sizeof(struct cmos_rtc_wire);
 }
 
 void ds3231_init(void)
