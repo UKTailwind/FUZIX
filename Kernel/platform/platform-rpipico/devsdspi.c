@@ -42,6 +42,16 @@
 #define Pico_SD_RX  16 // MISO
 #define Pico_SD_CS  17 // SD_CS
 
+#elif defined(CONFIG_PICO_COMPUTER_3)
+
+// Pico Computer 3 (RP2350B): SD on the hardware SPI1 block
+#define Pico_SD_SCK 30
+#define Pico_SD_TX  31 // MOSI
+#define Pico_SD_RX  28 // MISO
+#define Pico_SD_CS  33
+
+#define Pico_SD_SPI_MOD spi1
+
 #else
 
 /* Pico SPI GPIO connected to SD SPIO - David Given's Arrangement */

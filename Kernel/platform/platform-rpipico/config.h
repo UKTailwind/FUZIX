@@ -18,6 +18,11 @@
  *	    TX  GPIO 19
  *	    RX  GPIO 16
  *	    CS  GPIO 17
+ *  CONFIG_PICO_COMPUTER_3
+ *	    SCK GPIO 30
+ *	    TX  GPIO 31
+ *	    RX  GPIO 28
+ *	    CS  GPIO 33
  *  If Undefined
  *      SCK GPIO 2
  *      TX  GPIO 3
@@ -25,7 +30,7 @@
  *      CS  GPIO 5
  */
 
-#define CONFIG_RC2040
+#define CONFIG_PICO_COMPUTER_3
 
 /* We have a GPIO interface */
 #define CONFIG_DEV_GPIO
