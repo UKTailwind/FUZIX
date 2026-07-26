@@ -85,35 +85,60 @@ live document.
    chains — write /tmp/cmsg with a heredoc and `git commit -F`.
    And don't chain `&& git commit` after a build that can fail.
 
-## NEXT TASK: BBC BASIC port (the flagship application)
+## BBC BASIC (built; awaiting hardware test)
 
-Feasibility measured and green: rtrussell/BBCSDL (zlib licence),
-console-mode core compiles for cortex-m0plus at ~50K text
-(bbmain 10.2K + bbexec 18.8K + bbeval 14.7K + bbasmb_arm_v6m 6.1K).
-Estimated binary 90-100K + ~150K BASIC workspace inside the 256K
-ceiling.
+`Applications/bbcbasic/` = vendored BBCSDL console edition (zlib
+licence, upstream 22fb22f) + Fuzix OS layer.  Binary 139K
+(/usr/bin/bbcbasic on the SD image; NAND is full - SD only).
+Library dir: /usr/lib/bbc (@lib$).
 
-Plan:
-1. Clone https://github.com/rtrussell/BBCSDL (shallow). Vendor the
-   needed files into `Applications/bbcbasic/`: bbmain.c bbexec.c
-   bbeval.c bbasmb_arm_v6m.c bbdata_arm_32.s (check it assembles for
-   thumb; it is mostly data), BBC.h bbccon.h version.h.
-2. Write a Fuzix OS layer replacing bbccon.c/bbccos.c: stdin/stdout raw
-   tty I/O (our console is ANSI — exactly what the console edition
-   emits, so VDU/COLOUR/CLS largely work already), file I/O to Unix
-   calls, TIME via time()/uptime, no threads (the Linux build uses a
-   pthread timer — replace with polling in the interpreter trap check).
-   Reference: console/raspi/makefile shows the per-file CFLAGS and the
-   seven objects.
-3. Makefile.armm0 following the fforth/util pattern (rules.armm0,
-   LINKER_TAIL); soft-double via libgcc is automatic. Workspace: static
-   or sbrk ~150K.
-4. fuzix-bbcbasic.pkg -> /usr/bin/bbcbasic (+ maybe /usr/lib/bbc
-   examples); rebuild diskimage, refresh pc3-sd.img.
-5. Test: tokenise/run classics, the inline v6-M assembler, file
-   save/load. THEN: graphics statements (MODE/PLOT/GCOL) drive the
-   design of the framebuffer interface (deliberately deferred until
-   this consumer exists).
+How it is put together (differs from the original plan in useful ways):
+
+- bbccon.c was PATCHED (ifdef FUZIX), not replaced: single-threaded,
+  keyboard via non-blocking read (raw termios VMIN=0/VTIME=0 - the
+  Fuzix tty honours these), no reader thread.  The 250ms event timer is
+  polled (polltimer) from trap()/the wait loops; trap() itself gates
+  its poll to 1-in-64 statements so tight loops don't pay a syscall
+  per statement - the wait loops (oskey/osrdch/oswait) poll every
+  iteration so typing stays snappy.
+- Workspace: sbrk PROBES the 256K ceiling 4K at a time, then gives
+  back 12K slack for libc malloc (stdio/file channels/history).  The
+  ELF layout makes this safe: u_break starts ABOVE the args+stack, so
+  heap growth never touches the stack.  Nets ~105-110K of workspace.
+- The C stack is the fixed USERSTACK window between BSS and heap - now
+  8K (config.h).  bbexec has a FUZIX recursion guard (stklim, set in
+  main) giving 'Recursion too deep!' instead of silent corruption.
+- bbcstdio.c: own sprintf (%.*E/%.*f/%.*G, %lld, %llX) and sscanf
+  (%n, %i, %hu) - the Fuzix libc printf has NO float/long-long and its
+  scanf lacks %n.  Digit extraction is 64-bit-integer based; last
+  digit of 17-sig-fig output can be 1 ulp off glibc.  Also llabs and
+  strtoull.
+- bbccon.h ACCSLEN branch is 1024 for FUZIX (PICO-sized).
+- Libc/libm fixes this needed (all upstreamable): trunc/cos/tan/
+  __rem_pio2 added to Makefile.armm0 SRC_LM (trig was never linkable
+  before), tan.c vendored (was missing entirely), STRICT_ASSIGN in
+  libm.h.  Note libm is a SEPARATE archive: link -lmarmm0 before
+  LINKER_OPT.
+- Kernel: pagemap_realloc now refuses growth past PROGSIZE (it would
+  have let brk overflow the fixed swap slot and corrupt the
+  neighbour); brk_extend fails quietly (the probe loop relies on it);
+  console gained DSR 6n/5n replies (injected via kbd_push so POS/VPOS
+  work standalone; a serial terminal answering too is benign) and SGR
+  100-107 bright backgrounds.
+- Everything -mcpu=Cortex-M0plus: ld REFUSES to merge v8-M objects
+  with the v6-M libc, so no -mcpu=cortex-m33 in apps.  bbexec/bbeval
+  at -O2 (hot loops), rest -Os.
+- BBC.h uses GLOBAL REGISTER VARS r10/r11 (esi/esp) on __arm__: fine
+  under AAPCS + our context switch, but don't link objects built
+  without BBC.h into the interpreter's call graph.
+
+Test list for the first hardware session: banner + immediate mode,
+number formatting (PRINT 1/3, STR$, @%), keyboard ESCape of a running
+loop, *DIR/*TYPE/OSCLI, file LOAD/SAVE/OPENIN/PRINT#, TIME/TIME$,
+POS/VPOS standalone (DSR), osline editing/history, the inline v6-M
+assembler (CALL), 'Recursion too deep!' on a runaway recursion, and
+free/swap while several BASICs run.  THEN: MODE/PLOT/GCOL drive the
+Phase-5 framebuffer interface design.
 
 ## After that
 

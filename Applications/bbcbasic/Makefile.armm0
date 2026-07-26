@@ -1,0 +1,52 @@
+ROOT = ../..
+include $(ROOT)/Target/rules.armm0
+
+# The interpreter core is upstream BBCSDL (console edition); bbccon.c
+# carries the Fuzix OS layer under -DFUZIX, bbcstdio.c supplies the
+# float/long-long sprintf and %n sscanf the Fuzix libc lacks.
+# Everything stays -mcpu=Cortex-M0plus like the rest of the userland:
+# ld refuses to merge v8-M objects with the v6-M libc.
+CFLAGS += -DFUZIX -Dtruncl=trunc -Dfloorl=floor -include fuzixshim.h \
+	  -Wno-array-bounds -Wno-unused-result \
+	  -Wno-attributes -Wno-parentheses -Wno-unused-variable \
+	  -Wno-misleading-indentation -Wno-maybe-uninitialized
+FASTFP = -ffast-math -fno-finite-math-only
+
+OBJS = bbmain.o bbexec.o bbeval.o bbasmb.o bbdata.o bbccos.o bbccon.o \
+	bbcstdio.o
+
+all: bbcbasic
+
+bbmain.o: bbmain.c BBC.h bbccon.h
+	$(CC) $(CFLAGS) -Os $(FASTFP) -c -o $@ $<
+
+# The statement executor and expression evaluator are the interpreter's
+# hot loops: keep them at -O2 (the rest trades speed for workspace).
+bbexec.o: bbexec.c BBC.h bbccon.h
+	$(CC) $(CFLAGS) -O2 $(FASTFP) -c -o $@ $<
+
+bbeval.o: bbeval.c BBC.h bbccon.h
+	$(CC) $(CFLAGS) -O2 $(FASTFP) -fmath-errno -c -o $@ $<
+
+bbasmb.o: bbasmb_arm_v6m.c BBC.h bbccon.h
+	$(CC) $(CFLAGS) -Os -c -o $@ $<
+
+bbccos.o: bbccos.c bbccon.h BBC.h
+	$(CC) $(CFLAGS) -Os -c -o $@ $<
+
+bbccon.o: bbccon.c bbccon.h BBC.h version.h
+	$(CC) $(CFLAGS) -Os -c -o $@ $<
+
+bbcstdio.o: bbcstdio.c
+	$(CC) $(CFLAGS) -Os -c -o $@ $<
+
+bbdata.o: bbdata_arm_32.s
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+bbcbasic: $(OBJS) $(CRT0)
+	$(LINKER) -o bbcbasic.debug $(CRT0) $(OBJS) -lmarmm0 $(LINKER_OPT) \
+		$(LINKER_TAIL)
+	$(STRIP) $(STRIP_OPT) -o $@ $@.debug
+
+clean:
+	rm -f $(OBJS) bbcbasic bbcbasic.debug *~

@@ -1,0 +1,8 @@
+# BBC BASIC (R.T.Russell's BBCSDL console edition, Fuzix OS layer).
+# Built only for flat 32-bit ELF targets (armm0); gated on the binary.
+package  bbcbasic
+if-file  bbcbasic
+
+d 0755 /usr/lib/bbc
+
+f 0755 /usr/bin/bbcbasic     bbcbasic
