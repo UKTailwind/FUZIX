@@ -39,6 +39,8 @@ add_executable(fuzix
 	devpsram.c
 	display.c
 	ds3231.c
+	kbd_decode.c
+	usbkbd.c
 	psram.c
 	rawuart.c
 	swapper.c
@@ -86,6 +88,7 @@ add_executable(fuzix
 target_link_libraries(fuzix
 	pico_stdlib
 	pico_multicore
+	tinyusb_host
 	hardware_dma
 	hardware_flash
 	hardware_i2c

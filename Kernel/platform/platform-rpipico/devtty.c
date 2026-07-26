@@ -25,16 +25,24 @@ void no_setup(uint_fast8_t minor, uint_fast8_t devn, uint_fast8_t flags)
 }
 
 #ifdef CONFIG_PC3_DISPLAY
-/* Mirror the console uart onto the video display (console.c) */
+/* The console tty spans the machine: output mirrors to the uart and the
+ * video display (console.c); input merges the USB keyboard and the uart
+ * (usbkbd.c), which also pumps the host stack before the tty sleeps. */
 extern void console_putc(uint8_t devn, uint8_t c);
+extern int console_getc(uint8_t devn);
+extern void console_sleeping(uint8_t devn);
 #define UART_PUTC console_putc
+#define UART_GETC console_getc
+#define UART_SLEEPING console_sleeping
 #else
 #define UART_PUTC rawuart_putc
+#define UART_GETC rawuart_getc
+#define UART_SLEEPING rawuart_sleeping
 #endif
 
 struct ttydriver ttydrivers[2] =
     {
-        {UART_PUTC, rawuart_ready, rawuart_sleeping, rawuart_getc, rawuart_setup},
+        {UART_PUTC, rawuart_ready, UART_SLEEPING, UART_GETC, rawuart_setup},
         {usbconsole_putc, usbconsole_ready, usbconsole_sleeping, usbconsole_getc, no_setup},
 };
 

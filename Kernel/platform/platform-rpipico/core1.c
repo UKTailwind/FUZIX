@@ -128,6 +128,7 @@ void tud_umount_cb(void)
 	usb_host_connected = 0;
 }
 
+#ifndef CONFIG_PC3_DISPLAY
 static void core1_main(void)
 {
 	tusb_init();
@@ -166,13 +167,15 @@ static void core1_main(void)
 		}
 	}
 }
+#endif /* !CONFIG_PC3_DISPLAY */
 
 void core1_init(void)
 {
 	//multicore_reset_core1();
 	critical_section_init(&critical_section);
-	/* With the display enabled core1 belongs to the HSTX scanout and the
-	 * USB device consoles are dead weight - never start them. */
+	/* With the display enabled core1 belongs to the HSTX scanout, the
+	 * USB controller runs in host mode (usbkbd.c) and the device
+	 * consoles are never started. */
 #if NUM_DEV_TTY_USB > 0 && !defined(CONFIG_PC3_DISPLAY)
 	multicore_launch_core1(core1_main);
 #endif

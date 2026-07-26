@@ -1,6 +1,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
-#include "tusb_config.h"
+/* NOTE: tusb_config.h is included further down, after the board block:
+ * its host/device mode choice tests CONFIG_PC3_DISPLAY, which must be
+ * defined first. */
 /*
  * Set this according to your SD card pins
  *  CONFIG_RC2040
@@ -64,6 +66,8 @@
  * out of the build). */
 #define CONFIG_PC3_DISPLAY
 #endif
+
+#include "tusb_config.h"
 
 /* We have a GPIO interface */
 #define CONFIG_DEV_GPIO

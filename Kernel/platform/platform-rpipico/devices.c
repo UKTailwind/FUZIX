@@ -49,6 +49,12 @@ static void timer_tick_cb(unsigned alarm)
     absolute_time_t next;
     update_us_since_boot(&next, to_us_since_boot(now) + (1000000 / TICKSPERSEC));
 
+#ifdef CONFIG_PC3_DISPLAY
+    {
+        extern void usbkbd_tick(void);
+        usbkbd_tick();
+    }
+#endif
     tty_interrupt();
     timer_interrupt();
 
@@ -91,6 +97,13 @@ void device_init(void)
     devsd_init();
 
     psram_disc_init();
+
+#ifdef CONFIG_PC3_DISPLAY
+    {
+        extern void usbkbd_init(void);
+        usbkbd_init();
+    }
+#endif
 }
 
 /* vim: sw=4 ts=4 et: */

@@ -20,6 +20,15 @@ uint_fast8_t plt_param(char* p)
 {
     char *s;
     uint8_t drv;
+#ifdef CONFIG_PC3_DISPLAY
+    /* kbd=us|uk|de|fr|es|be : keyboard layout (type at the bootdev
+     * prompt, e.g. "hdb2 kbd=de") */
+    if (strncmp(p, "kbd=", sizeof("kbd=")-1) == 0)
+    {
+        extern int kbd_set_layout(const char *name);
+        return kbd_set_layout(p + sizeof("kbd=")-1) == 0;
+    }
+#endif
     if (strncmp(p, "tty=", sizeof("tty=")-1) == 0)
     {
         ttymap_count = 0;

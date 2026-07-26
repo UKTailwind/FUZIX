@@ -7,7 +7,9 @@ udata = progbase
 
 .text
 .thumb_func
-.global plt_idle
+/* weak: the PC3 display/keyboard config overrides this with a C version
+   that pumps the USB host stack before napping (usbkbd.c) */
+.weak plt_idle
 plt_idle:
     wfi
     bx lr
