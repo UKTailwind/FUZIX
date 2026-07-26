@@ -59,14 +59,10 @@
 
 /* HDMI display on HSTX: core1 is owned by the scanout, so the USB-device
  * console loop it used to run is disabled (the PC3's USB port faces the
- * on-board hub and is destined for host mode anyway). The kernel vt
- * layer renders an 80x40 console onto it. */
+ * on-board hub and is destined for host mode anyway). console.c renders
+ * an 80x40 ANSI console onto it (the kernel vt layer is VT52 and stays
+ * out of the build). */
 #define CONFIG_PC3_DISPLAY
-#define CONFIG_VT
-#define VT_WIDTH  80
-#define VT_HEIGHT 40
-#define VT_RIGHT  79
-#define VT_BOTTOM 39
 #endif
 
 /* We have a GPIO interface */
@@ -107,10 +103,8 @@
 
 #define CONFIG_32BIT
 #define CONFIG_USERMEM_DIRECT
-/* Serial TTY unless the PC3 display provides a VT console */
-#ifndef CONFIG_PC3_DISPLAY
+/* Serial TTY, no VT or font (the PC3 console is its own ANSI engine) */
 #undef CONFIG_VT
-#endif
 #undef CONFIG_FONT8X8
 
 /* Built in NAND flash. Warning, it's unstable. */

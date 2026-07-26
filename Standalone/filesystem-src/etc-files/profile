@@ -1,6 +1,11 @@
-# Default terminal type: the serial console is a vt100-class terminal
-# (TeraTerm etc.). Programs like ue and levee need TERM + /etc/termcap.
+# Terminal type per console: the video console (tty1) is the pc3 ANSI
+# console (80x40); serial logins are vt100-class terminals (TeraTerm).
+# While tty1 mirrors the serial port both ends parse ANSI, so pc3 is
+# right for both.
 if [ "$TERM" = "" ]; then
-	TERM=vt100
+	case "`tty`" in
+	/dev/tty1) TERM=pc3 ;;
+	*) TERM=vt100 ;;
+	esac
 	export TERM
 fi

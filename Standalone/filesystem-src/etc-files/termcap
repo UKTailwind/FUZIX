@@ -39,3 +39,15 @@ vt100|dec vt100:\
 	:le=^H:mb=\E[5m:md=\E[1m:me=\E[m\017:mr=\E[7m:nd=\E[C:\
 	:rc=\E8:sc=\E7:se=\E[m:sf=^J:so=\E[7m:sr=\EM:st=\EH:ta=^I:\
 	:ue=\E[m:up=\E[A:us=\E[4m:
+
+pc3|fuzix|Pico Computer 3 console:\
+	:am:bs:ms:\
+	:co#80:it#8:li#40:\
+	:bl=^G:cr=^M:sf=^J:ta=^I:nw=^M^J:\
+	:cl=\E[H\E[J:cd=\E[J:ce=\E[K:cm=\E[%i%d;%dH:ho=\E[H:\
+	:up=\E[A:do=^J:nd=\E[C:le=^H:\
+	:UP=\E[%dA:DO=\E[%dB:RI=\E[%dC:LE=\E[%dD:\
+	:so=\E[7m:se=\E[m:mr=\E[7m:md=\E[1m:me=\E[m:\
+	:sc=\E7:rc=\E8:sr=\EM:\
+	:ku=\E[A:kd=\E[B:kr=\E[C:kl=\E[D:kb=^H:\
+	:ve=\E[?25h:vi=\E[?25l:

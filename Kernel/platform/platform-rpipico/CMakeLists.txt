@@ -76,7 +76,6 @@ add_executable(fuzix
 	../../syscall_proc.c
 	../../timer.c
 	../../tty.c
-	../../vt.c
 	../../usermem.c
 	../../version.c
 	../../dev/net/net_native.c
