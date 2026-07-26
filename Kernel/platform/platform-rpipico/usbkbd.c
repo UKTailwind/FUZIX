@@ -196,7 +196,10 @@ static void hid_poll(void)
 
 /* --- task pump ----------------------------------------------------------- */
 
-static void usb_pump(void)
+/* The pump body: only ever entered via usb_pump_stacked (tricks.S),
+ * which switches to the dedicated USB stack first - tuh_task's depth
+ * must never land on the kernel stack (it overflows into udata). */
+void usb_pump_c(void)
 {
     /* tuh_task is not reentrant; guard against nested pumping */
     static volatile bool in_task;
@@ -210,10 +213,12 @@ static void usb_pump(void)
     }
 }
 
+extern void usb_pump_stacked(void);
+
 void usbkbd_task(void)
 {
     if (!udata.u_ininterrupt) {
-        usb_pump();
+        usb_pump_stacked();
     }
 }
 

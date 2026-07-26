@@ -159,6 +159,27 @@ preempt_user:
 .comm pendsv_pc_stash, 4
 .comm preempt_armed, 4
 
+# ---------------------------------------------------------------------------
+# Run the TinyUSB host pump on its own dedicated stack. tuh_task's call
+# depth on top of an arbitrary thread context (idle loop, tty pre-sleep
+# hook, the preempt trampoline) can overflow the ~1.2K kernel stack into
+# udata - the source of a family of corruption crashes. IRQs arriving
+# during the pump stack their frames here too, safely.
+
+.global usb_pump_stacked
+.text
+.thumb_func
+usb_pump_stacked:
+    push {r4, lr}
+    mov r4, sp
+    ldr r0, =usb_stack + 2560
+    mov sp, r0
+    bl usb_pump_c
+    mov sp, r4
+    pop {r4, pc}
+
+.comm usb_stack, 2560, 8
+
 .global plt_switchout
 .global switchin
 .text
