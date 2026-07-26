@@ -3,6 +3,7 @@
 
 #include <hardware/gpio.h>
 #include <hardware/regs/addressmap.h>
+#include <hardware/clocks.h>
 #include "pico/stdlib.h"
 
 #define MANGLED 1

@@ -32,6 +32,17 @@
 
 #define CONFIG_PICO_COMPUTER_3
 
+/* Pico Computer 3 clocking: 315 MHz (DVDD comes from the board's external
+ * 1.3 V regulator, so no vreg change; clk_peri follows clk_sys as in the
+ * PC3 MicroPython/MMBasic firmwares). The flash QMI clock is capped at
+ * 63 MHz so the divisor (= RXDELAY, a 3-bit field) stays valid: 315/63 ->
+ * div 5. PSRAM is 8 MiB on QMI CS1, GP47. */
+#ifdef CONFIG_PICO_COMPUTER_3
+#define PC3_SYS_CLOCK_KHZ 315000
+#define PC3_FLASH_MAX_HZ (63 * 1000 * 1000)
+#define PC3_PSRAM_CS_PIN 47
+#endif
+
 /* We have a GPIO interface */
 #define CONFIG_DEV_GPIO
 /* Enable to make ^Z dump the inode table for debug */

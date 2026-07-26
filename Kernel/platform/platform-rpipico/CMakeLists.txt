@@ -35,6 +35,7 @@ add_executable(fuzix
 	main.c
 	misc.c
 	rawflash.c
+	psram.c
 	rawuart.c
 	swapper.c
 	tricks.S

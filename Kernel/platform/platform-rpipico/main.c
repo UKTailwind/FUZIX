@@ -8,6 +8,9 @@
 #include "kernel-armm0.def"
 #include "globals.h"
 #include "printf.h"
+#include "psram.h"
+
+uint32_t psram_size;
 
 //the led that indicates power
 //The on board one is pin 25
@@ -91,8 +94,35 @@ void syscall_handler(struct svc_frame* eh)
 
 int main(void)
 {
+#ifdef PC3_SYS_CLOCK_KHZ
+    /* Pico Computer 3: raise clk_sys before anything derives a divisor
+     * from it (uart, spi). clk_peri follows clk_sys, as in the PC3's
+     * MicroPython/MMBasic firmwares. The flash QMI divisor must be
+     * re-capped immediately after; PSRAM timing derives from the final
+     * clk_sys inside psram_init. */
+    set_sys_clock_khz(PC3_SYS_CLOCK_KHZ, true);
+    qmi_flash_timing(PC3_FLASH_MAX_HZ);
+    psram_size = psram_init(PC3_PSRAM_CS_PIN);
+#endif
+
     // early init to handle boot kernel messages
     devtty_early_init();
+
+#ifdef PC3_SYS_CLOCK_KHZ
+    kprintf("clk_sys %dMHz; PSRAM ", (int)(clock_get_hz(clk_sys) / 1000000));
+    if (psram_size) {
+        /* quick confidence check through the XIP window */
+        volatile uint32_t *p = (volatile uint32_t *)PSRAM_BASE;
+        p[0] = 0x600DF00D;
+        p[1] = ~0x600DF00D;
+        if (p[0] == 0x600DF00D && p[1] == ~0x600DF00Du)
+            kprintf("%dKiB at 0x%x\n", (int)(psram_size >> 10), PSRAM_BASE);
+        else
+            kprintf("FAILED r/w test\n");
+    } else {
+        kprintf("not found\n");
+    }
+#endif
 
     if ((U_DATA__U_SP_OFFSET != offsetof(struct u_data, u_sp)) ||
         (U_DATA__U_PTAB_OFFSET != offsetof(struct u_data, u_ptab)) ||
