@@ -137,7 +137,7 @@ void usbkbd_tick(void)
 int usbkbd_starved(void)
 {
     return usbh_inited &&
-        (uint32_t)(time_us_64() / 1000) - last_pump_ms > 20;
+        (uint32_t)(time_us_64() / 1000) - last_pump_ms > 5;
 }
 
 /* Push the LED bitmap to a keyboard's physical LEDs: 1-byte OUTPUT
