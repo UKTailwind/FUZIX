@@ -5,6 +5,8 @@ remount -n / rw
 prtroot >/etc/mtab
 # 8 MiB PSRAM disc as swap (harmless error if no PSRAM fitted)
 swapon /dev/hdc 16384
+# USB keyboard layout: us uk de fr es be
+picoctl keymap uk
 #Uncomment if you have multiple file systems
 #fsck -a
 #mount -a
