@@ -20,7 +20,7 @@ uint_fast8_t plt_param(char* p)
 {
     char *s;
     uint8_t drv;
-#ifdef CONFIG_PC3_DISPLAY
+#ifdef CONFIG_PC3_USB_KBD
     /* kbd=us|uk|de|fr|es|be : keyboard layout (type at the bootdev
      * prompt, e.g. "hdb2 kbd=de") */
     if (strncmp(p, "kbd=", sizeof("kbd=")-1) == 0)

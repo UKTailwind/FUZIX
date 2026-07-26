@@ -166,6 +166,14 @@ preempt_user:
 # udata - the source of a family of corruption crashes. IRQs arriving
 # during the pump stack their frames here too, safely.
 
+.text
+.thumb_func
+/* weak no-op: the real pump (usbkbd.c) overrides when the USB keyboard
+   is configured in */
+.weak usb_pump_c
+usb_pump_c:
+    bx lr
+
 .global usb_pump_stacked
 .text
 .thumb_func

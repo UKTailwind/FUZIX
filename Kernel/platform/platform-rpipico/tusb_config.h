@@ -3,7 +3,7 @@
 #include "stdint.h"
 #include "config.h"
 
-#ifdef CONFIG_PC3_DISPLAY
+#ifdef CONFIG_PC3_USB_KBD
 
 /* Pico Computer 3: the USB controller faces the on-board 4-port hub and
  * runs in HOST mode for the keyboard. Values proven in the PC3

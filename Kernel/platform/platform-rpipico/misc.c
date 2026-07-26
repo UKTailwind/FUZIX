@@ -56,7 +56,7 @@ void preempt_init(void)
 void preempt_handler(void)
 {
     udata.u_insys = 1;
-#ifdef CONFIG_PC3_DISPLAY
+#ifdef CONFIG_PC3_USB_KBD
     {
         /* Thread context on a fresh kernel stack: the safe place to pump
          * the USB host stack when a spinning process has starved it */

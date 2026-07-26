@@ -65,6 +65,12 @@
  * an 80x40 ANSI console onto it (the kernel vt layer is VT52 and stays
  * out of the build). */
 #define CONFIG_PC3_DISPLAY
+
+/* USB host keyboard. Temporarily disabled to bisect the preemption
+ * crashes: with this off there is no TinyUSB activity at all (no init,
+ * no pump), input is serial-only, and the PendSV preemption machinery
+ * still runs - so spinner/kill tests over serial isolate the core. */
+/* #define CONFIG_PC3_USB_KBD */
 #endif
 
 #include "tusb_config.h"

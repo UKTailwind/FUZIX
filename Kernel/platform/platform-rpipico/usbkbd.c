@@ -26,7 +26,7 @@
 #include "picosdk.h"
 #include "config.h"
 
-#ifdef CONFIG_PC3_DISPLAY
+#ifdef CONFIG_PC3_USB_KBD
 
 #define ssize_t __ssize_t
 #define time_t __time_t

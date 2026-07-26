@@ -50,7 +50,7 @@ static void timer_tick_cb(unsigned alarm)
     absolute_time_t next;
     update_us_since_boot(&next, to_us_since_boot(now) + (1000000 / TICKSPERSEC));
 
-#ifdef CONFIG_PC3_DISPLAY
+#ifdef CONFIG_PC3_USB_KBD
     {
         extern void usbkbd_tick(void);
         usbkbd_tick();
@@ -66,7 +66,7 @@ static void timer_tick_cb(unsigned alarm)
        pumps the USB host stack when it has been starved by a spinning
        process (usbkbd_starved) - never from interrupt context. */
     {
-#ifdef CONFIG_PC3_DISPLAY
+#ifdef CONFIG_PC3_USB_KBD
         extern int usbkbd_starved(void);
         int starved = usbkbd_starved();
 #else
@@ -123,7 +123,7 @@ void device_init(void)
 
     psram_disc_init();
 
-#ifdef CONFIG_PC3_DISPLAY
+#ifdef CONFIG_PC3_USB_KBD
     {
         extern void usbkbd_init(void);
         usbkbd_init();
