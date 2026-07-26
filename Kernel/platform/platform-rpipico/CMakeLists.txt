@@ -35,6 +35,7 @@ add_executable(fuzix
 	main.c
 	misc.c
 	rawflash.c
+	devpsram.c
 	ds3231.c
 	psram.c
 	rawuart.c

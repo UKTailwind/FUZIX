@@ -14,4 +14,10 @@ void qmi_flash_timing(uint32_t max_flash_hz);
  * absent. Timing derives from clk_sys, so raise the clock first. */
 size_t psram_init(unsigned int cs_pin);
 
+/* Detected size in bytes (set at boot in main.c), 0 if absent */
+extern uint32_t psram_size;
+
+/* Register the PSRAM as a block device (hdc) */
+void psram_disc_init(void);
+
 #endif

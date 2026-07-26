@@ -47,6 +47,11 @@
 #define CONFIG_RTC
 #define CONFIG_RTC_FULL
 #define CONFIG_RTC_INTERVAL 50
+
+/* With 8 MiB of PSRAM swap behind /dev/hdc the process ceiling is swap
+ * slots, not RAM: raise the table from the default 15 (MAX_SWAPS is 31,
+ * so 30 processes always fit). */
+#define PTABSIZE 30
 #endif
 
 /* We have a GPIO interface */

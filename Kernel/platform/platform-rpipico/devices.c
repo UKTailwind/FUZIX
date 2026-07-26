@@ -69,6 +69,7 @@ extern void netdev_init(void);
 void device_init(void)
 {
     extern void ds3231_init(void);
+    extern void psram_disc_init(void);
     /* Timer interrup must be initialized before blcok devices.
        set_boot_line uses pause syscall which will not be operational otherwise. */
     hardware_alarm_claim(0);
@@ -88,6 +89,8 @@ void device_init(void)
 
     sd_rawinit();
     devsd_init();
+
+    psram_disc_init();
 }
 
 /* vim: sw=4 ts=4 et: */
