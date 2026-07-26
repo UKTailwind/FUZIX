@@ -83,7 +83,7 @@ int plt_dev_ioctl(uarg_t request, char *data)
         reset_usb_boot(0, 0);
         return 0;
     }
-#ifdef CONFIG_PC3_DISPLAY
+#ifdef CONFIG_PC3_USB_KBD
     if (request == PICOIOC_KBDMAP)
     {
         extern int kbd_set_layout(const char *name);
