@@ -34,8 +34,10 @@ endif
 
 include ../../../version.mk
 
-build/fuzix.elf: ../../version.c build/Makefile
+build/fuzix.elf: ../../version.c build/Makefile FORCE
 	$(MAKE) -C build
+
+FORCE:
 
 ../../version.c:
 	$(MAKE) -C ../.. TARGET=rpipico version.c
