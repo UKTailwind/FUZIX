@@ -41,6 +41,12 @@
 #define PC3_SYS_CLOCK_KHZ 315000
 #define PC3_FLASH_MAX_HZ (63 * 1000 * 1000)
 #define PC3_PSRAM_CS_PIN 47
+
+/* DS3231 RTC on I2C0 (GP20/21): time loads at boot via setdate in rc;
+ * resync the tick clock from it every 5s (interval is in deciseconds). */
+#define CONFIG_RTC
+#define CONFIG_RTC_FULL
+#define CONFIG_RTC_INTERVAL 50
 #endif
 
 /* We have a GPIO interface */

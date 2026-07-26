@@ -35,6 +35,7 @@ add_executable(fuzix
 	main.c
 	misc.c
 	rawflash.c
+	ds3231.c
 	psram.c
 	rawuart.c
 	swapper.c
@@ -83,6 +84,7 @@ target_link_libraries(fuzix
 	pico_stdlib
 	pico_multicore
 	hardware_flash
+	hardware_i2c
 	hardware_spi
 	tinyusb_device
 )

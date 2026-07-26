@@ -116,7 +116,7 @@ int main(void)
         p[0] = 0x600DF00D;
         p[1] = ~0x600DF00D;
         if (p[0] == 0x600DF00D && p[1] == ~0x600DF00Du)
-            kprintf("%dKiB at 0x%x\n", (int)(psram_size >> 10), PSRAM_BASE);
+            kprintf("%dKiB at 0x11000000\n", (int)(psram_size >> 10));
         else
             kprintf("FAILED r/w test\n");
     } else {
