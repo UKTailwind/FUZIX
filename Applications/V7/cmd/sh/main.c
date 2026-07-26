@@ -143,11 +143,18 @@ int main(int c, const char *v[])
 	dfault(&ifsnod, sptbnl);
 
 	if ((beenhere++) == FALSE) {	/* ? profile */
-		if (*cmdadr == '-'
-		    && (input = pathopen(nullstr, profile)) >= 0) {
-			exfile(rflag);
-			flags &= ~ttyflg;
-			;
+		if (*cmdadr == '-') {
+			/* System-wide profile first, then the user's own */
+			static const char etcprofile[] = "/etc/profile";
+			if ((input = pathopen(nullstr, etcprofile)) >= 0) {
+				exfile(rflag);
+				flags &= ~ttyflg;
+			}
+			if ((input = pathopen(nullstr, profile)) >= 0) {
+				exfile(rflag);
+				flags &= ~ttyflg;
+				;
+			}
 		}
 		if (rflag == 0) {
 			flags |= rshflg;
