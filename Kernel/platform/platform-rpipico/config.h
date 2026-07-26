@@ -140,7 +140,12 @@
 
 #define USERMEM ((TOTALMEM-NETMEM)*1024)
 
-#define PROGSIZE (65536 - UDATA_SIZE)
+/* 256K process ceiling (Pico Computer 3): resident memory is packed at
+ * actual size in 4K chunks and swap I/O only covers up to u_break, so
+ * small processes cost what they always did - the ceiling just permits
+ * big applications (BBC BASIC, the C compiler passes with headroom).
+ * With 8 MiB of PSRAM swap the slot count stays at 31. */
+#define PROGSIZE (262144 - UDATA_SIZE)
 extern uint8_t progbase[USERMEM];
 #define udata (*(struct u_data*)progbase)
 
@@ -153,7 +158,7 @@ extern uint8_t progbase[USERMEM];
 #define SWAPBASE PROGBASE
 #define SWAPTOP (PROGBASE + (uaddr_t)alignup(udata.u_break - PROGBASE, 1<<BLKSHIFT)) /* never swap in/out data above break */
 #define SWAP_SIZE   ((PROGSIZE >> BLKSHIFT) + UDATA_BLKS)
-#define MAX_SWAPS   (2048*2 / SWAP_SIZE) /* for a 2MB swap partition */
+#define MAX_SWAPS   (16384 / SWAP_SIZE) /* for the 8MB PSRAM swap disc */
 
 #define BOOT_TTY (512 + 1)   /* Set this to default device for stdio, stderr */
                           /* In this case, the default is the first TTY device */
