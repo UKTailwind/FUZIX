@@ -114,6 +114,10 @@ isr_pendsv:
     ldr r0, =pendsv_pc_stash
     str r1, [r0]
     ldr r0, =preempt_user
+    movs r2, #1                 /* the .thumb_func symbol has bit 0 set, but a
+                                   stacked exception-return PC must have it
+                                   clear (INVSTATE hard fault otherwise) */
+    bic r0, r2
     str r0, [sp, #6*4]
 1:
     bx lr
