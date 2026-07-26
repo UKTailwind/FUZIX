@@ -286,7 +286,7 @@ dofork:
     mov r10, r3
     mov r11, r4
     mov r12, r5
-    pop {r5, r6, r7, pc}
+    pop {r4, r5, r6, r7, pc}
 
 // vim: sw=4 ts=4 et:
 
