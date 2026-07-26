@@ -59,6 +59,10 @@ static uint clocks[] = {
 static uart_inst_t * rawuart_init_one(int num, int tx, int rx, int cts, int rts)
 {
     uart_inst_t *uart = uart_get_instance(num);
+    /* If the port is already running (tty re-init after early boot
+     * messages), let queued output drain before resetting it */
+    if (uart_get_hw(uart)->cr & UART_UARTCR_UARTEN_BITS)
+        uart_tx_wait_blocking(uart);
     uart_init(uart, PICO_DEFAULT_UART_BAUD_RATE);
     gpio_set_function(tx, GPIO_FUNC_UART);
     gpio_set_function(rx, GPIO_FUNC_UART);
