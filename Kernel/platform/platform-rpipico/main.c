@@ -96,7 +96,9 @@ void syscall_handler(struct svc_frame* eh)
 
     unix_syscall();
 
-    udata.u_insys = 1;
+    /* Was "= 1" - a typo, never cleared. Harmless while nothing consumed
+     * u_insys asynchronously, fatal to the PendSV preempt check. */
+    udata.u_insys = 0;
     eh->r0 = udata.u_retval;
     eh->r1 = udata.u_error;
 }
