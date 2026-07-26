@@ -77,7 +77,9 @@
 #define UDATA_BLKS  3
 #define UDATA_SIZE  (UDATA_BLKS << BLKSHIFT)
 
+#ifndef TOTALMEM
 #define TOTALMEM 160
+#endif
 #if TOTALMEM == 0
 #error TOTALMEM should have been defined via cmake
 #endif
@@ -126,7 +128,9 @@ extern uint8_t progbase[USERMEM];
 /* Device parameters */
 #define NUM_DEV_TTY_UART 1 /* min 1 max 2*/
 /* Pico Computer 3: the console is the CH340 (USB-C serial) wired to the
- * uart1 peripheral, GP8=TX / GP9=RX. */
+ * uart1 peripheral, GP8=TX / GP9=RX. 115200 like the other PC3 firmwares
+ * (the kernel default termios would drop the port to 9600 at tty open). */
+#define TTY_INIT_BAUD B115200
 #define DEV_UART_0_INSTANCE 1
 #define DEV_UART_0_TX_PIN 8
 #define DEV_UART_0_RX_PIN 9
