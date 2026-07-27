@@ -2,8 +2,8 @@ CC = arm-none-eabi-gcc
 AR = arm-none-eabi-ar
 PLATFORM = armm0
 export PLATFORM
-CC_OPT = -mcpu=Cortex-M0plus -ffunction-sections -fdata-sections -fno-strict-aliasing -fomit-frame-pointer -fno-builtin -Wall -g -Os -c -I../include 
-ASM_OPT = -g
+CC_OPT = -mcpu=cortex-m33 -ffunction-sections -fdata-sections -fno-strict-aliasing -fomit-frame-pointer -fno-builtin -Wall -g -Os -c -I../include 
+ASM_OPT = -g -mcpu=cortex-m33
 # copied in from kernel tree
 KRN_HEADERS = userstructs.h
 KRN_HEADERS_SRC = $(addprefix ../../Kernel/include/,$(KRN_HEADERS))

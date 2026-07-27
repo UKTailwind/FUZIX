@@ -4,8 +4,10 @@ include $(ROOT)/Target/rules.armm0
 # The interpreter core is upstream BBCSDL (console edition); bbccon.c
 # carries the Fuzix OS layer under -DFUZIX, bbcstdio.c supplies the
 # float/long-long sprintf and %n sscanf the Fuzix libc lacks.
-# Everything stays -mcpu=Cortex-M0plus like the rest of the userland:
-# ld refuses to merge v8-M objects with the v6-M libc.
+# Thumb-2 (cortex-m33, from rules.armm0) is REQUIRED here: gcc
+# mishandles the r10/r11 global register variables (esi/esp) in
+# Thumb-1 - getput advanced esi and the caller never saw the update,
+# so INPUT looped forever.
 # -fsigned-char: the interpreter was written for x86 where plain char
 # is signed; tokens are negative bytes and comparisons rely on it.
 CFLAGS += -DFUZIX -Dtruncl=trunc -Dfloorl=floor -include fuzixshim.h \

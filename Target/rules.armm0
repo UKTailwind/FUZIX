@@ -4,7 +4,10 @@ ASM = arm-none-eabi-as
 AR = arm-none-eabi-ar
 STRIP = arm-none-eabi-strip
 LINKER = arm-none-eabi-ld
-CFLAGS = -mcpu=Cortex-M0plus -ffunction-sections -fdata-sections -fno-strict-aliasing -fomit-frame-pointer -fno-builtin -Wall -g -Os -isystem $(FUZIX_ROOT)/Library/include
+# The Pico Computer 3 is an RP2350: Cortex-M33, Thumb-2.  (BBC BASIC
+# in particular NEEDS Thumb-2: its r10/r11 global register variables
+# are mishandled by gcc in Thumb-1.)  No RP2040 compatibility kept.
+CFLAGS = -mcpu=cortex-m33 -ffunction-sections -fdata-sections -fno-strict-aliasing -fomit-frame-pointer -fno-builtin -Wall -g -Os -isystem $(FUZIX_ROOT)/Library/include
 CFLAGS += -Wno-int-conversion -Wno-implicit-int
 LINKER_OPT = -L$(FUZIX_ROOT)/Library/libs -lc$(PLATFORM) -pie -static -no-dynamic-linker -z max-page-size=4
 LIBGCCDIR = $(dir $(shell $(CC) $(CFLAGS) -print-libgcc-file-name))
