@@ -47,6 +47,14 @@ void board_detect(void)
     gpio_set_input_enabled(DETECT_PIN, true);
     gpio_set_dir(DETECT_PIN, false);
     gpio_pull_up(DETECT_PIN);
+    gpio_set_input_hysteresis_enabled(DETECT_PIN, true);
+
+    /* let the pull-up charge the trace before watching for edges: a
+     * floating pin crossing the threshold could otherwise fake the
+     * clock and misidentify the board */
+    timeout = time_us_64() + 50;
+    while (time_us_64() < timeout)
+        ;
 
     /* two full cycles: high -> low -> high -> low */
     timeout = time_us_64() + DETECT_US;

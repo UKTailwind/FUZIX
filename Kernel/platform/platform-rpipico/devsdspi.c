@@ -112,16 +112,16 @@ void sd_rawinit(void)
         gpio_init(PC2_SD_SCK);
         gpio_set_dir(PC2_SD_SCK, true);
         gpio_init(PC2_SD_TX);
+        gpio_put(PC2_SD_TX, true);      /* level set before the pin drives */
         gpio_set_dir(PC2_SD_TX, true);
-        gpio_put(PC2_SD_TX, true);
         gpio_init(PC2_SD_RX);
         gpio_set_dir(PC2_SD_RX, false);
         gpio_set_input_enabled(PC2_SD_RX, true);
         gpio_pull_up(PC2_SD_RX);
         gpio_set_input_hysteresis_enabled(PC2_SD_RX, true);
         gpio_init(PC2_SD_CS);
+        gpio_put(PC2_SD_CS, true);      /* never glitch CS low at init */
         gpio_set_dir(PC2_SD_CS, true);
-        gpio_put(PC2_SD_CS, true);
         return;
     }
 #endif
