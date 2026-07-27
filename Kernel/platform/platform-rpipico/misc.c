@@ -5,6 +5,7 @@
 #include "picosdk.h"
 #include "pico_ioctl.h"
 #include "config.h"
+#include <hardware/adc.h>
 #ifdef CONFIG_PC3_DISPLAY
 #include "display.h"
 #endif
@@ -137,6 +138,48 @@ int plt_dev_ioctl(uarg_t request, char *data)
         return 0;
     }
 #endif
+    if (request == PICOIOC_ADVAL)
+    {
+        static uint8_t adv_ready;
+        int n;
+
+        if (uget(data, &n, sizeof(n)))
+            return -1;
+
+        if (n >= 0 && n <= 4) {
+            int i;
+            if (!adv_ready) {
+                /* joystick switches: GP34-37, pulled up, active low */
+                for (i = 34; i <= 37; i++) {
+                    gpio_init(i);
+                    gpio_set_dir(i, false);
+                    gpio_pull_up(i);
+                }
+                adc_init();
+                for (i = 1; i <= 4; i++)
+                    adc_gpio_init(40 + i);
+                adv_ready = 1;
+            }
+            if (n == 0) {
+                /* pressed = 1: bit0 GP34, bit1 GP35, bit2 GP36, bit3 GP37
+                 * (high GPIO bank: read per pin) */
+                int m = 0;
+                for (i = 0; i < 4; i++)
+                    if (!gpio_get(34 + i))
+                        m |= 1 << i;
+                return m;
+            }
+            adc_select_input(n);        /* GP40+n = ADC input n */
+            return adc_read() << 4;     /* BBC 16-bit convention */
+        }
+#ifdef CONFIG_PC3_SOUND
+        if (n <= -5 && n >= -8) {
+            extern int sound_qfree(int);
+            return sound_qfree(-5 - n);
+        }
+#endif
+        return 0;
+    }
 #ifdef CONFIG_PC3_SOUND
     if (request == SNDIOC_SOUND)
     {

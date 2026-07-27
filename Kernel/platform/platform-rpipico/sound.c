@@ -333,6 +333,12 @@ void sound_envelope(const uint8_t *e)
     memcpy(envs[n], e + 1, 13);
 }
 
+int sound_qfree(int cn)
+{
+    struct schan *c = &ch[cn & 3];
+    return SND_QLEN - (uint8_t)(c->qw - c->qr);
+}
+
 void sound_quiet(void)
 {
     int i;

@@ -513,12 +513,13 @@ static int sndfd = -2 ;
 
 void trap (void) ;		/* defined below */
 
-static int sndsys (void)
+int sndsys_fd (void)		/* shared with adval() */
 {
 	if (sndfd == -2)
 		sndfd = open ("/dev/sys", 0) ;
 	return sndfd ;
 }
+#define sndsys sndsys_fd
 
 struct snd_cmd { short chan, amp, pitch, dur ; } ;
 #define SNDIOC_SOUND  0x0006
@@ -620,6 +621,27 @@ int widths (unsigned char *s, int l)
 }
 
 // ADVAL(n)
+#ifdef FUZIX
+#define SNDIOC_ADVAL  0x0009
+int adval (int n)
+{
+	extern int sndsys_fd (void) ;
+	int fd, r ;
+	if (n == -1)
+	    	return (kbdqr - kbdqw - 1) & 0xFF ;
+	if ((n >= 0 && n <= 4) || (n <= -5 && n >= -8))
+	    {
+		fd = sndsys_fd () ;
+		if (fd >= 0)
+		    {
+			r = ioctl (fd, SNDIOC_ADVAL, &n) ;
+			if (r >= 0)
+				return r ;
+		    }
+	    }
+	return 0 ;
+}
+#else
 int adval (int n)
 {
 	if (n == -1)
@@ -627,6 +649,7 @@ int adval (int n)
 	error (255, "Sorry, not implemented") ;
 	return -1 ;
 }
+#endif
 
 // APICALL
 #ifdef __llvm__

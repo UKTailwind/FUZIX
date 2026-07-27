@@ -90,6 +90,7 @@ target_link_libraries(fuzix
 	pico_stdlib
 	pico_multicore
 	tinyusb_host
+	hardware_adc
 	hardware_dma
 	hardware_exception
 	hardware_flash
