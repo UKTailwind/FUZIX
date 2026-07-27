@@ -591,6 +591,12 @@ int getmodeno (void)
 // Get nearest palette index:
 int vpoint (int x, int y)
 {
+#ifdef FUZIX
+	extern int gfx_active (void) ;
+	extern int gfx_point (int, int) ;
+	if (gfx_active ())
+		return gfx_point (x, y) ;
+#endif
 	error (255, "Sorry, not implemented") ;
 	return -1 ;
 }

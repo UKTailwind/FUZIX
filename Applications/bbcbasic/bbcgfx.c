@@ -168,6 +168,23 @@ static int xshift;      /* units-per-pixel log2: mode0=1, mode1=2, mode2=3 */
 static int px_of(int ux) { return (ux + ox) >> xshift; }
 static int py_of(int uy) { return 255 - ((uy + oy) >> 2); }
 
+/* POINT(x,y): logical colour at BBC graphics coordinates, -1 off-screen */
+int gfx_point(int x, int y)
+{
+    int px, py;
+    if (curmode < 0)
+        return -1;
+    px = px_of(x);
+    py = py_of(y);
+    if (px < 0 || px >= width || py < 0 || py >= 256)
+        return -1;
+    if (bpp == 4) {
+        uint8_t b = fb[py * stride + (px >> 1)];
+        return (px & 1) ? (b & 15) : (b >> 4);
+    }
+    return (fb[py * stride + (px >> 3)] >> (7 - (px & 7))) & 1;
+}
+
 /* --- text rendering ------------------------------------------------------- */
 static void putglyph(int ch, int col, int row)
 {
