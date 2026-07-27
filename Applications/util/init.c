@@ -719,7 +719,9 @@ static int baudmatch(int fd, const char *p)
 	static struct termios ttmp;
 
 	if (p) {
-		for(i = 1; i < 15; i++) {
+		/* Fifteen real entries follow the B0 slot: <= or B115200
+		 * (the last) can never match */
+		for(i = 1; i <= 15; i++) {
 			if (strcmp(p, *str++) == 0)
 				return i;
 		}
