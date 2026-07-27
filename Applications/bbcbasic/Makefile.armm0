@@ -1,4 +1,5 @@
 ROOT = ../..
+FUZIX_ROOT ?= $(ROOT)
 include $(ROOT)/Target/rules.armm0
 
 # The interpreter core is upstream BBCSDL (console edition); bbccon.c
