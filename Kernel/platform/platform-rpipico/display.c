@@ -13,7 +13,8 @@
  *    with a palette lookup table:
  *      modes 1/4: 320x256, 4bpp -> x3 h, x3 v, 960 wide + 32px borders
  *      modes 2/5: 160x256, 4bpp -> x6 h, x3 v, ditto
- *      modes 0/3: 640x256, 1bpp -> x1 h, x2 v, centred 640x512
+ *      modes 0/3: 640x256, 1bpp -> 5:8 h (32-entry coverage LUT),
+ *                 x3 v: full-screen 1024x768
  *    4bpp layout: high nibble = left pixel.  1bpp: MSB = left.
  *
  * Core1 is owned by the display; nothing else may run there.  Mode
@@ -44,13 +45,13 @@ struct vtiming {
  * clk_hstx = clk_sys/3 (25 MHz pixel, 59.5 Hz); the BBC graphics
  * modes use MMBasic's PC3-proven XGA line: full-rate HSTX (75 MHz
  * pixel), 1328x806 frame, 1024x768 at 70.07 Hz. */
-static const struct vtiming tim_vga = {
+static struct vtiming tim_vga = {
     16, 96, 48, 640,  10, 2, 33, 480, 525,  3
 };
-static const struct vtiming tim_xga = {
+static struct vtiming tim_xga = {
     24, 136, 144, 1024,  3, 6, 29, 768, 806,  1
 };
-static const struct vtiming *tim = &tim_vga;
+static struct vtiming *tim = &tim_vga;
 
 /* --- HSTX command words and TMDS control symbols ------------------------ */
 #define HSTX_CMD_RAW         (0x0u << 12)
@@ -101,7 +102,7 @@ enum gexp {
     EXP_CONSOLE = 0,
     EXP_4BPP_X3,        /* modes 1/4: 320 wide, 160 bytes/line */
     EXP_4BPP_X6,        /* modes 2/5: 160 wide, 80 bytes/line  */
-    EXP_1BPP_X1,        /* modes 0/3: 640 wide, 80 bytes/line, x2 lines */
+    EXP_1BPP_5TO8,      /* modes 0/3: 640 wide -> 1024 (5:8), x3 lines */
 };
 static volatile enum gexp gfx_exp = EXP_CONSOLE;
 static uint8_t gfx_pal[16];
@@ -113,7 +114,7 @@ static uint8_t gfx_lut[256][16];
 
 /* BBC physical colours 0-7 in RGB332 (8-15 = the flashing set, mapped
  * to their steady counterparts) */
-static const uint8_t bbc_rgb332[8] = {
+static uint8_t bbc_rgb332[8] = {
     0x00, 0xE0, 0x1C, 0xFC, 0x03, 0xE3, 0x1F, 0xFF
 };
 
@@ -139,13 +140,37 @@ static void gfx_lut_rebuild(void)
             }
         }
         break;
-    case EXP_1BPP_X1:
-        for (b = 0; b < 256; b++) {
-            uint8_t *e = gfx_lut[b];
-            for (i = 0; i < 8; i++)
-                e[i] = (b & (0x80 >> i)) ? gfx_pal[1] : gfx_pal[0];
+    case EXP_1BPP_5TO8: {
+        /* 5 source pixels -> 8 output pixels: 32-entry LUT keyed by
+         * the 5-bit source group.  The three fractional output pixels
+         * per group blend the two source colours by linear coverage
+         * (weights in fifths), anti-aliasing the fine 640-wide text.
+         * Define GFX_MODE0_NEAREST for hard nearest-neighbour pixels
+         * instead. */
+        static uint8_t cov[8][3] = {
+            /* {left src px, right src px, left weight /5} */
+            { 0, 0, 5 }, { 0, 1, 3 }, { 1, 1, 5 }, { 1, 2, 1 },
+            { 2, 3, 4 }, { 3, 3, 5 }, { 3, 4, 2 }, { 4, 4, 5 },
+        };
+        for (b = 0; b < 32; b++) {
+            uint8_t c[5], *e = gfx_lut[b];
+            for (i = 0; i < 5; i++)
+                c[i] = (b & (0x10 >> i)) ? gfx_pal[1] : gfx_pal[0];
+            for (i = 0; i < 8; i++) {
+                uint8_t ca = c[cov[i][0]], cb = c[cov[i][1]];
+#ifdef GFX_MODE0_NEAREST
+                e[i] = (cov[i][2] >= 3) ? ca : cb;
+#else
+                uint8_t wa = cov[i][2], wb = 5 - wa;
+                uint8_t r = ((ca >> 5) * wa + (cb >> 5) * wb) / 5;
+                uint8_t g = (((ca >> 2) & 7) * wa + ((cb >> 2) & 7) * wb) / 5;
+                uint8_t bl = ((ca & 3) * wa + (cb & 3) * wb) / 5;
+                e[i] = (r << 5) | (g << 2) | bl;
+#endif
+            }
         }
         break;
+    }
     default:
         break;
     }
@@ -242,22 +267,43 @@ static void __not_in_flash_func(disp_fill_loop)(void)
                 memset(p, 0, 32);
                 break;
             }
-            case EXP_1BPP_X1: {
-                /* 640x512 centred in 768 lines */
-                if (active < 128 || active >= 640) {
-                    memset(p, 0, 1024);
-                    break;
-                }
-                const uint8_t *s = &disp_fb[((active - 128) / 2) * 80];
-                memset(p, 0, 192);
-                p += 192;
-                for (int t = 0; t < 80; t++) {
-                    const uint8_t *e = gfx_lut[s[t]];
+            case EXP_1BPP_5TO8: {
+                /* full width: 640 source pixels -> 1024 out, 5:8.
+                 * 5 source bytes = 40 bits = eight 5-bit groups. */
+                const uint8_t *s = &disp_fb[(active / 3) * 80];
+                for (int t = 0; t < 16; t++) {
+                    uint32_t hi = ((uint32_t)s[0] << 16) |
+                                  ((uint32_t)s[1] << 8) | s[2];
+                    uint32_t lo = ((uint32_t)(s[2] & 0x0F) << 16) |
+                                  ((uint32_t)s[3] << 8) | s[4];
+                    const uint8_t *e;
+                    e = gfx_lut[(hi >> 19) & 31];
                     *(uint32_t *)p = *(const uint32_t *)e;
                     *(uint32_t *)(p + 4) = *(const uint32_t *)(e + 4);
-                    p += 8;
+                    e = gfx_lut[(hi >> 14) & 31];
+                    *(uint32_t *)(p + 8) = *(const uint32_t *)e;
+                    *(uint32_t *)(p + 12) = *(const uint32_t *)(e + 4);
+                    e = gfx_lut[(hi >> 9) & 31];
+                    *(uint32_t *)(p + 16) = *(const uint32_t *)e;
+                    *(uint32_t *)(p + 20) = *(const uint32_t *)(e + 4);
+                    e = gfx_lut[(hi >> 4) & 31];
+                    *(uint32_t *)(p + 24) = *(const uint32_t *)e;
+                    *(uint32_t *)(p + 28) = *(const uint32_t *)(e + 4);
+                    e = gfx_lut[(lo >> 15) & 31];
+                    *(uint32_t *)(p + 32) = *(const uint32_t *)e;
+                    *(uint32_t *)(p + 36) = *(const uint32_t *)(e + 4);
+                    e = gfx_lut[(lo >> 10) & 31];
+                    *(uint32_t *)(p + 40) = *(const uint32_t *)e;
+                    *(uint32_t *)(p + 44) = *(const uint32_t *)(e + 4);
+                    e = gfx_lut[(lo >> 5) & 31];
+                    *(uint32_t *)(p + 48) = *(const uint32_t *)e;
+                    *(uint32_t *)(p + 52) = *(const uint32_t *)(e + 4);
+                    e = gfx_lut[lo & 31];
+                    *(uint32_t *)(p + 56) = *(const uint32_t *)e;
+                    *(uint32_t *)(p + 60) = *(const uint32_t *)(e + 4);
+                    p += 64;
+                    s += 5;
                 }
-                memset(p, 0, 192);
                 break;
             }
             }
@@ -325,7 +371,7 @@ static void __not_in_flash_func(disp_core1_entry)(void)
     hstx_ctrl_hw->bit[PC3_HDMI_CLK] = HSTX_CTRL_BIT0_CLK_BITS;
     hstx_ctrl_hw->bit[PC3_HDMI_CLK - 1] = HSTX_CTRL_BIT0_CLK_BITS | HSTX_CTRL_BIT0_INV_BITS;
 
-    static const int lane_to_bit[3] = { PC3_HDMI_D0, PC3_HDMI_D1, PC3_HDMI_D2 };
+    static int lane_to_bit[3] = { PC3_HDMI_D0, PC3_HDMI_D1, PC3_HDMI_D2 };
     for (uint lane = 0; lane < 3; ++lane) {
         int bit = lane_to_bit[lane];
         uint32_t sel = (lane * 10) << HSTX_CTRL_BIT0_SEL_P_LSB |
@@ -444,7 +490,7 @@ int display_gfx_mode(int mode)
 
     switch (mode) {
     case 0: case 3:
-        exp = EXP_1BPP_X1;
+        exp = EXP_1BPP_5TO8;
         gfx_stride = 80;
         size = 80 * 256;
         break;
@@ -473,7 +519,7 @@ int display_gfx_mode(int mode)
         tim = &tim_vga;
         console_gfx(0);         /* clears and repaints the console */
     } else {
-        static const uint8_t defpal[3][16] = {
+        static uint8_t defpal[3][16] = {
             /* modes 0/3: black, white */
             { 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7 },
             /* modes 1/4: black, red, yellow, white */
@@ -481,7 +527,7 @@ int display_gfx_mode(int mode)
             /* modes 2/5: the full set */
             { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7 },
         };
-        const uint8_t *dp = defpal[exp == EXP_1BPP_X1 ? 0 :
+        const uint8_t *dp = defpal[exp == EXP_1BPP_5TO8 ? 0 :
                                    exp == EXP_4BPP_X3 ? 1 : 2];
         for (int i = 0; i < 16; i++)
             gfx_pal[i] = bbc_rgb332[dp[i] & 7];

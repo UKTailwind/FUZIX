@@ -42,15 +42,16 @@ centred window (32px borders) divides perfectly for the colour modes:
 960x768 is 5:4 - within 7% of the authentic 4:3 frame.  Nobody will
 see the difference; every pixel is a clean rectangle.
 
-MODE 0/3/6 (640 wide) is the awkward one: 960/640 = 1.5 means
-alternating 1- and 2-wide pixels - shimmer on exactly the fine text
-these modes exist for.  Options:
-
-  (a) pixel-perfect 640x512 centred (x1 h, x2 v): crisp, all borders,
-      image is 62% x 67% of the screen.  RECOMMENDED default.
-  (b) 960x768 with the 2:3 pattern: full screen, uneven pixels.
-  Offer (b) later as a *command if wanted.  (The 80-column console
-  already covers most text use anyway.)
+MODE 0/3 (640 wide) - DECIDED rev 2: full-width 5:8 upscale to 1024
+exploiting the exact ratio: the source line is walked in 5-bit
+groups through a 32-entry LUT that emits 8 output pixels per group.
+The three fractional output pixels in each group blend the two
+source colours by linear coverage (weights in fifths, applied in
+RGB332 when the LUT is rebuilt on palette changes) - anti-aliased
+80-column text at zero per-pixel cost.  GFX_MODE0_NEAREST selects
+hard nearest-neighbour pixels at compile time instead.  With x3
+vertical this is full-screen 1024x768; pixel aspect 1:1.875, close
+to the authentic MODE 0 shape.
 
 ## Memory: no native framebuffer exists
 
