@@ -6,7 +6,10 @@ include $(ROOT)/Target/rules.armm0
 # float/long-long sprintf and %n sscanf the Fuzix libc lacks.
 # Everything stays -mcpu=Cortex-M0plus like the rest of the userland:
 # ld refuses to merge v8-M objects with the v6-M libc.
+# -fsigned-char: the interpreter was written for x86 where plain char
+# is signed; tokens are negative bytes and comparisons rely on it.
 CFLAGS += -DFUZIX -Dtruncl=trunc -Dfloorl=floor -include fuzixshim.h \
+	  -fsigned-char \
 	  -Wno-array-bounds -Wno-unused-result \
 	  -Wno-attributes -Wno-parentheses -Wno-unused-variable \
 	  -Wno-misleading-indentation -Wno-maybe-uninitialized
