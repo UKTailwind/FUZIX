@@ -1,0 +1,116 @@
+# PC3 Fuzix Phase 5: BBC graphics modes
+
+Design for MODE/PLOT/GCOL support in BBC BASIC, and the kernel
+framebuffer interface it drives.  Companion to PC3-DEVNOTES.md.
+
+## Targets: the original modes
+
+    MODE  res      colours  fb
+    0     640x256  2        20K     80-col text / hi-res
+    1     320x256  4        20K     the games mode
+    2     160x256  16       20K     full colour
+    3     640x256  2        10K     (text-only rows variant: treat as 0)
+    4     320x256  4        10K     as 1, half memory
+    5     160x256  16       10K     as 2, half memory
+    6     160x256  2        5K      (treat as 4-family)
+    (MODE 7 teletext: out of scope, as in BBCSDL)
+
+## Display timing: 1024x768
+
+256 lines x3 = 768: vertical is integer-perfect, full height.
+
+Clocking: 315MHz / 5 = 63MHz pixel clock; HSTX runs at clk_sys
+(full-rate DDR, 630Mb/s/lane) instead of the console's clk_sys/2.
+VESA 1024x768 timing (1344x806 total) at 63MHz = 58.2Hz - the same
+overclock PicoMite HDMI ships, proven on this silicon.  The mode
+switch reprograms the HSTX clock divider and the TMDS command lists;
+the console's 640x480@75 timing remains the text mode.
+
+## Horizontal scaling: use a 960-wide window
+
+1024 divides badly (640->1.6x, 320->3.2x, 160->6.4x).  A 960-wide
+centred window (32px borders) divides perfectly for the colour modes:
+
+    320 x3 = 960    MODE 1/4: 3x3 blocks, full screen
+    160 x6 = 960    MODE 2/5: 6x3 blocks, full screen
+
+960x768 is 5:4 - within 7% of the authentic 4:3 frame.  Nobody will
+see the difference; every pixel is a clean rectangle.
+
+MODE 0/3/6 (640 wide) is the awkward one: 960/640 = 1.5 means
+alternating 1- and 2-wide pixels - shimmer on exactly the fine text
+these modes exist for.  Options:
+
+  (a) pixel-perfect 640x512 centred (x1 h, x2 v): crisp, all borders,
+      image is 62% x 67% of the screen.  RECOMMENDED default.
+  (b) 960x768 with the 2:3 pattern: full screen, uneven pixels.
+  Offer (b) later as a *command if wanted.  (The 80-column console
+  already covers most text use anyway.)
+
+## Memory: no native framebuffer exists
+
+A 1024x768 native framebuffer at 4bpp is 384K - impossible next to
+USERMEM 320K in 520K of SRAM.  Instead the kernel keeps the BBC-RES
+framebuffer (max 20K, SMALLER than the console's 45K text+tile
+buffers - the two share the same allocation as a union) and core1
+expands each scanline on the fly during HSTX scanout, exactly as the
+text console already renders tiles:
+
+  - output line y reads BBC line y/3 (shift/multiply, no divide)
+  - a per-mode lookup table expands source bytes to RGB332 output:
+    4bpp: 256-entry LUT byte -> 2 pixels -> x6 = 12 output bytes
+    2bpp: 256-entry LUT byte -> 4 pixels -> x3 = 12 output bytes
+    1bpp: byte -> 8 pixels x1.5/x2 per option above
+  - 16-entry logical palette -> RGB332, applied when (re)building the
+    LUT, so GCOL/VDU19 palette changes are one LUT rebuild, not a
+    framebuffer pass.
+
+Line budget: 1024x768@58 = 45kHz lines = ~7000 cycles: ~6.8/pixel on
+the M33 with word writes and LUTs - tight but comparable to what the
+tile renderer does today, and PicoMite proves wider modes on the same
+core.
+
+## Kernel/userland interface
+
+/dev/gfx (new char device):
+
+    ioctl GFXIOC_SETMODE  (uint8_t)  0..6 BBC mode; 0xFF back to console
+    ioctl GFXIOC_SETPAL   (uint16_t) logical<<8 | rgb332
+    lseek/write                      raw BBC-res framebuffer bytes
+
+The app owns a shadow framebuffer in its workspace (<=20K of the
+~110K), renders everything there (lines, fills, text-at-graphics-
+cursor with the bbcfont), and pushes dirty byte ranges with plain
+lseek+write.  A full-frame push is 20K = well under a millisecond;
+PLOT-heavy programs push only the rows they touched.  No mmap needed,
+no shared state, swap-safe by construction.
+
+While a graphics mode is active the kernel console suspends screen
+rendering (kernel messages go to the serial mirror only); SETMODE
+0xFF or process exit (device close) restores the text console intact.
+
+## BBC BASIC side (Applications/bbcbasic)
+
+The console edition has no graphics layer at all (vtint/widths etc
+error out), so this is an addition, not a port: a fuzix graphics
+module implementing the VDU stream (16 CLG, 18 GCOL, 19 palette,
+22 MODE, 24 graphics window, 25 PLOT, 29 origin, 5/4 text routing)
+with Bresenham lines, the BBC PLOT family (points, lines, triangles
+- the primitives BBCSDL gets from SDL2_gfxPrimitives), flood fill
+(bounded, small stack), and 8x8 font rendering for VDU5 text.
+Coordinates: BBC 1280x1024 graphics units mapped to the mode's
+pixel grid, origin bottom-left, as authentic.
+
+## Plan
+
+1. Kernel: mode-switch scaffolding in display.c (timing tables, HSTX
+   clock divider, 1024x768 command lists), console suspend/resume.
+2. Kernel: BBC framebuffer + core1 scanline expanders (start MODE 1:
+   320x4colours x3x3 - the easiest and the most-used games mode),
+   /dev/gfx device + ioctls.
+3. App: VDU/PLOT engine rendering to the shadow fb + dirty-range
+   pushes.  First light: MODE 1 : GCOL 0,1 : PLOT 85 triangles.
+4. Remaining modes (2/5 then 0/3/6 with option (a)), palette/VDU19,
+   flood fill, VDU5 text.
+5. Test with classic listings; measure; then decide if the (b)
+   stretch option and flashing colours are worth it.
