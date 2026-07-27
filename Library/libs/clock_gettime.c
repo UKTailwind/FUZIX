@@ -41,9 +41,11 @@ int clock_gettime(clockid_t clk_id, struct timespec *res)
     res->tv_sec = tmp.low;
     d = res->tv_sec;
     /* We know that this wraps at 2^32 ticks which also means we know
-       it'll fit 32bits */
+       it will fit 32bits.  The counter is in deciseconds, so the
+       remainder is in 0.1s units of 100000000ns each - the old factor
+       of 100000 made all sub-second time vanish. */
     r = div10quickm(&d);
-    res->tv_nsec = 100000UL * r;
+    res->tv_nsec = 100000000UL * r;
     res->tv_sec = d;
     return 0;
   default:
