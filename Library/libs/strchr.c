@@ -12,8 +12,11 @@ char *strchr(const char *s, int c)
 {
 	register char ch;
 
+	/* POSIX: c is interpreted as a char.  Without the cast the
+	 * comparison fails for bytes >= 0x80 on unsigned-char targets
+	 * (ARM) whenever the caller passes a negative signed char. */
 	for (;;) {
-		if ((ch = *s) == c)
+		if ((ch = *s) == (char)c)
 			return (char *)s;
 		if (ch == 0)
 			return 0;

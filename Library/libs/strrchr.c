@@ -14,8 +14,9 @@ char *strrchr(const char *s, int c)
 	/* For null it's just like strlen */
 	if (c == '\0')
 		return (char *)p;
+	/* POSIX: c is interpreted as a char (see strchr.c) */
 	while (p != s) {
-		if (*--p == c)
+		if (*--p == (char)c)
 			return (char *)p;
 	}
 	return NULL;
