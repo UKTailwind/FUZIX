@@ -10,6 +10,13 @@ set(PICO_COPY_TO_RAM 1)
 option(TOTALMEM "specify how much TOTALMEM is present" 0)
 
 add_compile_definitions(
+		# The PC3 is an RP2350B: 48 GPIOs, ADC on GP40-47.  The pico2
+		# board header defaults to the A variant, which makes every
+		# SDK GPIO mask operation on pins >= 32 silently wrap (shift
+		# by pin & 31) and leaves the high-bank pad pull-downs in
+		# place - GP34-37 joystick reads and the GP41-44 ADC were
+		# both dead until this.
+		PICO_RP2350A=0
 		PICO_HEAP_SIZE=0x0
 		PICO_NO_BINARY_INFO=1
 		PICO_TIME_DEFAULT_ALARM_POOL_DISABLED

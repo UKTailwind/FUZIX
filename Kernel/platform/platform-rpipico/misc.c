@@ -170,7 +170,14 @@ int plt_dev_ioctl(uarg_t request, char *data)
                 return m;
             }
             adc_select_input(n);        /* GP40+n = ADC input n */
-            return adc_read() << 4;     /* BBC 16-bit convention */
+            adc_read();                 /* discard: mux settle */
+            {
+                uint16_t raw = adc_read();
+                /* TEMP diagnostic for ADC bring-up */
+                kprintf("adval%d raw=%d cs=%x fcs=%x\n", n, raw,
+                        adc_hw->cs, adc_hw->fcs);
+                return raw << 4;        /* BBC 16-bit convention */
+            }
         }
 #ifdef CONFIG_PC3_SOUND
         if (n <= -5 && n >= -8) {
