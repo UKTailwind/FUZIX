@@ -129,6 +129,12 @@ int pagemap_alloc(ptptr p)
 
     int blocks = get_proc_size_blocks(p);
     int slot = get_slot(p);
+
+    /* The whole process must fit its fixed-size swap slot: growing past
+     * PROGSIZE would make swapout overwrite the neighbouring slot. */
+    if (blocks * BLOCKSIZE > PROGSIZE + UDATA_SIZE)
+        return ENOMEM;
+
     #ifdef DEBUG
         kprintf("alloc %d, %d blocks\n", get_slot(p), blocks);
         debug_blocks();
@@ -159,6 +165,12 @@ int pagemap_realloc(struct exec *hdr, usize_t size)
     uaddr_t oldblocks = get_proc_size_blocks(p);
     int blocks = (int)alignup(size + UDATA_SIZE, BLOCKSIZE) / BLOCKSIZE;
     int slot = get_slot(p);
+
+    /* The whole process must fit its fixed-size swap slot: growing past
+     * PROGSIZE would make swapout overwrite the neighbouring slot. */
+    if (blocks * BLOCKSIZE > PROGSIZE + UDATA_SIZE)
+        return ENOMEM;
+
     #ifdef DEBUG
         kprintf("realloc %d from %d to %d blocks\n", get_slot(udata.u_ptab), oldblocks, blocks);
     #endif
