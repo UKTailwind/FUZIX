@@ -22,6 +22,14 @@ extern int dirlen;
 #endif
 #include <sys/types.h>
 #include <sys/stat.h>
+#ifdef FUZIX
+#include <termios.h>
+#ifdef PC3_HOST_TEST
+#include <sys/ioctl.h>
+#else
+extern int ioctl (int, int, ...) ;
+#endif
+#endif
 #include "bbccon.h"
 
 #ifdef _WIN32
@@ -195,8 +203,12 @@ static void newline (int *px, int *py)
 	int oldrow = *py ;
 	printf ("\012") ;
 	if (!stdin_handler (NULL, py)) *py += 1 ;
+#ifndef FUZIX
+	/* LF preserves the column on any real terminal; reasserting it
+	 * with absolute motion desyncs the mirrored serial display. */
 	if (*px)
 		printf ("\033[%i;%iH", *py + 1, *px + 1) ;
+#endif
 	if ((oldrow == *py) && (scroln & 0x80) && (--scroln == 0x7F))
 	    {
 		unsigned char ch ;
@@ -261,12 +273,31 @@ void xeqvdu (int code, int data1, int data2)
 	}
 #endif
 
+#ifdef FUZIX
+	/* The kernel console is mirrored to the serial port, and the two
+	 * displays' cursor rows need not agree - so never emit absolute
+	 * cursor motion just to learn the width: the jump-back lands on
+	 * the wrong serial line and overprints earlier output (the
+	 * upstream probe below).  Ask the tty for its size instead; the
+	 * position query alone is answered by the kernel console and is
+	 * never mirrored. */
+	if (rhs == 999)
+	    {
+		struct winsize ws ;
+		if ((ioctl (STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) && (ws.ws_col > 1))
+			rhs = ws.ws_col - 1 ;
+		else
+			rhs = 79 ;
+		stdin_handler (&col, &row) ;
+	    }
+#else
 	if ((rhs == 999) && (stdin_handler (&col, &row)))
 	    {
 		printf ("\033[%i;999H", row + 1) ;
 		stdin_handler (&rhs, NULL) ;
 		printf ("\033[%i;%iH", row + 1, col + 1) ;
 	    }
+#endif
 
 	switch (vdu)
 	    {
@@ -298,11 +329,21 @@ void xeqvdu (int code, int data1, int data2)
 			if (col == 0)
 			    {
 				col = rhs ;
+#ifdef FUZIX
+				/* Relative motion only: reverse-index to the
+				 * previous line (scrolls at the top) and clamp
+				 * to the right margin - keeps the mirrored
+				 * serial display in step. */
+				if (row > 0)
+					row -- ;
+				printf ("\033M\033[999C") ;
+#else
 				if (row == 0)
 					printf ("\033M") ;
 				else
 					row -- ;
 				printf ("\033[%i;%iH", row + 1, col + 1) ;
+#endif
 			    }
 			else
 			    {
