@@ -1295,6 +1295,105 @@ static FILE *lookup (void *chan)
 	return file ;
 }
 
+#ifdef FUZIX
+// Declared in bbmain.c:
+char *lexan (char *, char *, unsigned char) ;
+
+// Does the buffer hold a valid internal-format (tokenised) program?
+static int istokenised (unsigned char *b, unsigned int n)
+{
+	unsigned char *q = b, *end = b + n ;
+	while ((q < end) && *q)
+	    {
+		unsigned int l = *q ;
+		if ((l < 4) || (q + l > end) || (q[l - 1] != 0x0D))
+			return 0 ;
+		q += l ;
+	    }
+	if (q >= end)
+		b[n - 1] = 0 ;	/* unterminated: make gettop safe */
+	return 1 ;
+}
+
+// Tokenise a plain-text listing in place.  Unnumbered lines (modern
+// BBCSDL style) are numbered 10,20,... - or dense after an explicit
+// number so ordering survives mixed listings.
+static void tokenise_text (unsigned char *addr, unsigned int n,
+			   unsigned int max)
+{
+	static char line[258], toks[256] ;
+	unsigned char *src, *dst = addr, *s, *e ;
+	unsigned short lino, last = 0 ;
+	int autonum = 1 ;
+	int len, k ;
+
+	if (n >= max - 2)
+		error (0, NULL) ;	/* No room */
+	src = addr + max - n - 1 ;
+	memmove (src, addr, n) ;
+	src[n] = 0 ;
+
+	/* 10,20,30 numbering unless the listing brings its own */
+	for (s = src; *s; )
+	    {
+		while ((*s == ' ') || (*s == 9))
+			s++ ;
+		if ((*s >= '0') && (*s <= '9'))
+		    {
+			autonum = 0 ;
+			break ;
+		    }
+		while (*s && (*s != '\n'))
+			s++ ;
+		if (*s)
+			s++ ;
+	    }
+
+	s = src ;
+	while (*s)
+	    {
+		e = s ;
+		while (*e && (*e != '\n') && (*e != '\r'))
+			e++ ;
+		len = e - s ;
+		if (len > 250)
+			len = 250 ;
+		memcpy (line, s, len) ;
+		line[len] = 0x0D ;
+		line[len + 1] = 0 ;
+		s = e ;
+		while ((*s == '\r') || (*s == '\n'))
+			s++ ;
+
+		k = 0 ;
+		lino = 0 ;
+		sscanf (line, "%hu%n", &lino, &k) ;
+		while (line[k] == ' ')
+			k++ ;
+		if (line[k] == 0x0D)
+			continue ;	/* blank line */
+		if (lino == 0)
+			lino = autonum ? last + 10 : last + 1 ;
+		if (lino <= last)
+			lino = last + 1 ;
+		last = lino ;
+
+		*(lexan (line + k, toks, 1)) = 0 ;
+		len = strlen (toks) + 3 ;
+		if (len <= 4)
+			continue ;
+		if (dst + len >= src - 1)
+			error (0, NULL) ;	/* No room */
+		dst[0] = len ;
+		dst[1] = lino & 0xFF ;
+		dst[2] = lino >> 8 ;
+		memcpy (dst + 3, toks, len - 3) ;
+		dst += len ;
+	    }
+	*dst = 0 ;
+}
+#endif
+
 // Load a file into memory:
 void osload (char *p, void *addr, unsigned int max)
 {
@@ -1309,6 +1408,12 @@ void osload (char *p, void *addr, unsigned int max)
 	fclose (file) ;
 	if (n == 0)
 		error (189, "Couldn't read from file") ;
+#ifdef FUZIX
+	/* A plain-text listing loads as if it had been typed: LOAD and
+	 * CHAIN accept both the internal format and text directly. */
+	if (!istokenised (addr, n))
+		tokenise_text (addr, n, max) ;
+#endif
 }
 
 // Save a file from memory:
