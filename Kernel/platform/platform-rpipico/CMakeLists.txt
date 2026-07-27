@@ -43,6 +43,7 @@ add_executable(fuzix
 	usbkbd.c
 	psram.c
 	rawuart.c
+	sound.c
 	swapper.c
 	tricks.S
 	core1.c
@@ -93,6 +94,7 @@ target_link_libraries(fuzix
 	hardware_exception
 	hardware_flash
 	hardware_i2c
+	hardware_pio
 	hardware_spi
 	tinyusb_device
 )

@@ -137,6 +137,35 @@ int plt_dev_ioctl(uarg_t request, char *data)
         return 0;
     }
 #endif
+#ifdef CONFIG_PC3_SOUND
+    if (request == SNDIOC_SOUND)
+    {
+        extern int sound_cmd(uint16_t, int16_t, uint16_t, uint16_t);
+        struct snd_cmd sc;
+        if (uget(data, &sc, sizeof(sc)))
+            return -1;
+        if (sound_cmd(sc.chan, sc.amp, sc.pitch, sc.dur)) {
+            udata.u_error = EAGAIN;
+            return -1;
+        }
+        return 0;
+    }
+    if (request == SNDIOC_ENV)
+    {
+        extern void sound_envelope(const uint8_t *);
+        uint8_t e[14];
+        if (uget(data, e, sizeof(e)))
+            return -1;
+        sound_envelope(e);
+        return 0;
+    }
+    if (request == SNDIOC_QUIET)
+    {
+        extern void sound_quiet(void);
+        sound_quiet();
+        return 0;
+    }
+#endif
     return -1;
 }
 

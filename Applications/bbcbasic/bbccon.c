@@ -40,6 +40,8 @@ BOOL WINAPI K32EnumProcessModules (HANDLE, HMODULE*, DWORD, LPDWORD) ;
  * trap().  No mmap (workspace comes from sbrk), no dlopen. */
 #include <termios.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+extern int ioctl (int, int, ...) ;
 #define myftell ftell
 #define myfseek fseek
 #define PLATFORM "Fuzix"
@@ -503,6 +505,59 @@ void getcsr(int *px, int *py)
 	    }
 }
 
+#ifdef FUZIX
+/* The BBC sound system lives in the kernel (PCM5102 I2S; SNDIOC on
+ * /dev/sys).  SOUND blocks BBC-style while the channel queue is full,
+ * staying ESCape-able through trap(). */
+static int sndfd = -2 ;
+
+void trap (void) ;		/* defined below */
+
+static int sndsys (void)
+{
+	if (sndfd == -2)
+		sndfd = open ("/dev/sys", 0) ;
+	return sndfd ;
+}
+
+struct snd_cmd { short chan, amp, pitch, dur ; } ;
+#define SNDIOC_SOUND  0x0006
+#define SNDIOC_ENV    0x0007
+#define SNDIOC_QUIET  0x0008
+
+// SOUND Channel,Amplitude,Pitch,Duration
+void sound (short chan, signed char ampl, unsigned char pitch, unsigned char duration)
+{
+	struct snd_cmd sc ;
+	if (sndsys () < 0)
+		return ;
+	sc.chan = chan ;
+	sc.amp = ampl ;
+	sc.pitch = pitch ;
+	sc.dur = duration ;
+	while (ioctl (sndfd, SNDIOC_SOUND, &sc))
+	    {
+		trap () ;	/* queue full: wait, but let ESCape out */
+		usleep (20000) ;
+	    }
+}
+
+// ENVELOPE N,T,PI1,PI2,PI3,PN1,PN2,PN3,AA,AD,AS,AR,ALA,ALD
+void envel (signed char *env)
+{
+	if (sndsys () < 0)
+		return ;
+	ioctl (sndfd, SNDIOC_ENV, env) ;
+}
+
+// Disable sound generation:
+void quiet (void)
+{
+	if (sndsys () < 0)
+		return ;
+	ioctl (sndfd, SNDIOC_QUIET, 0) ;
+}
+#else
 // SOUND Channel,Amplitude,Pitch,Duration
 void sound (short chan, signed char ampl, unsigned char pitch, unsigned char duration)
 {
@@ -517,6 +572,7 @@ void envel (signed char *env)
 void quiet (void)
 {
 }
+#endif
 
 // Get pixel RGB colour:
 int vtint (int x, int y)

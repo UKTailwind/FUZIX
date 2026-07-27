@@ -123,6 +123,13 @@ void device_init(void)
 
     psram_disc_init();
 
+#ifdef CONFIG_PC3_SOUND
+    {
+        extern void sound_init(void);
+        sound_init();
+    }
+#endif
+
 #ifdef CONFIG_PC3_USB_KBD
     {
         extern void usbkbd_init(void);
