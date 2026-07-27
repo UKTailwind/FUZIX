@@ -2186,12 +2186,6 @@ VAR xeq (void)
 						VAR v ;
 						signed char al ;
 
-#ifdef FUZIX
-						{
-						extern void bbdiag (const char *, int, int, int) ;
-						bbdiag ("q", esi[0], esi[1], flag) ;
-						}
-#endif
 						if (termq ())
 							break ;
 
@@ -2216,12 +2210,6 @@ VAR xeq (void)
 								error (14, NULL) ; // 'Bad use of array'
 							if (type & BIT4)
 								error (56, NULL) ; // 'Bad use of structure'
-#ifdef FUZIX
-							{
-							extern void bbdiag (const char *, int, int, int) ;
-							bbdiag ("g", *esi, type, *bufptr) ;
-							}
-#endif
 							if (*bufptr == 0x0D)
 							    {
 								if (!(flag & BIT0))
@@ -2232,12 +2220,6 @@ VAR xeq (void)
 								osline (buff) ;
 								crlf () ;
 								bufptr = buff ;
-#ifdef FUZIX
-							{
-							extern void bbdiag (const char *, int, int, int) ;
-							bbdiag ("L", buff[0], buff[1], buff[2]) ;
-							}
-#endif
 							    }
 							if (flag & BIT7)
 							    {
@@ -2248,12 +2230,6 @@ VAR xeq (void)
 							else
 							    {
 								v.s.l = fetchs (&bufptr) ;
-#ifdef FUZIX
-							{
-							extern void bbdiag (const char *, int, int, int) ;
-							bbdiag ("f", v.s.l, *bufptr, *esi) ;
-							}
-#endif
 								if ((*bufptr == ',') || (*bufptr == ';'))
 									bufptr++ ;
 							    }
