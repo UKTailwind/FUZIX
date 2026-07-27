@@ -251,6 +251,16 @@ void xeqvdu (int code, int data1, int data2)
 	if ((vflags & VDUDIS) && (vdu != 6))
 		return ;
 
+#ifdef FUZIX
+	/* PC3 graphics modes (bbcgfx.c): consumes MODE 0-5 and, while a
+	 * graphics mode is active, the whole VDU stream. */
+	{
+		extern int fuzix_gfx_vdu (int, int, int) ;
+		if (fuzix_gfx_vdu (code, data1, data2))
+			return ;
+	}
+#endif
+
 	if ((rhs == 999) && (stdin_handler (&col, &row)))
 	    {
 		printf ("\033[%i;999H", row + 1) ;

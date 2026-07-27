@@ -2282,6 +2282,12 @@ pthread_t hThread = NULL ;
 
 	flags = 0 ;
 	exitcode = entry (immediate) ;
+#ifdef FUZIX
+	{
+		extern void gfx_shutdown (void) ;
+		gfx_shutdown () ;	/* restore the console if QUIT in a mode */
+	}
+#endif
 
 	if (UserTimerID)
 		StopTimer (UserTimerID) ;

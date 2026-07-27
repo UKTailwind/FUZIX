@@ -18,7 +18,7 @@ CFLAGS += -DFUZIX -Dtruncl=trunc -Dfloorl=floor -include fuzixshim.h \
 FASTFP = -ffast-math -fno-finite-math-only
 
 OBJS = bbmain.o bbexec.o bbeval.o bbasmb.o bbdata.o bbccos.o bbccon.o \
-	bbcstdio.o
+	bbcstdio.o bbcgfx.o
 
 all: bbcbasic
 
@@ -44,6 +44,9 @@ bbccon.o: bbccon.c bbccon.h BBC.h version.h
 
 bbcstdio.o: bbcstdio.c
 	$(CC) $(CFLAGS) -Os -c -o $@ $<
+
+bbcgfx.o: bbcgfx.c
+	$(CC) $(CFLAGS) -O2 -c -o $@ $<
 
 bbdata.o: bbdata_arm_32.s
 	$(CC) $(CFLAGS) -c -o $@ $<

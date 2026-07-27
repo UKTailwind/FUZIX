@@ -21,7 +21,8 @@ gcc $FLAGS -c -Os "$S/bbasmb_x86_64.c" -o bbasmb.o
 gcc $FLAGS -Wno-array-bounds -Wno-unused-result -c -Os \
     "$B/bbccos.c" "$B/bbccon.c"
 gcc $FLAGS -fno-builtin -c -Os "$B/bbcstdio.c"
+gcc $FLAGS -c -Os "$B/bbcgfx.c"
 nasm -f elf64 -s "$S/bbdata_x86_64.nas" -o bbdata.o
 gcc -o bbcfuzix-host bbmain.o bbexec.o bbeval.o bbasmb.o bbdata.o \
-    bbccos.o bbccon.o bbcstdio.o -lm -lrt
+    bbccos.o bbccon.o bbcstdio.o bbcgfx.o -lm -lrt
 echo "built: ./bbcfuzix-host"
