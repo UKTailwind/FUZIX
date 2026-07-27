@@ -398,6 +398,8 @@ int fuzix_gfx_vdu(int code, int data1, int data2)
         if (x < tcols && y < trows) {
             tx = x;
             ty = y;
+            printf("\033[%d;%dH", ty + 1, tx + 1);
+            fflush(stdout);
         }
         return 1;
     }
@@ -405,8 +407,19 @@ int fuzix_gfx_vdu(int code, int data1, int data2)
     default:
         if (vdu >= 32 || vdu == 8 || vdu == 9 || vdu == 10 ||
             vdu == 11 || vdu == 12 || vdu == 13 || vdu == 30 ||
-            vdu == 127)
+            vdu == 127) {
             text_char(vdu);
+            /* Mirror text to the serial console as a plain stream
+             * (the kernel console is suspended in graphics modes, so
+             * this write reaches only the uart). */
+            if (vdu == 12)
+                fputs("\033[2J\033[H", stdout);
+            else if (vdu == 30)
+                fputs("\033[H", stdout);
+            else
+                putchar(vdu);
+            fflush(stdout);
+        }
         flush();
         return 1;                       /* consume everything in-mode */
     }
