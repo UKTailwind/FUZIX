@@ -1355,10 +1355,38 @@ static void tokenise_text (unsigned char *addr, unsigned int n,
 		e = s ;
 		while (*e && (*e != '\n') && (*e != '\r'))
 			e++ ;
-		len = e - s ;
-		if (len > 250)
-			len = 250 ;
-		memcpy (line, s, len) ;
+		/* Desktop editors leave typographic UTF-8, NBSPs and tabs
+		 * in listings; any byte >= 0x80 would tokenise as garbage
+		 * that LIST cannot even display.  Map to plain ASCII. */
+		len = 0 ;
+		while ((s < e) && (len < 250))
+		    {
+			unsigned char c = *s ;
+			if (c == 9)
+				c = ' ' ;
+			else if ((c == 0xE2) && (s + 2 < e) && (s[1] == 0x80))
+			    {
+				unsigned char q = s[2] ;
+				if ((q == 0x9C) || (q == 0x9D))
+					c = '"' ;	/* curly quotes */
+				else if ((q == 0x98) || (q == 0x99))
+					c = 0x27 ;	/* curly apostrophes */
+				else if ((q == 0x93) || (q == 0x94))
+					c = '-' ;	/* en/em dash */
+				else
+					c = ' ' ;
+				s += 2 ;
+			    }
+			else if ((c == 0xC2) && (s + 1 < e) && (s[1] == 0xA0))
+			    {
+				c = ' ' ;	/* UTF-8 NBSP */
+				s++ ;
+			    }
+			else if (c >= 0x80)
+				c = ' ' ;	/* NBSP, BOM, anything else */
+			line[len++] = c ;
+			s++ ;
+		    }
 		line[len] = 0x0D ;
 		line[len + 1] = 0 ;
 		s = e ;
