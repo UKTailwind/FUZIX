@@ -19,12 +19,15 @@ framebuffer interface it drives.  Companion to PC3-DEVNOTES.md.
 
 256 lines x3 = 768: vertical is integer-perfect, full height.
 
-Clocking: 315MHz / 5 = 63MHz pixel clock; HSTX runs at clk_sys
-(full-rate DDR, 630Mb/s/lane) instead of the console's clk_sys/2.
-VESA 1024x768 timing (1344x806 total) at 63MHz = 58.2Hz - the same
-overclock PicoMite HDMI ships, proven on this silicon.  The mode
-switch reprograms the HSTX clock divider and the TMDS command lists;
-the console's 640x480@75 timing remains the text mode.
+Clocking (DECIDED): clk_sys = 324 MHz from boot - no dynamic clock
+switching.  Exactly 325 is not synthesizable from the 12 MHz crystal
+(no valid PLL FBDIV); 324 = VCO 1296/4.  Graphics modes run HSTX at
+full-rate DDR (648 Mb/s/lane): pixel clock 64.8 MHz, VESA 1024x768
+timing (1344x806) at 59.9 Hz.  The text console keeps its 640x480
+timing from the same clock at clk_sys/2: 32.4 MHz pixel = 77.1 Hz.
+Flash QMI 54 MHz (div 6), PSRAM 108 MHz (div 3), UART/SD divisors all
+derive at runtime.  MODE switch reprograms only the HSTX clock
+divider and TMDS command lists.
 
 ## Horizontal scaling: use a 960-wide window
 
@@ -58,12 +61,18 @@ text console already renders tiles:
 
   - output line y reads BBC line y/3 (shift/multiply, no divide)
   - a per-mode lookup table expands source bytes to RGB332 output:
-    4bpp: 256-entry LUT byte -> 2 pixels -> x6 = 12 output bytes
-    2bpp: 256-entry LUT byte -> 4 pixels -> x3 = 12 output bytes
-    1bpp: byte -> 8 pixels x1.5/x2 per option above
+    4bpp: 256-entry LUT byte -> 2 pixels -> x3 (mode 1) or x6 (mode 2)
+    1bpp: byte -> 8 pixels, x1.5/x2 per the mode-0 option above
   - 16-entry logical palette -> RGB332, applied when (re)building the
     LUT, so GCOL/VDU19 palette changes are one LUT rebuild, not a
     framebuffer pass.
+
+DECIDED: no 2bpp path at all - MODE 1/4 store 4bpp with the colour
+CHOICE limited to 4, sharing the MODE 2 pipeline.  Framebuffer sizes:
+mode 0: 640x256/8 = 20480; modes 1/2: 320x256/2 = 40960.  The console
+allocation (38400 fb + 6400 tiles = 44800 bytes) is a union with
+this, so no extra SRAM is needed and the expander only ever handles
+two formats.
 
 Line budget: 1024x768@58 = 45kHz lines = ~7000 cycles: ~6.8/pixel on
 the M33 with word writes and LUTs - tight but comparable to what the

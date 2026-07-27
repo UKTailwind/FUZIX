@@ -40,7 +40,14 @@
  * 63 MHz so the divisor (= RXDELAY, a 3-bit field) stays valid: 315/63 ->
  * div 5. PSRAM is 8 MiB on QMI CS1, GP47. */
 #ifdef CONFIG_PICO_COMPUTER_3
-#define PC3_SYS_CLOCK_KHZ 315000
+/* 324 MHz: the XGA-ready clock (pixel clock = clk_sys/5 = 64.8 MHz,
+ * 1024x768 at 59.9 Hz with HSTX at full-rate DDR).  Exactly 325 MHz
+ * is not synthesizable from the 12 MHz crystal (no valid PLL FBDIV);
+ * 324 = VCO 1296 / 4.  The text console timing derives from the same
+ * clock: 640x480 at 77.1 Hz (32.4 MHz pixel clock).  Flash QMI drops
+ * to 54 MHz (div 6), PSRAM to 108 MHz (div 3) - both computed at
+ * runtime from the actual clk_sys. */
+#define PC3_SYS_CLOCK_KHZ 324000
 #define PC3_FLASH_MAX_HZ (63 * 1000 * 1000)
 #define PC3_PSRAM_CS_PIN 47
 
