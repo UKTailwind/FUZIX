@@ -380,14 +380,43 @@ static void disp_scanout_start(void)
         disp_core1_stack, sizeof(disp_core1_stack));
 }
 
+/* Proven teardown order (MMBasic HDMI.c via the PC3 MicroPython
+ * driver): halt core1, break both DMA chains BEFORE aborting (point
+ * chain_to at self through the non-triggering alias, else aborting
+ * one re-triggers the other), abort both together through the abort
+ * register with bounded waits, and only THEN stop HSTX.  Stopping
+ * HSTX first kills the DREQ and leaves a channel BUSY forever - the
+ * per-channel abort helper then spins and the caller hangs. */
 static void disp_scanout_stop(void)
 {
+    uint32_t chans = (1u << dmach_ping) | (1u << dmach_pong);
+    uint64_t dl;
+
+    __sev();
     multicore_reset_core1();
+
+    hw_write_masked(&dma_hw->ch[dmach_ping].al1_ctrl,
+        (uint32_t)dmach_ping << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB,
+        DMA_CH0_CTRL_TRIG_CHAIN_TO_BITS);
+    hw_write_masked(&dma_hw->ch[dmach_pong].al1_ctrl,
+        (uint32_t)dmach_pong << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB,
+        DMA_CH0_CTRL_TRIG_CHAIN_TO_BITS);
+    __dmb();
+    dma_hw->abort = chans;
+    dl = time_us_64() + 2000;
+    while ((dma_hw->abort & chans) && time_us_64() < dl)
+        tight_loop_contents();
+    while ((dma_hw->ch[dmach_ping].ctrl_trig & DMA_CH0_CTRL_TRIG_BUSY_BITS) &&
+           time_us_64() < dl)
+        tight_loop_contents();
+    while ((dma_hw->ch[dmach_pong].ctrl_trig & DMA_CH0_CTRL_TRIG_BUSY_BITS) &&
+           time_us_64() < dl)
+        tight_loop_contents();
+
+    dma_hw->inte1 &= ~chans;
+    dma_hw->ints1 = chans;
     hstx_ctrl_hw->csr = 0;
-    dma_channel_abort(dmach_ping);
-    dma_channel_abort(dmach_pong);
-    dma_hw->inte1 &= ~((1u << dmach_ping) | (1u << dmach_pong));
-    dma_hw->ints1 = (1u << dmach_ping) | (1u << dmach_pong);
+    irq_remove_handler(DMA_IRQ_1, disp_dma_irq);
 }
 
 /* --- Public -------------------------------------------------------------- */
