@@ -84,7 +84,19 @@ live document.
 11. Shell quoting for commit messages: apostrophes break the wsl bash -c
    chains — write /tmp/cmsg with a heredoc and `git commit -F`.
    And don't chain `&& git commit` after a build that can fail.
-12. Kernel sleeps are DECISECONDS: the timer wheel (p_timeout, _pause,
+12. Shell $variables in one-line wsl bash -c commands get eaten by the
+   quoting layers: a for-loop clean with $d silently cleaned NOTHING,
+   the next build relinked stale Thumb-1 objects, and a whole
+   hardware round-trip was wasted re-diagnosing a fixed bug.  Put any
+   command with shell variables in a script FILE and run that.
+13. GCC + Thumb-1 mishandles BBC BASIC r10/r11 global register
+   variables: functions that do not reference them treat them as
+   scratch (save at entry, restore stale at exit - getput wiped the
+   esi advance getvar made and INPUT looped forever).  Thumb-2
+   (cortex-m33) codegen is correct - verify with objdump on getput
+   after any toolchain change.  The whole userland is m33 now; no
+   RP2040 compatibility.
+14. Kernel sleeps are DECISECONDS: the timer wheel (p_timeout, _pause,
    the monotonic counter behind CLOCK_MONOTONIC) runs at 10Hz on every
    Fuzix platform, whatever TICKSPERSEC is.  libc usleep() used to
    round sub-100ms periods to _pause(0) = sleep FOREVER (bbcbasic hung
