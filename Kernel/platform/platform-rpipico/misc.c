@@ -153,7 +153,9 @@ int plt_dev_ioctl(uarg_t request, char *data)
                 for (i = 34; i <= 37; i++) {
                     gpio_init(i);
                     gpio_set_dir(i, false);
+                    gpio_set_input_enabled(i, true);
                     gpio_pull_up(i);
+                    gpio_set_input_hysteresis_enabled(i, true);
                 }
                 adc_init();
                 for (i = 1; i <= 4; i++)
@@ -161,23 +163,13 @@ int plt_dev_ioctl(uarg_t request, char *data)
                 adv_ready = 1;
             }
             if (n == 0) {
-                /* pressed = 1: bit0 GP34, bit1 GP35, bit2 GP36, bit3 GP37
-                 * (high GPIO bank: read per pin) */
-                int m = 0;
-                for (i = 0; i < 4; i++)
-                    if (!gpio_get(34 + i))
-                        m |= 1 << i;
-                return m;
+                /* pressed = 1: bit0 GP34, bit1 GP35, bit2 GP36, bit3 GP37 */
+                uint64_t all = gpio_get_all64();
+                return (int)((~(all >> 34)) & 15);
             }
             adc_select_input(n);        /* GP40+n = ADC input n */
             adc_read();                 /* discard: mux settle */
-            {
-                uint16_t raw = adc_read();
-                /* TEMP diagnostic for ADC bring-up */
-                kprintf("adval%d raw=%d cs=%x fcs=%x\n", n, raw,
-                        adc_hw->cs, adc_hw->fcs);
-                return raw << 4;        /* BBC 16-bit convention */
-            }
+            return adc_read() << 4;     /* BBC 16-bit convention */
         }
 #ifdef CONFIG_PC3_SOUND
         if (n <= -5 && n >= -8) {
