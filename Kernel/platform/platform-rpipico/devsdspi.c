@@ -87,7 +87,10 @@ static uint8_t sd_bb_fast;      /* 0 = identification speed */
  * (via the MicroPython machine_sdcard bit-bang transport): mode 0,
  * MSB first, 20 us half-bits while identifying the card, NOP-padded
  * thereafter (the 3-NOP flavour: clk_sys is above 200 MHz), and MISO
- * sampled late in the clock-high phase for settling margin. */
+ * sampled late in the clock-high phase for settling margin.  MISO is
+ * GP32: high-bank pins must be read via gpio_get_all64() - per-pin
+ * gpio_get() misreads them here (as first seen with ADVAL on
+ * GP34-37). */
 #define SD_BB_NOP() __asm__ volatile ("nop")
 
 static uint8_t bb_xfer(uint8_t out)
@@ -101,7 +104,7 @@ static uint8_t bb_xfer(uint8_t out)
             in <<= 1;
             gpio_put(PC2_SD_SCK, 1);
             busy_wait_us_32(20);
-            in += gpio_get(PC2_SD_RX) ? 1 : 0;
+            in += ((gpio_get_all64() >> PC2_SD_RX) & 1);
             gpio_put(PC2_SD_SCK, 0);
             out <<= 1;
         }
@@ -116,7 +119,7 @@ static uint8_t bb_xfer(uint8_t out)
             SD_BB_NOP();
             SD_BB_NOP();
             SD_BB_NOP();
-            in += gpio_get(PC2_SD_RX) ? 1 : 0;
+            in += ((gpio_get_all64() >> PC2_SD_RX) & 1);
             gpio_put(PC2_SD_SCK, 0);
             out <<= 1;
         }
