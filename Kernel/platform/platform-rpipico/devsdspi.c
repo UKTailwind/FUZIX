@@ -81,23 +81,45 @@
 extern int board_is_pc2(void);
 
 static uint8_t sd_bb;           /* nonzero: bit-bang on the PC2 pin set */
-static uint16_t bb_half;        /* delay loop count per SCK half-cycle */
+static uint8_t sd_bb_fast;      /* 0 = identification speed */
+
+/* A straight port of MMBasic's BitBangSwapSPI as proven on this board
+ * (via the MicroPython machine_sdcard bit-bang transport): mode 0,
+ * MSB first, 20 us half-bits while identifying the card, NOP-padded
+ * thereafter (the 3-NOP flavour: clk_sys is above 200 MHz), and MISO
+ * sampled late in the clock-high phase for settling margin. */
+#define SD_BB_NOP() __asm__ volatile ("nop")
 
 static uint8_t bb_xfer(uint8_t out)
 {
     uint8_t in = 0;
-    int i;
-    volatile uint16_t d;
-    for (i = 0; i < 8; i++) {
-        gpio_put(PC2_SD_TX, out & 0x80);
-        out <<= 1;
-        for (d = 0; d < bb_half; d++)
-            ;
-        gpio_put(PC2_SD_SCK, true);         /* mode 0: sample on rise */
-        in = (in << 1) | (gpio_get(PC2_SD_RX) ? 1 : 0);
-        for (d = 0; d < bb_half; d++)
-            ;
-        gpio_put(PC2_SD_SCK, false);
+    int bit;
+    if (!sd_bb_fast) {
+        for (bit = 0; bit < 8; bit++) {
+            gpio_put(PC2_SD_TX, out & 0x80);
+            busy_wait_us_32(20);
+            in <<= 1;
+            gpio_put(PC2_SD_SCK, 1);
+            busy_wait_us_32(20);
+            in += gpio_get(PC2_SD_RX) ? 1 : 0;
+            gpio_put(PC2_SD_SCK, 0);
+            out <<= 1;
+        }
+    } else {
+        for (bit = 0; bit < 8; bit++) {
+            gpio_put(PC2_SD_TX, out & 0x80);
+            SD_BB_NOP();
+            SD_BB_NOP();
+            SD_BB_NOP();
+            in <<= 1;
+            gpio_put(PC2_SD_SCK, 1);
+            SD_BB_NOP();
+            SD_BB_NOP();
+            SD_BB_NOP();
+            in += gpio_get(PC2_SD_RX) ? 1 : 0;
+            gpio_put(PC2_SD_SCK, 0);
+            out <<= 1;
+        }
     }
     return in;
 }
@@ -108,7 +130,7 @@ void sd_rawinit(void)
 #ifdef CONFIG_PICO_COMPUTER_3
     if (board_is_pc2()) {
         sd_bb = 1;
-        bb_half = 150;                      /* ~400 kHz for card init */
+        sd_bb_fast = 0;                     /* identification speed */
         gpio_init(PC2_SD_SCK);
         gpio_set_dir(PC2_SD_SCK, true);
         gpio_init(PC2_SD_TX);
@@ -148,7 +170,7 @@ void sd_spi_clock(bool go_fast)
 {
 #ifdef CONFIG_PICO_COMPUTER_3
     if (sd_bb) {
-        bb_half = go_fast ? 4 : 150;        /* ~5 MHz / ~400 kHz */
+        sd_bb_fast = go_fast;
         return;
     }
 #endif
