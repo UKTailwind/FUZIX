@@ -109,6 +109,15 @@ refreshed pc3-sd.img.  Next: resume the test list below (TIME$, file
 I/O, editor keys, assembler, recursion guard, multi-process), then
 MODE/PLOT/GCOL -> Phase-5 framebuffer design.
 
+File interchange: /usr/bin/fat (Applications/util/fat.c) reads the SD
+FAT partition from Fuzix - format hdb1 in Windows (FAT16 or FAT32,
+NOT exFAT), drop files on it, then `fat ls` / `fat get NAME [dest]` /
+`fat info` on the PC3.  Long filenames and subdirectories work; read
+only (write support = future task; dosread in util is the old Minix
+FAT12/16 tool, not useful here).  Host-testable: fat.c compiles
+native and takes -d <image>; validated against mkfs.fat -F16/-F32
+images with mtools-written LFN files before ever touching hardware.
+
 ## BBC BASIC (built; awaiting hardware test)
 
 `Applications/bbcbasic/` = vendored BBCSDL console edition (zlib

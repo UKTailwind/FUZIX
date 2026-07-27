@@ -1,0 +1,5 @@
+# FAT partition reader (SD interchange with Windows/macOS/Linux).
+package  fat
+if-file  fat
+
+f 0755 /usr/bin/fat              fat

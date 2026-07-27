@@ -57,6 +57,7 @@ SRCS  = \
 	ed.c \
 	env.c \
 	factor.c \
+	fat.c \
 	fdisk.c \
 	fforth.c \
 	fgrep.c \
