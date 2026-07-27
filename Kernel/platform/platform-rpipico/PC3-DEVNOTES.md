@@ -101,13 +101,13 @@ BBC BASIC RUNS on hardware: banner, immediate mode, PRINT 1/3 =
 got there: usleep-forever libc bug (landmine 12), duplicate DSR
 replies (holdback added), int8 cursor wrap (console.c commit
 8d1c37c9f - CSI 999 H turned cx negative and poisoned every reply).
-The kernel the user has as fuzix-D.uf2 == build/fuzix.uf2 @8d1c37c9f.
+The good kernel is build/fuzix.uf2 @8d1c37c9f (was handed over as
+fuzix-D.uf2 during the bisect; the A-D test kernels are deleted).
 
-Cleanup queue for next session: strip the [bb:*] startup markers from
-bbccon.c (MARK macro + write() calls), rebuild app + diskimage +
-pc3-sd.img, delete Images/rpipico/fuzix-{A,B,C,D}.uf2 test kernels,
-then resume the test list below (TIME$, file I/O, editor keys,
-assembler, recursion guard, multi-process).
+Cleanup done (2026-07-27): startup markers stripped, clean app on the
+refreshed pc3-sd.img.  Next: resume the test list below (TIME$, file
+I/O, editor keys, assembler, recursion guard, multi-process), then
+MODE/PLOT/GCOL -> Phase-5 framebuffer design.
 
 ## BBC BASIC (built; awaiting hardware test)
 
