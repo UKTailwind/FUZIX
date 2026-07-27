@@ -4,3 +4,4 @@ disable-pkg platform-rpipico
 
 f 0755 /usr/bin/picoctl utils/picoctl
 f 0755 /usr/bin/picogpio utils/picogpio
+f 0755 /usr/bin/gfxtest utils/gfxtest

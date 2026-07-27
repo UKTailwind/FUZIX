@@ -4,6 +4,10 @@
 #include <exec.h>
 #include "picosdk.h"
 #include "pico_ioctl.h"
+#include "config.h"
+#ifdef CONFIG_PC3_DISPLAY
+#include "display.h"
+#endif
 #include <pico/multicore.h>
 #include <pico/bootrom.h>
 #include <hardware/watchdog.h>
@@ -95,6 +99,41 @@ int plt_dev_ioctl(uarg_t request, char *data)
             udata.u_error = EINVAL;
             return -1;
         }
+        return 0;
+    }
+#endif
+#ifdef CONFIG_PC3_DISPLAY
+    if (request == GFXIOC_MODE)
+    {
+        int m;
+        if (uget(data, &m, sizeof(m)))
+            return -1;
+        if (display_gfx_mode(m) < 0) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    if (request == GFXIOC_PAL)
+    {
+        int v;
+        if (uget(data, &v, sizeof(v)))
+            return -1;
+        display_gfx_pal((v >> 8) & 15, v & 15);
+        return 0;
+    }
+    if (request == GFXIOC_BLIT)
+    {
+        struct gfx_blit gb;
+        int size = display_gfx_size();
+        if (uget(data, &gb, sizeof(gb)))
+            return -1;
+        if (size == 0 || gb.offset >= size || gb.len > size - gb.offset) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        if (uget(gb.buf, disp_fb + gb.offset, gb.len))
+            return -1;
         return 0;
     }
 #endif

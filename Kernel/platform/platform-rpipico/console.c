@@ -493,10 +493,30 @@ static void charout(uint8_t c)
     }
 }
 
+/* While a BBC graphics mode owns the framebuffer the console renders
+ * nothing (output still reaches the serial mirror); returning rebuilds
+ * a clean screen. */
+static volatile uint8_t con_gfx_active;
+
+void console_gfx(int active)
+{
+    con_gfx_active = active;
+    if (!active) {
+        conbusy = 0;
+        conpend = 0;
+        cursor_px = -1;
+        con_reset();
+        con_cursor_on();
+    }
+}
+
 static void con_output(uint8_t c)
 {
     irqflags_t irq;
     uint8_t cq;
+
+    if (con_gfx_active)
+        return;
 
     irq = di();
     if (conbusy) {

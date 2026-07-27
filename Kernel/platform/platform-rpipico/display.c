@@ -1,20 +1,23 @@
 /*
- * Pico Computer 3 HDMI display for Fuzix: 640x480, 1 bit per pixel, with
- * RGB332 foreground/background colours per 8x12 character cell (the
- * PicoMiteVGA MODE 1 idea, cell-aligned for the console).
+ * Pico Computer 3 HDMI display for Fuzix.
  *
- * The scanout machinery - HSTX TMDS encode, sync command lists, ping-pong
- * scanline DMA, core1 line expansion - follows the Pico Computer 3
- * MicroPython driver (ports/rp2/hdmi_rp2.c), which in turn follows
- * MMBasic's HDMI.c. Core1 is owned by the display: it expands each active
- * line (1bpp + cell colours -> RGB332 bytes) into a double-buffered line
- * buffer that HSTX scans; nothing else may run there.
+ * Two personalities share the scanout machinery (HSTX TMDS encode, sync
+ * command lists, ping-pong scanline DMA, core1 line expansion):
  *
- * Pixel clock = clk_hstx / 5, clk_hstx = clk_sys / 2 (except 378 MHz,
- * which needs the fractional divider):
- *   252 MHz -> 25.2 MHz pixel -> 640x480@60
- *   315 MHz -> 31.5 MHz pixel -> 640x480@75
- *   378 MHz -> 25.1 MHz pixel -> 640x480@60
+ *  - Console: 640x480, 1bpp + RGB332 fg/bg per 8x12 cell (80x40), at
+ *    clk_hstx = clk_sys/2.  324 MHz -> 32.4 MHz pixel -> 77.1 Hz.
+ *  - BBC graphics modes 0-5: 1024x768 VESA timing at clk_hstx = clk_sys
+ *    (full-rate DDR: 324 MHz -> 64.8 MHz pixel -> 59.9 Hz).  The
+ *    framebuffer stays at BBC resolution (20K/40K, sharing the console
+ *    framebuffer allocation) and core1 expands each output scanline
+ *    with a palette lookup table:
+ *      modes 1/4: 320x256, 4bpp -> x3 h, x3 v, 960 wide + 32px borders
+ *      modes 2/5: 160x256, 4bpp -> x6 h, x3 v, ditto
+ *      modes 0/3: 640x256, 1bpp -> x1 h, x2 v, centred 640x512
+ *    4bpp layout: high nibble = left pixel.  1bpp: MSB = left.
+ *
+ * Core1 is owned by the display; nothing else may run there.  Mode
+ * switching stops and relaunches core1 with the new timing.
  */
 
 #include <kernel.h>
@@ -29,17 +32,20 @@
 #include <hardware/structs/hstx_fifo.h>
 #include <pico/multicore.h>
 
-/* --- 640x480 timing (both 60 and 75 Hz run this 800x525 frame) ---------- */
-#define H_FRONT_PORCH   16
-#define H_SYNC_WIDTH    96
-#define H_BACK_PORCH    48
-#define H_ACTIVE        640
-#define V_FRONT_PORCH   10
-#define V_SYNC_WIDTH    2
-#define V_BACK_PORCH    33
-#define V_ACTIVE        480
-#define V_TOTAL         525
-#define BLANKING_COUNT  (V_FRONT_PORCH + V_SYNC_WIDTH + V_BACK_PORCH)
+/* --- video timing -------------------------------------------------------- */
+struct vtiming {
+    uint16_t hfp, hsync, hbp, hact;
+    uint16_t vfp, vsync, vbp, vact, vtotal;
+    uint8_t  hstx_div;          /* clk_sys / this -> clk_hstx */
+};
+
+static const struct vtiming tim_vga = {
+    16, 96, 48, 640,  10, 2, 33, 480, 525,  2
+};
+static const struct vtiming tim_xga = {   /* VESA 1024x768 (1344x806) */
+    24, 136, 160, 1024,  3, 6, 29, 768, 806,  1
+};
+static const struct vtiming *tim = &tim_vga;
 
 /* --- HSTX command words and TMDS control symbols ------------------------ */
 #define HSTX_CMD_RAW         (0x0u << 12)
@@ -64,11 +70,13 @@
 #define PC3_HDMI_D2  7
 
 /* --- Video memory -------------------------------------------------------- */
-uint8_t disp_fb[DISP_HEIGHT * DISP_STRIDE];
+/* The pool serves the console (38400 used) and the BBC modes (up to
+ * 40960): they never coexist. */
+uint8_t disp_fb[DISP_FB_POOL];
 uint8_t disp_tile_fg[DISP_ROWS * DISP_COLS];
 uint8_t disp_tile_bg[DISP_ROWS * DISP_COLS];
 
-static uint8_t disp_lines[2][H_ACTIVE]; /* RGB332 expanded scanlines */
+static uint8_t disp_lines[2][1024]; /* RGB332 expanded scanlines */
 
 static uint32_t vblank_line_vsync_off[7];
 static uint32_t vblank_line_vsync_on[7];
@@ -83,6 +91,61 @@ static int dmach_ping = -1, dmach_pong = -1;
 #define STACK_SENTINEL    0xf00dbeefu
 static uint32_t disp_core1_stack[CORE1_STACK_WORDS] __attribute__((aligned(8)));
 
+/* --- BBC graphics state -------------------------------------------------- */
+enum gexp {
+    EXP_CONSOLE = 0,
+    EXP_4BPP_X3,        /* modes 1/4: 320 wide, 160 bytes/line */
+    EXP_4BPP_X6,        /* modes 2/5: 160 wide, 80 bytes/line  */
+    EXP_1BPP_X1,        /* modes 0/3: 640 wide, 80 bytes/line, x2 lines */
+};
+static volatile enum gexp gfx_exp = EXP_CONSOLE;
+static uint8_t gfx_pal[16];
+static uint16_t gfx_stride;                 /* source bytes per BBC line */
+
+/* One shared expansion LUT, 16-byte stride for shift-indexing:
+ *  4BPP_X3: byte -> 6 output bytes;  4BPP_X6: 12;  1BPP_X1: 8. */
+static uint8_t gfx_lut[256][16];
+
+/* BBC physical colours 0-7 in RGB332 (8-15 = the flashing set, mapped
+ * to their steady counterparts) */
+static const uint8_t bbc_rgb332[8] = {
+    0x00, 0xE0, 0x1C, 0xFC, 0x03, 0xE3, 0x1F, 0xFF
+};
+
+static void gfx_lut_rebuild(void)
+{
+    int b, i;
+    switch (gfx_exp) {
+    case EXP_4BPP_X3:
+        for (b = 0; b < 256; b++) {
+            uint8_t c1 = gfx_pal[b >> 4], c2 = gfx_pal[b & 15];
+            uint8_t *e = gfx_lut[b];
+            e[0] = e[1] = e[2] = c1;
+            e[3] = e[4] = e[5] = c2;
+        }
+        break;
+    case EXP_4BPP_X6:
+        for (b = 0; b < 256; b++) {
+            uint8_t c1 = gfx_pal[b >> 4], c2 = gfx_pal[b & 15];
+            uint8_t *e = gfx_lut[b];
+            for (i = 0; i < 6; i++) {
+                e[i] = c1;
+                e[i + 6] = c2;
+            }
+        }
+        break;
+    case EXP_1BPP_X1:
+        for (b = 0; b < 256; b++) {
+            uint8_t *e = gfx_lut[b];
+            for (i = 0; i < 8; i++)
+                e[i] = (b & (0x80 >> i)) ? gfx_pal[1] : gfx_pal[0];
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 /* --- DMA IRQ (runs on core1): post the next scanline --------------------- */
 static void __not_in_flash_func(disp_dma_irq)(void)
 {
@@ -91,10 +154,12 @@ static void __not_in_flash_func(disp_dma_irq)(void)
     dma_hw->ints1 = 1u << ch_num;
     dma_pong = !dma_pong;
 
-    if (v_scanline >= V_FRONT_PORCH && v_scanline < (V_FRONT_PORCH + V_SYNC_WIDTH)) {
+    int blanking = tim->vfp + tim->vsync + tim->vbp;
+
+    if (v_scanline >= tim->vfp && v_scanline < (tim->vfp + tim->vsync)) {
         ch->read_addr = (uintptr_t)vblank_line_vsync_on;
         ch->transfer_count = count_of(vblank_line_vsync_on);
-    } else if (v_scanline < BLANKING_COUNT) {
+    } else if (v_scanline < blanking) {
         ch->read_addr = (uintptr_t)vblank_line_vsync_off;
         ch->transfer_count = count_of(vblank_line_vsync_off);
     } else if (!vactive_cmdlist_posted) {
@@ -103,25 +168,29 @@ static void __not_in_flash_func(disp_dma_irq)(void)
         vactive_cmdlist_posted = true;
     } else {
         ch->read_addr = (uintptr_t)disp_lines[v_scanline & 1];
-        ch->transfer_count = H_ACTIVE / 4; /* 4 RGB332 px per word */
+        ch->transfer_count = tim->hact / 4; /* 4 RGB332 px per word */
         vactive_cmdlist_posted = false;
     }
 
     if (!vactive_cmdlist_posted) {
-        v_scanline = (v_scanline + 1) % V_TOTAL;
+        v_scanline = (v_scanline + 1) % tim->vtotal;
     }
 }
 
-/* --- core1 fill loop: expand 1bpp + cell colours into RGB332 ------------- */
+/* --- core1 fill loop: expand one scanline into RGB332 -------------------- */
 static void __not_in_flash_func(disp_fill_loop)(void)
 {
     int last_line = 2;
     for (;;) {
         if (v_scanline != last_line) {
             last_line = v_scanline;
-            int active = last_line - (V_TOTAL - V_ACTIVE);
-            if (active >= 0 && active < V_ACTIVE) {
-                uint8_t *p = disp_lines[last_line & 1];
+            int active = last_line - (tim->vtotal - tim->vact);
+            if (active < 0 || active >= tim->vact)
+                continue;
+            uint8_t *p = disp_lines[last_line & 1];
+
+            switch (gfx_exp) {
+            case EXP_CONSOLE: {
                 const uint8_t *s = &disp_fb[active * DISP_STRIDE];
                 const uint8_t *fg = &disp_tile_fg[(active / DISP_CELL_H) * DISP_COLS];
                 const uint8_t *bg = &disp_tile_bg[(active / DISP_CELL_H) * DISP_COLS];
@@ -139,6 +208,53 @@ static void __not_in_flash_func(disp_fill_loop)(void)
                     p[7] = (b & 0x01) ? f : k;
                     p += 8;
                 }
+                break;
+            }
+            case EXP_4BPP_X3: {
+                const uint8_t *s = &disp_fb[(active / 3) * 160];
+                memset(p, 0, 32);
+                p += 32;
+                for (int t = 0; t < 160; t++) {
+                    const uint8_t *e = gfx_lut[s[t]];
+                    *(uint32_t *)p = *(const uint32_t *)e;
+                    *(uint16_t *)(p + 4) = *(const uint16_t *)(e + 4);
+                    p += 6;
+                }
+                memset(p, 0, 32);
+                break;
+            }
+            case EXP_4BPP_X6: {
+                const uint8_t *s = &disp_fb[(active / 3) * 80];
+                memset(p, 0, 32);
+                p += 32;
+                for (int t = 0; t < 80; t++) {
+                    const uint8_t *e = gfx_lut[s[t]];
+                    *(uint32_t *)p = *(const uint32_t *)e;
+                    *(uint32_t *)(p + 4) = *(const uint32_t *)(e + 4);
+                    *(uint32_t *)(p + 8) = *(const uint32_t *)(e + 8);
+                    p += 12;
+                }
+                memset(p, 0, 32);
+                break;
+            }
+            case EXP_1BPP_X1: {
+                /* 640x512 centred in 768 lines */
+                if (active < 128 || active >= 640) {
+                    memset(p, 0, 1024);
+                    break;
+                }
+                const uint8_t *s = &disp_fb[((active - 128) / 2) * 80];
+                memset(p, 0, 192);
+                p += 192;
+                for (int t = 0; t < 80; t++) {
+                    const uint8_t *e = gfx_lut[s[t]];
+                    *(uint32_t *)p = *(const uint32_t *)e;
+                    *(uint32_t *)(p + 4) = *(const uint32_t *)(e + 4);
+                    p += 8;
+                }
+                memset(p, 0, 192);
+                break;
+            }
             }
         }
     }
@@ -149,7 +265,9 @@ static void __not_in_flash_func(disp_core1_entry)(void)
 {
     uint32_t hstx_in = clock_get_hz(clk_sys);
     uint32_t hstx_target;
-    if (hstx_in > 350 * 1000000u) {
+    if (tim->hstx_div == 1) {
+        hstx_target = hstx_in;
+    } else if (hstx_in > 350 * 1000000u) {
         /* 378 MHz: /2 would be far too fast; fractional to ~125.5 MHz */
         hstx_target = (uint32_t)(((uint64_t)hstx_in * 332) / 1000);
     } else {
@@ -159,31 +277,31 @@ static void __not_in_flash_func(disp_core1_entry)(void)
         CLOCKS_CLK_HSTX_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
         hstx_in, hstx_target);
 
-    vblank_line_vsync_off[0] = HSTX_CMD_RAW_REPEAT | H_FRONT_PORCH;
+    vblank_line_vsync_off[0] = HSTX_CMD_RAW_REPEAT | tim->hfp;
     vblank_line_vsync_off[1] = SYNC_V1_H1;
-    vblank_line_vsync_off[2] = HSTX_CMD_RAW_REPEAT | H_SYNC_WIDTH;
+    vblank_line_vsync_off[2] = HSTX_CMD_RAW_REPEAT | tim->hsync;
     vblank_line_vsync_off[3] = SYNC_V1_H0;
-    vblank_line_vsync_off[4] = HSTX_CMD_RAW_REPEAT | (H_BACK_PORCH + H_ACTIVE);
+    vblank_line_vsync_off[4] = HSTX_CMD_RAW_REPEAT | (tim->hbp + tim->hact);
     vblank_line_vsync_off[5] = SYNC_V1_H1;
     vblank_line_vsync_off[6] = HSTX_CMD_NOP;
 
-    vblank_line_vsync_on[0] = HSTX_CMD_RAW_REPEAT | H_FRONT_PORCH;
+    vblank_line_vsync_on[0] = HSTX_CMD_RAW_REPEAT | tim->hfp;
     vblank_line_vsync_on[1] = SYNC_V0_H1;
-    vblank_line_vsync_on[2] = HSTX_CMD_RAW_REPEAT | H_SYNC_WIDTH;
+    vblank_line_vsync_on[2] = HSTX_CMD_RAW_REPEAT | tim->hsync;
     vblank_line_vsync_on[3] = SYNC_V0_H0;
-    vblank_line_vsync_on[4] = HSTX_CMD_RAW_REPEAT | (H_BACK_PORCH + H_ACTIVE);
+    vblank_line_vsync_on[4] = HSTX_CMD_RAW_REPEAT | (tim->hbp + tim->hact);
     vblank_line_vsync_on[5] = SYNC_V0_H1;
     vblank_line_vsync_on[6] = HSTX_CMD_NOP;
 
-    vactive_line[0] = HSTX_CMD_RAW_REPEAT | H_FRONT_PORCH;
+    vactive_line[0] = HSTX_CMD_RAW_REPEAT | tim->hfp;
     vactive_line[1] = SYNC_V1_H1;
     vactive_line[2] = HSTX_CMD_NOP;
-    vactive_line[3] = HSTX_CMD_RAW_REPEAT | H_SYNC_WIDTH;
+    vactive_line[3] = HSTX_CMD_RAW_REPEAT | tim->hsync;
     vactive_line[4] = SYNC_V1_H0;
     vactive_line[5] = HSTX_CMD_NOP;
-    vactive_line[6] = HSTX_CMD_RAW_REPEAT | H_BACK_PORCH;
+    vactive_line[6] = HSTX_CMD_RAW_REPEAT | tim->hbp;
     vactive_line[7] = SYNC_V1_H1;
-    vactive_line[8] = HSTX_CMD_TMDS | H_ACTIVE;
+    vactive_line[8] = HSTX_CMD_TMDS | tim->hact;
 
     /* RGB332 byte = RRRGGGBB. NBITS field is (bits - 1). */
     hstx_ctrl_hw->expand_tmds =
@@ -251,10 +369,31 @@ static void __not_in_flash_func(disp_core1_entry)(void)
     disp_fill_loop();
 }
 
+/* --- scanout start/stop (mode switching) --------------------------------- */
+static void disp_scanout_start(void)
+{
+    v_scanline = 2;
+    dma_pong = false;
+    vactive_cmdlist_posted = false;
+    disp_core1_stack[0] = STACK_SENTINEL;
+    multicore_launch_core1_with_stack(disp_core1_entry,
+        disp_core1_stack, sizeof(disp_core1_stack));
+}
+
+static void disp_scanout_stop(void)
+{
+    multicore_reset_core1();
+    hstx_ctrl_hw->csr = 0;
+    dma_channel_abort(dmach_ping);
+    dma_channel_abort(dmach_pong);
+    dma_hw->inte1 &= ~((1u << dmach_ping) | (1u << dmach_pong));
+    dma_hw->ints1 = (1u << dmach_ping) | (1u << dmach_pong);
+}
+
 /* --- Public -------------------------------------------------------------- */
 bool display_in_blanking(void)
 {
-    return v_scanline < BLANKING_COUNT;
+    return v_scanline < (tim->vfp + tim->vsync + tim->vbp);
 }
 
 bool display_stack_ok(void)
@@ -262,17 +401,86 @@ bool display_stack_ok(void)
     return disp_core1_stack[0] == STACK_SENTINEL;
 }
 
+/* Enter a BBC graphics mode (0-5), or 0xFF back to the text console.
+ * Returns the framebuffer size, or -1 for a bad mode. */
+int display_gfx_mode(int mode)
+{
+    extern void console_gfx(int active);    /* console.c */
+    enum gexp exp;
+    int size;
+
+    switch (mode) {
+    case 0: case 3:
+        exp = EXP_1BPP_X1;
+        gfx_stride = 80;
+        size = 80 * 256;
+        break;
+    case 1: case 4:
+        exp = EXP_4BPP_X3;
+        gfx_stride = 160;
+        size = 160 * 256;
+        break;
+    case 2: case 5:
+        exp = EXP_4BPP_X6;
+        gfx_stride = 80;
+        size = 80 * 256;
+        break;
+    case 0xFF:
+        exp = EXP_CONSOLE;
+        size = 0;
+        break;
+    default:
+        return -1;
+    }
+
+    disp_scanout_stop();
+    gfx_exp = exp;
+
+    if (exp == EXP_CONSOLE) {
+        tim = &tim_vga;
+        console_gfx(0);         /* clears and repaints the console */
+    } else {
+        static const uint8_t defpal[3][16] = {
+            /* modes 0/3: black, white */
+            { 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7 },
+            /* modes 1/4: black, red, yellow, white */
+            { 0, 1, 3, 7, 0, 1, 3, 7, 0, 1, 3, 7, 0, 1, 3, 7 },
+            /* modes 2/5: the full set */
+            { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7 },
+        };
+        const uint8_t *dp = defpal[exp == EXP_1BPP_X1 ? 0 :
+                                   exp == EXP_4BPP_X3 ? 1 : 2];
+        for (int i = 0; i < 16; i++)
+            gfx_pal[i] = bbc_rgb332[dp[i] & 7];
+        tim = &tim_xga;
+        console_gfx(1);
+        memset(disp_fb, 0, size);
+        gfx_lut_rebuild();
+    }
+
+    disp_scanout_start();
+    return size;
+}
+
+/* Set logical colour -> BBC physical colour (0-15; 8-15 map steady). */
+void display_gfx_pal(uint8_t logical, uint8_t physical)
+{
+    gfx_pal[logical & 15] = bbc_rgb332[physical & 7];
+    gfx_lut_rebuild();
+}
+
+/* Current graphics framebuffer size (0 = console mode). */
+int display_gfx_size(void)
+{
+    return (gfx_exp == EXP_CONSOLE) ? 0 : gfx_stride * 256;
+}
+
 void display_init(void)
 {
     dmach_ping = dma_claim_unused_channel(true);
     dmach_pong = dma_claim_unused_channel(true);
 
-    v_scanline = 2;
-    dma_pong = false;
-    vactive_cmdlist_posted = false;
-    disp_core1_stack[0] = STACK_SENTINEL;
-    multicore_launch_core1_with_stack(disp_core1_entry,
-        disp_core1_stack, sizeof(disp_core1_stack));
+    disp_scanout_start();
 
-    kputs("HDMI display: 640x480 1bpp, 80x40 colour cells\n");
+    kputs("HDMI display: 640x480 console, BBC graphics modes 0-5\n");
 }

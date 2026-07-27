@@ -4,7 +4,7 @@ USERCPU=armm0
 VERBOSE=1
 include $(FUZIX_ROOT)/Target/rules.$(USERCPU)
 
-UTILS = picoctl.c picogpio.c
+UTILS = picoctl.c picogpio.c gfxtest.c
 UTILSBIN = $(UTILS:.c=)
 
 .PHONY: all clean
