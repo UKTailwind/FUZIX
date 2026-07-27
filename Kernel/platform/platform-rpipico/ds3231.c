@@ -49,38 +49,134 @@ static uint8_t tobcd(uint8_t v)
     return ((v / 10) << 4) | (v % 10);
 }
 
+static uint8_t rtc_present;    /* found at init */
+static uint8_t rtc_quiet;      /* suppress diagnostics (IRQ-context poll) */
+
+/* Standard I2C bus recovery. The DS3231 is battery backed and never
+ * resets: a transaction interrupted mid-bit (reboot at the wrong
+ * moment) can leave the chip driving SDA low forever - across power
+ * cycles - and every later transaction then times out. Clock the bus
+ * with up to 9 SCL pulses until the slave releases SDA, then send a
+ * STOP, then hand the pins back to the I2C block. */
+static void ds3231_bus_recover(void)
+{
+    int i;
+
+    gpio_init(DS3231_SDA);              /* SIO, input, pulled up */
+    gpio_init(DS3231_SCL);
+    gpio_set_input_enabled(DS3231_SDA, true);
+    gpio_set_input_enabled(DS3231_SCL, true);
+    gpio_pull_up(DS3231_SDA);
+    gpio_pull_up(DS3231_SCL);
+    busy_wait_us_32(10);
+
+    if (!((gpio_get_all64() >> DS3231_SDA) & 1)) {
+        kputs("ds3231: SDA held low, clocking bus free\n");
+        for (i = 0; i < 9; i++) {
+            /* drive SCL low, release high - open-drain style */
+            gpio_put(DS3231_SCL, 0);
+            gpio_set_dir(DS3231_SCL, true);
+            busy_wait_us_32(50);
+            gpio_set_dir(DS3231_SCL, false);
+            busy_wait_us_32(50);
+            if ((gpio_get_all64() >> DS3231_SDA) & 1)
+                break;
+        }
+        /* STOP: SDA low -> high while SCL high */
+        gpio_put(DS3231_SDA, 0);
+        gpio_set_dir(DS3231_SDA, true);
+        busy_wait_us_32(50);
+        gpio_set_dir(DS3231_SDA, false);
+        busy_wait_us_32(50);
+    }
+
+    gpio_set_function(DS3231_SDA, GPIO_FUNC_I2C);
+    gpio_set_function(DS3231_SCL, GPIO_FUNC_I2C);
+    gpio_pull_up(DS3231_SDA);
+    gpio_pull_up(DS3231_SCL);
+}
+
+/* All bus transactions run with interrupts off and retry: the timer
+ * interrupt polls plt_rtc_secs() every few seconds (CONFIG_RTC_INTERVAL),
+ * so a process-context transaction on the same controller could
+ * otherwise be interleaved with an IRQ-context one and both aborted.
+ * A transaction is ~300us at 400kHz - acceptable with interrupts held. */
 static int ds3231_read_regs(uint8_t reg, uint8_t *buf, unsigned int n)
 {
-    if (i2c_write_timeout_us(DS3231_I2C, DS3231_ADDR, &reg, 1, true,
-                             DS3231_TIMEOUT_US) != 1)
-        return -1;
-    if (i2c_read_timeout_us(DS3231_I2C, DS3231_ADDR, buf, n, false,
-                            DS3231_TIMEOUT_US) != (int)n)
-        return -1;
-    return 0;
+    int tries, r1, r2;
+    irqflags_t irq;
+
+    for (tries = 0; tries < 3; tries++) {
+        if (tries) {    /* previous try failed: unwedge bus + controller */
+            ds3231_bus_recover();
+            i2c_init(DS3231_I2C, 400 * 1000);
+        }
+        irq = di();
+        r1 = i2c_write_timeout_us(DS3231_I2C, DS3231_ADDR, &reg, 1, true,
+                                  DS3231_TIMEOUT_US);
+        r2 = (r1 == 1) ?
+             i2c_read_timeout_us(DS3231_I2C, DS3231_ADDR, buf, n, false,
+                                 DS3231_TIMEOUT_US) : -1;
+        irqrestore(irq);
+        if (r1 == 1 && r2 == (int)n)
+            return 0;
+    }
+    if (!rtc_quiet)
+        kprintf("ds3231: read reg %d fail (w=%d r=%d)\n", reg, r1, r2);
+    return -1;
 }
 
 static int ds3231_write_regs(uint8_t reg, const uint8_t *buf, unsigned int n)
 {
     uint8_t tmp[8];
+    int tries, r1;
+    irqflags_t irq;
 
     if (n > sizeof(tmp) - 1)
         return -1;
     tmp[0] = reg;
     memcpy(tmp + 1, buf, n);
-    if (i2c_write_timeout_us(DS3231_I2C, DS3231_ADDR, tmp, n + 1, false,
-                             DS3231_TIMEOUT_US) != (int)(n + 1))
-        return -1;
-    return 0;
+    for (tries = 0; tries < 3; tries++) {
+        if (tries) {    /* previous try failed: unwedge bus + controller */
+            ds3231_bus_recover();
+            i2c_init(DS3231_I2C, 400 * 1000);
+        }
+        irq = di();
+        r1 = i2c_write_timeout_us(DS3231_I2C, DS3231_ADDR, tmp, n + 1, false,
+                                  DS3231_TIMEOUT_US);
+        irqrestore(irq);
+        if (r1 == (int)(n + 1))
+            return 0;
+    }
+    kprintf("ds3231: write reg %d fail (%d)\n", reg, r1);
+    return -1;
 }
+
+/* Called from the timer interrupt every CONFIG_RTC_INTERVAL deciseconds
+ * (5s) to drift-correct the tick-driven system clock. System time runs
+ * from the crystal-derived tick; touching the I2C bus that often buys
+ * nothing, so resync about hourly as MMBasic does (255 = no data, skip).
+ * The interval must be a multiple of 3840s: updatetod's expected-seconds
+ * counter wraps mod 256 while the chip's wraps mod 60, and lcm(256,60)
+ * keeps the two congruent so the computed slide is pure drift. */
+#define RTC_SYNC_SECS  3840
+#define RTC_SYNC_CALLS (RTC_SYNC_SECS / (CONFIG_RTC_INTERVAL / 10))
 
 uint_fast8_t plt_rtc_secs(void)
 {
+    static uint16_t calls;
     uint8_t s;
+    uint8_t r;
 
-    if (ds3231_read_regs(REG_TIME, &s, 1))
+    if (!rtc_present)
         return 255;
-    return frombcd(s & 0x7F);
+    if (++calls < RTC_SYNC_CALLS)
+        return 255;
+    calls = 0;
+    rtc_quiet = 1;
+    r = ds3231_read_regs(REG_TIME, &s, 1) ? 255 : frombcd(s & 0x7F);
+    rtc_quiet = 0;
+    return r;
 }
 
 int plt_rtc_read(void)
@@ -163,16 +259,14 @@ void ds3231_init(void)
 {
     uint8_t st;
 
-    gpio_set_function(DS3231_SDA, GPIO_FUNC_I2C);
-    gpio_set_function(DS3231_SCL, GPIO_FUNC_I2C);
-    gpio_pull_up(DS3231_SDA);
-    gpio_pull_up(DS3231_SCL);
+    ds3231_bus_recover();
     i2c_init(DS3231_I2C, 400 * 1000);
 
     if (ds3231_read_regs(REG_STATUS, &st, 1)) {
         kputs("DS3231 RTC: not responding\n");
         return;
     }
+    rtc_present = 1;
     if (st & 0x80)
         kputs("DS3231 RTC: oscillator was stopped, time needs setting (setdate -w)\n");
     inittod();

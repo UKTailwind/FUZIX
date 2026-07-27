@@ -97,6 +97,46 @@ To power off, type `shutdown` (or at minimum `sync`, then wait a
 moment). After an unclean power-off the next boot repairs the
 filesystem automatically (`fsck -a -y`).
 
+## Setting the clock
+
+The board's DS3231 battery-backed clock supplies the date and time:
+at every boot `/etc/rc` runs `setdate`, which reads the chip and sets
+system time silently. If the chip cannot supply a valid time (fresh
+battery, or the battery was removed) the same command falls back to
+prompting on the console:
+
+```
+Current date is Mon 2026-07-27
+Enter new date:
+```
+
+Press Enter to keep a value, or type a new one (`2026-07-28`, then
+`16:30:00`). To set the clock at any other time run `setdate -u`,
+which always prompts.
+
+Setting the system time does not touch the chip. To make the time
+permanent, write it back:
+
+```
+# setdate -w
+writing
+```
+
+That also restarts a stopped oscillator, so the sequence for a new
+battery is: `setdate -u` (enter the time), then `setdate -w`. The
+kernel message `oscillator was stopped, time needs setting` at boot
+means exactly that sequence is wanted.
+
+While running, system time is kept by the crystal-driven timer tick
+and gently re-synchronised from the DS3231 about once an hour, the
+same policy as MMBasic. `date` prints the current time.
+
+If a transaction to the chip is ever interrupted at the wrong moment
+(a reset mid-read), the battery-backed DS3231 can be left jamming the
+I2C bus - even across power cycles. The kernel detects this at boot
+(`ds3231: SDA held low, clocking bus free`) and clears it
+automatically.
+
 ## Escape routes
 
 * **Esc** — inside BBC BASIC, stops the running program.
