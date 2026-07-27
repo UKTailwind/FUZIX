@@ -42,6 +42,7 @@ f 0755 /bin/reboot      reboot
 l /bin/reboot /bin/halt
 l /bin/reboot /bin/shutdown
 f 0755 /bin/remount     remount
+f 0755 /bin/rx          rx
 f 0755 /bin/rm          rm
 f 0755 /bin/rmdir       rmdir
 f 0755 /bin/setdate     setdate
@@ -110,6 +111,7 @@ f 0755 /bin/sort        sort
 f 0755 /bin/sum         sum
 f 0755 /bin/su          su
 f 0755 /bin/swapon	swapon
+f 0755 /bin/sx          sx
 f 0755 /bin/tail        tail
 f 0755 /bin/tar         tar
 f 0755 /usr/lib/tchelp  tchelp

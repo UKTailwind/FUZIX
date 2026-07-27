@@ -84,6 +84,7 @@ SRCS  = \
 	passwd.c \
 	ps.c \
 	remount.c \
+	rx.c \
 	sed.c \
 	seq.c \
 	setboot.c \
@@ -96,6 +97,7 @@ SRCS  = \
 	stty.c \
 	su.c \
 	swapon.c \
+	sx.c \
 	tar.c \
 	tail.c \
 	termcap.c \

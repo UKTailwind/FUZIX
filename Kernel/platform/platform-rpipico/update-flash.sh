@@ -125,6 +125,7 @@ bget ../../../Applications/util/echo
 bget ../../../Applications/util/ed
 bget ../../../Applications/util/env
 bget ../../../Applications/util/false
+bget ../../../Applications/util/fat
 bget ../../../Applications/util/fdisk
 bget ../../../Applications/util/fforth
 bget ../../../Applications/util/fgrep
@@ -158,6 +159,7 @@ bget ../../../Applications/util/reboot
 bget ../../../Applications/util/remount
 bget ../../../Applications/util/rm
 bget ../../../Applications/util/rmdir
+bget ../../../Applications/util/rx
 bget ../../../Applications/util/setdate
 bget ../../../Applications/util/setboot
 bget ../../../Applications/util/sleep
@@ -168,6 +170,7 @@ bget ../../../Applications/util/substroot
 bget ../../../Applications/util/sum
 bget ../../../Applications/util/su
 bget ../../../Applications/util/swapon
+bget ../../../Applications/util/sx
 bget ../../../Applications/util/sync
 bget ../../../Applications/util/tar
 bget ../../../Applications/util/tee
@@ -214,6 +217,7 @@ chmod 0755 echo
 chmod 0755 ed
 chmod 0755 env
 chmod 0755 false
+chmod 0755 fat
 chmod 0755 fdisk
 chmod 0755 fforth
 chmod 0755 fgrep
@@ -247,6 +251,7 @@ chmod 0755 reboot
 chmod 0755 remount
 chmod 0755 rm
 chmod 0755 rmdir
+chmod 0755 rx
 chmod 0755 setdate
 chmod 0775 setboot
 chmod 0755 sleep
@@ -257,6 +262,7 @@ chmod 0755 substroot
 chmod 0755 sum
 chmod 0755 su
 chmod 0755 swapon
+chmod 0755 sx
 chmod 0755 sync
 chmod 0755 tar
 chmod 0755 tee
