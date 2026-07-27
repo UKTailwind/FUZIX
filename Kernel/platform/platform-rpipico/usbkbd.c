@@ -85,7 +85,8 @@ void kbd_push(uint8_t c)
  * the same session (devn is the uart device number, passed through). */
 int console_getc(uint8_t devn)
 {
-    if (khead != ktail) {
+    /* the keyboard ring feeds the console session only */
+    if (devn == 1 && khead != ktail) {
         uint8_t c = kring[ktail];
         ktail = (ktail + 1) & (KBD_RING - 1);
         return c;

@@ -191,7 +191,7 @@ extern uint8_t progbase[USERMEM];
 #define SWAPDEV    (swap_dev) /* dynamic swap */
 
 /* Device parameters */
-#define NUM_DEV_TTY_UART 1 /* min 1 max 2*/
+#define NUM_DEV_TTY_UART 2 /* min 1 max 2*/
 /* Pico Computer 3: the console is the CH340 (USB-C serial) wired to the
  * uart1 peripheral, GP8=TX / GP9=RX. 115200 like the other PC3 firmwares
  * (the kernel default termios would drop the port to 9600 at tty open). */
@@ -199,10 +199,14 @@ extern uint8_t progbase[USERMEM];
 #define DEV_UART_0_INSTANCE 1
 #define DEV_UART_0_TX_PIN 8
 #define DEV_UART_0_RX_PIN 9
-#define DEV_UART_1_TX_PIN 6
-#define DEV_UART_1_RX_PIN 7
-#define DEV_UART_1_CTS_PIN 8
-#define DEV_UART_1_RTS_PIN 9
+/* Second serial port on the I/O header: /dev/tty2 = uart0, GP0=TX /
+ * GP1=RX, no flow control.  BBC BASIC reaches it as a port channel:
+ * ch% = OPENUP("/dev/tty2") then BGET#/BPUT#; baud via *stty. */
+#define DEV_UART_1_INSTANCE 0
+#define DEV_UART_1_TX_PIN 0
+#define DEV_UART_1_RX_PIN 1
+#define DEV_UART_1_CTS_PIN -1
+#define DEV_UART_1_RTS_PIN -1
 #define NUM_DEV_TTY_USB 4 /* min 1 max 4. */
 #define NUM_DEV_TTY (NUM_DEV_TTY_UART + NUM_DEV_TTY_USB)
 #ifdef CONFIG_PC3_DISPLAY
