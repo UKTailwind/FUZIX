@@ -106,6 +106,19 @@ live document.
    block in read() with VMIN=0/VTIME=1 (the tty wakes you the moment a
    byte arrives) - see kbwait1() in bbccon.c.
 
+## Status (2026-07-27 evening): the full machine
+
+ALL CONFIRMED ON HARDWARE: BBC BASIC runs with GRAPHICS (Phase 5,
+PC3-GFX-DESIGN.md - MODE 0-5 on 1024x768@70, MMBasic clocking at
+375 MHz, MODE 0 full-width 5:8 coverage upscale, PLOT/GCOL/palette)
+and SOUND (Phase 6, sound.c - the 4-channel BBC synth with queues,
+sync and ENVELOPE on the PCM5102 I2S DAC, SNDIOC on /dev/sys).
+Remaining graphics niceties queued: PLOT circles (144+) and
+rectangle fill (96+), GCOL modes 1-4, POINT( readback, VDU 5,
+ADVAL(-6..-9) sound queue readback, reclaiming the 40K shadow
+framebuffer when no mode is active.  MODE >= 6 returns to the
+console; MODE 7 teletext is a future treat.
+
 ## Session status (2026-07-26 evening)
 
 BBC BASIC RUNS on hardware: banner, immediate mode, PRINT 1/3 =
