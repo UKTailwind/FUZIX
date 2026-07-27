@@ -118,6 +118,15 @@ void device_init(void)
 #endif
     ds3231_init();
 
+#ifdef CONFIG_PICO_COMPUTER_3
+    {
+        /* Pico Computer 2 or 3? (board.c) - must precede the SD card,
+         * whose wiring differs between the two. */
+        extern void board_detect(void);
+        board_detect();
+    }
+#endif
+
     sd_rawinit();
     devsd_init();
 

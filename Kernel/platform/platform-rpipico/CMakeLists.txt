@@ -50,6 +50,7 @@ add_executable(fuzix
 	usbkbd.c
 	psram.c
 	rawuart.c
+	board.c
 	sound.c
 	swapper.c
 	tricks.S
