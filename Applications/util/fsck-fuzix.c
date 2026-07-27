@@ -76,6 +76,7 @@ static int dev_fd;
 static int error;
 static int rootfs;
 static int aflag;
+static int yflag;
 
 static unsigned char *bitmap;
 static uint16_t bitmap_size;
@@ -104,6 +105,10 @@ static uint16_t max_inode;
 static int yes_noerror(void)
 {
     static char buf[16];
+    if (yflag) {            /* unattended: answer yes, keep the log honest */
+        puts("y");
+        return 1;
+    }
     fflush(stdout);
     do {
         if (fgets(buf, 15, stdin) == NULL)
@@ -276,11 +281,18 @@ int perform_fsck(char *name)
 
 int main(int argc, char *argv[])
 {
-    if (argc == 3 && strcmp(argv[1], "-a") == 0) {
-        aflag = 1;
+    while (argc > 1 && argv[1][0] == '-') {
+        if (strcmp(argv[1], "-a") == 0)
+            aflag = 1;
+        else if (strcmp(argv[1], "-y") == 0)
+            yflag = 1;
+        else
+            break;
+        argc--;
         argv++;
-    } else if(argc != 2) {
-        fputs("syntax: fsck-fuzix [-a] [devfile]\n", stderr);
+    }
+    if (argc != 2) {
+        fputs("syntax: fsck-fuzix [-a] [-y] [devfile]\n", stderr);
         return 16;
     }
     /* Re-run each time the error code is 'do another run over the disk' */
