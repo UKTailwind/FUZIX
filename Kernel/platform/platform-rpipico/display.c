@@ -5,9 +5,9 @@
  * command lists, ping-pong scanline DMA, core1 line expansion):
  *
  *  - Console: 640x480, 1bpp + RGB332 fg/bg per 8x12 cell (80x40), at
- *    clk_hstx = clk_sys/2.  324 MHz -> 32.4 MHz pixel -> 77.1 Hz.
- *  - BBC graphics modes 0-5: 1024x768 VESA timing at clk_hstx = clk_sys
- *    (full-rate DDR: 324 MHz -> 64.8 MHz pixel -> 59.9 Hz).  The
+ *    clk_hstx = clk_sys/3.  375 MHz -> 25 MHz pixel -> 59.5 Hz.
+ *  - BBC graphics modes 0-5: MMBasic's PC3-proven XGA line at
+ *    clk_hstx = clk_sys (375 MHz DDR -> 75 MHz pixel -> 70.07 Hz).  The
  *    framebuffer stays at BBC resolution (20K/40K, sharing the console
  *    framebuffer allocation) and core1 expands each output scanline
  *    with a palette lookup table:
@@ -28,6 +28,7 @@
 #include "display.h"
 
 #include <hardware/dma.h>
+#include <hardware/resets.h>
 #include <hardware/structs/hstx_ctrl.h>
 #include <hardware/structs/hstx_fifo.h>
 #include <pico/multicore.h>
@@ -39,11 +40,15 @@ struct vtiming {
     uint8_t  hstx_div;          /* clk_sys / this -> clk_hstx */
 };
 
+/* clk_sys is 375 MHz (MMBasic FreqXGA): console 640x480 runs at
+ * clk_hstx = clk_sys/3 (25 MHz pixel, 59.5 Hz); the BBC graphics
+ * modes use MMBasic's PC3-proven XGA line: full-rate HSTX (75 MHz
+ * pixel), 1328x806 frame, 1024x768 at 70.07 Hz. */
 static const struct vtiming tim_vga = {
-    16, 96, 48, 640,  10, 2, 33, 480, 525,  2
+    16, 96, 48, 640,  10, 2, 33, 480, 525,  3
 };
-static const struct vtiming tim_xga = {   /* VESA 1024x768 (1344x806) */
-    24, 136, 160, 1024,  3, 6, 29, 768, 806,  1
+static const struct vtiming tim_xga = {
+    24, 136, 144, 1024,  3, 6, 29, 768, 806,  1
 };
 static const struct vtiming *tim = &tim_vga;
 
@@ -264,15 +269,7 @@ static void __not_in_flash_func(disp_fill_loop)(void)
 static void __not_in_flash_func(disp_core1_entry)(void)
 {
     uint32_t hstx_in = clock_get_hz(clk_sys);
-    uint32_t hstx_target;
-    if (tim->hstx_div == 1) {
-        hstx_target = hstx_in;
-    } else if (hstx_in > 350 * 1000000u) {
-        /* 378 MHz: /2 would be far too fast; fractional to ~125.5 MHz */
-        hstx_target = (uint32_t)(((uint64_t)hstx_in * 332) / 1000);
-    } else {
-        hstx_target = hstx_in / 2;
-    }
+    uint32_t hstx_target = hstx_in / tim->hstx_div;
     clock_configure(clk_hstx, 0,
         CLOCKS_CLK_HSTX_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
         hstx_in, hstx_target);
@@ -417,6 +414,13 @@ static void disp_scanout_stop(void)
     dma_hw->ints1 = chans;
     hstx_ctrl_hw->csr = 0;
     irq_remove_handler(DMA_IRQ_1, disp_dma_irq);
+
+    /* Fully reset the HSTX peripheral so the rebuild starts from
+     * cold-boot state: reconfiguring it with residual FIFO/serialiser
+     * state made MMBasic's live 640->1024 switches intermittently
+     * fail to produce a valid signal.  The restart re-does all HSTX
+     * and GPIO configuration, so this is safe. */
+    reset_unreset_block_num_wait_blocking(RESETS_RESET_HSTX_LSB);
 }
 
 /* --- Public -------------------------------------------------------------- */

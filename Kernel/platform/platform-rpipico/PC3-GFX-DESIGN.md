@@ -19,15 +19,17 @@ framebuffer interface it drives.  Companion to PC3-DEVNOTES.md.
 
 256 lines x3 = 768: vertical is integer-perfect, full height.
 
-Clocking (DECIDED): clk_sys = 324 MHz from boot - no dynamic clock
-switching.  Exactly 325 is not synthesizable from the 12 MHz crystal
-(no valid PLL FBDIV); 324 = VCO 1296/4.  Graphics modes run HSTX at
-full-rate DDR (648 Mb/s/lane): pixel clock 64.8 MHz, VESA 1024x768
-timing (1344x806) at 59.9 Hz.  The text console keeps its 640x480
-timing from the same clock at clk_sys/2: 32.4 MHz pixel = 77.1 Hz.
-Flash QMI 54 MHz (div 6), PSRAM 108 MHz (div 3), UART/SD divisors all
-derive at runtime.  MODE switch reprograms only the HSTX clock
-divider and TMDS command lists.
+Clocking (DECIDED, rev 2): clk_sys = 375 MHz from boot - MMBasic's
+FreqXGA, the PC3-proven XGA clock (VCO 1500/4) - no dynamic clock
+switching.  Graphics modes use MMBasic's exact XGA line: HSTX at
+clk_sys (750 Mb/s/lane), pixel clock 75 MHz, 1328x806 frame =
+1024x768 at 70.07 Hz.  The text console runs clk_hstx = clk_sys/3:
+25 MHz pixel = 640x480 at 59.5 Hz (the same /3 scheme PicoMite uses
+for VGA at 378).  Flash QMI 62.5 MHz (div 6), PSRAM 125 MHz (div 3),
+UART/SD divisors all derive at runtime.  A mode switch tears the
+scanout down in the order proven in MMBasic HDMI.c (break DMA chains,
+abort together, bounded waits, THEN stop HSTX) and fully resets the
+HSTX peripheral so every rebuild starts from cold-boot state.
 
 ## Horizontal scaling: use a 960-wide window
 
