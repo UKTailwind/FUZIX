@@ -85,9 +85,11 @@ isr_svcall_user:
 
 plt_switchout:
 	/* Save the callee-saved registers onto the stack in the same order
-	 * that switchout will do it, so switchin will restore it correctly. */
+	 * that switchout will do it, so switchin will restore it correctly.
+	 * r4 must be included: it is used as scratch below and switchin
+	 * clobbers it too, but AAPCS requires it preserved for the caller. */
 
-    push {r5, r6, r7, lr}
+    push {r4, r5, r6, r7, lr}
     mov r1, r8
     mov r2, r9
     mov r3, r10
@@ -145,7 +147,7 @@ switchin:
     mov r10, r3
     mov r11, r4
     mov r12, r5
-    pop {r5, r6, r7, pc}
+    pop {r4, r5, r6, r7, pc}
 
 .global dofork
 .text
@@ -155,7 +157,7 @@ dofork:
 	/* Save the callee-saved registers onto the stack in the same order
 	 * that switchout will do it, so switchin will restore it correctly. */
 
-    push {r5, r6, r7, lr}
+    push {r4, r5, r6, r7, lr}
     mov r1, r8
     mov r2, r9
     mov r3, r10
@@ -205,7 +207,7 @@ dofork:
     mov r10, r3
     mov r11, r4
     mov r12, r5
-    pop {r5, r6, r7, pc}
+    pop {r4, r5, r6, r7, pc}
 
 // vim: sw=4 ts=4 et:
 
