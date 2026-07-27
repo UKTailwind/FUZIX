@@ -77,7 +77,11 @@
 #define UDATA_BLKS  3
 #define UDATA_SIZE  (UDATA_BLKS << BLKSHIFT)
 
+/* cmake passes -DTOTALMEM on the compiler command line; the guard lets
+ * that value win instead of silently stomping it with the default. */
+#ifndef TOTALMEM
 #define TOTALMEM 160
+#endif
 #if TOTALMEM == 0
 #error TOTALMEM should have been defined via cmake
 #endif
@@ -124,6 +128,10 @@ extern uint8_t progbase[USERMEM];
 #define SWAPDEV    (swap_dev) /* dynamic swap */
 
 /* Device parameters */
+/* The boot console runs at 115200; without this the kernel default
+ * termios (9600) takes over at first tty open and the port speed
+ * changes under the user mid-login. */
+#define TTY_INIT_BAUD B115200
 #define NUM_DEV_TTY_UART 1 /* min 1 max 2*/
 #define DEV_UART_0_TX_PIN PICO_DEFAULT_UART_TX_PIN
 #define DEV_UART_0_RX_PIN PICO_DEFAULT_UART_RX_PIN
