@@ -57,11 +57,11 @@ static uart_inst_t * rawuart_init_one(int num, int tx, int rx, int cts, int rts)
     uart_set_fifo_enabled(uart, true);
     if (cts > 0)
     {
-        gpio_set_function(DEV_UART_0_CTS_PIN, GPIO_FUNC_UART);
+        gpio_set_function(cts, GPIO_FUNC_UART);
     }
     if (rts > 0)
     {
-        gpio_set_function(DEV_UART_0_RTS_PIN, GPIO_FUNC_UART);
+        gpio_set_function(rts, GPIO_FUNC_UART);
     }
     uart_set_hw_flow(uart, cts > 0, rts > 0);
     return uart;
@@ -134,14 +134,16 @@ void rawuart_setup(uint_fast8_t minor, uint_fast8_t devn, uint_fast8_t flags)
 {
     struct termios *t = &ttydata[minor].termios;
 
-    uart_inst_t *uart = rawuart_init(devn - 1);
+    uart_inst_t *uart = uart_get_instance(devn - 1);
 
-    /* Wait for output to finish */
+    /* Wait for output to finish - before uart_init resets the port,
+     * or the FIFO contents and the character on the wire are lost. */
     if (flags)
     {
         while (!uart_tx_is_empty(uart))
             _sched_yield();
     }
+    uart = rawuart_init(devn - 1);
     uint baud_rate;
     uint data_bits;
     uint stop_bits = 1;
