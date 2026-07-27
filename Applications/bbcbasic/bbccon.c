@@ -1797,7 +1797,7 @@ timer_t StartTimer (int period)
 {
 	timerperiod = period ;
 	lasttimer = GetTicks () ;
-	return 1 ;
+	return (timer_t) (size_t) 1 ;
 }
 
 void StopTimer (timer_t timerid)
@@ -2021,8 +2021,8 @@ static struct termios orig_termios ;
 	    {
 		intptr_t got = 0 ;
 		userRAM = sbrk (0) ;
-		while (sbrk (4096) != (void *)-1)
-			got += 4096 ;
+		while ((got < 0x38000) && (sbrk (4096) != (void *)-1))
+			got += 4096 ;	/* capped: probe, not landgrab */
 		if (got >= 0x3000 + 0x8000)	/* slack + minimum useful */
 		    {
 			sbrk (-0x3000) ;

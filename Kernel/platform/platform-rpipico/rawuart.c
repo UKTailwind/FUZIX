@@ -152,6 +152,16 @@ static inline bool uart_tx_is_empty(uart_inst_t *uart)
 void rawuart_setup(uint_fast8_t minor, uint_fast8_t devn, uint_fast8_t flags)
 {
     struct termios *t = &ttydata[minor].termios;
+    static uint32_t last_cflag[2] = { 0xFFFFFFFF, 0xFFFFFFFF };
+
+    /* Only the c_cflag bits (baud, size, stop, parity) reach the
+     * hardware.  Re-initialising the uart resets the FIFOs and eats
+     * bytes in flight, so a tcsetattr that only changes VMIN/VTIME or
+     * local flags - as polling loops do continually - must be a
+     * hardware no-op. */
+    if (t->c_cflag == last_cflag[devn - 1])
+        return;
+    last_cflag[devn - 1] = t->c_cflag;
 
     uart_inst_t *uart = rawuart_init(devn - 1);
 
@@ -171,6 +181,7 @@ void rawuart_setup(uint_fast8_t minor, uint_fast8_t devn, uint_fast8_t flags)
     if (baud_rate == 0) // Hangup if speed is B0 as per stty.1
     {
         rawuart_deinit(uart);
+        last_cflag[devn - 1] = 0xFFFFFFFF; // port is down: next setup must init
         return;
     }
 
