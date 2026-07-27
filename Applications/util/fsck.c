@@ -15,6 +15,7 @@
 
 static int error;
 static int aflag;
+static int yflag;
 
 const char *mntpoint(const char *mount)
 {
@@ -38,10 +39,17 @@ const char *mntpoint(const char *mount)
 
 static void perform_fsck_exec(const char *path)
 {
-	if (aflag == 0)
-		execl("/bin/fsck-fuzix", "fsck-fuzix", path, NULL);
-	else
-		execl("/bin/fsck-fuzix", "fsck-fuzix", "-a", path, NULL);
+	const char *args[5];
+	int i = 0;
+
+	args[i++] = "fsck-fuzix";
+	if (aflag)
+		args[i++] = "-a";
+	if (yflag)
+		args[i++] = "-y";
+	args[i++] = path;
+	args[i] = NULL;
+	execv("/bin/fsck-fuzix", (char **) args);
 	perror("fsck-fuzix");
 	exit(1);
 
@@ -112,10 +120,15 @@ static int perform_fsck(const char *path, uint8_t search, uint8_t only)
 int main(int argc, char *argv[])
 {
 	struct mntent *mnt;
-	if (argc > 1 && strcmp(argv[1], "-a") == 0) {
+	while (argc > 1 && argv[1][0] == '-') {
+		if (strcmp(argv[1], "-a") == 0)
+			aflag = 1;
+		else if (strcmp(argv[1], "-y") == 0)
+			yflag = 1;
+		else
+			break;
 		argc--;
 		argv++;
-		aflag = 1;
 	}
 
 	if (argc == 1 && aflag) {
