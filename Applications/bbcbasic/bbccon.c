@@ -106,6 +106,16 @@ void *progRAM = NULL ;
 void *userTOP = NULL ;
 #ifdef FUZIX
 void *stklim = NULL ;	// C stack redline (see bbexec.c recursion guard)
+
+// Temporary INPUT-path diagnostic (bbexec.c): compact hex trail on
+// stderr; removed once the PC3 INPUT loop is understood.
+void bbdiag (const char *tag, int a, int b, int c)
+{
+	char m[32] ;
+	sprintf (m, "[%s %02x %02x %02x]", tag,
+		(unsigned char) a, (unsigned char) b, (unsigned char) c) ;
+	write (2, m, strlen (m)) ;
+}
 #endif
 const int bLowercase = 0 ;    // Dummy
 const char szVersion[] = "BBC BASIC for "PLATFORM" Console "VERSION ;

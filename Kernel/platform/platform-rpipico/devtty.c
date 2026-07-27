@@ -221,6 +221,22 @@ void tty_interrupt(void)
         struct ttydriver *drv = &ttydrivers[map->drv];
         while ((c = drv->getc(map->tty)) >= 0)
         {
+            /* Emergency break: ^\ always raises SIGQUIT, even when the
+             * foreground program holds the tty raw with ISIG off.  The
+             * only session lives on this console - without this a
+             * wedged raw-mode program forces a reset (and an fsck).
+             * Restore sane line discipline so the shell that inherits
+             * the tty is usable. */
+            if (c == 0x1C)
+            {
+                struct tty *t = &ttydata[minor];
+                t->termios.c_lflag |= (ICANON | ECHO | ECHOE | ISIG);
+                t->termios.c_oflag |= (OPOST | ONLCR);
+                t->termios.c_iflag |= ICRNL;
+                if (t->pgrp)
+                    sgrpsig(t->pgrp, SIGQUIT);
+                continue;
+            }
             if (tty_inproc(minor, c) == 0)
             {
                 break;
