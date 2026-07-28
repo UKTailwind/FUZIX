@@ -7,6 +7,11 @@
 /* QMI-mapped PSRAM window (chip select 1) */
 #define PSRAM_BASE 0x11000000u
 
+/* Top of the PSRAM kept back from the disc/swap for kernel use:
+ * console line-editor history (lineedit.c).  Swap loses nothing in
+ * practice - 31 x 256K slots still fit and only 30 processes exist. */
+#define PSRAM_RESERVE 65536u
+
 /* Re-cap the flash (QMI CS0) divisor after clk_sys changes. */
 void qmi_flash_timing(uint32_t max_flash_hz);
 

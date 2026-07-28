@@ -137,6 +137,26 @@ I2C bus - even across power cycles. The kernel detects this at boot
 (`ds3231: SDA held low, clocking bus free`) and clears it
 automatically.
 
+## Command history and line editing
+
+At any cooked-mode prompt - the shell, login, most line-oriented
+programs - the console provides in-line editing and command history:
+
+| Key | Action |
+|-----|--------|
+| Up / Down | walk back / forward through previous commands |
+| Left / Right | move within the line |
+| Home / End (or Ctrl-A / Ctrl-E) | start / end of line |
+| Backspace / Delete | delete left / at the cursor |
+| Ctrl-U | discard the line |
+
+The history (about 500 commands) lives in a small region of PSRAM
+reserved next to the swap space, so it costs no program memory; like
+the RAM disc it survives a reset but not a power cycle.  Programs
+that take the terminal raw (BBC BASIC, the editor) see every
+keystroke themselves as usual - BBC BASIC has its own line editor
+and *EDIT.
+
 ## Escape routes
 
 * **Esc** — inside BBC BASIC, stops the running program.
