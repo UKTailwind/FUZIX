@@ -1,0 +1,56 @@
+# Host build of the compiler passes, for development and testing.
+#
+# Builds cc0 and cc1 as native binaries so the front end can be run over
+# real C on the development machine. This is how the 32-bit type model
+# gets exercised without a working code generator or a trip to hardware.
+#
+#   make -f Makefile.host                 # armm0, the 32-bit model
+#   make -f Makefile.host CPU=z80         # the 16-bit model, for comparison
+#
+# Objects go in host-$(CPU)/ so they can never collide with the
+# cross-built .o files that share this directory.
+
+CPU ?= armm0
+FLOAT ?= -DNO_FLOAT
+
+HOSTCC ?= cc
+# -include unistd.h: the passes call write() and expect the Fuzix headers
+# to have declared it. Host-only concern, so fix it here rather than in
+# shared source.
+HOSTCFLAGS = -g -O1 -Wall -Wno-unused-result -DCPU_$(CPU) $(FLOAT) -include unistd.h
+
+OBJDIR = host-$(CPU)
+
+ifeq ($(CPU),armm0)
+TARGET_SRC = target-thumb.c
+else
+TARGET_SRC = target-$(CPU).c
+endif
+
+SRC_C0 = frontend.c
+
+SRC_C1 = body.c declaration.c enum.c error.c expression.c header.c idxdata.c \
+	initializer.c label.c lex.c main.c primary.c stackframe.c storage.c \
+	struct.c switch.c symbol.c tree.c type.c type_iterator.c $(TARGET_SRC)
+
+OBJ_C0 = $(addprefix $(OBJDIR)/,$(SRC_C0:.c=.o))
+OBJ_C1 = $(addprefix $(OBJDIR)/,$(SRC_C1:.c=.o))
+
+all: $(OBJDIR)/cc0 $(OBJDIR)/cc1
+
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
+
+$(OBJDIR)/%.o: %.c | $(OBJDIR)
+	$(HOSTCC) $(HOSTCFLAGS) -c -o $@ $<
+
+$(OBJDIR)/cc0: $(OBJ_C0)
+	$(HOSTCC) $(HOSTCFLAGS) -o $@ $^
+
+$(OBJDIR)/cc1: $(OBJ_C1)
+	$(HOSTCC) $(HOSTCFLAGS) -o $@ $^
+
+clean:
+	rm -rf $(OBJDIR)
+
+.PHONY: all clean

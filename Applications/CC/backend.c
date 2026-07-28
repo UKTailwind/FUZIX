@@ -515,8 +515,13 @@ void process_data(void)
 
 void helper_type(unsigned t, unsigned s)
 {
+	/* A pointer is the natural integer width for the target. This was
+	   USHORT, which is the same thing on a 16bit target but wrong
+	   where pointers are 32bit. */
 	if (PTR(t))
-		t = USHORT;
+		t = UINT;
+	/* Cases must name concrete widths: on a target where int is 32bit
+	   UINT is ULONG, and "case UINT" then collides with "case ULONG". */
 	switch (t) {
 	case UCHAR:
 		if (s)
@@ -524,7 +529,7 @@ void helper_type(unsigned t, unsigned s)
 	case CCHAR:
 		putchar('c');
 		break;
-	case UINT:
+	case USHORT:
 		if (s)
 			putchar('u');
 	case CSHORT:

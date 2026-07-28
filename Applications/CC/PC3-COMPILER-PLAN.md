@@ -125,7 +125,34 @@ Freeze the bytecode as a **binary encoding**, not the text form
 `backend-bytecode.c` currently prints for the byte assembler. Drop the
 16-bit size variants; this is a 32-bit machine.
 
-### Phase 1 — 32-bit frontend
+### Phase 1 — 32-bit frontend — **DONE 2026-07-28**
+
+Delivered: `target-thumb.c`, the `CPU_armm0` block in `target.h`,
+`Makefile.host` (native cc0/cc1 for development) and `hosttest/`.
+
+Verified sizes, by scaling each `sizeof` by 1000 so it is unmistakable
+in the object stream: char 1, short 2, **int 4, pointer 4, int[2] 8**
+(the 16-bit model gives 2/2/4 for the last three). Type codes in the
+debug dump show `int` as 0x20 (CLONG) and `int *` as 0x21.
+
+Differential corpus over `Applications/util`, 121 files: 1 clean in both
+models, 119 with identical errors, 1 (`fforth`) where the 32-bit model
+reports *fewer* errors, and **0 regressions**. A width-sensitive torture
+test compiles with 0 errors.
+
+One real 32-bit bug found and fixed in shared code: `helper_type` in
+`backend.c` had `case UINT:` alongside `case ULONG:`, which collide once
+int is 32-bit, and mapped pointers to `USHORT`. Now uses concrete widths
+and `UINT` for pointers — identical on 16-bit targets, correct on 32-bit.
+
+All four passes cross-build for ARM. Loadable sizes: cc0 33K, **cc1
+48.8K**, cc2 32K, copt 12.5K, against a 255K process — so cc1 leaves
+~200K for its own tables, and the size question is settled.
+
+Known, pre-existing, not ours: `long long` declarations are rejected
+("type conflict") in both models, and `fforth` segfaults cc1 in both.
+
+### Phase 1 as originally planned
 
 `target-thumb.c` (~120 lines, model it on `target-z80.c`) and a
 `CPU_armm0` block in `target.h`; the makefiles already pass

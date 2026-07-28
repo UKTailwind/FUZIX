@@ -1,8 +1,13 @@
-# Stage 1 experiment: the compiler passes hosted on the ARM Fuzix
-# machine, generating Z80 code (no thumb backend exists yet). Proves
-# the passes fit and run in the 64K process; the thumb backend turns
-# this into a self-hosted native compiler.
-SRC_C1 = target-z80.c
+# The compiler passes hosted on the ARM Fuzix machine.
+#
+# cc1 now uses the real ARM type model (ILP32) via target-thumb.c.
+# cc2 is still the Z80 backend and therefore emits nonsense for this
+# machine - it is a placeholder so the build links, and phase 2 of
+# PC3-COMPILER-PLAN.md replaces it with the bytecode emitter.
+#
+# For development, Makefile.host builds cc0/cc1 as native binaries so
+# the front end can be run over real source without hardware.
+SRC_C1 = target-thumb.c
 SRC_C2 = backend-z80.c
 
 FLOAT = -DNO_FLOAT
