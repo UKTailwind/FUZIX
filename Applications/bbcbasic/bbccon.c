@@ -110,7 +110,12 @@ void *userTOP = NULL ;
 void *stklim = NULL ;	// C stack redline (see bbexec.c recursion guard)
 #endif
 const int bLowercase = 0 ;    // Dummy
+#ifdef FUZIX
+/* the build tag makes a stale binary identify itself in the banner */
+const char szVersion[] = "BBC BASIC for "PLATFORM" Console "VERSION" ("__DATE__" "__TIME__")" ;
+#else
 const char szVersion[] = "BBC BASIC for "PLATFORM" Console "VERSION ;
+#endif
 const char szNotice[] = "(C) Copyright R. T. Russell, "YEAR ;
 char *szLoadDir ;
 char *szLibrary ;
