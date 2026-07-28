@@ -51,6 +51,7 @@ add_executable(fuzix
 	psram.c
 	rawuart.c
 	board.c
+	lineedit.c
 	sound.c
 	swapper.c
 	tricks.S
