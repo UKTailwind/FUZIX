@@ -19,6 +19,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/time.h>
 #include <stdint.h>
 #include "bytecode.h"
 
@@ -415,6 +416,53 @@ static void lib_free(unsigned long ptr)
 	}
 }
 
+/* ---- platform services --------------------------------------------- */
+
+/*
+ *	Reaching the hardware.
+ *
+ *	MMBasic gives CFunctions a table of SDK entry points because those
+ *	are native code sharing the firmware's address space. Nothing here
+ *	executes native code: a bytecode program can only reach the
+ *	outside world through BC_LIBCALL, and the interpreter is an
+ *	ordinary Fuzix process, so it uses the same syscalls and ioctls
+ *	any other program would.
+ *
+ *	BC_LIBCALL already resolves by name at load time, so the libcall
+ *	table *is* the call table - and declaring "int time_us();" in the
+ *	C source is all the header a program needs, because the emitter
+ *	turns any undefined name into a libcall.
+ *
+ *	SDK routines the kernel does not already wrap need a new ioctl;
+ *	they cannot be called directly, as the SDK is linked into the
+ *	kernel and not into userland.
+ */
+extern int ioctl(int, int, ...);
+/* Fuzix's sys/time.h defines struct timeval but does not declare this. */
+extern int gettimeofday(struct timeval *, void *);
+
+#define PICOIOC_ADVAL	0x0009
+
+static int sysfd = -1;
+
+static int sys_open(void)
+{
+	if (sysfd < 0)
+		sysfd = open("/dev/sys", O_RDWR);
+	return sysfd;
+}
+
+/* ADVAL(n): joystick, ADC channels, sound queue, and the microsecond
+ * counter on -9. Returns -1 where there is no /dev/sys. */
+static long lib_adval(int sel)
+{
+	int fd = sys_open();
+	int n = sel;
+	if (fd < 0)
+		return -1;
+	return ioctl(fd, PICOIOC_ADVAL, &n);
+}
+
 /* ---- string and memory, all working in the program's address space -- */
 
 static unsigned long vstrlen(unsigned long a)
@@ -553,6 +601,22 @@ static void libcall(unsigned idx)
 		A = lseek((int)arg(0), arg(1), (int)arg(2));
 	} else if (!strcmp(name, "unlink")) {
 		A = unlink(getstr((unsigned long)arg(0)));
+
+	/* --- platform ------------------------------------------------- */
+	} else if (!strcmp(name, "adval")) {
+		A = lib_adval((int)arg(0));
+	} else if (!strcmp(name, "time_us")) {
+		/* 31 bits of the SDK's time_us_64, via the kernel. Falls back
+		 * to a host clock so the same program benchmarks on the
+		 * development machine as well as on the PC3. */
+		long t = lib_adval(-9);
+		if (t < 0) {
+			struct timeval tv;
+			gettimeofday(&tv, NULL);
+			t = (long)((tv.tv_sec * 1000000L + tv.tv_usec)
+				   & 0x7FFFFFFF);
+		}
+		A = t;
 
 	} else {
 		lib_eqop(name);
