@@ -135,8 +135,7 @@ int main(void)
 #ifdef PC3_SYS_CLOCK_KHZ
     /* build stamp: makes the running kernel identify itself, so a
      * stale flash can never be mistaken for the current one */
-    kprintf("kernel build: %s %s
-", __DATE__, __TIME__);
+    kprintf("kernel build: %s %s\n", __DATE__, __TIME__);
     kprintf("clk_sys %dMHz; PSRAM ", (int)(clock_get_hz(clk_sys) / 1000000));
     if (psram_size) {
         /* quick confidence check through the XIP window */
