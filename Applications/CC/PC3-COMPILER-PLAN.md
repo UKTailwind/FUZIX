@@ -1,0 +1,208 @@
+# An on-target compiler for the PC3
+
+Plan, 2026-07-28. Replaces THUMB-BACKEND-PLAN.md, which planned a
+conventional backend before the survey below changed the shape.
+
+## Decisions taken
+
+* **Scope is single-file programs.** Utilities and small programs that
+  can be compiled on the machine itself. Explicitly *not* libm, BBC
+  BASIC, or the kernel — see "What we cannot compile".
+* **No assembler and no linker.** Neither exists for ARM and neither is
+  needed at this scope.
+* **A bytecode intermediate layer**, so C, and later BASIC and Pascal,
+  share one path to code generation.
+* **Interpret first, translate later.** The bytecode runs before any
+  code generator exists.
+* Instruction set: Thumb. See "Thumb-1 or a Thumb-2 subset" — the
+  original decision was Thumb-1 only and there is a good argument for
+  relaxing it slightly.
+
+## Why not start from another compiler
+
+Surveyed and rejected, on two filters that apply before licence or
+quality:
+
+**Cortex-M executes Thumb only** — there is no A32 state. Almost every
+small ARM C compiler was written for Raspberry Pi-class Linux and emits
+A32, including TCC's `arm-gen.c`. Retargeting one is the same work as
+writing a Thumb backend from scratch.
+
+**Processes are 255K, flat, resident in SRAM.** PSRAM is swap, not
+address space. A monolithic compiler must fit code, data, symbol tables
+and heap in one process; TCC's binary alone is 100–300K before it reads
+any source.
+
+| candidate | verdict |
+|-----------|---------|
+| MicroCC (ezulabs) | closest on paper — Thumb codegen, runs on a Pico. One commit, no licence, no documented subset, **JIT only**. Read it, don't build on it. |
+| gfwilliams/tinycc | author: *"only works very minimally"*; prologs hacked, conditional branches unreliable |
+| TCC | A32 output, monolithic. Fatal on both filters |
+| lcc | C89, no ARM backend, needs an assembler, restrictive licence |
+| PCC | C99 and BSD-licensed, but A32 and workstation-shaped |
+
+The conclusion that matters: **FCC's multi-pass split is its real asset
+and the one thing no alternative has.** `cc0 → cc1 → cc2` as separate
+processes is why cc1 fits in 49.7K. That design was for 64K 8-bit
+machines, and a 255K flat process is closer to that world than to Linux.
+
+## What FCC already gives us
+
+More than expected. `Operations.md` is not prose — it is a numbered,
+language-neutral bytecode ISA for an accumulator+stack machine:
+
+    0  ltlt    16 32          38 assign   8 16 32
+    2  gtgt    16u 32u 16s 32s 41 deref   8s 8u 16 32
+    6  cceq    16 32          45 negate   16 32
+    8  band    16 32          47 funccall
+    10 mul     16 32          50 constant 8s 8u 16 32
+    20 plus    16 32          60 loadl
+    ...                       62 exit  63 jump  64 jfalse  65 jtrue
+
+and `backend-bytecode.c` (647 lines) already lowers C onto it. The
+proposed bytecode layer is largely specified and partly built.
+
+Also usable as-is: `cc0` (tokeniser, with a software IEEE-754 encoder so
+it bootstraps on machines with no FP), `cc1` (recursive-descent parser,
+reported to parse the whole Fuzix codebase), and the `target-<cpu>.c`
+split that confines machine knowledge to ~114 lines.
+
+## What we cannot compile, and why the scope is what it is
+
+FCC targets **C89 minus deliberate omissions**. Checked against this
+tree:
+
+* **No 64-bit `double`.** Every `target-*.c` remaps `DOUBLE → FLOAT`;
+  cc0 encodes 32-bit IEEE only. **81 files in `Library/libs` use
+  `double`** — that is libm. BBC BASIC uses it in five files.
+* **No bitfields** (omitted by design). Used by
+  `Kernel/platform/platform-rpipico/console.c`, `util/fat.c`,
+  `util/stty.c`, `Library/libs/resolv.h`.
+* **No struct/union passing or returning.**
+* **Locals have function-wide scope, not block scope.** This is not old
+  C, it silently changes the meaning of valid C89.
+* **Constants live in `unsigned long`** (`tree.h:15`). Cross-compiling
+  on x86-64 that is 64 bits; self-hosted on 32-bit ARM it is not, so
+  64-bit constants become unrepresentable exactly when self-hosting.
+* Identifiers significant to 14 characters; 30 struct members; 50 enum
+  constants; 128 case labels; `char` defaults unsigned; `-32768` is a
+  known mistyping bug.
+
+None of this is fixable cheaply, and all of it pushes against choices
+Alan Cox made deliberately. Hence: single-file programs, and gcc remains
+the toolchain for anything real.
+
+## Architecture
+
+    C (FCC cc0+cc1)      BASIC        Pascal
+              \            |            /
+               \           |           /
+                  bytecode (Operations.md, widened to 32-bit)
+                 /                          \
+        interpreter                   Thumb translator
+        (small, built first)          (later, for speed)
+
+Two properties make this the right shape:
+
+1. **The bytecode is executable before any code generator exists.** An
+   interpreter for that op set is a couple of KB. C programs *run* as
+   soon as the front end works, and every later front end inherits that
+   for free. The code generator is never on the critical path.
+2. **Native code can arrive incrementally.** Translate the hot opcodes,
+   interpret the rest — exactly the mechanism `TARGET.md` already
+   describes for replacing helpers one at a time.
+
+## Phases
+
+### Phase 0 — ABI and bytecode freeze
+
+32-bit `int`/`long`/pointer, 64-bit `long long` where representable,
+`char` signedness chosen deliberately (gcc's ARM default is unsigned;
+our gcc builds pass `-fsigned-char`). Decide whether float is in scope
+at all — `Makefile.armm0` currently passes `-DNO_FLOAT`.
+
+Freeze the bytecode as a **binary encoding**, not the text form
+`backend-bytecode.c` currently prints for the byte assembler. Drop the
+16-bit size variants; this is a 32-bit machine.
+
+### Phase 1 — 32-bit frontend
+
+`target-thumb.c` (~120 lines, model it on `target-z80.c`) and a
+`CPU_armm0` block in `target.h`; the makefiles already pass
+`-DCPU_$(USERCPU)`. `TARGET_MAX_INT/UINT/PTR` are used in only seven
+places (`enum.c:95`, `frontend.c:899-908`, `initializer.c:30,60,156`).
+
+**No existing target has ever set `CINT != CSHORT`.** Assume bugs and
+find them here, where they are cheap.
+
+Success test: cc1 parses a body of C with 32-bit types without
+asserting.
+
+### Phase 2 — bytecode emitter
+
+Widen `backend-bytecode.c` (it opens `/* For now assume 8/16bit */`) and
+switch it to the frozen binary encoding. Output is a file the loader can
+read — no assembler, no linker.
+
+### Phase 3 — interpreter on the PC3
+
+A bytecode interpreter as a normal Fuzix program. **At the end of this
+phase you can compile and run C on the machine.** Slow, but real, and
+it is the milestone that makes everything after it optional.
+
+Success test: `hello.c`, then progressively larger single-file programs
+from `Applications/util`, compiled and run on hardware.
+
+### Phase 4 — Thumb translator
+
+Bytecode → Thumb, opcode at a time, hottest first. Recommended form:
+**translate at load time into RAM**, not to a file. With the real
+addresses in hand there is no relocation, no file format and no linking
+to design. For single-file programs in a 255K process this is very
+reasonable, and it is what MicroCC does.
+
+If an ahead-of-time file is wanted later, `Kernel/syscall_exec32.c`
+(a.out plus custom relocations) already exists, uncompiled, and the
+kernel can dispatch on magic.
+
+Note `PROGLOAD` is now fixed at **0x20030600** (pinned pool at
+0x20030000 plus `UDATA_SIZE` 1536), so absolute code would work. Do not
+bake that in — that coupling is exactly what the 2026-07-28 stack
+alignment bug was made of.
+
+### Phase 5 — more front ends
+
+BASIC and Pascal emitting the same bytecode. This is where the layer
+pays for itself.
+
+## Thumb-1 or a Thumb-2 subset
+
+The decision was Thumb-1 (ARMv6-M) for simplicity. Having worked through
+the encodings, **that choice makes the implementation harder, not
+easier**, and it is worth revisiting:
+
+| problem | Thumb-1 | with a little Thumb-2 |
+|---------|---------|----------------------|
+| load a 32-bit constant | literal pool; `LDR Rd,[PC,#imm8*4]` reaches only **+1020 bytes forward**, so pools must be flushed constantly and placed where control flow cannot fall into them | `MOVW`/`MOVT`, two instructions, **no pool at all** |
+| conditional branch | **±256 bytes**; beyond that, invert the condition and jump over an unconditional `B` (±2KB); beyond that a `BL` veneer | `B<cond>.W` ±1MB |
+| divide | no instruction; helper call | `SDIV`/`UDIV` |
+
+Literal pools and branch veneers are the two fiddliest parts of Thumb-1
+code generation, and both simply vanish. The machine is definitely an
+M33; restricting to ARMv6-M buys portability to hardware we do not have,
+at the cost of the hardest code in the project.
+
+**Recommendation: allow `MOVW`/`MOVT`, `B<cond>.W` and `SDIV`/`UDIV`.**
+Everything else Thumb-1. If portability to an RP2040 ever matters, those
+four are a small, well-isolated set to provide fallbacks for.
+
+## Risks
+
+1. `CINT != CSHORT` has never been exercised by any target. Phase 1
+   exists to find out how bad that is before anything depends on it.
+2. The op set is **C-shaped** — C types, C pointer semantics. Pascal
+   sets and nested procedures, and BASIC strings, do not map directly
+   and will need runtime calls or op-set extensions. Phase 5 will be
+   less free than it looks.
+3. Interpreter performance may be disappointing enough to make phase 4
+   feel obligatory rather than optional. Measure before promising.
