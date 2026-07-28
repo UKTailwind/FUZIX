@@ -27,6 +27,7 @@ extern uint8_t disp_tile_bg[DISP_ROWS * DISP_COLS];
 void display_init(void);
 
 bool display_in_blanking(void);
+void display_stack_check(void);
 bool display_stack_ok(void);
 
 /* BBC graphics modes (PC3-GFX-DESIGN.md): 0-5 enter 1024x768 scanout

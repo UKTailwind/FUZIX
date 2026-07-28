@@ -93,9 +93,15 @@ static volatile bool dma_pong = false;
 static volatile bool vactive_cmdlist_posted = false;
 static int dmach_ping = -1, dmach_pong = -1;
 
-#define CORE1_STACK_WORDS 1024 /* 4 KB */
+/* 512 bytes, the size MMBasic uses for the same HDMI scanout core.
+ * Lives in SCRATCH_X, which the SDK reserves for a core1 stack we
+ * never use (core1 is launched with this stack instead) - so it costs
+ * no main SRAM, where the kernel and the 320K process area compete.
+ * disp_core1_stack[0] holds a sentinel; disp_core1_healthy() checks it. */
+#define CORE1_STACK_WORDS 128
 #define STACK_SENTINEL    0xf00dbeefu
-static uint32_t disp_core1_stack[CORE1_STACK_WORDS] __attribute__((aligned(8)));
+static uint32_t __scratch_x("disp") disp_core1_stack[CORE1_STACK_WORDS]
+        __attribute__((aligned(8)));
 
 /* --- BBC graphics state -------------------------------------------------- */
 enum gexp {
@@ -475,6 +481,19 @@ bool display_in_blanking(void)
     return v_scanline < (tim->vfp + tim->vsync + tim->vbp);
 }
 
+/* Checked on every mode switch: core1's stack is only 512 bytes, so
+ * the sentinel is the guard that it is enough.  A breach is reported
+ * once - silence here means the scanout core never came close. */
+void display_stack_check(void)
+{
+    static uint8_t moaned;
+
+    if (!moaned && disp_core1_stack[0] != STACK_SENTINEL) {
+        moaned = 1;
+        kprintf("display: core1 stack overflowed\n");
+    }
+}
+
 bool display_stack_ok(void)
 {
     return disp_core1_stack[0] == STACK_SENTINEL;
@@ -484,6 +503,8 @@ bool display_stack_ok(void)
  * Returns the framebuffer size, or -1 for a bad mode. */
 int display_gfx_mode(int mode)
 {
+    display_stack_check();
+
     extern void console_gfx(int active);    /* console.c */
     enum gexp exp;
     int size;
