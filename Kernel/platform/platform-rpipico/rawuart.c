@@ -389,14 +389,28 @@ void rawuart_putc(uint8_t devn, uint8_t c)
             txring_pump(uart, w);
     }
 
-    txring[w].buf[txring[w].head] = c;
-    txring[w].head = (txring[w].head + 1) & (TXRING - 1);
-
-    /* Ask for the transmit interrupt and kick it, as MMBasic does -
-     * the level interrupt will not fire on its own if the FIFO is
-     * already below the threshold. */
-    uart_set_irq_enables(uart, true, true);
-    irq_set_pending((uart == uart0) ? UART0_IRQ : UART1_IRQ);
+    /*
+     * The ring update has to be atomic. putc is called both from
+     * ordinary kernel context and from tty_interrupt(), which echoes
+     * from inside the timer tick - and the tick preempts ordinary
+     * context. Two calls interleaving between the store to buf[head]
+     * and the update of head corrupt the ring; if that leaves head
+     * equal to tail with the transmit interrupt already turned off,
+     * output stops permanently and the machine goes quiet. It only
+     * shows up under heavy output, which is why it survived hours of
+     * interactive use and then hung during a large file transfer.
+     */
+    {
+        irqflags_t irq = di();
+        txring[w].buf[txring[w].head] = c;
+        txring[w].head = (txring[w].head + 1) & (TXRING - 1);
+        /* Ask for the transmit interrupt and kick it, as MMBasic does -
+         * the level interrupt will not fire on its own if the FIFO is
+         * already below the threshold. */
+        uart_set_irq_enables(uart, true, true);
+        irq_set_pending((uart == uart0) ? UART0_IRQ : UART1_IRQ);
+        irqrestore(irq);
+    }
 }
 
 void rawuart_sleeping(uint8_t devn) {}
