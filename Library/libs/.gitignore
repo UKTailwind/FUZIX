@@ -1,3 +1,9 @@
+# Preprocessor output from the .S sources in SRC_ASM. These have been
+# committed by accident before now; the real sources are capital .S.
+helpers_armm0.s
+longjmp_armm0.s
+setjmp_armm0.s
+
 libc.l
 liberror.txt
 syscall.l
