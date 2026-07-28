@@ -34,6 +34,31 @@ That is the whole bug. Adding ~3.5 KB of kernel code (the console line
 editor) moved `progbase` and broke every process; removing it restored
 the exact previous size (197,120-byte uf2) and fixed it.
 
+## The RAM map (measured, good build `dcd63f4d8`)
+
+The kernel runs **from RAM, not XIP**, so text, data, bss and the pool
+all compete for the same 512 KB.
+
+| what | address | size |
+|------|---------|------|
+| `.text`        | 0x20000110 |  75,552 |
+| `.data`        | 0x20012730 |  22,232 |
+| `.bss`         | 0x20018048 | 415,520 |
+| ↳ `progbase`   | 0x2002b00c | 327,680 |
+| ↳ above pool (`progptr`, `ptab`, `sndbuf`, `usb_stack`, …) | 0x2007b00c | ~9.2 K |
+| `__bss_end__`  | 0x2007D628 | — |
+| **free**       | 0x2007D628–0x20080000 | **10,712** |
+| SCRATCH_X: `disp_core1_stack` 512 B, SDK core1 stack 2 K | 0x20080000 | 4 K |
+| SCRATCH_Y: core0 kernel stack | 0x20081000 | 4 K |
+
+Regenerate with `arm-none-eabi-nm -n build/fuzix.elf` and
+`arm-none-eabi-size -A build/fuzix.elf`.
+
+There is **no allocator in the image at all** — `nm` finds no `malloc`,
+`free`, `sbrk` or `_malloc_r`. `.heap` is size 0. Nothing consumes the
+free region at the top, so "the heap got starved" is not available as an
+explanation.
+
 ## Excluded by experiment — do not re-investigate
 
 * **The upstream libc import.** Interpreter machine code is byte-identical
@@ -70,27 +95,79 @@ Pinning at 0x20030000 links correctly (`progbase` 0x20030000,
 `__progbase_end` 0x20080000) but lands on a **broken** address, so the
 system fails to run. That is expected, not a linker problem.
 
+## What the numbers rule out
+
+An earlier draft of this document blamed the pool ending flush against
+the scratch banks at 0x20030000, with working layouts leaving ~10 KB of
+slack. **The measurements do not support that.** At the *broken*
+unpinned address 0x2002c690 the pool ends at 0x2007c690 — the same ~9 KB
+of BSS still sits above it and roughly 5 KB of main SRAM is still free
+below 0x20080000. That layout is not qualitatively different from the
+working 0x2002b00c one. Flushness explains the pinned 0x20030000 case at
+best, and cannot explain 0x2002c690 at all.
+
+What the table actually says is that the transition is **narrow**:
+
+    0x2002bfb4  works
+    0x2002c690  BROKEN     <- only 1,692 bytes apart
+
+so the boundary lies inside a 1,692-byte window, and that window
+contains 0x2002C000. A threshold that sharp is a hint: it points at
+something with a fixed address or a fixed alignment requirement, not at
+a gradual squeeze.
+
+Remaining suspect worth keeping: the per-process kernel syscall stack,
+which lives *inside* `udata` at the base of each process (1,536 bytes
+total, `tricks.S` sets `sp = udata + UDATA_SIZE`) with no guard at all.
+It would corrupt the process it belongs to, which matches the symptom,
+but nothing yet explains why its address would matter.
+
 ## Next experiment
 
-With the pool pinned the address is finally a controlled variable.
-Walk the PROGPOOL origin between a known-good and known-bad value —
-0x2002C000, 0x2002E000, 0x20030000 — and find the exact boundary. The
-boundary names the mechanism.
+Cheapest first — **steps 1 and 3 need no hardware.**
 
-Leading hypothesis: at 0x20030000 the pool ends flush against
-0x20080000 (the scratch banks), whereas working layouts left ~10 KB of
-BSS above it. Something is very likely writing past `PROGTOP` and was
-previously landing in harmless padding. Second suspect: the per-process
-kernel syscall stack, which lives *inside* `udata` at the base of each
-process (1,536 bytes total, `tricks.S` sets `sp = udata + UDATA_SIZE`)
-with no guard at all.
+1. **Desk diff.** Rebuild a known-broken kernel (restore `lineedit.c`
+   from `30514a217^`, or just add a 4 KB dummy array to grow `.text`)
+   and diff `arm-none-eabi-nm -n` good vs broken. Look for any symbol
+   that changes *region* rather than merely sliding, and check
+   `__bss_end__` against 0x20080000. Ten minutes, and it either names
+   the collision or eliminates the whole class.
+
+2. **Pinned walk.** With the pool pinned the address is a free
+   variable. Step the PROGPOOL origin across the narrow window in ~512 B
+   increments — 0x2002BC00, 0x2002C000, 0x2002C400 — rather than the
+   coarse 8 KB jumps this document originally suggested. Note that
+   pinning also changes where everything *else* lands, so confirm a
+   pinned build at a known-good origin still works before trusting a
+   pinned failure.
+
+3. **Make it fail loudly.** Add to the linker override:
+   `ASSERT(__bss_end__ <= 0x20080000, "kernel BSS ran into the scratch banks")`
+   and, when pinned, `ASSERT(__progbase_end == 0x20080000, ...)`.
+   Silence is what let this bug ship.
+
+4. **Runtime canary.** Fill 64 bytes immediately above `PROGTOP` with a
+   magic pattern and check it on every context switch. That converts
+   "processes are corrupt" into a caught event with a `pc` in the
+   backtrace, which names the writer outright.
+
+## Known-good state
+
+Commit `dcd63f4d8`, `build/fuzix.uf2` = 198,144 bytes, `progbase` at
+0x2002b00c. Verified on hardware: `PRINT 6*7` → 42, `PRINT TIME` and
+`PRINT ADVAL(-9)` both sane. Build with the usual
+`make -C Kernel/platform/platform-rpipico` route; the artefacts land in
+`Kernel/platform/platform-rpipico/build/`.
 
 ## Test rig (no hardware handling needed)
 
-Scripts in the session scratchpad; PC3 console is COM11 at 115200.
+Scripts live in `Kernel/platform/platform-rpipico/devtools/` (they used
+to be in a per-session scratchpad, which of course evaporated). PC3
+console is COM11 at 115200; needs `pyserial` on the Windows host.
 
-* `python fz2.py 25 "PRINT 6*7" ...` — runs BBC BASIC lines
-* `python fzsh.py 25 "cmd" ...` — runs shell commands
+* `python devtools/fz2.py 25 "PRINT 6*7" ...` — runs BBC BASIC lines
+* `python devtools/fzsh.py 25 "cmd" ...` — runs shell commands
+* `python devtools/fz.py` — probe / shell / basic, faster but less safe
 * **Send character-by-character with ~25 ms delay.** Bulk writes overflow
   the 132-byte tty queue and input is silently mangled — this cost hours
   of chasing phantom bugs.

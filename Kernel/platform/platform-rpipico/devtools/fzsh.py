@@ -1,0 +1,48 @@
+"""Slow shell driver for the Fuzix console (COM11).
+
+  python fzsh.py <delay_ms> "cmd" ["cmd" ...]
+"""
+import sys, time, serial
+
+PORT, BAUD = "COM11", 115200
+
+
+def drain(ser, quiet=0.6, limit=60.0):
+    buf = b""
+    last = time.time()
+    t0 = time.time()
+    while time.time() - t0 < limit:
+        n = ser.in_waiting
+        if n:
+            buf += ser.read(n)
+            last = time.time()
+        elif time.time() - last > quiet:
+            break
+        else:
+            time.sleep(0.05)
+    return buf.decode("latin-1")
+
+
+def slow(ser, line, delay):
+    for ch in line:
+        ser.write(ch.encode())
+        ser.flush()
+        time.sleep(delay)
+    ser.write(b"\r")
+    ser.flush()
+
+
+def main():
+    delay = float(sys.argv[1]) / 1000.0
+    with serial.Serial(PORT, BAUD, timeout=0.2) as ser:
+        time.sleep(0.2)
+        ser.reset_input_buffer()
+        slow(ser, "", delay)
+        drain(ser, 0.4, 5.0)
+        for c in sys.argv[2:]:
+            print("$ " + c)
+            slow(ser, c, delay)
+            print(drain(ser))
+
+
+main()
