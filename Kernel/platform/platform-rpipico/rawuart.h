@@ -10,4 +10,7 @@ extern void rawuart_sleeping(uint8_t devn);
 extern int rawuart_getc(uint8_t devn);
 extern void rawuart_setup(uint_fast8_t minor, uint_fast8_t devn, uint_fast8_t flags);
 
+extern void rawuart_rx_irq_start(void);
+extern unsigned rawuart_rx_lost(uint8_t devn);
+
 #endif

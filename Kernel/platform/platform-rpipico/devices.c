@@ -99,8 +99,22 @@ void device_init(void)
     extern void ds3231_init(void);
     extern void psram_disc_init(void);
     extern void preempt_init(void);
+    extern void rawuart_rx_irq_start(void);
 
     preempt_init();
+
+    /* Take the console uart under interrupt here and nowhere earlier.
+     * start.c calls device_init() after pagemap_init() and
+     * create_init(), so udata, the process table and the per-process
+     * kernel stack all exist by now.
+     *
+     * devtty_early_init() and devtty_init() are both too early -
+     * devtty_init is called *from* devtty_early_init, which is why
+     * moving it there changed nothing. A character arriving before
+     * create_init() has finished took a hard fault inside makeproc
+     * with a stack pointer outside KSTACK entirely. */
+    rawuart_rx_irq_start();
+
     /* Timer interrup must be initialized before blcok devices.
        set_boot_line uses pause syscall which will not be operational otherwise. */
     hardware_alarm_claim(0);
