@@ -1,0 +1,10 @@
+/* The process memory pool (see memory_ram.incl).  NOLOAD: there is
+ * nothing to initialise and it keeps 320K out of the image. */
+SECTIONS
+{
+    .progpool (NOLOAD) : {
+        __progbase_start = .;
+        KEEP(*(.progbase))
+        __progbase_end = .;
+    } > PROGPOOL
+}

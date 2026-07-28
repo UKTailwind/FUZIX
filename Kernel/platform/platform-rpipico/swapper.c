@@ -18,7 +18,12 @@
 #define BLOCKSIZE 4096
 #define NUM_ALLOCATION_BLOCKS (USERMEM / BLOCKSIZE)
 
-uint8_t progbase[USERMEM];
+/* Pinned to its own linker region (see linker_overrides/) rather than left
+ * to float in BSS. As plain BSS the pool moved every time the kernel's size
+ * changed, which made unrelated edits shift every process image and turned
+ * layout mistakes into bugs that looked like application faults. Now the
+ * address is fixed and the kernel outgrowing its half is a link error. */
+uint8_t progbase[USERMEM] __attribute__((section(".progbase")));
 
 struct mapentry
 {

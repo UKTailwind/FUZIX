@@ -110,5 +110,6 @@ target_link_libraries(fuzix
 
 pico_set_float_implementation(fuzix none)
 pico_set_double_implementation(fuzix none)
+pico_add_linker_script_override_path(fuzix ${CMAKE_CURRENT_LIST_DIR}/linker_overrides)
 pico_add_extra_outputs(fuzix)
 

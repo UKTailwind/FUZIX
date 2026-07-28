@@ -1,0 +1,19 @@
+/*
+ * Main SRAM is split in two so the process memory pool has a fixed
+ * home of its own.
+ *
+ * progbase used to be an ordinary BSS array: the linker placed it
+ * after whatever the kernel happened to contain, so every build that
+ * changed the kernel's size silently moved every process image.  That
+ * corrupted user memory in ways that looked like application bugs.
+ *
+ * RAM holds the kernel and nothing else; PROGPOOL is exactly USERMEM
+ * and runs to the top of main SRAM, where the scratch banks begin.
+ * If the kernel outgrows its half the link now fails with "region RAM
+ * overflowed" instead of quietly relocating user memory.
+ */
+MEMORY
+{
+    RAM(rwx)     : ORIGIN = RAM_ORIGIN,           LENGTH = 0x30000
+    PROGPOOL(rw) : ORIGIN = RAM_ORIGIN + 0x30000, LENGTH = 320k
+}
