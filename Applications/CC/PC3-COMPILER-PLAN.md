@@ -248,11 +248,37 @@ Four things that bit, all now fixed and worth not repeating:
   extended from 32 bits on a 64-bit host, and the return sentinel then
   has to be masked back to 32 bits or it never matches.
 
+**Verified on hardware 2026-07-28** once the console UART was fixed.
+`bcrun` (11.5K stripped) and the sample objects were sent over the
+console with `uusend.py`, and all four samples produce output identical
+to the host: a Sieve of Eratosthenes (46 primes below 200), an RPN
+calculator, a strings/struct exercise, and the recursion/printf test.
+
+Four defects found and fixed by those samples, none of which the earlier
+toy tests had exercised:
+
+* **`switch` was never implemented** in the interpreter. The table is
+  `[count]` then `(value, label)` pairs with the default label last, all
+  resolved by fixups.
+* **Case values are emitted at the switch expression's own width.**
+  `switch (c)` on a char gave one-byte values and a five-byte stride,
+  which read as garbage and jumped into hyperspace. C promotes the
+  switch expression to at least int, so the emitter now widens case
+  values to a word and the table is uniform.
+* **Compound assignment ignored the operand width.** `+=`, `++` and the
+  rest became library calls carrying no width, so the runtime did a
+  32-bit read-modify-write on whatever it was given. It works until a
+  carry leaves the object: `char a = 255, b = 2; a += 1;` wrapped `a`
+  correctly *and* incremented `b`. The calls now carry width and
+  signedness (`pluseq1u`, `shreq4s`).
+* **`printf` shared one static buffer** between the format string and
+  its `%s` arguments, so the format was overwritten mid-scan. It also
+  ignored width and flags, which threw the argument numbering out.
+
 Current limit: the runtime library is `putchar`, `puts`, `printf`
-(`%d %u %x %c %s`), `exit` and the compound-assignment helpers. Programs
-needing real file I/O will not run until that grows. Compound assignment
-on `char`/`short` is also wrong, because the emitter does not yet encode
-the operand width in the call.
+(`%d %u %x %c %s` with flags and width), `exit` and the
+compound-assignment helpers. Programs needing file I/O, `str*`/`mem*`
+or `malloc` will not run until that grows.
 
 ### Phase 3 as originally planned
 

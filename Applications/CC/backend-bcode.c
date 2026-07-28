@@ -413,8 +413,21 @@ static unsigned in_literal(void)
 	return curseg == A_LITERAL;
 }
 
+/*
+ *	Set while the body of a switch table is being emitted. The case
+ *	values otherwise go out at the switch expression's own width, so
+ *	"switch (c)" on a char produced one-byte values and a five-byte
+ *	stride, which the interpreter - reasonably assuming a word - read
+ *	as garbage and jumped into hyperspace. C promotes the switch
+ *	expression to at least int, so widening the values to a word
+ *	loses nothing and keeps the table uniform.
+ */
+static unsigned in_switchtab;
+
 void gen_segment(unsigned s)
 {
+	/* The table ends when its area is popped. */
+	in_switchtab = 0;
 	curseg = s;
 }
 
@@ -508,6 +521,7 @@ void gen_switchdata(unsigned n, unsigned size)
 	sprintf(buf, "Sw%u", n);
 	symdef(buf, BC_SYM_DATA, dhere());
 	dlong(size);
+	in_switchtab = 1;
 }
 
 void gen_case(unsigned tag, unsigned entry)
@@ -583,7 +597,8 @@ void gen_name(struct node *n)
 
 void gen_value(unsigned type, unsigned long value)
 {
-	if (PTR(type)) {
+	/* Case values are always a word: see in_switchtab. */
+	if (in_switchtab || PTR(type)) {
 		dlong(value);
 		return;
 	}
@@ -791,10 +806,22 @@ static unsigned fallback(struct node *n)
 	default:
 		/* Unknown, but still must not fall through to text. */
 		sprintf(buf, "__op%x", n->op);
-		name = buf;
-		break;
+		libcall(buf);
+		return 1;
 	}
-	libcall(name);
+
+	/*
+	 * Append the operand width and signedness.
+	 *
+	 * Without it the runtime cannot know whether it is updating a
+	 * char, a short or an int, and did a 32bit read-modify-write in
+	 * every case. That silently works until a carry leaves the object:
+	 * "char a = 255, b = 2; a += 1;" wrapped a correctly but also
+	 * incremented b. Signedness matters too, for /= %= and >>=.
+	 */
+	sprintf(buf, "%s%u%c", name, typesize(n->type),
+		(PTR(n->type) || (n->type & UNSIGNED)) ? 'u' : 's');
+	libcall(buf);
 	return 1;
 }
 

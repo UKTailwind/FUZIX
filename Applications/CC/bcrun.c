@@ -149,61 +149,88 @@ static unsigned long fetch32(void)
  */
 static void lib_eqop(const char *name)
 {
-	unsigned long addr = (unsigned long)pop();
-	long old = (long)rd32(addr);
-	long v = A;
+	char base[24];
+	unsigned len, sz = 4;
+	int uns = 0, post;
+	unsigned long addr;
+	long old, v, res;
 
-	if (!strcmp(name, "postinc")) {
-		wr32(addr, old + v);
-		A = old;
-	} else if (!strcmp(name, "postdec")) {
-		wr32(addr, old - v);
-		A = old;
-	} else if (!strcmp(name, "pluseq")) {
-		A = old + v;
-		wr32(addr, A);
-	} else if (!strcmp(name, "minuseq")) {
-		A = old - v;
-		wr32(addr, A);
-	} else if (!strcmp(name, "muleq")) {
-		A = old * v;
-		wr32(addr, A);
-	} else if (!strcmp(name, "diveq")) {
-		A = v ? old / v : 0;
-		wr32(addr, A);
-	} else if (!strcmp(name, "remeq")) {
-		A = v ? old % v : 0;
-		wr32(addr, A);
-	} else if (!strcmp(name, "andeq")) {
-		A = old & v;
-		wr32(addr, A);
-	} else if (!strcmp(name, "oreq")) {
-		A = old | v;
-		wr32(addr, A);
-	} else if (!strcmp(name, "xoreq")) {
-		A = old ^ v;
-		wr32(addr, A);
-	} else if (!strcmp(name, "shleq")) {
-		A = old << v;
-		wr32(addr, A);
-	} else if (!strcmp(name, "shreq")) {
-		A = old >> v;
-		wr32(addr, A);
-	} else {
+	/* The emitter appends the operand width in bytes and 's' or 'u',
+	   e.g. "pluseq1u" or "shreq4s". */
+	strncpy(base, name, sizeof(base) - 1);
+	base[sizeof(base) - 1] = 0;
+	len = strlen(base);
+	if (len && (base[len - 1] == 's' || base[len - 1] == 'u')) {
+		uns = (base[len - 1] == 'u');
+		base[--len] = 0;
+	}
+	if (len && base[len - 1] >= '1' && base[len - 1] <= '8') {
+		sz = base[len - 1] - '0';
+		base[--len] = 0;
+	}
+
+	addr = (unsigned long)pop();
+	v = A;
+
+	if (sz == 1)
+		old = uns ? (long)rd8(addr) : (long)(signed char)rd8(addr);
+	else if (sz == 2)
+		old = uns ? (long)rd16(addr) : (long)(short)rd16(addr);
+	else
+		old = S32(rd32(addr));
+
+	post = 0;
+	if (!strcmp(base, "postinc")) { res = old + v; post = 1; }
+	else if (!strcmp(base, "postdec")) { res = old - v; post = 1; }
+	else if (!strcmp(base, "pluseq")) res = old + v;
+	else if (!strcmp(base, "minuseq")) res = old - v;
+	else if (!strcmp(base, "muleq")) res = old * v;
+	else if (!strcmp(base, "diveq"))
+		res = v ? (uns ? (long)((unsigned long)old / (unsigned long)v)
+			       : old / v) : 0;
+	else if (!strcmp(base, "remeq"))
+		res = v ? (uns ? (long)((unsigned long)old % (unsigned long)v)
+			       : old % v) : 0;
+	else if (!strcmp(base, "andeq")) res = old & v;
+	else if (!strcmp(base, "oreq")) res = old | v;
+	else if (!strcmp(base, "xoreq")) res = old ^ v;
+	else if (!strcmp(base, "shleq")) res = old << v;
+	else if (!strcmp(base, "shreq"))
+		res = uns ? (long)((unsigned long)old >> v) : (old >> v);
+	else {
 		fprintf(stderr, "bcrun: no runtime function \"%s\"\n", name);
 		exit(1);
 	}
+
+	/* Store at the object's own width, so a carry cannot escape into
+	   whatever lives next to it. */
+	if (sz == 1)
+		wr8(addr, res);
+	else if (sz == 2)
+		wr16(addr, res);
+	else
+		wr32(addr, res);
+
+	A = post ? old : res;
 }
 
-/* Copy a NUL terminated string out of the program's memory. */
+/*
+ *	Copy a NUL terminated string out of the program's memory.
+ *
+ *	Rotates between a few buffers: printf needs the format string and
+ *	a %s argument live at the same time, and with one static buffer
+ *	the argument overwrote the format halfway through scanning it.
+ */
 static char *getstr(unsigned long a)
 {
-	static char buf[512];
+	static char buf[4][512];
+	static unsigned which;
+	char *b = buf[which++ & 3];
 	unsigned i = 0;
-	while (i < sizeof(buf) - 1 && a + i < MEMSIZE && mem[a + i])
-		buf[i] = mem[a + i], i++;
-	buf[i] = 0;
-	return buf;
+	while (i < 511 && a + i < MEMSIZE && mem[a + i])
+		b[i] = mem[a + i], i++;
+	b[i] = 0;
+	return b;
 }
 
 /*
@@ -215,38 +242,76 @@ static long arg(unsigned n)
 	return S32(rd32(sp + 4 * n));
 }
 
+/* Pad a already-formatted item to the requested width. */
+static void padout(const char *s, int width, int left, int zero)
+{
+	int n = (int)strlen(s);
+	int pad = width - n;
+	if (!left)
+		while (pad-- > 0)
+			putchar(zero ? '0' : ' ');
+	fputs(s, stdout);
+	if (left)
+		while (pad-- > 0)
+			putchar(' ');
+}
+
 static void lib_printf(void)
 {
 	const char *f = getstr((unsigned long)arg(0));
+	char tmp[544];
 	unsigned a = 1;
+
 	while (*f) {
+		int left = 0, zero = 0, width = 0;
+
 		if (*f != '%') {
 			putchar(*f++);
 			continue;
 		}
 		f++;
+		/* Flags and a numeric width: "%-2d", "%04x" and friends were
+		   printed literally before, which also threw the argument
+		   numbering out. */
+		for (;;) {
+			if (*f == '-') { left = 1; f++; }
+			else if (*f == '0') { zero = 1; f++; }
+			else break;
+		}
+		while (*f >= '1' && *f <= '9') {
+			width = width * 10 + (*f - '0');
+			f++;
+		}
+		if (*f == '0') { width *= 10; f++; }	/* e.g. %10d */
+
 		switch (*f) {
 		case 'd':
-			printf("%ld", arg(a++));
+			sprintf(tmp, "%ld", arg(a++));
+			padout(tmp, width, left, zero);
 			break;
 		case 'u':
-			printf("%lu", (unsigned long)arg(a++));
+			sprintf(tmp, "%lu", (unsigned long)arg(a++));
+			padout(tmp, width, left, zero);
 			break;
 		case 'x':
-			printf("%lx", (unsigned long)arg(a++));
+			sprintf(tmp, "%lx", (unsigned long)arg(a++));
+			padout(tmp, width, left, zero);
 			break;
 		case 'c':
-			putchar((int)arg(a++));
+			tmp[0] = (char)arg(a++);
+			tmp[1] = 0;
+			padout(tmp, width, left, 0);
 			break;
 		case 's':
-			fputs(getstr((unsigned long)arg(a++)), stdout);
+			padout(getstr((unsigned long)arg(a++)), width, left, 0);
 			break;
 		case '%':
 			putchar('%');
 			break;
 		default:
 			putchar('%');
-			putchar(*f);
+			if (*f)
+				putchar(*f);
 			break;
 		}
 		if (*f)
@@ -560,7 +625,30 @@ static int run(void)
 			libcall(fetch16());
 			break;
 		case BC_SWITCH:
-			fault("switch not implemented");
+			/*
+			 * Table, all 32-bit words, built by gen_switchdata /
+			 * gen_case_data:
+			 *
+			 *   [count][value0][label0]...[valueN-1][labelN-1][default]
+			 *
+			 * The labels are code offsets, already resolved by the
+			 * fixups. Values are word sized because C promotes the
+			 * switch expression to at least int.
+			 */
+			{
+				unsigned long tab = fetch32();
+				unsigned long cases = rd32(tab);
+				unsigned long i;
+				unsigned long target = rd32(tab + 4 + 8 * cases);
+
+				for (i = 0; i < cases; i++) {
+					if (S32(rd32(tab + 4 + 8 * i)) == A) {
+						target = rd32(tab + 8 + 8 * i);
+						break;
+					}
+				}
+				pc = target;
+			}
 			break;
 		default:
 			fault("bad opcode");
