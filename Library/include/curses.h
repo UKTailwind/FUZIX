@@ -6,10 +6,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-/* C23 this became a real type */
-#if ( __STDC_VERSION__ < 202000)
 typedef int bool;
-#endif
 
 #define TRUE 1
 #define FALSE 0

@@ -56,7 +56,7 @@ static void newattr(int ch)
 /* Output char with attribute */
 static void Putchar(int ch)
 {
-  if ((_cursvar.cursrow < LINES) && (_cursvar.curscol < COLS)) {
+  if ((_cursvar.cursrow < LINES) || (_cursvar.curscol < COLS)) {
 	newattr(ch);
 	putchar(ch);
   }

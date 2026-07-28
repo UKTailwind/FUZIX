@@ -49,7 +49,7 @@ char *getpass(char *prompt)
 	ol = t.c_lflag;
 	t.c_lflag &= ~ECHO|ECHOE|ECHOK;
 	if (tv == 0)
-		tcsetattr(fd, TCSADRAIN, &t);
+		tcsetattr(fd, TCSANOW, &t);
 	/* read the input */
 	if (_gets(fd, result, sizeof(result) - 1) == NULL)
 		result[0] = 0;

@@ -63,6 +63,6 @@ void keypad(WINDOW *win, bool flag)
 /* The terminal. We always allow this on the PC, so this one	*/
 /* Does nothing.						*/
 /****************************************************************/
-void meta(WINDOW *win, bool flag)
+void meta(WINDOW *win, int flag)
 {
 }

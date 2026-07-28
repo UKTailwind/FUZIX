@@ -8,8 +8,8 @@ WINDOW *initscr(void)
 {
 	char *term;
 
-	if ((term = getenv("TERM")) == NULL || setterm(term) == ERR)
-		return NULL;
+	if ((term = getenv("TERM")) == NULL) return NULL;
+	setterm(term);
 	gettmode();
 	if ((_cursvar.tmpwin = newwin(LINES, COLS, 0, 0)) == (WINDOW *)ERR)
 		return NULL;
