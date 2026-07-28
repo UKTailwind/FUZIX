@@ -27,7 +27,8 @@ static const char *sname(unsigned i)
 }
 
 /* Operand form for each opcode */
-enum { OP_NONE, OP_I8, OP_U8, OP_I16, OP_U16, OP_I32, OP_REL16, OP_A32 };
+enum { OP_NONE, OP_I8, OP_U8, OP_I16, OP_U16, OP_I32, OP_REL16, OP_A32,
+       OP_I64 };
 
 static struct {
 	unsigned char op;
@@ -96,6 +97,42 @@ static struct {
 	{ BC_ARGS,	"args",		OP_U8 },
 	{ BC_LIBCALL,	"libcall",	OP_U16 },
 	{ BC_SWITCH,	"switch",	OP_A32 },
+
+	{ BC_CONST64,	"const64",	OP_I64 },
+	{ BC_LOAD64,	"load64",	OP_NONE },
+	{ BC_STORE64,	"store64",	OP_NONE },
+	{ BC_PUSH64,	"push64",	OP_NONE },
+	{ BC_POP64,	"pop64",	OP_NONE },
+	{ BC_SEXT32,	"sext32",	OP_NONE },
+	{ BC_ZEXT32,	"zext32",	OP_NONE },
+	{ BC_TRUNC64,	"trunc64",	OP_NONE },
+	{ BC_ADD64,	"add64",	OP_NONE },
+	{ BC_SUB64,	"sub64",	OP_NONE },
+	{ BC_MUL64,	"mul64",	OP_NONE },
+	{ BC_DIVS64,	"divs64",	OP_NONE },
+	{ BC_DIVU64,	"divu64",	OP_NONE },
+	{ BC_REMS64,	"rems64",	OP_NONE },
+	{ BC_REMU64,	"remu64",	OP_NONE },
+	{ BC_AND64,	"and64",	OP_NONE },
+	{ BC_OR64,	"or64",		OP_NONE },
+	{ BC_XOR64,	"xor64",	OP_NONE },
+	{ BC_SHL64,	"shl64",	OP_NONE },
+	{ BC_SHRS64,	"shrs64",	OP_NONE },
+	{ BC_SHRU64,	"shru64",	OP_NONE },
+	{ BC_NEG64,	"neg64",	OP_NONE },
+	{ BC_NOT64,	"not64",	OP_NONE },
+	{ BC_LNOT64,	"lnot64",	OP_NONE },
+	{ BC_EQ64,	"eq64",		OP_NONE },
+	{ BC_NE64,	"ne64",		OP_NONE },
+	{ BC_LTS64,	"lts64",	OP_NONE },
+	{ BC_LTU64,	"ltu64",	OP_NONE },
+	{ BC_GTS64,	"gts64",	OP_NONE },
+	{ BC_GTU64,	"gtu64",	OP_NONE },
+	{ BC_LES64,	"les64",	OP_NONE },
+	{ BC_LEU64,	"leu64",	OP_NONE },
+	{ BC_GES64,	"ges64",	OP_NONE },
+	{ BC_GEU64,	"geu64",	OP_NONE },
+	{ BC_BOOL64,	"bool64",	OP_NONE },
 	{ 0, NULL, 0 }
 };
 
@@ -217,6 +254,14 @@ int main(int argc, char *argv[])
 		case OP_I32:
 			printf(" %ld", (long)get32(code + pc));
 			pc += 4;
+			break;
+		case OP_I64:
+			{
+				unsigned long long v = get32(code + pc) |
+				    ((unsigned long long)get32(code + pc + 4) << 32);
+				printf(" %lld", (long long)v);
+				pc += 8;
+			}
 			break;
 		case OP_REL16:
 			{

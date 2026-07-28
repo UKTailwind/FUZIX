@@ -113,7 +113,55 @@
 #define BC_LIBCALL	0x59	/* u16 runtime library function index */
 #define BC_SWITCH	0x5A	/* u32 table address, patched via a fixup */
 
-#define BC_MAXOP	0x5A
+/*
+ *	64-bit forms, for long long (and later double, which wants the
+ *	same 64-bit accumulator and slot).
+ *
+ *	The accumulator is 64 bits wide. The 32-bit operations above
+ *	truncate their result back to 32 bits, so "int" keeps wrapping
+ *	the way C requires; these do not. A 64-bit value occupies two
+ *	stack slots, which is why push and pop have their own forms -
+ *	the slots stay 4 bytes so argument offsets are unaffected.
+ */
+#define BC_CONST64	0x60	/* i64 */
+#define BC_LOAD64	0x61
+#define BC_STORE64	0x62
+#define BC_PUSH64	0x63
+#define BC_POP64	0x64
+#define BC_SEXT32	0x65	/* 32 -> 64, signed */
+#define BC_ZEXT32	0x66	/* 32 -> 64, unsigned */
+#define BC_TRUNC64	0x67	/* 64 -> 32 */
+
+#define BC_ADD64	0x68
+#define BC_SUB64	0x69
+#define BC_MUL64	0x6A
+#define BC_DIVS64	0x6B
+#define BC_DIVU64	0x6C
+#define BC_REMS64	0x6D
+#define BC_REMU64	0x6E
+#define BC_AND64	0x6F
+#define BC_OR64		0x70
+#define BC_XOR64	0x71
+#define BC_SHL64	0x72
+#define BC_SHRS64	0x73
+#define BC_SHRU64	0x74
+#define BC_NEG64	0x75
+#define BC_NOT64	0x76
+#define BC_LNOT64	0x77
+
+#define BC_EQ64		0x78
+#define BC_NE64		0x79
+#define BC_LTS64	0x7A
+#define BC_LTU64	0x7B
+#define BC_GTS64	0x7C
+#define BC_GTU64	0x7D
+#define BC_LES64	0x7E
+#define BC_LEU64	0x7F
+#define BC_GES64	0x80
+#define BC_GEU64	0x81
+#define BC_BOOL64	0x82
+
+#define BC_MAXOP	0x82
 
 /*
  *	Object file layout. Everything is little endian.

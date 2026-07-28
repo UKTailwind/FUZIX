@@ -305,6 +305,10 @@ static void emit_load(unsigned t)
 		cbyte(BC_LOAD32);
 		return;
 	}
+	if (typesize(t) == 8) {
+		cbyte(BC_LOAD64);
+		return;
+	}
 	switch (typesize(t)) {
 	case 1:
 		cbyte((t & UNSIGNED) ? BC_LOAD8U : BC_LOAD8S);
@@ -324,6 +328,10 @@ static void emit_store(unsigned t)
 		cbyte(BC_STORE32);
 		return;
 	}
+	if (typesize(t) == 8) {
+		cbyte(BC_STORE64);
+		return;
+	}
 	switch (typesize(t)) {
 	case 1:
 		cbyte(BC_STORE8);
@@ -337,9 +345,21 @@ static void emit_store(unsigned t)
 	}
 }
 
-static void emit_const(unsigned long v)
+static void emit_const(unsigned long v, unsigned t)
 {
 	long s = (long)v;
+
+	/*
+	 * A 64-bit constant has to arrive as one: the short forms all sign
+	 * extend into a 32-bit value, so "5000000000LL" would lose its top
+	 * half before anything could use it.
+	 */
+	if (typesize(t) == 8) {
+		cbyte(BC_CONST64);
+		clong(v & 0xFFFFFFFFUL);
+		clong((unsigned long)(((unsigned long long)v) >> 32));
+		return;
+	}
 	if (s >= -128 && s < 128) {
 		cbyte(BC_CONST8);
 		cbyte(v & 0xFF);
@@ -668,7 +688,8 @@ void gen_tree(struct node *n)
 unsigned gen_push(struct node *n)
 {
 	sp += stack_size(n->type);
-	cbyte(BC_PUSH);
+	/* A 64-bit value takes two slots and needs the wide push. */
+	cbyte(typesize(n->type) == 8 ? BC_PUSH64 : BC_PUSH);
 	return 1;
 }
 
@@ -713,57 +734,61 @@ static unsigned binop(struct node *n)
 {
 	unsigned t = n->left ? n->left->type : n->type;
 	unsigned u = (PTR(t) || (t & UNSIGNED));
+	/* Operand width decides which family of opcodes to use. The 64-bit
+	   forms do not truncate; the 32-bit ones do. */
+	unsigned w = typesize(t);
+
+#define OP(o32, o64)	do { cbyte(w == 8 ? (o64) : (o32)); return 1; } while (0)
 
 	switch (n->op) {
 	case T_PLUS:
-		cbyte(BC_ADD);
-		return 1;
+		OP(BC_ADD, BC_ADD64);
 	case T_MINUS:
-		cbyte(BC_SUB);
-		return 1;
+		OP(BC_SUB, BC_SUB64);
 	case T_STAR:
-		cbyte(BC_MUL);
-		return 1;
+		OP(BC_MUL, BC_MUL64);
 	case T_SLASH:
-		cbyte(u ? BC_DIVU : BC_DIVS);
-		return 1;
+		if (u)
+			OP(BC_DIVU, BC_DIVU64);
+		OP(BC_DIVS, BC_DIVS64);
 	case T_PERCENT:
-		cbyte(u ? BC_REMU : BC_REMS);
-		return 1;
+		if (u)
+			OP(BC_REMU, BC_REMU64);
+		OP(BC_REMS, BC_REMS64);
 	case T_AND:
-		cbyte(BC_AND);
-		return 1;
+		OP(BC_AND, BC_AND64);
 	case T_OR:
-		cbyte(BC_OR);
-		return 1;
+		OP(BC_OR, BC_OR64);
 	case T_HAT:
-		cbyte(BC_XOR);
-		return 1;
+		OP(BC_XOR, BC_XOR64);
 	case T_LTLT:
-		cbyte(BC_SHL);
-		return 1;
+		OP(BC_SHL, BC_SHL64);
 	case T_GTGT:
-		cbyte(u ? BC_SHRU : BC_SHRS);
-		return 1;
+		if (u)
+			OP(BC_SHRU, BC_SHRU64);
+		OP(BC_SHRS, BC_SHRS64);
 	case T_EQEQ:
-		cbyte(BC_EQ);
-		return 1;
+		OP(BC_EQ, BC_EQ64);
 	case T_BANGEQ:
-		cbyte(BC_NE);
-		return 1;
+		OP(BC_NE, BC_NE64);
 	case T_LT:
-		cbyte(u ? BC_LTU : BC_LTS);
-		return 1;
+		if (u)
+			OP(BC_LTU, BC_LTU64);
+		OP(BC_LTS, BC_LTS64);
 	case T_GT:
-		cbyte(u ? BC_GTU : BC_GTS);
-		return 1;
+		if (u)
+			OP(BC_GTU, BC_GTU64);
+		OP(BC_GTS, BC_GTS64);
 	case T_LTEQ:
-		cbyte(u ? BC_LEU : BC_LES);
-		return 1;
+		if (u)
+			OP(BC_LEU, BC_LEU64);
+		OP(BC_LES, BC_LES64);
 	case T_GTEQ:
-		cbyte(u ? BC_GEU : BC_GES);
-		return 1;
+		if (u)
+			OP(BC_GEU, BC_GEU64);
+		OP(BC_GES, BC_GES64);
 	}
+#undef OP
 	return 0;
 }
 
@@ -837,7 +862,7 @@ unsigned gen_node(struct node *n)
 
 	switch (n->op) {
 	case T_CONSTANT:
-		emit_const(v);
+		emit_const(v, n->type);
 		return 1;
 	case T_NAME:
 		emit_addr(symref(namestr(n->snum)), v);
@@ -908,16 +933,16 @@ unsigned gen_node(struct node *n)
 		}
 		return 1;
 	case T_NEGATE:
-		cbyte(BC_NEG);
+		cbyte(typesize(n->type) == 8 ? BC_NEG64 : BC_NEG);
 		return 1;
 	case T_TILDE:
-		cbyte(BC_NOT);
+		cbyte(typesize(n->type) == 8 ? BC_NOT64 : BC_NOT);
 		return 1;
 	case T_BANG:
-		cbyte(BC_LNOT);
+		cbyte(typesize(n->type) == 8 ? BC_LNOT64 : BC_LNOT);
 		return 1;
 	case T_BOOL:
-		cbyte(BC_BOOL);
+		cbyte(typesize(n->type) == 8 ? BC_BOOL64 : BC_BOOL);
 		return 1;
 	case T_CAST:
 		{
@@ -930,9 +955,24 @@ unsigned gen_node(struct node *n)
 				return 0;
 			ls = typesize(lt);
 			rs = typesize(rt);
-			if (ls >= 4 && rs == 1)
+			/* Widening to or narrowing from 64 bits. */
+			if (ls == 8 && rs < 8) {
+				/* bring the value up to 32 first if it came
+				   from a narrower object */
+				if (rs == 1)
+					cbyte((rt & UNSIGNED) ? BC_ZEXT8 : BC_SEXT8);
+				else if (rs == 2)
+					cbyte((rt & UNSIGNED) ? BC_ZEXT16 : BC_SEXT16);
+				cbyte((rt & UNSIGNED) || PTR(rt) ? BC_ZEXT32
+								 : BC_SEXT32);
+				return 1;
+			}
+			if (ls < 8 && rs == 8)
+				cbyte(BC_TRUNC64);
+
+			if (ls >= 4 && ls < 8 && rs == 1)
 				cbyte((rt & UNSIGNED) ? BC_ZEXT8 : BC_SEXT8);
-			else if (ls >= 4 && rs == 2)
+			else if (ls >= 4 && ls < 8 && rs == 2)
 				cbyte((rt & UNSIGNED) ? BC_ZEXT16 : BC_SEXT16);
 			/*
 			 * Narrowing is not free. It is tempting to leave it to

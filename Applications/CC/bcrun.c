@@ -56,7 +56,7 @@ static char *strtab;
 
 /* Machine state. sp and fp are offsets into mem[], and the stack grows
    down from the top. */
-static long A;
+static int64_t A;
 static unsigned long pc;
 static unsigned long sp;
 
@@ -86,6 +86,17 @@ static void wr32(unsigned long a, unsigned long v)
 	mem[a + 1] = v >> 8;
 	mem[a + 2] = v >> 16;
 	mem[a + 3] = v >> 24;
+}
+
+static uint64_t rd64(unsigned long a)
+{
+	return (uint64_t)rd32(a) | ((uint64_t)rd32(a + 4) << 32);
+}
+
+static void wr64(unsigned long a, uint64_t v)
+{
+	wr32(a, (unsigned long)(v & 0xFFFFFFFFu));
+	wr32(a + 4, (unsigned long)(v >> 32));
 }
 
 static unsigned rd16(unsigned long a)
@@ -128,6 +139,30 @@ static long pop(void)
 	long v = S32(rd32(sp));
 	sp += 4;
 	return v;
+}
+
+static void push64(int64_t v)
+{
+	sp -= 8;
+	wr64(sp, (uint64_t)v);
+}
+
+static int64_t pop64(void)
+{
+	int64_t v = (int64_t)rd64(sp);
+	sp += 8;
+	return v;
+}
+
+static int64_t fetch64(void)
+{
+	uint64_t lo, hi;
+	lo = code[pc] | ((uint32_t)code[pc+1] << 8) |
+	     ((uint32_t)code[pc+2] << 16) | ((uint32_t)code[pc+3] << 24);
+	hi = code[pc+4] | ((uint32_t)code[pc+5] << 8) |
+	     ((uint32_t)code[pc+6] << 16) | ((uint32_t)code[pc+7] << 24);
+	pc += 8;
+	return (int64_t)(lo | (hi << 32));
 }
 
 /* ---- instruction stream ------------------------------------------- */
@@ -305,7 +340,7 @@ static void lib_printf(void)
 
 		switch (*f) {
 		case 'd':
-			sprintf(tmp, "%ld", arg(a++));
+			sprintf(tmp, "%ld", (long)arg(a++));
 			padout(tmp, width, left, zero);
 			break;
 		case 'u':
@@ -748,7 +783,7 @@ static int run(void)
 
 	for (;;) {
 		unsigned char op;
-		long b;
+		int64_t b;
 
 		if (trace)
 			fprintf(stderr, "%04lx: op %02x A=%ld sp=%lx\n",
@@ -820,27 +855,33 @@ static int run(void)
 			wr32((unsigned long)pop(), A);
 			break;
 
-		case BC_ADD:	A = pop() + A; break;
-		case BC_SUB:	A = pop() - A; break;
-		case BC_MUL:	A = pop() * A; break;
-		case BC_DIVS:	b = pop(); A = A ? b / A : 0; break;
+		/*
+		 * The accumulator is 64 bits, so every 32-bit result has to
+		 * be truncated back or "int" stops wrapping the way C
+		 * requires: 2000000000 + 2000000000 must give -294967296,
+		 * not 4000000000.
+		 */
+		case BC_ADD:	A = S32(pop() + A); break;
+		case BC_SUB:	A = S32(pop() - A); break;
+		case BC_MUL:	A = S32(pop() * A); break;
+		case BC_DIVS:	b = pop(); A = A ? S32(b / A) : 0; break;
 		case BC_DIVU:	b = pop();
-				A = A ? (long)(U32(b) / U32(A)) : 0;
+				A = A ? S32(U32(b) / U32(A)) : 0;
 				break;
-		case BC_REMS:	b = pop(); A = A ? b % A : 0; break;
+		case BC_REMS:	b = pop(); A = A ? S32(b % A) : 0; break;
 		case BC_REMU:	b = pop();
-				A = A ? (long)(U32(b) % U32(A)) : 0;
+				A = A ? S32(U32(b) % U32(A)) : 0;
 				break;
-		case BC_AND:	A = pop() & A; break;
-		case BC_OR:	A = pop() | A; break;
-		case BC_XOR:	A = pop() ^ A; break;
-		case BC_SHL:	A = pop() << A; break;
-		case BC_SHRS:	A = pop() >> A; break;
+		case BC_AND:	A = S32(pop() & A); break;
+		case BC_OR:	A = S32(pop() | A); break;
+		case BC_XOR:	A = S32(pop() ^ A); break;
+		case BC_SHL:	A = S32(pop() << A); break;
+		case BC_SHRS:	A = S32(pop() >> A); break;
 		case BC_SHRU:	b = pop();
-				A = (long)(U32(b) >> A);
+				A = S32(U32(b) >> A);
 				break;
-		case BC_NEG:	A = -A; break;
-		case BC_NOT:	A = ~A; break;
+		case BC_NEG:	A = S32(-A); break;
+		case BC_NOT:	A = S32(~A); break;
 		case BC_LNOT:	A = !A; break;
 
 		case BC_EQ:	A = (pop() == A); break;
@@ -862,6 +903,56 @@ static int run(void)
 				A = (U32(b) >= U32(A));
 				break;
 		case BC_BOOL:	A = (A != 0); break;
+
+		/* ---- 64-bit: no truncation, two stack slots ---------- */
+		case BC_CONST64:	A = fetch64(); break;
+		case BC_LOAD64:		A = (int64_t)rd64((unsigned long)A); break;
+		case BC_STORE64:	wr64((unsigned long)pop(), (uint64_t)A);
+					break;
+		case BC_PUSH64:		push64(A); break;
+		case BC_POP64:		A = pop64(); break;
+		case BC_SEXT32:		A = (int64_t)(int32_t)A; break;
+		case BC_ZEXT32:		A = (int64_t)(uint32_t)A; break;
+		case BC_TRUNC64:	A = S32(A); break;
+
+		case BC_ADD64:	A = pop64() + A; break;
+		case BC_SUB64:	A = pop64() - A; break;
+		case BC_MUL64:	A = pop64() * A; break;
+		case BC_DIVS64:	b = pop64(); A = A ? b / A : 0; break;
+		case BC_DIVU64:	b = pop64();
+				A = A ? (int64_t)((uint64_t)b / (uint64_t)A) : 0;
+				break;
+		case BC_REMS64:	b = pop64(); A = A ? b % A : 0; break;
+		case BC_REMU64:	b = pop64();
+				A = A ? (int64_t)((uint64_t)b % (uint64_t)A) : 0;
+				break;
+		case BC_AND64:	A = pop64() & A; break;
+		case BC_OR64:	A = pop64() | A; break;
+		case BC_XOR64:	A = pop64() ^ A; break;
+		case BC_SHL64:	A = pop64() << A; break;
+		case BC_SHRS64:	A = pop64() >> A; break;
+		case BC_SHRU64:	b = pop64();
+				A = (int64_t)((uint64_t)b >> A);
+				break;
+		case BC_NEG64:	A = -A; break;
+		case BC_NOT64:	A = ~A; break;
+		case BC_LNOT64:	A = !A; break;
+
+		case BC_EQ64:	A = (pop64() == A); break;
+		case BC_NE64:	A = (pop64() != A); break;
+		case BC_LTS64:	A = (pop64() < A); break;
+		case BC_LTU64:	b = pop64();
+				A = ((uint64_t)b < (uint64_t)A); break;
+		case BC_GTS64:	A = (pop64() > A); break;
+		case BC_GTU64:	b = pop64();
+				A = ((uint64_t)b > (uint64_t)A); break;
+		case BC_LES64:	A = (pop64() <= A); break;
+		case BC_LEU64:	b = pop64();
+				A = ((uint64_t)b <= (uint64_t)A); break;
+		case BC_GES64:	A = (pop64() >= A); break;
+		case BC_GEU64:	b = pop64();
+				A = ((uint64_t)b >= (uint64_t)A); break;
+		case BC_BOOL64:	A = (A != 0); break;
 
 		case BC_SEXT8:	A = (signed char)A; break;
 		case BC_SEXT16:	A = (short)A; break;
