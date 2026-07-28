@@ -77,8 +77,13 @@ static unsigned base_type(void)
 			set_once(1);
 			break;
 		case T_LONG:
-			/* For now -- long long is for the future */
-			set_once(2);
+			/* "long long" is a second long, not a conflict. Bit 2
+			   is the first, bit 32 the second; a third is an
+			   error. */
+			if (once_flags & 2)
+				set_once(32);
+			else
+				set_once(2);
 			break;
 		case T_UNSIGNED:
 			set_once(4);
@@ -123,8 +128,15 @@ static unsigned base_type(void)
 	/* No void modifiers */
 	if (type == VOID && (once_flags & 15))
 		return typeconflict();
+	/* No short long long, and no long long char/float/double */
+	if ((once_flags & 32) && ((once_flags & 1) || type == CCHAR ||
+				  type == FLOAT || type == DOUBLE))
+		return typeconflict();
+	/* long long */
+	if (type == CINT && (once_flags & 32))
+		type = CLONGLONG;
 	/* long */
-	if (type == CINT && (once_flags & 2))
+	else if (type == CINT && (once_flags & 2))
 		type = CLONG;
 	if (type == FLOAT && (once_flags & 2))
 		type = DOUBLE;
