@@ -1,4 +1,5 @@
 ROOT = ../../..
+FUZIX_ROOT ?= $(ROOT)
 include $(ROOT)/Target/rules.armm0
 
 SRCS  = ac.c col.c dc.c diff.c ed.c makekey.c ptx.c sum.c wall.c

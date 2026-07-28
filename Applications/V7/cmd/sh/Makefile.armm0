@@ -1,4 +1,5 @@
 ROOT = ../../../..
+FUZIX_ROOT ?= $(ROOT)
 include $(ROOT)/Target/rules.armm0
 
 SRCS  = args.c blok.c builtin.c cmd.c ctype.c error.c expand.c fault.c io.c \

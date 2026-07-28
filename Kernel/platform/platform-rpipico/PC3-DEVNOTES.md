@@ -16,9 +16,15 @@ live document.
 - SD card layout: p1 = 64M FAT (unformatted placeholder), p2 = 32M Fuzix
   root (boot `hdb2`), p3 = 4M type 0x7F. Users write pc3-sd.img whole.
 - The user flashes hardware; never assume you can.
-- WSL DNS via the NAT proxy is broken: for git push / clone, pin
-  `20.26.156.215 github.com` in /etc/hosts (as root), work, remove. apt
-  needs archive.ubuntu.com pinned similarly.
+- WSL DNS is fixed (2026-07-28) — no more /etc/hosts pinning. The cause
+  was systemd-resolved having no upstream at all (`resolvectl status` ->
+  `Current Scopes: none`) because `/etc/wsl.conf` sets
+  `generateResolvConf = false`, so nothing ever supplied nameservers
+  while raw IP worked fine. Fixed by
+  `/etc/systemd/resolved.conf.d/wsl-dns.conf` with `DNS=<gateway>
+  1.1.1.1 8.8.8.8` plus `FallbackDNS`, so it survives the NAT gateway
+  address changing. Root without a sudo password:
+  `wsl.exe -d Ubuntu -u root -- bash -c '...'`.
 - The kernel is PICO_COPY_TO_RAM; `build/fuzix.elf` and the userland
   `.debug` files match what runs — `arm-none-eabi-addr2line -f -e` on
   panic addresses works and has solved every crash so far. User-space

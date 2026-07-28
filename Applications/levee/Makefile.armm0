@@ -1,4 +1,9 @@
 ROOT = ../..
+# The platform "world" target runs this makefile directly, where the top
+# level's exported FUZIX_ROOT is not in scope. Without it rules.armm0
+# builds -isystem /Library/include and everything compiles silently
+# against newlib, failing only at link with _impure_ptr and friends.
+FUZIX_ROOT ?= $(ROOT)
 include $(ROOT)/Target/rules.armm0
 
 CSRCS = beep.c blockio.c display.c doscall.c editcor.c exec.c find.c

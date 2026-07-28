@@ -1,4 +1,5 @@
 ROOT = ../..
+FUZIX_ROOT ?= $(ROOT)
 include $(ROOT)/Target/rules.armm0
 
 SRC = advent.c adventdb.c database.c english.c itverb.c lib.c saveadv.c \
