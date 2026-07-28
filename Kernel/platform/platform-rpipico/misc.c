@@ -178,9 +178,15 @@ int plt_dev_ioctl(uarg_t request, char *data)
         }
 #endif
         if (n == -9) {
-            /* hardware microsecond counter: the full 64-bit value is
-             * written back through the caller's buffer (the selector
-             * arrived in its low word) */
+            /* microsecond counter, 31 bits in the return value: the
+             * safe contract for callers that passed a 4-byte buffer */
+            return (int)(time_us_64() & 0x7FFFFFFF);
+        }
+        if (n == -10) {
+            /* microsecond counter, full 64 bits written back through
+             * the caller's 8-byte buffer (low word held the selector).
+             * A separate selector from -9: never write 8 bytes into a
+             * caller that only promised 4. */
             uint64_t us = time_us_64();
             if (uput(&us, data, sizeof(us)))
                 return -1;

@@ -50,9 +50,10 @@ struct snd_cmd {
  *          pressed = 1: bit0 GP34, bit1 GP35, bit2 GP36, bit3 GP37
  *   1-4    ADC GP41-GP44, 16-bit (12-bit ADC << 4)
  *   -5..-8 sound channel 0-3 queue free slots
- *   -9     hardware microsecond counter: pass an 8-byte buffer whose
- *          low word holds the selector; the kernel writes the full
- *          64-bit value back into it and returns 0 */
+ *   -9     hardware microsecond counter, 31 bits in the return value
+ *   -10    hardware microsecond counter, 64 bits: pass an 8-byte
+ *          buffer whose low word holds the selector; the kernel
+ *          writes the full value back into it and returns 0 */
 #define PICOIOC_ADVAL 0x0009
 
 #endif

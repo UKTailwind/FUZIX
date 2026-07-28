@@ -637,15 +637,19 @@ long long adval (int n)
 	    	return (kbdqr - kbdqw - 1) & 0xFF ;
 	if (n == -9)
 	    {
-		/* the kernel writes the 64-bit microsecond counter back
-		 * through the buffer; the selector occupies its low word */
-		long long t = -9 ;
+		/* Selector -10 on the wire: the kernel writes the 64-bit
+		 * microsecond counter back through this 8-byte buffer
+		 * (the selector occupies its low word).  Against an older
+		 * kernel the buffer comes back untouched; retry as the
+		 * 31-bit return-value protocol of plain -9. */
+		long long t = -10 ;
 		fd = sndsys_fd () ;
 		if (fd < 0)
 			return 0 ;
 		r = ioctl (fd, SNDIOC_ADVAL, &t) ;
-		if (r == 0 && t != -9)
+		if (r == 0 && t != -10)
 			return t ;
+		r = ioctl (fd, SNDIOC_ADVAL, &n) ;
 		return (r > 0) ? r : 0 ;
 	    }
 	if ((n >= 0 && n <= 4) || (n <= -5 && n >= -8))
