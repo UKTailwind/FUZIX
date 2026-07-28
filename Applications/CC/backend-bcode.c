@@ -43,6 +43,19 @@ static unsigned char databuf[DATAMAX];
 static unsigned long datalen;
 static unsigned long bsslen;
 
+/*
+ *	Literals are a separate segment, appended to data when the module
+ *	is written out. They cannot share datalen: the frontend declares
+ *	a data label, switches to the literal segment, emits the string,
+ *	then switches back and emits the initialiser. With one counter the
+ *	label records an offset the object never occupies and the two
+ *	overlap -- "char *msg = \"...\"" put both msg and the string at 0.
+ */
+static unsigned char litbuf[DATAMAX];
+static unsigned long litlen;
+static unsigned char sym_in_lit[MAXSYM];
+static unsigned char fix_in_lit[MAXFIX];
+
 #define STRMAX		8192
 static char strtab[STRMAX];
 static unsigned long strtablen;
@@ -101,13 +114,29 @@ static void clong(unsigned long v)
 	cbyte((v >> 24) & 0xFF);
 }
 
+static unsigned in_literal(void);
+
 static void dbyte(unsigned v)
 {
+	if (in_literal()) {
+		if (litlen >= DATAMAX) {
+			error("literal overflow");
+			return;
+		}
+		litbuf[litlen++] = v;
+		return;
+	}
 	if (datalen >= DATAMAX) {
 		error("data overflow");
 		return;
 	}
 	databuf[datalen++] = v;
+}
+
+/* Offset within whichever of the two segments is being filled. */
+static unsigned long dhere(void)
+{
+	return in_literal() ? litlen : datalen;
 }
 
 static void dword(unsigned v)
@@ -159,6 +188,8 @@ static void symdef(const char *name, unsigned type, unsigned long value)
 	unsigned s = symref(name);
 	symtab[s].s_type = type;
 	symtab[s].s_value = value;
+	if (type == BC_SYM_DATA)
+		sym_in_lit[s] = in_literal();
 }
 
 /* Labels get symbols too, so a switch table or a string can name one. */
@@ -179,6 +210,8 @@ static void fixup(unsigned seg, unsigned long off, unsigned sym)
 	fixtab[nfix].f_sym = sym;
 	fixtab[nfix].f_seg = seg;
 	fixtab[nfix].f_pad = 0;
+	if (seg == BC_SEG_DATA)
+		fix_in_lit[nfix] = in_literal();
 	nfix++;
 }
 
@@ -375,6 +408,11 @@ void gen_export(const char *name)
  */
 static unsigned curseg = A_CODE;
 
+static unsigned in_literal(void)
+{
+	return curseg == A_LITERAL;
+}
+
 void gen_segment(unsigned s)
 {
 	curseg = s;
@@ -387,19 +425,36 @@ void gen_prologue(const char *name)
 		entry = codelen;
 }
 
+/*
+ *	Frame layout. BC_ENTER n moves the stack pointer down by n, so
+ *	the locals occupy [sp, sp+n) and the return address and arguments
+ *	are above them:
+ *
+ *	    sp -> [ locals            ]  n bytes
+ *	          [ return address    ]  <- sp on entry
+ *	          [ argument 0        ]
+ *	          [ argument 1        ]  ...
+ *
+ *	"sp" below counts only what expression evaluation has pushed, not
+ *	the frame, because a local at frame offset v lives at sp + v +
+ *	pushes. Adding the frame size here as the other backends do puts
+ *	every local above the return address and in the caller's frame,
+ *	which loops forever rather than failing cleanly.
+ *
+ *	An argument at offset v lives at sp + v + frame_len + pushes,
+ *	which is what T_ARGUMENT emits.
+ */
 void gen_frame(unsigned size, unsigned aframe)
 {
-	frame_len = size + 4;		/* + return address slot */
+	frame_len = size + 4;		/* locals plus the return address */
 	cbyte(BC_ENTER);
 	cword(size);
-	sp += size;
 }
 
 void gen_epilogue(unsigned size, unsigned argsize)
 {
-	if (sp != size)
+	if (sp)
 		error("sp");
-	sp -= size;
 	cbyte(BC_LEAVE);
 	cword(size);
 	cbyte(BC_RET);
@@ -451,7 +506,7 @@ void gen_switchdata(unsigned n, unsigned size)
 {
 	char buf[24];
 	sprintf(buf, "Sw%u", n);
-	symdef(buf, BC_SYM_DATA, datalen);
+	symdef(buf, BC_SYM_DATA, dhere());
 	dlong(size);
 }
 
@@ -471,7 +526,7 @@ void gen_case_data(unsigned tag, unsigned entry)
 {
 	char buf[24];
 	sprintf(buf, "Sw%u_%u", tag, entry);
-	fixup(BC_SEG_DATA, datalen, symref(buf));
+	fixup(BC_SEG_DATA, dhere(), symref(buf));
 	dlong(0);
 }
 
@@ -488,7 +543,7 @@ void gen_data_label(const char *name, unsigned align)
 	if (curseg == A_BSS)
 		symdef(name, BC_SYM_BSS, bsslen);
 	else
-		symdef(name, BC_SYM_DATA, datalen);
+		symdef(name, BC_SYM_DATA, dhere());
 }
 
 void gen_space(unsigned value)
@@ -507,7 +562,7 @@ void gen_text_data(unsigned n)
 {
 	char buf[24];
 	sprintf(buf, "T%u", n);
-	fixup(BC_SEG_DATA, datalen, symref(buf));
+	fixup(BC_SEG_DATA, dhere(), symref(buf));
 	dlong(0);
 }
 
@@ -516,13 +571,13 @@ void gen_literal(unsigned n)
 	char buf[24];
 	if (n) {
 		sprintf(buf, "T%u", n);
-		symdef(buf, BC_SYM_DATA, datalen);
+		symdef(buf, BC_SYM_DATA, dhere());
 	}
 }
 
 void gen_name(struct node *n)
 {
-	fixup(BC_SEG_DATA, datalen, symref(namestr(n->snum)));
+	fixup(BC_SEG_DATA, dhere(), symref(namestr(n->snum)));
 	dlong(n->value);
 }
 
@@ -556,12 +611,21 @@ void gen_end(void)
 
 	resolve_jumps();
 
+	/* Literals sit after data in the emitted image, so everything
+	   recorded against the literal buffer moves up by datalen. */
+	for (i = 0; i < nsym; i++)
+		if (sym_in_lit[i])
+			symtab[i].s_value += datalen;
+	for (i = 0; i < nfix; i++)
+		if (fix_in_lit[i])
+			fixtab[i].f_offset += datalen;
+
 	memcpy(h.h_magic, BC_MAGIC, 4);
 	h.h_version = BC_VERSION;
 	h.h_pad = 0;
 	h.h_nsym = nsym;
 	h.h_code = codelen;
-	h.h_data = datalen;
+	h.h_data = datalen + litlen;
 	h.h_bss = bsslen;
 	h.h_entry = entry;
 	h.h_nfixup = nfix;
@@ -570,6 +634,7 @@ void gen_end(void)
 	fwrite(&h, sizeof(h), 1, stdout);
 	fwrite(codebuf, 1, codelen, stdout);
 	fwrite(databuf, 1, datalen, stdout);
+	fwrite(litbuf, 1, litlen, stdout);
 	for (i = 0; i < nfix; i++)
 		fwrite(&fixtab[i], sizeof(struct bc_fixup), 1, stdout);
 	for (i = 0; i < nsym; i++)

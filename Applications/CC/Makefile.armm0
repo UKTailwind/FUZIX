@@ -14,6 +14,18 @@ FLOAT = -DNO_FLOAT
 
 include Makefile.common
 
+# The runtime: bcrun executes a bytecode object, bcdump disassembles
+# one. Both are ordinary Fuzix programs and belong in /usr/bin.
+all: bcrun bcdump
+
+bcrun: bcrun.o
+	$(LINKER) $(CRT0) bcrun.o -o $@ $(LINKER_OPT) $(LINKER_TAIL)
+
+bcdump: bcdump.o
+	$(LINKER) $(CRT0) bcdump.o -o $@ $(LINKER_OPT) $(LINKER_TAIL)
+
+bcrun.o bcdump.o: bytecode.h
+
 # Stage 1: no on-target Z80 runtime libs; the passes are the experiment
 support:
 	@:

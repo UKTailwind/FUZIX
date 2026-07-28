@@ -203,7 +203,58 @@ Widen `backend-bytecode.c` (it opens `/* For now assume 8/16bit */`) and
 switch it to the frozen binary encoding. Output is a file the loader can
 read — no assembler, no linker.
 
-### Phase 3 — interpreter on the PC3
+### Phase 3 — interpreter — **DONE 2026-07-28**
+
+`bcrun.c`. **C compiles and runs.** Verified on the host:
+
+    sub(a,b) + a for-loop summing 1..10, returning 55-13   ->  exit 42
+    strings, %s, %d with negatives, %x, putchar,
+    and recursive fib(0..9)                     ->  0 1 1 2 3 5 8 13 21 34
+
+The 42 matters twice over: it is arithmetic and control flow, and `sub`
+is order-sensitive, so it also proves the argument mapping. Arguments
+turn out to be pushed right to left, so the first parameter is nearest
+the stack pointer.
+
+Built for ARM Fuzix too: bcrun 76.9K loadable (the 64K VM address space
+dominates), bcdump 8.8K, against a 255K process. Not yet run on
+hardware — that needs the SD card rewriting.
+
+Design decision worth keeping: **the VM has its own address space**, one
+`mem[]` array holding data, bss and the stack, with a program pointer
+being an offset into it. Program pointers stay 32-bit whatever the host
+is, so the same interpreter runs on the development machine and on the
+PC3. Code lives outside that space and is not addressable, so a function
+pointer is a code offset.
+
+Four things that bit, all now fixed and worth not repeating:
+
+* **The frame convention was wrong in the emitter.** `gen_frame` added
+  the frame size to the pushed-depth counter, as the other backends do,
+  which put every local *above* the return address in the caller's
+  frame. A local at frame offset v lives at `sp + v + pushes`; the size
+  belongs only in `frame_len` for arguments. The symptom was an infinite
+  loop, not a clean failure.
+* **Calls to undefined names are library calls**, and the compiler
+  cannot know that when it emits the call because the definition may
+  come later. The loader rewrites `BC_CALL` to a `BC_SYM_LIB` symbol
+  into `BC_LIBCALL`; the spare two bytes become NOPs so the instruction
+  keeps its length.
+* **Literals need their own buffer.** The frontend declares a data
+  label, switches to the literal segment, emits the string, then
+  switches back — one counter put `char *msg = "..."` and its string
+  both at offset 0.
+* **Sign extension.** Everything entering A or the stack must be sign
+  extended from 32 bits on a 64-bit host, and the return sentinel then
+  has to be masked back to 32 bits or it never matches.
+
+Current limit: the runtime library is `putchar`, `puts`, `printf`
+(`%d %u %x %c %s`), `exit` and the compound-assignment helpers. Programs
+needing real file I/O will not run until that grows. Compound assignment
+on `char`/`short` is also wrong, because the emitter does not yet encode
+the operand width in the call.
+
+### Phase 3 as originally planned
 
 A bytecode interpreter as a normal Fuzix program. **At the end of this
 phase you can compile and run C on the machine.** Slow, but real, and
