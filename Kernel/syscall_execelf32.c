@@ -329,6 +329,19 @@ arg_t _execve(void)
 	uint8_t** nargv = wargs(((char *) stacktop - sizeof(uaddr_t)), abuf, &argc);
 	uint8_t** nenvp = wargs((char *) (nargv), ebuf, NULL);
 
+	/* The stack pointer ends up wherever the argument and environment
+	 * strings happen to leave it: wargs subtracts their exact byte
+	 * length, and ALIGNUP is the identity on this platform. AAPCS
+	 * requires an 8-byte aligned stack on entry to a function, so on
+	 * ARM a program handed an odd multiple of 4 miscompiles its own
+	 * 64-bit accesses. Lay the block out again 4 bytes lower when it
+	 * lands wrong -- sp addresses [argc][argv][envp...] as one unit, so
+	 * the whole block has to move together, not just sp. */
+	if ((uaddr_t)(nenvp - 2) & 7) {
+		nargv = wargs(((char *) stacktop - 2 * sizeof(uaddr_t)), abuf, &argc);
+		nenvp = wargs((char *) (nargv), ebuf, NULL);
+	}
+
 	/* Fill in udata.u_name with program invocation name. */
 
 	uget((void *) ugetp(nargv), udata.u_name, 8);

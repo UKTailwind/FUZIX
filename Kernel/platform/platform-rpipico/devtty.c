@@ -237,6 +237,13 @@ void tty_interrupt(void)
                     sgrpsig(t->pgrp, SIGQUIT);
                 continue;
             }
+            {
+                /* canonical-mode line editing + history (lineedit.c);
+                 * raw-mode programs are untouched */
+                extern int lineedit_input(uint_fast8_t, uint_fast8_t);
+                if (lineedit_input(minor, c))
+                    continue;
+            }
             if (tty_inproc(minor, c) == 0)
             {
                 break;

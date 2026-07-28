@@ -132,6 +132,12 @@ void device_init(void)
 
     psram_disc_init();
 
+    {
+        /* console command history: lives in PSRAM reserved above */
+        extern void lineedit_init(void);
+        lineedit_init();
+    }
+
 #ifdef CONFIG_PC3_SOUND
     {
         extern void sound_init(void);
