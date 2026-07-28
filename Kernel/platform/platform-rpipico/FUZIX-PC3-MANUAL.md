@@ -272,7 +272,7 @@ full (Esc still works).
 | `ADVAL(1)`–`ADVAL(4)` | Analogue readings of GP41–GP44, 0–65520 (12-bit ADC ×16) |
 | `ADVAL(-1)`  | Characters waiting in the keyboard buffer               |
 | `ADVAL(-5)`–`ADVAL(-8)` | Free queue slots on sound channels 0–3       |
-| `ADVAL(-9)`  | Hardware microsecond counter (31 bits)                 |
+| `ADVAL(-9)`  | Hardware microsecond counter (64-bit)                  |
 
 The joystick inputs have pull-ups and Schmitt-trigger inputs enabled;
 wire switches directly to ground. The analogue inputs are 3.3 V
@@ -290,8 +290,9 @@ PRINT (FNtimer - T%) / 1000; " ms"
 ```
 
 Each reading costs one system call (a few tens of microseconds) -
-negligible over millisecond-scale measurements. The counter wraps
-every ~35.8 minutes; a single timed span must be shorter than that.
+negligible over millisecond-scale measurements. The value is the full
+64-bit hardware counter (BBC BASIC integers are 64-bit), counting
+microseconds since power-on: it never wraps in practice.
 
 ## Serial port
 

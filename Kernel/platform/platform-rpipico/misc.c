@@ -178,10 +178,13 @@ int plt_dev_ioctl(uarg_t request, char *data)
         }
 #endif
         if (n == -9) {
-            /* hardware microsecond counter, 31 bits (the ioctl return
-             * must stay positive): wraps every ~35.8 minutes, which
-             * benchmark deltas must tolerate */
-            return (int)(time_us_64() & 0x7FFFFFFF);
+            /* hardware microsecond counter: the full 64-bit value is
+             * written back through the caller's buffer (the selector
+             * arrived in its low word) */
+            uint64_t us = time_us_64();
+            if (uput(&us, data, sizeof(us)))
+                return -1;
+            return 0;
         }
         return 0;
     }

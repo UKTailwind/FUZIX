@@ -87,7 +87,7 @@ void getcsr (int*, int*) ;	// Get text cursor (caret) coords
 int vgetc (int, int) ;		// Get character at specified coords
 int oscall (int) ;		// Call an emulated OS function
 int widths (char *, int) ;	// Get string width in graphics units
-int adval (int) ;		// ADVAL function
+long long adval (int) ;		// ADVAL function (64-bit: microsecond timer)
 void *osopen (int, char *) ;	// Open a file
 unsigned char osbget (void*, int*) ; // Get a byte from a file
 long long getptr (void*) ;	// Get file pointer

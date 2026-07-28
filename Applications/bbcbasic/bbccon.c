@@ -629,13 +629,26 @@ int widths (unsigned char *s, int l)
 // ADVAL(n)
 #ifdef FUZIX
 #define SNDIOC_ADVAL  0x0009
-int adval (int n)
+long long adval (int n)
 {
 	extern int sndsys_fd (void) ;
 	int fd, r ;
 	if (n == -1)
 	    	return (kbdqr - kbdqw - 1) & 0xFF ;
-	if ((n >= 0 && n <= 4) || (n <= -5 && n >= -9))
+	if (n == -9)
+	    {
+		/* the kernel writes the 64-bit microsecond counter back
+		 * through the buffer; the selector occupies its low word */
+		long long t = -9 ;
+		fd = sndsys_fd () ;
+		if (fd < 0)
+			return 0 ;
+		r = ioctl (fd, SNDIOC_ADVAL, &t) ;
+		if (r == 0 && t != -9)
+			return t ;
+		return (r > 0) ? r : 0 ;
+	    }
+	if ((n >= 0 && n <= 4) || (n <= -5 && n >= -8))
 	    {
 		fd = sndsys_fd () ;
 		if (fd >= 0)
@@ -648,7 +661,7 @@ int adval (int n)
 	return 0 ;
 }
 #else
-int adval (int n)
+long long adval (int n)
 {
 	if (n == -1)
 	    	return (kbdqr - kbdqw - 1) & 0xFF ;
