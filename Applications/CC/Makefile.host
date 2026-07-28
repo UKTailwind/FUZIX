@@ -64,3 +64,8 @@ clean:
 	rm -rf $(OBJDIR)
 
 .PHONY: all clean
+
+# bytecode.h defines the object format: everything that reads or
+# writes it must be rebuilt when it changes, or cc2 keeps writing the
+# old layout while bcrun reads the new one.
+$(OBJ_C2): bytecode.h

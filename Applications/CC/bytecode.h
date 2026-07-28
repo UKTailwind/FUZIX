@@ -16,6 +16,8 @@
 #ifndef _BYTECODE_H
 #define _BYTECODE_H
 
+#include <stdint.h>
+
 #define BC_MAGIC	"FBC1"
 #define BC_VERSION	1
 
@@ -135,25 +137,25 @@
 
 struct bc_header {
 	char h_magic[4];	/* BC_MAGIC */
-	unsigned char h_version;
-	unsigned char h_pad;
-	unsigned short h_nsym;
-	unsigned long h_code;	/* bytes of code */
-	unsigned long h_data;	/* bytes of initialised data */
-	unsigned long h_bss;	/* bytes of zeroed data */
-	unsigned long h_entry;	/* code offset of the entry point */
-	unsigned long h_nfixup;
-	unsigned long h_strsize;	/* bytes of string table */
+	uint8_t h_version;
+	uint8_t h_pad;
+	uint16_t h_nsym;
+	uint32_t h_code;	/* bytes of code */
+	uint32_t h_data;	/* bytes of initialised data */
+	uint32_t h_bss;	/* bytes of zeroed data */
+	uint32_t h_entry;	/* code offset of the entry point */
+	uint32_t h_nfixup;
+	uint32_t h_strsize;	/* bytes of string table */
 };
 
 #define BC_SEG_CODE	0
 #define BC_SEG_DATA	1
 
 struct bc_fixup {
-	unsigned long f_offset;	/* where to patch */
-	unsigned short f_sym;	/* which symbol */
-	unsigned char f_seg;	/* BC_SEG_* that f_offset is within */
-	unsigned char f_pad;
+	uint32_t f_offset;	/* where to patch */
+	uint16_t f_sym;	/* which symbol */
+	uint8_t f_seg;	/* BC_SEG_* that f_offset is within */
+	uint8_t f_pad;
 };
 
 #define BC_SYM_CODE	0	/* offset within the code segment */
@@ -162,10 +164,10 @@ struct bc_fixup {
 #define BC_SYM_LIB	3	/* runtime library index, not an address */
 
 struct bc_sym {
-	unsigned long s_value;
-	unsigned long s_name;	/* offset into the string table */
-	unsigned char s_type;	/* BC_SYM_* */
-	unsigned char s_pad[3];
+	uint32_t s_value;
+	uint32_t s_name;	/* offset into the string table */
+	uint8_t s_type;	/* BC_SYM_* */
+	uint8_t s_pad[3];
 };
 
 #endif
