@@ -27,6 +27,10 @@
    the stack must be sign extended from 32 bits, or negative numbers
    read back as huge positive ones. */
 #define S32(x)	((long)(int32_t)(x))
+/* And unsigned operations must work at 32 bits too: A holds a sign
+   extended value, so casting it straight to unsigned long on a 64bit
+   host gives an enormous number instead of the intended one. */
+#define U32(x)	((uint32_t)(x))
 
 /*
  *	The program's address space.
@@ -305,11 +309,11 @@ static void lib_printf(void)
 			padout(tmp, width, left, zero);
 			break;
 		case 'u':
-			sprintf(tmp, "%lu", (unsigned long)arg(a++));
+			sprintf(tmp, "%lu", (unsigned long)U32(arg(a++)));
 			padout(tmp, width, left, zero);
 			break;
 		case 'x':
-			sprintf(tmp, "%lx", (unsigned long)arg(a++));
+			sprintf(tmp, "%lx", (unsigned long)U32(arg(a++)));
 			padout(tmp, width, left, zero);
 			break;
 		case 'c':
@@ -821,11 +825,11 @@ static int run(void)
 		case BC_MUL:	A = pop() * A; break;
 		case BC_DIVS:	b = pop(); A = A ? b / A : 0; break;
 		case BC_DIVU:	b = pop();
-				A = A ? (long)((unsigned long)b / (unsigned long)A) : 0;
+				A = A ? (long)(U32(b) / U32(A)) : 0;
 				break;
 		case BC_REMS:	b = pop(); A = A ? b % A : 0; break;
 		case BC_REMU:	b = pop();
-				A = A ? (long)((unsigned long)b % (unsigned long)A) : 0;
+				A = A ? (long)(U32(b) % U32(A)) : 0;
 				break;
 		case BC_AND:	A = pop() & A; break;
 		case BC_OR:	A = pop() | A; break;
@@ -833,7 +837,7 @@ static int run(void)
 		case BC_SHL:	A = pop() << A; break;
 		case BC_SHRS:	A = pop() >> A; break;
 		case BC_SHRU:	b = pop();
-				A = (long)((unsigned long)b >> A);
+				A = (long)(U32(b) >> A);
 				break;
 		case BC_NEG:	A = -A; break;
 		case BC_NOT:	A = ~A; break;
@@ -843,19 +847,19 @@ static int run(void)
 		case BC_NE:	A = (pop() != A); break;
 		case BC_LTS:	A = (pop() < A); break;
 		case BC_LTU:	b = pop();
-				A = ((unsigned long)b < (unsigned long)A);
+				A = (U32(b) < U32(A));
 				break;
 		case BC_GTS:	A = (pop() > A); break;
 		case BC_GTU:	b = pop();
-				A = ((unsigned long)b > (unsigned long)A);
+				A = (U32(b) > U32(A));
 				break;
 		case BC_LES:	A = (pop() <= A); break;
 		case BC_LEU:	b = pop();
-				A = ((unsigned long)b <= (unsigned long)A);
+				A = (U32(b) <= U32(A));
 				break;
 		case BC_GES:	A = (pop() >= A); break;
 		case BC_GEU:	b = pop();
-				A = ((unsigned long)b >= (unsigned long)A);
+				A = (U32(b) >= U32(A));
 				break;
 		case BC_BOOL:	A = (A != 0); break;
 

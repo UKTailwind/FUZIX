@@ -430,33 +430,42 @@ struct node *logic_tree(unsigned op, struct node *l, struct node *r)
  */
 unsigned long trim_constant(unsigned t, unsigned long value, unsigned warn)
 {
-	int sign = 1;
 	unsigned long ov = value;
+	unsigned long mask, sbit;
 
-	/* Signed is more fun */
-	if (!(t & UNSIGNED)) {
-		if ((signed long)value < 0) {
-			sign = -1;
-			value = -value;
-		}
+	/*
+	 * Match on the base type with the sign bit already masked off, so
+	 * the labels must be the signed forms. The cases here used to be
+	 * UCHAR/USHORT/ULONG (0x08/0x18/0x28), which "t & 0xF0" can never
+	 * produce - so nothing was ever trimmed and a narrowing cast of a
+	 * constant kept its full value: "(int)(signed char)200" folded to
+	 * 200 instead of -56.
+	 */
+	switch (t & 0xF0) {
+	case CCHAR:
+		mask = TARGET_CHAR_MASK;
+		break;
+	case CSHORT:
+		mask = TARGET_SHORT_MASK;
+		break;
+	case CLONG:
+		mask = TARGET_LONG_MASK;
+		break;
+	default:
+		return value;
 	}
-	/* Now trim the unsigned bit pattern */
-	switch(t & 0xF0) {
-	case UCHAR:
-		value &= TARGET_CHAR_MASK;
-		break;
-	case USHORT:
-		value &= TARGET_SHORT_MASK;
-		break;
-	case ULONG:
-		value &= TARGET_LONG_MASK;
-		break;
-	}
-	/* And do the range check */
+	sbit = (mask >> 1) + 1;
+
+	value &= mask;
+	/* Masking alone is not enough for a signed type: the value has to
+	   be sign extended out of the target's width, or a negative result
+	   comes back as a large positive one. */
+	if (!(t & UNSIGNED) && (value & sbit))
+		value |= ~mask;
+
 	if (warn && ov != value)
 		warning("out of range");
-	/* Then put the sign back so we sign extend into the upper bits */
-	return ((signed long)value) * sign;
+	return value;
 }
 
 /* FIXME: will need to use the right types for n->value etc eventually

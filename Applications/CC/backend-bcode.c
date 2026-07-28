@@ -934,7 +934,18 @@ unsigned gen_node(struct node *n)
 				cbyte((rt & UNSIGNED) ? BC_ZEXT8 : BC_SEXT8);
 			else if (ls >= 4 && rs == 2)
 				cbyte((rt & UNSIGNED) ? BC_ZEXT16 : BC_SEXT16);
-			/* narrowing is free: the store decides the width */
+			/*
+			 * Narrowing is not free. It is tempting to leave it to
+			 * the store, which does truncate - but a narrowed value
+			 * can be used directly, and then nothing reduces it:
+			 * "(int)(signed char)200" gave 200 instead of -56.
+			 * Force the value into the target's width and
+			 * signedness here.
+			 */
+			else if (ls == 1)
+				cbyte((lt & UNSIGNED) ? BC_ZEXT8 : BC_SEXT8);
+			else if (ls == 2)
+				cbyte((lt & UNSIGNED) ? BC_ZEXT16 : BC_SEXT16);
 			return 1;
 		}
 	}
