@@ -121,6 +121,11 @@
  *	  data   [h_data]
  *	  fixups [h_nfixup] of struct bc_fixup
  *	  symbols[h_nsym]   of struct bc_sym
+ *	  strings[h_strsize]  NUL separated, indexed by s_name
+ *
+ *	Names are kept because BC_SYM_LIB symbols have to be matched
+ *	against the runtime the interpreter provides; an index alone
+ *	would not say which function is meant.
  *
  *	There is no linker. A fixup names a symbol whose value the loader
  *	adds to the 32bit field at the given code or data offset. Symbols
@@ -138,6 +143,7 @@ struct bc_header {
 	unsigned long h_bss;	/* bytes of zeroed data */
 	unsigned long h_entry;	/* code offset of the entry point */
 	unsigned long h_nfixup;
+	unsigned long h_strsize;	/* bytes of string table */
 };
 
 #define BC_SEG_CODE	0
@@ -157,6 +163,7 @@ struct bc_fixup {
 
 struct bc_sym {
 	unsigned long s_value;
+	unsigned long s_name;	/* offset into the string table */
 	unsigned char s_type;	/* BC_SYM_* */
 	unsigned char s_pad[3];
 };

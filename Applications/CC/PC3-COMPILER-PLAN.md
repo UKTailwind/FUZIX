@@ -165,7 +165,39 @@ find them here, where they are cheap.
 Success test: cc1 parses a body of C with 32-bit types without
 asserting.
 
-### Phase 2 — bytecode emitter
+### Phase 2 — bytecode emitter — **DONE 2026-07-28**
+
+Delivered: `bytecode.h` + `BYTECODE.md` (the frozen encoding),
+`backend-bcode.c` (cc2 emitting binary objects) and `bcdump.c` (a
+disassembler, which is also the reference decoder the interpreter and
+the translator get written against).
+
+`Makefile.armm0` now builds the real thing: cc1 with the ARM type model,
+cc2 emitting bytecode. Loadable sizes cc0 33K, cc1 48.8K, cc2 109K
+against a 255K process — cc2's bss is mostly its fixed output buffers.
+
+Over `Applications/util`, 115 of 123 files compile all the way to
+bytecode with **no crashes** (5 errors, 3 unpreprocessable).
+
+Three things worth knowing, each of which cost a debugging round:
+
+* **`gen_node` must never return 0.** The shared `make_node()` falls
+  back to `helper()`, which `printf`s the helper name — harmless for a
+  backend emitting text, fatal for one writing a binary object, because
+  the name lands in the middle of the code stream. Anything not
+  generated inline becomes a `BC_LIBCALL` using FCC's own helper names.
+* **`T_CLEANUP` must be handled in `gen_direct`, not `gen_node`.** It
+  carries the function's return type, so the byte count to discard is in
+  `n->right->value`. Miss it and the pushed arguments stay in the
+  stack-depth accounting and every epilogue fails with "sp".
+* **`gen_segment` matters.** Ignore it and an uninitialised global gets
+  a data symbol while its storage is counted in bss.
+
+Symbols carry names in a string table: `BC_SYM_LIB` entries have to be
+matched against whatever runtime the interpreter provides, and an index
+alone would not say which function was meant.
+
+### Phase 2 as originally planned
 
 Widen `backend-bytecode.c` (it opens `/* For now assume 8/16bit */`) and
 switch it to the frozen binary encoding. Output is a file the loader can

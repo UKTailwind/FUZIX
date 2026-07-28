@@ -29,14 +29,21 @@ endif
 
 SRC_C0 = frontend.c
 
+ifeq ($(CPU),armm0)
+SRC_C2 = backend.c backend-bcode.c
+else
+SRC_C2 = backend.c backend-$(CPU).c
+endif
+
 SRC_C1 = body.c declaration.c enum.c error.c expression.c header.c idxdata.c \
 	initializer.c label.c lex.c main.c primary.c stackframe.c storage.c \
 	struct.c switch.c symbol.c tree.c type.c type_iterator.c $(TARGET_SRC)
 
 OBJ_C0 = $(addprefix $(OBJDIR)/,$(SRC_C0:.c=.o))
 OBJ_C1 = $(addprefix $(OBJDIR)/,$(SRC_C1:.c=.o))
+OBJ_C2 = $(addprefix $(OBJDIR)/,$(SRC_C2:.c=.o))
 
-all: $(OBJDIR)/cc0 $(OBJDIR)/cc1
+all: $(OBJDIR)/cc0 $(OBJDIR)/cc1 $(OBJDIR)/cc2
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
@@ -48,6 +55,9 @@ $(OBJDIR)/cc0: $(OBJ_C0)
 	$(HOSTCC) $(HOSTCFLAGS) -o $@ $^
 
 $(OBJDIR)/cc1: $(OBJ_C1)
+	$(HOSTCC) $(HOSTCFLAGS) -o $@ $^
+
+$(OBJDIR)/cc2: $(OBJ_C2)
 	$(HOSTCC) $(HOSTCFLAGS) -o $@ $^
 
 clean:

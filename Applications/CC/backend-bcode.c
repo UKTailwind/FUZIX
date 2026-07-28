@@ -1,0 +1,852 @@
+/*
+ *	cc2 backend emitting the PC3 bytecode (see BYTECODE.md).
+ *
+ *	Unlike the other backends this writes a binary object rather than
+ *	assembler text: there is no assembler and no linker for this
+ *	target. Code and data are built in memory, jumps are backpatched
+ *	when the module ends, and everything is written out by gen_end().
+ *
+ *	Anything the emitter has no opcode for falls back to a named
+ *	runtime helper via BC_LIBCALL, which is the same escape hatch the
+ *	other backends use with their helper calls.
+ */
+
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include "compiler.h"
+#include "backend.h"
+#include "bytecode.h"
+
+#define T_NREF		(T_USER)		/* Load of C global/static */
+#define T_CALLNAME	(T_USER+1)		/* Function call by name */
+#define T_NSTORE	(T_USER+2)		/* Store to a C global/static */
+#define T_LREF		(T_USER+3)		/* Ditto for local */
+#define T_LSTORE	(T_USER+4)
+#define T_LBREF		(T_USER+5)		/* Labelled strings/local static */
+#define T_LBSTORE	(T_USER+6)
+
+/*
+ *	Output buffers. A program that will not fit in memory here will
+ *	not fit in a 255K process anyway.
+ */
+#define CODEMAX		32768
+#define DATAMAX		16384
+#define MAXSYM		512
+#define MAXFIX		1024
+#define MAXLAB		512
+
+static unsigned char codebuf[CODEMAX];
+static unsigned long codelen;
+static unsigned char databuf[DATAMAX];
+static unsigned long datalen;
+static unsigned long bsslen;
+
+#define STRMAX		8192
+static char strtab[STRMAX];
+static unsigned long strtablen;
+
+static struct bc_sym symtab[MAXSYM];
+static char *bc_symname[MAXSYM];
+static unsigned nsym;
+
+static struct bc_fixup fixtab[MAXFIX];
+static unsigned nfix;
+
+/* Labels are (tail, number) pairs scoped to the module. */
+struct label {
+	unsigned num;
+	char tail[4];
+	unsigned long addr;
+	unsigned defined;
+};
+static struct label labtab[MAXLAB];
+static unsigned nlab;
+
+/* Jump sites waiting for their label. */
+struct patch {
+	unsigned long at;	/* code offset of the 16bit displacement */
+	unsigned lab;		/* index into labtab */
+};
+static struct patch patchtab[MAXFIX];
+static unsigned npatch;
+
+static unsigned frame_len;
+static unsigned sp;
+static unsigned long entry;
+
+/* ------------------------------------------------------------------ */
+
+static void cbyte(unsigned v)
+{
+	if (codelen >= CODEMAX) {
+		error("code overflow");
+		return;
+	}
+	codebuf[codelen++] = v;
+}
+
+static void cword(unsigned v)
+{
+	cbyte(v & 0xFF);
+	cbyte((v >> 8) & 0xFF);
+}
+
+static void clong(unsigned long v)
+{
+	cbyte(v & 0xFF);
+	cbyte((v >> 8) & 0xFF);
+	cbyte((v >> 16) & 0xFF);
+	cbyte((v >> 24) & 0xFF);
+}
+
+static void dbyte(unsigned v)
+{
+	if (datalen >= DATAMAX) {
+		error("data overflow");
+		return;
+	}
+	databuf[datalen++] = v;
+}
+
+static void dword(unsigned v)
+{
+	dbyte(v & 0xFF);
+	dbyte((v >> 8) & 0xFF);
+}
+
+static void dlong(unsigned long v)
+{
+	dbyte(v & 0xFF);
+	dbyte((v >> 8) & 0xFF);
+	dbyte((v >> 16) & 0xFF);
+	dbyte((v >> 24) & 0xFF);
+}
+
+/* ------------------------------------------------------------------ */
+
+/*
+ *	Symbols. A name that is never defined in this module is a runtime
+ *	library entry point: there is no linker to resolve it against, and
+ *	the interpreter provides the library.
+ */
+static unsigned symref(const char *name)
+{
+	unsigned i;
+	for (i = 0; i < nsym; i++) {
+		if (strcmp(bc_symname[i], name) == 0)
+			return i;
+	}
+	if (nsym >= MAXSYM) {
+		error("too many symbols");
+		return 0;
+	}
+	bc_symname[nsym] = strdup(name);
+	symtab[nsym].s_type = BC_SYM_LIB;
+	symtab[nsym].s_value = 0;
+	symtab[nsym].s_name = strtablen;
+	if (strtablen + strlen(name) + 1 < STRMAX) {
+		strcpy(strtab + strtablen, name);
+		strtablen += strlen(name) + 1;
+	} else
+		error("string table full");
+	return nsym++;
+}
+
+static void symdef(const char *name, unsigned type, unsigned long value)
+{
+	unsigned s = symref(name);
+	symtab[s].s_type = type;
+	symtab[s].s_value = value;
+}
+
+/* Labels get symbols too, so a switch table or a string can name one. */
+static unsigned labsym(const char *tail, unsigned n)
+{
+	char buf[24];
+	sprintf(buf, "L%u%s", n, tail);
+	return symref(buf);
+}
+
+static void fixup(unsigned seg, unsigned long off, unsigned sym)
+{
+	if (nfix >= MAXFIX) {
+		error("too many fixups");
+		return;
+	}
+	fixtab[nfix].f_offset = off;
+	fixtab[nfix].f_sym = sym;
+	fixtab[nfix].f_seg = seg;
+	fixtab[nfix].f_pad = 0;
+	nfix++;
+}
+
+/* ------------------------------------------------------------------ */
+
+static unsigned labref(const char *tail, unsigned n)
+{
+	unsigned i;
+	for (i = 0; i < nlab; i++) {
+		if (labtab[i].num == n && strncmp(labtab[i].tail, tail, 3) == 0)
+			return i;
+	}
+	if (nlab >= MAXLAB) {
+		error("too many labels");
+		return 0;
+	}
+	labtab[nlab].num = n;
+	strncpy(labtab[nlab].tail, tail, 3);
+	labtab[nlab].tail[3] = 0;
+	labtab[nlab].addr = 0;
+	labtab[nlab].defined = 0;
+	return nlab++;
+}
+
+/* Emit a jump-class opcode with a placeholder displacement. */
+static void jumpto(unsigned op, const char *tail, unsigned n)
+{
+	unsigned l = labref(tail, n);
+	cbyte(op);
+	if (npatch >= MAXFIX) {
+		error("too many jumps");
+		return;
+	}
+	patchtab[npatch].at = codelen;
+	patchtab[npatch].lab = l;
+	npatch++;
+	cword(0);
+}
+
+static void resolve_jumps(void)
+{
+	unsigned i;
+	for (i = 0; i < npatch; i++) {
+		struct label *l = &labtab[patchtab[i].lab];
+		long disp;
+		unsigned long at = patchtab[i].at;
+		if (!l->defined) {
+			error("undefined label");
+			continue;
+		}
+		/* Relative to the end of the instruction */
+		disp = (long)l->addr - (long)(at + 2);
+		if (disp < -32768 || disp > 32767) {
+			error("jump out of range");
+			continue;
+		}
+		codebuf[at] = disp & 0xFF;
+		codebuf[at + 1] = (disp >> 8) & 0xFF;
+	}
+}
+
+/* ------------------------------------------------------------------ */
+
+static unsigned typesize(unsigned t)
+{
+	if (PTR(t))
+		return 4;
+	if (t == CCHAR || t == UCHAR)
+		return 1;
+	if (t == CSHORT || t == USHORT)
+		return 2;
+	if (t == CLONG || t == ULONG || t == FLOAT)
+		return 4;
+	if (t == CLONGLONG || t == ULONGLONG || t == DOUBLE)
+		return 8;
+	if (t == VOID)
+		return 0;
+	return 4;
+}
+
+/* Stack slots are whole words */
+static unsigned stack_size(unsigned t)
+{
+	unsigned s = typesize(t);
+	return (s < 4) ? 4 : ((s + 3) & ~3);
+}
+
+static void emit_load(unsigned t)
+{
+	if (PTR(t)) {
+		cbyte(BC_LOAD32);
+		return;
+	}
+	switch (typesize(t)) {
+	case 1:
+		cbyte((t & UNSIGNED) ? BC_LOAD8U : BC_LOAD8S);
+		break;
+	case 2:
+		cbyte((t & UNSIGNED) ? BC_LOAD16U : BC_LOAD16S);
+		break;
+	default:
+		cbyte(BC_LOAD32);
+		break;
+	}
+}
+
+static void emit_store(unsigned t)
+{
+	if (PTR(t)) {
+		cbyte(BC_STORE32);
+		return;
+	}
+	switch (typesize(t)) {
+	case 1:
+		cbyte(BC_STORE8);
+		break;
+	case 2:
+		cbyte(BC_STORE16);
+		break;
+	default:
+		cbyte(BC_STORE32);
+		break;
+	}
+}
+
+static void emit_const(unsigned long v)
+{
+	long s = (long)v;
+	if (s >= -128 && s < 128) {
+		cbyte(BC_CONST8);
+		cbyte(v & 0xFF);
+	} else if (s >= -32768 && s < 32768) {
+		cbyte(BC_CONST16);
+		cword(v & 0xFFFF);
+	} else {
+		cbyte(BC_CONST32);
+		clong(v);
+	}
+}
+
+static void emit_local(unsigned off)
+{
+	if (off < 256) {
+		cbyte(BC_LOCAL8);
+		cbyte(off);
+	} else {
+		cbyte(BC_LOCAL16);
+		cword(off);
+	}
+}
+
+/* Address of a symbol plus an offset, left in A. */
+static void emit_addr(unsigned sym, unsigned long off)
+{
+	cbyte(BC_ADDR);
+	fixup(BC_SEG_CODE, codelen, sym);
+	clong(off);
+}
+
+/* Fall back to a named runtime helper. */
+static void libcall(const char *name)
+{
+	unsigned s = symref(name);
+	cbyte(BC_LIBCALL);
+	cword(s);
+}
+
+/* ------------------------------------------------------------------ */
+
+struct node *gen_rewrite_node(struct node *n)
+{
+	struct node *r = n->right;
+	unsigned op = n->op;
+
+	/* Turn a call of a name into a direct call */
+	if (op == T_FUNCCALL && r && r->op == T_NAME && PTR(r->type) == 1) {
+		n->op = T_CALLNAME;
+		n->snum = r->snum;
+		n->value = r->value;
+		free_node(r);
+		n->right = NULL;
+	}
+	return n;
+}
+
+void gen_export(const char *name)
+{
+}
+
+/*
+ *	Which segment subsequent labels and space belong to. Without this
+ *	an uninitialised global gets a data symbol while its storage is
+ *	counted in bss, and the loader resolves it to the wrong place.
+ */
+static unsigned curseg = A_CODE;
+
+void gen_segment(unsigned s)
+{
+	curseg = s;
+}
+
+void gen_prologue(const char *name)
+{
+	symdef(name, BC_SYM_CODE, codelen);
+	if (strcmp(name, "main") == 0)
+		entry = codelen;
+}
+
+void gen_frame(unsigned size, unsigned aframe)
+{
+	frame_len = size + 4;		/* + return address slot */
+	cbyte(BC_ENTER);
+	cword(size);
+	sp += size;
+}
+
+void gen_epilogue(unsigned size, unsigned argsize)
+{
+	if (sp != size)
+		error("sp");
+	sp -= size;
+	cbyte(BC_LEAVE);
+	cword(size);
+	cbyte(BC_RET);
+}
+
+void gen_label(const char *tail, unsigned n)
+{
+	unsigned l = labref(tail, n);
+	unsigned s;
+	labtab[l].addr = codelen;
+	labtab[l].defined = 1;
+	/* Also give it a symbol, so a switch table can name it */
+	s = labsym(tail, n);
+	symtab[s].s_type = BC_SYM_CODE;
+	symtab[s].s_value = codelen;
+}
+
+unsigned gen_exit(const char *tail, unsigned n)
+{
+	jumpto(BC_JUMP, tail, n);
+	return 0;
+}
+
+void gen_jump(const char *tail, unsigned n)
+{
+	jumpto(BC_JUMP, tail, n);
+}
+
+void gen_jfalse(const char *tail, unsigned n)
+{
+	jumpto(BC_JFALSE, tail, n);
+}
+
+void gen_jtrue(const char *tail, unsigned n)
+{
+	jumpto(BC_JTRUE, tail, n);
+}
+
+void gen_switch(unsigned n, unsigned type)
+{
+	char buf[24];
+	sprintf(buf, "Sw%u", n);
+	cbyte(BC_SWITCH);
+	fixup(BC_SEG_CODE, codelen, symref(buf));
+	clong(0);
+}
+
+void gen_switchdata(unsigned n, unsigned size)
+{
+	char buf[24];
+	sprintf(buf, "Sw%u", n);
+	symdef(buf, BC_SYM_DATA, datalen);
+	dlong(size);
+}
+
+void gen_case(unsigned tag, unsigned entry)
+{
+	char buf[24];
+	sprintf(buf, "Sw%u_%u", tag, entry);
+	symdef(buf, BC_SYM_CODE, codelen);
+}
+
+void gen_case_label(unsigned tag, unsigned entry)
+{
+	gen_case(tag, entry);
+}
+
+void gen_case_data(unsigned tag, unsigned entry)
+{
+	char buf[24];
+	sprintf(buf, "Sw%u_%u", tag, entry);
+	fixup(BC_SEG_DATA, datalen, symref(buf));
+	dlong(0);
+}
+
+void gen_helpcall(struct node *n)
+{
+}
+
+void gen_helpclean(struct node *n)
+{
+}
+
+void gen_data_label(const char *name, unsigned align)
+{
+	if (curseg == A_BSS)
+		symdef(name, BC_SYM_BSS, bsslen);
+	else
+		symdef(name, BC_SYM_DATA, datalen);
+}
+
+void gen_space(unsigned value)
+{
+	if (curseg == A_BSS)
+		bsslen += value;
+	else {
+		/* Reserved space inside initialised data still occupies
+		   the file, so it has to be written out as zeroes. */
+		while (value--)
+			dbyte(0);
+	}
+}
+
+void gen_text_data(unsigned n)
+{
+	char buf[24];
+	sprintf(buf, "T%u", n);
+	fixup(BC_SEG_DATA, datalen, symref(buf));
+	dlong(0);
+}
+
+void gen_literal(unsigned n)
+{
+	char buf[24];
+	if (n) {
+		sprintf(buf, "T%u", n);
+		symdef(buf, BC_SYM_DATA, datalen);
+	}
+}
+
+void gen_name(struct node *n)
+{
+	fixup(BC_SEG_DATA, datalen, symref(namestr(n->snum)));
+	dlong(n->value);
+}
+
+void gen_value(unsigned type, unsigned long value)
+{
+	if (PTR(type)) {
+		dlong(value);
+		return;
+	}
+	switch (typesize(type)) {
+	case 1:
+		dbyte(value & 0xFF);
+		break;
+	case 2:
+		dword(value & 0xFFFF);
+		break;
+	default:
+		dlong(value);
+		break;
+	}
+}
+
+void gen_start(void)
+{
+}
+
+void gen_end(void)
+{
+	struct bc_header h;
+	unsigned i;
+
+	resolve_jumps();
+
+	memcpy(h.h_magic, BC_MAGIC, 4);
+	h.h_version = BC_VERSION;
+	h.h_pad = 0;
+	h.h_nsym = nsym;
+	h.h_code = codelen;
+	h.h_data = datalen;
+	h.h_bss = bsslen;
+	h.h_entry = entry;
+	h.h_nfixup = nfix;
+	h.h_strsize = strtablen;
+
+	fwrite(&h, sizeof(h), 1, stdout);
+	fwrite(codebuf, 1, codelen, stdout);
+	fwrite(databuf, 1, datalen, stdout);
+	for (i = 0; i < nfix; i++)
+		fwrite(&fixtab[i], sizeof(struct bc_fixup), 1, stdout);
+	for (i = 0; i < nsym; i++)
+		fwrite(&symtab[i], sizeof(struct bc_sym), 1, stdout);
+	fwrite(strtab, 1, strtablen, stdout);
+	fflush(stdout);
+}
+
+void gen_tree(struct node *n)
+{
+	codegen_lr(n);
+}
+
+/* ------------------------------------------------------------------ */
+
+unsigned gen_push(struct node *n)
+{
+	sp += stack_size(n->type);
+	cbyte(BC_PUSH);
+	return 1;
+}
+
+unsigned gen_direct(struct node *n)
+{
+	unsigned long v;
+	switch (n->op) {
+	/*
+	 * Cleanup must be handled here, not in gen_node. It carries the
+	 * function's return type, so the byte count to discard is in
+	 * n->right->value and not derivable from the node's own type.
+	 * Missing this leaves the pushed arguments in the stack-depth
+	 * accounting and the epilogue check fails with "sp".
+	 */
+	case T_CLEANUP:
+		v = n->right->value;
+		if (v) {
+			cbyte(BC_ARGS);
+			cbyte(v & 0xFF);
+		}
+		sp -= v;
+		return 1;
+	}
+	return 0;
+}
+
+unsigned gen_uni_direct(struct node *n)
+{
+	return 0;
+}
+
+unsigned gen_shortcut(struct node *n)
+{
+	return 0;
+}
+
+/*
+ *	Binary operators. Signedness is decided by the left operand's
+ *	type, as the tree has already applied the usual conversions.
+ */
+static unsigned binop(struct node *n)
+{
+	unsigned t = n->left ? n->left->type : n->type;
+	unsigned u = (PTR(t) || (t & UNSIGNED));
+
+	switch (n->op) {
+	case T_PLUS:
+		cbyte(BC_ADD);
+		return 1;
+	case T_MINUS:
+		cbyte(BC_SUB);
+		return 1;
+	case T_STAR:
+		cbyte(BC_MUL);
+		return 1;
+	case T_SLASH:
+		cbyte(u ? BC_DIVU : BC_DIVS);
+		return 1;
+	case T_PERCENT:
+		cbyte(u ? BC_REMU : BC_REMS);
+		return 1;
+	case T_AND:
+		cbyte(BC_AND);
+		return 1;
+	case T_OR:
+		cbyte(BC_OR);
+		return 1;
+	case T_HAT:
+		cbyte(BC_XOR);
+		return 1;
+	case T_LTLT:
+		cbyte(BC_SHL);
+		return 1;
+	case T_GTGT:
+		cbyte(u ? BC_SHRU : BC_SHRS);
+		return 1;
+	case T_EQEQ:
+		cbyte(BC_EQ);
+		return 1;
+	case T_BANGEQ:
+		cbyte(BC_NE);
+		return 1;
+	case T_LT:
+		cbyte(u ? BC_LTU : BC_LTS);
+		return 1;
+	case T_GT:
+		cbyte(u ? BC_GTU : BC_GTS);
+		return 1;
+	case T_LTEQ:
+		cbyte(u ? BC_LEU : BC_LES);
+		return 1;
+	case T_GTEQ:
+		cbyte(u ? BC_GEU : BC_GES);
+		return 1;
+	}
+	return 0;
+}
+
+/*
+ *	gen_node must never return 0. The shared make_node() falls back to
+ *	helper(), which printf()s the helper name -- fine for a backend
+ *	emitting assembler text, fatal for one writing a binary object,
+ *	because the name lands in the middle of the code stream.
+ *
+ *	So anything not generated inline becomes a runtime call, using
+ *	FCC's own helper names so the interpreter and the other backends
+ *	agree on what each one means.
+ */
+static unsigned fallback(struct node *n)
+{
+	const char *name = NULL;
+	char buf[16];
+
+	switch (n->op) {
+	case T_NULL:
+		return 1;
+	case T_ARGCOMMA:
+		/* Structural: the arguments have already been pushed by the
+		   tree walk and there is nothing to emit. Without this it
+		   became a bogus runtime call between the last argument and
+		   the call itself. */
+		return 1;
+	case T_PLUSEQ:		name = "pluseq";	break;
+	case T_MINUSEQ:		name = "minuseq";	break;
+	case T_STAREQ:		name = "muleq";		break;
+	case T_SLASHEQ:		name = "diveq";		break;
+	case T_PERCENTEQ:	name = "remeq";		break;
+	case T_ANDEQ:		name = "andeq";		break;
+	case T_OREQ:		name = "oreq";		break;
+	case T_HATEQ:		name = "xoreq";		break;
+	case T_SHLEQ:		name = "shleq";		break;
+	case T_SHREQ:		name = "shreq";		break;
+	case T_PLUSPLUS:	name = "postinc";	break;
+	case T_MINUSMINUS:	name = "postdec";	break;
+	default:
+		/* Unknown, but still must not fall through to text. */
+		sprintf(buf, "__op%x", n->op);
+		name = buf;
+		break;
+	}
+	libcall(name);
+	return 1;
+}
+
+unsigned gen_node(struct node *n)
+{
+	unsigned long v = n->value;
+	unsigned nr = n->flags & NORETURN;
+
+	/* Arguments are removed by the call, reported via T_CLEANUP */
+	if (n->left && n->op != T_ARGCOMMA && n->op != T_FUNCCALL &&
+	    n->op != T_CALLNAME)
+		sp -= stack_size(n->left->type);
+
+	switch (n->op) {
+	case T_CONSTANT:
+		emit_const(v);
+		return 1;
+	case T_NAME:
+		emit_addr(symref(namestr(n->snum)), v);
+		return 1;
+	case T_LABEL:
+		{
+			char buf[24];
+			sprintf(buf, "T%u", (unsigned)n->val2);
+			emit_addr(symref(buf), v);
+			return 1;
+		}
+	case T_NREF:
+		emit_addr(symref(namestr(n->snum)), v);
+		emit_load(n->type);
+		return 1;
+	case T_LBREF:
+		{
+			char buf[24];
+			sprintf(buf, "T%u", (unsigned)n->val2);
+			emit_addr(symref(buf), v);
+			emit_load(n->type);
+			return 1;
+		}
+	case T_LREF:
+		if (nr)
+			return 1;
+		emit_local(v + sp);
+		emit_load(n->type);
+		return 1;
+	case T_NSTORE:
+		emit_addr(symref(namestr(n->snum)), v);
+		cbyte(BC_PUSH);
+		cbyte(BC_SWAP);
+		emit_store(n->type);
+		return 1;
+	case T_LSTORE:
+		if (nr)
+			return 1;
+		emit_local(v + sp);
+		cbyte(BC_PUSH);
+		cbyte(BC_SWAP);
+		emit_store(n->type);
+		return 1;
+	case T_LOCAL:
+		emit_local(v + sp);
+		return 1;
+	case T_ARGUMENT:
+		emit_local(v + frame_len + sp);
+		return 1;
+	case T_DEREF:
+		emit_load(n->type);
+		return 1;
+	case T_EQ:
+		emit_store(n->type);
+		return 1;
+	case T_CALLNAME:
+		cbyte(BC_CALL);
+		fixup(BC_SEG_CODE, codelen, symref(namestr(n->snum)));
+		clong(v);
+		return 1;
+	case T_FUNCCALL:
+		cbyte(BC_CALLA);
+		return 1;
+	case T_CLEANUP:
+		if (v) {
+			cbyte(BC_ARGS);
+			cbyte(v & 0xFF);
+		}
+		return 1;
+	case T_NEGATE:
+		cbyte(BC_NEG);
+		return 1;
+	case T_TILDE:
+		cbyte(BC_NOT);
+		return 1;
+	case T_BANG:
+		cbyte(BC_LNOT);
+		return 1;
+	case T_BOOL:
+		cbyte(BC_BOOL);
+		return 1;
+	case T_CAST:
+		{
+			unsigned lt = n->type;
+			unsigned rt = n->right ? n->right->type : lt;
+			unsigned ls, rs;
+			if (PTR(lt) || PTR(rt))
+				return 1;
+			if (!IS_INTARITH(lt) || !IS_INTARITH(rt))
+				return 0;
+			ls = typesize(lt);
+			rs = typesize(rt);
+			if (ls >= 4 && rs == 1)
+				cbyte((rt & UNSIGNED) ? BC_ZEXT8 : BC_SEXT8);
+			else if (ls >= 4 && rs == 2)
+				cbyte((rt & UNSIGNED) ? BC_ZEXT16 : BC_SEXT16);
+			/* narrowing is free: the store decides the width */
+			return 1;
+		}
+	}
+	if (binop(n))
+		return 1;
+	return fallback(n);
+}

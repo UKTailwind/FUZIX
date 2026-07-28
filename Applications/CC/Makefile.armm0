@@ -1,14 +1,14 @@
 # The compiler passes hosted on the ARM Fuzix machine.
 #
-# cc1 now uses the real ARM type model (ILP32) via target-thumb.c.
-# cc2 is still the Z80 backend and therefore emits nonsense for this
-# machine - it is a placeholder so the build links, and phase 2 of
-# PC3-COMPILER-PLAN.md replaces it with the bytecode emitter.
+# cc1 uses the ARM type model (ILP32) via target-thumb.c and cc2 emits
+# the PC3 bytecode (BYTECODE.md) as a binary object - there is no
+# assembler and no linker for this target.
 #
-# For development, Makefile.host builds cc0/cc1 as native binaries so
-# the front end can be run over real source without hardware.
+# For development, Makefile.host builds cc0/cc1/cc2 as native binaries
+# so the compiler can be run over real source without hardware, and
+# bcdump disassembles what comes out.
 SRC_C1 = target-thumb.c
-SRC_C2 = backend-z80.c
+SRC_C2 = backend-bcode.c
 
 FLOAT = -DNO_FLOAT
 
