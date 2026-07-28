@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include "bytecode.h"
 
@@ -25,8 +27,20 @@
    read back as huge positive ones. */
 #define S32(x)	((long)(int32_t)(x))
 
-#define MEMSIZE		65536		/* program address space */
-#define STACKROOM	4096
+/*
+ *	The program's address space.
+ *
+ *	  [ data ][ bss ][ heap -> ........... <- stack ]
+ *
+ *	Everything the program can address is an offset into mem[], which
+ *	is why the allocator below deals purely in offsets. It also means
+ *	this memory can live anywhere without the library caring: putting
+ *	it in PSRAM, as the MicroPython port does on this board, is a
+ *	matter of pointing mem at a reserved region rather than declaring
+ *	an array - see PSRAM_RESERVE in the kernel's psram.h.
+ */
+#define MEMSIZE		131072		/* program address space */
+#define STACKROOM	8192		/* kept clear at the top for the stack */
 
 static unsigned char *code;
 static unsigned char mem[MEMSIZE];
@@ -320,6 +334,104 @@ static void lib_printf(void)
 	A = 0;
 }
 
+/* ---- heap ---------------------------------------------------------- */
+
+/*
+ *	A first-fit allocator over the gap between bss and the stack.
+ *	Every block carries an 8-byte header: size (including header) and
+ *	a used flag. Free blocks coalesce forwards on release, which is
+ *	enough to stop simple alloc/free loops fragmenting.
+ */
+#define HDR	8
+
+static unsigned long heap_base, heap_top;
+
+static void heap_init(unsigned long base)
+{
+	heap_base = (base + 3) & ~3UL;
+	heap_top = MEMSIZE - STACKROOM;
+	if (heap_top <= heap_base + HDR) {
+		heap_base = heap_top = 0;
+		return;
+	}
+	/* one free block covering everything */
+	wr32(heap_base, heap_top - heap_base);
+	wr32(heap_base + 4, 0);
+}
+
+static long lib_malloc(unsigned long want)
+{
+	unsigned long p = heap_base;
+
+	if (!heap_base || want == 0)
+		return 0;
+	want = (want + HDR + 3) & ~3UL;
+
+	while (p < heap_top) {
+		unsigned long sz = rd32(p);
+		unsigned long used = rd32(p + 4);
+		if (sz < HDR || p + sz > heap_top)
+			return 0;			/* corrupt */
+		if (!used && sz >= want) {
+			if (sz >= want + HDR + 8) {	/* split */
+				wr32(p + want, sz - want);
+				wr32(p + want + 4, 0);
+				wr32(p, want);
+			}
+			wr32(p + 4, 1);
+			return (long)(p + HDR);
+		}
+		p += sz;
+	}
+	return 0;					/* out of memory */
+}
+
+static void lib_free(unsigned long ptr)
+{
+	unsigned long p, q;
+
+	if (!ptr || !heap_base)
+		return;
+	p = ptr - HDR;
+	if (p < heap_base || p >= heap_top)
+		return;
+	wr32(p + 4, 0);
+
+	/* coalesce forwards */
+	q = heap_base;
+	while (q < heap_top) {
+		unsigned long sz = rd32(q);
+		if (sz < HDR)
+			return;
+		if (!rd32(q + 4)) {
+			unsigned long n = q + sz;
+			while (n < heap_top && !rd32(n + 4)) {
+				sz += rd32(n);
+				wr32(q, sz);
+				n = q + sz;
+			}
+		}
+		q += rd32(q);
+	}
+}
+
+/* ---- string and memory, all working in the program's address space -- */
+
+static unsigned long vstrlen(unsigned long a)
+{
+	unsigned long n = 0;
+	while (a + n < MEMSIZE && mem[a + n])
+		n++;
+	return n;
+}
+
+static void vcopy(unsigned long d, unsigned long s, unsigned long n)
+{
+	if (d + n > MEMSIZE || s + n > MEMSIZE)
+		fault("bad address");
+	memmove(mem + d, mem + s, n);
+}
+
 static void libcall(unsigned idx)
 {
 	const char *name;
@@ -330,6 +442,7 @@ static void libcall(unsigned idx)
 
 	if (!strcmp(name, "putchar")) {
 		putchar((int)arg(0));
+		fflush(stdout);
 		A = arg(0);
 	} else if (!strcmp(name, "puts")) {
 		puts(getstr((unsigned long)arg(0)));
@@ -338,6 +451,109 @@ static void libcall(unsigned idx)
 		lib_printf();
 	} else if (!strcmp(name, "exit")) {
 		exit((int)arg(0));
+
+	/* --- memory --------------------------------------------------- */
+	} else if (!strcmp(name, "malloc")) {
+		A = lib_malloc((unsigned long)arg(0));
+	} else if (!strcmp(name, "calloc")) {
+		unsigned long n = (unsigned long)arg(0) * (unsigned long)arg(1);
+		A = lib_malloc(n);
+		if (A)
+			memset(mem + A, 0, n);
+	} else if (!strcmp(name, "free")) {
+		lib_free((unsigned long)arg(0));
+		A = 0;
+	} else if (!strcmp(name, "realloc")) {
+		unsigned long old = (unsigned long)arg(0);
+		unsigned long n = (unsigned long)arg(1);
+		long np = lib_malloc(n);
+		if (np && old) {
+			unsigned long osz = rd32(old - HDR) - HDR;
+			vcopy((unsigned long)np, old, osz < n ? osz : n);
+			lib_free(old);
+		}
+		A = np;
+
+	/* --- strings -------------------------------------------------- */
+	} else if (!strcmp(name, "strlen")) {
+		A = (long)vstrlen((unsigned long)arg(0));
+	} else if (!strcmp(name, "strcpy")) {
+		unsigned long d = arg(0), s = arg(1);
+		vcopy(d, s, vstrlen(s) + 1);
+		A = d;
+	} else if (!strcmp(name, "strncpy")) {
+		unsigned long d = arg(0), s = arg(1), n = arg(2), l = vstrlen(s);
+		if (l > n) l = n;
+		vcopy(d, s, l);
+		while (l < n) wr8(d + l++, 0);
+		A = d;
+	} else if (!strcmp(name, "strcat")) {
+		unsigned long d = arg(0), s = arg(1);
+		vcopy(d + vstrlen(d), s, vstrlen(s) + 1);
+		A = d;
+	} else if (!strcmp(name, "strcmp")) {
+		A = strcmp(getstr((unsigned long)arg(0)),
+			   getstr((unsigned long)arg(1)));
+	} else if (!strcmp(name, "strncmp")) {
+		A = strncmp(getstr((unsigned long)arg(0)),
+			    getstr((unsigned long)arg(1)),
+			    (size_t)arg(2));
+	} else if (!strcmp(name, "strchr")) {
+		unsigned long s = arg(0);
+		int c = (int)arg(1);
+		unsigned long i = 0, l = vstrlen(s);
+		A = 0;
+		for (; i <= l; i++)
+			if (mem[s + i] == c) { A = (long)(s + i); break; }
+	} else if (!strcmp(name, "strrchr")) {
+		unsigned long s = arg(0);
+		int c = (int)arg(1);
+		long i = (long)vstrlen(s);
+		A = 0;
+		for (; i >= 0; i--)
+			if (mem[s + i] == c) { A = (long)(s + i); break; }
+
+	/* --- memory blocks -------------------------------------------- */
+	} else if (!strcmp(name, "memset")) {
+		unsigned long d = arg(0), n = arg(2);
+		if (d + n > MEMSIZE) fault("bad address");
+		memset(mem + d, (int)arg(1), n);
+		A = d;
+	} else if (!strcmp(name, "memcpy") || !strcmp(name, "memmove")) {
+		vcopy(arg(0), arg(1), arg(2));
+		A = arg(0);
+	} else if (!strcmp(name, "memcmp")) {
+		unsigned long a = arg(0), b = arg(1), n = arg(2);
+		if (a + n > MEMSIZE || b + n > MEMSIZE) fault("bad address");
+		A = memcmp(mem + a, mem + b, n);
+
+	/* --- conversion ----------------------------------------------- */
+	} else if (!strcmp(name, "atoi")) {
+		A = atoi(getstr((unsigned long)arg(0)));
+	} else if (!strcmp(name, "abs")) {
+		long v = arg(0);
+		A = v < 0 ? -v : v;
+
+	/* --- files, straight onto the host's descriptors --------------- */
+	} else if (!strcmp(name, "open")) {
+		A = open(getstr((unsigned long)arg(0)), (int)arg(1), 0666);
+	} else if (!strcmp(name, "creat")) {
+		A = creat(getstr((unsigned long)arg(0)), 0666);
+	} else if (!strcmp(name, "close")) {
+		A = close((int)arg(0));
+	} else if (!strcmp(name, "read")) {
+		unsigned long b = arg(1), n = arg(2);
+		if (b + n > MEMSIZE) fault("bad address");
+		A = read((int)arg(0), mem + b, n);
+	} else if (!strcmp(name, "write")) {
+		unsigned long b = arg(1), n = arg(2);
+		if (b + n > MEMSIZE) fault("bad address");
+		A = write((int)arg(0), mem + b, n);
+	} else if (!strcmp(name, "lseek")) {
+		A = lseek((int)arg(0), arg(1), (int)arg(2));
+	} else if (!strcmp(name, "unlink")) {
+		A = unlink(getstr((unsigned long)arg(0)));
+
 	} else {
 		lib_eqop(name);
 	}
@@ -393,6 +609,8 @@ static void load(const char *path)
 	   directly after it, and the stack starts at the top. */
 	database = 0;
 	bssbase = h.h_data;
+	/* The heap is whatever is left between bss and the stack. */
+	heap_init(h.h_data + h.h_bss);
 	if (h.h_data + h.h_bss + STACKROOM > MEMSIZE) {
 		fprintf(stderr, "bcrun: program too large\n");
 		exit(1);
