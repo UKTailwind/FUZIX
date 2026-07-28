@@ -3,7 +3,7 @@
  * PSRAM_BASE by psram_init, exposed as a block device via the blkdev
  * framework (it registers after the NAND and SD drives, so it appears as
  * hdc). Contents do not survive power off: intended as fast swap -
- *   swapon /dev/hdc 16256
+ *   swapon /dev/hdc 16384
  * - or scratch space, not storage.
  */
 
@@ -29,7 +29,7 @@ void psram_disc_init(void)
 {
     blkdev_t *blk;
 
-    if (psram_size <= PSRAM_RESERVE)
+    if (!psram_size)
         return;
     blk = blkdev_alloc();
     if (!blk)
@@ -41,8 +41,7 @@ void psram_disc_init(void)
     memset((void *)PSRAM_BASE, 0, 2048);
 
     blk->transfer = psram_disc_transfer;
-    /* the top PSRAM_RESERVE bytes belong to the kernel (lineedit.c) */
-    blk->drive_lba_count = (psram_size - PSRAM_RESERVE) >> 9;
+    blk->drive_lba_count = psram_size >> 9;
     kprintf("PSRAM disc %dKiB: ", (int)(psram_size >> 10));
     blkdev_scan(blk, 0);
 }
