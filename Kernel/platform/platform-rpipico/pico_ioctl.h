@@ -49,7 +49,8 @@ struct snd_cmd {
  *   0      joystick switches GP34-37 (pulled up, active low),
  *          pressed = 1: bit0 GP34, bit1 GP35, bit2 GP36, bit3 GP37
  *   1-4    ADC GP41-GP44, 16-bit (12-bit ADC << 4)
- *   -5..-8 sound channel 0-3 queue free slots */
+ *   -5..-8 sound channel 0-3 queue free slots
+ *   -9     hardware microsecond counter, 31 bits (wraps ~35.8 min) */
 #define PICOIOC_ADVAL 0x0009
 
 #endif

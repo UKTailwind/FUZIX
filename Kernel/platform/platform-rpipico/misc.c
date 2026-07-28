@@ -177,6 +177,12 @@ int plt_dev_ioctl(uarg_t request, char *data)
             return sound_qfree(-5 - n);
         }
 #endif
+        if (n == -9) {
+            /* hardware microsecond counter, 31 bits (the ioctl return
+             * must stay positive): wraps every ~35.8 minutes, which
+             * benchmark deltas must tolerate */
+            return (int)(time_us_64() & 0x7FFFFFFF);
+        }
         return 0;
     }
 #ifdef CONFIG_PC3_SOUND

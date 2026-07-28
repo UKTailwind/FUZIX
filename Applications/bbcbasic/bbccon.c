@@ -635,7 +635,7 @@ int adval (int n)
 	int fd, r ;
 	if (n == -1)
 	    	return (kbdqr - kbdqw - 1) & 0xFF ;
-	if ((n >= 0 && n <= 4) || (n <= -5 && n >= -8))
+	if ((n >= 0 && n <= 4) || (n <= -5 && n >= -9))
 	    {
 		fd = sndsys_fd () ;
 		if (fd >= 0)

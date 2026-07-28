@@ -272,10 +272,26 @@ full (Esc still works).
 | `ADVAL(1)`–`ADVAL(4)` | Analogue readings of GP41–GP44, 0–65520 (12-bit ADC ×16) |
 | `ADVAL(-1)`  | Characters waiting in the keyboard buffer               |
 | `ADVAL(-5)`–`ADVAL(-8)` | Free queue slots on sound channels 0–3       |
+| `ADVAL(-9)`  | Hardware microsecond counter (31 bits)                 |
 
 The joystick inputs have pull-ups and Schmitt-trigger inputs enabled;
 wire switches directly to ground. The analogue inputs are 3.3 V
 full-scale.
+
+`ADVAL(-9)` is the benchmarking clock — the RP2350's free-running
+microsecond timer, far finer than `TIME`'s centiseconds (which tick
+in tenths of a second on this kernel). MMBasic-style usage:
+
+```
+DEF FNtimer = ADVAL(-9)
+T% = FNtimer
+REM ... code under test ...
+PRINT (FNtimer - T%) / 1000; " ms"
+```
+
+Each reading costs one system call (a few tens of microseconds) -
+negligible over millisecond-scale measurements. The counter wraps
+every ~35.8 minutes; a single timed span must be shorter than that.
 
 ## Serial port
 
