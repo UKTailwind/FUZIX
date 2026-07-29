@@ -1,0 +1,6 @@
+copy 3 4 3 4
+back 3 4
+nest 1 2 10 20 122
+inner 10 20
+arr 0 1 2 4
+chain 7 8 7 8

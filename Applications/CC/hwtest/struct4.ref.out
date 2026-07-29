@@ -1,0 +1,19 @@
+mk 3 4
+origin 0 0
+member 7 8
+feed 11
+two 33
+nested 3
+nested 7
+twice 6 12
+getg 11 22
+odd 1 2 3
+big 100 101 102 103 123
+uni 68 65
+loop 0 0 0
+loop 1 1 1
+loop 2 2 4
+loop 3 3 9
+walk 10 30
+apply 8 9
+done

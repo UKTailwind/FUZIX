@@ -60,10 +60,17 @@ for name in sys.argv[1:]:
     if not send_file(src, name + ".c"):
         print("%-10s transfer failed" % name); fails += 1; continue
 
-    cmds = ["cc %s.c" % name, "./bcrun %s.bc" % name]
+    # Delete the object first. Without this a cc that fails leaves the
+    # previous .bc in place and bcrun happily runs it, so the suite
+    # reports a pass for a build that did not happen - which is exactly
+    # what it once did, against a stale cross compiled object.
+    # bcrun from the PATH, not ./bcrun: the interpreter belongs in
+    # /usr/bin next to cc, and a copy in the working directory is one
+    # more thing to go stale or be lost.
+    cmds = ["rm -f %s.bc" % name, "cc %s.c" % name, "bcrun %s.bc" % name]
     res = talk(cmds)
-    build, run = res[0], res[1]
-    got = clean(run, cmds[1])
+    build, run = res[1], res[2]
+    got = clean(run, cmds[2])
     want = open(refp).read().replace("\r", "").rstrip("\n")
 
     if got.strip() == want.strip():
@@ -72,7 +79,7 @@ for name in sys.argv[1:]:
         fails += 1
         print("%-10s FAIL" % name)
         if build.strip():
-            print("   build said:", clean(build, cmds[0])[:400])
+            print("   build said:", clean(build, cmds[1])[:400])
         for l in difflib.unified_diff(want.split("\n"), got.split("\n"),
                                       "gcc", "pc3", lineterm="", n=1):
             print("   " + l)

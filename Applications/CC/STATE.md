@@ -41,29 +41,83 @@ worth doing.
 
 **The compiler runs on the PC3 itself** (2026-07-29). `cc prog.c` on the
 board drives cpp, cc0, cc1 and cc2 and writes a `.bc` that bcrun
-executes. Nine samples - sieve, strs, rpn, libtest, ll2, width3, sw2,
-dbl, fp - compile on the board and produce output identical to gcc.
-cc0's literal encoding is byte for byte identical to the host's over
-265 literals.
+executes. Twelve samples - sieve, strs, rpn, libtest, ll2, width3, sw2,
+scope, dbl, fp, struct2, struct3, struct4 and optest - compile on the
+board and produce output identical to gcc. cc0's literal encoding is
+byte for byte identical to the host's over 265 literals.
 
-**`optest.c` is not among them**, and the reason is worth keeping:
-cc1 rejects `(int)(&arr[5] - arr)` at line 136 with "type mismatch",
-and the on-target driver stops on a cc1 error where `optest.sh` prints
-it and carries on. An earlier run of this suite reported optest passing
-on the board - that was the harness running a stale `.bc` left from a
-cross-compiled transfer, since it did not delete the object first. It
-does now.
+`optest.c` was the last holdout and now builds too. It was not a
+pointer difference as previously recorded here: cc1 was rejecting
+`apply(addfn, 9, 4)`, because a pointer to a function with an
+unspecified argument list matched no prototype. See "Passing and
+returning structs" below.
 
 Installed there: the three passes in `/usr/lib/cc`, and `cc`, `cpp`,
 `bcrun`, `bcdump` in `/usr/bin`.
 
-## Next task: struct passing by value
+## Done: struct passing and returning
 
-Read **"3. Struct passing and returning — RESUME HERE"** in
-PLAN-c89-gaps.md. Struct *assignment* is done; passing was attempted,
-failed cc2's `sp` balance check and was reverted, and the note records
-the design to rebuild, what was written, and what to read before
-writing any more of it.
+Both work, on the host and compiled on the PC3. `hosttest/samples`
+struct2 (assignment), struct3 (passing) and struct4 (returning) cover
+them and all three build on the board.
+
+Two facts govern all of it and are worth carrying to the bitfield work:
+
+* **A struct valued expression is represented by its address.** Nothing
+  can load an aggregate into the accumulator, so `hier1` and
+  `call_args` keep both sides as addresses instead of calling
+  `make_rval`, which would insert a dereference.
+* **cc2 cannot size a struct.** `typesize()` returns 4 for anything it
+  does not recognise, because struct sizes live in cc1's symbol table.
+  Any aggregate operation must carry its length from the front end as
+  an immediate - `BC_COPY` and `BC_PUSHN` both take a u16.
+
+Returning is a hidden first argument holding the address of caller
+allocated space; the function copies its result there and returns that
+address, so the call's value is an address like every other struct
+expression and `f().x` and `a = f()` fall out. The declarator is walked
+before the base type is applied to it, so `type_parse_function` reads
+the base type `do_type_name_parse` recorded rather than the return type
+it does not have yet.
+
+The trap that cost the first attempt: `gen_push` was adding
+`stack_size()` - 4, the fallback - to the stack depth for an object it
+pushed sixteen bytes of, while `T_CLEANUP` took back the real
+`target_argsize`. That is what cc2's "sp" at the epilogue means.
+
+## Next task: the filesystem, then conformance testing
+
+**Not bitfields.** The inode double free has stopped being a nuisance
+and become the blocking problem: running this suite on the board on
+2026-07-29 killed the machine outright, needed a reflash, and lost a
+file written four minutes earlier. See
+`Kernel/platform/platform-rpipico/NOTES-inode-freelist.md`, section 4a.
+
+After that, run the c-testsuite `tests/single-exec` conformance set
+(https://github.com/c-testsuite/c-testsuite) — each test is a source, an
+expected output and a tag file naming the C version it applies to, so
+the C89 subset can be selected and the rest reported as out of scope.
+It is hundreds of compile-and-run cycles back to back, which is exactly
+the workload that provokes the filesystem fault, so it has to wait.
+
+**Bitfields** are still the last C89 gap - read "4. Bitfields" in
+PLAN-c89-gaps.md - but the conformance run is what will say which gaps
+actually matter, so it is worth having that evidence first.
+
+## Passing and returning structs turned up two function pointer bugs
+
+Both in shared front end code, both silent until the harness stopped
+ignoring cc1:
+
+* `int (*fp)()` - an unspecified argument list, which is how a callback
+  is declared - matched no real function. `parse_function_arguments`
+  records `()` as a lone ELLIPSIS, so the type code differs from any
+  prototype's and every comparison called it a mismatch.
+  `type_pointerconv` now accepts either side being unspecified when the
+  return types agree.
+* `&func` was incremented to a pointer to a pointer by `typeconv`'s
+  function-to-pointer fixup, which did not check for the pointer it
+  already was.
 
 ## Done: the float and double opcodes
 
@@ -108,6 +162,12 @@ and reports which opcodes were exercised. A difference is a bug, not a
 judgement call. This found four real defects in its first few minutes,
 one of them in shared frontend code affecting every FCC target.
 
+**It fails on a non-zero exit from cc1 or cc2.** It used to print their
+errors and carry on, so the suite compared two outputs that were both
+produced despite the front end having rejected part of the input - that
+is how the two function pointer bugs above survived. Anything that
+expects an error has to say so.
+
 `littest.sh` compares the bits of every floating literal against what
 gcc encodes for the same text, so it tests cc0 alone and needs no code
 generator. Its random mode found the leading-zero float bug (`015.5`
@@ -149,6 +209,25 @@ seconds now that the console is interrupt driven.
 To reflash: `sync; remount -n / ro; sync` then `picoctl flash`, the
 board appears as drive F:, copy the uf2. **Always remount read-only
 first** or the card needs an fsck on every boot.
+
+## Running the suite on the board
+
+`devtools/hwbuild.py struct3 optest ...` sends each sample, compiles it
+with the board's own `cc`, runs it under `bcrun` and diffs against the
+gcc reference in `hwtest/`. `hwtest/mkref.sh <names>` captures those
+references; `hwtest/stripall.sh` strips the cross built passes ready
+for `uusend.py`.
+
+It deletes the object before compiling. Without that a `cc` that fails
+leaves the previous `.bc` in place and bcrun happily runs it, so the
+suite reports a pass for a build that never happened - which it once
+did, against a stale cross compiled object.
+
+Sending new passes: `hwtest/stripall.sh`, then `uusend.py` each of
+cc0, cc1, cc2, then `chmod +x` and move them into `/usr/lib/cc`.
+Resend `bcrun` whenever `bytecode.h` changes or a program that passes
+on the host will fail on the board with "bad opcode", which reads like
+a code generator bug and is not one.
 
 ## Compiling on the board
 

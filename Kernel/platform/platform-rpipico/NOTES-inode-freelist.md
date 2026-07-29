@@ -140,6 +140,37 @@ looked up, and gives its mode and link count. The old
 
 ---
 
+## 4a. It has got worse, and it is now the blocking task
+
+**2026-07-29, later the same day.** Running the compiler test suite on
+the board — twelve samples, each one creating and unlinking five
+temporaries — the machine died: video gone, no console, unrecoverable
+by reset, needed BOOTSEL and a reflash. On the next boot fsck said
+
+    Filesystem was not cleanly unmounted.
+    Free inode count in superblock is 1360, should be 1391. Fix? y
+    Pass 2: Rebuilding free list...
+
+and **a 24K file written four minutes earlier had vanished**
+(`/root/cc/bcrun`). The guards had been firing throughout, including
+during plain `uud` transfers with no compiler involved:
+
+    i_alloc: 659 in free list but in use, skipped
+    i_alloc: 673 in free list but in use, skipped
+    i_alloc: 647 in free list but in use, skipped
+
+So the guards contain the *symptom* — an allocation of a live inode —
+but the underlying corruption is still accumulating, and under enough
+create/unlink traffic it now takes the machine down and loses data.
+This is no longer a nuisance to work around.
+
+It is also what stands between this port and the next thing worth
+doing: running the c-testsuite `tests/single-exec` conformance set
+(https://github.com/c-testsuite/c-testsuite) on the board. That is
+hundreds of compile-and-run cycles back to back, which is precisely the
+workload that triggers this, and there is no point starting it until
+the filesystem is trustworthy.
+
 ## 5. What is outstanding
 
 **The double deref itself.** `i_deref` reaches its freeing branch twice
