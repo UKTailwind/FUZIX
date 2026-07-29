@@ -1,6 +1,6 @@
 extern unsigned token;
 extern unsigned line_num;
-extern unsigned long token_value;
+extern cval_t token_value;
 extern char filename[33];
 
 extern unsigned label_tag;

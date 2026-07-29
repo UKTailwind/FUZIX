@@ -53,7 +53,7 @@ void put_padding_data(unsigned space)
 	free_node(n);
 }
 
-void put_typed_constant(unsigned type, unsigned long value)
+void put_typed_constant(unsigned type, cval_t value)
 {
 	struct node *n = make_constant(value, type);
 	put_typed_data(n);

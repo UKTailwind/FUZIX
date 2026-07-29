@@ -1,8 +1,8 @@
 #include "compiler.h"
 
 /* Will need typing for the largest integral type TODO */
-unsigned long switch_table[NUM_SWITCH];
-unsigned long *switch_next = switch_table;
+cval_t switch_table[NUM_SWITCH];
+cval_t *switch_next = switch_table;
 
 /*
  *	When we finish a switch block off we write the table out. We could
@@ -10,10 +10,10 @@ unsigned long *switch_next = switch_table;
  *	for some types it's tricky
  *	TODO;
  */
-void switch_done(unsigned tag, unsigned long *oldptr, unsigned type)
+void switch_done(unsigned tag, cval_t *oldptr, unsigned type)
 {
     unsigned count = 0;
-    unsigned long *p = oldptr;
+    cval_t *p = oldptr;
 
     header(H_SWITCHTAB, tag, switch_next - oldptr);
     /* Table */
@@ -27,12 +27,12 @@ void switch_done(unsigned tag, unsigned long *oldptr, unsigned type)
     switch_next = oldptr;
 }
 
-unsigned long *switch_alloc(void)
+cval_t *switch_alloc(void)
 {
     return switch_next;
 }
 
-void switch_add_node(unsigned long value)
+void switch_add_node(cval_t value)
 {
     if (switch_next == &switch_table[NUM_SWITCH])
         fatal("switch table full");

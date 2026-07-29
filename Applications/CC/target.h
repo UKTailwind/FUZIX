@@ -7,9 +7,6 @@
  *	at least as wide, and the compiler's type encoding has one slot
  *	per width.
  *
- *	TARGET_MAX_* are compared against host unsigned long values, so
- *	building the compiler itself needs a host where that is 64bit if
- *	64bit constants are to survive (see PC3-COMPILER-PLAN.md).
  */
 #define TARGET_MAX_INT		2147483647L
 #define TARGET_MAX_LONG		2147483647UL
@@ -23,7 +20,30 @@
  */
 #define TARGET_HAS_DOUBLE
 
+/*
+ *	The width a constant is carried at through cc1 and cc2.
+ *
+ *	This target has long long and double, so it needs 64 bits.
+ *	Everything used to say "unsigned long", which is 64 bits on the
+ *	x86-64 development host and 32 on the board, so cross compiled
+ *	code was right and the same source compiled on the machine itself
+ *	silently lost the top half: 5000000000LL came out as 705032704.
+ *	It was correct by accident, and only on one of the two machines it
+ *	has to be correct on.
+ *
+ *	Other targets keep the narrow form. Four more bytes on every node
+ *	is not free on an 8bit machine, and none of them have a 64 bit
+ *	type to carry.
+ */
+typedef unsigned long long cval_t;
+
 #else
+
+typedef unsigned long cval_t;
+
+#endif
+
+#ifndef CPU_armm0
 
 #define TARGET_MAX_INT		32767L
 #define TARGET_MAX_LONG		2147483647UL	/* and a double persenne prime too */

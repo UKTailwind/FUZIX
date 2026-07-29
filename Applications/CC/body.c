@@ -141,7 +141,7 @@ static void switch_statement(void)
 	unsigned oldswc = switch_count;
 	unsigned oldswtype = switch_type;
 	unsigned olddefault = switch_default;
-	unsigned long *swptr;
+	cval_t *swptr;
 
 	switch_tag = next_tag++;
 	break_tag = next_tag++;

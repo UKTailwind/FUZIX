@@ -1,5 +1,1 @@
-# TODO
-
-all:
-
-clean:
+include Makefile.common

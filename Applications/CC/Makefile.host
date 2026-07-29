@@ -43,7 +43,25 @@ OBJ_C0 = $(addprefix $(OBJDIR)/,$(SRC_C0:.c=.o))
 OBJ_C1 = $(addprefix $(OBJDIR)/,$(SRC_C1:.c=.o))
 OBJ_C2 = $(addprefix $(OBJDIR)/,$(SRC_C2:.c=.o))
 
-all: $(OBJDIR)/cc0 $(OBJDIR)/cc1 $(OBJDIR)/cc2
+# bcrun executes a bytecode object, bcdump disassembles one, dumptokens
+# prints cc0's output and ccbc drives the three passes. They are not
+# compiler passes, but every test script needs them, and leaving them to
+# be built by hand means "make clean" quietly breaks the whole suite.
+TOOLS = $(OBJDIR)/bcrun $(OBJDIR)/bcdump $(OBJDIR)/dumptokens $(OBJDIR)/ccbc
+
+all: $(OBJDIR)/cc0 $(OBJDIR)/cc1 $(OBJDIR)/cc2 $(TOOLS)
+
+$(OBJDIR)/bcrun: bcrun.c bytecode.h | $(OBJDIR)
+	$(HOSTCC) $(HOSTCFLAGS) -o $@ bcrun.c
+
+$(OBJDIR)/bcdump: bcdump.c bytecode.h | $(OBJDIR)
+	$(HOSTCC) $(HOSTCFLAGS) -o $@ bcdump.c
+
+$(OBJDIR)/dumptokens: dumptokens.c token.h | $(OBJDIR)
+	$(HOSTCC) $(HOSTCFLAGS) -o $@ dumptokens.c
+
+$(OBJDIR)/ccbc: ccbc.c | $(OBJDIR)
+	$(HOSTCC) $(HOSTCFLAGS) -o $@ ccbc.c
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)

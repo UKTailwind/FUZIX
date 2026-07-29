@@ -345,7 +345,7 @@ static void emit_store(unsigned t)
 	}
 }
 
-static void emit_const(unsigned long v, unsigned t)
+static void emit_const(cval_t v, unsigned t)
 {
 	long s = (long)v;
 
@@ -615,7 +615,7 @@ void gen_name(struct node *n)
 	dlong(n->value);
 }
 
-void gen_value(unsigned type, unsigned long value)
+void gen_value(unsigned type, cval_t value)
 {
 	/* Case values are always a word: see in_switchtab. */
 	if (in_switchtab || PTR(type)) {
@@ -695,7 +695,7 @@ unsigned gen_push(struct node *n)
 
 unsigned gen_direct(struct node *n)
 {
-	unsigned long v;
+	cval_t v;
 	switch (n->op) {
 	/*
 	 * Cleanup must be handled here, not in gen_node. It carries the
@@ -900,7 +900,7 @@ static unsigned fallback(struct node *n)
 
 unsigned gen_node(struct node *n)
 {
-	unsigned long v = n->value;
+	cval_t v = n->value;
 	unsigned nr = n->flags & NORETURN;
 
 	/* Arguments are removed by the call, reported via T_CLEANUP */

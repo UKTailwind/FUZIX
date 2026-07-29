@@ -39,7 +39,7 @@ extern void gen_data_label(const char *t, unsigned align);
 
 extern void gen_space(unsigned value);
 extern void gen_text_data(unsigned value);
-extern void gen_value(unsigned type, unsigned long value);
+extern void gen_value(unsigned type, cval_t value);
 extern void gen_name(struct node *n);
 extern void gen_literal(unsigned value);
 

@@ -12,7 +12,7 @@ struct node
 #define IMPURE			16	/* Something in the subtree has a side effect */
 #define CCONLY			32	/* Only need condition side effects if platform has cc based branching */
 #define NEEDCC			64	/* Node needs the cc setting behaviour */
-    unsigned long value;	/* Offset for a NAME fp offset for a LOCAL */
+    cval_t value;	/* Offset for a NAME fp offset for a LOCAL */
     unsigned snum;		/* Name of symbol (for code generator) */
     unsigned val2;		/* Label for name, (also used for code gen) */
 };
@@ -27,7 +27,7 @@ extern struct node *new_node(void);
 extern struct node *make_rval(struct node *n);
 extern struct node *make_noreturn(struct node *n);
 extern struct node *make_cast(struct node *n, unsigned t);
-extern struct node *make_constant(unsigned long val, unsigned t);
+extern struct node *make_constant(cval_t val, unsigned t);
 extern struct node *make_symbol(struct symbol *s);
 extern struct node *make_label(unsigned n);
 

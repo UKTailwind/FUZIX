@@ -32,12 +32,15 @@ interpreted on the development host.
 Floating point literals are encoded correctly and `double` is a real
 64-bit double, but there is no floating point *arithmetic* yet.
 
-Verified on the board 2026-07-29: the PC3's own cc0 emits a byte for
-byte identical token stream to the host's for 265 literals, and optest
-and ll2 still match their gcc references when run there. `bcrun` is on
-the board; **cc1 and cc2 have never been, so the on-target chain end to
-end is still untested** - everything else so far has been cross
-compiled on the host and only run on the PC3.
+**The compiler runs on the PC3 itself** (2026-07-29). `cc prog.c` on the
+board drives cpp, cc0, cc1 and cc2 and writes a `.bc` that bcrun
+executes. All eight samples - sieve, strs, rpn, libtest, ll2, optest,
+width3, sw2 - compile on the board and produce output identical to gcc,
+optest included, which covers about 55 opcodes. cc0's literal encoding
+is byte for byte identical to the host's over 265 literals.
+
+Installed there: the three passes in `/usr/lib/cc`, and `cc`, `cpp`,
+`bcrun`, `bcdump` in `/usr/bin`.
 
 ## Next task: the float and double opcodes
 
@@ -124,6 +127,33 @@ To reflash: `sync; remount -n / ro; sync` then `picoctl flash`, the
 board appears as drive F:, copy the uf2. **Always remount read-only
 first** or the card needs an fsck on every boot.
 
+## Compiling on the board
+
+    cc prog.c            -> prog.bc
+    cc -v prog.c         show each pass
+    cc -k prog.c         keep the .pp .tok .ir intermediates
+    bcrun prog.bc
+
+`ccbc.c` is that driver. It exists rather than being another `#ifdef` in
+`ccfuzix.c` for two reasons: this target has no assembler and no linker,
+so one source file is one program and the pipeline stops after cc2; and
+`ccfuzix.c` under `CPU_armm0` is still configured to emit Z80.
+
+**The passes cannot be driven from the shell.** cc1 and cc2 read back
+from their own standard output, so it has to be opened `O_RDWR`. The
+host harness spells that `1<>`; the Fuzix shell has no such redirection
+and quietly leaves the pass reading the console instead, which looks
+exactly like a hang.
+
+cpp is not optional even for source with no directives in it: cc0 does
+not know what a comment is - stripping them has always been cpp's job -
+so without it the first comment in the file becomes a divide followed
+by a multiply. `Applications/cpp/Makefile.armm0` was a `# TODO` stub;
+it now includes `Makefile.common` like every other CPU, and builds.
+
+There is still no libc for compiled programs and no headers, so declare
+what you use (`int printf();`) - the runtime lives inside bcrun.
+
 ## Things that have cost hours
 
 * **Never conclude the board is dead from silence.** After a reset it
@@ -146,3 +176,17 @@ first** or the card needs an fsck on every boot.
 * **Header dependencies.** `Makefile.host` now depends on bytecode.h;
   without it cc2 keeps writing the old object layout while bcrun reads
   the new one, which looks exactly like a corrupt object.
+* **Constants are `cval_t`, not `unsigned long`.** `unsigned long` is
+  64 bits on the x86-64 host and 32 on the board, so the constant path
+  was correct by accident and only on one of the two machines. Anything
+  new that carries a literal must use `cval_t` or it will work cross
+  compiled and truncate when self hosted - a difference no host test
+  can see.
+* **`make -f Makefile.armm0 <one target>` does not rebuild the others.**
+  Two builds in a row produced byte-identical cc1 binaries after a
+  header change, which looked like the change having no effect. It was
+  a stale object. `rm -f *.o` when a header moves.
+* **Build the tools, do not hand-build them.** `make -f Makefile.host`
+  now builds bcrun, bcdump, dumptokens and ccbc as well as the passes.
+  They used to be built by hand, so `rm -rf host-armm0` made every test
+  fail at once in a way that looked like a compiler regression.

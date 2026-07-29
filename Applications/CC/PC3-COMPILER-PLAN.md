@@ -82,9 +82,13 @@ tree:
 * **No struct/union passing or returning.**
 * **Locals have function-wide scope, not block scope.** This is not old
   C, it silently changes the meaning of valid C89.
-* **Constants live in `unsigned long`** (`tree.h:15`). Cross-compiling
-  on x86-64 that is 64 bits; self-hosted on 32-bit ARM it is not, so
-  64-bit constants become unrepresentable exactly when self-hosting.
+* ~~**Constants live in `unsigned long`** (`tree.h:15`).~~ Fixed for
+  this target, 2026-07-29, and it was not theoretical: compiled on the
+  board, `5000000000LL` came out as `705032704`. Constants are now
+  carried at `cval_t`, 64-bit here and `unsigned long` everywhere else,
+  the whole way from `token_value` through the node to the emitter.
+  Found by compiling the samples on the PC3 rather than cross-compiling
+  them — no host test can see this one.
 * Identifiers significant to 14 characters; 30 struct members; 50 enum
   constants; 128 case labels; `char` defaults unsigned; `-32768` is a
   known mistyping bug.

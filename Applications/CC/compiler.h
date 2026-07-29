@@ -22,6 +22,10 @@
 
 #include <stdio.h>
 
+/* Out of alphabetical order deliberately: it defines cval_t, the width
+   a constant is carried at, which the headers below use */
+#include "target.h"
+
 #include "symbol.h"
 
 #include "body.h"
@@ -39,7 +43,6 @@
 #include "stackframe.h"
 #include "struct.h"
 #include "switch.h"
-#include "target.h"
 #include "token.h"
 #include "tree.h"
 #include "type.h"

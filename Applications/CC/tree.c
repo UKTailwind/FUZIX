@@ -83,7 +83,7 @@ struct node *sf_tree(unsigned op, struct node *l, struct node *r)
 	return n;
 }
 
-struct node *make_constant(unsigned long value, unsigned type)
+struct node *make_constant(cval_t value, unsigned type)
 {
 	struct node *n = new_node();
 	n->op = T_CONSTANT;
@@ -183,7 +183,7 @@ unsigned is_constant_zero(struct node *n)
 static void nameref(struct node *n)
 {
 	if (is_constant(n->right) && IS_NAME(n->left->op)) {
-		unsigned value = n->left->value + n->right->value;
+		cval_t value = n->left->value + n->right->value;
 		struct node *l = n->left;
 		memcpy(n , n->right, sizeof(*n));
 		free_node(n->right);
@@ -428,10 +428,10 @@ struct node *logic_tree(unsigned op, struct node *l, struct node *r)
 
    Needs review and to be a bit more precise
  */
-unsigned long trim_constant(unsigned t, unsigned long value, unsigned warn)
+cval_t trim_constant(unsigned t, cval_t value, unsigned warn)
 {
-	unsigned long ov = value;
-	unsigned long mask, sbit;
+	cval_t ov = value;
+	cval_t mask, sbit;
 
 	/*
 	 * Match on the base type with the sign bit already masked off, so
@@ -472,7 +472,7 @@ unsigned long trim_constant(unsigned t, unsigned long value, unsigned warn)
    and maybe union a float/double */
 
 /* For now this only supports integer types */
-static struct node *replace_constant(struct node *n, unsigned t, unsigned long value)
+static struct node *replace_constant(struct node *n, unsigned t, cval_t value)
 {
 	if (n->left)
 		free_node(n->left);
@@ -626,7 +626,7 @@ struct node *constify(struct node *n)
 	}
 	if (l) {
 		unsigned lt = l->type;
-		unsigned long value = l->value;
+		cval_t value = l->value;
 
 		/* Lval names are constant but a maths operation on two name lval is not */
 		if (is_name(l->op) || is_name(r->op)) {
@@ -753,7 +753,7 @@ struct node *constify(struct node *n)
 	if (r) {
 		/* Uni-ops */
 		unsigned rt = r->type;
-		unsigned long value = r->value;
+		cval_t value = r->value;
 
 		if (r->flags & LVAL)
 			return NULL;

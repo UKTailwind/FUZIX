@@ -15,14 +15,19 @@ FLOAT = -DNO_FLOAT
 include Makefile.common
 
 # The runtime: bcrun executes a bytecode object, bcdump disassembles
-# one. Both are ordinary Fuzix programs and belong in /usr/bin.
-all: bcrun bcdump
+# one. ccbc is the driver that runs the three passes, and goes on the
+# board as /usr/bin/cc. All ordinary Fuzix programs, all in /usr/bin;
+# the passes themselves live in /usr/lib/cc.
+all: bcrun bcdump ccbc
 
 bcrun: bcrun.o
 	$(LINKER) $(CRT0) bcrun.o -o $@ $(LINKER_OPT) $(LINKER_TAIL)
 
 bcdump: bcdump.o
 	$(LINKER) $(CRT0) bcdump.o -o $@ $(LINKER_OPT) $(LINKER_TAIL)
+
+ccbc: ccbc.o
+	$(LINKER) $(CRT0) ccbc.o -o $@ $(LINKER_OPT) $(LINKER_TAIL)
 
 bcrun.o bcdump.o: bytecode.h
 
