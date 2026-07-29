@@ -29,8 +29,15 @@ PICOIOC ioctl.
 Measured on hardware: 2000-element sieve in ~75 ms, against ~1 ms
 interpreted on the development host.
 
-Floating point literals are encoded correctly and `double` is a real
-64-bit double, but there is no floating point *arithmetic* yet.
+**Floating point works.** `float` and `double` arithmetic, comparisons,
+the conversion matrix both ways and both signednesses, compound
+assignment, globals, arrays, structs, arguments and returns - all
+matching gcc, on the host and compiled on the PC3 itself.
+
+The remaining gap is **`printf` has no `%f`**, so a program can compute
+in floating point but cannot print it except by scaling and casting to
+an integer, which is what `samples/fp.c` does. That is the next thing
+worth doing.
 
 **The compiler runs on the PC3 itself** (2026-07-29). `cc prog.c` on the
 board drives cpp, cc0, cc1 and cc2 and writes a `.bc` that bcrun

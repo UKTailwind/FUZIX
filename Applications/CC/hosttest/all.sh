@@ -25,10 +25,6 @@ for f in samples/*.c; do
 	ll)
 		echo "n/a   host sizeof(long) is 8, ours is 4"
 		continue ;;
-	dbl)
-		# Delete this case as the first act of step 3
-		echo "todo  waiting on the float and double opcodes"
-		continue ;;
 	esac
 	out=$(W=/tmp/fcc-all bash optest.sh "$f" 2>&1)
 	line=$(echo "$out" | grep -E '^(PASS|FAIL)' | head -1)

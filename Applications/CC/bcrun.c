@@ -54,6 +54,41 @@ static struct bc_sym *sym;
 static struct bc_fixup *fix;
 static char *strtab;
 
+/*
+ * A double is carried in the accumulator as its bit pattern and a float
+ * in the low 32 bits, so these are how the arithmetic gets at it. The
+ * union is not decoration: reading an int64_t through a double * is an
+ * aliasing violation that gcc is entitled to optimise on.
+ */
+static double dget(int64_t v)
+{
+	union { int64_t i; double d; } u;
+	u.i = v;
+	return u.d;
+}
+
+static int64_t dput(double d)
+{
+	union { int64_t i; double d; } u;
+	u.d = d;
+	return u.i;
+}
+
+static float fget(int64_t v)
+{
+	union { uint32_t i; float f; } u;
+	u.i = (uint32_t)v;
+	return u.f;
+}
+
+static int64_t fput(float f)
+{
+	union { uint32_t i; float f; } u;
+	u.f = f;
+	/* Sign extended, because everything else in A is */
+	return S32(u.i);
+}
+
 /* Machine state. sp and fp are offsets into mem[], and the stack grows
    down from the top. */
 static int64_t A;
@@ -201,6 +236,63 @@ static unsigned long fetch32(void)
  *	width in the call, so char and short compound assignment is wrong;
  *	that is a known gap, recorded in PC3-COMPILER-PLAN.md.
  */
+/*
+ *	The floating point forms of the above. The emitter marks these with
+ *	a trailing 'd' or 'f' instead of a width and a signedness, because
+ *	neither means anything here.
+ */
+static int lib_eqop_fp(const char *name)
+{
+	char base[24];
+	unsigned len;
+	int dbl;
+	unsigned long addr;
+	double old, v, res;
+
+	strncpy(base, name, sizeof(base) - 1);
+	base[sizeof(base) - 1] = 0;
+	len = strlen(base);
+	if (len == 0)
+		return 0;
+	dbl = (base[len - 1] == 'd');
+	if (!dbl && base[len - 1] != 'f')
+		return 0;
+	base[--len] = 0;
+
+	if (strcmp(base, "pluseq") && strcmp(base, "minuseq") &&
+	    strcmp(base, "muleq") && strcmp(base, "diveq") &&
+	    strcmp(base, "postinc") && strcmp(base, "postdec"))
+		return 0;
+
+	addr = (unsigned long)pop();
+	v = dbl ? dget(A) : (double)fget(A);
+	old = dbl ? dget((int64_t)rd64(addr)) : (double)fget(S32(rd32(addr)));
+
+	if (!strcmp(base, "pluseq") || !strcmp(base, "postinc"))
+		res = old + v;
+	else if (!strcmp(base, "minuseq") || !strcmp(base, "postdec"))
+		res = old - v;
+	else if (!strcmp(base, "muleq"))
+		res = old * v;
+	else
+		res = v ? old / v : 0.0;
+
+	/* postinc and postdec yield the old value, the rest the new one */
+	if (!strcmp(base, "postinc") || !strcmp(base, "postdec"))
+		v = old;
+	else
+		v = res;
+
+	if (dbl) {
+		wr64(addr, (uint64_t)dput(res));
+		A = dput(v);
+	} else {
+		wr32(addr, (unsigned long)(uint32_t)fput((float)res));
+		A = fput((float)v);
+	}
+	return 1;
+}
+
 static void lib_eqop(const char *name)
 {
 	char base[24];
@@ -208,6 +300,9 @@ static void lib_eqop(const char *name)
 	int uns = 0, post;
 	unsigned long addr;
 	long old, v, res;
+
+	if (lib_eqop_fp(name))
+		return;
 
 	/* The emitter appends the operand width in bytes and 's' or 'u',
 	   e.g. "pluseq1u" or "shreq4s". */
@@ -953,6 +1048,52 @@ static int run(void)
 		case BC_GEU64:	b = pop64();
 				A = ((uint64_t)b >= (uint64_t)A); break;
 		case BC_BOOL64:	A = (A != 0); break;
+
+		/*
+		 * Floating point. The accumulator holds the bit pattern, so
+		 * every one of these unpacks, operates and repacks. dget and
+		 * friends go through a union: casting an int64_t* to double*
+		 * would be an aliasing violation and gcc is entitled to
+		 * assume it never happens.
+		 */
+		case BC_ADDD:	A = dput(dget(pop64()) + dget(A)); break;
+		case BC_SUBD:	A = dput(dget(pop64()) - dget(A)); break;
+		case BC_MULD:	A = dput(dget(pop64()) * dget(A)); break;
+		case BC_DIVD:	A = dput(dget(pop64()) / dget(A)); break;
+		case BC_NEGD:	A = dput(-dget(A)); break;
+		case BC_EQD:	A = (dget(pop64()) == dget(A)); break;
+		case BC_NED:	A = (dget(pop64()) != dget(A)); break;
+		case BC_LTD:	A = (dget(pop64()) <  dget(A)); break;
+		case BC_GTD:	A = (dget(pop64()) >  dget(A)); break;
+		case BC_LED:	A = (dget(pop64()) <= dget(A)); break;
+		case BC_GED:	A = (dget(pop64()) >= dget(A)); break;
+		case BC_BOOLD:	A = (dget(A) != 0.0); break;
+		case BC_LNOTD:	A = (dget(A) == 0.0); break;
+
+		case BC_ADDF:	A = fput(fget(pop()) + fget(A)); break;
+		case BC_SUBF:	A = fput(fget(pop()) - fget(A)); break;
+		case BC_MULF:	A = fput(fget(pop()) * fget(A)); break;
+		case BC_DIVF:	A = fput(fget(pop()) / fget(A)); break;
+		case BC_NEGF:	A = fput(-fget(A)); break;
+		case BC_EQF:	A = (fget(pop()) == fget(A)); break;
+		case BC_NEF:	A = (fget(pop()) != fget(A)); break;
+		case BC_LTF:	A = (fget(pop()) <  fget(A)); break;
+		case BC_GTF:	A = (fget(pop()) >  fget(A)); break;
+		case BC_LEF:	A = (fget(pop()) <= fget(A)); break;
+		case BC_GEF:	A = (fget(pop()) >= fget(A)); break;
+		case BC_BOOLF:	A = (fget(A) != 0.0f); break;
+		case BC_LNOTF:	A = (fget(A) == 0.0f); break;
+
+		case BC_I2D:	A = dput((double)A); break;
+		case BC_U2D:	A = dput((double)(uint64_t)A); break;
+		case BC_D2I:	A = (int64_t)dget(A); break;
+		case BC_D2U:	A = (int64_t)(uint64_t)dget(A); break;
+		case BC_I2F:	A = fput((float)A); break;
+		case BC_U2F:	A = fput((float)(uint64_t)A); break;
+		case BC_F2I:	A = (int64_t)fget(A); break;
+		case BC_F2U:	A = (int64_t)(uint64_t)fget(A); break;
+		case BC_F2D:	A = dput((double)fget(A)); break;
+		case BC_D2F:	A = fput((float)dget(A)); break;
 
 		case BC_SEXT8:	A = (signed char)A; break;
 		case BC_SEXT16:	A = (short)A; break;

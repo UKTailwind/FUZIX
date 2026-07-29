@@ -36,6 +36,8 @@
 #define IS_ARITH(x)	(!PTR(x) && (x) < VOID)
 #define IS_INTARITH(x)	(!PTR(x) && (x) < FLOAT)
 #define IS_INTORPTR(x)	((x) < (FLOAT | 7))
+/* float or double: an arithmetic type that is not an integer one */
+#define IS_FLOATING(x)	(IS_ARITH(x) && !IS_INTARITH(x))
 
 #define C_SIMPLE	0x0000
 #define C_STRUCT	0x4000

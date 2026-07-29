@@ -629,6 +629,13 @@ void gen_value(unsigned type, cval_t value)
 	case 2:
 		dword(value & 0xFFFF);
 		break;
+	case 8:
+		/* An initialised long long or double in the data segment.
+		   Writing one word here left the object four bytes short of
+		   what the symbol claimed, so everything after it moved. */
+		dlong(value & 0xFFFFFFFFUL);
+		dlong((unsigned long)(((unsigned long long)value) >> 32));
+		break;
 	default:
 		dlong(value);
 		break;
@@ -727,24 +734,34 @@ unsigned gen_shortcut(struct node *n)
 }
 
 /*
- *	Floating point is not generated yet - that is step 3 of the plan in
- *	PC3-COMPILER-PLAN.md, and cc0 now produces real doubles ahead of it.
+ *	Floating point.
  *
- *	Until the opcodes exist, every floating operation has to become a
- *	named runtime call that does not exist, so bcrun says
+ *	A double is carried in the accumulator as its bit pattern and a
+ *	float in the low 32 bits, so loads, stores, pushes and constants
+ *	are the existing 64 and 32 bit ones and only the operations that
+ *	interpret the bits are floating point specific.
  *
- *		bcrun: no runtime function "addd"
- *
- *	and names what is missing. The trap being avoided is silence:
- *	typesize(DOUBLE) is 8, so "a + b" on two doubles would otherwise
- *	fall into the 64-bit integer cases and add the bit patterns, which
- *	prints a wrong answer instead of failing.
+ *	The trap this exists to avoid is silence rather than failure:
+ *	typesize(DOUBLE) is 8, so without a branch of its own "a + b" on
+ *	two doubles falls into the 64-bit *integer* cases and adds the bit
+ *	patterns, printing a wrong answer instead of stopping.
  */
+static unsigned isdouble(unsigned t)
+{
+	return BASE_TYPE(t) == DOUBLE;
+}
+
+static unsigned isfp(unsigned t)
+{
+	return !PTR(t) && !IS_INTARITH(t) && IS_ARITH(t);
+}
+
+/* Anything floating that is still not generated inline */
 static unsigned fpcall(const char *base, unsigned t)
 {
 	char buf[16];
 
-	sprintf(buf, "%s%c", base, BASE_TYPE(t) == DOUBLE ? 'd' : 'f');
+	sprintf(buf, "%s%c", base, isdouble(t) ? 'd' : 'f');
 	libcall(buf);
 	return 1;
 }
@@ -761,22 +778,27 @@ static unsigned binop(struct node *n)
 	   forms do not truncate; the 32-bit ones do. */
 	unsigned w = typesize(t);
 
-	if (!IS_INTARITH(t) && !PTR(t)) {
-		const char *name = NULL;
+	/* Floating point has its own set: see the note above binop's
+	   helpers. %  & | ^ << >> are not valid on it, so they fall
+	   through to the runtime call and are reported. */
+	if (isfp(t)) {
+		unsigned d = isdouble(t);
+
+#define FP(od, of)	do { cbyte(d ? (od) : (of)); return 1; } while (0)
+
 		switch (n->op) {
-		case T_PLUS:	name = "add";	break;
-		case T_MINUS:	name = "sub";	break;
-		case T_STAR:	name = "mul";	break;
-		case T_SLASH:	name = "div";	break;
-		case T_EQEQ:	name = "eq";	break;
-		case T_BANGEQ:	name = "ne";	break;
-		case T_LT:	name = "lt";	break;
-		case T_GT:	name = "gt";	break;
-		case T_LTEQ:	name = "le";	break;
-		case T_GTEQ:	name = "ge";	break;
+		case T_PLUS:	FP(BC_ADDD, BC_ADDF);
+		case T_MINUS:	FP(BC_SUBD, BC_SUBF);
+		case T_STAR:	FP(BC_MULD, BC_MULF);
+		case T_SLASH:	FP(BC_DIVD, BC_DIVF);
+		case T_EQEQ:	FP(BC_EQD, BC_EQF);
+		case T_BANGEQ:	FP(BC_NED, BC_NEF);
+		case T_LT:	FP(BC_LTD, BC_LTF);
+		case T_GT:	FP(BC_GTD, BC_GTF);
+		case T_LTEQ:	FP(BC_LED, BC_LEF);
+		case T_GTEQ:	FP(BC_GED, BC_GEF);
 		}
-		if (name)
-			return fpcall(name, t);
+#undef FP
 		return 0;
 	}
 
@@ -983,23 +1005,43 @@ unsigned gen_node(struct node *n)
 	/* Each of these keys off the operand width, and a double is eight
 	   bytes wide, so each needs saving from the 64-bit integer form */
 	case T_NEGATE:
-		if (!IS_INTARITH(n->type) && !PTR(n->type))
-			return fpcall("neg", n->type);
+		if (isfp(n->type)) {
+			cbyte(isdouble(n->type) ? BC_NEGD : BC_NEGF);
+			return 1;
+		}
 		cbyte(typesize(n->type) == 8 ? BC_NEG64 : BC_NEG);
 		return 1;
 	case T_TILDE:
+		/* Not valid on a float, so no case for one */
 		cbyte(typesize(n->type) == 8 ? BC_NOT64 : BC_NOT);
 		return 1;
+	/*
+	 * These two produce an int from whatever they are given, so the
+	 * node's own type is int and says nothing about the operand. Key
+	 * off the operand instead: "!x" on a double was emitting the
+	 * 64-bit integer form, which gets the right answer for 0.0 and the
+	 * wrong one for -0.0.
+	 */
 	case T_BANG:
-		if (!IS_INTARITH(n->type) && !PTR(n->type))
-			return fpcall("lnot", n->type);
-		cbyte(typesize(n->type) == 8 ? BC_LNOT64 : BC_LNOT);
-		return 1;
+		{
+			unsigned ot = n->right ? n->right->type : n->type;
+			if (isfp(ot)) {
+				cbyte(isdouble(ot) ? BC_LNOTD : BC_LNOTF);
+				return 1;
+			}
+			cbyte(typesize(ot) == 8 ? BC_LNOT64 : BC_LNOT);
+			return 1;
+		}
 	case T_BOOL:
-		if (!IS_INTARITH(n->type) && !PTR(n->type))
-			return fpcall("bool", n->type);
-		cbyte(typesize(n->type) == 8 ? BC_BOOL64 : BC_BOOL);
-		return 1;
+		{
+			unsigned ot = n->right ? n->right->type : n->type;
+			if (isfp(ot)) {
+				cbyte(isdouble(ot) ? BC_BOOLD : BC_BOOLF);
+				return 1;
+			}
+			cbyte(typesize(ot) == 8 ? BC_BOOL64 : BC_BOOL);
+			return 1;
+		}
 	case T_CAST:
 		{
 			unsigned lt = n->type;
@@ -1007,25 +1049,54 @@ unsigned gen_node(struct node *n)
 			unsigned ls, rs;
 			if (PTR(lt) || PTR(rt))
 				return 1;
-			if (!IS_INTARITH(lt) || !IS_INTARITH(rt)) {
-				/*
-				 * A conversion involving float or double.
-				 * Returning 0 here sends it to the shared
-				 * helper(), which printf()s the helper name
-				 * into the middle of the binary object - the
-				 * file then does not even load, which is a
-				 * long way from the actual problem. Name the
-				 * conversion instead: "castid" is int to
-				 * double, "castdi" the other way.
-				 */
-				char buf[16];
-				sprintf(buf, "cast%c%c",
-					IS_INTARITH(rt) ? 'i' :
-					  (BASE_TYPE(rt) == DOUBLE ? 'd' : 'f'),
-					IS_INTARITH(lt) ? 'i' :
-					  (BASE_TYPE(lt) == DOUBLE ? 'd' : 'f'));
-				libcall(buf);
-				return 1;
+			/*
+			 * A conversion with floating point on one side or
+			 * both. The integer side is always the full 64-bit
+			 * accumulator, so widen to 64 before converting and
+			 * truncate after, which is one conversion per pair
+			 * instead of one per width.
+			 */
+			if (isfp(lt) || isfp(rt)) {
+				if (isfp(lt) && isfp(rt)) {
+					if (isdouble(lt) && !isdouble(rt))
+						cbyte(BC_F2D);
+					else if (!isdouble(lt) && isdouble(rt))
+						cbyte(BC_D2F);
+					return 1;
+				}
+				if (isfp(lt)) {		/* integer -> float */
+					unsigned u = (rt & UNSIGNED) || PTR(rt);
+					rs = typesize(rt);
+					if (rs == 1)
+						cbyte(u ? BC_ZEXT8 : BC_SEXT8);
+					else if (rs == 2)
+						cbyte(u ? BC_ZEXT16 : BC_SEXT16);
+					if (rs < 8)
+						cbyte(u ? BC_ZEXT32 : BC_SEXT32);
+					if (isdouble(lt))
+						cbyte(u ? BC_U2D : BC_I2D);
+					else
+						cbyte(u ? BC_U2F : BC_I2F);
+					return 1;
+				}
+				/* float -> integer */
+				{
+					unsigned u = (lt & UNSIGNED);
+					if (isdouble(rt))
+						cbyte(u ? BC_D2U : BC_D2I);
+					else
+						cbyte(u ? BC_F2U : BC_F2I);
+					ls = typesize(lt);
+					if (ls < 8)
+						cbyte(BC_TRUNC64);
+					/* And down to the target's own width, for
+					   the reason the integer path below gives */
+					if (ls == 1)
+						cbyte(u ? BC_ZEXT8 : BC_SEXT8);
+					else if (ls == 2)
+						cbyte(u ? BC_ZEXT16 : BC_SEXT16);
+					return 1;
+				}
 			}
 			ls = typesize(lt);
 			rs = typesize(rt);

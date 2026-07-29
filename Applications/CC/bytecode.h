@@ -161,7 +161,66 @@
 #define BC_GEU64	0x81
 #define BC_BOOL64	0x82
 
-#define BC_MAXOP	0x82
+/*
+ *	Floating point.
+ *
+ *	A double lives in the accumulator as its IEEE754 bit pattern and a
+ *	float in the low 32 bits of it, so none of these need loads,
+ *	stores, pushes or constants of their own - CONST64/LOAD64/STORE64/
+ *	PUSH64/POP64 already move eight bytes and the 32-bit forms move
+ *	four. Only the operations that have to interpret the bits are new.
+ *
+ *	Float is not done by promoting to double and back. That would need
+ *	the stacked operand converted as well as the one in A, which the
+ *	machine has no way to reach.
+ */
+#define BC_ADDD		0x90
+#define BC_SUBD		0x91
+#define BC_MULD		0x92
+#define BC_DIVD		0x93
+#define BC_NEGD		0x94
+#define BC_EQD		0x95
+#define BC_NED		0x96
+#define BC_LTD		0x97
+#define BC_GTD		0x98
+#define BC_LED		0x99
+#define BC_GED		0x9A
+#define BC_BOOLD	0x9B	/* A = (d != 0) */
+#define BC_LNOTD	0x9C	/* A = (d == 0) */
+
+#define BC_ADDF		0xA0
+#define BC_SUBF		0xA1
+#define BC_MULF		0xA2
+#define BC_DIVF		0xA3
+#define BC_NEGF		0xA4
+#define BC_EQF		0xA5
+#define BC_NEF		0xA6
+#define BC_LTF		0xA7
+#define BC_GTF		0xA8
+#define BC_LEF		0xA9
+#define BC_GEF		0xAA
+#define BC_BOOLF	0xAB
+#define BC_LNOTF	0xAC
+
+/*
+ *	Conversions. The integer side is always the full 64-bit
+ *	accumulator, so an int converts by widening to 64 first with
+ *	SEXT32/ZEXT32 and a narrower result truncates afterwards with
+ *	TRUNC64. That keeps one conversion per pair instead of one per
+ *	width.
+ */
+#define BC_I2D		0xB0	/* int64  -> double */
+#define BC_U2D		0xB1	/* uint64 -> double */
+#define BC_D2I		0xB2	/* double -> int64 */
+#define BC_D2U		0xB3	/* double -> uint64 */
+#define BC_I2F		0xB4
+#define BC_U2F		0xB5
+#define BC_F2I		0xB6
+#define BC_F2U		0xB7
+#define BC_F2D		0xB8	/* float  -> double */
+#define BC_D2F		0xB9	/* double -> float */
+
+#define BC_MAXOP	0xB9
 
 /*
  *	Object file layout. Everything is little endian.

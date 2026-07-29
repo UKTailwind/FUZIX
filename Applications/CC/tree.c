@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -237,8 +238,21 @@ struct node *make_cast(struct node *n, unsigned t)
 	unsigned nt = type_canonical(n->type);
 	n->type = nt;
 	if (nt != t) {
-		n = tree(T_CAST, NULL, n);
-		n->type = t;
+		struct node *c, *f;
+		/*
+		 * Not tree(), because tree() folds the node before the type
+		 * can be set on it and a cast is the one operation whose
+		 * whole meaning is its result type. Folding saw the source
+		 * type as the destination, so "(float)1.25" collapsed to
+		 * the double 1.25 with the cast thrown away, and the four
+		 * byte store that followed wrote the bottom half of it.
+		 */
+		c = new_node();
+		c->op = T_CAST;
+		c->right = n;
+		c->type = t;
+		f = constify(c);
+		return f ? f : c;
 	}
 	return n;
 }
@@ -468,10 +482,120 @@ cval_t trim_constant(unsigned t, cval_t value, unsigned warn)
 	return value;
 }
 
-/* FIXME: will need to use the right types for n->value etc eventually
-   and maybe union a float/double */
+static struct node *replace_constant(struct node *n, unsigned t, cval_t value);
 
-/* For now this only supports integer types */
+/*
+ *	Constant folding where floating point is involved.
+ *
+ *	A floating constant is carried as its IEEE754 bit pattern, so it
+ *	has to be unpacked before anything can be done with it and packed
+ *	again afterwards. Only a static initialiser really needs this -
+ *	the code generator has opcodes for the rest - but an initialiser
+ *	has nowhere to put an instruction, so "float f = 1.25;" has to be
+ *	converted here or it stores the bottom half of a double.
+ *
+ *	This uses the host's own floating point rather than assembling the
+ *	bits by hand. FCC avoids that in general so it can bootstrap from
+ *	an integer-only compiler, but this target has double in the
+ *	compiler it is built with and in the one it now generates, and
+ *	using the same arithmetic the interpreter uses is one fewer place
+ *	for the two to disagree.
+ */
+
+#ifdef TARGET_HAS_DOUBLE
+
+static double fp_unpack(cval_t v, unsigned t)
+{
+	if (type_sizeof(t) == 8) {
+		union { cval_t b; double d; } u;
+		u.b = v;
+		return u.d;
+	} else {
+		union { uint32_t b; float f; } u;
+		u.b = (uint32_t)v;
+		return (double)u.f;
+	}
+}
+
+static cval_t fp_pack(double d, unsigned t)
+{
+	if (type_sizeof(t) == 8) {
+		union { cval_t b; double d; } u;
+		u.d = d;
+		return u.b;
+	} else {
+		union { uint32_t b; float f; } u;
+		u.f = (float)d;
+		return (cval_t)u.b;
+	}
+}
+
+static struct node *fold_float_unary(struct node *n, struct node *r,
+				     unsigned op)
+{
+	unsigned rt = r->type;
+	unsigned lt = n->type;
+	double d;
+
+	switch (op) {
+	case T_NEGATE:
+		/* Just the sign bit, so this one needs no arithmetic at
+		   all - but it has to be the right sign bit */
+		r->value ^= ((cval_t)1) << (8 * type_sizeof(rt) - 1);
+		return r;
+	case T_BANG:
+		return replace_constant(n, lt, fp_unpack(r->value, rt) == 0.0);
+	case T_BOOL:
+		if (n->flags & NEEDCC)
+			return NULL;
+		return replace_constant(n, lt, fp_unpack(r->value, rt) != 0.0);
+	case T_CAST:
+		if (IS_FLOATING(rt) && IS_FLOATING(lt)) {
+			if (type_sizeof(rt) == type_sizeof(lt))
+				return replace_constant(n, lt, r->value);
+			return replace_constant(n, lt,
+				fp_pack(fp_unpack(r->value, rt), lt));
+		}
+		if (IS_FLOATING(lt)) {		/* integer -> floating */
+			if (rt & UNSIGNED)
+				d = (double)(cval_t)r->value;
+			else
+				d = (double)(long long)r->value;
+			return replace_constant(n, lt, fp_pack(d, lt));
+		}
+		if (IS_FLOATING(rt) && IS_INTARITH(lt)) {
+			d = fp_unpack(r->value, rt);
+			if (lt & UNSIGNED)
+				return replace_constant(n, lt, (cval_t)d);
+			return replace_constant(n, lt,
+					(cval_t)(long long)d);
+		}
+		/* To a pointer, which is not something to fold */
+		return NULL;
+	default:
+		return NULL;
+	}
+}
+
+#else
+
+/*
+ *	Without double in the compiler, only the sign flip is safe to do
+ *	on the bits, and that is all the front end needs: it tokenises a
+ *	negative constant as a negate of a positive one.
+ */
+static struct node *fold_float_unary(struct node *n, struct node *r,
+				     unsigned op)
+{
+	if (op == T_NEGATE) {
+		r->value ^= ((cval_t)1) << (8 * type_sizeof(r->type) - 1);
+		return r;
+	}
+	return NULL;
+}
+
+#endif
+
 static struct node *replace_constant(struct node *n, unsigned t, cval_t value)
 {
 	if (n->left)
@@ -529,8 +653,19 @@ struct node *constify(struct node *n)
 	   so all we have to worry about is truncating constants and just
 	   relabelling the type on a name or label */
 	if (op == T_CAST) {
-		if (r->op == T_CONSTANT)
+		if (r->op == T_CONSTANT) {
+			/*
+			 * Relabelling the type is the whole conversion for
+			 * an integer, whose value is a number in both. It
+			 * is not for floating point, where the value is a
+			 * bit pattern that means something different under
+			 * the new type: (float)1.25 relabelled is the
+			 * bottom half of the double, which is zero.
+			 */
+			if (IS_FLOATING(n->type) || IS_FLOATING(r->type))
+				return fold_float_unary(n, r, op);
 			return replace_constant(n, n->type, r->value);
+		}
 		if (r->op == T_NAME || r->op == T_LABEL) {
 			r->type = n->type;
 			free_node(n);
@@ -758,14 +893,22 @@ struct node *constify(struct node *n)
 		if (r->flags & LVAL)
 			return NULL;
 
-		/* We special case one float manipulation as we need it here
-		   until we change how the front end tokenises -const */
-
-		if (r->op == T_CONSTANT && (rt == FLOAT || rt == DOUBLE)) {
-			/* FIXME: this assumes IEE754 math at 32bit */
-			r->value ^= 0x80000000UL;
-			return r;
-		}
+		/*
+		 * A unary operation on a constant with floating point on
+		 * either side. The value here is an IEEE754 bit pattern,
+		 * not a number, so none of the integer folding below applies
+		 * to it.
+		 *
+		 * This used to be one line - flip bit 31 and return - which
+		 * was right only for negating a float. It ran for every
+		 * unary operator and both widths, so negating a double
+		 * flipped a bit in the middle of its mantissa, and casting
+		 * a floating constant to anything returned it unconverted
+		 * with a mantissa bit flipped for good measure.
+		 */
+		if (r->op == T_CONSTANT && (IS_FLOATING(rt) ||
+					    IS_FLOATING(n->type)))
+			return fold_float_unary(n, r, op);
 
 		if (!IS_INTORPTR(rt))
 			return NULL;
