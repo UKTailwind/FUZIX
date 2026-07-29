@@ -37,6 +37,15 @@ unsigned getquad(void)
 	return n;
 }
 
+unsigned long long getoct(void)
+{
+	unsigned long long n = 0;
+	unsigned i;
+	for (i = 0; i < 8; i++)
+		n |= (unsigned long long)getbyte() << (8 * i);
+	return n;
+}
+
 unsigned gettok(void)
 {
 	unsigned n = getbyte();
@@ -319,6 +328,27 @@ unsigned decode_token(void)
 	case T_ULONGVAL:
 		printf("ulong %u\n", getquad());
 		break;
+	/* The wide forms carry eight bytes. The float and double cases
+	   print the bits as well as the value, because that is what a
+	   literal encoder has to be checked against */
+	case T_LONGLONGVAL:
+		printf("longlong %lld\n", (long long)getoct());
+		break;
+	case T_ULONGLONGVAL:
+		printf("ulonglong %llu\n", getoct());
+		break;
+	case T_FLOATVAL: {
+		union { unsigned long u; float f; } v;
+		v.u = getquad();
+		printf("float %08lx %.9g\n", v.u, (double)v.f);
+		break;
+	}
+	case T_DOUBLEVAL: {
+		union { unsigned long long u; double d; } v;
+		v.u = getoct();
+		printf("double %016llx %.17g\n", v.u, v.d);
+		break;
+	}
 	case T_STRING:
 		printf("string: ");
 		dostring();
@@ -326,9 +356,21 @@ unsigned decode_token(void)
 	case T_STRING_END:
 		printf("$end\n");
 		break;
-	case T_LINE:
-		printf("Line %d\n", getpair());
+	case T_LINE: {
+		/* Bit 15 says a NUL terminated file name follows - see the
+		   matching code in lex.c. Without this the dumper falls off
+		   the rails on the very first token of any input. */
+		unsigned l = getpair();
+		if (l & 0x8000) {
+			unsigned ch;
+			printf("Line %d file ", l & 0x7FFF);
+			while ((ch = getbyte()) != 0)
+				pchar(ch);
+			printf("\n");
+		} else
+			printf("Line %d\n", l);
 		break;
+	}
 	default:
 		if (n >= T_SYMBOL)
 			printf("Symbol %d\n", n - T_SYMBOL);

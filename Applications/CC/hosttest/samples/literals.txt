@@ -1,0 +1,79 @@
+# Floating literals for littest.sh, one per line, blank lines and #
+# comments ignored. A trailing f or F makes it a float, otherwise it
+# is a double. No leading minus - cc0 tokenizes that as an operator.
+
+# The easy ones
+0.0
+1.0
+0.5
+2.0
+1.5
+0.25
+100.0
+1000000.0
+
+# Not representable, so the rounding has to be right
+0.1
+0.2
+0.3
+0.7
+3.14159265358979
+2.718281828459045
+1.0000000000000002
+
+# The case that started this: nine decimals was the old table limit
+0.123456789123456
+123456789.123456789
+0.000000000123456789
+0.0000000000000000000000000000000001
+
+# Seventeen significant digits, and more than the mantissa can hold
+1234567890123456789.0
+9007199254740992.0
+9007199254740993.0
+9007199254740994.0
+12345678901234567890123456789.0
+
+# Exponent forms
+1e0
+1e1
+1e10
+1e-10
+1e100
+1e-100
+5e-1
+0.5e1
+1.5e-5
+6.02214076e23
+1.602176634e-19
+2.99792458e8
+
+# The edges of the format
+1.7976931348623157e308
+2.2250738585072014e-308
+1e308
+1e-308
+1e-320
+5e-324
+4.9406564584124654e-324
+2.2250738585072011e-308
+
+# Hex, where the digits are exact
+0x1p0
+0x1.8p1
+0x1p-10
+0x1.fffffffffffffp1023
+0x1p-1022
+0x1.921fb54442d18p1
+
+# Floats
+0.0f
+1.5f
+0.1f
+3.14159265358979f
+16777216.0f
+16777217.0f
+3.4028234663852886e38f
+1.1754943508222875e-38f
+1e-45f
+1e40f

@@ -16,6 +16,13 @@
 #define TARGET_MAX_UINT		4294967295UL
 #define TARGET_MAX_PTR		TARGET_MAX_UINT
 
+/*
+ *	Double is a real 64bit double here, not an alias for float. cc0
+ *	emits T_DOUBLEVAL for an unsuffixed floating constant, and
+ *	target_type_remap() has to leave DOUBLE alone to match.
+ */
+#define TARGET_HAS_DOUBLE
+
 #else
 
 #define TARGET_MAX_INT		32767L

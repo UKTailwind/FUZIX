@@ -29,19 +29,26 @@ PICOIOC ioctl.
 Measured on hardware: 2000-element sieve in ~75 ms, against ~1 ms
 interpreted on the development host.
 
-## Next task: double
+Floating point literals are encoded correctly and `double` is a real
+64-bit double, but there is no floating point *arithmetic* yet.
 
-See "What double still needs" in PC3-COMPILER-PLAN.md - it has the
-constants worked out, which is the part that costs time to rediscover.
-Three steps, in order:
+## Next task: the float and double opcodes
 
-1. a double literal encoder in cc0 (the real work; the existing one is
-   single precision end to end and its fraction table stops at 1e-9);
-2. stop `target_type_remap()` folding DOUBLE onto FLOAT in
-   target-thumb.c;
-3. float and double opcodes, following the 64-bit integer pattern.
+Steps 1 and 2 of the double work are done (see "Double" in
+PC3-COMPILER-PLAN.md). cc0 encodes IEEE-754 doubles that match gcc bit
+for bit, and `sizeof(double)` is 8.
 
-`samples/ll2.c` and a double equivalent are the cases to drive it.
+What is left is step 3, the opcodes. Follow the 64-bit integer pattern:
+the accumulator and slot handling already exist, so it is new opcodes
+plus conversions to and from the integer types.
+
+`hosttest/samples/dbl.c` is the test. It fails today, on purpose, and
+`all.sh` has one line to delete when it starts passing. Every floating
+operation currently emits a named runtime call that does not exist, so
+bcrun says `no runtime function "addd"` and names what is missing -
+`backend-bcode.c` does that deliberately, because `typesize(DOUBLE)` is
+8 and without the guard a double `+` would quietly emit a 64-bit
+integer add over the bit patterns.
 
 ## How to run things
 
@@ -54,15 +61,31 @@ Host tools, which is where all development happens:
 can be exercised without hardware. `CPU=z80` builds the 16-bit model
 for comparison.
 
-Differential test - gcc is the oracle:
+Differential tests - gcc is the oracle throughout:
 
-    cd hosttest && bash optest.sh samples/optest.c
+    cd hosttest
+    bash all.sh                  # everything, one line per sample
+    bash optest.sh samples/optest.c
+    bash littest.sh              # the floating literal encoder
+    bash littest.sh -r 5000 7    # ... plus 5000 random literals, seed 7
 
-It builds the same source with gcc (`-std=gnu89 -funsigned-char`, both
-needed) and through our chain, diffs the output, and reports which
-opcodes were exercised. A difference is a bug, not a judgement call.
-This found four real defects in its first few minutes, one of them in
-shared frontend code affecting every FCC target.
+`optest.sh` builds the same source with gcc (`-std=gnu89
+-funsigned-char`, both needed) and through our chain, diffs the output,
+and reports which opcodes were exercised. A difference is a bug, not a
+judgement call. This found four real defects in its first few minutes,
+one of them in shared frontend code affecting every FCC target.
+
+`littest.sh` compares the bits of every floating literal against what
+gcc encodes for the same text, so it tests cc0 alone and needs no code
+generator. Its random mode found the leading-zero float bug (`015.5`
+parsed as octal 13 followed by `.5`) that nobody would have written by
+hand. `all.sh` says which samples cannot use gcc as an oracle, and why,
+rather than quietly skipping them.
+
+    ../host-armm0/dumptokens < file.tok
+
+prints the token stream, including the bits and the value of every
+floating constant.
 
 Cross build for the target:
 

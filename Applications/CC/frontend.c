@@ -495,28 +495,15 @@ static unsigned tokenize_symbol(unsigned c)
 }
 
 /*
- *	Software float encoding. This is a bit long winded because
- *	we want it to work on an 8bit micro on a compiler that
- *	has no floating point so that you can bootstrap an FP
- *	compiler with an integer only one.
- */
-
-/*
- *	This does all the clever stuff and is about the only
- *	IEEE754 dependent part of the operation except negate.
+ *	Software floating point encoding. This is a bit long winded
+ *	because we want it to work on an 8bit micro on a compiler that
+ *	has no floating point, so that you can bootstrap an FP compiler
+ *	with an integer only one. It does now need 64bit integers, which
+ *	the token stream work already required.
  *
- *	We are passed a 32.32 fixed point value in sum/frac along
- *	with a binary exponent (exp) from building the bits, and a
- *	decimal exponent from the user.
- *
- *	We turn this into a 28bit mantissa for ease of manipulation
- *	and then exponentiate for the passed exponent adjusting the
- *	binary exponent as we go to keep the bits. Finally we normalize it
- *	to 24bit manitissa and assemble an unsigned IEEE 754 float.
- *
- *	This is not paritcularly fast. It's adequate for the compiler
- *	but it's not clear there is any gain from using an FP version
- *	for FP capable compilers.
+ *	Everything is encoded as an IEEE754 double and narrowed to a
+ *	float afterwards if that is what the target or the suffix asked
+ *	for. One path, so one thing to get right and one thing to test.
  */
 
 static uint16_t rtype;
@@ -557,76 +544,240 @@ static void exp_overflow(void)
 	warning("exponent under/overflow");
 }
 
-static void convert_fix32(int exp, uint32_t sum, uint32_t frac, int uexp)
+static unsigned is_fp_token(unsigned t)
 {
-	rtype = T_FLOATVAL;
-	if (sum == 0 && frac == 0) {
+	return t == T_FLOATVAL || t == T_DOUBLEVAL;
+}
+
+/*
+ *	The working value while a floating constant is being built. It is a
+ *	128bit fixed point number held as two 64bit halves and a binary
+ *	exponent, and it means
+ *
+ *		(dhi + dlo / 2^64) * 2^dexp
+ *
+ *	The parsers put the significant digits into dhi and set dexp, then
+ *	call convert_double() with whatever power of ten is left over.
+ *
+ *	128 bits sounds excessive for a 53 bit mantissa, but scaling by a
+ *	decimal exponent means up to 300-odd multiplies or divides by ten,
+ *	each of which throws away the bottom bit or so. The 75 spare bits
+ *	are what stops that reaching the mantissa.
+ */
+static uint64_t dhi, dlo;
+static int dexp;
+
+/*
+ *	dhi is kept normalised with bit 59 set, so it is a 60bit value and
+ *	ten times it still fits in 64 bits. That is the whole reason for
+ *	the odd looking constant.
+ */
+#define DNORM		0x0800000000000000ULL	/* bit 59 */
+#define DMANT		0x0010000000000000ULL	/* bit 52, the mantissa top */
+#define DMANTMASK	0x000FFFFFFFFFFFFFULL
+#define DHALF		0x8000000000000000ULL	/* half an ulp of dhi */
+
+static void dshl(void)
+{
+	dhi = (dhi << 1) | (dlo >> 63);
+	dlo <<= 1;
+	dexp--;
+}
+
+static void dshr(void)
+{
+	dlo = (dlo >> 1) | (dhi << 63);
+	dhi >>= 1;
+	dexp++;
+}
+
+/* Caller guarantees the value is not zero, or this does not terminate */
+static void dnorm(void)
+{
+	while (dhi >= (DNORM << 1))
+		dshr();
+	while (!(dhi & DNORM))
+		dshl();
+}
+
+/* Multiply the 128bit value by ten, in 32bit pieces so that no step
+   needs more than 64 bits of intermediate */
+static void dmul10(void)
+{
+	uint32_t l0 = (uint32_t) dlo;
+	uint32_t l1 = (uint32_t) (dlo >> 32);
+	uint64_t t;
+
+	t = (uint64_t) l0 * 10;
+	l0 = (uint32_t) t;
+	t = (uint64_t) l1 * 10 + (t >> 32);
+	l1 = (uint32_t) t;
+	dlo = ((uint64_t) l1 << 32) | l0;
+	/* Normalised, so dhi is under 2^60 and this cannot overflow */
+	dhi = dhi * 10 + (t >> 32);
+}
+
+/* And divide it by ten, long division carrying the remainder down */
+static void ddiv10(void)
+{
+	uint64_t r, t;
+
+	r = dhi % 10;
+	dhi /= 10;
+	t = (r << 32) | (dlo >> 32);
+	r = t % 10;
+	t /= 10;
+	dlo = (t << 32) | (((r << 32) | (dlo & 0xFFFFFFFFULL)) / 10);
+}
+
+/*
+ *	Scale the working value by ten to the uexp and assemble an IEEE754
+ *	double. This is the only part that knows the format, along with
+ *	narrow_float() and the sign flip in tokenize_numeric().
+ *
+ *	Once normalised to bit 52 the value is 1.m * 2^(52 + dexp), so the
+ *	stored exponent is dexp + 52 + 1023. That is where the 1075 comes
+ *	from; the float path used to spell the same sum 22 + 128, being
+ *	23 + 127.
+ */
+static void convert_double(int uexp)
+{
+	int e;
+
+	rtype = T_DOUBLEVAL;
+	if (dhi == 0 && dlo == 0) {
 		result = 0;
 		return;
 	}
-
-	/* Start by getting it down to 28bits */
-	while (!(sum & 0x08000000)) {
-		sum <<= 1;
-		if (frac & 0x80000000)
-			sum |= 1;
-		frac <<= 1;
-		exp--;
-	}
-	/* A 28bit number will never overflow when multiplied by ten */
+	dnorm();
 	while (uexp > 0) {
-		sum *= 10;
-		/* Shift it down to keep it fitting */
-		while (sum & 0xF0000000) {
-			sum >>= 1;
-			exp++;
-		}
+		dmul10();
+		dnorm();
 		uexp--;
 	}
-	/* Fix up the exponent in the other direction */
 	while (uexp < 0) {
-		sum /= 10;
-		while (!(sum & 0x08000000)) {
-			sum <<= 1;
-			exp--;
-		}
+		ddiv10();
+		dnorm();
 		uexp++;
 	}
-
-	exp += 22;
-	/* If the sum has too many bits then shift it down and adjust
-	   the exponent */
-	while (sum & 0xFF000000) {
-		sum >>= 1;
-		exp++;
+	/* Bit 59 down to bit 52, keeping what falls off it for rounding */
+	for (e = 0; e < 7; e++)
+		dshr();
+	e = dexp + 1075;
+	if (e < 1) {
+		/*
+		 * Denormal. Shift down to the fixed exponent of 2^-1074 and
+		 * let the rounding below happen there - rounding at bit 52
+		 * first and then shifting would round twice, and two
+		 * roundings do not add up to one.
+		 */
+		int s = 1 - e;
+		if (s > 54) {
+			exp_overflow();
+			result = 0;
+			return;
+		}
+		while (s--)
+			dshr();
+		e = 0;
 	}
-	/* If there are leading zero bits, then shift up and merge in frac */
-	while ((sum & 0x00800000) == 0) {
-		sum <<= 1;
-		if (frac & 0x80000000)
-			sum++;
-		frac <<= 1;
-		exp--;
+	/* Round to nearest, ties to even, as gcc does */
+	if (dlo > DHALF || (dlo == DHALF && (dhi & 1))) {
+		dhi++;
+		if (dhi & (DMANT << 1)) {	/* carried out of the mantissa */
+			dhi >>= 1;
+			e++;
+		}
 	}
-
-	exp += 128;
-
-	/* No denormals */
-	if (exp < 1) {
+	if (e > 2046) {
 		exp_overflow();
-		result = 0;	/* Zero */
+		result = 0x7FF0000000000000ULL;		/* Infinity */
 		return;
 	}
-	if (exp > 254) {
-		exp_overflow();
-		result = 0x7F800000;	/* Infinity */
+	if (e == 0) {
+		/* The exponent field sits directly above the mantissa, so a
+		   round up into bit 52 turns the largest denormal into the
+		   smallest normal on its own */
+		result = dhi;
 		return;
 	}
+	result = (dhi & DMANTMASK) | ((uint64_t) e << 52);
+}
 
-	/* Assemble result */
-	sum &= 0x007FFFFF;
-	sum |= (exp << 23) & 0x7F800000UL;
-	result = sum;
+/*
+ *	Narrow the double in result to an IEEE754 float, rounding the same
+ *	way. Used when the target has no double, or for an F suffix.
+ */
+static void narrow_float(void)
+{
+	uint64_t m = (result & DMANTMASK) | DMANT;	/* implicit bit back */
+	uint32_t sign = (uint32_t) ((result >> 32) & 0x80000000UL);
+	int e = (int) ((result >> 52) & 0x7FF);
+	uint64_t drop, half;
+	uint32_t f;
+	int s;
+
+	rtype = T_FLOATVAL;
+	if (e == 0) {			/* zero, or a double denormal */
+		result = sign;
+		return;
+	}
+	if (e == 0x7FF) {
+		result = sign | 0x7F800000UL;
+		return;
+	}
+	e -= 896;			/* 1023 - 127 */
+	s = 29;				/* 52 - 23 mantissa bits to drop */
+	if (e < 1) {
+		/* Denormal float: drop more bits instead of lowering the
+		   exponent, and round once at the end like the double case */
+		s += 1 - e;
+		if (s > 55) {
+			exp_overflow();
+			result = sign;
+			return;
+		}
+		e = 0;
+	}
+	drop = m & ((1ULL << s) - 1);
+	half = 1ULL << (s - 1);
+	f = (uint32_t) (m >> s);
+	if (drop > half || (drop == half && (f & 1))) {
+		f++;
+		if (f & 0x01000000UL) {	/* carried out of the mantissa */
+			f >>= 1;
+			e++;
+		}
+	}
+	if (e > 254) {
+		exp_overflow();
+		result = sign | 0x7F800000UL;
+		return;
+	}
+	if (e == 0)			/* As above: the carry sorts itself out */
+		result = sign | f;
+	else
+		result = sign | ((uint32_t) e << 23) | (f & 0x007FFFFFUL);
+}
+
+/* An integer constant that has picked up a floating point suffix */
+static void int_to_double(void)
+{
+	dhi = result;
+	dlo = 0;
+	dexp = 0;
+	convert_double(0);
+}
+
+/* Assumes IEEE754, which is the whole point of the above */
+static void negate_constant(void)
+{
+	if (rtype == T_DOUBLEVAL)
+		result ^= 0x8000000000000000ULL;
+	else if (rtype == T_FLOATVAL)
+		result ^= 0x80000000UL;
+	else
+		result = -result;
 }
 
 /* After the E or P in a floating point value is a signed decimal exponent.
@@ -654,43 +805,94 @@ static int parse_exponent(void)
 		c = get();
 	}
 	unget(c);
-	/* If it is out of the range then error */
-	if (sum > 128)
+	/*
+	 * A double reaches 1e308, so the old limit of 128 was a float
+	 * limit and is now wrong. Clamp rather than just warn: the value
+	 * becomes the trip count of the scaling loop, and 1e99999999 would
+	 * otherwise sit there multiplying by ten until the heat death of
+	 * the machine.
+	 */
+	if (sum > 4096) {
 		exp_overflow();
+		sum = 4096;
+	}
 	return sum * neg;
 }
 
-/* Decimal float format digits.digitsEdigits. We don't handle
-   the 0.0000000000000000000000000000000001 type silly yet */
+/*
+ *	Decimal, in the form digits.digitsEdigits.
+ *
+ *	There is no table of decimal fractions any more. Every significant
+ *	digit, on either side of the point, goes into the same 64bit
+ *	significand and the point is just a place where the decimal
+ *	exponent starts counting down, so the value is always
+ *
+ *		mant * 10^decexp
+ *
+ *	and 0.0000000000000000000000000000000001 is no harder than 1.0.
+ *	The old table had nine entries ending in 0x2A and 0x4, so anything
+ *	past the ninth decimal place was thrown away before precision was
+ *	even the question.
+ *
+ *	64 bits holds 19 digits and 17 are enough to pin down a double, so
+ *	digits past the nineteenth only move decexp.
+ */
 
-/* Table of decminal fractions as binary value. We only need 24bit
-   precision worst case so this is adequate */
-static const uint32_t fraction[10] = {
-	/* 0.100000 */ 0x199999A0,
-	/* 0.010000 */ 0x28F5C28,
-	/* 0.001000 */ 0x418937,
-	/* 0.000100 */ 0x68DB8,
-	/* 0.000010 */ 0xA7C5,
-	/* 0.000001 */ 0x10C6,
-	/* 0.000000 */ 0x1AD,
-	/* 0.000000 */ 0x2A,
-	/* 0.000000 */ 0x4,
-	0
-};
+/* True while the significand can still take another digit */
+#define FITS(m, c)	((m) <= (0xFFFFFFFFFFFFFFFFULL - (c)) / 10)
+
+/*
+ *	Everything from the point onwards, given the digits already seen as
+ *	mant * 10^decexp and the character that ended them.
+ *
+ *	This is shared because a decimal float can arrive with a leading
+ *	zero - 015.5 is perfectly good C - and that goes to the octal
+ *	scanner first. It used to come back out as the octal integer 13
+ *	followed by a second constant .5, silently.
+ */
+static void float_tail(unsigned c, uint64_t mant, int decexp)
+{
+	int uex = 0;
+
+	if (c == '.') {
+		while (1) {
+			c = get();
+			if (c == 'E' || c == 'e')
+				break;
+			if (!isdigit(c)) {
+				unget(c);
+				break;
+			}
+			c -= '0';
+			if (FITS(mant, c)) {
+				mant = mant * 10 + c;
+				decexp--;
+			}
+			/* Otherwise it is below the mantissa: drop it, and
+			   the exponent does not move because the digit was
+			   after the point */
+		}
+	}
+	if (c == 'E' || c == 'e')
+		uex = parse_exponent();
+
+	dhi = mant;
+	dlo = 0;
+	dexp = 0;
+	convert_double(decexp + uex);
+}
 
 static void dec_format(unsigned c)
 {
-	uint32_t sum = 0, frac = 0, n;
 	/*
-	 * The integer value at full width, kept alongside the 32-bit sum
-	 * the float path needs. sum deliberately loses bits once it
-	 * overflows - it only has to carry enough mantissa - but an
-	 * integer literal must keep every bit, and 5000000000 has more
-	 * than 32 of them.
+	 * The integer value at full width. This is the one that has to be
+	 * exact for an integer literal - 5000000000 needs more than 32
+	 * bits and used to lose them here.
 	 */
 	uint64_t isum = 0;
 	unsigned iov = 0;
-	unsigned ex = 0, uex;
+	uint64_t mant = 0;
+	int decexp = 0;
 
 	/* Parse digits before . : could be integer or float */
 	while (c != 'E' && c != 'e' && c != '.') {
@@ -710,47 +912,14 @@ static void dec_format(unsigned c)
 			iov = 1;
 		else
 			isum = isum * 10 + c;
-		n = sum * 10 + c;
-		/* If we wrap then keep shifting */
-		/* There's probably a better way to do this */
-		while (n < sum) {
-			sum >>= 1;
-			ex++;
-			n = sum * 10 + c;
-		}
-		sum = n;
+		if (FITS(mant, c))
+			mant = mant * 10 + c;
+		else
+			decexp++;	/* Digit is below the mantissa */
 		c = get();
 	}
 	/* We have done the integer part, and found floaty stuff */
-	n = 0;
-	/* Parse any fractional part using the fraction table */
-	if (c == '.') {
-		while (1) {
-			c = get();
-			if (c == 'E' || c == 'e')
-				break;
-			if (!isdigit(c)) {
-				unget(c);
-				convert_fix32(ex, sum, frac, 0);
-				return;
-			}
-			c -= '0';
-			if (fraction[n]) {
-				frac += c * fraction[n];
-				n++;
-			}
-		}
-	}
-	/* If we shifted the non fractional part to make it fit then we
-	   don't need the frac bits */
-	if (ex)
-		frac = 0;
-	/* Now look for an exponent */
-	if (c == 'E' || c == 'e')
-		uex = parse_exponent();
-	else
-		unget(c);
-	convert_fix32(ex, sum, frac, uex);
+	float_tail(c, mant, decexp);
 }
 
 /*
@@ -768,12 +937,22 @@ static unsigned unhex(unsigned c)
 	return c;
 }
 
+/*
+ *	Hex, and hex float in the form 0xdigits.digitsPdigits.
+ *
+ *	A hex digit is four binary bits, so unlike the decimal case there
+ *	is no scaling to do: the digits go straight into the mantissa and
+ *	the point and the P exponent only move the binary exponent. The
+ *	value is exact if it fits in 60 bits, which every sane hex float
+ *	does.
+ */
 static void hex_format(void)
 {
-	uint32_t sum = 0, frac = 0, n;
+	uint64_t sum = 0;
 	unsigned c;
-	int ct;
-	unsigned ex = 0, uex;
+	unsigned iov = 0;
+	int bexp = 0;
+	int uex = 0;
 
 	/* Parse digits before . : could be integer or float */
 	while (1) {
@@ -783,33 +962,21 @@ static void hex_format(void)
 		if (!isxdigit(c)) {
 			/* Done */
 			unget(c);
-			if (ex == 0) {
-				result = sum;
-				rtype = T_INTVAL;
-				return;
-			}
-			/* Oversized integer */
-			error("range");
+			if (iov)
+				overflow();
+			result = sum;
+			rtype = T_INTVAL;
 			return;
 		}
 		c = unhex(c);
-		n = sum << 4;
-
-		if (n >= sum)
-			sum = n + c;
-		else
-			/* Digits we are parsing are not relevant, but remember
-			   the shift */
-			ex += 4;
+		if (sum <= 0x0FFFFFFFFFFFFFFFULL)
+			sum = (sum << 4) | c;
+		else {
+			/* Below the mantissa, but the shift still counts */
+			iov = 1;
+			bexp += 4;
+		}
 	}
-	/* We have done the integer part, and found floaty stuff */
-	ct = 28;
-
-	/* If we stopped parsing because we had too many bits then
-	   don't add in the fractional part */
-	if (ex)
-		ct = -1;
-
 	if (c == '.') {
 		while (1) {
 			c = get();
@@ -817,32 +984,37 @@ static void hex_format(void)
 				break;
 			if (!isxdigit(c)) {
 				unget(c);
-				convert_fix32(ex, sum, frac, 0);
-				return;
+				break;
 			}
-			/* Keep adding on fraction bits that fit */
 			c = unhex(c);
-			/* Only add relevant fractions */
-			if (ct >= 0) {
-				frac |= c << n;
-				ct -= 4;
+			/* Digits after the point buy bits at the bottom */
+			if (sum <= 0x0FFFFFFFFFFFFFFFULL) {
+				sum = (sum << 4) | c;
+				bexp -= 4;
 			}
 		}
 	}
 	/* Now look for an exponent */
 	if (c == 'P' || c == 'p')
 		uex = parse_exponent();
-	else
-		unget(c);
-	convert_fix32(ex, sum, frac, uex);
+
+	dhi = sum;
+	dlo = 0;
+	dexp = bexp + uex;
+	convert_double(0);
 }
 
 /*
- *	We parsed a 0, check for 0x or octal
+ *	We parsed a 0, so this is 0x, octal, or a decimal float with a
+ *	leading zero. Which of the three is not known until the digits run
+ *	out, so accumulate it both ways and decide at the end.
  */
 static void oct_format(void)
 {
-	uint32_t sum = 0, n;
+	uint64_t sum = 0;		/* As octal */
+	uint64_t mant = 0;		/* As the significand of a float */
+	int decexp = 0;
+	unsigned iov = 0, bad = 0;
 	unsigned c;
 
 	c = get();
@@ -850,21 +1022,31 @@ static void oct_format(void)
 		hex_format();
 		return;
 	}
-	if (c == '.') {
-		/* Implied fractional part of decimal */
-		dec_format(c);
-		return;
-	}
 
-	while (c >= '0' && c <= '7') {
-		n = (sum << 3) + c - '0';
-		if (n < sum)
-			overflow();
-		sum = n;
+	while (isdigit(c)) {
+		c -= '0';
+		if (c > 7)
+			bad = 1;	/* Only matters if this is an integer */
+		if (sum > (0xFFFFFFFFFFFFFFFFULL >> 3))
+			iov = 1;
+		else
+			sum = (sum << 3) | c;
+		if (FITS(mant, c))
+			mant = mant * 10 + c;
+		else
+			decexp++;
 		c = get();
 	}
-	/* Done */
+	if (c == '.' || c == 'E' || c == 'e') {
+		float_tail(c, mant, decexp);
+		return;
+	}
+	/* Done, and it really was an integer */
 	unget(c);
+	if (bad)
+		error("invalid octal digit");
+	if (iov)
+		overflow();
 	result = sum;
 	rtype = T_INTVAL;
 }
@@ -916,28 +1098,36 @@ static unsigned tokenize_numeric(unsigned c, unsigned neg)
 			break;
 		}
 	}
-	/* UF is not valid but LF or FL is a double */
+	/* UF is not valid. LF or FL is a long double, which we make a
+	   double - it is the widest thing we have */
 	if (force_float && force_unsigned)
 		error("invalid type specifiers");
 
-	if (force_float && rtype != T_FLOATVAL) {
-		convert_fix32(0, result, 0, 0);
-		/* This also sets rtype */
-	}
-	if (neg) {
-		/* Assumes IEEE 754 */
-		if (rtype == T_FLOATVAL)
-			result ^= 0x80000000UL;
-		else
-			result = -result;
-	}
-	if (rtype != T_FLOATVAL && force_longlong) {
+	/* An integer constant that has picked up an F suffix */
+	if (force_float && !is_fp_token(rtype))
+		int_to_double();	/* This also sets rtype */
+	/*
+	 * A floating constant is a double in C unless the F suffix says
+	 * otherwise. Narrow it for the suffix, or unconditionally on a
+	 * target that has no double and has to do everything in single
+	 * precision.
+	 */
+#ifdef TARGET_HAS_DOUBLE
+	if (rtype == T_DOUBLEVAL && force_float)
+		narrow_float();
+#else
+	if (rtype == T_DOUBLEVAL)
+		narrow_float();
+#endif
+	if (neg)
+		negate_constant();
+	if (!is_fp_token(rtype) && force_longlong) {
 		/* An explicit LL keeps its width whatever the value is */
 		rtype = force_unsigned ? T_ULONGLONGVAL : T_LONGLONGVAL;
-	} else if (rtype != T_FLOATVAL && result > 0xFFFFFFFFUL) {
+	} else if (!is_fp_token(rtype) && result > 0xFFFFFFFFUL) {
 		/* Too wide for the narrow forms even without a suffix */
 		rtype = force_unsigned ? T_ULONGLONGVAL : T_LONGLONGVAL;
-	} else if (rtype != T_FLOATVAL) {
+	} else if (!is_fp_token(rtype)) {
 		/* Anything can be shoved in a ulong */
 		rtype = T_ULONGVAL;
 		/* FIXME: this needs review for the -32768 case */
@@ -955,14 +1145,9 @@ static unsigned tokenize_numeric(unsigned c, unsigned neg)
 				rtype = T_INTVAL;
 		}
 	}
-	if (neg) {
-		/* Assumes IEEE754 */
-		if (rtype == T_FLOATVAL)
-			result ^= 0x80000000UL;
-		else
-			result = -result;
-	}
-	/* Order really doesn't matter here so stick to LE. We will worry about 
+	if (neg)
+		negate_constant();
+	/* Order really doesn't matter here so stick to LE. We will worry about
 	   actual byte order in the code generation */
 	encode_value();
 	return rtype;

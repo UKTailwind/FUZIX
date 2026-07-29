@@ -72,9 +72,10 @@ split that confines machine knowledge to ~114 lines.
 FCC targets **C89 minus deliberate omissions**. Checked against this
 tree:
 
-* **No 64-bit `double`.** Every `target-*.c` remaps `DOUBLE → FLOAT`;
-  cc0 encodes 32-bit IEEE only. **81 files in `Library/libs` use
-  `double`** — that is libm. BBC BASIC uses it in five files.
+* ~~**No 64-bit `double`.**~~ Fixed for this target, 2026-07-29: cc0
+  encodes real IEEE-754 doubles and `target-thumb.c` no longer remaps
+  `DOUBLE → FLOAT`. The other targets still do both. The arithmetic
+  opcodes are still to come — see below.
 * **No bitfields** (omitted by design). Used by
   `Kernel/platform/platform-rpipico/console.c`, `util/fat.c`,
   `util/stty.c`, `Library/libs/resolv.h`.
@@ -112,50 +113,69 @@ Two properties make this the right shape:
    interpret the rest — exactly the mechanism `TARGET.md` already
    describes for replacing helpers one at a time.
 
-## What double still needs
+## Double
 
-The wide-literal work is done (token stream, cc0 accumulation, lex,
-primary), so `long long` literals now match gcc. `double` needs three
-more things, in this order, and the first is the real work.
+**1. The literal encoder in cc0 — DONE 2026-07-29.**
 
-**1. A double literal encoder in cc0.** `convert_fix32()` is
-single-precision from end to end and cannot be reused as-is:
+`convert_fix32()` is gone, along with its nine-entry decimal fraction
+table. Everything is now encoded as an IEEE-754 double by
+`convert_double()` and narrowed afterwards by `narrow_float()` if the
+`F` suffix or a target without `TARGET_HAS_DOUBLE` asks for single
+precision. One path, so one thing to get right.
 
-* input is a 32.32 fixed point pair, so the value carries at most
-  ~56 bits before conversion even starts;
-* it normalises to a 28-bit intermediate, then to a 24-bit mantissa;
-* it assembles `sum |= (exp << 23) & 0x7F800000` — IEEE single;
-* the decimal fraction table is 24-bit with **nine entries**, stopping
-  at 1e-9, and the last few are already degenerate (`0x2A`, `0x4`, 0).
+Two decisions carry the accuracy:
 
-So `0.123456789123456` arrives as about `0.12345679` — and digits past
-the ninth decimal are dropped before precision is even the question.
+* **No fraction table.** Every significant digit on either side of the
+  point goes into the same 64-bit significand and the point only
+  decides where the decimal exponent starts counting down, so the value
+  is always `mant * 10^decexp`. The old table stopped at 1e-9 with
+  entries already down to `0x2A` and `0x4`, which is why
+  `0.123456789123456` used to arrive as about `0.12345679`.
+* **A 128-bit working value** (`dhi`/`dlo`/`dexp`), because scaling by
+  a decimal exponent means up to 300-odd multiplies or divides by ten
+  and each one throws away the bottom bit. The 75 bits below the
+  mantissa are what stop that reaching it.
 
-The constants are worth writing down, because they are not obvious.
-`exp += 22` then `exp += 128` is `exp + 150`, which is `23 + 127`: the
-mantissa is normalised with bit 23 set, so the value is
-`1.xxx * 2^(23+exp)` and the stored exponent is `23 + exp + bias`. For
-double the equivalent is **`exp + 1075`** (`52 + 1023`), with the
-mantissa normalised to bit 52, the exponent field at bit 52, the valid
-range 1..2046, and infinity `0x7FF0000000000000`.
+The constants, since they are not obvious: `dhi` is normalised with
+bit 59 set, so it is a 60-bit value and ten times it still fits in 64
+bits — that is what makes `dmul10` safe. Normalised down to bit 52 the
+value is `1.m * 2^(52 + dexp)`, so the stored exponent is
+**`dexp + 1075`** (`52 + 1023`); the old float path spelled the same
+sum `22 + 128`, being `23 + 127`. Valid range 1..2046, infinity
+`0x7FF0000000000000`. Rounding is to nearest, ties to even, done once —
+denormals shift down *before* the rounding, because two roundings do
+not add up to one.
 
-The pre-multiply normalisation is 28 bits so that a `* 10` cannot
-overflow 32; the double equivalent is 60 bits so it cannot overflow 64.
+Verified by `hosttest/littest.sh`: 60 hand-picked literals and 20,000
+random ones, all encoding to exactly the bits gcc produces, including
+denormals, both ends of the exponent range, hex floats, and the
+ties-to-even cases. The random sweep also turned up a pre-existing bug
+in which a decimal float with a leading zero — `015.5` is valid C —
+went to the octal scanner and came back out as the integer 13 followed
+by a second constant `.5`, silently.
 
-Also needed: a fraction table with ~64-bit entries extended to about
-1e-19, and `frac` accumulated at 64 bits in `dec_format`.
+**2. The type remap — DONE 2026-07-29.** `target_type_remap()` in
+`target-thumb.c` no longer folds `DOUBLE` onto `FLOAT`, and
+`TARGET_HAS_DOUBLE` in `target.h` is the matching half in cc0. The two
+have to agree. `sizeof(double)` is now 8.
 
-**2. Stop remapping the type.** Every `target-*.c` has
-`if (type == DOUBLE) return FLOAT;` in `target_type_remap()`, so DOUBLE
-never survives the frontend. target-thumb.c has to keep it once the
-backend can handle it.
+**3. Float and double opcodes — TO DO.** Same pattern as the 64-bit
+integer set: the accumulator and slot handling already exist, so this
+is largely new opcodes plus conversions to and from the integer types.
+`hosttest/samples/dbl.c` is the test, and `all.sh` has a line to delete
+when it starts passing.
 
-**3. Float and double opcodes.** Same pattern as the 64-bit integer
-set: the accumulator and slot handling already exist, so this is
-largely new opcodes plus conversions to and from the integer types.
+Until then every floating operation emits a named runtime call that
+does not exist, so `bcrun` says `no runtime function "addd"` and names
+what is missing. That is deliberate: `typesize(DOUBLE)` is 8, so
+without the guards in `backend-bcode.c` a `+` on two doubles would fall
+into the 64-bit *integer* cases and add the bit patterns — a wrong
+answer rather than a failure. The names to implement are `addd subd
+muld divd negd eqd ned ltd gtd led ged boold lnotd`, the same set with
+`f` for float, and the conversions `castid castdi castfd castdf`.
 
-gcc is the oracle throughout - `hosttest/optest.sh` will report a
-mis-encoded constant immediately.
+gcc is the oracle throughout — `littest.sh` for the encoding,
+`optest.sh` for the arithmetic.
 
 ## Phases
 

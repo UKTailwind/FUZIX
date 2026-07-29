@@ -94,13 +94,13 @@ unsigned target_scale_ptr(unsigned t, unsigned scale)
 unsigned target_type_remap(unsigned type)
 {
 	/*
-	 * Our double is float. Every other target does this too, but be
-	 * clear about what it costs: code using double silently gets
-	 * single precision. It is the reason libm and BBC BASIC are out
-	 * of scope for this compiler.
+	 * Every other target folds DOUBLE onto FLOAT, so code using double
+	 * silently gets single precision. We do not: the machine has 64bit
+	 * integers to build on and the literal encoder in cc0 produces
+	 * real IEEE754 doubles, so a double here is eight bytes and 53
+	 * bits of mantissa. TARGET_HAS_DOUBLE in target.h is the other
+	 * half of this and the two have to agree.
 	 */
-	if (type == DOUBLE)
-		return FLOAT;
 	return type;
 }
 

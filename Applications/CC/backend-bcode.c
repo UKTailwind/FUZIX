@@ -727,6 +727,29 @@ unsigned gen_shortcut(struct node *n)
 }
 
 /*
+ *	Floating point is not generated yet - that is step 3 of the plan in
+ *	PC3-COMPILER-PLAN.md, and cc0 now produces real doubles ahead of it.
+ *
+ *	Until the opcodes exist, every floating operation has to become a
+ *	named runtime call that does not exist, so bcrun says
+ *
+ *		bcrun: no runtime function "addd"
+ *
+ *	and names what is missing. The trap being avoided is silence:
+ *	typesize(DOUBLE) is 8, so "a + b" on two doubles would otherwise
+ *	fall into the 64-bit integer cases and add the bit patterns, which
+ *	prints a wrong answer instead of failing.
+ */
+static unsigned fpcall(const char *base, unsigned t)
+{
+	char buf[16];
+
+	sprintf(buf, "%s%c", base, BASE_TYPE(t) == DOUBLE ? 'd' : 'f');
+	libcall(buf);
+	return 1;
+}
+
+/*
  *	Binary operators. Signedness is decided by the left operand's
  *	type, as the tree has already applied the usual conversions.
  */
@@ -737,6 +760,25 @@ static unsigned binop(struct node *n)
 	/* Operand width decides which family of opcodes to use. The 64-bit
 	   forms do not truncate; the 32-bit ones do. */
 	unsigned w = typesize(t);
+
+	if (!IS_INTARITH(t) && !PTR(t)) {
+		const char *name = NULL;
+		switch (n->op) {
+		case T_PLUS:	name = "add";	break;
+		case T_MINUS:	name = "sub";	break;
+		case T_STAR:	name = "mul";	break;
+		case T_SLASH:	name = "div";	break;
+		case T_EQEQ:	name = "eq";	break;
+		case T_BANGEQ:	name = "ne";	break;
+		case T_LT:	name = "lt";	break;
+		case T_GT:	name = "gt";	break;
+		case T_LTEQ:	name = "le";	break;
+		case T_GTEQ:	name = "ge";	break;
+		}
+		if (name)
+			return fpcall(name, t);
+		return 0;
+	}
 
 #define OP(o32, o64)	do { cbyte(w == 8 ? (o64) : (o32)); return 1; } while (0)
 
@@ -835,6 +877,12 @@ static unsigned fallback(struct node *n)
 		return 1;
 	}
 
+	/* Floating point has no width and signedness, and no runtime
+	   function either yet, so name it as such rather than emitting
+	   "pluseq8s" and having it run as an integer */
+	if (!IS_INTARITH(n->type) && !PTR(n->type))
+		return fpcall(name, n->type);
+
 	/*
 	 * Append the operand width and signedness.
 	 *
@@ -932,16 +980,24 @@ unsigned gen_node(struct node *n)
 			cbyte(v & 0xFF);
 		}
 		return 1;
+	/* Each of these keys off the operand width, and a double is eight
+	   bytes wide, so each needs saving from the 64-bit integer form */
 	case T_NEGATE:
+		if (!IS_INTARITH(n->type) && !PTR(n->type))
+			return fpcall("neg", n->type);
 		cbyte(typesize(n->type) == 8 ? BC_NEG64 : BC_NEG);
 		return 1;
 	case T_TILDE:
 		cbyte(typesize(n->type) == 8 ? BC_NOT64 : BC_NOT);
 		return 1;
 	case T_BANG:
+		if (!IS_INTARITH(n->type) && !PTR(n->type))
+			return fpcall("lnot", n->type);
 		cbyte(typesize(n->type) == 8 ? BC_LNOT64 : BC_LNOT);
 		return 1;
 	case T_BOOL:
+		if (!IS_INTARITH(n->type) && !PTR(n->type))
+			return fpcall("bool", n->type);
 		cbyte(typesize(n->type) == 8 ? BC_BOOL64 : BC_BOOL);
 		return 1;
 	case T_CAST:
@@ -951,8 +1007,26 @@ unsigned gen_node(struct node *n)
 			unsigned ls, rs;
 			if (PTR(lt) || PTR(rt))
 				return 1;
-			if (!IS_INTARITH(lt) || !IS_INTARITH(rt))
-				return 0;
+			if (!IS_INTARITH(lt) || !IS_INTARITH(rt)) {
+				/*
+				 * A conversion involving float or double.
+				 * Returning 0 here sends it to the shared
+				 * helper(), which printf()s the helper name
+				 * into the middle of the binary object - the
+				 * file then does not even load, which is a
+				 * long way from the actual problem. Name the
+				 * conversion instead: "castid" is int to
+				 * double, "castdi" the other way.
+				 */
+				char buf[16];
+				sprintf(buf, "cast%c%c",
+					IS_INTARITH(rt) ? 'i' :
+					  (BASE_TYPE(rt) == DOUBLE ? 'd' : 'f'),
+					IS_INTARITH(lt) ? 'i' :
+					  (BASE_TYPE(lt) == DOUBLE ? 'd' : 'f'));
+				libcall(buf);
+				return 1;
+			}
 			ls = typesize(lt);
 			rs = typesize(rt);
 			/* Widening to or narrowing from 64 bits. */
