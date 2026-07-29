@@ -292,8 +292,21 @@ bufptr freebuf(void)
 	/* FIXME: Once we support sleeping on disk I/O this goes away and
 	   we sleep on something - buffer going unbusy or even the oldest
 	   buffer and then check if it's still old and if not retry */
-	if (!oldest)
+	if (!oldest) {
+		/*
+		 * DEBUG: every buffer is pinned. Say which blocks and with
+		 * what busy count before dying, because "no free buffers"
+		 * on its own says nothing about who is holding them - and a
+		 * leak of one buffer per operation looks identical to
+		 * genuine pressure until you can see the list.
+		 */
+		for (bp = bufpool; bp < bufpool_end; ++bp)
+			kprintf("buf %d: dev %d blk %d busy %d dirty %d\n",
+				(int)(bp - bufpool), (int)bp->bf_dev,
+				(int)bp->bf_blk, (int)bp->bf_busy,
+				(int)bp->bf_dirty);
 		panic(PANIC_NOFREEB);
+	}
 
 	block(oldest);
 	if (oldest->bf_dirty) {
