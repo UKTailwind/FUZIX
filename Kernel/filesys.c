@@ -267,6 +267,7 @@ inoptr i_open(register uint16_t dev, uint16_t ino)
     register inoptr j;
     struct mount *m;
     bool isnew = false;
+    bool cached = false;
 
     validchk(dev, PANIC_IOPEN);
 
@@ -295,6 +296,7 @@ inoptr i_open(register uint16_t dev, uint16_t ino)
 
         if(j->c_dev == dev && j->c_num == ino) {
             nindex = j;
+            cached = true;
             goto found;
         }
     }
@@ -315,6 +317,21 @@ inoptr i_open(register uint16_t dev, uint16_t ino)
     nindex->c_flags = (m->m_flags & MS_RDONLY) ? CRDONLY : 0;
 found:
     if(isnew) {
+        /*
+         * A freshly allocated inode has to be checked against the
+         * disk, not against whatever this table entry still holds
+         * from the last file that used this inode number.
+         *
+         * The loop above takes a matching entry whatever its
+         * reference count, and that path does not read the inode - so
+         * a newly allocated number that happened to be cached was
+         * validated against a stale copy. The in-core inode and the
+         * disk then disagree, and the next i_deref frees an inode
+         * that is really in use, putting a live file on the free
+         * list.
+         */
+        if (cached && breadi(dev, ino, &nindex->c_node))
+            return NULLINODE;
         if(nindex->c_node.i_nlink || nindex->c_node.i_mode & F_MASK)
             goto badino;
     } else {
@@ -646,6 +663,9 @@ tryagain:
     }
 
 done:
+    /* The scan was checked for duplicates while chasing the above and
+       never produced one, which is what pointed at i_free. Each
+       (block, slot) is visited exactly once, so it cannot. */
     if(!k) {
         if(dev->s_tinode)
             goto corrupt;
@@ -673,12 +693,54 @@ corrupt:
 void i_free(uint16_t devno, uint16_t ino)
 {
     register fsptr dev;
+    uint16_t i;		/* DEBUG */
 
     if(baddev(dev = getdev(devno)))
         return;
 
     if(ino < 2 || ino >=(dev->s_isize-2)*8)
         panic(PANIC_IFREE_BADI);
+
+    /*
+     * An inode may appear on the free list at most once. Nothing here
+     * ever checked, and i_deref does reach its freeing branch twice
+     * for the same inode - so the list ended up holding it twice, and
+     * the second allocation handed out a live file. That is the fault
+     * behind "i_open: bad disk inode", which the create path then
+     * reports as the entirely misleading ENFILE.
+     *
+     * Enforce the invariant where it is broken. Freeing something
+     * already free is a no-op, not a reason to add it again. The list
+     * is at most FILESYS_TABSIZE entries, so the scan is cheap next to
+     * the block I/O around it.
+     *
+     * This is a guard, not a cure: the double deref that provokes it
+     * is still there and still worth finding. It is safe to fix here
+     * because the invariant is the thing that matters - an allocator
+     * must never hand out the same object twice.
+     */
+    for (i = 0; i < dev->s_ninode; i++) {
+        if (dev->s_inode[i] == ino) {
+            kprintf("i_free: %u freed twice\n", (uint16_t)ino);
+            return;
+        }
+    }
+
+    /* DEBUG: is anything still holding this inode? Freeing one that is
+       live is the more damaging half of the fault - it is what puts a
+       live inode on the list for i_alloc to hand out again. */
+    {
+        register inoptr j;
+        for (j = i_tab; j < i_tab + ITABSIZE; j++) {
+            if (j->c_dev == devno && j->c_num == ino && j->c_refs) {
+                kprintf("i_free: %u still has %u refs, mode %x nlink %u\n",
+                        (uint16_t)ino, (uint16_t)j->c_refs,
+                        (uint16_t)j->c_node.i_mode,
+                        (uint16_t)j->c_node.i_nlink);
+                break;
+            }
+        }
+    }
 
     ++dev->s_tinode;
     if(dev->s_ninode < FILESYS_TABSIZE)

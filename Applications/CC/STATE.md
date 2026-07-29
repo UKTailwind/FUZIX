@@ -161,38 +161,25 @@ it now includes `Makefile.common` like every other CPU, and builds.
 There is still no libc for compiled programs and no headers, so declare
 what you use (`int printf();`) - the runtime lives inside bcrun.
 
-## Open: the board cannot create files during a compile
+## Fixed: the board could not create files during a compile
 
-2026-07-29, unresolved and **not a compiler fault**. On the PC3, a
-compile that has worked before starts failing at one of the passes with
+2026-07-29, kernel commit 27a82379f. It was never a compiler fault. The
+free inode list in the superblock is only a cache, nothing validated
+it, and `i_alloc` was handing out inodes that were live files - the
+same four came off the list twice, the second time after they had
+become files. `fmount()` now discards the on-disk list so `i_alloc`
+rebuilds it, and `i_alloc` reads each inode before believing the list
+says it is free.
 
-    i_open: bad disk inode
-    fp.bc: File table overflow
+Worth remembering from it: **"File table overflow" is a misleading
+message.** `filesys.c:507` maps every `i_open` failure onto `ENFILE`,
+so that is what you see whatever went wrong. The real error is the
+`i_open: bad inode` line above it, which now says which inode, whether
+it was newly allocated, and its mode and link count.
 
-The second line is a lie and will cost you an hour if you believe it.
-`filesys.c:507` maps *every* `i_open` failure onto `ENFILE`, which
-prints as "File table overflow". The table is not full: `df -i` shows
-1380 inodes free and `ps` shows nothing leaking. The real error is the
-line above it - the kernel allocated an inode and then decided it was
-in use.
-
-What is established:
-
-* not the compiler - `cc optest.c` runs to completion, and the same
-  sources compile correctly on the host;
-* not a full disk or a full table - plenty of both free;
-* not repaired by `fsck`, which reports the filesystem clean, nor by a
-  clean reboot;
-* deterministic per file - `fp.c` failed identically five times running
-  while `sieve.c` compiled fine;
-* provoked by creating and deleting the same handful of names over and
-  over, which is what running `cc` in a loop does and which nothing on
-  this board had done before.
-
-`mkccimage.sh` builds a fresh SD image with the compiler installed, to
-find out whether this follows a clean filesystem. If it does, it is a
-live kernel bug in inode allocation rather than damage left by a hard
-reset.
+Also eliminated, do not re-investigate: PSRAM. The machine is
+overclocked and swap lives in PSRAM, so it was the obvious suspect;
+swap was moved to the SD partition and the fault reproduced exactly.
 
 ## Things that have cost hours
 
