@@ -175,12 +175,29 @@ that ambition rather than on their own.
 
 ## Recommended order
 
-1. **Identifier length and the truncation warning**, with block scope.
-   An hour, and it removes the only silent-wrong-code case.
-2. **Block scope.** Small, contained, and the probe already exists.
-3. **Struct passing and returning.** Establish the ABI first.
+1. ~~**Identifier length and the truncation warning.**~~ **DONE**
+   2026-07-29, commit `1b97bbd62`. 31 significant characters on this
+   target, the limit taken from `NAMELEN` in both places that had their
+   own number for it, and a warning when characters are dropped.
+2. ~~**Block scope.**~~ **DONE** in the same commit. `block_base`, and
+   the duplicate check scoped to it. Verified in both directions -
+   four kinds of genuine duplicate still rejected, shadowing of an
+   outer local and of a parameter accepted. `samples/scope.c` passes on
+   the host and on the PC3.
+3. **Struct passing and returning.** Next. Establish the ABI first.
 4. **Bitfields.** Schedule against wanting to compile Fuzix sources,
    not before.
+
+### Left behind by 1 and 2
+
+* Shadowed locals each take their own frame slot instead of reusing the
+  space, so a function with many blocks has a larger frame than it
+  needs. Wasteful, not wrong; fixing it means a high-water mark per
+  block.
+* `NAMELEN` lives in `symtab.h`, which cc0 writes and cc2 reads. A
+  rebuilt cc0 against an old cc2 produces an object that builds, runs,
+  and prints nothing. `Makefile.host` now depends on it for both, as it
+  already did for `bytecode.h` - the cross Makefile always did.
 
 ## One thing to fix alongside
 
