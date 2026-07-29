@@ -176,6 +176,7 @@ struct node *function_call(struct node *n)
 	unsigned argsize = 0;
 	unsigned narg;
 	unsigned va = 0;
+	struct node *args;
 
 	/* Must be a function or pointer to function */
 	if (!IS_FUNCTION(n->type)) {
@@ -197,12 +198,41 @@ struct node *function_call(struct node *n)
 	/* A function without arguments */
 	if (match(T_RPAREN)) {
 		/* Make sure no arguments is acceptable */
-		n  = sf_tree(T_FUNCCALL, NULL, n);
+		args = NULL;
 		missedarg(narg, argp[0]);
 	} else {
-		n = sf_tree(T_FUNCCALL, call_args(&narg, argp, &argsize, &va), n);
+		args = call_args(&narg, argp, &argsize, &va);
 		missedarg(narg, argp[0]);
 	}
+
+	/*
+	 * A struct or union return goes through a hidden first argument:
+	 * the caller reserves the space and passes its address, and the
+	 * function copies its result there and hands the same address
+	 * back. So the call's value is an address, which is how every
+	 * other struct valued expression is already represented, and
+	 * "f().x" and "a = f()" then need nothing of their own.
+	 *
+	 * Being the first argument means being pushed last, which is what
+	 * wrapping the existing chain in one more T_ARGCOMMA does.
+	 */
+	if (IS_STRUCT(type) && !PTR(type)) {
+		struct node *h = new_node();
+		h->op = T_LOCAL;
+		h->value = assign_storage(type, S_AUTO);
+		/* No LVAL: we want the address of the temporary, not its
+		   contents, and T_LOCAL on its own is that address */
+		h->type = type_ptr(type);
+		if (args) {
+			args = tree(T_ARGCOMMA, args, h);
+			args->type = h->type;
+			args->value = 0;
+		} else
+			args = h;
+		argsize += target_argsize(h->type);
+	}
+
+	n = sf_tree(T_FUNCCALL, args, n);
 	/* Always emit this - some targets have other uses for knowing
 	   the boundary of a function call return */
 	n->type = type;

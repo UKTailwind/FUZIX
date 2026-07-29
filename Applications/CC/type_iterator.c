@@ -194,6 +194,9 @@ struct declstack {
 struct declstack decls[MAX_DECL];
 struct declstack *decp = decls;
 
+/* The base type of the declaration being walked - see do_type_name_parse */
+static unsigned decl_base_type;
+
 static void declarator_add(unsigned form, unsigned ptr, unsigned *idx)
 {
 	if (decp == &decls[MAX_DECL])
@@ -218,12 +221,27 @@ static void declarator_add(unsigned form, unsigned ptr, unsigned *idx)
  */
 
 
-static void parse_function_arguments(unsigned *tplt)
+static void parse_function_arguments(unsigned *tplt, unsigned hidden)
 {
 	unsigned *tn = tplt + 1;
 	unsigned t;
 	unsigned an;
 	struct symbol *sym;
+
+	/*
+	 * A function returning a struct or union is passed the address of
+	 * space the caller has reserved, as a hidden first argument, and
+	 * returns that same address. Reserving it here - before any
+	 * declared parameter - puts it at argument offset zero and shifts
+	 * everything else up by a word, which is what the call site
+	 * builds.
+	 *
+	 * It is deliberately not added to the argument template: the
+	 * template is the function's type, used to check calls against
+	 * the prototype, and the hidden argument is not part of it.
+	 */
+	if (hidden)
+		assign_storage(type_ptr(hidden), S_ARGUMENT);
 
 	/* Parse the bracketed arguments if any and nail them to the
 	   symbol. */
@@ -282,9 +300,28 @@ void type_parse_function(unsigned ptr)
 	unsigned tplt[33];	/* max 32 typed arguments */
 	unsigned argsave, locsave;
 	unsigned *idx;
+	unsigned hidden = 0;
+
+	/*
+	 * Does this function return a struct or union? The declarator is
+	 * parsed before the base type is applied to it, so the return
+	 * type does not exist yet - but it is the base type of the
+	 * declaration currently being parsed with this level's
+	 * indirections applied, and only ptr == 0 gives an aggregate.
+	 */
+	if (ptr == 0 && IS_STRUCT(decl_base_type) && !PTR(decl_base_type)) {
+#ifdef TARGET_HAS_STRUCTARG
+		hidden = decl_base_type;
+#else
+		/* Refuse rather than miscompile. Without the hidden
+		   argument the caller reads whatever a scalar return
+		   would have left behind. */
+		error("cannot return objects");
+#endif
+	}
 
 	mark_storage(&argsave, &locsave);
-	parse_function_arguments(tplt);
+	parse_function_arguments(tplt, hidden);
 	header(H_ARGFRAME, arg_size(), 0);
 	pop_storage(&argsave, &locsave);
 
@@ -370,11 +407,20 @@ static void declarator(unsigned *name, unsigned depth)
 static unsigned do_type_name_parse(unsigned type, unsigned *name)
 {
 	struct declstack *dp = decp;
+	unsigned obase = decl_base_type;
 
 	*name = 0;
 
+	/* type_parse_function() needs to know what this declaration's base
+	   type is, because the declarator is walked before the base type
+	   is applied to it. Saved and restored because parsing a
+	   parameter list re-enters here with a base type of its own. */
+	decl_base_type = type;
+
 	/* Walk the declaration building a type stack.*/
 	declarator(name, 0);
+
+	decl_base_type = obase;
 
 	/* Now work back down the stack from outside inwards so we can
 	   create our types cleanly */

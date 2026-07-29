@@ -110,11 +110,55 @@ static void for_statement(void)
 	cont_tag = oldcont;
 }
 
+/*
+ *	"return expr;" from a function returning a struct or union.
+ *
+ *	The caller passed the address of space for the result as a hidden
+ *	first argument, so this is a block copy into it that then leaves
+ *	that same address behind as the return value - which is exactly
+ *	what T_EQ on an aggregate already generates.
+ *
+ *	The destination is the *contents* of argument zero, so it is a
+ *	load, not the argument's own address. The source stays an address
+ *	like every other struct valued expression, which is why hier0() is
+ *	used directly rather than expression_tree().
+ */
+static void return_struct(void)
+{
+	struct node *dst, *src, *n;
+
+	if (token == T_SEMICOLON) {
+		error("return value expected");
+		write_tree(tree(T_NULL, NULL, NULL));
+		return;
+	}
+	src = hier0(0);
+	if (type_canonical(src->type) != func_type || PTR(src->type)) {
+		typemismatch();
+		write_tree(tree(T_NULL, NULL, NULL));
+		return;
+	}
+	dst = new_node();
+	dst->op = T_ARGUMENT;
+	dst->value = 0;
+	dst->type = type_ptr(func_type);
+	dst->flags = LVAL;
+	dst = make_rval(dst);		/* load the hidden pointer */
+
+	n = sf_tree(T_EQ, dst, src);
+	n->type = func_type;
+	n->value = type_sizeof(func_type);
+	write_tree(n);
+}
+
 static void return_statement(void)
 {
 	next_token();
 	header(H_RETURN, func_tag, 0);
-	expression_typed(func_type);
+	if (IS_STRUCT(func_type) && !PTR(func_type))
+		return_struct();
+	else
+		expression_typed(func_type);
 	footer(H_RETURN, func_tag, 0);
 }
 
