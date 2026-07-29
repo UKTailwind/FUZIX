@@ -461,26 +461,41 @@ static void keywords(void)
 }
 
 /* Read up to 14 more bytes into the symbol name, plus a terminator */
+/*
+ *	Collect the rest of an identifier, the caller having taken the
+ *	first character.
+ *
+ *	The limit comes from NAMELEN rather than a number written here:
+ *	the two disagreeing is how identifiers ended up significant to
+ *	fifteen characters when the table had room for sixteen. Say so
+ *	when characters are dropped - a silently truncated name turns two
+ *	variables into one and the program still builds.
+ */
 static void get_symbol_tail(char *p)
 {
-	unsigned n = 14;
+	unsigned n = NAMELEN - 2;	/* less the first character and the NUL */
 	unsigned c;
+	unsigned lost = 0;
+
 	while ((c = get()) != 0) {
 		if (!iscsymbol(c))
 			break;
 		if (n) {
 			n--;
 			*p++ = c;
-		}
+		} else
+			lost = 1;
 	}
 	*p = 0;
+	if (lost)
+		warning("identifier truncated");
 	unget(c);
 }
 
 /* Also does keywords */
 static unsigned tokenize_symbol(unsigned c)
 {
-	char symstr[16];
+	char symstr[NAMELEN];
 	unsigned h;
 	struct name *s;
 	*symstr = c;

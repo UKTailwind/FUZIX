@@ -298,6 +298,7 @@ static void declaration_block(void)
 void statement_block(unsigned need_brack)
 {
 	struct symbol *ltop;
+	struct symbol *obase;
 	if (token == T_EOF) {
 		fatal("unexpected EOF");
 		return;
@@ -325,6 +326,17 @@ void statement_block(unsigned need_brack)
 	}
 	next_token();
 	ltop = mark_local_symbols();
+	/*
+	 * Names declared from here on belong to this block and may shadow
+	 * anything below. Saved and restored because blocks nest.
+	 *
+	 * Not for a function body: its parameters and its outermost block
+	 * are one scope in C, so type_name_parse has already set the base
+	 * below the parameters and this must not move it above them.
+	 */
+	obase = block_base;
+	if (!need_brack)
+		block_base = ltop;
 	/* declarations */
 	declaration_block();
 
@@ -332,6 +344,7 @@ void statement_block(unsigned need_brack)
 		/* statements */
 		statement_block(0);
 	}
+	block_base = obase;
 	pop_local_symbols(ltop);
 	next_token();
 }

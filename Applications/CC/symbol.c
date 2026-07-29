@@ -15,6 +15,14 @@ static void symbol_bss(struct symbol *);
 struct symbol symtab[MAXSYM];
 struct symbol *last_sym = symtab - 1;
 struct symbol *local_top = symtab;
+/*
+ *	Where the current block's symbols start. Everything above this was
+ *	declared in this block; everything below is an enclosing block, a
+ *	parameter or a global. Redeclaring a name from below is shadowing,
+ *	which is legal C - redeclaring one from above is a duplicate.
+ *	statement_block() maintains this.
+ */
+struct symbol *block_base = symtab;
 
 struct symbol *symbol_ref(unsigned type)
 {
@@ -177,9 +185,23 @@ struct symbol *update_symbol_by_name(unsigned name, unsigned storage,
 	   it - we create a local one masking it */
 	if (sym && global == 0 && sym->infonext >= S_STATIC)
 		sym = NULL;
-	/* Local symbols don't duplicate. TODO awareness of block level */
-	if (sym && !global)
-		error("duplicate name");
+	/*
+	 * A local may not be declared twice in the same block, but it may
+	 * perfectly well shadow one from an enclosing block, or a
+	 * parameter. Only the first is an error; the second has to become
+	 * a new symbol rather than an update of the outer one, or the two
+	 * names end up sharing storage.
+	 *
+	 * Passing NULL is what makes it a new symbol, and it also side
+	 * steps update_symbol's storage class check - shadowing a
+	 * parameter with an auto is not a "storage class mismatch".
+	 */
+	if (sym && !global) {
+		if (sym > block_base)
+			error("duplicate name");
+		else
+			sym = NULL;
+	}
 	return update_symbol(sym, name, storage, type);
 }
 

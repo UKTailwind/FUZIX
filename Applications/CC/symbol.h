@@ -42,6 +42,7 @@ extern struct symbol *find_symbol_by_class(unsigned name, unsigned class);
 extern struct symbol *alloc_symbol(unsigned name, unsigned local);
 extern void pop_local_symbols(struct symbol *top);
 extern struct symbol *mark_local_symbols(void);
+extern struct symbol *block_base;
 extern unsigned *sym_find_idx(unsigned storage, unsigned *idx, unsigned len);
 extern unsigned func_return(unsigned type);
 extern unsigned *func_args(unsigned type);

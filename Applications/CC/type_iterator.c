@@ -394,6 +394,7 @@ static unsigned parse_depth = 0;
 unsigned type_name_parse(unsigned storage, unsigned type, unsigned *name)
 {
 	struct symbol *ltop = mark_local_symbols();
+	struct symbol *obase;
 	parse_depth++;
 	if (parse_depth == 8)
 		fatal("too complex");
@@ -410,7 +411,17 @@ unsigned type_name_parse(unsigned storage, unsigned type, unsigned *name)
 			header(H_EXPORT, *name, 0);
 		mark_storage(&argsave, &locsave);
 		init_storage();
+		/*
+		 * The parameters and the outermost block of the body are one
+		 * scope in C, so "f(int p) { int p; }" is a redeclaration and
+		 * not a shadow. ltop was taken before the parameters were
+		 * parsed, which makes it the right base for that block -
+		 * statement_block leaves it alone for a function body.
+		 */
+		obase = block_base;
+		block_base = ltop;
 		function_body(storage, *name, type);
+		block_base = obase;
 		pop_storage(&argsave, &locsave);
 		sym->infonext |= INITIALIZED;
 		funcbody = 1;
