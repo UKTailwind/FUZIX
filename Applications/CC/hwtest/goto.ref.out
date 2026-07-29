@@ -1,0 +1,5 @@
+chain 0
+countdown 15
+scatter 100 200 300 400
+escape 607
+tail 99 7

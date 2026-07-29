@@ -1,7 +1,13 @@
 # c-testsuite conformance — analysis and plan
 
-2026-07-29. Standing at **137 of 175** on the C89 subset of the
+2026-07-29. Standing at **143 of 175** on the C89 subset of the
 `single-exec` set (https://github.com/c-testsuite/c-testsuite).
+
+**Group 1 is done, commit `f5a1864ef`. No wrong-answer failures
+remain** - everything left either refuses to compile or needs a runtime
+function we do not have. All 18 samples build on the PC3 itself and
+match gcc, and the inode count is conserved exactly across a compile
+run.
 
     bash hosttest/ctest.sh        # run it
     bash hosttest/ctestwhy.sh     # what cc1 objected to, counted
@@ -28,11 +34,17 @@ are listed under the gaps anyway (00212, 00218, and the `%f` in 00195).
 
 ---
 
-## 1. Silent miscompiles — do these first
+## 1. Silent miscompiles — DONE, commit `f5a1864ef`
 
 **A compiler that refuses a program is a nuisance. One that accepts it
-and produces the wrong answer is a liability.** These six all compile
-without a diagnostic and then misbehave, so nothing warns you.
+and produces the wrong answer is a liability.** These six all compiled
+without a diagnostic and then misbehaved, so nothing warned you.
+
+All six are fixed. Regression samples: `ptrarray.c`, `escapes.c`,
+`statics.c`, and `goto.c` from the label fix before them. Kept below
+because the *reasons* are worth having when the same shapes recur -
+two of the six were the type encoding not distinguishing a pointer from
+an array, and that will come up again.
 
 ### 1.1 Pointer to array indexes with the wrong scale — 00130
 
@@ -77,13 +89,34 @@ both character constants and string literals. cc0's escape handling.
 Legal, if strange. Also exercises `goto` out of a nested switch and a
 label inside a switch block. Returns 1 where it should return 0.
 
-### 1.6 `bad address` crash — 00182
+### 1.6 A static local aliased the string literals — 00182
 
-`bcrun: bad address at pc 15` on a real program (a 7-segment display
-formatter). Not yet isolated; it is the only failure that crashes
-rather than answering wrongly, so it may well be one of the five above
-in disguise. **Re-check after fixing 1.1–1.5 before spending time on
-it.**
+`bcrun: bad address` on a real program, and much the most interesting
+of the six.
+
+`gen_data_label()` checks the segment and emits a BSS symbol when it is
+in bss. `gen_literal()`, which is what a *numbered* label uses, always
+said `BC_SYM_DATA`. A static local is written out as a numbered label,
+so `static int d[4]` inside a function got a data address and aliased
+the string literal area: assigning to `d[3]` rewrote the fourth word of
+the literals, and a `printf` format string later became whatever had
+been stored there.
+
+Worth remembering as a shape: the symptom was *other functions*
+printing rubbish, nowhere near the code at fault.
+
+### 1.7 Left behind
+
+`char (*cp)[4] = carr;` is still refused with `type mismatch`. The
+auto-initialiser half is fixed - a pointer to an array is a scalar and
+initialises like one, which is now `type_is_pointer_object()` - but a
+decayed `char[2][4]` and a declared `char (*)[4]` get **different type
+codes** even though they are the same type, because the array symbol
+differs. Assignment accepts it and initialisation does not, which is
+itself inconsistent.
+
+Not a miscompile, so it is not group 1, but it belongs with the type
+work in section 5.
 
 ---
 
@@ -224,18 +257,20 @@ machine. It is the only non-C89 item on this list worth taking.
 
 ## Recommended order
 
-1. **The six miscompiles** (section 1). Wrong answers before anything
-   else, and 1.1 above all - `p[1][3]` returning 0 will bite real code.
-2. **Cast to void** (2.1). Minutes, and C89.
+1. ~~**The six miscompiles** (section 1).~~ **DONE** `f5a1864ef`.
+   137 -> 143, and nothing left answers wrongly.
+2. **Cast to void** (2.1). Minutes, and C89. **Next.**
 3. **Automatic aggregate initialisers** (section 3). Everyday C.
 4. **Declaration after statement** (section 7 decision). Nine tests,
    small change, if you want it.
-5. **`%f`, then `sprintf`, then a minimal `FILE`** (section 4).
-6. **The smaller parser gaps** (section 5), tag scope first.
+5. **`%f`, then `sprintf`, then a minimal `FILE`** (section 4). These
+   are now two of the four remaining non-rejection failures.
+6. **The smaller parser gaps** (section 5), tag scope first, and 1.7
+   with them.
 7. **Bitfields** (section 6), scheduled against compiling real Fuzix
    sources as `PLAN-c89-gaps.md` already says.
 
-Expected position after 1–5: **around 160 of 175**, with the remainder
+Expected position after 2–5: **around 160 of 175**, with the remainder
 being genuinely-not-C89 constructs and bitfields.
 
 ## Do not lose
