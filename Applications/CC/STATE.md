@@ -85,24 +85,26 @@ The trap that cost the first attempt: `gen_push` was adding
 pushed sixteen bytes of, while `T_CLEANUP` took back the real
 `target_argsize`. That is what cc2's "sp" at the epilogue means.
 
-## Next task: the filesystem, then conformance testing
+## Next task: the c-testsuite conformance run
 
-**Not bitfields.** The inode double free has stopped being a nuisance
-and become the blocking problem: running this suite on the board on
-2026-07-29 killed the machine outright, needed a reflash, and lost a
-file written four minutes earlier. See
-`Kernel/platform/platform-rpipico/NOTES-inode-freelist.md`, section 4a.
+The filesystem fault that was blocking this is **fixed** (2026-07-29,
+kernel commit `d5f93d4d3`). It was never an inode bug: a two-byte
+overrun in `blk_alloc` was overwriting the inode free list count with a
+stale value off the disk. 70 consecutive on-target compiles are now
+silent and the inode count is exactly conserved. Full write-up in
+`Kernel/platform/platform-rpipico/NOTES-inode-freelist.md`.
 
-After that, run the c-testsuite `tests/single-exec` conformance set
-(https://github.com/c-testsuite/c-testsuite) — each test is a source, an
+So the board can now take sustained compile-and-run loads, and the next
+thing is the c-testsuite `tests/single-exec` set
+(https://github.com/c-testsuite/c-testsuite). Each test is a source, an
 expected output and a tag file naming the C version it applies to, so
-the C89 subset can be selected and the rest reported as out of scope.
-It is hundreds of compile-and-run cycles back to back, which is exactly
-the workload that provokes the filesystem fault, so it has to wait.
+the C89 subset can be selected and the rest reported as out of scope
+rather than as failures. Run it on the host chain first - it is much
+faster and needs no serial link - then on the board.
 
-**Bitfields** are still the last C89 gap - read "4. Bitfields" in
+**Bitfields** are the last known C89 gap - read "4. Bitfields" in
 PLAN-c89-gaps.md - but the conformance run is what will say which gaps
-actually matter, so it is worth having that evidence first.
+actually matter, so it is worth having that evidence before starting.
 
 ## Passing and returning structs turned up two function pointer bugs
 
@@ -256,21 +258,25 @@ it now includes `Makefile.common` like every other CPU, and builds.
 There is still no libc for compiled programs and no headers, so declare
 what you use (`int printf();`) - the runtime lives inside bcrun.
 
-## Contained, not fixed: the board could not create files
+## Fixed: the board could not create files
 
-2026-07-29, kernel commits 27a82379f and 9006603d5. **It was never a
-compiler fault** - the kernel was allocating inodes that were live
-files, because an inode was reaching the free list twice.
+2026-07-29, kernel commit `d5f93d4d3`. **It was never a compiler
+fault**, and it was never really an inode fault either: `blk_alloc`
+refilled the *block* free list with a length of `sizeof(int) + ...`
+where the field is a `uint16_t`, so on this 32-bit target it copied two
+bytes too many - straight onto `s_ninode`, the inode free list count,
+which sits immediately after `s_free[]` in `struct filesys`. Every
+refill restored a stale count and resurrected already-popped entries
+naming live files.
 
-Full briefing note, written to be picked up cold:
-**`Kernel/platform/platform-rpipico/NOTES-inode-freelist.md`**. Read
-that rather than this paragraph if you are going near it. The short
-version: one real fix (the kernel no longer trusts the free list stored
-in the superblock) and two guards that make the remaining fault
-harmless. The guards log when they fire, so a silent kernel means it is
-fixed and these mean it is not:
+Full write-up, including the five V7 divergences found on the way and
+fixed alongside:
+**`Kernel/platform/platform-rpipico/NOTES-inode-freelist.md`**.
 
-    i_alloc: 664 in free list but in use, skipped
+The guards from the hunt are still in and still log, so a silent kernel
+means it is behaving and these mean something has regressed:
+
+    i_alloc: 664 in free list but in use (mode 81a4 nlink 1)
     i_free: 664 freed twice
 
 Worth remembering even if you never touch the filesystem: **"File table
