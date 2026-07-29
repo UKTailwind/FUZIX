@@ -1452,6 +1452,13 @@ void mm_sort_s(char (*a)[MM_STRSZ], MMINTEGER *idx, int total, int start,
 
 /* ================= whole array operations ========================== */
 
+int mm_arr_count(const MMINTEGER *b)
+{
+    int k, rank = (int)b[0], n = 1;
+    for (k = 1; k <= rank; k++) n *= (int)(b[k] + 1);
+    return n;
+}
+
 void mm_arr_set_i(MMINTEGER *a, int n, MMINTEGER v)
 { int i; for (i = 0; i < n; i++) a[i] = v; }
 

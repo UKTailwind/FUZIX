@@ -344,6 +344,27 @@ and the like) — the interpreter tolerates this, C does not.
 
 ---
 
+## When something cannot be translated
+
+By default an untranslatable statement does not stop the conversion. It is
+rolled back, left in the C as a comment naming the line and the reason, and
+listed in the report:
+
+```
+/* MMBASIC line 949 not translated: array rank mismatch */
+/*     matxvec(tmatrix(), rhohatijk(), rhohatsez()) */
+```
+
+Nothing is emitted in its place, so check the surrounding logic still makes
+sense — particularly if the skipped line opened a block. Pass `--strict` to
+stop on the first one instead.
+
+A 3213-line real program (a solar eclipse predictor for the Micromite
+eXtreme) currently converts with **zero** skipped lines, compiles clean, and
+reproduces the August 2017 eclipse to the second.
+
+---
+
 ## Not yet
 
 Statements: `TYPE` structures, `REDIM`, `OPTION ESCAPE` backslash
@@ -363,6 +384,15 @@ than silently wrong C.
 ---
 
 ## Building
+
+On Windows there is `build.bat` instead:
+
+```
+build tests\t1.bas          translate and compile with cl or gcc
+build tests\t1.bas run      ... and run it
+```
+
+On anything with GNU make:
 
 ```
 make            translate and build every tests/*.bas into build/

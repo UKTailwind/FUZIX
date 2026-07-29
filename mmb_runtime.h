@@ -223,6 +223,10 @@ void mm_sort_f(MMFLOAT   *a, MMINTEGER *idx, int total, int start,
 void mm_sort_s(char (*a)[MM_STRSZ], MMINTEGER *idx, int total, int start,
                int count, int flags);
 
+/* An array handed to a SUB comes with its bounds: { rank, ub1, ub2, ... }
+ * so the callee can index any rank and ask BOUND() about it.          */
+int mm_arr_count(const MMINTEGER *bounds);
+
 /* ---- whole array operations (ARRAY SET/ADD, MATH SET/SCALE/ADD) ---- */
 void mm_arr_set_i  (MMINTEGER *a, int n, MMINTEGER v);
 void mm_arr_set_f  (MMFLOAT   *a, int n, MMFLOAT   v);

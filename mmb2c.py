@@ -151,6 +151,12 @@ class MMError(Exception):
     pass
 
 
+def cblock_safe(text):
+    """Make text safe to sit inside a C /* */ comment."""
+    out = text.replace('*/', '* /')
+    return ''.join(c if 32 <= ord(c) < 127 else ' ' for c in out)
+
+
 def tokenize(line, lineno):
     """Turn one source line into a list of (kind, text, upper) tuples."""
     out = []
@@ -161,6 +167,8 @@ def tokenize(line, lineno):
         if c == ' ' or c == '\t' or c == '\r' or c == '\n':
             i += 1
             continue
+        if c == '\x1a':            # a DOS end of file marker: stop here
+            break
         if c == "'":                       # comment to end of line
             break
         if is_alpha(c):
@@ -293,7 +301,7 @@ class Sym(object):
 
 class Routine(object):
     __slots__ = ('name', 'cname', 'is_func', 'ty', 'params', 'locals',
-                 'statics', 'line', 'gtouch', 'disp')
+                 'statics', 'line', 'gtouch', 'disp', 'local_order')
 
     def __init__(self, name, is_func):
         self.name = name
@@ -303,6 +311,8 @@ class Routine(object):
         self.ty = TY_F
         self.params = []          # list of Sym
         self.locals = {}          # canonical name -> Sym
+        self.local_order = []     # names in declaration order, so the C
+                                  # comes out the same on any Python
         self.statics = []         # list of Sym (subset of locals)
         self.line = 0
         self.gtouch = {}          # global name -> first line touched here
@@ -345,6 +355,8 @@ class Conv(object):
         self.implied = []             # (name, ty, line, routine)
         self.data = []                # DATA items, in program order
         self.data_at = {}             # label -> index of the next DATA item
+        self.lenient = True           # comment out what cannot be translated
+        self.skipped = []             # (line, source text, reason)
         self.labels_used = {}         # labels that some GOTO targets
         self.label_depth = {}         # block nesting where a label sits
         self.goto_depth = {}          # shallowest nesting that jumps to it
@@ -371,10 +383,7 @@ class Conv(object):
 
     # -- error reporting ------------------------------------------------
     def err(self, msg):
-        text = "line %d: %s" % (self.lineno, msg)
-        if text not in self.errors:
-            self.errors.append(text)
-        raise MMError(text)
+        raise MMError("line %d: %s" % (self.lineno, msg))
 
     def warn(self, msg):
         text = "line %d: %s" % (self.lineno, msg)
@@ -462,7 +471,11 @@ class Conv(object):
         else:
             table = self.globals
         for sfx in ('', '$'):
-            if (canon + sfx).upper() in BUILTINS:
+            nm = (canon + sfx).upper()
+            # only the built-ins that can appear without brackets are
+            # genuinely reserved; MIN, LEN and friends are told apart from
+            # a variable by the '(' that follows them
+            if nm in BUILTINS and BUILTINS[nm][0] == 0:
                 self.err("'%s' is a built-in function and cannot be used as "
                          "a variable name" % canon)
         old = table.get(canon)
@@ -479,6 +492,8 @@ class Conv(object):
             s.is_array = True
             s.dims = arr_dims
         table[canon] = s
+        if scope == 'local':
+            self.cur.local_order.append(canon)
         if scope == 'local' and static:
             self.cur.statics.append(s)
         return s
@@ -720,7 +735,7 @@ class Conv(object):
             args = self.call_args(True)
             return self.emit_call(r, args)
 
-        if up in BUILTINS:
+        if up in BUILTINS and (BUILTINS[up][0] == 0 or self.is_op('(')):
             return self.call_builtin(up)
 
         as_array = self.is_op('(')
@@ -745,6 +760,16 @@ class Conv(object):
             if not self.accept_op(','):
                 break
         self.expect_op(')')
+        if s.is_param:
+            # MMBasic gives an array parameter no rank of its own - it
+            # inherits whatever was passed - so the subscripts are folded
+            # into one offset using the bounds handed in alongside it.
+            b = '__b_' + s.name.replace('.', '__')
+            off = parts[0]
+            for k in range(1, len(parts)):
+                off = '((%s) * ((%s)[%d] + 1) + (%s))' % (off, b, k + 1,
+                                                          parts[k])
+            return '%s[%s]' % (s.acc, off)
         if len(parts) != len(s.dims):
             self.err("'%s' has %d dimension(s), %d given"
                      % (s.name, len(s.dims), len(parts)))
@@ -835,14 +860,19 @@ class Conv(object):
             s = a[1]
             if s.ty != p.ty:
                 self.err("array type mismatch in call to '%s'" % r.name)
-            if len(s.dims) != len(p.dims):
-                self.err("array rank mismatch in call to '%s'" % r.name)
             if s.is_param:
                 bnd = '__b_' + s.name.replace('.', '__')
+                base = s.acc
             else:
-                bnd = ('(const MMINTEGER[]){ %s }'
-                       % ', '.join('(%s) - 1' % d for d in s.dims))
-            return '%s, %s' % (s.acc, bnd)
+                bnd = ('(const MMINTEGER[]){ %d, %s }'
+                       % (len(s.dims),
+                          ', '.join('(%s) - 1' % d for d in s.dims)))
+                # flatten, so the callee can index any rank it likes
+                if s.ty == TY_S:
+                    base = '(char (*)[MM_STRSZ])%s' % s.acc
+                else:
+                    base = '(%s *)%s' % (CTYPE[s.ty], s.acc)
+            return '%s, %s' % (base, bnd)
         if p.ty == TY_S:
             if a is None:
                 return 'mm_tmp()'
@@ -1292,7 +1322,7 @@ class Conv(object):
         if not s.is_array:
             self.err("'%s' is not an array" % s.name)
         if s.is_param:
-            cnt = '(int)((__b_%s)[0] + 1)' % s.name.replace('.', '__')
+            cnt = 'mm_arr_count(__b_%s)' % s.name.replace('.', '__')
             return (s.acc, cnt)
         cnt = '(int)(%s)' % ' * '.join('(%s)' % d for d in s.dims)
         if s.ty == TY_S:
@@ -1335,7 +1365,7 @@ class Conv(object):
             nm = '__b_' + sym.name.replace('.', '__')
             if k == 0:
                 return str(self.opt_base)
-            return '(%s)[(%s) - 1]' % (nm, kexpr)
+            return '(%s)[%s]' % (nm, kexpr)
         if k is None:
             self.err("BOUND() on a DIMmed array needs a constant dimension")
         if k == 0:
@@ -1562,7 +1592,8 @@ class Conv(object):
             while self.accept_op(','):
                 nd += 1
             self.expect_op(')')
-            dims = ['0'] * nd
+            dims = ['0'] * nd       # a rank hint only: the real rank comes
+                                    # from the array the caller passes
         ty = sfx
         if self.accept_kw('AS'):
             ty2 = self.type_word()
@@ -1588,6 +1619,7 @@ class Conv(object):
             s.acc = 'p_' + canon.replace('.', '__')
         r.params.append(s)
         r.locals[canon] = s
+        r.local_order.append(canon)
 
     def type_word(self):
         t = self.nxt()
@@ -1790,7 +1822,9 @@ class Conv(object):
                     continue
                 try:
                     self.statement()
-                except MMError:
+                except MMError as e:
+                    if str(e) not in self.errors:
+                        self.errors.append(str(e))
                     self.skip_statement()
         if self.blocks:
             self.errors.append("unterminated %s block (started line %d)"
@@ -1807,16 +1841,47 @@ class Conv(object):
         where = len(self.out)
         out_at_entry = self.out
         ind = self.indent
+        blocks_at_entry = list(self.blocks)
+        tok_at_entry = self.i
         outer = self.tmp_used
         self.tmp_used = False
+        failed = None
         try:
             self.statement_inner()
+        except MMError as e:
+            if not self.lenient:
+                raise
+            failed = str(e)
         finally:
             if self.mode == 'emit' and self.tmp_used \
-                    and self.out is out_at_entry:
+                    and self.out is out_at_entry and failed is None:
                 out_at_entry.insert(where,
                                     '    ' * ind + 'mm_release(__mark);')
             self.tmp_used = outer or self.tmp_used
+        if failed is not None:
+            self.skip_out(where, out_at_entry, ind, blocks_at_entry,
+                          tok_at_entry, failed)
+
+    def skip_out(self, where, out_at_entry, ind, blocks, tok_at_entry, why):
+        """Undo whatever a failed statement emitted and leave a comment in
+        its place, so one untranslatable line does not lose the rest of
+        the program."""
+        if self.out is out_at_entry:
+            del out_at_entry[where:]
+        self.indent = ind
+        self.blocks = blocks
+        self.skip_statement()
+        text = self.source_text(tok_at_entry, self.i).strip()
+        if not text:
+            text = self.lines[self.lineno - 1].strip()
+        reason = why
+        if reason.startswith('line '):
+            reason = reason.split(': ', 1)[-1]
+        if self.mode == 'emit':
+            self.skipped.append((self.lineno, text, reason))
+            self.emit('/* MMBASIC line %d not translated: %s */'
+                      % (self.lineno, cblock_safe(reason)))
+            self.emit('/*     %s */' % cblock_safe(text))
 
     def loop_cond(self, c):
         """A loop test is re-evaluated every time round, so it needs its
@@ -2968,9 +3033,29 @@ class Conv(object):
         if self.accept_kw('FUNCTION'):
             self.emit('mm_release(__mark); return __ret;')
             return
-        if self.accept_kw('FOR') or self.accept_kw('DO') or self.stmt_end():
+        if self.accept_kw('FOR') or self.accept_kw('DO'):
             self.emit('break;')
             return
+        if self.stmt_end():
+            # bare EXIT: the manual documents it as "exit a DO loop", but
+            # real programs also use it inside a SUB to mean EXIT SUB, so
+            # take whichever the enclosing block actually is
+            for blk in reversed(self.blocks):
+                if blk[0] in ('for', 'do', 'while'):
+                    self.emit('break;')
+                    return
+                if blk[0] == 'routine':
+                    break
+            if self.cur is not None:
+                self.warn("bare EXIT inside %s with no enclosing loop; "
+                          "treated as EXIT %s" % (self.cur.name,
+                          'FUNCTION' if self.cur.is_func else 'SUB'))
+                if self.cur.is_func:
+                    self.emit('mm_release(__mark); return __ret;')
+                else:
+                    self.emit('mm_release(__mark); return;')
+                return
+            self.err("bare EXIT is outside any loop, SUB or FUNCTION")
         self.err("unknown EXIT variant")
 
     def note_goto(self, canon):
@@ -3029,8 +3114,11 @@ class Conv(object):
         self.raw(self.signature(r) + ' {')
         self.indent = 1
         self.emit('unsigned __mark = mm_mark(); (void)__mark;')
-        # hoist every local declaration to the top of the C function
-        for s in r.locals.values():
+        # hoist every local declaration to the top of the C function,
+        # in declaration order so the output does not depend on the host
+        # Python's dictionary ordering
+        for nm in r.local_order:
+            s = r.locals[nm]
             if s.is_param:
                 continue
             self.emit_local_decl(s)
@@ -3071,10 +3159,6 @@ class Conv(object):
         for p in r.params:
             nm = 'p_' + p.name.replace('.', '__')
             if p.is_array:
-                if len(p.dims) != 1:
-                    self.errors.append(
-                        "line %d: only one-dimensional array parameters are "
-                        "supported (%s in %s)" % (p.where, p.name, r.name))
                 if p.ty == TY_S:
                     parts.append('char (*%s)[MM_STRSZ]' % nm)
                 else:
@@ -3167,6 +3251,14 @@ class Conv(object):
                 g = self.globals.get(nm)
                 out.append('    %-20s %-8s first used line %-5d %s'
                            % (g.disp if g else nm, TYNAME[ty], ln, where))
+        if self.skipped:
+            out.append('')
+            out.append('Lines that could not be translated.  Each is left in')
+            out.append('the C as a comment; nothing was emitted for it, so')
+            out.append('check the surrounding logic still makes sense:')
+            for ln, text, why in self.skipped:
+                out.append('    line %-5d %s' % (ln, text[:60]))
+                out.append('              -> %s' % why[:64])
         # every global reached from inside a routine is worth a look
         rn = list(self.routines.keys())
         rn.sort()
@@ -3267,7 +3359,7 @@ def _const_fixup(conv):
             s.acc = cvar(nm)
 
 
-def convert(inpath, outpath=None, report=False):
+def convert(inpath, outpath=None, report=False, lenient=True):
     lines = []
     f = open(inpath, 'r')
     try:
@@ -3280,6 +3372,7 @@ def convert(inpath, outpath=None, report=False):
         f.close()
 
     conv = Conv(lines, inpath)
+    conv.lenient = lenient
     conv.pass_routine_names()
     conv.pass_declarations()
     conv.walk('scan')
@@ -3314,6 +3407,11 @@ def convert(inpath, outpath=None, report=False):
     finally:
         of.close()
 
+    if conv.skipped:
+        print("%d line(s) could not be translated and were commented out:"
+              % len(conv.skipped))
+        for ln, text, why in conv.skipped:
+            print("  line %d: %s" % (ln, why))
     if report:
         for ln in conv.report():
             print(ln)
@@ -3326,6 +3424,7 @@ def main(argv):
     src = None
     dst = None
     rep = False
+    strict = False
     k = 1
     while k < len(argv):
         a = argv[k]
@@ -3334,16 +3433,22 @@ def main(argv):
             dst = argv[k]
         elif a == '--report':
             rep = True
+        elif a == '--strict':
+            strict = True
         elif a in ('-h', '--help'):
-            print("usage: mmb2c.py source.bas [-o out.c] [--report]")
+            print("usage: mmb2c.py source.bas [-o out.c] [--report] "
+                  "[--strict]")
+            print("  --report  list implied globals and skipped lines")
+            print("  --strict  stop on anything that cannot be translated,")
+            print("            instead of commenting it out and carrying on")
             return 0
         else:
             src = a
         k += 1
     if src is None:
-        print("usage: mmb2c.py source.bas [-o out.c] [--report]")
+        print("usage: mmb2c.py source.bas [-o out.c] [--report] [--strict]")
         return 1
-    out = convert(src, dst, rep)
+    out = convert(src, dst, rep, not strict)
     if out is None:
         return 2
     print("wrote " + out)
