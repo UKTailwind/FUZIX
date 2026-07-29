@@ -1,13 +1,13 @@
 # c-testsuite conformance — analysis and plan
 
-2026-07-29. Standing at **143 of 175** on the C89 subset of the
+2026-07-29. Standing at **165 of 175** on the C89 subset of the
 `single-exec` set (https://github.com/c-testsuite/c-testsuite).
 
-**Group 1 is done, commit `f5a1864ef`. No wrong-answer failures
-remain** - everything left either refuses to compile or needs a runtime
-function we do not have. All 18 samples build on the PC3 itself and
-match gcc, and the inode count is conserved exactly across a compile
-run.
+**Bitfields are the only genuine C89 gap left.** Of the other nine
+failures, eight are constructs that are not C89 at all and are
+correctly refused, and one is an object format limitation. No test
+answers *wrongly*: everything left either refuses to compile or, in
+00189's case, refuses to load.
 
     bash hosttest/ctest.sh        # run it
     bash hosttest/ctestwhy.sh     # what cc1 objected to, counted
@@ -16,35 +16,19 @@ run.
 
 ---
 
-## The 20 that remain, categorised
+## The 10 that remain
 
-Reclassified 2026-07-29 at 155/175. gcc's `-pedantic-errors` verdict is
-in `ctestc89.sh`, but it answers "is this file C89", not "why did *we*
-refuse it" - several files contain a non-C89 construct somewhere and
-fail here for an entirely different and perfectly legitimate reason. So
-these are grouped by the cause we actually hit.
-
-### A. Genuine C89 gaps — 10
+### A. Genuine C89 gap — 1
 
 | test | what |
 |---|---|
-| 00202 | **unary plus.** `60 + +3` and `+5` are both rejected - the operator is not implemented at all. ANSI added it; it is C89. Smallest fix on this list. |
-| 00198 | **`typedef` inside a block.** Not the anonymous enum it looked like: *any* typedef in a block fails, including `typedef int myint;`. They are only handled in `toplevel()`, never in a block. |
-| 00078 | block-scope function declaration - `int f1(char *);` inside a function reaches `assign_storage` and gives "can't size type" |
-| 00114 | `int main(void);` then `int main() {}` - a prototype and a K&R definition are compatible in C89 |
-| 00124 | a function returning a function pointer, with parameter names repeated between the two lists. The lists are different scopes; we say "duplicate name" |
-| 00144 | a null pointer constant in `?:` - `p = i ? 0 : (void *)0;` |
-| 00129 | **label namespace.** Labels have their own namespace; a label sharing a name with a type or variable is rejected |
-| 00098 | wide character constants, `L'\0'` |
-| 00205 | a long list of parenthesised constant expressions as an initialiser - "expected {", not yet diagnosed |
-| 00218 | **bitfields** - see section 6. `unsigned x : 1;` is C89 (the enum-typed one in that test is not) |
+| 00218 | **bitfields.** See section 6, and `PLAN-c89-gaps.md` section 4. `unsigned x : 1;` is C89; the enum-typed bitfield in that test is not, so gcc refuses the file too. Deliberately not attempted: see the note below. |
 
-### B. Our own limits, not dialect — 2
+### B. Our own limit, not dialect — 1
 
 | test | what |
 |---|---|
-| 00200 | cc2 runs out of symbols. `MAXSYM` is 768; memory is not the constraint on this target that it is on a Z80, so raising it is reasonable |
-| 00189 | `&fprintf`. A runtime library symbol is resolved by index and has no address, so the object format cannot express this. bcrun now refuses it at load time by name rather than storing an index where a code address belongs |
+| 00189 | `&fprintf`. A runtime library symbol is resolved by *index* and has no address, so the object format cannot express its address at all. bcrun refuses it by name at load time rather than storing an index where a code address belongs. Fixing it means giving library functions real addresses - a thunk per imported function, or a relocation kind that resolves to one - which is an object format change, not a compiler gap. |
 
 ### C. Not C89, correctly refused — 8
 
@@ -55,11 +39,75 @@ rejects all of these too.
 length arrays · 00216 compound literals · 00213 and 00214 statement
 expressions (`({ ... })`) · 00210 `__attribute__` · 00219 `_Generic`
 
-### Where to go next
+---
 
-00202 and 00198 are the two to take first: both are plain C89, both are
-things people write constantly, and neither is implemented *at all* -
-which is a different and worse thing from the subtle gaps around them.
+## Done 2026-07-29: 155 -> 165
+
+Commit `258c89528`. Each has a sample in `hosttest/samples/` so it
+cannot regress quietly, and all four new samples were also compiled
+**on the PC3** and diffed against the gcc reference - identical.
+
+| test | gap | sample |
+|---|---|---|
+| 00202 | unary plus, not implemented at all | `unaryplus.c` |
+| 00198 | `typedef` inside a block | `blocktypedef.c` |
+| 00129 | a typedef name shadowed by an ordinary identifier | `namespace.c` |
+| 00078 | block-scope function declarations | `namespace.c` |
+| 00114 | prototype then K&R definition | `namespace.c` |
+| 00124 | parameter names repeated across declarator levels | `namespace.c` |
+| 00144 | null pointer constant in `?:` | `namespace.c` |
+| 00098 | wide character constants | — |
+| 00205 | elided braces in aggregate initialisers | `braceelide.c` |
+| 00200 | cc2 `MAXSYM` 512, inherited from the 8-bit targets | — |
+
+Three of these are worth remembering for the shape rather than the fix:
+
+* **The label namespace was never broken.** 00129 was filed as a label
+  problem and labels turned out to be fine. The real blocker was that
+  `is_typedef()` still answered yes after an ordinary identifier had
+  shadowed the typedef, so `myt = 5;` was parsed as a *declaration*.
+  Reducing the test rather than reading its title is what found it.
+* **Brace elision is half a comma problem.** The visible failure was
+  "expected {". The half that would have bitten later is that an elided
+  group must leave the separating comma for its parent - eating it makes
+  the parent think its own list ended early, which produces no
+  diagnostic at all, just an object of the right shape with the wrong
+  contents. `braceelide.c` therefore checks every field of every group.
+* **Wide strings are refused, not accepted.** `L'x'` is taken as a plain
+  character constant, which is honest here - wchar_t is an integer type
+  and the character set is ASCII. `L"..."` would have to come back as a
+  narrow array, right in bytes and wrong in element size, so it gets a
+  diagnostic instead. Refusing beats miscompiling.
+
+### Why bitfields were not attempted
+
+The parser and layout halves are tractable. The access half is not, at
+least not safely in one pass: a bitfield *write* is a read-modify-write
+that has to evaluate the container's address exactly once, and the tree
+has no temporary mechanism for holding it. Re-evaluating is fine for
+`s.f = x` and wrong the moment the address expression has side effects,
+which is a silent wrong answer rather than a diagnostic.
+
+That is the one failure mode this plan has consistently said is worse
+than the gap - so bitfields keep erroring loudly until they can be done
+whole. `PLAN-c89-gaps.md` section 4 already schedules them against
+wanting to compile real Fuzix sources, which is the right trigger:
+`console.c`, `util/fat.c`, `util/stty.c` and `resolv.h` all use them.
+
+### Also landed alongside
+
+**`#include <stdio.h>` works on the board for the first time.** cpp has
+no built-in include path - `include_paths[]` is only ever filled from
+`-I` - so every on-target program had to declare its own
+`int printf();`. `ccbc.c` now passes `-I<libpath>include` and the
+`ctest-include` headers, which describe what bcrun actually provides,
+are installed at `/usr/lib/cc/include`. `/usr/include` is the wrong
+answer: those headers are the Fuzix libc's, for native binaries.
+
+**bcrun printf length modifiers.** `%ld` had no handling at all, fell
+through to the default and printed itself literally - and consumed no
+argument, so every conversion after it took the wrong one. `%i`, `%o`
+and `%X` were missing too.
 
 ---
 

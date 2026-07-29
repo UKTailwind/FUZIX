@@ -109,24 +109,33 @@ The trap that cost the first attempt: `gen_push` was adding
 pushed sixteen bytes of, while `T_CLEANUP` took back the real
 `target_argsize`. That is what cc2's "sp" at the epilogue means.
 
-## Conformance: 155 of 175 on the C89 subset
+## Conformance: 165 of 175 on the C89 subset
 
-`bash hosttest/ctest.sh`, and read **PLAN-conformance.md** - the 20
-remaining failures are categorised there by the cause we actually hit,
-and it says what to do next. Nothing left compiles and then answers
-wrongly: 10 are genuine C89 gaps, 2 are our own limits rather than
-dialect, 8 are correctly refused as not C89.
+`bash hosttest/ctest.sh`, and read **PLAN-conformance.md** for the
+detail. **Bitfields are the only genuine C89 gap left.** Of the other
+nine failures, eight are not C89 at all and are correctly refused, and
+one (`&fprintf`, 00189) is an object format limitation rather than a
+compiler one - a library symbol is resolved by index and has no address.
 
-**Next two, and they are the cheapest on the list.** Both are plain
-C89, both are written constantly, and neither exists *at all*, which is
-a different and worse thing than the subtle gaps around them:
+Nothing left compiles and then answers wrongly.
 
-* **unary plus.** `60 + +3` and `+5` are both rejected.
-* **`typedef` inside a block.** Not just the anonymous enum it looks
-  like in test 00198 - `typedef int myint;` in a block fails too.
-  Typedefs are only handled in `toplevel()`, and `is_storage_word()`
-  does not cover `T_TYPEDEF`, so a block does not even recognise one as
-  the start of a declaration.
+**Bitfields are deliberately still refused, loudly.** The parser and
+layout halves are tractable; the access half is not, safely. A bitfield
+write is a read-modify-write that must evaluate the container's address
+exactly once, and the tree has no temporary to hold it in -
+re-evaluating is fine for `s.f = x` and wrong as soon as the address
+expression has side effects, which is a silent wrong answer rather than
+a diagnostic. That is the one failure mode consistently worth avoiding
+here. `PLAN-c89-gaps.md` section 4 schedules them against wanting to
+compile real Fuzix sources, which is the right trigger.
+
+**`#include <stdio.h>` now works on the board.** cpp has no built-in
+include path - `include_paths[]` is only ever filled from `-I` - so
+every on-target program used to need its own `int printf();`. `ccbc.c`
+passes `-I<libpath>include`, and the `ctest-include` headers, which
+describe what bcrun actually provides, live at `/usr/lib/cc/include`.
+Not `/usr/include`: those are the Fuzix libc's headers, for native
+binaries.
 
 Three harness lessons are baked in and worth not relearning: the
 suite's own dialect tags are unreliable (`ctestc89.sh` asks gcc with
@@ -171,9 +180,9 @@ Neither ever blocked compiler work: the samples and the conformance
 suite run on the host, and the board takes sustained compile loads
 without trouble. They were a hazard when driving the board.
 
-**Bitfields** remain the largest known C89 gap - "4. Bitfields" in
-PLAN-c89-gaps.md - but PLAN-conformance.md now has evidence for what
-actually matters, and two cheaper things come first.
+**Bitfields** are now the *only* known C89 gap - "4. Bitfields" in
+PLAN-c89-gaps.md, and see the conformance section above for why they are
+still refused rather than half-implemented.
 
 ## Passing and returning structs turned up two function pointer bugs
 
@@ -352,6 +361,17 @@ real error is the `i_open: bad inode` line above it.
 
 ## Things that have cost hours
 
+* **Reduce the test; do not read its title.** c-testsuite 00129 was
+  filed here as a label-namespace gap. Labels were fine. The actual
+  blocker was `is_typedef()` still answering yes after an ordinary
+  identifier had shadowed the typedef, so an assignment was parsed as a
+  declaration. Cutting the test down to four lines found it in minutes;
+  the title had pointed at the wrong subsystem entirely.
+* **Write the harness carefully or it will lie to you.** A throwaway
+  script for running cc0/cc1 by hand reported "read error" on programs
+  that were perfectly fine, which briefly looked like a parser bug in
+  labels. `optest.sh` said PASS on the same files. Use the real harness;
+  a five-line convenience wrapper has no test coverage of its own.
 * **A symptom that "cannot" be X is evidence about your model, not
   about X.** "It died while idle, so it must be a leak" was the load
   bearing assumption of the buffer hunt, and it was wrong: idle meant

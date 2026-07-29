@@ -35,9 +35,19 @@
 
 #define LIBPATH		"/usr/lib/cc/"
 #define CMD_CPP		"/usr/bin/cpp"
+/*
+ * Headers describing what bcrun actually provides, which is not what
+ * /usr/include describes - those are the Fuzix libc's, for native
+ * binaries. cpp has no built-in search path at all (include_paths[] is
+ * only ever filled from -I), so without this "#include <stdio.h>"
+ * simply failed on the board and every program had to declare its own
+ * "int printf();".
+ */
+#define INCDIR		"include"
 
 static const char *libpath = LIBPATH;
 static const char *cppcmd = CMD_CPP;
+static char incpath[80];
 static int verbose;
 static int keep;
 static int pp_is_src;		/* no cpp: cc0 reads the source itself */
@@ -234,10 +244,16 @@ int main(int argc, char *argv[])
 	 * comments, which is a trap worth naming out loud.
 	 */
 	if (access(cppcmd, X_OK) == 0) {
+		/* -I<libpath>include, so that -L moves the headers with the
+		   passes rather than leaving them behind. */
+		strcpy(incpath, "-I");
+		strcat(incpath, libpath);
+		strcat(incpath, INCDIR);
 		av[0] = (char *) cppcmd;
 		av[1] = "-E";
-		av[2] = src;
-		av[3] = NULL;
+		av[2] = incpath;
+		av[3] = src;
+		av[4] = NULL;
 		run(av, NULL, ppfile);
 	} else {
 		fprintf(stderr, "cc: no %s - compiling without the "

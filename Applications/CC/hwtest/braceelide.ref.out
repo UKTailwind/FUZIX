@@ -1,0 +1,29 @@
+flat[0] c0=1 c1=2 c2=3 c3=4 b=10 e=20 k=30
+flat[1] c0=5 c1=6 c2=7 c3=8 b=40 e=50 k=60
+braced[0] c0=11 c1=12 c2=13 c3=14 b=15 e=16 k=17
+braced[1] c0=21 c1=22 c2=23 c3=24 b=25 e=26 k=27
+mixed[0] c0=31 c1=32 c2=33 c3=34 b=35 e=36 k=37
+mixed[1] c0=41 c1=42 c2=43 c3=44 b=45 e=46 k=47
+part[0] c0=1 c1=0 c2=0 c3=0 b=2 e=0 k=0
+part[1] c0=3 c1=4 c2=0 c3=0 b=0 e=0 k=0
+aflat[0] c0=1 c1=2 c2=3 c3=4 b=10 e=20 k=30
+aflat[1] c0=5 c1=6 c2=7 c3=8 b=40 e=50 k=60
+apart[0] c0=1 c1=0 c2=0 c3=0 b=2 e=0 k=0
+apart[1] c0=3 c1=4 c2=0 c3=0 b=0 e=0 k=0
+grid 0 0 1 1
+grid 0 1 2 2
+grid 0 2 3 3
+grid 1 0 4 4
+grid 1 1 5 5
+grid 1 2 6 6
+part2 0 1 0
+part2 1 2 3
+part2 2 0 0
+agrid 0 0 1
+agrid 0 1 2
+agrid 0 2 3
+agrid 1 0 4
+agrid 1 1 5
+agrid 1 2 6
+deep 1 2 3 4 5 6 7 99
+sizes 2 2 1
