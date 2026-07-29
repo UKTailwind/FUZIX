@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "July 2026 — kernel branch pc3"
+date: "Release v0.2 — July 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -21,6 +21,10 @@ flagship application, complete with BBC graphics modes on the HDMI
 display, the four-channel BBC sound system on the audio DAC, joystick
 and analogue inputs, and a spare serial port.
 
+It also compiles C on its own. `cc` is a complete C89 toolchain running
+on the hardware — not a cross-compiler — so the machine can build its
+own programs with no PC involved.
+
 One kernel image serves both machines. At boot it probes GP27 for the
 DS3231's 32 kHz clock (the same test MMBasic and MicroPython use):
 present means Pico Computer 3, absent means Pico Computer 2. The
@@ -39,6 +43,7 @@ Headline specification as configured here:
   port, with USB keyboard support (six layouts)
 * Pre-emptive multitasking: a runaway program can always be stopped
   from the keyboard
+* A self-hosted C89 compiler: `cc` runs on the machine itself
 
 # Installing Fuzix
 
@@ -353,6 +358,115 @@ Not (yet) present, compared with an original machine or full BBCSDL:
 * `TIME` advances in 0.1 s steps (the kernel clock granularity)
 * Cassette/Econet/ROM filing systems, for obvious reasons
 
+# The C compiler
+
+The machine compiles C on its own, with no PC involved. `cc` is Alan
+Cox's Fuzix Compiler Kit, retargeted here to a bytecode machine.
+
+```
+# cat > hello.c
+#include <stdio.h>
+
+int main(void)
+{
+        printf("hello from Fuzix\n");
+        return 0;
+}
+^D
+# cc hello.c
+# bcrun hello.bc
+hello from Fuzix
+```
+
+`cc prog.c` writes `prog.bc`; `bcrun prog.bc` runs it. Options are
+`-o name`, `-v` to show each pass as it runs, and `-k` to keep the
+intermediates. `bcdump prog.bc` disassembles.
+
+`cc` is a driver: it runs `cpp`, then the three compiler passes from
+`/usr/lib/cc`. The passes cannot be driven from the shell by hand — two
+of them read back from their own standard output, which needs a
+redirection the Bourne shell here does not have. Like BBC BASIC, the
+compiler lives on the SD card root and is not in the NAND recovery
+system.
+
+A small program takes about a second to compile. The dots `cc` prints
+are progress, one per top-level declaration.
+
+## What it compiles
+
+**C89, plus declarations after statements** — the one C99 borrowing,
+because refusing it is a nuisance out of proportion to the standard it
+comes from. Everything else is ANSI C as of 1989: the full type system,
+`struct` and `union` including passing and returning them by value,
+`enum`, `typedef`, function pointers, `switch`, `goto`, all the usual
+operators, 64-bit `long long`, and double-precision floating point.
+
+The compiler is checked against gcc as an oracle: 165 of the 175
+applicable tests in the public `c-testsuite` conformance suite pass with
+byte-identical output, and a set of samples in the source tree is
+diffed against gcc on every change — on the board as well as on the
+host.
+
+## Headers and the runtime library
+
+`/usr/lib/cc/include` holds `stdio.h`, `stdlib.h`, `string.h`,
+`assert.h`, `limits.h` and `stddef.h`. These describe what `bcrun`
+actually provides, and they are deliberately **not** `/usr/include`,
+which describes the Fuzix C library used by native binaries.
+
+Available: `printf` `sprintf` `puts` `putchar`; `fopen` `fclose`
+`fread` `fwrite` `fgetc` `getc` `fputc` `putc` `fgets` `fputs`
+`fprintf` `feof` `fseek` `ftell` `rewind` `fflush` `remove`;
+`malloc` `calloc` `realloc` `free` `exit` `atoi` `abs`; `strlen`
+`strcpy` `strncpy` `strcat` `strcmp` `strncmp` `strchr` `strrchr`
+`memset` `memcpy` `memmove` `memcmp`.
+
+The raw system calls `open` `creat` `close` `read` `write` `lseek`
+`unlink` are also linked in, but no header declares them — declare them
+yourself if you want them. Two extras reach the hardware: `time_us()`
+returns the microsecond counter, and `adval(n)` is the BASIC `ADVAL`
+function (joystick, analogue inputs, sound queues).
+
+## Limitations
+
+These are worth knowing before you start a large program.
+
+* **One source file per program.** There is no assembler and no linker:
+  `cc2` writes a loadable object directly, so nothing can be linked
+  together. `cc` rejects a second source file rather than pretending.
+* **Bitfields are not implemented.** `unsigned flags : 3;` is refused
+  with a diagnostic. This is the only part of C89 missing.
+* **`&` on a library function does not work.** A runtime function is
+  resolved by index and has no address, so `&printf` cannot be
+  represented. `bcrun` refuses such a program by name when it loads it,
+  rather than running it with something wrong in place of an address.
+  Pointers to *your own* functions are entirely fine.
+* **No wide strings.** `L'x'` is accepted (and equals `'x'` here);
+  `L"..."` is refused rather than quietly returned as a narrow array.
+* **`printf` rounds halves up.** `%.2f` of `0.125` gives `0.13` where a
+  full C library gives `0.12`. A deliberate, documented difference:
+  matching the round-half-to-even rule needs exact decimal expansion.
+* **No `math.h`.** No `sin`, `sqrt` and so on — arithmetic on `double`
+  works, but there are no library functions over it.
+
+## Speed, and what this is for
+
+`bcrun` is an interpreter, so expect roughly two orders of magnitude
+less speed than compiled code. A loop of a million iterations doing
+`s += i & 7` on `long` takes about 13 seconds. Numeric work of any
+weight is faster in BBC BASIC, whose inner loops are hand-written
+machine code.
+
+What the compiler is *for* is being able to write and build real
+programs on the machine itself — utilities, file handling, glue, and
+anything where being self-hosted matters more than raw speed. Nothing
+else on the Pico Computer can do it: this is a complete C toolchain
+that runs on the hardware, not a cross-compiler.
+
+The bytecode is also a deliberately language-neutral intermediate form,
+so front ends for other languages can share the same back end and
+runtime.
+
 # The FAT partition and the `fat` command
 
 Partition 1 of the SD card is ordinary FAT, readable and writable by
@@ -388,6 +502,7 @@ partition is FAT16.
 /usr/bin      larger tools, BBC BASIC, fat, picoctl
 /usr/games    the games collection
 /usr/lib/bbc  BBC BASIC library directory (@lib$)
+/usr/lib/cc   the C compiler passes, and its headers in include/
 /usr/man      manual pages (man <name>)
 /dev          devices - see below
 /etc          rc (boot script), inittab, passwd, termcap
@@ -422,8 +537,7 @@ sed tr cut sort uniq wc find xargs diff diff3 cmp comm join split
 rev tar dd df du free ps kill killall uptime date cal banner echo
 sleep tee touch which who su passwd stty mount umount sync fsck
 mkfs fdisk chmod chown chgrp od hd factor seq units dc expr m4
-make cron at mail write wall
-```
+make cron at mail write wall`
 (and more — see `ls /bin /usr/bin`).
 
 **Machine tools:** `picoctl` (keyboard layout, reboot to the
@@ -431,8 +545,9 @@ flasher), `picogpio`/`gpiotool`, `gfxtest` (display test card),
 `setdate` (DS3231), `flashrom`, `setboot`, `dosread`/`doswrite`
 (FAT12/16 floppy-era transfers), `fat`.
 
-**Languages:** `bbcbasic`, `fforth` (a complete ANS Forth), the
-`as09`/`ld09` assembler pair, and `dc`.
+**Languages:** `bbcbasic`, `cc` (the on-board C compiler — see its
+own chapter, with `cpp`, `bcrun` and `bcdump`), `fforth` (a complete
+ANS Forth), the `as09`/`ld09` assembler pair, and `dc`.
 
 **Games** (`/usr/games`): the original Colossal Cave `advent`, the
 complete Scott Adams `adv01`–`adv14` and Mysterious Adventures
