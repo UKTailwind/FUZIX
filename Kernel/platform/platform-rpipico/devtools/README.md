@@ -56,6 +56,25 @@ delay argument on the other scripts is now belt and braces.
 boot. If the kernel has panicked, `picoctl` cannot run and the board
 needs BOOTSEL by hand.
 
+From BOOTSEL, the board appears as drive **F:** labelled `RP2350`
+(`F:\INFO_UF2.TXT` confirms it). Copy the uf2 and it reboots itself:
+
+    Copy-Item <path>\Kernel\platform\platform-rpipico\build\fuzix.uf2 F:\
+
+The drive disappearing is the success signal. Flash the image the board
+was already running unless there is a reason not to - the build tree
+one, not `Images/rpipico/fuzix.uf2`, which is the v0.1 release.
+
+## Do not send a command that can block on the console
+
+The console *is* the only link, so anything left reading stdin eats
+every command sent afterwards and the board looks dead while being
+perfectly healthy. `sh -c 'cat 1<> /tmp/z'` did exactly that here - the
+Fuzix shell has no `1<>`, so `cat` ran with stdin on the console.
+
+Recovery is a raw `\x03`, which is why it is worth having a script that
+can send control characters rather than only whole lines.
+
 After any reset the board waits at `bootdev:`. A bare CR does not
 re-prompt, so silence there does **not** mean it is dead - send `hdb2`,
 then `root`.
