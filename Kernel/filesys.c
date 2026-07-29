@@ -325,7 +325,17 @@ found:
     return nindex;
 
 badino:
-    kputs("i_open: bad disk inode\n");
+    /*
+     * Say which inode and what was wrong with it. The bare message
+     * this replaces gave no way to tell an allocator handing out a
+     * live inode from a directory entry pointing at a dead one, and
+     * the caller turns this into ENFILE - "File table overflow" -
+     * which sends you looking at the wrong thing entirely.
+     */
+    kprintf("i_open: bad inode %u %s mode %x nlink %u\n",
+            (uint16_t)ino, isnew ? "new" : "old",
+            (uint16_t)nindex->c_node.i_mode,
+            (uint16_t)nindex->c_node.i_nlink);
     return NULLINODE;
 }
 
@@ -590,12 +600,27 @@ uint16_t i_alloc(uint16_t devno)
         goto corrupt;
 
 tryagain:
-    if(dev->s_ninode) {
+    while(dev->s_ninode) {
+        struct dinode check;
         if(!(dev->s_tinode))
             goto corrupt;
         ino = dev->s_inode[--dev->s_ninode];
         if(ino < 2 || ino >=(dev->s_isize-2)*8)
             goto corrupt;
+        /*
+         * The free list is a cache written by whoever last had the
+         * filesystem, and it can be wrong: an entry may name an inode
+         * that is now a live file. Handing that out corrupts the file
+         * that owns it, so check the inode on disk before believing
+         * the list. The block is almost always in the buffer cache,
+         * and being wrong here is expensive enough to be worth a read.
+         */
+        if (breadi(devno, ino, &check) == 0 &&
+            (check.i_mode || check.i_nlink)) {
+            kprintf("i_alloc: %u in free list but in use, skipped\n",
+                    (uint16_t)ino);
+            continue;		/* try the next entry */
+        }
         --dev->s_tinode;
         return(ino);
     }
@@ -1255,6 +1280,28 @@ struct mount *fmount(uint16_t dev, register inoptr ino, uint16_t flags)
         udata.u_error = EINVAL;
         return NULL;
     }
+
+    /*
+     * The free inode list in the superblock is only a cache of inodes
+     * that were free when it was written. Do not trust it: discard it
+     * and let i_alloc rebuild it from the disk on first use.
+     *
+     * Anything that writes the filesystem while we are not looking
+     * invalidates it, and two things routinely do. ucp builds the
+     * image on the host, and fsck runs from rc against the root we
+     * have *already* mounted - it sets s_ninode to 0 on disk for
+     * exactly this reason, but we read the superblock before it ran
+     * and would otherwise keep using the stale copy, and write it back
+     * over fsck's correction on the next sync.
+     *
+     * The symptom when this goes wrong is i_alloc handing out an inode
+     * that is a live file, which surfaces as "i_open: bad disk inode"
+     * and then, misleadingly, ENFILE - "File table overflow" - from
+     * the create path, on a filesystem fsck calls clean.
+     *
+     * The cost is one inode scan after each mount.
+     */
+    fp->s_ninode = 0;
 
     if (fp->s_fmod == FMOD_DIRTY) {
         kputs("warning: mounting dirty file system, forcing r/o.\n");
