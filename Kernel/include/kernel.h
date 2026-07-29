@@ -386,6 +386,15 @@ struct mount {
     uint16_t m_flags;
     inoptr   m_mntpt;     /* Mount point */
     struct filesys m_fs;
+    /*
+     * V7's s_ilock. Not in struct filesys because that is the on-disk
+     * superblock. i_alloc() rebuilds m_fs.s_inode[] from index 0 and
+     * assigns s_ninode at the end, and it does block I/O to do it - so
+     * two overlapping rebuilds interleave into one array and the loser's
+     * entries survive as inodes that have already been handed out.
+     * i_alloc's own comment asked for this lock.
+     */
+    uint8_t  m_ilock;
 };
 #define MS_RDONLY	1
 #define MS_NOSUID	2

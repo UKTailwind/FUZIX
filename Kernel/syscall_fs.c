@@ -336,6 +336,12 @@ arg_t _pipe(void)
 	++ino->c_refs;
 	ino->c_node.i_mode = F_PIPE | 0777;	/* No permissions necessary on pipes */
 	ino->c_node.i_nlink = 0;	/* a pipe is not in any directory */
+	/* The disk copy still says this inode is free, and nothing here
+	   changes that. Say so, as V7's pipe() does with IACC|IUPD|ICHG,
+	   so a sync writes it out; i_alloc's scan no longer depends on
+	   that having happened, but leaving the two silently disagreeing
+	   is what made this inode look allocatable. */
+	ino->c_flags |= CDIRTY;
 	ino->c_readers++;
 	ino->c_writers++;
 

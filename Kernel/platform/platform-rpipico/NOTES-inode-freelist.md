@@ -1,10 +1,69 @@
 # Inode double free — briefing note
 
-2026-07-29. **Open.** Contained, not cured.
+2026-07-29. **SOLVED.** See section 0 for the answer; the rest is the
+hunt, kept because most of what it eliminates is still worth knowing.
 
-The filesystem is fundamental, so this is written to be picked up cold.
-It records what the fault is, what was eliminated, what was changed and
-what is still wrong. Kernel commits `27a82379f` and `9006603d5`.
+## 0. The answer
+
+**It was never an inode bug at all. It was a two-byte buffer overrun in
+the *block* allocator, landing on the inode free list count.**
+
+`blk_alloc()` refills the block free list from a chain block:
+
+    blktok(&dev->s_nfree, buf, 0,
+        sizeof(int) + FILESYS_TABSIZE * sizeof(blkno_t));
+
+`s_nfree` is a `uint16_t`. On the 8 and 16 bit machines Fuzix grew up
+on `sizeof(int)` is 2 and the two agree - the comment in `blk_free()`
+even says so: *"nfree must directly preceed the blocks and without
+padding. That's the assumption UZI always had."* On this 32 bit target
+`sizeof(int)` is 4, so the copy runs **two bytes past the end of
+`s_free[]`**. And in `struct filesys`, what sits immediately after
+`s_free[]` is:
+
+    blkno_t       s_free[FILESYS_TABSIZE];
+    int16_t       s_ninode;              <-- the inode free list count
+    uint16_t      s_inode[FILESYS_TABSIZE];
+
+`blk_free()` wrote the same over-long field, so those two spare bytes
+on disk hold whatever `s_ninode` happened to be when that chain block
+was written. Every block free list refill therefore **restored a stale
+inode free list count**, and every already-popped slot in `s_inode[]`
+above the true count came back to life - naming inodes that were by
+then live files.
+
+That is why:
+
+* no `i_free()` call ever appeared in the trace, and no scan ran - the
+  list grew without either;
+* the same small set of inodes recurred: they are the most recently
+  popped slots, which are exactly the files just created;
+* it only bit under heavy *block* allocation, which is what triggers a
+  refill, which is why big compiles provoked it and small ones did not;
+* fsck always found the structure sound: the damage was in a counter
+  and a cache, not in the filesystem.
+
+Offsets 0..101 of the chain block are unchanged, so existing cards,
+images and host tools still interoperate; the fix simply stops touching
+the two bytes past the block list.
+
+**This is a 32 bit portability bug in shared Fuzix code** and will be
+present on any 32 bit target. Worth sending upstream.
+
+### Verified
+
+70 consecutive on-target compiles with no kernel message of any kind,
+where the guards previously fired within three. `df -i` before and
+after 28 compiles: 1349 free inodes both times, exactly conserved.
+fsck afterwards reports no count discrepancy and all five passes clean.
+All 14 compiler samples still build on the board and match gcc.
+
+---
+
+## The hunt
+
+What follows was written while it was still open. Kernel commits
+`27a82379f` and `9006603d5` plus the V7 comparison in section 4b.
 
 ---
 
@@ -171,10 +230,66 @@ hundreds of compile-and-run cycles back to back, which is precisely the
 workload that triggers this, and there is no point starting it until
 the filesystem is trustworthy.
 
-## 5. What is outstanding
+## 4b. The V7 comparison, and what it fixed
 
-**The double deref itself.** `i_deref` reaches its freeing branch twice
-for one inode and nothing above knows why.
+Comparing `i_deref()` against V7's `iput()` (and `i_alloc()` against
+V7's `ialloc()`) found five genuine divergences. **None of them was the
+root cause**, but all five are real and all five are fixed, because
+each was a latent fault of its own:
+
+| | V7 | Fuzix, before |
+|---|---|---|
+| ref drop | after the destruction | before `f_trunc` |
+| free condition | `i_nlink <= 0` alone | also required `CDIRTY` |
+| after freeing | `i_flag = 0; i_number = 0` | entry still findable by number |
+| lock across the rebuild | `s_ilock` + sleep/wakeup | none |
+| rebuild scan | skips inodes that are in core | did not |
+
+What each was actually costing:
+
+* **Dirty-gated free.** An inode whose last link and last reference
+  went away without anything dirtying it was never returned to the
+  free list *and* never had its mode cleared on disk. A silent leak.
+* **Entry not invalidated.** A dead cache entry could still be matched
+  by number by a later `i_open`, including for a newly allocated inode
+  that reused the number, and validated against a copy of an inode that
+  no longer described anything.
+* **Ref dropped early.** From `f_trunc` (which does block I/O) to the
+  end of the function the entry read as unreferenced, so `i_open` would
+  hand it out as a free slot.
+* **No in-core check in the scan.** `_pipe()` sets `i_mode` to F_PIPE
+  in core and never writes it, so the disk still says that inode is
+  free. A scan would list a live pipe.
+* **No lock.** `i_alloc` refills `s_inode[]` from index 0 and assigns
+  `s_ninode` only at the end. The function's own comment asked for the
+  lock. Measurement afterwards showed no actual concurrency on this
+  workload, so it was not the cause here - but it is still required.
+
+Also fixed alongside: `i_open` leaked a freshly allocated inode on its
+ENFILE and read-failure paths, which is where the *other* half of the
+"free inode count should be N+31" drift came from.
+
+**Do not undo these while cleaning up.** They are correct against V7
+and they are each a bug in their own right.
+
+## 5. Outstanding
+
+**Nothing on the inode double free.** It is fixed and verified; see
+section 0.
+
+Two things remain worth doing:
+
+**`rc` runs `fsck -a -y /` on an already-mounted root.** fsck writing a
+filesystem the kernel has cached is unsound in general; the `fmount`
+change only covers the one field it touches. The clean fix is to fsck
+before mounting read-write, or to have fsck refuse a mounted
+filesystem.
+
+**The `ENFILE` mapping** in the create path should distinguish "no
+inode table slot" from "i_open rejected the inode". It cost an hour
+here and will cost it again.
+
+### Historical: what the double deref looked like
 
 Known:
 

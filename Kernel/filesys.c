@@ -304,11 +304,11 @@ inoptr i_open(register uint16_t dev, uint16_t ino)
 
     if(!nindex){      /* No unrefed slots in inode table */
         udata.u_error = ENFILE;
-        return(NULLINODE);
+        goto lost;
     }
 
     if (breadi(dev, ino, &nindex->c_node))
-        return NULLINODE;
+        goto lost;
 
     nindex->c_dev = dev;
     nindex->c_num = ino;
@@ -330,8 +330,21 @@ found:
          * that is really in use, putting a live file on the free
          * list.
          */
-        if (cached && breadi(dev, ino, &nindex->c_node))
-            return NULLINODE;
+        if (cached) {
+            /*
+             * ...unless the entry is in use. If i_alloc has handed out
+             * an inode that is open, the in-core copy belongs to the
+             * file using it and holds block pointers and a size that
+             * are not on disk yet. Overwriting it here loses all of
+             * that, and the stale copy is then written back at close -
+             * a 24K file was destroyed exactly this way. Refuse the
+             * allocation instead and leave the open file alone.
+             */
+            if (nindex->c_refs)
+                goto badino;
+            if (breadi(dev, ino, &nindex->c_node))
+                return NULLINODE;
+        }
         if(nindex->c_node.i_nlink || nindex->c_node.i_mode & F_MASK)
             goto badino;
     } else {
@@ -353,6 +366,22 @@ badino:
             (uint16_t)ino, isnew ? "new" : "old",
             (uint16_t)nindex->c_node.i_mode,
             (uint16_t)nindex->c_node.i_nlink);
+    return NULLINODE;
+
+lost:
+    /*
+     * We allocated an inode and are now failing for an unrelated
+     * reason. Give it back, or it stays marked in use with nothing
+     * pointing at it and s_tinode drifts down by one every time. That
+     * is the "free inode count in superblock is N, should be N+31"
+     * fsck reports after a heavy run.
+     *
+     * Only on these paths. A badino failure with isnew means the inode
+     * we were handed is a live file, and freeing it again is precisely
+     * the thing being fixed.
+     */
+    if (isnew)
+        i_free(dev, ino);
     return NULLINODE;
 }
 
@@ -603,6 +632,14 @@ bool inline baddev(fsptr dev)
  * This will need to happen under the superblock lock once we do sleeping
  */
 
+/*
+ *	DEBUG: which code path put each free list entry there - 'F' for
+ *	i_free, 'S' for the disk scan. When i_alloc finds a live inode on
+ *	the list this says where it came from, which is the one thing the
+ *	message on its own could never tell us. Indexed the same as
+ *	dev->s_inode[]; single device is fine for the purpose.
+ */
+
 uint16_t i_alloc(uint16_t devno)
 {
     staticfast fsptr dev;
@@ -610,11 +647,32 @@ uint16_t i_alloc(uint16_t devno)
     register struct dinode *di;
     staticfast uint16_t j;
     register struct blkbuf *buf;
+    staticfast struct mount *mnt;
     uint16_t k;
     unsigned ino;
+    uint16_t ret;
 
-    if(baddev(dev = getdev(devno)))
-        goto corrupt;
+    if(baddev(dev = getdev(devno))) {
+        /* Before the lock is held, so report and leave directly */
+        kputs("i_alloc: corrupt superblock\n");
+        dev->s_mounted = 1;
+        udata.u_error = ENOSPC;
+        return 0;
+    }
+
+    /*
+     * V7's s_ilock, which this function's own comment asked for. The
+     * rebuild below refills s_inode[] from index 0 and only assigns
+     * s_ninode when it has finished, and it sleeps in block I/O to get
+     * there. Two processes creating files at once therefore ran two
+     * rebuilds into one array: the second overwrote entries the first
+     * had already handed out, and those inodes came back round as free
+     * while they were live files.
+     */
+    mnt = fs_tab_get(devno);
+    while (mnt->m_ilock)
+        psleep(&mnt->m_ilock);
+    mnt->m_ilock = 1;
 
 tryagain:
     while(dev->s_ninode) {
@@ -634,12 +692,18 @@ tryagain:
          */
         if (breadi(devno, ino, &check) == 0 &&
             (check.i_mode || check.i_nlink)) {
-            kprintf("i_alloc: %u in free list but in use, skipped\n",
-                    (uint16_t)ino);
+            kprintf("i_alloc: %u in free list but in use (mode %x nlink %u)\n",
+                    (uint16_t)ino,
+                    (uint16_t)check.i_mode, (uint16_t)check.i_nlink);
+            /* It was never free, so the count that said it was is one
+               too high. Repair it rather than carrying the error. */
+            if (dev->s_tinode)
+                --dev->s_tinode;
             continue;		/* try the next entry */
         }
         --dev->s_tinode;
-        return(ino);
+        ret = ino;
+        goto done_unlock;
     }
     /* We must scan the inodes, and fill up the table */
 
@@ -652,8 +716,33 @@ tryagain:
         for(j=0; j < INO_PER_BLOCK; j++) {
             /* Optimisation: add offsetof and use that to reduce blkptr range */
             di = blkptr(buf, sizeof(struct dinode) * j, sizeof(struct dinode));
-            if(!(di->i_mode || di->i_nlink))
-                dev->s_inode[k++] = INO_PER_BLOCK * (blk - 2) + j;
+            if(!(di->i_mode || di->i_nlink)) {
+                register inoptr itp;
+                ino = INO_PER_BLOCK * (blk - 2) + j;
+                /*
+                 * An inode that is in core is not free, whatever the
+                 * disk says. The in-core copy is the newer one and the
+                 * disk has simply not caught up: _pipe() sets i_mode
+                 * to F_PIPE in core and never writes it, newfile() has
+                 * a window between i_open() and wr_inode(), and sync()
+                 * above only flushes entries with c_refs > 0.
+                 *
+                 * Without this the scan puts live objects on the free
+                 * list and i_alloc hands them out a second time. That
+                 * is the inode double free: the pipes a shell creates
+                 * for every command are the common case, which is why
+                 * it took a compiler driver to provoke it.
+                 *
+                 * V7's ialloc() has exactly this check and it is the
+                 * only thing protecting it, since V7 does not write a
+                 * newly allocated inode to disk either.
+                 */
+                for (itp = i_tab; itp < i_tab + ITABSIZE; itp++)
+                    if (itp->c_dev == devno && itp->c_num == ino)
+                        goto skip;
+                dev->s_inode[k++] = ino;
+            }
+skip:
             if(k == FILESYS_TABSIZE) {
                 brelse(buf);
                 goto done;
@@ -663,14 +752,15 @@ tryagain:
     }
 
 done:
-    /* The scan was checked for duplicates while chasing the above and
-       never produced one, which is what pointed at i_free. Each
-       (block, slot) is visited exactly once, so it cannot. */
+    /* Each (block, slot) is visited exactly once, so the scan cannot
+       produce an internal duplicate; the in-core check above is what
+       stops it duplicating something that is already live. */
     if(!k) {
         if(dev->s_tinode)
             goto corrupt;
         udata.u_error = ENOSPC;
-        return(0);
+        ret = 0;
+        goto done_unlock;
     }
     dev->s_ninode = k;
     goto tryagain;
@@ -679,7 +769,12 @@ corrupt:
     kputs("i_alloc: corrupt superblock\n");
     dev->s_mounted = 1;
     udata.u_error = ENOSPC;
-    return(0);
+    ret = 0;
+
+done_unlock:
+    mnt->m_ilock = 0;
+    wakeup(&mnt->m_ilock);
+    return ret;
 }
 
 
@@ -693,6 +788,7 @@ corrupt:
 void i_free(uint16_t devno, uint16_t ino)
 {
     register fsptr dev;
+    struct mount *mnt;
     uint16_t i;		/* DEBUG */
 
     if(baddev(dev = getdev(devno)))
@@ -700,6 +796,21 @@ void i_free(uint16_t devno, uint16_t ino)
 
     if(ino < 2 || ino >=(dev->s_isize-2)*8)
         panic(PANIC_IFREE_BADI);
+
+    /*
+     * If a rebuild is in progress, keep away from the list entirely -
+     * this is what V7's ifree() does. The rebuild refills s_inode[]
+     * from index 0 and assigns s_ninode at the end, so anything pushed
+     * while it runs is simply overwritten, and the inode is lost from
+     * the cache while still counted as allocated. The inode is already
+     * clear on disk, so the next scan will find it; the cache is only
+     * a cache.
+     */
+    mnt = fs_tab_get(devno);
+    if (mnt && mnt->m_ilock) {
+        ++dev->s_tinode;
+        return;
+    }
 
     /*
      * An inode may appear on the free list at most once. Nothing here
@@ -726,25 +837,10 @@ void i_free(uint16_t devno, uint16_t ino)
         }
     }
 
-    /* DEBUG: is anything still holding this inode? Freeing one that is
-       live is the more damaging half of the fault - it is what puts a
-       live inode on the list for i_alloc to hand out again. */
-    {
-        register inoptr j;
-        for (j = i_tab; j < i_tab + ITABSIZE; j++) {
-            if (j->c_dev == devno && j->c_num == ino && j->c_refs) {
-                kprintf("i_free: %u still has %u refs, mode %x nlink %u\n",
-                        (uint16_t)ino, (uint16_t)j->c_refs,
-                        (uint16_t)j->c_node.i_mode,
-                        (uint16_t)j->c_node.i_nlink);
-                break;
-            }
-        }
-    }
-
     ++dev->s_tinode;
-    if(dev->s_ninode < FILESYS_TABSIZE)
+    if(dev->s_ninode < FILESYS_TABSIZE) {
         dev->s_inode[dev->s_ninode++] = ino;
+    }
 }
 
 
@@ -783,8 +879,29 @@ blkno_t blk_alloc(uint16_t devno)
         buf = bread(devno, newno, 0);
         if (buf == NULL)
             goto corrupt;
+        /*
+         * sizeof(dev->s_nfree), NOT sizeof(int).
+         *
+         * s_nfree is a uint16_t. On the 8 and 16 bit targets Fuzix
+         * grew up on, int is two bytes and the two agree; here int is
+         * four, so this copied two bytes too many - and what sits
+         * immediately after s_free[] in struct filesys is s_ninode.
+         *
+         * blk_free() wrote the same over-long field, so the two spare
+         * bytes on disk hold whatever s_ninode was when that free list
+         * block was written. Refilling the block list therefore
+         * restored a stale inode free list count, and every already
+         * popped slot in s_inode[] above the real count came back to
+         * life - naming inodes that were by then live files. That is
+         * the inode double free, and it is why it only appeared under
+         * heavy block allocation and never showed an i_free() call.
+         *
+         * Offsets 0..101 are unchanged, so existing filesystems and the
+         * host side tools still interoperate; only the two bytes past
+         * the block list are no longer touched.
+         */
         blktok(&dev->s_nfree, buf, 0,
-            sizeof(int) + FILESYS_TABSIZE * sizeof(blkno_t));
+            sizeof(dev->s_nfree) + FILESYS_TABSIZE * sizeof(blkno_t));
         /* This assumes no padding: this is an UZI era assumption */
         brelse(buf);
     }
@@ -840,8 +957,13 @@ void blk_free(uint16_t devno, blkno_t blk)
         buf = bread(devno, blk, 1);
         if (buf) {
             /* nfree must directly preceed the blocks and without padding. That's
-               the assumption UZI always had */
-            blkfromk(&dev->s_nfree, buf, 0, sizeof(int) + 50 * sizeof(blkno_t));
+               the assumption UZI always had.
+               sizeof(dev->s_nfree), NOT sizeof(int): s_nfree is a
+               uint16_t and int is four bytes on a 32bit target, so
+               "sizeof(int)" copied two bytes too many. See the matching
+               read in blk_alloc() for what that cost. */
+            blkfromk(&dev->s_nfree, buf, 0,
+                sizeof(dev->s_nfree) + FILESYS_TABSIZE * sizeof(blkno_t));
             bawrite(buf);
             dev->s_nfree = 0;
         } else
@@ -938,6 +1060,31 @@ int_fast8_t uf_alloc(void)
  * links, the inode itself and its blocks(if not a device) is freed.
  */
 
+/*
+ *	Compare this with V7's iput(), which is where it comes from. Four
+ *	things had drifted, and together they are the inode double free:
+ *
+ *	  * V7 does all of the destruction with i_count still 1 and only
+ *	    decrements at the very end. This decremented first, so from
+ *	    f_trunc() - which does block I/O - until the end of the
+ *	    function the table entry read as unreferenced and i_open()
+ *	    would hand it out as a free slot to whoever ran next.
+ *	  * V7 frees on i_nlink <= 0 alone. This also required CDIRTY, so
+ *	    an inode whose last link and last reference went away without
+ *	    anything having dirtied it was never returned to the free list
+ *	    and never had its mode cleared on disk - it stayed allocated
+ *	    with nothing pointing at it.
+ *	  * V7 finishes with "ip->i_flag = 0; ip->i_number = 0;" - the
+ *	    cache entry is dead and can never be found again. This left
+ *	    c_num set, so a later i_open could still match the entry by
+ *	    number and validate against a copy of an inode that no longer
+ *	    described anything. That is where the in-core inode and the
+ *	    disk came to disagree.
+ *	  * V7 holds ILOCK across itrunc. i_lock() is a no-op in this
+ *	    configuration (kernel.h), so there is no lock to hold; keeping
+ *	    the reference is what stands in for it.
+ */
+
 void i_deref(register inoptr ino)
 {
     uint_fast8_t mode = getmode(ino);
@@ -950,26 +1097,38 @@ void i_deref(register inoptr ino)
     if (mode == MODE_R(F_PIPE))
         wakeup((uint8_t *)ino);
 
-    /* If the inode has no links and no refs, it must have
-       its blocks freed. */
-
-    if(!(--ino->c_refs || ino->c_node.i_nlink))
-        /*
-           SN (mcy)
-           */
-        if (mode == MODE_R(F_REG) || mode == MODE_R(F_DIR) || mode == MODE_R(F_PIPE))
-            f_trunc(ino);
-
-    /* If the inode was modified, we must write it to disk. */
-    if(!(ino->c_refs) && (ino->c_flags & CDIRTY))
-    {
-        if(!(ino->c_node.i_nlink))
-        {
+    if (ino->c_refs == 1) {
+        /* Last reference. Do not drop it until the object is gone. */
+        if (!ino->c_node.i_nlink && !(ino->c_flags & CRDONLY)) {
+            /* No links and no other users: the file ceases to exist */
+            if (mode == MODE_R(F_REG) || mode == MODE_R(F_DIR) ||
+                mode == MODE_R(F_PIPE))
+                f_trunc(ino);
             ino->c_node.i_mode = 0;
+            /* Zeroing the mode has to reach the disk, or i_alloc's
+               scan will not see the inode as free either */
+            ino->c_flags |= CDIRTY;
+            wr_inode(ino);
+            /*
+             * Only now is it safe to list it. Freeing before the
+             * cleared inode reached the disk left a window in which
+             * the list said "free" and the disk still described a live
+             * file, which is what i_alloc's validation reads.
+             */
             i_free(ino->c_dev, ino->c_num);
         }
-        wr_inode(ino);
+
+        /* If the inode was modified, we must write it to disk. */
+        if (ino->c_flags & CDIRTY)
+            wr_inode(ino);
+
+        if (!ino->c_node.i_nlink) {
+            /* Dead. Make the entry unfindable, as V7 does. */
+            ino->c_num = 0;
+            ino->c_flags = 0;
+        }
     }
+    ino->c_refs--;
 }
 
 void corrupt_fs(uint16_t devno)
