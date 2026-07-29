@@ -198,14 +198,33 @@ this run puts a number on it. A minimal `FILE` layer over the `open`/
 
 ## 5. Smaller parser gaps
 
-### 5.1 Struct tag scope — 00044, 00053
+### 5.1 Struct tag scope — DONE
 
-    struct T { int x; };
-    { struct T { int z; }; }     /* a new, distinct type */
+Tags are now scoped like any other name. Three things were needed and
+the third is the one worth remembering:
 
-We say `struct declared twice`. Tags need the same block scoping that
-ordinary identifiers got in commit `1b97bbd62`, so this should be able
-to reuse `block_base`.
+* `find_struct` searched the table **forwards** and took the first
+  match, so the outermost tag always won. Ordinary identifiers have
+  always searched backwards for exactly this reason.
+* tags were never discarded at the end of a block, because
+  `pop_local_symbols` keeps anything whose storage class is at or above
+  `S_STATIC`, and `S_STRUCT` is well above it.
+* **position in the table cannot decide which tags to discard.** A file
+  scope tag sits above `symtab` while `block_base` may still *be*
+  `symtab`, so "above the mark" does not mean "declared in this block".
+  Tags therefore carry `S_TAGLOCAL`, set when the tag is declared
+  inside a function body, and are allocated as local so `local_top`
+  moves past them - without that an inner block's pop reaches back and
+  frees a tag belonging to the block outside it.
+
+`in_funcbody` was added for this. Note that the existing `funcbody`
+looks like it says the same thing and does not: it is set *after*
+`function_body()` returns, meaning "one has just been parsed".
+
+`samples/tagscope.c` covers it, including that the file scope tag is
+visible again once an inner block has ended, that unions behave the
+same, and that a tag first seen inside one function does not leak into
+the next.
 
 ### 5.2 Prototype then K&R definition — 00114
 

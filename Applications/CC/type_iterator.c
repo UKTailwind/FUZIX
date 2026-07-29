@@ -42,7 +42,7 @@ static unsigned structured_type(unsigned sflag)
 	struct symbol *sym;
 	unsigned name = symname();
 
-	sym = update_struct(name, sflag);
+	sym = update_struct(name, sflag, token == T_LCURLY);
 	if (sym == NULL) {
 		error("not a struct");
 		junk();

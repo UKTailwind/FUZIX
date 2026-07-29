@@ -15,6 +15,8 @@ static unsigned switch_default;
 static unsigned func_type;
 
 unsigned func_flags;
+/* Nonzero while a function body is being parsed. See function_body. */
+unsigned in_funcbody;
 
 /* C keyword statements */
 
@@ -483,7 +485,12 @@ void function_body(unsigned st, unsigned name, unsigned type)
 
 	init_labels();
 
+	/* Note that we are *inside* a body. funcbody looks like it says
+	   this and does not - it is set after function_body() returns, to
+	   mean "one has just been parsed". */
+	in_funcbody++;
 	statement_block(1);
+	in_funcbody--;
 
 	/*
 	 * Falling off the end of main returns 0.

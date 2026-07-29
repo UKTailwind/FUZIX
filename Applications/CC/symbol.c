@@ -72,9 +72,15 @@ void pop_local_symbols(struct symbol *top)
 {
 	struct symbol *s = top + 1;
 	while (s <= last_sym) {
-		if (S_STORAGE(s->infonext) < S_STATIC) {
+		unsigned st = S_STORAGE(s->infonext);
+		if (st < S_STATIC) {
 			/* Write out any storage if needed */
 			symbol_bss(s);
+			s->infonext = S_FREE;
+			s->name = 0;
+		} else if ((st == S_STRUCT || st == S_UNION) &&
+			   (s->infonext & S_TAGLOCAL)) {
+			/* A tag declared inside this block goes with it */
 			s->infonext = S_FREE;
 			s->name = 0;
 		}
@@ -339,22 +345,35 @@ unsigned array_compatible(unsigned t1, unsigned t2)
 
 static struct symbol *find_struct(unsigned name)
 {
-	struct symbol *sym = symtab;
+	struct symbol *sym = last_sym;
 	/* Anonymous structs are unique each time */
 	if (name == 0)
 		return 0;
-	while(sym <= last_sym) {
+	/* Backwards, so the innermost declaration of a tag wins - the same
+	   rule find_symbol uses for ordinary identifiers. Searching
+	   forwards returned the outermost, so a tag redeclared in an inner
+	   block could never be seen. */
+	while(sym >= symtab) {
 		if (sym->name == name) {
 			unsigned st = S_STORAGE(sym->infonext);
 			if (st == S_STRUCT || st == S_UNION)
 				return sym;
 		}
-		sym++;
+		sym--;
 	}
 	return NULL;
 }
 
-struct symbol *update_struct(unsigned name, unsigned t)
+/*
+ *	Look up or create a struct/union tag.
+ *
+ *	"defining" says a body follows - "struct T { ... }" rather than a
+ *	mention of T. That is the difference between using the tag from
+ *	whatever scope declared it and declaring a new one here: an inner
+ *	block may define its own T, and it is a distinct type from the
+ *	outer one rather than a redefinition of it.
+ */
+struct symbol *update_struct(unsigned name, unsigned t, unsigned defining)
 {
 	struct symbol *sym;
 	if (t)
@@ -362,9 +381,36 @@ struct symbol *update_struct(unsigned name, unsigned t)
 	else
 		t = S_UNION;
 	sym = find_struct(name);
+	/*
+	 * A body makes this a definition. If the tag we found belongs to
+	 * an enclosing scope we want a new one; only a tag declared in
+	 * *this* scope is a redefinition, which struct_declaration then
+	 * reports.
+	 *
+	 * Which scope it belongs to cannot be decided by position alone:
+	 * a file scope tag sits above symtab while block_base may still be
+	 * symtab. So ask the flag first - a tag without S_TAGLOCAL is at
+	 * file scope, and redefining it from inside a function always
+	 * makes a new one - and only compare positions between two tags
+	 * that are both block local, where block_base does mean something.
+	 */
+	if (sym && defining) {
+		if (!(sym->infonext & S_TAGLOCAL)) {
+			if (in_funcbody)
+				sym = NULL;
+		} else if (sym <= block_base)
+			sym = NULL;
+	}
 	if (sym == NULL) {
-		sym = alloc_symbol(name, 0);	/* TODO scoping */
-		sym->infonext = t;
+		/*
+		 * A tag declared inside a function body dies with its block.
+		 * Allocated as local so that local_top moves past it: that
+		 * is what makes the mark an enclosing block took cover it,
+		 * and stops an inner block's pop reaching back and freeing
+		 * a tag that belongs to the block outside it.
+		 */
+		sym = alloc_symbol(name, in_funcbody ? 1 : 0);
+		sym->infonext = t | (in_funcbody ? S_TAGLOCAL : 0);
 		sym->data.idx = NULL;	/* Not yet known */
 	} else {
 		if (S_STORAGE(sym->infonext) != t)
