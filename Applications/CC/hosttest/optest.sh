@@ -34,7 +34,12 @@ fi
 refrc=$?
 
 # --- ours: cc0 | cc1 | cc2, then interpret --------------------------
-gcc -E -P "$src" > "$b.pp" || exit 1
+# Our chain gets our headers, not the host's: glibc's are full of GNU
+# extensions no C89 compiler can parse. gcc above built the reference
+# against its own, which is the point - the two only have to agree on
+# behaviour, not on how the declarations are spelled.
+gcc -E -P -nostdinc -U__LP64__ -U__LLP64__ -D__ILP32__ \
+	-I "$CC/hosttest/ctest-include" "$src" > "$b.pp" || exit 1
 "$CC/host-armm0/cc0" < "$b.pp" > "$b.tok" 2> "$b.cc0.err"
 rm -f "$b.ir"; "$CC/host-armm0/cc1" < "$b.tok" 1<> "$b.ir" 2> "$b.cc1.err"
 cc1rc=$?

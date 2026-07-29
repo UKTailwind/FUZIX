@@ -555,15 +555,35 @@ static void fmt_double(char *out, double v, int prec)
  */
 static unsigned long out_at;		/* destination for sprintf */
 static int out_to_mem;
+static int out_fd = 1;			/* when not to memory */
 static unsigned long out_len;
+
+/* Bytes bound for a descriptor other than stdout, batched so a format
+   run is one write rather than one per character. */
+static char out_buf[256];
+static unsigned out_n;
+
+static void out_flush(void)
+{
+	if (out_n) {
+		if (write(out_fd, out_buf, out_n) < 0)
+			/* nothing useful to do about it here */;
+		out_n = 0;
+	}
+}
 
 static void emit(char c)
 {
 	if (out_to_mem) {
 		if (out_at < MEMSIZE)
 			mem[out_at++] = (uint8_t) c;
-	} else
-		putchar(c);
+	} else if (out_fd == 1)
+		putchar(c);		/* stays in step with printf */
+	else {
+		if (out_n == sizeof(out_buf))
+			out_flush();
+		out_buf[out_n++] = c;
+	}
 	out_len++;
 }
 
@@ -684,9 +704,238 @@ static void do_format(unsigned abase)
 static void lib_printf(void)
 {
 	out_to_mem = 0;
+	out_fd = 1;
 	out_len = 0;
 	do_format(0);
 	A = (int64_t) out_len;		/* printf returns the count written */
+}
+
+/* ---- stdio --------------------------------------------------------- */
+
+/*
+ *	A FILE * is the descriptor plus one.
+ *
+ *	That keeps stdin, stdout and stderr as the constants 1, 2 and 3,
+ *	which the header can define directly - our object format has no
+ *	way to import a *data* symbol from the runtime, only functions, so
+ *	they could not have been real objects. It also means no open file
+ *	table: every operation is the matching syscall on handle - 1.
+ *
+ *	Unbuffered. The kernel is doing the buffering underneath and this
+ *	is not the place to add another layer.
+ */
+#define MAXFD	64
+static uint8_t file_eof[MAXFD];
+
+static int fh(long handle)
+{
+	int fd = (int) handle - 1;
+	if (fd < 0 || fd >= MAXFD)
+		return -1;
+	return fd;
+}
+
+static void lib_fopen(void)
+{
+	const char *path = getstr((unsigned long) arg(0));
+	const char *mode = getstr((unsigned long) arg(1));
+	int flags = 0, fd;
+
+	/* "b" is meaningless here and is simply ignored, as C allows */
+	if (mode[0] == 'r')
+		flags = strchr(mode, '+') ? O_RDWR : O_RDONLY;
+	else if (mode[0] == 'w')
+		flags = (strchr(mode, '+') ? O_RDWR : O_WRONLY) | O_CREAT | O_TRUNC;
+	else if (mode[0] == 'a')
+		flags = (strchr(mode, '+') ? O_RDWR : O_WRONLY) | O_CREAT | O_APPEND;
+	else {
+		A = 0;
+		return;
+	}
+	fd = open(path, flags, 0666);
+	if (fd < 0 || fd >= MAXFD) {
+		if (fd >= 0)
+			close(fd);
+		A = 0;			/* NULL */
+		return;
+	}
+	file_eof[fd] = 0;
+	A = fd + 1;
+}
+
+static void lib_fclose(void)
+{
+	int fd = fh(arg(0));
+	A = (fd < 0) ? -1 : close(fd);
+}
+
+/* fread/fwrite count items, not bytes, and return the item count */
+static void lib_fread(void)
+{
+	unsigned long b = (unsigned long) arg(0);
+	unsigned long size = (unsigned long) arg(1);
+	unsigned long n = (unsigned long) arg(2);
+	int fd = fh(arg(3));
+	long got;
+
+	if (fd < 0 || size == 0 || b + size * n > MEMSIZE) {
+		A = 0;
+		return;
+	}
+	got = read(fd, mem + b, size * n);
+	if (got <= 0) {
+		file_eof[fd] = 1;
+		A = 0;
+		return;
+	}
+	if ((unsigned long) got < size * n)
+		file_eof[fd] = 1;
+	A = got / (long) size;
+}
+
+static void lib_fwrite(void)
+{
+	unsigned long b = (unsigned long) arg(0);
+	unsigned long size = (unsigned long) arg(1);
+	unsigned long n = (unsigned long) arg(2);
+	int fd = fh(arg(3));
+	long put;
+
+	if (fd < 0 || size == 0 || b + size * n > MEMSIZE) {
+		A = 0;
+		return;
+	}
+	if (fd == 1)
+		fflush(stdout);		/* keep printf and fwrite in order */
+	put = write(fd, mem + b, size * n);
+	A = (put <= 0) ? 0 : put / (long) size;
+}
+
+static void lib_fgetc(void)
+{
+	int fd = fh(arg(0));
+	unsigned char c;
+
+	if (fd < 0 || read(fd, &c, 1) != 1) {
+		if (fd >= 0)
+			file_eof[fd] = 1;
+		A = -1;			/* EOF */
+		return;
+	}
+	A = c;
+}
+
+static void lib_fputc(void)
+{
+	int fd = fh(arg(1));
+	unsigned char c = (unsigned char) arg(0);
+
+	if (fd < 0) {
+		A = -1;
+		return;
+	}
+	if (fd == 1) {
+		putchar(c);
+		A = c;
+		return;
+	}
+	A = (write(fd, &c, 1) == 1) ? c : -1;
+}
+
+/*
+ *	Up to n-1 bytes, stopping after a newline, NUL terminated.
+ *	Returns the buffer, or NULL at end of file with nothing read.
+ */
+static void lib_fgets(void)
+{
+	unsigned long b = (unsigned long) arg(0);
+	long n = arg(1);
+	int fd = fh(arg(2));
+	long i = 0;
+	unsigned char c;
+
+	if (fd < 0 || n <= 0 || b + n > MEMSIZE) {
+		A = 0;
+		return;
+	}
+	while (i < n - 1) {
+		if (read(fd, &c, 1) != 1) {
+			file_eof[fd] = 1;
+			break;
+		}
+		mem[b + i++] = c;
+		if (c == '\n')
+			break;
+	}
+	if (i == 0) {
+		A = 0;			/* NULL */
+		return;
+	}
+	mem[b + i] = 0;
+	A = (int64_t) b;
+}
+
+static void lib_fputs(void)
+{
+	const char *s = getstr((unsigned long) arg(0));
+	int fd = fh(arg(1));
+	size_t len = strlen(s);
+
+	if (fd < 0) {
+		A = -1;
+		return;
+	}
+	if (fd == 1) {
+		fputs(s, stdout);
+		A = (int64_t) len;
+		return;
+	}
+	A = (write(fd, s, len) == (long) len) ? (int64_t) len : -1;
+}
+
+static void lib_fprintf(void)
+{
+	int fd = fh(arg(0));
+
+	if (fd < 0) {
+		A = -1;
+		return;
+	}
+	out_to_mem = 0;
+	out_fd = fd;
+	out_n = 0;
+	out_len = 0;
+	if (fd == 1)
+		do_format(1);
+	else {
+		do_format(1);
+		out_flush();
+	}
+	out_fd = 1;
+	A = (int64_t) out_len;
+}
+
+static void lib_feof(void)
+{
+	int fd = fh(arg(0));
+	A = (fd < 0) ? 1 : file_eof[fd];
+}
+
+static void lib_fseek(void)
+{
+	int fd = fh(arg(0));
+	if (fd < 0) {
+		A = -1;
+		return;
+	}
+	file_eof[fd] = 0;
+	A = (lseek(fd, arg(1), (int) arg(2)) < 0) ? -1 : 0;
+}
+
+static void lib_ftell(void)
+{
+	int fd = fh(arg(0));
+	A = (fd < 0) ? -1 : lseek(fd, 0, SEEK_CUR);
 }
 
 static void lib_sprintf(void)
@@ -865,6 +1114,42 @@ static void libcall(unsigned idx)
 		lib_printf();
 	} else if (!strcmp(name, "sprintf")) {
 		lib_sprintf();
+	} else if (!strcmp(name, "fopen")) {
+		lib_fopen();
+	} else if (!strcmp(name, "fclose")) {
+		lib_fclose();
+	} else if (!strcmp(name, "fread")) {
+		lib_fread();
+	} else if (!strcmp(name, "fwrite")) {
+		lib_fwrite();
+	} else if (!strcmp(name, "fgetc") || !strcmp(name, "getc")) {
+		lib_fgetc();
+	} else if (!strcmp(name, "fputc") || !strcmp(name, "putc")) {
+		lib_fputc();
+	} else if (!strcmp(name, "fgets")) {
+		lib_fgets();
+	} else if (!strcmp(name, "fputs")) {
+		lib_fputs();
+	} else if (!strcmp(name, "fprintf")) {
+		lib_fprintf();
+	} else if (!strcmp(name, "feof")) {
+		lib_feof();
+	} else if (!strcmp(name, "fseek")) {
+		lib_fseek();
+	} else if (!strcmp(name, "ftell")) {
+		lib_ftell();
+	} else if (!strcmp(name, "rewind")) {
+		int fd = fh(arg(0));
+		if (fd >= 0) {
+			lseek(fd, 0, SEEK_SET);
+			file_eof[fd] = 0;
+		}
+		A = 0;
+	} else if (!strcmp(name, "fflush")) {
+		fflush(stdout);
+		A = 0;
+	} else if (!strcmp(name, "remove")) {
+		A = unlink(getstr((unsigned long)arg(0)));
 	} else if (!strcmp(name, "exit")) {
 		exit((int)arg(0));
 
@@ -1091,6 +1376,22 @@ static void load(const char *path)
 			code[o + 2] = BC_NOP;
 			code[o + 3] = BC_NOP;
 			continue;
+		}
+
+		/*
+		 * A runtime library symbol has no address: it is resolved
+		 * by index, and the rewrite above is the only thing that
+		 * can use one. Anywhere else - "&fprintf", or a table of
+		 * them - the index would be stored as though it were a code
+		 * address and an indirect call through it would jump into
+		 * nowhere. Say so rather than letting it run.
+		 */
+		if (sym[fix[i].f_sym].s_type == BC_SYM_LIB) {
+			fprintf(stderr,
+				"bcrun: cannot take the address of library "
+				"function \"%s\"\n",
+				strtab + sym[fix[i].f_sym].s_name);
+			exit(1);
 		}
 
 		if (fix[i].f_seg == BC_SEG_CODE) {
