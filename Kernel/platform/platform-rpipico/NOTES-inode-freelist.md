@@ -3,6 +3,11 @@
 2026-07-29. **SOLVED.** See section 0 for the answer; the rest is the
 hunt, kept because most of what it eliminates is still worth knowing.
 
+> **Not the current problem.** The board still crashes, but with
+> `panic: no free buffers`, which is the buffer cache and a different
+> fault entirely - see `NOTES-buffer-panic.md`. The inode accounting
+> has survived four hard crashes since this was fixed.
+
 ## 0. The answer
 
 **It was never an inode bug at all. It was a two-byte buffer overrun in

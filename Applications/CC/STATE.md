@@ -21,10 +21,23 @@ globals/locals/arguments, `long long` declarations, storage, loads,
 stores, shifts, arithmetic, comparisons and literals.
 
 Runtime library: `malloc`/`calloc`/`free`/`realloc`, the `str*` and
-`mem*` families, `atoi`, `abs`, `printf`/`puts`/`putchar` with width
-and flags, `open`/`creat`/`close`/`read`/`write`/`lseek`/`unlink` onto
-real Fuzix descriptors, and `time_us`/`adval` through the kernel's
-PICOIOC ioctl.
+`mem*` families, `atoi`, `abs`, `printf`/`sprintf`/`puts`/`putchar`
+with width, precision and flags, `open`/`creat`/`close`/`read`/`write`/
+`lseek`/`unlink` onto real Fuzix descriptors, and `time_us`/`adval`
+through the kernel's PICOIOC ioctl.
+
+**stdio** over those descriptors: `fopen`, `fclose`, `fread`, `fwrite`,
+`fgetc`, `getc`, `fputc`, `putc`, `fgets`, `fputs`, `fprintf`, `feof`,
+`fseek`, `ftell`, `rewind`, `fflush`, `remove`. A `FILE *` is the
+descriptor plus one, which makes `stdin`/`stdout`/`stderr` the
+constants 1, 2 and 3 - they have to be constants, because the object
+format can import a *function* from the runtime but not a variable.
+The same limit means **the address of a library function cannot be
+taken**; bcrun refuses `&fprintf` by name at load time rather than
+storing an index where a code address belongs.
+
+Declarations for all of it are in `hosttest/ctest-include`, which is
+what both test harnesses preprocess against.
 
 Measured on hardware: 2000-element sieve in ~75 ms, against ~1 ms
 interpreted on the development host.
@@ -46,16 +59,22 @@ existed.
 
 **The compiler runs on the PC3 itself** (2026-07-29). `cc prog.c` on the
 board drives cpp, cc0, cc1 and cc2 and writes a `.bc` that bcrun
-executes. Twelve samples - sieve, strs, rpn, libtest, ll2, width3, sw2,
-scope, dbl, fp, struct2, struct3, struct4 and optest - compile on the
-board and produce output identical to gcc. cc0's literal encoding is
-byte for byte identical to the host's over 265 literals.
+executes. **27 samples** pass on the host and everything tried on the
+board has matched gcc there too - including `fmt` (which is what proves
+the hand-written `%f` works on the target, the whole reason it could
+not be delegated to libc). cc0's literal encoding is byte for byte
+identical to the host's over 265 literals.
 
 `optest.c` was the last holdout and now builds too. It was not a
 pointer difference as previously recorded here: cc1 was rejecting
 `apply(addfn, 9, 4)`, because a pointer to a function with an
 unspecified argument list matched no prototype. See "Passing and
 returning structs" below.
+
+**The dialect is C89 plus declaration-after-statement.** That one C99
+relaxation was taken deliberately: everyone writes it, refusing it is a
+nuisance out of proportion to the standard, and it changes the meaning
+of nothing that was legal before.
 
 Installed there: the three passes in `/usr/lib/cc`, and `cc`, `cpp`,
 `bcrun`, `bcdump` in `/usr/bin`.
@@ -90,39 +109,58 @@ The trap that cost the first attempt: `gen_push` was adding
 pushed sixteen bytes of, while `T_CLEANUP` took back the real
 `target_argsize`. That is what cc2's "sp" at the epilogue means.
 
-## Conformance: 148 of 175 on the C89 subset
+## Conformance: 155 of 175 on the C89 subset
 
-`bash hosttest/ctest.sh`, and read **PLAN-conformance.md** - it
-classifies every remaining failure and says what to do next. Every one
-of them is now a cc1 rejection except a single cc2 symbol table limit:
-nothing left compiles and then answers wrongly.
+`bash hosttest/ctest.sh`, and read **PLAN-conformance.md** - the 20
+remaining failures are categorised there by the cause we actually hit,
+and it says what to do next. Nothing left compiles and then answers
+wrongly: 10 are genuine C89 gaps, 2 are our own limits rather than
+dialect, 8 are correctly refused as not C89.
 
-Two harness lessons are baked in there and worth not relearning: the
+**Next two, and they are the cheapest on the list.** Both are plain
+C89, both are written constantly, and neither exists *at all*, which is
+a different and worse thing than the subtle gaps around them:
+
+* **unary plus.** `60 + +3` and `+5` are both rejected.
+* **`typedef` inside a block.** Not just the anonymous enum it looks
+  like in test 00198 - `typedef int myint;` in a block fails too.
+  Typedefs are only handled in `toplevel()`, and `is_storage_word()`
+  does not cover `T_TYPEDEF`, so a block does not even recognise one as
+  the start of a declaration.
+
+Three harness lessons are baked in and worth not relearning: the
 suite's own dialect tags are unreliable (`ctestc89.sh` asks gcc with
-`-std=c89 -pedantic-errors` instead), and `optest.sh` now compares the
-**exit status** as well as the output, which it never used to - that
-blind spot is where the missing implicit `return 0` for main lived.
+`-std=c89 -pedantic-errors` instead), `optest.sh` compares the **exit
+status** as well as the output - that blind spot is where the missing
+implicit `return 0` for main lived - and it preprocesses our chain with
+`-nostdinc -I hosttest/ctest-include` so a sample can use real headers
+while gcc still builds the reference against the host's.
 
-## Older note: the c-testsuite conformance run
+## The state of the kernel underneath
 
-The filesystem fault that was blocking this is **fixed** (2026-07-29,
-kernel commit `d5f93d4d3`). It was never an inode bug: a two-byte
-overrun in `blk_alloc` was overwriting the inode free list count with a
-stale value off the disk. 70 consecutive on-target compiles are now
-silent and the inode count is exactly conserved. Full write-up in
-`Kernel/platform/platform-rpipico/NOTES-inode-freelist.md`.
+Two separate faults, and it matters not to confuse them.
 
-So the board can now take sustained compile-and-run loads, and the next
-thing is the c-testsuite `tests/single-exec` set
-(https://github.com/c-testsuite/c-testsuite). Each test is a source, an
-expected output and a tag file naming the C version it applies to, so
-the C89 subset can be selected and the rest reported as out of scope
-rather than as failures. Run it on the host chain first - it is much
-faster and needs no serial link - then on the board.
+**Fixed:** the inode double free, 2026-07-29, kernel commit
+`d5f93d4d3`. It was never an inode bug - a two-byte overrun in
+`blk_alloc` was overwriting the inode free-list count with a stale
+value off the disk, because `s_nfree` is a `uint16_t` and the copy
+length said `sizeof(int)`. A 32-bit portability bug in shared Fuzix
+code. `NOTES-inode-freelist.md`.
 
-**Bitfields** are the last known C89 gap - read "4. Bitfields" in
-PLAN-c89-gaps.md - but the conformance run is what will say which gaps
-actually matter, so it is worth having that evidence before starting.
+**Open:** `panic: no free buffers`. The board still dies, now in the
+buffer cache, and it did so **while idle** - which means a leak rather
+than pressure, and means raising `NBUFS` would hide it.
+`NOTES-buffer-panic.md` has the briefing, including what has already
+been eliminated and the pool dump now wired into `freebuf()`.
+
+This does not block compiler work: the samples and the conformance
+suite run on the host, and the board takes sustained compile loads
+without trouble. It is a hazard when driving the board, not when
+developing.
+
+**Bitfields** remain the largest known C89 gap - "4. Bitfields" in
+PLAN-c89-gaps.md - but PLAN-conformance.md now has evidence for what
+actually matters, and two cheaper things come first.
 
 ## Passing and returning structs turned up two function pointer bugs
 
@@ -141,21 +179,18 @@ ignoring cc1:
 
 ## Done: the float and double opcodes
 
-Steps 1 and 2 of the double work are done (see "Double" in
-PC3-COMPILER-PLAN.md). cc0 encodes IEEE-754 doubles that match gcc bit
-for bit, and `sizeof(double)` is 8.
+All three steps of the double work are finished (see "Double" in
+PC3-COMPILER-PLAN.md). cc0 encodes IEEE-754 doubles matching gcc bit
+for bit, `sizeof(double)` is 8, and the arithmetic, comparisons and
+conversion opcodes are in. `samples/dbl.c` and `samples/fp.c` pass on
+the host and on the board.
 
-What is left is step 3, the opcodes. Follow the 64-bit integer pattern:
-the accumulator and slot handling already exist, so it is new opcodes
-plus conversions to and from the integer types.
-
-`hosttest/samples/dbl.c` is the test. It fails today, on purpose, and
-`all.sh` has one line to delete when it starts passing. Every floating
-operation currently emits a named runtime call that does not exist, so
-bcrun says `no runtime function "addd"` and names what is missing -
-`backend-bcode.c` does that deliberately, because `typesize(DOUBLE)` is
-8 and without the guard a double `+` would quietly emit a 64-bit
-integer add over the bit patterns.
+Worth keeping from that work: `backend-bcode.c` deliberately routes any
+floating operation it cannot generate to a *named* runtime call that
+does not exist, so bcrun says `no runtime function "addd"` and names
+what is missing. Without that guard a double `+` falls into the 64-bit
+*integer* cases - `typesize(DOUBLE)` is 8 - and adds the bit patterns,
+printing a wrong answer instead of stopping.
 
 ## How to run things
 
@@ -338,3 +373,30 @@ real error is the `i_open: bad inode` line above it.
   now builds bcrun, bcdump, dumptokens and ccbc as well as the passes.
   They used to be built by hand, so `rm -rf host-armm0` made every test
   fail at once in a way that looked like a compiler regression.
+* **`funcbody` does not mean "inside a function body".** It is set
+  *after* `function_body()` returns, to mean "one has just been
+  parsed". Trusting the name cost two wrong turns during the struct tag
+  scoping work. `in_funcbody` is the one that means what it says.
+* **Symbol table position cannot tell you what scope a name is in.** A
+  file scope symbol sits above `symtab` while `block_base` may still
+  *be* `symtab`, so "above the mark" does not mean "declared in this
+  block". The first tag scoping attempt swept every file scope struct
+  in the program on that assumption. Ordinary locals get away with it
+  only because the `< S_STATIC` storage class test protects everything
+  else; anything outside that test needs its own flag.
+* **A rejection hides whatever comes after it.** Allowing mixed
+  declarations unblocked nine conformance tests and gained four - the
+  other five had a second, unrelated gap waiting behind the first
+  error. Do not estimate remaining work from failure counts.
+* **The oracle decides, and that includes the exit status.**
+  `optest.sh` threw gcc's away and only printed ours for a long time. A
+  program's status is part of its answer, and that blind spot is
+  exactly where the missing implicit `return 0` for `main` was living.
+* **gcc in `-std=gnu89` is not a reference for everything.** It does
+  not zero main's return either (that is a C99 rule), its `long` is 8
+  bytes, and its headers are unparseable by a C89 compiler. Where the
+  oracle disagrees by construction, say so in the sample and check the
+  behaviour another way - `samples/mainret.c` and `ll` both do.
+* **Read `%TEMP%\uusend.log` after any board death.** The transfer tool
+  used to count the board's replies as flow control and discard them,
+  which is how four crashes in a row said nothing. It logs now.
