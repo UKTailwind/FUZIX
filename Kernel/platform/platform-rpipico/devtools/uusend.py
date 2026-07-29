@@ -69,17 +69,19 @@ def drain(ser, quiet=1.0, limit=15.0):
     return buf.decode("latin-1", "replace")
 
 
-def main():
-    local, remote = sys.argv[1], sys.argv[2]
-    gap = (int(sys.argv[3]) if len(sys.argv) > 3 else 25) / 1000.0
+def send(ser, local, remote, gap, verbose=True):
+    """Type a file into the board over an already-open port.
+
+    Split out from main() so bufwatch.py can drive a transfer as one
+    step of a longer cycle without handing the port back and forth.
+    """
+    def say(*a):
+        if verbose:
+            print(*a)
 
     data = open(local, "rb").read()
     lines = uuencode(data, remote)
-    print("%s -> %s: %d bytes, %d lines" % (local, remote, len(data), len(lines)))
-
-    ser = serial.Serial(PORT, BAUD, timeout=1)
-    time.sleep(0.3); ser.reset_input_buffer()
-    ser.write(b"\r"); ser.flush(); drain(ser, 0.4, 3)
+    say("%s -> %s: %d bytes, %d lines" % (local, remote, len(data), len(lines)))
 
     # Echo stays ON deliberately: it is the only flow signal available.
     # A fixed delay per line is not enough -- the tty queue is 132 bytes
@@ -116,20 +118,41 @@ def main():
             print("  log: %s" % LOGPATH)
         time.sleep(gap)
         if n % 50 == 0:
-            print("  %d/%d" % (n, len(lines)))
+            say("  %d/%d" % (n, len(lines)))
     ser.write(b"\x04")          # end of input for cat
     ser.flush()
     time.sleep(1.0)
-    print("sent in %.1fs" % (time.time() - t0))
-    print(drain(ser, 1.0, 8))
+    say("sent in %.1fs" % (time.time() - t0))
+    say(drain(ser, 1.0, 8))
+    return len(data)
 
+
+def decode(ser, remote, verbose=True):
+    """Run uud on a file just sent. Separate from send() so a caller can
+    sample the kernel between typing the text in and decoding it."""
     ser.write(("uud %s.uu\r" % remote).encode()); ser.flush()
     time.sleep(1.0)
-    print(drain(ser, 1.5, 20))
+    out = drain(ser, 1.5, 20)
+    if verbose:
+        print(out)
+    return out
+
+
+def main():
+    local, remote = sys.argv[1], sys.argv[2]
+    gap = (int(sys.argv[3]) if len(sys.argv) > 3 else 25) / 1000.0
+
+    ser = serial.Serial(PORT, BAUD, timeout=1)
+    time.sleep(0.3); ser.reset_input_buffer()
+    ser.write(b"\r"); ser.flush(); drain(ser, 0.4, 3)
+
+    send(ser, local, remote, gap)
+    decode(ser, remote)
     ser.write(("ls -l %s\r" % remote).encode()); ser.flush()
     time.sleep(0.5)
     print(drain(ser, 1.5, 10))
     return 0
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

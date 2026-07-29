@@ -10,6 +10,7 @@
 #include <i2c.h>
 #include <net_native.h>
 #include <kmod.h>
+#include <bufstat.h>
 
 /*
  *	System devices:
@@ -168,6 +169,9 @@ int sys_ioctl(uint_fast8_t minor, uarg_t request, char *data)
 	case PIO_ENTRYSIZE:
 		uputi(sizeof(struct p_tab), data);
 		break;
+
+	case PIOC_BUFSTAT:
+		return bufstat_report((uint8_t *)data);
 
 	default:
 		return -1;

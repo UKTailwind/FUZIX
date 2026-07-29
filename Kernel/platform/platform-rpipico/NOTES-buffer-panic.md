@@ -1,103 +1,153 @@
-# "panic: no free buffers" — briefing note
+# "panic: no free buffers" — found
 
-2026-07-29. **OPEN.** This is the live kernel problem; the inode double
-free that preceded it is fixed (`NOTES-inode-freelist.md`).
+2026-07-29. **FIXED.** Not a leak. A 16-bit wrap in `freebuf()`'s LRU
+selection that only misbehaves where `int` is 32 bits.
 
-## The symptom
+The inode double free that preceded it is a separate, earlier fault
+(`NOTES-inode-freelist.md`).
 
-    panic: no free buffers
+## The bug
 
-The board dies. On the crashes seen so far the HDMI output goes first,
-which is what it looks like from the front, but that is a consequence
-and not a clue - see "eliminated" below.
+`Kernel/devio.c`, `freebuf()`, as it was:
 
-## Why it took four crashes to see the message
+    regptr bufptr oldest;
+    register int16_t oldtime;
 
-It was going into bytes that were being thrown away. `uusend.py` waits
-for each line to echo back as its only flow control, and it *counted*
-those bytes without keeping them. Every word the board said during a
-transfer went into that count.
-
-`uusend.py` now logs everything the board sends to `%TEMP%\uusend.log`
-and prints the tail on an echo timeout. **Read that log first.** It is
-how the panic was finally caught.
-
-## What it means
-
-`freebuf()` in `devio.c` panics when every buffer in the pool is busy:
-
-    for (bp = bufpool; bp < bufpool_end; ++bp)
-        if (bufclock - bp->bf_time >= oldtime && !bisbusy(bp))
+    oldest = NULL;
+    oldtime = 0;
+    for (bp = bufpool; bp < bufpool_end; ++bp) {
+        if (bufclock - bp->bf_time >= oldtime && !bisbusy(bp)) {
             oldest = bp;
+            oldtime = bufclock - bp->bf_time;
+        }
+    }
     if (!oldest)
         panic(PANIC_NOFREEB);
 
-`NBUFS` is 20 (`config.h`).
+`bufclock` and `bf_time` are both `uint16_t`.
 
-**The machine was idle when it died.** That is the important fact: an
-idle machine cannot be under buffer pressure, so twenty pinned buffers
-mean something finished and did not release them. This is a leak.
+**Where `int` is 16 bits** - every 8-bit Fuzix target - they promote to
+`unsigned int`, the subtraction wraps modulo 65536, and the age is
+correct across a wrap. The code is right on z80.
 
-**Do not just raise NBUFS.** It would turn a crash in an hour into a
-crash in three and lose the signal.
+**Where `int` is 32 bits** - every ARM target, including this one - they
+promote to *signed* `int` instead. No wrap happens. A buffer stamped
+before `bufclock` last wrapped gives a large negative age: at
+`bufclock = 3`, a buffer stamped at 65500 ages as `3 - 65500 = -65497`.
 
-## Instrumentation in place
+`oldtime` starts at 0, so the test is `age >= 0` on the first iteration.
+Every negative age fails it. Immediately after `bufclock` wraps, *every*
+buffer has a negative age, `oldest` stays NULL, and the kernel panics
+with the entire pool free.
 
-`freebuf()` now dumps the whole pool before panicking - index, device,
-block, busy count, dirty flag. "No free buffers" on its own cannot
-distinguish a leak of one buffer per operation from real pressure; the
-list names the holder. This is the same trick that cracked the inode
-bug, where recording *which code path* put an entry on the free list
-was what finally identified it.
+That is the "leak" that consumed several sessions. There was never a
+leak. Every `bread`/`brelse` audit came back balanced because it was
+balanced.
 
-Next crash: read the dump, and read `%TEMP%\uusend.log`.
+## How it presented, and why each clue misled
 
-## Eliminated — do not re-investigate
+* **"It dies while idle."** True, and it was read as proof of a leak -
+  an idle machine cannot be under buffer pressure. It is really proof
+  of the opposite: the pool was free and the panic fired anyway.
+* **"Larger C files precede the crash."** The user's observation, and
+  the key that cracked it. `bufclock` advances once per buffer
+  acquisition, so time-to-panic is measured in buffer traffic, not
+  wall clock. Bigger files reach the wrap sooner. Nothing about
+  indirect blocks, which is where that clue first pointed.
+* **The screen going blank first.** A consequence of the panic.
 
-* **Every `bread`/`brelse` pair** in `filesys.c`, `inode.c` and
-  `blk512.c`, error paths included. All balanced. `breadi`, `bwritei`
-  and `bmap` in particular.
-* **The compiler work.** The leak shows with the machine idle, and the
-  filesystem changes made the same day are accounted for below.
-* **Flash writes.** Worth reading the reasoning in
-  `git show 25f1e4e50` before going near this: the kernel is
-  `PICO_COPY_TO_RAM`, `.text` is 78K at 0x20000110, `.rodata` is empty
-  and the vector table is `ram_vector_table` at 0x20000000. **Core1
-  never touches XIP**, so a flash write needs only core0's interrupts
-  masked. A real hazard was found there and fixed - boot2 re-runs
-  inside the flash routines and leaves QMI M0 at CLKDIV=2, and they
-  invalidate the XIP cache that PSRAM (and therefore swap) is cached
-  through - but it is not this.
-* **Core1 / the display.** Its code is in RAM, its data is non-const
-  and so in RAM, its stack is an assigned array in SCRATCH_X with a
-  sentinel that `display_stack_check()` tests. The blank screen is a
-  symptom of the machine dying, not a cause.
+## The proof
 
-## Noted while looking, not a leak
+The pool dump wired into `freebuf()` before the panic printed this:
 
-`freeblk()` recurses **while still holding its buffer**:
+    buf 0: dev 18 blk 8031 busy 0 dirty 0
+    ... 18 of the 20 with busy 0 ...
+    panic: no free buffers
 
-    buf = bread(dev, blk, 0);
-    for (j = ...; j >= 0; --j)
-        freeblk(dev, bn[j], level-1, b);   /* recurses, buf still held */
-    brelse(buf);
+Eighteen free buffers and it could not find one. That is not ambiguous.
 
-Truncating a doubly indirect file therefore pins two buffers at once,
-plus whatever `blk_free` needs for the chain block. Bounded at three,
-so it will not exhaust twenty by itself - but the usable pool is
-smaller than `NBUFS` suggests, and it will bring a small leak to the
-panic sooner.
+`bufclock` at the last successful sample was 64775, and the panic came
+during the next step. Predicted before it happened, from the arithmetic.
 
-Also in `readi` (`inode.c` ~line 137): `bp` is not reset to NULL after
-`brelse(bp)`, and the next iteration tests `else if (bp == NULL)`.
-Worth a look - it reads as a use-after-release rather than a leak, but
-it is the same neighbourhood.
+## The fix
 
-## Filesystem state across these crashes
+Truncate the age back to `uint16_t` and compare unsigned, which is the
+ordinary LRU-with-wrap idiom and correct at either int width:
 
-The inode accounting has held. Four hard crashes since the `blk_alloc`
-fix and fsck has reported no systematic free-inode drift - the worst
-was off by one, in the over-counting direction, which is an inode freed
-in core whose disk copy did not get written before the panic. Ordinary
-crash damage. Before that fix the same crashes left it 31 and then 148
-adrift.
+    register uint16_t oldtime;
+    uint16_t age;
+    ...
+        age = bufclock - bp->bf_time;
+        if (age >= oldtime && !bisbusy(bp)) {
+
+`/tmp/wraptest.c` (host, throwaway) ran both versions over the cases:
+
+    all free, before wrap        clock 65535 -> old   0   new   0
+    all free, just wrapped       clock     3 -> old  -1   new   0
+    all free, well past wrap     clock   200 -> old  -1   new   0
+    normal, oldest is 0          clock  2000 -> old   0   new   0
+    straddling wrap, oldest 0    clock    20 -> old   6   new   0
+    all busy (must be -1)        clock  2000 -> old  -1   new  -1
+
+Confirmed on hardware. The same `bufwatch.py` workload that killed the
+old kernel at cycle 6 was rerun against the fixed one and walked
+straight through the wrap:
+
+     9 cleanup       0     0     17   62874
+    10 send          0     0     17   65045
+    10 decode        0     0     17     651     <- bufclock wrapped here
+    10 compile       0     0     17    3556
+    11 send          0     0     17    6326
+
+`busy 0` throughout, no panic, and it kept going.
+
+`-1` is `oldest == NULL`, ie the panic. Note line 5: straddling a wrap
+the old code also evicted the *wrong* buffer, so this was quietly
+degrading the cache the whole time, not only crashing at the boundary.
+Line 6 matters too - "every buffer genuinely busy" must still return
+NULL, so the panic keeps its meaning.
+
+## Upstream
+
+`freebuf()` is unmodified Fuzix; `git log` on the LRU loop shows only
+the debug dump added here. So this is an upstream portability bug that
+bites the 32-bit ports (ARM, riscv32, esp32) and not the 8-bit ones.
+Worth sending upstream.
+
+## Instrumentation left behind
+
+Worth keeping - it is what turned a guess into a measurement.
+
+* **`utils/bufs.c`** - `bufs`, `bufs -v`, `bufs -q`. Reports the pool
+  over the `PIOC_BUFSTAT` ioctl on `/dev/proc` (`Kernel/devsys.c`,
+  collector `bufstat_report()` in `devio.c`, shared layout in
+  `Kernel/include/bufstat.h`).
+* **`bf_pid` / `bf_call`** in `struct blkbuf`, stamped by `bufown()` in
+  `block()`. Four bytes a buffer; names the pid and syscall that pinned
+  each one. It said the two busy buffers at the panic were legitimately
+  held, which is what ruled the leak out.
+* **`devtools/bufwatch.py`** - runs send/decode/compile/run in a loop
+  and samples the pool between every step. `--pad N` grows the source,
+  because every sample in the tree is under 4K and the wrap is reached
+  by volume. This is what reproduced the panic on demand at cycle 6 of
+  a 40K workload.
+* The pool dump in `freebuf()` before `panic()`.
+
+## Related, NOT fixed — `timer_expired()`
+
+Noticed while sweeping for the same bug class. `Kernel/timer.c`:
+
+    timer_t set_timer_duration(uint16_t d) { ... a = d; a += ticks.h.low; return a; }
+    uint8_t timer_expired(timer_t t)       { return t < ticks.h.low; }
+
+A plain magnitude compare, not modular, so it is wrong across a wrap at
+*either* int width. If `ticks.h.low + duration` overflows 16 bits the
+timer reads as expired immediately. This is live on this port: `devsd.c`
+uses it for SD command timeouts, so it is a source of occasional
+spurious SD errors. Correct form is
+`(int16_t)(ticks.h.low - t) >= 0`. Separate bug, not touched here.
+
+## Filesystem state
+
+The inode accounting held throughout. Five hard crashes since the
+`blk_alloc` fix with no systematic free-inode drift.

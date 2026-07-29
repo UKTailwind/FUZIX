@@ -208,6 +208,11 @@ typedef struct blkbuf {
     uint8_t     bf_dirty;	/* bit 0 used */
     uint8_t     bf_busy;	/* bits 0-1 used */
     uint16_t    bf_time;        /* LRU time stamp */
+    /* DEBUG: who was running when this buffer was last pinned. Only
+       meaningful while bf_busy, and only here to find a buffer leak -
+       see include/bufstat.h. Four bytes a buffer. */
+    uint16_t    bf_pid;
+    uint8_t     bf_call;
 } blkbuf, *bufptr;
 
 #if defined(CONFIG_BLKBUF_HELPERS)
@@ -983,6 +988,7 @@ extern void bdrop(uint16_t dev);
 extern bufptr freebuf(void);
 extern void bufinit(void);
 extern void bufdump (void);
+extern int bufstat_report(uint8_t *data);	/* DEBUG, see bufstat.h */
 extern int bdread(bufptr bp);
 extern int bdwrite(bufptr bp);
 extern int cdread(uint16_t dev, uint_fast8_t flag);

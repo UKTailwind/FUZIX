@@ -138,25 +138,38 @@ while gcc still builds the reference against the host's.
 
 ## The state of the kernel underneath
 
-Two separate faults, and it matters not to confuse them.
+Two separate faults, both now fixed, and **both the same bug class**:
+shared Fuzix code that is correct where `int` is 16 bits and wrong
+where it is 32. That pattern is the single most useful thing on this
+page. When something in the kernel misbehaves here and the code looks
+obviously right, suspect the integer width before suspecting the logic.
 
 **Fixed:** the inode double free, 2026-07-29, kernel commit
 `d5f93d4d3`. It was never an inode bug - a two-byte overrun in
 `blk_alloc` was overwriting the inode free-list count with a stale
 value off the disk, because `s_nfree` is a `uint16_t` and the copy
-length said `sizeof(int)`. A 32-bit portability bug in shared Fuzix
-code. `NOTES-inode-freelist.md`.
+length said `sizeof(int)`. `NOTES-inode-freelist.md`.
 
-**Open:** `panic: no free buffers`. The board still dies, now in the
-buffer cache, and it did so **while idle** - which means a leak rather
-than pressure, and means raising `NBUFS` would hide it.
-`NOTES-buffer-panic.md` has the briefing, including what has already
-been eliminated and the pool dump now wired into `freebuf()`.
+**Fixed:** `panic: no free buffers`, 2026-07-29. Never a leak. The LRU
+scan in `freebuf()` computed a buffer's age as `bufclock - bf_time`
+with both `uint16_t` and the running best in an `int16_t`. At 16-bit
+int those promote to `unsigned` and wrap correctly; at 32-bit they
+promote to *signed*, so after `bufclock` wraps every buffer has a large
+negative age, fails the `>= oldtime` test, and the kernel panics with
+the whole pool free. The dump caught it with 18 of 20 buffers reading
+`busy 0`. `NOTES-buffer-panic.md`.
 
-This does not block compiler work: the samples and the conformance
+The clue that cracked it was the user's: *larger C files precede the
+crash*. `bufclock` advances per buffer acquisition, so time-to-panic is
+measured in buffer traffic, not wall clock - which also explains why it
+died "while idle", the reading that had sent the hunt after a leak.
+
+`devtools/bufwatch.py` and the `bufs` command reproduce and measure it
+on demand; see the notes.
+
+Neither ever blocked compiler work: the samples and the conformance
 suite run on the host, and the board takes sustained compile loads
-without trouble. It is a hazard when driving the board, not when
-developing.
+without trouble. They were a hazard when driving the board.
 
 **Bitfields** remain the largest known C89 gap - "4. Bitfields" in
 PLAN-c89-gaps.md - but PLAN-conformance.md now has evidence for what
@@ -338,6 +351,23 @@ failure onto `ENFILE`, so that is what you see whatever went wrong. The
 real error is the `i_open: bad inode` line above it.
 
 ## Things that have cost hours
+
+* **A symptom that "cannot" be X is evidence about your model, not
+  about X.** "It died while idle, so it must be a leak" was the load
+  bearing assumption of the buffer hunt, and it was wrong: idle meant
+  the pool was *free* and the panic fired anyway. Sessions went into
+  auditing `bread`/`brelse` pairs that were balanced all along. The
+  question that would have shortcut it is the cheap one - *is the thing
+  the panic claims actually true?* Printing the pool answered it in one
+  crash.
+* **Ask what the counter is measured in.** `bufclock` counts buffer
+  acquisitions, not time, so "dies while idle" and "large files precede
+  the crash" are the same fact. The user supplied the second clue and it
+  was worth more than every audit.
+* **On this port, suspect the integer width first.** Both kernel faults
+  found so far are shared Fuzix code that is correct at 16-bit int and
+  wrong at 32 - `sizeof(int)` for a `uint16_t` field, and `uint16_t`
+  operands promoting to signed. Neither looks wrong when you read it.
 
 * **Never conclude the board is dead from silence.** After a reset it
   sits at the `bootdev:` prompt, and a bare CR does not re-prompt. Send
