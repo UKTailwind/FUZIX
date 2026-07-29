@@ -112,6 +112,51 @@ Two properties make this the right shape:
    interpret the rest — exactly the mechanism `TARGET.md` already
    describes for replacing helpers one at a time.
 
+## What double still needs
+
+The wide-literal work is done (token stream, cc0 accumulation, lex,
+primary), so `long long` literals now match gcc. `double` needs three
+more things, in this order, and the first is the real work.
+
+**1. A double literal encoder in cc0.** `convert_fix32()` is
+single-precision from end to end and cannot be reused as-is:
+
+* input is a 32.32 fixed point pair, so the value carries at most
+  ~56 bits before conversion even starts;
+* it normalises to a 28-bit intermediate, then to a 24-bit mantissa;
+* it assembles `sum |= (exp << 23) & 0x7F800000` — IEEE single;
+* the decimal fraction table is 24-bit with **nine entries**, stopping
+  at 1e-9, and the last few are already degenerate (`0x2A`, `0x4`, 0).
+
+So `0.123456789123456` arrives as about `0.12345679` — and digits past
+the ninth decimal are dropped before precision is even the question.
+
+The constants are worth writing down, because they are not obvious.
+`exp += 22` then `exp += 128` is `exp + 150`, which is `23 + 127`: the
+mantissa is normalised with bit 23 set, so the value is
+`1.xxx * 2^(23+exp)` and the stored exponent is `23 + exp + bias`. For
+double the equivalent is **`exp + 1075`** (`52 + 1023`), with the
+mantissa normalised to bit 52, the exponent field at bit 52, the valid
+range 1..2046, and infinity `0x7FF0000000000000`.
+
+The pre-multiply normalisation is 28 bits so that a `* 10` cannot
+overflow 32; the double equivalent is 60 bits so it cannot overflow 64.
+
+Also needed: a fraction table with ~64-bit entries extended to about
+1e-19, and `frac` accumulated at 64 bits in `dec_format`.
+
+**2. Stop remapping the type.** Every `target-*.c` has
+`if (type == DOUBLE) return FLOAT;` in `target_type_remap()`, so DOUBLE
+never survives the frontend. target-thumb.c has to keep it once the
+backend can handle it.
+
+**3. Float and double opcodes.** Same pattern as the 64-bit integer
+set: the accumulator and slot handling already exist, so this is
+largely new opcodes plus conversions to and from the integer types.
+
+gcc is the oracle throughout - `hosttest/optest.sh` will report a
+mis-encoded constant immediately.
+
 ## Phases
 
 ### Phase 0 — ABI and bytecode freeze
