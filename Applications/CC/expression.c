@@ -693,10 +693,30 @@ static struct node *hier1(void)
 	if (match(T_EQ)) {
 		if ((l->flags & LVAL) == 0)
 			needlval();
-		r = make_rval(hier1());
 		/* You can't assign to an array/offset, you assign to
 		   the underlying type */
 		l->type = type_canonical(l->type);
+		/*
+		 * Assigning a whole struct or union is a block copy, so
+		 * both sides stay addresses - make_rval would insert a
+		 * dereference and there is no way to load an aggregate into
+		 * the accumulator. The size travels in the node's value
+		 * because the code generator cannot size a struct: that
+		 * lives in this pass's symbol table.
+		 */
+		if (IS_STRUCT(l->type) && !PTR(l->type)) {
+			struct node *n;
+			r = hier1();
+			if (type_canonical(r->type) != l->type || PTR(r->type)) {
+				typemismatch();
+				return l;
+			}
+			n = sf_tree(T_EQ, l, r);
+			n->type = l->type;
+			n->value = type_sizeof(l->type);
+			return n;
+		}
+		r = make_rval(hier1());
 		if (!IS_SIMPLE(l->type) && !PTR(l->type)) {
 			badtype();
 			return l;

@@ -173,6 +173,8 @@ static struct {
 	{ BC_F2D,	"f2d",		OP_NONE },
 	{ BC_D2F,	"d2f",		OP_NONE },
 
+	{ BC_COPY,	"copy",		OP_U16 },
+
 	{ 0, NULL, 0 }
 };
 

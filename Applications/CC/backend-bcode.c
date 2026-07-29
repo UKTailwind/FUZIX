@@ -986,6 +986,14 @@ unsigned gen_node(struct node *n)
 		emit_load(n->type);
 		return 1;
 	case T_EQ:
+		/* A whole struct or union: both sides are addresses and the
+		   size came from the front end, which is the only pass that
+		   can work it out */
+		if (IS_STRUCT(n->type) && !PTR(n->type)) {
+			cbyte(BC_COPY);
+			cword(v & 0xFFFF);
+			return 1;
+		}
 		emit_store(n->type);
 		return 1;
 	case T_CALLNAME:

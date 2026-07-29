@@ -220,7 +220,24 @@
 #define BC_F2D		0xB8	/* float  -> double */
 #define BC_D2F		0xB9	/* double -> float */
 
-#define BC_MAXOP	0xB9
+/*
+ *	Aggregates.
+ *
+ *	A struct is too big for the accumulator, so a struct valued
+ *	expression is represented by its address and moving one is a block
+ *	copy. That covers assignment, passing by value and returning by
+ *	value - all three are the same operation.
+ *
+ *	    u16  bytes to copy
+ *	    source address in A, destination on the stack
+ *	    the destination is left in A, so "a = b = c" works
+ *
+ *	The size is an immediate because the code generator cannot size a
+ *	struct: that knowledge lives in cc1's symbol table.
+ */
+#define BC_COPY		0xC0	/* u16 length */
+
+#define BC_MAXOP	0xC0
 
 /*
  *	Object file layout. Everything is little endian.

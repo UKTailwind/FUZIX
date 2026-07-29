@@ -1095,6 +1095,20 @@ static int run(void)
 		case BC_F2D:	A = dput((double)fget(A)); break;
 		case BC_D2F:	A = fput((float)dget(A)); break;
 
+		/*
+		 * Block copy: a struct is moved by address because it does
+		 * not fit in the accumulator. Destination is left in A so
+		 * that an assignment still yields the object it assigned to.
+		 */
+		case BC_COPY: {
+			unsigned long len = fetch16();
+			unsigned long src = (unsigned long)A;
+			unsigned long dst = (unsigned long)pop();
+			vcopy(dst, src, len);
+			A = dst;
+			break;
+		}
+
 		case BC_SEXT8:	A = (signed char)A; break;
 		case BC_SEXT16:	A = (short)A; break;
 		case BC_ZEXT8:	A = A & 0xFF; break;
