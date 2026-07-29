@@ -1178,20 +1178,38 @@ static unsigned tokenize_neg(unsigned c)
 	return tokenize_numeric(c, 1);
 }
 
+/*
+ *	\x followed by hex digits.
+ *
+ *	This used to read exactly two and then assemble them the wrong way
+ *	round - "\x40" came out as 0x04 - so every hex escape in every
+ *	character constant and string literal was silently wrong.
+ *
+ *	Unlike an octal escape, which takes at most three digits, C89 puts
+ *	no limit on the number of hex digits: \x consumes every one that
+ *	follows and the value is truncated to the character type. So "\x1"
+ *	is valid too, which the two-digit version rejected.
+ */
 static unsigned hexpair(void)
 {
-	unsigned c, c2;
-	c = get();
-	if (!isxdigit(c)) {
+	unsigned c;
+	unsigned n = 0;
+	unsigned digits = 0;
+
+	for (;;) {
+		c = get();
+		if (!isxdigit(c)) {
+			unget(c);
+			break;
+		}
+		n = (n << 4) | unhex(c);
+		digits++;
+	}
+	if (!digits) {
 		warning("invalid hexadecimal escape");
 		return T_INVALID;
 	}
-	c2 = get();
-	if (!isxdigit(c2)) {
-		warning("invalid hexadecimal escape");
-		return T_INVALID;
-	}
-	return (unhex(c2) << 4) | unhex(c);
+	return n & 0xFF;
 }
 
 static unsigned octalset(unsigned c)

@@ -209,9 +209,26 @@ struct node *make_rval(struct node *n)
 	if (n->flags & LVAL) {
 		if (IS_ARRAY(nt)) {
 			if (PTR(nt) == array_num_dimensions(nt)) {
+				/* The array object itself. Its value is its
+				   own address, so there is nothing to load */
 				n->flags &= ~LVAL;
 				return n;
 			}
+			/*
+			 * More indirections than dimensions means this is a
+			 * pointer *to* an array - "char (*p)[4]" - and not
+			 * an array at all. It is an ordinary object whose
+			 * value has to be loaded like any other.
+			 *
+			 * Without this it kept its lvalue-ness, so the tree
+			 * used the address of p where it wanted the pointer
+			 * held in p, and "p[1][3]" quietly read from the
+			 * wrong place. Fewer indirections than dimensions is
+			 * a sub-array of a multidimensional array, which is
+			 * an array object again and does not load.
+			 */
+			if (PTR(nt) > array_num_dimensions(nt))
+				return sf_tree(T_DEREF, NULL, n);
 #if 0
 			n = sf_tree(T_DEREF, NULL, n);
 			/* Decay to base type of array */

@@ -621,7 +621,20 @@ void gen_literal(unsigned n)
 	char buf[24];
 	if (n) {
 		sprintf(buf, "T%u", n);
-		symdef(buf, BC_SYM_DATA, dhere());
+		/*
+		 * Respect the segment, exactly as gen_data_label does.
+		 * This always said DATA, so a numbered label emitted into
+		 * bss - which is how a static local is written out - got a
+		 * data address instead of a bss one. A "static int d[4]"
+		 * inside a function then aliased the string literal area:
+		 * assigning to d[3] rewrote the fourth word of the
+		 * literals, and a printf format string turned into
+		 * whatever had just been stored.
+		 */
+		if (curseg == A_BSS)
+			symdef(buf, BC_SYM_BSS, bsslen);
+		else
+			symdef(buf, BC_SYM_DATA, dhere());
 	}
 }
 

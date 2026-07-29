@@ -228,3 +228,21 @@ unsigned type_ptrscale_binop(unsigned op, struct node *l, struct node *r,
 	invalidtype();
 	return 1;
 }
+
+/*
+ *	Is this type a pointer *object* rather than an array object?
+ *
+ *	An array type carries its dimension count in the same field as the
+ *	indirection count, so "char (*p)[4]" and "char a[2][4]" both have
+ *	two. The difference is that a pointer has more indirections than
+ *	the type has dimensions. Everything that must tell a pointer from
+ *	an array needs this test - make_rval() spells out the same rule.
+ */
+int type_is_pointer_object(unsigned t)
+{
+	if (!PTR(t))
+		return 0;
+	if (IS_ARRAY(t))
+		return PTR(t) > array_num_dimensions(t);
+	return 1;
+}

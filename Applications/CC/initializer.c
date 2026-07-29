@@ -180,7 +180,11 @@ static void ini_array(struct symbol *sym, unsigned type, unsigned depth, unsigne
  */
 void initializers(struct symbol *sym, unsigned type, unsigned storage)
 {
-    if (PTR(type) && !IS_ARRAY(type)) {
+    /* A pointer to an array - "char (*p)[4]" - is a pointer object and
+       initialises like any other scalar. Testing !IS_ARRAY refused it,
+       because such a type is an array type with one more indirection
+       than it has dimensions. */
+    if (type_is_pointer_object(type)) {
         ini_single(sym, type, storage);
         return;
     }

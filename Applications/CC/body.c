@@ -303,6 +303,10 @@ static void statement(void)
 	case T_GOTO:
 		goto_statement();
 		break;
+	/* statement_block() consumes any run of labels before calling us,
+	   so these are only reached for a case or default that is not
+	   prefixing a statement at all. Report and move on rather than
+	   letting it fall into the expression parser. */
 	case T_CASE:
 		case_statement();
 		return;
@@ -347,19 +351,50 @@ void statement_block(unsigned need_brack)
 		fatal("unexpected EOF");
 		return;
 	}
-	/* We could write this not to push back a token but it's
-	   actually much cleaner to push back */
-	while (token >= T_SYMBOL) {
-		unsigned name = token;
-		next_token();
-		if (token == T_COLON) {
-			next_token();
-			/* We found a label */
-			add_label(name);
-			header(H_LABEL, func_tag, name);
-		} else {
-			push_token(name);
+	/*
+	 * Labels prefix a statement, they are not statements themselves:
+	 * "case 1: return 1;" is one labelled statement. So consume any
+	 * run of them here and then parse the statement they belong to.
+	 *
+	 * case and default have to be in this loop with ordinary labels.
+	 * They used to be handled in statement(), which returned after
+	 * emitting the label - fine inside a { } body, where the enclosing
+	 * loop picks up the next statement anyway, and wrong when the
+	 * switch body is a bare statement:
+	 *
+	 *     switch (x)
+	 *         case 1:
+	 *             return 1;
+	 *
+	 * ended the switch at the colon, so the case body landed *after*
+	 * the break label and ran whether or not the case matched.
+	 *
+	 * We could write this not to push back a token but it's
+	 * actually much cleaner to push back
+	 */
+	for (;;) {
+		if (token == T_CASE) {
+			case_statement();
+			continue;
+		}
+		if (token == T_DEFAULT) {
+			default_statement();
+			continue;
+		}
+		if (token < T_SYMBOL)
 			break;
+		{
+			unsigned name = token;
+			next_token();
+			if (token == T_COLON) {
+				next_token();
+				/* We found a label */
+				add_label(name);
+				header(H_LABEL, func_tag, name);
+			} else {
+				push_token(name);
+				break;
+			}
 		}
 	}
 	if (token != T_LCURLY) {

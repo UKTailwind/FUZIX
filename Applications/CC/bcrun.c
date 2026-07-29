@@ -45,6 +45,9 @@
  *	an array - see PSRAM_RESERVE in the kernel's psram.h.
  */
 #define MEMSIZE		131072		/* program address space */
+/* Dead space at the bottom so that no object can live at address 0 and
+   a null pointer stays distinguishable from a real one. */
+#define NULLGUARD	16
 #define STACKROOM	8192		/* kept clear at the top for the stack */
 
 static unsigned char *code;
@@ -803,13 +806,21 @@ static void load(const char *path)
 	if (fread(code, 1, h.h_code, f) != h.h_code)
 		fault("short code");
 
-	/* Data goes at the bottom of the program's address space, bss
-	   directly after it, and the stack starts at the top. */
-	database = 0;
-	bssbase = h.h_data;
+	/*
+	 * Data goes near the bottom of the program's address space, bss
+	 * directly after it, and the stack starts at the top.
+	 *
+	 * Near the bottom, not at it: address zero must not be a valid
+	 * object, or a null pointer is indistinguishable from whatever
+	 * the linker happened to put first. It put a string literal
+	 * there, so "abc" == (void *)0 was true. No real implementation
+	 * places an object at zero and C leans on that everywhere.
+	 */
+	database = NULLGUARD;
+	bssbase = database + h.h_data;
 	/* The heap is whatever is left between bss and the stack. */
-	heap_init(h.h_data + h.h_bss);
-	if (h.h_data + h.h_bss + STACKROOM > MEMSIZE) {
+	heap_init(bssbase + h.h_bss);
+	if (bssbase + h.h_bss + STACKROOM > MEMSIZE) {
 		fprintf(stderr, "bcrun: program too large\n");
 		exit(1);
 	}

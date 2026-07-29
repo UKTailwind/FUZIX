@@ -1,6 +1,9 @@
 #include <stddef.h>
 #include "compiler.h"
 
+/* get_sizeof needs the unary-expression parser, which is below it */
+static struct node *hier10(void);
+
 static void unexarg(void)
 {
 	error("unexpected argument");
@@ -256,29 +259,37 @@ struct node *get_sizeof(void)
 	unsigned name;
 	unsigned type;
 	struct node *n, *r;
-	unsigned want_paren = 0;
 
-	if (match(T_LPAREN))
-		want_paren = 1;
-
-	/* We will eventually need to count typedefs as type_word */
-	if (is_type_word() || is_typedef()) {
-		type = type_name_parse(S_NONE, get_type(), &name);
-		if (type == UNKNOWN || name)
-			return badsizeof();
-		require(T_RPAREN);
-		return make_constant(type_sizeof(type), UINT);
+	if (match(T_LPAREN)) {
+		/* We will eventually need to count typedefs as type_word */
+		if (is_type_word() || is_typedef()) {
+			type = type_name_parse(S_NONE, get_type(), &name);
+			if (type == UNKNOWN || name)
+				return badsizeof();
+			require(T_RPAREN);
+			return make_constant(type_sizeof(type), UINT);
+		}
+		/* Not a type name, so the bracket belongs to the expression.
+		   Put it back and let hier10 take it as a primary, which
+		   also keeps any postfix operators after the bracket. */
+		push_token(T_LPAREN);
 	}
-	/* Sizeof an expression. This is one case that does not degrade to a pointer
-	   if the result is an array. We track whether we are in sizeof so that
-	   we can optimize some of the symbol table tracking for constanrt strings
-	   to keep memory usage a bit more controlled. See primary.c */
+	/*
+	 * Sizeof an expression takes a *unary-expression*, not a full one:
+	 * "sizeof 0 < 2" means "(sizeof 0) < 2". Parsing a whole
+	 * expression here made it "sizeof (0 < 2)", and since that is 4
+	 * the condition silently came out true.
+	 *
+	 * This is also the one case that does not degrade to a pointer if
+	 * the result is an array. We track whether we are in sizeof so
+	 * that we can optimize some of the symbol table tracking for
+	 * constant strings to keep memory usage a bit more controlled.
+	 * See primary.c
+	 */
 	in_sizeof++;
-	n = hier0(0);
+	n = hier10();
 	r = make_constant(type_sizeof(n->type), UINT);
 	free_tree(n);
-	if (want_paren)
-		require(T_RPAREN);
 	in_sizeof--;
 	return r;
 }
