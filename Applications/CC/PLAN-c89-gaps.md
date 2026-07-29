@@ -109,32 +109,87 @@ once it passes.
 
 ---
 
-## 3. Struct passing and returning
+## 3. Struct passing and returning — RESUME HERE
 
-**What happens.** `type_iterator.c:250` refuses a struct parameter with
-"cannot pass objects", and returning one fails the same way. Everything
-downstream then cascades.
+**ABI decided:** hidden pointer for *all* struct returns, no size split.
+Passing is by copying onto the argument stack.
 
-**Fix.** This one needs an ABI decision before any code:
+### Done: assignment, commit `74afa0885`
 
-* **Return** via a hidden first argument — the caller allocates space
-  and passes its address, the callee copies into it. This is what the
-  gcc-built userland does, and matching it matters if compiled code
-  ever has to call gcc-built code.
-* **Pass** by copying onto the argument stack. Arguments are already
-  word-aligned and `target_argsize()` already reports the real size, so
-  the frame arithmetic is in place.
+`b = a` works, including globals both ways, nested structs, arrays of
+structs and `g = b = a`. `samples/struct2.c` covers it and is in the
+suite.
 
-Then: drop the refusal in the frontend, make struct assignment emit a
-block copy, and give the backend a way to move n bytes. The interpreter
-already has `vcopy()`, so this can start as a libcall and become an
-opcode later if it matters.
+Two facts from that work shape everything below:
 
-Check first whether plain struct *assignment* (`b = a;`) already works
-— the probe cascaded from the earlier errors, so that is currently
-unknown, and it may be a smaller job than it looks.
+* **A struct valued expression is represented by its address.** There
+  is no loading an aggregate into the accumulator, so `hier1` keeps
+  both sides as addresses rather than calling `make_rval`, which would
+  insert a dereference.
+* **cc2 cannot size a struct.** Its `typesize()` returns 4 for anything
+  it does not recognise, because struct sizes live in cc1's symbol
+  table (`type_sizeof`, which reads `s->data.idx[1]`). **Any aggregate
+  operation must carry its length from the front end.** `BC_COPY` takes
+  it as a u16 immediate from the node's `value`.
 
-Medium sized, and the ABI choice is the part to get right.
+### Attempted and reverted: passing
+
+The design is sound and should be rebuilt as-is. What was written:
+
+* `type_iterator.c` — drop the `cannot pass objects` refusal for
+  structs, keep it for functions;
+* `target-thumb.c` — `target_argsize()` uses `type_sizeof` for
+  aggregates (`target_sizeof` errors on them) and rounds up to a whole
+  number of words;
+* `token.h` — `T_ARGSTRUCT` (0x1211), wrapping a struct argument, child
+  evaluates to the address, `value` holds the length;
+* `expression.c` `call_args()` — wrap a struct argument in it before
+  `*argsize += target_argsize(...)`;
+* `bytecode.h` — `BC_PUSHN` u16, copy that many bytes from the address
+  in A onto the stack, rounded up to words;
+* `backend-bcode.c` — `gen_push()` emits `BC_PUSHN` when the node is
+  `T_ARGSTRUCT`; `gen_node` does nothing for it, the address is already
+  in A;
+* `bcrun.c` — `BC_PUSHN`: `sp -= roundup(len); vcopy(sp, A, len);`
+
+**It fails with cc2 reporting `sp`** — the stack depth counter is not
+back to zero at the epilogue, so the push accounting and what
+`T_CLEANUP` subtracts do not agree.
+
+### What to do first, before writing any code
+
+Work out the invariant `sp` in `backend-bcode.c` is meant to satisfy,
+and exactly which node gets pushed for an argument. Specifically:
+
+* `codegen_lr()` in `backend.c` does `codegen_lr(n->left)`, then
+  `gen_direct(n)`, then `gen_push(n->left)` — that is the *generic*
+  binary-node push, not an argument-specific one;
+* arguments are a `T_ARGCOMMA` chain built right to left in
+  `call_args()`, so `left` is the remaining arguments and `right` is
+  this one;
+* **a single argument is not wrapped in `T_ARGCOMMA` at all** - it is
+  the direct left child of `T_FUNCCALL`. That asymmetry is the most
+  likely place the accounting went wrong;
+* `T_CLEANUP` subtracts `n->right->value`, the `argsize` accumulated by
+  `call_args()`, and is handled in `gen_direct` not `gen_node`.
+
+Do not guess at the arithmetic. A code generator that balances on the
+samples and quietly miscompiles something else is worse than one that
+refuses to build.
+
+### Then: returning, via the hidden pointer
+
+Reuses the same machinery. The pieces:
+
+* a function returning a struct gains a hidden first parameter holding
+  the address of caller-allocated space, which shifts every real
+  parameter's offset;
+* at the call site the front end reserves a temporary in the caller's
+  frame and passes its address as that first argument;
+* `return expr;` in such a function becomes a `BC_COPY` to the hidden
+  pointer, then returns the pointer in A;
+* the call's value is then an address, which is what the rest of the
+  struct handling already expects - so `f().x` and `a = f()` fall out.
 
 ---
 

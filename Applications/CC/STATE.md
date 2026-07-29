@@ -41,15 +41,31 @@ worth doing.
 
 **The compiler runs on the PC3 itself** (2026-07-29). `cc prog.c` on the
 board drives cpp, cc0, cc1 and cc2 and writes a `.bc` that bcrun
-executes. All eight samples - sieve, strs, rpn, libtest, ll2, optest,
-width3, sw2 - compile on the board and produce output identical to gcc,
-optest included, which covers about 55 opcodes. cc0's literal encoding
-is byte for byte identical to the host's over 265 literals.
+executes. Nine samples - sieve, strs, rpn, libtest, ll2, width3, sw2,
+dbl, fp - compile on the board and produce output identical to gcc.
+cc0's literal encoding is byte for byte identical to the host's over
+265 literals.
+
+**`optest.c` is not among them**, and the reason is worth keeping:
+cc1 rejects `(int)(&arr[5] - arr)` at line 136 with "type mismatch",
+and the on-target driver stops on a cc1 error where `optest.sh` prints
+it and carries on. An earlier run of this suite reported optest passing
+on the board - that was the harness running a stale `.bc` left from a
+cross-compiled transfer, since it did not delete the object first. It
+does now.
 
 Installed there: the three passes in `/usr/lib/cc`, and `cc`, `cpp`,
 `bcrun`, `bcdump` in `/usr/bin`.
 
-## Next task: the float and double opcodes
+## Next task: struct passing by value
+
+Read **"3. Struct passing and returning — RESUME HERE"** in
+PLAN-c89-gaps.md. Struct *assignment* is done; passing was attempted,
+failed cc2's `sp` balance check and was reverted, and the note records
+the design to rebuild, what was written, and what to read before
+writing any more of it.
+
+## Done: the float and double opcodes
 
 Steps 1 and 2 of the double work are done (see "Double" in
 PC3-COMPILER-PLAN.md). cc0 encodes IEEE-754 doubles that match gcc bit
