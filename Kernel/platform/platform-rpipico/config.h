@@ -126,7 +126,35 @@
 #undef CONFIG_VT
 #undef CONFIG_FONT8X8
 
-/* Built in NAND flash. Warning, it's unstable. */
+/*
+ * Built in NAND flash (/dev/hda, dhara over the XIP flash).
+ *
+ * OFF, and this is why it was "unstable". rawflash.c calls
+ * flash_range_erase/flash_range_program guarded by nothing but di(),
+ * and on RP2350 at this clock those calls do two things to the rest of
+ * the machine:
+ *
+ *  - boot2 re-runs inside them and leaves QMI M0 at CLKDIV=2. At
+ *    375MHz that is ~189MHz flash SPI, well above spec, and it is not
+ *    restored afterwards. MMBasic wraps every call to save and restore
+ *    qmi_hw->m[0].timing/rfmt - and m[1] with it, which is the PSRAM.
+ *
+ *  - they invalidate the XIP cache. psram.c sets XIP_CTRL_WRITABLE_M1,
+ *    so PSRAM is cached write-back, which means the swap device's
+ *    dirty lines live in that cache. Invalidating without cleaning
+ *    first throws them away. MMBasic walks XIP_MAINTENANCE_BASE over
+ *    16K to commit them before it lets that happen; we do not clean
+ *    that cache anywhere at all.
+ *
+ * Both are now handled in rawflash.c, following MMBasic's FileIO.c
+ * rather than re-deriving them.
+ *
+ * Left ON deliberately even though root is on SD and swap is in PSRAM,
+ * so this device earns little: turning it off renumbers every block
+ * device - the SD moves from hdb to hda and the PSRAM disc from hdc to
+ * hdb - which silently breaks "swapon /dev/hdc" in rc, every bootdev
+ * habit, and the manual. Not worth it for a device that is now safe.
+ */
 #define CONFIG_PICO_FLASH
 
 /* Program layout */

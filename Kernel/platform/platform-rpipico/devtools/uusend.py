@@ -30,12 +30,38 @@ def uuencode(data, name):
     return out
 
 
+"""Everything the board says during a transfer is logged.
+
+Two transfers have killed the machine mid-send and left nothing to look
+at, because the echo bytes this waits on were counted and discarded. If
+it dies again the tail of this log is the board's last words.
+"""
+LOGPATH = os.path.join(os.environ.get("TEMP", "/tmp"), "uusend.log")
+_log = None
+_tail = bytearray()
+
+
+def logbytes(b):
+    global _log
+    if _log is None:
+        _log = open(LOGPATH, "wb")
+    _log.write(b)
+    _log.flush()
+    _tail.extend(b)
+    del _tail[:-4096]
+
+
+def tail(n):
+    return bytes(_tail[-n:]).decode("latin-1", "replace")
+
+
 def drain(ser, quiet=1.0, limit=15.0):
     buf = b""; last = t0 = time.time()
     while time.time() - t0 < limit:
         n = ser.in_waiting
         if n:
-            buf += ser.read(n); last = time.time()
+            chunk = ser.read(n); logbytes(chunk)
+            buf += chunk; last = time.time()
         elif time.time() - last > quiet:
             break
         else:
@@ -76,11 +102,18 @@ def main():
         while got < want and time.time() < deadline:
             k = ser.in_waiting
             if k:
-                got += len(ser.read(k))
+                chunk = ser.read(k)
+                got += len(chunk)
+                logbytes(chunk)
             else:
                 time.sleep(0.002)
         if got < want:
+            # The board has stopped echoing. Whatever it said last is
+            # the only evidence of why, and it used to be counted and
+            # thrown away - two transfers died here with nothing kept.
             print("  line %d: echo timeout (%d/%d)" % (n, got, want))
+            print("  last from board: %r" % (tail(400),))
+            print("  log: %s" % LOGPATH)
         time.sleep(gap)
         if n % 50 == 0:
             print("  %d/%d" % (n, len(lines)))
