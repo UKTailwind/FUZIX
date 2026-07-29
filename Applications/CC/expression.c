@@ -498,7 +498,26 @@ static struct node *hier10(void)
 		require(T_RPAREN);
 		if (t == UNKNOWN || name)
 			badtype();
-		return typeconv(make_rval(hier10()), t, 0);
+		r = make_rval(hier10());
+		/*
+		 * "(void)expr" is always valid and simply says "evaluate
+		 * this and throw the result away". It is not a conversion,
+		 * and typeconv only knows how to convert between arithmetic
+		 * and pointer types, so it called this an invalid type
+		 * conversion - on "(void)printf(...)", which is everywhere.
+		 *
+		 * Done here rather than in typeconv because typeconv is
+		 * also what checks "return expr;" against the function's
+		 * type, and accepting void there would stop it complaining
+		 * about a value returned from a void function.
+		 */
+		if (t == VOID) {
+			r = tree(T_CAST, NULL, r);
+			r->type = VOID;
+			r->flags |= NORETURN;
+			return r;
+		}
+		return typeconv(r, t, 0);
 	case T_SIZEOF:
 		return get_sizeof();
 

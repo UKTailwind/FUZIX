@@ -777,6 +777,24 @@ unsigned gen_uni_direct(struct node *n)
 
 unsigned gen_shortcut(struct node *n)
 {
+	/*
+	 * The comma operator. Nothing generated it before, so it reached
+	 * the fallback and came out as a call to "__op2c" that does not
+	 * exist - "(void)f(), g();" and "for (i = 0, j = 0; ...)" simply
+	 * did not work.
+	 *
+	 * Handled here rather than in gen_node because the generic walk
+	 * would push the left operand's value first, and the whole point
+	 * of a comma is that the left value is thrown away. Marking it
+	 * NORETURN also lets a left side with no side effects disappear
+	 * completely.
+	 */
+	if (n->op == T_COMMA) {
+		n->left->flags |= NORETURN;
+		codegen_lr(n->left);
+		codegen_lr(n->right);
+		return 1;
+	}
 	return 0;
 }
 
@@ -1107,6 +1125,11 @@ unsigned gen_node(struct node *n)
 			unsigned lt = n->type;
 			unsigned rt = n->right ? n->right->type : lt;
 			unsigned ls, rs;
+			/* A cast to void discards the value. The operand has
+			   already been generated for its side effects and
+			   there is nothing to convert it to. */
+			if (lt == VOID)
+				return 1;
 			if (PTR(lt) || PTR(rt))
 				return 1;
 			/*

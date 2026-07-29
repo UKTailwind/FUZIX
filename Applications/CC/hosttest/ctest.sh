@@ -49,7 +49,15 @@ run_one() {
 	# glibc pulls in GNU extensions no C89 compiler can parse, and every
 	# needs-libc test then fails in cc1 for a reason that has nothing to
 	# do with the test. See ctest-include/README.md.
-	if ! gcc -E -P -nostdinc -I "$INC" -I "$SUITE" "$src" \
+	#
+	# The data model macros have to describe *our* target, not the
+	# machine running the preprocessor. This target is ILP32 - short
+	# 16, int 32, long 32, pointers 32 - and saying so is what lets a
+	# test that checks its own sizeof values take the branch that
+	# matches. Left alone, the host's __LP64__ came through and 00212
+	# duly reported that long was not eight bytes.
+	if ! gcc -E -P -nostdinc -U__LP64__ -U__LLP64__ -D__ILP32__ \
+			-I "$INC" -I "$SUITE" "$src" \
 			> "$W/$b.pp" 2> "$W/$b.cpp.err"; then
 		echo "CPP"; return
 	fi
