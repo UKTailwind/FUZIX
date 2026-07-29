@@ -68,9 +68,23 @@ static struct bc_fixup fixtab[MAXFIX];
 static unsigned nfix;
 
 /* Labels are (tail, number) pairs scoped to the module. */
+/*
+ *	A label is a tag number plus a short name: "_b" and "_c" for the
+ *	break and continue of a loop, "_g<n>" for a user goto label.
+ *
+ *	The tail used to be four bytes and was compared over three, which
+ *	is fine for the compiler's own two character names and silently
+ *	wrong for goto: "_g32769", "_g32770" and "_g32771" are all "_g3",
+ *	so every goto label in a function was the same label and the last
+ *	one defined won. Two labels in one function was enough to generate
+ *	a jump to itself. Frontend symbol numbers reach five digits, so
+ *	"_g" plus five plus the NUL.
+ */
+#define LABTAIL	12
+
 struct label {
 	unsigned num;
-	char tail[4];
+	char tail[LABTAIL];
 	unsigned long addr;
 	unsigned defined;
 };
@@ -221,16 +235,18 @@ static unsigned labref(const char *tail, unsigned n)
 {
 	unsigned i;
 	for (i = 0; i < nlab; i++) {
-		if (labtab[i].num == n && strncmp(labtab[i].tail, tail, 3) == 0)
+		if (labtab[i].num == n && strcmp(labtab[i].tail, tail) == 0)
 			return i;
 	}
 	if (nlab >= MAXLAB) {
 		error("too many labels");
 		return 0;
 	}
+	if (strlen(tail) >= LABTAIL)
+		error("label name too long");
 	labtab[nlab].num = n;
-	strncpy(labtab[nlab].tail, tail, 3);
-	labtab[nlab].tail[3] = 0;
+	strncpy(labtab[nlab].tail, tail, LABTAIL - 1);
+	labtab[nlab].tail[LABTAIL - 1] = 0;
 	labtab[nlab].addr = 0;
 	labtab[nlab].defined = 0;
 	return nlab++;
