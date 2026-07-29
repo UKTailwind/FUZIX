@@ -1353,6 +1353,32 @@ static unsigned tokenize(void)
 	c = get_nb();
 	if (c == 0)
 		return T_EOF;
+	/*
+	 * Wide literals. "L" is an ordinary identifier start, so L'\0' used
+	 * to lex as the symbol L followed by a character constant and came
+	 * out as "unknown symbol" (c-testsuite 00098).
+	 *
+	 * A wide character constant is taken as a plain one. That is honest
+	 * here: wchar_t is an integer type, the execution character set is
+	 * ASCII, and L'x' and 'x' have the same value for every character
+	 * that can be written.
+	 *
+	 * A wide *string* is refused instead, because accepting it would
+	 * mean handing back a narrow array - right length in bytes, wrong
+	 * element size - and anything that indexed or sized it would get
+	 * quietly wrong answers. Real support needs a wchar_t type and a
+	 * literal segment of its own.
+	 */
+	if (c == 'L') {
+		c2 = get();
+		if (c2 == '\'')
+			return tokenize_char();
+		if (c2 == '"') {
+			error("wide strings not supported");
+			return tokenize_string();
+		}
+		unget(c2);
+	}
 	if (iscsymstart(c))
 		return tokenize_symbol(c);
 	if (isdigit(c))

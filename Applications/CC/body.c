@@ -435,8 +435,17 @@ void statement_block(unsigned need_brack)
 	 * that is legal in no dialect at all.
 	 */
 	while (token != T_RCURLY) {
-		if (is_modifier() || is_storage_word() || is_type_word() ||
-				is_typedef())
+		/* A typedef is a declaration but not one declaration() can
+		   handle - it has its own syntax - and it was previously
+		   only ever recognised in toplevel(), so "typedef int myint;"
+		   inside any block was rejected. It is scoped to the block:
+		   update_typedef() marks it so pop_local_symbols() below
+		   discards it. */
+		if (token == T_TYPEDEF) {
+			next_token();
+			dotypedef();
+		} else if (is_modifier() || is_storage_word() ||
+				is_type_word() || is_typedef())
 			declaration(S_AUTO);
 		else
 			statement_block(0);

@@ -13,7 +13,7 @@ unsigned one_typedef(unsigned type, unsigned name)
 		junk();
 		return 0;
 	}
-	update_symbol_by_name(name, S_TYPEDEF, type);
+	update_typedef(name, type);
 	return 1;
 }
 
@@ -51,7 +51,17 @@ unsigned one_declaration(unsigned s, unsigned type, unsigned name, unsigned defs
 	if ((s == S_AUTO || s == S_REGISTER) && defstorage == S_EXTDEF)
 		error("no automatic globals");
 
-	if (IS_FUNCTION(type) && !PTR(type) && s == S_EXTDEF)
+	/*
+	 * A declaration of a function - as opposed to a pointer to one -
+	 * never has storage, whatever the surrounding default is. At file
+	 * scope that default is S_EXTDEF; inside a block it is S_AUTO, and
+	 * "int f(char *);" there used to fall through to assign_storage()
+	 * below and fail with "can't size type" (c-testsuite 00078). C89
+	 * allows only extern on a block scope function declarator anyway,
+	 * so mapping the default to S_EXTERN is what it means.
+	 */
+	if (IS_FUNCTION(type) && !PTR(type) &&
+	    (s == S_EXTDEF || s == S_AUTO || s == S_REGISTER))
 		s = S_EXTERN;
 
 	if (s == S_REGISTER) {

@@ -11,12 +11,13 @@ struct symbol
 
 #define INITIALIZED	0x0800
 /*
- * A struct or union tag declared inside a function body, which goes out
- * of scope with its block. Storage class cannot say so - S_STRUCT is
- * above S_STATIC, which is what marks a symbol permanent - and neither
- * can position in the table, because a file scope tag may sit above the
- * mark a block was entered at. The low bits of infonext are the index
- * field, which is never set for a tag.
+ * A struct or union tag, or a typedef, declared inside a function body,
+ * which goes out of scope with its block. Storage class cannot say so -
+ * S_STRUCT and S_TYPEDEF are both above S_STATIC, which is what marks a
+ * symbol permanent - and neither can position in the table, because a
+ * file scope name may sit above the mark a block was entered at. The
+ * low bits of infonext are the index field, which is never set for
+ * either of these.
  */
 #define S_TAGLOCAL	0x0400
 #define S_FREE		0x0000	/* Unused */
@@ -46,6 +47,7 @@ struct symbol
 
 extern struct symbol *update_symbol(struct symbol *sym, unsigned name, unsigned storage, unsigned type);
 extern struct symbol *update_symbol_by_name(unsigned name, unsigned storage, unsigned type);
+extern struct symbol *update_typedef(unsigned name, unsigned type);
 extern struct symbol *find_symbol(unsigned name, unsigned global);
 extern struct symbol *find_symbol_by_class(unsigned name, unsigned class);
 extern struct symbol *alloc_symbol(unsigned name, unsigned local);

@@ -106,6 +106,26 @@ static unsigned ini_string(unsigned n)
 }
 
 /*
+ *	Braces may be elided from the initializer of a sub-aggregate:
+ *
+ *	    struct { int c[4]; int b, e, k; } t[] = { 1,2,3,4, 5,6,7 };
+ *
+ *	is C89 (6.5.7) and is how the J interpreter snippet in c-testsuite
+ *	00205 is written. When the brace is absent this level consumes as
+ *	many items as it needs from the list its parent is already reading,
+ *	and must not look for a closing brace either.
+ *
+ *	The other half of it is the comma. An elided group stops as soon as
+ *	its quota is filled and leaves the separator alone, because that
+ *	comma belongs to the parent's list - eating it would make the parent
+ *	think its own list had ended.
+ */
+static unsigned ini_braced(void)
+{
+    return match(T_LCURLY);
+}
+
+/*
  *	Array bottom level initializer: repeated runs of the same type
  *
  *	TODO: In theory we could have a platform that needs padding
@@ -118,6 +138,7 @@ static unsigned ini_group(struct symbol *sym, unsigned type, unsigned n,
     unsigned string = 0;
     unsigned count = 0;
     unsigned esize = type_sizeof(type);
+    unsigned braced;
     /* C has a funky special case rule that you can write
        char x[16] = "foo"; which creates a copy of the string in that
        array not a literal reference. It's also got a second funky special case
@@ -138,7 +159,10 @@ static unsigned ini_group(struct symbol *sym, unsigned type, unsigned n,
         }
         return ini_string(n);
     }
-    require(T_LCURLY);
+    /* Braces may be elided from an inner initializer - C89 6.5.7 - in
+       which case this level takes what it needs from the list its
+       parent is already reading. See ini_braced(). */
+    braced = ini_braced();
     if (!sized)
         n = TARGET_MAX_PTR;
     while(n && token != T_RCURLY) {
@@ -149,7 +173,8 @@ static unsigned ini_group(struct symbol *sym, unsigned type, unsigned n,
                 return count;
             }
             n = ini_string(sized);
-            require(T_RCURLY);
+            if (braced)
+                require(T_RCURLY);
             return n;
         }
         string = 0;	/* Only valid first */
@@ -158,13 +183,16 @@ static unsigned ini_group(struct symbol *sym, unsigned type, unsigned n,
         n--;
         initializers(sym, type, storage, off + count * esize);
         count++;
+        if (!n && !braced)
+            break;	/* Quota met - the comma belongs to the parent */
         if (!match(T_COMMA))
             break;
     }
     if (n && sized)
         ini_pad(sym, storage, off + count * esize, esize * n);
     /* Catches any excess elements */
-    require(T_RCURLY);
+    if (braced)
+        require(T_RCURLY);
     return count;
 }
 
@@ -190,12 +218,13 @@ static void ini_struct(struct symbol *psym, unsigned type, unsigned storage,
     unsigned n = *p;
     unsigned s = p[1];	/* Size of object (needed for union) */
     unsigned pos = 0;
+    unsigned braced;
 
     p += 2;
     /* We only initialize the first object */
     if (S_STORAGE(sym->infonext) == S_UNION)
         n = 1;
-    require(T_LCURLY);
+    braced = ini_braced();
     while(n-- && token != T_RCURLY) {
         /* Name, type, offset tuples */
         type = p[1];
@@ -212,12 +241,16 @@ static void ini_struct(struct symbol *psym, unsigned type, unsigned storage,
         /* Next field */
         p += 3;
 
+        if (!n && !braced)
+            break;	/* Quota met - the comma belongs to the parent */
         if (!match(T_COMMA))
             break;
     }
-    if (n == -1 && token != T_RCURLY)
-        error("too many initializers");
-    require(T_RCURLY);
+    if (braced) {
+        if (n == -1 && token != T_RCURLY)
+            error("too many initializers");
+        require(T_RCURLY);
+    }
     /* For a union zerofill the slack if other elements are bigger */
     /* For a struct fill from the offset of the next field to the size of
        the base object */
@@ -241,14 +274,17 @@ static void ini_array(struct symbol *sym, unsigned type, unsigned depth,
 
     if (depth < array_num_dimensions(type)) {
         unsigned esize;
+        unsigned braced;
         type = type_deref(type);
         esize = type_sizeof(type);
-        require(T_LCURLY);
+        braced = ini_braced();
         if (n == 0)
             n = TARGET_MAX_PTR;
         while(n--) {
             ini_array(sym, type, depth + 1, storage, off + count * esize);
             count++;
+            if (!n && !braced)
+                break;	/* Quota met - the comma belongs to the parent */
             /* Trailing comma is allowed so eat it before checking n */
             if (match(T_COMMA) && n)
                 continue;
@@ -262,7 +298,8 @@ static void ini_array(struct symbol *sym, unsigned type, unsigned depth,
            initializer. */
         if (sized)
             ini_pad(sym, storage, off + count * esize, esize * n);
-        require(T_RCURLY);
+        if (braced)
+            require(T_RCURLY);
     } else {
         n = ini_group(sym, type_deref(type), n, storage, off);
         if (array_dimension(type, 1) == 0)

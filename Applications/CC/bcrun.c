@@ -406,6 +406,14 @@ static double argd(unsigned n)
 }
 
 /*
+ *	A long long argument, likewise two slots.
+ */
+static long long argll(unsigned n)
+{
+	return (long long)rd64(sp + 4 * n);
+}
+
+/*
  *	%f, by hand.
  *
  *	Everything else here hands the work to the host's sprintf, but
@@ -618,7 +626,7 @@ static void do_format(unsigned abase)
 	unsigned a = abase + 1;
 
 	while (*f) {
-		int left = 0, zero = 0, width = 0, prec = -1;
+		int left = 0, zero = 0, width = 0, prec = -1, lng = 0;
 
 		if (*f != '%') {
 			emit(*f++);
@@ -656,17 +664,69 @@ static void do_format(unsigned abase)
 				prec = 0;
 		}
 
+		/*
+		 * Length modifiers. These had no handling at all, so "%ld"
+		 * fell through to the default below and printed itself
+		 * literally - and, worse, consumed no argument, so every
+		 * conversion after it took the wrong one.
+		 *
+		 * h and l are both no-ops here: char and short promote to
+		 * int in a variadic call, and long is 32 bits on this
+		 * target, the same as int. Only ll changes anything,
+		 * because a long long really does occupy two slots.
+		 */
+		if (*f == 'h') {
+			f++;
+			if (*f == 'h')
+				f++;
+		} else if (*f == 'l') {
+			f++;
+			lng = 1;
+			if (*f == 'l') {
+				f++;
+				lng = 2;
+			}
+		}
+
 		switch (*f) {
 		case 'd':
-			sprintf(tmp, "%ld", (long)arg(a++));
+		case 'i':
+			if (lng == 2) {
+				sprintf(tmp, "%lld", argll(a));
+				a += 2;
+			} else
+				sprintf(tmp, "%ld", (long)arg(a++));
 			padout(tmp, width, left, zero);
 			break;
 		case 'u':
-			sprintf(tmp, "%lu", (unsigned long)U32(arg(a++)));
+			if (lng == 2) {
+				sprintf(tmp, "%llu",
+					(unsigned long long)argll(a));
+				a += 2;
+			} else
+				sprintf(tmp, "%lu",
+					(unsigned long)U32(arg(a++)));
 			padout(tmp, width, left, zero);
 			break;
 		case 'x':
-			sprintf(tmp, "%lx", (unsigned long)U32(arg(a++)));
+		case 'X':
+			if (lng == 2) {
+				sprintf(tmp, *f == 'X' ? "%llX" : "%llx",
+					(unsigned long long)argll(a));
+				a += 2;
+			} else
+				sprintf(tmp, *f == 'X' ? "%lX" : "%lx",
+					(unsigned long)U32(arg(a++)));
+			padout(tmp, width, left, zero);
+			break;
+		case 'o':
+			if (lng == 2) {
+				sprintf(tmp, "%llo",
+					(unsigned long long)argll(a));
+				a += 2;
+			} else
+				sprintf(tmp, "%lo",
+					(unsigned long)U32(arg(a++)));
 			padout(tmp, width, left, zero);
 			break;
 		case 'c':

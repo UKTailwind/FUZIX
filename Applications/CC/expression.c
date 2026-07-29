@@ -408,6 +408,7 @@ static struct node *hier10(void)
 	    && token != T_SIZEOF
 	    && token != T_MINUSMINUS
 	    && token != T_MINUS
+	    && token != T_PLUS
 	    && token != T_TILDE
 	    && is_tcast == 0
 	    && token != T_BANG && token != T_STAR && token != T_AND) {
@@ -465,6 +466,18 @@ static struct node *hier10(void)
 		if (!IS_ARITH(r->type) && !PTR(r->type))
 			badtype();
 		return tree(T_NEGATE, NULL, r);
+	case T_PLUS:
+		/* Unary plus. ANSI added it, so it is C89, and it was not
+		   implemented at all - "+5" and "60 + +3" were both refused.
+		   The operand must be arithmetic (unlike unary minus above,
+		   a pointer is not allowed) and the value is unchanged, so
+		   there is no node to build. Arithmetic here is always 32
+		   bit, so the integer promotion it formally performs has
+		   nothing to do. */
+		r = make_rval(hier10());
+		if (!IS_ARITH(r->type))
+			badtype();
+		return r;
 	case T_BANG:
 		/* Floating point allowed */
 		r = make_rval(hier10());
@@ -738,7 +751,7 @@ static struct node *hier1a(void)
 	struct node *l;
 	struct node *a1, *a2;
 	unsigned lt;
-	unsigned a1t, a2t;
+	unsigned a1t, a2t, rt;
 
 	l = hier1b();
 	if (!match(T_QUESTION))
@@ -763,14 +776,41 @@ static struct node *hier1a(void)
 	a1t = type_canonical(a1->type);
 	a2t = type_canonical(a2->type);
 
-	/* Check the two sides of colon are compatible */
-	if (a1t == a2t || type_pointermatch(a1, a2) || (IS_ARITH(a1t) && IS_ARITH(a2t))) {
-		a2 = tree(T_QUESTION, bool_tree(l, NEEDCC), tree(T_COLON, a1, typeconv(a2, a1t, 1)));
-		/* Takes the type of the : arguments not the ? */
-		a2->type = a1t;
-	}
-	else
+	/*
+	 * Check the two sides of the colon are compatible and decide the
+	 * type of the result, which is that of the colon arguments and not
+	 * of the condition.
+	 *
+	 * The null pointer constant cases were missing. C89 says that when
+	 * one operand is a pointer and the other a null pointer constant,
+	 * the result has the pointer type - but the type was taken from a1
+	 * unconditionally, so "i ? 0 : q" came out as int and whatever it
+	 * was assigned to then reported a type mismatch. c-testsuite 00144,
+	 * and "x ? p : 0" is ordinary code.
+	 *
+	 * These two tests have to come first. type_pointermatch() already
+	 * answers yes for (constant zero, pointer), so the general case
+	 * below matched and then took a1's type - which for "i ? 0 : q" is
+	 * int, exactly the case being fixed.
+	 */
+	if (PTR(a2t) && is_constant_zero(a1))
+		rt = a2t;
+	else if (PTR(a1t) && is_constant_zero(a2))
+		rt = a1t;
+	else if (a1t == a2t || type_pointermatch(a1, a2) ||
+		 (IS_ARITH(a1t) && IS_ARITH(a2t)))
+		rt = a1t;
+	else {
 		badtype();
+		return a2;
+	}
+	/* Only convert a1 when it is the side that has to move, so the
+	   common case generates exactly what it did before. */
+	if (a1t != rt)
+		a1 = typeconv(a1, rt, 1);
+	a2 = tree(T_QUESTION, bool_tree(l, NEEDCC),
+		  tree(T_COLON, a1, typeconv(a2, rt, 1)));
+	a2->type = rt;
 	return a2;
 }
 

@@ -33,9 +33,13 @@
  */
 #define CODEMAX		32768
 #define DATAMAX		16384
-#define MAXSYM		512
-#define MAXFIX		1024
-#define MAXLAB		512
+/* 512 was inherited from the 8-bit targets, where the table really is
+   scarce. Here cc2 runs in a 256K process, so the cost of 2048 is a few
+   tens of K against a program that would otherwise simply not compile
+   ("too many symbols" on c-testsuite 00200). */
+#define MAXSYM		2048
+#define MAXFIX		4096
+#define MAXLAB		2048
 
 static unsigned char codebuf[CODEMAX];
 static unsigned long codelen;

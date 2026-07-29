@@ -58,7 +58,16 @@ struct symbol *find_symbol_by_class(unsigned name, unsigned class)
 	   by scope */
 	while (s >= symtab) {
 		if (s->name == name && S_STORAGE(s->infonext) == class) {
-			if (s->infonext < S_STATIC)
+			/* S_TAGLOCAL is how a typedef or tag says "block
+			   scope"; its storage class cannot, being above
+			   S_STATIC. Without this the loop falls into the
+			   gmatch branch below, which - because the walk is
+			   backwards - keeps overwriting and ends up
+			   returning the *outermost* match. A block typedef
+			   shadowing a file scope one then had no effect:
+			   sizeof(t) gave the outer type. */
+			if (s->infonext < S_STATIC ||
+			    (s->infonext & S_TAGLOCAL))
 				return s;
 			else	/* Still need to look for a local */
 				gmatch = s;
@@ -78,9 +87,11 @@ void pop_local_symbols(struct symbol *top)
 			symbol_bss(s);
 			s->infonext = S_FREE;
 			s->name = 0;
-		} else if ((st == S_STRUCT || st == S_UNION) &&
+		} else if ((st == S_STRUCT || st == S_UNION ||
+			    st == S_TYPEDEF) &&
 			   (s->infonext & S_TAGLOCAL)) {
-			/* A tag declared inside this block goes with it */
+			/* A tag or typedef declared inside this block goes
+			   with it */
 			s->infonext = S_FREE;
 			s->name = 0;
 		}
@@ -137,8 +148,15 @@ struct symbol *update_symbol(struct symbol *sym, unsigned name, unsigned storage
 			error("invalid name");
 		else if (symst < S_STATIC || !local) {
 			if (sym->type != type) {
+				unsigned keep;
 				if (IS_ARRAY(type) && IS_ARRAY(sym->type))
 					sym->type = array_compatible(type, sym->type);
+				else if (type_func_compatible(sym->type, type,
+							      &keep))
+					/* A prototype and a K&R definition of
+					   the same function. Keep whichever
+					   states the arguments. */
+					sym->type = keep;
 				else
 					typemismatch();
 			}
@@ -209,6 +227,40 @@ struct symbol *update_symbol_by_name(unsigned name, unsigned storage,
 			sym = NULL;
 	}
 	return update_symbol(sym, name, storage, type);
+}
+
+/*
+ *	A typedef declared inside a function body is scoped to its block,
+ *	exactly as a struct tag is - see update_struct(). Two things follow
+ *	and neither is handled by the generic path:
+ *
+ *	It must be allocated *local* so that local_top moves past it and an
+ *	inner block's pop cannot reach back over it, and it must carry
+ *	S_TAGLOCAL so pop_local_symbols() frees it at all - S_TYPEDEF sorts
+ *	above S_STATIC, which otherwise means "permanent".
+ *
+ *	And it must never update an outer typedef of the same name. An
+ *	inner "typedef char foo;" shadows a file scope "typedef int foo;"
+ *	and both have to survive until the block ends, so a match found
+ *	outside this block means allocate, not overwrite.
+ */
+struct symbol *update_typedef(unsigned name, unsigned type)
+{
+	struct symbol *sym;
+
+	if (!in_funcbody)
+		return update_symbol_by_name(name, S_TYPEDEF, type);
+
+	sym = find_symbol_by_class(name, S_TYPEDEF);
+	if (sym && sym > block_base && (sym->infonext & S_TAGLOCAL)) {
+		error("duplicate name");
+		return sym;
+	}
+	sym = alloc_symbol(name, 1);
+	sym->type = type;
+	sym->infonext = S_TYPEDEF | S_TAGLOCAL;
+	sym->data.idx = 0;
+	return sym;
 }
 
 /*

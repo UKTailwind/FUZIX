@@ -186,6 +186,47 @@ int type_pointerconv(struct node *r, unsigned lt, unsigned warn)
 }
 
 /*
+ *	Are two function types compatible, given that one of them may have
+ *	an unspecified argument list?
+ *
+ *	    int main(void);
+ *	    int main() { return 0; }
+ *
+ *	is C89 and is everywhere in period source, but the K&R form is
+ *	recorded as a lone ELLIPSIS by parse_function_arguments(), so the
+ *	two type codes differ and the definition looked like a redeclaration
+ *	with a different type (c-testsuite 00114).
+ *
+ *	Only the return type has to agree - the same rule
+ *	type_pointerconv() already applies to pointers to functions above.
+ *	Returns 1 if compatible, and sets *keep to whichever type is the
+ *	more informative of the two, so the prototype survives.
+ */
+int type_func_compatible(unsigned lt, unsigned rt, unsigned *keep)
+{
+	unsigned *la, *ra;
+	unsigned lany, rany;
+
+	if (PTR(lt) || PTR(rt))
+		return 0;
+	if (!IS_FUNCTION(lt) || !IS_FUNCTION(rt))
+		return 0;
+	if (func_return(lt) != func_return(rt))
+		return 0;
+	la = func_args(lt);
+	ra = func_args(rt);
+	if (la == NULL || ra == NULL)
+		return 0;
+	lany = (la[0] == 1 && la[1] == ELLIPSIS);
+	rany = (ra[0] == 1 && ra[1] == ELLIPSIS);
+	if (!lany && !rany)
+		return 0;
+	if (keep)
+		*keep = lany ? rt : lt;
+	return 1;
+}
+
+/*
  *	Do two pointers match for conversion purposes
  */
 int type_pointermatch(struct node *l, struct node *r)
