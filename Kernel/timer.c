@@ -26,8 +26,36 @@ timer_t set_timer_duration(uint16_t duration)
 
 uint8_t timer_expired(timer_t timer_val)
 {
+	uint16_t elapsed;
+
 	sync_clock();
-	return timer_val < ticks.h.low;
+	/*
+	 * How far past the deadline we are, computed modulo 65536. This
+	 * used to be a plain "timer_val < ticks.h.low", which is a
+	 * magnitude comparison and so wrong whenever the deadline wrapped:
+	 * set_timer_duration() returns ticks.h.low + duration, and once
+	 * that sum exceeds 65535 the deadline is a *small* number, less
+	 * than the current tick, so the timer read as already expired the
+	 * instant it was created.
+	 *
+	 * The window is duration/65536 of every call, so it is rare rather
+	 * than harmless - and this is live on platforms whose block driver
+	 * uses these for command timeouts (devsd.c, devide.c), where it
+	 * shows up as an occasional spurious I/O error. The opposite case
+	 * is worse: a deadline that has wrapped can also fail to expire
+	 * for most of a full turn of the counter.
+	 *
+	 * Unlike freebuf()'s LRU wrap this was wrong at either int width,
+	 * so it is not the 16-vs-32 bit trap - just a comparison that
+	 * needed to be modular from the start. Subtracting into a uint16_t
+	 * is well defined; the deadline is guaranteed inside half a turn by
+	 * set_timer_duration(), which rejects a duration of 32K or more.
+	 *
+	 * "elapsed != 0" keeps the original strict sense, that the tick on
+	 * which a timer falls due does not yet count as expired.
+	 */
+	elapsed = ticks.h.low - timer_val;
+	return elapsed && elapsed < 0x8000;
 }
 
 /*-----------------------------------------------------------*/

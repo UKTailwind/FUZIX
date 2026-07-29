@@ -133,19 +133,30 @@ Worth keeping - it is what turned a guess into a measurement.
   a 40K workload.
 * The pool dump in `freebuf()` before `panic()`.
 
-## Related, NOT fixed — `timer_expired()`
+## Related, and now also fixed — `timer_expired()`
 
-Noticed while sweeping for the same bug class. `Kernel/timer.c`:
+Found while sweeping for the same bug class, fixed separately.
+`Kernel/timer.c` had:
 
     timer_t set_timer_duration(uint16_t d) { ... a = d; a += ticks.h.low; return a; }
     uint8_t timer_expired(timer_t t)       { return t < ticks.h.low; }
 
-A plain magnitude compare, not modular, so it is wrong across a wrap at
-*either* int width. If `ticks.h.low + duration` overflows 16 bits the
-timer reads as expired immediately. This is live on this port: `devsd.c`
-uses it for SD command timeouts, so it is a source of occasional
-spurious SD errors. Correct form is
-`(int16_t)(ticks.h.low - t) >= 0`. Separate bug, not touched here.
+A plain magnitude compare where the counter wraps. Once
+`ticks.h.low + duration` exceeds 65535 the deadline is a *small*
+number, below the current tick, and the timer read as expired the
+instant it was created; the mirror case is a wrapped deadline that
+fails to expire for most of a turn of the counter, nearly two hours at
+ten ticks a second. Live here through `devsd.c`'s SD command timeouts,
+where it presents as an occasional spurious I/O error.
+
+Now computes the distance past the deadline modulo 65536, which is what
+a wrapping counter needs;  `set_timer_duration()` already guarantees the
+deadline is inside half a turn by rejecting a duration of 32K or more.
+
+**Note the difference from the panic above:** this one is wrong at
+*either* int width. It is not the 16-vs-32-bit promotion trap, just a
+comparison that always needed to be modular. Two adjacent bugs with
+similar symptoms and different causes - worth keeping straight.
 
 ## Filesystem state
 
