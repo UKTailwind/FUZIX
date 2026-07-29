@@ -61,8 +61,17 @@ struct node *constant_node(void)
 	case T_ULONGVAL:
 		t = ULONG;
 		break;
+	case T_LONGLONGVAL:
+		t = CLONGLONG;
+		break;
+	case T_ULONGLONGVAL:
+		t = ULONGLONG;
+		break;
 	case T_FLOATVAL:
 		t = FLOAT;
+		break;
+	case T_DOUBLEVAL:
+		t = DOUBLE;
 		break;
 	default:
 		error("invalid value");

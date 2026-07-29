@@ -120,6 +120,13 @@
 /* End marker for strings (mostly a dummy for convenience) */
 #define T_STRING_END	0x1106
 
+/* These are followed by an EIGHT byte little endian value. 0x1105 and
+   0x1106 are the string markers above - do not reuse them, an earlier
+   attempt did and turned every string literal into a constant. */
+#define T_LONGLONGVAL	0x1107
+#define T_ULONGLONGVAL	0x1108
+#define T_DOUBLEVAL	0x1109
+
 /* Encodings that are used internally for nodes but have no actual equivalent
    token */
 #define T_CAST		0x1200		/* (int *) etc */

@@ -520,7 +520,32 @@ static unsigned tokenize_symbol(unsigned c)
  */
 
 static uint16_t rtype;
-static uint32_t result;
+/*
+ *	Wide enough for a long long literal, and later for a double. The
+ *	token stream carries four bytes for the narrow types and eight for
+ *	T_LONGLONGVAL, T_ULONGLONGVAL and T_DOUBLEVAL - see encode_value().
+ */
+static uint64_t result;
+
+/*
+ *	Write the constant into the token stream: four bytes for the
+ *	narrow types, eight for the wide ones. cc1's next_token() reads
+ *	the matching number back, keyed on the same token codes.
+ */
+static void encode_value(void)
+{
+	encode_byte(result);
+	encode_byte(result >> 8);
+	encode_byte(result >> 16);
+	encode_byte(result >> 24);
+	if (rtype == T_LONGLONGVAL || rtype == T_ULONGLONGVAL ||
+	    rtype == T_DOUBLEVAL) {
+		encode_byte(result >> 32);
+		encode_byte(result >> 40);
+		encode_byte(result >> 48);
+		encode_byte(result >> 56);
+	}
+}
 
 static void overflow(void)
 {
@@ -656,6 +681,15 @@ static const uint32_t fraction[10] = {
 static void dec_format(unsigned c)
 {
 	uint32_t sum = 0, frac = 0, n;
+	/*
+	 * The integer value at full width, kept alongside the 32-bit sum
+	 * the float path needs. sum deliberately loses bits once it
+	 * overflows - it only has to carry enough mantissa - but an
+	 * integer literal must keep every bit, and 5000000000 has more
+	 * than 32 of them.
+	 */
+	uint64_t isum = 0;
+	unsigned iov = 0;
 	unsigned ex = 0, uex;
 
 	/* Parse digits before . : could be integer or float */
@@ -663,16 +697,19 @@ static void dec_format(unsigned c)
 		if (!isdigit(c)) {
 			/* Done */
 			unget(c);
-			if (ex == 0) {
-				result = sum;
-				rtype = T_INTVAL;
+			if (iov) {
+				overflow();
 				return;
 			}
-			/* Oversized integer */
-			overflow();
+			result = isum;
+			rtype = T_INTVAL;
 			return;
 		}
 		c -= '0';
+		if (isum > (0xFFFFFFFFFFFFFFFFULL - c) / 10)
+			iov = 1;
+		else
+			isum = isum * 10 + c;
 		n = sum * 10 + c;
 		/* If we wrap then keep shifting */
 		/* There's probably a better way to do this */
@@ -856,6 +893,7 @@ static unsigned tokenize_numeric(unsigned c, unsigned neg)
 {
 	unsigned force_unsigned = 0;
 	unsigned force_long = 0;
+	unsigned force_longlong = 0;
 	unsigned force_float = 0;
 	unsigned cup;
 
@@ -871,6 +909,8 @@ static unsigned tokenize_numeric(unsigned c, unsigned neg)
 			force_unsigned = 1;
 		else if (cup == 'L' && !force_long)
 			force_long = 1;
+		else if (cup == 'L' && !force_longlong)
+			force_longlong = 1;	/* the second L of 5000000000LL */
 		else {
 			unget(c);
 			break;
@@ -891,7 +931,13 @@ static unsigned tokenize_numeric(unsigned c, unsigned neg)
 		else
 			result = -result;
 	}
-	if (rtype != T_FLOATVAL) {
+	if (rtype != T_FLOATVAL && force_longlong) {
+		/* An explicit LL keeps its width whatever the value is */
+		rtype = force_unsigned ? T_ULONGLONGVAL : T_LONGLONGVAL;
+	} else if (rtype != T_FLOATVAL && result > 0xFFFFFFFFUL) {
+		/* Too wide for the narrow forms even without a suffix */
+		rtype = force_unsigned ? T_ULONGLONGVAL : T_LONGLONGVAL;
+	} else if (rtype != T_FLOATVAL) {
 		/* Anything can be shoved in a ulong */
 		rtype = T_ULONGVAL;
 		/* FIXME: this needs review for the -32768 case */
@@ -918,10 +964,7 @@ static unsigned tokenize_numeric(unsigned c, unsigned neg)
 	}
 	/* Order really doesn't matter here so stick to LE. We will worry about 
 	   actual byte order in the code generation */
-	encode_byte(result);
-	encode_byte(result >> 8);
-	encode_byte(result >> 16);
-	encode_byte(result >> 24);
+	encode_value();
 	return rtype;
 }
 

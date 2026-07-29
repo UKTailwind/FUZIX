@@ -183,9 +183,17 @@ void next_token(void)
 	if (token == T_INTVAL || token == T_LONGVAL || token == T_UINTVAL
 	    || token == T_ULONGVAL || token == T_FLOATVAL) {
 		token_value = tokbyte();
-		token_value |= tokbyte() << 8;
-		token_value |= tokbyte() << 16;
-		token_value |= tokbyte() << 24;
+		token_value |= (unsigned long)tokbyte() << 8;
+		token_value |= (unsigned long)tokbyte() << 16;
+		token_value |= (unsigned long)tokbyte() << 24;
+	}
+	/* The wide forms carry eight bytes, not four */
+	else if (token == T_LONGLONGVAL || token == T_ULONGLONGVAL
+		 || token == T_DOUBLEVAL) {
+		unsigned i;
+		token_value = 0;
+		for (i = 0; i < 8; i++)
+			token_value |= (unsigned long)tokbyte() << (8 * i);
 	}
 }
 
