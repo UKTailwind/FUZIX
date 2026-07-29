@@ -34,10 +34,15 @@ the conversion matrix both ways and both signednesses, compound
 assignment, globals, arrays, structs, arguments and returns - all
 matching gcc, on the host and compiled on the PC3 itself.
 
-The remaining gap is **`printf` has no `%f`**, so a program can compute
-in floating point but cannot print it except by scaling and casting to
-an integer, which is what `samples/fp.c` does. That is the next thing
-worth doing.
+**`printf` has `%f`** as of 2026-07-29, with precision, width and the
+flags, plus `sprintf`. It could not be handed to the host library the
+way `%d` is - bcrun runs on the PC3 against Fuzix libc, whose printf
+has no floating point at all - so the conversion is done by hand in
+bcrun and checked against gcc by `samples/fmt.c`. One deliberate
+difference, commented where it lives: rounding is half up, where a full
+C library rounds half to even, so `%.2f` of 0.125 gives 0.13 rather
+than 0.12. `samples/fp.c` still scales and casts, from before this
+existed.
 
 **The compiler runs on the PC3 itself** (2026-07-29). `cc prog.c` on the
 board drives cpp, cc0, cc1 and cc2 and writes a `.bc` that bcrun
@@ -85,7 +90,20 @@ The trap that cost the first attempt: `gen_push` was adding
 pushed sixteen bytes of, while `T_CLEANUP` took back the real
 `target_argsize`. That is what cc2's "sp" at the epilogue means.
 
-## Next task: the c-testsuite conformance run
+## Conformance: 148 of 175 on the C89 subset
+
+`bash hosttest/ctest.sh`, and read **PLAN-conformance.md** - it
+classifies every remaining failure and says what to do next. Every one
+of them is now a cc1 rejection except a single cc2 symbol table limit:
+nothing left compiles and then answers wrongly.
+
+Two harness lessons are baked in there and worth not relearning: the
+suite's own dialect tags are unreliable (`ctestc89.sh` asks gcc with
+`-std=c89 -pedantic-errors` instead), and `optest.sh` now compares the
+**exit status** as well as the output, which it never used to - that
+blind spot is where the missing implicit `return 0` for main lived.
+
+## Older note: the c-testsuite conformance run
 
 The filesystem fault that was blocking this is **fixed** (2026-07-29,
 kernel commit `d5f93d4d3`). It was never an inode bug: a two-byte
