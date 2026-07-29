@@ -219,11 +219,16 @@ Details worth knowing:
   honoured there — only `VAL()` does that, same as the interpreter.
 
 Everything above is ISO C except the six calls that need a directory
-layer — `MKDIR RMDIR CHDIR DIR$ FILES CWD$` use `dirent.h`, `sys/stat.h`
-and `unistd.h`. Build with `-DMM_NO_DIRS` on a target without them and
-those six become clean runtime errors; the rest of the file handling is
-untouched. Serial ports (`OPEN comspec$ AS #n`) are rejected with a
-message rather than silently mistranslated.
+layer — `MKDIR RMDIR CHDIR DIR$ FILES CWD$`. Those have two ports:
+`dirent.h` / `sys/stat.h` / `unistd.h` on POSIX, and `direct.h` /
+`io.h` with `_findfirst` on Windows, so MSVC and MinGW build without a
+shim. Wildcard matching is done in the runtime rather than handed to the
+platform, so both ports agree with each other and with MMBasic. Build
+with `-DMM_NO_DIRS` on a target with no filesystem at all and those six
+become clean runtime errors; the rest of the file handling is untouched.
+
+Serial ports (`OPEN comspec$ AS #n`) are rejected with a message rather
+than silently mistranslated.
 
 ---
 

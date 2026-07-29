@@ -18,7 +18,7 @@ python mmb2c.py "%~1" -o "build\%NAME%.c" || exit /b 1
 
 where cl >nul 2>nul
 if %errorlevel%==0 (
-  cl /nologo /W3 /I. /Fo:build\ /Fe:build\%NAME%.exe build\%NAME%.c mmb_runtime.c || exit /b 1
+  cl /nologo /W3 /D_CRT_SECURE_NO_WARNINGS /I. /Fo:build\ /Fe:build\%NAME%.exe build\%NAME%.c mmb_runtime.c || exit /b 1
 ) else (
   where gcc >nul 2>nul || (echo Need cl or gcc on PATH & exit /b 1)
   gcc -std=c99 -Wall -I. -o build\%NAME%.exe build\%NAME%.c mmb_runtime.c -lm || exit /b 1
