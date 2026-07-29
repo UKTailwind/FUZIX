@@ -16,7 +16,54 @@ run.
 
 ---
 
-## The 38 failures, honestly classified
+## The 20 that remain, categorised
+
+Reclassified 2026-07-29 at 155/175. gcc's `-pedantic-errors` verdict is
+in `ctestc89.sh`, but it answers "is this file C89", not "why did *we*
+refuse it" - several files contain a non-C89 construct somewhere and
+fail here for an entirely different and perfectly legitimate reason. So
+these are grouped by the cause we actually hit.
+
+### A. Genuine C89 gaps — 10
+
+| test | what |
+|---|---|
+| 00202 | **unary plus.** `60 + +3` and `+5` are both rejected - the operator is not implemented at all. ANSI added it; it is C89. Smallest fix on this list. |
+| 00198 | **`typedef` inside a block.** Not the anonymous enum it looked like: *any* typedef in a block fails, including `typedef int myint;`. They are only handled in `toplevel()`, never in a block. |
+| 00078 | block-scope function declaration - `int f1(char *);` inside a function reaches `assign_storage` and gives "can't size type" |
+| 00114 | `int main(void);` then `int main() {}` - a prototype and a K&R definition are compatible in C89 |
+| 00124 | a function returning a function pointer, with parameter names repeated between the two lists. The lists are different scopes; we say "duplicate name" |
+| 00144 | a null pointer constant in `?:` - `p = i ? 0 : (void *)0;` |
+| 00129 | **label namespace.** Labels have their own namespace; a label sharing a name with a type or variable is rejected |
+| 00098 | wide character constants, `L'\0'` |
+| 00205 | a long list of parenthesised constant expressions as an initialiser - "expected {", not yet diagnosed |
+| 00218 | **bitfields** - see section 6. `unsigned x : 1;` is C89 (the enum-typed one in that test is not) |
+
+### B. Our own limits, not dialect — 2
+
+| test | what |
+|---|---|
+| 00200 | cc2 runs out of symbols. `MAXSYM` is 768; memory is not the constraint on this target that it is on a Z80, so raising it is reasonable |
+| 00189 | `&fprintf`. A runtime library symbol is resolved by index and has no address, so the object format cannot express this. bcrun now refuses it at load time by name rather than storing an index where a code address belongs |
+
+### C. Not C89, correctly refused — 8
+
+Recorded so nobody re-investigates. gcc `-std=c89 -pedantic-errors`
+rejects all of these too.
+
+00170 and 00209 incomplete or forward-declared enums · 00207 variable
+length arrays · 00216 compound literals · 00213 and 00214 statement
+expressions (`({ ... })`) · 00210 `__attribute__` · 00219 `_Generic`
+
+### Where to go next
+
+00202 and 00198 are the two to take first: both are plain C89, both are
+things people write constantly, and neither is implemented *at all* -
+which is a different and worse thing from the subtle gaps around them.
+
+---
+
+## Appendix: the original 38, as first classified
 
 The suite's own tags are **not reliable** for deciding what we should
 support: several tests tagged `c89` use VLAs, statement expressions,
