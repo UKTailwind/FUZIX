@@ -469,6 +469,25 @@ void function_body(unsigned st, unsigned name, unsigned type)
 
 	statement_block(1);
 
+	/*
+	 * Falling off the end of main returns 0.
+	 *
+	 * C89 leaves that value undefined, but every implementation makes
+	 * it zero and programs rely on it. Without this, main returned
+	 * whatever happened to be in the accumulator - so a program that
+	 * ended in a printf exited with the character count as its status,
+	 * which is what stopped printf being able to return one.
+	 *
+	 * Emitted unconditionally: if main already ended with a return
+	 * this is a few unreachable bytes, which is cheaper than working
+	 * out whether the last statement could fall through.
+	 */
+	if (name == T_MAIN && func_type != VOID) {
+		header(H_RETURN, func_tag, 0);
+		write_tree(make_constant(0, func_type));
+		footer(H_RETURN, func_tag, 0);
+	}
+
 	footer(H_FUNCTION, func_tag, name);
 
 	rewrite_header(hrw, H_FRAME, frame_size(), func_flags);

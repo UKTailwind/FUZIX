@@ -453,11 +453,26 @@ static void keywords(void)
 {
 	const char **p = keytab;
 	int i = T_KEYWORD;
+	unsigned id;
+
 	while (*p) {
 		new_symbol(*p, hash_symbol(*p), i++);
 		p++;
 	}
 	symbase = nextsym;
+
+	/*
+	 * "main" is interned first, so it always has the id T_MAIN.
+	 *
+	 * Names reach the later passes as ids, not strings - cc1 has no
+	 * name table at all - so without a fixed id there is no way for
+	 * it to know it is compiling main. It needs to, in order to give
+	 * the implicit "return 0" that C guarantees when control falls off
+	 * the end. Costs one table entry in every object.
+	 */
+	id = new_symbol("main", hash_symbol("main"), symnum++)->id;
+	if (id != T_MAIN)
+		fatal("main is not T_MAIN");
 }
 
 /* Read up to 14 more bytes into the symbol name, plus a terminator */

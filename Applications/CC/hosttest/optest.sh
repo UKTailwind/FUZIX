@@ -31,6 +31,7 @@ if ! gcc -std=gnu89 -funsigned-char -w -o "$b.ref" "$src" 2> "$b.gcc.err"; then
     echo "gcc could not build the test:"; sed 's/^/  /' "$b.gcc.err"; exit 1
 fi
 ./"$b.ref" > "$b.ref.out" 2>&1
+refrc=$?
 
 # --- ours: cc0 | cc1 | cc2, then interpret --------------------------
 gcc -E -P "$src" > "$b.pp" || exit 1
@@ -59,8 +60,15 @@ fi
 rc=$?
 
 # --- compare --------------------------------------------------------
-if diff -u "$b.ref.out" "$b.bc.out" > "$b.diff"; then
-    echo "PASS  output identical to gcc ($(wc -l < "$b.ref.out") lines, bcrun rc=$rc)"
+# The exit status is part of the answer and was never compared: gcc's
+# was thrown away and ours only printed. That is how "main falls off the
+# end without returning 0" stayed invisible - the output matched and the
+# status was nobody's business.
+if [ "$rc" != "$refrc" ]; then
+    echo "FAIL  exit status $rc, gcc gives $refrc"
+    ok=1
+elif diff -u "$b.ref.out" "$b.bc.out" > "$b.diff"; then
+    echo "PASS  output identical to gcc ($(wc -l < "$b.ref.out") lines, rc=$rc)"
     ok=0
 else
     echo "FAIL  output differs from gcc:"

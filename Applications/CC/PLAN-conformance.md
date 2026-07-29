@@ -150,27 +150,35 @@ data, which is why it was left out.
 
 ---
 
-## 3a. Next: cc1 does not emit an implicit "return 0" for main
+## 3a. DONE: implicit "return 0" for main
 
-Falling off the end of `main` returns whatever is in the accumulator.
-C89 leaves that undefined, but every compiler returns 0 and programs
-rely on it - a program ending in a `printf` should not exit with the
-character count.
+Falling off the end of `main` returned whatever was in the accumulator,
+so a program ending in a `printf` exited with the character count. That
+is what stopped `printf` returning a count, which it is supposed to do:
+making printf correct turned two passing tests into exit 3 and exit 12.
+The fault was in main, not printf, and both are now right.
 
-This surfaced when `printf` was made to return its count, which is what
-printf is supposed to do: two passing tests immediately became exit 3
-and exit 12. `bcrun`'s `lib_printf` therefore still returns 0, with a
-comment saying why. **Fix the implicit return first, then change that
-line back.**
+cc1 could not tell it was compiling `main` - names reach it as ids and
+cc0 owns the string table. Solved by interning `"main"` as the very
+first user symbol in cc0, so it always carries `T_MAIN` (= `T_SYMBOL`);
+cc0 checks that promise at startup. Costs one table entry per object.
 
-The obstacle is that cc1 cannot tell it is compiling `main`: names
-reach it as token ids and cc0 owns the string table, so there is
-nothing to compare against. Options, cheapest first:
+**Note what this actually is.** gcc with `-std=gnu89` does *not* zero
+main's return either - it leaves the same garbage we used to. Zeroing
+is a C99 rule. We apply it deliberately, because it is what every
+modern compiler does and what the conformance suite assumes, but that
+means gcc-in-C89-mode cannot be the oracle for it. `samples/mainret.c`
+therefore ends with an explicit `return 0` and says so; the coverage
+for the implicit case is c-testsuite 00206 and 00212.
 
-* have cc0 emit a reserved, well-known token id for `main`;
-* have cc1 load `.symtmp` the way cc2 already does, and compare names;
-* emit the implicit return for *every* non-void function that falls off
-  the end, which is defensible but changes more than it needs to.
+### Found alongside: the harness never compared exit status
+
+`optest.sh` threw gcc's exit status away and only printed ours. The
+whole point of a differential test is that the oracle decides, and the
+program's status is part of its answer - it is exactly where this bug
+lived. Now compared, which also puts real checks on the samples that
+return meaningful values (min1 111, sw2 70, sieve 46, strs 16, rpn 7,
+width3 2).
 
 ## 4. Runtime library
 

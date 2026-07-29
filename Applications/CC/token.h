@@ -1,6 +1,15 @@
 /* Tokens */
 #define T_SYMBOL	0x8000	/* Upwards */
 
+/*
+ *	cc0 interns "main" as the very first user symbol, so it always
+ *	carries this id. Later passes see names as ids and not strings -
+ *	cc1 has no name table - and this is how they recognise main.
+ *	Anything else interned before it in keywords() breaks the promise;
+ *	cc0 checks.
+ */
+#define T_MAIN		T_SYMBOL
+
 /* Special control symbols */
 #define T_EOF		0x7F00
 #define T_INVALID	0x7F01

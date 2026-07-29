@@ -686,20 +686,7 @@ static void lib_printf(void)
 	out_to_mem = 0;
 	out_len = 0;
 	do_format(0);
-	/*
-	 * Should be out_len - printf returns the number of characters
-	 * written - and returning 0 is a wart. It stays for now because
-	 * cc1 does not emit an implicit "return 0" at the end of main, so
-	 * a program that ends in a printf and falls off the end of main
-	 * exits with whatever is in the accumulator. Making this correct
-	 * turned two passing conformance tests into exit 3 and exit 12.
-	 *
-	 * The accident is in the compiler, not here: fix the implicit
-	 * return first, then change this line. cc1 cannot currently spot
-	 * main, because names reach it as token ids and cc0 owns the
-	 * string table - see PLAN-conformance.md.
-	 */
-	A = 0;
+	A = (int64_t) out_len;		/* printf returns the count written */
 }
 
 static void lib_sprintf(void)
