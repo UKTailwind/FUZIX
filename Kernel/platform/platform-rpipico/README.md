@@ -173,8 +173,21 @@ You probably can swap to the NAND flash, but it's a terrible idea.
 There are many, the biggest of which are:
 
 - CPU exceptions should be mapped to signals.
+- **An inode can reach the free list twice, so the kernel can allocate
+  an inode that is a live file.** Contained by guards, not fixed. This
+  one matters - see `NOTES-inode-freelist.md`, which is written to be
+  picked up cold. If you see `i_alloc: N in free list but in use` or
+  `i_free: N freed twice`, that is this, being caught.
 
 ...and probably others.
+
+## Notes in this directory
+
+- `NOTES-inode-freelist.md` - the inode double free, open
+- `NOTES-process-memory.md` - the progbase alignment bug, solved
+- `PC3-DEVNOTES.md` - as-built notes for the Pico Computer 3
+- `PC3-GFX-DESIGN.md` - the framebuffer and GFXIOC design
+- `devtools/README.md` - driving the board over the console from a host
 
 ## Postscript
 

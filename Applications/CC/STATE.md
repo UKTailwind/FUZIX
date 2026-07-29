@@ -161,25 +161,27 @@ it now includes `Makefile.common` like every other CPU, and builds.
 There is still no libc for compiled programs and no headers, so declare
 what you use (`int printf();`) - the runtime lives inside bcrun.
 
-## Fixed: the board could not create files during a compile
+## Contained, not fixed: the board could not create files
 
-2026-07-29, kernel commit 27a82379f. It was never a compiler fault. The
-free inode list in the superblock is only a cache, nothing validated
-it, and `i_alloc` was handing out inodes that were live files - the
-same four came off the list twice, the second time after they had
-become files. `fmount()` now discards the on-disk list so `i_alloc`
-rebuilds it, and `i_alloc` reads each inode before believing the list
-says it is free.
+2026-07-29, kernel commits 27a82379f and 9006603d5. **It was never a
+compiler fault** - the kernel was allocating inodes that were live
+files, because an inode was reaching the free list twice.
 
-Worth remembering from it: **"File table overflow" is a misleading
-message.** `filesys.c:507` maps every `i_open` failure onto `ENFILE`,
-so that is what you see whatever went wrong. The real error is the
-`i_open: bad inode` line above it, which now says which inode, whether
-it was newly allocated, and its mode and link count.
+Full briefing note, written to be picked up cold:
+**`Kernel/platform/platform-rpipico/NOTES-inode-freelist.md`**. Read
+that rather than this paragraph if you are going near it. The short
+version: one real fix (the kernel no longer trusts the free list stored
+in the superblock) and two guards that make the remaining fault
+harmless. The guards log when they fire, so a silent kernel means it is
+fixed and these mean it is not:
 
-Also eliminated, do not re-investigate: PSRAM. The machine is
-overclocked and swap lives in PSRAM, so it was the obvious suspect;
-swap was moved to the SD partition and the fault reproduced exactly.
+    i_alloc: 664 in free list but in use, skipped
+    i_free: 664 freed twice
+
+Worth remembering even if you never touch the filesystem: **"File table
+overflow" is a misleading message.** `filesys.c` maps every `i_open`
+failure onto `ENFILE`, so that is what you see whatever went wrong. The
+real error is the `i_open: bad inode` line above it.
 
 ## Things that have cost hours
 
