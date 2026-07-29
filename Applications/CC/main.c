@@ -14,6 +14,9 @@ unsigned deffunctype;		/* The type of an undeclared function */
 unsigned funcbody;		/* Parser global for function body */
 unsigned voltrack;		/* Track possible volatiles */
 unsigned in_sizeof;		/* Set if we are in sizeof() */
+/* Set once we have written a progress dot, so we know to end the line */
+static unsigned progress;
+
 /*
  *	A C program consists of a series of declarations that by default
  *	are external definitions.
@@ -31,6 +34,7 @@ static void toplevel(void)
 		/* For unix we should probably hide this, for CP/M it's
 		   going to be a nice to have */
 		write(2, ".", 1);
+		progress = 1;
 	}
 }
 
@@ -59,5 +63,9 @@ int main(int argc, char *argv[])
 	/* No write out any uninitialized variables */
 	write_bss();
 	out_write();
+	/* End the line of progress dots, or the shell prompt lands on the
+	   end of them */
+	if (progress)
+		write(2, "\n", 1);
 	return errors;
 }
