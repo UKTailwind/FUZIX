@@ -22,6 +22,21 @@ the console *is* the serial link, so the first byte sent reads as a
 cancel. The tools assume a separate port - `rx file < /dev/tty2` would
 work if a second adapter were ever wired to GP0/GP1.
 
+## Keeping the board's binaries current
+
+`bcrun` on the card goes stale. A `.bc` built by a newer cc2 then fails
+with `bad opcode at pc N`, which reads like a code generator bug and is
+not one - it happened with the 64-bit opcodes. If a program that passes
+on the host fails on the board with a bad opcode, resend `bcrun` before
+investigating anything else:
+
+    make -f Makefile.armm0 FUZIX_ROOT=$PWD/../.. USERCPU=armm0 bcrun
+    arm-none-eabi-strip bcrun -o bcrun.stripped
+    python uusend.py <path>/bcrun.stripped bcrun 0
+    python fzsh.py 25 "chmod +x bcrun"
+
+Strip everything before sending. cc0 is 74K unstripped and 10K stripped.
+
 ## Pacing
 
 Before the console became interrupt driven, everything had to be sent

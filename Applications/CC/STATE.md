@@ -32,6 +32,13 @@ interpreted on the development host.
 Floating point literals are encoded correctly and `double` is a real
 64-bit double, but there is no floating point *arithmetic* yet.
 
+Verified on the board 2026-07-29: the PC3's own cc0 emits a byte for
+byte identical token stream to the host's for 265 literals, and optest
+and ll2 still match their gcc references when run there. `bcrun` is on
+the board; **cc1 and cc2 have never been, so the on-target chain end to
+end is still untested** - everything else so far has been cross
+compiled on the host and only run on the PC3.
+
 ## Next task: the float and double opcodes
 
 Steps 1 and 2 of the double work are done (see "Double" in
@@ -86,6 +93,13 @@ rather than quietly skipping them.
 
 prints the token stream, including the bits and the value of every
 floating constant.
+
+`hwlit.sh` prepares the same literal test for the board and its header
+has the exact transfer and compare commands. Worth doing after anything
+that touches the encoder: the host has a 64-bit `unsigned long` and the
+board does not, and the encoder is built entirely out of 64-bit
+arithmetic, so agreeing with gcc on the host does not settle what
+happens on the machine it is for.
 
 Cross build for the target:
 
