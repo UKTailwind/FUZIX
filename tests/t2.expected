@@ -1,0 +1,22 @@
+sum = 150
+oops = 42
+counter = 1
+shadow still = 111
+p = 101  q = 1
+three: 7 0 9
+three: 7 0 0
+abcXYZghij len= 10
+ABCXY|ij|cXYZ
+instr = 4
+val = 3.25 hex=00FF
+concat: global string / 0 / A
+ 1small
+ 2middle
+ 3middle
+ 4large
+ 5large
+nested: 8
+grid direct: 0 4 100 204
+grid in sub: 0 4 100 204
+bounds: 2 4
+after fill: 0 4 10 24

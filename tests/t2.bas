@@ -51,6 +51,19 @@ FOR n% = 1 TO 5
 NEXT n%
 
 PRINT "nested:"; Outer(3)
+
+' a NON-SQUARE 2-D array passed to a SUB: the only thing that pins down
+' the row stride, since a square matrix hides a wrong one
+DIM INTEGER grid(2, 4)
+FOR i = 0 TO 2
+  FOR n% = 0 TO 4
+    grid(i, n%) = i * 100 + n%
+  NEXT n%
+NEXT i
+PRINT "grid direct:"; grid(0,0); grid(0,4); grid(1,0); grid(2,4)
+ShowGrid grid()
+FillGrid grid()
+PRINT "after fill:"; grid(0,0); grid(0,4); grid(1,0); grid(2,4)
 END
 
 SUB Fill arr%()
@@ -97,3 +110,17 @@ END FUNCTION
 FUNCTION Inner(x)
   Inner = x + 1
 END FUNCTION
+
+SUB ShowGrid g%()
+  PRINT "grid in sub:"; g%(0,0); g%(0,4); g%(1,0); g%(2,4)
+  PRINT "bounds:"; BOUND(g%(), 1); BOUND(g%(), 2)
+END SUB
+
+SUB FillGrid g%()
+  LOCAL INTEGER r, c
+  FOR r = 0 TO BOUND(g%(), 1)
+    FOR c = 0 TO BOUND(g%(), 2)
+      g%(r, c) = r * 10 + c
+    NEXT c
+  NEXT r
+END SUB
