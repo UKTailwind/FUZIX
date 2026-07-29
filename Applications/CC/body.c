@@ -271,9 +271,14 @@ static void statement(void)
 	if (token == T_RCURLY)
 		return;
 
-#if 0	/* C99 for later if we want it */
-	declaration_block();
-#endif
+	/*
+	 * This is where a "declaration_block()" call used to sit disabled,
+	 * marked "C99 for later if we want it". We do want it, but not
+	 * here: statement() is also what a bare "if (x) ..." body is, and
+	 * "if (x) int y;" is legal in no dialect. Mixed declarations are
+	 * handled in statement_block(), where a declaration really is
+	 * allowed.
+	 */
 	/* Check for keywords */
 	switch (token) {
 	case T_IF:
@@ -330,13 +335,6 @@ static void statement(void)
 	require(T_SEMICOLON);
 }
 
-static void declaration_block(void)
-{
-	while (is_modifier() || is_storage_word() || is_type_word() ||
-			is_typedef()) {
-		declaration(S_AUTO);
-	}
-}
 
 /*
  *	Either a statement or a sequence of statements enclosed in { }. In
@@ -416,12 +414,30 @@ void statement_block(unsigned need_brack)
 	obase = block_base;
 	if (!need_brack)
 		block_base = ltop;
-	/* declarations */
-	declaration_block();
 
+	/*
+	 * Declarations and statements, in any order.
+	 *
+	 * C89 wants every declaration at the head of the block, and this
+	 * used to parse them once here and then loop over statements
+	 * only. Mixing them is a C99 rule, but it is what everyone writes
+	 * and refusing it is a nuisance out of all proportion to the
+	 * standard it comes from - so the compiler is C89 plus this.
+	 *
+	 * It is a pure relaxation: nothing that was legal before changes
+	 * meaning, and block scope already works, so a declaration part
+	 * way down a block behaves exactly like one at the top of it.
+	 *
+	 * A declaration only where a *statement* may appear, mind - not
+	 * inside statement() - or "if (x) int y;" would be accepted, and
+	 * that is legal in no dialect at all.
+	 */
 	while (token != T_RCURLY) {
-		/* statements */
-		statement_block(0);
+		if (is_modifier() || is_storage_word() || is_type_word() ||
+				is_typedef())
+			declaration(S_AUTO);
+		else
+			statement_block(0);
 	}
 	block_base = obase;
 	pop_local_symbols(ltop);

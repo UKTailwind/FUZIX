@@ -233,6 +233,18 @@ lists are different scopes.
 `expected "{"` on a long list of parenthesised constant expressions.
 Not yet diagnosed.
 
+### 5.7 Tags, members and ordinary identifiers share a namespace — 00129, 00198
+
+    typedef struct s s;
+    struct s { ... } s2;
+    ...
+    struct s s;        /* a variable also called s */
+
+C keeps struct/union/enum *tags*, struct *members*, and ordinary
+identifiers in separate namespaces; we appear to conflate them, and
+report `invalid value` on the declaration. Two tests, and the pattern
+is common in real headers.
+
 ### 5.6 Wide character constants — 00098
 
 `L'\0'`. C89, but genuinely niche for this target. Lowest priority of
@@ -270,18 +282,29 @@ Recorded so nobody re-investigates them. gcc `-std=c89
   A limit rather than a bug, but worth raising for this target since
   memory is not the constraint it is on a Z80.
 
-### The one decision worth taking deliberately
+### DONE: mixed declarations and code
 
-**Mixed declarations and code is nine of the twenty.** It is C99, not
-C89, so refusing it is defensible. But it is universally expected,
-costs nothing at runtime, and the change is small - allow a declaration
-wherever a statement may appear in `statement_block()`. Since block
-scope already works, the machinery is there.
+Taken deliberately. It is C99 rather than C89, so the compiler is now
+**C89 plus declaration-after-statement**, on the grounds that everyone
+writes it and refusing it is a nuisance out of all proportion to the
+standard it comes from. A pure relaxation: nothing legal before changes
+meaning.
 
-Recommendation: **do it**, and say in the documentation that the
-compiler is C89 plus declaration-after-statement. It buys nine tests
-and a good deal of goodwill from anyone typing real code at the
-machine. It is the only non-C89 item on this list worth taking.
+Done in `statement_block()`, where a declaration really is allowed -
+*not* in `statement()`, where a disabled `declaration_block()` call had
+been sitting marked "C99 for later if we want it". That call would also
+have accepted `if (x) int y;`, which is legal in no dialect. The
+comment there now says so.
+
+It unblocked all nine tests but only gained four, because five had a
+second unrelated gap behind it: 00129 and 00198 the tag/typedef
+namespace question (5.7 below), 00187 needs `FILE`/`fopen`, 00210 uses
+`__attribute__` and 00214 statement expressions. Worth remembering when
+estimating from failure counts - a rejection hides whatever comes after
+it.
+
+`samples/mixdecl.c` covers it, including that scoping, shadowing and
+re-initialisation behave the same wherever the declaration sits.
 
 ---
 
