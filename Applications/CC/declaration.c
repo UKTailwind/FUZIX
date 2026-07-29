@@ -75,6 +75,16 @@ unsigned one_declaration(unsigned s, unsigned type, unsigned name, unsigned defs
 
 	if (s != S_EXTERN && (PTR(type) || !IS_FUNCTION(type)) && match(T_EQ)) {
 		unsigned label = sym->name;
+		/*
+		 * "int a[] = { ... };" on the stack. assign_storage above
+		 * reserved nothing, because the type has no dimension yet -
+		 * only the initializer knows how long the array is. The
+		 * *start* of the slot is known now though, which is all the
+		 * initializer needs to store into it, so reserve the size
+		 * afterwards once the type has been completed.
+		 */
+		unsigned unsized = (s == S_AUTO && IS_ARRAY(type) &&
+				    array_dimension(type, 1) == 0);
 		if (s == S_LSTATIC)
 			label = sym->data.offset;
 		if (sym->infonext & INITIALIZED)
@@ -82,9 +92,19 @@ unsigned one_declaration(unsigned s, unsigned type, unsigned name, unsigned defs
 		sym->infonext |= INITIALIZED;
 		if (s >= S_LSTATIC)
 		        header(H_DATA, label, target_alignof(type, s));
-		initializers(sym, type, s);
+		initializers(sym, type, s, 0);
 		if (s >= S_LSTATIC)
 		        footer(H_DATA, label, 0);
+		if (unsized) {
+			/* Same alignment and the frame has not moved, so
+			   this hands back the offset the stores already
+			   used - and now reserves the space. If something
+			   else claimed frame space while the initializer
+			   was being parsed the two would overlap, so check
+			   rather than quietly generating an alias. */
+			if (assign_storage(sym->type, S_AUTO) != sym->data.offset)
+				error("frame moved during initializer");
+		}
 	}
 	return 1;
 }

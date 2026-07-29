@@ -1,17 +1,91 @@
 #include "compiler.h"
 
 /*
+ *	An object on the stack is initialized by generating assignments,
+ *	a static or global one by generating a stream of typed data. Both
+ *	walk the same structure, so every function here carries a byte
+ *	offset into the object being initialized: the static side ignores
+ *	it and just writes the next thing, the auto side needs it to know
+ *	which part of the frame slot to store into.
+ *
+ *	An automatic aggregate occupies a contiguous run of the frame, so
+ *	the element at byte offset "off" is simply the symbol's own local
+ *	node with that much added to its frame offset.
+ */
+
+static unsigned is_auto(unsigned storage)
+{
+    return storage == S_AUTO || storage == S_REGISTER;
+}
+
+static struct node *auto_at(struct symbol *sym, unsigned type, unsigned off)
+{
+    struct node *n = make_symbol(sym);
+    n->value += off;
+    n->type = type;
+    n->flags = LVAL;
+    return n;
+}
+
+static void auto_store(struct symbol *sym, unsigned type, unsigned off,
+                       struct node *v)
+{
+    write_tree(tree(T_EQ, auto_at(sym, type, off), v));
+}
+
+/*
+ *	C requires everything an initializer does not mention to be zero,
+ *	so the slack has to be written out rather than left as whatever
+ *	the frame happened to hold. Widest aligned store each time, which
+ *	keeps "struct { char c; int i; } s = { 1 };" down to a couple of
+ *	instructions.
+ */
+static void auto_pad(struct symbol *sym, unsigned off, unsigned size)
+{
+    while (size) {
+        unsigned t, s;
+        if (size >= 4 && (off & 3) == 0) {
+            t = CINT;
+            s = 4;
+        } else if (size >= 2 && (off & 1) == 0) {
+            t = CSHORT;
+            s = 2;
+        } else {
+            t = CCHAR;
+            s = 1;
+        }
+        auto_store(sym, t, off, make_constant(0, t));
+        off += s;
+        size -= s;
+    }
+}
+
+/*
+ *	Pad the rest of an object, whichever kind of storage it has.
+ */
+static void ini_pad(struct symbol *sym, unsigned storage, unsigned off,
+                    unsigned size)
+{
+    if (!size)
+        return;
+    if (is_auto(storage))
+        auto_pad(sym, off, size);
+    else
+        put_padding_data(size);
+}
+
+/*
  *	Write a single initialization element to the stream. For auto variables
  *	we generate the assignment tree, for static or globals we generate a
  *	stream of data with types for the backend.
  */
-static void ini_single(struct symbol *sym, unsigned type, unsigned storage)
+static void ini_single(struct symbol *sym, unsigned type, unsigned storage,
+                       unsigned off)
 {
     struct node *n = expression_tree(0);
     n = typeconv(n, type, 1);
-    if (storage == S_AUTO || storage == S_REGISTER) {
-        n = tree(T_EQ, make_symbol(sym), n);
-        write_tree(n);
+    if (is_auto(storage)) {
+        auto_store(sym, type, off, n);
     } else {
         put_typed_data(n);
         free_tree(n);
@@ -37,11 +111,13 @@ static unsigned ini_string(unsigned n)
  *	TODO: In theory we could have a platform that needs padding
  *	and we don't deal with that aspect of alignment yet
  */
-static unsigned ini_group(struct symbol *sym, unsigned type, unsigned n, unsigned storage)
+static unsigned ini_group(struct symbol *sym, unsigned type, unsigned n,
+                          unsigned storage, unsigned off)
 {
     unsigned sized = n;
     unsigned string = 0;
     unsigned count = 0;
+    unsigned esize = type_sizeof(type);
     /* C has a funky special case rule that you can write
        char x[16] = "foo"; which creates a copy of the string in that
        array not a literal reference. It's also got a second funky special case
@@ -53,6 +129,13 @@ static unsigned ini_group(struct symbol *sym, unsigned type, unsigned n, unsigne
     if (token == T_STRING) {
         if (!string)
             typemismatch();
+        if (is_auto(storage)) {
+            /* Would have to be copied into the frame a byte at a
+               time; the data stream form below only works for a
+               static object. */
+            error("auto string initializer");
+            return n;
+        }
         return ini_string(n);
     }
     require(T_LCURLY);
@@ -61,6 +144,10 @@ static unsigned ini_group(struct symbol *sym, unsigned type, unsigned n, unsigne
     while(n && token != T_RCURLY) {
         /* Deal with the second string special case, gotta love C some days */
         if (token == T_STRING && string) {
+            if (is_auto(storage)) {
+                error("auto string initializer");
+                return count;
+            }
             n = ini_string(sized);
             require(T_RCURLY);
             return n;
@@ -69,15 +156,13 @@ static unsigned ini_group(struct symbol *sym, unsigned type, unsigned n, unsigne
         if (token == T_ELLIPSIS)
             break;
         n--;
-        initializers(sym, type, storage);
+        initializers(sym, type, storage, off + count * esize);
         count++;
         if (!match(T_COMMA))
             break;
     }
-    if (n && sized) {
-        unsigned s = type_sizeof(type) * n;
-        put_padding_data(s);
-    }
+    if (n && sized)
+        ini_pad(sym, storage, off + count * esize, esize * n);
     /* Catches any excess elements */
     require(T_RCURLY);
     return count;
@@ -92,10 +177,13 @@ static unsigned ini_group(struct symbol *sym, unsigned type, unsigned n, unsigne
  *
  *	Remaining space in the object is padded.
  *
- *	We don't deal with auto here as with arrays because we don't support
- *	the C extensions of auto array and struct with initializers.
+ *	Automatic objects work here too now: "pos" is the offset within
+ *	this struct and "off" where the struct itself starts, so a field
+ *	assignment lands at off + pos exactly as the data stream lands at
+ *	pos.
  */
-static void ini_struct(struct symbol *psym, unsigned type, unsigned storage)
+static void ini_struct(struct symbol *psym, unsigned type, unsigned storage,
+                       unsigned off)
 {
     struct symbol *sym = symbol_ref(type);
     unsigned *p = sym->data.idx;
@@ -114,11 +202,11 @@ static void ini_struct(struct symbol *psym, unsigned type, unsigned storage)
 
         /* Align */
         if (pos != p[2]) {
-            put_padding_data(p[2] - pos);
+            ini_pad(psym, storage, off + pos, p[2] - pos);
             pos = p[2];
         }
         /* Write out field */
-        initializers(psym, type, storage);
+        initializers(psym, type, storage, off + pos);
         pos += type_sizeof(type);
 
         /* Next field */
@@ -134,7 +222,7 @@ static void ini_struct(struct symbol *psym, unsigned type, unsigned storage)
     /* For a struct fill from the offset of the next field to the size of
        the base object */
     if (pos != s)
-        put_padding_data(s - pos);	/* Fill remaining space */
+        ini_pad(psym, storage, off + pos, s - pos);	/* Fill remaining space */
 }
 
 /*
@@ -144,18 +232,22 @@ static void ini_struct(struct symbol *psym, unsigned type, unsigned storage)
  *	layer of the array which should be a series of values in the type
  *	of the array. The base value may be a structure.
  */
-static void ini_array(struct symbol *sym, unsigned type, unsigned depth, unsigned storage)
+static void ini_array(struct symbol *sym, unsigned type, unsigned depth,
+                      unsigned storage, unsigned off)
 {
     unsigned n = array_dimension(type, depth);
+    unsigned sized = n;
     unsigned count = 0;
 
     if (depth < array_num_dimensions(type)) {
+        unsigned esize;
         type = type_deref(type);
+        esize = type_sizeof(type);
         require(T_LCURLY);
         if (n == 0)
             n = TARGET_MAX_PTR;
         while(n--) {
-            ini_array(sym, type, depth + 1, storage);
+            ini_array(sym, type, depth + 1, storage, off + count * esize);
             count++;
             /* Trailing comma is allowed so eat it before checking n */
             if (match(T_COMMA) && n)
@@ -164,12 +256,15 @@ static void ini_array(struct symbol *sym, unsigned type, unsigned depth, unsigne
         }
         if (array_dimension(type, 1) == 0)
             sym->type = array_with_size(type, count);
-        /* Pad the remaining pieces */
-        while(n--)
-            put_padding_data(type_sizeof(type));
+        /* Pad the remaining pieces. n is what the loop above left,
+           which is exactly the number still to fill; an unsized array
+           has nothing to pad because it is only as long as its
+           initializer. */
+        if (sized)
+            ini_pad(sym, storage, off + count * esize, esize * n);
         require(T_RCURLY);
     } else {
-        n = ini_group(sym, type_deref(type), n, storage);
+        n = ini_group(sym, type_deref(type), n, storage, off);
         if (array_dimension(type, 1) == 0)
             sym->type = array_with_size(type, n);
     }
@@ -178,23 +273,19 @@ static void ini_array(struct symbol *sym, unsigned type, unsigned depth, unsigne
 /*
  *	Initialize an object.
  */
-void initializers(struct symbol *sym, unsigned type, unsigned storage)
+void initializers(struct symbol *sym, unsigned type, unsigned storage,
+                  unsigned off)
 {
     /* A pointer to an array - "char (*p)[4]" - is a pointer object and
        initialises like any other scalar. Testing !IS_ARRAY refused it,
        because such a type is an array type with one more indirection
        than it has dimensions. */
     if (type_is_pointer_object(type)) {
-        ini_single(sym, type, storage);
+        ini_single(sym, type, storage, off);
         return;
     }
     if (IS_ARITH(type)) {
-        ini_single(sym, type, storage);
-        return;
-    }
-    /* No complex stack initializers, for now at least */
-    if (storage == S_AUTO || storage == S_REGISTER) {
-        error("not a valid auto initializer");
+        ini_single(sym, type, storage, off);
         return;
     }
     if (storage == S_EXTERN) {
@@ -206,9 +297,9 @@ void initializers(struct symbol *sym, unsigned type, unsigned storage)
                                    function forms even if it would be more
                                    logical than the C syntax */
     else if (IS_ARRAY(type))
-        ini_array(sym, type, 1, storage);
+        ini_array(sym, type, 1, storage, off);
     else if (IS_STRUCT(type))
-        ini_struct(sym, type, storage);
+        ini_struct(sym, type, storage, off);
     else
         error("cannot initialize this type");
 }
