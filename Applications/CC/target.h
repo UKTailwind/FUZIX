@@ -21,6 +21,14 @@
 #define TARGET_HAS_DOUBLE
 
 /*
+ *	Structs and unions may be passed by value. The other targets keep
+ *	the refusal in type_iterator.c: accepting the declaration without
+ *	a backend that copies the object would turn a loud error into a
+ *	silent miscompile, which is much the worse of the two.
+ */
+#define TARGET_HAS_STRUCTARG
+
+/*
  *	The width a constant is carried at through cc1 and cc2.
  *
  *	This target has long long and double, so it needs 64 bits.

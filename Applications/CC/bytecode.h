@@ -236,8 +236,11 @@
  *	struct: that knowledge lives in cc1's symbol table.
  */
 #define BC_COPY		0xC0	/* u16 length */
+#define BC_PUSHN	0xC1	/* u16 length: push that many bytes from
+				   the address in A, rounded up to a whole
+				   number of stack slots */
 
-#define BC_MAXOP	0xC0
+#define BC_MAXOP	0xC1
 
 /*
  *	Object file layout. Everything is little endian.

@@ -67,13 +67,30 @@ unsigned target_alignof(unsigned t, unsigned storage)
 	}
 }
 
-/* Arguments are passed in whole words */
+/*
+ *	Arguments are passed in whole words.
+ *
+ *	A struct or union argument is copied onto the stack whole, so its
+ *	size has to come from type_sizeof - the struct index in this
+ *	pass's symbol table - because target_sizeof only knows the
+ *	primitives and calls error() on anything else.
+ *
+ *	This must agree exactly with what gen_push() adds to the code
+ *	generator's stack depth, since the total lands in T_CLEANUP and a
+ *	disagreement shows up as "sp" at the epilogue rather than as bad
+ *	code.
+ */
 unsigned target_argsize(unsigned t)
 {
-	unsigned s = target_sizeof(t);
+	unsigned s;
+
+	if (!PTR(t) && IS_STRUCT(t))
+		s = type_sizeof(t);
+	else
+		s = target_sizeof(t);
 	if (s < 4)
 		return 4;
-	return s;
+	return (s + 3) & ~3;
 }
 
 /* integer type for a pointer of type t. For most platforms this is trivial

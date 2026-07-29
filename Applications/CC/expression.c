@@ -21,13 +21,24 @@ struct node *typeconv(struct node *n, unsigned type, unsigned warn)
 {
 	unsigned nt = type_canonical(n->type);
 
+	/* An aggregate is passed and assigned whole, so a matching struct
+	   or union type needs no conversion at all. Everything below this
+	   understands only scalars and would call it an invalid
+	   conversion. */
+	if (nt == type && !PTR(nt) && IS_STRUCT(nt))
+		return n;
+
 	/* Weirdness with functions. Properly you should write
 	         funcptr = &func,
 	   but compilers allow funcptr = func even though this is
 	   by strict interpretation nonsense */
-	if (PTR(type) == 1 && IS_FUNCTION(n->type)) {
+	if (PTR(type) == 1 && IS_FUNCTION(n->type) && !PTR(n->type)) {
 		/* A function type can only be a name, you can't do maths
-		   on them or dereference them */
+		   on them or dereference them.
+		   The !PTR test matters: "&func" has already produced a
+		   pointer to function, and incrementing that again made it
+		   a pointer to a pointer, which then failed to match the
+		   parameter it was being passed to. */
 		n->type++;
 	}
 	/* Handle the various cases where we are working with complex types
@@ -90,8 +101,19 @@ struct node *typeconv_implicit(struct node *n)
  */
 struct node *call_args(unsigned *narg, unsigned *argt, unsigned *argsize, unsigned *va)
 {
-	struct node *n = expression_tree(0);
+	struct node *n = hier0(0);
 	unsigned t;
+	unsigned sz = 0;
+
+	/*
+	 * Normally this is expression_tree(), which is make_rval(hier0()).
+	 * A struct or union argument is copied onto the stack whole and so
+	 * stays an address, exactly as in struct assignment: make_rval
+	 * would insert a dereference and there is no way to load an
+	 * aggregate into the accumulator.
+	 */
+	if (!IS_STRUCT(n->type) || PTR(n->type))
+		n = make_rval(n);
 
 	/* See what argument type handling is needed */
 	if (*argt == VOID)
@@ -114,10 +136,26 @@ struct node *call_args(unsigned *narg, unsigned *argt, unsigned *argsize, unsign
 	}
 	*argsize += target_argsize(n->type);
 	t = n->type;
+	/*
+	 * The code generator cannot size a struct, so the length has to
+	 * travel with the node that gets pushed - and which node that is
+	 * depends on position. codegen_lr() pushes n->left, which is the
+	 * T_ARGCOMMA for every argument but the last, and the argument
+	 * itself for the last one. So the length goes on both: T_ARGSTRUCT
+	 * wraps the argument (its own value field is in use for an offset)
+	 * and the T_ARGCOMMA above it carries a copy.
+	 */
+	if (IS_STRUCT(t) && !PTR(t)) {
+		sz = type_sizeof(t);
+		n = sf_tree(T_ARGSTRUCT, NULL, n);
+		n->type = t;
+		n->value = sz;
+	}
 	if (match(T_COMMA)) {
 		/* Switch around for calling order */
 		n = tree(T_ARGCOMMA, call_args(narg, argt, argsize, va), n);
 		n->type = t;
+		n->value = sz;
 		return n;
 	}
 	require(T_RPAREN);

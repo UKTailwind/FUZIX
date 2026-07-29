@@ -694,9 +694,27 @@ void gen_tree(struct node *n)
 
 unsigned gen_push(struct node *n)
 {
-	sp += stack_size(n->type);
+	unsigned t = n->type;
+
+	/*
+	 * A struct or union argument is copied onto the stack whole. The
+	 * accumulator holds its address, and the length came from the
+	 * front end in the node's value because this pass cannot size an
+	 * aggregate. The rounding here has to match target_argsize(),
+	 * which is what T_CLEANUP eventually takes back off.
+	 */
+	if (IS_STRUCT(t) && !PTR(t)) {
+		unsigned len = n->value;
+		if (len == 0 || len > 0xFFFF)
+			error("struct size");
+		cbyte(BC_PUSHN);
+		cword(len);
+		sp += (len < 4) ? 4 : ((len + 3) & ~3);
+		return 1;
+	}
+	sp += stack_size(t);
 	/* A 64-bit value takes two slots and needs the wide push. */
-	cbyte(typesize(n->type) == 8 ? BC_PUSH64 : BC_PUSH);
+	cbyte(typesize(t) == 8 ? BC_PUSH64 : BC_PUSH);
 	return 1;
 }
 
@@ -984,6 +1002,11 @@ unsigned gen_node(struct node *n)
 		return 1;
 	case T_DEREF:
 		emit_load(n->type);
+		return 1;
+	case T_ARGSTRUCT:
+		/* Structural only: the child left the struct's address in
+		   the accumulator, which is what gen_push wants. It exists
+		   to carry the length, which is read there. */
 		return 1;
 	case T_EQ:
 		/* A whole struct or union: both sides are addresses and the

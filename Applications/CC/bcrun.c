@@ -1109,6 +1109,15 @@ static int run(void)
 			break;
 		}
 
+		case BC_PUSHN: {
+			unsigned long len = fetch16();
+			unsigned long src = (unsigned long)A;
+			unsigned long n = (len < 4) ? 4 : ((len + 3) & ~3UL);
+			sp -= n;
+			vcopy(sp, src, len);
+			break;
+		}
+
 		case BC_SEXT8:	A = (signed char)A; break;
 		case BC_SEXT16:	A = (short)A; break;
 		case BC_ZEXT8:	A = A & 0xFF; break;

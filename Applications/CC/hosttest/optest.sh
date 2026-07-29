@@ -36,11 +36,24 @@ fi
 gcc -E -P "$src" > "$b.pp" || exit 1
 "$CC/host-armm0/cc0" < "$b.pp" > "$b.tok" 2> "$b.cc0.err"
 rm -f "$b.ir"; "$CC/host-armm0/cc1" < "$b.tok" 1<> "$b.ir" 2> "$b.cc1.err"
-if grep -q ' - ' "$b.cc1.err"; then
-    echo "cc1 errors:"; grep ' - ' "$b.cc1.err" | head -10 | sed 's/^/  /'
+cc1rc=$?
+# cc1 exits with its error count. This used to be reported and then
+# ignored, which is how a "type mismatch" in optest.c went unnoticed for
+# a day: the suite compared two outputs that were both produced despite
+# the front end having rejected part of the input. A pass that refuses
+# the program is a failure, not a note.
+if [ "$cc1rc" != 0 ]; then
+    echo "FAIL  cc1 rejected the program ($cc1rc error(s)):"
+    grep ' - ' "$b.cc1.err" | head -10 | sed 's/^/  /'
+    exit 1
 fi
 rm -f "$b.bc"; "$CC/host-armm0/cc2" .symtmp armm0 0 < "$b.ir" 1<> "$b.bc" 2> "$b.cc2.err"
-[ -s "$b.cc2.err" ] && { echo "cc2 errors:"; sed 's/^/  /' "$b.cc2.err"; }
+cc2rc=$?
+if [ "$cc2rc" != 0 ] || [ -s "$b.cc2.err" ]; then
+    echo "FAIL  cc2 rejected the program (rc=$cc2rc):"
+    sed 's/^/  /' "$b.cc2.err" | head -10
+    exit 1
+fi
 
 "$CC/host-armm0/bcrun" "$b.bc" > "$b.bc.out" 2>&1
 rc=$?

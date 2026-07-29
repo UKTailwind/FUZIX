@@ -152,6 +152,25 @@ int type_pointerconv(struct node *r, unsigned lt, unsigned warn)
     /* Same depth and type */
     if (lt == rt)
         return 1;
+    /*
+     * Pointers to functions where one side has an unspecified argument
+     * list. "int (*fp)()" is C89's way of saying "any arguments", and
+     * parse_function_arguments() records it as a lone ELLIPSIS, so the
+     * type codes differ from those of a real prototype and every
+     * comparison below then calls it a mismatch. Only the return type
+     * has to agree.
+     *
+     * This is not a corner: it is how a callback is declared, and it
+     * made optest.c's "apply(addfn, 9, 4)" fail to compile.
+     */
+    if (PTR(lt) == 1 && PTR(rt) == 1 && IS_FUNCTION(lt) && IS_FUNCTION(rt)) {
+        unsigned *la = func_args(lt);
+        unsigned *ra = func_args(rt);
+        if (func_return(lt) == func_return(rt) && la && ra &&
+            ((la[0] == 1 && la[1] == ELLIPSIS) ||
+             (ra[0] == 1 && ra[1] == ELLIPSIS)))
+            return 1;
+    }
     /* void * is fine */
     if (BASE_TYPE(lt) == VOID)
         return 1;

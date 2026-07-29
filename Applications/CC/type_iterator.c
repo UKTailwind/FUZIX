@@ -246,10 +246,16 @@ static void parse_function_arguments(unsigned *tplt)
 			*tn++ = VOID;
 			break;
 		}
-		if (!PTR(t) && (IS_STRUCT(t) || IS_FUNCTION(t))) {
+		if (!PTR(t) && IS_FUNCTION(t)) {
 			error("cannot pass objects");
 			t = CINT;
 		}
+#ifndef TARGET_HAS_STRUCTARG
+		if (!PTR(t) && IS_STRUCT(t)) {
+			error("cannot pass objects");
+			t = CINT;
+		}
+#endif
 		t = type_canonical(t);
 		if (an) {
 			sym = update_symbol_by_name(an, S_ARGUMENT, t);

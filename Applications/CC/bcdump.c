@@ -174,6 +174,7 @@ static struct {
 	{ BC_D2F,	"d2f",		OP_NONE },
 
 	{ BC_COPY,	"copy",		OP_U16 },
+	{ BC_PUSHN,	"pushn",	OP_U16 },
 
 	{ 0, NULL, 0 }
 };
