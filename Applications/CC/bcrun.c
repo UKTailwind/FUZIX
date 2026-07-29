@@ -394,6 +394,185 @@ static long arg(unsigned n)
 	return S32(rd32(sp + 4 * n));
 }
 
+/*
+ *	A double argument occupies two stack slots, not one.
+ */
+static double argd(unsigned n)
+{
+	uint64_t v = rd64(sp + 4 * n);
+	double d;
+	memcpy(&d, &v, sizeof(d));
+	return d;
+}
+
+/*
+ *	%f, by hand.
+ *
+ *	Everything else here hands the work to the host's sprintf, but
+ *	that is not available for this: bcrun runs on the PC3 against
+ *	Fuzix libc, whose printf has no floating point at all. So the
+ *	conversion has to be done here or "%f" cannot work on the machine
+ *	this is for - which is the whole point of it.
+ *
+ *	Straight fixed point: round at the requested precision, split into
+ *	integer and fraction, then peel digits. Exact for any value whose
+ *	integer part fits a 64-bit unsigned, which is everything anyone
+ *	will realistically print. Above that a correct %f needs arbitrary
+ *	precision arithmetic to expand the binary value exactly, which is
+ *	not worth carrying here, so it degrades to exponent form and says
+ *	so rather than printing confident rubbish.
+ */
+static void fmt_double(char *out, double v, int prec)
+{
+	char digits[64];
+	int nd = 0;
+	int intlen = 0;
+	uint64_t ip;
+	double fp;
+	int i;
+	char *p = out;
+
+	if (v != v) {
+		strcpy(out, "nan");
+		return;
+	}
+	/* By the sign bit, not "v < 0": negative zero is not less than
+	   zero but still prints with a minus. */
+	{
+		uint64_t bits;
+		memcpy(&bits, &v, sizeof(bits));
+		if (bits >> 63) {
+			*p++ = '-';
+			v = -v;
+		}
+	}
+	if (v > 1.7e308) {
+		strcpy(p, "inf");
+		return;
+	}
+
+	if (v >= 18446744073709551615.0) {
+		/* Beyond exact fixed point here - see the note above */
+		int e = 0;
+		while (v >= 10.0) { v /= 10.0; e++; }
+		ip = (uint64_t) v;
+		fp = v - (double) ip;
+		p += 1;
+		out[p - out - 1] = (char) ('0' + ip);
+		*p++ = '.';
+		for (i = 0; i < 6; i++) {
+			fp *= 10.0;
+			*p++ = (char) ('0' + (int) fp);
+			fp -= (double) (int) fp;
+		}
+		*p++ = 'e';
+		if (e >= 100) *p++ = (char) ('0' + e / 100);
+		if (e >= 10) *p++ = (char) ('0' + (e / 10) % 10);
+		*p++ = (char) ('0' + e % 10);
+		*p = 0;
+		return;
+	}
+
+	ip = (uint64_t) v;
+	fp = v - (double) ip;
+
+	/* Integer digits, most significant first */
+	if (ip == 0)
+		digits[nd++] = '0';
+	else {
+		char rev[24];
+		int nr = 0;
+		while (ip) {
+			rev[nr++] = (char) ('0' + (int) (ip % 10));
+			ip /= 10;
+		}
+		while (nr)
+			digits[nd++] = rev[--nr];
+	}
+	intlen = nd;
+
+	/* Then the fraction, one digit at a time */
+	for (i = 0; i < prec; i++) {
+		int d;
+		fp *= 10.0;
+		d = (int) fp;
+		if (d < 0) d = 0;
+		if (d > 9) d = 9;
+		digits[nd++] = (char) ('0' + d);
+		fp -= (double) d;
+	}
+
+	/*
+	 * Round half up, on the remainder still in hand.
+	 *
+	 * A full C library rounds half to *even*, and this does not, for
+	 * one specific case: a fraction that is an exact binary half at
+	 * the rounding digit. "%.2f" of 0.125 gives 0.13 here and 0.12
+	 * from glibc.
+	 *
+	 * Getting that right needs the exact decimal expansion of the
+	 * binary value, which needs arbitrary precision arithmetic - the
+	 * digits cannot be peeled off with double multiplies, because
+	 * 0.05 * 10.0 rounds to exactly 0.5 and an exact half then looks
+	 * identical to a value just above one. Trying it that way fixed
+	 * 0.125 and broke 0.05, which is much the more common shape.
+	 *
+	 * So: half up, which is what small C libraries generally do, and
+	 * the difference is confined to exact binary halves.
+	 */
+	{
+		int up = (fp >= 0.5);
+		if (up) {
+			int k = nd - 1;
+			while (k >= 0 && digits[k] == '9')
+				digits[k--] = '0';
+			if (k < 0) {
+				/* 9.99 -> 10.0: the carry ran off the front */
+				for (k = nd; k > 0; k--)
+					digits[k] = digits[k - 1];
+				digits[0] = '1';
+				nd++;
+				intlen++;
+			} else
+				digits[k]++;
+		}
+	}
+
+	for (i = 0; i < intlen; i++)
+		*p++ = digits[i];
+	if (prec > 0) {
+		*p++ = '.';
+		for (i = intlen; i < nd; i++)
+			*p++ = digits[i];
+	}
+	*p = 0;
+}
+
+/*
+ *	Where formatted output goes. printf sends it to stdout, sprintf
+ *	into the program's own address space; everything between the two
+ *	is identical, so the formatter writes through here.
+ */
+static unsigned long out_at;		/* destination for sprintf */
+static int out_to_mem;
+static unsigned long out_len;
+
+static void emit(char c)
+{
+	if (out_to_mem) {
+		if (out_at < MEMSIZE)
+			mem[out_at++] = (uint8_t) c;
+	} else
+		putchar(c);
+	out_len++;
+}
+
+static void emits(const char *s)
+{
+	while (*s)
+		emit(*s++);
+}
+
 /* Pad a already-formatted item to the requested width. */
 static void padout(const char *s, int width, int left, int zero)
 {
@@ -401,24 +580,28 @@ static void padout(const char *s, int width, int left, int zero)
 	int pad = width - n;
 	if (!left)
 		while (pad-- > 0)
-			putchar(zero ? '0' : ' ');
-	fputs(s, stdout);
+			emit(zero ? '0' : ' ');
+	emits(s);
 	if (left)
 		while (pad-- > 0)
-			putchar(' ');
+			emit(' ');
 }
 
-static void lib_printf(void)
+/*
+ *	The shared formatter. "abase" is the stack slot the format string
+ *	sits in, so printf passes 0 and sprintf 1.
+ */
+static void do_format(unsigned abase)
 {
-	const char *f = getstr((unsigned long)arg(0));
+	const char *f = getstr((unsigned long)arg(abase));
 	char tmp[544];
-	unsigned a = 1;
+	unsigned a = abase + 1;
 
 	while (*f) {
-		int left = 0, zero = 0, width = 0;
+		int left = 0, zero = 0, width = 0, prec = -1;
 
 		if (*f != '%') {
-			putchar(*f++);
+			emit(*f++);
 			continue;
 		}
 		f++;
@@ -435,6 +618,23 @@ static void lib_printf(void)
 			f++;
 		}
 		if (*f == '0') { width *= 10; f++; }	/* e.g. %10d */
+
+		/* Precision: ".<digits>" or ".*" taking it from an argument.
+		   Needed for %f, where it also has a default of 6. */
+		if (*f == '.') {
+			f++;
+			prec = 0;
+			if (*f == '*') {
+				prec = (int) arg(a++);
+				f++;
+			} else
+				while (*f >= '0' && *f <= '9') {
+					prec = prec * 10 + (*f - '0');
+					f++;
+				}
+			if (prec < 0)
+				prec = 0;
+		}
 
 		switch (*f) {
 		case 'd':
@@ -457,19 +657,61 @@ static void lib_printf(void)
 		case 's':
 			padout(getstr((unsigned long)arg(a++)), width, left, 0);
 			break;
+		case 'f':
+			/* A double is two slots, and the default precision
+			   for %f is six. Floats reaching a variadic call
+			   have already been promoted to double by the front
+			   end's typeconv_implicit, so there is only ever a
+			   double here. */
+			fmt_double(tmp, argd(a), prec < 0 ? 6 : prec);
+			a += 2;
+			padout(tmp, width, left, zero);
+			break;
 		case '%':
-			putchar('%');
+			emit('%');
 			break;
 		default:
-			putchar('%');
+			emit('%');
 			if (*f)
-				putchar(*f);
+				emit(*f);
 			break;
 		}
 		if (*f)
 			f++;
 	}
+}
+
+static void lib_printf(void)
+{
+	out_to_mem = 0;
+	out_len = 0;
+	do_format(0);
+	/*
+	 * Should be out_len - printf returns the number of characters
+	 * written - and returning 0 is a wart. It stays for now because
+	 * cc1 does not emit an implicit "return 0" at the end of main, so
+	 * a program that ends in a printf and falls off the end of main
+	 * exits with whatever is in the accumulator. Making this correct
+	 * turned two passing conformance tests into exit 3 and exit 12.
+	 *
+	 * The accident is in the compiler, not here: fix the implicit
+	 * return first, then change this line. cc1 cannot currently spot
+	 * main, because names reach it as token ids and cc0 owns the
+	 * string table - see PLAN-conformance.md.
+	 */
 	A = 0;
+}
+
+static void lib_sprintf(void)
+{
+	out_to_mem = 1;
+	out_at = (unsigned long) arg(0);
+	out_len = 0;
+	do_format(1);
+	if (out_at < MEMSIZE)
+		mem[out_at] = 0;	/* terminate, not counted */
+	out_to_mem = 0;
+	A = (int64_t) out_len;
 }
 
 /* ---- heap ---------------------------------------------------------- */
@@ -634,6 +876,8 @@ static void libcall(unsigned idx)
 		A = 0;
 	} else if (!strcmp(name, "printf")) {
 		lib_printf();
+	} else if (!strcmp(name, "sprintf")) {
+		lib_sprintf();
 	} else if (!strcmp(name, "exit")) {
 		exit((int)arg(0));
 

@@ -6,6 +6,7 @@
 #define EOF (-1)
 
 int printf();
+int sprintf();
 int puts();
 int putchar();
 

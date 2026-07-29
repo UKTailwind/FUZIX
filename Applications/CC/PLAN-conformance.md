@@ -150,6 +150,28 @@ data, which is why it was left out.
 
 ---
 
+## 3a. Next: cc1 does not emit an implicit "return 0" for main
+
+Falling off the end of `main` returns whatever is in the accumulator.
+C89 leaves that undefined, but every compiler returns 0 and programs
+rely on it - a program ending in a `printf` should not exit with the
+character count.
+
+This surfaced when `printf` was made to return its count, which is what
+printf is supposed to do: two passing tests immediately became exit 3
+and exit 12. `bcrun`'s `lib_printf` therefore still returns 0, with a
+comment saying why. **Fix the implicit return first, then change that
+line back.**
+
+The obstacle is that cc1 cannot tell it is compiling `main`: names
+reach it as token ids and cc0 owns the string table, so there is
+nothing to compare against. Options, cheapest first:
+
+* have cc0 emit a reserved, well-known token id for `main`;
+* have cc1 load `.symtmp` the way cc2 already does, and compare names;
+* emit the implicit return for *every* non-void function that falls off
+  the end, which is defensible but changes more than it needs to.
+
 ## 4. Runtime library
 
 | test | needs |
