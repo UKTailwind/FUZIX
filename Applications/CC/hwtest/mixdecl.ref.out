@@ -1,0 +1,20 @@
+a 1
+b 2
+c 11 22
+mid
+d 4 5 f
+arr 7 8 9
+g 2 6
+outer b 2
+inner b 99
+outer b again 2
+iter 0
+fresh 1
+iter 1
+fresh 11
+iter 2
+fresh 21
+case
+inswitch 42
+last
+trailing 7
