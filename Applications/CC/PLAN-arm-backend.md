@@ -205,6 +205,46 @@ unless the code buffer would overflow, then largest-functions-first
 back to bytecode); SD image refresh; eclipse timing.  Target from the
 ladder doc: roughly 2–4 s.
 
+## Baseline (2026-07-30, hosttest/bench.c)
+
+The eclipse is deliberately NOT the yardstick: it lives in native
+libm, so dispatch is a minority of its time (going native-runtime only
+moved it 9.82 s → 9.19 s).  bench.c is what dispatch actually costs -
+five phases, integer/call/memory bound, no float in any hot loop, each
+printing a 32-bit checksum so every run is a differential test against
+gcc -O2 as well as a timing.  Run both ways with hosttest/bench.sh;
+the .bc is 3,387 bytes and travels to the board in two seconds.
+
+| phase | host gcc -O2 | host bcrun | PC3 bcrun |
+|---|---|---|---|
+| sieve (8191×10)   | <1 ms | 67 ms  | 3.93 s |
+| fib(27)           | <1 ms | 33 ms  | 2.69 s |
+| shellsort (2000×5)| <1 ms | 52 ms  | 3.76 s |
+| xorshift (200k)   | <1 ms | 184 ms | 8.30 s |
+| byte-rev (4K×200) | <1 ms | 98 ms  | 6.94 s |
+
+Board ≈ 45-82× the host interpreter, phase for phase.  These are the
+numbers the backend is judged against: at the expected 3-8× for the
+naive emitter, the board column lands around 0.5-2.5 s per phase, and
+per-phase movement says which templates pay (rng = pure ALU, rev =
+loads/stores, fib = call boundary, sieve/sort = mixed).
+
+**Dhrystone 2.1** (netlib dhry-c in hosttest/dhry/, definitions
+ANSI-fied for cc1 — it has no old-style parameter declarations — plus
+a TIME_US microsecond clock and a fixed run count; bodies untouched,
+output self-validates):
+
+| build | Dhrystones/s |
+|---|---|
+| host gcc -O2 | 74,970,000 |
+| host bcrun | 289,700 |
+| **PC3 bcrun** | **3,800** (263 µs/run, ≈ 2.2 DMIPS) |
+
+A native M33 at this clock is good for roughly 300-600k Dhrystones/s,
+so the ceiling above the interpreter is ~100× on this workload; the
+naive emitter's 3-8× leaves plenty for stage 8's peepholes to chase.
+`bash hosttest/dhry/dhry.sh` rebuilds all three.
+
 ## Order of risk retirement
 
 Stages 1–3 are small and kill the unknowns (harness fidelity,
