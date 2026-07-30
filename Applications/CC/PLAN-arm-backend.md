@@ -245,6 +245,33 @@ so the ceiling above the interpreter is ~100× on this workload; the
 naive emitter's 3-8× leaves plenty for stage 8's peepholes to chase.
 `bash hosttest/dhry/dhry.sh` rebuilds all three.
 
+## Status
+
+* **Stage 0 done** 2026-07-30: mm runtime native in bcrun (bcrun_mm.c),
+  eclipse 9.19 s on the PC3, t6 dirs free, programs ~4.7× smaller.
+* **Stage 1 done** 2026-07-30: Makefile.qemu + hosttest/qemudiff.sh,
+  10/10 differential-pass including the eclipse.  The harness earned
+  its keep immediately: an odd h_data put the whole bss segment - and
+  its "aligned" int64 arrays - at an odd address (SIGBUS under qemu,
+  silent on x86, latent on the board).  bssbase now rounds to 8 in the
+  loader and mem[] itself carries aligned(8) instead of linker luck.
+* **Stage 2 done** 2026-07-30: BC_NATIVE marker + version 2 objects
+  (bytecode.h), unified call_target dispatch, re-entrant bc_exec,
+  native_enter with the r4/r5/r6 register file.  All suites green,
+  conformance still 165, bench times unchanged - the dispatch test
+  costs nothing measurable.
+* **Stage 3 done** 2026-07-30, on hardware: hand-written Thumb add2
+  (hosttest/nat/) patched over its bytecode stub by natpatch.py, run
+  through the real dispatch under qemu AND on the PC3 - plain sums
+  where the stub shows +1000000, nested calls feeding native results
+  to native args across the VM stack.  Executable RAM under Fuzix
+  confirmed (no MPU surprise), Thumb bit right, frame parity right,
+  x86 host refuses version-2 objects cleanly.  Eclipse regression
+  clean at 9.08 s.
+
+Next: stage 4, backend-thumb.c v1 - integer leaf functions with
+per-function fallback to bytecode.
+
 ## Order of risk retirement
 
 Stages 1–3 are small and kill the unknowns (harness fidelity,

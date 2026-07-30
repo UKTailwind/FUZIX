@@ -20,6 +20,14 @@
 
 #define BC_MAGIC	"FBC1"
 #define BC_VERSION	1
+/*
+ *	An object whose code segment contains native (Thumb) functions
+ *	carries version 2, so an interpreter that predates mixed mode
+ *	rejects it cleanly at load ("version 2, expected 1") instead of
+ *	faulting on the marker mid-run.  Interpreters from version 2 on
+ *	accept both.
+ */
+#define BC_VERSION_NATIVE 2
 
 /*
  *	Machine model
@@ -241,6 +249,20 @@
 				   number of stack slots */
 
 #define BC_MAXOP	0xC1
+
+/*
+ *	Mixed mode.  Not an executable opcode: the first code byte of a
+ *	native (Thumb) function is this marker, and every call goes
+ *	through a dispatch that tests it.  After the marker, padding to
+ *	the next even offset, then Thumb code - the entry point is
+ *	((offset + 3) & ~1).  Registers on entry: r4 = VM stack pointer
+ *	as a native pointer (the return-pc slot at r4+0 exists for frame
+ *	parity with a bytecode callee, args from r4+4 up), r5 = helper
+ *	vector, r6 = mem[] base; the result returns in r0/r1 exactly as
+ *	the accumulator A.  See PLAN-arm-backend.md.
+ */
+#define BC_NATIVE	0xF0
+#define BC_NATIVE_ENTRY(off)	(((off) + 3) & ~1UL)
 
 /*
  *	Object file layout. Everything is little endian.

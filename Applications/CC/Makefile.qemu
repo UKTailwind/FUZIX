@@ -1,0 +1,31 @@
+# Linux-ARM build of bcrun, run under qemu-arm user emulation.
+#
+# This is the development-side executor for NATIVE code: Thumb-2
+# emitted for the Cortex-M33 executes unchanged in an ARMv7-A Linux
+# process, so the differential harness (hosttest/qemudiff.sh) gets
+# board-faithful execution at host speed.  The Fuzix cross build
+# cannot serve here - qemu-arm supplies Linux syscalls, not Fuzix
+# ones - hence a third bcrun build.
+#
+# Needs: apt install qemu-user gcc-arm-linux-gnueabihf
+#
+# -marm for bcrun itself is irrelevant; what matters is the loaded
+# code buffer, which mprotect() makes executable (see bcrun.c).
+# -fomit-frame-pointer keeps r7 free: native_enter clobbers it.
+
+CROSS ?= arm-linux-gnueabihf-gcc
+CFLAGS = -O2 -g -Wall -static -mthumb -fomit-frame-pointer -DBIG_TABLES
+OBJDIR = qemu-armm0
+
+all: $(OBJDIR)/bcrun
+
+$(OBJDIR)/bcrun: bcrun.c bcrun_mm.c mmb_runtime.c mmb_runtime.h bytecode.h | $(OBJDIR)
+	$(CROSS) $(CFLAGS) -o $@ bcrun.c -lm
+
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
+
+clean:
+	rm -rf $(OBJDIR)
+
+.PHONY: all clean

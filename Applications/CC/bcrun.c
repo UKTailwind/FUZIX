@@ -23,6 +23,9 @@
 #include <stdint.h>
 #include <math.h>
 #include <time.h>
+#ifdef __linux__
+#include <sys/mman.h>		/* executable code buffer for native fns */
+#endif
 #include "bytecode.h"
 
 /* The machine is 32bit. On a 64bit host every value that enters A or
@@ -69,7 +72,10 @@
 #define STACKROOM	8192		/* kept clear at the top for the stack */
 
 static unsigned char *code;
-static unsigned char mem[MEMSIZE];
+/* Aligned, not by linker luck: the native mm runtime (and native code
+   to come) dereference VM offsets through real pointers, so mem's own
+   base must not break the alignment the offsets were given. */
+static unsigned char mem[MEMSIZE] __attribute__((aligned(8)));
 static struct bc_header h;
 static struct bc_sym *sym;
 static struct bc_fixup *fix;
@@ -1569,7 +1575,10 @@ static void load(const char *path)
 		fprintf(stderr, "%s: not a bytecode object\n", path);
 		exit(1);
 	}
-	if (h.h_version != BC_VERSION) {
+	/* Version 2 objects differ only in containing native code; the
+	   bump exists so interpreters that predate mixed mode reject
+	   them cleanly rather than faulting on the marker mid-run. */
+	if (h.h_version != BC_VERSION && h.h_version != BC_VERSION_NATIVE) {
 		fprintf(stderr, "%s: version %u, expected %u\n", path,
 			h.h_version, BC_VERSION);
 		exit(1);
@@ -1588,6 +1597,19 @@ static void load(const char *path)
 	if (fread(code, 1, h.h_code, f) != h.h_code)
 		fault("short code");
 
+#ifdef __linux__
+	/* Linux (and so qemu-arm, the development-side executor for
+	   native code) enforces NX on malloc'd memory; the board's flat
+	   memory does not.  Harmless for pure-bytecode objects. */
+	{
+		uintptr_t p0 = (uintptr_t)code & ~4095UL;
+		uintptr_t p1 = ((uintptr_t)code + (h.h_code ? h.h_code : 1)
+				+ 4095) & ~4095UL;
+		mprotect((void *)p0, p1 - p0,
+			 PROT_READ | PROT_WRITE | PROT_EXEC);
+	}
+#endif
+
 	/*
 	 * Data goes near the bottom of the program's address space, bss
 	 * directly after it, and the stack starts at the top.
@@ -1599,7 +1621,12 @@ static void load(const char *path)
 	 * places an object at zero and C leans on that everywhere.
 	 */
 	database = NULLGUARD;
-	bssbase = database + h.h_data;
+	/* Rounded up: cc2 aligns objects as offsets WITHIN bss, which
+	   only means anything if the segment base is itself aligned.
+	   Found by the qemu harness as a SIGBUS: an odd h_data put the
+	   whole bss segment - and its "8-aligned" int64 arrays - at an
+	   odd address, which x86 shrugged at and ARM does not. */
+	bssbase = (database + h.h_data + 7) & ~7UL;
 	if (bssbase + h.h_bss + STACKROOM > MEMSIZE) {
 		fprintf(stderr, "bcrun: program too large\n");
 		exit(1);
@@ -1689,13 +1716,79 @@ static void load(const char *path)
 	}
 }
 
+/* ---- native code ---------------------------------------------------- */
+
+/*
+ *	Mixed mode: a function whose first code byte is BC_NATIVE is
+ *	Thumb machine code, entered here.  Register file per
+ *	PLAN-arm-backend.md: r4 = VM stack pointer as a native pointer,
+ *	r5 = helper vector, r6 = mem[] base; the result comes back in
+ *	r0/r1, exactly the accumulator's convention.  r4-r6 are dead on
+ *	return - they are reloaded on every entry, never trusted after.
+ */
+static void *native_helpers[1];		/* the emitter stages fill this */
+
+#if defined(__arm__) || defined(__thumb__)
+static int64_t native_enter(unsigned long off)
+{
+	register uint32_t r0v asm("r0");
+	register uint32_t r1v asm("r1");
+	register uint32_t fn asm("r3") =
+	    (uint32_t)(uintptr_t)(code + BC_NATIVE_ENTRY(off)) | 1;
+	register unsigned char *vsp asm("r4") = mem + sp;
+	register void **hv asm("r5") = native_helpers;
+	register unsigned char *mb asm("r6") = mem;
+
+	asm volatile("blx %[fn]"
+		: "=r" (r0v), "=r" (r1v), [fn] "+r" (fn),
+		  "+r" (vsp), "+r" (hv), "+r" (mb)
+		:
+		: "r2", "r7", "r12", "lr", "cc", "memory");
+	return (int64_t)(((uint64_t)r1v << 32) | r0v);
+}
+#else
+static int64_t native_enter(unsigned long off)
+{
+	(void)off;
+	fault("object contains native code this host cannot execute");
+	return 0;
+}
+#endif
+
+/*
+ *	Every transfer to a function goes through here, so nothing else
+ *	ever needs to know what the callee compiled to.  The frame is
+ *	identical either way: the caller has pushed the args, this slot
+ *	is the return-pc a bytecode callee pops with BC_RET - a native
+ *	callee ignores it and the slot is popped here instead - and the
+ *	offsets cc2 bakes into BC_LOCAL agree in both worlds.
+ */
+static void call_target(unsigned long target)
+{
+	if (target < h.h_code && code[target] == BC_NATIVE) {
+		push(0xFFFFFFFEUL);
+		A = native_enter(target);
+		pop();
+		return;
+	}
+	push(pc);
+	pc = target;
+}
+
 /* ---- the interpreter ------------------------------------------------ */
 
-static int run(void)
+/*
+ *	Run bytecode from entry until the frame that entered returns.
+ *	The sentinel pushed here comes back through BC_RET; re-entrant,
+ *	so a native function calling back into bytecode gets its own
+ *	sentinel and its own loop, stacked on the caller's.
+ */
+static int64_t bc_exec(unsigned long entry)
 {
-	sp = MEMSIZE - 4;
-	pc = h.h_entry;
-	/* A return to this impossible address ends the program. */
+	unsigned long saved_pc = pc;
+
+	pc = entry;
+	/* A return to this impossible address ends this activation. */
 	push(0xFFFFFFFFUL);
 
 	for (;;) {
@@ -1704,7 +1797,7 @@ static int run(void)
 
 		if (trace)
 			fprintf(stderr, "%04lx: op %02x A=%ld sp=%lx\n",
-				pc, code[pc], A, sp);
+				pc, code[pc], (long)A, sp);
 		op = fetch8();
 		switch (op) {
 		case BC_NOP:
@@ -1960,20 +2053,19 @@ static int run(void)
 				pc += b;
 			break;
 		case BC_CALL:
-			b = (long)fetch32();
-			push(pc);
-			pc = b;
+			call_target(fetch32());
 			break;
 		case BC_CALLA:
-			push(pc);
-			pc = A;
+			call_target((unsigned long)A & 0xFFFFFFFFUL);
 			break;
 		case BC_RET:
 			/* Mask: pop() sign extends, so the sentinel comes
 			   back as -1 and would widen past 32 bits here. */
 			pc = (unsigned long)pop() & 0xFFFFFFFFUL;
-			if (pc == 0xFFFFFFFFUL)
-				return (int)A;
+			if (pc == 0xFFFFFFFFUL) {
+				pc = saved_pc;
+				return A;
+			}
 			break;
 		case BC_ENTER:
 			sp -= fetch16();
@@ -2013,10 +2105,20 @@ static int run(void)
 				pc = target;
 			}
 			break;
+		case BC_NATIVE:
+			/* Only reachable by falling INTO a native function
+			   rather than calling it - a dispatch bug. */
+			fault("fell into native code");
 		default:
 			fault("bad opcode");
 		}
 	}
+}
+
+static int run(void)
+{
+	sp = MEMSIZE - 4;
+	return (int)bc_exec(h.h_entry);
 }
 
 int main(int argc, char *argv[])
