@@ -338,9 +338,18 @@ static int t_span(unsigned long start, unsigned long end)
 			break;
 		}
 		case BC_RET:
-			t16(0x4770);		/* bx lr */
+			/* the preamble pushed lr on the real machine
+			   stack, so calls can clobber it freely */
+			t16(0xBD00);		/* pop {pc} */
 			o++;
 			break;
+		case BC_ARGS: {
+			unsigned n = codebuf[o + 1];
+			if (n)
+				t16(0x3400 | n);	/* adds r4, #n */
+			o += 2;
+			break;
+		}
 		case BC_CONST8:
 			t_const((unsigned long)(long)(signed char)codebuf[o + 1]
 				& 0xFFFFFFFFUL);
@@ -529,11 +538,63 @@ static int t_span(unsigned long start, unsigned long end)
 			break;
 		case BC_LIBCALL: {
 			unsigned s = t_rd16(o + 1);
-			if (s >= nsym || !t_eqop(bc_symname[s]))
+			if (s >= nsym)
 				return 0;
+			if (t_eqop(bc_symname[s])) {
+				o += 3;
+				break;
+			}
+			/* An eqop name that did NOT inline (64-bit or
+			   floating forms) pops its address slot inside the
+			   C helper, which would desync this function's r4:
+			   the whole function stays bytecode. */
+			{
+				const struct teqop *e;
+				for (e = teqops; e->base; e++)
+					if (strncmp(bc_symname[s], e->base,
+						    strlen(e->base)) == 0)
+						return 0;
+			}
+			/* Anything else - printf, the mm runtime, libm -
+			   goes through the C side.  sp syncs from r4 via
+			   the second argument. */
+			if (s < 256)
+				t16(0x2000 | s);	/* movs r0, #s   */
+			else
+				t_mov16(0, 0, s);	/* movw r0, #s   */
+			t16(0x4621);			/* mov  r1, r4   */
+			t16(0x686B);			/* ldr  r3, [r5, #4] */
+			t16(0x4798);			/* blx  r3       */
 			o += 3;
 			break;
 		}
+		/* ---- CP-E (stage 5): calls -------------------------- */
+		case BC_CALL: {
+			unsigned s;
+			if (!t_addrsym(o + 1, &s))
+				return 0;
+			if (ntpool >= TPOOLMAX)
+				return 0;
+			if (!t_dry) {
+				tpooltab[ntpool].sym = s;
+				tpooltab[ntpool].addend = t_rd32c(o + 1);
+				tpooltab[ntpool].site = tlen;
+			}
+			ntpool++;
+			t32(0xF8DF, 0x0000);	/* ldr.w r0, [pc, #..] */
+			t16(0x4621);		/* mov  r1, r4       */
+			t16(0x682B);		/* ldr  r3, [r5, #0] */
+			t16(0x4798);		/* blx  r3           */
+			o += 5;
+			break;
+		}
+		case BC_CALLA:
+			/* the target is already in A = r0 */
+			t16(0x4621);		/* mov  r1, r4       */
+			t16(0x682B);		/* ldr  r3, [r5, #0] */
+			t16(0x4798);		/* blx  r3           */
+			o++;
+			break;
 
 		/* ---- CP-D: compares and conditional jumps ----------- */
 		/* cmp, then a five-halfword materialise: branch-taken
@@ -636,6 +697,11 @@ static void thumb_commit(void)
 	cbyte((fn_start >> 24) & 0xFF);
 	while (codelen < entry)
 		cbyte(BC_NOP);
+	/* Preamble: save lr on the real machine stack, so call sites
+	   can clobber it; BC_RET translates to pop {pc}.  Before tbuf
+	   rather than in it, so tmap and branch offsets are unaffected. */
+	cbyte(0x00);
+	cbyte(0xB5);			/* push {lr} */
 	base = codelen;
 	for (i = 0; i < tlen; i++)
 		cbyte(tbuf[i]);
@@ -644,6 +710,9 @@ static void thumb_commit(void)
 	pbase = codelen;
 	for (i = 0; i < ntpool; i++) {
 		fixup(BC_SEG_CODE, codelen, tpooltab[i].sym);
+		/* flag 1: a value slot, not a BC_CALL operand - see the
+		   loader */
+		fixtab[nfix - 1].f_pad = 1;
 		clong(tpooltab[i].addend);
 	}
 	if (codelen >= CODEMAX)

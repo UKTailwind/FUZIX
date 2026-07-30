@@ -1667,6 +1667,29 @@ static void load(const char *path)
 		unsigned long o = fix[i].f_offset;
 
 		/*
+		 * Flag 1 marks a literal-pool word in native code: a plain
+		 * value slot that must never be mistaken for a BC_CALL
+		 * operand by the rewrite below, whatever byte happens to
+		 * precede it.  A library symbol has no address at all, so
+		 * the slot gets a tagged index that helper_call turns back
+		 * into a libcall at the call site.
+		 */
+		if (fix[i].f_pad & 1) {
+			if (sym[fix[i].f_sym].s_type == BC_SYM_LIB)
+				v = 0x80000000UL | fix[i].f_sym;
+			else
+				v += code[o] |
+				    ((unsigned long)code[o + 1] << 8) |
+				    ((unsigned long)code[o + 2] << 16) |
+				    ((unsigned long)code[o + 3] << 24);
+			code[o] = v;
+			code[o + 1] = v >> 8;
+			code[o + 2] = v >> 16;
+			code[o + 3] = v >> 24;
+			continue;
+		}
+
+		/*
 		 * A call to a name this module never defines is a library
 		 * call: the compiler cannot tell them apart when it emits
 		 * the call, because the definition may come later. Rewrite
@@ -1725,12 +1748,30 @@ static void load(const char *path)
  *	r5 = helper vector, r6 = mem[] base; the result comes back in
  *	r0/r1, exactly the accumulator's convention.  r4-r6 are dead on
  *	return - they are reloaded on every entry, never trusted after.
+ *
+ *	The helper vector is how native code reaches back into C: a
+ *	call site loads the pointer from [r5, #index*4], passes its vsp
+ *	in r1 so the C side can sync the global sp, and BLXes.  C
+ *	helpers preserve r4-r6 by the AAPCS, so the native caller's
+ *	register file survives.
  */
-static void *native_helpers[1];		/* the emitter stages fill this */
+static int64_t helper_call(unsigned long target, unsigned char *vsp);
+static int64_t helper_libcall(unsigned long idx, unsigned char *vsp);
+
+#define NH_CALL		0
+#define NH_LIBCALL	1
+static void *native_helpers[] = {
+	(void *)helper_call,
+	(void *)helper_libcall,
+};
+
+static int64_t bc_exec(unsigned long entry);
+static void libcall(unsigned idx);
 
 #if defined(__arm__) || defined(__thumb__)
 static int64_t native_enter(unsigned long off)
 {
+	unsigned long saved_sp = sp;
 	register uint32_t r0v asm("r0");
 	register uint32_t r1v asm("r1");
 	register uint32_t fn asm("r3") =
@@ -1739,11 +1780,26 @@ static int64_t native_enter(unsigned long off)
 	register void **hv asm("r5") = native_helpers;
 	register unsigned char *mb asm("r6") = mem;
 
+	/*
+	 *	The explicit "+m" operands are not decoration.  The
+	 *	native callee reaches every piece of VM state through the
+	 *	helper vector, and gcc's IPA analysis at -Os looked
+	 *	straight through the bare "memory" clobber, decided this
+	 *	function never touches the global sp, and deleted the
+	 *	callers' save/restore of it around the call - which cost
+	 *	an afternoon on the board.  Declaring the state as
+	 *	operands makes the dependency visible to every pass.
+	 */
 	asm volatile("blx %[fn]"
 		: "=r" (r0v), "=r" (r1v), [fn] "+r" (fn),
-		  "+r" (vsp), "+r" (hv), "+r" (mb)
+		  "+r" (vsp), "+r" (hv), "+r" (mb),
+		  "+m" (sp), "+m" (A), "+m" (pc), "+m" (mem)
 		:
 		: "r2", "r7", "r12", "lr", "cc", "memory");
+	/* Contract: native_enter preserves the interpreter's sp.  The
+	   callee's own helper calls leave it wherever they please; the
+	   caller's truth is its r4. */
+	sp = saved_sp;
 	return (int64_t)(((uint64_t)r1v << 32) | r0v);
 }
 #else
@@ -1765,6 +1821,52 @@ static int64_t native_enter(unsigned long off)
  */
 static int force_bytecode;	/* BCRUN_BYTECODE=1: ignore native code */
 
+/*
+ *	A call FROM native code, any callee.  The stub at the call site
+ *	synced the global sp from its r4 before coming here.  A native
+ *	callee goes through native_enter exactly as the interpreter's
+ *	dispatch does; a bytecode callee runs to completion under its own
+ *	bc_exec activation, whose sentinel is also the frame-parity slot.
+ *	A target with the top bit set is a library symbol index - the
+ *	loader marks pool words that resolved to BC_SYM_LIB that way,
+ *	since a library function has no address to call.
+ */
+static int64_t helper_call(unsigned long target, unsigned char *vsp)
+{
+	sp = (unsigned long)(vsp - mem);
+	if (target & 0x80000000UL) {
+		libcall((unsigned)(target & 0x7FFFFFFFUL));
+		return A;
+	}
+	if (target < h.h_code && code[target] == BC_NATIVE) {
+		unsigned long alias = code[target + 1] |
+		    ((unsigned long)code[target + 2] << 8) |
+		    ((unsigned long)code[target + 3] << 16) |
+		    ((unsigned long)code[target + 4] << 24);
+		if (!force_bytecode || alias == 0xFFFFFFFFUL) {
+			unsigned long saved;
+			push(0xFFFFFFFEUL);
+			saved = sp;
+			A = native_enter(target);
+			/* The callee's own helper calls resync the global
+			   sp as they please; the caller's truth is its r4,
+			   so restore the slot level before popping it. */
+			sp = saved;
+			pop();
+			return A;
+		}
+		target = alias;
+	}
+	return bc_exec(target);
+}
+
+static int64_t helper_libcall(unsigned long idx, unsigned char *vsp)
+{
+	sp = (unsigned long)(vsp - mem);
+	libcall((unsigned)idx);
+	return A;
+}
+
 static void call_target(unsigned long target)
 {
 	if (target < h.h_code && code[target] == BC_NATIVE) {
@@ -1774,8 +1876,13 @@ static void call_target(unsigned long target)
 		    ((unsigned long)code[target + 4] << 24);
 #if defined(__arm__) || defined(__thumb__)
 		if (!force_bytecode || alias == 0xFFFFFFFFUL) {
+			unsigned long saved;
 			push(0xFFFFFFFEUL);
+			saved = sp;
 			A = native_enter(target);
+			/* see helper_call: the callee's helper calls move
+			   the global sp; restore the slot level */
+			sp = saved;
 			pop();
 			return;
 		}

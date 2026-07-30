@@ -43,7 +43,7 @@ if [ -n "$1" ]; then
 	one "$1"; exit $?
 fi
 fail=0
-for p in cpa.c cpb.c cpc.c cpd.c; do
+for p in cpa.c cpb.c cpc.c cpd.c cpe.c; do
 	one "$p" || fail=1
 done
 exit $fail

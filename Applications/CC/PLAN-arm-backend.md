@@ -302,10 +302,47 @@ naive emitter's 3-8× leaves plenty for stage 8's peepholes to chase.
   at essentially native M33 speed.  Conformance 165 throughout;
   fcctests 9/9; qemudiff 10/10 every checkpoint.
 
-Next: stage 5, calls - vsp writeback around call_target, then fib and
-whole call-dense programs go native.  Then stage 6 (64-bit + float
-helper BLs), 7 (switch, struct copy, CALLA), 8 (peepholes), 9 (board
-sizing policy + SD refresh).
+* **Stage 5 done** 2026-07-30 (CP-E): calls.  A native call site
+  loads a trampoline from the helper vector, passes its vsp in r1,
+  and BLXes; helper_call dispatches to native_enter for a native
+  callee or a fresh bc_exec activation for a bytecode one - whose
+  sentinel is also the frame-parity slot, so the layouts line up by
+  construction.  BC_CALL targets travel through the literal pool with
+  a flagged fixup (flag 1 = value slot): the loader must never
+  mistake a pool word for a BC_CALL operand, and a target that
+  resolves to a library symbol becomes a tagged index the trampoline
+  turns back into a libcall.  General libcalls (printf, the mm
+  runtime, libm) go through a second trampoline; the 64-bit/floating
+  eqop names bail the function - they pop a slot inside C, which
+  would desync the caller's r4.  Functions now save lr (push {lr} /
+  pop {pc}).
+
+  Two bugs found by the gates, both in dispatch plumbing, neither in
+  emitted code: (1) after a native callee that itself makes calls,
+  the global sp is whatever the deepest helper sync left it - the
+  dispatcher must restore the slot level before popping (leaf
+  callees, which every earlier checkpoint used, never touch it);
+  (2) at -Os, gcc's IPA analysis looked straight through the asm
+  "memory" clobber, decided native_enter never writes sp, and
+  deleted the callers' restore - the board failed where the -O2 qemu
+  build passed.  native_enter now preserves sp itself and declares
+  sp/A/pc/mem as explicit "+m" asm operands.  The -Os/qemu repro
+  (arm-linux-gnueabihf-gcc -Os) is the debugging path of record for
+  any future board-only failure.
+
+  **Hardware: fib(27) 2644 -> 382 ms (6.9×); Dhrystone 3,808 ->
+  8,288/s (2.2×) with only 9 of 18 functions native** - struct
+  assignment and switch (stages 6-7) block the rest, including the
+  measurement loop's own Proc_1.  cpe probe: recursion, mutual
+  recursion, function pointers through CALLA, printf from native
+  code - all on the PC3.  The eclipse stays 0/34 native (every
+  function touches doubles) until stage 6.
+
+Next: stage 6 - the 64-bit and floating ops as helper calls (and the
+loads/stores/pushes for two-slot values), which is where the eclipse
+moves.  Then 7 (switch, struct copy), 8 (peepholes - direct BL for
+known-native callees will lift fib well past 6.9×), 9 (board sizing
+policy + SD refresh).
 
 ## Order of risk retirement
 
