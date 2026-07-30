@@ -3340,10 +3340,23 @@ class Conv(object):
             for name, body in tabs:
                 wr('static const MMINTEGER %s[] = { %s };\n' % (name, body))
         if self.data:
-            wr('\n/* ---- DATA items ---- */\n')
-            wr('static const MMDataItem __mmb_data[] = {\n')
-            for isstr, f, i, sv in self.data:
-                wr('    { %d, %s, %s, %s },\n' % (isstr, f, i, sv))
+            wr('\n/* ---- DATA items: parallel primitive arrays, so no\n')
+            wr(' * struct layout crosses the bcrun VM boundary ---- */\n')
+            wr('static const int __mmb_data_kind[] = {\n')
+            for kind, f, i, sv in self.data:
+                wr('    %d,\n' % kind)
+            wr('};\n')
+            wr('static const MMFLOAT __mmb_data_f[] = {\n')
+            for kind, f, i, sv in self.data:
+                wr('    %s,\n' % f)
+            wr('};\n')
+            wr('static const MMINTEGER __mmb_data_i[] = {\n')
+            for kind, f, i, sv in self.data:
+                wr('    %s,\n' % i)
+            wr('};\n')
+            wr('static const char *__mmb_data_s[] = {\n')
+            for kind, f, i, sv in self.data:
+                wr('    %s,\n' % sv)
             wr('};\n')
         wr('\n/* ---- forward declarations ---- */\n')
         if self.uses_clear:
@@ -3369,7 +3382,8 @@ class Conv(object):
         wr('int main(void)\n{\n')
         wr('    unsigned __mark = mm_mark(); (void)__mark;\n')
         if self.data:
-            wr('    mm_data_init(__mmb_data, %d);\n' % len(self.data))
+            wr('    mm_data_init4(__mmb_data_kind, __mmb_data_f, '
+               '__mmb_data_i, __mmb_data_s, %d);\n' % len(self.data))
         for ln in self.out_main:
             wr(ln + '\n')
         wr('    return 0;\n}\n')

@@ -93,7 +93,8 @@ inputs, output verified correct:**
 |---|---|
 | MMBasic (interpreted BASIC) | 12.5 s |
 | MicroPython port | 8.77 s |
-| **mmb2c → FCC bytecode → bcrun under Fuzix** | **9.82 s** |
+| mmb2c → FCC bytecode → bcrun, runtime as bytecode | 9.82 s |
+| **mmb2c → FCC bytecode → bcrun, runtime native** | **9.19 s** |
 
 Faster than the MMBasic interpreter already, 12% behind MicroPython —
 with a plain bytecode interpreter and the whole mm runtime still
@@ -133,15 +134,49 @@ moon() — called every objective evaluation — flooded the console file,
 wedged the board, and cost a reflash + fsck.  The working pattern:
 call the SUB once from the main line, print, `End`.
 
+### Runtime into bcrun: DONE 2026-07-30, on hardware
+
+The mm_* runtime is native inside bcrun (`bcrun_mm.c` in the FUZIX
+tree includes verbatim copies of mmb_runtime.c/.h — masters stay HERE,
+`fcc/sync-runtime.sh` copies them over).  The runtime's own code runs
+on native pointers untouched; ~135 small wrappers convert VM offsets
+at the boundary, and the only program-addressable state — the scratch
+pool and the by-ref pool — is carved out of VM memory by the loader.
+Names bind once per run through a cache (libbind), not per call.
+
+What it took, beyond the wrappers:
+
+* **cc2 now honours data/bss alignment** (gen_data_label ignored its
+  align argument).  The interpreter never cared — byte-at-a-time — but
+  native code dereferencing a VM double on ARM does.  The Thumb
+  backend will want this anyway.
+* **DATA moved to four parallel primitive arrays** (`mm_data_init4`):
+  int, double and int64 read identically on both sides of the VM
+  boundary, where MMDataItem's padding was each compiler's own
+  business.  The string table stays a VM offset — its elements are
+  32-bit VM pointers, unreadable through a 64-bit host pointer.
+* Fuzix libc islands: strtoll/strtoull route to bcrun's own 64-bit
+  parser (Fuzix's stops at 32), remove() → unlink().
+
+Results, all 9 tests byte-exact on host AND the eclipse on hardware:
+
+* **t6 is 9/9** — the POSIX directory code that had to be stubbed in
+  the bytecode world (no opendir libcall) simply runs natively.  The
+  planned dir_open/dir_next libcall design is moot.
+* programs shrink ~4.7× (t-tests 74K → 15.7K; the eclipse 163K →
+  103K, its own 3,200 lines are genuinely most of it)
+* **eclipse on the PC3: 9.191 s** (was 9.82 s with the bytecode
+  runtime; MMBasic 12.5, MicroPython 8.77).  Float-heavy, so the
+  gain is modest — string-heavy programs gain far more.
+* `RTBC=1 fccbuild.sh` still builds the old concatenated shape for
+  differential debugging.
+
 Still to do in phase 1:
 
-1. mm_* runtime into bcrun as native libcalls — drops every program's
-   bytecode from ~93K to ~20K, gives the VM its space back, and should
-   close much of the MicroPython gap (strings and formatting go
-   native).  xcheck digits proven on-board.
-2. The directory libcall set; t6 to 9/9.
 3. Refresh the SD image with the new binaries (they live only on this
-   card until then).
+   card until then).  Note the on-card cc2 and bcrun were updated over
+   serial 2026-07-30 — a .bc compiled on-board by the new cc2 needs
+   the new bcrun and vice versa is fine (alignment only adds padding).
 
 ## Phase 2 — the translator in C
 

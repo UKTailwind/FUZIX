@@ -24,8 +24,18 @@
 
 /* ================= scratch buffers ================================= */
 
+#ifdef MM_HOSTED
+/* Compiled into bcrun (see bcrun_mm.c in the FUZIX Applications/CC
+ * tree): a translated program holds pointers to these, so the scratch
+ * pool and the by-ref pool must live inside the VM's address space.
+ * The loader carves the space out between bss and the heap and binds
+ * it here through mm_hosted_bind() before entry. */
+static char   (*mm_pool)[MM_STRSZ];
+static unsigned mm_pool_top = 0;
+#else
 static char     mm_pool[MM_TMPN][MM_STRSZ];
 static unsigned mm_pool_top = 0;
+#endif
 
 char *mm_tmp(void)
 {
@@ -45,11 +55,25 @@ char *mm_tmp(void)
  * received one can run for a long time.  It winds back with the same
  * mark/release the string temporaries use, so both stack tops travel
  * packed in the one mark word and the generated code never changes. */
-static union {
+union mm_byref_u {
     MMFLOAT   f;
     MMINTEGER i;
-} mm_byref_pool[MM_BYREFN];
+};
+#ifdef MM_HOSTED
+static union mm_byref_u *mm_byref_pool;
 static unsigned mm_byref_top = 0;
+
+/* Called by bcrun's loader once the VM region is reserved. */
+void mm_hosted_bind(char *pool, void *byref)
+{
+    mm_pool = (char (*)[MM_STRSZ])pool;
+    mm_byref_pool = (union mm_byref_u *)byref;
+    mm_pool_top = mm_byref_top = 0;
+}
+#else
+static union mm_byref_u mm_byref_pool[MM_BYREFN];
+static unsigned mm_byref_top = 0;
+#endif
 
 unsigned mm_mark(void)
 {
@@ -1263,7 +1287,13 @@ MMFLOAT   mm_atof(const char *s) { return (MMFLOAT)atof(mm_cstr(s)); }
 
 void mm_kill(const char *fname)
 {
+#ifdef MM_HOSTED
+    /* Fuzix libc has no ISO C remove(); unlink is already declared by
+     * bcrun's own headers in the hosted translation unit. */
+    if (unlink(mm_cstr(fname)) != 0) mm_error("Cannot delete the file");
+#else
     if (remove(mm_cstr(fname)) != 0) mm_error("Cannot delete the file");
+#endif
 }
 
 void mm_rename(const char *from, const char *to)
@@ -1469,9 +1499,51 @@ static int  mm_dn = 0, mm_dptr = 0;
 static int  mm_dstack[8];
 static int  mm_dsp = 0;
 
+/* mmb2c emits the table as four parallel primitive arrays
+ * (mm_data_init4) so that no struct layout ever crosses the bcrun VM
+ * boundary - int, double and int64 read identically on both sides,
+ * where a struct's padding is each compiler's own business.  The
+ * struct form stays for hand-written driver code. */
+static const int       *mm_d4_kind = NULL;
+static const MMFLOAT   *mm_d4_f;
+static const MMINTEGER *mm_d4_i;
+#ifdef MM_HOSTED
+/* The string table holds 32-bit VM pointers whatever the host width,
+ * so it is kept as a VM offset and read through bcrun. */
+extern unsigned char   *mm_vm_base(void);
+extern unsigned long    mm_vm_rd32(unsigned long a);
+static unsigned long    mm_d4_s;
+#else
+static const char     **mm_d4_s;
+#endif
+
+static const char *mm_d4_str(int j)
+{
+#ifdef MM_HOSTED
+    return (const char *)mm_vm_base()
+        + mm_vm_rd32(mm_d4_s + 4ul * (unsigned long)j);
+#else
+    return mm_d4_s[j];
+#endif
+}
+
 void mm_data_init(const MMDataItem *tbl, int n)
 {
-    mm_dtbl = tbl; mm_dn = n; mm_dptr = 0; mm_dsp = 0;
+    mm_dtbl = tbl; mm_d4_kind = NULL;
+    mm_dn = n; mm_dptr = 0; mm_dsp = 0;
+}
+
+#ifdef MM_HOSTED
+void mm_data_init4(const int *k, const MMFLOAT *f, const MMINTEGER *i,
+                   unsigned long s, int n)
+#else
+void mm_data_init4(const int *k, const MMFLOAT *f, const MMINTEGER *i,
+                   const char **s, int n)
+#endif
+{
+    mm_d4_kind = k; mm_d4_f = f; mm_d4_i = i; mm_d4_s = s;
+    mm_dtbl = NULL;
+    mm_dn = n; mm_dptr = 0; mm_dsp = 0;
 }
 
 void mm_restore(int index)
@@ -1480,29 +1552,41 @@ void mm_restore(int index)
     mm_dptr = index;
 }
 
-static const MMDataItem *mm_next_data(void)
+static int mm_next_idx(void)
 {
     if (mm_dptr >= mm_dn) mm_error("No more DATA to READ");
-    return &mm_dtbl[mm_dptr++];
+    return mm_dptr++;
 }
 
 MMFLOAT mm_read_f(void)
 {
-    const MMDataItem *d = mm_next_data();
-    if (d->kind == MM_D_STR) return mm_val(d->s);
-    if (d->kind == MM_D_INT) return (MMFLOAT)d->i;
-    return d->f;
+    int j = mm_next_idx();
+    int kind = mm_d4_kind ? mm_d4_kind[j] : mm_dtbl[j].kind;
+    if (kind == MM_D_STR)
+        return mm_val(mm_d4_kind ? mm_d4_str(j) : mm_dtbl[j].s);
+    if (kind == MM_D_INT)
+        return (MMFLOAT)(mm_d4_kind ? mm_d4_i[j] : mm_dtbl[j].i);
+    return mm_d4_kind ? mm_d4_f[j] : mm_dtbl[j].f;
 }
 
 MMINTEGER mm_read_i(void)
 {
-    const MMDataItem *d = mm_next_data();
-    if (d->kind == MM_D_STR) return (MMINTEGER)mm_val(d->s);
-    if (d->kind == MM_D_FLT) return mm_toint(d->f);
-    return d->i;
+    int j = mm_next_idx();
+    int kind = mm_d4_kind ? mm_d4_kind[j] : mm_dtbl[j].kind;
+    if (kind == MM_D_STR)
+        return (MMINTEGER)mm_val(mm_d4_kind ? mm_d4_str(j) : mm_dtbl[j].s);
+    if (kind == MM_D_FLT)
+        return mm_toint(mm_d4_kind ? mm_d4_f[j] : mm_dtbl[j].f);
+    return mm_d4_kind ? mm_d4_i[j] : mm_dtbl[j].i;
 }
-char     *mm_read_s(void) { const MMDataItem *d = mm_next_data();
-                            char *t = mm_tmp(); mm_sset(t, d->s); return t; }
+
+char *mm_read_s(void)
+{
+    int j = mm_next_idx();
+    char *t = mm_tmp();
+    mm_sset(t, mm_d4_kind ? mm_d4_str(j) : mm_dtbl[j].s);
+    return t;
+}
 
 void mm_read_save(void)
 {
@@ -1714,17 +1798,18 @@ MM_STAT_BODY(f, MMFLOAT)
 
 /* ================= misc Tier A ===================================== */
 
-#ifdef MM_FCC
+#if defined(MM_FCC) && !defined(MM_HOSTED)
 /* Microseconds since start, native in the bytecode interpreter: the
  * PC3 kernel's clock on the board, gettimeofday on the development
  * machine.  31 bits, so TIMER wraps after about 35 minutes - known
- * phase 0 limitation. */
+ * phase 0 limitation.  The hosted build defines its own static
+ * time_us() from the same sources before including this file. */
 long time_us();
 #endif
 
 void mm_pause(MMFLOAT ms)
 {
-#ifdef MM_FCC
+#if defined(MM_FCC) || defined(MM_HOSTED)
     long end = time_us() + (long)(ms * 1000.0);
     if (ms < 0) return;
     while (time_us() < end) { }
@@ -1753,7 +1838,7 @@ MMINTEGER mm_clock_offset(void) { return mm_clock_off; }
 
 static MMINTEGER mm_ms_now(void)
 {
-#ifdef MM_FCC
+#if defined(MM_FCC) || defined(MM_HOSTED)
     return (MMINTEGER)(time_us() / 1000);
 #else
     return (MMINTEGER)((double)clock() * 1000.0 / (double)CLOCKS_PER_SEC);

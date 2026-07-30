@@ -219,6 +219,16 @@ typedef struct {
 } MMDataItem;
 
 void       mm_data_init(const MMDataItem *tbl, int n);
+/* The form mmb2c emits: four parallel primitive arrays, so no struct
+ * layout crosses the bcrun VM boundary.  In the hosted (bcrun) build
+ * the string table stays a VM offset - see mmb_runtime.c. */
+#ifdef MM_HOSTED
+void       mm_data_init4(const int *kind, const MMFLOAT *f,
+                         const MMINTEGER *i, unsigned long s, int n);
+#else
+void       mm_data_init4(const int *kind, const MMFLOAT *f,
+                         const MMINTEGER *i, const char **s, int n);
+#endif
 void       mm_restore(int index);
 MMFLOAT    mm_read_f(void);
 MMINTEGER  mm_read_i(void);

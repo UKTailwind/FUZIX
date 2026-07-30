@@ -7,8 +7,10 @@
 #   bash fcc/fccbuild.sh tests/t1.bas run      # ... and run it
 #   bash fcc/fccbuild.sh tests/t1.bas run < input
 #
-# The bytecode world has no linker, so the runtime is concatenated with
-# the generated program and the pair compiled as one translation unit.
+# The mm_* runtime is native inside bcrun (phase 1): the program is
+# compiled alone and every mm_* call resolves as a named libcall at
+# load.  RTBC=1 restores the old phase-0 shape - runtime concatenated
+# and compiled to bytecode - for differential debugging.
 # Header search: our fcc/include first, then the compiler's own C89 test
 # headers for stdio/string/stddef/limits/assert.
 #
@@ -41,11 +43,17 @@ case "$src" in
 	;;
 esac
 
-# one translation unit: runtime first, program second
-cat "$M/mmb_runtime.c" "$W/$b.c" > "$W/$b.one.c"
+if [ "${RTBC:-0}" = 1 ]; then
+	# phase-0 shape: runtime concatenated, compiled as one unit
+	cat "$M/mmb_runtime.c" "$W/$b.c" > "$W/$b.one.c"
+	RTDEF="-DMM_NO_DIRS"
+else
+	RTDEF=
+	cp "$W/$b.c" "$W/$b.one.c"
+fi
 
 if ! gcc -E -P -nostdinc -U__LP64__ -U__LLP64__ -D__ILP32__ \
-		-DMM_FCC -DMM_NO_DIRS \
+		-DMM_FCC $RTDEF \
 		-I "$INC" -I "$CINC" -I "$M" -I "$W" \
 		"$W/$b.one.c" > "$W/$b.pp" 2> "$W/$b.cpp.err"; then
 	echo "CPP FAIL"; cat "$W/$b.cpp.err"; exit 1
