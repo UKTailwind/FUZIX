@@ -31,6 +31,7 @@ ccbc: ccbc.o
 
 bcrun.o bcdump.o: bytecode.h
 bcrun.o: bcrun_mm.c mmb_runtime.c mmb_runtime.h
+backend-bcode.o: backend-thumb.c
 
 # Stage 1: no on-target Z80 runtime libs; the passes are the experiment
 support:

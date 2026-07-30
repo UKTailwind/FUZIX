@@ -40,14 +40,16 @@ for i in range(nsym):
 assert target is not None, "no code symbol " + name
 
 limit = min([v for v in codesyms if v > target] + [codesz])
-entry_off = (target + 3) & ~1           # BC_NATIVE_ENTRY()
+entry_off = (target + 6) & ~1           # BC_NATIVE_ENTRY(): marker + alias
 need = (entry_off - target) + len(native)
 assert target + need <= limit, \
     "native body (%d bytes) will not fit the stub (%d)" % (need, limit - target)
 
 code_at = HDR + target
 data[code_at] = BC_NATIVE
-for i in range(target + 1, entry_off):
+# no bytecode alias for hand-written native
+data[code_at + 1:code_at + 5] = b"\xff\xff\xff\xff"
+for i in range(target + 5, entry_off):
     data[HDR + i] = 0
 data[HDR + entry_off:HDR + entry_off + len(native)] = native
 data[4] = 2                             # BC_VERSION_NATIVE

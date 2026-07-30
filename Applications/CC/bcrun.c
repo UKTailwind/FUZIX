@@ -1763,12 +1763,31 @@ static int64_t native_enter(unsigned long off)
  *	callee ignores it and the slot is popped here instead - and the
  *	offsets cc2 bakes into BC_LOCAL agree in both worlds.
  */
+static int force_bytecode;	/* BCRUN_BYTECODE=1: ignore native code */
+
 static void call_target(unsigned long target)
 {
 	if (target < h.h_code && code[target] == BC_NATIVE) {
-		push(0xFFFFFFFEUL);
-		A = native_enter(target);
-		pop();
+		unsigned long alias = code[target + 1] |
+		    ((unsigned long)code[target + 2] << 8) |
+		    ((unsigned long)code[target + 3] << 16) |
+		    ((unsigned long)code[target + 4] << 24);
+#if defined(__arm__) || defined(__thumb__)
+		if (!force_bytecode || alias == 0xFFFFFFFFUL) {
+			push(0xFFFFFFFEUL);
+			A = native_enter(target);
+			pop();
+			return;
+		}
+#else
+		if (alias == 0xFFFFFFFFUL) {
+			native_enter(target);	/* faults with the message */
+			return;
+		}
+#endif
+		/* Interpret the function's still-present bytecode. */
+		push(pc);
+		pc = alias;
 		return;
 	}
 	push(pc);
@@ -2134,6 +2153,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "usage: bcrun [-t] program.bc\n");
 		return 1;
 	}
+	force_bytecode = getenv("BCRUN_BYTECODE") != NULL;
 	load(argv[i]);
 	return run();
 }

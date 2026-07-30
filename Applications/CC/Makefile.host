@@ -87,6 +87,7 @@ clean:
 # writes it must be rebuilt when it changes, or cc2 keeps writing the
 # old layout while bcrun reads the new one.
 $(OBJ_C2): bytecode.h
+$(OBJDIR)/backend-bcode.o: backend-thumb.c
 
 # symtab.h is the same kind of trap: cc0 writes the symbol table and
 # cc2 reads it, so a change to NAMELEN reaching only one of them gives

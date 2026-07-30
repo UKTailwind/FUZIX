@@ -124,6 +124,13 @@ static unsigned frame_len;
 static unsigned sp;
 static unsigned long entry;
 
+/* Mixed mode: the Thumb translator (backend-thumb.c, included at the
+   end of this file) shadows every function and commits native code
+   when the whole span is covered. */
+static int have_native;
+static void thumb_fn_begin(const char *name);
+static void thumb_commit(void);
+
 /* ------------------------------------------------------------------ */
 
 static void cbyte(unsigned v)
@@ -493,6 +500,7 @@ void gen_prologue(const char *name)
 	symdef(name, BC_SYM_CODE, codelen);
 	if (strcmp(name, "main") == 0)
 		entry = codelen;
+	thumb_fn_begin(name);
 }
 
 /*
@@ -528,6 +536,7 @@ void gen_epilogue(unsigned size, unsigned argsize)
 	cbyte(BC_LEAVE);
 	cword(size);
 	cbyte(BC_RET);
+	thumb_commit();
 }
 
 void gen_label(const char *tail, unsigned n)
@@ -729,7 +738,7 @@ void gen_end(void)
 			fixtab[i].f_offset += datalen;
 
 	memcpy(h.h_magic, BC_MAGIC, 4);
-	h.h_version = BC_VERSION;
+	h.h_version = have_native ? BC_VERSION_NATIVE : BC_VERSION;
 	h.h_pad = 0;
 	h.h_nsym = nsym;
 	h.h_code = codelen;
@@ -1258,3 +1267,5 @@ unsigned gen_node(struct node *n)
 		return 1;
 	return fallback(n);
 }
+
+#include "backend-thumb.c"

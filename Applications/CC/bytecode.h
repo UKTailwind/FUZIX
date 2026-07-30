@@ -253,16 +253,24 @@
 /*
  *	Mixed mode.  Not an executable opcode: the first code byte of a
  *	native (Thumb) function is this marker, and every call goes
- *	through a dispatch that tests it.  After the marker, padding to
- *	the next even offset, then Thumb code - the entry point is
- *	((offset + 3) & ~1).  Registers on entry: r4 = VM stack pointer
- *	as a native pointer (the return-pc slot at r4+0 exists for frame
- *	parity with a bytecode callee, args from r4+4 up), r5 = helper
- *	vector, r6 = mem[] base; the result returns in r0/r1 exactly as
- *	the accumulator A.  See PLAN-arm-backend.md.
+ *	through a dispatch that tests it.  Layout:
+ *
+ *	    +0  BC_NATIVE
+ *	    +1  u32  bytecode alias - the code offset of the function's
+ *	        original bytecode, still present in the object, so a host
+ *	        that cannot execute Thumb (x86 development machine, or ARM
+ *	        with BCRUN_BYTECODE=1 for A/B timing) interprets instead.
+ *	        0xFFFFFFFF = none (hand-written native only).
+ *	    +5  pad to even, then Thumb code - BC_NATIVE_ENTRY(off).
+ *
+ *	Registers on native entry: r4 = VM stack pointer as a native
+ *	pointer (the return-pc slot at r4+0 exists for frame parity with
+ *	a bytecode callee, args from r4+4 up), r5 = helper vector, r6 =
+ *	mem[] base; the result returns in r0/r1 exactly as the
+ *	accumulator A.  See PLAN-arm-backend.md.
  */
 #define BC_NATIVE	0xF0
-#define BC_NATIVE_ENTRY(off)	(((off) + 3) & ~1UL)
+#define BC_NATIVE_ENTRY(off)	(((off) + 6) & ~1UL)
 
 /*
  *	Object file layout. Everything is little endian.
