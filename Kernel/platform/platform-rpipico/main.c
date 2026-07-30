@@ -184,6 +184,18 @@ int main(void)
     gpio_set_dir(POWER_LED, GPIO_OUT);
     gpio_put(POWER_LED, 1);
 
+    /*
+     * The boot udata lives at progbase, plain SRAM outside the
+     * kernel's bss, and SRAM survives a warm reset.  create_init()
+     * wipes only the file table and trusts everything else to be
+     * zero - true on ports where udata sits in bss, false here: after
+     * a reset it still held the PREVIOUS run's udata, and i_ref() of
+     * a stale u_cwd inode pointer bus-faulted the boot.  A flash
+     * cycle papered over it because the BOOTSEL ROM session happens
+     * to trample this SRAM.  Zero what the core assumes is zeroed.
+     */
+    memset(&udata, 0, sizeof(struct u_data));
+
     di();
     fuzix_main();
 }
