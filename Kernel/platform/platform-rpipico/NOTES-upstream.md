@@ -14,7 +14,7 @@ which is how the first, unscoped token was diagnosed.
 
 | PR | Branch | What |
 |---|---|---|
-| [1261](https://codeberg.org/EtchedPixels/FUZIX/pulls/1261) | `cb-fcc-trim-constant` | `trim_constant` never trimmed anything |
+| [1261](https://codeberg.org/EtchedPixels/FUZIX/pulls/1261) | `cb-fcc-trim-constant` | `trim_constant` never trimmed anything — [commented](https://codeberg.org/EtchedPixels/FUZIX/pulls/1261#issuecomment-20300521) that the fix already exists in the compiler kit and a vendored-copy resync may be preferred |
 | [1262](https://codeberg.org/EtchedPixels/FUZIX/pulls/1262) | `cb-filesys-nfree-overrun` | `sizeof(int)` overrun onto `s_ninode` |
 | [1263](https://codeberg.org/EtchedPixels/FUZIX/pulls/1263) | `cb-devio-lru-wrap` | LRU wrap panics with the pool free |
 | [1264](https://codeberg.org/EtchedPixels/FUZIX/pulls/1264) | `cb-libc-decisecond-units` | `usleep()` <100ms hangs; `clock_gettime` sub-seconds |
