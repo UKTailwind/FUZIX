@@ -30,6 +30,7 @@ ccbc: ccbc.o
 	$(LINKER) $(CRT0) ccbc.o -o $@ $(LINKER_OPT) $(LINKER_TAIL)
 
 bcrun.o bcdump.o: bytecode.h
+bcrun.o: bcrun_mm.c mmb_runtime.c mmb_runtime.h
 
 # Stage 1: no on-target Z80 runtime libs; the passes are the experiment
 support:

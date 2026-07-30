@@ -76,6 +76,16 @@ static struct bc_fixup *fix;
 static char *strtab;
 
 /*
+ *	The mm_* BASIC runtime lives in bcrun natively - bcrun_mm.c,
+ *	included at the end of this file.  libbind caches the wrapper
+ *	resolved for each library symbol so the name is matched once per
+ *	run, not once per call.
+ */
+static void (**libbind)(void);
+static void (*mm_wrap_lookup(const char *name))(void);
+static unsigned long mmrt_reserve(unsigned long base);
+
+/*
  * A double is carried in the accumulator as its bit pattern and a float
  * in the low 32 bits, so these are how the arithmetic gets at it. The
  * union is not decoration: reading an int64_t through a double * is an
@@ -1286,7 +1296,20 @@ static void libcall(unsigned idx)
 
 	if (idx >= h.h_nsym)
 		fault("bad library index");
+	if (libbind[idx]) {
+		libbind[idx]();
+		return;
+	}
 	name = strtab + sym[idx].s_name;
+
+	if (name[0] == 'm' && name[1] == 'm' && name[2] == '_') {
+		void (*fn)(void) = mm_wrap_lookup(name);
+		if (fn) {
+			libbind[idx] = fn;
+			fn();
+			return;
+		}
+	}
 
 	if (!strcmp(name, "putchar")) {
 		putchar((int)arg(0));
@@ -1577,8 +1600,6 @@ static void load(const char *path)
 	 */
 	database = NULLGUARD;
 	bssbase = database + h.h_data;
-	/* The heap is whatever is left between bss and the stack. */
-	heap_init(bssbase + h.h_bss);
 	if (bssbase + h.h_bss + STACKROOM > MEMSIZE) {
 		fprintf(stderr, "bcrun: program too large\n");
 		exit(1);
@@ -1601,6 +1622,17 @@ static void load(const char *path)
 	if (h.h_strsize && fread(strtab, 1, h.h_strsize, f) != h.h_strsize)
 		fault("short string table");
 	fclose(f);
+
+	libbind = calloc(h.h_nsym ? h.h_nsym : 1, sizeof(*libbind));
+	if (libbind == NULL) {
+		fprintf(stderr, "%s: out of memory (bind table)\n", path);
+		exit(1);
+	}
+
+	/* The heap is whatever is left between bss, the mm runtime's
+	   pools if this program uses it, and the stack.  Needs the
+	   symbol and string tables, hence down here. */
+	heap_init(mmrt_reserve(bssbase + h.h_bss));
 
 	/* Apply fixups: add the symbol's value to the 32bit field. */
 	for (i = 0; i < h.h_nfixup; i++) {
@@ -2003,3 +2035,10 @@ int main(int argc, char *argv[])
 	load(argv[i]);
 	return run();
 }
+
+/*
+ *	The mm_* BASIC runtime, one translation unit with the
+ *	interpreter: the wrappers want arg()/dput()/mem and the loader
+ *	wants mmrt_reserve(), and none of it needs external linkage.
+ */
+#include "bcrun_mm.c"

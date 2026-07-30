@@ -611,6 +611,22 @@ void gen_helpclean(struct node *n)
 
 void gen_data_label(const char *name, unsigned align)
 {
+	/*
+	 *	The interpreter reads memory a byte at a time and never
+	 *	cared about alignment, but the native mm runtime (and the
+	 *	Thumb backend to come) reach VM data through real pointers,
+	 *	and on ARM an int64/double load needs the front end's
+	 *	alignment honoured.  The literal segment is only strings
+	 *	and is rebased when the module is written out, so it stays
+	 *	byte packed.
+	 */
+	if (align > 1 && curseg != A_LITERAL) {
+		if (curseg == A_BSS)
+			bsslen = (bsslen + align - 1) & ~(unsigned long)(align - 1);
+		else
+			while (dhere() & (align - 1))
+				dbyte(0);
+	}
 	if (curseg == A_BSS)
 		symdef(name, BC_SYM_BSS, bsslen);
 	else

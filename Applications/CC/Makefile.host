@@ -51,7 +51,7 @@ TOOLS = $(OBJDIR)/bcrun $(OBJDIR)/bcdump $(OBJDIR)/dumptokens $(OBJDIR)/ccbc
 
 all: $(OBJDIR)/cc0 $(OBJDIR)/cc1 $(OBJDIR)/cc2 $(TOOLS)
 
-$(OBJDIR)/bcrun: bcrun.c bytecode.h | $(OBJDIR)
+$(OBJDIR)/bcrun: bcrun.c bcrun_mm.c mmb_runtime.c mmb_runtime.h bytecode.h | $(OBJDIR)
 	$(HOSTCC) $(HOSTCFLAGS) -o $@ bcrun.c -lm
 
 $(OBJDIR)/bcdump: bcdump.c bytecode.h | $(OBJDIR)
