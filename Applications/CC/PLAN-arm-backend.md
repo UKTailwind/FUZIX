@@ -344,6 +344,24 @@ moves.  Then 7 (switch, struct copy), 8 (peepholes - direct BL for
 known-native callees will lift fib well past 6.9×), 9 (board sizing
 policy + SD refresh).
 
+Stage 6 working notes, set down before it starts:
+* CONST64 / LOAD64 / STORE64 / PUSH64 / POP64 are r0:r1 pairs against
+  r4/r6, mechanical.  64-bit add/sub/logic inline as instruction
+  pairs (adds/adcs...); mul/div/shift via new C helpers reached
+  through the r5 vector, alongside every D/F arithmetic, compare and
+  conversion op - bcrun's aeabi doubles are the DCP now, so native
+  code inherits that for free.
+* Native BOOLD/LNOTD (and the float forms) must be BIT TESTS
+  (pattern << 1 == 0), never real compares: the DCP flushes
+  denormals, and the day this rule was learned is documented under
+  "Floating point engines" below.
+* The fp/64-bit eqop names currently bail the whole function (their C
+  helpers pop a slot, desyncing the caller's r4).  Stage 6 should
+  lift that: either inline them like the 32-bit family or emit the
+  slot pop natively after a non-popping helper.
+* The eclipse (0/34 native today) is the acceptance benchmark; every
+  one of its functions is double-blocked and should light up.
+
 ## Floating point engines (decided 2026-07-30, checked against the SDK)
 
 The RP2040's boot-ROM float library does not exist on the RP2350: the
