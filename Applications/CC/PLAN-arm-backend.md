@@ -344,6 +344,29 @@ moves.  Then 7 (switch, struct copy), 8 (peepholes - direct BL for
 known-native callees will lift fib well past 6.9×), 9 (board sizing
 policy + SD refresh).
 
+## Floating point engines (decided 2026-07-30, checked against the SDK)
+
+The RP2040's boot-ROM float library does not exist on the RP2350: the
+SDK's fast path there is double_aeabi_dcp.S - hand assembly for the
+DCP, the double-precision coprocessor in the M33s - shipped in the
+binary, nothing in ROM, nothing copied from ROM.  Our Fuzix userland
+links the v8-m.main/nofp libgcc, so bcrun's doubles today are plain
+soft-float in its own text.  64-bit integers involve no ROM or
+coprocessor anywhere: inline adds/adcs/umull, libgcc __aeabi_ldivmod
+for divide.
+
+Stage 6 stays engine-agnostic - helper BLs remove the dispatch around
+FP whatever implements the arithmetic.  The engine upgrade is a
+SEPARATE work item benefiting interpreter and native equally: import
+the SDK's DCP __aeabi_d* routines into bcrun (soft-ABI libm lowers
+all its arithmetic to those symbols, so libm accelerates
+transparently), plus the kernel side - CPACR enable and lazy
+per-process DCP/FPU context save, mandatory now the port preempts.
+MicroPython's 8.77 s eclipse already rides the DCP via the SDK; this
+is the gap-closer.  The single-precision FPU (FPV5-SP) has the same
+kernel prerequisite and much less value here: MMFLOAT is double, so
+translated BASIC touches almost no single-precision.
+
 ## Order of risk retirement
 
 Stages 1–3 are small and kill the unknowns (harness fidelity,
