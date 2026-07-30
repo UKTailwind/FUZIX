@@ -84,23 +84,64 @@ Makefile.host: bcrun links -lm; note it has **no header dependencies**
   emits).  Teaching type_pointerconv the decay equivalence is upstream
   work, not urgent.
 
-## Numbers so far (host, Ryzen)
+## Numbers
 
-solar eclipse compute section: bcrun 0.10 s, gcc -O2 native 0.002 s —
-the interpreter costs ~50× on float-heavy code.  The comparison that
-matters — bcrun on the PC3 against MMBasic's 12.5 s and MicroPython's
-8.77 s on the same chip — needs phase 1's board bcrun (the board's
-current binary predates the math libcalls).  MMBasic is an interpreter
-too; that race is fair, and machine-code output later is the real win.
+**On the PC3 (RP2350B @ 378 MHz), solar eclipse, same program, same
+inputs, output verified correct:**
 
-## Phase 1 — the board
+| environment | time |
+|---|---|
+| MMBasic (interpreted BASIC) | 12.5 s |
+| MicroPython port | 8.77 s |
+| **mmb2c → FCC bytecode → bcrun under Fuzix** | **9.82 s** |
 
-1. Rebuild bcrun for Fuzix/ARM with the new libcalls; refresh the SD.
-2. Solar eclipse timed on the PC3.  This is the benchmark that decides
-   how loudly the manual talks about speed.
-3. mm_* runtime into bcrun as native libcalls (the placement decision
-   above), xcheck digits proven on-board.
-4. The directory libcall set; t6 to 9/9.
+Faster than the MMBasic interpreter already, 12% behind MicroPython —
+with a plain bytecode interpreter and the whole mm runtime still
+compiled *as* bytecode.  Host reference (Ryzen): bcrun 0.10 s vs
+gcc -O2 native 0.002 s, ~50× interpreter cost, so the machine-code
+backend remains the big win when it comes.
+
+## Phase 1 — the board: bcrun landed 2026-07-30
+
+Done: board bcrun rebuilt with the math libcalls and installed over
+serial along with the fixed cc1/cc2; the eclipse runs correct on
+hardware.  Getting there found **three Fuzix libc bugs** (all fixed in
+the FUZIX tree, all upstream candidates):
+
+* **`tan()` returned `-cot()` for every argument** above 2^-27: tan.c
+  is musl-shaped (odd = 0 means tan), the __tan.c kernel was FreeBSD's
+  (k = 1 means tan).  Found because the moon's right ascension came
+  out 35° wrong while its declination was exact — `sin(π−x) = sin(x)`
+  pointed straight at the one function the math probes hadn't covered.
+* **`strtod()` built fractions back to front** — ".25" parsed as 0.52
+  (`fp/10 + digit/10` instead of a shrinking scale), and the exponent
+  loop added one per digit ("1e2" = 1000).  ELKS code from 1995.
+* **`cosh`/`tanh` missing from the libc build** — cosh.c existed but
+  was never in SRC_LM; tanh.c didn't exist at all (written new,
+  expm1-based).  tanf is still absent and __tandf still has the
+  FreeBSD flag convention — flagged, not fixed, no callers today.
+
+Board memory reality: bcrun is one 256K Fuzix process holding its own
+code, the VM data space AND the loaded bytecode + tables.  The VM gives
+way on the board: MEMSIZE 48K (`BIG_TABLES` keeps 128K on the host).
+The loader's mallocs are now checked — unchecked they surfaced as
+"short code at pc 0".  Board cc2 keeps the small table sizes for the
+same reason.
+
+Debugging method note: instrument off the hot path.  A Print inside
+moon() — called every objective evaluation — flooded the console file,
+wedged the board, and cost a reflash + fsck.  The working pattern:
+call the SUB once from the main line, print, `End`.
+
+Still to do in phase 1:
+
+1. mm_* runtime into bcrun as native libcalls — drops every program's
+   bytecode from ~93K to ~20K, gives the VM its space back, and should
+   close much of the MicroPython gap (strings and formatting go
+   native).  xcheck digits proven on-board.
+2. The directory libcall set; t6 to 9/9.
+3. Refresh the SD image with the new binaries (they live only on this
+   card until then).
 
 ## Phase 2 — the translator in C
 
