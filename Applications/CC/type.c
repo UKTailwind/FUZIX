@@ -43,8 +43,13 @@ unsigned type_addpointer(unsigned t, unsigned ptr)
  */
 unsigned type_canonical(unsigned t)
 {
-	/* An array is pointer to the base type of the array */
-	if (IS_ARRAY(t)) {
+	/* An array is pointer to the base type of the array.  A pointer
+	   TO an array - "char (*a)[257]", more indirections than the
+	   array has dimensions - is already a pointer and must keep its
+	   array typing: that is where the row size lives.  Decaying it
+	   too turned a parameter's rows into a scale of zero, and every
+	   a[i] quietly addressed row 0. */
+	if (IS_ARRAY(t) && PTR(t) <= array_num_dimensions(t)) {
 		struct symbol *s = symbol_ref(t);
 		/* Shouldn't be possible */
 		if (PTR(s->type) + PTR(t) > 7)

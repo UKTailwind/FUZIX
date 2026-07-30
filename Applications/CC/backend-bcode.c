@@ -31,15 +31,15 @@
  *	Output buffers. A program that will not fit in memory here will
  *	not fit in a 255K process anyway.
  */
-#define CODEMAX		32768
-#define DATAMAX		16384
+#define CODEMAX		131072
+#define DATAMAX		65536
 /* 512 was inherited from the 8-bit targets, where the table really is
    scarce. Here cc2 runs in a 256K process, so the cost of 2048 is a few
    tens of K against a program that would otherwise simply not compile
    ("too many symbols" on c-testsuite 00200). */
-#define MAXSYM		2048
-#define MAXFIX		4096
-#define MAXLAB		2048
+#define MAXSYM		4096
+#define MAXFIX		8192
+#define MAXLAB		4096
 
 static unsigned char codebuf[CODEMAX];
 static unsigned long codelen;
@@ -60,7 +60,7 @@ static unsigned long litlen;
 static unsigned char sym_in_lit[MAXSYM];
 static unsigned char fix_in_lit[MAXFIX];
 
-#define STRMAX		8192
+#define STRMAX		32768
 static char strtab[STRMAX];
 static unsigned long strtablen;
 

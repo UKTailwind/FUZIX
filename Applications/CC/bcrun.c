@@ -21,6 +21,8 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <stdint.h>
+#include <math.h>
+#include <time.h>
 #include "bytecode.h"
 
 /* The machine is 32bit. On a 64bit host every value that enters A or
@@ -302,13 +304,15 @@ static void lib_eqop(const char *name)
 	unsigned len, sz = 4;
 	int uns = 0, post;
 	unsigned long addr;
-	long old, v, res;
+	int64_t old, v, res;
 
 	if (lib_eqop_fp(name))
 		return;
 
 	/* The emitter appends the operand width in bytes and 's' or 'u',
-	   e.g. "pluseq1u" or "shreq4s". */
+	   e.g. "pluseq1u" or "shreq4s".  int64_t throughout, not long:
+	   the size 8 forms need all 64 bits whatever the host, and on the
+	   PC3 itself long is 32. */
 	strncpy(base, name, sizeof(base) - 1);
 	base[sizeof(base) - 1] = 0;
 	len = strlen(base);
@@ -325,11 +329,13 @@ static void lib_eqop(const char *name)
 	v = A;
 
 	if (sz == 1)
-		old = uns ? (long)rd8(addr) : (long)(signed char)rd8(addr);
+		old = uns ? (int64_t)rd8(addr) : (int64_t)(signed char)rd8(addr);
 	else if (sz == 2)
-		old = uns ? (long)rd16(addr) : (long)(short)rd16(addr);
+		old = uns ? (int64_t)rd16(addr) : (int64_t)(short)rd16(addr);
+	else if (sz == 4)
+		old = uns ? (int64_t)(uint32_t)rd32(addr) : (int64_t)S32(rd32(addr));
 	else
-		old = S32(rd32(addr));
+		old = (int64_t)rd64(addr);
 
 	post = 0;
 	if (!strcmp(base, "postinc")) { res = old + v; post = 1; }
@@ -338,17 +344,17 @@ static void lib_eqop(const char *name)
 	else if (!strcmp(base, "minuseq")) res = old - v;
 	else if (!strcmp(base, "muleq")) res = old * v;
 	else if (!strcmp(base, "diveq"))
-		res = v ? (uns ? (long)((unsigned long)old / (unsigned long)v)
+		res = v ? (uns ? (int64_t)((uint64_t)old / (uint64_t)v)
 			       : old / v) : 0;
 	else if (!strcmp(base, "remeq"))
-		res = v ? (uns ? (long)((unsigned long)old % (unsigned long)v)
+		res = v ? (uns ? (int64_t)((uint64_t)old % (uint64_t)v)
 			       : old % v) : 0;
 	else if (!strcmp(base, "andeq")) res = old & v;
 	else if (!strcmp(base, "oreq")) res = old | v;
 	else if (!strcmp(base, "xoreq")) res = old ^ v;
 	else if (!strcmp(base, "shleq")) res = old << v;
 	else if (!strcmp(base, "shreq"))
-		res = uns ? (long)((unsigned long)old >> v) : (old >> v);
+		res = uns ? (int64_t)((uint64_t)old >> v) : (old >> v);
 	else {
 		fprintf(stderr, "bcrun: no runtime function \"%s\"\n", name);
 		exit(1);
@@ -360,10 +366,15 @@ static void lib_eqop(const char *name)
 		wr8(addr, res);
 	else if (sz == 2)
 		wr16(addr, res);
+	else if (sz == 4)
+		wr32(addr, (unsigned long)(uint32_t)res);
 	else
-		wr32(addr, res);
+		wr64(addr, (uint64_t)res);
 
 	A = post ? old : res;
+	/* A carries 32-bit values sign extended, whatever their type */
+	if (sz == 4)
+		A = S32((uint32_t)A);
 }
 
 /*
@@ -1155,6 +1166,57 @@ static void vcopy(unsigned long d, unsigned long s, unsigned long n)
 	memmove(mem + d, mem + s, n);
 }
 
+/*
+ *	The mathematics library, table driven because it is twenty
+ *	functions with two shapes. Doubles travel as their bit pattern
+ *	(dget/dput) and a double argument takes two stack slots, so the
+ *	second argument of the two-argument forms lives at slot 2.
+ *
+ *	These run at native speed, which is the point: a translated BASIC
+ *	program spends its time in here and in the string runtime, not in
+ *	the bytecode.
+ */
+static const struct mfn {
+	const char *name;
+	double (*f1)(double);
+	double (*f2)(double, double);
+} mfns[] = {
+	{ "sin",   sin,   NULL  },
+	{ "cos",   cos,   NULL  },
+	{ "tan",   tan,   NULL  },
+	{ "asin",  asin,  NULL  },
+	{ "acos",  acos,  NULL  },
+	{ "atan",  atan,  NULL  },
+	{ "sinh",  sinh,  NULL  },
+	{ "cosh",  cosh,  NULL  },
+	{ "tanh",  tanh,  NULL  },
+	{ "sqrt",  sqrt,  NULL  },
+	{ "exp",   exp,   NULL  },
+	{ "log",   log,   NULL  },
+	{ "log10", log10, NULL  },
+	{ "floor", floor, NULL  },
+	{ "ceil",  ceil,  NULL  },
+	{ "fabs",  fabs,  NULL  },
+	{ "pow",   NULL,  pow   },
+	{ "atan2", NULL,  atan2 },
+	{ "fmod",  NULL,  fmod  },
+	{ NULL,    NULL,  NULL  }
+};
+
+static int lib_math(const char *name)
+{
+	const struct mfn *m;
+
+	for (m = mfns; m->name; m++) {
+		if (!strcmp(m->name, name)) {
+			A = dput(m->f1 ? m->f1(argd(0))
+				       : m->f2(argd(0), argd(2)));
+			return 1;
+		}
+	}
+	return 0;
+}
+
 static void libcall(unsigned idx)
 {
 	const char *name;
@@ -1210,6 +1272,9 @@ static void libcall(unsigned idx)
 		A = 0;
 	} else if (!strcmp(name, "remove")) {
 		A = unlink(getstr((unsigned long)arg(0)));
+	} else if (!strcmp(name, "rename")) {
+		A = rename(getstr((unsigned long)arg(0)),
+			   getstr((unsigned long)arg(1)));
 	} else if (!strcmp(name, "exit")) {
 		exit((int)arg(0));
 
@@ -1288,12 +1353,61 @@ static void libcall(unsigned idx)
 		if (a + n > MEMSIZE || b + n > MEMSIZE) fault("bad address");
 		A = memcmp(mem + a, mem + b, n);
 
+	/* --- mathematics ----------------------------------------------- */
+	} else if (lib_math(name)) {
+		/* handled from the table above */
+
 	/* --- conversion ----------------------------------------------- */
 	} else if (!strcmp(name, "atoi")) {
 		A = atoi(getstr((unsigned long)arg(0)));
+	} else if (!strcmp(name, "atol")) {
+		A = atol(getstr((unsigned long)arg(0)));
+	} else if (!strcmp(name, "atof")) {
+		A = dput(atof(getstr((unsigned long)arg(0))));
+	} else if (!strcmp(name, "strtod")) {
+		/* The end pointer the caller sees must be an address in the
+		   program's space, so it is rebuilt from the host one as an
+		   offset from the start of the string. */
+		unsigned long s = (unsigned long)arg(0);
+		unsigned long ep = (unsigned long)arg(1);
+		char *str = getstr(s), *end;
+		double d = strtod(str, &end);
+		if (ep)
+			wr32(ep, s + (unsigned long)(end - str));
+		A = dput(d);
+	} else if (!strcmp(name, "strtol") || !strcmp(name, "strtoll") ||
+		   !strcmp(name, "strtoul") || !strcmp(name, "strtoull")) {
+		unsigned long s = (unsigned long)arg(0);
+		unsigned long ep = (unsigned long)arg(1);
+		int base = (int)arg(2);
+		char *str = getstr(s), *end;
+		if (name[5] == 'u')
+			A = (int64_t)strtoull(str, &end, base);
+		else
+			A = (int64_t)strtoll(str, &end, base);
+		if (ep)
+			wr32(ep, s + (unsigned long)(end - str));
 	} else if (!strcmp(name, "abs")) {
 		long v = arg(0);
 		A = v < 0 ? -v : v;
+	} else if (!strcmp(name, "labs")) {
+		long v = arg(0);
+		A = v < 0 ? -v : v;
+	} else if (!strcmp(name, "llabs")) {
+		long long v = argll(0);
+		A = v < 0 ? -v : v;
+
+	/* --- pseudo-random and time ------------------------------------ */
+	} else if (!strcmp(name, "rand")) {
+		A = rand() & 0x7FFFFFFF;
+	} else if (!strcmp(name, "srand")) {
+		srand((unsigned)arg(0));
+		A = 0;
+	} else if (!strcmp(name, "time")) {
+		long t = (long)time(NULL);
+		if (arg(0))
+			wr32((unsigned long)arg(0), (unsigned long)t);
+		A = t;
 
 	/* --- files, straight onto the host's descriptors --------------- */
 	} else if (!strcmp(name, "open")) {

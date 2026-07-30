@@ -7,11 +7,11 @@
 #define MAXSYM			768
 /* Expression nodes. Currently 16 bytes on a small box will be about 24 once
    we have everything in */
-#define NUM_NODES		100
+#define NUM_NODES		512
 /* Number of bytees of index data used for tagging structs, prototypes etc */
 #define IDX_SIZE		2560
 /* Maximum number of goto labels per function (not switches), 4 bytes each */
-#define MAXLABEL		16
+#define MAXLABEL		256
 /* Maximum number of fields per structure, 6 bytes per entry on stack, per
    recursive struct definition */
 #define NUM_STRUCT_FIELD	50

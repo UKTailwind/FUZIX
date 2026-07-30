@@ -58,6 +58,29 @@ every FCC target, not just ours:
 * `int (*fp)()` matches no prototype; `&func` gets incremented to
   pointer-to-pointer by `typeconv`
 
+Found 2026-07-30 by the mmb2c phase 0 work (each bisected to a minimal
+repro with gcc as oracle, each fixed on `pc3`, none yet branched):
+
+* **constant comparison folding** — `T_GT` and `T_GTEQ` in tree.c's
+  folder compute `<`, a copy-paste of the `T_LT` case.  `4 >= 5` folds
+  to 1.  Shared front end, affects every target.  Check the kit too.
+* **cast of a sub-array** — `(char *)two[1]` with `char two[5][257]`
+  loads the row's first four bytes as the pointer value.  make_rval
+  leaves a sub-array flagged LVAL and the cast treats it as an object.
+  Fixed by clearing LVAL, same as the whole-array case.
+* **pointer-to-array parameter** — `type_canonical` decays
+  `char (*a)[257]` as if it were an array, so the row size is lost and
+  every `a[i]` addresses row 0.  Guarded with the PTR-vs-dimensions
+  test make_rval already uses.  (Follow-on: passing an uncast 2-D
+  array where `char (*)[N]` is expected now wants an explicit cast;
+  type_pointerconv doesn't know the decay equivalence.)
+
+bcrun (ours, but the vendored FUZIX copy shares it): `lib_eqop` never
+handled the size-8 forms — `x /= 16` on a long long read and wrote 32
+bits.  Plus capacity limits raised for real programs: NUM_NODES,
+MAXLABEL (16 was too small for GOSUB return switches), CODEMAX,
+DATAMAX, MAXSYM, STRMAX.
+
 Optional, needs a judgement call: the `i_open`/`i_alloc` diagnostics
 and free-list validation from `27a82379f`. The *diagnostic* half is
 clearly worth it - the bare "i_open: bad disk inode" becomes ENFILE,

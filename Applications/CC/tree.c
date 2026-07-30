@@ -229,6 +229,16 @@ struct node *make_rval(struct node *n)
 			 */
 			if (PTR(nt) > array_num_dimensions(nt))
 				return sf_tree(T_DEREF, NULL, n);
+			/*
+			 * A sub-array - "two[1]" of char two[5][257].  Like
+			 * the whole-array case above its value is its own
+			 * address, so nothing is loaded and it stops being
+			 * an lvalue.  Left marked LVAL, a cast wrapped round
+			 * it - "(char *)two[1]" - treated it as an object
+			 * and loaded the first four bytes of the row as the
+			 * pointer value.
+			 */
+			n->flags &= ~LVAL;
 #if 0
 			n = sf_tree(T_DEREF, NULL, n);
 			/* Decay to base type of array */
@@ -887,15 +897,15 @@ struct node *constify(struct node *n)
 			break;
 		case T_GT:
 			if (l->type & UNSIGNED)
-				value = value < r->value;
+				value = value > r->value;
 			else
-				value = (signed long)value < (signed long )r->value;
+				value = (signed long)value > (signed long )r->value;
 			break;
 		case T_GTEQ:
 			if (l->type & UNSIGNED)
-				value = value < r->value;
+				value = value >= r->value;
 			else
-				value = (signed long)value < (signed long )r->value;
+				value = (signed long)value >= (signed long )r->value;
 			break;
 		default:
 			return NULL;
