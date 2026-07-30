@@ -18,6 +18,8 @@ which is how the first, unscoped token was diagnosed.
 | [1262](https://codeberg.org/EtchedPixels/FUZIX/pulls/1262) | `cb-filesys-nfree-overrun` | **MERGED** ("Thanks") |
 | [1263](https://codeberg.org/EtchedPixels/FUZIX/pulls/1263) | `cb-devio-lru-wrap` | **MERGED** ("Thanks - nice find.") |
 | [1264](https://codeberg.org/EtchedPixels/FUZIX/pulls/1264) | `cb-libc-decisecond-units` | open. Alan queried the usleep half — wants "at least that long", i.e. `_pause(1)` for sub-tick. The patch already rounds up (`(us+99999)/100000`); [replied](https://codeberg.org/EtchedPixels/FUZIX/pulls/1264#issuecomment-20308342) clarifying, and offered to make `usleep(0)` pause a tick too if preferred. |
+| [1265](https://codeberg.org/EtchedPixels/FUZIX/pulls/1265) | `cb-libc-strtod` | strtod parsed fractions digit-reversed (".25"→0.52, ELKS 1995); exponent loop added one per digit; endptr NULL-guarded |
+| [1266](https://codeberg.org/EtchedPixels/FUZIX/pulls/1266) | `cb-armm0-double-math` | armm0 libm stopped partway through the double set: cos/__rem_pio2 unbuilt (sin unlinkable), tan/tanh absent from the tree. Adds them; __tan.c kernel maps the musl flag. **Note: upstream never had a broken tan — it had no tan; the musl/FreeBSD convention mix was introduced by our own earlier tan.c and only ever existed in our tree.** |
 
 Two of four merged the same day they were reviewed. Staggering worked;
 1262 (silent filesystem corruption) landed first as intended. The kit
