@@ -367,6 +367,40 @@ is the gap-closer.  The single-precision FPU (FPV5-SP) has the same
 kernel prerequisite and much less value here: MMFLOAT is double, so
 translated BASIC touches almost no single-precision.
 
+**DONE 2026-07-30.**  Library/libs gains dcp_double.S and
+dcp_conv_m33.S - the SDK's DCP aeabi routines and the pure-M33
+64-bit conversions, regenerated verbatim by dcp-sync.sh under a
+small local macro prelude (the __aeabi_l2d/ul2d/f2d set must come
+too: libgcc bundles them in one object with dadd, so any unresolved
+member drags all the soft doubles back in and collides).  These
+override libgcc purely by link order, so EVERY userland relink gets
+them - bbcbasic included.  Kernel: CPACR CP4 enable plus one RCMP to
+clear the stale-at-reset engaged flag (miss that and the wrappers'
+save path restores garbage state forever).  No context-switch save
+needed: the SDK wrappers are self-saving against interrupted use.
+
+**Results, PC3, all digit-identical to soft-float/host:** eclipse
+9.19 s -> **7.16 s** (past MicroPython's 8.77, runtime still
+interpreted bytecode); bbcbasic 1M-double-arith loop 15 s -> 9 s,
+100k SIN*COS 3 s -> 2 s.
+
+The hunt found a real latent compiler bug: cc2 emitted the
+double-typed BOOL on the *integer* result of a double comparison.
+Integer 1 read as a double is 5e-324 - a denormal - so exact
+soft-float said "true" by accident for years, and the DCP, which
+flushes denormals to zero, said "false": every compared condition in
+every bytecode program died.  Fixed twice over: BOOLD/LNOTD (and the
+float forms) in bcrun are now bit tests - identical IEEE semantics
+including NaN and -0.0, denormal-exact on any engine - and the
+backend's T_BOOL/T_BANG treat relational operands as the integers
+they are (is_boolish).  Debugging path of record: soft-float relink
+(ar d the dcp objects) bisects engine vs everything else in one run.
+
+Known DCP limitation, accepted: genuinely denormal user values
+compare as zero.  MMBasic arithmetic does not produce them in
+practice; anything that cares can BCRUN_BYTECODE=1... no - can link
+soft.  Documented here so nobody rediscovers it the hard way.
+
 ## Order of risk retirement
 
 Stages 1–3 are small and kill the unknowns (harness fidelity,

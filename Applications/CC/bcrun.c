@@ -2108,8 +2108,18 @@ static int64_t bc_exec(unsigned long entry)
 		case BC_GTD:	A = (dget(pop64()) >  dget(A)); break;
 		case BC_LED:	A = (dget(pop64()) <= dget(A)); break;
 		case BC_GED:	A = (dget(pop64()) >= dget(A)); break;
-		case BC_BOOLD:	A = (dget(A) != 0.0); break;
-		case BC_LNOTD:	A = (dget(A) == 0.0); break;
+		/*
+		 * Truthiness by bits, not by comparing against 0.0: shifting
+		 * out the sign leaves zero for +-0.0 and non-zero for
+		 * everything else including NaN, exactly IEEE's != 0.0 -
+		 * and unlike a real compare it is denormal-exact on every
+		 * engine.  The RP2350's DCP flushes denormals to zero, and
+		 * cc2 emitted BOOLD on the *integer* result of a double
+		 * comparison (int 1 = 5e-324, a denormal), so on the DCP
+		 * every comparison result died right here.
+		 */
+		case BC_BOOLD:	A = (((uint64_t)A << 1) != 0); break;
+		case BC_LNOTD:	A = (((uint64_t)A << 1) == 0); break;
 
 		case BC_ADDF:	A = fput(fget(pop()) + fget(A)); break;
 		case BC_SUBF:	A = fput(fget(pop()) - fget(A)); break;
@@ -2122,8 +2132,9 @@ static int64_t bc_exec(unsigned long entry)
 		case BC_GTF:	A = (fget(pop()) >  fget(A)); break;
 		case BC_LEF:	A = (fget(pop()) <= fget(A)); break;
 		case BC_GEF:	A = (fget(pop()) >= fget(A)); break;
-		case BC_BOOLF:	A = (fget(A) != 0.0f); break;
-		case BC_LNOTF:	A = (fget(A) == 0.0f); break;
+		/* same by-bits truthiness as BOOLD, for the same reasons */
+		case BC_BOOLF:	A = ((A & 0x7FFFFFFF) != 0); break;
+		case BC_LNOTF:	A = ((A & 0x7FFFFFFF) == 0); break;
 
 		case BC_I2D:	A = dput((double)A); break;
 		case BC_U2D:	A = dput((double)(uint64_t)A); break;

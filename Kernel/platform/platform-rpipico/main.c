@@ -118,6 +118,20 @@ void syscall_handler(struct svc_frame* eh)
 
 int main(void)
 {
+    /* Grant coprocessor 4 - the RP2350's double-precision DCP - to
+     * everything.  Userland's libc __aeabi_d* routines run on it; they
+     * are the SDK's self-saving wrappers, which save and restore an
+     * interrupted context's 24 bytes of DCP state on their own stack,
+     * so no context-switch support is needed here - only access.
+     * (CPACR field n is bits [2n+1:2n]; 0b11 = full access.) */
+    *(volatile uint32_t *)0xE000ED88 |= 3u << (2 * 4);
+    __asm volatile("dsb; isb");
+    /* The engaged flag is stale out of reset; the wrappers' PCMP test
+     * would forever take the save/restore path against garbage state.
+     * Reading via RCMP clears it - the SDK's runtime init does the
+     * same thing for the same reason. */
+    __asm volatile("mrc p4, #0, r0, c0, c0, #1" : : : "r0");
+
 #ifdef PC3_SYS_CLOCK_KHZ
     /* Pico Computer 3: raise clk_sys before anything derives a divisor
      * from it (uart, spi). clk_peri follows clk_sys, as in the PC3's

@@ -862,6 +862,26 @@ static unsigned isdouble(unsigned t)
 	return BASE_TYPE(t) == DOUBLE;
 }
 
+/* Operators whose result in A is already an integer 0 or 1, whatever
+   the operand types were. */
+static unsigned is_boolish(unsigned op)
+{
+	switch (op) {
+	case T_EQEQ:
+	case T_BANGEQ:
+	case T_LT:
+	case T_GT:
+	case T_LTEQ:
+	case T_GTEQ:
+	case T_BOOL:
+	case T_BANG:
+	case T_ANDAND:
+	case T_OROR:
+		return 1;
+	}
+	return 0;
+}
+
 static unsigned isfp(unsigned t)
 {
 	return !PTR(t) && !IS_INTARITH(t) && IS_ARITH(t);
@@ -1149,6 +1169,18 @@ unsigned gen_node(struct node *n)
 	case T_BANG:
 		{
 			unsigned ot = n->right ? n->right->type : n->type;
+			/*
+			 * A relational or logical operand already left an
+			 * integer 0/1 in A whatever its declared type says,
+			 * so the value must be tested as an integer.  The
+			 * floating forms reinterpreted the bit pattern: int
+			 * 1 read as a double is 5e-324, a denormal - "true"
+			 * under exact soft-float by accident, zero on the
+			 * RP2350's flush-to-zero DCP, where every compared
+			 * condition went false.
+			 */
+			if (n->right && is_boolish(n->right->op))
+				ot = CINT;
 			if (isfp(ot)) {
 				cbyte(isdouble(ot) ? BC_LNOTD : BC_LNOTF);
 				return 1;
@@ -1159,6 +1191,9 @@ unsigned gen_node(struct node *n)
 	case T_BOOL:
 		{
 			unsigned ot = n->right ? n->right->type : n->type;
+			/* see T_BANG */
+			if (n->right && is_boolish(n->right->op))
+				ot = CINT;
 			if (isfp(ot)) {
 				cbyte(isdouble(ot) ? BC_BOOLD : BC_BOOLF);
 				return 1;

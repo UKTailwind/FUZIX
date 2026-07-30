@@ -12,6 +12,10 @@ SRC_CRT0 = crt0_$(PLATFORM).S crt0nostdio_$(PLATFORM).S
 OBJ_CRT0 = $(SRC_CRT0:.S=.o)
 SRC_ASM = setjmp_armm0.S longjmp_armm0.S helpers_armm0.S
 OBJ_ASM = $(SRC_ASM:.S=.o)
+# Double precision on the RP2350's DCP coprocessor; overrides libgcc's
+# soft-float __aeabi_d* by link order.  Regenerate from pico-sdk with
+# dcp-sync.sh.
+OBJ_DCP = dcp_double.o dcp_conv_m33.o
 SRC_C =  __argv.c abort.c accept.c aes256.c asctime.c asctime_r.c assert.c atexit.c
 SRC_C += basename.c bcmp.c bcopy.c bind.c bsearch.c bzero.c
 SRC_C += calloc.c cfree.c clock.c closedir.c
@@ -107,7 +111,7 @@ OBJ_CT = $(SRC_CT:.c=.o)
 OBJ_RL = $(SRC_RL:.c=.o)
 OBJ_LM = $(SRC_LM:.c=.o)
 OBJ_HARD = $(SRC_HARD:.c=.o)
-OBJ_ALL = $(OBJ_ASM) $(OBJ_C) $(OBJ_LM) $(OBJ_HARD) $(OBJ_RL)
+OBJ_ALL = $(OBJ_ASM) $(OBJ_DCP) $(OBJ_C) $(OBJ_LM) $(OBJ_HARD) $(OBJ_RL)
 
 all: syslib$(PLATFORM).lib liberror.txt $(OBJ_CRT0) curses$(PLATFORM).lib \
      readline$(PLATFORM).lib termcap$(PLATFORM).lib m$(PLATFORM).lib
@@ -164,6 +168,12 @@ $(OBJ_ASM):%.o: %.s
 
 $(OBJ_CRT0):%.o: %.S
 	$(CC) $(ASM_OPT) -c -o $@ $(@:.o=.S)
+
+dcp_double.o: dcp_double.S dcp_prelude.inc.S dcp_instr.inc.S dcp_canned.inc.S
+	$(CC) $(ASM_OPT) -c -o $@ dcp_double.S
+
+dcp_conv_m33.o: dcp_conv_m33.S dcp_prelude.inc.S dcp_instr.inc.S dcp_canned.inc.S
+	$(CC) $(ASM_OPT) -c -o $@ dcp_conv_m33.S
 
 $(OBJ_C):%.o: %.c
 	$(CC) $(CC_OPT) $(@:.o=.c)
