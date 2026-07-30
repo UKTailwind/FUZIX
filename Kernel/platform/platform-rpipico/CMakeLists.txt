@@ -114,3 +114,19 @@ pico_set_double_implementation(fuzix none)
 pico_add_linker_script_override_path(fuzix ${CMAKE_CURRENT_LIST_DIR}/linker_overrides)
 pico_add_extra_outputs(fuzix)
 
+# The dhara flash disk starts at FLASH_OFFSET (globals.h).  If the
+# kernel image reaches it, dhara's journal "repair" erases the image's
+# own tail on first boot and the board is dead until reflashed - found
+# the hard way when the kernel outgrew the old 96K offset.  Refuse to
+# build an image that can eat itself.
+add_custom_command(TARGET fuzix POST_BUILD
+	COMMAND sh -c "sz=$(stat -c %s fuzix.bin); lim=$((512*1024)); \
+		if [ $sz -ge $lim ]; then \
+			echo \"fuzix.bin ($sz bytes) reaches FLASH_OFFSET ($lim): the flash disk would erase the kernel image. Raise FLASH_OFFSET in globals.h.\"; \
+			exit 1; \
+		else \
+			echo \"flash footprint: $sz of $lim bytes ($((100*sz/lim))% of FLASH_OFFSET)\"; \
+		fi"
+	VERBATIM
+	WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+

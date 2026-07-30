@@ -1,7 +1,24 @@
 #ifndef GLOBALS_H
 #define GLOBALS_H
 
-#define FLASH_OFFSET (96*1024)
+/*
+ *	Where the dhara flash disk begins, and therefore the hard ceiling
+ *	on the kernel image's flash footprint.
+ *
+ *	This was 96K, and the kernel quietly grew past it.  The result
+ *	was the nastiest failure mode this port has had: dhara's resume
+ *	found the kernel's own code where its journal should be, "repaired"
+ *	the journal by erasing those blocks - on the FIRST boot after
+ *	flashing - and the ROM's next attempt to load the image found it
+ *	mutilated.  The board then looked bricked: reset and power cycle
+ *	both dead (the damage is persistent), only a reflash reviving it,
+ *	and that only until the next boot re-ate the tail.
+ *
+ *	512K leaves the ~100K image five-fold headroom, and CMakeLists
+ *	fails the build outright if fuzix.bin ever reaches this offset,
+ *	so the overlap can never come back silently.
+ */
+#define FLASH_OFFSET (512*1024)
 
 extern void flash_dev_init(void);
 extern void sd_rawinit(void);
