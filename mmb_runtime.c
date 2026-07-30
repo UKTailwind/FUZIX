@@ -38,9 +38,45 @@ char *mm_tmp(void)
     return p;
 }
 
-unsigned mm_mark(void) { return mm_pool_top; }
+/* By-reference arguments built from expressions, for compilers with no
+ * compound literals (mmb2c --fcc).  A stack, not a ring: the value must
+ * stay live for the whole duration of the call it was built for, and
+ * that call's body may build arbitrarily many more of them - a SUB that
+ * received one can run for a long time.  It winds back with the same
+ * mark/release the string temporaries use, so both stack tops travel
+ * packed in the one mark word and the generated code never changes. */
+static union {
+    MMFLOAT   f;
+    MMINTEGER i;
+} mm_byref_pool[MM_BYREFN];
+static unsigned mm_byref_top = 0;
 
-void mm_release(unsigned mark) { mm_pool_top = mark; }
+unsigned mm_mark(void)
+{
+    return (mm_byref_top << 16) | (mm_pool_top & 0xFFFF);
+}
+
+void mm_release(unsigned mark)
+{
+    mm_pool_top  = mark & 0xFFFF;
+    mm_byref_top = mark >> 16;
+}
+
+MMFLOAT *mm_byref_f(MMFLOAT v)
+{
+    if (mm_byref_top >= MM_BYREFN)
+        mm_error("Expression too complex - raise MM_BYREFN");
+    mm_byref_pool[mm_byref_top].f = v;
+    return &mm_byref_pool[mm_byref_top++].f;
+}
+
+MMINTEGER *mm_byref_i(MMINTEGER v)
+{
+    if (mm_byref_top >= MM_BYREFN)
+        mm_error("Expression too complex - raise MM_BYREFN");
+    mm_byref_pool[mm_byref_top].i = v;
+    return &mm_byref_pool[mm_byref_top++].i;
+}
 
 /* ================= core string ops ================================= */
 
@@ -740,14 +776,37 @@ static const char *mm_daynames[8] = { "", "Monday", "Tuesday", "Wednesday",
 extern MMINTEGER mm_clock_offset(void);
 MMINTEGER mm_epoch_now(void) { return (MMINTEGER)time(NULL) + mm_clock_offset(); }
 
+/* civil from days (Howard Hinnant's algorithm) - the inverse of
+ * mm_days_from_civil below.  Doing the calendar ourselves rather than
+ * through gmtime() keeps the runtime off struct tm, which the Fuzix
+ * bytecode world does not have, and makes the answers identical on
+ * every platform. */
+static void mm_civil_from_days(long long z, int *y, int *m, int *d)
+{
+    long long era, doe, yoe, doy, mp, yy;
+    z += 719468;
+    era = (z >= 0 ? z : z - 146096) / 146097;
+    doe = z - era * 146097;
+    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    yy = yoe + era * 400;
+    doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    mp = (5 * doy + 2) / 153;
+    *d = (int)(doy - (153 * mp + 2) / 5 + 1);
+    *m = (int)(mp + (mp < 10 ? 3 : -9));
+    *y = (int)(yy + (*m <= 2));
+}
+
 static void mm_break_epoch(MMINTEGER e, int *Y, int *M, int *D,
                            int *h, int *m, int *s, int *wd)
 {
-    time_t tt = (time_t)e;
-    struct tm *tm = gmtime(&tt);
-    *Y = tm->tm_year + 1900; *M = tm->tm_mon + 1; *D = tm->tm_mday;
-    *h = tm->tm_hour; *m = tm->tm_min; *s = tm->tm_sec;
-    *wd = tm->tm_wday ? tm->tm_wday : 7;
+    long long days = (e >= 0 ? e : e - 86399) / 86400;
+    long long sec = e - days * 86400;
+    mm_civil_from_days(days, Y, M, D);
+    *h = (int)(sec / 3600);
+    *m = (int)((sec / 60) % 60);
+    *s = (int)(sec % 60);
+    /* 1970-01-01 was a Thursday; 1 = Monday .. 7 = Sunday */
+    *wd = (int)(((days + 3) % 7 + 7) % 7) + 1;
 }
 
 /* days from civil (Howard Hinnant's algorithm) - avoids timegm */
@@ -761,6 +820,27 @@ static long long mm_days_from_civil(int y, int m, int d)
     doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
     doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     return era * 146097 + doe - 719468;
+}
+
+/* "h:m[:s]" -> fields; how many were parsed.  Replaces sscanf, which
+ * neither MSVC (deprecation) nor the Fuzix bytecode runtime is happy
+ * with, and this is the only scanning the runtime ever did. */
+static int mm_parse_hms(const char *q, int *h, int *m, int *s)
+{
+    int n = 0;
+    int *out[3];
+    out[0] = h; out[1] = m; out[2] = s;
+    while (n < 3) {
+        int v = 0, got = 0;
+        while (*q == ' ') q++;
+        while (*q >= '0' && *q <= '9') { v = v * 10 + (*q++ - '0'); got = 1; }
+        if (!got)
+            break;
+        *out[n++] = v;
+        if (*q == ':') q++;
+        else break;
+    }
+    return n;
 }
 
 /* accepts "dd-mm-yyyy[ hh:mm:ss]", "dd-mm-yy...", "yyyy-mm-dd..."  and
@@ -783,7 +863,7 @@ MMINTEGER mm_epoch_str(const char *ds)
     a = vals[0]; b = vals[1]; c = vals[2];
     while (*q == ' ') q++;
     if (*q) {
-        if (sscanf(q, "%d:%d:%d", &h, &mi, &se) < 2) { h = mi = se = 0; }
+        if (mm_parse_hms(q, &h, &mi, &se) < 2) { h = mi = se = 0; }
     }
     if (a > 1000) { y = a; m = b; d = c; }
     else          { d = a; m = b; y = c; }
@@ -966,8 +1046,11 @@ void mm_open(const char *fname, int mode, MMINTEGER fnbr)
     f = fopen(mm_cstr(fname), m);
     if (!f && mode == MM_F_RANDOM) f = fopen(mm_cstr(fname), "w+b");
     if (!f) {
+        /* an MMBasic string is at most MM_STRLEN bytes, so this cannot
+           overrun and needs no snprintf */
         static char msg[MM_STRLEN + 32];
-        snprintf(msg, sizeof msg, "Cannot open %s", mm_cstr(fname));
+        strcpy(msg, "Cannot open ");
+        strcat(msg, mm_cstr(fname));
         mm_error(msg);
     }
     if (mode == MM_F_RANDOM) fseek(f, 0, SEEK_END); /* "positioned at the
@@ -1034,14 +1117,29 @@ void mm_fpr_tab(MMINTEGER fnbr) { mm_outc(fnbr, '\t'); }
 MMINTEGER mm_eof(MMINTEGER fnbr)
 {
     FILE *f;
+#ifdef MM_FCC
+    long here, end;
+#else
     int c;
+#endif
     if (fnbr == 0) return 0;
     f = mm_ch(fnbr, 0)->f;
+#ifdef MM_FCC
+    /* The bytecode runtime's files are plain descriptors with no
+       pushback, but on Fuzix they are all seekable: EOF is simply "at
+       or past the end". */
+    here = ftell(f);
+    fseek(f, 0, SEEK_END);
+    end = ftell(f);
+    fseek(f, here, SEEK_SET);
+    return here >= end;
+#else
     c = fgetc(f);                       /* feof() only latches after a
                                            failed read, so peek instead */
     if (c == EOF) return 1;
     ungetc(c, f);
     return 0;
+#endif
 }
 
 MMINTEGER mm_loc(MMINTEGER fnbr)
@@ -1616,9 +1714,21 @@ MM_STAT_BODY(f, MMFLOAT)
 
 /* ================= misc Tier A ===================================== */
 
+#ifdef MM_FCC
+/* Microseconds since start, native in the bytecode interpreter: the
+ * PC3 kernel's clock on the board, gettimeofday on the development
+ * machine.  31 bits, so TIMER wraps after about 35 minutes - known
+ * phase 0 limitation. */
+long time_us();
+#endif
+
 void mm_pause(MMFLOAT ms)
 {
-#if defined(_POSIX_C_SOURCE) && !defined(_WIN32)
+#ifdef MM_FCC
+    long end = time_us() + (long)(ms * 1000.0);
+    if (ms < 0) return;
+    while (time_us() < end) { }
+#elif defined(_POSIX_C_SOURCE) && !defined(_WIN32)
     struct timespec ts;
     if (ms < 0) ms = 0;
     ts.tv_sec  = (time_t)(ms / 1000.0);
@@ -1643,7 +1753,11 @@ MMINTEGER mm_clock_offset(void) { return mm_clock_off; }
 
 static MMINTEGER mm_ms_now(void)
 {
+#ifdef MM_FCC
+    return (MMINTEGER)(time_us() / 1000);
+#else
     return (MMINTEGER)((double)clock() * 1000.0 / (double)CLOCKS_PER_SEC);
+#endif
 }
 
 void mm_timer_set(MMINTEGER ms) { mm_timer_base = mm_ms_now() - ms; }
@@ -1663,7 +1777,7 @@ void mm_set_time(const char *t)
     MMINTEGER now = mm_epoch_now();
     MMINTEGER day = now - (now % 86400);
     int h = 0, m = 0, sec = 0;
-    sscanf(mm_cstr(t), "%d:%d:%d", &h, &m, &sec);
+    mm_parse_hms(mm_cstr(t), &h, &m, &sec);
     mm_clock_off += (day + h * 3600 + m * 60 + sec) - now;
 }
 

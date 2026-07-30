@@ -51,6 +51,18 @@ char    *mm_tmp(void);              /* push a scratch buffer, set to "" */
 unsigned mm_mark(void);             /* current top of the scratch stack */
 void     mm_release(unsigned mark); /* pop back down to 'mark'          */
 
+/* Park a value and return its address: how a by-reference argument is
+ * built from an expression on a compiler with no compound literals
+ * (mmb2c --fcc).  A stack wound back by the same mark/release as the
+ * string temporaries, so the value lives exactly as long as the call
+ * statement it was built for - however long the callee runs.  At most
+ * MM_BYREFN can be live at once (call nesting x by-ref args).        */
+#ifndef MM_BYREFN
+#define MM_BYREFN 16
+#endif
+MMFLOAT   *mm_byref_f(MMFLOAT v);
+MMINTEGER *mm_byref_i(MMINTEGER v);
+
 /* ---- core string ops ---------------------------------------------- */
 #define mm_slen(s)  ((int)(unsigned char)(s)[0])
 #define mm_cstr(s)  ((const char *)((s) + 1))   /* NUL-terminated view  */

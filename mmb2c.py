@@ -356,6 +356,10 @@ class Conv(object):
         self.data = []                # DATA items, in program order
         self.data_at = {}             # label -> index of the next DATA item
         self.lenient = True           # comment out what cannot be translated
+        self.fcc = False              # C89 output for the Fuzix C compiler:
+                                      # no compound literals - hoisted bounds
+                                      # tables and mm_byref instead
+        self.bnd_tables = {}          # array acc -> (table name, dims text)
         self.skipped = []             # (line, source text, reason)
         self.labels_used = {}         # labels that some GOTO targets
         self.label_depth = {}         # block nesting where a label sits
@@ -864,9 +868,20 @@ class Conv(object):
                 bnd = '__b_' + s.name.replace('.', '__')
                 base = s.acc
             else:
-                bnd = ('(const MMINTEGER[]){ %d, %s }'
-                       % (len(s.dims),
-                          ', '.join('(%s) - 1' % d for d in s.dims)))
+                body = ('%d, %s'
+                        % (len(s.dims),
+                           ', '.join('(%s) - 1' % d for d in s.dims)))
+                if self.fcc:
+                    # FCC has no compound literals; the contents are
+                    # compile-time constant, so hoist one static table
+                    # per array to file scope instead.
+                    if s.acc not in self.bnd_tables:
+                        self.bnd_tables[s.acc] = ('__bnd_%d'
+                                                  % len(self.bnd_tables),
+                                                  body)
+                    bnd = self.bnd_tables[s.acc][0]
+                else:
+                    bnd = '(const MMINTEGER[]){ %s }' % body
                 # flatten, so the callee can index any rank it likes
                 if s.ty == TY_S:
                     base = '(char (*)[MM_STRSZ])%s' % s.acc
@@ -907,6 +922,11 @@ class Conv(object):
             v = a[2]
             val = self.as_int(v) if p.ty == TY_I else self.as_flt(v)
         if p.byref:
+            if self.fcc:
+                # No compound literals in FCC: the runtime parks the value
+                # in a small ring of scratch slots and returns its address.
+                return 'mm_byref_%s(%s)' % ('i' if p.ty == TY_I else 'f',
+                                            val)
             return '(%s[]){ %s }' % (ct, val)
         return '(' + val + ')'
 
@@ -3312,6 +3332,13 @@ class Conv(object):
         wr('\n/* ---- global variables ---- */\n')
         for ln in self.global_decls():
             wr(ln + '\n')
+        if self.bnd_tables:
+            wr('\n/* ---- array bounds tables (FCC has no compound'
+               ' literals) ---- */\n')
+            tabs = list(self.bnd_tables.values())
+            tabs.sort()
+            for name, body in tabs:
+                wr('static const MMINTEGER %s[] = { %s };\n' % (name, body))
         if self.data:
             wr('\n/* ---- DATA items ---- */\n')
             wr('static const MMDataItem __mmb_data[] = {\n')
@@ -3359,7 +3386,7 @@ def _const_fixup(conv):
             s.acc = cvar(nm)
 
 
-def convert(inpath, outpath=None, report=False, lenient=True):
+def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
     lines = []
     f = open(inpath, 'r')
     try:
@@ -3373,6 +3400,7 @@ def convert(inpath, outpath=None, report=False, lenient=True):
 
     conv = Conv(lines, inpath)
     conv.lenient = lenient
+    conv.fcc = fcc
     conv.pass_routine_names()
     conv.pass_declarations()
     conv.walk('scan')
@@ -3425,6 +3453,7 @@ def main(argv):
     dst = None
     rep = False
     strict = False
+    fcc = False
     k = 1
     while k < len(argv):
         a = argv[k]
@@ -3435,20 +3464,25 @@ def main(argv):
             rep = True
         elif a == '--strict':
             strict = True
+        elif a == '--fcc':
+            fcc = True
         elif a in ('-h', '--help'):
             print("usage: mmb2c.py source.bas [-o out.c] [--report] "
-                  "[--strict]")
+                  "[--strict] [--fcc]")
             print("  --report  list implied globals and skipped lines")
             print("  --strict  stop on anything that cannot be translated,")
             print("            instead of commenting it out and carrying on")
+            print("  --fcc     C89 output for the Fuzix C compiler: no")
+            print("            compound literals")
             return 0
         else:
             src = a
         k += 1
     if src is None:
-        print("usage: mmb2c.py source.bas [-o out.c] [--report] [--strict]")
+        print("usage: mmb2c.py source.bas [-o out.c] [--report] [--strict] "
+              "[--fcc]")
         return 1
-    out = convert(src, dst, rep, not strict)
+    out = convert(src, dst, rep, not strict, fcc)
     if out is None:
         return 2
     print("wrote " + out)
