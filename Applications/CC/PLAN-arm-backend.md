@@ -1,0 +1,223 @@
+# The Thumb backend, incrementally — rung 3 working plan
+
+2026-07-30.  Decision taken: skip rung 2 (load-time translation) and go
+straight to a real cc2 Thumb backend in mixed mode.  Rationale in
+PLAN-native-backend.md; this is the execution plan.  The ladder doc's
+job was "is this feasible in increments"; this doc's job is "what is
+the next commit".
+
+## The shape of the thing
+
+One new file, `backend-thumb.c`, cloned from `backend-bcode.c` and
+sharing everything except the code bytes: same object format (FBC1),
+same data/literal segments, same symbols, fixups, labels and backpatch
+machinery, same gen_* API driven by the same backend.c tree walker.
+cc1 is untouched — target-thumb.c already models the ARM types.
+
+Mixed mode is the increment mechanism: the emitter compiles a function
+natively only if it meets the current coverage list, otherwise
+re-emits it as bytecode.  Both kinds live in one object's code
+segment; interpreted and native functions call each other freely.
+Coverage widens one construct at a time, and at every point in between
+the whole test suite runs and passes.
+
+Native code keeps the interpreter's machine model deliberately:
+
+* the VM stack in mem[] stays the stack — args, locals, temporaries.
+  Callers push args the same way whichever kind of function they call,
+  which is what makes mixing free.  The real machine stack is used
+  only for BL return addresses within native code.
+* program addresses stay 32-bit offsets into mem[]; native code keeps
+  the mem base in a register and addresses with `[base, offset]`.
+* A stays the value home: returned in r0/r1 (low/high, doubles as
+  bit patterns) exactly as the interpreter's A.
+* anything not yet inlined is a BL into a helper — and the helpers are
+  the interpreter's own case bodies, extracted.  So the first native
+  function body is correct by construction, and speed comes from
+  replacing helper calls with inline Thumb, one opcode at a time.
+  (This is rung 2's one good idea, relocated to compile time where the
+  branch-remapping problem disappears — cc2 already has labels and
+  fixups.)
+
+Register plan (fixed for the life of the design, so helpers and
+emitted code agree):
+
+	r0/r1	A (value / value:high), scratch, arg to helpers
+	r2/r3	scratch
+	r4	vsp — the VM stack pointer, as a native pointer
+	r5	helper vector base
+	r6	mem[] base
+	r7	scratch / future use
+	sp	real machine stack: BL frames only
+
+r4–r6 are callee-saved in AAPCS, so helpers written in C preserve
+them for free.  vsp lives in a register as a native pointer, not an
+offset, because it is touched constantly; it is written back to the
+interpreter's `sp` (offset form) only at the boundaries.
+
+## The seam: how the two worlds call each other
+
+The frame layout is identical for both kinds of callee — that is the
+whole trick.  A caller (either kind) pushes args on the VM stack, then
+one slot for the return-pc, then transfers control.  A bytecode callee
+BC_RETs through that slot; a native callee ignores it and its
+trampoline pops it.  Offsets baked into BC_LOCAL / native equivalents
+are the same either way.
+
+Function entry gets a marker: the first code byte of a native function
+is a new pseudo-op, `BC_NATIVE` (0xF0), followed by padding to 2-byte
+alignment, then Thumb code.  Dispatch is then one byte-test:
+
+* **bytecode calls X**: BC_CALL/BC_CALLA look at `code[X]`.  Marker
+  absent: push pc, jump — exactly today.  Marker present: push the
+  sentinel into the return-pc slot, load the register file (vsp, mem
+  base, helper base), BLX into the Thumb entry, write A back, pop the
+  slot, continue at the next bytecode.
+* **native calls X**: every call site BLs a `call_target` trampoline
+  with X in r0.  Marker present: tail-call it.  Absent: save pc, push
+  sentinel, run the interpreter loop until it hits the sentinel RET
+  (the existing 0xFFFFFFFF mechanism — made re-entrant by saving and
+  restoring the loop's pc), restore, return with A.
+
+Uniform indirection at every native call site costs a few cycles and
+buys total freedom over which functions are native — no fixup
+distinguishes the cases, and the emitter never needs to know what a
+callee compiled to (it may not have seen it yet).  Direct BL between
+known-native pairs is a stage-8 peephole, not a design requirement.
+
+Helpers get no per-site fixups either: the loader fills a word table
+(helper vector, base in r5) and native code does
+`ldr r3, [r5, #idx*4]; blx r3`.  BC_LIBCALL from native code is the
+same thing via a `native_libcall(idx)` helper, so printf, libm and the
+mm runtime need nothing new.
+
+Object format: unchanged except the marker byte inside code, and
+`h_pad` becomes `h_flags` with bit 0 = "contains native code", so an
+old interpreter rejects a mixed object at load with a clear message
+instead of faulting on 0xF0 mid-run.
+
+## Instruction-set notes (decided up front, so they never surprise)
+
+* Thumb-2 as ARMv7-M: everything ARMv8-M mainline (M33) executes, and
+  it also runs under qemu-arm on any Cortex-A.  No FPU instructions
+  ever — doubles go through helpers, where the real work (aeabi
+  soft-float inside bcrun) already happens; that is why the eclipse
+  only stands to gain ~12% from floats but far more from dispatch.
+* Constants via movw/movt, never literal pools — no pool placement,
+  no 4-byte alignment islands, no pc-relative loads to get wrong.
+* All code 2-byte aligned; BLX targets carry bit 0 (Thumb bit).
+* Bounds checking: native loads/stores do not bounds-check (the
+  interpreter's rd/wr do).  This is the one semantic divergence;
+  the differential harness compares *output*, not faults, and a debug
+  build can route loads/stores through helpers to restore checking.
+
+## Stages
+
+Each stage ends green: conformance suite + mmb2c suite, differential
+where applicable, before the next begins.
+
+**Stage 0 — prerequisite, independent: mm runtime into bcrun.**
+Phase 1's outstanding move (mmb2c repo, fcc/PLAN-fuzix.md): the mm_*
+runtime becomes native libcalls, translated programs shrink ~93K→~20K.
+Wanted regardless, and it means the backend only ever compiles *user*
+code — the runtime never round-trips through Thumb emission.
+
+**Stage 1 — harness before backend.**  A `Makefile.qemu` building
+bcrun with arm-linux-gnueabihf-gcc (static, -marm/-mthumb irrelevant
+for bcrun itself; what matters is that emitted Thumb-2 runs in the
+process) and a differential runner: every .bc executed under native
+bcrun (host reference) and qemu bcrun, stdout byte-compared.  Run the
+whole existing suite through it *interpreted* first — proves the
+harness with zero new code in the loop.  (The Fuzix cross build can't
+run under qemu-arm — Linux user emulation supplies Linux syscalls —
+hence a third bcrun build.  Board remains the final gate.)
+Setup, checked 2026-07-30: arm-none-eabi-as/objdump are present in
+WSL; `qemu-user` and `gcc-arm-linux-gnueabihf` are not — one apt
+install before stage 1 starts.
+
+**Stage 2 — the seam, with no native code yet.**  BC_NATIVE defined;
+h_flags; `bc_exec()` made re-entrant (save/restore pc); call dispatch
+factored so BC_CALL/BC_CALLA go through one `call_target` path.  No
+emitter changes; the marker is never generated.  Everything still
+passes — this stage is pure refactor and lands first because it
+touches the interpreter, which is trusted and tested.
+
+**Stage 3 — one hand-written native function.**  Before cc2 learns
+anything: hand-assemble (`arm-none-eabi-as` or a 20-line Python
+encoder) the body of `int add2(int a, int b)` reading args off the VM
+stack per the frame layout, patch it into a .bc by hand, run it under
+qemu and *on the board*.  ~50 lines total, and it retires every real
+unknown at once: the register file, the trampolines both directions,
+frame-slot arithmetic, executable-RAM on Fuzix (checks any MPU
+surprise), bit-0 interworking.  If anything about the design is wrong,
+it is wrong here, cheaply.
+
+**Stage 4 — backend-thumb.c v1: integer leaf functions.**  Clone
+backend-bcode.c; emit per-function into a side buffer; if the function
+trips anything outside coverage, throw the buffer away and re-emit
+bytecode (the bcode emitter is cheap; per-function two-pass is fine).
+v1 coverage — the integer core, each op a short inline sequence or a
+helper BL, in this order, validating after each:
+
+1. prologue/epilogue, BC_ENTER/LEAVE/RET equivalents, CONST via
+   movw/movt, LOCAL addressing, PUSH/POP on vsp
+2. LOAD/STORE at widths 1/2/4 (`ldrb/ldrsb/ldrh/ldrsh/ldr` + mem base)
+3. add/sub/and/or/xor/shifts inline; mul inline; div/rem via helper
+   (M33 has sdiv/udiv but the helper keeps v1 uniform)
+4. compares materialising 0/1 (ite or branch pair), BOOL, jumps and
+   conditional jumps to labels via the existing patch table
+5. everything else — calls, 64-bit, floats, switch, struct copy,
+   compound-assign helpers — trips the fallback
+
+Exit: the integer subset of the conformance suite runs with those
+functions native, differential-clean, and a loop-heavy microbenchmark
+shows the expected multiple.
+
+**Stage 5 — calls.**  Drop the leaf restriction: call sites become
+`movw/movt r0, target-fixup; bl call_target`, BC_ARGS becomes an add
+to vsp.  This is the stage where *most* real functions go native,
+because BASIC-translated code is call-dense.
+
+**Stage 6 — the wide types.**  64-bit ops (r0/r1 pairs where trivial —
+add/sub/logic — helpers where not: mul/div/shifts); then the
+double/float ops as pure helper BLs (BC_ADDD → `bl h_addd`); the
+conversions likewise.  After this stage the eclipse compiles fully
+native — first end-to-end timing against the 9.82 s interpreted mark.
+
+**Stage 7 — the tail.**  BC_SWITCH (helper reusing the interpreter's
+table walk), BC_COPY/BC_PUSHN (helper), the named compound-assign
+libcalls, CALLA for function pointers.  Coverage list empties; the
+bytecode fallback remains as the safety valve and the size lever.
+
+**Stage 8 — measured peepholes, only now.**  In expected-value order:
+compare+jfalse fusion (cmp + conditional branch, no 0/1
+materialisation); constants folded into operands (add imm) via
+gen_direct, which already presents them; redundant push/pop pairs
+around sequential ops; direct BL for intra-module known-native
+callees.  One peephole per commit, differential suite after each —
+this is where a naive stack transcription usually goes subtly wrong,
+so it waits until there is a trusted baseline to diff against.
+
+**Stage 9 — the board proper.**  BIG_TABLES sizing for native output
+(expect ~3–4× bytecode for covered code — CODEMAX and the on-board
+cc2 limits need re-checking); a size policy for mixed mode (native
+unless the code buffer would overflow, then largest-functions-first
+back to bytecode); SD image refresh; eclipse timing.  Target from the
+ladder doc: roughly 2–4 s.
+
+## Order of risk retirement
+
+Stages 1–3 are small and kill the unknowns (harness fidelity,
+re-entrancy, executable RAM, the ABI).  Stage 4 is the long grind but
+each step is mechanical against backend-bcode.c open in the other
+window.  Nothing after stage 3 should produce a surprise that isn't a
+plain emitter bug, and every emitter bug is caught by a differential
+run naming the first diverging output line.
+
+## What is deliberately not here
+
+No register allocation, no FPU use, no direct-threaded dispatch
+improvements to the interpreter (rungs 1–2 declined), no attempt to
+make native objects loadable by old bcruns.  And no board-side cc2
+work until stage 9 — development runs host-side, qemu for execution,
+the board for milestones.

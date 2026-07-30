@@ -1,6 +1,8 @@
 # From bytecode to machine code — the migration ladder
 
 2026-07-30.  Analysis locked in ahead of a decision on next steps.
+**Decision taken later the same day: rung 3 mixed mode, skipping rung
+2 — the staged execution plan is PLAN-arm-backend.md.**
 Context: the mmb2c pipeline runs real programs on the PC3 under bcrun
 (solar eclipse 9.82 s vs MMBasic's 12.5 s, MicroPython's 8.77 s), and
 the intention is native ARM output eventually.  The question was
