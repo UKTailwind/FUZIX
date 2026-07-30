@@ -18,13 +18,28 @@ which is how the first, unscoped token was diagnosed.
 | [1262](https://codeberg.org/EtchedPixels/FUZIX/pulls/1262) | `cb-filesys-nfree-overrun` | **MERGED** ("Thanks") |
 | [1263](https://codeberg.org/EtchedPixels/FUZIX/pulls/1263) | `cb-devio-lru-wrap` | **MERGED** ("Thanks - nice find.") |
 | [1264](https://codeberg.org/EtchedPixels/FUZIX/pulls/1264) | `cb-libc-decisecond-units` | open. Alan queried the usleep half — wants "at least that long", i.e. `_pause(1)` for sub-tick. The patch already rounds up (`(us+99999)/100000`); [replied](https://codeberg.org/EtchedPixels/FUZIX/pulls/1264#issuecomment-20308342) clarifying, and offered to make `usleep(0)` pause a tick too if preferred. |
-| [1265](https://codeberg.org/EtchedPixels/FUZIX/pulls/1265) | `cb-libc-strtod` | strtod parsed fractions digit-reversed (".25"→0.52, ELKS 1995); exponent loop added one per digit; endptr NULL-guarded |
-| [1266](https://codeberg.org/EtchedPixels/FUZIX/pulls/1266) | `cb-armm0-double-math` | armm0 libm stopped partway through the double set: cos/__rem_pio2 unbuilt (sin unlinkable), tan/tanh absent from the tree. Adds them; __tan.c kernel maps the musl flag. **Note: upstream never had a broken tan — it had no tan; the musl/FreeBSD convention mix was introduced by our own earlier tan.c and only ever existed in our tree.** |
+| [1265](https://codeberg.org/EtchedPixels/FUZIX/pulls/1265) | `cb-libc-strtod` | **CLOSED unmerged: the project does not accept AI-generated code** (copyright/provenance policy; our commits carry Co-Authored-By trailers, so this was transparent and the policy applied). The *report* was welcomed: Alan reviewed, found "about 10 other things wrong", and converted it to an issue — strtod is being rewritten upstream by him. The bug gets fixed either way. |
+| [1266](https://codeberg.org/EtchedPixels/FUZIX/pulls/1266) | `cb-armm0-double-math` | open, and effectively superseded in the best way: Alan is implementing the gap himself on the back of the report — tanf/truncf/tanh added from the Sun-derived originals, __rem_pio2 fixed for 8/16-bit targets, 64-bit imports on his TODO. Expect closure in favour of his commits. |
 
-Two of four merged the same day they were reviewed. Staggering worked;
-1262 (silent filesystem corruption) landed first as intended. The kit
-1.0-then-reimport plan means further *compiler* fixes should go to the
-kit, not this tree — the libc/kernel ones stay here.
+Three of six merged (1262, 1263, 1264 — the last after one round of
+clarification: "That argument makes total sense to me. Merged").
+1261 superseded by the kit-reimport plan as expected.
+
+**Policy, learned at 1265 and binding from here on: upstream does not
+accept AI-generated code** (copyright/provenance grounds — the same
+position several other projects have taken). Reports with test cases
+are explicitly welcome, and the outcomes show they work: strtod is
+being rewritten upstream off the back of ours, and 1266's math gaps
+are being filled by Alan from the Sun-derived originals.
+
+So the upstreaming model changes: **file issues with a minimal repro
+and a test case, not patches.** The queued branches
+(exec-stack-align, strchr-char, armm0-rules, init-baud, ucp-dirent,
+pico-r4-abi) and the new devsd CMD0-retry fix should be recast as
+issue reports; keep our fixes on pc3 regardless. The same policy
+presumably applies at the Compiler Kit — the cc1 findings
+(constant-fold GT/GTEQ, sub-array LVAL, pointer-to-array decay, K&R
+parameter declarations) go there as issues with repro cases.
 
 ## Pushed to the fork, NOT yet proposed
 
