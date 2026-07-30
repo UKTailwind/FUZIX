@@ -12,17 +12,17 @@ which is how the first, unscoped token was diagnosed.
 
 ## Open pull requests
 
-| PR | Branch | What |
+| PR | Branch | State (2026-07-30 evening) |
 |---|---|---|
-| [1261](https://codeberg.org/EtchedPixels/FUZIX/pulls/1261) | `cb-fcc-trim-constant` | `trim_constant` never trimmed anything — [commented](https://codeberg.org/EtchedPixels/FUZIX/pulls/1261#issuecomment-20300521) that the fix already exists in the compiler kit and a vendored-copy resync may be preferred |
-| [1262](https://codeberg.org/EtchedPixels/FUZIX/pulls/1262) | `cb-filesys-nfree-overrun` | `sizeof(int)` overrun onto `s_ninode` |
-| [1263](https://codeberg.org/EtchedPixels/FUZIX/pulls/1263) | `cb-devio-lru-wrap` | LRU wrap panics with the pool free |
-| [1264](https://codeberg.org/EtchedPixels/FUZIX/pulls/1264) | `cb-libc-decisecond-units` | `usleep()` <100ms hangs; `clock_gettime` sub-seconds |
+| [1261](https://codeberg.org/EtchedPixels/FUZIX/pulls/1261) | `cb-fcc-trim-constant` | open. Alan confirmed the vendored copy is an old snapshot ("imported to test how well it worked on an 8bit micro and do some profiling"); he is polishing the kit to a **1.0 release and will re-import** — blockers he named: the optimizer doesn't fit in 64K yet, and the kit's make lacks % rules. Expect this PR to be superseded by the resync. |
+| [1262](https://codeberg.org/EtchedPixels/FUZIX/pulls/1262) | `cb-filesys-nfree-overrun` | **MERGED** ("Thanks") |
+| [1263](https://codeberg.org/EtchedPixels/FUZIX/pulls/1263) | `cb-devio-lru-wrap` | **MERGED** ("Thanks - nice find.") |
+| [1264](https://codeberg.org/EtchedPixels/FUZIX/pulls/1264) | `cb-libc-decisecond-units` | open. Alan queried the usleep half — wants "at least that long", i.e. `_pause(1)` for sub-tick. The patch already rounds up (`(us+99999)/100000`); [replied](https://codeberg.org/EtchedPixels/FUZIX/pulls/1264#issuecomment-20308342) clarifying, and offered to make `usleep(0)` pause a tick too if preferred. |
 
-All four reported mergeable at creation. Deliberately staggered: nine
-PRs at once from a new account is a lot to land on a maintainer, and
-1262 is the most consequential (silent filesystem corruption) so it
-wanted to arrive while attention was fresh.
+Two of four merged the same day they were reviewed. Staggering worked;
+1262 (silent filesystem corruption) landed first as intended. The kit
+1.0-then-reimport plan means further *compiler* fixes should go to the
+kit, not this tree — the libc/kernel ones stay here.
 
 ## Pushed to the fork, NOT yet proposed
 
