@@ -99,8 +99,32 @@ int sd_spi_init(void)
 
     card_type = CT_NONE;
 
-    /* Enter Idle state */
-    if (sd_send_command(CMD0, 0) == 1) {
+    /*
+     * Enter Idle state.
+     *
+     * One CMD0 is not enough on a warm restart: the card keeps its
+     * own state across the host's reset, and if it was mid-way
+     * through streaming a block it will not recognise a command until
+     * that transfer has been clocked out or aborted.  A single
+     * attempt then reports "no card found" while the very traffic of
+     * the failed attempt nudges the card far enough that the NEXT
+     * boot succeeds - an alternating boot/no-boot pattern that looks
+     * like anything but the SD card.  So: abort any in-flight read
+     * first, then retry CMD0 generously, exactly as MMBasic and the
+     * other battle-tested SPI drivers do.  At identification clock
+     * each attempt costs about a millisecond; a present card answers
+     * on the first or second.
+     */
+    sd_send_command(CMD12, 0);          /* stop any in-flight read */
+    sd_spi_release();
+    for (n = 20; n; n--)
+        sd_spi_receive_byte();
+
+    for (n = 100; n; n--)
+        if (sd_send_command(CMD0, 0) == 1)
+            break;
+
+    if (n) {
         /* initialisation timeout 2 seconds */
         timer = set_timer_sec(2);
         if (sd_send_command(CMD8, (uint32_t)0x1AA) == 1) {    /* SDHC */
