@@ -25,7 +25,7 @@ been fixed at source.
 |---|---|
 | `trim_constant` dispatch (`t & 0xF0` vs `UCHAR`) | **already fixed** — uses `case CCHAR/CSHORT/CLONG` |
 | hex escape nibble order | **already fixed** — `(unhex(c) << 4) \| unhex(c2)` |
-| unary plus | **already done**, independently, in `primary.c` (`f4c6b83e4`) — a different approach to ours, which is in `hier10` |
+| unary plus | **only partially** — `f4c6b83e4` skips a `+` in `primary()` immediately before the numeric-constant switch, so `+11` works but `+a`, `+(x*y)` and `+f()` are still rejected; and as a token-skip it applies no integer promotion and leaves an lvalue (`+a = 5` would parse). Ours in `hier10` is general — still worth offering |
 | `sizeof` binding a unary-expression | still broken (uses `hier0`) |
 | identifier tail hardcoded 14 vs `NAMELEN` 16 | still broken |
 | cast to void | still missing |
@@ -56,6 +56,7 @@ so this is a merge, not a pull.
 **Ours to theirs.** Our C89 conformance work is target-independent and
 substantial, and none of it has been offered:
 
+* unary plus, done properly (`hier10`) — see the table above
 * cast to void
 * `sizeof` binding
 * identifier length, and the truncation warning
@@ -71,6 +72,12 @@ substantial, and none of it has been offered:
 * wide character constants
 * declarations after statements (a deliberate C99 borrowing — his call
   whether he wants it)
+
+**Routing note.** `bcrun.c` and `backend-bcode.c` do not exist in the
+kit at all — it has `backend-byte.c` / `target-bytecode.c`, and no
+`MAXSYM` in either. The bcode backend and its interpreter are FUZIX-side
+additions, so our bcrun printf-length-modifier fix and the MAXSYM
+512→2048 bump belong to the *FUZIX* tree, not the kit.
 
 **And the thing that is probably worth more than any single fix: the
 harness.** `hosttest/ctest.sh` plus the c-testsuite runner and
