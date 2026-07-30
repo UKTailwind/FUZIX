@@ -269,8 +269,43 @@ naive emitter's 3-8× leaves plenty for stage 8's peepholes to chase.
   x86 host refuses version-2 objects cleanly.  Eclipse regression
   clean at 9.08 s.
 
-Next: stage 4, backend-thumb.c v1 - integer leaf functions with
-per-function fallback to bytecode.
+* **Stage 4 v1 done** 2026-07-30, checkpointed on hardware every few
+  opcode groups (CP-A frame/const/jump/ret, CP-B stack/locals/loads/
+  stores/addresses, CP-C 32-bit ALU + inlined compound-assign
+  helpers, CP-D compares and conditional jumps - probes preserved in
+  hosttest/thumb/, gate.sh runs all four, four-way agreement demanded:
+  gcc -O2, host-alias, qemu-native, qemu-forced-bytecode).
+
+  The design ended up better than planned: rather than a second tree
+  walker, backend-thumb.c translates the function's just-emitted
+  bytecode span at gen_epilogue - the bytecode is the single source
+  of truth, labels are still symbolic, and bailing is free.  The
+  BC_NATIVE marker carries a bytecode-alias field so mixed objects
+  run on ANY host (x86 interprets the original span; BCRUN_BYTECODE=1
+  forces it on ARM = free A/B).  Every i++ style compound assign,
+  previously a named libcall, is inlined.
+
+  **Hardware results, integer leaf functions (bench.c on the PC3,
+  same binary A/B):**
+
+  | phase | bytecode | native | speedup |
+  |---|---|---|---|
+  | sieve | 3847 ms | 50 ms | 77× |
+  | shellsort | 3659 ms | 74 ms | 49× |
+  | xorshift | 8176 ms | 60 ms | 136× |
+  | byte-rev | 6757 ms | 118 ms | 57× |
+  | fib(27) | 2644 ms | (bytecode: calls) | - |
+
+  The "3-8×" estimate was off by an order of magnitude: the
+  interpreter's bounds-checked byte-assembled memory path made board
+  dispatch far more expensive than modelled, and these loops now run
+  at essentially native M33 speed.  Conformance 165 throughout;
+  fcctests 9/9; qemudiff 10/10 every checkpoint.
+
+Next: stage 5, calls - vsp writeback around call_target, then fib and
+whole call-dense programs go native.  Then stage 6 (64-bit + float
+helper BLs), 7 (switch, struct copy, CALLA), 8 (peepholes), 9 (board
+sizing policy + SD refresh).
 
 ## Order of risk retirement
 
