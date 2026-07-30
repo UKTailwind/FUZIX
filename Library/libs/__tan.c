@@ -93,12 +93,20 @@ double __tan(double x, double y, int iy)
 	r = y + z * (s * (r + v) + y);
 	r += T[0] * s;
 	w = x + r;
+	/*
+	 * Convention fix: tan.c is musl-shaped and passes odd = 0 for
+	 * tan, odd = 1 for -1/tan (the n&1 of the pi/2 reduction).  This
+	 * kernel is FreeBSD's, which wanted k = 1 for tan and k = -1 for
+	 * -1/tan.  Mixed, tan(x) returned -cot(x) for every argument
+	 * larger than 2^-27 - found when the moon's right ascension came
+	 * out 35 degrees wrong on the PC3.  Map the musl flag here.
+	 */
 	if (ix >= 0x3FE59428) {
-		v = iy;
+		v = iy ? -1.0 : 1.0;
 		sign = 1 - ((hx >> 30) & 2);
 		return sign * (v - 2.0 * (x - (w * w / (w + v) - r)));
 	}
-	if (iy == 1)
+	if (iy == 0)
 		return w;
 	else {
 		/*

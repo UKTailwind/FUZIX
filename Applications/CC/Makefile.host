@@ -17,7 +17,7 @@ HOSTCC ?= cc
 # -include unistd.h: the passes call write() and expect the Fuzix headers
 # to have declared it. Host-only concern, so fix it here rather than in
 # shared source.
-HOSTCFLAGS = -g -O1 -Wall -Wno-unused-result -DCPU_$(CPU) $(FLOAT) -include unistd.h
+HOSTCFLAGS = -g -O1 -Wall -Wno-unused-result -DCPU_$(CPU) $(FLOAT) -DBIG_TABLES -include unistd.h
 
 OBJDIR = host-$(CPU)
 

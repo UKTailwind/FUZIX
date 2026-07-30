@@ -92,6 +92,8 @@ static void init_name_cache(void)
 /*
  *	Expression tree nodes
  */
+/* cc2's own node pool, nothing to do with cc1's in compiler.h */
+#undef NUM_NODES
 #define NUM_NODES 100
 
 static struct node node_table[NUM_NODES];

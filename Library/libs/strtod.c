@@ -20,15 +20,23 @@
 #include <stdlib.h>
 #include <ctype.h>
 
+/*
+ * Two long-standing bugs fixed here.  The fraction loop was
+ *
+ *	fp_part = fp_part / 10.0 + (*nptr - '0') / 10.0;
+ *
+ * which builds the fraction back to front: ".25" parsed as 0.52, so
+ * every decimal that passed through here came out with its digits
+ * reversed.  And the exponent loop did "exponent = exponent * 10 + d;
+ * exponent++", adding one per digit - "1e2" was a thousand.
+ */
 double strtod(const char *nptr, char **endptr)
 {
 	unsigned short negative;
 	double number;
-	double fp_part;
+	double scale;
 	int exponent;
 	unsigned short exp_negative;
-
-	*endptr = NULL;
 
 	/* advance beyond any leading whitespace */
 	while (isspace(*nptr))
@@ -50,12 +58,12 @@ double strtod(const char *nptr, char **endptr)
 
 	if (*nptr == '.') {
 		nptr++;
-		fp_part = 0;
+		scale = 0.1;
 		while (isdigit(*nptr)) {
-			fp_part = fp_part / 10.0 + (*nptr - '0') / 10.0;
+			number += (*nptr - '0') * scale;
+			scale /= 10.0;
 			nptr++;
 		}
-		number += fp_part;
 	}
 
 	if (*nptr == 'e' || *nptr == 'E') {
@@ -70,7 +78,6 @@ double strtod(const char *nptr, char **endptr)
 		exponent = 0;
 		while (isdigit(*nptr)) {
 			exponent = exponent * 10 + (*nptr - '0');
-			exponent++;
 			nptr++;
 		}
 
@@ -82,6 +89,7 @@ double strtod(const char *nptr, char **endptr)
 			exponent--;
 		}
 	}
-	*endptr = (char *) nptr;
+	if (endptr)
+		*endptr = (char *) nptr;
 	return (negative ? -number : number);
 }

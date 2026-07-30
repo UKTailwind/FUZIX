@@ -81,6 +81,25 @@ bits.  Plus capacity limits raised for real programs: NUM_NODES,
 MAXLABEL (16 was too small for GOSUB return switches), CODEMAX,
 DATAMAX, MAXSYM, STRMAX.
 
+**Libc, found by running the eclipse on hardware 2026-07-30 — these
+are the strongest upstream candidates yet, every Fuzix target with
+floating point is affected:**
+
+* **`Library/libs/tan.c` + `__tan.c`: `tan()` returns `-cot()`** for
+  every |x| > 2^-27.  tan.c is musl-shaped and passes odd ∈ {0,1}
+  (0 = tan); the __tan.c kernel is FreeBSD's and wanted k ∈ {1,-1}
+  (1 = tan).  Every call takes the wrong branch.  Fixed by mapping the
+  musl flag in the kernel.  `__tandf.c` has the same convention and no
+  tanf.c caller exists — latent, flagged in the source.
+* **`Library/libs/strtod.c`: fractions parse back to front** — ".25"
+  gives 0.52 (`fp/10 + d/10` instead of a shrinking scale) — and the
+  exponent loop increments per digit ("1e2" = 1000).  Inherited from
+  ELKS libc-8086, 1995.  Also wrote through endptr without a NULL
+  check.
+* **`cosh`/`tanh` absent from the armm0 libc build** — cosh.c existed
+  but was never in SRC_LM; tanh.c did not exist in the tree at all
+  (added, expm1-based; tanhf wrapper too).
+
 Optional, needs a judgement call: the `i_open`/`i_alloc` diagnostics
 and free-list validation from `27a82379f`. The *diagnostic* half is
 clearly worth it - the bare "i_open: bad disk inode" becomes ENFILE,

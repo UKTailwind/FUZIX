@@ -46,7 +46,23 @@
  *	matter of pointing mem at a reserved region rather than declaring
  *	an array - see PSRAM_RESERVE in the kernel's psram.h.
  */
+/*
+ *	On the development machine the program gets a full 128K.  On the
+ *	board bcrun is itself a 256K Fuzix process which must also hold
+ *	the loaded code (the mmb2c runtime plus a large program is ~90K),
+ *	so the data space gives way: 64K, of which a typical translated
+ *	program touches a fraction.  BIG_TABLES is the existing "built
+ *	for a machine with room" switch.
+ */
+#ifdef BIG_TABLES
 #define MEMSIZE		131072		/* program address space */
+#else
+/* 48K: the largest translated program so far uses ~8K of data+bss and
+   the stack; what remains is heap.  Every byte given here is taken
+   from the loader's mallocs (code, symbols, string table) in the same
+   256K process. */
+#define MEMSIZE		49152
+#endif
 /* Dead space at the bottom so that no object can live at address 0 and
    a null pointer stays distinguishable from a real one. */
 #define NULLGUARD	16
@@ -1167,6 +1183,53 @@ static void vcopy(unsigned long d, unsigned long s, unsigned long n)
 }
 
 /*
+ *	64-bit strtol, both signednesses.  Fuzix libc stops at 32 bits,
+ *	so this is done here once for every host rather than sometimes
+ *	by the C library.  C90 strtol rules: optional space, optional
+ *	sign, 0x/0 prefixes when base is 0 or 16.
+ */
+static int64_t bc_strtoll(const char *s, char **end, int base, int uns)
+{
+	uint64_t v = 0;
+	int neg = 0;
+	const char *p = s;
+	const char *digits_start;
+
+	while (*p == ' ' || *p == '\t')
+		p++;
+	if (*p == '+' || *p == '-')
+		neg = (*p++ == '-');
+	if ((base == 0 || base == 16) && p[0] == '0' &&
+	    (p[1] == 'x' || p[1] == 'X')) {
+		p += 2;
+		base = 16;
+	} else if (base == 0)
+		base = (*p == '0') ? 8 : 10;
+	digits_start = p;
+	for (;;) {
+		int c = *p;
+		int d;
+		if (c >= '0' && c <= '9')
+			d = c - '0';
+		else if (c >= 'a' && c <= 'z')
+			d = c - 'a' + 10;
+		else if (c >= 'A' && c <= 'Z')
+			d = c - 'A' + 10;
+		else
+			break;
+		if (d >= base)
+			break;
+		v = v * base + d;
+		p++;
+	}
+	if (end)
+		*end = (char *)(p == digits_start ? s : p);
+	if (uns)
+		return (int64_t)(neg ? (uint64_t)0 - v : v);
+	return neg ? -(int64_t)v : (int64_t)v;
+}
+
+/*
  *	The mathematics library, table driven because it is twenty
  *	functions with two shapes. Doubles travel as their bit pattern
  *	(dget/dput) and a double argument takes two stack slots, so the
@@ -1381,10 +1444,9 @@ static void libcall(unsigned idx)
 		unsigned long ep = (unsigned long)arg(1);
 		int base = (int)arg(2);
 		char *str = getstr(s), *end;
-		if (name[5] == 'u')
-			A = (int64_t)strtoull(str, &end, base);
-		else
-			A = (int64_t)strtoll(str, &end, base);
+		/* Fuzix libc has no 64-bit strtoll, so parse here - one
+		   implementation for every host. */
+		A = bc_strtoll(str, &end, base, name[5] == 'u');
 		if (ep)
 			wr32(ep, s + (unsigned long)(end - str));
 	} else if (!strcmp(name, "abs")) {
@@ -1492,6 +1554,13 @@ static void load(const char *path)
 	code = malloc(h.h_code ? h.h_code : 1);
 	sym = malloc((h.h_nsym ? h.h_nsym : 1) * sizeof(struct bc_sym));
 	fix = malloc((h.h_nfixup ? h.h_nfixup : 1) * sizeof(struct bc_fixup));
+	if (code == NULL || sym == NULL || fix == NULL) {
+		/* Unchecked, this surfaced as "short code at pc 0", which
+		   reads like a truncated file rather than what it is. */
+		fprintf(stderr, "%s: out of memory (%lu bytes of code)\n",
+			path, (unsigned long)h.h_code);
+		exit(1);
+	}
 
 	if (fread(code, 1, h.h_code, f) != h.h_code)
 		fault("short code");
@@ -1525,6 +1594,10 @@ static void load(const char *path)
 		if (fread(&sym[i], sizeof(struct bc_sym), 1, f) != 1)
 			fault("short symbols");
 	strtab = malloc(h.h_strsize ? h.h_strsize : 1);
+	if (strtab == NULL) {
+		fprintf(stderr, "%s: out of memory (string table)\n", path);
+		exit(1);
+	}
 	if (h.h_strsize && fread(strtab, 1, h.h_strsize, f) != h.h_strsize)
 		fault("short string table");
 	fclose(f);
