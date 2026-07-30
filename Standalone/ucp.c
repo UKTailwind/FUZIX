@@ -442,7 +442,21 @@ static int cmd_ls(char *path)
 	}
 	st = (statbuf.st_mode & F_MASK);
 	if ((st & F_MASK) == F_DIR) {
-		while (fuzix_read(d, (char *) &buf, 16) == 16) {
+		/*
+		 * A directory entry is sizeof(struct direct) - two bytes of
+		 * inode plus FILENAME_LEN, which is 30, so 32 in total. This
+		 * read said 16, left over from the old 14-character name
+		 * format, and so consumed half an entry at a time.
+		 *
+		 * It looked as though it worked: for a name of 13 characters
+		 * or fewer the terminator falls inside the first half, and
+		 * the second half then starts with a NUL and is skipped by
+		 * the test below. A name that exactly fills the first half -
+		 * 14 characters, "blocktypedef.c" - has no terminator in it,
+		 * so d_name ran on into the rest of the struct and the entry
+		 * appeared as garbage that could not be stat'ed.
+		 */
+		while (fuzix_read(d, (char *) &buf, sizeof(buf)) == sizeof(buf)) {
 			if (buf.d_name[0] == '\0')
 				continue;
 
@@ -504,7 +518,9 @@ static int find_path(struct find_path *fp,
 		if (fp->path[fp->offset])
 			fp->stop = cb(&fp->path[fp->offset], arg);
 
-		while (!fp->stop && fuzix_read(d, (char *)&buf, 16) == 16) {
+		/* Same half-entry read as cmd_ls above */
+		while (!fp->stop &&
+		       fuzix_read(d, (char *)&buf, sizeof(buf)) == sizeof(buf)) {
 			const size_t d_len = strlen(buf.d_name);
 			int err_;
 

@@ -58,6 +58,16 @@ echo "--- installing"
 		echo "bget $CC/hwtest/$f.s $f"
 		echo "chmod 755 $f"
 	done
+	# The headers cc looks for: ccbc.c passes -I<libpath>include, and
+	# cpp has no built-in search path at all, so without these
+	# "#include <stdio.h>" fails. These describe what bcrun provides -
+	# deliberately not /usr/include, which describes the Fuzix C
+	# library that native binaries link against.
+	echo "mkdir include"
+	echo "cd include"
+	for f in "$CC"/hosttest/ctest-include/*.h; do
+		echo "get $f $(basename "$f")"
+	done
 	echo "cd /usr/bin"
 	echo "bget $CC/hwtest/ccbc.s cc"
 	echo "chmod 755 cc"
