@@ -1,0 +1,15 @@
+umask 022
+fsck -a -y /
+setdate
+remount -n / rw
+prtroot >/etc/mtab
+# PSRAM disc as swap - 14208 sectors: the top 1 MiB is the userland
+# arena (PC3-PSRAM-ARENA.md) and 64K above that is the kernel's.
+# Harmless error if no PSRAM is fitted.
+swapon /dev/hdc 14208
+# USB keyboard layout: us uk de fr es be
+picoctl keymap uk
+#Uncomment if you have multiple file systems
+#fsck -a
+#mount -a
+>/var/run/utmp

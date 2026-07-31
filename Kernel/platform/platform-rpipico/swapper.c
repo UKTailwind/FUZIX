@@ -165,12 +165,6 @@ int pagemap_realloc(struct exec *hdr, usize_t size)
 {
     struct p_tab* p = udata.u_ptab;
 
-    /* exec passes a header; brk growth passes NULL.  An exec releases
-       the process's PSRAM arenas on the same footing as its brk - the
-       new image has no way to know the old addresses. */
-    if (hdr)
-        arena_release(p);
-
     uaddr_t oldblocks = get_proc_size_blocks(p);
     int blocks = (int)alignup(size + UDATA_SIZE, BLOCKSIZE) / BLOCKSIZE;
     int slot = get_slot(p);

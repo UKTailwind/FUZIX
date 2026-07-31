@@ -104,6 +104,13 @@
  * PSRAM arena the process owns is equally legitimate - without this,
  * read() into an arena is EFAULT and the facility cannot do I/O. */
 #define CONFIG_CUSTOM_VALADDR
+/* "#!" scripts exec the platform's fixed interpreter (misc.c: bcrun),
+ * which is how the C compiler's output runs as ./prog */
+#define CONFIG_SCRIPT_INTERP
+/* exec calls plt_exec_cleanup() once committed: PSRAM arenas do not
+ * survive into the new image (exec's pagemap_realloc gets a NULL hdr
+ * on this port, so the release cannot key off that) */
+#define CONFIG_PLT_EXEC_CLEANUP
 /* Pure swap */
 #define CONFIG_BANKS 1
 /* brk() calls pagemap_realloc() to get more memory. */

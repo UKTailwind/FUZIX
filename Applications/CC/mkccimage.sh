@@ -81,6 +81,12 @@ echo "--- installing"
 	for f in "$CC"/hosttest/samples/*.c; do
 		echo "get $f $(basename "$f")"
 	done
+	# rc with the swap size matching the arena split; it MUST be
+	# executable or init cannot run it, and a boot without rc has a
+	# read-only root whose strangest symptom is "cannot make pipe"
+	echo "cd /etc"
+	echo "get $R/Kernel/platform/platform-rpipico/rc rc"
+	echo "chmod 755 rc"
 	echo "df"
 	echo "exit"
 } > "$W/cmds"

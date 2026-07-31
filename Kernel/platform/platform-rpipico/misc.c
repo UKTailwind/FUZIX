@@ -267,6 +267,22 @@ uaddr_t pagemap_base(void)
     return PROGBASE;
 }
 
+/* The one interpreter "#!" execs (CONFIG_SCRIPT_INTERP): cc's output
+ * starts with this line so compiled programs run as ./prog. */
+const uint8_t script_interp_path[] = "/usr/bin/bcrun";
+
+const uint8_t *plt_script_interp(void)
+{
+    return script_interp_path;
+}
+
+/* exec is committed to the new image: nothing out-of-process from the
+ * old one survives (CONFIG_PLT_EXEC_CLEANUP) */
+void plt_exec_cleanup(void)
+{
+    arena_release(udata.u_ptab);
+}
+
 usize_t valaddr(const uint8_t *base, usize_t size, uint_fast8_t is_write)
 {
         if (base + size < base)
@@ -277,6 +293,13 @@ usize_t valaddr(const uint8_t *base, usize_t size, uint_fast8_t is_write)
                 uint32_t n = arena_valaddr((uint32_t)(size_t)base, size);
                 if (n)
                         return n;
+                /* Exec's "#!" support hands n_open the interpreter's
+                 * path, a kernel string: accept reads of exactly that
+                 * one object and nothing else. */
+                if (!is_write &&
+                    base >= script_interp_path &&
+                    base < script_interp_path + sizeof("/usr/bin/bcrun"))
+                        return size;
                 size = 0;
         }
         else if (base + size > (const uint8_t *)(size_t)udata.u_ptab->p_top)

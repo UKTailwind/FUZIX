@@ -226,8 +226,19 @@ int main(int argc, char *argv[])
 		perror(argv[1]);
 		return 1;
 	}
-	if (fread(&h, sizeof(h), 1, f) != 1 ||
-	    memcmp(h.h_magic, BC_MAGIC, 4) != 0) {
+	/* skip a "#!/usr/bin/bcrun" line - cc marks its output that way */
+	if (fread(&h, sizeof(h), 1, f) == 1 &&
+	    h.h_magic[0] == '#' && h.h_magic[1] == '!') {
+		int c;
+		rewind(f);
+		while ((c = getc(f)) != EOF && c != '\n')
+			;
+		if (fread(&h, sizeof(h), 1, f) != 1) {
+			fprintf(stderr, "%s: truncated\n", argv[1]);
+			return 1;
+		}
+	}
+	if (memcmp(h.h_magic, BC_MAGIC, 4) != 0) {
 		fprintf(stderr, "%s: not a bytecode object\n", argv[1]);
 		return 1;
 	}

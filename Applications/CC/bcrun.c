@@ -1715,6 +1715,8 @@ static unsigned long symval(unsigned s)
 	return 0;
 }
 
+static long file_base;		/* header offset: 0, or past a #! line */
+
 static void load(const char *path)
 {
 	FILE *f = fopen(path, "rb");
@@ -1724,8 +1726,25 @@ static void load(const char *path)
 		perror(path);
 		exit(1);
 	}
-	if (fread(&h, sizeof(h), 1, f) != 1 ||
-	    memcmp(h.h_magic, BC_MAGIC, 4) != 0) {
+	/* cc marks its output "#!/usr/bin/bcrun" so the kernel can exec
+	   it directly; skip any #! line before the header. */
+	if (fread(&h, sizeof(h), 1, f) == 1 &&
+	    h.h_magic[0] == '#' && h.h_magic[1] == '!') {
+		int c;
+		rewind(f);
+		while ((c = getc(f)) != EOF && c != '\n' && file_base < 127)
+			file_base++;
+		if (c != '\n') {
+			fprintf(stderr, "%s: not a bytecode object\n", path);
+			exit(1);
+		}
+		file_base++;
+		if (fseek(f, file_base, SEEK_SET))
+			fault("seek");
+		if (fread(&h, sizeof(h), 1, f) != 1)
+			fault("short header");
+	}
+	if (memcmp(h.h_magic, BC_MAGIC, 4) != 0) {
 		fprintf(stderr, "%s: not a bytecode object\n", path);
 		exit(1);
 	}
@@ -1820,7 +1839,8 @@ static void load(const char *path)
 
 	/* Apply fixups, streamed straight off the file: add the symbol's
 	   value to the 32bit field. */
-	if (fseek(f, (long)(sizeof(h) + h.h_code + h.h_data), SEEK_SET))
+	if (fseek(f, file_base + (long)(sizeof(h) + h.h_code + h.h_data),
+		  SEEK_SET))
 		fault("seek");
 	for (i = 0; i < h.h_nfixup; i++) {
 		struct bc_fixup fx;

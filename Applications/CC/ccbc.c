@@ -31,6 +31,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 
 #define LIBPATH		"/usr/lib/cc/"
@@ -91,6 +92,11 @@ static void onsig(int sig)
  *	what they have written, so plain O_WRONLY gives an object that
  *	looks corrupt for no visible reason.
  */
+/* Written at the front of the final object before cc2 runs, so the
+   kernel's #! support execs the result directly: cc prog.c; ./prog.bc */
+static const char shebang[] = "#!/usr/bin/bcrun\n";
+static int put_shebang;
+
 static void run(char **argv, const char *in, const char *out)
 {
 	pid_t pid, p;
@@ -118,6 +124,12 @@ static void run(char **argv, const char *in, const char *out)
 	if (fdout == -1) {
 		perror(out);
 		fatal();
+	}
+	if (put_shebang) {
+		/* the child inherits the shared offset, so its output
+		   lands after the line; bcrun's loader skips it */
+		write(fdout, shebang, sizeof(shebang) - 1);
+		put_shebang = 0;
 	}
 
 	pid = fork();
@@ -277,7 +289,9 @@ int main(int argc, char *argv[])
 	av[2] = "armm0";
 	av[3] = "0";
 	av[4] = NULL;
+	put_shebang = 1;
 	run(av, irfile, out);
+	chmod(out, 0755);
 
 	cleanup();
 	return 0;
