@@ -3462,12 +3462,31 @@ def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
     return outpath
 
 
+def dump_tokens(inpath):
+    """Debug aid for the C rewrite (mmbc): print the token stream in a
+    fixed format so `mmbc --tokens` can be byte-diffed against it."""
+    f = open(inpath, 'r')
+    lines = f.readlines()
+    f.close()
+    for idx in range(len(lines)):
+        lineno = idx + 1
+        try:
+            toks = tokenize(lines[idx], lineno)
+        except MMError as e:
+            print('ERR %d %s' % (lineno, str(e)))
+            continue
+        for kind, text, up in toks:
+            print('%d %d [%s] [%s]' % (lineno, kind, text, up))
+    return 0
+
+
 def main(argv):
     src = None
     dst = None
     rep = False
     strict = False
     fcc = False
+    tokens = False
     k = 1
     while k < len(argv):
         a = argv[k]
@@ -3480,6 +3499,8 @@ def main(argv):
             strict = True
         elif a == '--fcc':
             fcc = True
+        elif a == '--tokens':
+            tokens = True
         elif a in ('-h', '--help'):
             print("usage: mmb2c.py source.bas [-o out.c] [--report] "
                   "[--strict] [--fcc]")
@@ -3496,6 +3517,8 @@ def main(argv):
         print("usage: mmb2c.py source.bas [-o out.c] [--report] [--strict] "
               "[--fcc]")
         return 1
+    if tokens:
+        return dump_tokens(src)
     out = convert(src, dst, rep, not strict, fcc)
     if out is None:
         return 2

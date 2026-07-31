@@ -1,0 +1,15 @@
+# Host build of mmbc.  The board build (arm-none-eabi + Fuzix libc)
+# lands with stage 7 in FUZIX Applications/CC.
+
+CC = gcc
+CFLAGS = -O2 -g -Wall -Wextra -Wno-unused-parameter
+
+OBJS = mmbc_main.o mmbc_lex.o mmbc_util.o
+
+mmbc: $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS)
+
+$(OBJS): mmbc.h
+
+clean:
+	rm -f mmbc $(OBJS)
