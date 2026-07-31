@@ -36,8 +36,11 @@ void error(const char *p)
 
 static void xread(int fd, void *buf, int len)
 {
-	if (read(fd, buf, len) != len)
+	int n = read(fd, buf, len);
+	if (n != len) {
+		fprintf(stderr, "xread fd=%d want=%d got=%d\n", fd, len, n);
 		error("short read");
+	}
 }
 
 /*
@@ -94,9 +97,16 @@ static void init_name_cache(void)
  */
 /* cc2's own node pool, nothing to do with cc1's in compiler.h */
 #undef NUM_NODES
+#ifdef ARENA_TABLES
+/* Storage comes from the PSRAM arena (see backend-bcode.c); 100 was
+   the "Too many nodes" every 12-argument printf tripped over. */
+#define NUM_NODES 512
+struct node *node_table;
+#else
 #define NUM_NODES 100
 
 static struct node node_table[NUM_NODES];
+#endif
 static struct node *nodes;
 
 struct node *new_node(void)
@@ -937,6 +947,17 @@ int main(int argc, char *argv[])
 		codeseg = argv[4];
 	init_name_cache();
 	load_symbols(argv[1]);
+#ifdef ARENA_TABLES
+	/* Table storage comes from the PSRAM arena; the node pool is
+	   carved here because NUM_NODES is this file's business. */
+	{
+		extern void bc_arena_init(void);
+		extern void *bc_arena_carve(unsigned long n);
+		bc_arena_init();
+		node_table = bc_arena_carve(NUM_NODES *
+					    sizeof(struct node));
+	}
+#endif
 	init_nodes();
 
 	gen_start();

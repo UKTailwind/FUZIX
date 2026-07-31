@@ -43,6 +43,14 @@
    the eclipse with every function native is ~250K of code segment. */
 #define CODEMAX		393216
 #define DATAMAX		65536
+#elif defined(ARENA_TABLES)
+/* The board: storage comes from the PSRAM arena (PC3-PSRAM-ARENA.md),
+   so the limits are sized to real programs rather than to the 256K
+   process - the whole set is ~900K against a 1 MiB pool.  With
+   THUMB_RECLAIM=1 the code buffer's peak is the bytecode so far plus
+   one native span, which is why 192K compiles the eclipse. */
+#define CODEMAX		196608
+#define DATAMAX		65536
 #else
 #define CODEMAX		32768
 #define DATAMAX		16384
@@ -51,19 +59,33 @@
    scarce. Here cc2 runs in a 256K process, so the cost of 2048 is a few
    tens of K against a program that would otherwise simply not compile
    ("too many symbols" on c-testsuite 00200). */
-#ifdef BIG_TABLES
+#if defined(BIG_TABLES) || defined(ARENA_TABLES)
 #define MAXSYM		4096
 #define MAXFIX		8192
-#define MAXLAB		4096
+#define MAXLAB		3072
 #else
 #define MAXSYM		2048
 #define MAXFIX		4096
 #define MAXLAB		2048
 #endif
 
-static unsigned char codebuf[CODEMAX];
+/*
+ *	Under ARENA_TABLES every large table is a pointer carved from
+ *	one PSRAM arena allocation by bc_arena_init() - the static form
+ *	stopped fitting a 256K process when the Thumb translator's
+ *	buffers joined the set.  ATAB declares whichever form applies.
+ */
+#ifdef ARENA_TABLES
+#define ATAB(decl_array, decl_ptr)	decl_ptr
+#else
+#define ATAB(decl_array, decl_ptr)	decl_array
+#endif
+
+ATAB(static unsigned char codebuf[CODEMAX],
+     static unsigned char *codebuf);
 static unsigned long codelen;
-static unsigned char databuf[DATAMAX];
+ATAB(static unsigned char databuf[DATAMAX],
+     static unsigned char *databuf);
 static unsigned long datalen;
 static unsigned long bsslen;
 
@@ -75,20 +97,31 @@ static unsigned long bsslen;
  *	label records an offset the object never occupies and the two
  *	overlap -- "char *msg = \"...\"" put both msg and the string at 0.
  */
-static unsigned char litbuf[DATAMAX];
+ATAB(static unsigned char litbuf[DATAMAX],
+     static unsigned char *litbuf);
 static unsigned long litlen;
-static unsigned char sym_in_lit[MAXSYM];
-static unsigned char fix_in_lit[MAXFIX];
+ATAB(static unsigned char sym_in_lit[MAXSYM],
+     static unsigned char *sym_in_lit);
+ATAB(static unsigned char fix_in_lit[MAXFIX],
+     static unsigned char *fix_in_lit);
 
+#ifdef ARENA_TABLES
+#define STRMAX		65536
+#else
 #define STRMAX		32768
-static char strtab[STRMAX];
+#endif
+ATAB(static char strtab[STRMAX],
+     static char *strtab);
 static unsigned long strtablen;
 
-static struct bc_sym symtab[MAXSYM];
-static char *bc_symname[MAXSYM];
+ATAB(static struct bc_sym symtab[MAXSYM],
+     static struct bc_sym *symtab);
+ATAB(static char *bc_symname[MAXSYM],
+     static char **bc_symname);
 static unsigned nsym;
 
-static struct bc_fixup fixtab[MAXFIX];
+ATAB(static struct bc_fixup fixtab[MAXFIX],
+     static struct bc_fixup *fixtab);
 static unsigned nfix;
 
 /* Labels are (tail, number) pairs scoped to the module. */
@@ -112,7 +145,8 @@ struct label {
 	unsigned long addr;
 	unsigned defined;
 };
-static struct label labtab[MAXLAB];
+ATAB(static struct label labtab[MAXLAB],
+     static struct label *labtab);
 static unsigned nlab;
 
 /* Jump sites waiting for their label. */
@@ -120,7 +154,8 @@ struct patch {
 	unsigned long at;	/* code offset of the 16bit displacement */
 	unsigned lab;		/* index into labtab */
 };
-static struct patch patchtab[MAXFIX];
+ATAB(static struct patch patchtab[MAXFIX],
+     static struct patch *patchtab);
 static unsigned npatch;
 
 static unsigned frame_len;
@@ -446,11 +481,13 @@ static void emit_addr(unsigned sym, unsigned long off)
  *	Forms: 0 = 16-bit LE bytecode operand, 1 = movs r0,#imm8,
  *	2 = movw r0,#imm16.
  */
-static struct libref {
+struct libref {
 	unsigned long at;
 	unsigned short sym;
 	unsigned char form;
-} libreftab[MAXFIX];
+};
+ATAB(static struct libref libreftab[MAXFIX],
+     static struct libref *libreftab);
 static unsigned nlibref;
 
 static void librec(unsigned long at, unsigned sym, unsigned form)

@@ -120,6 +120,32 @@ void arena_release(struct p_tab *owner)
 			slots[i].owner = NULL;
 }
 
+/*
+ *	For the platform's valaddr (misc.c): is [base, base+size) inside
+ *	an arena the CURRENT process owns?  Returns the usable length
+ *	from base (clamped to the arena's end), 0 if not owned.  Without
+ *	this, any syscall handed an arena buffer - a compiler reading
+ *	source into its tables, an editor writing its PSRAM text buffer
+ *	out - dies with EFAULT, and the facility cannot do I/O.
+ */
+uint32_t arena_valaddr(uint32_t b, uint32_t size)
+{
+	unsigned i;
+
+	for (i = 0; i < ARENA_SLOTS; i++) {
+		uint32_t top;
+		if (slots[i].owner != udata.u_ptab)
+			continue;
+		top = slots[i].base + slots[i].len;
+		if (b < slots[i].base || b >= top)
+			continue;
+		if (b + size > top)
+			size = top - b;
+		return size;
+	}
+	return 0;
+}
+
 void arena_stat(uint32_t *total, uint32_t *freeb, uint32_t *largest)
 {
 	unsigned i;

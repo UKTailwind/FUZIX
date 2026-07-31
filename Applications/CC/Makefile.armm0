@@ -11,6 +11,12 @@ SRC_C1 = target-thumb.c
 SRC_C2 = backend-bcode.c
 
 FLOAT = -DNO_FLOAT
+# cc2's large tables live in a PSRAM arena (PC3-PSRAM-ARENA.md): the
+# board build gets near-BIG_TABLES limits at almost no process cost.
+# Without the arena facility in the kernel, cc2 says so and exits -
+# the small static tables stopped fitting a 256K process when the
+# Thumb translator joined them.
+CCOPTS += -DARENA_TABLES
 
 include Makefile.common
 

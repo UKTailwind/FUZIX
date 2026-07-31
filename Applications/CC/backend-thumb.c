@@ -54,30 +54,48 @@
 #ifdef BIG_TABLES
 #define TMAX	262144
 #define TPOOLMAX 8192
+#elif defined(ARENA_TABLES)
+/* 48K of native span covers everything but f_moon-class functions,
+   which the size policy excludes on the board anyway */
+#define TMAX	49152
+#define TPOOLMAX 2048
 #else
 #define TMAX	8192
 #define TPOOLMAX 128
 #endif
 
-static unsigned char tbuf[TMAX];
+ATAB(static unsigned char tbuf[TMAX],
+     static unsigned char *tbuf);
 static unsigned tlen;
-static unsigned tmap[TMAX];		/* bc offset in span -> native */
+/* bc offset in span -> native; 16 bits suffices whenever TMAX does
+   not exceed 64K, which is every build except host BIG_TABLES */
+#ifdef BIG_TABLES
+typedef unsigned tmap_t;
+#else
+typedef unsigned short tmap_t;
+#endif
+ATAB(static tmap_t tmap[TMAX],
+     static tmap_t *tmap);
 
 /* Loader-patched sites: each is a movw/movt pair (flag-2 fixup) */
-static struct tpool {
+struct tpool {
 	unsigned sym;
 	unsigned site;			/* toff of the movw first halfword */
-} tpooltab[TPOOLMAX];
+};
+ATAB(static struct tpool tpooltab[TPOOLMAX],
+     static struct tpool *tpooltab);
 static unsigned ntpool;
 
 /* Baked libcall indices in this function's native code, for the
    compact_syms() rewrite: tbuf offset of the immediate instruction
    plus the form it took (1 = movs imm8, 2 = movw) */
-static struct tref {
+struct tref {
 	unsigned sym;
 	unsigned site;
 	unsigned char form;
-} treftab[TPOOLMAX];
+};
+ATAB(static struct tref treftab[TPOOLMAX],
+     static struct tref *treftab);
 static unsigned ntref;
 
 static unsigned long fn_start;
@@ -1496,3 +1514,80 @@ static void thumb_link_calls(void)
 				linked);
 	}
 }
+
+/*
+ *	ARENA_TABLES: carve every large table from one PSRAM arena
+ *	allocation (PC3-PSRAM-ARENA.md stage 3 - the compiler is the
+ *	facility's first client).  Called from cc2's main before
+ *	anything touches a table.  There is no static fallback - this
+ *	table set stopped fitting a 256K process when the Thumb
+ *	translator's buffers joined it - so a missing facility is a
+ *	message, not a crash.
+ */
+#ifdef ARENA_TABLES
+
+#include <fcntl.h>
+#include <sys/ioctl.h>
+
+#define PSRAMIOC_ALLOC	0x000A
+struct psram_req {
+	unsigned long len;
+	unsigned long base;
+};
+
+static unsigned char *bc_arena_cursor;
+
+void *bc_arena_carve(unsigned long n)
+{
+	void *p = bc_arena_cursor;
+	bc_arena_cursor += (n + 7) & ~7UL;
+	return p;
+}
+
+void bc_arena_init(void)
+{
+	struct psram_req rq;
+	int fd = open("/dev/sys", O_RDWR);
+
+	rq.len = CODEMAX + 2UL * DATAMAX + STRMAX +
+	    MAXSYM * (sizeof(struct bc_sym) + sizeof(char *) + 1) +
+	    MAXFIX * (sizeof(struct bc_fixup) + 1 + sizeof(struct patch) +
+		      sizeof(struct libref)) +
+	    MAXLAB * sizeof(struct label) +
+	    TMAX * (1UL + sizeof(tmap_t)) +
+	    TPOOLMAX * (sizeof(struct tpool) + sizeof(struct tref)) +
+	    32768 /* the node pool and carve rounding */;
+	if (fd < 0 || ioctl(fd, PSRAMIOC_ALLOC, &rq) < 0) {
+		fprintf(stderr,
+			"cc2: no PSRAM arena (kernel without "
+			"PSRAMIOC_ALLOC?)\n");
+		exit(1);
+	}
+	close(fd);
+	bc_arena_cursor = (unsigned char *)rq.base;
+
+	codebuf = bc_arena_carve(CODEMAX);
+	databuf = bc_arena_carve(DATAMAX);
+	litbuf = bc_arena_carve(DATAMAX);
+	strtab = bc_arena_carve(STRMAX);
+	symtab = bc_arena_carve(MAXSYM * sizeof(struct bc_sym));
+	bc_symname = bc_arena_carve(MAXSYM * sizeof(char *));
+	sym_in_lit = bc_arena_carve(MAXSYM);
+	fixtab = bc_arena_carve(MAXFIX * sizeof(struct bc_fixup));
+	fix_in_lit = bc_arena_carve(MAXFIX);
+	labtab = bc_arena_carve(MAXLAB * sizeof(struct label));
+	patchtab = bc_arena_carve(MAXFIX * sizeof(struct patch));
+	libreftab = bc_arena_carve(MAXFIX * sizeof(struct libref));
+	tbuf = bc_arena_carve(TMAX);
+	tmap = bc_arena_carve(TMAX * sizeof(tmap_t));
+	tpooltab = bc_arena_carve(TPOOLMAX * sizeof(struct tpool));
+	treftab = bc_arena_carve(TPOOLMAX * sizeof(struct tref));
+}
+
+#else
+
+void bc_arena_init(void)
+{
+}
+
+#endif

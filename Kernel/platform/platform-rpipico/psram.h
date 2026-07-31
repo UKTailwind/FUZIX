@@ -26,6 +26,7 @@ uint32_t arena_alloc(struct p_tab *owner, uint32_t len);
 int arena_free(struct p_tab *owner, uint32_t base);
 void arena_release(struct p_tab *owner);
 void arena_stat(uint32_t *total, uint32_t *freeb, uint32_t *largest);
+uint32_t arena_valaddr(uint32_t base, uint32_t size);
 
 /* Re-cap the flash (QMI CS0) divisor after clk_sys changes. */
 void qmi_flash_timing(uint32_t max_flash_hz);

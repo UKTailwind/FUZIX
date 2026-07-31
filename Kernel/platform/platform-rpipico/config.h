@@ -99,6 +99,11 @@
 #define CONFIG_MULTI
 /* 32bit with flat memory */
 #undef CONFIG_FLAT
+/* The platform validates syscall buffer addresses itself (arena.c):
+ * the stock valaddr accepts only the process image, and a buffer in a
+ * PSRAM arena the process owns is equally legitimate - without this,
+ * read() into an arena is EFAULT and the facility cannot do I/O. */
+#define CONFIG_CUSTOM_VALADDR
 /* Pure swap */
 #define CONFIG_BANKS 1
 /* brk() calls pagemap_realloc() to get more memory. */
