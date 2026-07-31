@@ -233,8 +233,72 @@ void pagemap_init(void)
 	udata.u_ptab = NULL;
 }
 
+/* Corruption tripwire (debug): a dormant process's frame contents must
+ * not change between the moment it stops running and the moment it
+ * runs again.  Sum every resident process's frames when it becomes
+ * dormant, verify before it becomes current; panic at the first
+ * mismatch instead of crashing minutes later inside the victim. */
+#define TRIPWIRE 0
+#if TRIPWIRE
+static uint32_t slot_sum[PTABSIZE];
+static uint8_t slot_sum_valid[PTABSIZE];
+
+static uint32_t sum_slot(int slot, int blocks)
+{
+    uint32_t sum = 0;
+    for (int i = 0; i < blocks; i++) {
+        struct mapentry *b = find_block(slot, i);
+        uint32_t *w, *e;
+        if (!b)
+            panic("tripwire: lost block");
+        w = (uint32_t *)((void *)PROGBASE
+                         + (b - allocation_map) * BLOCKSIZE);
+        e = w + BLOCKSIZE / 4;
+        while (w < e)
+            sum = (sum << 1 | sum >> 31) ^ *w++;
+    }
+    return sum;
+}
+
+static void tripwire_check(ptptr newp)
+{
+    for (ptptr q = ptab; q < ptab + PTABSIZE; q++) {
+        int s;
+        if (q->p_status == P_EMPTY || !q->p_page)
+            continue;
+        s = get_slot(q);
+        if (!slot_sum_valid[s]) {
+            /* freshly dormant (the outgoing process): record it */
+            slot_sum[s] = sum_slot(s, get_proc_size_blocks(q));
+            slot_sum_valid[s] = 1;
+            continue;
+        }
+        if (q == newp)
+            continue;        /* about to run: verified below by caller */
+        if (slot_sum[s] != sum_slot(s, get_proc_size_blocks(q))) {
+            kprintf("tripwire: slot %d pid %d corrupted while dormant\n",
+                    s, q->p_pid);
+            panic("tripwire");
+        }
+    }
+}
+#endif
+
 void contextswitch(ptptr p)
 {
+#if TRIPWIRE
+    tripwire_check(p);
+    if (p->p_page) {
+        int s = get_slot(p);
+        if (slot_sum_valid[s]
+            && slot_sum[s] != sum_slot(s, get_proc_size_blocks(p))) {
+            kprintf("tripwire: incoming slot %d pid %d corrupt\n",
+                    s, p->p_pid);
+            panic("tripwire");
+        }
+        slot_sum_valid[s] = 0;   /* it is about to run and change */
+    }
+#endif
     #ifdef DEBUG
         kprintf("context switch from %d to %d\n", get_slot(udata.u_ptab), get_slot(p));
     #endif

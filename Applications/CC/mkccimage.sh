@@ -68,6 +68,12 @@ echo "--- installing"
 	for f in "$CC"/hosttest/ctest-include/*.h; do
 		echo "get $f $(basename "$f")"
 	done
+	# what mmbc-generated C includes: the runtime's interface and the
+	# FCC-view headers (math.h etc. map to bcrun natives)
+	echo "get $CC/mmb_runtime.h mmb_runtime.h"
+	for f in "$CC"/hosttest/fcc-include/*.h; do
+		echo "get $f $(basename "$f")"
+	done
 	echo "cd /usr/bin"
 	echo "bget $CC/hwtest/ccbc.s cc"
 	echo "chmod 755 cc"
