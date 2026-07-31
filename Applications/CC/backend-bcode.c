@@ -724,12 +724,15 @@ void gen_start(void)
 {
 }
 
+static void thumb_link_calls(void);
+
 void gen_end(void)
 {
 	struct bc_header h;
 	unsigned i;
 
 	resolve_jumps();
+	thumb_link_calls();
 
 	/* Literals sit after data in the emitted image, so everything
 	   recorded against the literal buffer moves up by datalen. */

@@ -75,6 +75,9 @@ static unsigned fn_sym;
 static unsigned fn_patch_lo;
 static unsigned fn_fix_lo;
 static int t_dry;
+static unsigned long t_base;	/* prospective code offset of this
+				   function's push{lr} preamble; tbuf[0]
+				   lands at t_base + 2 */
 static const char *t_bail;	/* why the last t_span gave up */
 static unsigned t_bailop;
 
@@ -236,6 +239,21 @@ static void t_bw(long off)
 	unsigned j2 = (!(i2 ^ s)) & 1;
 	t32(0xF000 | (s << 10) | imm10,
 	    0x9000 | (j1 << 13) | (j2 << 11) | imm11);
+}
+
+/* bl, same encoding with the link bit */
+static void t_blw(long off)
+{
+	unsigned long u = ((unsigned long)off >> 1) & 0xFFFFFF;
+	unsigned imm11 = u & 0x7FF;
+	unsigned imm10 = (u >> 11) & 0x3FF;
+	unsigned i2 = (u >> 21) & 1;
+	unsigned i1 = (u >> 22) & 1;
+	unsigned s = (off < 0);
+	unsigned j1 = (!(i1 ^ s)) & 1;
+	unsigned j2 = (!(i2 ^ s)) & 1;
+	t32(0xF000 | (s << 10) | imm10,
+	    0xD000 | (j1 << 13) | (j2 << 11) | imm11);
 }
 
 /* b<cond>.w, offset as above (T3, +-1MB) */
@@ -742,8 +760,43 @@ static int t_span(unsigned long start, unsigned long end)
 		case BC_CALL: {
 			unsigned s;
 			unsigned long ad = t_rd32c(o + 1);
+			unsigned long tent = ~0UL;
 			if (!t_addrsym(o + 1, &s))
 				return 0;
+			/*
+			 *	Stage-8 peephole: a callee already known to
+			 *	be native - itself, or any function this
+			 *	module committed earlier - is a direct BL.
+			 *	The parity slot is dead for a native callee
+			 *	(only a bytecode BC_RET reads it), so the
+			 *	site is subs/bl/adds: no trampoline, no
+			 *	register-file reload, no global-sp traffic.
+			 *	The callee returns r4 balanced (ENTER/LEAVE
+			 *	and pushes are symmetric) and preserves
+			 *	r4-r6 by construction.  Forced-bytecode and
+			 *	x86 hosts never execute this span, so the
+			 *	alias path is untouched.
+			 */
+			if (ad == 0) {
+				if (s == fn_sym)
+					tent = t_base;	/* self-recursion:
+							   own preamble */
+				else if (symtab[s].s_type == BC_SYM_CODE &&
+					 symtab[s].s_value < codelen &&
+					 codebuf[symtab[s].s_value] == BC_NATIVE)
+					tent = BC_NATIVE_ENTRY(symtab[s].s_value);
+			}
+			if (tent != ~0UL) {
+				t16(0x3C04);	/* subs r4, #4 - slot */
+				if (t_dry)
+					t32(0, 0);
+				else
+					t_blw((long)tent -
+					      (long)(t_base + 2 + tlen + 4));
+				t16(0x3404);	/* adds r4, #4        */
+				o += 5;
+				break;
+			}
 			if (ntpool >= TPOOLMAX)
 				return 0;
 			if (!t_dry) {
@@ -1116,6 +1169,10 @@ static void thumb_commit(void)
 		t_bail = "span";
 		goto bailed;
 	}
+	/* Where this function will land if it commits - codelen is not
+	   moved by translation, so both passes see the truth.  Direct
+	   BLs (self and known-native callees) are encoded against it. */
+	t_base = BC_NATIVE_ENTRY(end);
 
 	tlen = 0;
 	ntpool = 0;
@@ -1182,5 +1239,101 @@ bailed:
 		if (t_bailop)
 			fprintf(stderr, " %02x", t_bailop);
 		fputc('\n', stderr);
+	}
+}
+
+/*
+ *	Link-time half of the direct-BL peephole.  Translation can only
+ *	turn a call into a direct BL when the callee committed EARLIER;
+ *	most real calls are forward references, so at gen_end - every
+ *	function placed - each remaining trampoline call site whose
+ *	callee did go native is rewritten in place.  A call site is a
+ *	pair-fixup at a movw/movt r0 followed by the exact trampoline
+ *	tail (mov r1,r4 / ldr r3,[r5] / blx r3), 14 bytes; it becomes
+ *	subs r4,#4 / bl callee / adds r4,#4 / 3x nop - same length, so
+ *	no relayout - and the fixup is dropped so the loader cannot
+ *	patch what is no longer an address pair.  (&func constants are
+ *	movw/movt too, but never carry the call tail; forced-bytecode
+ *	and x86 hosts never execute native spans, so the alias path is
+ *	untouched either way.)
+ */
+static void thumb_link_calls(void)
+{
+	unsigned i, o2;
+	unsigned linked = 0;
+
+	if (!have_native)
+		return;
+	for (i = 0; i < nfix; i++) {
+		unsigned long o = fixtab[i].f_offset;
+		unsigned s = fixtab[i].f_sym;
+		unsigned long tent, site_pc;
+		long disp;
+		unsigned long u;
+		unsigned imm11, imm10, i1, i2, sn, j1, j2;
+
+		if (fixtab[i].f_pad != 2 || fixtab[i].f_seg != BC_SEG_CODE)
+			continue;
+		if (symtab[s].s_type != BC_SYM_CODE)
+			continue;
+		if (symtab[s].s_value >= codelen ||
+		    codebuf[symtab[s].s_value] != BC_NATIVE)
+			continue;
+		if (o + 14 > codelen)
+			continue;
+		/* movw r0 / movt r0 with any imm, then the call tail */
+		if ((codebuf[o] & 0xF0) != 0x40 ||
+		    (codebuf[o + 1] & 0xFB) != 0xF2 ||
+		    (codebuf[o + 3] & 0x8F) != 0 ||
+		    (codebuf[o + 4] & 0xF0) != 0xC0 ||
+		    (codebuf[o + 5] & 0xFB) != 0xF2 ||
+		    (codebuf[o + 7] & 0x8F) != 0)
+			continue;
+		if (codebuf[o + 8] != 0x21 || codebuf[o + 9] != 0x46 ||
+		    codebuf[o + 10] != 0x2B || codebuf[o + 11] != 0x68 ||
+		    codebuf[o + 12] != 0x98 || codebuf[o + 13] != 0x47)
+			continue;
+
+		tent = BC_NATIVE_ENTRY(symtab[s].s_value);
+		site_pc = o + 2 + 4;	/* BL follows the subs */
+		disp = (long)tent - (long)site_pc;
+
+		codebuf[o] = 0x04;	/* subs r4, #4 */
+		codebuf[o + 1] = 0x3C;
+		u = ((unsigned long)disp >> 1) & 0xFFFFFF;
+		imm11 = u & 0x7FF;
+		imm10 = (u >> 11) & 0x3FF;
+		i2 = (u >> 21) & 1;
+		i1 = (u >> 22) & 1;
+		sn = (disp < 0);
+		j1 = (!(i1 ^ sn)) & 1;
+		j2 = (!(i2 ^ sn)) & 1;
+		codebuf[o + 2] = (0xF000 | (sn << 10) | imm10) & 0xFF;
+		codebuf[o + 3] = (0xF000 | (sn << 10) | imm10) >> 8;
+		codebuf[o + 4] = (0xD000 | (j1 << 13) | (j2 << 11) | imm11) & 0xFF;
+		codebuf[o + 5] = (0xD000 | (j1 << 13) | (j2 << 11) | imm11) >> 8;
+		codebuf[o + 6] = 0x04;	/* adds r4, #4 */
+		codebuf[o + 7] = 0x34;
+		codebuf[o + 8] = 0x00;	/* nop x3 */
+		codebuf[o + 9] = 0xBF;
+		codebuf[o + 10] = 0x00;
+		codebuf[o + 11] = 0xBF;
+		codebuf[o + 12] = 0x00;
+		codebuf[o + 13] = 0xBF;
+
+		fixtab[i].f_sym = 0xFFFF;	/* drop below */
+		linked++;
+	}
+	if (linked) {
+		for (i = o2 = 0; i < nfix; i++)
+			if (!(fixtab[i].f_pad == 2 && fixtab[i].f_sym == 0xFFFF)) {
+				fixtab[o2] = fixtab[i];
+				fix_in_lit[o2] = fix_in_lit[i];
+				o2++;
+			}
+		nfix = o2;
+		if (getenv("THUMB_VERBOSE"))
+			fprintf(stderr, "linked: %u call sites -> direct BL\n",
+				linked);
 	}
 }
