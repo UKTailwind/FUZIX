@@ -2099,6 +2099,39 @@ static int64_t native_enter(unsigned long off)
 static int force_bytecode;	/* BCRUN_BYTECODE=1: ignore native code */
 
 /*
+ *	BCRUN_PROF=1: count every crossing from native code back into
+ *	the runtime - the whole remaining cost surface of translated
+ *	code - and dump the histogram at exit.  Counted at the helper
+ *	entries, so interpreter execution is invisible: this measures
+ *	what NATIVE code still pays for.
+ */
+static int prof_on;
+static uint32_t prof_op[256];		/* helper_op by opcode      */
+static uint32_t prof_lib[256];		/* helper_libcall by index  */
+static uint32_t prof_call, prof_libcall, prof_eqop, prof_enter;
+
+static void prof_dump(void)
+{
+	unsigned i;
+
+	if (!prof_on)
+		return;
+	fprintf(stderr, "-- bcrun profile --\n");
+	fprintf(stderr, "native entries %lu, helper_call %lu, "
+		"libcall %lu, eqop %lu\n",
+		(unsigned long)prof_enter, (unsigned long)prof_call,
+		(unsigned long)prof_libcall, (unsigned long)prof_eqop);
+	for (i = 0; i < 256; i++)
+		if (prof_op[i])
+			fprintf(stderr, "op %02x %lu\n", i,
+				(unsigned long)prof_op[i]);
+	for (i = 0; i < 256; i++)
+		if (prof_lib[i])
+			fprintf(stderr, "lib %u %lu\n", i,
+				(unsigned long)prof_lib[i]);
+}
+
+/*
  *	A call FROM native code, any callee.  The stub at the call site
  *	synced the global sp from its r4 before coming here.  A native
  *	callee goes through native_enter exactly as the interpreter's
@@ -2111,6 +2144,7 @@ static int force_bytecode;	/* BCRUN_BYTECODE=1: ignore native code */
 static int64_t helper_call(unsigned long target, unsigned char *vsp)
 {
 	sp = (unsigned long)(vsp - mem);
+	prof_call++;
 	if (target & 0x80000000UL) {
 		libcall((unsigned)(target & 0x7FFFFFFFUL));
 		return A;
@@ -2140,6 +2174,8 @@ static int64_t helper_call(unsigned long target, unsigned char *vsp)
 static int64_t helper_libcall(unsigned long idx, unsigned char *vsp)
 {
 	sp = (unsigned long)(vsp - mem);
+	prof_libcall++;
+	prof_lib[idx & 0xFF]++;
 	libcall((unsigned)idx);
 	return A;
 }
@@ -2157,6 +2193,7 @@ static int64_t helper_libcall(unsigned long idx, unsigned char *vsp)
 static int64_t helper_eqop(unsigned long idx, unsigned char *vsp, int64_t a)
 {
 	sp = (unsigned long)(vsp - mem);
+	prof_eqop++;
 	A = a;
 	libcall((unsigned)idx);
 	return A;
@@ -2184,6 +2221,7 @@ static int64_t helper_op(unsigned long op, unsigned char *vsp, int64_t a)
 	int64_t b;
 
 	op &= 0xFFFF;
+	prof_op[op & 0xFF]++;
 	switch (op) {
 	/*
 	 * Aggregates carry their length in the op word's high half - the
@@ -2710,6 +2748,9 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	force_bytecode = getenv("BCRUN_BYTECODE") != NULL;
+	prof_on = getenv("BCRUN_PROF") != NULL;
+	if (prof_on)
+		atexit(prof_dump);	/* mm_end() exits through here */
 	load(argv[i]);
 	return run();
 }
