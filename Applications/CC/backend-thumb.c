@@ -107,6 +107,27 @@ static unsigned long t_maxfn(void)
 	return (unsigned long)cached;
 }
 
+/*
+ *	THUMB_BUDGET caps the TOTAL native bytes added to the object
+ *	(first-come): a mixed object must fit the target process ceiling
+ *	alongside its retained bytecode.  The full-native eclipse is
+ *	172K loaded against ~124K free on the board - reclaiming a
+ *	committed function's dead bytecode is the stage-9 fix; until
+ *	then a board build passes a budget and ships as much native as
+ *	fits.  0 or unset = uncapped.
+ */
+static unsigned long t_spent;
+
+static unsigned long t_budget(void)
+{
+	static long cached = -1;
+	if (cached < 0) {
+		const char *e = getenv("THUMB_BUDGET");
+		cached = e ? atol(e) : 0;
+	}
+	return (unsigned long)cached;
+}
+
 /* ---- raw emission --------------------------------------------------- */
 
 static void t16(unsigned v)
@@ -1008,6 +1029,10 @@ static void thumb_commit(void)
 		t_bail = "size policy";
 		goto bailed;
 	}
+	if (t_budget() && t_spent + tlen + 8 > t_budget()) {
+		t_bail = "budget";
+		goto bailed;
+	}
 
 	tlen = 0;
 	ntpool = 0;
@@ -1046,6 +1071,7 @@ static void thumb_commit(void)
 
 	symtab[fn_sym].s_value = marker;
 	have_native = 1;
+	t_spent += tlen + 8;
 	if (getenv("THUMB_VERBOSE"))
 		fprintf(stderr, "native: %s (%lu bc -> %u bytes)\n",
 			bc_symname[fn_sym], end - fn_start, tlen);
