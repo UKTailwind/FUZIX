@@ -437,10 +437,38 @@ naive emitter's 3-8× leaves plenty for stage 8's peepholes to chase.
   call still crosses two trampolines and a C helper, and compares
   still materialise 0/1.
 
-Next: stage 8 (peepholes, measured, one per commit - direct BL for
-known-native callees first, cmp+branch fusion second), then 9 (the
-fit levers above + SD refresh; the eclipse's other 27 functions are
-waiting on exactly that).
+* **Stage 8 done** 2026-07-31 (a: direct BL, b: cmp+branch fusion;
+  both board-verified same day).
+
+  8a, two halves: at translate time a call to a callee already
+  known native (itself, or anything committed earlier) emits
+  subs r4,#4 / bl / adds r4,#4 - the parity slot is dead for a
+  native callee, r4 comes back balanced, and t_base anchors the
+  displacement.  Most calls are forward references, so at gen_end
+  thumb_link_calls() rewrites every remaining trampoline site whose
+  callee went native (recognised by its pair fixup + the exact
+  14-byte movw/movt+tail pattern) into the same form plus three
+  nops, in place, dropping the fixup.  **fib(27) 385 -> 78 ms**
+  (2644 interpreted); the eclipse links 44 sites, Dhrystone 14.
+
+  8b: every flag-materialise site fuses with a following JFALSE/
+  JTRUE when nothing can land on the jump - branch on the flags,
+  no 0/1, no second compare.  The && / || join labels (reached
+  with A live) are excluded by their "L" tail - the one shape
+  where fusion would be wrong, guarded by construction.  Board:
+  sieve 47 ms, fib 71, sort 74, rng 57, rev 119 (all checksums
+  good); Dhrystone 11,689/s; eclipse 6.36 s.
+
+  **Cumulative vs the interpreter on the PC3: sieve 82x, fib 37x,
+  sort 49x, rng 143x, rev 57x; Dhrystone 3.0x (string libcalls
+  dominate what remains); eclipse 7.11 -> 6.36 s at only 7/34
+  native.**  Remaining stage-8 candidates, unmeasured and parked:
+  constants folded into operands via gen_direct, redundant
+  push/pop pairs around sequential ops.
+
+Next: stage 9 - the fit levers above (dead-bytecode reclaim,
+streamed fixups) so the eclipse's other 27 functions go native on
+the board, then sizing policy polish and the SD refresh.
 
 Stage 6 lessons, kept:
 * BOOLD/LNOTD (and float forms) are BIT TESTS (pattern << 1 == 0),
