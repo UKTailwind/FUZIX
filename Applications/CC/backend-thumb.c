@@ -98,6 +98,56 @@ ATAB(static struct tref treftab[TPOOLMAX],
      static struct tref *treftab);
 static unsigned ntref;
 
+/*
+ *	Stage 10 peephole state.  t_targets: one bit per span byte, set
+ *	during the dry pass for every in-span branch/case target - all
+ *	tracking dies at a marked op, because control can arrive there
+ *	with any register contents.  t_track: what the wet pass knows
+ *	about the machine beyond the bytecode contract - currently,
+ *	whether A still mirrors a known mem[] address (set by a store
+ *	through a constant address, used to elide the reload pair).
+ */
+ATAB(static unsigned char t_targets[TMAX / 8],
+     static unsigned char *t_targets);
+
+/* An address the pass can reason about: a plain constant (kind 1) or
+   a symbol plus addend (kind 2, the BC_ADDR form globals use - the
+   loader relocates both mentions identically, so symbol+addend
+   equality means address equality).  kind 0 = unknown. */
+struct t_addr {
+	unsigned char kind;
+	unsigned sym;
+	unsigned long k;
+};
+
+static struct {
+	int a_valid;		/* A == mem[a_key], width a_width */
+	struct t_addr a_key;
+	unsigned char a_width;	/* 4 or 8 */
+	struct t_addr a_is;	/* what value A itself holds */
+	struct t_addr slot;	/* a pushed address awaiting its store */
+	long slot_depth;	/* bytes of stack above that slot */
+} t_track;
+
+/* Net stack-bytes each op pushes (positive) or pops, set by the case
+   bodies; T_DUNK (the loop-top default) means "unknown effect" and
+   kills slot tracking - jumps, calls, anything variable. */
+#define T_DUNK 999
+static long t_d;
+
+static int t_addr_eq(const struct t_addr *x, const struct t_addr *y)
+{
+	return x->kind && x->kind == y->kind && x->k == y->k
+	    && (x->kind != 2 || x->sym == y->sym);
+}
+
+static void t_invalidate(void)
+{
+	t_track.a_valid = 0;
+	t_track.a_is.kind = 0;
+	t_track.slot.kind = 0;
+}
+
 static unsigned long fn_start;
 static unsigned fn_sym;
 static unsigned fn_patch_lo;
@@ -345,6 +395,7 @@ static void t_helperop(unsigned long op, unsigned pops)
 	t16(0x47E0);		/* blx  r12               */
 	if (pops)
 		t16(0x3400 | pops);	/* adds r4, #pops */
+	t_d = -(long)pops;	/* fixed stack effect (PUSHN overrides) */
 }
 
 /*
@@ -381,6 +432,7 @@ static void t_dcpbin(unsigned slot)
 	t16(0x3408);		/* adds r4, #8  - pop the operand */
 	t32(0xF8D5, 0xC000 | (slot * 4));	/* ldr.w r12, [r5, #] */
 	t16(0x47E0);		/* blx  r12                       */
+	t_d = -8;
 }
 
 /* conversion: A is already the argument in r0/r1 */
@@ -388,6 +440,7 @@ static void t_dcpconv(unsigned slot)
 {
 	t32(0xF8D5, 0xC000 | (slot * 4));	/* ldr.w r12, [r5, #] */
 	t16(0x47E0);		/* blx  r12                       */
+	t_d = 0;
 }
 
 /* add/sub rd, rn, #imm12 (T4 ADDW/SUBW, no flags) */
@@ -492,9 +545,16 @@ static unsigned long t_case_target(unsigned long off)
 		if (fixtab[i].f_seg == BC_SEG_DATA && fix_in_lit[i] &&
 		    fixtab[i].f_offset == off) {
 			unsigned s = fixtab[i].f_sym;
+			unsigned long tgt;
 			if (symtab[s].s_type != BC_SYM_CODE)
 				return ~0UL;
-			return symtab[s].s_value + t_lit32(off);
+			tgt = symtab[s].s_value + t_lit32(off);
+			/* case labels are landing sites too */
+			if (t_dry && tgt >= fn_start
+			    && tgt - fn_start < TMAX)
+				t_targets[(tgt - fn_start) >> 3] |=
+				    1 << ((tgt - fn_start) & 7);
+			return tgt;
 		}
 	}
 	return ~0UL;
@@ -514,6 +574,12 @@ static unsigned long t_target(unsigned long at)
 			struct label *l = &labtab[patchtab[i].lab];
 			if (!l->defined)
 				return ~0UL;
+			/* dry pass: remember every in-span landing site
+			   for the peephole pass (see t_targets) */
+			if (t_dry && l->addr >= fn_start
+			    && l->addr - fn_start < TMAX)
+				t_targets[(l->addr - fn_start) >> 3] |=
+				    1 << ((l->addr - fn_start) & 7);
 			return l->addr;
 		}
 	}
@@ -653,17 +719,28 @@ static int t_eqop(const char *name)
  *	displacements.  Both passes run the same code so the sizes cannot
  *	disagree.  Returns 0 to bail - the function stays bytecode.
  */
+static int t_keep;	/* set by ops that maintain t_track facts */
+
 static int t_span(unsigned long start, unsigned long end)
 {
 	unsigned long o = start;
 
 	t_bail = "limits";	/* any non-opcode return 0 below */
+	t_invalidate();
 	while (o < end) {
 		unsigned op = codebuf[o];
 
 		if (o - start >= TMAX || tlen > TMAX - 64)
 			return 0;
 		tmap[o - start] = tlen;
+
+		/* control can land here with anything in the registers:
+		   forget everything.  The bitmap is complete before any
+		   sizing pass runs (the collect walk), so every pass
+		   takes identical decisions and sizes agree. */
+		if (t_targets[(o - start) >> 3] & (1 << ((o - start) & 7)))
+			t_invalidate();
+		t_d = T_DUNK;
 
 		switch (op) {
 		case BC_NOP:
@@ -695,20 +772,66 @@ static int t_span(unsigned long start, unsigned long end)
 			o += 2;
 			break;
 		}
-		case BC_CONST8:
-			t_const((unsigned long)(long)(signed char)codebuf[o + 1]
-				& 0xFFFFFFFFUL);
+		case BC_CONST8: {
+			unsigned long k =
+			    (unsigned long)(long)(signed char)codebuf[o + 1]
+			    & 0xFFFFFFFFUL;
+			t_const(k);
+			t_track.a_is.kind = 1;
+			t_track.a_is.k = k;
+			t_track.a_valid = 0;
+			t_keep = 1;
+			t_d = 0;
 			o += 2;
 			break;
-		case BC_CONST16:
-			t_const((unsigned long)(long)(short)t_rd16(o + 1)
-				& 0xFFFFFFFFUL);
+		}
+		case BC_CONST16: {
+			unsigned long k =
+			    (unsigned long)(long)(short)t_rd16(o + 1)
+			    & 0xFFFFFFFFUL;
+			t_const(k);
+			t_track.a_is.kind = 1;
+			t_track.a_is.k = k;
+			t_track.a_valid = 0;
+			t_keep = 1;
+			t_d = 0;
 			o += 3;
 			break;
-		case BC_CONST32:
-			t_const(t_rd32c(o + 1));
+		}
+		case BC_CONST32: {
+			unsigned long k = t_rd32c(o + 1);
+			struct t_addr me;
+			me.kind = 1;
+			me.sym = 0;
+			me.k = k;
+			/* Elide "CONST32 addr; LOADxx" when A already
+			   mirrors mem[addr]: the store that set a_valid
+			   left the value in A.  Only when no branch can
+			   land on the load (bitmap), and the width the
+			   store established matches the load. */
+			if (t_track.a_valid && o + 5 < end
+			    && t_addr_eq(&me, &t_track.a_key)
+			    && !(t_targets[(o + 5 - start) >> 3] &
+				 (1 << ((o + 5 - start) & 7)))
+			    && ((t_track.a_width == 4 &&
+				 codebuf[o + 5] == BC_LOAD32) ||
+				(t_track.a_width == 8 &&
+				 codebuf[o + 5] == BC_LOAD64))) {
+				tmap[o + 5 - start] = tlen;
+				t_track.a_is.kind = 0;
+				t_keep = 1;	/* a_valid survives */
+				t_d = 0;
+				o += 6;
+				break;
+			}
+			t_const(k);
+			t_track.a_is = me;
+			t_track.a_valid = 0;
+			t_keep = 1;
+			t_d = 0;
 			o += 5;
 			break;
+		}
 		case BC_JUMP: {
 			unsigned long tgt = t_target(o + 1);
 			if (tgt == ~0UL || tgt < start || tgt >= end)
@@ -725,17 +848,27 @@ static int t_span(unsigned long start, unsigned long end)
 		case BC_PUSH:
 			t16(0x3C04);		/* subs r4, #4      */
 			t16(0x6020);		/* str  r0, [r4]    */
+			/* A untouched: its facts survive.  Whatever A is
+			   known to hold is now also the newest stack
+			   slot - begin tracking it toward its store
+			   (depth pre-compensated for this op's +4). */
+			t_track.slot = t_track.a_is;
+			t_track.slot_depth = -4;
+			t_d = 4;
+			t_keep = 1;
 			o++;
 			break;
 		case BC_POP:
 			t16(0x6820);		/* ldr  r0, [r4]    */
 			t16(0x3404);		/* adds r4, #4      */
+			t_d = -4;
 			o++;
 			break;
 		case BC_DUP:
 			t16(0x6822);		/* ldr  r2, [r4]    */
 			t16(0x3C04);		/* subs r4, #4      */
 			t16(0x6022);		/* str  r2, [r4]    */
+			t_d = 4;
 			o++;
 			break;
 		case BC_SWAP:
@@ -746,6 +879,7 @@ static int t_span(unsigned long start, unsigned long end)
 			break;
 		case BC_DROP:
 			t16(0x3404);		/* adds r4, #4      */
+			t_d = -4;
 			o++;
 			break;
 		case BC_LOCAL8:
@@ -763,27 +897,33 @@ static int t_span(unsigned long start, unsigned long end)
 				else
 					return 0;
 			}
+			t_d = 0;
 			o += (op == BC_LOCAL8) ? 2 : 3;
 			break;
 		}
 		case BC_LOAD8S:
 			t16(0x5630);		/* ldrsb r0, [r6, r0] */
+			t_d = 0;
 			o++;
 			break;
 		case BC_LOAD8U:
 			t16(0x5C30);		/* ldrb  r0, [r6, r0] */
+			t_d = 0;
 			o++;
 			break;
 		case BC_LOAD16S:
 			t16(0x5E30);		/* ldrsh r0, [r6, r0] */
+			t_d = 0;
 			o++;
 			break;
 		case BC_LOAD16U:
 			t16(0x5A30);		/* ldrh  r0, [r6, r0] */
+			t_d = 0;
 			o++;
 			break;
 		case BC_LOAD32:
 			t16(0x5830);		/* ldr   r0, [r6, r0] */
+			t_d = 0;
 			o++;
 			break;
 		case BC_STORE8:
@@ -797,13 +937,63 @@ static int t_span(unsigned long start, unsigned long end)
 				t16(0x52B0);	/* strh r0, [r6, r2] */
 			else
 				t16(0x50B0);	/* str  r0, [r6, r2] */
+			/* A untouched.  A 32-bit store through a known
+			   constant address makes A a mirror of that
+			   memory - the seed for the reload elision.
+			   Narrow stores truncate (no seed, and they may
+			   break an existing mirror); a 32-bit store to
+			   an UNKNOWN address keeps a 4-byte mirror (if
+			   it hit a_addr it wrote A there) but can break
+			   the high half of an 8-byte one. */
+			if (op == BC_STORE32 && t_track.slot.kind
+			    && t_track.slot_depth == 0) {
+				t_track.a_valid = 1;
+				t_track.a_key = t_track.slot;
+				t_track.a_width = 4;
+			} else if (op != BC_STORE32 ||
+				   t_track.a_width == 8) {
+				t_track.a_valid = 0;
+			}
+			t_d = -4;	/* consumes the address slot */
+			t_keep = 1;
 			o++;
 			break;
 		case BC_ADDR: {
 			unsigned s;
 			unsigned long ad = t_rd32c(o + 1);
+			struct t_addr me;
 			if (!t_addrsym(o + 1, &s))
 				return 0;
+			me.kind = 2;
+			me.sym = s;
+			me.k = ad;
+			/* A already holds exactly this address: the movw/
+			   movt pair (and its fixup) is a repeat.  Frequent:
+			   consecutive statements about the same variable. */
+			if (t_addr_eq(&me, &t_track.a_is)) {
+				t_keep = 1;
+				t_d = 0;
+				o += 5;
+				break;
+			}
+			/* the global-variable form of the reload elision:
+			   ADDR sym; LOADxx straight after a store through
+			   the same sym+addend re-reads what A still holds */
+			if (t_track.a_valid && o + 5 < end
+			    && t_addr_eq(&me, &t_track.a_key)
+			    && !(t_targets[(o + 5 - start) >> 3] &
+				 (1 << ((o + 5 - start) & 7)))
+			    && ((t_track.a_width == 4 &&
+				 codebuf[o + 5] == BC_LOAD32) ||
+				(t_track.a_width == 8 &&
+				 codebuf[o + 5] == BC_LOAD64))) {
+				tmap[o + 5 - start] = tlen;
+				t_track.a_is.kind = 0;
+				t_keep = 1;	/* a_valid survives */
+				t_d = 0;
+				o += 6;
+				break;
+			}
 			if (ntpool >= TPOOLMAX)
 				return 0;
 			if (!t_dry) {
@@ -816,6 +1006,10 @@ static int t_span(unsigned long start, unsigned long end)
 			   whatever the addend, so the site is uniform */
 			t_mov16(0, 0, ad & 0xFFFF);
 			t_mov16(1, 0, (ad >> 16) & 0xFFFF);
+			t_track.a_is = me;
+			t_track.a_valid = 0;
+			t_keep = 1;
+			t_d = 0;
 			o += 5;
 			break;
 		}
@@ -1030,6 +1224,7 @@ static int t_span(unsigned long start, unsigned long end)
 		case BC_CONST64:
 			t_constr(0, t_rd32c(o + 1));
 			t_constr(1, t_rd32c(o + 5));
+			t_d = 0;
 			o += 9;
 			break;
 		case BC_LOAD64:
@@ -1039,6 +1234,7 @@ static int t_span(unsigned long start, unsigned long end)
 			t16(0x1832);		/* adds r2, r6, r0   */
 			t16(0x6810);		/* ldr  r0, [r2]     */
 			t16(0x6851);		/* ldr  r1, [r2, #4] */
+			t_d = 0;
 			o++;
 			break;
 		case BC_STORE64:
@@ -1047,6 +1243,68 @@ static int t_span(unsigned long start, unsigned long end)
 			t16(0x1992);		/* adds r2, r2, r6   */
 			t16(0x6010);		/* str  r0, [r2]     */
 			t16(0x6051);		/* str  r1, [r2, #4] */
+			/* The commonest statement seam in compiled BASIC:
+			     STORE64 ; ADDR s1 ; PUSH ; ADDR key ; LOAD64
+			   with key = the address this store just wrote.
+			   A still holds the stored value, so push s1
+			   through r2 instead of A and the whole reload
+			   disappears. */
+			if (t_track.slot.kind == 2 && t_track.slot_depth == 0
+			    && o + 13 <= end
+			    && codebuf[o + 1] == BC_ADDR
+			    && codebuf[o + 6] == BC_PUSH
+			    && codebuf[o + 7] == BC_ADDR
+			    && codebuf[o + 12] == BC_LOAD64) {
+				unsigned s1, s2;
+				unsigned long ad1 = t_rd32c(o + 2);
+				struct t_addr k2;
+				int hit = t_addrsym(o + 2, &s1)
+				    && t_addrsym(o + 8, &s2);
+				unsigned long i2;
+				k2.kind = 2;
+				k2.sym = s2;
+				k2.k = t_rd32c(o + 8);
+				for (i2 = o + 1; hit && i2 <= o + 12; i2++)
+					if (t_targets[(i2 - start) >> 3] &
+					    (1 << ((i2 - start) & 7)))
+						hit = 0;
+				if (hit && t_addr_eq(&k2, &t_track.slot)
+				    && ntpool < TPOOLMAX) {
+					if (!t_dry) {
+						tpooltab[ntpool].sym = s1;
+						tpooltab[ntpool].site = tlen;
+					}
+					ntpool++;
+					t_mov16(0, 2, ad1 & 0xFFFF);
+					t_mov16(1, 2, (ad1 >> 16) & 0xFFFF);
+					t16(0x3C04);	/* subs r4, #4  */
+					t16(0x6022);	/* str  r2, [r4] */
+					for (i2 = o + 1; i2 <= o + 12; i2++)
+						tmap[i2 - start] = tlen;
+					/* A: still the stored value, and
+					   a mirror of key; the fresh slot
+					   is s1 awaiting its own store */
+					t_track.a_valid = 1;
+					t_track.a_key = t_track.slot;
+					t_track.a_width = 8;
+					t_track.a_is.kind = 0;
+					t_track.slot.kind = 2;
+					t_track.slot.sym = s1;
+					t_track.slot.k = ad1;
+					t_track.slot_depth = 0;
+					t_d = 0;
+					t_keep = 1;
+					o += 13;
+					break;
+				}
+			}
+			if (t_track.slot.kind && t_track.slot_depth == 0) {
+				t_track.a_valid = 1;
+				t_track.a_key = t_track.slot;
+				t_track.a_width = 8;
+			}
+			t_d = -4;	/* consumes the address slot */
+			t_keep = 1;
 			o++;
 			break;
 		case BC_PUSH64:
@@ -1054,16 +1312,19 @@ static int t_span(unsigned long start, unsigned long end)
 			t16(0x3C08);		/* subs r4, #8       */
 			t16(0x6020);		/* str  r0, [r4]     */
 			t16(0x6061);		/* str  r1, [r4, #4] */
+			t_d = 8;
 			o++;
 			break;
 		case BC_POP64:
 			t16(0x6820);		/* ldr  r0, [r4]     */
 			t16(0x6861);		/* ldr  r1, [r4, #4] */
 			t16(0x3408);		/* adds r4, #8       */
+			t_d = -8;
 			o++;
 			break;
 		case BC_SEXT32:
 			t16(0x17C1);		/* asrs r1, r0, #31  */
+			t_d = 0;
 			o++;
 			break;
 		case BC_ZEXT32:
@@ -1272,6 +1533,7 @@ static int t_span(unsigned long start, unsigned long end)
 				t16(0x3C00 | n);	/* subs r4, #n */
 			else
 				t_addsubw(1, 4, 4, n);	/* sub.w r4, #n */
+			t_d = T_DUNK;	/* variable */
 			o += 3;
 			break;
 		}
@@ -1329,6 +1591,26 @@ static int t_span(unsigned long start, unsigned long end)
 			t_bailop = op;
 			return 0;
 		}
+		/* The slot survives any run of ops with a declared stack
+		   effect; an op of unknown effect, or one that pops
+		   through it, kills it.  A-register facts are stricter:
+		   only ops that explicitly maintain them keep them.
+		   Sound by default either way - a new op cannot
+		   silently inherit stale facts. */
+		if (t_track.slot.kind) {
+			if (t_d == T_DUNK)
+				t_track.slot.kind = 0;
+			else {
+				t_track.slot_depth += t_d;
+				if (t_track.slot_depth < 0)
+					t_track.slot.kind = 0;
+			}
+		}
+		if (!t_keep) {
+			t_track.a_valid = 0;
+			t_track.a_is.kind = 0;
+		}
+		t_keep = 0;
 	}
 	return 1;
 }
@@ -1365,6 +1647,19 @@ static void thumb_commit(void)
 	   moved by translation, so both passes see the truth.  Direct
 	   BLs (self and known-native callees) are encoded against it. */
 	t_base = BC_NATIVE_ENTRY(reclaim ? fn_start : end);
+
+	/* Collect walk: the target bitmap must be COMPLETE before any
+	   pass whose size matters, or a backward jump's landing site is
+	   unmarked during the sizing pass and marked during emission -
+	   the passes would then disagree about elisions and every
+	   branch offset after the divergence is garbage. */
+	memset(t_targets, 0, TMAX / 8);
+	tlen = 0;
+	ntpool = 0;
+	ntref = 0;
+	t_dry = 1;
+	if (!t_span(fn_start, end))
+		goto bailed;
 
 	tlen = 0;
 	ntpool = 0;
@@ -1641,6 +1936,7 @@ void bc_arena_init(void)
 	libreftab = bc_arena_carve(MAXFIX * sizeof(struct libref));
 	tbuf = bc_arena_carve(TMAX);
 	tmap = bc_arena_carve(TMAX * sizeof(tmap_t));
+	t_targets = bc_arena_carve(TMAX / 8);
 	tpooltab = bc_arena_carve(TPOOLMAX * sizeof(struct tpool));
 	treftab = bc_arena_carve(TPOOLMAX * sizeof(struct tref));
 }

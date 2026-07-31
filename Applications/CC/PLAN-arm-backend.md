@@ -591,3 +591,46 @@ improvements to the interpreter (rungs 1–2 declined), no attempt to
 make native objects loadable by old bcruns.  And no board-side cc2
 work until stage 9 — development runs host-side, qemu for execution,
 the board for milestones.
+
+## Stage 10: the peephole pass (designed 2026-07-31, profile-driven)
+
+BCRUN_PROF proved the helper crossings are gone (v3): Dhrystone runs
+4460 cycles/iter against gcc's 990 and nearly all of the difference
+is the stack-machine shape - every operand round-trips through mem[]
+where gcc keeps it in a register.  Subjects of record: dhrystone,
+eclipse, benchmark.bas, KnivD bench.bas; board-measured; all gates
+green after every stage.
+
+Constraints discovered up front (violating any one is a wrong-code
+bug the gates will catch, but design for them):
+ - BC_LOCAL computes an address FROM r4.  A fusion that elides a
+   push's memory traffic must still adjust r4 across any window
+   containing LOCAL, or exclude LOCAL from windows.  Keeping the r4
+   arithmetic (subs/adds #4) and eliding only the str/ldr is the
+   safe default - the win is the memory traffic, not the adds.
+ - r2/r3 die at every BL (helpers, DCP slots, calls).  A cached left
+   operand lives in r2 (r2:r3 wide): windows must be call-free.
+ - Branch targets invalidate all tracking.  The dry pass gains a
+   target bitmap (TMAX/8 bytes, arena-carved on the board): every
+   t_target seen during the dry walk sets a bit; the wet pass resets
+   tracking state at every marked op and at every label/patch site.
+
+Stages, each gated and board-measured before the next:
+ 10a  Infrastructure: target bitmap + a tiny tracking struct
+      (what is in r2/r3, what address A mirrors) with a single
+      invalidate() called at targets, calls, helper ops.
+ 10b  Store->load elision: STOREx addr via CONST32 leaves A intact;
+      a following CONST32 same-addr + LOADx of the same width is a
+      no-op.  Cross-statement, hits every "v = expr" followed by a
+      use of v.  32-bit and 64-bit forms.
+ 10c  Push/op fusion, 32-bit: PUSH ; [r2-safe A-builder ops <= 4:
+      CONSTx, LOCALx, LOADxx] ; binop  =>  keep r4 arithmetic, carry
+      left in r2 (mov r2, r0), emit binop reg-to-reg.  Every binary
+      expression in the program pays this pattern today.
+ 10d  Push/op fusion, 64-bit/double: left cached in r2:r3.  The DCP
+      call wants left in r0:r1 - for commutative ops (ADDD MULD EQD
+      NED, int ADD64 etc) call with swapped operands; for ordered
+      ops either a 3-instr swap or parameterized load-to-r2:r3
+      emitters for the builder ops (decide by measurement).
+ 10e  Re-measure, re-profile, decide whether DUP/SWAP/POP patterns
+      and the DCP wrapper cost (self-save per call) are next.
