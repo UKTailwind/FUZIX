@@ -267,151 +267,162 @@ static unsigned long fetch32(void)
 /*
  *	Compound assignment and increment arrive as library calls rather
  *	than opcodes: the address is on the stack and the amount is in A.
- *	See BYTECODE.md.
+ *	See BYTECODE.md.  The name encodes everything - "pluseq4s",
+ *	"shreq8u", "postincd" - and is parsed ONCE per symbol into a
+ *	descriptor cached in eqbind: these are the hottest libcalls a
+ *	program has (every += on a double or long long), and the old
+ *	per-call string parse was a measurable slice of the eclipse.
  *
- *	These assume a 32bit operand. The emitter does not yet encode the
- *	width in the call, so char and short compound assignment is wrong;
- *	that is a known gap, recorded in PC3-COMPILER-PLAN.md.
+ *	Descriptor: bit15 valid, bit14 fp (size 4 = float, 8 = double),
+ *	bits 13-12 log2 size, bit11 unsigned, bits 3-0 kind.
  */
-/*
- *	The floating point forms of the above. The emitter marks these with
- *	a trailing 'd' or 'f' instead of a width and a signedness, because
- *	neither means anything here.
- */
-static int lib_eqop_fp(const char *name)
+#define EQ_VALID	0x8000
+#define EQ_FP		0x4000
+#define EQ_SZLOG(d)	(((d) >> 12) & 3)
+#define EQ_UNS		0x0800
+#define EQ_KIND(d)	((d) & 15)
+
+enum {
+	EQK_PLUS, EQK_MINUS, EQK_MUL, EQK_DIV, EQK_REM, EQK_AND,
+	EQK_OR, EQK_XOR, EQK_SHL, EQK_SHR, EQK_POSTINC, EQK_POSTDEC
+};
+
+static const char *const eqnames[] = {
+	"pluseq", "minuseq", "muleq", "diveq", "remeq", "andeq",
+	"oreq", "xoreq", "shleq", "shreq", "postinc", "postdec", NULL
+};
+
+static unsigned parse_eqop(const char *name)
 {
-	char base[24];
-	unsigned len;
-	int dbl;
-	unsigned long addr;
-	double old, v, res;
+	unsigned k, szlog, uns = 0;
+	const char *t;
 
-	strncpy(base, name, sizeof(base) - 1);
-	base[sizeof(base) - 1] = 0;
-	len = strlen(base);
-	if (len == 0)
+	for (k = 0; eqnames[k]; k++)
+		if (strncmp(name, eqnames[k], strlen(eqnames[k])) == 0)
+			break;
+	if (!eqnames[k])
 		return 0;
-	dbl = (base[len - 1] == 'd');
-	if (!dbl && base[len - 1] != 'f')
-		return 0;
-	base[--len] = 0;
-
-	if (strcmp(base, "pluseq") && strcmp(base, "minuseq") &&
-	    strcmp(base, "muleq") && strcmp(base, "diveq") &&
-	    strcmp(base, "postinc") && strcmp(base, "postdec"))
-		return 0;
-
-	addr = (unsigned long)pop();
-	v = dbl ? dget(A) : (double)fget(A);
-	old = dbl ? dget((int64_t)rd64(addr)) : (double)fget(S32(rd32(addr)));
-
-	if (!strcmp(base, "pluseq") || !strcmp(base, "postinc"))
-		res = old + v;
-	else if (!strcmp(base, "minuseq") || !strcmp(base, "postdec"))
-		res = old - v;
-	else if (!strcmp(base, "muleq"))
-		res = old * v;
-	else
-		res = v ? old / v : 0.0;
-
-	/* postinc and postdec yield the old value, the rest the new one */
-	if (!strcmp(base, "postinc") || !strcmp(base, "postdec"))
-		v = old;
-	else
-		v = res;
-
-	if (dbl) {
-		wr64(addr, (uint64_t)dput(res));
-		A = dput(v);
-	} else {
-		wr32(addr, (unsigned long)(uint32_t)fput((float)res));
-		A = fput((float)v);
+	t = name + strlen(eqnames[k]);
+	if ((t[0] == 'd' || t[0] == 'f') && !t[1]) {
+		/* the fp family has no remainder, logic or shifts */
+		if (k >= EQK_REM && k <= EQK_SHR)
+			return 0;
+		return EQ_VALID | EQ_FP | ((t[0] == 'd' ? 3u : 2u) << 12) | k;
 	}
-	return 1;
+	switch (t[0]) {
+	case '1': szlog = 0; break;
+	case '2': szlog = 1; break;
+	case '4': szlog = 2; break;
+	case '8': szlog = 3; break;
+	default: return 0;
+	}
+	if (t[1] == 'u')
+		uns = EQ_UNS;
+	else if (t[1] != 's')
+		return 0;
+	if (t[2])
+		return 0;
+	return EQ_VALID | (szlog << 12) | uns | k;
 }
 
-static void lib_eqop(const char *name)
+static void exec_eqop(unsigned d)
 {
-	char base[24];
-	unsigned len, sz = 4;
-	int uns = 0, post;
-	unsigned long addr;
+	unsigned long addr = (unsigned long)pop();
+	unsigned k = EQ_KIND(d);
+	unsigned post = (k == EQK_POSTINC || k == EQK_POSTDEC);
+	unsigned uns = (d & EQ_UNS) != 0;
 	int64_t old, v, res;
 
-	if (lib_eqop_fp(name))
+	if (d & EQ_FP) {
+		/* both float and double compute in double, exactly as the
+		   original per-name code did */
+		int dbl = (EQ_SZLOG(d) == 3);
+		double fv = dbl ? dget(A) : (double)fget(A);
+		double fold = dbl ? dget((int64_t)rd64(addr))
+				  : (double)fget(S32(rd32(addr)));
+		double fres;
+
+		switch (k) {
+		case EQK_PLUS: case EQK_POSTINC:
+			fres = fold + fv; break;
+		case EQK_MINUS: case EQK_POSTDEC:
+			fres = fold - fv; break;
+		case EQK_MUL:
+			fres = fold * fv; break;
+		default:
+			fres = fv ? fold / fv : 0.0; break;
+		}
+		fv = post ? fold : fres;
+		if (dbl) {
+			wr64(addr, (uint64_t)dput(fres));
+			A = dput(fv);
+		} else {
+			wr32(addr, (unsigned long)(uint32_t)fput((float)fres));
+			A = fput((float)fv);
+		}
 		return;
-
-	/* The emitter appends the operand width in bytes and 's' or 'u',
-	   e.g. "pluseq1u" or "shreq4s".  int64_t throughout, not long:
-	   the size 8 forms need all 64 bits whatever the host, and on the
-	   PC3 itself long is 32. */
-	strncpy(base, name, sizeof(base) - 1);
-	base[sizeof(base) - 1] = 0;
-	len = strlen(base);
-	if (len && (base[len - 1] == 's' || base[len - 1] == 'u')) {
-		uns = (base[len - 1] == 'u');
-		base[--len] = 0;
-	}
-	if (len && base[len - 1] >= '1' && base[len - 1] <= '8') {
-		sz = base[len - 1] - '0';
-		base[--len] = 0;
 	}
 
-	addr = (unsigned long)pop();
 	/* The amount for a 32-bit-or-narrower object is itself a 32-bit
 	   value: read it at that width, per the low-32 contract (the
 	   high word is meaningless when it came through the native seam) */
-	if (sz == 8)
+	if (EQ_SZLOG(d) == 3)
 		v = A;
 	else
 		v = uns ? (int64_t)U32(A) : S32(A);
 
-	if (sz == 1)
-		old = uns ? (int64_t)rd8(addr) : (int64_t)(signed char)rd8(addr);
-	else if (sz == 2)
-		old = uns ? (int64_t)rd16(addr) : (int64_t)(short)rd16(addr);
-	else if (sz == 4)
-		old = uns ? (int64_t)(uint32_t)rd32(addr) : (int64_t)S32(rd32(addr));
-	else
+	switch (EQ_SZLOG(d)) {
+	case 0:
+		old = uns ? (int64_t)rd8(addr)
+			  : (int64_t)(signed char)rd8(addr);
+		break;
+	case 1:
+		old = uns ? (int64_t)rd16(addr)
+			  : (int64_t)(short)rd16(addr);
+		break;
+	case 2:
+		old = uns ? (int64_t)(uint32_t)rd32(addr)
+			  : (int64_t)S32(rd32(addr));
+		break;
+	default:
 		old = (int64_t)rd64(addr);
+	}
 
-	post = 0;
-	if (!strcmp(base, "postinc")) { res = old + v; post = 1; }
-	else if (!strcmp(base, "postdec")) { res = old - v; post = 1; }
-	else if (!strcmp(base, "pluseq")) res = old + v;
-	else if (!strcmp(base, "minuseq")) res = old - v;
-	else if (!strcmp(base, "muleq")) res = old * v;
-	else if (!strcmp(base, "diveq"))
+	switch (k) {
+	case EQK_PLUS: case EQK_POSTINC:
+		res = old + v; break;
+	case EQK_MINUS: case EQK_POSTDEC:
+		res = old - v; break;
+	case EQK_MUL:
+		res = old * v; break;
+	case EQK_DIV:
 		res = v ? (uns ? (int64_t)((uint64_t)old / (uint64_t)v)
 			       : old / v) : 0;
-	else if (!strcmp(base, "remeq"))
+		break;
+	case EQK_REM:
 		res = v ? (uns ? (int64_t)((uint64_t)old % (uint64_t)v)
 			       : old % v) : 0;
-	else if (!strcmp(base, "andeq")) res = old & v;
-	else if (!strcmp(base, "oreq")) res = old | v;
-	else if (!strcmp(base, "xoreq")) res = old ^ v;
-	else if (!strcmp(base, "shleq")) res = old << v;
-	else if (!strcmp(base, "shreq"))
+		break;
+	case EQK_AND:	res = old & v; break;
+	case EQK_OR:	res = old | v; break;
+	case EQK_XOR:	res = old ^ v; break;
+	case EQK_SHL:	res = old << v; break;
+	default:
 		res = uns ? (int64_t)((uint64_t)old >> v) : (old >> v);
-	else {
-		fprintf(stderr, "bcrun: no runtime function \"%s\"\n", name);
-		exit(1);
 	}
 
 	/* Store at the object's own width, so a carry cannot escape into
 	   whatever lives next to it. */
-	if (sz == 1)
-		wr8(addr, res);
-	else if (sz == 2)
-		wr16(addr, res);
-	else if (sz == 4)
-		wr32(addr, (unsigned long)(uint32_t)res);
-	else
-		wr64(addr, (uint64_t)res);
+	switch (EQ_SZLOG(d)) {
+	case 0:	wr8(addr, res); break;
+	case 1:	wr16(addr, res); break;
+	case 2:	wr32(addr, (unsigned long)(uint32_t)res); break;
+	default: wr64(addr, (uint64_t)res);
+	}
 
 	A = post ? old : res;
 	/* A carries 32-bit values sign extended, whatever their type */
-	if (sz == 4)
+	if (EQ_SZLOG(d) == 2)
 		A = S32((uint32_t)A);
 }
 
@@ -1313,28 +1324,211 @@ static const struct mfn {
 	{ NULL,    NULL,  NULL  }
 };
 
-static int lib_math(const char *name)
+static int lib_math_find(const char *name)
 {
-	const struct mfn *m;
+	unsigned i;
 
-	for (m = mfns; m->name; m++) {
-		if (!strcmp(m->name, name)) {
-			A = dput(m->f1 ? m->f1(argd(0))
-				       : m->f2(argd(0), argd(2)));
-			return 1;
+	for (i = 0; mfns[i].name; i++)
+		if (!strcmp(mfns[i].name, name))
+			return (int)i;
+	return -1;
+}
+
+static void math_exec(unsigned i)
+{
+	A = dput(mfns[i].f1 ? mfns[i].f1(argd(0))
+			    : mfns[i].f2(argd(0), argd(2)));
+}
+
+/*
+ *	The string and memory family, factored out of the dispatch chain
+ *	so they can bind: Dhrystone spends its life in strcpy/strcmp and
+ *	paid ~30 failed strcmps of dispatch per call.  strcmp/strncmp
+ *	compare the program's bytes directly instead of copying both
+ *	strings out through getstr - same result, without the two copies
+ *	and the 511-byte truncation.
+ */
+static void lib_strlen(void)
+{
+	A = (long)vstrlen((unsigned long)arg(0));
+}
+
+static void lib_strcpy(void)
+{
+	unsigned long d = arg(0), s = arg(1);
+	vcopy(d, s, vstrlen(s) + 1);
+	A = d;
+}
+
+static void lib_strncpy(void)
+{
+	unsigned long d = arg(0), s = arg(1), n = arg(2), l = vstrlen(s);
+	if (l > n)
+		l = n;
+	vcopy(d, s, l);
+	while (l < n)
+		wr8(d + l++, 0);
+	A = d;
+}
+
+static void lib_strcat(void)
+{
+	unsigned long d = arg(0), s = arg(1);
+	vcopy(d + vstrlen(d), s, vstrlen(s) + 1);
+	A = d;
+}
+
+static void lib_strcmp(void)
+{
+	unsigned long a = (unsigned long)arg(0), b = (unsigned long)arg(1);
+	unsigned ca, cb;
+
+	for (;;) {
+		ca = rd8(a++);
+		cb = rd8(b++);
+		if (ca != cb) {
+			A = (int)ca - (int)cb;
+			return;
+		}
+		if (!ca) {
+			A = 0;
+			return;
 		}
 	}
-	return 0;
 }
+
+static void lib_strncmp(void)
+{
+	unsigned long a = (unsigned long)arg(0), b = (unsigned long)arg(1);
+	unsigned long n = (unsigned long)arg(2);
+	unsigned ca, cb;
+
+	A = 0;
+	while (n--) {
+		ca = rd8(a++);
+		cb = rd8(b++);
+		if (ca != cb) {
+			A = (int)ca - (int)cb;
+			return;
+		}
+		if (!ca)
+			return;
+	}
+}
+
+static void lib_strchr(void)
+{
+	unsigned long s = arg(0);
+	int c = (int)arg(1);
+	unsigned long i = 0, l = vstrlen(s);
+
+	A = 0;
+	for (; i <= l; i++)
+		if (mem[s + i] == c) {
+			A = (long)(s + i);
+			break;
+		}
+}
+
+static void lib_strrchr(void)
+{
+	unsigned long s = arg(0);
+	int c = (int)arg(1);
+	long i = (long)vstrlen(s);
+
+	A = 0;
+	for (; i >= 0; i--)
+		if (mem[s + i] == c) {
+			A = (long)(s + i);
+			break;
+		}
+}
+
+static void lib_memset(void)
+{
+	unsigned long d = arg(0), n = arg(2);
+	if (d + n > MEMSIZE)
+		fault("bad address");
+	memset(mem + d, (int)arg(1), n);
+	A = d;
+}
+
+static void lib_memcpy(void)
+{
+	vcopy(arg(0), arg(1), arg(2));
+	A = arg(0);
+}
+
+static void lib_memcmp(void)
+{
+	unsigned long a = arg(0), b = arg(1), n = arg(2);
+	if (a + n > MEMSIZE || b + n > MEMSIZE)
+		fault("bad address");
+	A = memcmp(mem + a, mem + b, n);
+}
+
+static void lib_putchar(void)
+{
+	putchar((int)arg(0));
+	fflush(stdout);
+	A = arg(0);
+}
+
+static void lib_puts(void)
+{
+	puts(getstr((unsigned long)arg(0)));
+	A = 0;
+}
+
+/*
+ *	First-call binding.  libbind (function), mathbind (mfns index+1)
+ *	and eqbind (parsed descriptor) memoise per symbol index, so the
+ *	name is examined once per program run, not once per call - the
+ *	dispatch chain below only ever runs for a symbol's first call.
+ */
+static const struct {
+	const char *name;
+	void (*fn)(void);
+} lib_fast[] = {
+	{ "strlen", lib_strlen }, { "strcpy", lib_strcpy },
+	{ "strncpy", lib_strncpy }, { "strcat", lib_strcat },
+	{ "strcmp", lib_strcmp }, { "strncmp", lib_strncmp },
+	{ "strchr", lib_strchr }, { "strrchr", lib_strrchr },
+	{ "memset", lib_memset }, { "memcpy", lib_memcpy },
+	{ "memmove", lib_memcpy }, { "memcmp", lib_memcmp },
+	{ "printf", lib_printf }, { "sprintf", lib_sprintf },
+	{ "fprintf", lib_fprintf }, { "fopen", lib_fopen },
+	{ "fclose", lib_fclose }, { "fread", lib_fread },
+	{ "fwrite", lib_fwrite }, { "fgetc", lib_fgetc },
+	{ "getc", lib_fgetc }, { "fputc", lib_fputc },
+	{ "putc", lib_fputc }, { "fgets", lib_fgets },
+	{ "fputs", lib_fputs }, { "feof", lib_feof },
+	{ "fseek", lib_fseek }, { "ftell", lib_ftell },
+	{ "putchar", lib_putchar }, { "puts", lib_puts },
+	{ NULL, NULL }
+};
+
+static unsigned char *mathbind;		/* symbol -> mfns index + 1 */
+static unsigned short *eqbind;		/* symbol -> eqop descriptor */
 
 static void libcall(unsigned idx)
 {
 	const char *name;
+	unsigned i;
+	int mi;
 
 	if (idx >= h.h_nsym)
 		fault("bad library index");
 	if (libbind[idx]) {
 		libbind[idx]();
+		return;
+	}
+	if (mathbind[idx]) {
+		math_exec(mathbind[idx] - 1);
+		return;
+	}
+	if (eqbind[idx]) {
+		exec_eqop(eqbind[idx]);
 		return;
 	}
 	name = strtab + sym[idx].s_name;
@@ -1347,43 +1541,21 @@ static void libcall(unsigned idx)
 			return;
 		}
 	}
+	for (i = 0; lib_fast[i].name; i++) {
+		if (!strcmp(lib_fast[i].name, name)) {
+			libbind[idx] = lib_fast[i].fn;
+			lib_fast[i].fn();
+			return;
+		}
+	}
+	mi = lib_math_find(name);
+	if (mi >= 0) {
+		mathbind[idx] = mi + 1;
+		math_exec(mi);
+		return;
+	}
 
-	if (!strcmp(name, "putchar")) {
-		putchar((int)arg(0));
-		fflush(stdout);
-		A = arg(0);
-	} else if (!strcmp(name, "puts")) {
-		puts(getstr((unsigned long)arg(0)));
-		A = 0;
-	} else if (!strcmp(name, "printf")) {
-		lib_printf();
-	} else if (!strcmp(name, "sprintf")) {
-		lib_sprintf();
-	} else if (!strcmp(name, "fopen")) {
-		lib_fopen();
-	} else if (!strcmp(name, "fclose")) {
-		lib_fclose();
-	} else if (!strcmp(name, "fread")) {
-		lib_fread();
-	} else if (!strcmp(name, "fwrite")) {
-		lib_fwrite();
-	} else if (!strcmp(name, "fgetc") || !strcmp(name, "getc")) {
-		lib_fgetc();
-	} else if (!strcmp(name, "fputc") || !strcmp(name, "putc")) {
-		lib_fputc();
-	} else if (!strcmp(name, "fgets")) {
-		lib_fgets();
-	} else if (!strcmp(name, "fputs")) {
-		lib_fputs();
-	} else if (!strcmp(name, "fprintf")) {
-		lib_fprintf();
-	} else if (!strcmp(name, "feof")) {
-		lib_feof();
-	} else if (!strcmp(name, "fseek")) {
-		lib_fseek();
-	} else if (!strcmp(name, "ftell")) {
-		lib_ftell();
-	} else if (!strcmp(name, "rewind")) {
+	if (!strcmp(name, "rewind")) {
 		int fd = fh(arg(0));
 		if (fd >= 0) {
 			lseek(fd, 0, SEEK_SET);
@@ -1423,62 +1595,7 @@ static void libcall(unsigned idx)
 		}
 		A = np;
 
-	/* --- strings -------------------------------------------------- */
-	} else if (!strcmp(name, "strlen")) {
-		A = (long)vstrlen((unsigned long)arg(0));
-	} else if (!strcmp(name, "strcpy")) {
-		unsigned long d = arg(0), s = arg(1);
-		vcopy(d, s, vstrlen(s) + 1);
-		A = d;
-	} else if (!strcmp(name, "strncpy")) {
-		unsigned long d = arg(0), s = arg(1), n = arg(2), l = vstrlen(s);
-		if (l > n) l = n;
-		vcopy(d, s, l);
-		while (l < n) wr8(d + l++, 0);
-		A = d;
-	} else if (!strcmp(name, "strcat")) {
-		unsigned long d = arg(0), s = arg(1);
-		vcopy(d + vstrlen(d), s, vstrlen(s) + 1);
-		A = d;
-	} else if (!strcmp(name, "strcmp")) {
-		A = strcmp(getstr((unsigned long)arg(0)),
-			   getstr((unsigned long)arg(1)));
-	} else if (!strcmp(name, "strncmp")) {
-		A = strncmp(getstr((unsigned long)arg(0)),
-			    getstr((unsigned long)arg(1)),
-			    (size_t)arg(2));
-	} else if (!strcmp(name, "strchr")) {
-		unsigned long s = arg(0);
-		int c = (int)arg(1);
-		unsigned long i = 0, l = vstrlen(s);
-		A = 0;
-		for (; i <= l; i++)
-			if (mem[s + i] == c) { A = (long)(s + i); break; }
-	} else if (!strcmp(name, "strrchr")) {
-		unsigned long s = arg(0);
-		int c = (int)arg(1);
-		long i = (long)vstrlen(s);
-		A = 0;
-		for (; i >= 0; i--)
-			if (mem[s + i] == c) { A = (long)(s + i); break; }
-
-	/* --- memory blocks -------------------------------------------- */
-	} else if (!strcmp(name, "memset")) {
-		unsigned long d = arg(0), n = arg(2);
-		if (d + n > MEMSIZE) fault("bad address");
-		memset(mem + d, (int)arg(1), n);
-		A = d;
-	} else if (!strcmp(name, "memcpy") || !strcmp(name, "memmove")) {
-		vcopy(arg(0), arg(1), arg(2));
-		A = arg(0);
-	} else if (!strcmp(name, "memcmp")) {
-		unsigned long a = arg(0), b = arg(1), n = arg(2);
-		if (a + n > MEMSIZE || b + n > MEMSIZE) fault("bad address");
-		A = memcmp(mem + a, mem + b, n);
-
-	/* --- mathematics ----------------------------------------------- */
-	} else if (lib_math(name)) {
-		/* handled from the table above */
+	/* strings, memory and mathematics bind through the tables above */
 
 	/* --- conversion ----------------------------------------------- */
 	} else if (!strcmp(name, "atoi")) {
@@ -1568,7 +1685,14 @@ static void libcall(unsigned idx)
 		A = t;
 
 	} else {
-		lib_eqop(name);
+		unsigned d = parse_eqop(name);
+		if (!d) {
+			fprintf(stderr,
+				"bcrun: no runtime function \"%s\"\n", name);
+			exit(1);
+		}
+		eqbind[idx] = d;
+		exec_eqop(d);
 	}
 }
 
@@ -1682,7 +1806,9 @@ static void load(const char *path)
 	fclose(f);
 
 	libbind = calloc(h.h_nsym ? h.h_nsym : 1, sizeof(*libbind));
-	if (libbind == NULL) {
+	mathbind = calloc(h.h_nsym ? h.h_nsym : 1, sizeof(*mathbind));
+	eqbind = calloc(h.h_nsym ? h.h_nsym : 1, sizeof(*eqbind));
+	if (libbind == NULL || mathbind == NULL || eqbind == NULL) {
 		fprintf(stderr, "%s: out of memory (bind table)\n", path);
 		exit(1);
 	}

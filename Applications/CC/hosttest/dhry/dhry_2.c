@@ -26,6 +26,12 @@
 extern  int     Int_Glob;
 extern  char    Ch_1_Glob;
 
+/* PC3 port: prototype added - Func_3 is used before its definition
+   and an enum parameter cannot match an implicit declaration, which
+   gcc 14 makes a hard error.  Same ANSI-fication island policy as
+   the definitions below; bodies untouched. */
+Boolean Func_3 (Enumeration Enum_Par_Val);
+
 
 Proc_6 (Enumeration Enum_Val_Par, Enumeration *Enum_Ref_Par)
 /*********************************/

@@ -37,7 +37,9 @@ build_bc() {
 }
 
 build_bc 1500000 dhry-host.bc  || exit 1
-build_bc 30000   dhry-board.bc || exit 1
+# BOARD_RUNS: raise as the backend gets faster - Dhrystone refuses to
+# report from under two measured seconds
+build_bc "${BOARD_RUNS:-300000}" dhry-board.bc || exit 1
 
 gcc -O2 -w -std=gnu89 -DTIME_US -DDHRY_RUNS=500000000 -o "$W/dhry.native" \
 	"$D/dhry_1.c" "$D/dhry_2.c" "$D/dhry_shim.c" || exit 1
@@ -48,4 +50,4 @@ echo
 echo "== FCC bytecode under host bcrun (1,500,000 runs, $(stat -c %s "$W/dhry-host.bc") bytes) =="
 "$BIN/bcrun" "$W/dhry-host.bc" | tail -6
 echo
-echo "board image: $W/dhry-board.bc (30,000 runs)"
+echo "board image: $W/dhry-board.bc (${BOARD_RUNS:-300000} runs)"
