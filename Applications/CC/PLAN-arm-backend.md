@@ -338,29 +338,79 @@ naive emitter's 3-8× leaves plenty for stage 8's peepholes to chase.
   code - all on the PC3.  The eclipse stays 0/34 native (every
   function touches doubles) until stage 6.
 
-Next: stage 6 - the 64-bit and floating ops as helper calls (and the
-loads/stores/pushes for two-slot values), which is where the eclipse
-moves.  Then 7 (switch, struct copy), 8 (peepholes - direct BL for
-known-native callees will lift fib well past 6.9×), 9 (board sizing
-policy + SD refresh).
+* **Stage 6 done** 2026-07-31 (host+qemu; board numbers pending the
+  next session with the console free).  Groundwork first: the
+  interpreter's sign-extended-A invariant was retired in favour of a
+  **low-32 contract** - every 32-bit op reads only the low 32 bits of
+  A (S32/U32 at compares, divides, shift counts, BOOL, JFALSE,
+  SWITCH, load addresses, lib_eqop amounts) - because a native
+  function returning a 32-bit value cannot cheaply maintain the old
+  invariant in r1, and cc2 never tells the backend the return type.
+  This also retired a latent stage-5 hazard (a native callee's int
+  result compared/divided directly read garbage high bits).
 
-Stage 6 working notes, set down before it starts:
-* CONST64 / LOAD64 / STORE64 / PUSH64 / POP64 are r0:r1 pairs against
-  r4/r6, mechanical.  64-bit add/sub/logic inline as instruction
-  pairs (adds/adcs...); mul/div/shift via new C helpers reached
-  through the r5 vector, alongside every D/F arithmetic, compare and
-  conversion op - bcrun's aeabi doubles are the DCP now, so native
-  code inherits that for free.
-* Native BOOLD/LNOTD (and the float forms) must be BIT TESTS
-  (pattern << 1 == 0), never real compares: the DCP flushes
-  denormals, and the day this rule was learned is documented under
-  "Floating point engines" below.
-* The fp/64-bit eqop names currently bail the whole function (their C
-  helpers pop a slot, desyncing the caller's r4).  Stage 6 should
-  lift that: either inline them like the 32-bit family or emit the
-  slot pop natively after a non-popping helper.
-* The eclipse (0/34 native today) is the acceptance benchmark; every
-  one of its functions is double-blocked and should light up.
+  The ops: CONST64/LOAD64/STORE64/PUSH64/POP64/SEXT32/ZEXT32 inline
+  as r0:r1 pairs; TRUNC64 emits nothing; add/sub/and/or/xor/neg/
+  not64 as adds/adcs-style pairs; eq/ne64 by xor-orr; ordered 64-bit
+  compares by subs/sbcs (subtract the other way round for gt/le - Z
+  after sbcs is only the high word's).  Everything else goes through
+  **helper_op** (vector slot 2): one C function running the
+  interpreter's own case bodies with A in r2/r3 per the AAPCS, pure
+  (reads the stacked operand through vsp, never moves the global sp;
+  the call site adds the op's fixed pop count - 8/4/0 - to its own
+  r4).  On the board those bodies are the DCP.  NEGD/NEGF inline as
+  sign-bit flips; BOOLD/LNOTD/BOOLF/LNOTF are bit tests, per the
+  rule below.  The fp/64 eqop bail is lifted via **helper_eqop**
+  (slot 3) - the one libcall family that takes an input in A - with
+  the fixed one-slot pop applied to r4 at the call site.
+
+  **Literal pools are gone**: seven of the eclipse's eleven holdouts
+  bailed on the 4KB LDR reach.  Loader-patched addresses are now
+  movw/movt pairs under a pair fixup (f_pad flag 2) that decodes the
+  scattered imm16s, adds the symbol (or stores the tagged lib
+  index), re-encodes.  Old flag-1 pool objects still load.
+
+  **Eclipse: 0/34 -> 33/34 native** (probes cpf/cpg join the 4-way
+  gate; ctest 165, qemudiff 12/12, fcctests 9/9 throughout).
+  f_moon - 31K of straight-line lunar series bytecode - translates
+  to 117K and is excluded by a size policy (THUMB_MAXFN, default
+  40000; THUMB_VERBOSE now names every bail).  Native expansion runs
+  ~2.4-3.8x the bytecode.
+
+  **The board fit problem, measured** (this is stage 9's brief):
+  bcrun on the board is text 82.3K + data 0.4K + bss 54K (mem[] 48K)
+  in a 260.6K process -> ~124K free for the loaded object.  The
+  full-native eclipse is code 126.7K + sym 17.2K + fix 18.6K + str
+  6.8K + libbind 4.3K = 172K.  Levers, in value order: (1) reclaim
+  committed functions' dead bytecode by rewinding codelen and
+  re-emitting in place - saves 22.7K here and shrinks every mixed
+  object, but costs the bytecode alias (no BCRUN_BYTECODE A/B, no
+  x86 host run), so it must be opt-in for board builds and main
+  must stay bytecode (h_entry is interpreted); (2) stream fixups at
+  load instead of malloc'ing fix[] - the file order needs two
+  fseeks, saves 8 x nfix = 18.6K; (3) trim MEMSIZE or compact
+  non-LIB symbols.  (1)+(2) lands ~127K - close; f_moon native
+  (117K span) is unreachable on the board, ever.  Until then
+  **THUMB_BUDGET** caps total native bytes first-come: the board
+  eclipse ships at 19000 -> 73.8K code, 118.9K loaded, 7/34 native.
+
+  Dhrystone: 10/18 native (Proc_1 waits on struct copy, Proc_6 and
+  the Sw18 family on switch - stage 7 exactly as planned).
+
+Next: board verification of stage 6 (bcrun+cc2 reinstall, cpf/cpg
+probes, bench A/B, Dhrystone, the budgeted eclipse vs the 7.16s
+interpreted mark), then 7 (switch, struct copy - the rest of
+Dhrystone), 8 (peepholes - direct BL for known-native callees lifts
+fib), 9 (the fit levers above + SD refresh).
+
+Stage 6 lessons, kept:
+* BOOLD/LNOTD (and float forms) are BIT TESTS (pattern << 1 == 0),
+  never real compares: the DCP flushes denormals - see "Floating
+  point engines" below.
+* Any libcall that pops VM stack inside C needs its pop count
+  mirrored on the native caller's r4; any libcall that reads A needs
+  A marshalled in r2/r3.  lib_eqop is the only family that does
+  either - one slot, fixed - hence helper_eqop.
 
 ## Floating point engines (decided 2026-07-30, checked against the SDK)
 
