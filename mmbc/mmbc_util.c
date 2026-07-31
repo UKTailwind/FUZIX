@@ -50,7 +50,9 @@ char *pstr(const char *s)
 
 /* ---- scratch pool: one block, reset at each tokenize() ---- */
 
-#define SBLOCK (256 * 1024)
+/* Sized for the biggest single-line churn plus a whole write() phase
+ * (no tokenize reset runs during output assembly). */
+#define SBLOCK (512 * 1024)
 
 static char *sbase;
 static size_t sused;
@@ -100,6 +102,16 @@ char *sfmt(const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(p, (size_t)n + 1, fmt, ap);
     va_end(ap);
+    return p;
+}
+
+void *xrealloc(void *p, size_t n)
+{
+    p = realloc(p, n);
+    if (p == NULL) {
+        fprintf(stderr, "mmbc: out of memory\n");
+        exit(2);
+    }
     return p;
 }
 
