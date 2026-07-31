@@ -24,10 +24,24 @@ include Makefile.common
 # one. ccbc is the driver that runs the three passes, and goes on the
 # board as /usr/bin/cc. All ordinary Fuzix programs, all in /usr/bin;
 # the passes themselves live in /usr/lib/cc.
-all: bcrun bcdump ccbc
+all: bcrun bcdump ccbc mmbc
 
 bcrun: bcrun.o
 	$(LINKER) $(CRT0) bcrun.o -o $@ $(LINKER_OPT) $(LINKER_TAIL)
+
+# The MMBasic -> C translator (masters in the mmb2c repo, synced by
+# fcc/sync-mmbc.sh; byte-identical to mmb2c.py by that repo's gates).
+# MMBC_ARENA: pools live in one PSRAM arena allocation - the second
+# arena client after cc2.
+MMBC_OBJ = mmbc_main.o mmbc_lex.o mmbc_util.o mmbc_tab.o mmbc_sym.o \
+	   mmbc_expr.o mmbc_builtin.o mmbc_decl.o mmbc_walk.o \
+	   mmbc_stmt.o mmbc_out.o
+
+$(MMBC_OBJ): CCOPTS += -DMMBC_ARENA
+$(MMBC_OBJ): mmbc.h mmbc_expr.h
+
+mmbc: $(MMBC_OBJ)
+	$(LINKER) $(CRT0) $(MMBC_OBJ) -o $@ $(LINKER_OPT) $(LINKER_TAIL)
 
 bcdump: bcdump.o
 	$(LINKER) $(CRT0) bcdump.o -o $@ $(LINKER_OPT) $(LINKER_TAIL)

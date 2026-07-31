@@ -1,0 +1,373 @@
+/* mmbc_sym.c - Conv plumbing: token access, emission, error/warning
+ * lists, symbol tables and the implied-global rule.
+ *
+ * Mirrors mmb2c.py Conv.err through Conv.note_touch plus as_int/as_flt.
+ * Error message text is part of byte identity (skip reasons land in
+ * the generated C's header comment) - keep every string exact. */
+
+#include "mmbc.h"
+
+struct conv cv;
+
+/* ---- error / warning lists ---- */
+
+void errors_add(const char *msg)
+{
+    GROW(cv.errors, cv.nerrors, cv.cerrors);
+    cv.errors[cv.nerrors++] = pstr(msg);
+}
+
+void errors_add_dedup(const char *msg)
+{
+    int k;
+    for (k = 0; k < cv.nerrors; k++)
+        if (strcmp(cv.errors[k], msg) == 0)
+            return;
+    errors_add(msg);
+}
+
+/* self.err: raise MMError("line %d: %s") */
+void cv_err(const char *fmt, ...)
+{
+    char buf[400];
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    mm_error("line %d: %s", cv.lineno, buf);
+}
+
+/* self.warn: "line %d: %s", appended once */
+void cv_warn(const char *fmt, ...)
+{
+    char buf[400];
+    char text[448];
+    va_list ap;
+    int k;
+
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    snprintf(text, sizeof(text), "line %d: %s", cv.lineno, buf);
+    for (k = 0; k < cv.nwarnings; k++)
+        if (strcmp(cv.warnings[k], text) == 0)
+            return;
+    GROW(cv.warnings, cv.nwarnings, cv.cwarnings);
+    cv.warnings[cv.nwarnings++] = pstr(text);
+}
+
+/* ---- token access ---- */
+
+struct tok *peek(int k)
+{
+    int j = cv.i + k;
+    if (j >= 0 && j < cv.ntoks)
+        return &cv.toks[j];
+    return NULL;
+}
+
+int at_end(void)
+{
+    return cv.i >= cv.ntoks;
+}
+
+struct tok *nxt(void)
+{
+    struct tok *t = peek(0);
+    if (t == NULL)
+        cv_err("unexpected end of line");
+    cv.i++;
+    return t;
+}
+
+int is_op(const char *s, int k)
+{
+    struct tok *t = peek(k);
+    return t != NULL && t->kind == T_OP && strcmp(t->text, s) == 0;
+}
+
+int is_kw(const char *s, int k)
+{
+    struct tok *t = peek(k);
+    return t != NULL && t->kind == T_ID && strcmp(t->up, s) == 0;
+}
+
+int accept_op(const char *s)
+{
+    if (is_op(s, 0)) {
+        cv.i++;
+        return 1;
+    }
+    return 0;
+}
+
+void expect_op(const char *s)
+{
+    if (!accept_op(s))
+        cv_err("expected '%s'", s);
+}
+
+int accept_kw(const char *s)
+{
+    if (is_kw(s, 0)) {
+        cv.i++;
+        return 1;
+    }
+    return 0;
+}
+
+/* ELSE terminates a statement too (single-line IF). */
+int stmt_end(void)
+{
+    return at_end() || is_op(":", 0) || is_kw("ELSE", 0);
+}
+
+/* ---- emission ---- */
+
+void out_append(struct outbuf *o, const char *line)
+{
+    GROW(o->lines, o->n, o->cap);
+    o->lines[o->n++] = line;
+}
+
+void out_insert(struct outbuf *o, int where, const char *line)
+{
+    GROW(o->lines, o->n, o->cap);
+    memmove(o->lines + where + 1, o->lines + where,
+            sizeof(*o->lines) * (size_t)(o->n - where));
+    o->lines[where] = line;
+    o->n++;
+}
+
+void emit(const char *text)
+{
+    char *ln;
+    int k;
+
+    if (cv.mode != M_EMIT)
+        return;
+    ln = palloc((size_t)cv.indent * 4 + strlen(text) + 1);
+    for (k = 0; k < cv.indent * 4; k++)
+        ln[k] = ' ';
+    strcpy(ln + k, text);
+    out_append(cv.out, ln);
+}
+
+void raw(const char *text)
+{
+    if (cv.mode != M_EMIT)
+        return;
+    out_append(cv.out, pstr(text));
+}
+
+char *newtmp(const char *pfx)
+{
+    cv.tmpn++;
+    return sfmt("__%s%d", pfx, cv.tmpn);
+}
+
+/* ---- labels: find-or-create the record for one name ---- */
+
+struct label *label_rec(const char *canon)
+{
+    int k;
+    struct label *l;
+
+    for (k = 0; k < cv.nlabels; k++)
+        if (strcmp(cv.labels[k].name, canon) == 0)
+            return &cv.labels[k];
+    GROW(cv.labels, cv.nlabels, cv.clabels);
+    l = &cv.labels[cv.nlabels++];
+    memset(l, 0, sizeof(*l));
+    l->name = pstr(canon);
+    return l;
+}
+
+/* ---- symbol lookup / creation ---- */
+
+static struct sym *table_get(struct sym **tab, int n, const char *canon)
+{
+    int k;
+    for (k = 0; k < n; k++)
+        if (strcmp(tab[k]->name, canon) == 0)
+            return tab[k];
+    return NULL;
+}
+
+/* Local (or param) first, then global.  NULL if unknown. */
+struct sym *sym_lookup(const char *canon)
+{
+    struct sym *s;
+
+    if (cv.cur != NULL) {
+        s = table_get(cv.cur->locals, cv.cur->nlocals, canon);
+        if (s != NULL)
+            return s;
+    }
+    return table_get(cv.globals, cv.nglobals, canon);
+}
+
+static struct sym *sym_new(const char *canon, int ty, const char *acc)
+{
+    struct sym *s = palloc(sizeof(*s));
+
+    memset(s, 0, sizeof(*s));
+    s->name = pstr(canon);
+    s->disp = s->name;
+    s->ty = ty;
+    s->acc = pstr(acc);
+    s->declared_in = "";
+    return s;
+}
+
+/* Explicit DIM / LOCAL / STATIC / CONST / parameter. */
+struct sym *declare(const char *canon, int ty, const char *scope,
+                    const char **arr_dims, int ndims, int is_static)
+{
+    int local = strcmp(scope, "local") == 0;
+    struct sym *old, *s;
+    const struct builtin *b;
+    int pass;
+
+    for (pass = 0; pass < 2; pass++) {
+        /* only built-ins that can appear without brackets are genuinely
+         * reserved; MIN, LEN and friends are told apart from a variable
+         * by the '(' that follows them */
+        char *nm = upper(pass ? sfmt("%s$", canon) : sstr(canon));
+        b = builtin_get(nm);
+        if (b != NULL && b->minargs == 0)
+            cv_err("'%s' is a built-in function and cannot be used as "
+                   "a variable name", canon);
+    }
+    old = local ? table_get(cv.cur->locals, cv.cur->nlocals, canon)
+                : table_get(cv.globals, cv.nglobals, canon);
+    if (old != NULL) {
+        if (old->ty != ty)
+            cv_err("'%s' already declared as %s", canon,
+                   tyname_of(old->ty));
+        return old;
+    }
+    s = sym_new(canon, ty, cvar(canon));
+    s->where = cv.lineno;
+    s->is_static = is_static;
+    s->declared_in = (local && cv.cur) ? cv.cur->name : "";
+    if (arr_dims != NULL) {
+        int k;
+        s->is_array = 1;
+        s->ndims = ndims;
+        s->dims = palloc(sizeof(char *) * (size_t)(ndims ? ndims : 1));
+        for (k = 0; k < ndims; k++)
+            s->dims[k] = pstr(arr_dims[k]);
+    }
+    if (local) {
+        GROW(cv.cur->locals, cv.cur->nlocals, cv.cur->clocals);
+        cv.cur->locals[cv.cur->nlocals++] = s;
+        GROW(cv.cur->local_order, cv.cur->nlocal_order,
+             cv.cur->clocal_order);
+        cv.cur->local_order[cv.cur->nlocal_order++] = s->name;
+        if (is_static) {
+            GROW(cv.cur->statics, cv.cur->nstatics, cv.cur->cstatics);
+            cv.cur->statics[cv.cur->nstatics++] = s;
+        }
+    } else {
+        GROW(cv.globals, cv.nglobals, cv.cglobals);
+        cv.globals[cv.nglobals++] = s;
+    }
+    return s;
+}
+
+/* A name used in an expression or as an assignment target.  If it is
+ * not already known then MMBasic creates it, right here, as a GLOBAL -
+ * even inside a subroutine.  The implied-declaration rule; this is the
+ * one place it happens. */
+struct sym *reference(const char *word, int as_array)
+{
+    int sfx;
+    char *canon = split_suffix(word, &sfx);
+    struct sym *s = sym_lookup(canon);
+    int ty;
+
+    if (s != NULL) {
+        if (sfx != TY_NONE && sfx != s->ty)
+            cv_err("'%s' is %s but used as %s", canon,
+                   tyname_of(s->ty), tyname_of(sfx));
+        note_touch(canon, s);
+        return s;
+    }
+    if (as_array)
+        cv_err("array '%s' used but never DIMensioned", canon);
+    ty = (sfx != TY_NONE) ? sfx : cv.opt_default;
+    if (ty == TY_NONE)
+        cv_err("OPTION DEFAULT NONE: '%s' has no type", canon);
+    if (cv.opt_explicit)
+        cv_err("OPTION EXPLICIT: '%s' has not been declared", canon);
+    if (cv.mode != M_EMIT) {
+        struct implied_rec *r;
+        s = sym_new(canon, ty, cvar(canon));
+        s->disp = pstr(word);
+        s->where = cv.lineno;
+        s->implied = 1;
+        GROW(cv.globals, cv.nglobals, cv.cglobals);
+        cv.globals[cv.nglobals++] = s;
+        GROW(cv.implied, cv.nimplied, cv.cimplied);
+        r = &cv.implied[cv.nimplied++];
+        r->name = s->name;
+        r->ty = ty;
+        r->line = cv.lineno;
+        r->routine = cv.cur ? cv.cur->name : "";
+        note_touch(canon, s);
+        return s;
+    }
+    cv_err("internal: '%s' unresolved in emit pass", canon);
+    return NULL;
+}
+
+/* Remember that this SUB/FUNCTION reached out to a global. */
+void note_touch(const char *canon, struct sym *s)
+{
+    int k;
+
+    if (cv.mode != M_SCAN || cv.cur == NULL)
+        return;
+    if (s->is_const || s->is_param)
+        return;
+    if (table_get(cv.cur->locals, cv.cur->nlocals, canon) != NULL)
+        return;
+    for (k = 0; k < cv.cur->ngtouch; k++)
+        if (strcmp(cv.cur->gtouch[k].name, canon) == 0)
+            return;
+    GROW(cv.cur->gtouch, cv.cur->ngtouch, cv.cur->cgtouch);
+    cv.cur->gtouch[cv.cur->ngtouch].name = pstr(canon);
+    cv.cur->gtouch[cv.cur->ngtouch].line = cv.lineno;
+    cv.cur->ngtouch++;
+}
+
+/* ---- value coercions ---- */
+
+const char *as_int(struct val v)
+{
+    if (v.ty == TY_I)
+        return v.code;
+    if (v.ty == TY_F)
+        return sfmt("mm_toint(%s)", v.code);
+    cv_err("string used where a number is required");
+    return NULL;
+}
+
+const char *as_flt(struct val v)
+{
+    if (v.ty == TY_F)
+        return v.code;
+    if (v.ty == TY_I)
+        return sfmt("(MMFLOAT)(%s)", v.code);
+    cv_err("string used where a number is required");
+    return NULL;
+}
+
+struct val need_num(struct val v)
+{
+    if (v.ty == TY_S)
+        cv_err("string used where a number is required");
+    return v;
+}

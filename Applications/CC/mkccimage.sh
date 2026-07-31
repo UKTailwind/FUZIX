@@ -34,7 +34,7 @@ COUNT=65536
 
 set -e
 [ -r "$SRC" ] || { echo "no base image at $SRC" >&2; exit 1; }
-for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp; do
+for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc; do
 	[ -r "$CC/hwtest/$f.s" ] || {
 		echo "missing $CC/hwtest/$f.s - cross build and strip first" >&2
 		exit 1; }
@@ -71,7 +71,10 @@ echo "--- installing"
 	echo "cd /usr/bin"
 	echo "bget $CC/hwtest/ccbc.s cc"
 	echo "chmod 755 cc"
-	for f in cpp bcrun bcdump; do
+	# mmbc: the MMBasic -> C translator (mmb2c.py rewritten in C,
+	# byte-identical by that repo's gates) - BASIC self-hosts:
+	#   mmbc prog.bas ; cc prog.c ; ./prog.bc
+	for f in cpp bcrun bcdump mmbc; do
 		echo "bget $CC/hwtest/$f.s $f"
 		echo "chmod 755 $f"
 	done
@@ -80,6 +83,10 @@ echo "--- installing"
 	echo "cd cc"
 	for f in "$CC"/hosttest/samples/*.c; do
 		echo "get $f $(basename "$f")"
+	done
+	# BASIC samples for mmbc (synced from the mmb2c repo)
+	for f in "$CC"/hwtest/*.bas "$CC"/hwtest/*.in; do
+		[ -r "$f" ] && echo "get $f $(basename "$f")"
 	done
 	# rc with the swap size matching the arena split; it MUST be
 	# executable or init cannot run it, and a boot without rc has a

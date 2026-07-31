@@ -1,0 +1,350 @@
+/* mmbc_lex.c - tokenize() and the small string helpers.
+ *
+ * Mirrors mmb2c.py from `def is_alpha` to `def clabel` - same branch
+ * order, same messages.  Divergences from the Python are marked. */
+
+#include "mmbc.h"
+
+const char *ctype_of(int ty)
+{
+    switch (ty) {
+    case TY_F: return "MMFLOAT";
+    case TY_I: return "MMINTEGER";
+    case TY_S: return "char";
+    }
+    return "?";
+}
+
+const char *tyname_of(int ty)
+{
+    switch (ty) {
+    case TY_F: return "FLOAT";
+    case TY_I: return "INTEGER";
+    case TY_S: return "STRING";
+    }
+    return "?";
+}
+
+int is_alpha(int c)
+{
+    return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_';
+}
+
+int is_digit_c(int c)
+{
+    return '0' <= c && c <= '9';
+}
+
+int is_idchar(int c)
+{
+    return is_alpha(c) || is_digit_c(c) || c == '.';
+}
+
+int is_hexd(int c)
+{
+    return is_digit_c(c) || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F');
+}
+
+char *upper(const char *s)
+{
+    char *p = sstr(s);
+    char *q;
+    for (q = p; *q; q++)
+        if ('a' <= *q && *q <= 'z')
+            *q += 'A' - 'a';
+    return p;
+}
+
+char *lower(const char *s)
+{
+    char *p = sstr(s);
+    char *q;
+    for (q = p; *q; q++)
+        if ('A' <= *q && *q <= 'Z')
+            *q += 'a' - 'A';
+    return p;
+}
+
+/* Make text safe to sit inside a C comment. */
+char *cblock_safe(const char *text)
+{
+    size_t n = strlen(text);
+    char *out = salloc(n + 1);
+    size_t i, j = 0;
+
+    for (i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)text[i];
+        if (c == '*' && text[i + 1] == '/') {
+            /* the Python replaces the pair with "* /" */
+            out[j++] = '*';
+            c = ' ';
+            /* leave the '/' to the ordinary path next iteration */
+        }
+        out[j++] = (c >= 32 && c < 127) ? (char)c : ' ';
+    }
+    out[j] = 0;
+    return out;
+}
+
+/* Python repr() of a one-character string, for the tokenizer's
+ * "unexpected character %r" message.  Exact for ASCII input. */
+static char *char_repr(int c)
+{
+    if (c == '\'')
+        return sstr("\"'\"");
+    if (c == '\\')
+        return sstr("'\\\\'");
+    if (c >= 32 && c < 127)
+        return sfmt("'%c'", c);
+    return sfmt("'\\x%02x'", c & 0xFF);
+}
+
+static const char *ops2[] = { "<=", ">=", "<>", "=<", "=>", "><",
+                              "<<", ">>", NULL };
+static const char ops1[] = "+-*/\\^=<>(),;:?@#";
+
+static void addtok(struct tok *out, int *nt, int lineno,
+                   int kind, const char *text, const char *up)
+{
+    if (*nt >= MAXTOKS)
+        mm_error("line %d: too many tokens", lineno);
+    out[*nt].kind = kind;
+    out[*nt].text = text;
+    out[*nt].up = up;
+    (*nt)++;
+}
+
+/* Turn one source line into tokens; returns the count.  Resets the
+ * scratch pool: the previous line's tokens and strings die here. */
+int tokenize(const char *line, int lineno, struct tok *out)
+{
+    int nt = 0;
+    int i = 0;
+    int n;
+
+    scratch_reset();
+    n = (int)strlen(line);
+    while (i < n) {
+        char c = line[i];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+            i++;
+            continue;
+        }
+        if (c == '\x1a')                /* DOS end of file marker */
+            break;
+        if (c == '\'')                  /* comment to end of line */
+            break;
+        if (is_alpha(c)) {
+            int j = i;
+            char *word;
+            char *up;
+            while (j < n && is_idchar(line[j]))
+                j++;
+            if (j < n && (line[j] == '$' || line[j] == '%'
+                          || line[j] == '!'))
+                j++;
+            word = salloc((size_t)(j - i) + 1);
+            memcpy(word, line + i, (size_t)(j - i));
+            word[j - i] = 0;
+            up = upper(word);
+            if (strcmp(up, "REM") == 0)  /* comment */
+                break;
+            addtok(out, &nt, lineno, T_ID, word, up);
+            i = j;
+            continue;
+        }
+        if (is_digit_c(c)
+            || (c == '.' && i + 1 < n && is_digit_c(line[i + 1]))) {
+            int j = i;
+            int isf = 0;
+            char *txt;
+            while (j < n && is_digit_c(line[j]))
+                j++;
+            if (j < n && line[j] == '.') {
+                isf = 1;
+                j++;
+                while (j < n && is_digit_c(line[j]))
+                    j++;
+            }
+            if (j < n && (line[j] == 'e' || line[j] == 'E')) {
+                int k = j + 1;
+                if (k < n && (line[k] == '+' || line[k] == '-'))
+                    k++;
+                if (k < n && is_digit_c(line[k])) {
+                    isf = 1;
+                    j = k;
+                    while (j < n && is_digit_c(line[j]))
+                        j++;
+                }
+            }
+            txt = salloc((size_t)(j - i) + 1);
+            memcpy(txt, line + i, (size_t)(j - i));
+            txt[j - i] = 0;
+            addtok(out, &nt, lineno, T_NUM, txt, isf ? "F" : "I");
+            i = j;
+            continue;
+        }
+        if (c == '&') {                 /* &H &O &B -> integer */
+            int j = i + 1;
+            if (j < n && (line[j] == 'h' || line[j] == 'H'
+                          || line[j] == 'o' || line[j] == 'O'
+                          || line[j] == 'b' || line[j] == 'B')) {
+                int base = 16;
+                int k;
+                unsigned long long val = 0;
+                if (line[j] == 'o' || line[j] == 'O')
+                    base = 8;
+                else if (line[j] == 'b' || line[j] == 'B')
+                    base = 2;
+                j++;
+                k = j;
+                while (k < n && is_hexd(line[k]))
+                    k++;
+                if (k == j)
+                    mm_error("line %d: bad &-constant", lineno);
+                for (; j < k; j++) {
+                    int d = line[j];
+                    d = is_digit_c(d) ? d - '0'
+                        : (d >= 'a' ? d - 'a' + 10 : d - 'A' + 10);
+                    /* a digit outside the base tracebacks the Python
+                     * (int() ValueError); we error instead */
+                    if (d >= base)
+                        mm_error("line %d: bad &-constant", lineno);
+                    val = val * (unsigned)base + (unsigned)d;
+                }
+                /* unsigned 64-bit; hex so >2^63 cannot overflow */
+                addtok(out, &nt, lineno, T_NUM,
+                       sfmt("((MMINTEGER)0x%llXULL)", val), "H");
+                i = k;
+                continue;
+            }
+            mm_error("line %d: bad & constant", lineno);
+        }
+        if (c == '"') {
+            int j = i + 1;
+            char *buf;
+            while (j < n && line[j] != '"')
+                j++;
+            if (j >= n)
+                mm_error("line %d: unterminated string", lineno);
+            buf = salloc((size_t)(j - i));
+            memcpy(buf, line + i + 1, (size_t)(j - i - 1));
+            buf[j - i - 1] = 0;
+            addtok(out, &nt, lineno, T_STR, buf, "");
+            i = j + 1;
+            continue;
+        }
+        if (i + 1 < n) {
+            char two[3];
+            int m;
+            two[0] = line[i];
+            two[1] = line[i + 1];
+            two[2] = 0;
+            for (m = 0; ops2[m]; m++)
+                if (strcmp(two, ops2[m]) == 0)
+                    break;
+            if (ops2[m]) {
+                const char *t = ops2[m];
+                if (strcmp(t, "=<") == 0)
+                    t = "<=";
+                else if (strcmp(t, "=>") == 0)
+                    t = ">=";
+                else if (strcmp(t, "><") == 0)
+                    t = "<>";
+                addtok(out, &nt, lineno, T_OP, t, t);
+                i += 2;
+                continue;
+            }
+        }
+        if (strchr(ops1, c) != NULL) {
+            char *t = salloc(2);
+            t[0] = c;
+            t[1] = 0;
+            addtok(out, &nt, lineno, T_OP, t, t);
+            i++;
+            continue;
+        }
+        mm_error("line %d: unexpected character %s", lineno, char_repr(c));
+    }
+    return nt;
+}
+
+/* MMBasic string constant -> C initialiser with the length byte. */
+char *c_string_literal(const char *s)
+{
+    size_t n = strlen(s);
+    char *body;
+    size_t i, j = 0;
+
+    if (n > 255)
+        mm_error("string constant longer than 255 characters");
+    body = salloc(n * 4 + 1);
+    for (i = 0; i < n; i++) {
+        unsigned char o = (unsigned char)s[i];
+        if (o == '"') {
+            body[j++] = '\\';
+            body[j++] = '"';
+        } else if (o == '\\') {
+            body[j++] = '\\';
+            body[j++] = '\\';
+        } else if (o >= 32 && o < 127) {
+            body[j++] = (char)o;
+        } else {
+            j += (size_t)sprintf(body + j, "\\%03o", o);
+        }
+    }
+    body[j] = 0;
+    /* two adjacent literals so the length byte can never be swallowed
+     * by a following hex/octal digit */
+    return sfmt("\"\\%03o\" \"%s\"", (unsigned)n, body);
+}
+
+/* 'nbr%' -> ("nbr", TY_I).  Canonical lower-case name; *ty gets the
+ * suffix type or TY_NONE. */
+char *split_suffix(const char *word, int *ty)
+{
+    size_t n = strlen(word);
+    char *p;
+
+    if (n > 0 && (word[n - 1] == '$' || word[n - 1] == '%'
+                  || word[n - 1] == '!')) {
+        *ty = word[n - 1] == '$' ? TY_S
+            : word[n - 1] == '%' ? TY_I : TY_F;
+        p = salloc(n);
+        memcpy(p, word, n - 1);
+        p[n - 1] = 0;
+        return lower(p);
+    }
+    *ty = TY_NONE;
+    return lower(word);
+}
+
+static char *dots_to_dunder(const char *pfx, const char *name)
+{
+    size_t n = strlen(name);
+    char *out = salloc(strlen(pfx) + n * 2 + 1);
+    size_t j = strlen(pfx);
+    size_t i;
+
+    memcpy(out, pfx, j);
+    for (i = 0; i < n; i++) {
+        if (name[i] == '.') {
+            out[j++] = '_';
+            out[j++] = '_';
+        } else {
+            out[j++] = name[i];
+        }
+    }
+    out[j] = 0;
+    return out;
+}
+
+char *cvar(const char *name)
+{
+    return dots_to_dunder("v_", name);
+}
+
+char *clabel(const char *name)
+{
+    return dots_to_dunder("L_", name);
+}
