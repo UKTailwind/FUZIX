@@ -650,6 +650,28 @@ static void emits(const char *s)
 		emit(*s++);
 }
 
+/*
+ *	64-bit integer conversions are formatted here, never delegated
+ *	to the host sprintf: the board's libc printf reads a 'long' for
+ *	"ll" and prints the low word.  One code path on every host also
+ *	means one output.
+ */
+static void fmt64(char *tmp, uint64_t v, unsigned radix, int upper, int neg)
+{
+	char buf[24];
+	char *p = buf + sizeof(buf);
+	const char *d = upper ? "0123456789ABCDEF" : "0123456789abcdef";
+
+	*--p = 0;
+	do {
+		*--p = d[v % radix];
+		v /= radix;
+	} while (v);
+	if (neg)
+		*--p = '-';
+	strcpy(tmp, p);
+}
+
 /* Pad a already-formatted item to the requested width. */
 static void padout(const char *s, int width, int left, int zero)
 {
@@ -740,42 +762,45 @@ static void do_format(unsigned abase)
 		switch (*f) {
 		case 'd':
 		case 'i':
-			if (lng == 2) {
-				sprintf(tmp, "%lld", argll(a));
-				a += 2;
-			} else
-				sprintf(tmp, "%ld", (long)arg(a++));
+			{
+				int64_t v;
+				uint64_t uv;
+				if (lng == 2) {
+					v = argll(a);
+					a += 2;
+				} else
+					v = arg(a++);
+				uv = (uint64_t)v;
+				if (v < 0)
+					uv = (uint64_t)0 - uv;
+				fmt64(tmp, uv, 10, 0, v < 0);
+			}
 			padout(tmp, width, left, zero);
 			break;
 		case 'u':
 			if (lng == 2) {
-				sprintf(tmp, "%llu",
-					(unsigned long long)argll(a));
+				fmt64(tmp, (uint64_t)argll(a), 10, 0, 0);
 				a += 2;
 			} else
-				sprintf(tmp, "%lu",
-					(unsigned long)U32(arg(a++)));
+				fmt64(tmp, U32(arg(a++)), 10, 0, 0);
 			padout(tmp, width, left, zero);
 			break;
 		case 'x':
 		case 'X':
 			if (lng == 2) {
-				sprintf(tmp, *f == 'X' ? "%llX" : "%llx",
-					(unsigned long long)argll(a));
+				fmt64(tmp, (uint64_t)argll(a), 16,
+				      *f == 'X', 0);
 				a += 2;
 			} else
-				sprintf(tmp, *f == 'X' ? "%lX" : "%lx",
-					(unsigned long)U32(arg(a++)));
+				fmt64(tmp, U32(arg(a++)), 16, *f == 'X', 0);
 			padout(tmp, width, left, zero);
 			break;
 		case 'o':
 			if (lng == 2) {
-				sprintf(tmp, "%llo",
-					(unsigned long long)argll(a));
+				fmt64(tmp, (uint64_t)argll(a), 8, 0, 0);
 				a += 2;
 			} else
-				sprintf(tmp, "%lo",
-					(unsigned long)U32(arg(a++)));
+				fmt64(tmp, U32(arg(a++)), 8, 0, 0);
 			padout(tmp, width, left, zero);
 			break;
 		case 'c':
