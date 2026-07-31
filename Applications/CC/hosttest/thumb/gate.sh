@@ -28,13 +28,20 @@ one() {
 	"$BIN/bcrun" "$b.bc" > out.host
 	qemu-arm "$CC/qemu-armm0/bcrun" "$b.bc" > out.qemu
 	BCRUN_BYTECODE=1 qemu-arm "$CC/qemu-armm0/bcrun" "$b.bc" > out.qbc
+	# fifth way: dead bytecode reclaimed - qemu only, there is no
+	# alias for an interpreting host to fall back on
+	rm -f "$b.rbc"
+	THUMB_RECLAIM=1 "$BIN/cc2" .symtmp armm0 0 < p.ir 1<> "$b.rbc" 2> cc2r.err
+	[ -s cc2r.err ] && { cat cc2r.err; return 1; }
+	qemu-arm "$CC/qemu-armm0/bcrun" "$b.rbc" > out.qrec
 	if cmp -s out.native out.host && cmp -s out.native out.qemu \
-	   && cmp -s out.native out.qbc; then
+	   && cmp -s out.native out.qbc && cmp -s out.native out.qrec; then
 		n=$(python3 "$CC/hosttest/nat/natlist.py" "$b.bc" | tail -1)
-		echo "pass  $b   ($n)"
+		echo "pass  $b   ($n; reclaim $(stat -c %s "$b.bc") -> $(stat -c %s "$b.rbc") bytes)"
 	else
 		echo "FAIL  $b"
 		diff out.native out.qemu | head -4
+		diff out.native out.qrec | head -4
 		return 1
 	fi
 }

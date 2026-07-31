@@ -78,7 +78,6 @@ static unsigned char *code;
 static unsigned char mem[MEMSIZE] __attribute__((aligned(8)));
 static struct bc_header h;
 static struct bc_sym *sym;
-static struct bc_fixup *fix;
 static char *strtab;
 
 /*
@@ -1740,8 +1739,7 @@ static void load(const char *path)
 	}
 	code = malloc(h.h_code ? h.h_code : 1);
 	sym = malloc((h.h_nsym ? h.h_nsym : 1) * sizeof(struct bc_sym));
-	fix = malloc((h.h_nfixup ? h.h_nfixup : 1) * sizeof(struct bc_fixup));
-	if (code == NULL || sym == NULL || fix == NULL) {
+	if (code == NULL || sym == NULL) {
 		/* Unchecked, this surfaced as "short code at pc 0", which
 		   reads like a truncated file rather than what it is. */
 		fprintf(stderr, "%s: out of memory (%lu bytes of code)\n",
@@ -1790,9 +1788,12 @@ static void load(const char *path)
 		fault("short data");
 	memset(mem + bssbase, 0, h.h_bss);
 
-	for (i = 0; i < h.h_nfixup; i++)
-		if (fread(&fix[i], sizeof(struct bc_fixup), 1, f) != 1)
-			fault("short fixups");
+	/* Symbols first - fixups are streamed in a second pass below,
+	   one record at a time, so the fixup table never needs memory
+	   of its own: 8 bytes x thousands of fixups was a real slice
+	   of a 256K process once whole programs went native. */
+	if (fseek(f, (long)(h.h_nfixup * sizeof(struct bc_fixup)), SEEK_CUR))
+		fault("seek");
 	for (i = 0; i < h.h_nsym; i++)
 		if (fread(&sym[i], sizeof(struct bc_sym), 1, f) != 1)
 			fault("short symbols");
@@ -1803,7 +1804,6 @@ static void load(const char *path)
 	}
 	if (h.h_strsize && fread(strtab, 1, h.h_strsize, f) != h.h_strsize)
 		fault("short string table");
-	fclose(f);
 
 	libbind = calloc(h.h_nsym ? h.h_nsym : 1, sizeof(*libbind));
 	mathbind = calloc(h.h_nsym ? h.h_nsym : 1, sizeof(*mathbind));
@@ -1818,10 +1818,18 @@ static void load(const char *path)
 	   symbol and string tables, hence down here. */
 	heap_init(mmrt_reserve(bssbase + h.h_bss));
 
-	/* Apply fixups: add the symbol's value to the 32bit field. */
+	/* Apply fixups, streamed straight off the file: add the symbol's
+	   value to the 32bit field. */
+	if (fseek(f, (long)(sizeof(h) + h.h_code + h.h_data), SEEK_SET))
+		fault("seek");
 	for (i = 0; i < h.h_nfixup; i++) {
-		unsigned long v = symval(fix[i].f_sym);
-		unsigned long o = fix[i].f_offset;
+		struct bc_fixup fx;
+		unsigned long v, o;
+
+		if (fread(&fx, sizeof(fx), 1, f) != 1)
+			fault("short fixups");
+		v = symval(fx.f_sym);
+		o = fx.f_offset;
 
 		/*
 		 * Flag 2 marks a movw/movt pair in native code: the pair
@@ -1831,7 +1839,7 @@ static void load(const char *path)
 		 * which has no address, store the tagged index helper_call
 		 * turns back into a libcall - and re-encode.
 		 */
-		if (fix[i].f_pad & 2) {
+		if (fx.f_pad & 2) {
 			unsigned hw[4];
 			unsigned j;
 			for (j = 0; j < 4; j++)
@@ -1844,8 +1852,8 @@ static void load(const char *path)
 			    ((unsigned long)((hw[2] >> 10) & 1) << 27) |
 			    ((unsigned long)((hw[3] >> 12) & 7) << 24) |
 			    ((unsigned long)(hw[3] & 0xFF) << 16);
-			if (sym[fix[i].f_sym].s_type == BC_SYM_LIB)
-				v = 0x80000000UL | fix[i].f_sym;
+			if (sym[fx.f_sym].s_type == BC_SYM_LIB)
+				v = 0x80000000UL | fx.f_sym;
 			hw[0] = (hw[0] & 0xFBF0) | ((v >> 12) & 0xF) |
 			    (((v >> 11) & 1) << 10);
 			hw[1] = (hw[1] & 0x8F00) | (((v >> 8) & 7) << 12) |
@@ -1871,9 +1879,9 @@ static void load(const char *path)
 		 * movw/movt pair fixup above, whose reach is unlimited;
 		 * still honoured so older mixed objects keep loading.)
 		 */
-		if (fix[i].f_pad & 1) {
-			if (sym[fix[i].f_sym].s_type == BC_SYM_LIB)
-				v = 0x80000000UL | fix[i].f_sym;
+		if (fx.f_pad & 1) {
+			if (sym[fx.f_sym].s_type == BC_SYM_LIB)
+				v = 0x80000000UL | fx.f_sym;
 			else
 				v += code[o] |
 				    ((unsigned long)code[o + 1] << 8) |
@@ -1894,11 +1902,11 @@ static void load(const char *path)
 		 * is two, so the two spare bytes become NOPs and the
 		 * instruction keeps its length.
 		 */
-		if (fix[i].f_seg == BC_SEG_CODE && o > 0 &&
-		    code[o - 1] == BC_CALL && sym[fix[i].f_sym].s_type == BC_SYM_LIB) {
+		if (fx.f_seg == BC_SEG_CODE && o > 0 &&
+		    code[o - 1] == BC_CALL && sym[fx.f_sym].s_type == BC_SYM_LIB) {
 			code[o - 1] = BC_LIBCALL;
-			code[o] = fix[i].f_sym;
-			code[o + 1] = fix[i].f_sym >> 8;
+			code[o] = fx.f_sym;
+			code[o + 1] = fx.f_sym >> 8;
 			code[o + 2] = BC_NOP;
 			code[o + 3] = BC_NOP;
 			continue;
@@ -1912,15 +1920,15 @@ static void load(const char *path)
 		 * address and an indirect call through it would jump into
 		 * nowhere. Say so rather than letting it run.
 		 */
-		if (sym[fix[i].f_sym].s_type == BC_SYM_LIB) {
+		if (sym[fx.f_sym].s_type == BC_SYM_LIB) {
 			fprintf(stderr,
 				"bcrun: cannot take the address of library "
 				"function \"%s\"\n",
-				strtab + sym[fix[i].f_sym].s_name);
+				strtab + sym[fx.f_sym].s_name);
 			exit(1);
 		}
 
-		if (fix[i].f_seg == BC_SEG_CODE) {
+		if (fx.f_seg == BC_SEG_CODE) {
 			unsigned long old = code[o] |
 			    ((unsigned long)code[o + 1] << 8) |
 			    ((unsigned long)code[o + 2] << 16) |
@@ -1934,6 +1942,7 @@ static void load(const char *path)
 			wr32(database + o, rd32(database + o) + v);
 		}
 	}
+	fclose(f);
 }
 
 /* ---- native code ---------------------------------------------------- */

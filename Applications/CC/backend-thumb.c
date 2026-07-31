@@ -70,10 +70,21 @@ static struct tpool {
 } tpooltab[TPOOLMAX];
 static unsigned ntpool;
 
+/* Baked libcall indices in this function's native code, for the
+   compact_syms() rewrite: tbuf offset of the immediate instruction
+   plus the form it took (1 = movs imm8, 2 = movw) */
+static struct tref {
+	unsigned sym;
+	unsigned site;
+	unsigned char form;
+} treftab[TPOOLMAX];
+static unsigned ntref;
+
 static unsigned long fn_start;
 static unsigned fn_sym;
 static unsigned fn_patch_lo;
 static unsigned fn_fix_lo;
+static int fn_is_main;
 static int t_dry;
 static unsigned long t_base;	/* prospective code offset of this
 				   function's push{lr} preamble; tbuf[0]
@@ -86,6 +97,26 @@ static int thumb_enabled(void)
 	static int cached = -1;
 	if (cached < 0)
 		cached = getenv("BCODE_ONLY") ? 0 : 1;
+	return cached;
+}
+
+/*
+ *	THUMB_RECLAIM=1: a committed function's dead bytecode is not
+ *	kept - the native replacement is emitted where the bytecode
+ *	was, its code fixups and jump patches are dropped, and the
+ *	marker carries no alias.  Mixed objects shrink to what actually
+ *	runs, which is what lets a whole program fit a 256K process.
+ *	The price is the fallback: no BCRUN_BYTECODE A/B and no
+ *	interpreting host can run the object, so it is opt-in, meant
+ *	for board builds after the gates have passed on an aliased
+ *	build of the same source.  main keeps its bytecode alias
+ *	regardless: h_entry is entered through the interpreter.
+ */
+static int thumb_reclaim(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = getenv("THUMB_RECLAIM") ? 1 : 0;
 	return cached;
 }
 
@@ -254,6 +285,24 @@ static unsigned long t_boolbranch(unsigned long o, unsigned cond,
 	}
 	t_flagval(cond);
 	return o + 1;
+}
+
+/*
+ *	r0 = a library symbol index, recorded for compact_syms(): the
+ *	index is baked into the instruction, not carried by a fixup.
+ */
+static void t_libimm(unsigned s)
+{
+	if (!t_dry) {
+		treftab[ntref].sym = s;
+		treftab[ntref].site = tlen;
+		treftab[ntref].form = (s < 256) ? 1 : 2;
+	}
+	ntref++;
+	if (s < 256)
+		t16(0x2000 | s);	/* movs r0, #s */
+	else
+		t_mov16(0, 0, s);	/* movw r0, #s */
 }
 
 /*
@@ -779,6 +828,8 @@ static int t_span(unsigned long start, unsigned long end)
 			unsigned s = t_rd16(o + 1);
 			if (s >= nsym)
 				return 0;
+			if (ntref >= TPOOLMAX)
+				return 0;
 			if (t_eqop(bc_symname[s])) {
 				o += 3;
 				break;
@@ -795,10 +846,7 @@ static int t_span(unsigned long start, unsigned long end)
 			if (t_eqop_name(bc_symname[s])) {
 				t16(0x4602);	/* mov  r2, r0 - A low  */
 				t16(0x460B);	/* mov  r3, r1 - A high */
-				if (s < 256)
-					t16(0x2000 | s);
-				else
-					t_mov16(0, 0, s);
+				t_libimm(s);
 				t16(0x4621);		/* mov  r1, r4   */
 				t32(0xF8D5, 0xC00C);	/* ldr.w r12, [r5, #12] */
 				t16(0x47E0);		/* blx  r12      */
@@ -810,10 +858,7 @@ static int t_span(unsigned long start, unsigned long end)
 			   goes through the C side, arguments all on the
 			   stack.  sp syncs from r4 via the second
 			   argument. */
-			if (s < 256)
-				t16(0x2000 | s);	/* movs r0, #s   */
-			else
-				t_mov16(0, 0, s);	/* movw r0, #s   */
+			t_libimm(s);
 			t16(0x4621);			/* mov  r1, r4   */
 			t16(0x686B);			/* ldr  r3, [r5, #4] */
 			t16(0x4798);			/* blx  r3       */
@@ -1217,6 +1262,7 @@ static void thumb_fn_begin(const char *name)
 	fn_start = codelen;
 	fn_patch_lo = npatch;
 	fn_fix_lo = nfix;
+	fn_is_main = (strcmp(name, "main") == 0);
 }
 
 static void thumb_commit(void)
@@ -1224,6 +1270,7 @@ static void thumb_commit(void)
 	unsigned long end = codelen;
 	unsigned long marker, entry, base;
 	unsigned i;
+	int reclaim;
 
 	if (!thumb_enabled())
 		return;
@@ -1233,13 +1280,16 @@ static void thumb_commit(void)
 		t_bail = "span";
 		goto bailed;
 	}
-	/* Where this function will land if it commits - codelen is not
+	reclaim = thumb_reclaim() && !fn_is_main;
+	/* Where this function will land if it commits - reclaiming, on
+	   top of its own bytecode; otherwise appended.  codelen is not
 	   moved by translation, so both passes see the truth.  Direct
 	   BLs (self and known-native callees) are encoded against it. */
-	t_base = BC_NATIVE_ENTRY(end);
+	t_base = BC_NATIVE_ENTRY(reclaim ? fn_start : end);
 
 	tlen = 0;
 	ntpool = 0;
+	ntref = 0;
 	t_dry = 1;
 	if (!t_span(fn_start, end))
 		goto bailed;
@@ -1254,18 +1304,59 @@ static void thumb_commit(void)
 
 	tlen = 0;
 	ntpool = 0;
+	ntref = 0;
 	t_dry = 0;
 	t_span(fn_start, end);		/* same input: cannot fail now */
+
+	if (reclaim) {
+		/*
+		 *	The span is dead before it is even kept: drop the
+		 *	bytecode's own code fixups, jump patches and baked
+		 *	libcall records, rewind, and emit the native
+		 *	replacement in its place.  The wet pass above is
+		 *	complete, so nothing reads the span or its fixups
+		 *	after this.  Data fixups made during the function
+		 *	(switch tables, initialised data) survive - only
+		 *	references INTO the dead code go.
+		 */
+		unsigned o2;
+		for (i = fn_fix_lo, o2 = fn_fix_lo; i < nfix; i++) {
+			if (fixtab[i].f_seg == BC_SEG_CODE &&
+			    fixtab[i].f_offset >= fn_start &&
+			    fixtab[i].f_offset < end)
+				continue;
+			fixtab[o2] = fixtab[i];
+			fix_in_lit[o2] = fix_in_lit[i];
+			o2++;
+		}
+		nfix = o2;
+		npatch = fn_patch_lo;
+		for (i = o2 = 0; i < nlibref; i++) {
+			if (libreftab[i].at >= fn_start &&
+			    libreftab[i].at < end)
+				continue;
+			libreftab[o2++] = libreftab[i];
+		}
+		nlibref = o2;
+		codelen = fn_start;
+	}
 
 	marker = codelen;
 	entry = BC_NATIVE_ENTRY(marker);
 	cbyte(BC_NATIVE);
 	/* the bytecode alias: hosts that cannot execute Thumb interpret
-	   the original span instead */
-	cbyte(fn_start & 0xFF);
-	cbyte((fn_start >> 8) & 0xFF);
-	cbyte((fn_start >> 16) & 0xFF);
-	cbyte((fn_start >> 24) & 0xFF);
+	   the original span instead; a reclaimed function has none */
+	if (reclaim) {
+		cbyte(0xFF);
+		cbyte(0xFF);
+		cbyte(0xFF);
+		cbyte(0xFF);
+	} else {
+		cbyte(fn_start & 0xFF);
+		cbyte((fn_start >> 8) & 0xFF);
+		cbyte((fn_start >> 16) & 0xFF);
+		cbyte((fn_start >> 24) & 0xFF);
+	}
 	while (codelen < entry)
 		cbyte(BC_NOP);
 	/* Preamble: save lr on the real machine stack, so call sites
@@ -1286,6 +1377,10 @@ static void thumb_commit(void)
 		fixup(BC_SEG_CODE, base + tpooltab[i].site, tpooltab[i].sym);
 		fixtab[nfix - 1].f_pad = 2;
 	}
+	/* ... and this function's baked libcall indices, now absolute */
+	for (i = 0; i < ntref; i++)
+		librec(base + treftab[i].site, treftab[i].sym,
+		       treftab[i].form);
 
 	symtab[fn_sym].s_value = marker;
 	have_native = 1;

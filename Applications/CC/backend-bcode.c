@@ -438,11 +438,39 @@ static void emit_addr(unsigned sym, unsigned long off)
 	clong(off);
 }
 
+/*
+ *	Symbol indices baked into code rather than carried by a fixup:
+ *	BC_LIBCALL's operand, and the native libcall sites the Thumb
+ *	translator emits.  compact_syms() must rewrite these when the
+ *	table is renumbered, so every one is recorded as it is emitted.
+ *	Forms: 0 = 16-bit LE bytecode operand, 1 = movs r0,#imm8,
+ *	2 = movw r0,#imm16.
+ */
+static struct libref {
+	unsigned long at;
+	unsigned short sym;
+	unsigned char form;
+} libreftab[MAXFIX];
+static unsigned nlibref;
+
+static void librec(unsigned long at, unsigned sym, unsigned form)
+{
+	if (nlibref >= MAXFIX) {
+		error("too many libcalls");
+		return;
+	}
+	libreftab[nlibref].at = at;
+	libreftab[nlibref].sym = sym;
+	libreftab[nlibref].form = form;
+	nlibref++;
+}
+
 /* Fall back to a named runtime helper. */
 static void libcall(const char *name)
 {
 	unsigned s = symref(name);
 	cbyte(BC_LIBCALL);
+	librec(codelen, s, 0);
 	cword(s);
 }
 
@@ -726,6 +754,78 @@ void gen_start(void)
 
 static void thumb_link_calls(void);
 
+/*
+ *	Drop generated label symbols ("L<n>...", "Sw<n>_<n>") that no
+ *	fixup references - jump labels resolve at compile time and a
+ *	reclaimed function's switch entries lose their table fixups, so
+ *	most of them are dead weight by now: 19 bytes of load footprint
+ *	each (symbol row, name, bind slots).  Real names stay whether
+ *	referenced or not, for natlist and its kind.  Symbol indices are
+ *	only ever stored in fixups, which are remapped here; the loader's
+ *	CALL-to-LIBCALL rewrite bakes the remapped index.
+ */
+static void compact_syms(void)
+{
+	static unsigned short remap[MAXSYM];
+	static unsigned char keep[MAXSYM];
+	unsigned i, o2;
+
+	memset(keep, 0, nsym);
+	for (i = 0; i < nfix; i++)
+		keep[fixtab[i].f_sym] = 1;
+	for (i = 0; i < nlibref; i++)
+		keep[libreftab[i].sym] = 1;
+	for (i = 0; i < nsym; i++) {
+		const char *n = bc_symname[i];
+		if (!(n[0] == 'L' && n[1] >= '0' && n[1] <= '9') &&
+		    !(n[0] == 'S' && n[1] == 'w' && n[2] >= '0' && n[2] <= '9'))
+			keep[i] = 1;
+	}
+	strtablen = 0;
+	for (i = o2 = 0; i < nsym; i++) {
+		if (!keep[i])
+			continue;
+		remap[i] = o2;
+		symtab[o2] = symtab[i];
+		symtab[o2].s_name = strtablen;
+		sym_in_lit[o2] = sym_in_lit[i];
+		bc_symname[o2] = bc_symname[i];
+		strcpy(strtab + strtablen, bc_symname[i]);
+		strtablen += strlen(bc_symname[i]) + 1;
+		o2++;
+	}
+	nsym = o2;
+	for (i = 0; i < nfix; i++)
+		fixtab[i].f_sym = remap[fixtab[i].f_sym];
+
+	/* Rewrite the baked indices - the bytecode LIBCALL operands and
+	   the native movs/movw immediates.  Indices only ever shrink, so
+	   the instruction form always still fits. */
+	for (i = 0; i < nlibref; i++) {
+		unsigned long at = libreftab[i].at;
+		unsigned s = remap[libreftab[i].sym];
+		switch (libreftab[i].form) {
+		case 0:			/* 16-bit LE operand */
+			codebuf[at] = s & 0xFF;
+			codebuf[at + 1] = (s >> 8) & 0xFF;
+			break;
+		case 1:			/* movs r0, #imm8 */
+			codebuf[at] = s & 0xFF;
+			break;
+		default: {		/* movw r0, #imm16 */
+			unsigned hw1 = 0xF240 | (((s >> 11) & 1) << 10) |
+			    ((s >> 12) & 0xF);
+			unsigned hw2 = (((s >> 8) & 7) << 12) | (s & 0xFF);
+			codebuf[at] = hw1 & 0xFF;
+			codebuf[at + 1] = hw1 >> 8;
+			codebuf[at + 2] = hw2 & 0xFF;
+			codebuf[at + 3] = hw2 >> 8;
+			break;
+		}
+		}
+	}
+}
+
 void gen_end(void)
 {
 	struct bc_header h;
@@ -733,6 +833,7 @@ void gen_end(void)
 
 	resolve_jumps();
 	thumb_link_calls();
+	compact_syms();
 
 	/* Literals sit after data in the emitted image, so everything
 	   recorded against the literal buffer moves up by datalen. */
