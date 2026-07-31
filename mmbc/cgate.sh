@@ -24,7 +24,13 @@ for src in "$M"/tests/*.bas; do
 			> "$W/$b.$mode.c.out" 2>&1
 		d=$(diff "$W/$b.$mode.py.c" "$W/$b.$mode.c.c" 2>/dev/null \
 			| grep -c '^[<>]')
-		o=$(diff "$W/$b.$mode.py.out" "$W/$b.$mode.c.out" \
+		# the two runs are handed different -o paths by this very
+		# script, so the 'wrote <path>' line differs by construction;
+		# normalise the path before comparing stdout
+		o=$(diff <(sed "s|$W/$b.$mode.py.c\$|OUT|" \
+				"$W/$b.$mode.py.out") \
+			 <(sed "s|$W/$b.$mode.c.c\$|OUT|" \
+				"$W/$b.$mode.c.out") \
 			2>/dev/null | grep -c '^[<>]')
 		total=$((total + d + o))
 		printf '%-16s %-5s  C diff %5d   stdout diff %3d\n' \

@@ -87,6 +87,17 @@ The Python was audited (2026-07-31) before a line of C was written:
    then `cc` + `./se.bc` — the machine compiles BASIC to native ARM
    with no other computer involved.
 
+## Status
+
+- 2026-07-31: stages 0-1 DONE (`ddeab51`) — tokgate 9/9 incl. error
+  paths.  Framework half DONE (`25cf78c`) — symbols, decl passes,
+  walk/statement wrapper, output side, driver; collect_data calls
+  expr(), so the stage gates were re-cut: the real gate from stage 2
+  on is `cgate.sh`, a burn-down diff of generated C vs the Python
+  (both modes, all tests; stubs baseline 31105 lines).  Expression
+  grammar + builtins DONE (`4281243`).  Statement region in flight —
+  last one; the port is complete when cgate reads 0.
+
 ## Byte-identity traps found in the audit (check before debugging)
 
 - Python `%-20s`/`%-5d` field padding — printf-compatible, but mind

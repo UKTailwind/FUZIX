@@ -38,7 +38,10 @@ case "$src" in
 	;;
 *)
 	b=$(basename "$src" .bas)
-	python3 "$M/mmb2c.py" "$src" --fcc -o "$W/$b.c" > "$W/$b.mmb2c.out" 2>&1 \
+	# MMB2C overrides the translator, e.g. MMB2C=$M/mmbc/mmbc to run
+	# the C rewrite through the same harness
+	${MMB2C:-python3 "$M/mmb2c.py"} "$src" --fcc -o "$W/$b.c" \
+		> "$W/$b.mmb2c.out" 2>&1 \
 		|| { echo "TRANSLATE FAIL"; cat "$W/$b.mmb2c.out"; exit 1; }
 	;;
 esac
