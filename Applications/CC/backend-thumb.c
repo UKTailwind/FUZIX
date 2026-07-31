@@ -110,15 +110,24 @@ static unsigned ntref;
 ATAB(static unsigned char t_targets[TMAX / 8],
      static unsigned char *t_targets);
 
-/* An address the pass can reason about: a plain constant (kind 1) or
-   a symbol plus addend (kind 2, the BC_ADDR form globals use - the
+/* An address the pass can reason about: a plain constant (kind 1), a
+   symbol plus addend (kind 2, the BC_ADDR form globals use - the
    loader relocates both mentions identically, so symbol+addend
-   equality means address equality).  kind 0 = unknown. */
+   equality means address equality), or a stack local (kind 3: the
+   LOCAL offset normalised by the running push-depth, valid only
+   within one t_epoch - locals are r4-relative, so the same offset
+   names different addresses at different depths, and any op with an
+   unknown stack effect starts a new epoch).  kind 0 = unknown. */
 struct t_addr {
 	unsigned char kind;
-	unsigned sym;
+	unsigned sym;		/* kind 2: symbol; kind 3: epoch */
 	unsigned long k;
 };
+
+static long t_seamn;		/* local-form seams fired (see THUMB_SEAMMAX) */
+static long t_depth;		/* cumulative pushed bytes this epoch */
+static unsigned t_epoch;
+static int t_keep;	/* set by ops that maintain t_track facts */
 
 static struct {
 	int a_valid;		/* A == mem[a_key], width a_width */
@@ -138,7 +147,7 @@ static long t_d;
 static int t_addr_eq(const struct t_addr *x, const struct t_addr *y)
 {
 	return x->kind && x->kind == y->kind && x->k == y->k
-	    && (x->kind != 2 || x->sym == y->sym);
+	    && (x->kind == 1 || x->sym == y->sym);
 }
 
 static void t_invalidate(void)
@@ -146,6 +155,8 @@ static void t_invalidate(void)
 	t_track.a_valid = 0;
 	t_track.a_is.kind = 0;
 	t_track.slot.kind = 0;
+	t_epoch++;
+	t_depth = 0;
 }
 
 static unsigned long fn_start;
@@ -419,6 +430,177 @@ static void t_helperop(unsigned long op, unsigned pops)
 #define NHS_UL2D	14
 #define NHS_D2LZ	15
 #define NHS_D2ULZ	16
+
+static unsigned t_addrsym(unsigned long at, unsigned *symp);
+static unsigned t_rd16(unsigned long off);
+static unsigned long t_rd32c(unsigned long off);
+static void t_addsubw(unsigned sub, unsigned rd, unsigned rn,
+		      unsigned imm12);
+
+/*
+ *	The commonest statement seam in compiled code:
+ *	    STOREx ; <addr of next target> ; PUSH ; <addr of key> ; LOADx
+ *	with key = the address the store just wrote.  A still holds the
+ *	stored value, so the next target's address is pushed through r2
+ *	instead of A and the whole reload disappears.  Both address
+ *	forms: ADDR (globals, via the pool) and LOCALn (depth-normalised
+ *	keys).  Called by the store cases AFTER emitting the store, with
+ *	the slot fact still live; returns the bytecode offset to resume
+ *	at (having set every tracker and t_d/t_keep), or 0 to decline.
+ */
+static unsigned long t_seam(unsigned long o, unsigned long start,
+			    unsigned long end, int width)
+{
+	/* DISABLED: wrong code.  t1.bas under qemu-native segfaults
+	 * with this on (wild tmap-sourced branch; r4 destroyed), and the
+	 * eclipse trips MM_BYREFN - while every probe gate stays green:
+	 * the guilty shape is not yet in the gates.  The emitted seam
+	 * bytes disassemble correctly in isolation, so the fault is an
+	 * interaction (tmap/branch bookkeeping around skipped ops is the
+	 * prime suspect).  Re-enable only with a t1-t8 qemu-native sweep
+	 * in the gate. */
+	if (1)
+		return 0;
+	unsigned wantload = (width == 8) ? BC_LOAD64 : BC_LOAD32;
+	unsigned long p2, p3, p4, i2;
+	struct t_addr k1, k2;
+	unsigned s1 = 0, s2;
+	unsigned long ad1 = 0;
+	unsigned v1 = 0;
+
+	if (!t_track.slot.kind || t_track.slot_depth != 0)
+		return 0;
+	/* first mention: the NEXT statement's target address */
+	if (o + 1 >= end)
+		return 0;
+	if (codebuf[o + 1] == BC_ADDR && o + 6 < end) {
+		if (!t_addrsym(o + 2, &s1))
+			return 0;
+		ad1 = t_rd32c(o + 2);
+		k1.kind = 2;
+		k1.sym = s1;
+		k1.k = ad1;
+		p2 = o + 6;
+	} else if ((codebuf[o + 1] == BC_LOCAL8 ||
+		    codebuf[o + 1] == BC_LOCAL16)) {
+		unsigned long l1 = (codebuf[o + 1] == BC_LOCAL8) ? 2 : 3;
+		if (o + 1 + l1 >= end)
+			return 0;
+		v1 = (codebuf[o + 1] == BC_LOCAL8) ? codebuf[o + 2]
+						   : t_rd16(o + 2);
+		if (v1 > 4095)
+			return 0;
+		k1.kind = 3;
+		k1.sym = t_epoch;
+		/* computed after the store's pop: depth is 4 less */
+		k1.k = v1 - (unsigned long)(t_depth - 4);
+		p2 = o + 1 + l1;
+	} else
+		return 0;
+	if (p2 >= end || codebuf[p2] != BC_PUSH)
+		return 0;
+	p3 = p2 + 1;
+	/* second mention: must be the address the store just wrote */
+	if (p3 >= end)
+		return 0;
+	if (codebuf[p3] == BC_ADDR && p3 + 5 < end) {
+		if (!t_addrsym(p3 + 1, &s2))
+			return 0;
+		k2.kind = 2;
+		k2.sym = s2;
+		k2.k = t_rd32c(p3 + 1);
+		p4 = p3 + 5;
+	} else if ((codebuf[p3] == BC_LOCAL8 ||
+		    codebuf[p3] == BC_LOCAL16)) {
+		unsigned long l2 = (codebuf[p3] == BC_LOCAL8) ? 2 : 3;
+		unsigned v2;
+		if (p3 + l2 >= end)
+			return 0;
+		v2 = (codebuf[p3] == BC_LOCAL8) ? codebuf[p3 + 1]
+						: t_rd16(p3 + 1);
+		k2.kind = 3;
+		k2.sym = t_epoch;
+		/* store popped 4, push put 4 back: depth as at entry */
+		k2.k = v2 - (unsigned long)t_depth;
+		p4 = p3 + l2;
+	} else
+		return 0;
+	if (p4 >= end || codebuf[p4] != wantload)
+		return 0;
+	if (!t_addr_eq(&k2, &t_track.slot))
+		return 0;
+	for (i2 = o + 1; i2 <= p4; i2++)
+		if (t_targets[(i2 - start) >> 3] & (1 << ((i2 - start) & 7)))
+			return 0;
+	if (k1.kind == 3) {
+		static long smax = -2;
+		if (smax == -2) {
+			char *e = getenv("THUMB_SEAMMAX");
+			smax = e ? atol(e) : -1;
+		}
+		if (smax >= 0) {
+			if (t_seamn >= smax)
+				return 0;
+			t_seamn++;
+		}
+		if (!t_dry && getenv("THUMB_SEAMDBG")) {
+			unsigned long q;
+			fprintf(stderr, "seam @%lu k1=(%u,%lu) "
+				"k2=(%u,%lu) slot=(%u,%lu) dep=%ld w=%d:",
+				o, k1.kind, (unsigned long)k1.k,
+				k2.kind, (unsigned long)k2.k,
+				t_track.slot.kind,
+				(unsigned long)t_track.slot.k,
+				t_depth, width);
+			for (q = o; q <= p4 && q < o + 16; q++)
+				fprintf(stderr, " %02x", codebuf[q]);
+			fputc('\n', stderr);
+		}
+	}
+	if (!t_dry && getenv("THUMB_SEAMDBG")) {
+		unsigned long q;
+		fprintf(stderr, "seam %s @%lu tl=%u k1k=%u k2k=%u w=%d:",
+			bc_symname[fn_sym], o, tlen, k1.kind, k2.kind, width);
+		for (q = o; q <= p4 && q < o + 16; q++)
+			fprintf(stderr, " %02x", codebuf[q]);
+		fputc(0x0a, stderr);
+	}
+	/* commit: push the next target's address through r2 */
+	if (k1.kind == 2) {
+		if (ntpool >= TPOOLMAX)
+			return 0;
+		if (!t_dry) {
+			tpooltab[ntpool].sym = s1;
+			tpooltab[ntpool].site = tlen;
+		}
+		ntpool++;
+		t_mov16(0, 2, ad1 & 0xFFFF);
+		t_mov16(1, 2, (ad1 >> 16) & 0xFFFF);
+	} else {
+		t16(0x1BA2);		/* subs r2, r4, r6 */
+		if (v1) {
+			if (v1 < 256)
+				t16(0x3200 | v1);	/* adds r2, #v1 */
+			else
+				t_addsubw(0, 2, 2, v1);
+		}
+	}
+	t16(0x3C04);			/* subs r4, #4   */
+	t16(0x6022);			/* str  r2, [r4] */
+	for (i2 = o + 1; i2 <= p4; i2++)
+		tmap[i2 - start] = tlen;
+	/* A: still the stored value, and a mirror of key; the fresh
+	   slot is the next target awaiting its own store */
+	t_track.a_valid = 1;
+	t_track.a_key = t_track.slot;
+	t_track.a_width = (unsigned char)width;
+	t_track.a_is.kind = 0;
+	t_track.slot = k1;
+	t_track.slot_depth = 0;
+	t_d = 0;
+	t_keep = 1;
+	return p4 + 1;
+}
 
 /* stacked OP A: stacked operand -> left (r0/r1), A -> right (r2/r3),
    pop 8.  Result (value or 0/1 flag) comes back in r0/r1; compares
@@ -719,14 +901,15 @@ static int t_eqop(const char *name)
  *	displacements.  Both passes run the same code so the sizes cannot
  *	disagree.  Returns 0 to bail - the function stays bytecode.
  */
-static int t_keep;	/* set by ops that maintain t_track facts */
-
 static int t_span(unsigned long start, unsigned long end)
 {
 	unsigned long o = start;
 
 	t_bail = "limits";	/* any non-opcode return 0 below */
 	t_invalidate();
+	t_depth = 0;
+	t_epoch = 0;	/* every walk must evolve identically */
+	t_seamn = 0;
 	while (o < end) {
 		unsigned op = codebuf[o];
 
@@ -886,6 +1069,34 @@ static int t_span(unsigned long start, unsigned long end)
 		case BC_LOCAL16: {
 			unsigned v = (op == BC_LOCAL8) ? codebuf[o + 1]
 						       : t_rd16(o + 1);
+			unsigned long sz = (op == BC_LOCAL8) ? 2 : 3;
+			struct t_addr me;
+			me.kind = 3;
+			me.sym = t_epoch;
+			me.k = v - (unsigned long)t_depth;
+			/* duplicate of what A already holds? */
+			if (t_addr_eq(&me, &t_track.a_is)) {
+				t_keep = 1;
+				t_d = 0;
+				o += sz;
+				break;
+			}
+			/* the local form of the reload elision */
+			if (t_track.a_valid && o + sz < end
+			    && t_addr_eq(&me, &t_track.a_key)
+			    && !(t_targets[(o + sz - start) >> 3] &
+				 (1 << ((o + sz - start) & 7)))
+			    && ((t_track.a_width == 4 &&
+				 codebuf[o + sz] == BC_LOAD32) ||
+				(t_track.a_width == 8 &&
+				 codebuf[o + sz] == BC_LOAD64))) {
+				tmap[o + sz - start] = tlen;
+				t_track.a_is.kind = 0;
+				t_keep = 1;
+				t_d = 0;
+				o += sz + 1;
+				break;
+			}
 			/* A = the VM offset of sp+v: the native sp is a
 			   pointer, so subtract the base back out */
 			t16(0x1BA0);		/* subs r0, r4, r6  */
@@ -897,8 +1108,11 @@ static int t_span(unsigned long start, unsigned long end)
 				else
 					return 0;
 			}
+			t_track.a_is = me;
+			t_track.a_valid = 0;
+			t_keep = 1;
 			t_d = 0;
-			o += (op == BC_LOCAL8) ? 2 : 3;
+			o += sz;
 			break;
 		}
 		case BC_LOAD8S:
@@ -937,6 +1151,13 @@ static int t_span(unsigned long start, unsigned long end)
 				t16(0x52B0);	/* strh r0, [r6, r2] */
 			else
 				t16(0x50B0);	/* str  r0, [r6, r2] */
+			if (op == BC_STORE32) {
+				unsigned long nl = t_seam(o, start, end, 4);
+				if (nl) {
+					o = nl;
+					break;
+				}
+			}
 			/* A untouched.  A 32-bit store through a known
 			   constant address makes A a mirror of that
 			   memory - the seed for the reload elision.
@@ -1053,6 +1274,7 @@ static int t_span(unsigned long start, unsigned long end)
 			case BC_SHRS: t32(0xFA42, 0xF000); break;
 			case BC_SHRU: t32(0xFA22, 0xF000); break;
 			}
+			t_d = -4;
 			o++;
 			break;
 		case BC_NEG:
@@ -1196,12 +1418,15 @@ static int t_span(unsigned long start, unsigned long end)
 			t16(0x6822);		/* ldr  r2, [r4]   */
 			t16(0x3404);		/* adds r4, #4     */
 			t16(0x4282);		/* cmp  r2, r0     */
+			t_d = -4;	/* fall-through keeps facts; the taken
+					   path lands on a marked target */
 			o = t_boolbranch(o, cc[op - BC_EQ], start, end);
 			break;
 		}
 		case BC_BOOL:
 		case BC_LNOT:
 			t16(0x2800);		/* cmp r0, #0      */
+			t_d = 0;
 			o = t_boolbranch(o, op == BC_BOOL ? 1 : 0,
 					 start, end);
 			break;
@@ -1243,58 +1468,10 @@ static int t_span(unsigned long start, unsigned long end)
 			t16(0x1992);		/* adds r2, r2, r6   */
 			t16(0x6010);		/* str  r0, [r2]     */
 			t16(0x6051);		/* str  r1, [r2, #4] */
-			/* The commonest statement seam in compiled BASIC:
-			     STORE64 ; ADDR s1 ; PUSH ; ADDR key ; LOAD64
-			   with key = the address this store just wrote.
-			   A still holds the stored value, so push s1
-			   through r2 instead of A and the whole reload
-			   disappears. */
-			if (t_track.slot.kind == 2 && t_track.slot_depth == 0
-			    && o + 13 <= end
-			    && codebuf[o + 1] == BC_ADDR
-			    && codebuf[o + 6] == BC_PUSH
-			    && codebuf[o + 7] == BC_ADDR
-			    && codebuf[o + 12] == BC_LOAD64) {
-				unsigned s1, s2;
-				unsigned long ad1 = t_rd32c(o + 2);
-				struct t_addr k2;
-				int hit = t_addrsym(o + 2, &s1)
-				    && t_addrsym(o + 8, &s2);
-				unsigned long i2;
-				k2.kind = 2;
-				k2.sym = s2;
-				k2.k = t_rd32c(o + 8);
-				for (i2 = o + 1; hit && i2 <= o + 12; i2++)
-					if (t_targets[(i2 - start) >> 3] &
-					    (1 << ((i2 - start) & 7)))
-						hit = 0;
-				if (hit && t_addr_eq(&k2, &t_track.slot)
-				    && ntpool < TPOOLMAX) {
-					if (!t_dry) {
-						tpooltab[ntpool].sym = s1;
-						tpooltab[ntpool].site = tlen;
-					}
-					ntpool++;
-					t_mov16(0, 2, ad1 & 0xFFFF);
-					t_mov16(1, 2, (ad1 >> 16) & 0xFFFF);
-					t16(0x3C04);	/* subs r4, #4  */
-					t16(0x6022);	/* str  r2, [r4] */
-					for (i2 = o + 1; i2 <= o + 12; i2++)
-						tmap[i2 - start] = tlen;
-					/* A: still the stored value, and
-					   a mirror of key; the fresh slot
-					   is s1 awaiting its own store */
-					t_track.a_valid = 1;
-					t_track.a_key = t_track.slot;
-					t_track.a_width = 8;
-					t_track.a_is.kind = 0;
-					t_track.slot.kind = 2;
-					t_track.slot.sym = s1;
-					t_track.slot.k = ad1;
-					t_track.slot_depth = 0;
-					t_d = 0;
-					t_keep = 1;
-					o += 13;
+			{
+				unsigned long nl = t_seam(o, start, end, 8);
+				if (nl) {
+					o = nl;
 					break;
 				}
 			}
@@ -1597,10 +1774,15 @@ static int t_span(unsigned long start, unsigned long end)
 		   only ops that explicitly maintain them keep them.
 		   Sound by default either way - a new op cannot
 		   silently inherit stale facts. */
-		if (t_track.slot.kind) {
-			if (t_d == T_DUNK)
-				t_track.slot.kind = 0;
-			else {
+		if (t_d == T_DUNK) {
+			/* unknown stack effect: local keys from before
+			   this point must never compare equal again */
+			t_epoch++;
+			t_depth = 0;
+			t_track.slot.kind = 0;
+		} else {
+			t_depth += t_d;
+			if (t_track.slot.kind) {
 				t_track.slot_depth += t_d;
 				if (t_track.slot_depth < 0)
 					t_track.slot.kind = 0;
@@ -1676,11 +1858,17 @@ static void thumb_commit(void)
 		goto bailed;
 	}
 
+	{
+		unsigned dry_tlen = tlen;
 	tlen = 0;
 	ntpool = 0;
 	ntref = 0;
 	t_dry = 0;
 	t_span(fn_start, end);		/* same input: cannot fail now */
+		if (tlen != dry_tlen)
+			fprintf(stderr, "SIZE DIVERGE %s dry=%u wet=%u\n",
+				bc_symname[fn_sym], dry_tlen, tlen);
+	}
 
 	if (reclaim) {
 		/*
