@@ -466,9 +466,48 @@ naive emitter's 3-8× leaves plenty for stage 8's peepholes to chase.
   constants folded into operands via gen_direct, redundant
   push/pop pairs around sequential ops.
 
-Next: stage 9 - the fit levers above (dead-bytecode reclaim,
-streamed fixups) so the eclipse's other 27 functions go native on
-the board, then sizing policy polish and the SD refresh.
+* **The native reference point** 2026-07-31 (hosttest/dhry/
+  dhry-fuzix.sh + dhry_fuzix.c): Dhrystone cross-compiled by
+  arm-none-eabi-gcc as an ordinary Fuzix application - same libc,
+  same PICOIOC_ADVAL clock, shim printf for the %f the libc lacks.
+  **On the PC3: 367,864/s at -Os, 379,022/s at -O2** (9.5K binary).
+  That calibrated everything: we were 32x off, and the first thing
+  the gap exposed was dispatch, not code generation - libbind only
+  cached mm_* wrappers, so every strcpy walked ~30 strcmps of chain
+  and every double += re-parsed its own name.  Binding everything
+  once per symbol (fast table + mathbind + eqbind descriptors) took
+  Dhrystone 11,689 -> **16,961/s** and the budgeted eclipse 6.36 ->
+  **5.16 s**, runtime-only, same objects.  We stand at 22x off a
+  real compiler; the rest is the software eval stack and the
+  trampoline per still-unbound construct - stage-8-style work,
+  measured, when it matters.
+
+* **Stage 9 done** 2026-07-31, board-verified same day.  Three
+  levers together closed the fit gap: streamed fixups (the loader
+  applies records straight off the file - no fix[] malloc), dead-
+  bytecode reclaim (THUMB_RECLAIM=1, opt-in: the native replacement
+  lands where the bytecode was, alias gone, main kept interpreted;
+  gate.sh grew a fifth way for it), and always-on symbol compaction
+  at gen_end (unreferenced generated labels dropped, string table
+  rebuilt, every reference renumbered - which meant owning the
+  indices fixups do NOT carry: BC_LIBCALL operands and native
+  movs/movw libcall immediates are recorded at emission, made
+  absolute at commit, purged with reclaimed spans, and rewritten
+  with the remap.  The eclipse shed 438 dead labels = 11.0K).
+
+  **The full-native eclipse fits: 102.8K code, 119.0K loaded,
+  33/34 native, no budget - and runs in 3.465 s on the PC3,
+  digit-identical.**  The stage-9 target was 2-4 s.  The lineage
+  on this hardware: MMBasic 12.5 s -> MicroPython 8.77 ->
+  interpreted bcrun 9.19 -> DCP 7.16 -> stage 6 partial 6.39 ->
+  libcall binding 5.16 -> **full native 3.465 s**.  f_moon stays
+  interpreted forever (117K native span); the remaining distance
+  to gcc is FP-helper overhead and f_moon itself.
+
+Remaining, small: the SD image refresh with the new binaries; the
+shebang trick so fcc output executes as ./prog (bcrun skipping a
+leading #! line); the parked stage-8 peepholes (gen_direct constant
+folding, push/pop pair elision) if a benchmark ever asks for them.
 
 Stage 6 lessons, kept:
 * BOOLD/LNOTD (and float forms) are BIT TESTS (pattern << 1 == 0),
