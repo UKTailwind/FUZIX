@@ -925,6 +925,11 @@ class Conv(object):
             if self.fcc:
                 # No compound literals in FCC: the runtime parks the value
                 # in a small ring of scratch slots and returns its address.
+                # The slot is scratch wound back by mm_release, so it must
+                # count as a consumed temporary - the per-iteration loop
+                # releases used to mask this, and removing them overflowed
+                # the byref stack on the eclipse.
+                self.tmp_used = True
                 return 'mm_byref_%s(%s)' % ('i' if p.ty == TY_I else 'f',
                                             val)
             return '(%s[]){ %s }' % (ct, val)
