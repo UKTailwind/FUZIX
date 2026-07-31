@@ -582,12 +582,18 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r)
             val = (p->ty == TY_I) ? as_int(a->v) : as_flt(a->v);
         }
         if (p->byref) {
-            if (cv.fcc)
+            if (cv.fcc) {
                 /* No compound literals in FCC: the runtime parks the
                  * value in a small ring of scratch slots and returns
-                 * its address. */
+                 * its address.  The slot is scratch wound back by
+                 * mm_release, so it must count as a consumed
+                 * temporary - the per-iteration loop releases used
+                 * to mask this, and removing them overflowed the
+                 * byref stack on the eclipse. */
+                cv.tmp_used = 1;
                 return sfmt("mm_byref_%s(%s)",
                             (p->ty == TY_I) ? "i" : "f", val);
+            }
             return sfmt("(%s[]){ %s }", ct, val);
         }
         return sfmt("(%s)", val);
