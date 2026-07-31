@@ -175,3 +175,14 @@ char *loop_cond(const char *c)
 {
     return sfmt("(mm_release(__mark), (%s))", c);
 }
+
+/* mmb2c.py 2910 - shared by do_next and bound_of. */
+int is_literal_number(struct val v)
+{
+    const char *p;
+
+    for (p = v.code; *p; p++)
+        if (!(is_digit_c(*p) || strchr("-+.()LlEe", *p) != NULL))
+            return 0;
+    return 1;
+}

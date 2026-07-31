@@ -174,12 +174,20 @@ struct bnd { const char *key; const char *name; const char *body; };
 
 struct outbuf { const char **lines; int n, cap; };
 
+/* gosub_sites: routine name ('' = main) -> site numbers, scan order */
+struct gsub { const char *routine; int *sites; int n, cap; };
+
 /* The Python block stack holds tuples of per-kind shape; tuple[0] is
  * the kind ('if', 'for', 'do', 'while', 'select', 'routine', ...) and
  * the LAST element is always the start line (walk's unterminated-block
  * error reads blk[0] and blk[-1]).  The middle members become a..d;
  * each push site documents its own mapping. */
-struct block { const char *kind; const char *a, *b, *c, *d; int line; };
+/* Shapes: ['if',line] ['while',line] ['routine',line]
+ * ['for',canon,line]->a  ['do','head'|'tail',line]->a
+ * ['select',name,ty,line]->a,ty.  Strings pushed here must be pstr()d
+ * (newtmp returns scratch). */
+struct block { const char *kind; const char *a, *b, *c, *d;
+               int ty; int line; };
 
 /* ---- the guts: Python's Conv instance as one global ---- */
 
@@ -200,6 +208,7 @@ struct conv {
     int lenient, fcc;
     struct bnd *bnds; int nbnds, cbnds;                /* bnd_tables */
     struct skip_rec *skipped; int nskipped, cskipped;
+    struct gsub *gsubs; int ngsubs, cgsubs;            /* gosub_sites */
     int gosub_n;
     int opt_default;            /* TY_* or TY_NONE (OPTION DEFAULT NONE) */
     int opt_explicit, opt_base;
@@ -287,6 +296,7 @@ void walk(int mode);
 void statement(void);
 void statement_inner(void);
 char *loop_cond(const char *c);
+int is_literal_number(struct val v);
 struct routine *routine_get(const char *canon);
 int type_word(void);
 char *zero_of(struct sym *s);

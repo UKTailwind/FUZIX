@@ -4,7 +4,9 @@
 CC = gcc
 CFLAGS = -O2 -g -Wall -Wextra -Wno-unused-parameter
 
-OBJS = mmbc_main.o mmbc_lex.o mmbc_util.o
+OBJS = mmbc_main.o mmbc_lex.o mmbc_util.o mmbc_tab.o mmbc_sym.o \
+       mmbc_expr.o mmbc_builtin.o mmbc_decl.o mmbc_walk.o mmbc_out.o \
+       mmbc_stubs.o
 
 mmbc: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS)
