@@ -347,6 +347,49 @@ static void t_helperop(unsigned long op, unsigned pops)
 		t16(0x3400 | pops);	/* adds r4, #pops */
 }
 
+/*
+ *	Version-3 fast path: double arithmetic, compares and int64
+ *	converts BL the aeabi routine (the DCP engine, on the board)
+ *	through helper-vector slots 4+ instead of the helper_op round
+ *	trip, whose marshalling and switch cost more than the
+ *	arithmetic itself in a tight loop.  Slot order is bcrun.c's
+ *	native_helpers[] - keep in step.
+ */
+#define NHS_DADD	4
+#define NHS_DSUB	5
+#define NHS_DMUL	6
+#define NHS_DDIV	7
+#define NHS_DCMPEQ	8
+#define NHS_DCMPLT	9
+#define NHS_DCMPLE	10
+#define NHS_DCMPGE	11
+#define NHS_DCMPGT	12
+#define NHS_L2D		13
+#define NHS_UL2D	14
+#define NHS_D2LZ	15
+#define NHS_D2ULZ	16
+
+/* stacked OP A: stacked operand -> left (r0/r1), A -> right (r2/r3),
+   pop 8.  Result (value or 0/1 flag) comes back in r0/r1; compares
+   leave r1 as garbage, which the low-32 contract permits. */
+static void t_dcpbin(unsigned slot)
+{
+	t16(0x4602);		/* mov  r2, r0  - A low  -> right */
+	t16(0x460B);		/* mov  r3, r1  - A high          */
+	t16(0x6820);		/* ldr  r0, [r4, #0] - left low   */
+	t16(0x6861);		/* ldr  r1, [r4, #4] - left high  */
+	t16(0x3408);		/* adds r4, #8  - pop the operand */
+	t32(0xF8D5, 0xC000 | (slot * 4));	/* ldr.w r12, [r5, #] */
+	t16(0x47E0);		/* blx  r12                       */
+}
+
+/* conversion: A is already the argument in r0/r1 */
+static void t_dcpconv(unsigned slot)
+{
+	t32(0xF8D5, 0xC000 | (slot * 4));	/* ldr.w r12, [r5, #] */
+	t16(0x47E0);		/* blx  r12                       */
+}
+
 /* add/sub rd, rn, #imm12 (T4 ADDW/SUBW, no flags) */
 static void t_addsubw(unsigned sub, unsigned rd, unsigned rn, unsigned imm12)
 {
@@ -1175,19 +1218,37 @@ static int t_span(unsigned long start, unsigned long end)
 		case BC_MUL64: case BC_DIVS64: case BC_DIVU64:
 		case BC_REMS64: case BC_REMU64:
 		case BC_SHL64: case BC_SHRS64: case BC_SHRU64:
-		case BC_ADDD: case BC_SUBD: case BC_MULD: case BC_DIVD:
-		case BC_EQD: case BC_NED: case BC_LTD: case BC_GTD:
-		case BC_LED: case BC_GED:
 			t_helperop(op, 8);
 			o++;
 			break;
+
+		/* ---- direct DCP arithmetic (version 3) -------------- */
+		case BC_ADDD:	t_dcpbin(NHS_DADD);   o++; break;
+		case BC_SUBD:	t_dcpbin(NHS_DSUB);   o++; break;
+		case BC_MULD:	t_dcpbin(NHS_DMUL);   o++; break;
+		case BC_DIVD:	t_dcpbin(NHS_DDIV);   o++; break;
+		case BC_EQD:	t_dcpbin(NHS_DCMPEQ); o++; break;
+		case BC_NED:
+			t_dcpbin(NHS_DCMPEQ);
+			t16(0x2201);	/* movs r2, #1        */
+			t16(0x4050);	/* eors r0, r2 - != is
+					   !(==), NaN included */
+			o++;
+			break;
+		case BC_LTD:	t_dcpbin(NHS_DCMPLT); o++; break;
+		case BC_GTD:	t_dcpbin(NHS_DCMPGT); o++; break;
+		case BC_LED:	t_dcpbin(NHS_DCMPLE); o++; break;
+		case BC_GED:	t_dcpbin(NHS_DCMPGE); o++; break;
 		case BC_ADDF: case BC_SUBF: case BC_MULF: case BC_DIVF:
 		case BC_EQF: case BC_NEF: case BC_LTF: case BC_GTF:
 		case BC_LEF: case BC_GEF:
 			t_helperop(op, 4);
 			o++;
 			break;
-		case BC_I2D: case BC_U2D: case BC_D2I: case BC_D2U:
+		case BC_I2D:	t_dcpconv(NHS_L2D);   o++; break;
+		case BC_U2D:	t_dcpconv(NHS_UL2D);  o++; break;
+		case BC_D2I:	t_dcpconv(NHS_D2LZ);  o++; break;
+		case BC_D2U:	t_dcpconv(NHS_D2ULZ); o++; break;
 		case BC_I2F: case BC_U2F: case BC_F2I: case BC_F2U:
 		case BC_F2D: case BC_D2F:
 			t_helperop(op, 0);

@@ -1750,8 +1750,12 @@ static void load(const char *path)
 	}
 	/* Version 2 objects differ only in containing native code; the
 	   bump exists so interpreters that predate mixed mode reject
-	   them cleanly rather than faulting on the marker mid-run. */
-	if (h.h_version != BC_VERSION && h.h_version != BC_VERSION_NATIVE) {
+	   them cleanly rather than faulting on the marker mid-run.
+	   Version 3 native code additionally calls through helper-vector
+	   slots 4+ (direct DCP arithmetic) - same rule, older bcrun
+	   must refuse it. */
+	if (h.h_version != BC_VERSION && h.h_version != BC_VERSION_NATIVE
+	    && h.h_version != BC_VERSION_NATIVE3) {
 		fprintf(stderr, "%s: version %u, expected %u\n", path,
 			h.h_version, BC_VERSION);
 		exit(1);
@@ -1990,11 +1994,52 @@ static int64_t helper_eqop(unsigned long idx, unsigned char *vsp, int64_t a);
 #define NH_LIBCALL	1
 #define NH_OP		2
 #define NH_EQOP		3
+
+/*
+ *	Slots 4+ (version-3 objects): the double arithmetic, compares
+ *	and int64 converts as DIRECT targets - on the board these are
+ *	the DCP-backed aeabi routines, and translated code BLs them
+ *	with a two-instruction marshal instead of a helper_op round
+ *	trip, which costs more than the arithmetic itself in a tight
+ *	loop.  Order is baked into backend-thumb.c (NHS_*): keep the
+ *	two lists in step or new objects jump through the wrong slot.
+ */
+#if defined(__arm__) || defined(__thumb__)
+extern double __aeabi_dadd(double, double);
+extern double __aeabi_dsub(double, double);
+extern double __aeabi_dmul(double, double);
+extern double __aeabi_ddiv(double, double);
+extern int __aeabi_dcmpeq(double, double);
+extern int __aeabi_dcmplt(double, double);
+extern int __aeabi_dcmple(double, double);
+extern int __aeabi_dcmpge(double, double);
+extern int __aeabi_dcmpgt(double, double);
+extern double __aeabi_l2d(long long);
+extern double __aeabi_ul2d(unsigned long long);
+extern long long __aeabi_d2lz(double);
+extern unsigned long long __aeabi_d2ulz(double);
+#endif
+
 static void *native_helpers[] = {
 	(void *)helper_call,
 	(void *)helper_libcall,
 	(void *)helper_op,
 	(void *)helper_eqop,
+#if defined(__arm__) || defined(__thumb__)
+	(void *)__aeabi_dadd,	/* 4  */
+	(void *)__aeabi_dsub,	/* 5  */
+	(void *)__aeabi_dmul,	/* 6  */
+	(void *)__aeabi_ddiv,	/* 7  */
+	(void *)__aeabi_dcmpeq,	/* 8  */
+	(void *)__aeabi_dcmplt,	/* 9  */
+	(void *)__aeabi_dcmple,	/* 10 */
+	(void *)__aeabi_dcmpge,	/* 11 */
+	(void *)__aeabi_dcmpgt,	/* 12 */
+	(void *)__aeabi_l2d,	/* 13 */
+	(void *)__aeabi_ul2d,	/* 14 */
+	(void *)__aeabi_d2lz,	/* 15 */
+	(void *)__aeabi_d2ulz,	/* 16 */
+#endif
 };
 
 static int64_t bc_exec(unsigned long entry);
@@ -2618,6 +2663,36 @@ static int64_t bc_exec(unsigned long entry)
 static int run(void)
 {
 	sp = MEMSIZE - 4;
+	/* Dispatch the entry exactly like a call site: h_entry points
+	   at main's BC_NATIVE marker when it was translated, and a
+	   BASIC program lives in its main line - entering through the
+	   bytecode quietly interpreted the whole program while every
+	   benchmark with the work in called functions stayed fast. */
+	if (h.h_entry < h.h_code && code[h.h_entry] == BC_NATIVE) {
+		unsigned long alias = code[h.h_entry + 1] |
+		    ((unsigned long)code[h.h_entry + 2] << 8) |
+		    ((unsigned long)code[h.h_entry + 3] << 16) |
+		    ((unsigned long)code[h.h_entry + 4] << 24);
+#if defined(__arm__) || defined(__thumb__)
+		if (!force_bytecode || alias == 0xFFFFFFFFUL) {
+			unsigned long saved;
+			int64_t r;
+			push(0xFFFFFFFEUL);	/* the return-pc slot the
+						   frame layout expects */
+			saved = sp;
+			r = native_enter(h.h_entry);
+			sp = saved;
+			pop();
+			return (int)r;
+		}
+#else
+		if (alias == 0xFFFFFFFFUL) {
+			native_enter(h.h_entry);	/* faults */
+			return 1;
+		}
+#endif
+		return (int)bc_exec(alias);
+	}
 	return (int)bc_exec(h.h_entry);
 }
 

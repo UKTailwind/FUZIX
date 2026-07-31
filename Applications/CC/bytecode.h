@@ -28,6 +28,10 @@
  *	accept both.
  */
 #define BC_VERSION_NATIVE 2
+/* 3: native code reaches the DCP aeabi arithmetic directly through
+   helper-vector slots 4+ (bcrun.c native_helpers) - an older bcrun
+   must reject these objects instead of jumping through garbage */
+#define BC_VERSION_NATIVE3 3
 
 /*
  *	Machine model

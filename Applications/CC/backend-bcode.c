@@ -563,11 +563,15 @@ void gen_segment(unsigned s)
 	curseg = s;
 }
 
+static int entry_sym = -1;	/* main's symbol: h_entry follows it */
+
 void gen_prologue(const char *name)
 {
 	symdef(name, BC_SYM_CODE, codelen);
-	if (strcmp(name, "main") == 0)
+	if (strcmp(name, "main") == 0) {
 		entry = codelen;
+		entry_sym = symref(name);
+	}
 	thumb_fn_begin(name);
 }
 
@@ -882,12 +886,22 @@ void gen_end(void)
 			fixtab[i].f_offset += datalen;
 
 	memcpy(h.h_magic, BC_MAGIC, 4);
-	h.h_version = have_native ? BC_VERSION_NATIVE : BC_VERSION;
+	h.h_version = have_native ? BC_VERSION_NATIVE3 : BC_VERSION;
 	h.h_pad = 0;
 	h.h_nsym = nsym;
 	h.h_code = codelen;
 	h.h_data = datalen + litlen;
 	h.h_bss = bsslen;
+	/* If main was translated its symbol moved to the BC_NATIVE
+	   marker: point h_entry there too, so the loader can enter the
+	   main line native.  A BASIC program lives in its main line -
+	   entering through the bytecode left the whole program
+	   interpreted while every gate that exercised CALLED functions
+	   stayed green.  If main bailed, the symbol still holds the
+	   plain bytecode offset and nothing changes.  Re-resolved by
+	   name: compact_syms renumbers indices. */
+	if (entry_sym >= 0)
+		entry = symtab[symref("main")].s_value;
 	h.h_entry = entry;
 	h.h_nfixup = nfix;
 	h.h_strsize = strtablen;
