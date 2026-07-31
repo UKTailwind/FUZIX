@@ -1487,10 +1487,28 @@ static void do_for(void)
                        stp, s->acc, lim, s->acc, lim);
         inc = sfmt("%s += %s", s->acc, stp);
     }
+    /* the comparison is against plain variables: no temps, and so no
+     * per-iteration release point */
     emit(sfmt("for (%s = %s; %s; %s) {",
-              s->acc, conv(start), loop_cond(cmp_txt), inc));
+              s->acc, conv(start), cmp_txt, inc));
     cv.indent++;
     push_block("for", pstr(canon), 0);
+}
+
+/* Build a loop condition and say whether evaluating it consumes
+ * string temporaries.  Only then is the per-iteration release point
+ * needed: an unconditional one is a library call per trip that costs
+ * more than the body of a tight FOR loop. */
+static char *cond_release(int *used)
+{
+    int outer = cv.tmp_used;
+    char *c;
+
+    cv.tmp_used = 0;
+    c = cond();
+    *used = cv.tmp_used;
+    cv.tmp_used = outer || cv.tmp_used;
+    return c;
 }
 
 static void do_next(void)
@@ -1534,15 +1552,18 @@ static void do_next(void)
 static void do_do(void)
 {
     if (accept_kw("WHILE")) {
-        char *c = cond();
-        emit(sfmt("while (%s) {", loop_cond(c)));
+        int used;
+        char *c = cond_release(&used);
+        emit(sfmt("while (%s) {", used ? loop_cond(c) : c));
         cv.indent++;
         push_block("do", "head", 0);
         return;
     }
     if (accept_kw("UNTIL")) {
-        char *c = cond();
-        emit(sfmt("while (%s) {", loop_cond(sfmt("!(%s)", c))));
+        int used;
+        char *c = cond_release(&used);
+        c = sfmt("!(%s)", c);
+        emit(sfmt("while (%s) {", used ? loop_cond(c) : c));
         cv.indent++;
         push_block("do", "head", 0);
         return;

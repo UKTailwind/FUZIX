@@ -1908,6 +1908,18 @@ class Conv(object):
         own release point."""
         return '(mm_release(__mark), (%s))' % c
 
+    def cond_release(self):
+        """Build a loop condition and say whether evaluating it consumes
+        string temporaries.  Only then is the per-iteration release
+        point needed: an unconditional one is a library call per trip
+        that costs more than the body of a tight FOR loop."""
+        outer = self.tmp_used
+        self.tmp_used = False
+        c = self.cond()
+        used = self.tmp_used
+        self.tmp_used = outer or self.tmp_used
+        return c, used
+
     def statement_inner(self):
         t = self.peek()
         if t is None:
@@ -2902,8 +2914,10 @@ class Conv(object):
             cmp_txt = ('(%s >= 0 ? %s <= %s : %s >= %s)'
                        % (stp, s.acc, lim, s.acc, lim))
             inc = '%s += %s' % (s.acc, stp)
+        # the comparison is against plain variables: no temps, and so no
+        # per-iteration release point
         self.emit('for (%s = %s; %s; %s) {'
-                  % (s.acc, conv(start), self.loop_cond(cmp_txt), inc))
+                  % (s.acc, conv(start), cmp_txt, inc))
         self.indent += 1
         self.blocks.append(['for', canon, self.lineno])
 
@@ -2940,14 +2954,17 @@ class Conv(object):
     # -- DO / LOOP / WHILE ------------------------------------------------
     def do_do(self):
         if self.accept_kw('WHILE'):
-            c = self.cond()
-            self.emit('while (%s) {' % self.loop_cond(c))
+            c, used = self.cond_release()
+            self.emit('while (%s) {'
+                      % (self.loop_cond(c) if used else c))
             self.indent += 1
             self.blocks.append(['do', 'head', self.lineno])
             return
         if self.accept_kw('UNTIL'):
-            c = self.cond()
-            self.emit('while (%s) {' % self.loop_cond('!(%s)' % c))
+            c, used = self.cond_release()
+            c = '!(%s)' % c
+            self.emit('while (%s) {'
+                      % (self.loop_cond(c) if used else c))
             self.indent += 1
             self.blocks.append(['do', 'head', self.lineno])
             return
@@ -2966,17 +2983,20 @@ class Conv(object):
             self.emit('}')
             return
         if self.accept_kw('UNTIL'):
-            c = self.cond()
-            self.emit('} while (%s);' % self.loop_cond('!(%s)' % c))
+            c, used = self.cond_release()
+            c = '!(%s)' % c
+            self.emit('} while (%s);'
+                      % (self.loop_cond(c) if used else c))
         elif self.accept_kw('WHILE'):
-            c = self.cond()
-            self.emit('} while (%s);' % self.loop_cond(c))
+            c, used = self.cond_release()
+            self.emit('} while (%s);'
+                      % (self.loop_cond(c) if used else c))
         else:
             self.emit('} while (1);')
 
     def do_while(self):
-        c = self.cond()
-        self.emit('while (%s) {' % self.loop_cond(c))
+        c, used = self.cond_release()
+        self.emit('while (%s) {' % (self.loop_cond(c) if used else c))
         self.indent += 1
         self.blocks.append(['while', self.lineno])
 
