@@ -1589,11 +1589,14 @@ static void do_loop(void)
         return;
     }
     if (accept_kw("UNTIL")) {
-        char *c = cond();
-        emit(sfmt("} while (%s);", loop_cond(sfmt("!(%s)", c))));
+        int used;
+        char *c = cond_release(&used);
+        c = sfmt("!(%s)", c);
+        emit(sfmt("} while (%s);", used ? loop_cond(c) : c));
     } else if (accept_kw("WHILE")) {
-        char *c = cond();
-        emit(sfmt("} while (%s);", loop_cond(c)));
+        int used;
+        char *c = cond_release(&used);
+        emit(sfmt("} while (%s);", used ? loop_cond(c) : c));
     } else {
         emit("} while (1);");
     }
@@ -1601,9 +1604,10 @@ static void do_loop(void)
 
 static void do_while(void)
 {
-    char *c = cond();
+    int used;
+    char *c = cond_release(&used);
 
-    emit(sfmt("while (%s) {", loop_cond(c)));
+    emit(sfmt("while (%s) {", used ? loop_cond(c) : c));
     cv.indent++;
     push_block("while", NULL, 0);
 }
