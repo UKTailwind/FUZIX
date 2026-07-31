@@ -5,6 +5,7 @@
 #include "picosdk.h"
 #include "pico_ioctl.h"
 #include "config.h"
+#include "psram.h"
 #include <hardware/adc.h>
 #ifdef CONFIG_PC3_DISPLAY
 #include "display.h"
@@ -138,6 +139,41 @@ int plt_dev_ioctl(uarg_t request, char *data)
         return 0;
     }
 #endif
+    if (request == PSRAMIOC_ALLOC)
+    {
+        struct psram_req rq;
+        uint32_t b;
+        if (uget(data, &rq, sizeof(rq)))
+            return -1;
+        b = arena_alloc(udata.u_ptab, rq.len);
+        if (!b) {
+            udata.u_error = ENOMEM;
+            return -1;
+        }
+        rq.base = b;
+        if (uput(&rq, data, sizeof(rq)))
+            return -1;
+        return 0;
+    }
+    if (request == PSRAMIOC_FREE)
+    {
+        uint32_t b;
+        if (uget(data, &b, sizeof(b)))
+            return -1;
+        if (arena_free(udata.u_ptab, b)) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    if (request == PSRAMIOC_STAT)
+    {
+        struct psram_stat st;
+        arena_stat(&st.total, &st.free, &st.largest);
+        if (uput(&st, data, sizeof(st)))
+            return -1;
+        return 0;
+    }
     if (request == PICOIOC_ADVAL)
     {
         static uint8_t adv_ready;

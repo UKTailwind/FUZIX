@@ -29,6 +29,25 @@ uint_fast8_t plt_param(char* p)
         return kbd_set_layout(p + sizeof("kbd=")-1) == 0;
     }
 #endif
+    /* psram=<n>[K|M] : resize the userland arena (0 disables it and
+     * returns the space to the disc).  Type at the bootdev prompt,
+     * e.g. "hdb2 psram=2M"; rc's swapon size must agree with the disc
+     * that results - an overrunning swap gets EIO, not corruption. */
+    if (strncmp(p, "psram=", sizeof("psram=")-1) == 0)
+    {
+        extern void psram_disc_resize(void);
+        uint32_t v = 0;
+        s = p + sizeof("psram=")-1;
+        while (*s >= '0' && *s <= '9')
+            v = v * 10 + (*s++ - '0');
+        if (*s == 'M' || *s == 'm')
+            v <<= 20;
+        else if (*s == 'K' || *s == 'k')
+            v <<= 10;
+        arena_len = v & ~4095u;
+        psram_disc_resize();
+        return 1;
+    }
     if (strncmp(p, "tty=", sizeof("tty=")-1) == 0)
     {
         ttymap_count = 0;

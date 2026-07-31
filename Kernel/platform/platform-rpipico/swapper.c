@@ -4,6 +4,7 @@
 #include <exec.h>
 #include "config.h"
 #include "globals.h"
+#include "psram.h"
 
 #undef DEBUG
 
@@ -111,6 +112,9 @@ void pagemap_free(ptptr p)
     #ifdef DEBUG
         kprintf("free %d\n", get_slot(p));
     #endif
+    /* the process is going away: its PSRAM arenas go with it, or a
+       megabyte leaks with no OOM killer to recover it */
+    arena_release(p);
     int slot = get_slot(p);
     for (int i=0; i<NUM_ALLOCATION_BLOCKS; i++)
     {
@@ -160,6 +164,12 @@ int pagemap_alloc(ptptr p)
 int pagemap_realloc(struct exec *hdr, usize_t size)
 {
     struct p_tab* p = udata.u_ptab;
+
+    /* exec passes a header; brk growth passes NULL.  An exec releases
+       the process's PSRAM arenas on the same footing as its brk - the
+       new image has no way to know the old addresses. */
+    if (hdr)
+        arena_release(p);
 
     uaddr_t oldblocks = get_proc_size_blocks(p);
     int blocks = (int)alignup(size + UDATA_SIZE, BLOCKSIZE) / BLOCKSIZE;

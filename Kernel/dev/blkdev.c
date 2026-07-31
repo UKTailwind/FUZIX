@@ -75,13 +75,20 @@ int blkdev_open(uint_fast8_t minor, uint16_t flags)
 static int translate_lba(uint_fast8_t minor)
 {
     uint_fast8_t partition = minor & 0x0F;
+    /* Bound the WHOLE transfer, not just its first sector: the loop in
+       blkdev_transfer advances blk_op.lba without re-checking, so a
+       multi-sector request straddling the end would otherwise run off
+       the device - which, for a memory-window device like the PSRAM
+       disc, is silent corruption of whatever lies beyond. */
     if(partition == 0){
 	/* partition 0 is the whole disk and requires no translation */
-	if(blk_op.lba >= blk_op.blkdev->drive_lba_count)
+	if(blk_op.lba >= blk_op.blkdev->drive_lba_count ||
+	   blk_op.nblock > blk_op.blkdev->drive_lba_count - blk_op.lba)
 	    return 1;
     } else {
 	/* partitions 1+ require us to add in an offset */
-	if(blk_op.lba >= blk_op.blkdev->lba_count[partition-1])
+	if(blk_op.lba >= blk_op.blkdev->lba_count[partition-1] ||
+	   blk_op.nblock > blk_op.blkdev->lba_count[partition-1] - blk_op.lba)
 	    return 1;
 
 	blk_op.lba += blk_op.blkdev->lba_first[partition-1];

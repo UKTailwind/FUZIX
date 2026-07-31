@@ -25,6 +25,24 @@ static uint_fast8_t psram_disc_transfer(void)
     return 1;
 }
 
+/* Kept so a "psram=" boot parameter can retune the split after the
+ * probe has already registered the disc (the bootdev prompt comes
+ * after device init but before rc's swapon, which is what matters). */
+static blkdev_t *psram_blk;
+
+void psram_disc_resize(void)
+{
+    if (!psram_blk)
+        return;
+    if (arena_len > psram_size - PSRAM_RESERVE)
+        arena_len = psram_size - PSRAM_RESERVE;
+    psram_blk->drive_lba_count =
+        (psram_size - PSRAM_RESERVE - arena_len) >> 9;
+    kprintf("PSRAM: disc %dKiB, arena %dKiB, kernel %dKiB\n",
+            (int)((psram_size - PSRAM_RESERVE - arena_len) >> 10),
+            (int)(arena_len >> 10), (int)(PSRAM_RESERVE >> 10));
+}
+
 void psram_disc_init(void)
 {
     blkdev_t *blk;
@@ -41,8 +59,15 @@ void psram_disc_init(void)
     memset((void *)PSRAM_BASE, 0, 2048);
 
     blk->transfer = psram_disc_transfer;
-    /* the top PSRAM_RESERVE bytes belong to the kernel (lineedit.c) */
-    blk->drive_lba_count = (psram_size - PSRAM_RESERVE) >> 9;
-    kprintf("PSRAM disc %dKiB: ", (int)(psram_size >> 10));
+    psram_blk = blk;
+    /* three-way split: disc, then the userland arena, then the top
+     * PSRAM_RESERVE bytes for the kernel (lineedit.c) */
+    if (arena_len > psram_size - PSRAM_RESERVE)
+        arena_len = psram_size - PSRAM_RESERVE;
+    blk->drive_lba_count =
+        (psram_size - PSRAM_RESERVE - arena_len) >> 9;
+    kprintf("PSRAM disc %dKiB (arena %dKiB): ",
+            (int)((psram_size - PSRAM_RESERVE - arena_len) >> 10),
+            (int)(arena_len >> 10));
     blkdev_scan(blk, 0);
 }

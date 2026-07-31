@@ -43,6 +43,7 @@ add_executable(fuzix
 	misc.c
 	rawflash.c
 	console.c
+	arena.c
 	devpsram.c
 	display.c
 	ds3231.c

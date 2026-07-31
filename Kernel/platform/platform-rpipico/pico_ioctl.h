@@ -56,4 +56,22 @@ struct snd_cmd {
  *          writes the full value back into it and returns 0 */
 #define PICOIOC_ADVAL 0x0009
 
+/* The PSRAM arena (PC3-PSRAM-ARENA.md): a region of PSRAM outside the
+ * process image.  Not context-switch copied, not swapped, not forked -
+ * and not protected: the base address is raw, because with no MMU
+ * there is nothing else it could be.  Released on exec and exit; a
+ * fork leaves the arena with the parent. */
+struct psram_req {
+	uint32_t len;			/* in: bytes (4K granular) */
+	uint32_t base;			/* out: address, raw */
+};
+struct psram_stat {
+	uint32_t total;
+	uint32_t free;
+	uint32_t largest;
+};
+#define PSRAMIOC_ALLOC 0x000A		/* struct psram_req */
+#define PSRAMIOC_FREE  0x000B		/* uint32_t base */
+#define PSRAMIOC_STAT  0x000C		/* struct psram_stat */
+
 #endif
