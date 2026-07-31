@@ -192,6 +192,70 @@ static void t_flagval(unsigned cond)
 	t16(0x2001);			/* movs r0, #1     */
 }
 
+/* Could a jump, case or call land at this bytecode offset?  Fusing a
+   compare with the conditional jump that follows skips the jump's own
+   tmap entry, which is only safe if nothing targets it. */
+static int t_landing(unsigned long o2)
+{
+	unsigned i;
+	for (i = 0; i < nlab; i++)
+		if (labtab[i].defined && labtab[i].addr == o2)
+			return 1;
+	for (i = 0; i < nsym; i++)
+		if (symtab[i].s_type == BC_SYM_CODE && symtab[i].s_value == o2)
+			return 1;
+	return 0;
+}
+
+/*
+ *	Stage-8 peephole: the flags are set and `cond` is the condition
+ *	for "true".  If the next bytecode op is JFALSE/JTRUE (and nothing
+ *	can land on it), branch on the flags directly - no 0/1
+ *	materialisation, no second compare.  Returns the offset after
+ *	everything consumed; o is the compare's own offset (a 1-byte op).
+ *
+ *	The one place this is WRONG is the short-circuit family: && and
+ *	|| (and ?:) jump to their join label with A carrying the left
+ *	side's boolean - `x = (a<b) && c` reads A at the label when the
+ *	branch is taken, so the 0/1 must exist.  Those - and only those -
+ *	are emitted against labels with tail "L" (codegen_lr), while
+ *	statement conditions use "_b"/"_t"/"_e"; an "L" target
+ *	materialises as before.
+ */
+static void t_bcw(unsigned cond, long off);
+
+static unsigned long t_boolbranch(unsigned long o, unsigned cond,
+				  unsigned long start, unsigned long end)
+{
+	unsigned nxt = (o + 1 < end) ? codebuf[o + 1] : BC_NOP;
+
+	if ((nxt == BC_JFALSE || nxt == BC_JTRUE) && !t_landing(o + 1)) {
+		unsigned i;
+		for (i = fn_patch_lo; i < npatch; i++) {
+			if (patchtab[i].at != o + 2)
+				continue;
+			{
+				struct label *l = &labtab[patchtab[i].lab];
+				if (l->defined && strcmp(l->tail, "L") != 0 &&
+				    l->addr >= start && l->addr < end) {
+					unsigned c = (nxt == BC_JFALSE) ?
+						(cond ^ 1) : cond;
+					if (t_dry)
+						t32(0, 0);
+					else
+						t_bcw(c,
+						  (long)tmap[l->addr - start] -
+						  (long)(tlen + 4));
+					return o + 4;
+				}
+			}
+			break;
+		}
+	}
+	t_flagval(cond);
+	return o + 1;
+}
+
 /*
  *	One bytecode op through the C side: bcrun's helper_op executes
  *	the fp and wide-integer arithmetic the emitter does not inline,
@@ -832,15 +896,14 @@ static int t_span(unsigned long start, unsigned long end)
 			t16(0x6822);		/* ldr  r2, [r4]   */
 			t16(0x3404);		/* adds r4, #4     */
 			t16(0x4282);		/* cmp  r2, r0     */
-			t_flagval(cc[op - BC_EQ]);
-			o++;
+			o = t_boolbranch(o, cc[op - BC_EQ], start, end);
 			break;
 		}
 		case BC_BOOL:
 		case BC_LNOT:
 			t16(0x2800);		/* cmp r0, #0      */
-			t_flagval(op == BC_BOOL ? 1 : 0);
-			o++;
+			o = t_boolbranch(o, op == BC_BOOL ? 1 : 0,
+					 start, end);
 			break;
 		case BC_JFALSE:
 		case BC_JTRUE: {
@@ -960,8 +1023,8 @@ static int t_span(unsigned long start, unsigned long end)
 		case BC_LNOT64:
 			t16(0x4602);		/* mov  r2, r0       */
 			t16(0x430A);		/* orrs r2, r1       */
-			t_flagval(op == BC_BOOL64 ? 1 : 0);
-			o++;
+			o = t_boolbranch(o, op == BC_BOOL64 ? 1 : 0,
+					 start, end);
 			break;
 
 		/*
@@ -979,8 +1042,8 @@ static int t_span(unsigned long start, unsigned long end)
 			t16(0x4042);		/* eors r2, r0       */
 			t16(0x404B);		/* eors r3, r1       */
 			t16(0x431A);		/* orrs r2, r3       */
-			t_flagval(op == BC_EQ64 ? 0 : 1);
-			o++;
+			o = t_boolbranch(o, op == BC_EQ64 ? 0 : 1,
+					 start, end);
 			break;
 		case BC_LTS64: case BC_LTU64:
 		case BC_GES64: case BC_GEU64:
@@ -1005,8 +1068,9 @@ static int t_span(unsigned long start, unsigned long end)
 				t16(0x418B);	/* sbcs r3, r1       */
 			}
 			/* lt=11 ge=10 lo=3 hs=2 */
-			t_flagval(uns ? (ge ? 2 : 3) : (ge ? 10 : 11));
-			o++;
+			o = t_boolbranch(o, uns ? (ge ? 2 : 3)
+					       : (ge ? 10 : 11),
+					 start, end);
 			break;
 		}
 
@@ -1032,14 +1096,14 @@ static int t_span(unsigned long start, unsigned long end)
 		case BC_LNOTD:
 			t16(0x004A);		/* lsls r2, r1, #1   */
 			t16(0x4302);		/* orrs r2, r0       */
-			t_flagval(op == BC_BOOLD ? 1 : 0);
-			o++;
+			o = t_boolbranch(o, op == BC_BOOLD ? 1 : 0,
+					 start, end);
 			break;
 		case BC_BOOLF:
 		case BC_LNOTF:
 			t16(0x0042);		/* lsls r2, r0, #1   */
-			t_flagval(op == BC_BOOLF ? 1 : 0);
-			o++;
+			o = t_boolbranch(o, op == BC_BOOLF ? 1 : 0,
+					 start, end);
 			break;
 
 		/* Everything else fp/wide goes through helper_op, which
