@@ -1980,9 +1980,27 @@ static int64_t helper_eqop(unsigned long idx, unsigned char *vsp, int64_t a)
 static int64_t helper_op(unsigned long op, unsigned char *vsp, int64_t a)
 {
 	unsigned long boff = (unsigned long)(vsp - mem);
+	unsigned long imm = op >> 16;	/* COPY/PUSHN length */
 	int64_t b;
 
+	op &= 0xFFFF;
 	switch (op) {
+	/*
+	 * Aggregates carry their length in the op word's high half - the
+	 * only operations with an immediate.  COPY pops the destination
+	 * (the native call site adds the slot to its r4); PUSHN writes
+	 * below vsp and the call site lowers r4 by the rounded length.
+	 */
+	case BC_COPY: {
+		unsigned long dst = rd32(boff);
+		vcopy(dst, U32(a), imm);
+		return S32(dst);
+	}
+	case BC_PUSHN: {
+		unsigned long n = (imm < 4) ? 4 : ((imm + 3) & ~3UL);
+		vcopy(boff - n, U32(a), imm);
+		return a;
+	}
 	case BC_MUL64:	return (int64_t)rd64(boff) * a;
 	case BC_DIVS64:	b = (int64_t)rd64(boff);
 			return a ? b / a : 0;

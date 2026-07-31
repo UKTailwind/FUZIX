@@ -199,11 +199,13 @@ static void t_flagval(unsigned cond)
  *	the global sp, so the op's fixed pop count is applied to r4
  *	here, in native code.
  */
-static void t_helperop(unsigned op, unsigned pops)
+static void t_helperop(unsigned long op, unsigned pops)
 {
 	t16(0x4602);		/* mov  r2, r0  - A low   */
 	t16(0x460B);		/* mov  r3, r1  - A high  */
-	t16(0x2000 | op);	/* movs r0, #op           */
+	t_constr(0, op);	/* r0 = op (COPY/PUSHN
+				   carry a length in the
+				   high half)             */
 	t16(0x4621);		/* mov  r1, r4  - vsp     */
 	t32(0xF8D5, 0xC008);	/* ldr.w r12, [r5, #8]    */
 	t16(0x47E0);		/* blx  r12               */
@@ -277,6 +279,33 @@ static unsigned t_addrsym(unsigned long at, unsigned *symp)
 		}
 	}
 	return 0;
+}
+
+static unsigned long t_lit32(unsigned long o)
+{
+	return litbuf[o] | ((unsigned long)litbuf[o + 1] << 8) |
+	    ((unsigned long)litbuf[o + 2] << 16) |
+	    ((unsigned long)litbuf[o + 3] << 24);
+}
+
+/*
+ *	A switch-table entry's target: the fixup at that literal offset
+ *	names a case symbol whose value is a bytecode offset in the
+ *	current span.  ~0 = not found / not usable.
+ */
+static unsigned long t_case_target(unsigned long off)
+{
+	unsigned i;
+	for (i = fn_fix_lo; i < nfix; i++) {
+		if (fixtab[i].f_seg == BC_SEG_DATA && fix_in_lit[i] &&
+		    fixtab[i].f_offset == off) {
+			unsigned s = fixtab[i].f_sym;
+			if (symtab[s].s_type != BC_SYM_CODE)
+				return ~0UL;
+			return symtab[s].s_value + t_lit32(off);
+		}
+	}
+	return ~0UL;
 }
 
 /*
@@ -984,6 +1013,74 @@ static int t_span(unsigned long start, unsigned long end)
 			t_helperop(op, 0);
 			o++;
 			break;
+
+		/* ---- CP-H (stage 7): aggregates and switch ---------- */
+		case BC_COPY:
+			/* length rides in the op word's high half */
+			t_helperop(op | ((unsigned long)t_rd16(o + 1) << 16), 4);
+			o += 3;
+			break;
+		case BC_PUSHN: {
+			unsigned len = t_rd16(o + 1);
+			unsigned n = (len < 4) ? 4 : ((len + 3) & ~3U);
+			if (n > 4095)
+				return 0;
+			t_helperop(op | ((unsigned long)len << 16), 0);
+			/* the helper wrote below vsp; take the slots */
+			if (n < 256)
+				t16(0x3C00 | n);	/* subs r4, #n */
+			else
+				t_addsubw(1, 4, 4, n);	/* sub.w r4, #n */
+			o += 3;
+			break;
+		}
+		case BC_SWITCH: {
+			/*
+			 *	The whole table is known at translate time:
+			 *	the operand's fixup names the table symbol
+			 *	(in the literal segment), each entry's target
+			 *	fixup names a case symbol whose value is a
+			 *	bytecode offset in this very span.  So the
+			 *	native form is a compare chain - no table,
+			 *	no fixups, no runtime walk.  The dead
+			 *	bytecode keeps the operand fixup for the
+			 *	alias path.
+			 */
+			unsigned s;
+			unsigned long tab, cnt, i, tgt;
+			if (!t_addrsym(o + 1, &s))
+				return 0;
+			if (symtab[s].s_type != BC_SYM_DATA || !sym_in_lit[s])
+				return 0;
+			tab = symtab[s].s_value + t_rd32c(o + 1);
+			if (tab + 4 > litlen)
+				return 0;
+			cnt = t_lit32(tab);
+			if (tab + 8 + 8 * cnt > litlen)
+				return 0;
+			for (i = 0; i < cnt; i++) {
+				tgt = t_case_target(tab + 8 + 8 * i);
+				if (tgt == ~0UL || tgt < start || tgt >= end)
+					return 0;
+				t_constr(2, t_lit32(tab + 4 + 8 * i));
+				t16(0x4290);	/* cmp r0, r2 */
+				if (t_dry)
+					t32(0, 0);
+				else
+					t_bcw(0, (long)tmap[tgt - start] -
+						 (long)(tlen + 4));
+			}
+			tgt = t_case_target(tab + 4 + 8 * cnt);
+			if (tgt == ~0UL || tgt < start || tgt >= end)
+				return 0;
+			if (t_dry)
+				t32(0, 0);
+			else
+				t_bw((long)tmap[tgt - start] -
+				     (long)(tlen + 4));
+			o += 5;
+			break;
+		}
 
 		default:
 			/* not covered yet: stay bytecode */

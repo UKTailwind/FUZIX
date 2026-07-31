@@ -13,18 +13,23 @@ symoff = HDR + codesz + datasz + nfix * FIXSZ
 stroff = symoff + nsym * SYMSZ
 strtab = data[stroff:stroff + strsz]
 
+def label_sym(name):
+    """cc2's generated code symbols: "L<n>..." jump labels and
+    "Sw<n>_<n>" switch case entries.  Not functions."""
+    import re
+    return re.fullmatch(r"L\d+\S*|Sw\d+_\d+", name) is not None
+
 nat = tot = 0
 for i in range(nsym):
     value, nameoff, styp = struct.unpack_from("<IIB", data, symoff + i * SYMSZ)
     if styp != 0:
         continue
     name = strtab[nameoff:strtab.index(b"\0", nameoff)].decode()
-    if name.startswith(("L", "Sw")) and not name.isidentifier():
-        pass
+    if label_sym(name):
+        continue
     isnat = value < codesz and data[HDR + value] == 0xF0
-    if not name.startswith("L"):
-        tot += 1
-        if isnat:
-            nat += 1
-        print("%-24s %6d  %s" % (name, value, "NATIVE" if isnat else "bytecode"))
+    tot += 1
+    if isnat:
+        nat += 1
+    print("%-24s %6d  %s" % (name, value, "NATIVE" if isnat else "bytecode"))
 print("version %d: %d of %d functions native" % (ver, nat, tot))
