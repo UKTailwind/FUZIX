@@ -414,8 +414,31 @@ naive emitter's 3-8× leaves plenty for stage 8's peepholes to chase.
   are still interpreted only because the process ceiling excludes
   their native spans.
 
-Next: stage 7 (switch, struct copy - the rest of Dhrystone), 8
-(peepholes - direct BL for known-native callees lifts fib), 9 (the
+* **Stage 7 done** 2026-07-31, board-verified same day (CP-H).
+  BC_SWITCH translates to a compare chain decoded entirely at
+  translate time: the operand's fixup names the table symbol (in
+  the literal segment), each entry's fixup names a case symbol
+  whose value is a bytecode offset inside the current span - so
+  native needs no table, no fixups, no runtime walk, and the dead
+  bytecode keeps the operand fixup for the alias path.  BC_COPY /
+  BC_PUSHN ride through helper_op with the length packed in the op
+  word's high half (the only ops with an immediate); COPY's popped
+  destination slot and PUSHN's rounded stack take are applied to r4
+  at the call site.  natlist.py stops counting L<n>/Sw<n>_<n>
+  generated symbols as functions - Dhrystone was 12 functions all
+  along, and **all 12 are native now**.
+
+  Probe cph.c (switch shapes incl. fallthrough, shared bodies,
+  switch-in-loop, switch on a call result; struct assign/pass/
+  return) - byte-identical on the board.  **Dhrystone, same binary
+  A/B on the PC3: 3,912/s forced-bytecode -> 11,287/s native
+  (2.9x; the interpreted-era baseline was 3,808)**.  That is ~29x
+  off a native M33's ceiling, which is stage 8's territory: every
+  call still crosses two trampolines and a C helper, and compares
+  still materialise 0/1.
+
+Next: stage 8 (peepholes, measured, one per commit - direct BL for
+known-native callees first, cmp+branch fusion second), then 9 (the
 fit levers above + SD refresh; the eclipse's other 27 functions are
 waiting on exactly that).
 
