@@ -38,7 +38,10 @@
  *	fits; an on-board compile that overflows them says so cleanly.
  */
 #ifdef BIG_TABLES
-#define CODEMAX		131072
+/* Mixed mode keeps a committed function's dead bytecode alongside its
+   native span (~2.7x the bytecode), so a big program roughly triples;
+   the eclipse with every function native is ~250K of code segment. */
+#define CODEMAX		393216
 #define DATAMAX		65536
 #else
 #define CODEMAX		32768

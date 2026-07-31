@@ -5,7 +5,7 @@
 # (forced interpretation of the same mixed object).
 #
 #   bash gate.sh cpd.c          one probe
-#   bash gate.sh                all four checkpoints
+#   bash gate.sh                all checkpoints
 CC=$(cd "$(dirname "$0")/../.." && pwd)
 BIN=$CC/host-armm0
 INC=$CC/hosttest/ctest-include
@@ -43,7 +43,7 @@ if [ -n "$1" ]; then
 	one "$1"; exit $?
 fi
 fail=0
-for p in cpa.c cpb.c cpc.c cpd.c cpe.c; do
+for p in cpa.c cpb.c cpc.c cpd.c cpe.c cpf.c cpg.c; do
 	one "$p" || fail=1
 done
 exit $fail

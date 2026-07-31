@@ -1673,12 +1673,52 @@ static void load(const char *path)
 		unsigned long o = fix[i].f_offset;
 
 		/*
+		 * Flag 2 marks a movw/movt pair in native code: the pair
+		 * loads a 32-bit value whose bits are scattered across the
+		 * two Thumb-2 instructions.  Decode the assembled value
+		 * (the addend), add the symbol - or, for a library symbol,
+		 * which has no address, store the tagged index helper_call
+		 * turns back into a libcall - and re-encode.
+		 */
+		if (fix[i].f_pad & 2) {
+			unsigned hw[4];
+			unsigned j;
+			for (j = 0; j < 4; j++)
+				hw[j] = code[o + 2 * j] |
+				    ((unsigned)code[o + 2 * j + 1] << 8);
+			v += ((unsigned long)(hw[0] & 0xF) << 12) |
+			    ((unsigned long)((hw[0] >> 10) & 1) << 11) |
+			    (((hw[1] >> 12) & 7) << 8) | (hw[1] & 0xFF) |
+			    ((unsigned long)(hw[2] & 0xF) << 28) |
+			    ((unsigned long)((hw[2] >> 10) & 1) << 27) |
+			    ((unsigned long)((hw[3] >> 12) & 7) << 24) |
+			    ((unsigned long)(hw[3] & 0xFF) << 16);
+			if (sym[fix[i].f_sym].s_type == BC_SYM_LIB)
+				v = 0x80000000UL | fix[i].f_sym;
+			hw[0] = (hw[0] & 0xFBF0) | ((v >> 12) & 0xF) |
+			    (((v >> 11) & 1) << 10);
+			hw[1] = (hw[1] & 0x8F00) | (((v >> 8) & 7) << 12) |
+			    (v & 0xFF);
+			hw[2] = (hw[2] & 0xFBF0) | ((v >> 28) & 0xF) |
+			    (((v >> 27) & 1) << 10);
+			hw[3] = (hw[3] & 0x8F00) | (((v >> 24) & 7) << 12) |
+			    ((v >> 16) & 0xFF);
+			for (j = 0; j < 4; j++) {
+				code[o + 2 * j] = hw[j];
+				code[o + 2 * j + 1] = hw[j] >> 8;
+			}
+			continue;
+		}
+
+		/*
 		 * Flag 1 marks a literal-pool word in native code: a plain
 		 * value slot that must never be mistaken for a BC_CALL
 		 * operand by the rewrite below, whatever byte happens to
 		 * precede it.  A library symbol has no address at all, so
 		 * the slot gets a tagged index that helper_call turns back
-		 * into a libcall at the call site.
+		 * into a libcall at the call site.  (Superseded by the
+		 * movw/movt pair fixup above, whose reach is unlimited;
+		 * still honoured so older mixed objects keep loading.)
 		 */
 		if (fix[i].f_pad & 1) {
 			if (sym[fix[i].f_sym].s_type == BC_SYM_LIB)
@@ -1763,12 +1803,18 @@ static void load(const char *path)
  */
 static int64_t helper_call(unsigned long target, unsigned char *vsp);
 static int64_t helper_libcall(unsigned long idx, unsigned char *vsp);
+static int64_t helper_op(unsigned long op, unsigned char *vsp, int64_t a);
+static int64_t helper_eqop(unsigned long idx, unsigned char *vsp, int64_t a);
 
 #define NH_CALL		0
 #define NH_LIBCALL	1
+#define NH_OP		2
+#define NH_EQOP		3
 static void *native_helpers[] = {
 	(void *)helper_call,
 	(void *)helper_libcall,
+	(void *)helper_op,
+	(void *)helper_eqop,
 };
 
 static int64_t bc_exec(unsigned long entry);
@@ -1871,6 +1917,95 @@ static int64_t helper_libcall(unsigned long idx, unsigned char *vsp)
 	sp = (unsigned long)(vsp - mem);
 	libcall((unsigned)idx);
 	return A;
+}
+
+/*
+ *	The compound-assign libcalls are the one family that takes an
+ *	input in A (the amount; the address is on the stack) - a generic
+ *	libcall reads all its arguments from the stack, which is why
+ *	helper_libcall does not carry A across.  The native emitter
+ *	routes the non-inlined eqop forms (64-bit and floating) here
+ *	instead, with A in r2/r3 as helper_op takes it.  lib_eqop pops
+ *	the address slot from the global sp; the native caller applies
+ *	that fixed one-slot pop to its own r4 afterwards.
+ */
+static int64_t helper_eqop(unsigned long idx, unsigned char *vsp, int64_t a)
+{
+	sp = (unsigned long)(vsp - mem);
+	A = a;
+	libcall((unsigned)idx);
+	return A;
+}
+
+/*
+ *	One bytecode operation, for native code: the fp and wide-integer
+ *	arithmetic the emitter does not inline.  A arrives in r2/r3 by the
+ *	AAPCS (op in r0, vsp in r1) and the result goes back as A does.
+ *
+ *	Pure: the stacked operand, where the op has one, is read through
+ *	vsp - never through the global sp, which is not synced for this
+ *	call - and the native caller adjusts its own r4 afterwards by the
+ *	op's fixed pop count (8 for a double or 64-bit operand, 4 for a
+ *	float, 0 for a conversion).  The bodies mirror the interpreter's
+ *	cases exactly, divide-by-zero-is-0 included; on the board the
+ *	double arithmetic lands in the same DCP aeabi routines the
+ *	interpreter uses, which is the whole point of routing FP through
+ *	bcrun rather than emitting soft-float calls of the program's own.
+ */
+static int64_t helper_op(unsigned long op, unsigned char *vsp, int64_t a)
+{
+	unsigned long boff = (unsigned long)(vsp - mem);
+	int64_t b;
+
+	switch (op) {
+	case BC_MUL64:	return (int64_t)rd64(boff) * a;
+	case BC_DIVS64:	b = (int64_t)rd64(boff);
+			return a ? b / a : 0;
+	case BC_DIVU64:	b = (int64_t)rd64(boff);
+			return a ? (int64_t)((uint64_t)b / (uint64_t)a) : 0;
+	case BC_REMS64:	b = (int64_t)rd64(boff);
+			return a ? b % a : 0;
+	case BC_REMU64:	b = (int64_t)rd64(boff);
+			return a ? (int64_t)((uint64_t)b % (uint64_t)a) : 0;
+	case BC_SHL64:	return (int64_t)rd64(boff) << (U32(a) & 63);
+	case BC_SHRS64:	return (int64_t)rd64(boff) >> (U32(a) & 63);
+	case BC_SHRU64:	return (int64_t)(rd64(boff) >> (U32(a) & 63));
+
+	case BC_ADDD:	return dput(dget((int64_t)rd64(boff)) + dget(a));
+	case BC_SUBD:	return dput(dget((int64_t)rd64(boff)) - dget(a));
+	case BC_MULD:	return dput(dget((int64_t)rd64(boff)) * dget(a));
+	case BC_DIVD:	return dput(dget((int64_t)rd64(boff)) / dget(a));
+	case BC_EQD:	return (dget((int64_t)rd64(boff)) == dget(a));
+	case BC_NED:	return (dget((int64_t)rd64(boff)) != dget(a));
+	case BC_LTD:	return (dget((int64_t)rd64(boff)) <  dget(a));
+	case BC_GTD:	return (dget((int64_t)rd64(boff)) >  dget(a));
+	case BC_LED:	return (dget((int64_t)rd64(boff)) <= dget(a));
+	case BC_GED:	return (dget((int64_t)rd64(boff)) >= dget(a));
+
+	case BC_ADDF:	return fput(fget(S32(rd32(boff))) + fget(a));
+	case BC_SUBF:	return fput(fget(S32(rd32(boff))) - fget(a));
+	case BC_MULF:	return fput(fget(S32(rd32(boff))) * fget(a));
+	case BC_DIVF:	return fput(fget(S32(rd32(boff))) / fget(a));
+	case BC_EQF:	return (fget(S32(rd32(boff))) == fget(a));
+	case BC_NEF:	return (fget(S32(rd32(boff))) != fget(a));
+	case BC_LTF:	return (fget(S32(rd32(boff))) <  fget(a));
+	case BC_GTF:	return (fget(S32(rd32(boff))) >  fget(a));
+	case BC_LEF:	return (fget(S32(rd32(boff))) <= fget(a));
+	case BC_GEF:	return (fget(S32(rd32(boff))) >= fget(a));
+
+	case BC_I2D:	return dput((double)a);
+	case BC_U2D:	return dput((double)(uint64_t)a);
+	case BC_D2I:	return (int64_t)dget(a);
+	case BC_D2U:	return (int64_t)(uint64_t)dget(a);
+	case BC_I2F:	return fput((float)a);
+	case BC_U2F:	return fput((float)(uint64_t)a);
+	case BC_F2I:	return (int64_t)fget(a);
+	case BC_F2U:	return (int64_t)(uint64_t)fget(a);
+	case BC_F2D:	return dput((double)fget(a));
+	case BC_D2F:	return fput((float)dget(a));
+	}
+	fault("bad helper op");
+	return 0;
 }
 
 static void call_target(unsigned long target)

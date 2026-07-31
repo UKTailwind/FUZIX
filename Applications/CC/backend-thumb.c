@@ -27,34 +27,46 @@
  *	Register file (bytecode.h): r0/r1 = A, r4 = VM stack pointer as
  *	a native pointer, r5 = helper vector, r6 = mem[] base; r2/r3
  *	scratch.  Flags are dead between bytecode ops, so flag-setting
- *	16-bit forms are used freely.  Loader-patched addresses live in a
- *	per-function literal pool read with LDR pc-relative - the
- *	object's add-32-bit-symbol fixups cannot patch a movw/movt pair,
- *	and this way the loader needs no new fixup kind.
+ *	16-bit forms are used freely.  Loader-patched addresses are
+ *	movw/movt pairs under a dedicated pair fixup (flag 2) - the
+ *	plain add-32-bit-symbol fixup cannot patch the scattered imm16
+ *	fields.  (Stage 5 used a pc-relative literal pool instead; its
+ *	4KB LDR reach turned out to be the binding limit on real
+ *	functions - the eclipse's - so the loader learned the pair kind.)
  *
  *	Coverage grows checkpoint by checkpoint, each verified on the
  *	hardware (see PLAN-arm-backend.md):
  *	  CP-A  frame, constants, unconditional jumps, return
- *	  CP-B  stack ops, locals/args, loads and stores      (pending)
- *	  CP-C  32-bit ALU, inline compound-assign helpers    (pending)
- *	  CP-D  compares, conditional jumps, casts            (pending)
+ *	  CP-B  stack ops, locals/args, loads and stores
+ *	  CP-C  32-bit ALU, inline compound-assign helpers
+ *	  CP-D  compares, conditional jumps, casts
+ *	  CP-E  calls, libcalls (stage 5)
+ *	  CP-F  64-bit values: moves and the cheap ALU pairs  (stage 6)
+ *	  CP-G  floating point and helper-routed wide ops     (stage 6)
+ *
+ *	Stage 6 note: a native function returning a 32-bit value leaves
+ *	r1 - A's high half - undefined; the interpreter's 32-bit ops read
+ *	only the low 32 bits of A by contract, so this is fine, and
+ *	64-bit consumers only ever see A after CONST64/LOAD64/POP64/
+ *	SEXT32/ZEXT32 established the high word.
  */
 
 #ifdef BIG_TABLES
-#define TMAX	65536
+#define TMAX	262144
+#define TPOOLMAX 8192
 #else
 #define TMAX	8192
-#endif
 #define TPOOLMAX 128
+#endif
 
 static unsigned char tbuf[TMAX];
 static unsigned tlen;
-static unsigned short tmap[TMAX];	/* bc offset in span -> native */
+static unsigned tmap[TMAX];		/* bc offset in span -> native */
 
+/* Loader-patched sites: each is a movw/movt pair (flag-2 fixup) */
 static struct tpool {
 	unsigned sym;
-	unsigned long addend;
-	unsigned site;			/* toff of the LDR.W first halfword */
+	unsigned site;			/* toff of the movw first halfword */
 } tpooltab[TPOOLMAX];
 static unsigned ntpool;
 
@@ -63,6 +75,8 @@ static unsigned fn_sym;
 static unsigned fn_patch_lo;
 static unsigned fn_fix_lo;
 static int t_dry;
+static const char *t_bail;	/* why the last t_span gave up */
+static unsigned t_bailop;
 
 static int thumb_enabled(void)
 {
@@ -70,6 +84,27 @@ static int thumb_enabled(void)
 	if (cached < 0)
 		cached = getenv("BCODE_ONLY") ? 0 : 1;
 	return cached;
+}
+
+/*
+ *	Size policy.  A committed function keeps its dead bytecode, so
+ *	code roughly triples for covered functions - fine, until one
+ *	function is the eclipse's f_moon: 31K of straight-line lunar
+ *	series that translates to 117K and pushes the object past what a
+ *	256K Fuzix process can load.  Functions whose native span would
+ *	exceed the cap stay bytecode; THUMB_MAXFN overrides (0 = no cap)
+ *	for qemu experiments where the process ceiling does not apply.
+ */
+static unsigned long t_maxfn(void)
+{
+	static long cached = -1;
+	if (cached < 0) {
+		const char *e = getenv("THUMB_MAXFN");
+		cached = e ? atol(e) : 40000;
+		if (!cached)
+			cached = TMAX;
+	}
+	return (unsigned long)cached;
 }
 
 /* ---- raw emission --------------------------------------------------- */
@@ -102,16 +137,57 @@ static void t_mov16(unsigned top, unsigned rd, unsigned imm16)
 	    (imm3 << 12) | (rd << 8) | imm8);
 }
 
-/* A = constant, shortest form */
-static void t_const(unsigned long v)
+/* rd = constant, shortest form (rd must be a low register) */
+static void t_constr(unsigned rd, unsigned long v)
 {
 	if (v < 256) {
-		t16(0x2000 | (v & 0xFF));	/* movs r0, #v */
+		t16(0x2000 | (rd << 8) | (v & 0xFF));	/* movs rd, #v */
 		return;
 	}
-	t_mov16(0, 0, v & 0xFFFF);
+	t_mov16(0, rd, v & 0xFFFF);
 	if ((v >> 16) & 0xFFFF)
-		t_mov16(1, 0, (v >> 16) & 0xFFFF);
+		t_mov16(1, rd, (v >> 16) & 0xFFFF);
+}
+
+/* A = constant */
+static void t_const(unsigned long v)
+{
+	t_constr(0, v);
+}
+
+/*
+ *	Materialise the flags as 0/1 in r0: branch-taken lands on
+ *	movs r0, #1.  The flag-setting instruction comes first; no IT
+ *	blocks to get wrong.
+ */
+static void t_flagval(unsigned cond)
+{
+	t16(0xD001 | (cond << 8));	/* b<cond> +1 insn */
+	t16(0x2000);			/* movs r0, #0     */
+	t16(0xE000);			/* b    +0 insn    */
+	t16(0x2001);			/* movs r0, #1     */
+}
+
+/*
+ *	One bytecode op through the C side: bcrun's helper_op executes
+ *	the fp and wide-integer arithmetic the emitter does not inline,
+ *	against the same engine the interpreter uses (the DCP aeabi
+ *	doubles, on the board).  A travels in r2/r3 per the AAPCS - op
+ *	is r0, vsp r1 - and comes back in r0/r1 as ever.  The helper is
+ *	pure: it reads the stacked operand through vsp and never moves
+ *	the global sp, so the op's fixed pop count is applied to r4
+ *	here, in native code.
+ */
+static void t_helperop(unsigned op, unsigned pops)
+{
+	t16(0x4602);		/* mov  r2, r0  - A low   */
+	t16(0x460B);		/* mov  r3, r1  - A high  */
+	t16(0x2000 | op);	/* movs r0, #op           */
+	t16(0x4621);		/* mov  r1, r4  - vsp     */
+	t32(0xF8D5, 0xC008);	/* ldr.w r12, [r5, #8]    */
+	t16(0x47E0);		/* blx  r12               */
+	if (pops)
+		t16(0x3400 | pops);	/* adds r4, #pops */
 }
 
 /* add/sub rd, rn, #imm12 (T4 ADDW/SUBW, no flags) */
@@ -223,6 +299,32 @@ static const struct teqop {
 	{ NULL, 0 }
 };
 
+/*
+ *	Is this exactly a compound-assign helper name - base + width and
+ *	signedness ("pluseq8s") or base + 'd'/'f' for the floating forms?
+ *	Strict, because a library call that happens to share the prefix
+ *	must not be mistaken for the one libcall family that pops a slot.
+ */
+static int t_eqop_name(const char *name)
+{
+	const struct teqop *e;
+	unsigned blen;
+	const char *t;
+
+	for (e = teqops; e->base; e++) {
+		blen = strlen(e->base);
+		if (strncmp(name, e->base, blen) == 0) {
+			t = name + blen;
+			if ((t[0] == 'd' || t[0] == 'f') && !t[1])
+				return 1;
+			if (t[0] >= '1' && t[0] <= '8' &&
+			    (t[1] == 's' || t[1] == 'u') && !t[2])
+				return 1;
+		}
+	}
+	return 0;
+}
+
 static int t_eqop(const char *name)
 {
 	const struct teqop *e;
@@ -313,6 +415,7 @@ static int t_span(unsigned long start, unsigned long end)
 {
 	unsigned long o = start;
 
+	t_bail = "limits";	/* any non-opcode return 0 below */
 	while (o < end) {
 		unsigned op = codebuf[o];
 
@@ -456,17 +559,21 @@ static int t_span(unsigned long start, unsigned long end)
 			break;
 		case BC_ADDR: {
 			unsigned s;
+			unsigned long ad = t_rd32c(o + 1);
 			if (!t_addrsym(o + 1, &s))
 				return 0;
 			if (ntpool >= TPOOLMAX)
 				return 0;
 			if (!t_dry) {
 				tpooltab[ntpool].sym = s;
-				tpooltab[ntpool].addend = t_rd32c(o + 1);
 				tpooltab[ntpool].site = tlen;
 			}
 			ntpool++;
-			t32(0xF8DF, 0x0000);	/* ldr.w r0, [pc, #..] */
+			/* movw/movt pair carrying the addend, patched by
+			   the loader's pair fixup - always both halves,
+			   whatever the addend, so the site is uniform */
+			t_mov16(0, 0, ad & 0xFFFF);
+			t_mov16(1, 0, (ad >> 16) & 0xFFFF);
 			o += 5;
 			break;
 		}
@@ -544,20 +651,33 @@ static int t_span(unsigned long start, unsigned long end)
 				o += 3;
 				break;
 			}
-			/* An eqop name that did NOT inline (64-bit or
-			   floating forms) pops its address slot inside the
-			   C helper, which would desync this function's r4:
-			   the whole function stays bytecode. */
-			{
-				const struct teqop *e;
-				for (e = teqops; e->base; e++)
-					if (strncmp(bc_symname[s], e->base,
-						    strlen(e->base)) == 0)
-						return 0;
+			/*
+			 * An eqop that did not inline above - the 64-bit
+			 * and floating forms - is the one libcall family
+			 * that takes an input in A, so it goes through
+			 * helper_eqop, which carries A across in r2/r3.
+			 * lib_eqop also pops its address slot; that fixed
+			 * one-slot pop resyncs r4 here rather than bailing
+			 * the whole function as stage 5 did.
+			 */
+			if (t_eqop_name(bc_symname[s])) {
+				t16(0x4602);	/* mov  r2, r0 - A low  */
+				t16(0x460B);	/* mov  r3, r1 - A high */
+				if (s < 256)
+					t16(0x2000 | s);
+				else
+					t_mov16(0, 0, s);
+				t16(0x4621);		/* mov  r1, r4   */
+				t32(0xF8D5, 0xC00C);	/* ldr.w r12, [r5, #12] */
+				t16(0x47E0);		/* blx  r12      */
+				t16(0x3404);		/* adds r4, #4   */
+				o += 3;
+				break;
 			}
 			/* Anything else - printf, the mm runtime, libm -
-			   goes through the C side.  sp syncs from r4 via
-			   the second argument. */
+			   goes through the C side, arguments all on the
+			   stack.  sp syncs from r4 via the second
+			   argument. */
 			if (s < 256)
 				t16(0x2000 | s);	/* movs r0, #s   */
 			else
@@ -571,17 +691,18 @@ static int t_span(unsigned long start, unsigned long end)
 		/* ---- CP-E (stage 5): calls -------------------------- */
 		case BC_CALL: {
 			unsigned s;
+			unsigned long ad = t_rd32c(o + 1);
 			if (!t_addrsym(o + 1, &s))
 				return 0;
 			if (ntpool >= TPOOLMAX)
 				return 0;
 			if (!t_dry) {
 				tpooltab[ntpool].sym = s;
-				tpooltab[ntpool].addend = t_rd32c(o + 1);
 				tpooltab[ntpool].site = tlen;
 			}
 			ntpool++;
-			t32(0xF8DF, 0x0000);	/* ldr.w r0, [pc, #..] */
+			t_mov16(0, 0, ad & 0xFFFF);
+			t_mov16(1, 0, (ad >> 16) & 0xFFFF);
 			t16(0x4621);		/* mov  r1, r4       */
 			t16(0x682B);		/* ldr  r3, [r5, #0] */
 			t16(0x4798);		/* blx  r3           */
@@ -597,8 +718,6 @@ static int t_span(unsigned long start, unsigned long end)
 			break;
 
 		/* ---- CP-D: compares and conditional jumps ----------- */
-		/* cmp, then a five-halfword materialise: branch-taken
-		   lands on movs r0,#1.  No IT blocks to get wrong. */
 		case BC_EQ:  case BC_NE:
 		case BC_LTS: case BC_LTU:
 		case BC_GTS: case BC_GTU:
@@ -607,24 +726,17 @@ static int t_span(unsigned long start, unsigned long end)
 			static const unsigned char cc[] = {
 				0, 1, 11, 3, 12, 8, 13, 9, 10, 2
 			};	/* eq ne lt lo gt hi le ls ge hs */
-			unsigned c = cc[op - BC_EQ];
 			t16(0x6822);		/* ldr  r2, [r4]   */
 			t16(0x3404);		/* adds r4, #4     */
 			t16(0x4282);		/* cmp  r2, r0     */
-			t16(0xD001 | (c << 8));	/* b<c> +1 insn    */
-			t16(0x2000);		/* movs r0, #0     */
-			t16(0xE000);		/* b    +0 insn    */
-			t16(0x2001);		/* movs r0, #1     */
+			t_flagval(cc[op - BC_EQ]);
 			o++;
 			break;
 		}
 		case BC_BOOL:
 		case BC_LNOT:
 			t16(0x2800);		/* cmp r0, #0      */
-			t16(0xD001 | ((op == BC_BOOL ? 1 : 0) << 8));
-			t16(0x2000);
-			t16(0xE000);
-			t16(0x2001);
+			t_flagval(op == BC_BOOL ? 1 : 0);
 			o++;
 			break;
 		case BC_JFALSE:
@@ -642,8 +754,221 @@ static int t_span(unsigned long start, unsigned long end)
 			break;
 		}
 
+		/* ---- CP-F: 64-bit values (stage 6) ------------------ */
+		case BC_CONST64:
+			t_constr(0, t_rd32c(o + 1));
+			t_constr(1, t_rd32c(o + 5));
+			o += 9;
+			break;
+		case BC_LOAD64:
+			/* Two plain ldr, never ldrd: rd64 assembles bytes,
+			   so any alignment the interpreter accepts must
+			   work here too, and plain loads take unaligned */
+			t16(0x1832);		/* adds r2, r6, r0   */
+			t16(0x6810);		/* ldr  r0, [r2]     */
+			t16(0x6851);		/* ldr  r1, [r2, #4] */
+			o++;
+			break;
+		case BC_STORE64:
+			t16(0x6822);		/* ldr  r2, [r4]     */
+			t16(0x3404);		/* adds r4, #4       */
+			t16(0x1992);		/* adds r2, r2, r6   */
+			t16(0x6010);		/* str  r0, [r2]     */
+			t16(0x6051);		/* str  r1, [r2, #4] */
+			o++;
+			break;
+		case BC_PUSH64:
+			/* low word at the lower address, as push64 does */
+			t16(0x3C08);		/* subs r4, #8       */
+			t16(0x6020);		/* str  r0, [r4]     */
+			t16(0x6061);		/* str  r1, [r4, #4] */
+			o++;
+			break;
+		case BC_POP64:
+			t16(0x6820);		/* ldr  r0, [r4]     */
+			t16(0x6861);		/* ldr  r1, [r4, #4] */
+			t16(0x3408);		/* adds r4, #8       */
+			o++;
+			break;
+		case BC_SEXT32:
+			t16(0x17C1);		/* asrs r1, r0, #31  */
+			o++;
+			break;
+		case BC_ZEXT32:
+			t16(0x2100);		/* movs r1, #0       */
+			o++;
+			break;
+		case BC_TRUNC64:
+			/* nothing: 32-bit consumers read only r0 (the
+			   low-32 contract) and re-widening always goes
+			   through SEXT32/ZEXT32 */
+			o++;
+			break;
+
+		/* 64-bit ALU with a cheap instruction-pair form; the rest
+		   of the family goes through helper_op below */
+		case BC_ADD64:
+		case BC_SUB64:
+		case BC_AND64:
+		case BC_OR64:
+		case BC_XOR64:
+			t16(0x6822);		/* ldr  r2, [r4]     */
+			t16(0x6863);		/* ldr  r3, [r4, #4] */
+			t16(0x3408);		/* adds r4, #8       */
+			switch (op) {
+			case BC_ADD64:
+				t16(0x1810);	/* adds r0, r2, r0 */
+				t16(0x4159);	/* adcs r1, r3     */
+				break;
+			case BC_SUB64:
+				t16(0x1A10);	/* subs r0, r2, r0 */
+				t16(0x418B);	/* sbcs r3, r1     */
+				t16(0x4619);	/* mov  r1, r3     */
+				break;
+			case BC_AND64:
+				t16(0x4010);	/* ands r0, r2     */
+				t16(0x4019);	/* ands r1, r3     */
+				break;
+			case BC_OR64:
+				t16(0x4310);	/* orrs r0, r2     */
+				t16(0x4319);	/* orrs r1, r3     */
+				break;
+			case BC_XOR64:
+				t16(0x4050);	/* eors r0, r2     */
+				t16(0x4059);	/* eors r1, r3     */
+				break;
+			}
+			o++;
+			break;
+		case BC_NEG64:
+			t16(0x4240);		/* rsbs r0, r0, #0   */
+			t16(0x2200);		/* movs r2, #0 - flags
+						   set N/Z, carry kept */
+			t16(0x418A);		/* sbcs r2, r1       */
+			t16(0x4611);		/* mov  r1, r2       */
+			o++;
+			break;
+		case BC_NOT64:
+			t16(0x43C0);		/* mvns r0, r0       */
+			t16(0x43C9);		/* mvns r1, r1       */
+			o++;
+			break;
+		case BC_BOOL64:
+		case BC_LNOT64:
+			t16(0x4602);		/* mov  r2, r0       */
+			t16(0x430A);		/* orrs r2, r1       */
+			t_flagval(op == BC_BOOL64 ? 1 : 0);
+			o++;
+			break;
+
+		/*
+		 *	64-bit compares.  subs/sbcs leaves signed lt/ge and
+		 *	unsigned lo/hs true across the whole pair; gt/le
+		 *	come from subtracting the other way round.  Z after
+		 *	sbcs is only the high word's, so eq/ne use the
+		 *	xor-orr form instead.
+		 */
+		case BC_EQ64:
+		case BC_NE64:
+			t16(0x6822);		/* ldr  r2, [r4]     */
+			t16(0x6863);		/* ldr  r3, [r4, #4] */
+			t16(0x3408);		/* adds r4, #8       */
+			t16(0x4042);		/* eors r2, r0       */
+			t16(0x404B);		/* eors r3, r1       */
+			t16(0x431A);		/* orrs r2, r3       */
+			t_flagval(op == BC_EQ64 ? 0 : 1);
+			o++;
+			break;
+		case BC_LTS64: case BC_LTU64:
+		case BC_GES64: case BC_GEU64:
+		case BC_GTS64: case BC_GTU64:
+		case BC_LES64: case BC_LEU64: {
+			/* b OP A: b-A serves lt/ge/lo/hs directly; the
+			   swapped A-b turns gt into lt and le into ge */
+			unsigned swap = (op == BC_GTS64 || op == BC_GTU64 ||
+					 op == BC_LES64 || op == BC_LEU64);
+			unsigned uns = (op == BC_LTU64 || op == BC_GEU64 ||
+					op == BC_GTU64 || op == BC_LEU64);
+			unsigned ge = (op == BC_GES64 || op == BC_GEU64 ||
+				       op == BC_LES64 || op == BC_LEU64);
+			t16(0x6822);		/* ldr  r2, [r4]     */
+			t16(0x6863);		/* ldr  r3, [r4, #4] */
+			t16(0x3408);		/* adds r4, #8       */
+			if (swap) {
+				t16(0x1A80);	/* subs r0, r0, r2   */
+				t16(0x4199);	/* sbcs r1, r3       */
+			} else {
+				t16(0x1A12);	/* subs r2, r2, r0   */
+				t16(0x418B);	/* sbcs r3, r1       */
+			}
+			/* lt=11 ge=10 lo=3 hs=2 */
+			t_flagval(uns ? (ge ? 2 : 3) : (ge ? 10 : 11));
+			o++;
+			break;
+		}
+
+		/* ---- CP-G: floating point ---------------------------- */
+		case BC_NEGD:
+			t16(0x2201);		/* movs r2, #1       */
+			t16(0x07D2);		/* lsls r2, r2, #31  */
+			t16(0x4051);		/* eors r1, r2       */
+			o++;
+			break;
+		case BC_NEGF:
+			t16(0x2201);		/* movs r2, #1       */
+			t16(0x07D2);		/* lsls r2, r2, #31  */
+			t16(0x4050);		/* eors r0, r2       */
+			o++;
+			break;
+		/* Truthiness is a BIT TEST, never a real compare: the
+		   DCP flushes denormals to zero, and the day that rule
+		   was learned is documented in PLAN-arm-backend.md under
+		   "Floating point engines".  (A<<1)==0 catches +-0.0
+		   exactly, NaN included, on every engine. */
+		case BC_BOOLD:
+		case BC_LNOTD:
+			t16(0x004A);		/* lsls r2, r1, #1   */
+			t16(0x4302);		/* orrs r2, r0       */
+			t_flagval(op == BC_BOOLD ? 1 : 0);
+			o++;
+			break;
+		case BC_BOOLF:
+		case BC_LNOTF:
+			t16(0x0042);		/* lsls r2, r0, #1   */
+			t_flagval(op == BC_BOOLF ? 1 : 0);
+			o++;
+			break;
+
+		/* Everything else fp/wide goes through helper_op, which
+		   runs the interpreter's own case body - on the board
+		   that is the DCP aeabi engine, inherited for free */
+		case BC_MUL64: case BC_DIVS64: case BC_DIVU64:
+		case BC_REMS64: case BC_REMU64:
+		case BC_SHL64: case BC_SHRS64: case BC_SHRU64:
+		case BC_ADDD: case BC_SUBD: case BC_MULD: case BC_DIVD:
+		case BC_EQD: case BC_NED: case BC_LTD: case BC_GTD:
+		case BC_LED: case BC_GED:
+			t_helperop(op, 8);
+			o++;
+			break;
+		case BC_ADDF: case BC_SUBF: case BC_MULF: case BC_DIVF:
+		case BC_EQF: case BC_NEF: case BC_LTF: case BC_GTF:
+		case BC_LEF: case BC_GEF:
+			t_helperop(op, 4);
+			o++;
+			break;
+		case BC_I2D: case BC_U2D: case BC_D2I: case BC_D2U:
+		case BC_I2F: case BC_U2F: case BC_F2I: case BC_F2U:
+		case BC_F2D: case BC_D2F:
+			t_helperop(op, 0);
+			o++;
+			break;
+
 		default:
-			return 0;	/* not covered yet: stay bytecode */
+			/* not covered yet: stay bytecode */
+			t_bail = "opcode";
+			t_bailop = op;
+			return 0;
 		}
 	}
 	return 1;
@@ -662,24 +987,27 @@ static void thumb_fn_begin(const char *name)
 static void thumb_commit(void)
 {
 	unsigned long end = codelen;
-	unsigned long marker, entry, base, pbase;
+	unsigned long marker, entry, base;
 	unsigned i;
 
 	if (!thumb_enabled())
 		return;
-	if (end - fn_start > TMAX)
-		return;
+	t_bail = NULL;
+	t_bailop = 0;
+	if (end - fn_start > TMAX) {
+		t_bail = "span";
+		goto bailed;
+	}
 
 	tlen = 0;
 	ntpool = 0;
 	t_dry = 1;
 	if (!t_span(fn_start, end))
-		return;
-	/* An LDR literal reaches 4095 bytes; keep pool users well clear */
-	if (ntpool && tlen + 4 * ntpool > 4000)
-		return;
-	if (ntpool > TPOOLMAX)
-		return;
+		goto bailed;
+	if (tlen > t_maxfn()) {
+		t_bail = "size policy";
+		goto bailed;
+	}
 
 	tlen = 0;
 	ntpool = 0;
@@ -705,27 +1033,15 @@ static void thumb_commit(void)
 	base = codelen;
 	for (i = 0; i < tlen; i++)
 		cbyte(tbuf[i]);
-	while (codelen & 3)
-		cbyte(BC_NOP);
-	pbase = codelen;
-	for (i = 0; i < ntpool; i++) {
-		fixup(BC_SEG_CODE, codelen, tpooltab[i].sym);
-		/* flag 1: a value slot, not a BC_CALL operand - see the
-		   loader */
-		fixtab[nfix - 1].f_pad = 1;
-		clong(tpooltab[i].addend);
-	}
 	if (codelen >= CODEMAX)
 		return;			/* cbyte already said "overflow" */
 
-	/* Patch the LDR literal sites now the layout is absolute.  The
-	   pc base of an LDR literal is Align4(site + 4); the code buffer
-	   is loaded 8-aligned, so offsets here are the runtime truth. */
+	/* Address sites are movw/movt pairs carrying their addend in
+	   the instruction bits; the loader's flag-2 fixup decodes, adds
+	   the symbol and re-encodes.  No literal pool, no reach limit. */
 	for (i = 0; i < ntpool; i++) {
-		unsigned long site = base + tpooltab[i].site;
-		unsigned long imm = (pbase + 4UL * i) - ((site + 4) & ~3UL);
-		codebuf[site + 2] = imm & 0xFF;
-		codebuf[site + 3] = (imm >> 8) & 0xF;	/* rt = r0 */
+		fixup(BC_SEG_CODE, base + tpooltab[i].site, tpooltab[i].sym);
+		fixtab[nfix - 1].f_pad = 2;
 	}
 
 	symtab[fn_sym].s_value = marker;
@@ -733,4 +1049,15 @@ static void thumb_commit(void)
 	if (getenv("THUMB_VERBOSE"))
 		fprintf(stderr, "native: %s (%lu bc -> %u bytes)\n",
 			bc_symname[fn_sym], end - fn_start, tlen);
+	return;
+
+bailed:
+	if (getenv("THUMB_VERBOSE")) {
+		fprintf(stderr, "bytecode: %s (%lu bc): %s",
+			bc_symname[fn_sym], end - fn_start,
+			t_bail ? t_bail : "?");
+		if (t_bailop)
+			fprintf(stderr, " %02x", t_bailop);
+		fputc('\n', stderr);
+	}
 }
