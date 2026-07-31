@@ -358,7 +358,13 @@ static void lib_eqop(const char *name)
 	}
 
 	addr = (unsigned long)pop();
-	v = A;
+	/* The amount for a 32-bit-or-narrower object is itself a 32-bit
+	   value: read it at that width, per the low-32 contract (the
+	   high word is meaningless when it came through the native seam) */
+	if (sz == 8)
+		v = A;
+	else
+		v = uns ? (int64_t)U32(A) : S32(A);
 
 	if (sz == 1)
 		old = uns ? (int64_t)rd8(addr) : (int64_t)(signed char)rd8(addr);
@@ -1965,20 +1971,31 @@ static int64_t bc_exec(unsigned long entry)
 			sp += 4;
 			break;
 
+		/*
+		 * Every 32-bit operation reads only the low 32 bits of A.
+		 * This is the contract that lets a native (Thumb) function
+		 * return a 32-bit result in r0 with whatever the high half
+		 * of the pair happens to hold: the interpreter's own ops
+		 * keep A sign extended, but a value that crossed the native
+		 * seam arrives with a meaningless high word, and these are
+		 * the sites that would otherwise see it.  64-bit values only
+		 * ever reach the 64-bit ops through CONST64/LOAD64/POP64/
+		 * SEXT32/ZEXT32, which establish the high word properly.
+		 */
 		case BC_LOAD8S:
-			A = (signed char)rd8(A);
+			A = (signed char)rd8(U32(A));
 			break;
 		case BC_LOAD8U:
-			A = rd8(A);
+			A = rd8(U32(A));
 			break;
 		case BC_LOAD16S:
-			A = (short)rd16(A);
+			A = (short)rd16(U32(A));
 			break;
 		case BC_LOAD16U:
-			A = rd16(A);
+			A = rd16(U32(A));
 			break;
 		case BC_LOAD32:
-			A = S32(rd32(A));
+			A = S32(rd32(U32(A)));
 			break;
 
 		case BC_STORE8:
@@ -2000,49 +2017,59 @@ static int64_t bc_exec(unsigned long entry)
 		case BC_ADD:	A = S32(pop() + A); break;
 		case BC_SUB:	A = S32(pop() - A); break;
 		case BC_MUL:	A = S32(pop() * A); break;
-		case BC_DIVS:	b = pop(); A = A ? S32(b / A) : 0; break;
-		case BC_DIVU:	b = pop();
-				A = A ? S32(U32(b) / U32(A)) : 0;
+		case BC_DIVS:	b = pop();
+				A = S32(A) ? S32(b / S32(A)) : 0;
 				break;
-		case BC_REMS:	b = pop(); A = A ? S32(b % A) : 0; break;
+		case BC_DIVU:	b = pop();
+				A = U32(A) ? S32(U32(b) / U32(A)) : 0;
+				break;
+		case BC_REMS:	b = pop();
+				A = S32(A) ? S32(b % S32(A)) : 0;
+				break;
 		case BC_REMU:	b = pop();
-				A = A ? S32(U32(b) % U32(A)) : 0;
+				A = U32(A) ? S32(U32(b) % U32(A)) : 0;
 				break;
 		case BC_AND:	A = S32(pop() & A); break;
 		case BC_OR:	A = S32(pop() | A); break;
 		case BC_XOR:	A = S32(pop() ^ A); break;
-		case BC_SHL:	A = S32(pop() << A); break;
-		case BC_SHRS:	A = S32(pop() >> A); break;
+		/* Shift counts are the low 32 bits of A; 63 caps the int64
+		   shift below at defined behaviour.  A count of 32..63 falls
+		   out of the S32 truncation as 0 for SHL/SHRU and as the
+		   sign for SHRS, which is what the hardware's 8-bit-count
+		   register shifts do too; larger counts are the program's
+		   own undefined behaviour. */
+		case BC_SHL:	A = S32(pop() << (U32(A) & 63)); break;
+		case BC_SHRS:	A = S32(pop() >> (U32(A) & 63)); break;
 		case BC_SHRU:	b = pop();
-				A = S32(U32(b) >> A);
+				A = S32(U32(b) >> (U32(A) & 63));
 				break;
 		case BC_NEG:	A = S32(-A); break;
 		case BC_NOT:	A = S32(~A); break;
-		case BC_LNOT:	A = !A; break;
+		case BC_LNOT:	A = !S32(A); break;
 
-		case BC_EQ:	A = (pop() == A); break;
-		case BC_NE:	A = (pop() != A); break;
-		case BC_LTS:	A = (pop() < A); break;
+		case BC_EQ:	A = (pop() == S32(A)); break;
+		case BC_NE:	A = (pop() != S32(A)); break;
+		case BC_LTS:	A = (pop() < S32(A)); break;
 		case BC_LTU:	b = pop();
 				A = (U32(b) < U32(A));
 				break;
-		case BC_GTS:	A = (pop() > A); break;
+		case BC_GTS:	A = (pop() > S32(A)); break;
 		case BC_GTU:	b = pop();
 				A = (U32(b) > U32(A));
 				break;
-		case BC_LES:	A = (pop() <= A); break;
+		case BC_LES:	A = (pop() <= S32(A)); break;
 		case BC_LEU:	b = pop();
 				A = (U32(b) <= U32(A));
 				break;
-		case BC_GES:	A = (pop() >= A); break;
+		case BC_GES:	A = (pop() >= S32(A)); break;
 		case BC_GEU:	b = pop();
 				A = (U32(b) >= U32(A));
 				break;
-		case BC_BOOL:	A = (A != 0); break;
+		case BC_BOOL:	A = (S32(A) != 0); break;
 
 		/* ---- 64-bit: no truncation, two stack slots ---------- */
 		case BC_CONST64:	A = fetch64(); break;
-		case BC_LOAD64:		A = (int64_t)rd64((unsigned long)A); break;
+		case BC_LOAD64:		A = (int64_t)rd64(U32(A)); break;
 		case BC_STORE64:	wr64((unsigned long)pop(), (uint64_t)A);
 					break;
 		case BC_PUSH64:		push64(A); break;
@@ -2154,7 +2181,7 @@ static int64_t bc_exec(unsigned long entry)
 		 */
 		case BC_COPY: {
 			unsigned long len = fetch16();
-			unsigned long src = (unsigned long)A;
+			unsigned long src = U32(A);
 			unsigned long dst = (unsigned long)pop();
 			vcopy(dst, src, len);
 			A = dst;
@@ -2163,7 +2190,7 @@ static int64_t bc_exec(unsigned long entry)
 
 		case BC_PUSHN: {
 			unsigned long len = fetch16();
-			unsigned long src = (unsigned long)A;
+			unsigned long src = U32(A);
 			unsigned long n = (len < 4) ? 4 : ((len + 3) & ~3UL);
 			sp -= n;
 			vcopy(sp, src, len);
@@ -2179,14 +2206,17 @@ static int64_t bc_exec(unsigned long entry)
 			b = (short)fetch16();
 			pc += b;
 			break;
+		/* Conditions are always BOOL/relational-normalised 0 or 1,
+		   but test only the low word anyway - it is what the native
+		   translation of these does (cmp r0, #0). */
 		case BC_JFALSE:
 			b = (short)fetch16();
-			if (!A)
+			if (!S32(A))
 				pc += b;
 			break;
 		case BC_JTRUE:
 			b = (short)fetch16();
-			if (A)
+			if (S32(A))
 				pc += b;
 			break;
 		case BC_CALL:
@@ -2234,7 +2264,7 @@ static int64_t bc_exec(unsigned long entry)
 				unsigned long target = rd32(tab + 4 + 8 * cases);
 
 				for (i = 0; i < cases; i++) {
-					if (S32(rd32(tab + 4 + 8 * i)) == A) {
+					if (S32(rd32(tab + 4 + 8 * i)) == S32(A)) {
 						target = rd32(tab + 8 + 8 * i);
 						break;
 					}
