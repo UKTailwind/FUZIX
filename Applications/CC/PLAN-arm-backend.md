@@ -338,8 +338,8 @@ naive emitter's 3-8× leaves plenty for stage 8's peepholes to chase.
   code - all on the PC3.  The eclipse stays 0/34 native (every
   function touches doubles) until stage 6.
 
-* **Stage 6 done** 2026-07-31 (host+qemu; board numbers pending the
-  next session with the console free).  Groundwork first: the
+* **Stage 6 done** 2026-07-31, verified on hardware the same day.
+  Groundwork first: the
   interpreter's sign-extended-A invariant was retired in favour of a
   **low-32 contract** - every 32-bit op reads only the low 32 bits of
   A (S32/U32 at compares, divides, shift counts, BOOL, JFALSE,
@@ -397,11 +397,27 @@ naive emitter's 3-8× leaves plenty for stage 8's peepholes to chase.
   Dhrystone: 10/18 native (Proc_1 waits on struct copy, Proc_6 and
   the Sw18 family on switch - stage 7 exactly as planned).
 
-Next: board verification of stage 6 (bcrun+cc2 reinstall, cpf/cpg
-probes, bench A/B, Dhrystone, the budgeted eclipse vs the 7.16s
-interpreted mark), then 7 (switch, struct copy - the rest of
-Dhrystone), 8 (peepholes - direct BL for known-native callees lifts
-fib), 9 (the fit levers above + SD refresh).
+  **Board results 2026-07-31** (new bcrun+cc2 installed over
+  serial): cpf and cpg byte-identical to the gcc reference on
+  hardware; bench unchanged from stage 5 (sieve 51 / fib 385 /
+  sort 77 / rng 60 / rev 123 ms, checksums good - the pair fixups
+  and the low-32 contract cost nothing); Dhrystone 8,288 ->
+  **8,421/s** at 10/18; the budgeted eclipse **loaded (118.9K,
+  fit confirmed) and ran digit-identical: 7.11 s forced-bytecode ->
+  6.39 s** with just 7/34 native, first-come.  The board hunt also
+  caught a real libc gap the first time 64-bit values were printed
+  on hardware: Fuzix vfprintf reads a long for "ll" and prints the
+  low word of the 8-byte vararg - bcrun now formats 64-bit integer
+  conversions itself on every host (one code path, one output;
+  upstream issue material, Alan's TODO already lists 64-bit
+  support).  The remaining eclipse gap is stage 9's: most functions
+  are still interpreted only because the process ceiling excludes
+  their native spans.
+
+Next: stage 7 (switch, struct copy - the rest of Dhrystone), 8
+(peepholes - direct BL for known-native callees lifts fib), 9 (the
+fit levers above + SD refresh; the eclipse's other 27 functions are
+waiting on exactly that).
 
 Stage 6 lessons, kept:
 * BOOLD/LNOTD (and float forms) are BIT TESTS (pattern << 1 == 0),
