@@ -93,6 +93,11 @@ uint_fast8_t plt_param(char* p)
 void fatal_exception_handler(struct extended_exception_frame* eh)
 {
     kprintf("FLAGRANT SYSTEM ERROR! EXCEPTION %d\n", eh->cause);
+    /* First, not last: the console TX can die partway through a dump
+     * in fault context, and this is the line that names the fault */
+    kprintf("CFSR=%p HFSR=%p MMFAR=%p BFAR=%p\n",
+        *(volatile uint32_t *)0xE000ED28, *(volatile uint32_t *)0xE000ED2C,
+        *(volatile uint32_t *)0xE000ED34, *(volatile uint32_t *)0xE000ED38);
     kprintf(" r0=%p r1=%p  r2=%p  r3=%p\n", eh->r0, eh->r1, eh->r2, eh->r3);
     kprintf(" r4=%p r5=%p  r6=%p  r7=%p\n", eh->r4, eh->r5, eh->r6, eh->r7);
     kprintf(" r8=%p r9=%p r10=%p r11=%p\n", eh->r8, eh->r9, eh->r10, eh->r11);

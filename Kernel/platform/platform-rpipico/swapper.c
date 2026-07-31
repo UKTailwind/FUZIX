@@ -347,11 +347,17 @@ int swapout(ptptr p)
     for (int i=0; i<blocks; i++)
     {
         struct mapentry* b = find_block(slot, i);
-        int blockindex = b - allocation_map;
-        void* p = (void*)PROGBASE + blockindex*BLOCKSIZE;
+        int blockindex;
+        void* p;
 
-        swapwrite(SWAPDEV, swaparea + (i*(BLOCKSIZE>>BLKSHIFT)),
-            BLOCKSIZE, (uaddr_t)p, 1);
+        if (!b)
+            panic("swapout: lost block");
+        blockindex = b - allocation_map;
+        p = (void*)PROGBASE + blockindex*BLOCKSIZE;
+
+        if (swapwrite(SWAPDEV, swaparea + (i*(BLOCKSIZE>>BLKSHIFT)),
+            BLOCKSIZE, (uaddr_t)p, 1) != BLOCKSIZE)
+            panic("swapout: write failed");
 
         b->slot = b->block = 0xff;
     }
@@ -373,11 +379,22 @@ void swapin(ptptr p, uint16_t map)
     for (int i=0; i<blocks; i++)
     {
         struct mapentry* b = find_free_block(p);
-        int blockindex = b - allocation_map;
-        void* p = (void*)PROGBASE + blockindex*BLOCKSIZE;
+        int blockindex;
+        void* p;
 
-        swapread(SWAPDEV, swaparea + (i*(BLOCKSIZE>>BLKSHIFT)),
-            BLOCKSIZE, (uaddr_t)p, 1);
+        /* find_free_block returning NULL is survivable for brk (the
+         * caller reports ENOMEM) but not here: dereferencing it turns
+         * into a swapread through a wild constant pointer - 4K of
+         * disc into the same innocent memory every time, which is
+         * exactly the class of corruption that must be a panic. */
+        if (!b)
+            panic("swapin: no memory");
+        blockindex = b - allocation_map;
+        p = (void*)PROGBASE + blockindex*BLOCKSIZE;
+
+        if (swapread(SWAPDEV, swaparea + (i*(BLOCKSIZE>>BLKSHIFT)),
+            BLOCKSIZE, (uaddr_t)p, 1) != BLOCKSIZE)
+            panic("swapin: read failed");
 
         b->slot = slot;
         b->block = i;
@@ -385,6 +402,14 @@ void swapin(ptptr p, uint16_t map)
 
     p->p_page = 1;
     p->p_page2 = 0;
+    /* The slot is free again.  The generic kernel does this in
+     * swapper2(); this port swaps in from contextswitch() and never
+     * goes through swapper2(), so without this line every swap-in
+     * leaked one of the ~22 slots and a single multi-pass compile
+     * exhausted the pool - after which the NULL path above corrupted
+     * memory deterministically.  Found 2026-07-31 chasing a shell
+     * crash at a constant PC. */
+    swapmap_add(map);
 }
 
 arg_t brk_extend(uaddr_t addr)
