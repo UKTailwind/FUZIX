@@ -43,6 +43,32 @@ struct gfx_blit {
 };
 #define GFXIOC_BLIT   0x0005
 
+/* Current mode geometry, so a program can size a shadow buffer and
+ * clip without hardcoding what the kernel already knows. */
+struct gfx_info {
+	uint16_t width;		/* pixels */
+	uint16_t height;
+	uint16_t stride;	/* bytes per line */
+	uint8_t  bpp;		/* 1 or 4 */
+	uint8_t  mode;		/* 0-5, 7, or 0xFF for the text console */
+};
+#define GFXIOC_INFO   0x000E
+
+/* Set one pixel.  The hot path: MMBasic's PIXEL statement costs 5us,
+ * so this must stay cheap - the coordinates and colour are packed into
+ * the data argument ITSELF rather than pointed to, which skips the
+ * uget and its validation entirely.  There is nothing to copy.
+ *
+ *   data = x | (y << 10) | (colour << 19)
+ *
+ * x 0-1023, y 0-511, colour 0-255.  Out-of-range pixels are dropped,
+ * not an error, exactly as MMBasic does.  4bpp layout is high nibble =
+ * LEFT pixel (framebuf GS4_HMSB), which is the opposite of MMBasic's
+ * RGB121 - see PC3-GFX-DESIGN.md. */
+#define GFXIOC_PIXEL  0x000F
+#define GFX_PIXEL_PACK(x, y, c) \
+	(((x) & 0x3FF) | (((y) & 0x1FF) << 10) | (((c) & 0xFF) << 19))
+
 /* BBC sound (PC3): the SOUND statement's raw parameters; the channel
  * word carries the &1x flush and &Sxx sync bits.  Returns -1/EAGAIN
  * when that channel's note queue is full. */

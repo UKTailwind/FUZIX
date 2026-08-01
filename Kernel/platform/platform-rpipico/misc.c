@@ -132,6 +132,25 @@ int plt_dev_ioctl(uarg_t request, char *data)
         display_gfx_pal((v >> 8) & 15, v & 15);
         return 0;
     }
+    if (request == GFXIOC_PIXEL)
+    {
+        /* The hot path.  The coordinates and colour are packed into the
+         * data argument ITSELF, so there is no uget and nothing to
+         * validate - the whole call is a switch and a store.  MMBasic's
+         * PIXEL statement costs 5us; this has to be well under it. */
+        uint32_t v = (uint32_t)data;
+        return display_gfx_pixel(v & 0x3FF, (v >> 10) & 0x1FF,
+                                 (v >> 19) & 0xFF);
+    }
+    if (request == GFXIOC_INFO)
+    {
+        struct gfx_info gi;
+        display_gfx_geom(&gi.width, &gi.height, &gi.stride, &gi.bpp,
+                         &gi.mode);
+        if (uput(&gi, data, sizeof(gi)))
+            return -1;
+        return 0;
+    }
     if (request == GFXIOC_BLIT)
     {
         struct gfx_blit gb;

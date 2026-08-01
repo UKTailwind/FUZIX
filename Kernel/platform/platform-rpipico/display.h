@@ -42,4 +42,18 @@ int display_gfx_mode(int mode);
 void display_gfx_pal(uint8_t logical, uint8_t physical);
 int display_gfx_size(void);
 
+/* Drawing primitives, dispatched by the current mode - MMBasic's shape
+ * (it swings a DrawPixel/DrawRectangle function pointer at each mode
+ * change; a switch is the same thing without the indirect call).
+ * Pixel is kept tight rather than routed through rectangle, as MMBasic
+ * does, so it skips the swapping and clipping.
+ * Out-of-range coordinates are dropped, not an error.  Returns -1 only
+ * when there is no drawable mode. */
+int display_gfx_pixel(int x, int y, int c);
+int display_gfx_rect(int x1, int y1, int x2, int y2, int c);
+
+/* Current geometry, for GFXIOC_INFO. */
+void display_gfx_geom(uint16_t *w, uint16_t *h, uint16_t *stride,
+                      uint8_t *bpp, uint8_t *mode);
+
 #endif

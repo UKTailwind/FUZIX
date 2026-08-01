@@ -124,6 +124,7 @@ static volatile enum gexp gfx_exp = EXP_CONSOLE;
 static uint8_t gfx_pal[16];
 static uint16_t gfx_stride;                 /* source bytes per mode line */
 static uint16_t gfx_rows;                   /* source lines: 256, or 240 */
+static uint8_t gfx_mode_now = 0xFF;         /* the mode number as asked for */
 
 /* One shared expansion LUT, 16-byte stride for shift-indexing:
  *  4BPP_X2: byte -> 4 output bytes;  4BPP_X3: 6;  4BPP_X6: 12;
@@ -626,6 +627,7 @@ int display_gfx_mode(int mode)
 
     gfx_stride = stride;
     gfx_rows = rows;
+    gfx_mode_now = (uint8_t)mode;
 
     if (exp == EXP_CONSOLE) {
         /* Blank the whole pool first: on a live switch core1 is still
@@ -671,6 +673,131 @@ void display_gfx_pal(uint8_t logical, uint8_t physical)
 int display_gfx_size(void)
 {
     return (int)gfx_stride * gfx_rows;
+}
+
+/* --- drawing primitives -------------------------------------------------- */
+/* Width and depth of the live mode.  The console is drawable too: it is
+ * a 640x480 1bpp bitmap, with colour coming from the per-cell tiles. */
+static int gfx_width(enum gexp ex)
+{
+    switch (ex) {
+    case EXP_CONSOLE:    return DISP_WIDTH;     /* 640, 1bpp */
+    case EXP_4BPP_X2:    return 320;
+    case EXP_4BPP_X3:    return 320;
+    case EXP_4BPP_X6:    return 160;
+    case EXP_1BPP_5TO8:  return 640;
+    }
+    return 0;
+}
+
+static int gfx_bpp(enum gexp ex)
+{
+    return (ex == EXP_CONSOLE || ex == EXP_1BPP_5TO8) ? 1 : 4;
+}
+
+void display_gfx_geom(uint16_t *w, uint16_t *h, uint16_t *stride,
+                      uint8_t *bpp, uint8_t *mode)
+{
+    enum gexp ex = gfx_exp;
+
+    *w = (uint16_t)gfx_width(ex);
+    *bpp = (uint8_t)gfx_bpp(ex);
+    if (ex == EXP_CONSOLE) {
+        *h = DISP_HEIGHT;
+        *stride = DISP_STRIDE;
+        *mode = 0xFF;
+    } else {
+        *h = gfx_rows;
+        *stride = gfx_stride;
+        *mode = gfx_mode_now;
+    }
+}
+
+/* One pixel.  Kept tight - no swapping, no clipping loop - because this
+ * is the hot path: MMBasic's PIXEL statement costs 5us and a compiled
+ * one has to beat it.  4bpp layout is high nibble = LEFT pixel, which
+ * is framebuf's GS4_HMSB and the opposite of MMBasic's RGB121. */
+int display_gfx_pixel(int x, int y, int c)
+{
+    enum gexp ex = gfx_exp;
+    int w = gfx_width(ex);
+    int h = (ex == EXP_CONSOLE) ? DISP_HEIGHT : gfx_rows;
+    int stride = (ex == EXP_CONSOLE) ? DISP_STRIDE : gfx_stride;
+    uint8_t *p;
+
+    if (!w)
+        return -1;
+    if (x < 0 || y < 0 || x >= w || y >= h)
+        return 0;               /* off-screen is not an error */
+
+    if (gfx_bpp(ex) == 4) {
+        p = &disp_fb[y * stride + (x >> 1)];
+        if (x & 1)
+            *p = (*p & 0xF0) | (c & 15);        /* odd  -> low nibble */
+        else
+            *p = (*p & 0x0F) | ((c & 15) << 4); /* even -> high nibble */
+    } else {
+        p = &disp_fb[y * stride + (x >> 3)];
+        if (c)
+            *p |= 0x80 >> (x & 7);              /* MSB = leftmost */
+        else
+            *p &= ~(0x80 >> (x & 7));
+    }
+    return 0;
+}
+
+/* A filled rectangle, which is also how lines arrive (x1==x2 or
+ * y1==y2).  Ordering and clipping are done once, then the span loop is
+ * flat - the point of having this as a primitive rather than making
+ * userland call the pixel one in a loop. */
+int display_gfx_rect(int x1, int y1, int x2, int y2, int c)
+{
+    enum gexp ex = gfx_exp;
+    int w = gfx_width(ex);
+    int h = (ex == EXP_CONSOLE) ? DISP_HEIGHT : gfx_rows;
+    int stride = (ex == EXP_CONSOLE) ? DISP_STRIDE : gfx_stride;
+    int x, y, t;
+
+    if (!w)
+        return -1;
+    if (x2 < x1) { t = x1; x1 = x2; x2 = t; }
+    if (y2 < y1) { t = y1; y1 = y2; y2 = t; }
+    if (x1 < 0) x1 = 0;
+    if (y1 < 0) y1 = 0;
+    if (x2 >= w) x2 = w - 1;
+    if (y2 >= h) y2 = h - 1;
+    if (x1 > x2 || y1 > y2)
+        return 0;               /* entirely off-screen */
+
+    if (gfx_bpp(ex) == 4) {
+        uint8_t both = ((c & 15) << 4) | (c & 15);
+        for (y = y1; y <= y2; y++) {
+            uint8_t *row = &disp_fb[y * stride];
+            x = x1;
+            if (x & 1) {        /* odd left edge: low nibble only */
+                row[x >> 1] = (row[x >> 1] & 0xF0) | (c & 15);
+                x++;
+            }
+            /* whole bytes are two pixels at a time */
+            while (x + 1 <= x2) {
+                row[x >> 1] = both;
+                x += 2;
+            }
+            if (x <= x2)        /* even right edge: high nibble only */
+                row[x >> 1] = (row[x >> 1] & 0x0F) | ((c & 15) << 4);
+        }
+    } else {
+        for (y = y1; y <= y2; y++) {
+            uint8_t *row = &disp_fb[y * stride];
+            for (x = x1; x <= x2; x++) {
+                if (c)
+                    row[x >> 3] |= 0x80 >> (x & 7);
+                else
+                    row[x >> 3] &= ~(0x80 >> (x & 7));
+            }
+        }
+    }
+    return 0;
 }
 
 void display_init(void)
