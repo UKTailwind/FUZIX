@@ -37,7 +37,7 @@ static uint32_t ticks_ms(void)
 // MMBasic's shape - a long wait before the first repeat so a deliberate
 // keypress never doubles, then a comfortable typematic rate.
 #define KBD_REPEAT_FIRST_DEFAULT (600)
-#define KBD_REPEAT_NEXT_DEFAULT  (250)
+#define KBD_REPEAT_NEXT_DEFAULT  (100)
 uint16_t kbd_repeat_first = KBD_REPEAT_FIRST_DEFAULT;
 uint16_t kbd_repeat_next = KBD_REPEAT_NEXT_DEFAULT;
 // A poll gap longer than this means a release could have been missed,
@@ -51,7 +51,6 @@ static bool kbd_scroll;           // scroll-lock state
 static uint8_t kbd_held;          // usage currently repeating (0 = none)
 static uint8_t kbd_held_mods;
 static uint32_t kbd_next_repeat;  // ticks_ms() of the next repeat
-static uint32_t kbd_last_report;  // ticks_ms() of the last HID report
 
 // Currently-held keys, MMBasic KeyDown[]: [0..5] = mapped key codes of the held
 // keys, most recent first; [6] = modifier bitmap.
@@ -218,7 +217,6 @@ void kbd_process_report(const uint8_t *r, uint16_t len, int slot)
     if (len < 8) {
         return; // 8-byte boot report: [mods][reserved][keycode x6]
     }
-    kbd_last_report = ticks_ms();       // the held-key state is now fresh
     uint8_t mods = r[0];
     const uint8_t *keys = r + 2;
     for (int i = 0; i < 6; i++) {
@@ -302,30 +300,45 @@ int usb_kbd_keydown(int n)
 
 // Called from the usb task (thread context) to synthesise auto-repeat.
 //
-// Only repeat while the held-key state is FRESH.  If reports have not
-// been arriving, the release of the held key may have happened without
-// being seen, and repeating then repeats a key that is no longer down:
-// it showed up as one extra Return after "hdb2" at the boot prompt,
-// where the pump is starved through mount and init and the stale
-// repeat arrived just in time for login to read an empty line.
+// A gap since the last call means the pump was starved, so the release
+// of the held key may have happened without being seen; repeating then
+// repeats a key that is no longer down.  That showed up as one extra
+// Return after "hdb2" at the boot prompt, where the pump is starved
+// through mount and init.
 //
-// Freshness is measured from the last REPORT, not from the last call
-// to this function.  Timing the calls was wrong: the console mirrors
-// every byte to the 115200 uart, so a full-screen repaint is ~3KB and
-// takes ~260ms, during which nothing pumps - and that starved every
-// repaint past the threshold, re-armed the delay each time, and made
-// auto-repeat look broken.  Reports are polled every 20ms, so a stale
-// window of 150ms means "several polls missed", which is what the
-// boot-time case actually looks like.
+// Two things this must NOT do, both learned the hard way:
+//
+//  - It must not re-arm the whole first-repeat delay after a gap.  The
+//    console mirrors every byte to the 115200 uart, so a full-screen
+//    repaint is ~3KB and takes ~260ms with nothing pumping; re-arming
+//    on that cancelled auto-repeat on every repaint.
+//  - It must not measure freshness from the last REPORT.  A HID
+//    keyboard only reports on state change, so while a key is held
+//    down no reports arrive at all - which is the whole reason repeats
+//    are synthesised here.  That measure is stale precisely when a
+//    repeat is due, and stops it dead.
+//
+// So: after a gap, hold off just long enough for the next poll (20ms)
+// to deliver any pending release.  If the key really was let go,
+// kbd_held clears before we fire; if it is still down, repeating
+// resumes after one short hiccup instead of starting over.
+#define KBD_REPEAT_SETTLE_MS (50)
+
 void kbd_repeat_check(void)
 {
+    static uint32_t last_check;
     uint32_t now = ticks_ms();
+    uint32_t gap = now - last_check;
 
+    last_check = now;
     if (!kbd_held) {
         return;
     }
-    if (now - kbd_last_report > KBD_REPEAT_STALE_MS) {
-        kbd_next_repeat = now + kbd_repeat_first;
+    if (gap > KBD_REPEAT_STALE_MS) {
+        /* Push the deadline out, never pull it in. */
+        if ((int32_t)(kbd_next_repeat - (now + KBD_REPEAT_SETTLE_MS)) < 0) {
+            kbd_next_repeat = now + KBD_REPEAT_SETTLE_MS;
+        }
         return;
     }
     if ((int32_t)(now - kbd_next_repeat) >= 0) {
