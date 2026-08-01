@@ -2333,13 +2333,41 @@ static unsigned char *bc_arena_cursor;
 
 void *bc_arena_carve(unsigned long n)
 {
+#ifdef ARENA_MALLOC
+	/* Development build: board-sized tables, but each one its own
+	   allocation, so a sanitiser reports the exact table that
+	   overflowed instead of the next table quietly absorbing it.
+	   The board carves one arena; this carves the same sizes. */
+	return calloc(1, n ? n : 1);
+#else
 	void *p = bc_arena_cursor;
 	bc_arena_cursor += (n + 7) & ~7UL;
 	return p;
+#endif
 }
 
 void bc_arena_init(void)
 {
+#ifdef ARENA_MALLOC
+	codebuf = bc_arena_carve(CODEMAX);
+	databuf = bc_arena_carve(DATAMAX);
+	litbuf = bc_arena_carve(DATAMAX);
+	strtab = bc_arena_carve(STRMAX);
+	symtab = bc_arena_carve(MAXSYM * sizeof(struct bc_sym));
+	bc_symname = bc_arena_carve(MAXSYM * sizeof(char *));
+	sym_in_lit = bc_arena_carve(MAXSYM);
+	fixtab = bc_arena_carve(MAXFIX * sizeof(struct bc_fixup));
+	fix_in_lit = bc_arena_carve(MAXFIX);
+	labtab = bc_arena_carve(MAXLAB * sizeof(struct label));
+	patchtab = bc_arena_carve(MAXFIX * sizeof(struct patch));
+	libreftab = bc_arena_carve(MAXFIX * sizeof(struct libref));
+	tbuf = bc_arena_carve(TMAX);
+	tmap = bc_arena_carve(TMAX * sizeof(tmap_t));
+	t_targets = bc_arena_carve(TMAX / 8);
+	tpooltab = bc_arena_carve(TPOOLMAX * sizeof(struct tpool));
+	treftab = bc_arena_carve(TPOOLMAX * sizeof(struct tref));
+	return;
+#else
 	struct psram_req rq;
 	int fd = open("/dev/sys", O_RDWR);
 
@@ -2377,6 +2405,7 @@ void bc_arena_init(void)
 	t_targets = bc_arena_carve(TMAX / 8);
 	tpooltab = bc_arena_carve(TPOOLMAX * sizeof(struct tpool));
 	treftab = bc_arena_carve(TPOOLMAX * sizeof(struct tref));
+#endif	/* ARENA_MALLOC */
 }
 
 #else

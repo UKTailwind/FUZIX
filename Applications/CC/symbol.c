@@ -111,7 +111,7 @@ struct symbol *mark_local_symbols(void)
 struct symbol *alloc_symbol(unsigned name, unsigned local)
 {
 	struct symbol *s = local_top;
-	while (s <= &symtab[MAXSYM]) {
+	while (s < &symtab[MAXSYM]) {	/* [MAXSYM] is one past the end */
 		if (s->infonext == S_FREE) {
 			if (local && local_top < s)
 				local_top = s;
@@ -289,12 +289,25 @@ static struct symbol *do_type_match(unsigned st, unsigned rtype, unsigned *idx)
 	return sym;
 }
 
+/*
+ *	Intern an index list: the dimensions of an array type, or the
+ *	argument template of a function type.  Both start with their own
+ *	length, and that word has to be checked BEFORE the comparison -
+ *	without it the memcmp reads len words out of a list that may be
+ *	shorter, past the end of the stored copy, and can match on the
+ *	rubbish beyond it and hand back somebody else's dimensions.  A
+ *	three-dimensional array comparing against a one-dimensional one
+ *	is enough to do it.
+ */
 unsigned *sym_find_idx(unsigned storage, unsigned *idx, unsigned len)
 {
 	struct symbol *sym = symtab;
 	unsigned blen = len * sizeof(unsigned);
 	while (sym <= last_sym) {
-		if (S_STORAGE(sym->infonext) == storage && memcmp(sym->data.idx, idx, blen) == 0)
+		if (S_STORAGE(sym->infonext) == storage &&
+		    sym->data.idx != NULL &&
+		    sym->data.idx[0] == idx[0] &&
+		    memcmp(sym->data.idx, idx, blen) == 0)
 			return sym->data.idx;
 		sym++;
 	}
