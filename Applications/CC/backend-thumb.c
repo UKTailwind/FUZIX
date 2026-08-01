@@ -189,16 +189,26 @@ static int thumb_enabled(void)
  *	marker carries no alias.  Mixed objects shrink to what actually
  *	runs, which is what lets a whole program fit a 256K process.
  *	The price is the fallback: no BCRUN_BYTECODE A/B and no
- *	interpreting host can run the object, so it is opt-in, meant
- *	for board builds after the gates have passed on an aliased
- *	build of the same source.  main keeps its bytecode alias
+ *	interpreting host can run the object, so on the host it is
+ *	opt-in, used by the gates after the aliased build of the same
+ *	source has passed.  On the BOARD it is the default: the board's
+ *	bcrun always executes native, and a large program that keeps
+ *	its dead bytecode does not fit its own process - the eclipse
+ *	compiled on the machine and then would not load.  THUMB_RECLAIM=0
+ *	turns it off either side.  main keeps its bytecode alias
  *	regardless: h_entry is entered through the interpreter.
  */
 static int thumb_reclaim(void)
 {
 	static int cached = -1;
-	if (cached < 0)
-		cached = getenv("THUMB_RECLAIM") ? 1 : 0;
+	if (cached < 0) {
+		const char *e = getenv("THUMB_RECLAIM");
+#ifdef ARENA_TABLES
+		cached = e ? atoi(e) : 1;
+#else
+		cached = e ? atoi(e) : 0;
+#endif
+	}
 	return cached;
 }
 
