@@ -176,24 +176,47 @@ single allocation, a raw pointer, no swap interaction.  Where MMBasic
 squeezes into a ~96 KB `EDIT_BUFFER_SIZE`, we can hand it a megabyte
 and stop thinking about it.
 
-**The one thing to measure before committing**: every keystroke at the
-top of a large file memmoves the whole tail *through PSRAM*.  MMBasic
-gets away with this because its buffer is 96 KB of SRAM.  A 1 MB file
-in PSRAM is a different proposition, and I do not yet know the
-achievable memmove bandwidth on this part.
+### MEASURED (psbench, on the board)
 
-Measure it first.  If a worst-case keystroke costs more than about
-20 ms the editor will feel sticky, and the fix is a **gap buffer** -
-keep the free space at the cursor so ordinary typing moves nothing,
-and only pay when the cursor jumps.  That is a contained change to
-`editInsertChar` and `findLine`, but it does break the editor's
-assumption that the buffer is flat, so it is much cheaper to decide
-before porting than after.
+    PSRAM  memmove(p+1, p, n)   12 MB/s   (any size, any alignment)
+    PSRAM  memmove(p+4096, p, n) 12 MB/s
+    SRAM   memmove(p+1, p, n)   44 MB/s
+    sustained: 200 inserts x 64K tail = 1066 ms, 5330 us each
 
-A cheaper hedge, if the measurement is bad: cap the file size at
-something like 128 KB and keep the buffer in the process's own SRAM,
-using PSRAM only for the undo/clipboard. Less ambitious, no gap
-buffer, and still far beyond what the machine can do today.
+PSRAM is 3.7x slower than SRAM, and the editor's awkward case - an
+overlapping backward move at a one-byte offset - costs no more than an
+aligned one, so there is no fast path being missed.  Cost of one
+keystroke, which is one memmove of everything after the cursor:
+
+    tail     16K    32K    64K    128K    256K    512K
+    PSRAM   1.3ms  2.5ms  5.4ms  10.7ms  21.5ms  42.9ms
+
+**Second constraint, and it is the binding one: the arena is 1024 KB
+in total** ("PSRAM disc 7104KiB (arena 1024KiB)"), and cc2 wants it too
+for ARENA_TABLES.  A megabyte edit buffer would take the whole thing.
+
+### DECISION: flat buffer, capped at 128 KB
+
+Worst case - typing at the very top of a full 128 KB file - is 10.7 ms
+per keystroke, and the typical case (cursor mid-file) is half that.
+Usable.  128 KB is about 4,000 lines of BASIC, larger than the solar
+eclipse, and comfortably more than MMBasic's own 96 KB editor buffer,
+so we are running the reference implementation inside the size it was
+designed for.
+
+The decisive argument is not the milliseconds, it is that a flat
+buffer means **MMBasic's editor code is used unmodified**.  In a
+3,785-line port every deviation is a bug I would have to find on
+hardware.  A gap buffer - free space parked at the cursor, so ordinary
+typing moves nothing - is the textbook answer and would make file size
+a non-issue, but it breaks the assumption that the buffer is flat, and
+that assumption is threaded through findLine, printLine, SetColour and
+the mark/clipboard code.
+
+So: flat now, and if it proves sticky in real use, add the gap buffer
+knowing it is needed rather than guessing.  Holding a key down is the
+case to watch - auto-repeat at 30/s against a 64 KB tail is 5.3 ms per
+repeat, which is 16% of the CPU doing nothing but memmove.
 
 ## Syntax colouring: a decision to make
 
@@ -226,8 +249,8 @@ set (fcc/coverage.py) marking the flag.
 
 1. **DONE** - Kernel console: deferred wrap + DECAWM, F1-F12 in
    kbd_decode.c, termcap.  `wraptest` passes 7/7 on hardware.
-2. **Measure PSRAM memmove bandwidth** and decide flat buffer vs gap
-   buffer.
+2. **DONE** - PSRAM measured at 12 MB/s (psbench).  Flat buffer,
+   capped at 128 KB; gap buffer only if it proves sticky in use.
 3. **The shim**: raw mode, `inkey()`, arena allocation, file I/O,
    stubs.  Get a stub editor that paints a file and moves the cursor.
 4. **Import the editor core** with the file-manager and
