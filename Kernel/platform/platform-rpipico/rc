@@ -9,9 +9,11 @@ prtroot >/etc/mtab
 swapon /dev/hdc 14208
 # USB keyboard layout: us uk de fr es be
 picoctl keymap uk
-# Auto-repeat: kbdrate <repeat> <first delay>, in TENTHS of a second.
-# 1 6 = 600ms before the first repeat, then 100ms between the rest.
-kbdrate 1 6
+# NOTE: keyboard auto-repeat (kbdrate) does NOT belong here - rc runs
+# before init has given it a controlling terminal, and kbdrate opens
+# /dev/tty, so it fails with "failed ioctl".  It lives in /etc/profile
+# instead.  The compiled-in default (600ms then 100ms) already matches,
+# so this is only for retuning.
 #Uncomment if you have multiple file systems
 #fsck -a
 #mount -a
