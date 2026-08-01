@@ -4,7 +4,7 @@ USERCPU=armm0
 VERBOSE=1
 include $(FUZIX_ROOT)/Target/rules.$(USERCPU)
 
-OBJS = mmedit.o shim.o
+OBJS = mmedit.o shim.o editor.o keywords.o
 
 # Recursive descent over a whole file wants more than the 8K default;
 # the loader honours PT_GNU_STACK (see PC3-DEVNOTES.md).
@@ -17,6 +17,7 @@ mmedit: $(OBJS)
 	$(STRIP) -o mmedit mmedit.debug
 
 $(OBJS): mmedit.h
+editor.o keywords.o: mmb_compat.h
 
 clean:
 	rm -f *.o mmedit mmedit.debug

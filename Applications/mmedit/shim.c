@@ -232,6 +232,14 @@ static int decode_csi(void)
             if (!have_n)
                 return 0;
             switch (n) {
+            /* 1/4 and 7/8 are the VT220 and rxvt spellings of Home and
+             * End.  Our own keyboard sends CSI H and CSI F, but the
+             * editor has to work from a serial terminal too and every
+             * one of them spells these differently. */
+            case 1:  k = K_HOME; break;
+            case 4:  k = K_END; break;
+            case 7:  k = K_HOME; break;
+            case 8:  k = K_END; break;
             case 2:  k = K_INSERT; break;
             case 3:  k = K_DEL; break;
             case 5:  k = K_PUP; break;
@@ -282,6 +290,63 @@ int inkey(void)
      * byte for next time (Alt-<key> on some terminals). */
     pushed = c;
     return K_ESC;
+}
+
+/* --- the names MMBasic's editor calls -------------------------------------- */
+/* Editor.c reaches these through function pointers so it can be aimed at
+ * a serial console or an LCD panel.  There is one target here, so they
+ * are ordinary functions. */
+void PrintString(char *s)
+{
+    scr_puts(s);
+}
+
+char SSputchar(char c, int flush)
+{
+    scr_putc(c);
+    if (flush)
+        scr_flush();
+    return c;
+}
+
+int MMInkey(void)
+{
+    int k = inkey();
+    return k ? k : -1;           /* MMBasic's "nothing" is -1, ours is 0 */
+}
+
+int MMgetchar(void)
+{
+    int k;
+    do {
+        k = inkey();
+    } while (k == 0);
+    return k;
+}
+
+/* The drain after a repaint: `while (getConsole() != -1);`.  It MUST NOT
+ * wait - inkey() blocks for up to 100ms, and a repaint happens on every
+ * newline, so going through inkey() here would put a visible stall on
+ * ordinary typing.  A non-blocking read costs nothing when idle. */
+int getConsole(void)
+{
+    unsigned char c;
+    int fl, r;
+
+    fl = fcntl(0, F_GETFL, 0);
+    if (fl < 0)
+        return -1;
+    if (fcntl(0, F_SETFL, fl | O_NONBLOCK) < 0)
+        return -1;
+    r = read(0, &c, 1);
+    fcntl(0, F_SETFL, fl);
+    return (r == 1) ? c : -1;
+}
+
+void routinechecks(void)
+{
+    /* MMBasic services the watchdog, the serial ports and its interrupt
+     * queue here.  Under Fuzix the kernel does all of that. */
 }
 
 /* --- the buffer and files -------------------------------------------------- */
@@ -346,6 +411,41 @@ int file_load(const char *name)
     EdBuff[used] = 0;
     nbrlines = buf_count_lines();
     return used;
+}
+
+/* Copy the file aside before overwriting it, as MMBasic's editor does.
+ * A missing original is not an error - saving a new file is normal. */
+int file_backup(const char *name)
+{
+    char bak[128];
+    char buf[512];
+    int in, out, n, w, off;
+
+    if ((int)strlen(name) + 5 > (int)sizeof(bak))
+        return 0;               /* no room for a name: save anyway */
+    strcpy(bak, name);
+    strcat(bak, ".bak");
+
+    in = open(name, O_RDONLY);
+    if (in < 0)
+        return 0;
+    out = open(bak, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (out < 0) {
+        close(in);
+        return -1;
+    }
+    while ((n = read(in, buf, sizeof(buf))) > 0) {
+        for (off = 0; off < n; off += w) {
+            w = write(out, buf + off, n - off);
+            if (w <= 0) {
+                close(in);
+                close(out);
+                return -1;
+            }
+        }
+    }
+    close(in);
+    return close(out) < 0 ? -1 : (n < 0 ? -1 : 0);
 }
 
 int file_save(const char *name)

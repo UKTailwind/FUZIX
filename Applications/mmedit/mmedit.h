@@ -81,7 +81,19 @@ extern int nbrlines;                /* lines currently in the buffer */
 
 int  file_load(const char *name);   /* -1 = error, sets errno */
 int  file_save(const char *name);
+int  file_backup(const char *name); /* <name>.bak, as MMBasic does */
 int  buf_count_lines(void);
 unsigned char *buf_line(int n);     /* start of line n, or NULL */
+
+/* --- the editor ----------------------------------------------------------- */
+/* MMBasic's own entry point.  x,y is where the cursor starts.  The key
+ * that ended the session is left in editor_exit_key: F2 means "save,
+ * exit and run", which on a PicoMite handed the program to the
+ * interpreter and here is the caller's business. */
+void FullScreenEditor(int x, int y, char *fname, int edit_buff_size,
+                      int cmdfile);
+extern int editor_exit_key;
+extern int VWidth, VHeight;
+extern unsigned char *txtp;
 
 #endif
