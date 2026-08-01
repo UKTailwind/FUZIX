@@ -167,11 +167,25 @@ one ioctl costs 1.5us of overhead plus the same 4.8us of work.  So:
   - **Batched primitives are effectively free through an ioctl.**
     Rectangle, bitmap, string, line, fill.  An editor repaint at one
     call per line is 60us, against 260ms of serial mirroring.
-  - **Single pixels are ruined by it.**  PIXEL in compiled mmbc code
-    should cost 20-50ns; a 1488ns syscall is 30x the actual work, and
-    a full 320x240 plot becomes 114ms against MMBasic's ~1ms.
+  - Single pixels pay the whole 1488ns, so the question is only
+    whether that is fast enough.
 
-So the primitives live in the KERNEL - DrawRectangle and DrawBitmap
+MEASURE AGAINST THE RIGHT BASELINE.  The first pass of this note
+compared a syscall against a bare memory store (15ns) and concluded
+the overhead was 30x the work.  That was wrong: the thing to beat is
+MMBasic, and MMBasic's PIXEL statement costs **5us** at the same clock
+(1000 `Pixel 100,100` statements timed on the board).  The store is
+0.3% of that; the rest is interpreter overhead.  So:
+
+    MMBasic PIXEL statement        5000 ns   full screen  384 ms
+    mmbc + kernel ioctl           ~1700 ns                131 ms
+    mmbc + direct store            ~215 ns                 17 ms
+
+An ioctl per PIXEL is already ~3x faster than MMBasic.  It is not
+disqualifying, and the case for handing userland a raw framebuffer
+pointer evaporates with it.
+
+So: the primitives live in the KERNEL - DrawRectangle and DrawBitmap
 first, in 1-bit and 4-bit variants, imported from MMBasic (Draw.c's
 DrawRectangle2/DrawBitmap2 for 1-bit, RGB121.c's DrawPixel16/
 DrawBitmap16 for 4-bit).  One implementation, no copy in every
@@ -179,12 +193,14 @@ program, bounds-checked where userland cannot be trusted, dispatched
 by mode, and bbcbasic can eventually drop bbcgfx.c's private pset/
 line/triangle in favour of them.
 
-AND the framebuffer address is published (a GFXIOC_INFO returning base,
-geometry, stride, bpp and the tile arrays), so PIXEL - the first
-MMBasic extension wanted in mmbc - stays a direct store at MMBasic's
-speed.  That is an escape hatch for the per-pixel path, not the
-interface, and it is the same bargain the PSRAM arena already strikes:
-with no MMU there is nothing to enforce anyway.
+**No raw framebuffer address is published.**  The remaining 8x for
+bulk pixel work is reached instead by the mechanism that already
+exists: render into a shadow buffer in the process's own memory
+(~215ns/pixel, and it is the program's own RAM so nothing can be
+corrupted) and push the dirty region with one GFXIOC_BLIT.  That is
+MMBasic's own WriteBuf model, and exactly what bbcgfx.c already does.
+One interface, no hole in the kernel, and faster than MMBasic on both
+paths.
 
 ## Nibble order: high nibble = left pixel
 
