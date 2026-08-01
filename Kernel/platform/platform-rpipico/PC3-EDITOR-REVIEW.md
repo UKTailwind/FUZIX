@@ -90,21 +90,38 @@ board.  `mmedit <file>` opens, colours, edits, saves with a `.bak` and
 exits; `mmbc`/`cc`/run on the file it just saved works, so the machine
 now edits, translates, compiles and runs its own BASIC.
 
-**Still to do, in the order it is worth doing:**
+**NEXT SESSION STARTS HERE: F4 then F12.**
 
-1. **Mark mode (F4)** - Editor.c 7402-8208, ~800 self-contained lines.
-   It is the only thing that fills the clipboard, so F5 paste, F7/F8
-   replace and F10 export are all waiting on it.  The stub says so.
-2. **Beautify (F12 / Ctrl-A)** - Editor.c 5536-6105, the block
-   re-indenter.  Also stubbed and announced.
+1. **Mark mode (F4)** - Editor.c 7402-8208, ~800 self-contained lines,
+   currently a stub that says so on screen.  It is the only thing that
+   fills the clipboard, so F5 paste, F7/F8 replace and F10 export are
+   all waiting on it.  Port it the same way the rest went: take the
+   region verbatim, delete the mouse and tile blocks, and let
+   mmb_compat.h supply the names.  The one thing to watch is that
+   MarkMode drives `restoreColourFromLineStart`, which is already
+   ported and is the only caller of it - so the colour state machine
+   gets exercised for the first time by this.
+2. **Beautify (F12 / Ctrl-A)** - Editor.c 5536-6105 (`editBeautify`
+   plus `beautify_has_stray_blanks`), the block re-indenter.  Also
+   stubbed and announced.  Self-contained: it rewrites the buffer and
+   the caller resets the cursor to the top.
+
+Then, in whatever order suits:
+
 3. **A pixel-bound demo** (plasma or fire) to measure the other end of
    the graphics range: ripple is arithmetic-bound, so it flatters the
    ioctl-per-pixel path.  See PC3-GFX-DESIGN.md.
 4. **DrawBitmap and DrawRectangle in mmbc**, so BASIC can reach the
    primitives the kernel now has.
-5. **A soak test of the editor from the USB keyboard**, which is the
-   one path not exercised from here - everything above was driven down
-   the serial console with `devtools/fzkeys.py`.
+5. **A soak of the editor from the USB keyboard.**
+
+**Before touching the editor again, know that the "editor lockup" was
+not the editor.** It was `switchin` returning to a resumed process with
+PRIMASK still set (commit 7d4f38058), which wedged the console on any
+sustained output - `cat` of a 70K file did it just as well.  If output
+ever stops dead again, `rawuart_ready` prints the uart's own state to
+the screen after two million not-ready returns; that diagnostic is
+still in the tree and it is what found this.
 
 **Known rough edges**, none blocking:
 
