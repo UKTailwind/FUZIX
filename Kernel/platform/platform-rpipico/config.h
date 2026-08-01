@@ -203,6 +203,15 @@ extern uint8_t progbase[USERMEM];
  * depth against this figure minus a margin). */
 #define USERSTACK (8*1024)
 
+/* A program may ask for more with ld -z stack-size=N, recorded in its
+ * PT_GNU_STACK header and honoured by the ELF loader; this caps what
+ * it can take out of its own 256K.  The compiler passes need it: cc1
+ * and cc2 are recursive-descent over expression trees, and a large
+ * generated program (a 3000-line BASIC translation) drives them deeper
+ * than 8K of frames.  Overflowing the window runs into BSS silently,
+ * which is how it presented - a wild pointer and a dead machine. */
+#define USERSTACK_MAX (64*1024)
+
 #define CONFIG_CUSTOM_VALADDR
 #define PROGBASE ((uaddr_t)&progbase[0])
 #define PROGLOAD ((uaddr_t)&progbase[UDATA_SIZE])

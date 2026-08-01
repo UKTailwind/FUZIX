@@ -313,6 +313,9 @@ typedef struct {
 #define PT_NUM		7		/* Number of segment types */
 #define PT_LOOS     0x60000000  /* reserved range for operating system */
 #define PT_HIOS     0x6fffffff  /*  specific segment types */
+#define PT_GNU_STACK	0x6474e551	/* stack flags, and p_memsz is the
+					   size the linker was asked for
+					   (ld -z stack-size=N) */
 #define PT_LOPROC	0x70000000	/* reserved range for processor */
 #define PT_HIPROC	0x7fffffff	/*  specific segment types */
 

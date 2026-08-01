@@ -55,6 +55,7 @@ arg_t _execve(void)
 	uaddr_t dynamic;
 	uaddr_t lomem;
 	uaddr_t himem;
+	uaddr_t stacksize;
 	uint_fast8_t mflags;
 #ifdef CONFIG_SCRIPT_INTERP
 	uint_fast8_t script = 0;
@@ -169,6 +170,7 @@ restart:
 
 	lomem = 0;
 	dynamic = 0;
+	stacksize = USERSTACK;
 	for (int i=0; i<ehdr.e_phnum; i++) {
 		Elf32_Phdr* ph = &phdr[i];
 		switch (ph->p_type)
@@ -186,6 +188,26 @@ restart:
 				dynamic = ph->p_vaddr;
 				break;
 			}
+
+			case PT_GNU_STACK:
+			{
+				/*
+				 * The stack is a fixed window between BSS and
+				 * heap, so its size is decided here, once, and
+				 * a program that needs more than the default
+				 * has no way to say so at run time - it just
+				 * runs off the bottom into its own BSS.  The
+				 * linker will record a request (ld -z
+				 * stack-size=N); honour it, within reason, so
+				 * a recursive-descent compiler can ask for
+				 * what it needs without every other program
+				 * paying for it out of its heap.
+				 */
+				if (ph->p_memsz > stacksize &&
+				    ph->p_memsz <= USERSTACK_MAX)
+					stacksize = (uaddr_t)ALIGNUP(ph->p_memsz);
+				break;
+			}
 		}
 	}
 	if (dynamic == 0) {
@@ -196,7 +218,7 @@ restart:
 	}
 	/* dynamic points at the load address of the relocation data; this is also
 	 * the top of BSS. */
-	uaddr_t stacktop = (uaddr_t)ALIGNUP(dynamic) + USERSTACK;
+	uaddr_t stacktop = (uaddr_t)ALIGNUP(dynamic) + stacksize;
 	if ((stacktop > himem) || (lomem > himem)) {
 #ifdef DEBUG
 		kprintf("failed: out of memory (have %p, asked for %p)\n", himem, stacktop);
@@ -364,7 +386,7 @@ restart:
 
 	/* Clear the stack (the BSS has already been cleared by the loader). */
 
-	uzero((void*)dynamic, USERSTACK);
+	uzero((void*)dynamic, stacksize);
 
 	if (!(mflags & MS_NOSUID)) {
 		/* setuid, setgid if executable requires it */
