@@ -83,32 +83,40 @@ not rendered - cosmetic.
 **We do not have to write a renderer.**  That is the single reason
 this port is a few weeks rather than a rewrite.
 
-## RESUME HERE - the ordered list to get the editor opening and closing
+## THE EDITOR RUNS (commit bb34b41fd) - what is left
 
-1. **Flash the kernel.**  What is on the board predates the RGB888
-   colour contract (8e14c0968).  Nothing below works until it is
-   flashed.
-2. **Mirror the mmbc C side.**  mmb2c.py is the master and mmbc/ is a
-   byte-identical C mirror.  PIXEL (statement + function), CLS and the
-   BUILTINS entry went into mmb2c.py only, so tokgate.sh and cgate.sh
-   will fail until mmbc/ matches.
-3. **Rebuild bcrun** with the new mmb_runtime.c (mm_pixel,
-   mm_pixel_get, mm_cls) and send it to the board - bcrun has the
-   runtime compiled in, so mmbc PIXEL cannot work end to end until it
-   is refreshed.  devtools/README.md has the recipe.
-4. **Verify ripple end to end**: `mmbc ripple.bas; cc ripple.c;
-   ./ripple.bc`.  MMBasic does it in 2100 ms; the hand-written C did
-   201 ms through the ioctl and 177 ms through a shadow buffer.
-5. **Kernel DrawBitmap, 1-bit first** - the editor draws its text
-   through it.  Import MMBasic's DrawBitmap2 (Draw.c ~5379) with TWO
-   inversions: our 1bpp is MSB-leftmost where MMBasic uses
-   `1 << (x % 8)`, and our 4bpp is high-nibble-left where MMBasic's
-   RGB121 is low-nibble-left.
-6. **Import the editor core** and get it to open a file and exit.
+Everything on the previous ordered list is done and verified on the
+board.  `mmedit <file>` opens, colours, edits, saves with a `.bak` and
+exits; `mmbc`/`cc`/run on the file it just saved works, so the machine
+now edits, translates, compiles and runs its own BASIC.
 
-Stage 3 (the shim) is already done and on the board as /usr/bin/mmedit
-- raw mode, inkey(), the 120K buffer and a verified full-width repaint.
-Stage 4 replaces its viewer with MMBasic's editor.
+**Still to do, in the order it is worth doing:**
+
+1. **Mark mode (F4)** - Editor.c 7402-8208, ~800 self-contained lines.
+   It is the only thing that fills the clipboard, so F5 paste, F7/F8
+   replace and F10 export are all waiting on it.  The stub says so.
+2. **Beautify (F12 / Ctrl-A)** - Editor.c 5536-6105, the block
+   re-indenter.  Also stubbed and announced.
+3. **A pixel-bound demo** (plasma or fire) to measure the other end of
+   the graphics range: ripple is arithmetic-bound, so it flatters the
+   ioctl-per-pixel path.  See PC3-GFX-DESIGN.md.
+4. **DrawBitmap and DrawRectangle in mmbc**, so BASIC can reach the
+   primitives the kernel now has.
+5. **A soak test of the editor from the USB keyboard**, which is the
+   one path not exercised from here - everything above was driven down
+   the serial console with `devtools/fzkeys.py`.
+
+**Known rough edges**, none blocking:
+
+- the status line only refreshes on an edit or after five seconds of
+  idling; MMBasic refreshed it far more often because its poll loop
+  spun rather than blocking for 100ms.
+- the function-key legend is drawn on the first keystroke rather than
+  on entry.  That is MMBasic's own behaviour (`drawstatusline` is set
+  before the loop and acted on inside it), kept deliberately.
+- a file over 120K is refused rather than paged.  The buffer is a flat
+  array in the process's own SRAM - see the memory section below for
+  why that beat the PSRAM arena.
 
 ## STAGE 1 IS DONE (commit 41d7ee07b)
 
