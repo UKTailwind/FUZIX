@@ -202,6 +202,34 @@ MMBasic's own WriteBuf model, and exactly what bbcgfx.c already does.
 One interface, no hole in the kernel, and faster than MMBasic on both
 paths.
 
+## First measurement against MMBasic: the ripple surface
+
+The hidden-line ripple demo (utils/ripple.c, hand-translated from the
+MMBasic original - what mmbc should generate once PIXEL exists),
+19,366 plotted pixels, same board, same clock:
+
+    MMBasic                        2100 ms
+    ours, ioctl per pixel           201 ms   10.4x faster
+    ours, shadow buffer + 1 blit    177 ms   11.9x faster
+    ours, compute only              176 ms
+
+Picture verified correct on the screen, so the 1bpp bit order,
+coordinate mapping and clipping in display_gfx_pixel are right - which
+matters beyond this demo, since the editor draws text through the same
+routine.
+
+The breakdown is the interesting part.  MMBasic spends ~97 ms on Pixel
+statements (19,366 x 5us) and ~2000 ms interpreting the Sqr/Sin loop,
+so pixels are 4.6% of its time.  We spend 25 ms on pixels and 176 ms
+on the same arithmetic compiled, so pixels are 12% of ours.
+
+**The faster the compiled code gets, the more the syscall overhead
+matters in relative terms.**  That is the argument for keeping the
+shadow-buffer route even though the ioctl is comfortably good enough
+here, and it will only sharpen as mmbc improves.  This demo is
+arithmetic-bound; a pixel-bound one (plasma, fire) would show the two
+paths 21x apart rather than 14%.
+
 ## Nibble order: high nibble = left pixel
 
 DECIDED.  The scanout expander is INDIFFERENT - it does one load and
