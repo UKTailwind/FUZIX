@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.2 — July 2026"
+date: "Release v0.4 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -21,9 +21,12 @@ flagship application, complete with BBC graphics modes on the HDMI
 display, the four-channel BBC sound system on the audio DAC, joystick
 and analogue inputs, and a spare serial port.
 
-It also compiles C on its own. `cc` is a complete C89 toolchain running
-on the hardware — not a cross-compiler — so the machine can build its
-own programs with no PC involved.
+It also compiles on its own. `cc` is a complete C89 toolchain running on
+the hardware — not a cross-compiler — and it generates native ARM code,
+so the machine builds its own programs, at its own speed, with no PC
+involved. `mmbc` puts MMBasic in front of it: an MMBasic program
+translates to C, compiles, and runs as a native program several times
+faster than the interpreter it was written for.
 
 One kernel image serves both machines. At boot it probes GP27 for the
 DS3231's 32 kHz clock (the same test MMBasic and MicroPython use):
@@ -43,7 +46,8 @@ Headline specification as configured here:
   port, with USB keyboard support (six layouts)
 * Pre-emptive multitasking: a runaway program can always be stopped
   from the keyboard
-* A self-hosted C89 compiler: `cc` runs on the machine itself
+* A self-hosted C89 compiler generating native ARM code, and an
+  MMBasic translator in front of it — both run on the machine itself
 
 # Installing Fuzix
 
@@ -374,13 +378,16 @@ int main(void)
 }
 ^D
 # cc hello.c
-# bcrun hello.bc
+# ./hello.bc
 hello from Fuzix
 ```
 
-`cc prog.c` writes `prog.bc`; `bcrun prog.bc` runs it. Options are
-`-o name`, `-v` to show each pass as it runs, and `-k` to keep the
-intermediates. `bcdump prog.bc` disassembles.
+`cc prog.c` writes `prog.bc` and makes it executable, so `./prog.bc`
+runs it directly — the object starts with `#!/usr/bin/bcrun`, and the
+kernel does the rest. `bcrun prog.bc` still works and is the way to run
+an object that has lost its execute bit. Options are `-o name`, `-v` to
+show each pass as it runs, and `-k` to keep the intermediates.
+`bcdump prog.bc` disassembles.
 
 `cc` is a driver: it runs `cpp`, then the three compiler passes from
 `/usr/lib/cc`. The passes cannot be driven from the shell by hand — two
@@ -410,16 +417,21 @@ host.
 ## Headers and the runtime library
 
 `/usr/lib/cc/include` holds `stdio.h`, `stdlib.h`, `string.h`,
-`assert.h`, `limits.h` and `stddef.h`. These describe what `bcrun`
-actually provides, and they are deliberately **not** `/usr/include`,
-which describes the Fuzix C library used by native binaries.
+`math.h`, `assert.h`, `limits.h` and `stddef.h`. These describe what
+`bcrun` actually provides, and they are deliberately **not**
+`/usr/include`, which describes the Fuzix C library used by native
+binaries.
 
 Available: `printf` `sprintf` `puts` `putchar`; `fopen` `fclose`
 `fread` `fwrite` `fgetc` `getc` `fputc` `putc` `fgets` `fputs`
 `fprintf` `feof` `fseek` `ftell` `rewind` `fflush` `remove`;
 `malloc` `calloc` `realloc` `free` `exit` `atoi` `abs`; `strlen`
 `strcpy` `strncpy` `strcat` `strcmp` `strncmp` `strchr` `strrchr`
-`memset` `memcpy` `memmove` `memcmp`.
+`memset` `memcpy` `memmove` `memcmp`; and from `math.h`, in double
+precision, `sin` `cos` `tan` `asin` `acos` `atan` `atan2` `sinh`
+`cosh` `tanh` `sqrt` `exp` `log` `log10` `pow` `floor` `ceil` `fabs`
+`fmod`. Each of those is a native function inside `bcrun`, so it runs
+at machine speed whatever the calling code is.
 
 The raw system calls `open` `creat` `close` `read` `write` `lseek`
 `unlink` are also linked in, but no header declares them — declare them
@@ -446,26 +458,250 @@ These are worth knowing before you start a large program.
 * **`printf` rounds halves up.** `%.2f` of `0.125` gives `0.13` where a
   full C library gives `0.12`. A deliberate, documented difference:
   matching the round-half-to-even rule needs exact decimal expansion.
-* **No `math.h`.** No `sin`, `sqrt` and so on — arithmetic on `double`
-  works, but there are no library functions over it.
 
-## Speed, and what this is for
+## Speed
 
-`bcrun` is an interpreter, so expect roughly two orders of magnitude
-less speed than compiled code. A loop of a million iterations doing
-`s += i & 7` on `long` takes about 13 seconds. Numeric work of any
-weight is faster in BBC BASIC, whose inner loops are hand-written
-machine code.
+`cc2` translates each function it compiles into native Thumb-2 for the
+Cortex-M33 and stores that in the object beside the bytecode; `bcrun`
+runs the native code and keeps the interpreter for whatever did not
+translate. Nothing needs to be asked for — it is simply what the
+compiler does.
+
+Dhrystone 2.1, compiled on the machine, runs at about **90,000
+Dhrystones/second**, which is a quarter of the same benchmark
+cross-compiled by `gcc -O2` for the same chip (379,000). Individual
+loops do better: a sieve, a shell sort and an xorshift generator all
+land within a factor of two or three of gcc, and double-precision
+arithmetic uses the RP2350's hardware co-processor through the same
+routines the rest of the system uses.
+
+A program can be forced to interpret with `BCRUN_BYTECODE=1` in the
+environment, which is how the native code is checked against the
+interpreter — the two must agree exactly.
 
 What the compiler is *for* is being able to write and build real
 programs on the machine itself — utilities, file handling, glue, and
-anything where being self-hosted matters more than raw speed. Nothing
-else on the Pico Computer can do it: this is a complete C toolchain
-that runs on the hardware, not a cross-compiler.
+now whole applications where the speed matters. Nothing else on the
+Pico Computer can do it: this is a complete toolchain that runs on the
+hardware, not a cross-compiler.
 
 The bytecode is also a deliberately language-neutral intermediate form,
 so front ends for other languages can share the same back end and
-runtime.
+runtime. `mmbc`, the MMBasic translator described next, is the first.
+
+# MMBasic: the `mmbc` translator
+
+`mmbc` translates an MMBasic program into C. `cc` compiles that C into
+native ARM code. The result runs as an ordinary program, several times
+faster than the same source under the MMBasic interpreter, on the same
+machine at the same clock.
+
+Nothing about it is a cross-development trick: both programs live on
+the SD card and run on the Pico Computer.
+
+## The three commands
+
+```
+# mmbc prog.bas          -> prog.c
+# cc prog.c              -> prog.bc
+# ./prog.bc              runs it
+```
+
+`mmbc` writes `prog.c` next to the source and says so. `-o name.c`
+puts it somewhere else. Every line it cannot translate is reported with
+its line number and left as a comment in the C, so a program that uses
+something unsupported still produces a translation you can read, and
+tells you exactly where it gave up.
+
+On the machine, `mmbc` writes C for the machine's own compiler. On a
+host it writes the slightly different C that gcc prefers; `--fcc` and
+`--gcc` force either form, which only matters if you are moving the
+generated C between the two.
+
+## A first program
+
+```
+# cat > hello.bas
+Print "Hello from MMBasic"
+For i = 1 To 5
+  Print i, i * i
+Next i
+^D
+# mmbc hello.bas
+wrote hello.c
+# cc hello.c
+....
+# ./hello.bc
+Hello from MMBasic
+ 1       1
+ 2       4
+ 3       9
+ 4       16
+ 5       25
+```
+
+The dots from `cc` are one per top-level declaration — a translated
+program carries the MMBasic runtime's declarations with it, so there
+are a couple of hundred of them even for four lines of BASIC. That is
+also why the first compile takes longer than the size of your program
+suggests: about half a minute here, and much the same for anything
+small.
+
+`Print` with a comma gives MMBasic's tabbed columns, as above.
+
+## A worked example: the KnivD benchmark
+
+This is a published MMBasic benchmark, unmodified. It runs four
+thirty-second rounds and reports a score.
+
+```
+# cat bench.bas
+Print "MMBASIC benchmark (C) KnivD 2016"
+Dim integer t, i=0
+Dim float x(1000), f=0.0
+Dim string s=""
+Print "Calculating... ";
+count%=0
+Do
+  s=""
+  f=0.0
+  i=0
+  Timer =0
+  Do While Timer<30000
+    i=i+2 : f=f+2.0002
+    If (i Mod 2)=0 Then
+      i=i*2 : i=i\2
+      f=f*2.0002 : f=f/2.0002
+    End If
+    i=i-1
+    For t=1 To 100
+      f=f-1.0001
+      If (f-Int(f))>=0.5 Then
+        f=Sin(f*Log(i))
+        s=Str$(f,6,6)
+      End If
+      f=(f-Tan(i))*(Rnd(0)/i)
+      If Instr(s,LEFT$(Str$(i),2))>0 Then s=s+"0"
+    Next
+    x(1+(i Mod 1000))=f
+  Loop
+  Print Chr$(13)+"Performance: "+Str$((i*1024)\286,8,0)+" grains"
+  Inc count%
+Loop Until count%=4
+End
+
+# mmbc bench.bas
+wrote bench.c
+# cc bench.c
+.......................................................................
+# ./bench.bc
+MMBASIC benchmark (C) KnivD 2016
+Calculating... Performance:    28944 grains
+Performance:    28944 grains
+Performance:    28944 grains
+Performance:    28940 grains
+```
+
+MMBasic itself scores about 12,000 grains on the same board at the same
+clock. Note what the program exercises: 64-bit integers, doubles,
+string building, `Str$`, `Instr`, `Sin`, `Log`, `Tan`, `Rnd`, a
+thousand-element array and a timer — all of it translated, compiled and
+running natively.
+
+## A worked example: something numerical
+
+A longer one. `solar_eclipse.bas`, in `/root/cc`, is a 3,200-line
+astronomical calculation (Bessel elements, lunar and solar series)
+that reads a date and prints the circumstances of an eclipse. It is a
+good test because every digit of its output can be checked against
+other machines.
+
+```
+# mmbc solar_eclipse.bas
+wrote solar_eclipse.c
+# ./solar_eclipse.bc < solar_eclipse.in
+...
+event duration          2.61100904 hours
+Time taken :     3.242  Seconds
+```
+
+The same program takes 12.5 seconds under MMBasic and 8.8 seconds
+under MicroPython on this hardware; every digit printed is identical in
+all three. Translating it takes a few seconds. Compiling it is a much
+longer job than the benchmark above — it is a hundred and forty
+kilobytes of C — so start it when you have the machine to yourself.
+
+## What the translation looks like
+
+The C is meant to be read. Variables keep their names, control flow
+keeps its shape, and the MMBasic semantics that C does not share —
+integer division, `Mod` on negative numbers, string handling, the
+64-bit integer/double type rules — are handled by a small runtime
+inside `bcrun` rather than by rewriting your program into something
+unrecognisable.
+
+```
+# mmbc hello.bas
+# head -20 hello.c
+```
+
+is worth doing once, to see what your program became.
+
+## Strings, arrays and functions
+
+Strings are MMBasic strings: `Dim string s` gives the usual 255
+characters, and `Dim string s length 40` the shorter form. Arrays index
+from `OPTION BASE` as they should, and `Bound()` reports their limits.
+`Sub` and `Function` work, including arrays passed by reference and
+modified in place.
+
+The one thing to remember is that a translated program is a *program*,
+not an interactive session: there is no editor, no `RUN`, no immediate
+mode. You edit the `.bas` file, translate, compile and run — which is
+also why a translated program can be put in `/usr/bin` and used like
+any other command.
+
+## Errors
+
+`mmbc` reports what it could not translate, by line, and carries on:
+
+```
+# mmbc gpio.bas
+2 line(s) could not be translated and were commented out:
+  line 2: expected '='
+  line 3: 'pin' is not an array
+wrote gpio.c
+```
+
+The reasons are the translator's own — it reads `SetPin GP1, DOUT` as
+far as it can and then says what it wanted to see — so they name the
+symptom rather than the statement. The lines themselves appear in the
+C as comments, with the original text, which is the quickest way to
+see what was dropped:
+
+```
+    /*     SetPin GP1 , DOUT */
+```
+
+The translation still happens and everything else works. `--strict`
+stops on the first such line instead, and `--report` lists them again
+at the end along with any implied global variables.
+
+Appendix C lists what is covered.
+
+## Practical notes
+
+* One `.bas` file per program, because `cc` compiles one file per
+  program. `Sub`s and `Function`s all live in that file.
+* The C file is a normal file — you can keep it, edit it, or hand it
+  to `cc` on another day.
+* `mmbc` and `cc` each need a little room. On a machine with other
+  things running, a large program is happier if you are not also
+  holding a big file open in an editor.
+* Programs built this way are the same objects `cc` produces from hand
+  written C, so `bcdump` disassembles them and `BCRUN_BYTECODE=1`
+  forces interpretation for comparison.
+
 
 # The FAT partition and the `fat` command
 
@@ -591,3 +827,89 @@ The build, source and development notes live in the `pc3` branch of
 `github.com/UKTailwind/FUZIX` under
 `Kernel/platform/platform-rpipico/` — see `PC3-DEVNOTES.md` for the
 engineering history and `PC3-GFX-DESIGN.md` for the display design.
+
+\newpage
+
+# Appendix C: MMBasic coverage
+
+This is what `mmbc` translates today. It is generated from the
+translator's own tables (`fcc/coverage.py` in the mmb2c repository), so
+it says what the program does rather than what anyone remembers it
+doing.
+
+Coverage grows with each release, and it will never be complete.
+MMBasic is a large language whose statements reach deep into one
+particular firmware, and a translator that emits portable C cannot
+follow all of it. Anything not listed here is reported by name, with
+its line number, and the translation continues - so you find out at
+translate time, not at run time.
+
+## Statements
+
+|   |   |   |   |
+|---|---|---|---|
+| `?` | `ARRAY` | `CALL` | `CASE` |
+| `CAT` | `CHDIR` | `CLEAR` | `CLOSE` |
+| `CONST` | `CONTINUE` | `COPY` | `DATA` |
+| `DATE$` | `DIM` | `DO` | `ELSE` |
+| `ELSEIF` | `END` | `ENDIF` | `ERASE` |
+| `ERROR` | `EXIT` | `FILES` | `FOR` |
+| `FUNCTION` | `GOSUB` | `GOTO` | `IF` |
+| `INC` | `INPUT` | `KILL` | `LET` |
+| `LINE` | `LOCAL` | `LONGSTRING` | `LOOP` |
+| `MATH` | `MKDIR` | `NEXT` | `ON` |
+| `OPEN` | `OPTION` | `PAUSE` | `PRINT` |
+| `RANDOMIZE` | `READ` | `RENAME` | `RESTORE` |
+| `RETURN` | `RMDIR` | `SEEK` | `SELECT` |
+| `SORT` | `STATIC` | `SUB` | `TIME$` |
+| `TIMER` | `WEND` | `WHILE` |  |
+
+Assignment needs no keyword (`LET` is accepted). Statement separators,
+line numbers and labels, `REM` and `'` comments all work as expected.
+
+## Functions
+
+|   |   |   |   |
+|---|---|---|---|
+| `ABS` | `ACOS` | `ASC` | `ASIN` |
+| `ATAN2` | `ATN` | `BIN$` | `BIN2STR$` |
+| `BIT` | `BOUND` | `BYTE` | `CHOICE` |
+| `CHR$` | `CINT` | `COS` | `CWD$` |
+| `DATE$` | `DATETIME$` | `DAY$` | `DEG` |
+| `DIR$` | `EOF` | `EPOCH` | `EXP` |
+| `FIELD$` | `FIX` | `FORMAT$` | `HEX$` |
+| `INPUT$` | `INSTR` | `INT` | `LCASE$` |
+| `LCOMPARE` | `LEFT$` | `LEN` | `LGETBYTE` |
+| `LGETSTR$` | `LINPUT` | `LINSTR` | `LLEN` |
+| `LOC` | `LOF` | `LOG` | `LTRIM$` |
+| `MATH` | `MAX` | `MID$` | `MIN` |
+| `OCT$` | `PI` | `RAD` | `RGB` |
+| `RIGHT$` | `RND` | `RTRIM$` | `SGN` |
+| `SIN` | `SPACE$` | `SQR` | `STR$` |
+| `STR2BIN` | `STRING$` | `TAB` | `TAN` |
+| `TIME$` | `TIMER` | `TRIM$` | `UCASE$` |
+| `VAL` |  |  |  |
+
+## MATH() sub-functions
+
+Scalar: `ATAN3`, `COSH`, `LOG10`, `SINH`, `TANH`
+
+Whole-array (one number out of an array): `MAX`, `MEAN`, `MEDIAN`, `MIN`, `SD`, `SUM`
+
+## Types and structure
+
+`INTEGER` (64-bit), `FLOAT` (double), `STRING`, and arrays of each, up
+to the dimensions MMBasic allows. `DIM`, `LOCAL`, `STATIC`, `CONST`,
+`OPTION BASE`, `SUB` and `FUNCTION` with by-reference arguments, and
+the usual control flow.
+
+## Not covered
+
+Everything to do with the firmware's own hardware - display, sound,
+GPIO, I2C, SPI, one-wire, interrupts, `SETPIN`, `PIN`, `PORT` - along
+with the editor, `RUN`, `LIST`, `EDIT`, `LOAD`, `SAVE` and the rest of
+the immediate-mode environment. Some of the hardware statements are the
+subject of current work; the immediate-mode ones will never apply, as a
+translated program is compiled and run, not typed at a prompt.
+
+\newpage
