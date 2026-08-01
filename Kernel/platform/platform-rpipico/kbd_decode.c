@@ -32,8 +32,14 @@ static uint32_t ticks_ms(void)
 
 // Auto-repeat (typematic): HID keyboards only report on state change, so we
 // synthesise repeats from the held key.
-#define KBD_REPEAT_DELAY_MS (400)
-#define KBD_REPEAT_RATE_MS  (40)
+// Configurable through the standard Fuzix KBRATE ioctl (/bin/kbdrate),
+// which works in tenths of a second; kept in ms here.  Defaults are
+// MMBasic's shape - a long wait before the first repeat so a deliberate
+// keypress never doubles, then a comfortable typematic rate.
+#define KBD_REPEAT_FIRST_DEFAULT (600)
+#define KBD_REPEAT_NEXT_DEFAULT  (250)
+uint16_t kbd_repeat_first = KBD_REPEAT_FIRST_DEFAULT;
+uint16_t kbd_repeat_next = KBD_REPEAT_NEXT_DEFAULT;
 // A poll gap longer than this means a release could have been missed,
 // so the held key is no longer trustworthy for repeat purposes.
 #define KBD_REPEAT_STALE_MS (150)
@@ -45,6 +51,7 @@ static bool kbd_scroll;           // scroll-lock state
 static uint8_t kbd_held;          // usage currently repeating (0 = none)
 static uint8_t kbd_held_mods;
 static uint32_t kbd_next_repeat;  // ticks_ms() of the next repeat
+static uint32_t kbd_last_report;  // ticks_ms() of the last HID report
 
 // Currently-held keys, MMBasic KeyDown[]: [0..5] = mapped key codes of the held
 // keys, most recent first; [6] = modifier bitmap.
@@ -211,6 +218,7 @@ void kbd_process_report(const uint8_t *r, uint16_t len, int slot)
     if (len < 8) {
         return; // 8-byte boot report: [mods][reserved][keycode x6]
     }
+    kbd_last_report = ticks_ms();       // the held-key state is now fresh
     uint8_t mods = r[0];
     const uint8_t *keys = r + 2;
     for (int i = 0; i < 6; i++) {
@@ -230,7 +238,7 @@ void kbd_process_report(const uint8_t *r, uint16_t len, int slot)
             if (k != 0x39 && k != 0x53 && k != 0x47) { // no repeat for lock keys
                 kbd_held = k; // last new key wins the repeat
                 kbd_held_mods = mods;
-                kbd_next_repeat = ticks_ms() + KBD_REPEAT_DELAY_MS;
+                kbd_next_repeat = ticks_ms() + kbd_repeat_first;
             }
         }
     }
@@ -294,31 +302,52 @@ int usb_kbd_keydown(int n)
 
 // Called from the usb task (thread context) to synthesise auto-repeat.
 //
-// A gap since the last call means the keyboard was not being polled,
-// so the release of the held key may have happened without being seen:
-// repeating then is repeating a key that is no longer down.  It showed
-// up as one extra Return after "hdb2" at the boot prompt - the pump is
-// starved through mount and init, and the stale repeat arrived just in
-// time for login to read an empty line and print its prompt twice.
-// After a gap, re-arm the delay instead of firing.
+// Only repeat while the held-key state is FRESH.  If reports have not
+// been arriving, the release of the held key may have happened without
+// being seen, and repeating then repeats a key that is no longer down:
+// it showed up as one extra Return after "hdb2" at the boot prompt,
+// where the pump is starved through mount and init and the stale
+// repeat arrived just in time for login to read an empty line.
+//
+// Freshness is measured from the last REPORT, not from the last call
+// to this function.  Timing the calls was wrong: the console mirrors
+// every byte to the 115200 uart, so a full-screen repaint is ~3KB and
+// takes ~260ms, during which nothing pumps - and that starved every
+// repaint past the threshold, re-armed the delay each time, and made
+// auto-repeat look broken.  Reports are polled every 20ms, so a stale
+// window of 150ms means "several polls missed", which is what the
+// boot-time case actually looks like.
 void kbd_repeat_check(void)
 {
-    static uint32_t last_check;
     uint32_t now = ticks_ms();
-    uint32_t gap = now - last_check;
 
-    last_check = now;
     if (!kbd_held) {
         return;
     }
-    if (gap > KBD_REPEAT_STALE_MS) {
-        kbd_next_repeat = now + KBD_REPEAT_DELAY_MS;
+    if (now - kbd_last_report > KBD_REPEAT_STALE_MS) {
+        kbd_next_repeat = now + kbd_repeat_first;
         return;
     }
     if ((int32_t)(now - kbd_next_repeat) >= 0) {
         kbd_key(kbd_held, kbd_held_mods, -1);
-        kbd_next_repeat = now + KBD_REPEAT_RATE_MS;
+        kbd_next_repeat = now + kbd_repeat_next;
     }
+}
+
+// KBRATE (sys/kd.h): the standard Fuzix keyboard-rate ioctl, in tenths
+// of a second.  Clamped so a bad value cannot wedge the keyboard into
+// never repeating or repeating continuously.
+void kbd_set_repeat(unsigned first_tenths, unsigned next_tenths)
+{
+    unsigned f = first_tenths * 100;
+    unsigned n = next_tenths * 100;
+
+    if (f < 100) f = 100;
+    if (f > 2000) f = 2000;
+    if (n < 25) n = 25;
+    if (n > 2000) n = 2000;
+    kbd_repeat_first = (uint16_t)f;
+    kbd_repeat_next = (uint16_t)n;
 }
 
 // Lock-state bitmap in LED order (0x01 num, 0x02 caps, 0x04 scroll).

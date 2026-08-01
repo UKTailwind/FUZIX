@@ -76,6 +76,7 @@
  * crashes: with this off there is no TinyUSB activity at all (no init,
  * no pump), input is serial-only, and the PendSV preemption machinery
  * still runs - so spinner/kill tests over serial isolate the core. */
+#define PC3_NO_USB_BUS_RESET
 #define CONFIG_PC3_USB_KBD
 
 /* BBC 4-channel sound on the PCM5102 I2S DAC (GP10/11/22) */

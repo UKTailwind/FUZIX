@@ -10,6 +10,16 @@
  * (US/UK/DE/FR/ES/BE, case-insensitive) */
 #define PICOIOC_KBDMAP 0x0002
 
+/* Re-drive an SE0 bus reset on the root USB port, forcing any attached
+ * hub back to Default state so it re-enumerates.  The kernel does this
+ * once at boot; this is for when a hub appears AFTER boot already
+ * configured - on the PC3 that means flipping the DPDT switch from the
+ * programming port to the hub, which presents a hub that has never
+ * lost VBUS and so ignores enumeration from address 0.  Needed because
+ * hcd_port_reset() is a no-op stub in the pico-sdk TinyUSB driver, so
+ * enumeration never resets the port by itself.  No argument. */
+#define PICOIOC_USBRESET 0x000D
+
 /* Graphics (PC3: see PC3-GFX-DESIGN.md).  All on /dev/sys. */
 
 /* data -> int: BBC mode 0-5, mode 7 (320x240 16 colours, NOT teletext),

@@ -251,4 +251,27 @@ void tty_interrupt(void)
         }
     }
 }
+
+/* Platform tty ioctl: KBRATE for the USB keyboard's auto-repeat, then
+ * the generic handler.  KBRATE is the standard Fuzix interface (see
+ * sys/kd.h and /bin/kbdrate) - a two-byte { first, continual } in
+ * TENTHS of a second, so `kbdrate 2 6` gives a 600ms wait before the
+ * first repeat and 200ms between the rest.  Tenths is coarse, but it
+ * is what the existing tool speaks, and inventing a private ioctl for
+ * a knob the system already has would be worse. */
+int pc3_tty_ioctl(uint_fast8_t minor, uarg_t request, char *data)
+{
+#ifdef CONFIG_PC3_USB_KBD
+    if (request == KBRATE)
+    {
+        extern void kbd_set_repeat(unsigned first_tenths, unsigned next_tenths);
+        uint8_t kr[2];          /* { first, continual } */
+        if (uget(data, kr, sizeof(kr)))
+            return -1;
+        kbd_set_repeat(kr[0], kr[1]);
+        return 0;
+    }
+#endif
+    return tty_ioctl(minor, request, data);
+}
 /* vim: sw=4 ts=4 et: */

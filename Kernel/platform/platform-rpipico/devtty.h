@@ -25,6 +25,7 @@ struct ttymap
 extern int ttymap_count;
 extern struct ttymap ttymap[NUM_DEV_TTY+1];
 extern void tty_interrupt(void);
+extern int pc3_tty_ioctl(uint_fast8_t minor, uarg_t request, char *data);
 extern void devtty_early_init(void);
 extern void devtty_init(void);
 

@@ -13,6 +13,7 @@ int main(int argc, char **argv)
         puts("Command list:");
         puts("\tflash\tReset into flash mode.");
         puts("\tkeymap <cc>\tSet the USB keyboard layout (us uk de fr es be).");
+        puts("\tusbreset\tRe-enumerate the USB bus (after the DPDT switch).");
         return 0;
     }
     int fd = open("/dev/sys", O_RDWR, 0);
@@ -35,6 +36,12 @@ int main(int argc, char **argv)
             exit(1);
         }
         r = ioctl(fd, PICOIOC_KBDMAP, argv[2]);
+    }
+    else if (strcmp(argv[1], "usbreset") == 0)
+    {
+        r = ioctl(fd, PICOIOC_USBRESET);
+        if (r == 0)
+            puts("USB bus reset; devices should re-enumerate.");
     }
     else
     {

@@ -104,6 +104,14 @@ int plt_dev_ioctl(uarg_t request, char *data)
         return 0;
     }
 #endif
+#if defined(CONFIG_PC3_USB_KBD) && !defined(PC3_NO_USB_BUS_RESET)
+    if (request == PICOIOC_USBRESET)
+    {
+        extern void usb_bus_reset(void);
+        usb_bus_reset();
+        return 0;
+    }
+#endif
 #ifdef CONFIG_PC3_DISPLAY
     if (request == GFXIOC_MODE)
     {

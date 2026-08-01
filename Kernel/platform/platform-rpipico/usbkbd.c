@@ -299,7 +299,7 @@ void console_sleeping(uint8_t devn)
     USB_USBPHY_DIRECT_OVERRIDE_TX_DP_OE_OVERRIDE_EN_BITS | \
     USB_USBPHY_DIRECT_OVERRIDE_TX_DP_OVERRIDE_EN_BITS)
 
-static void usb_bus_reset(void)
+void usb_bus_reset(void)
 {
     /* Take manual control of the DP/DM output drivers. */
     hw_set_bits(&usb_hw->phy_direct_override, USB_BUS_RESET_PHY_OVERRIDE_EN);
@@ -335,8 +335,10 @@ void usbkbd_init(void)
         memset((void *)&hid_slots[i], 0, sizeof(hid_slots[i]));
 
     tuh_init(0); /* native controller, root-hub port 0 */
+#ifndef PC3_NO_USB_BUS_RESET
     usb_bus_reset();    /* force any attached hub back to Default state */
     busy_wait_us(50000); /* let the hub re-detect its downstream ports */
+#endif
 
     usbh_inited = true;
     kputs("USB host: keyboard on the hub, layout ");
