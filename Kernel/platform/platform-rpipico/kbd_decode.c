@@ -34,6 +34,9 @@ static uint32_t ticks_ms(void)
 // synthesise repeats from the held key.
 #define KBD_REPEAT_DELAY_MS (400)
 #define KBD_REPEAT_RATE_MS  (40)
+// A poll gap longer than this means a release could have been missed,
+// so the held key is no longer trustworthy for repeat purposes.
+#define KBD_REPEAT_STALE_MS (150)
 
 static uint8_t kbd_prev[6];       // keycodes from the previous report
 static bool kbd_caps;             // caps-lock state
@@ -250,14 +253,31 @@ int usb_kbd_keydown(int n)
 }
 
 // Called from the usb task (thread context) to synthesise auto-repeat.
+//
+// A gap since the last call means the keyboard was not being polled,
+// so the release of the held key may have happened without being seen:
+// repeating then is repeating a key that is no longer down.  It showed
+// up as one extra Return after "hdb2" at the boot prompt - the pump is
+// starved through mount and init, and the stale repeat arrived just in
+// time for login to read an empty line and print its prompt twice.
+// After a gap, re-arm the delay instead of firing.
 void kbd_repeat_check(void)
 {
-    if (kbd_held) {
-        uint32_t now = ticks_ms();
-        if ((int32_t)(now - kbd_next_repeat) >= 0) {
-            kbd_key(kbd_held, kbd_held_mods, -1);
-            kbd_next_repeat = now + KBD_REPEAT_RATE_MS;
-        }
+    static uint32_t last_check;
+    uint32_t now = ticks_ms();
+    uint32_t gap = now - last_check;
+
+    last_check = now;
+    if (!kbd_held) {
+        return;
+    }
+    if (gap > KBD_REPEAT_STALE_MS) {
+        kbd_next_repeat = now + KBD_REPEAT_DELAY_MS;
+        return;
+    }
+    if ((int32_t)(now - kbd_next_repeat) >= 0) {
+        kbd_key(kbd_held, kbd_held_mods, -1);
+        kbd_next_repeat = now + KBD_REPEAT_RATE_MS;
     }
 }
 

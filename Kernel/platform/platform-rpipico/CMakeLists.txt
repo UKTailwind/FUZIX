@@ -7,6 +7,17 @@ project(fuzix C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_BUILD_TYPE Debug)
 set(PICO_COPY_TO_RAM 1)
+
+# Hardware debugging kernel: TinyUSB-s enumeration trace on the console.
+#   make SUBTARGET=pico2 PC3_USB_TRACE=1
+if(DEFINED ENV{PC3_USB_TRACE})
+	add_compile_definitions(PC3_USB_TRACE=1)
+endif()
+
+# Experiment: no keyboard LED reports (a control transfer on EP0).
+if(DEFINED ENV{PC3_NO_KBD_LEDS})
+	add_compile_definitions(PC3_NO_KBD_LEDS=1)
+endif()
 option(TOTALMEM "specify how much TOTALMEM is present" 0)
 
 add_compile_definitions(
@@ -49,6 +60,7 @@ add_executable(fuzix
 	ds3231.c
 	kbd_decode.c
 	usbkbd.c
+	usbtrace.c
 	psram.c
 	rawuart.c
 	board.c

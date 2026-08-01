@@ -17,6 +17,16 @@
 #define CFG_TUH_HID_EPIN_BUFSIZE    (64)
 #define CFG_TUH_HID_EPOUT_BUFSIZE   (64)
 
+/* PC3_USB_TRACE: the stack's own enumeration trace, through the small
+ * printf in usbtrace.c.  A hardware debugging kernel only - verbose,
+ * and it slows the pump - but it is what says where enumeration stops.
+ * Build with: make SUBTARGET=pico2 PC3_USB_TRACE=1 */
+#ifdef PC3_USB_TRACE
+#define CFG_TUSB_DEBUG              1
+extern int usb_trace_printf(const char *fmt, ...);
+#define CFG_TUSB_DEBUG_PRINTF       usb_trace_printf
+#endif
+
 #else
 
 #define CFG_TUSB_RHPORT0_MODE   (OPT_MODE_DEVICE)

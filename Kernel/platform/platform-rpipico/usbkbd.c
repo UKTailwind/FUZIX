@@ -108,6 +108,7 @@ typedef struct {
     volatile int report_timer;      /* ms since last report (advanced by tick) */
     int report_rate;                /* ms between report requests */
     bool notfirsttime;              /* LED report has been sent once */
+    volatile bool leds_dirty;       /* LEDs changed; hid_poll will send them */
     uint8_t sendlights;             /* LED bitmap: 0x01 num 0x02 caps 0x04 scroll */
 } hid_slot_t;
 
@@ -143,12 +144,33 @@ int usbkbd_starved(void)
 
 /* Push the LED bitmap to a keyboard's physical LEDs: 1-byte OUTPUT
  * report, exactly as MMBasic. */
-static void kbd_set_leds(int slot)
+/*
+ *	The LED report is a control transfer on EP0 - the endpoint
+ *	enumeration also needs.  Issued from wherever a lock key happened
+ *	to be decoded, it wedged EP0: the keyboard kept working on its
+ *	interrupt endpoint until the next lock key, then stopped, and
+ *	from then on an attached device was seen but could never
+ *	enumerate.
+ *
+ *	So nothing sends it inline.  A lock key marks the LEDs dirty, and
+ *	hid_poll - which already owns the one-transfer-at-a-time rhythm
+ *	for this keyboard - sends it when no report request is in flight,
+ *	keeps it dirty if the submission is refused, and tries again on
+ *	the next pass.  It matters on this hardware: a Pi keyboard has an
+ *	embedded keypad, so a keyboard left in num lock types 6 for O
+ *	until the host tells it otherwise.
+ */
+static void kbd_leds_mark(int slot)
 {
-    if (slot < 0) {
-        return;
+    if (slot >= 0) {
+        hid_slots[slot].leds_dirty = true;
     }
-    tuh_hid_set_report(hid_slots[slot].addr, hid_slots[slot].inst, 0,
+}
+
+/* Only ever called from hid_poll, with EP0 idle. */
+static bool kbd_leds_send(int slot)
+{
+    return tuh_hid_set_report(hid_slots[slot].addr, hid_slots[slot].inst, 0,
         HID_REPORT_TYPE_OUTPUT, &hid_slots[slot].sendlights, 1);
 }
 
@@ -158,7 +180,7 @@ void kbd_backend_set_leds(int slot, uint8_t leds)
         return;
     }
     hid_slots[slot].sendlights = leds;
-    kbd_set_leds(slot);
+    kbd_leds_mark(slot);
 }
 
 static int hid_slot_find(uint8_t addr, uint8_t inst)
@@ -181,10 +203,23 @@ static void hid_poll(void)
             continue;
         }
         if (hid_slots[i].report_timer >= hid_slots[i].report_rate) {
-            /* First poll of a keyboard: push the initial LED state once. */
+            /* First poll of a keyboard: push the initial LED state once
+               - which is what turns num lock OFF on a keyboard that
+               powered up with it on. */
             if (hid_slots[i].type == HID_KBD && !hid_slots[i].notfirsttime) {
                 hid_slots[i].notfirsttime = true;
-                kbd_set_leds(i);
+                hid_slots[i].leds_dirty = true;
+            }
+            /* One transfer at a time, and EP0 first: the LED report
+               goes out on its own pass, and the input report is
+               requested on the next.  A refused submission stays
+               dirty and is retried rather than lost. */
+            if (hid_slots[i].leds_dirty) {
+                if (kbd_leds_send(i)) {
+                    hid_slots[i].leds_dirty = false;
+                    hid_slots[i].report_timer = 0;
+                }
+                continue;
             }
             hid_slots[i].report_requested = true;
             if (!tuh_hid_receive_report(hid_slots[i].addr, hid_slots[i].inst)) {
@@ -258,6 +293,8 @@ void tuh_mount_cb(uint8_t dev_addr)
 
 void tuh_umount_cb(uint8_t dev_addr)
 {
+    /* Quiet: the keyboard says when it goes (tuh_hid_umount_cb), and
+       the hub behind it coming and going is not news. */
     (void)dev_addr;
 }
 
@@ -299,6 +336,11 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance)
     if (slot >= 0) {
         if (hid_slots[slot].type == HID_KBD) {
             kbd_clear_state();
+            /* Said out loud: a keyboard that goes away without being
+               unplugged is the fault being chased, and silence made it
+               indistinguishable from one that simply stopped
+               reporting. */
+            kputs("USB keyboard detached\n");
         }
         memset(&hid_slots[slot], 0, sizeof(hid_slots[slot]));
         hid_slots[slot].report_requested = true; /* don't poll an empty slot */
