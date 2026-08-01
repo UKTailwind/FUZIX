@@ -14,9 +14,28 @@
 #include "config.h"
 #include "psram.h"
 
+static blkdev_t *psram_blk;
+
+/*
+ * The disc is a window into the XIP-mapped PSRAM, so an out-of-range
+ * block is not an I/O error that gets reported - it is a memcpy to
+ * wherever the arithmetic landed.  A swap block number that had gone
+ * wild wrote 512 bytes at PSRAM_BASE + (lba << 9), off the end of the
+ * window, and bus-faulted the machine with nothing to say for itself.
+ * Refuse it instead, and name it: a short transfer is something the
+ * callers already check.
+ */
 static uint_fast8_t psram_disc_transfer(void)
 {
-    uint8_t *pd = (uint8_t *)PSRAM_BASE + (blk_op.lba << 9);
+    uint8_t *pd;
+
+    if (psram_blk && blk_op.lba >= psram_blk->drive_lba_count) {
+        kprintf("psram: block %u beyond disc (%u), %s refused\n",
+            (unsigned)blk_op.lba, (unsigned)psram_blk->drive_lba_count,
+            blk_op.is_read ? "read" : "write");
+        return 0;
+    }
+    pd = (uint8_t *)PSRAM_BASE + (blk_op.lba << 9);
 
     if (blk_op.is_read)
         memcpy(blk_op.addr, pd, 512);
@@ -25,10 +44,10 @@ static uint_fast8_t psram_disc_transfer(void)
     return 1;
 }
 
-/* Kept so a "psram=" boot parameter can retune the split after the
- * probe has already registered the disc (the bootdev prompt comes
- * after device init but before rc's swapon, which is what matters). */
-static blkdev_t *psram_blk;
+/* psram_blk (declared above, where the transfer bounds-checks against
+ * it) is kept so a "psram=" boot parameter can retune the split after
+ * the probe has already registered the disc - the bootdev prompt comes
+ * after device init but before rc's swapon, which is what matters. */
 
 void psram_disc_resize(void)
 {

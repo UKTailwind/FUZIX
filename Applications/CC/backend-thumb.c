@@ -2331,81 +2331,97 @@ struct psram_req {
 
 static unsigned char *bc_arena_cursor;
 
+/*
+ *	The carve list is walked TWICE: once to measure, once to place.
+ *	The size asked of the kernel is therefore the size the carves
+ *	actually use, by construction.  It used to be a hand-written sum
+ *	of the same terms, kept in step by hand - and it had already
+ *	drifted, missing the target bitmap the peephole pass added, so
+ *	the last tables carved sat outside the region the kernel had
+ *	granted.
+ */
+static unsigned long bc_arena_need;
+static int bc_arena_measuring;
+
 void *bc_arena_carve(unsigned long n)
 {
+	n = (n + 7) & ~7UL;
 #ifdef ARENA_MALLOC
 	/* Development build: board-sized tables, but each one its own
 	   allocation, so a sanitiser reports the exact table that
-	   overflowed instead of the next table quietly absorbing it.
-	   The board carves one arena; this carves the same sizes. */
+	   overflowed instead of the next table quietly absorbing it. */
+	if (bc_arena_measuring) {
+		bc_arena_need += n;
+		return NULL;
+	}
 	return calloc(1, n ? n : 1);
 #else
-	void *p = bc_arena_cursor;
-	bc_arena_cursor += (n + 7) & ~7UL;
-	return p;
+	if (bc_arena_measuring) {
+		bc_arena_need += n;
+		return NULL;
+	}
+	{
+		void *p = bc_arena_cursor;
+		bc_arena_cursor += n;
+		return p;
+	}
 #endif
+}
+
+/* The one list of what cc2 needs; walked to measure and to place. */
+static void bc_arena_carve_all(void)
+{
+	codebuf = bc_arena_carve(CODEMAX);
+	databuf = bc_arena_carve(DATAMAX);
+	litbuf = bc_arena_carve(DATAMAX);
+	strtab = bc_arena_carve(STRMAX);
+	symtab = bc_arena_carve(MAXSYM * sizeof(struct bc_sym));
+	bc_symname = bc_arena_carve(MAXSYM * sizeof(char *));
+	sym_in_lit = bc_arena_carve(MAXSYM);
+	fixtab = bc_arena_carve(MAXFIX * sizeof(struct bc_fixup));
+	fix_in_lit = bc_arena_carve(MAXFIX);
+	labtab = bc_arena_carve(MAXLAB * sizeof(struct label));
+	patchtab = bc_arena_carve(MAXFIX * sizeof(struct patch));
+	libreftab = bc_arena_carve(MAXFIX * sizeof(struct libref));
+	tbuf = bc_arena_carve(TMAX);
+	tmap = bc_arena_carve(TMAX * sizeof(tmap_t));
+	t_targets = bc_arena_carve(TMAX / 8);
+	tpooltab = bc_arena_carve(TPOOLMAX * sizeof(struct tpool));
+	treftab = bc_arena_carve(TPOOLMAX * sizeof(struct tref));
+	/* the node pool and anything else that carves later */
+	bc_arena_carve(32768);
 }
 
 void bc_arena_init(void)
 {
+	bc_arena_measuring = 1;
+	bc_arena_need = 0;
+	bc_arena_carve_all();
+	bc_arena_measuring = 0;
+	if (getenv("CC2_ARENA"))
+		fprintf(stderr, "cc2: arena wants %lu bytes\n",
+			(unsigned long)bc_arena_need);
+
 #ifdef ARENA_MALLOC
-	codebuf = bc_arena_carve(CODEMAX);
-	databuf = bc_arena_carve(DATAMAX);
-	litbuf = bc_arena_carve(DATAMAX);
-	strtab = bc_arena_carve(STRMAX);
-	symtab = bc_arena_carve(MAXSYM * sizeof(struct bc_sym));
-	bc_symname = bc_arena_carve(MAXSYM * sizeof(char *));
-	sym_in_lit = bc_arena_carve(MAXSYM);
-	fixtab = bc_arena_carve(MAXFIX * sizeof(struct bc_fixup));
-	fix_in_lit = bc_arena_carve(MAXFIX);
-	labtab = bc_arena_carve(MAXLAB * sizeof(struct label));
-	patchtab = bc_arena_carve(MAXFIX * sizeof(struct patch));
-	libreftab = bc_arena_carve(MAXFIX * sizeof(struct libref));
-	tbuf = bc_arena_carve(TMAX);
-	tmap = bc_arena_carve(TMAX * sizeof(tmap_t));
-	t_targets = bc_arena_carve(TMAX / 8);
-	tpooltab = bc_arena_carve(TPOOLMAX * sizeof(struct tpool));
-	treftab = bc_arena_carve(TPOOLMAX * sizeof(struct tref));
-	return;
+	bc_arena_carve_all();
 #else
-	struct psram_req rq;
-	int fd = open("/dev/sys", O_RDWR);
+	{
+		struct psram_req rq;
+		int fd = open("/dev/sys", O_RDWR);
 
-	rq.len = CODEMAX + 2UL * DATAMAX + STRMAX +
-	    MAXSYM * (sizeof(struct bc_sym) + sizeof(char *) + 1) +
-	    MAXFIX * (sizeof(struct bc_fixup) + 1 + sizeof(struct patch) +
-		      sizeof(struct libref)) +
-	    MAXLAB * sizeof(struct label) +
-	    TMAX * (1UL + sizeof(tmap_t)) +
-	    TPOOLMAX * (sizeof(struct tpool) + sizeof(struct tref)) +
-	    32768 /* the node pool and carve rounding */;
-	if (fd < 0 || ioctl(fd, PSRAMIOC_ALLOC, &rq) < 0) {
-		fprintf(stderr,
-			"cc2: no PSRAM arena (kernel without "
-			"PSRAMIOC_ALLOC?)\n");
-		exit(1);
+		rq.len = bc_arena_need;
+		rq.base = 0;
+		if (fd < 0 || ioctl(fd, PSRAMIOC_ALLOC, &rq) < 0 || !rq.base) {
+			fprintf(stderr,
+				"cc2: no PSRAM arena for %lu bytes\n",
+				(unsigned long)bc_arena_need);
+			exit(1);
+		}
+		close(fd);
+		bc_arena_cursor = (unsigned char *)rq.base;
+		bc_arena_carve_all();
 	}
-	close(fd);
-	bc_arena_cursor = (unsigned char *)rq.base;
-
-	codebuf = bc_arena_carve(CODEMAX);
-	databuf = bc_arena_carve(DATAMAX);
-	litbuf = bc_arena_carve(DATAMAX);
-	strtab = bc_arena_carve(STRMAX);
-	symtab = bc_arena_carve(MAXSYM * sizeof(struct bc_sym));
-	bc_symname = bc_arena_carve(MAXSYM * sizeof(char *));
-	sym_in_lit = bc_arena_carve(MAXSYM);
-	fixtab = bc_arena_carve(MAXFIX * sizeof(struct bc_fixup));
-	fix_in_lit = bc_arena_carve(MAXFIX);
-	labtab = bc_arena_carve(MAXLAB * sizeof(struct label));
-	patchtab = bc_arena_carve(MAXFIX * sizeof(struct patch));
-	libreftab = bc_arena_carve(MAXFIX * sizeof(struct libref));
-	tbuf = bc_arena_carve(TMAX);
-	tmap = bc_arena_carve(TMAX * sizeof(tmap_t));
-	t_targets = bc_arena_carve(TMAX / 8);
-	tpooltab = bc_arena_carve(TPOOLMAX * sizeof(struct tpool));
-	treftab = bc_arena_carve(TPOOLMAX * sizeof(struct tref));
-#endif	/* ARENA_MALLOC */
+#endif
 }
 
 #else

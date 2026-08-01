@@ -93,19 +93,30 @@ uint_fast8_t plt_param(char* p)
 void fatal_exception_handler(struct extended_exception_frame* eh)
 {
     kprintf("FLAGRANT SYSTEM ERROR! EXCEPTION %d\n", eh->cause);
-    /* First, not last: the console TX can die partway through a dump
-     * in fault context, and this is the line that names the fault */
+    /*
+     * Order matters more than tidiness here: the console TX can die
+     * partway through a dump in fault context, so everything needed to
+     * IDENTIFY the fault goes out first - what faulted, where it
+     * faulted, and where the program was loaded, so a PC can be turned
+     * back into a source line.  The general registers are context and
+     * come after; they were what survived when the interesting lines
+     * did not.
+     */
     kprintf("CFSR=%p HFSR=%p MMFAR=%p BFAR=%p\n",
         *(volatile uint32_t *)0xE000ED28, *(volatile uint32_t *)0xE000ED2C,
         *(volatile uint32_t *)0xE000ED34, *(volatile uint32_t *)0xE000ED38);
+    kprintf("pc=%p lr=%p sp=%p PROGLOAD=%p\n",
+        eh->pc, eh->lr, eh->sp, PROGLOAD);
+    kprintf("user mode relative: pc=%p lr=%p pid=%d\n",
+        eh->pc-PROGLOAD, eh->lr-PROGLOAD,
+        udata.u_ptab ? udata.u_ptab->p_pid : -1);
     kprintf(" r0=%p r1=%p  r2=%p  r3=%p\n", eh->r0, eh->r1, eh->r2, eh->r3);
     kprintf(" r4=%p r5=%p  r6=%p  r7=%p\n", eh->r4, eh->r5, eh->r6, eh->r7);
     kprintf(" r8=%p r9=%p r10=%p r11=%p\n", eh->r8, eh->r9, eh->r10, eh->r11);
     kprintf("r12=%p sp=%p  lr=%p  pc=%p\n", eh->r12, eh->sp, eh->lr, eh->pc);
     kprintf("PROGBASE=%p PROGLOAD=%p PROGTOP=%p\n", PROGBASE, PROGLOAD, PROGTOP);
     kprintf("UDATA=%p KSTACK=%p-%p\n", &udata, &udata+1, ((uint32_t)&udata) + UDATA_SIZE);
-    kprintf("user mode relative: lr=%p pc=%p isp=%p brk=%p\n",
-        eh->lr-PROGLOAD, eh->pc-PROGLOAD, udata.u_isp, udata.u_break);
+    kprintf("isp=%p brk=%p\n", udata.u_isp, udata.u_break);
     /* Why: CFSR decodes usage/bus/mem faults, HFSR says if escalated,
      * MMFAR/BFAR give the faulting address when valid */
     kprintf("CFSR=%p HFSR=%p MMFAR=%p BFAR=%p\n",
