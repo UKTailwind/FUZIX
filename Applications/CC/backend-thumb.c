@@ -165,6 +165,9 @@ static unsigned fn_patch_lo;
 static unsigned fn_fix_lo;
 static int fn_is_main;
 static int t_dry;
+/* the first of the three walks: builds the target bitmap, so every
+   rewrite that would skip ops stands down while it runs */
+static int t_collect;
 static unsigned long t_base;	/* prospective code offset of this
 				   function's push{lr} preamble; tbuf[0]
 				   lands at t_base + 2 */
@@ -358,6 +361,23 @@ static int t_landing(unsigned long o2)
  */
 static void t_bcw(unsigned cond, long off);
 
+/*
+ *	Record an in-span landing site during a dry pass.  EVERY path
+ *	that resolves a branch target must call this, not just the plain
+ *	jump cases: a peephole that skips ops asks the bitmap whether it
+ *	is allowed to, and an unmarked target is one it will swallow.
+ *	t_boolbranch resolving its own fused target without marking it
+ *	is what let the statement seam eat a loop back-edge - the loop
+ *	then re-entered past the address push and leaked four bytes of
+ *	VM stack per iteration until it ran off the top of memory.
+ */
+static void t_mark_target(unsigned long addr)
+{
+	if (t_dry && addr >= fn_start && addr - fn_start < TMAX)
+		t_targets[(addr - fn_start) >> 3] |=
+		    1 << ((addr - fn_start) & 7);
+}
+
 static unsigned long t_boolbranch(unsigned long o, unsigned cond,
 				  unsigned long start, unsigned long end)
 {
@@ -374,6 +394,7 @@ static unsigned long t_boolbranch(unsigned long o, unsigned cond,
 				    l->addr >= start && l->addr < end) {
 					unsigned c = (nxt == BC_JFALSE) ?
 						(cond ^ 1) : cond;
+					t_mark_target(l->addr);
 					if (t_dry)
 						t32(0, 0);
 					else
@@ -475,18 +496,14 @@ static void t_addsubw(unsigned sub, unsigned rd, unsigned rn,
 static unsigned long t_seam(unsigned long o, unsigned long start,
 			    unsigned long end, int width)
 {
-	/* DISABLED: wrong code.  t1.bas under qemu-native segfaults
-	 * with this on (wild tmap-sourced branch; r4 destroyed), and the
-	 * eclipse trips MM_BYREFN - while every probe gate stays green:
-	 * the guilty shape is not yet in the gates.  The emitted seam
-	 * bytes disassemble correctly in isolation, so the fault is an
-	 * interaction (tmap/branch bookkeeping around skipped ops is the
-	 * prime suspect).  Re-enable only with a t1-t8 qemu-native sweep
-	 * in the gate. */
-	if (1)
-		return 0;
+	static int off = -1;
 	unsigned wantload = (width == 8) ? BC_LOAD64 : BC_LOAD32;
 	unsigned long p2, p3, p4, i2;
+
+	if (off < 0)
+		off = getenv("THUMB_NOSEAM") ? 1 : 0;
+	if (off || t_collect)
+		return 0;
 	struct t_addr k1, k2;
 	unsigned s1 = 0, s2;
 	unsigned long ad1 = 0;
@@ -756,10 +773,7 @@ static unsigned long t_case_target(unsigned long off)
 				return ~0UL;
 			tgt = symtab[s].s_value + t_lit32(off);
 			/* case labels are landing sites too */
-			if (t_dry && tgt >= fn_start
-			    && tgt - fn_start < TMAX)
-				t_targets[(tgt - fn_start) >> 3] |=
-				    1 << ((tgt - fn_start) & 7);
+			t_mark_target(tgt);
 			return tgt;
 		}
 	}
@@ -782,10 +796,7 @@ static unsigned long t_target(unsigned long at)
 				return ~0UL;
 			/* dry pass: remember every in-span landing site
 			   for the peephole pass (see t_targets) */
-			if (t_dry && l->addr >= fn_start
-			    && l->addr - fn_start < TMAX)
-				t_targets[(l->addr - fn_start) >> 3] |=
-				    1 << ((l->addr - fn_start) & 7);
+			t_mark_target(l->addr);
 			return l->addr;
 		}
 	}
@@ -1862,14 +1873,24 @@ static void thumb_commit(void)
 	   pass whose size matters, or a backward jump's landing site is
 	   unmarked during the sizing pass and marked during emission -
 	   the passes would then disagree about elisions and every
-	   branch offset after the divergence is garbage. */
+	   branch offset after the divergence is garbage.
+
+	   It runs with the skip-ahead rewrites switched off (t_collect),
+	   so it visits every op in the span exactly once.  Otherwise the
+	   walk that BUILDS the bitmap is itself deciding what to skip
+	   from an empty bitmap, and anything a skipped op would have
+	   recorded is lost. */
 	memset(t_targets, 0, TMAX / 8);
 	tlen = 0;
 	ntpool = 0;
 	ntref = 0;
 	t_dry = 1;
-	if (!t_span(fn_start, end))
+	t_collect = 1;
+	if (!t_span(fn_start, end)) {
+		t_collect = 0;
 		goto bailed;
+	}
+	t_collect = 0;
 
 	tlen = 0;
 	ntpool = 0;
