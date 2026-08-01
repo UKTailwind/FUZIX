@@ -4,21 +4,28 @@
  * Two personalities share the scanout machinery (HSTX TMDS encode, sync
  * command lists, ping-pong scanline DMA, core1 line expansion):
  *
- *  - Console: 640x480, 1bpp + RGB332 fg/bg per 8x12 cell (80x40), at
- *    clk_hstx = clk_sys/3.  375 MHz -> 25 MHz pixel -> 59.5 Hz.
- *  - BBC graphics modes 0-5: MMBasic's PC3-proven XGA line at
- *    clk_hstx = clk_sys (375 MHz DDR -> 75 MHz pixel -> 70.07 Hz).  The
- *    framebuffer stays at BBC resolution (20K/40K, sharing the console
- *    framebuffer allocation) and core1 expands each output scanline
- *    with a palette lookup table:
+ * Two RASTERS, several modes on each.  The raster is all the monitor
+ * sees, so only a change of raster costs a resync:
+ *
+ *  - 640x480 at clk_hstx = clk_sys/3 (375 MHz -> 25 MHz pixel, 59.5 Hz)
+ *      console: 1bpp + RGB332 fg/bg per 8x12 cell (80x40)
+ *      MODE 7:  320x240, 4bpp -> x2 h, x2 v, full screen
+ *  - 1024x768 at clk_hstx = clk_sys, MMBasic's PC3-proven XGA line
+ *    (375 MHz DDR -> 75 MHz pixel, 70.07 Hz)
  *      modes 1/4: 320x256, 4bpp -> x3 h, x3 v, 960 wide + 32px borders
  *      modes 2/5: 160x256, 4bpp -> x6 h, x3 v, ditto
  *      modes 0/3: 640x256, 1bpp -> 5:8 h (32-entry coverage LUT),
  *                 x3 v: full-screen 1024x768
- *    4bpp layout: high nibble = left pixel.  1bpp: MSB = left.
  *
- * Core1 is owned by the display; nothing else may run there.  Mode
- * switching stops and relaunches core1 with the new timing.
+ * The framebuffer always stays at MODE resolution (20K/38K/40K, all
+ * sharing the console's allocation) and core1 expands each output
+ * scanline through a palette lookup table.  4bpp layout: high nibble =
+ * left pixel.  1bpp: MSB = left.
+ *
+ * Core1 is owned by the display; nothing else may run there.  Switching
+ * modes WITHIN one raster only swaps the expander, during vertical
+ * blanking, with core1 still running - the monitor never loses lock.
+ * Only a change of raster stops and relaunches core1.
  */
 
 #include <kernel.h>
@@ -82,7 +89,9 @@ uint8_t disp_fb[DISP_FB_POOL];
 uint8_t disp_tile_fg[DISP_ROWS * DISP_COLS];
 uint8_t disp_tile_bg[DISP_ROWS * DISP_COLS];
 
-static uint8_t disp_lines[2][1024]; /* RGB332 expanded scanlines */
+/* RGB332 expanded scanlines.  Word-aligned: the expanders write them
+ * through uint32_t stores. */
+static uint8_t disp_lines[2][1024] __attribute__((aligned(4)));
 
 static uint32_t vblank_line_vsync_off[7];
 static uint32_t vblank_line_vsync_on[7];
@@ -106,28 +115,52 @@ static uint32_t __scratch_x("disp") disp_core1_stack[CORE1_STACK_WORDS]
 /* --- BBC graphics state -------------------------------------------------- */
 enum gexp {
     EXP_CONSOLE = 0,
+    EXP_4BPP_X2,        /* mode 7:   320 wide, 160 bytes/line, 240 lines */
     EXP_4BPP_X3,        /* modes 1/4: 320 wide, 160 bytes/line */
     EXP_4BPP_X6,        /* modes 2/5: 160 wide, 80 bytes/line  */
     EXP_1BPP_5TO8,      /* modes 0/3: 640 wide -> 1024 (5:8), x3 lines */
 };
 static volatile enum gexp gfx_exp = EXP_CONSOLE;
 static uint8_t gfx_pal[16];
-static uint16_t gfx_stride;                 /* source bytes per BBC line */
+static uint16_t gfx_stride;                 /* source bytes per mode line */
+static uint16_t gfx_rows;                   /* source lines: 256, or 240 */
 
 /* One shared expansion LUT, 16-byte stride for shift-indexing:
- *  4BPP_X3: byte -> 6 output bytes;  4BPP_X6: 12;  1BPP_X1: 8. */
-static uint8_t gfx_lut[256][16];
+ *  4BPP_X2: byte -> 4 output bytes;  4BPP_X3: 6;  4BPP_X6: 12;
+ *  1BPP_5TO8: 8 (indexed by a 5-bit group, not a byte). */
+static uint8_t gfx_lut[256][16] __attribute__((aligned(4)));
 
-/* BBC physical colours 0-7 in RGB332 (8-15 = the flashing set, mapped
- * to their steady counterparts) */
-static uint8_t bbc_rgb332[8] = {
-    0x00, 0xE0, 0x1C, 0xFC, 0x03, 0xE3, 0x1F, 0xFF
+/* Physical colours in RGB332.  0-7 are the authentic BBC set, and are
+ * all that modes 0-5 can reach (the real 8-15 flash, which we do not
+ * do, so those map to their steady counterparts).  MODE 7 is our own
+ * mode, not teletext, and uses all 16: 8-15 are a darker companion set
+ * so its 16 logical colours are 16 DISTINCT colours by default. */
+static uint8_t bbc_rgb332[16] = {
+    0x00, 0xE0, 0x1C, 0xFC, 0x03, 0xE3, 0x1F, 0xFF,
+    0x6D, 0x60, 0x0C, 0x6C, 0x01, 0x61, 0x0D, 0x24
 };
 
-static void gfx_lut_rebuild(void)
+/* Mask applied to a physical colour number in this expander: MODE 7
+ * reaches all 16, every BBC mode only the authentic 8. */
+static uint8_t gfx_physmask(enum gexp ex)
+{
+    return (ex == EXP_4BPP_X2) ? 15 : 7;
+}
+
+/* Built for the mode we are ABOUT to enter, so a live switch can have
+ * the table ready before the expander is handed to core1. */
+static void gfx_lut_rebuild(enum gexp ex)
 {
     int b, i;
-    switch (gfx_exp) {
+    switch (ex) {
+    case EXP_4BPP_X2:
+        for (b = 0; b < 256; b++) {
+            uint8_t c1 = gfx_pal[b >> 4], c2 = gfx_pal[b & 15];
+            uint8_t *e = gfx_lut[b];
+            e[0] = e[1] = c1;
+            e[2] = e[3] = c2;
+        }
+        break;
     case EXP_4BPP_X3:
         for (b = 0; b < 256; b++) {
             uint8_t c1 = gfx_pal[b >> 4], c2 = gfx_pal[b & 15];
@@ -243,6 +276,17 @@ static void __not_in_flash_func(disp_fill_loop)(void)
                     p[6] = (b & 0x02) ? f : k;
                     p[7] = (b & 0x01) ? f : k;
                     p += 8;
+                }
+                break;
+            }
+            case EXP_4BPP_X2: {
+                /* MODE 7: 320x240 4bpp doubled both ways inside the
+                 * 640x480 console raster - 160 source bytes, one word
+                 * of output each, exactly 640 pixels, no borders. */
+                const uint8_t *s = &disp_fb[(active >> 1) * 160];
+                for (int t = 0; t < 160; t++) {
+                    *(uint32_t *)p = *(const uint32_t *)gfx_lut[s[t]];
+                    p += 4;
                 }
                 break;
             }
@@ -499,80 +543,134 @@ bool display_stack_ok(void)
     return disp_core1_stack[0] == STACK_SENTINEL;
 }
 
-/* Enter a BBC graphics mode (0-5), or 0xFF back to the text console.
- * Returns the framebuffer size, or -1 for a bad mode. */
+/* Wait for the top of vertical blanking, so a live switch has the
+ * whole blanking interval to swap expander, palette and framebuffer
+ * before the next active line is fetched.  Bounded, like MMBasic's
+ * setmode(): if core1 ever stops, this must not hang the caller.
+ * Blanking is ~670us at XGA / ~800us at VGA - far longer than the
+ * ~40us the swap actually takes. */
+static void gfx_wait_vblank(void)
+{
+    uint64_t dl = time_us_64() + 50000;
+
+    while (v_scanline != 0 && time_us_64() < dl)
+        tight_loop_contents();
+}
+
+/* Enter a graphics mode - BBC 0-5, or MODE 7 (320x240, 16 colours) -
+ * or 0xFF back to the text console.  Returns the framebuffer size, or
+ * -1 for a mode we do not have.
+ *
+ * The scanout is only torn down and rebuilt when the underlying RASTER
+ * changes, because that is the only thing the monitor can see: HSTX,
+ * clk_hstx, the sync command lists and the DMA chain all belong to the
+ * raster, not to the mode.  Modes 0-5 share 1024x768 and the console
+ * and MODE 7 share 640x480, so every switch WITHIN either group is
+ * done live during vertical blanking with core1 still running - the
+ * monitor keeps lock and only the picture changes.  This is exactly
+ * how MMBasic splits setmode() from restartHDMI(). */
 int display_gfx_mode(int mode)
 {
-    display_stack_check();
-
     extern void console_gfx(int active);    /* console.c */
+    /* Default logical -> physical palettes, indexed by the pal column
+     * below.  The BBC modes reach physical 0-7; MODE 7 reaches 16. */
+    static const uint8_t defpal[4][16] = {
+        /* 0: modes 0/3 - black, white */
+        { 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7 },
+        /* 1: modes 1/4 - black, red, yellow, white */
+        { 0, 1, 3, 7, 0, 1, 3, 7, 0, 1, 3, 7, 0, 1, 3, 7 },
+        /* 2: modes 2/5 - the full BBC set, twice */
+        { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7 },
+        /* 3: mode 7 - 16 distinct colours, BBC-authentic in the low 8 */
+        { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+    };
+    struct vtiming *newtim;
     enum gexp exp;
-    int size;
+    uint16_t stride, rows;
+    int pal, i;
+    bool rebuild;
+
+    display_stack_check();
 
     switch (mode) {
     case 0: case 3:
-        exp = EXP_1BPP_5TO8;
-        gfx_stride = 80;
-        size = 80 * 256;
+        exp = EXP_1BPP_5TO8; stride = 80;  rows = 256;
+        newtim = &tim_xga; pal = 0;
         break;
     case 1: case 4:
-        exp = EXP_4BPP_X3;
-        gfx_stride = 160;
-        size = 160 * 256;
+        exp = EXP_4BPP_X3;   stride = 160; rows = 256;
+        newtim = &tim_xga; pal = 1;
         break;
     case 2: case 5:
-        exp = EXP_4BPP_X6;
-        gfx_stride = 80;
-        size = 80 * 256;
+        exp = EXP_4BPP_X6;   stride = 80;  rows = 256;
+        newtim = &tim_xga; pal = 2;
+        break;
+    case 7:
+        exp = EXP_4BPP_X2;   stride = 160; rows = 240;
+        newtim = &tim_vga; pal = 3;
         break;
     case 0xFF:
-        exp = EXP_CONSOLE;
-        size = 0;
+        exp = EXP_CONSOLE;   stride = 0;   rows = 0;
+        newtim = &tim_vga; pal = -1;
         break;
     default:
         return -1;
     }
 
-    disp_scanout_stop();
-    gfx_exp = exp;
+    rebuild = (newtim != tim);
+
+    if (rebuild)
+        disp_scanout_stop();
+    else
+        gfx_wait_vblank();
+
+    gfx_stride = stride;
+    gfx_rows = rows;
 
     if (exp == EXP_CONSOLE) {
-        tim = &tim_vga;
+        /* Blank the whole pool first: on a live switch core1 is still
+         * scanning it out, and the old graphics picture would show for
+         * a frame under the console expander before the repaint. */
+        memset(disp_fb, 0, DISP_FB_POOL);
+        gfx_exp = exp;
+        __dmb();
+        tim = newtim;
         console_gfx(0);         /* clears and repaints the console */
     } else {
-        static uint8_t defpal[3][16] = {
-            /* modes 0/3: black, white */
-            { 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7, 0, 7 },
-            /* modes 1/4: black, red, yellow, white */
-            { 0, 1, 3, 7, 0, 1, 3, 7, 0, 1, 3, 7, 0, 1, 3, 7 },
-            /* modes 2/5: the full set */
-            { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7 },
-        };
-        const uint8_t *dp = defpal[exp == EXP_1BPP_5TO8 ? 0 :
-                                   exp == EXP_4BPP_X3 ? 1 : 2];
-        for (int i = 0; i < 16; i++)
-            gfx_pal[i] = bbc_rgb332[dp[i] & 7];
-        tim = &tim_xga;
+        for (i = 0; i < 16; i++)
+            gfx_pal[i] = bbc_rgb332[defpal[pal][i] & gfx_physmask(exp)];
+        /* Palette, table and framebuffer all ready BEFORE core1 is
+         * told to use them - gfx_exp is the handover, and nothing the
+         * expanders read may still be stale when it changes. */
+        gfx_lut_rebuild(exp);
+        memset(disp_fb, 0, (int)stride * rows);
         console_gfx(1);
-        memset(disp_fb, 0, size);
-        gfx_lut_rebuild();
+        gfx_exp = exp;
+        __dmb();
+        tim = newtim;
     }
 
-    disp_scanout_start();
-    return size;
+    if (rebuild)
+        disp_scanout_start();
+    return (int)stride * rows;
 }
 
-/* Set logical colour -> BBC physical colour (0-15; 8-15 map steady). */
+/* Set logical colour -> physical colour.  Modes 0-5 take the authentic
+ * BBC 0-7 (8-15 flash on real hardware; here they map steady); MODE 7
+ * takes all 16. */
 void display_gfx_pal(uint8_t logical, uint8_t physical)
 {
-    gfx_pal[logical & 15] = bbc_rgb332[physical & 7];
-    gfx_lut_rebuild();
+    enum gexp ex = gfx_exp;
+
+    gfx_pal[logical & 15] = bbc_rgb332[physical & gfx_physmask(ex)];
+    gfx_lut_rebuild(ex);
 }
 
-/* Current graphics framebuffer size (0 = console mode). */
+/* Current graphics framebuffer size (0 = console mode: the geometry is
+ * zeroed on the way back, so this needs no special case). */
 int display_gfx_size(void)
 {
-    return (gfx_exp == EXP_CONSOLE) ? 0 : gfx_stride * 256;
+    return (int)gfx_stride * gfx_rows;
 }
 
 void display_init(void)
@@ -582,5 +680,5 @@ void display_init(void)
 
     disp_scanout_start();
 
-    kputs("HDMI display: 640x480 console, BBC graphics modes 0-5\n");
+    kputs("HDMI display: 640x480 console, graphics modes 0-5 and 7\n");
 }

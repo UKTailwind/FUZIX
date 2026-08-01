@@ -10,17 +10,22 @@
  * (US/UK/DE/FR/ES/BE, case-insensitive) */
 #define PICOIOC_KBDMAP 0x0002
 
-/* BBC graphics (PC3: see PC3-GFX-DESIGN.md).  All on /dev/sys. */
+/* Graphics (PC3: see PC3-GFX-DESIGN.md).  All on /dev/sys. */
 
-/* data -> int: BBC mode 0-5, or 0xFF back to the text console */
+/* data -> int: BBC mode 0-5, mode 7 (320x240 16 colours, NOT teletext),
+ * or 0xFF back to the text console.  Modes 0-5 scan out at 1024x768
+ * and the console and mode 7 at 640x480; switching within one of those
+ * groups holds the monitor's lock, crossing between them does not. */
 #define GFXIOC_MODE   0x0003
 
-/* data -> int: (logical colour << 8) | BBC physical colour 0-15 */
+/* data -> int: (logical colour << 8) | physical colour.  Modes 0-5
+ * take the authentic BBC 0-7; mode 7 takes all 16. */
 #define GFXIOC_PAL    0x0004
 
 /* data -> struct gfx_blit: copy bytes into the mode framebuffer.
  * Layout (PC3 modes): 4bpp high nibble = left pixel, 1bpp MSB = left;
- * line stride 160 bytes (modes 1/4) or 80 (modes 0/2/3/5), 256 lines. */
+ * line stride 160 bytes (modes 1/4/7) or 80 (modes 0/2/3/5), and 256
+ * lines - except mode 7, which has 240. */
 struct gfx_blit {
     uint16_t offset;            /* byte offset into the framebuffer */
     uint16_t len;

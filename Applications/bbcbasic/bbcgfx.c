@@ -8,10 +8,17 @@
  *   0: 640x256, 2 colours, 1bpp, 80 bytes/line
  *   1: 320x256, 4 colours (stored 4bpp), 160 bytes/line
  *   2: 160x256, 16 colours, 4bpp, 80 bytes/line
+ * plus one mode of our own:
+ *   7: 320x240, 16 colours, 4bpp, 160 bytes/line
+ * MODE 7 is NOT teletext.  The number is reused for the 320x240 4bpp
+ * geometry MMBasic wants, which shares the console's 640x480 raster:
+ * switching between MODE 7 and the console (or into it from BASIC)
+ * leaves the monitor locked.
+ *
  * Graphics units are the authentic 1280x1024, origin bottom-left,
  * movable with VDU 29.  Text in a graphics mode renders with the
- * interpreter's own 8x8 font.  MODE with n > 5 (or QUIT) returns to
- * the Fuzix text console.
+ * interpreter's own 8x8 font.  MODE with any other n (or QUIT)
+ * returns to the Fuzix text console.
  *
  * Hooked from xeqvdu (bbccos.c) ahead of the ANSI terminal path:
  * fuzix_gfx_vdu() returns 1 when it consumed the call.  While a
@@ -43,7 +50,13 @@ extern int ioctl(int, int, ...);
 static uint8_t fb[160 * 256];           /* shadow framebuffer (worst case) */
 static int fd = -1;
 static int curmode = -1;                /* -1 = console */
-static int width, stride, bpp, colmask;
+static int width, height, stride, bpp, colmask;
+
+/* Is n one of ours, or does it mean "back to the text console"? */
+static int gfx_mode_ours(int n)
+{
+    return (n >= 0 && n <= 5) || n == 7;
+}
 
 /* graphics state, BBC units */
 static int gx[3], gy[3];                /* point history: [0] newest */
@@ -76,7 +89,7 @@ static void flush(void)
     gb.buf = fb + gb.offset;
     if (fd >= 0)
         ioctl(fd, GFXIOC_BLIT, &gb);
-    dirty_lo = 256;
+    dirty_lo = height;
     dirty_hi = -1;
 }
 
@@ -84,7 +97,7 @@ static void flush(void)
 static void pset(int x, int y, uint8_t c)
 {
     uint8_t *p;
-    if (x < 0 || y < 0 || x >= width || y >= 256)
+    if (x < 0 || y < 0 || x >= width || y >= height)
         return;
     if (bpp == 4) {
         p = fb + y * stride + (x >> 1);
@@ -105,7 +118,7 @@ static void pset(int x, int y, uint8_t c)
 static void hline(int x0, int x1, int y, uint8_t c)
 {
     int x;
-    if (y < 0 || y >= 256)
+    if (y < 0 || y >= height)
         return;
     if (x0 > x1) { x = x0; x0 = x1; x1 = x; }
     if (x0 < 0) x0 = 0;
@@ -162,11 +175,16 @@ static void triangle(int x0, int y0, int x1, int y1, int x2, int y2, uint8_t c)
     }
 }
 
-/* --- BBC units -> pixels -------------------------------------------------- */
-static int xshift;      /* units-per-pixel log2: mode0=1, mode1=2, mode2=3 */
+/* --- BBC units -> pixels --------------------------------------------------
+ * The graphics unit space is always 1280x1024 with the origin at the
+ * bottom left, whatever the mode's pixel grid.  Horizontally every mode
+ * divides 1280 by a power of two; vertically 1024/height is only a
+ * shift for the 256-line modes, so scale by height and shift by 10 -
+ * which collapses to the same >>2 when height is 256. */
+static int xshift;      /* units-per-pixel log2: mode0=1, mode1/7=2, mode2=3 */
 
 static int px_of(int ux) { return (ux + ox) >> xshift; }
-static int py_of(int uy) { return 255 - ((uy + oy) >> 2); }
+static int py_of(int uy) { return (height - 1) - (((uy + oy) * height) >> 10); }
 
 /* POINT(x,y): logical colour at BBC graphics coordinates, -1 off-screen */
 int gfx_point(int x, int y)
@@ -176,7 +194,7 @@ int gfx_point(int x, int y)
         return -1;
     px = px_of(x);
     py = py_of(y);
-    if (px < 0 || px >= width || py < 0 || py >= 256)
+    if (px < 0 || px >= width || py < 0 || py >= height)
         return -1;
     if (bpp == 4) {
         uint8_t b = fb[py * stride + (px >> 1)];
@@ -199,10 +217,10 @@ static void putglyph(int ch, int col, int row)
 
 static void text_scroll(void)
 {
-    memmove(fb, fb + 8 * stride, (256 - 8) * stride);
-    memset(fb + (256 - 8) * stride, 0, 8 * stride);
+    memmove(fb, fb + 8 * stride, (height - 8) * stride);
+    memset(fb + (height - 8) * stride, 0, 8 * stride);
     dirty_lo = 0;
-    dirty_hi = 255;
+    dirty_hi = height - 1;
 }
 
 static void text_char(int ch)
@@ -228,8 +246,8 @@ static void text_char(int ch)
         tx = ty = 0;
         return;
     case 12:
-        memset(fb, 0, stride * 256);
-        dirty_lo = 0; dirty_hi = 255;
+        memset(fb, 0, stride * height);
+        dirty_lo = 0; dirty_hi = height - 1;
         tx = ty = 0;
         return;
     case 127:
@@ -261,13 +279,20 @@ static int gfx_enter(int n)
 
     switch (n) {
     case 0: case 3:
-        width = 640; stride = 80; bpp = 1; colmask = 1; xshift = 1;
+        width = 640; height = 256; stride = 80;
+        bpp = 1; colmask = 1; xshift = 1;
         break;
     case 1: case 4:
-        width = 320; stride = 160; bpp = 4; colmask = 3; xshift = 2;
+        width = 320; height = 256; stride = 160;
+        bpp = 4; colmask = 3; xshift = 2;
+        break;
+    case 7:
+        width = 320; height = 240; stride = 160;
+        bpp = 4; colmask = 15; xshift = 2;
         break;
     default: /* 2, 5 */
-        width = 160; stride = 80; bpp = 4; colmask = 15; xshift = 3;
+        width = 160; height = 256; stride = 80;
+        bpp = 4; colmask = 15; xshift = 3;
         break;
     }
     curmode = n;
@@ -280,8 +305,8 @@ static int gfx_enter(int n)
     tbg = 0;
     tx = ty = 0;
     tcols = width / 8;
-    trows = 32;
-    dirty_lo = 256;
+    trows = height / 8;
+    dirty_lo = height;
     dirty_hi = -1;
     return 0;
 }
@@ -346,8 +371,8 @@ int fuzix_gfx_vdu(int code, int data1, int data2)
     (void)data2;
 
     if (curmode < 0) {
-        /* console mode: only MODE 0-5 is ours */
-        if (vdu == 22 && (code & 0xFF) <= 5) {
+        /* console mode: only a mode we implement is ours */
+        if (vdu == 22 && gfx_mode_ours(code & 0xFF)) {
             if (gfx_enter(code & 0xFF) == 0)
                 return 1;
         }
@@ -356,7 +381,7 @@ int fuzix_gfx_vdu(int code, int data1, int data2)
 
     switch (vdu) {
     case 22:                            /* MODE */
-        if ((code & 0xFF) <= 5) {
+        if (gfx_mode_ours(code & 0xFF)) {
             gfx_enter(code & 0xFF);
         } else {
             gfx_exit();
@@ -374,9 +399,9 @@ int fuzix_gfx_vdu(int code, int data1, int data2)
 
     case 16:                            /* CLG */
         memset(fb, (bpp == 4) ? (gbg | (gbg << 4)) :
-                   ((gbg & 1) ? 0xFF : 0), stride * 256);
+                   ((gbg & 1) ? 0xFF : 0), stride * height);
         dirty_lo = 0;
-        dirty_hi = 255;
+        dirty_hi = height - 1;
         flush();
         return 1;
 

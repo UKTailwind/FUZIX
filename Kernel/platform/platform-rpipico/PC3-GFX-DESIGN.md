@@ -13,7 +13,42 @@ framebuffer interface it drives.  Companion to PC3-DEVNOTES.md.
     4     320x256  4        10K     as 1, half memory
     5     160x256  16       10K     as 2, half memory
     6     160x256  2        5K      (treat as 4-family)
-    (MODE 7 teletext: out of scope, as in BBCSDL)
+
+Plus one mode that is not a BBC mode at all:
+
+    7     320x240  16       37.5K   MMBasic's geometry
+
+Teletext is out of scope (as in BBCSDL), so the number 7 is free and
+is reused for the 320x240 4bpp mode MMBasic wants.  Documented as a
+deliberate departure: anyone expecting SAA5050 will not find it.
+
+## Two rasters, and what a mode switch costs
+
+The monitor only ever sees the RASTER - the pixel clock, the sync
+command lists and the DMA chain.  The MODE is just how core1 expands
+each line into that raster, so a change of mode inside one raster
+costs nothing the monitor can detect.  Two rasters, therefore:
+
+    640x480   clk_hstx = clk_sys/3   the text console, and MODE 7
+    1024x768  clk_hstx = clk_sys     BBC modes 0-5
+
+Switching within either group is done live, during vertical blanking,
+with HSTX and core1 still running: palette, LUT and framebuffer are
+all made ready first and `gfx_exp` is the handover.  The monitor keeps
+lock and only the picture changes.  Only 640x480 <-> 1024x768 stops
+and rebuilds the scanout, and that is the only switch that resyncs.
+
+This is MMBasic's split: `setmode()` changes DISPLAY_TYPE after a
+bounded wait for the frame boundary and touches no hardware, while
+`restartHDMI()` - the teardown, HSTX reset and rebuild - runs only for
+a change of `Option.Resolution`.  MODE 7 was put on the console's
+raster deliberately so that entering and leaving graphics from BASIC,
+which is the common case, never makes the screen blink.
+
+Blanking is ~670us at XGA and ~1.4ms at VGA; the swap needs ~80us at
+worst (clear the framebuffer, rebuild the LUT), so it always lands
+inside one interval.  The wait is bounded at 50ms regardless: if core1
+ever stops, a mode change must not hang the caller.
 
 ## Display timing: 1024x768
 
@@ -72,10 +107,20 @@ text console already renders tiles:
 
 DECIDED: no 2bpp path at all - MODE 1/4 store 4bpp with the colour
 CHOICE limited to 4, sharing the MODE 2 pipeline.  Framebuffer sizes:
-mode 0: 640x256/8 = 20480; modes 1/2: 320x256/2 = 40960.  The console
-allocation (38400 fb + 6400 tiles = 44800 bytes) is a union with
-this, so no extra SRAM is needed and the expander only ever handles
-two formats.
+mode 0: 640x256/8 = 20480; modes 1/2: 320x256/2 = 40960; mode 7:
+320x240/2 = 38400, which is exactly the console's own framebuffer.
+The console allocation (38400 fb + 6400 tiles = 44800 bytes) is a
+union with this, so no extra SRAM is needed and the expander only
+ever handles two formats.
+
+MODE 7's expander is the cheapest of the lot: 160 source bytes, each
+one LUT word, x2 across and x2 down into the 640x480 raster - 640
+output pixels exactly, no borders, and no division to find the source
+line (`active >> 1`).  Its 16 logical colours default to 16 DISTINCT
+physical colours: 0-7 the authentic BBC set, 8-15 a darker companion
+set, since a mode advertised as 16-colour should show sixteen without
+the program having to set a palette up first.  The BBC modes still
+reach only physicals 0-7, as on real hardware.
 
 Line budget: 1024x768@58 = 45kHz lines = ~7000 cycles: ~6.8/pixel on
 the M33 with word writes and LUTs - tight but comparable to what the
@@ -84,18 +129,24 @@ core.
 
 ## Kernel/userland interface
 
-/dev/gfx (new char device):
+AS BUILT: three ioctls on /dev/sys, not a new device - the platform
+already has a control device and a mode switch is not worth a second
+one.  See pico_ioctl.h.
 
-    ioctl GFXIOC_SETMODE  (uint8_t)  0..6 BBC mode; 0xFF back to console
-    ioctl GFXIOC_SETPAL   (uint16_t) logical<<8 | rgb332
-    lseek/write                      raw BBC-res framebuffer bytes
+    GFXIOC_MODE  (int)  0-5 BBC mode, 7, or 0xFF back to the console
+    GFXIOC_PAL   (int)  logical<<8 | physical
+    GFXIOC_BLIT  (struct gfx_blit)  offset, len, buf
 
-The app owns a shadow framebuffer in its workspace (<=20K of the
+The app owns a shadow framebuffer in its workspace (<=40K of the
 ~110K), renders everything there (lines, fills, text-at-graphics-
-cursor with the bbcfont), and pushes dirty byte ranges with plain
-lseek+write.  A full-frame push is 20K = well under a millisecond;
-PLOT-heavy programs push only the rows they touched.  No mmap needed,
-no shared state, swap-safe by construction.
+cursor with the bbcfont), and pushes dirty byte ranges with BLIT.
+A full-frame push is 20-38K = well under a millisecond; PLOT-heavy
+programs push only the rows they touched.  No mmap needed, no shared
+state, swap-safe by construction.
+
+Note gfx_blit's offset and len are uint16_t, which every mode fits
+inside today (the largest framebuffer is 40960).  A mode bigger than
+64K would have to widen them.
 
 While a graphics mode is active the kernel console suspends screen
 rendering (kernel messages go to the serial mirror only); SETMODE
@@ -115,14 +166,19 @@ pixel grid, origin bottom-left, as authentic.
 
 ## Plan
 
-1. Kernel: mode-switch scaffolding in display.c (timing tables, HSTX
-   clock divider, 1024x768 command lists), console suspend/resume.
-2. Kernel: BBC framebuffer + core1 scanline expanders (start MODE 1:
-   320x4colours x3x3 - the easiest and the most-used games mode),
-   /dev/gfx device + ioctls.
-3. App: VDU/PLOT engine rendering to the shadow fb + dirty-range
-   pushes.  First light: MODE 1 : GCOL 0,1 : PLOT 85 triangles.
-4. Remaining modes (2/5 then 0/3/6 with option (a)), palette/VDU19,
-   flood fill, VDU5 text.
-5. Test with classic listings; measure; then decide if the (b)
-   stretch option and flashing colours are worth it.
+1. DONE  Kernel: mode-switch scaffolding in display.c (timing tables,
+   HSTX clock divider, 1024x768 command lists), console
+   suspend/resume.
+2. DONE  Kernel: framebuffer + core1 scanline expanders, GFXIOC on
+   /dev/sys.
+3. DONE  App: VDU/PLOT engine rendering to the shadow fb + dirty-range
+   pushes.
+4. DONE  Modes 0/3, 1/4, 2/5, palette/VDU19.
+5. DONE  MODE 7 (320x240x16) on the console's raster, and the split
+   between a live mode change and a scanout rebuild.
+6. NEXT  A C header exposing the mode switch and the drawing calls, so
+   translated MMBasic (mmbc) can use them.  Open question to settle
+   first: what a program should do when it selects a graphics mode
+   with no HDMI attached - fail, or run blind.
+7. Then: flood fill, VDU5 text, VDU24 graphics window; test with
+   classic listings; measure.  Flashing colours probably never.
