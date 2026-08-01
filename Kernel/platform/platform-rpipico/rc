@@ -9,6 +9,9 @@ prtroot >/etc/mtab
 swapon /dev/hdc 14208
 # USB keyboard layout: us uk de fr es be
 picoctl keymap uk
+# Auto-repeat: kbdrate <repeat> <first delay>, in TENTHS of a second.
+# 1 6 = 600ms before the first repeat, then 100ms between the rest.
+kbdrate 1 6
 #Uncomment if you have multiple file systems
 #fsck -a
 #mount -a
