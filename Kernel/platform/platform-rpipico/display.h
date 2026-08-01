@@ -56,6 +56,13 @@ void display_gfx_colour(uint32_t rgb888);
 int display_gfx_curcol(void);
 int display_gfx_getpixel(int x, int y);
 
+/* RGB888 -> the live mode's own colour, without setting the current one.
+ * Bitmap takes an explicit foreground and background, so it needs both
+ * converted; bc < 0 means transparent, as MMBasic's -1 does. */
+uint8_t display_gfx_map(uint32_t rgb888);
+int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
+                       int fc, int bc, const uint8_t *bitmap);
+
 /* Current geometry, for GFXIOC_INFO. */
 void display_gfx_geom(uint16_t *w, uint16_t *h, uint16_t *stride,
                       uint8_t *bpp, uint8_t *mode);

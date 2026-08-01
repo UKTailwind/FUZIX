@@ -80,6 +80,34 @@ struct gfx_info {
  * which returns RGB888 - the caller maps the index back. */
 #define GFXIOC_GETPIXEL 0x0011
 
+/* A filled rectangle in the current colour, which is also how lines
+ * arrive (x1 == x2 or y1 == y2).  One call for the whole span, so the
+ * syscall is paid once instead of per pixel - the reason the drawing
+ * primitives are in the kernel at all. */
+struct gfx_rect {
+	int16_t x1, y1, x2, y2;
+};
+#define GFXIOC_RECT   0x0012
+
+/* Draw a 1-bit source bitmap, scaled, with its own foreground and
+ * background - MMBasic's DrawBitmap, and how text reaches the screen.
+ * Both colours are RGB888; bg = -1 leaves the paper alone, which is
+ * MMBasic's transparency.  The source bits are MSB-first, row-major,
+ * exactly as MMBasic's fonts are packed, so they interchange. */
+struct gfx_bitmap {
+	int16_t x, y;
+	uint8_t width, height;	/* of the SOURCE, in pixels */
+	uint8_t scale;
+	uint8_t pad;
+	int32_t fg;		/* RGB888 */
+	int32_t bg;		/* RGB888, or -1 for transparent */
+	void *bits;
+};
+#define GFXIOC_BITMAP 0x0013
+/* Bits are copied in before drawing, so the source has a ceiling: an
+ * 8x12 glyph is 12 bytes and 32x32 is the largest square that fits. */
+#define GFX_BITMAP_MAX 256
+
 /* BBC sound (PC3): the SOUND statement's raw parameters; the channel
  * word carries the &1x flush and &Sxx sync bits.  Returns -1/EAGAIN
  * when that channel's note queue is full. */

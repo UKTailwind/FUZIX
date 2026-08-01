@@ -153,6 +153,40 @@ int plt_dev_ioctl(uarg_t request, char *data)
         uint32_t v = (uint32_t)data;
         return display_gfx_getpixel(v & 0x3FF, (v >> 10) & 0x1FF);
     }
+    if (request == GFXIOC_RECT)
+    {
+        struct gfx_rect gr;
+        if (uget(data, &gr, sizeof(gr)))
+            return -1;
+        return display_gfx_rect(gr.x1, gr.y1, gr.x2, gr.y2,
+                                display_gfx_curcol());
+    }
+    if (request == GFXIOC_BITMAP)
+    {
+        /* The bits are read where they lie.  Copying them in would want
+         * a buffer the kernel has no room for - RAM here is within a
+         * few hundred bytes of full - and valaddr_r blesses the whole
+         * span once, which is the same guarantee for a lot less. */
+        struct gfx_bitmap gb;
+        int nbytes;
+        if (uget(data, &gb, sizeof(gb)))
+            return -1;
+        if (gb.width == 0 || gb.height == 0 || gb.scale == 0) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        nbytes = ((int)gb.width * gb.height + 7) / 8;
+        if (valaddr_r(gb.bits, nbytes) != (usize_t)nbytes) {
+            udata.u_error = EFAULT;
+            return -1;
+        }
+        return display_gfx_bitmap(gb.x, gb.y, gb.width, gb.height,
+                                  gb.scale,
+                                  display_gfx_map((uint32_t)gb.fg),
+                                  gb.bg < 0 ? -1
+                                            : display_gfx_map((uint32_t)gb.bg),
+                                  gb.bits);
+    }
     if (request == GFXIOC_INFO)
     {
         struct gfx_info gi;

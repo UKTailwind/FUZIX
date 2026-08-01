@@ -730,7 +730,10 @@ void display_gfx_geom(uint16_t *w, uint16_t *h, uint16_t *stride,
  * change, keeps the per-pixel path down to a store. */
 static uint8_t gfx_curcol = 1;
 
-void display_gfx_colour(uint32_t rgb888)
+/* RGB888 -> whatever the live mode uses.  Split out from the current
+ * colour because DrawBitmap takes an explicit foreground and background
+ * and must convert both without disturbing it. */
+uint8_t display_gfx_map(uint32_t rgb888)
 {
     enum gexp ex = gfx_exp;
     uint8_t want, best = 0, i;
@@ -740,8 +743,7 @@ void display_gfx_colour(uint32_t rgb888)
     if (gfx_bpp(ex) == 1) {
         /* Two colours: anything that is not black is ink.  This is what
          * MMBasic's DrawPixel2 does with its `if (c)`. */
-        gfx_curcol = rgb888 ? 1 : 0;
-        return;
+        return rgb888 ? 1 : 0;
     }
 
     /* 4bpp here is PALETTISED - gfx_pal[] maps 16 logical colours to
@@ -763,7 +765,12 @@ void display_gfx_colour(uint32_t rgb888)
             best = i;
         }
     }
-    gfx_curcol = best;
+    return best;
+}
+
+void display_gfx_colour(uint32_t rgb888)
+{
+    gfx_curcol = display_gfx_map(rgb888);
 }
 
 int display_gfx_curcol(void)
@@ -892,6 +899,84 @@ int display_gfx_rect(int x1, int y1, int x2, int y2, int c)
                     row[x >> 3] |= 0x80 >> (x & 7);
                 else
                     row[x >> 3] &= ~(0x80 >> (x & 7));
+            }
+        }
+    }
+    return 0;
+}
+
+/* A scaled 1-bit source bitmap - MMBasic's DrawBitmap2 and DrawBitmap16
+ * folded into one, because at this level they differ only in how a pixel
+ * is stored.  Every character on the screen goes through this, which is
+ * why the editor needs it before anything else.
+ *
+ * fc and bc are already reduced to the mode's own colours; bc < 0 leaves
+ * the background alone, which is MMBasic's `bc == -1` transparency.
+ *
+ * TWO conventions differ from MMBasic and both are deliberate:
+ *
+ *   - the SOURCE bit order is MMBasic's, verbatim, so its fonts and
+ *     BLIT data can be used unchanged.  It looks strange - the shift is
+ *     taken from the END of the bitmap - but for any bitmap whose total
+ *     bit count is a multiple of 8 (every font) it is plain MSB-first.
+ *   - the DESTINATION is ours: 1bpp MSB = leftmost pixel and 4bpp high
+ *     nibble = left pixel, where MMBasic uses `1 << (x % 8)` and the
+ *     low nibble.  See PC3-GFX-DESIGN.md - the port is unified with
+ *     MicroPython's framebuf so assets interchange between the two PC3
+ *     environments, and the scanout expander is indifferent.
+ */
+int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
+                       int fc, int bc, const uint8_t *bitmap)
+{
+    enum gexp ex = gfx_exp;
+    int w = gfx_width(ex);
+    int h = (ex == EXP_CONSOLE) ? DISP_HEIGHT : gfx_rows;
+    int stride = (ex == EXP_CONSOLE) ? DISP_STRIDE : gfx_stride;
+    int bpp = gfx_bpp(ex);
+    int nbits = width * height;
+    int i, j, k, m, x, y, c;
+
+    if (!w)
+        return -1;
+    if (width <= 0 || height <= 0 || scale <= 0)
+        return -1;
+    /* wholly off-screen: MMBasic's own early out, before any work */
+    if (x1 >= w || y1 >= h ||
+        x1 + width * scale < 0 || y1 + height * scale < 0)
+        return 0;
+
+    for (i = 0; i < height; i++) {              /* source scan line */
+        for (j = 0; j < scale; j++) {           /* repeated to scale */
+            y = y1 + i * scale + j;
+            if (y < 0 || y >= h)
+                continue;
+            for (k = 0; k < width; k++) {       /* bit in that line */
+                int n = i * width + k;
+                int set = (bitmap[n >> 3] >> ((nbits - n - 1) & 7)) & 1;
+
+                c = set ? fc : bc;
+                if (c < 0)
+                    continue;                   /* transparent paper */
+                for (m = 0; m < scale; m++) {
+                    uint8_t *p;
+
+                    x = x1 + k * scale + m;
+                    if (x < 0 || x >= w)
+                        continue;
+                    if (bpp == 4) {
+                        p = &disp_fb[y * stride + (x >> 1)];
+                        if (x & 1)
+                            *p = (*p & 0xF0) | (c & 15);
+                        else
+                            *p = (*p & 0x0F) | ((c & 15) << 4);
+                    } else {
+                        p = &disp_fb[y * stride + (x >> 3)];
+                        if (c)
+                            *p |= 0x80 >> (x & 7);
+                        else
+                            *p &= ~(0x80 >> (x & 7));
+                    }
+                }
             }
         }
     }

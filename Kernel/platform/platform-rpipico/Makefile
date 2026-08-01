@@ -14,11 +14,15 @@ endif
 ifeq ($(SUBTARGET),pico_w)
 TOTALMEM=160
 endif
+# 316, not 320: the kernel needed a fourth K of the 512K and the top of
+# the pool was unreachable slack anyway (PROGSIZE caps a process at
+# 256K).  linker_overrides/memory_ram.incl must agree - it carves the
+# same split, and nothing checks that the two match.
 ifeq ($(SUBTARGET),pico2)
-TOTALMEM=320
+TOTALMEM=316
 endif
 ifeq ($(SUBTARGET),pico2_w)
-TOTALMEM=320
+TOTALMEM=316
 endif
 
 PICOTOOLFLAGS= --family rp2040
