@@ -2109,3 +2109,83 @@ MMINTEGER mm_timer(void)
 {
     return mm_ms_now() - mm_timer_base;
 }
+
+/* CLS.  Clearing through the console rather than the framebuffer keeps
+ * this working on the host and over a serial terminal, and on the PC3
+ * the console IS the display - it renders ANSI into the framebuffer and
+ * resets the per-cell colours, which poking disp_fb directly would not
+ * do.  A graphics-mode CLS will need the framebuffer path instead. */
+void mm_cls(void)
+{
+    fputs("\033[2J\033[H", stdout);
+    fflush(stdout);
+}
+
+/* ---- graphics (PC3) --------------------------------------------------
+ * MMBasic's contract: callers speak RGB888 and the primitive converts.
+ * On the PC3 that primitive is in the kernel, so this is two ioctls at
+ * worst and one in the common case - the colour is only pushed when it
+ * changes, which is what makes a fill loop cheap.  Measured 1.30us per
+ * pixel against MMBasic's 5us for the whole PIXEL statement.
+ *
+ * The ioctl numbers are duplicated from the platform's pico_ioctl.h
+ * rather than included, so the runtime does not need the FUZIX tree on
+ * the include path.  Keep them in step.  */
+#if defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
+
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+
+#define MM_GFXIOC_PIXEL    0x000F
+#define MM_GFXIOC_COLOUR   0x0010
+#define MM_GFXIOC_GETPIXEL 0x0011
+#define MM_GFX_PACK(x, y)  (((x) & 0x3FF) | (((y) & 0x1FF) << 10))
+
+static int mm_gfx_fd = -2;              /* -2 = not tried yet */
+static MMINTEGER mm_gfx_col = -1;       /* last colour pushed */
+
+static int mm_gfx_open(void)
+{
+    if (mm_gfx_fd == -2)
+        mm_gfx_fd = open("/dev/sys", O_RDWR);
+    return mm_gfx_fd;
+}
+
+void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb)
+{
+    if (mm_gfx_open() < 0)
+        return;                         /* no display: draw nothing */
+    if (rgb != mm_gfx_col) {
+        ioctl(mm_gfx_fd, MM_GFXIOC_COLOUR,
+              (void *)(long)(rgb & 0xFFFFFF));
+        mm_gfx_col = rgb;
+    }
+    ioctl(mm_gfx_fd, MM_GFXIOC_PIXEL,
+          (void *)(long)MM_GFX_PACK((int)x, (int)y));
+}
+
+MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
+{
+    int r;
+    if (mm_gfx_open() < 0)
+        return 0;
+    r = ioctl(mm_gfx_fd, MM_GFXIOC_GETPIXEL,
+              (void *)(long)MM_GFX_PACK((int)x, (int)y));
+    return (r < 0) ? 0 : (MMINTEGER)r;  /* off-screen reads black */
+}
+
+#else   /* host: no display, but translated programs must still run */
+
+void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb)
+{
+    (void)x; (void)y; (void)rgb;
+}
+
+MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
+{
+    (void)x; (void)y;
+    return 0;
+}
+
+#endif

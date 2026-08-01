@@ -272,6 +272,11 @@ static void w_timer_set(void){ mm_timer_set(LL(0)); A = 0; }
 static void w_set_date(void) { mm_set_date(Ps(0)); A = 0; }
 static void w_set_time(void) { mm_set_time(Ps(0)); A = 0; }
 
+/* graphics - every argument and result is RGB888, as in MMBasic */
+static void w_pixel(void)    { mm_pixel(LL(0), LL(2), LL(4)); A = 0; }
+static void w_pixel_get(void){ A = mm_pixel_get(LL(0), LL(2)); }
+static void w_cls(void)      { mm_cls(); A = 0; }
+
 /* LONGSTRING */
 static void w_ls_len(void)   { A = mm_ls_len(PI(0)); }
 static void w_ls_clear(void) { mm_ls_clear(PI(0), I(1)); A = 0; }
@@ -442,6 +447,9 @@ static const struct mmwrap {
 	{ "mm_timer_set",	w_timer_set },
 	{ "mm_set_date",	w_set_date },
 	{ "mm_set_time",	w_set_time },
+	{ "mm_pixel",		w_pixel },
+	{ "mm_pixel_get",	w_pixel_get },
+	{ "mm_cls",		w_cls },
 	{ "mm_ls_len",		w_ls_len },
 	{ "mm_ls_clear",	w_ls_clear },
 	{ "mm_ls_append",	w_ls_append },

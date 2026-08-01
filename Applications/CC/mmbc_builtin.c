@@ -266,6 +266,15 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval(sfmt("mm_field(%s, %s, %s, %s)", a0, a1, delim, quote),
                      TY_S);
     }
+    if (strcmp(up, "PIXEL") == 0) {
+        /* PIXEL(x, y) reads a pixel back AS RGB888 - the kernel
+           primitive maps the mode's own colour numbering back out,
+           so nothing here knows about depths or palettes. */
+        const char *a0 = n(0);
+        const char *a1 = n(1);
+
+        return mkval(sfmt("mm_pixel_get(%s, %s)", a0, a1), TY_I);
+    }
     cv_err("built-in %s() is not supported yet", up);
     return mkval(NULL, TY_NONE);        /* not reached */
 
