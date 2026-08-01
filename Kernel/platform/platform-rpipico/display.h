@@ -41,6 +41,7 @@ bool display_stack_ok(void);
 int display_gfx_mode(int mode);
 void display_gfx_pal(uint8_t logical, uint8_t physical);
 int display_gfx_size(void);
+int display_gfx_fbsize(void);
 
 /* Drawing primitives, dispatched by the current mode - MMBasic's shape
  * (it swings a DrawPixel/DrawRectangle function pointer at each mode

@@ -154,7 +154,7 @@ int plt_dev_ioctl(uarg_t request, char *data)
     if (request == GFXIOC_BLIT)
     {
         struct gfx_blit gb;
-        int size = display_gfx_size();
+        int size = display_gfx_fbsize();
         if (uget(data, &gb, sizeof(gb)))
             return -1;
         if (size == 0 || gb.offset >= size || gb.len > size - gb.offset) {

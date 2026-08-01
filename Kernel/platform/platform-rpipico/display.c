@@ -675,6 +675,17 @@ int display_gfx_size(void)
     return (int)gfx_stride * gfx_rows;
 }
 
+/* Size of the DRAWABLE framebuffer, which is not the same thing: the
+ * console is drawable (640x480 1bpp = 38400 bytes) but its graphics
+ * geometry is zeroed, so display_gfx_size() reports 0 for it.  BLIT
+ * must use this, or it rejects every write to the text console. */
+int display_gfx_fbsize(void)
+{
+    if (gfx_exp == EXP_CONSOLE)
+        return DISP_STRIDE * DISP_HEIGHT;
+    return (int)gfx_stride * gfx_rows;
+}
+
 /* --- drawing primitives -------------------------------------------------- */
 /* Width and depth of the live mode.  The console is drawable too: it is
  * a 640x480 1bpp bitmap, with colour coming from the per-cell tiles. */
