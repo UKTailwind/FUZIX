@@ -244,6 +244,15 @@ static unsigned long t_budget(void)
 	return (unsigned long)cached;
 }
 
+/* THUMB_NOFUSE=1 turns push/op fusion off, for A/B without a rebuild */
+static int t_nofuse(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = getenv("THUMB_NOFUSE") ? 1 : 0;
+	return cached;
+}
+
 /*
  *	THUMB_SKIP=name[,name...] keeps the named functions in bytecode.
  *	A debugging knob: when a whole-program build misbehaves and the
@@ -376,6 +385,144 @@ static void t_mark_target(unsigned long addr)
 	if (t_dry && addr >= fn_start && addr - fn_start < TMAX)
 		t_targets[(addr - fn_start) >> 3] |=
 		    1 << ((addr - fn_start) & 7);
+}
+
+/*
+ *	Push/op fusion.
+ *
+ *	A stack machine wraps every binary operator in a round trip
+ *	through memory: PUSH stores the left operand and the operator
+ *	loads it straight back, a few instructions later.  When nothing
+ *	in between can disturb r2 (r2:r3 for the wide forms), the value
+ *	can just stay in the register:
+ *
+ *	    push ; <builders> ; op   ->   subs r4,#4 ; mov r2,r0
+ *	                                  <builders>
+ *	                                  adds r4,#4 ; op r0,r2,r0
+ *
+ *	The r4 pair stays.  It costs two instructions but keeps the VM
+ *	stack pointer honest, which LOCAL addressing and anything that
+ *	reads the stack depend on; what actually goes is the store and
+ *	the load - two memory accesses per binary operator.
+ *
+ *	Unlike the statement seam this skips no ops: every op is still
+ *	translated, so tmap and the target bitmap stay complete and a
+ *	jump into the window is the only hazard.  That one is real - the
+ *	landing site would find r2 holding nothing - so the whole window
+ *	is checked against t_targets, and calls are excluded because a
+ *	BL clobbers r2/r3 and the callee reads the stack.
+ */
+static unsigned long t_fuse_at;		/* offset of the fused operator */
+static unsigned char t_fuse_width;
+
+/* A builder leaves the right operand in A and touches neither r2/r3
+   nor the VM stack; the length is the op's encoded size.  Anything not
+   listed here ends the window - conversions included, since in a
+   version-3 object they are calls through the helper vector. */
+static unsigned t_builder_len(unsigned op)
+{
+	switch (op) {
+	case BC_NOP:
+	case BC_LOAD8S: case BC_LOAD8U:
+	case BC_LOAD16S: case BC_LOAD16U:
+	case BC_LOAD32: case BC_LOAD64:
+	case BC_SEXT8: case BC_SEXT16: case BC_SEXT32:
+	case BC_ZEXT8: case BC_ZEXT16: case BC_ZEXT32:
+	case BC_TRUNC64:
+	case BC_NEG: case BC_NOT:
+	case BC_NEG64: case BC_NOT64:
+	case BC_NEGD:
+		return 1;
+	case BC_CONST8:
+	case BC_LOCAL8:
+		return 2;
+	case BC_CONST16:
+	case BC_LOCAL16:
+		return 3;
+	case BC_CONST32:
+	case BC_ADDR:
+		return 5;
+	case BC_CONST64:
+		return 9;
+	}
+	return 0;
+}
+
+/* Operators that can take their left operand from the parked register
+   pair instead of the stack.  The 32- and 64-bit forms read it into
+   r2 (r2:r3) anyway.  The double forms call the aeabi routine with the
+   left in r0:r1 and the right in r2:r3 - the mirror image of the
+   parked layout - so only the commutative ones qualify: calling with
+   the operands the other way round gives the same answer. */
+static int t_fusable_op(unsigned op, unsigned width)
+{
+	if (width == 4) {
+		switch (op) {
+		case BC_ADD: case BC_SUB: case BC_MUL:
+		case BC_DIVS: case BC_DIVU: case BC_REMS: case BC_REMU:
+		case BC_AND: case BC_OR: case BC_XOR:
+		case BC_SHL: case BC_SHRS: case BC_SHRU:
+		case BC_EQ: case BC_NE:
+		case BC_LTS: case BC_LTU: case BC_GTS: case BC_GTU:
+		case BC_LES: case BC_LEU: case BC_GES: case BC_GEU:
+			return 1;
+		}
+		return 0;
+	}
+	switch (op) {
+	case BC_ADD64: case BC_SUB64:
+	case BC_AND64: case BC_OR64: case BC_XOR64:
+	case BC_EQ64: case BC_NE64:
+	case BC_LTS64: case BC_LTU64: case BC_GTS64: case BC_GTU64:
+	case BC_LES64: case BC_LEU64: case BC_GES64: case BC_GEU64:
+		return 1;
+	case BC_ADDD: case BC_MULD:	/* commutative: see above */
+	case BC_EQD: case BC_NED:
+		return 1;
+	}
+	return 0;
+}
+
+/*
+ *	Does the push at o begin a fusable window?  Records where the
+ *	operator is, for the operator case to find.
+ */
+static int t_fuse_scan(unsigned long o, unsigned width,
+		       unsigned long start, unsigned long end)
+{
+	unsigned long p = o + 1;
+	unsigned n = 0;
+	unsigned len;
+
+	if (t_nofuse())
+		return 0;
+	while (p < end && n <= 6) {
+		unsigned op = codebuf[p];
+		/* a landing site anywhere in the window, operator
+		   included, and the parked register is a lie */
+		if (t_targets[(p - start) >> 3] & (1 << ((p - start) & 7)))
+			return 0;
+		if (t_fusable_op(op, width)) {
+			t_fuse_at = p;
+			t_fuse_width = (unsigned char)width;
+			return 1;
+		}
+		len = t_builder_len(op);
+		if (!len)
+			return 0;
+		p += len;
+		n++;
+	}
+	return 0;
+}
+
+/* True when the operator at o is the one a fusable push parked for. */
+static int t_fused(unsigned long o, unsigned width)
+{
+	if (t_fuse_at != o || t_fuse_width != width)
+		return 0;
+	t_fuse_at = 0;
+	return 1;
 }
 
 static unsigned long t_boolbranch(unsigned long o, unsigned cond,
@@ -646,12 +793,20 @@ static unsigned long t_seam(unsigned long o, unsigned long start,
 /* stacked OP A: stacked operand -> left (r0/r1), A -> right (r2/r3),
    pop 8.  Result (value or 0/1 flag) comes back in r0/r1; compares
    leave r1 as garbage, which the low-32 contract permits. */
-static void t_dcpbin(unsigned slot)
+/*
+ *	fused = the left operand is already parked in r2:r3 and A holds
+ *	the right, which is the aeabi argument order reversed.  Only
+ *	commutative operators are ever fused (t_fusable_op), so the call
+ *	goes out as it stands and four instructions disappear.
+ */
+static void t_dcpbin(unsigned slot, int fused)
 {
-	t16(0x4602);		/* mov  r2, r0  - A low  -> right */
-	t16(0x460B);		/* mov  r3, r1  - A high          */
-	t16(0x6820);		/* ldr  r0, [r4, #0] - left low   */
-	t16(0x6861);		/* ldr  r1, [r4, #4] - left high  */
+	if (!fused) {
+		t16(0x4602);	/* mov  r2, r0  - A low  -> right */
+		t16(0x460B);	/* mov  r3, r1  - A high          */
+		t16(0x6820);	/* ldr  r0, [r4, #0] - left low   */
+		t16(0x6861);	/* ldr  r1, [r4, #4] - left high  */
+	}
 	t16(0x3408);		/* adds r4, #8  - pop the operand */
 	t32(0xF8D5, 0xC000 | (slot * 4));	/* ldr.w r12, [r5, #] */
 	t16(0x47E0);		/* blx  r12                       */
@@ -945,6 +1100,7 @@ static int t_span(unsigned long start, unsigned long end)
 	t_depth = 0;
 	t_epoch = 0;	/* every walk must evolve identically */
 	t_seamn = 0;
+	t_fuse_at = 0;	/* no push is parked across a walk */
 	while (o < end) {
 		unsigned op = codebuf[o];
 
@@ -1064,6 +1220,15 @@ static int t_span(unsigned long start, unsigned long end)
 
 		/* ---- CP-B: stack, locals, loads, stores, addresses -- */
 		case BC_PUSH:
+			if (t_fuse_scan(o, 4, start, end)) {
+				t16(0x3C04);	/* subs r4, #4      */
+				t16(0x4602);	/* mov  r2, r0      */
+				t_d = 4;
+				t_keep = 1;
+				t_track.slot.kind = 0;
+				o++;
+				break;
+			}
 			t16(0x3C04);		/* subs r4, #4      */
 			t16(0x6020);		/* str  r0, [r4]    */
 			/* A untouched: its facts survive.  Whatever A is
@@ -1286,7 +1451,10 @@ static int t_span(unsigned long start, unsigned long end)
 		case BC_SHL:
 		case BC_SHRS:
 		case BC_SHRU:
-			t16(0x6822);		/* ldr  r2, [r4] */
+			/* left operand: parked in r2 by a fused push, or
+			   still on the stack */
+			if (!t_fused(o, 4))
+				t16(0x6822);	/* ldr  r2, [r4] */
 			t16(0x3404);		/* adds r4, #4   */
 			switch (op) {
 			case BC_ADD:  t16(0x1810); break;  /* adds r0,r2,r0 */
@@ -1450,7 +1618,8 @@ static int t_span(unsigned long start, unsigned long end)
 			static const unsigned char cc[] = {
 				0, 1, 11, 3, 12, 8, 13, 9, 10, 2
 			};	/* eq ne lt lo gt hi le ls ge hs */
-			t16(0x6822);		/* ldr  r2, [r4]   */
+			if (!t_fused(o, 4))
+				t16(0x6822);	/* ldr  r2, [r4]   */
 			t16(0x3404);		/* adds r4, #4     */
 			t16(0x4282);		/* cmp  r2, r0     */
 			t_d = -4;	/* fall-through keeps facts; the taken
@@ -1490,10 +1659,14 @@ static int t_span(unsigned long start, unsigned long end)
 		case BC_LOAD64:
 			/* Two plain ldr, never ldrd: rd64 assembles bytes,
 			   so any alignment the interpreter accepts must
-			   work here too, and plain loads take unaligned */
-			t16(0x1832);		/* adds r2, r6, r0   */
-			t16(0x6810);		/* ldr  r0, [r2]     */
-			t16(0x6851);		/* ldr  r1, [r2, #4] */
+			   work here too, and plain loads take unaligned.
+			   The address lives in r0 and the high word is
+			   loaded first, so this needs no scratch register -
+			   it used r2, and r2 is where push/op fusion parks
+			   the left operand. */
+			t16(0x1830);		/* adds r0, r6, r0   */
+			t16(0x6841);		/* ldr  r1, [r0, #4] */
+			t16(0x6800);		/* ldr  r0, [r0]     */
 			t_d = 0;
 			o++;
 			break;
@@ -1520,6 +1693,16 @@ static int t_span(unsigned long start, unsigned long end)
 			o++;
 			break;
 		case BC_PUSH64:
+			if (t_fuse_scan(o, 8, start, end)) {
+				t16(0x3C08);	/* subs r4, #8       */
+				t16(0x4602);	/* mov  r2, r0       */
+				t16(0x460B);	/* mov  r3, r1       */
+				t_d = 8;
+				t_keep = 1;
+				t_track.slot.kind = 0;
+				o++;
+				break;
+			}
 			/* low word at the lower address, as push64 does */
 			t16(0x3C08);		/* subs r4, #8       */
 			t16(0x6020);		/* str  r0, [r4]     */
@@ -1557,8 +1740,10 @@ static int t_span(unsigned long start, unsigned long end)
 		case BC_AND64:
 		case BC_OR64:
 		case BC_XOR64:
-			t16(0x6822);		/* ldr  r2, [r4]     */
-			t16(0x6863);		/* ldr  r3, [r4, #4] */
+			if (!t_fused(o, 8)) {
+				t16(0x6822);	/* ldr  r2, [r4]     */
+				t16(0x6863);	/* ldr  r3, [r4, #4] */
+			}
 			t16(0x3408);		/* adds r4, #8       */
 			switch (op) {
 			case BC_ADD64:
@@ -1615,8 +1800,10 @@ static int t_span(unsigned long start, unsigned long end)
 		 */
 		case BC_EQ64:
 		case BC_NE64:
-			t16(0x6822);		/* ldr  r2, [r4]     */
-			t16(0x6863);		/* ldr  r3, [r4, #4] */
+			if (!t_fused(o, 8)) {
+				t16(0x6822);	/* ldr  r2, [r4]     */
+				t16(0x6863);	/* ldr  r3, [r4, #4] */
+			}
 			t16(0x3408);		/* adds r4, #8       */
 			t16(0x4042);		/* eors r2, r0       */
 			t16(0x404B);		/* eors r3, r1       */
@@ -1636,8 +1823,10 @@ static int t_span(unsigned long start, unsigned long end)
 					op == BC_GTU64 || op == BC_LEU64);
 			unsigned ge = (op == BC_GES64 || op == BC_GEU64 ||
 				       op == BC_LES64 || op == BC_LEU64);
-			t16(0x6822);		/* ldr  r2, [r4]     */
-			t16(0x6863);		/* ldr  r3, [r4, #4] */
+			if (!t_fused(o, 8)) {
+				t16(0x6822);	/* ldr  r2, [r4]     */
+				t16(0x6863);	/* ldr  r3, [r4, #4] */
+			}
 			t16(0x3408);		/* adds r4, #8       */
 			if (swap) {
 				t16(0x1A80);	/* subs r0, r0, r2   */
@@ -1696,22 +1885,22 @@ static int t_span(unsigned long start, unsigned long end)
 			break;
 
 		/* ---- direct DCP arithmetic (version 3) -------------- */
-		case BC_ADDD:	t_dcpbin(NHS_DADD);   o++; break;
-		case BC_SUBD:	t_dcpbin(NHS_DSUB);   o++; break;
-		case BC_MULD:	t_dcpbin(NHS_DMUL);   o++; break;
-		case BC_DIVD:	t_dcpbin(NHS_DDIV);   o++; break;
-		case BC_EQD:	t_dcpbin(NHS_DCMPEQ); o++; break;
+		case BC_ADDD:	t_dcpbin(NHS_DADD, t_fused(o, 8));   o++; break;
+		case BC_SUBD:	t_dcpbin(NHS_DSUB, 0);   o++; break;
+		case BC_MULD:	t_dcpbin(NHS_DMUL, t_fused(o, 8));   o++; break;
+		case BC_DIVD:	t_dcpbin(NHS_DDIV, 0);   o++; break;
+		case BC_EQD:	t_dcpbin(NHS_DCMPEQ, t_fused(o, 8)); o++; break;
 		case BC_NED:
-			t_dcpbin(NHS_DCMPEQ);
+			t_dcpbin(NHS_DCMPEQ, t_fused(o, 8));
 			t16(0x2201);	/* movs r2, #1        */
 			t16(0x4050);	/* eors r0, r2 - != is
 					   !(==), NaN included */
 			o++;
 			break;
-		case BC_LTD:	t_dcpbin(NHS_DCMPLT); o++; break;
-		case BC_GTD:	t_dcpbin(NHS_DCMPGT); o++; break;
-		case BC_LED:	t_dcpbin(NHS_DCMPLE); o++; break;
-		case BC_GED:	t_dcpbin(NHS_DCMPGE); o++; break;
+		case BC_LTD:	t_dcpbin(NHS_DCMPLT, 0); o++; break;
+		case BC_GTD:	t_dcpbin(NHS_DCMPGT, 0); o++; break;
+		case BC_LED:	t_dcpbin(NHS_DCMPLE, 0); o++; break;
+		case BC_GED:	t_dcpbin(NHS_DCMPGE, 0); o++; break;
 		case BC_ADDF: case BC_SUBF: case BC_MULF: case BC_DIVF:
 		case BC_EQF: case BC_NEF: case BC_LTF: case BC_GTF:
 		case BC_LEF: case BC_GEF:
