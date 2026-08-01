@@ -11,12 +11,10 @@ committing to the design.
 
 ## What the machine has today
 
-There is **no editor at all** on the card - `ls /usr/bin` has no `ed`,
-no `vi`, no `ue`, no `levee`.  Files are written on a PC and sent over
-with `uusend.py`.  So this is not a matter of preferring a nicer
-editor to an existing one; it is the missing piece that stops the
-machine being self-contained, in the same way the compiler was before
-v0.4.
+`/bin` has `ed`, `vi`, `vile`, `levee` and `ue`.  What it does not have
+is anything modern or WYSIWYG, and `ue` in particular mangled the
+display - which turned out to be the console's wrap bug, not `ue`
+(see STAGE 1 below).  None of them colour BASIC.
 
 Relevant facts, all verified on the board:
 
@@ -85,6 +83,23 @@ not rendered - cosmetic.
 **We do not have to write a renderer.**  That is the single reason
 this port is a few weeks rather than a rewrite.
 
+## STAGE 1 IS DONE (commit 41d7ee07b)
+
+Both blockers below are fixed and measured on hardware.  `wraptest`
+(utils/wraptest.c) asks the console where the cursor actually is with
+CSI 6n, so the result does not depend on anyone looking at the screen.
+
+Against the old kernel, 4 of 7 failed - including the one that matters
+most, writing the bottom right cell scrolling the whole screen:
+
+    after writing col 80, cursor stays    (2,1)  want (1,80)  FAIL
+    DECAWM off: no wrap, stays on col 80  (7,2)  want (6,80)  FAIL
+    DECAWM back on: defers again          (9,1)  want (8,80)  FAIL
+    bottom-right cell does not scroll     (40,1) want (40,80) FAIL
+
+Against the new kernel all seven pass.  The rest of this section is
+kept as the record of what was wrong and why.
+
 ## Blocker 1: the console always wraps
 
 `charout()` in console.c wraps unconditionally the moment the 80th
@@ -111,17 +126,31 @@ Two pieces of work, both in console.c:
 This is the one change that must land in the kernel, and it is small
 and independently testable.
 
-## Blocker 2: no function keys
+## Blocker 2: the function keys were not VT100
 
 The editor is driven from the function keys - F1 save-and-exit, F2
 save-exit-and-run, F3 find, F5, F10, and so on, plus SHIFT-F3 for
 find-again.  All twelve appear in the key dispatch.
 
-`kbd_decode.c` emits proper VT100 for arrows, Home, End, Insert,
-Delete, PgUp and PgDn - but HID usages 0x3A-0x45 (F1-F12) have **no
-cases at all**, so the USB keyboard produces nothing for them.  They
-need adding as the usual xterm sequences (`ESC O P..S` for F1-F4,
-`ESC [ 15~` onwards for F5-F12), with shifted variants.
+The keyboard was **inconsistent with itself**.  `kbd_decode.c` emits
+proper VT100 for arrows, Home, End, Insert, Delete, PgUp and PgDn, but
+F1-F12 fell through to the layout tables, which carry MMBasic's
+pseudo-ASCII codes (0x91-0x9c, shifted 0xb1-0xbc) because they were
+imported from MMBasic wholesale.  So F1 pushed a bare 0x91 while the
+up arrow pushed `ESC [ A`.
+
+Fixed by emitting what a terminal emits - SS3 P..S for F1-F4,
+`CSI 15/17..24 ~` for F5-F12 (16 and 22 skipped, as on a VT220), and
+xterm's modifier form when shifted.  The deciding argument is that one
+`pc3` termcap entry has to describe both this keyboard and a serial
+terminal on the same tty, and the editor must work over the serial
+console - TeraTerm cannot send 0x91.  A program wanting MMBasic's
+codes maps them back in its own `inkey()`, which the editor has to do
+for the serial case anyway.
+
+termcap gained `xn` (the magic-margin flag, which now describes us
+honestly), `k1`-`k12`, and the editing cluster - so `vi`, `levee` and
+`ue` get function keys as a side effect.
 
 ## The shim we have to write
 
@@ -185,17 +214,18 @@ Two options, and they give genuinely different products:
    feedback on what will actually translate - type `SPRITE` and it
    stays white.
 
-My recommendation is (1) with (2) available as a switch, because a
-keyword that is real MMBasic but unsupported here should not look like
-a typo - but it *should* be distinguishable, so a third colour for
-"valid MMBasic, not supported by mmbc" may be better than either.
-Your call; it changes the table format, so it is worth settling first.
+**DECIDED: three colours.**  A keyword that is real MMBasic but not
+supported by mmbc gets its own colour - distinct from both a supported
+keyword and from ordinary text.  That makes the editor live feedback
+on translator coverage without ever lying about what is valid MMBasic.
+The table therefore needs a flag per entry, not two separate lists:
+generate it from MMBasic's command/token names with the mmbc-supported
+set (fcc/coverage.py) marking the flag.
 
 ## Proposed staging
 
-1. **Kernel console: deferred wrap + DECAWM, and F1-F12 in
-   kbd_decode.c.**  Independent of everything else, testable on its
-   own, and useful to any full-screen program.
+1. **DONE** - Kernel console: deferred wrap + DECAWM, F1-F12 in
+   kbd_decode.c, termcap.  `wraptest` passes 7/7 on hardware.
 2. **Measure PSRAM memmove bandwidth** and decide flat buffer vs gap
    buffer.
 3. **The shim**: raw mode, `inkey()`, arena allocation, file I/O,
