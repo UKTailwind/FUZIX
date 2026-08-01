@@ -3524,6 +3524,10 @@ def main(argv):
             strict = True
         elif a == '--fcc':
             fcc = True
+        elif a == '--gcc':
+            # the default here, and the board build's opposite: mmbc on
+            # the PC3 translates for the Fuzix compiler unless asked
+            fcc = False
         elif a == '--tokens':
             tokens = True
         elif a in ('-h', '--help'):

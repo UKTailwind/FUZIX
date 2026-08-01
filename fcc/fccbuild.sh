@@ -76,11 +76,19 @@ if grep -qv '^\.*$' "$W/$b.cc1.err"; then
 	echo "CC1 SAID:"; grep -v '^\.*$' "$W/$b.cc1.err"
 fi
 
-rm -f "$W/$b.bc"
-"$BIN/cc2" .symtmp armm0 0 < "$W/$b.ir" 1<> "$W/$b.bc" 2> "$W/$b.cc2.err"
+rm -f "$W/$b.raw" "$W/$b.bc"
+"$BIN/cc2" .symtmp armm0 0 < "$W/$b.ir" 1<> "$W/$b.raw" 2> "$W/$b.cc2.err"
 if [ $? != 0 ] || [ -s "$W/$b.cc2.err" ]; then
 	echo "CC2 FAIL"; cat "$W/$b.cc2.err"; exit 1
 fi
+# The "#!" line the board's cc writes ahead of the object, so a program
+# copied to the PC3 runs as ./prog.bc and not only under bcrun.  Every
+# bcrun and bcdump skips it and offsets it; without it the shell reads
+# the object as a script and says "syntax error at line 1".  cc2 keeps
+# stdout open read-write, so the line is prepended afterwards rather
+# than seeded into the file it writes.
+{ printf '#!/usr/bin/bcrun\n'; cat "$W/$b.raw"; } > "$W/$b.bc"
+chmod 755 "$W/$b.bc"
 
 echo "built $W/$b.bc ($(stat -c %s "$W/$b.bc") bytes)"
 if [ "$act" = run ]; then

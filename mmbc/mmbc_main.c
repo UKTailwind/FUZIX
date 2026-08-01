@@ -191,7 +191,20 @@ int main(int argc, char **argv)
     const char *src = NULL;
     const char *dst = NULL;
     const char *out;
-    int rep = 0, strict = 0, fcc = 0, tokens = 0;
+    /*
+     * On the board the only compiler is the Fuzix one, which is C89:
+     * the gcc-shaped output uses compound literals for array bounds
+     * and will not compile there.  So the board build translates for
+     * its own compiler unless told otherwise, and --gcc asks for the
+     * host form.  The host build keeps the old default so the gates,
+     * which pass the mode explicitly, compare like with like.
+     */
+#ifdef MMBC_ARENA
+    int fcc = 1;
+#else
+    int fcc = 0;
+#endif
+    int rep = 0, strict = 0, tokens = 0;
     int k;
 
     for (k = 1; k < argc; k++) {
@@ -203,6 +216,8 @@ int main(int argc, char **argv)
             strict = 1;
         } else if (strcmp(argv[k], "--fcc") == 0) {
             fcc = 1;
+        } else if (strcmp(argv[k], "--gcc") == 0) {
+            fcc = 0;
         } else if (strcmp(argv[k], "--tokens") == 0) {
             tokens = 1;
         } else if (strcmp(argv[k], "-h") == 0
@@ -216,7 +231,18 @@ int main(int argc, char **argv)
                    "carrying on\n");
             printf("  --fcc     C89 output for the Fuzix C compiler: "
                    "no\n");
-            printf("            compound literals\n");
+            printf("            compound literals%s\n",
+#ifdef MMBC_ARENA
+                   " (the default here)");
+#else
+                   "");
+#endif
+            printf("  --gcc     C99 output for a host compiler%s\n",
+#ifdef MMBC_ARENA
+                   "");
+#else
+                   " (the default here)");
+#endif
             return 0;
         } else {
             src = argv[k];
