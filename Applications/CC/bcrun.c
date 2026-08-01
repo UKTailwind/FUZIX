@@ -2113,6 +2113,17 @@ static int force_bytecode;	/* BCRUN_BYTECODE=1: ignore native code */
  *	entries, so interpreter execution is invisible: this measures
  *	what NATIVE code still pays for.
  */
+/*
+ *	BCRUN_SITES=1 is the other half: a counter per code offset,
+ *	incremented in the interpreter's dispatch.  A pure-bytecode
+ *	build (BCODE_ONLY) then reports how often each op SITE really
+ *	runs, which is what turns a static count of peephole
+ *	opportunities into a weighted one.  Interpreted, so the timings
+ *	mean nothing - only the ratios do.
+ */
+static uint32_t *prof_site;
+static unsigned long prof_site_n;
+
 static int prof_on;
 static uint32_t prof_op[256];		/* helper_op by opcode      */
 static uint32_t prof_lib[256];		/* helper_libcall by index  */
@@ -2122,6 +2133,17 @@ static void prof_dump(void)
 {
 	unsigned i;
 
+	if (prof_site) {
+		unsigned long o;
+		FILE *f = fopen(getenv("BCRUN_SITES"), "w");
+		if (f) {
+			for (o = 0; o < prof_site_n; o++)
+				if (prof_site[o])
+					fprintf(f, "%lu %lu\n", o,
+						(unsigned long)prof_site[o]);
+			fclose(f);
+		}
+	}
 	if (!prof_on)
 		return;
 	fprintf(stderr, "-- bcrun profile --\n");
@@ -2354,6 +2376,8 @@ static int64_t bc_exec(unsigned long entry)
 		if (trace)
 			fprintf(stderr, "%04lx: op %02x A=%ld sp=%lx\n",
 				pc, code[pc], (long)A, sp);
+		if (prof_site && pc < prof_site_n)
+			prof_site[pc]++;
 		op = fetch8();
 		switch (op) {
 		case BC_NOP:
@@ -2757,9 +2781,13 @@ int main(int argc, char *argv[])
 	}
 	force_bytecode = getenv("BCRUN_BYTECODE") != NULL;
 	prof_on = getenv("BCRUN_PROF") != NULL;
-	if (prof_on)
+	if (prof_on || getenv("BCRUN_SITES"))
 		atexit(prof_dump);	/* mm_end() exits through here */
 	load(argv[i]);
+	if (getenv("BCRUN_SITES")) {
+		prof_site_n = h.h_code;
+		prof_site = calloc(prof_site_n, sizeof(*prof_site));
+	}
 	return run();
 }
 
