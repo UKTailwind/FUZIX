@@ -112,6 +112,88 @@ live document.
    block in read() with VMIN=0/VTIME=1 (the tty wakes you the moment a
    byte arrives) - see kbwait1() in bbccon.c.
 
+## Status (2026-08-01): pc3-v0.4 shipped — MMBasic self-hosts
+
+Release: https://github.com/UKTailwind/FUZIX/releases/tag/pc3-v0.4
+(kernel uf2 + pc3-sd-cc.img.gz + manual). BOTH the kernel and the card
+are needed: the card carries the compiler, the kernel carries the
+loader that honours its stack request.
+
+`mmbc prog.bas; cc prog.c; ./prog.bc` all run on the machine. The
+3200-line solar eclipse translates, compiles and runs here in 3.24 s
+(MMBasic 12.5, MicroPython 8.8); Dhrystone compiled on the board is
+90,021/s, a quarter of gcc -O2 cross-compiled for the same chip.
+
+Fixed this session, each of which had been taking the machine down:
+
+- **8K USERSTACK was not enough for the compiler passes.** Recursive
+  descent over a large program overflows it silently into BSS. Binaries
+  now ASK: the ELF loader honours `PT_GNU_STACK` p_memsz (capped by
+  `USERSTACK_MAX`), cc1/cc2 request 32K and mmbc 16K. The linker script
+  has an explicit PHDRS list, so `ld -z stack-size` is silently ignored
+  — the request is a NOLOAD section placed LAST (placing it first
+  shifts .text up by the stack size) sized by `--defsym __stack_size=N`.
+  **Test this class of bug off-hardware: `ulimit -s 8` on the host
+  build reproduces it exactly.**
+- **cc1 `sym_find_idx` compared index lists without checking length** —
+  it read past shorter dimension lists and could match on the rubbish
+  beyond, returning another type's dimensions.
+- **cc2 arena**: the request is measured by walking the carve list
+  twice. The 32K node-pool reserve must be COUNTED while measuring and
+  NOT carved while placing — carving it put backend.c's later node-pool
+  carve outside the granted region, where valaddr refuses I/O, and cc2
+  died on its first read (EFAULT dressed up as "short read").
+- **Board cc2 defaults to THUMB_RECLAIM**: the board bcrun always runs
+  native, and an eclipse that keeps its dead bytecode does not fit a
+  256K process.
+- **USB keyboard**: the LED report is a control transfer on EP0 and was
+  issued inline from wherever a lock key was decoded. That wedged EP0 —
+  the keyboard worked until the next lock key, and thereafter a device
+  could attach but never enumerate. It now goes out from `hid_poll`
+  only, one transfer at a time, left dirty and retried if refused. The
+  mount callback now has three rules, not two: no set_protocol, no
+  receive_report, no set_report.
+- **Stray Return after the boot prompt**: auto-repeat on a key whose
+  release was never fetched (the pump is starved through mount and
+  init). `kbd_repeat_check` re-arms after a poll gap instead of firing.
+
+**Interrupts: read PC3-IRQ-REVIEW.md before touching a vector.** The
+SDK's mechanisms work on this port — VTOR points at the SDK's
+`ram_vector_table` and runtime handler installation works. The comment
+in rawuart.c saying otherwise is wrong, and it cost a day. Defining
+`isr_irqN` for a slot the SDK or a library also claims makes
+`irq_add_shared_handler` chain over a handler it did not install, and
+the SDK's answer to that is `panic()` — a BKPT, which without a
+debugger is a HardFault with HFSR.DEBUGEVT and a PC inside the SDK's
+printf.
+
+Debug builds: `PC3_USB_TRACE=1` gives TinyUSB's own trace through the
+small printf in usbtrace.c (level 2 overflows kernel RAM, level 1
+fits); `PC3_NO_KBD_LEDS=1` builds the LED report out. Flashing without
+touching the buttons: `picoctl flash` from a booted shell (`sync` and
+`remount / ro` first), then copy the uf2 to the RP2350 drive — but only
+with the board's DPDT USB switch in the PROGRAMMING position. That
+switch is also the rig for USB work: flipping it to the hub is a clean,
+repeatable port-connect event with nothing else going on.
+
+## NEXT: graphics for MMBasic — a 320x240 4bpp mode
+
+The agreed next task. Add a 320x240 4-bit (16 colour) driver to BBC
+BASIC as **MODE 7**, because that is the geometry MMBasic needs. Then
+expose the kernel's mode-switch calls through a header so C — and
+therefore translated MMBasic — can select the mode and draw in it.
+
+That header is the first of the peripheral surfaces `mmbc` will grow.
+The rest (GPIO, I2C/SPI/one-wire, sound) should follow the same shape:
+a documented C interface in `/usr/lib/cc/include`, a runtime inside
+bcrun, and translator support in mmb2c + the mmbc mirror, with
+Appendix C of the manual regenerated from the tables
+(`mmb2c fcc/coverage.py`) as coverage grows.
+
+Open question to settle when starting: what a translated program should
+do when it selects a graphics mode with no HDMI attached — fail, or run
+blind.
+
 ## Status (2026-07-27 evening): the full machine
 
 ALL CONFIRMED ON HARDWARE: BBC BASIC runs with GRAPHICS (Phase 5,
