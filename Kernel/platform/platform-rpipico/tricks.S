@@ -295,6 +295,32 @@ switchin:
     ldr r1, =runticks
     strh r0, [r1]
 
+	/*
+	 * Resume with interrupts ENABLED.
+	 *
+	 * switchout() does di() on entry and every path out of it re-enables
+	 * before returning - except this one, which does not return at all:
+	 * it falls into plt_switchout and comes back here in the context of
+	 * whichever process is resumed.  Nothing was putting PRIMASK back,
+	 * so a process resumed through here carried on with interrupts off.
+	 *
+	 * Mostly that healed at the next syscall or preemption.  It could
+	 * not heal in tty_putc_maywait's TTY_READY_SOON branch, which yields
+	 * with a bare switchout() and then loops back to ask the driver
+	 * again: interrupts off, so the uart interrupt that would drain the
+	 * transmit ring can never run, so the ring stays full, so it asks
+	 * again, for ever.  The console dies in both directions and the
+	 * machine looks dead while sitting in that loop.
+	 *
+	 * It needed a process to be preempted mid-write with something else
+	 * runnable, which is why it took sustained output to show and why it
+	 * always stopped at about the same point - one scheduling quantum in.
+	 * Measured on the board at the moment of the hang: PRIMASK=1 with
+	 * the uart interrupt enabled AND pending AND the uart asserting
+	 * TXRIS, transmit FIFO empty and idle.
+	 */
+    cpsie i
+
     pop {r0}                /* pushed pid */
     pop {r1, r2, r3, r4, r5}
     mov r8, r1

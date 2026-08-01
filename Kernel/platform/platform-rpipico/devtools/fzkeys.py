@@ -17,7 +17,22 @@ import serial
 PORT, BAUD = "COM11", 115200
 
 
-def drain(ser, quiet=0.8, limit=15.0):
+# QUIET GAP, and why it is this long.
+# 
+# Typing into a console that is still streaming is a known way to lock
+# the PC3 up - it is why fzsh.py reads to a prompt and uusend.py
+# refuses to start unless the line is idle.  A full screen repaint here
+# is several kilobytes AND the editor stops to compute syntax colours
+# between lines, so it goes quiet for a long time mid-paint while being
+# nowhere near finished.  A short gap reads that pause as "done" and
+# sends the next key into the middle of the stream.
+# 
+# 3 seconds is well past anything the editor pauses for.  If a test
+# ever looks like it hung, raise this before suspecting the board.
+QUIET = 3.0
+
+
+def drain(ser, quiet=QUIET, limit=60.0):
     buf = b""
     last = time.time()
     t0 = time.time()

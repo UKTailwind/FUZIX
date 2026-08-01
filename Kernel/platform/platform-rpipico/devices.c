@@ -12,6 +12,7 @@
 #include <hardware/irq.h>
 #include <hardware/structs/scb.h>
 #include "core1.h"
+#include "rawuart.h"
 
 struct devsw dev_tab[] =  /* The device driver switch table */
 {
@@ -57,6 +58,10 @@ static void timer_tick_cb(unsigned alarm)
     }
 #endif
     tty_interrupt();
+    /* After the echo, not before: tty_interrupt() is what queues it, and
+     * this is the kick that makes sure a tick's worth of queued output
+     * actually leaves.  See rawuart_tx_poll. */
+    rawuart_tx_poll();
     timer_interrupt();
 
     /* Pre-empt / signal a running user process: pend PendSV, whose

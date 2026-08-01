@@ -160,9 +160,12 @@ static void rawuart_rx_irq(unsigned which)
 		}
 	}
 
-	/* Transmit, as MMBasic does: send the next byte, and when the ring
-	 * runs dry turn the transmit interrupt off again so it stops
-	 * asking. */
+	/*
+	 * Transmit, exactly as MMBasic does it: ONE byte per interrupt, and
+	 * when the ring runs dry turn the transmit interrupt off so it
+	 * stops asking.  This is the whole of it - see rawuart_putc for the
+	 * producer, which is the half that has to be right.
+	 */
 	if (uart_is_writable(uart)) {
 		if (!txring_empty(which))
 			txring_pump(uart, which);
@@ -172,31 +175,24 @@ static void rawuart_rx_irq(unsigned which)
 }
 
 /*
- *	Hook the vector statically, the way tricks.S hooks isr_svcall and
- *	isr_pendsv, rather than calling irq_set_exclusive_handler().
+ *	Installed the SDK's way, with irq_set_exclusive_handler().
  *
- *	That call installs into the table VTOR points at, and only does
- *	anything when the SDK has built a writable RAM vector table. This
- *	kernel is PICO_COPY_TO_RAM, and the call left the default handler
- *	in place: the uart interrupt was enabled in the NVIC but vectored
- *	to __unhandled_user_irq, so no character ever reached the ring
- *	(the console simply did not respond) and a byte arriving after a
- *	reset took a hard fault with a garbage stack pointer.
- *
- *	crt0.S declares isr_irq0..isr_irq79 weak, so a strong definition
- *	here wins at link time and needs no runtime installation at all.
- *	The names must be literal, hence the static assertions.
+ *	These used to be strong definitions of isr_irq33/isr_irq34 hooked
+ *	straight into the vector table, on the belief that the SDK call
+ *	does nothing under PICO_COPY_TO_RAM.  That belief was wrong and is
+ *	recorded as wrong in PC3-IRQ-REVIEW.md: measured on the running
+ *	board, VTOR points at ram_vector_table and runtime installation
+ *	works.  Worse, a strong handler in a slot the SDK also manages is
+ *	what makes irq_add_shared_handler chain over a handler it did not
+ *	install, and the SDK's answer to that is panic().  Two mechanisms
+ *	for one vector is a bug waiting to happen; display.c and sound.c
+ *	already do it this way.
  */
-_Static_assert(UART0_IRQ == 33, "UART0_IRQ moved: rename isr_irq33");
-_Static_assert(UART1_IRQ == 34, "UART1_IRQ moved: rename isr_irq34");
-
-/* Which logical uart each hardware instance belongs to. On the PC3 the
- * console is GP8/GP9, which is hardware uart1. */
 #define LOGICAL_OF_HW0	(DEV_UART_0_INSTANCE == 0 ? 0 : 1)
 #define LOGICAL_OF_HW1	(DEV_UART_0_INSTANCE == 1 ? 0 : 1)
 
-void isr_irq33(void) { rawuart_rx_irq(LOGICAL_OF_HW0); }	/* uart0 */
-void isr_irq34(void) { rawuart_rx_irq(LOGICAL_OF_HW1); }	/* uart1 */
+static void rawuart_irq_hw0(void) { rawuart_rx_irq(LOGICAL_OF_HW0); }
+static void rawuart_irq_hw1(void) { rawuart_rx_irq(LOGICAL_OF_HW1); }
 
 /* Take one character from the ring, or -1 if it is empty. */
 static int rawuart_ring_get(unsigned which)
@@ -247,6 +243,8 @@ static void rawuart_rx_irq_enable(uart_inst_t *uart, unsigned which)
 	 */
 	irq_set_priority(irqn, 0x40);
 
+	irq_set_exclusive_handler(irqn, (uart == uart0) ? rawuart_irq_hw0
+							: rawuart_irq_hw1);
 	irq_set_enabled(irqn, true);
 	uart_set_irq_enables(uart, true, false);
 }
@@ -362,10 +360,148 @@ static inline uart_inst_t *rawuart_instance(uint_fast8_t num)
     return uart_get_instance(num == 0 ? DEV_UART_0_INSTANCE : DEV_UART_1_INSTANCE);
 }
 
+/*
+ *	Called from the timer tick.  This is the safety net, and the reason
+ *	it has to exist is worth stating plainly.
+ *
+ *	The PL011 transmit interrupt is a watermark CROSSING, not a level,
+ *	and the SDK sets the threshold to 1/8 - four bytes of a 32 byte
+ *	FIFO.  A FIFO that never rises above four therefore never crosses
+ *	the watermark on the way down and never interrupts again.  In
+ *	steady state that is exactly what happens, so console output is not
+ *	really interrupt driven at all: it is driven by the manual kick in
+ *	putc, and the hardware edge almost never fires.
+ *
+ *	That makes a lost kick fatal rather than merely late, and kicks are
+ *	easy to lose.  putc is reached from tty_interrupt(), which runs
+ *	inside timer_tick_cb with PRIMASK set (devices.c does di() on
+ *	entry), and the NVIC pending bit is ONE bit: a whole tick's worth
+ *	of characters coalesces into a single interrupt.  Whatever that one
+ *	interrupt does not send is then stranded with no pending bit and no
+ *	edge coming.  The console stops for ever, in both directions,
+ *	because receive shares the handler - the machine is alive and looks
+ *	dead.
+ *
+ *	Rather than try to prove that can never happen, make it
+ *	recoverable: if the ring has anything in it, ask again.  One
+ *	compare per tick, and a permanent hang becomes a 5ms hiccup.
+ */
+static void hex8(char *p, uint32_t v)
+{
+	static const char d[] = "0123456789ABCDEF";
+	int i;
+
+	for (i = 7; i >= 0; i--) {
+		p[i] = d[v & 15];
+		v >>= 4;
+	}
+}
+
+/* Counters the report reads.  ticks proves whether the timer interrupt
+ * is still running, which is the first thing to know when the machine
+ * has gone quiet: everything else is downstream of that. */
+static volatile unsigned rawuart_ticks;
+static unsigned rawuart_notready[2];
+static uint8_t rawuart_reported[2];
+
+/*
+ * Dump the uart's own account of itself TO THE SCREEN.  console_putc
+ * mirrors every byte to the uart as well as the display, so kprintf
+ * dies along with the uart and is no use here; core1 paints the screen
+ * from its own framebuffer and does not care.
+ */
+static void rawuart_report(unsigned w, const char *why)
+{
+	extern void console_screen_puts(const char *s);
+	/* Must fit in 80 columns or the interesting end wraps away. */
+	char msg[] = "\r\n[u0 tk=........ en=. pd=. ac=. pm=. bp=.. "
+		     "ri=.... h=... t=...]\r\n";
+	uart_hw_t *hw = uart_get_hw(rawuart_instance(w));
+	unsigned irqn = (rawuart_instance(w) == uart0) ? UART0_IRQ : UART1_IRQ;
+	volatile uint32_t *iser = (volatile uint32_t *)0xE000E100;
+	volatile uint32_t *ispr = (volatile uint32_t *)0xE000E200;
+	volatile uint32_t *iabr = (volatile uint32_t *)0xE000E300;
+	uint32_t primask, basepri;
+	static const char d[] = "0123456789ABCDEF";
+
+	(void)why;
+	if (rawuart_reported[w])
+		return;
+	rawuart_reported[w] = 1;
+
+	__asm__ volatile ("mrs %0, primask" : "=r" (primask));
+	__asm__ volatile ("mrs %0, basepri" : "=r" (basepri));
+
+	msg[4] = '0' + w;
+	hex8(&msg[9], rawuart_ticks);
+	/* en: enabled in the NVIC.  pd: pending.  ac: ACTIVE - the handler
+	 * was entered and never completed, which is the one state that
+	 * stops delivery for ever while the hardware keeps asking. */
+	msg[21] = '0' + ((iser[irqn >> 5] >> (irqn & 31)) & 1);
+	msg[26] = '0' + ((ispr[irqn >> 5] >> (irqn & 31)) & 1);
+	msg[31] = '0' + ((iabr[irqn >> 5] >> (irqn & 31)) & 1);
+	msg[36] = '0' + (primask & 1);
+	msg[41] = d[(basepri >> 4) & 15];
+	msg[42] = d[basepri & 15];
+	msg[47] = d[(hw->ris >> 12) & 15];
+	msg[48] = d[(hw->ris >> 8) & 15];
+	msg[49] = d[(hw->ris >> 4) & 15];
+	msg[50] = d[hw->ris & 15];
+	msg[54] = d[(txring[w].head >> 8) & 15];
+	msg[55] = d[(txring[w].head >> 4) & 15];
+	msg[56] = d[txring[w].head & 15];
+	msg[60] = d[(txring[w].tail >> 8) & 15];
+	msg[61] = d[(txring[w].tail >> 4) & 15];
+	msg[62] = d[txring[w].tail & 15];
+	console_screen_puts(msg);
+}
+
+/*
+ *	The stall watchdog.
+ *
+ *	If the ring has not moved for a second while holding characters,
+ *	the console is wedged.  Say so ON THE SCREEN - console_putc mirrors
+ *	every byte to the uart as well as the display, so kprintf dies with
+ *	the uart and is no use here, but core1 keeps painting the screen
+ *	out of its own framebuffer regardless.
+ *
+ *	This prints once and then keeps the port alive by polling: the
+ *	point is to get the machine's own account of what the uart was
+ *	doing, not to leave it dead.
+ */
+void rawuart_tx_poll(void)
+{
+	unsigned w;
+
+	rawuart_ticks++;
+
+	for (w = 0; w < 2; w++) {
+		uart_inst_t *uart;
+
+		if (!rawuart_irq_installed[w] || txring_empty(w))
+			continue;
+		uart = rawuart_instance(w);
+		uart_set_irq_enables(uart, true, true);
+		irq_set_pending((uart == uart0) ? UART0_IRQ : UART1_IRQ);
+	}
+}
+
+/* True when interrupts are enabled here, so the transmit interrupt can
+ * be relied on to drain the ring.  It cannot when putc is reached from
+ * tty_interrupt(), because timer_tick_cb holds di() across the tick. */
+static inline int irq_enabled(void)
+{
+    uint32_t primask;
+
+    __asm__ volatile ("mrs %0, primask" : "=r" (primask));
+    return (primask & 1u) == 0;
+}
+
 void rawuart_putc(uint8_t devn, uint8_t c)
 {
     uint_fast8_t w = devn - 1;
     uart_inst_t *uart = rawuart_instance(w);
+    int empty;
 
     /* Before the interrupt is running (boot messages) there is no ring
      * to queue into, so write straight through. */
@@ -377,39 +513,64 @@ void rawuart_putc(uint8_t devn, uint8_t c)
         return;
     }
 
+    /* Sampled BEFORE queueing - see the note below. */
+    empty = uart_is_writable(uart);
+
     /*
-     * A full ring cannot simply wait for the transmit interrupt to
-     * drain it: putc is reached from tty_interrupt(), which runs with
-     * PRIMASK set, so that interrupt could never run and we would hang
-     * forever. Drain by polling instead, which works regardless.
+     * MMBasic's SerialConsolePutC, followed exactly (PicoMite.c ~1210):
+     *
+     *     int empty = uart_is_writable(uart);
+     *     while (buffer full) ;
+     *     buf[head] = c; head = (head + 1) % size;
+     *     if (empty) { while (irqs) {} ; enable tx irq; set pending; }
+     *
+     * Three things in that are load bearing, and we had all three
+     * wrong:
+     *
+     *  1. `empty` is sampled BEFORE queueing.  It records whether the
+     *     transmit engine might be idle, which is the only case where a
+     *     kick is needed at all.  If the FIFO was full, a watermark
+     *     crossing is already guaranteed.
+     *  2. the wait for a full ring does NOT touch the ring.  The
+     *     interrupt is the only consumer.  Ours pumped from here as
+     *     well, and two consumers advancing `tail` - one of them
+     *     interruptible between reading buf[tail] and storing the new
+     *     tail - is how a ring gets left in a state where it is neither
+     *     empty nor has room, which wedges output permanently.
+     *  3. `while (irqs) {}` waits until interrupts are ON before
+     *     enabling and kicking, so the kick cannot be swallowed.
+     *
+     * We cannot do (3) literally: tty_interrupt() echoes from inside
+     * timer_tick_cb, which holds di() across the whole tick, so waiting
+     * there would deadlock.  In that one case the handler's own body is
+     * run inline - which keeps the single-consumer invariant, because
+     * interrupts are already masked and nothing else can be in it.
      */
     while (txring_full(w))
     {
-        if (uart_is_writable(uart))
-            txring_pump(uart, w);
+        if (irq_enabled())
+            continue;           /* the interrupt will drain it: wait */
+        rawuart_rx_irq(w);      /* masked: be the interrupt ourselves */
     }
 
     /*
-     * The ring update has to be atomic. putc is called both from
-     * ordinary kernel context and from tty_interrupt(), which echoes
-     * from inside the timer tick - and the tick preempts ordinary
-     * context. Two calls interleaving between the store to buf[head]
-     * and the update of head corrupt the ring; if that leaves head
-     * equal to tail with the transmit interrupt already turned off,
-     * output stops permanently and the machine goes quiet. It only
-     * shows up under heavy output, which is why it survived hours of
-     * interactive use and then hung during a large file transfer.
+     * The queue itself still has to be atomic against the tick, which
+     * preempts ordinary context and echoes.  Two calls interleaving
+     * between the store to buf[head] and the update of head corrupt the
+     * ring, and if that leaves head equal to tail with the transmit
+     * interrupt already off, output stops for good.
      */
     {
         irqflags_t irq = di();
         txring[w].buf[txring[w].head] = c;
         txring[w].head = (txring[w].head + 1) & (TXRING - 1);
-        /* Ask for the transmit interrupt and kick it, as MMBasic does -
-         * the level interrupt will not fire on its own if the FIFO is
-         * already below the threshold. */
+        irqrestore(irq);
+    }
+
+    if (empty)
+    {
         uart_set_irq_enables(uart, true, true);
         irq_set_pending((uart == uart0) ? UART0_IRQ : UART1_IRQ);
-        irqrestore(irq);
     }
 }
 
@@ -423,7 +584,23 @@ ttyready_t rawuart_ready(uint8_t devn)
         return uart_is_writable(rawuart_instance(w)) ? TTY_READY_NOW
                                                      : TTY_READY_SOON;
     /* Room in the ring is what matters now, not the hardware FIFO. */
-    return txring_full(w) ? TTY_READY_SOON : TTY_READY_NOW;
+    if (!txring_full(w)) {
+        rawuart_notready[w] = 0;
+        return TTY_READY_NOW;
+    }
+    /*
+     * The ring is full, which is the NORMAL steady state when a process
+     * outruns 115200 - the tty layer spins here calling us until the
+     * interrupt frees a slot.  So this is the exact spot the machine
+     * sits in when output wedges, and the one place an instrument can
+     * run with interrupts still enabled.  Report once, to the screen,
+     * because the uart is the thing that cannot be trusted to report on
+     * itself - and count ticks so the dump says whether the timer is
+     * still alive.
+     */
+    if (++rawuart_notready[w] == 2000000u)
+        rawuart_report(w, "tty wait");
+    return TTY_READY_SOON;
 }
 
 int rawuart_getc(uint8_t devn)

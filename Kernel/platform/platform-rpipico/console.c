@@ -613,6 +613,21 @@ static void con_output(uint8_t c)
  * queue where it reads as junk keys and a spurious Escape - each
  * query then consumes the previous stale reply and the session
  * corrupts progressively.  Everything else is forwarded intact. */
+/*
+ * Write to the SCREEN ONLY, never the uart.
+ *
+ * When console output wedges, the uart is exactly what cannot be
+ * trusted to report it - and because console_putc mirrors every byte to
+ * both, an ordinary kprintf dies with it.  The screen is painted by
+ * core1 out of its own framebuffer and does not care, so this is the one
+ * channel that still works.  Diagnostics only.
+ */
+void console_screen_puts(const char *s)
+{
+    while (*s)
+        con_output((uint8_t)*s++);
+}
+
 void console_putc(uint8_t devn, uint8_t c)
 {
     /* Holdback state: shared between process context and the tick IRQ

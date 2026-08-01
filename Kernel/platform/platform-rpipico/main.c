@@ -214,10 +214,14 @@ int main(void)
     }
     ramsize = (SRAM_END - SRAM_BASE) / 1024;
     procmem = USERMEM / 1024;
-    //turn on power led
-    gpio_init(POWER_LED);
-    gpio_set_dir(POWER_LED, GPIO_OUT);
-    gpio_put(POWER_LED, 1);
+    /*
+     * GP25 is NOT an LED here.  That is the plain Pico's on-board LED,
+     * and this code came with the port; on the Pico Computer 3 the pin
+     * is the CYW43's chip select (WL_CS).  The radio is unused and
+     * unpowered, so driving a pin into it does nothing useful and can
+     * leak current back through its protection diodes.  The board has
+     * no LED on a GPIO to turn on, so nothing replaces this.
+     */
 
     /*
      * The boot udata lives at progbase, plain SRAM outside the
