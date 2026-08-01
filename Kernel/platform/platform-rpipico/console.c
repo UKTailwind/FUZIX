@@ -11,7 +11,9 @@
  * (NEL), ESC M (reverse index), ESC c (reset), ESC ( / ESC ) (charset,
  * ignored); CSI A/B/C/D (counted moves), E/F (next/prev line), G (column),
  * d (row), H/f (position), J (0/1/2 erase display), K (0/1/2 erase line),
- * m (SGR: 0,1,7,22,27,30-37,39,40-47,49,90-97), s/u and ?25l/h.
+ * m (SGR: 0,1,7,22,27,30-37,39,40-47,49,90-97), s/u, ?25l/h (cursor)
+ * and ?7l/h (autowrap).  The last column defers its wrap the way a real
+ * VT100 does - see wrap_pend.
  *
  * Because the framebuffer is cell-aligned and the MMBasic console font is
  * one byte per row, plot_char is twelve byte stores and scrolling is a
@@ -61,6 +63,22 @@ static uint8_t con_bright, con_inverse;
 static int16_t saved_x, saved_y;
 static uint8_t saved_ink, saved_paper, saved_bright, saved_inverse;
 static uint8_t cursorhide;
+
+/* Autowrap (DECAWM, CSI ?7 h/l) and the VT100 "last column" flag.
+ *
+ * A real terminal does NOT move the cursor when the last column is
+ * written: the cursor stays there and the wrap happens only when the
+ * next printable character arrives.  Wrapping immediately - which is
+ * what this console used to do - means a full-width line moves the
+ * cursor to the next row, and writing the bottom right cell scrolls
+ * the screen.  Full-screen programs (ue, and the MMBasic editor) paint
+ * the last column routinely, so they came out a line adrift.
+ *
+ * The pending wrap is cancelled by anything that moves the cursor, but
+ * NOT by SGR - an editor that changes colour at the right margin must
+ * still wrap on the following character. */
+static uint8_t con_wrap = 1;    /* DECAWM: set after reset, as on a VT */
+static uint8_t wrap_pend;
 
 /* Parser state */
 #define ST_NORM 0
@@ -198,6 +216,8 @@ static void con_reset(void)
     cx = cy = 0;
     saved_x = saved_y = 0;
     cursorhide = 0;
+    con_wrap = 1;               /* DECAWM is set after a reset */
+    wrap_pend = 0;
     pstate = ST_NORM;
     sgr_reset();
     con_clear_lines(0, CON_ROWS);
@@ -245,7 +265,7 @@ static void do_csi(uint8_t c)
     int16_t n = parm[0] > 0 ? parm[0] : 1;
 
     if (priv) {
-        /* DEC private: only cursor visibility is rendered */
+        /* DEC private modes: cursor visibility and autowrap */
         if (parm[0] == 25) {
             if (c == 'l') {
                 cursorhide = 1;
@@ -253,8 +273,27 @@ static void do_csi(uint8_t c)
             } else if (c == 'h') {
                 cursorhide = 0;
             }
+        } else if (parm[0] == 7) {
+            if (c == 'h' || c == 'l') {
+                con_wrap = (c == 'h');
+                if (!con_wrap)
+                    wrap_pend = 0;
+            }
         }
         return;
+    }
+
+    /* Everything that moves the cursor cancels a pending wrap.  SGR
+     * (m), save cursor (s) and the status reports (n) deliberately do
+     * not - see the note by wrap_pend. */
+    switch (c) {
+    case 'A': case 'B': case 'C': case 'D':
+    case 'E': case 'F': case 'G': case 'd':
+    case 'H': case 'f': case 'J': case 'K': case 'u':
+        wrap_pend = 0;
+        break;
+    default:
+        break;
     }
 
     switch (c) {
@@ -381,26 +420,47 @@ static void charout(uint8_t c)
     switch (pstate) {
     case ST_NORM:
         if (c >= 32 && c != 0x7F) {
-            con_plot(cy, cx, c);
-            if (++cx >= CON_COLS) {
+            /* Take the wrap the PREVIOUS character deferred, scrolling
+             * first so the plot below is always on a real row. */
+            if (wrap_pend) {
+                wrap_pend = 0;
                 cx = 0;
                 cy++;
+                if (cy >= CON_ROWS) {
+                    con_scroll_up();
+                    cy = CON_ROWS - 1;
+                }
+            }
+            con_plot(cy, cx, c);
+            if (cx + 1 >= CON_COLS) {
+                /* Last column: the cursor stays put.  With autowrap on
+                 * the next printable character wraps; with it off, the
+                 * next one overwrites this cell. */
+                if (con_wrap)
+                    wrap_pend = 1;
+            } else {
+                cx++;
             }
         } else if (c == 13) {
+            wrap_pend = 0;
             cx = 0;
         } else if (c == 10) {
+            wrap_pend = 0;
             cy++;
         } else if (c == 8) {
+            wrap_pend = 0;
             if (cx)
                 cx--;
         } else if (c == 9) {
+            wrap_pend = 0;
             do {
                 con_plot(cy, cx, ' ');
                 cx++;
             } while ((cx & 7) && cx < CON_COLS);
             if (cx >= CON_COLS) {
-                cx = 0;
-                cy++;
+                cx = CON_COLS - 1;
+                if (con_wrap)
+                    wrap_pend = 1;
             }
         } else if (c == 7) {
             /* no beeper */
@@ -430,6 +490,7 @@ static void charout(uint8_t c)
             saved_inverse = con_inverse;
             break;
         case '8':
+            wrap_pend = 0;
             cx = saved_x;
             cy = saved_y;
             con_ink = saved_ink;
@@ -438,6 +499,7 @@ static void charout(uint8_t c)
             con_inverse = saved_inverse;
             break;
         case 'E':
+            wrap_pend = 0;
             cx = 0;
             cy++;
             if (cy >= CON_ROWS) {
@@ -446,6 +508,7 @@ static void charout(uint8_t c)
             }
             break;
         case 'D':
+            wrap_pend = 0;
             cy++;
             if (cy >= CON_ROWS) {
                 con_scroll_up();
@@ -453,6 +516,7 @@ static void charout(uint8_t c)
             }
             break;
         case 'M':
+            wrap_pend = 0;
             if (cy)
                 cy--;
             else

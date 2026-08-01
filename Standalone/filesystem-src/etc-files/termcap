@@ -41,7 +41,7 @@ vt100|dec vt100:\
 	:ue=\E[m:up=\E[A:us=\E[4m:
 
 pc3|fuzix|Pico Computer 3 console:\
-	:am:bs:ms:\
+	:am:bs:ms:xn:\
 	:co#80:it#8:li#40:\
 	:bl=^G:cr=^M:sf=^J:ta=^I:nw=^M^J:\
 	:cl=\E[H\E[J:cd=\E[J:ce=\E[K:cm=\E[%i%d;%dH:ho=\E[H:\
@@ -50,4 +50,8 @@ pc3|fuzix|Pico Computer 3 console:\
 	:so=\E[7m:se=\E[m:mr=\E[7m:md=\E[1m:me=\E[m:\
 	:sc=\E7:rc=\E8:sr=\EM:\
 	:ku=\E[A:kd=\E[B:kr=\E[C:kl=\E[D:kb=^H:\
+	:kh=\E[H:@7=\E[F:kI=\E[2~:kD=\E[3~:kP=\E[5~:kN=\E[6~:\
+	:k1=\EOP:k2=\EOQ:k3=\EOR:k4=\EOS:k5=\E[15~:k6=\E[17~:\
+	:k7=\E[18~:k8=\E[19~:k9=\E[20~:k;=\E[21~:\
+	:F1=\E[23~:F2=\E[24~:\
 	:ve=\E[?25h:vi=\E[?25l:

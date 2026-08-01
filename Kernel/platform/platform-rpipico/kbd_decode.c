@@ -127,6 +127,46 @@ static void kbd_key(uint8_t usage, uint8_t mods, int slot)
             usage = nav[usage - 0x59];
         }
     }
+    // Function keys F1-F12 (HID 0x3a..0x45) as the xterm sequences a
+    // terminal sends. The layout tables carry MMBasic's pseudo-ASCII codes
+    // (0x91-0x9c, shifted 0xb1-0xbc) because they were imported wholesale
+    // from MMBasic - but every other special key here is already a VT100
+    // sequence (the arrows emit CSI A..D), and one termcap entry has to
+    // describe both this keyboard and a serial terminal on the same tty.
+    // So emit what a terminal emits; a program wanting MMBasic's codes
+    // maps them back itself.
+    if (usage >= 0x3a && usage <= 0x45) {
+        static const char ss3[4] = {'P', 'Q', 'R', 'S'};              // F1-F4
+        static const uint8_t num[8] = {15, 17, 18, 19, 20, 21, 23, 24}; // F5-F12
+        uint8_t buf[8];
+        int n = 0, i;
+        buf[n++] = 0x1b;
+        if (usage <= 0x3d) {
+            if (shift) { // xterm modifier form: CSI 1 ; 2 <letter>
+                buf[n++] = '[';
+                buf[n++] = '1';
+                buf[n++] = ';';
+                buf[n++] = '2';
+            } else {
+                buf[n++] = 'O';
+            }
+            buf[n++] = ss3[usage - 0x3a];
+        } else {
+            uint8_t v = num[usage - 0x3e]; // 16 and 22 are skipped, as on a VT220
+            buf[n++] = '[';
+            buf[n++] = '0' + v / 10;
+            buf[n++] = '0' + v % 10;
+            if (shift) {
+                buf[n++] = ';';
+                buf[n++] = '2';
+            }
+            buf[n++] = '~';
+        }
+        for (i = 0; i < n; i++) {
+            kbd_push(buf[i]);
+        }
+        return;
+    }
     // The table covers printing keys. Skip the caps-lock and editing/navigation
     // cluster (0x39, 0x49..0x52) so they fall to the escape-sequence switch
     // below - e.g. Delete emits "\x1b[3~" (forward delete), not 0x7f.
