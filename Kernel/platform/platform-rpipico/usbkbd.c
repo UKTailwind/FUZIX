@@ -34,6 +34,7 @@
 #undef ssize_t
 #undef time_t
 #include "pico/time.h"
+#include <hardware/structs/usb.h>
 #include "kbd_decode.h"
 #include "keyboard_maps.h"
 #include "rawuart.h"
@@ -275,9 +276,68 @@ void console_sleeping(uint8_t devn)
     usbkbd_task();
 }
 
+/*
+ * Force a real SE0 bus reset on the root port.  Verbatim from MMBasic
+ * (USBKeyboard.c USB_bus_reset), including the timings.
+ *
+ * hcd_port_reset() in the pico-sdk TinyUSB driver is a no-op stub, so
+ * driving the PHY directly is the only way to assert a USB reset on
+ * RP2040/RP2350.  It matters here because the PC3's CH334 hub is
+ * EXTERNALLY POWERED: it never loses VBUS when the board warm-reboots,
+ * so it keeps the USB address and configured state it held in the
+ * previous session and ignores re-enumeration from address 0 - the
+ * whole device tree simply vanishes.  An SE0 reset forces a directly
+ * attached hub back to Default state; TinyUSB then cascades the reset
+ * to the devices behind it as it re-enumerates each downstream port.
+ *
+ * The controller must ALREADY be initialised when this is called, so
+ * that the PHY is powered and muxed.
+ */
+#define USB_BUS_RESET_PHY_OVERRIDE_EN ( \
+    USB_USBPHY_DIRECT_OVERRIDE_TX_DM_OE_OVERRIDE_EN_BITS | \
+    USB_USBPHY_DIRECT_OVERRIDE_TX_DM_OVERRIDE_EN_BITS | \
+    USB_USBPHY_DIRECT_OVERRIDE_TX_DP_OE_OVERRIDE_EN_BITS | \
+    USB_USBPHY_DIRECT_OVERRIDE_TX_DP_OVERRIDE_EN_BITS)
+
+static void usb_bus_reset(void)
+{
+    /* Take manual control of the DP/DM output drivers. */
+    hw_set_bits(&usb_hw->phy_direct_override, USB_BUS_RESET_PHY_OVERRIDE_EN);
+    /* Enable the drivers, then pull both lines low = SE0 = bus reset. */
+    hw_set_bits(&usb_hw->phy_direct,
+        USB_USBPHY_DIRECT_TX_DM_OE_BITS | USB_USBPHY_DIRECT_TX_DP_OE_BITS);
+    hw_clear_bits(&usb_hw->phy_direct,
+        USB_USBPHY_DIRECT_TX_DM_BITS | USB_USBPHY_DIRECT_TX_DP_BITS);
+
+    /* Hold it.  The spec minimum is 10ms; MMBasic drives ~20ms so that
+     * slow and cheap hubs sample it reliably. */
+    busy_wait_us(20000);
+
+    /* Release: hand DP/DM back to the SIE.  ALL four override-enable
+     * bits must be cleared - clearing only the DM pair leaves DP under
+     * manual control on return, which is what made this unreliable in
+     * MMBasic before it was fixed there. */
+    hw_clear_bits(&usb_hw->phy_direct,
+        USB_USBPHY_DIRECT_TX_DM_OE_BITS | USB_USBPHY_DIRECT_TX_DP_OE_BITS);
+    hw_clear_bits(&usb_hw->phy_direct_override, USB_BUS_RESET_PHY_OVERRIDE_EN);
+}
+
 void usbkbd_init(void)
 {
+    int i;
+
+    /* MMBasic's startup order exactly (PicoMite.c): clear the slot
+     * state, bring the host controller up so the PHY is powered, THEN
+     * drive the bus reset, then allow recovery time.  Enumeration is
+     * deferred to tuh_task() - pumped from plt_idle here - which runs
+     * after all of this, so it starts from a clean bus. */
+    for (i = 0; i < HID_NSLOTS; i++)
+        memset((void *)&hid_slots[i], 0, sizeof(hid_slots[i]));
+
     tuh_init(0); /* native controller, root-hub port 0 */
+    usb_bus_reset();    /* force any attached hub back to Default state */
+    busy_wait_us(50000); /* let the hub re-detect its downstream ports */
+
     usbh_inited = true;
     kputs("USB host: keyboard on the hub, layout ");
     kputs(kbd_layout_name);
