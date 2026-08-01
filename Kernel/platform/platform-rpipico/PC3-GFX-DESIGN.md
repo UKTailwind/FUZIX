@@ -152,6 +152,59 @@ While a graphics mode is active the kernel console suspends screen
 rendering (kernel messages go to the serial mirror only); SETMODE
 0xFF or process exit (device close) restores the text console intact.
 
+## Drawing primitives: kernel, plus a published framebuffer address
+
+DECIDED, on measurement (utils/syscallbench.c, run on the board):
+
+    direct memory write    15 ns
+    getpid()              597 ns
+    ioctl(/dev/sys)      1488 ns
+
+A syscall is ~100x a memory write, but the cost is per CALL, not per
+pixel.  A 320-pixel line drawn directly costs 4.8us; the same line as
+one ioctl costs 1.5us of overhead plus the same 4.8us of work.  So:
+
+  - **Batched primitives are effectively free through an ioctl.**
+    Rectangle, bitmap, string, line, fill.  An editor repaint at one
+    call per line is 60us, against 260ms of serial mirroring.
+  - **Single pixels are ruined by it.**  PIXEL in compiled mmbc code
+    should cost 20-50ns; a 1488ns syscall is 30x the actual work, and
+    a full 320x240 plot becomes 114ms against MMBasic's ~1ms.
+
+So the primitives live in the KERNEL - DrawRectangle and DrawBitmap
+first, in 1-bit and 4-bit variants, imported from MMBasic (Draw.c's
+DrawRectangle2/DrawBitmap2 for 1-bit, RGB121.c's DrawPixel16/
+DrawBitmap16 for 4-bit).  One implementation, no copy in every
+program, bounds-checked where userland cannot be trusted, dispatched
+by mode, and bbcbasic can eventually drop bbcgfx.c's private pset/
+line/triangle in favour of them.
+
+AND the framebuffer address is published (a GFXIOC_INFO returning base,
+geometry, stride, bpp and the tile arrays), so PIXEL - the first
+MMBasic extension wanted in mmbc - stays a direct store at MMBasic's
+speed.  That is an escape hatch for the per-pixel path, not the
+interface, and it is the same bargain the PSRAM arena already strikes:
+with no MMU there is nothing to enforce anyway.
+
+## Nibble order: high nibble = left pixel
+
+DECIDED.  The scanout expander is INDIFFERENT - it does one load and
+one store per source byte through a 256-entry LUT, and the nibble
+order only changes how that LUT is filled, once per palette change.
+There is no scanout optimisation to be had either way.
+
+So it is decided on interchange instead.  MicroPython's framebuf
+GS4_HMSB puts the even/left pixel in the HIGH nibble, and the PC3
+MicroPython port unified its C side on that after exactly this
+confusion caused a bug (its DEVELOPMENT_NOTES.md note 56).  Fuzix
+MODE 7 already matches.  Keeping it means bitmaps, BMPs and assets are
+interchangeable between the two PC3 environments.
+
+MMBasic's RGB121 is the odd one out (low nibble = left), so the
+imported primitives need a mechanical `x & 1` inversion.  That is a
+contained edit in a handful of places, and much cheaper than
+desynchronising the two ports.
+
 ## BBC BASIC side (Applications/bbcbasic)
 
 The console edition has no graphics layer at all (vtint/widths etc
