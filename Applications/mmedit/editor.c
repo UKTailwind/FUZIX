@@ -1760,6 +1760,13 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
             for (i = 0; i < MAXCLIP + 1; i++)
                 buf[i] = buf[i + 1]; // suffle down the buffer to get the next char
         } while (*buf);
+        /* Line and column, refreshed after every key.  MMBasic only did
+         * this on an edit and relied on the idle counter above to catch
+         * cursor movement - which was free there, because its poll loop
+         * spun.  Here a poll costs 100ms, so the same counter left the
+         * status seconds out of date after arrowing around.  Redrawing
+         * it costs a couple of dozen bytes down the wire. */
+        PrintStatus();
     }
 }
 

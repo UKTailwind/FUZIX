@@ -409,6 +409,23 @@ int file_load(const char *name)
     }
     close(fd);
     EdBuff[used] = 0;
+
+    /* Strip CR.  MMBasic writes CRLF and most .bas files in circulation
+     * are DOS files; the editor treats only LF as a line ending, so a
+     * stray CR sits IN the text - it prints, sending the terminal back
+     * to column 0 in the middle of a line, and every column the editor
+     * computes is then wrong.  solar_eclipse.bas is one of these. */
+    {
+        unsigned char *r = EdBuff, *w = EdBuff;
+        while (*r) {
+            if (*r == '\r' && r[1] == '\n')
+                r++;
+            else
+                *w++ = *r++;
+        }
+        *w = 0;
+        used = (int)(w - EdBuff);
+    }
     nbrlines = buf_count_lines();
     return used;
 }

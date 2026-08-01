@@ -240,7 +240,6 @@ const struct mmb_keyword commandtbl[] = {
     { "Slew", 0 },
     { "TMC22xx", 0 },
     { "Keyboard", 0 },
-    { "", 0 },
     { NULL, 0 }
 };
 
@@ -372,7 +371,6 @@ const struct mmb_keyword tokentbl[] = {
     { "Frame(", 0 },
     { "Ray(", 0 },
     { "Tilemap(", 0 },
-    { "", 0 },
     { NULL, 0 }
 };
 
@@ -386,5 +384,5 @@ const char *const overlaid_functions[] = {
 const int MMEND = (int)(sizeof(overlaid_functions) /
                         sizeof(overlaid_functions[0]));
 
-const int CommandTableSize = 228;
-const int TokenTableSize = 129;
+const int CommandTableSize = 227;
+const int TokenTableSize = 128;

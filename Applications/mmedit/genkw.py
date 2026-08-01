@@ -41,7 +41,11 @@ def names(lines):
         if line.lstrip().startswith("//") or line.lstrip().startswith("/*"):
             continue
         m = re.search(r'\(unsigned char \*\)"([^"]*)"', line)
-        if m:
+        # MMBasic keeps two empty-named placeholder rows.  They must not
+        # reach the editor: EditCompStr indexes name[1] on the "."/"_"
+        # alias path, which reads past the end of a one-byte string, and
+        # an empty name matches any character that is not a name char.
+        if m and m.group(1):
             out.append(m.group(1))
     return out
 
