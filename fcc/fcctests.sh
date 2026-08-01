@@ -9,6 +9,7 @@ M=$(cd "$(dirname "$0")/.." && pwd)
 FCC=${FCC:-/home/peter/src/FUZIX/Applications/CC}
 BIN=$FCC/host-armm0
 W=${W:-/tmp/fccbuild}
+mkdir -p "$W"
 
 pass=0; fail=0
 for src in "$M"/tests/*.bas; do
