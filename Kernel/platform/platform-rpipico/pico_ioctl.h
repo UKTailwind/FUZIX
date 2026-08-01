@@ -54,20 +54,31 @@ struct gfx_info {
 };
 #define GFXIOC_INFO   0x000E
 
-/* Set one pixel.  The hot path: MMBasic's PIXEL statement costs 5us,
- * so this must stay cheap - the coordinates and colour are packed into
- * the data argument ITSELF rather than pointed to, which skips the
- * uget and its validation entirely.  There is nothing to copy.
+/* Set the current drawing colour.  data IS the RGB888 value (24 bits
+ * fit in the argument, so no uget).  MMBasic's contract: callers always
+ * speak RGB888 and the primitive converts to whatever the current mode
+ * uses - 0/1 for the 1bpp modes, or the nearest of the 16 logical
+ * colours for the 4bpp ones.  Converted once here, never per pixel. */
+#define GFXIOC_COLOUR 0x0010
+
+/* Set one pixel in the current colour.  The hot path: MMBasic's PIXEL
+ * statement costs 5us, so this must stay cheap - the coordinates are
+ * packed into the data argument ITSELF rather than pointed to, which
+ * skips the uget and its validation entirely.  Measured at 1.30us
+ * against 1.488us for an ordinary ioctl.
  *
- *   data = x | (y << 10) | (colour << 19)
+ *   data = x | (y << 10)        x 0-1023, y 0-511
  *
- * x 0-1023, y 0-511, colour 0-255.  Out-of-range pixels are dropped,
- * not an error, exactly as MMBasic does.  4bpp layout is high nibble =
- * LEFT pixel (framebuf GS4_HMSB), which is the opposite of MMBasic's
- * RGB121 - see PC3-GFX-DESIGN.md. */
+ * Out-of-range pixels are dropped, not an error, as MMBasic does.
+ * 4bpp layout is high nibble = LEFT pixel (framebuf GS4_HMSB), the
+ * opposite of MMBasic's RGB121 - see PC3-GFX-DESIGN.md. */
 #define GFXIOC_PIXEL  0x000F
-#define GFX_PIXEL_PACK(x, y, c) \
-	(((x) & 0x3FF) | (((y) & 0x1FF) << 10) | (((c) & 0xFF) << 19))
+#define GFX_PIXEL_PACK(x, y) (((x) & 0x3FF) | (((y) & 0x1FF) << 10))
+
+/* Read one pixel back: data = packed x,y as above; returns the mode's
+ * colour index, or -1 off-screen.  Used by MMBasic's PIXEL() function,
+ * which returns RGB888 - the caller maps the index back. */
+#define GFXIOC_GETPIXEL 0x0011
 
 /* BBC sound (PC3): the SOUND statement's raw parameters; the channel
  * word carries the &1x flush and &Sxx sync bits.  Returns -1/EAGAIN

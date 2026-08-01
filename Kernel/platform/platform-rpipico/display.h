@@ -52,6 +52,9 @@ int display_gfx_fbsize(void);
  * when there is no drawable mode. */
 int display_gfx_pixel(int x, int y, int c);
 int display_gfx_rect(int x1, int y1, int x2, int y2, int c);
+void display_gfx_colour(uint32_t rgb888);
+int display_gfx_curcol(void);
+int display_gfx_getpixel(int x, int y);
 
 /* Current geometry, for GFXIOC_INFO. */
 void display_gfx_geom(uint16_t *w, uint16_t *h, uint16_t *stride,

@@ -724,6 +724,93 @@ void display_gfx_geom(uint16_t *w, uint16_t *h, uint16_t *stride,
     }
 }
 
+/* The current drawing colour, already reduced to the mode's own
+ * representation.  MMBasic's contract is that callers always speak
+ * RGB888 and the primitive converts; doing it here, once per colour
+ * change, keeps the per-pixel path down to a store. */
+static uint8_t gfx_curcol = 1;
+
+void display_gfx_colour(uint32_t rgb888)
+{
+    enum gexp ex = gfx_exp;
+    uint8_t want, best = 0, i;
+    int bestd = 0x7FFF;
+    uint8_t r, g, b;
+
+    if (gfx_bpp(ex) == 1) {
+        /* Two colours: anything that is not black is ink.  This is what
+         * MMBasic's DrawPixel2 does with its `if (c)`. */
+        gfx_curcol = rgb888 ? 1 : 0;
+        return;
+    }
+
+    /* 4bpp here is PALETTISED - gfx_pal[] maps 16 logical colours to
+     * RGB332 - so there is no fixed encoding to apply.  Reduce the
+     * request to RGB332 and take the nearest palette entry, which
+     * works whatever VDU19 has done to the palette.  16 comparisons,
+     * once per colour change. */
+    r = (rgb888 >> 16) & 0xFF;
+    g = (rgb888 >> 8) & 0xFF;
+    b = rgb888 & 0xFF;
+    want = ((r >> 5) << 5) | ((g >> 5) << 2) | (b >> 6);
+    for (i = 0; i < 16; i++) {
+        int dr = ((gfx_pal[i] >> 5) & 7) - ((want >> 5) & 7);
+        int dg = ((gfx_pal[i] >> 2) & 7) - ((want >> 2) & 7);
+        int db = (gfx_pal[i] & 3) - (want & 3);
+        int d = dr * dr + dg * dg + db * db * 4;  /* blue has 2 bits */
+        if (d < bestd) {
+            bestd = d;
+            best = i;
+        }
+    }
+    gfx_curcol = best;
+}
+
+int display_gfx_curcol(void)
+{
+    return gfx_curcol;
+}
+
+/* RGB332 -> RGB888, so callers only ever see MMBasic's colour space. */
+static uint32_t rgb332_to_888(uint8_t c)
+{
+    uint32_t r = ((c >> 5) & 7) * 255u / 7u;
+    uint32_t g = ((c >> 2) & 7) * 255u / 7u;
+    uint32_t b = (c & 3) * 255u / 3u;
+
+    return (r << 16) | (g << 8) | b;
+}
+
+/* Read one pixel back AS RGB888 - MMBasic's PIXEL() function returns a
+ * colour, not an index, and the conversion belongs in the primitive
+ * for the same reason the forward one does.  -1 off-screen. */
+int display_gfx_getpixel(int x, int y)
+{
+    enum gexp ex = gfx_exp;
+    int w = gfx_width(ex);
+    int h = (ex == EXP_CONSOLE) ? DISP_HEIGHT : gfx_rows;
+    int stride = (ex == EXP_CONSOLE) ? DISP_STRIDE : gfx_stride;
+    uint8_t v;
+
+    if (!w || x < 0 || y < 0 || x >= w || y >= h)
+        return -1;
+    if (gfx_bpp(ex) == 4) {
+        v = disp_fb[y * stride + (x >> 1)];
+        return (int)rgb332_to_888(gfx_pal[(x & 1) ? (v & 15) : (v >> 4)]);
+    }
+    /* 1bpp: the bit chooses ink or paper, and the actual colour lives
+     * in the cell's tile attributes - so read those rather than
+     * pretending the console is black and white. */
+    v = disp_fb[y * stride + (x >> 3)];
+    if (ex == EXP_CONSOLE) {
+        int cell = (y / DISP_CELL_H) * DISP_COLS + (x / DISP_CELL_W);
+        uint8_t c = ((v >> (7 - (x & 7))) & 1) ? disp_tile_fg[cell]
+                                               : disp_tile_bg[cell];
+        return (int)rgb332_to_888(c);
+    }
+    return ((v >> (7 - (x & 7))) & 1) ? 0xFFFFFF : 0x000000;
+}
+
 /* One pixel.  Kept tight - no swapping, no clipping loop - because this
  * is the hot path: MMBasic's PIXEL statement costs 5us and a compiled
  * one has to beat it.  4bpp layout is high nibble = LEFT pixel, which
