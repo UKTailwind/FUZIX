@@ -290,8 +290,13 @@ static void fixup(unsigned seg, unsigned long off, unsigned sym)
 	fixtab[nfix].f_sym = sym;
 	fixtab[nfix].f_seg = seg;
 	fixtab[nfix].f_pad = 0;
-	if (seg == BC_SEG_DATA)
-		fix_in_lit[nfix] = in_literal();
+	/* Always written, never inherited: a fixup slot is reused after
+	   a reclaimed function's fixups are dropped, and a code fixup
+	   landing on a slot left set by some earlier literal fixup was
+	   shifted by datalen at gen_end - four bytes in Dhrystone, which
+	   aimed the loader's movw/movt patch at the next two
+	   instructions and rewrote them into nonsense. */
+	fix_in_lit[nfix] = (seg == BC_SEG_DATA) ? in_literal() : 0;
 	nfix++;
 }
 

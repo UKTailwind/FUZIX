@@ -241,6 +241,30 @@ static unsigned long t_budget(void)
 	return (unsigned long)cached;
 }
 
+/*
+ *	THUMB_SKIP=name[,name...] keeps the named functions in bytecode.
+ *	A debugging knob: when a whole-program build misbehaves and the
+ *	budget can only bisect in commit order, this takes one function
+ *	out of the middle.
+ */
+static int t_skipped(const char *name)
+{
+	const char *e = getenv("THUMB_SKIP");
+	size_t n;
+	if (e == NULL)
+		return 0;
+	n = strlen(name);
+	while (*e) {
+		if (strncmp(e, name, n) == 0 && (e[n] == 0 || e[n] == ','))
+			return 1;
+		while (*e && *e != ',')
+			e++;
+		if (*e)
+			e++;
+	}
+	return 0;
+}
+
 /* ---- raw emission --------------------------------------------------- */
 
 static void t16(unsigned v)
@@ -1823,6 +1847,10 @@ static void thumb_commit(void)
 		t_bail = "span";
 		goto bailed;
 	}
+	if (t_skipped(bc_symname[fn_sym])) {
+		t_bail = "skip";
+		goto bailed;
+	}
 	reclaim = thumb_reclaim() && !fn_is_main;
 	/* Where this function will land if it commits - reclaiming, on
 	   top of its own bytecode; otherwise appended.  codelen is not
@@ -1938,6 +1966,18 @@ static void thumb_commit(void)
 	for (i = 0; i < ntpool; i++) {
 		fixup(BC_SEG_CODE, base + tpooltab[i].site, tpooltab[i].sym);
 		fixtab[nfix - 1].f_pad = 2;
+		if (getenv("THUMB_POOLDBG"))
+			fprintf(stderr, "pool %s[%u] marker %lu base %lu "
+				"site %u -> @%lu sym %s "
+				"bytes %02x%02x %02x%02x\n",
+				bc_symname[fn_sym], i, marker, base,
+				tpooltab[i].site,
+				(unsigned long)fixtab[nfix - 1].f_offset,
+				bc_symname[tpooltab[i].sym],
+				tbuf[tpooltab[i].site],
+				tbuf[tpooltab[i].site + 1],
+				tbuf[tpooltab[i].site + 2],
+				tbuf[tpooltab[i].site + 3]);
 	}
 	/* ... and this function's baked libcall indices, now absolute */
 	for (i = 0; i < ntref; i++)

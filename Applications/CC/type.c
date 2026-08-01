@@ -51,6 +51,33 @@ unsigned type_canonical(unsigned t)
 	   a[i] quietly addressed row 0. */
 	if (IS_ARRAY(t) && PTR(t) <= array_num_dimensions(t)) {
 		struct symbol *s = symbol_ref(t);
+		unsigned p = PTR(t);
+		/*
+		 * An array object with more than one dimension left decays
+		 * to a pointer to its ROW type, not to a pointer to the
+		 * element: "int a[5][7]" passed to a function is
+		 * "int (*)[7]", and that 7 is the scale of a[i].  Decaying
+		 * it all the way to "int **" made a[i] a load of the row's
+		 * first word, so every store through a two dimensional
+		 * parameter went somewhere else entirely - Dhrystone's
+		 * Proc_8 never touched Arr_2_Glob.
+		 *
+		 * PTR counts the dimensions still in play, from the right,
+		 * so the row type is an array of the last p - 1 of them.
+		 */
+		if (p > 1) {
+			unsigned n = array_num_dimensions(t);
+			unsigned idx[9];
+			unsigned i;
+			idx[0] = p - 1;
+			for (i = 1; i < p; i++)
+				idx[i] = array_dimension(t, n - p + 1 + i);
+			/* Array types are matched by the identity of their
+			   dimension list, so it has to be the interned copy
+			   and never this stack frame */
+			return type_ptr(make_array(s->type,
+				sym_find_idx(S_ARRAY, idx, p)));
+		}
 		/* Shouldn't be possible */
 		if (PTR(s->type) + PTR(t) > 7)
 			indirections();

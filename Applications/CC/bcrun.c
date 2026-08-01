@@ -1773,6 +1773,14 @@ static void load(const char *path)
 	if (fread(code, 1, h.h_code, f) != h.h_code)
 		fault("short code");
 
+	/* BCRUN_MAP=1: where the code landed, so a faulting PC from a
+	   debugger or qemu -d cpu can be turned back into an offset in
+	   the object (and from there a native span to disassemble). */
+	if (getenv("BCRUN_MAP"))
+		fprintf(stderr, "bcrun: code %p + %lu, entry %lu\n",
+			(void *)code, (unsigned long)h.h_code,
+			(unsigned long)h.h_entry);
+
 #ifdef __linux__
 	/* Linux (and so qemu-arm, the development-side executor for
 	   native code) enforces NX on malloc'd memory; the board's flat
