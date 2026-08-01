@@ -362,6 +362,42 @@ void statement_inner(void)
         cv.uses_clear = 1;
         return;
     }
+    if (strcmp(up, "CLS") == 0) {
+        cv.i++;
+        emit("mm_cls();");
+        return;
+    }
+    if (strcmp(up, "PIXEL") == 0) {
+        /* PIXEL x, y        - in the current foreground colour
+           PIXEL x, y, c     - c is RGB888, as everywhere in MMBasic;
+                               the kernel primitive converts it to
+                               whatever the current mode uses.
+           The function form PIXEL(x,y) is handled in the expression
+           parser; a statement never starts with the open bracket. */
+        struct val x, y;
+        const char *col;
+        const char *xs, *ys;
+
+        cv.i++;
+        x = expr();
+        expect_op(",");
+        y = expr();
+        if (is_op(",", 0)) {
+            struct val c;
+            cv.i++;
+            c = expr();
+            col = as_int(c);
+        } else {
+            /* No COLOUR statement yet, so the "current" foreground
+               is white - which is ink on the 1bpp console and the
+               brightest palette entry in the 4bpp modes. */
+            col = "0xFFFFFFLL";
+        }
+        xs = as_int(x);
+        ys = as_int(y);
+        emit(sfmt("mm_pixel(%s, %s, %s);", xs, ys, col));
+        return;
+    }
     if (strcmp(up, "PAUSE") == 0) {
         struct val v;
         cv.i++;
