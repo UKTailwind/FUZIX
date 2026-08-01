@@ -163,18 +163,19 @@ Small, and the only genuinely new code:
 - **raw mode** - `tcsetattr` with `icanon`, `echo` and `isig` off,
   restored on exit and on signal.  The editor must not be killable
   into a wedged terminal.
-- **`GetMemory()`** -> `PSRAMIOC_ALLOC`.
+- **`GetMemory()`** -> a static buffer (see the memory section; the
+  arena turned out not to be needed).
 - **`error()`** -> print and return to the shell.
 - **`routinechecks()`** -> no-op, or a signal check.
 - file load/save, and `main()` in place of `cmd_editfile()`.
 
-## Memory: the file in PSRAM
+## Memory: where the file buffer lives
 
 The editor keeps the whole file in one contiguous buffer and memmoves
-the tail on every insert and delete.  The arena suits that exactly: a
-single allocation, a raw pointer, no swap interaction.  Where MMBasic
-squeezes into a ~96 KB `EDIT_BUFFER_SIZE`, we can hand it a megabyte
-and stop thinking about it.
+the tail on every insert and delete.  The obvious home was the PSRAM
+arena - a single allocation, a raw pointer, megabytes available.  Two
+measurements moved it back into the process's own SRAM; both are
+below.
 
 ### MEASURED (psbench, on the board)
 
@@ -195,7 +196,50 @@ keystroke, which is one memmove of everything after the cursor:
 in total** ("PSRAM disc 7104KiB (arena 1024KiB)"), and cc2 wants it too
 for ARENA_TABLES.  A megabyte edit buffer would take the whole thing.
 
-### DECISION: flat buffer, capped at 128 KB
+### ...but the buffer does not need PSRAM at all
+
+`memprobe` carried a real 120 KB static buffer, touched and verified
+every page, and then grew the break until the kernel refused:
+
+    static buffer: 120 KB, intact
+    sbrk headroom above that: 120 KB
+    so an editor could have 240 KB of buffer in its own space
+    free: total 320, used 68, free 252
+
+**A process gets ~240 KB of its own SRAM** (PROGSIZE is 256 KB less
+udata).  Allow ~60 KB for the ported editor's code and ~16 KB of stack
+and roughly 170 KB is left for a buffer - so the 120 KB that covers
+nearly everything in MMBasic fits with room to spare.
+
+### DECISION: flat buffer, 120 KB, in the process's own SRAM
+
+No arena, no ioctl, no PSRAM.  Five reasons, and the first is just
+arithmetic:
+
+1. **SRAM is 3.7x faster.**  A worst-case keystroke against a full
+   120 KB buffer is 2.7 ms, against 10.7 ms for the same thing in
+   PSRAM.  Holding a key down stops being a question.
+2. cc2 keeps the whole 1024 KB arena; the editor and the compiler no
+   longer compete for it.
+3. It is **exactly MMBasic's own architecture** - a static buffer -
+   so it is one less deviation from the reference in a 3,785-line
+   port.
+4. It is swap-safe by construction.  The arena is explicitly NOT
+   swapped, which would have been a subtle hazard for a long-lived
+   interactive process.
+5. The whole editor process is then ~190 KB, so it and a shell live
+   inside the 320 KB process area at once and nothing swaps.  (240 KB
+   of buffer would also fit, but leaves less headroom for whatever
+   else is running.)
+
+MMBasic's own editor buffer is ~96 KB, so at 120 KB we are running the
+reference implementation slightly above the size it was designed for,
+on a machine that is faster at moving the bytes.
+
+The gap buffer is now firmly off the table: it was only ever needed to
+paper over PSRAM's bandwidth.
+
+### The old PSRAM-based decision, kept for the record
 
 Worst case - typing at the very top of a full 128 KB file - is 10.7 ms
 per keystroke, and the typical case (cursor mid-file) is half that.
