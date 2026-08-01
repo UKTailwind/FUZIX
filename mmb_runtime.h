@@ -325,6 +325,18 @@ int  mm_gosub_pop (void);
 /* MID$(s, start, num) = repl$   (the statement form) */
 void mm_mid_assign(char *dst, MMINTEGER start, MMINTEGER num, const char *repl);
 
+/* ---- graphics (PC3) --------------------------------------------------
+ * Colours are ALWAYS RGB888, as everywhere in MMBasic; the kernel
+ * primitive converts to whatever the current mode uses (0/1 for the
+ * 1bpp modes, nearest of the 16 logical colours for 4bpp).  Nothing
+ * here knows about the mode.
+ *
+ * On the host these are no-ops returning black, so a translated
+ * program that draws still runs under the gates.  */
+void mm_cls(void);
+void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb);
+MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y);
+
 /* ---- misc ----------------------------------------------------------- */
 void mm_error(const char *msg);     /* prints and exits                */
 void mm_end  (void);                /* the END statement               */

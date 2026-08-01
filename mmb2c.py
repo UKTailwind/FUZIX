@@ -85,6 +85,7 @@ BUILTINS = {
     'CHOICE': (3, 3), 'BOUND': (1, 2), 'TRIM$': (1, 3), 'FIELD$': (2, 4),
     'DATETIME$': (1, 1), 'DAY$': (1, 1), 'EPOCH': (1, 1),
     'BIN2STR$': (2, 3), 'STR2BIN': (2, 3), 'RGB': (1, 3), 'MATH': (1, 1),
+    'PIXEL': (2, 2),
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
     'LINSTR': (2, 3), 'LCOMPARE': (2, 2), 'LINPUT': (3, 3),
@@ -1081,6 +1082,11 @@ class Conv(object):
             quote = s(3) if len(args) > 3 else '"\\000" ""'
             return ('mm_field(%s, %s, %s, %s)'
                     % (s(0), n(1), delim, quote), TY_S)
+        if up == 'PIXEL':
+            # PIXEL(x, y) reads a pixel back AS RGB888 - the kernel
+            # primitive maps the mode's own colour numbering back out,
+            # so nothing here knows about depths or palettes.
+            return ('mm_pixel_get(%s, %s)' % (n(0), n(1)), TY_I)
         self.err("built-in %s() is not supported yet" % up)
 
     # -- built-ins whose arguments are not ordinary expressions ----------
@@ -2100,6 +2106,33 @@ class Conv(object):
                       "handed back the way the interpreter does")
             self.emit('__mmb_clear();')
             self.uses_clear = True
+            return
+        if up == 'CLS':
+            self.i += 1
+            self.emit('mm_cls();')
+            return
+        if up == 'PIXEL':
+            # PIXEL x, y        - in the current foreground colour
+            # PIXEL x, y, c     - c is RGB888, as everywhere in MMBasic;
+            #                     the kernel primitive converts it to
+            #                     whatever the current mode uses.
+            # The function form PIXEL(x,y) is handled in the expression
+            # parser; a statement never starts with the open bracket.
+            self.i += 1
+            x = self.expr()
+            self.expect_op(',')
+            y = self.expr()
+            if self.is_op(','):
+                self.i += 1
+                c = self.expr()
+                col = self.as_int(c)
+            else:
+                # No COLOUR statement yet, so the "current" foreground
+                # is white - which is ink on the 1bpp console and the
+                # brightest palette entry in the 4bpp modes.
+                col = '0xFFFFFFLL'
+            self.emit('mm_pixel(%s, %s, %s);'
+                      % (self.as_int(x), self.as_int(y), col))
             return
         if up == 'PAUSE':
             self.i += 1
