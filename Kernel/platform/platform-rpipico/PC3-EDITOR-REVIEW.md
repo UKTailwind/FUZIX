@@ -83,6 +83,33 @@ not rendered - cosmetic.
 **We do not have to write a renderer.**  That is the single reason
 this port is a few weeks rather than a rewrite.
 
+## RESUME HERE - the ordered list to get the editor opening and closing
+
+1. **Flash the kernel.**  What is on the board predates the RGB888
+   colour contract (8e14c0968).  Nothing below works until it is
+   flashed.
+2. **Mirror the mmbc C side.**  mmb2c.py is the master and mmbc/ is a
+   byte-identical C mirror.  PIXEL (statement + function), CLS and the
+   BUILTINS entry went into mmb2c.py only, so tokgate.sh and cgate.sh
+   will fail until mmbc/ matches.
+3. **Rebuild bcrun** with the new mmb_runtime.c (mm_pixel,
+   mm_pixel_get, mm_cls) and send it to the board - bcrun has the
+   runtime compiled in, so mmbc PIXEL cannot work end to end until it
+   is refreshed.  devtools/README.md has the recipe.
+4. **Verify ripple end to end**: `mmbc ripple.bas; cc ripple.c;
+   ./ripple.bc`.  MMBasic does it in 2100 ms; the hand-written C did
+   201 ms through the ioctl and 177 ms through a shadow buffer.
+5. **Kernel DrawBitmap, 1-bit first** - the editor draws its text
+   through it.  Import MMBasic's DrawBitmap2 (Draw.c ~5379) with TWO
+   inversions: our 1bpp is MSB-leftmost where MMBasic uses
+   `1 << (x % 8)`, and our 4bpp is high-nibble-left where MMBasic's
+   RGB121 is low-nibble-left.
+6. **Import the editor core** and get it to open a file and exit.
+
+Stage 3 (the shim) is already done and on the board as /usr/bin/mmedit
+- raw mode, inkey(), the 120K buffer and a verified full-width repaint.
+Stage 4 replaces its viewer with MMBasic's editor.
+
 ## STAGE 1 IS DONE (commit 41d7ee07b)
 
 Both blockers below are fixed and measured on hardware.  `wraptest`
