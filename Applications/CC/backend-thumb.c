@@ -2388,8 +2388,13 @@ static void bc_arena_carve_all(void)
 	t_targets = bc_arena_carve(TMAX / 8);
 	tpooltab = bc_arena_carve(TPOOLMAX * sizeof(struct tpool));
 	treftab = bc_arena_carve(TPOOLMAX * sizeof(struct tref));
-	/* the node pool and anything else that carves later */
-	bc_arena_carve(32768);
+	/* The node pool (backend.c) carves AFTER init, out of this
+	   reserve.  Counted while measuring, NOT carved while placing -
+	   consuming it here left the later carve past the end of the
+	   granted region, where valaddr rightly refuses I/O and cc2's
+	   first read into a node came back EFAULT. */
+	if (bc_arena_measuring)
+		bc_arena_need += 32768;
 }
 
 void bc_arena_init(void)
