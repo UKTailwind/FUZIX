@@ -1924,16 +1924,30 @@ void mm_run_arg(const char *mmstr)
     mm_run_push(mm_cstr(mmstr), (int)mm_slen(mmstr));
 }
 
-/* STR$ of it, so a number reaches the program written the way BASIC
- * would have written it. */
+/*
+ * STR$ of it, so a number reaches the program written the way BASIC
+ * would have written it - but formatted into a local buffer rather
+ * than through mm_str_i and mm_str_f.
+ *
+ * Those return a scratch string from the temporary pool, and the pool
+ * is only wound back when a FUNCTION returns.  A SAVE IMAGE with four
+ * coordinates inside a loop therefore leaked four temporaries an
+ * iteration and died with "String expression too complex" on the fifth
+ * round.  Nothing here needs a temporary at all: the text is copied
+ * into the argument buffer immediately.
+ */
 void mm_run_arg_i(MMINTEGER v)
 {
-    mm_run_arg(mm_str_i(v, 0, MM_AUTO_PRECISION, "\001 "));
+    char b[MM_INTBUF + 64];
+    mm_int_to_str_pad(b, (long long)v, ' ', 0, 10);
+    mm_run_push(b, (int)strlen(b));
 }
 
 void mm_run_arg_f(MMFLOAT v)
 {
-    mm_run_arg(mm_str_f(v, 0, MM_AUTO_PRECISION, "\001 "));
+    char b[MM_INTBUF + 64];
+    mm_float_to_str(b, v, 0, MM_AUTO_PRECISION, ' ');
+    mm_run_push(b, (int)strlen(b));
 }
 
 void mm_error_s(const char *mmstr)
@@ -2289,8 +2303,13 @@ MMINTEGER mm_run_exec(void)
      * If this is what it turns out to be, the real fault is in the
      * kernel's buffer and swap interaction and belongs there; this is
      * a userland mitigation, not the fix.
+     *
+     * Only on the board: the development machine has no swap problem,
+     * and glibc hides sync() behind a feature macro.
      */
+#if defined(MM_PC3) || defined(__FUZIX__)
     sync();
+#endif
 
     pid = fork();
     if (pid < 0) {
@@ -2303,7 +2322,9 @@ MMINTEGER mm_run_exec(void)
     }
     while (waitpid(pid, &status, 0) < 0)
         ;
+#if defined(MM_PC3) || defined(__FUZIX__)
     sync();                     /* and whatever the child wrote */
+#endif
     if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
         mm_error("no such program");
         return -1;
