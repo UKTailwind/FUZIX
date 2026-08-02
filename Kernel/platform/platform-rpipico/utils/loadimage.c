@@ -1,6 +1,6 @@
 /* loadimage - draw a Windows BMP on the screen.
  *
- *   loadimage file.bmp [x y]
+ *   loadimage file.bmp [x [y [mode [ximage [yimage]]]]]
  *
  * MMBasic's LOAD IMAGE, as a program.  The screen has sixteen colours
  * in MODE 2 and two in MODE 1, so anything photographic has to be
@@ -58,8 +58,16 @@ static struct gfx_info gi;
 
 static unsigned long  rgbrow[MAXW];	/* one decoded row, RGB888 */
 static unsigned char  raw[MAXW * 4];	/* the same row as it lies in the file */
-static short  err_r[MAXW + 2], err_g[MAXW + 2], err_b[MAXW + 2];
-static short  nxt_r[MAXW + 2], nxt_g[MAXW + 2], nxt_b[MAXW + 2];
+static short  err_r[MAXW + 4], err_g[MAXW + 4], err_b[MAXW + 4];
+static short  nxt_r[MAXW + 4], nxt_g[MAXW + 4], nxt_b[MAXW + 4];
+static short  nx2_r[MAXW + 4], nx2_g[MAXW + 4], nx2_b[MAXW + 4];
+/* The mode argument.  -1, the default, means no dithering at all;
+   bits 0-1 name the output format and bit 2 the method, which is
+   the interpreter's encoding.  The format bits are accepted and
+   ignored: the screen already fixes the format. */
+static int    dmode = -1;
+#define DITHERING	(dmode >= 0)
+#define ATKINSON	(dmode & 4)
 static unsigned long  linestart[MAXH];	/* RLE only */
 static struct gfx_pt  pts[BATCH];
 static unsigned long  cols[BATCH];
@@ -369,66 +377,153 @@ static void plot(int x, int y, unsigned long rgb)
  */
 static unsigned long quantise(int r, int g, int b, int *qr, int *qg, int *qb)
 {
-	if (gi.bpp == 1) {
-		/* luminance, the usual weights */
-		int y = (r * 77 + g * 151 + b * 28) >> 8;
-		int on = (y >= 128);
-		*qr = *qg = *qb = on ? 255 : 0;
-		return on ? 0xFFFFFFUL : 0UL;
-	} else {
-		int r1 = (r >= 128) ? 1 : 0;
-		int g2 = (g * 3 + 127) / 255;
-		int b1 = (b >= 128) ? 1 : 0;
-		*qr = r1 * 255;
-		*qg = g2 * 85;
-		*qb = b1 * 255;
-		/* The palette's own value for this cell, so the kernel maps
-		   it back to exactly the entry that was chosen. */
-		return ((unsigned long)(r1 * 255) << 16)
-		     | ((unsigned long)(g2 == 0 ? 0 : g2 == 1 ? 0x40
-					: g2 == 2 ? 0x80 : 0xFF) << 8)
-		     |  (unsigned long)(b1 * 255);
-	}
+	int r1 = (r >= 128) ? 1 : 0;
+	int g2 = (g * 3 + 127) / 255;
+	int b1 = (b >= 128) ? 1 : 0;
+	*qr = r1 * 255;
+	*qg = g2 * 85;
+	*qb = b1 * 255;
+	/* The palette's own value for this cell, so the kernel maps it
+	   back to exactly the entry that was chosen. */
+	return ((unsigned long)(r1 * 255) << 16)
+	     | ((unsigned long)(g2 == 0 ? 0 : g2 == 1 ? 0x40
+				: g2 == 2 ? 0x80 : 0xFF) << 8)
+	     |  (unsigned long)(b1 * 255);
 }
 
+/* The usual weights, summing to 256. */
+static int luma(unsigned long p)
+{
+	return (int)((((p >> 16) & 0xFF) * 77 + ((p >> 8) & 0xFF) * 151
+		      + (p & 0xFF) * 28) >> 8);
+}
+
+/*
+ * One row, one bit deep: ink or paper, chosen on luminance.
+ *
+ * So the error is diffused on luminance too - ONE plane, not three.
+ * Feeding three channel errors into a decision taken on a single
+ * number is not merely wasteful, it is wrong: a pixel that reads back
+ * as a saturated colour quantises to white and injects an error of
+ * -255 on the channels it lacks, which turns off perfectly good
+ * neighbours.  In console mode that is not a rare case, because a set
+ * bit takes its colour from its cell's ink attribute and need not be
+ * white.  The symptom was dithering disturbing a picture that was
+ * already black and white.
+ */
+static void ditherrow1(int screeny, int x0, int w)
+{
+	int x;
+
+	for (x = 0; x < w; x++) {
+		int y = luma(rgbrow[x]) + (DITHERING ? err_r[x + 1] : 0);
+		int on, e;
+
+		if (y < 0) y = 0; else if (y > 255) y = 255;
+		on = (y >= 128);
+
+		if (DITHERING) {
+			e = y - (on ? 255 : 0);
+			if (ATKINSON) {
+				/*     X   1/8 1/8
+				   1/8 1/8 1/8
+				       1/8            */
+				err_r[x + 2] += (short)(e / 8);
+				err_r[x + 3] += (short)(e / 8);
+				nxt_r[x]     += (short)(e / 8);
+				nxt_r[x + 1] += (short)(e / 8);
+				nxt_r[x + 2] += (short)(e / 8);
+				nx2_r[x + 1] += (short)(e / 8);
+			} else {
+				/*      X   7/16
+				   3/16 5/16 1/16     */
+				err_r[x + 2] += (short)((e * 7) / 16);
+				nxt_r[x]     += (short)((e * 3) / 16);
+				nxt_r[x + 1] += (short)((e * 5) / 16);
+				nxt_r[x + 2] += (short)(e / 16);
+			}
+		}
+
+		if (x0 + x >= 0 && x0 + x < gi.width)
+			plot(x0 + x, screeny, on ? 0xFFFFFFUL : 0UL);
+	}
+	flush();
+	/* Roll the planes on.  Atkinson reaches two rows down, so this is
+	   a rotation rather than a clear - zeroing "next" at the top of a
+	   row would throw away what the row before last put there. */
+	memcpy(err_r, nxt_r, sizeof(err_r));
+	memcpy(nxt_r, nx2_r, sizeof(nxt_r));
+	memset(nx2_r, 0, sizeof(nx2_r));
+}
+
+/*
+ * One row, four bits deep: the sixteen colours of RGB121, quantised
+ * per channel, so the error is per channel too.
+ */
 static void ditherrow(int screeny, int x0, int w)
 {
 	int x;
 
-	for (x = 0; x < w + 2; x++)
-		nxt_r[x] = nxt_g[x] = nxt_b[x] = 0;
+	if (gi.bpp == 1) {
+		ditherrow1(screeny, x0, w);
+		return;
+	}
 
 	for (x = 0; x < w; x++) {
 		unsigned long p = rgbrow[x];
-		int r = (int)((p >> 16) & 0xFF) + err_r[x + 1];
-		int g = (int)((p >> 8) & 0xFF)  + err_g[x + 1];
-		int b = (int)(p & 0xFF)         + err_b[x + 1];
-		int qr, qg, qb, er, eg, eb;
+		int r = (int)((p >> 16) & 0xFF);
+		int g = (int)((p >> 8) & 0xFF);
+		int b = (int)(p & 0xFF);
+		int qr, qg, qb;
 		unsigned long out;
 
+		if (DITHERING) {
+			r += err_r[x + 1];
+			g += err_g[x + 1];
+			b += err_b[x + 1];
+		}
 		if (r < 0) r = 0; else if (r > 255) r = 255;
 		if (g < 0) g = 0; else if (g > 255) g = 255;
 		if (b < 0) b = 0; else if (b > 255) b = 255;
 
 		out = quantise(r, g, b, &qr, &qg, &qb);
-		er = r - qr;
-		eg = g - qg;
-		eb = b - qb;
 
-		/* Floyd-Steinberg:      X   7/16
-		                    3/16 5/16 1/16   */
-		err_r[x + 2] += (short)((er * 7) / 16);
-		err_g[x + 2] += (short)((eg * 7) / 16);
-		err_b[x + 2] += (short)((eb * 7) / 16);
-		nxt_r[x]     += (short)((er * 3) / 16);
-		nxt_g[x]     += (short)((eg * 3) / 16);
-		nxt_b[x]     += (short)((eb * 3) / 16);
-		nxt_r[x + 1] += (short)((er * 5) / 16);
-		nxt_g[x + 1] += (short)((eg * 5) / 16);
-		nxt_b[x + 1] += (short)((eb * 5) / 16);
-		nxt_r[x + 2] += (short)(er / 16);
-		nxt_g[x + 2] += (short)(eg / 16);
-		nxt_b[x + 2] += (short)(eb / 16);
+		if (DITHERING) {
+			int er = r - qr, eg = g - qg, eb = b - qb;
+			if (ATKINSON) {
+				err_r[x + 2] += (short)(er / 8);
+				err_g[x + 2] += (short)(eg / 8);
+				err_b[x + 2] += (short)(eb / 8);
+				err_r[x + 3] += (short)(er / 8);
+				err_g[x + 3] += (short)(eg / 8);
+				err_b[x + 3] += (short)(eb / 8);
+				nxt_r[x]     += (short)(er / 8);
+				nxt_g[x]     += (short)(eg / 8);
+				nxt_b[x]     += (short)(eb / 8);
+				nxt_r[x + 1] += (short)(er / 8);
+				nxt_g[x + 1] += (short)(eg / 8);
+				nxt_b[x + 1] += (short)(eb / 8);
+				nxt_r[x + 2] += (short)(er / 8);
+				nxt_g[x + 2] += (short)(eg / 8);
+				nxt_b[x + 2] += (short)(eb / 8);
+				nx2_r[x + 1] += (short)(er / 8);
+				nx2_g[x + 1] += (short)(eg / 8);
+				nx2_b[x + 1] += (short)(eb / 8);
+			} else {
+				err_r[x + 2] += (short)((er * 7) / 16);
+				err_g[x + 2] += (short)((eg * 7) / 16);
+				err_b[x + 2] += (short)((eb * 7) / 16);
+				nxt_r[x]     += (short)((er * 3) / 16);
+				nxt_g[x]     += (short)((eg * 3) / 16);
+				nxt_b[x]     += (short)((eb * 3) / 16);
+				nxt_r[x + 1] += (short)((er * 5) / 16);
+				nxt_g[x + 1] += (short)((eg * 5) / 16);
+				nxt_b[x + 1] += (short)((eb * 5) / 16);
+				nxt_r[x + 2] += (short)(er / 16);
+				nxt_g[x + 2] += (short)(eg / 16);
+				nxt_b[x + 2] += (short)(eb / 16);
+			}
+		}
 
 		if (x0 + x >= 0 && x0 + x < gi.width)
 			plot(x0 + x, screeny, out);
@@ -437,20 +532,47 @@ static void ditherrow(int screeny, int x0, int w)
 	memcpy(err_r, nxt_r, sizeof(err_r));
 	memcpy(err_g, nxt_g, sizeof(err_g));
 	memcpy(err_b, nxt_b, sizeof(err_b));
+	memcpy(nxt_r, nx2_r, sizeof(nxt_r));
+	memcpy(nxt_g, nx2_g, sizeof(nxt_g));
+	memcpy(nxt_b, nx2_b, sizeof(nxt_b));
+	memset(nx2_r, 0, sizeof(nx2_r));
+	memset(nx2_g, 0, sizeof(nx2_g));
+	memset(nx2_b, 0, sizeof(nx2_b));
+}
+
+/* An argument that was left out is passed as an empty string, because
+   MMBasic lets any optional one be blank: LOAD IMAGE f$,,,4 sets the
+   mode and nothing else. */
+static int arg(int argc, char *argv[], int n, int dflt)
+{
+	if (n >= argc || argv[n][0] == '\0')
+		return dflt;
+	return atoi(argv[n]);
 }
 
 int main(int argc, char *argv[])
 {
-	int x0 = 0, y0 = 0, y, rlerows = 0;
+	int x0, y0, ximg, yimg, y, rlerows = 0;
 
-	if (argc != 2 && argc != 4) {
-		fprintf(stderr, "usage: %s file.bmp [x y]\n", argv[0]);
+	if (argc < 2 || argc > 7) {
+		fprintf(stderr,
+			"usage: %s file.bmp [x [y [mode [ximage [yimage]]]]]\n",
+			argv[0]);
 		return 1;
 	}
-	if (argc == 4) {
-		x0 = atoi(argv[2]);
-		y0 = atoi(argv[3]);
-	}
+	x0    = arg(argc, argv, 2, 0);
+	y0    = arg(argc, argv, 3, 0);
+	dmode = arg(argc, argv, 4, -1);
+	ximg  = arg(argc, argv, 5, 0);
+	yimg  = arg(argc, argv, 6, 0);
+	if (dmode == 3 || dmode == 7)
+		die("RGB565 dithering not yet supported");
+	if (dmode < -1 || dmode > 7)
+		die("mode must be -1 to 7");
+	/* Where in the IMAGE to start, which moves the picture the other
+	   way on the screen. */
+	x0 -= ximg;
+	y0 -= yimg;
 
 	sysfd = open("/dev/sys", O_RDWR);
 	if (sysfd < 0)
@@ -471,6 +593,12 @@ int main(int argc, char *argv[])
 	}
 
 	memset(err_r, 0, sizeof(err_r));
+	memset(nxt_r, 0, sizeof(nxt_r));
+	memset(nxt_g, 0, sizeof(nxt_g));
+	memset(nxt_b, 0, sizeof(nxt_b));
+	memset(nx2_r, 0, sizeof(nx2_r));
+	memset(nx2_g, 0, sizeof(nx2_g));
+	memset(nx2_b, 0, sizeof(nx2_b));
 	memset(err_g, 0, sizeof(err_g));
 	memset(err_b, 0, sizeof(err_b));
 
