@@ -1300,15 +1300,43 @@ int f_trunc_blocks(register inoptr ino, uint16_t nblock)
     /* FIXME: ideally zero the indirect pointers before we write the
        free lists */
 
-    /* First deallocate the double indirect blocks */
+    /*
+     * First deallocate the double indirect blocks.
+     *
+     * freeblk() frees the block it is given, root included, so when
+     * nothing is retained (map2 == 0, which is EVERY f_trunc() - it
+     * always passes nblock 0) i_addr[19] must be cleared. The test used
+     * to be "if (map2)", the exact opposite, so a full truncation left
+     * i_addr[19] pointing at a block it had just put on the free list.
+     *
+     * That is the filesystem corruption chased on 2026-08-02. Rewriting
+     * the file - SAVE IMAGE opening with O_TRUNC and writing 451 blocks
+     * straight back - reaches logical block 274, bmap finds i_addr[19]
+     * still set and reuses the freed block as the double indirect root,
+     * by then reallocated as somebody's data or as a free list chain
+     * block. Hence block numbers like 50 and 65442 appearing in a file's
+     * block list, blk_free() panicking on them, and a chain block
+     * coming back zeroed because blk_alloc had handed it out twice.
+     *
+     * It only bites files longer than 273 blocks, which is why it
+     * survived on machines with small discs.
+     *
+     * Note the single indirect line below already had the right sense -
+     * the two tests were opposites, and its "???? should this just be if
+     * map1" says the doubt was known.
+     */
     freeblk(dev, ino->c_node.i_addr[19], 2, map2);
-    if (map2)
+    if (map2 == 0)
         ino->c_node.i_addr[19] = 0;
 
-    /* Also deallocate the indirect blocks */
-    freeblk(dev, ino->c_node.i_addr[18], 1, map1);
-    if (map1 == 0 && map2 == 0)	/* ???? should this just be if map1 */
-        ino->c_node.i_addr[18] = 0;
+    /* Also deallocate the indirect blocks. With nblock > 273 the whole
+       single indirect range is retained, so it must not be touched at
+       all - freeblk(.., map1 == 0) would free the lot. */
+    if (nblock < 274) {
+        freeblk(dev, ino->c_node.i_addr[18], 1, map1);
+        if (map1 == 0)
+            ino->c_node.i_addr[18] = 0;
+    }
 
     /* Finally, free the direct blocks */
     /* FIXME: use pointers for efficiency ? */
