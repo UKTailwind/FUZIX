@@ -367,6 +367,34 @@ void statement_inner(void)
         emit("mm_cls();");
         return;
     }
+    if (strcmp(up, "MODE") == 0) {
+        /* MODE 1  640x480, one bit    MODE 2  320x240, 16 colours
+           The PicoMite VGA numbering, which is also the first two
+           HDMI modes; the runtime maps it onto the kernel's own. */
+        struct val n;
+        cv.i++;
+        n = expr();
+        emit(sfmt("mm_mode(%s);", as_int(n)));
+        return;
+    }
+    if (strcmp(up, "COLOUR") == 0 || strcmp(up, "COLOR") == 0) {
+        /* COLOUR fg [, bg].  Everything that draws without being given
+           a colour uses fg.  bg is remembered but nothing reads it yet
+           - TEXT and the filled shapes will. */
+        struct val fg;
+        const char *bg;
+        const char *f;
+
+        cv.i++;
+        fg = expr();
+        if (accept_op(","))
+            bg = as_int(expr());
+        else
+            bg = "MM_CUR";
+        f = as_int(fg);
+        emit(sfmt("mm_colour(%s, %s);", f, bg));
+        return;
+    }
     if (strcmp(up, "PIXEL") == 0) {
         /* PIXEL x, y        - in the current foreground colour
            PIXEL x, y, c     - c is RGB888, as everywhere in MMBasic;
@@ -388,10 +416,7 @@ void statement_inner(void)
             c = expr();
             col = as_int(c);
         } else {
-            /* No COLOUR statement yet, so the "current" foreground
-               is white - which is ink on the 1bpp console and the
-               brightest palette entry in the 4bpp modes. */
-            col = "0xFFFFFFLL";
+            col = "MM_CUR";
         }
         xs = as_int(x);
         ys = as_int(y);
@@ -407,7 +432,7 @@ void statement_inner(void)
          * Measured 433us point-by-point against 71us batched for a 312
          * point diagonal. */
         struct val x1, y1, x2, y2;
-        const char *col = "0xFFFFFFLL";
+        const char *col = "MM_CUR";
         const char *a, *b, *c2, *d;
 
         cv.i++;

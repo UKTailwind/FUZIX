@@ -333,6 +333,23 @@ void mm_mid_assign(char *dst, MMINTEGER start, MMINTEGER num, const char *repl);
  *
  * On the host these are no-ops returning black, so a translated
  * program that draws still runs under the gates.  */
+
+/* Passed as the colour by a statement that was given none: draw in
+ * whatever COLOUR last set.  Resolved inside the primitive so the hot
+ * path stays one call, rather than the caller fetching it first. */
+#define MM_CUR (-1)
+
+/* MODE n: 1 = 640x480 one bit, 2 = 320x240 sixteen colours.  The
+ * PicoMite VGA numbering, which is also the first two HDMI modes - NOT
+ * the kernel's own, where 0-5 are the BBC modes and the 320x240 screen
+ * is 7.  The mapping is in mm_mode. */
+void mm_mode(MMINTEGER n);
+/* COLOUR fg [, bg].  Pass MM_CUR as bg to leave the background alone.
+ * The kernel holds one colour and knows nothing of a background; bg is
+ * kept here for TEXT and filled shapes. */
+void mm_colour(MMINTEGER fg, MMINTEGER bg);
+MMINTEGER mm_fg(void);
+MMINTEGER mm_bg(void);
 void mm_cls(void);
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb);
 MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y);

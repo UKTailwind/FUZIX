@@ -279,6 +279,10 @@ static void w_line(void)     { mm_line(LL(0), LL(2), LL(4), LL(6), LL(8));
                                A = 0; }
 static void w_hres(void)     { A = mm_hres(); }
 static void w_vres(void)     { A = mm_vres(); }
+static void w_mode(void)     { mm_mode(LL(0)); A = 0; }
+static void w_colour(void)   { mm_colour(LL(0), LL(2)); A = 0; }
+static void w_fg(void)       { A = mm_fg(); }
+static void w_bg(void)       { A = mm_bg(); }
 
 /* LONGSTRING */
 static void w_ls_len(void)   { A = mm_ls_len(PI(0)); }
@@ -456,6 +460,10 @@ static const struct mmwrap {
 	{ "mm_line",		w_line },
 	{ "mm_hres",		w_hres },
 	{ "mm_vres",		w_vres },
+	{ "mm_mode",		w_mode },
+	{ "mm_colour",		w_colour },
+	{ "mm_fg",		w_fg },
+	{ "mm_bg",		w_bg },
 	{ "mm_ls_len",		w_ls_len },
 	{ "mm_ls_clear",	w_ls_clear },
 	{ "mm_ls_append",	w_ls_append },

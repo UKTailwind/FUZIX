@@ -2140,12 +2140,33 @@ void mm_cls(void)
  * The ioctl numbers are duplicated from the platform's pico_ioctl.h
  * rather than included, so the runtime does not need the FUZIX tree on
  * the include path.  Keep them in step.  */
+
+/* The current drawing colour.  MMBasic keeps one, and PIXEL, LINE and
+ * the rest draw in it whenever no colour is given; only COLOUR changes
+ * it.  It lives here rather than being read back from the kernel
+ * because the kernel stores it already reduced to the live mode's own
+ * representation, so a MODE change would silently reinterpret it.
+ * Every primitive takes an explicit RGB888 or MM_CUR for this one. */
+static MMINTEGER mm_gfx_fg = 0xFFFFFF;
+static MMINTEGER mm_gfx_bg = 0;
+
+void mm_colour(MMINTEGER fg, MMINTEGER bg)
+{
+    mm_gfx_fg = fg & 0xFFFFFF;
+    if (bg >= 0)                        /* COLOUR fg leaves bg alone */
+        mm_gfx_bg = bg & 0xFFFFFF;
+}
+
+MMINTEGER mm_fg(void) { return mm_gfx_fg; }
+MMINTEGER mm_bg(void) { return mm_gfx_bg; }
+
 #if defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
 
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 
+#define MM_GFXIOC_MODE     0x0003
 #define MM_GFXIOC_PIXEL    0x000F
 #define MM_GFXIOC_COLOUR   0x0010
 #define MM_GFXIOC_GETPIXEL 0x0011
@@ -2161,15 +2182,56 @@ static int mm_gfx_open(void)
     return mm_gfx_fd;
 }
 
+/* Set the one current colour, if it is not already that.  MM_CUR means
+ * whatever COLOUR last set. */
+static void mm_gfx_setcol(MMINTEGER rgb)
+{
+    if (rgb == MM_CUR)
+        rgb = mm_gfx_fg;
+    if (rgb != mm_gfx_col) {
+        ioctl(mm_gfx_fd, MM_GFXIOC_COLOUR, (void *)(long)(rgb & 0xFFFFFF));
+        mm_gfx_col = rgb;
+    }
+}
+
+/*
+ * MODE n.
+ *
+ * mmb2c numbers the modes the way the VGA PicoMite and the first two
+ * HDMI modes do - MODE 1 is 640x480 in one bit, MODE 2 is 320x240 in
+ * 16 colours - which is deliberately NOT the kernel's own numbering.
+ * The kernel calls the 320x240 16-colour screen mode 7 (its 0-5 are
+ * the BBC modes on a 1024x768 raster), and its 640x480 one-bit surface
+ * is the text console, whose framebuffer the drawing primitives share.
+ * So MODE 1 goes back to the console, which is also where the prompt
+ * is - the same thing MODE 1 means on a PicoMite.
+ */
+void mm_mode(MMINTEGER n)
+{
+    int k;
+
+    if (n == 1)
+        k = 0xFF;                       /* the console: 640x480, 1bpp */
+    else if (n == 2)
+        k = 7;                          /* 320x240, 16 colours */
+    else {
+        mm_error("MODE must be 1 or 2");
+        return;
+    }
+    if (mm_gfx_open() < 0)
+        return;
+    ioctl(mm_gfx_fd, MM_GFXIOC_MODE, &k);
+    /* The kernel holds its current colour already reduced to the mode
+     * that was live when it was set, so the cached value is now
+     * meaningless: force the next draw to push again. */
+    mm_gfx_col = -1;
+}
+
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb)
 {
     if (mm_gfx_open() < 0)
         return;                         /* no display: draw nothing */
-    if (rgb != mm_gfx_col) {
-        ioctl(mm_gfx_fd, MM_GFXIOC_COLOUR,
-              (void *)(long)(rgb & 0xFFFFFF));
-        mm_gfx_col = rgb;
-    }
+    mm_gfx_setcol(rgb);
     ioctl(mm_gfx_fd, MM_GFXIOC_PIXEL,
           (void *)(long)MM_GFX_PACK((int)x, (int)y));
 }
@@ -2244,15 +2306,6 @@ struct mm_gfx_batch {
 };
 
 static struct mm_gfx_pt mm_ptbuf[MM_BATCH];
-
-/* Set the one current colour, if it is not already that. */
-static void mm_gfx_setcol(MMINTEGER rgb)
-{
-    if (rgb != mm_gfx_col) {
-        ioctl(mm_gfx_fd, MM_GFXIOC_COLOUR, (void *)(long)(rgb & 0xFFFFFF));
-        mm_gfx_col = rgb;
-    }
-}
 
 static void mm_gfx_flush_pts(int n)
 {
@@ -2371,10 +2424,22 @@ void mm_line(MMINTEGER x1, MMINTEGER y1, MMINTEGER x2, MMINTEGER y2,
 }
 
 /* The host has no display, but a program that asks how big it is must
- * still get a sane answer rather than zero - the PC3 console size, so
- * the same program lays out identically under the gates. */
-MMINTEGER mm_hres(void) { return 640; }
-MMINTEGER mm_vres(void) { return 480; }
+ * still get a sane answer rather than zero - the PC3 screen sizes, so
+ * the same program lays itself out identically under the gates.  That
+ * is the whole reason MODE is tracked here at all. */
+static MMINTEGER mm_host_mode = 1;
+
+void mm_mode(MMINTEGER n)
+{
+    if (n != 1 && n != 2) {
+        mm_error("MODE must be 1 or 2");
+        return;
+    }
+    mm_host_mode = n;
+}
+
+MMINTEGER mm_hres(void) { return mm_host_mode == 2 ? 320 : 640; }
+MMINTEGER mm_vres(void) { return mm_host_mode == 2 ? 240 : 480; }
 
 void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
                const MMFLOAT *yf, const MMINTEGER *yi,
