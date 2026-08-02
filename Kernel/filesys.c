@@ -309,6 +309,9 @@ inoptr i_open(register uint16_t dev, uint16_t ino)
 
     if (breadi(dev, ino, &nindex->c_node))
         goto lost;
+#ifdef CONFIG_SB_TRIPWIRE
+    ino_blocks_check(dev, ino, &nindex->c_node, "read");
+#endif
 
     nindex->c_dev = dev;
     nindex->c_num = ino;
@@ -1224,6 +1227,9 @@ void wr_inode(register inoptr ino)
     blkno_t blkno;
 */
     magic(ino);
+#ifdef CONFIG_SB_TRIPWIRE
+    ino_blocks_check(ino->c_dev, ino->c_num, &ino->c_node, "write");
+#endif
 
     if (bwritei(ino))
         corrupt_fs(ino->c_dev);
@@ -1409,6 +1415,54 @@ void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, uint16_t nblock)
  *  data block for the given device.
  */
 #ifdef CONFIG_SB_TRIPWIRE
+/*
+ *	Inode block-list tripwire.
+ *
+ *	validblk(blk_free) caught the corruption naming block 50 - a block
+ *	inside the INODE area, reached from a file's block list while
+ *	truncating it. That says an inode (or one of its indirect blocks)
+ *	holds a bad pointer, but not WHERE it went wrong, and those are two
+ *	entirely different bugs:
+ *
+ *	  - bad as it comes off the disk  -> an earlier WRITE put garbage
+ *	    there, so the fault is in the write path;
+ *	  - good on disk, bad later	  -> something scribbled on the
+ *	    in-core inode table, so the fault is memory corruption.
+ *
+ *	So check the list at both ends: as i_open reads it, and as wr_inode
+ *	is about to write it back. Whichever fires first decides which of
+ *	those two searches to start. Only regular files and directories -
+ *	a device inode keeps its device number in i_addr[0].
+ */
+void ino_blocks_check(uint16_t dev, uint16_t inum, const dinode *d,
+                      const char *where)
+{
+    register struct mount *mnt;
+    uint16_t mode = d->i_mode & F_MASK;
+    int i;
+
+    if (mode != F_REG && mode != F_DIR)
+        return;
+    mnt = fs_tab_get(dev);
+    if (mnt == NULL || mnt->m_fs.s_mounted == 0)
+        return;
+
+    for (i = 0; i < 20; i++) {
+        blkno_t b = d->i_addr[i];
+        if (b == 0)
+            continue;
+        if (b < mnt->m_fs.s_isize || b >= mnt->m_fs.s_fsize) {
+            kprintf("\ninode tripwire(%s): dev %u inode %u i_addr[%d] = %u"
+                    " outside %u..%u (mode %x size %u)\n",
+                    where, dev, inum, i, (unsigned)b,
+                    (unsigned)mnt->m_fs.s_isize,
+                    (unsigned)mnt->m_fs.s_fsize,
+                    (unsigned)d->i_mode, (unsigned)d->i_size);
+            panic("inoblk");
+        }
+    }
+}
+
 void validblk_at(uint16_t dev, register blkno_t num, const char *who)
 #else
 void validblk(uint16_t dev, register blkno_t num)

@@ -139,10 +139,18 @@ def decode(ser, remote, verbose=True):
 
 
 def main():
-    local, remote = sys.argv[1], sys.argv[2]
-    gap = (int(sys.argv[3]) if len(sys.argv) > 3 else 25) / 1000.0
+    # --port=COMn picks the board (COM11 the PC3, COM14 the PC2); it may
+    # appear anywhere, so the positional arguments keep their places.
+    argv = [a for a in sys.argv[1:] if not a.startswith("--port=")]
+    port = PORT
+    for a in sys.argv[1:]:
+        if a.startswith("--port="):
+            port = a[7:]
 
-    ser = serial.Serial(PORT, BAUD, timeout=1)
+    local, remote = argv[0], argv[1]
+    gap = (int(argv[2]) if len(argv) > 2 else 25) / 1000.0
+
+    ser = serial.Serial(port, BAUD, timeout=1)
     time.sleep(0.3); ser.reset_input_buffer()
     ser.write(b"\r"); ser.flush(); drain(ser, 0.4, 3)
 

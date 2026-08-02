@@ -1,6 +1,10 @@
 """Send one command to the Fuzix console and read until it finishes.
 
-  python fzrun.py "cmd" [--until=STR] [--max=SECS] [--delay=MS]
+  python fzrun.py "cmd" [--until=STR] [--max=SECS] [--delay=MS] [--port=COMn]
+
+--port picks the board: COM11 is the PC3, COM14 the PC2 (whose SD is
+bit-banged rather than driven by the PC3's SPI, which makes it the
+control for anything that smells like an SD driver fault).
 
 fzsh.py drains until 0.6s of silence, so a command that thinks before it
 speaks returns with only its echo; listen.py then always burns its full
@@ -28,6 +32,7 @@ def main():
     until = None
     limit = 600.0
     delay = 0.012
+    port = PORT
     for a in sys.argv[2:]:
         if a.startswith("--until="):
             until = a[8:]
@@ -35,8 +40,10 @@ def main():
             limit = float(a[6:])
         elif a.startswith("--delay="):
             delay = float(a[8:]) / 1000.0
+        elif a.startswith("--port="):
+            port = a[7:]
 
-    with serial.Serial(PORT, BAUD, timeout=0.2) as ser:
+    with serial.Serial(port, BAUD, timeout=0.2) as ser:
         time.sleep(0.2)
         ser.reset_input_buffer()
         for ch in cmd:

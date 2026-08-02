@@ -238,11 +238,42 @@ void pagemap_init(void)
  * runs again.  Sum every resident process's frames when it becomes
  * dormant, verify before it becomes current; panic at the first
  * mismatch instead of crashing minutes later inside the victim. */
+/* OFF, and not worth turning on again without redesigning it.  Enabled
+ * 2026-08-02 to chase the filesystem corruption, it produced two false
+ * alarms (see get_proc_size's write in tripwire_blocks(), and udata
+ * living inside block 0) and then hung the machine solid - no panic, no
+ * reboot, no response to ^C - in the one workload we needed it for,
+ * while the compile it does not care about ran fine.  It cost three
+ * re-image-and-flash cycles and yielded nothing about the actual bug. */
 #define TRIPWIRE 0
 #if TRIPWIRE
 static uint32_t slot_sum[PTABSIZE];
 static uint8_t slot_sum_valid[PTABSIZE];
 
+/* Measuring must not MODIFY.  get_proc_size() carries init's fixup -
+ * "if (!p->p_top) udata.u_top = p->p_top = PROGLOAD + 512" - and udata
+ * here is *(struct u_data *)progbase, i.e. the CURRENT process.  So
+ * sizing some OTHER process from the tripwire would write the running
+ * process's u_top, a store the unmodified kernel never makes.  A
+ * process that has not been sized yet is simply not checked. */
+static int tripwire_blocks(ptptr p)
+{
+    if (!p->p_top)
+        return 0;
+    return (int)((uaddr_t)alignup(p->p_top - PROGBASE, BLOCKSIZE) / BLOCKSIZE);
+}
+
+/* Block 0 starts with udata (`#define udata (*(struct u_data*)progbase)`
+ * - it lives INSIDE the process image, not beside it), and the kernel is
+ * entitled to write a dormant process's udata: fork copies the parent's
+ * blocks, swaps the map entries and then fills in the child's u_ptab and
+ * its zero return value while the child is not running.  Summing it
+ * therefore reports every fork as corruption - which is what "incoming
+ * slot 1 pid 2" was, a freshly forked child, on a perfectly clean disk.
+ *
+ * So skip the udata bytes and start block 0 at PROGLOAD.  Everything the
+ * process itself owns is still covered; the one region whose changes are
+ * legitimate is not. */
 static uint32_t sum_slot(int slot, int blocks)
 {
     uint32_t sum = 0;
@@ -254,6 +285,8 @@ static uint32_t sum_slot(int slot, int blocks)
         w = (uint32_t *)((void *)PROGBASE
                          + (b - allocation_map) * BLOCKSIZE);
         e = w + BLOCKSIZE / 4;
+        if (i == 0)
+            w += UDATA_SIZE / 4;
         while (w < e)
             sum = (sum << 1 | sum >> 31) ^ *w++;
     }
@@ -263,19 +296,22 @@ static uint32_t sum_slot(int slot, int blocks)
 static void tripwire_check(ptptr newp)
 {
     for (ptptr q = ptab; q < ptab + PTABSIZE; q++) {
-        int s;
+        int s, nb;
         if (q->p_status == P_EMPTY || !q->p_page)
             continue;
+        nb = tripwire_blocks(q);
+        if (!nb)
+            continue;        /* not sized yet - see tripwire_blocks() */
         s = get_slot(q);
         if (!slot_sum_valid[s]) {
             /* freshly dormant (the outgoing process): record it */
-            slot_sum[s] = sum_slot(s, get_proc_size_blocks(q));
+            slot_sum[s] = sum_slot(s, nb);
             slot_sum_valid[s] = 1;
             continue;
         }
         if (q == newp)
             continue;        /* about to run: verified below by caller */
-        if (slot_sum[s] != sum_slot(s, get_proc_size_blocks(q))) {
+        if (slot_sum[s] != sum_slot(s, nb)) {
             kprintf("tripwire: slot %d pid %d corrupted while dormant\n",
                     s, q->p_pid);
             panic("tripwire");
@@ -288,10 +324,10 @@ void contextswitch(ptptr p)
 {
 #if TRIPWIRE
     tripwire_check(p);
-    if (p->p_page) {
+    if (p->p_page && tripwire_blocks(p)) {
         int s = get_slot(p);
         if (slot_sum_valid[s]
-            && slot_sum[s] != sum_slot(s, get_proc_size_blocks(p))) {
+            && slot_sum[s] != sum_slot(s, tripwire_blocks(p))) {
             kprintf("tripwire: incoming slot %d pid %d corrupt\n",
                     s, p->p_pid);
             panic("tripwire");

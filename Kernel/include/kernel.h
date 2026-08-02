@@ -1049,6 +1049,10 @@ extern blkno_t bmap(inoptr ip, blkno_t bn, unsigned int rwflg);
 #ifdef CONFIG_SB_TRIPWIRE
 /* names the caller in the panic - see validblk_at() in filesys.c */
 extern void validblk_at(uint16_t dev, blkno_t num, const char *who);
+/* checks an inode's block list as it is read and as it is written back,
+ * to say whether a bad pointer came off the disk or was made in memory */
+extern void ino_blocks_check(uint16_t dev, uint16_t inum, const dinode *d,
+                             const char *where);
 #define validblk(dev, num) validblk_at((dev), (num), __func__)
 #else
 extern void validblk(uint16_t dev, blkno_t num);
