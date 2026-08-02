@@ -90,7 +90,24 @@ board.  `mmedit <file>` opens, colours, edits, saves with a `.bak` and
 exits; `mmbc`/`cc`/run on the file it just saved works, so the machine
 now edits, translates, compiles and runs its own BASIC.
 
-**NEXT SESSION STARTS HERE: F4 then F12.**
+**F4 AND F12 ARE DONE** (commit 1102335ad) - mark mode and the
+beautifier are ported and tested on the board, so the editor is now
+feature-complete against MMBasic's bar the file manager.  What follows
+is kept as the record of how they were ported; the remaining work is
+the numbered list after it.
+
+Fast loop worth reusing for any further editor work: it builds and runs
+on Linux unchanged, so
+ plus a pty
+driver finds a fault in seconds without touching the board.
+
+Mark mode was also the first code to exercise
+restoreColourFromLineStart: un-highlighting has to restore the syntax
+colour for a character mid-line, which replays the colour state machine
+from the start of that line.  It had been ported with SetColour and had
+never run.
+
+WHAT WAS PORTED:
 
 1. **Mark mode (F4)** - Editor.c 7402-8208, ~800 self-contained lines,
    currently a stub that says so on screen.  It is the only thing that
