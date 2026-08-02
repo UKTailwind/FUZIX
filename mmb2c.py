@@ -2166,6 +2166,26 @@ class Conv(object):
             self.i += 1
             self.emit('mm_cls();')
             return
+        if up == 'MODE':
+            # MODE 1  640x480, one bit    MODE 2  320x240, 16 colours
+            # The PicoMite VGA numbering, which is also the first two
+            # HDMI modes; the runtime maps it onto the kernel's own.
+            self.i += 1
+            n = self.expr()
+            self.emit('mm_mode(%s);' % self.as_int(n))
+            return
+        if up in ('COLOUR', 'COLOR'):
+            # COLOUR fg [, bg].  Everything that draws without being
+            # given a colour uses fg.  bg is remembered but nothing
+            # reads it yet - TEXT and the filled shapes will.
+            self.i += 1
+            fg = self.expr()
+            if self.accept_op(','):
+                bg = self.as_int(self.expr())
+            else:
+                bg = 'MM_CUR'
+            self.emit('mm_colour(%s, %s);' % (self.as_int(fg), bg))
+            return
         if up == 'PIXEL':
             # PIXEL x, y        - in the current foreground colour
             # PIXEL x, y, c     - c is RGB888, as everywhere in MMBasic;
@@ -2182,10 +2202,7 @@ class Conv(object):
                 c = self.expr()
                 col = self.as_int(c)
             else:
-                # No COLOUR statement yet, so the "current" foreground
-                # is white - which is ink on the 1bpp console and the
-                # brightest palette entry in the 4bpp modes.
-                col = '0xFFFFFFLL'
+                col = 'MM_CUR'
             self.emit('mm_pixel(%s, %s, %s);'
                       % (self.as_int(x), self.as_int(y), col))
             return
@@ -2205,7 +2222,7 @@ class Conv(object):
             x2 = self.expr()
             self.expect_op(',')
             y2 = self.expr()
-            col = '0xFFFFFFLL'
+            col = 'MM_CUR'
             if self.is_op(','):
                 self.i += 1
                 w = self.expr()
