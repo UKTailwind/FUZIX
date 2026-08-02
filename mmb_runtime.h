@@ -277,6 +277,18 @@ MMFLOAT mm_st_med_f (const MMFLOAT   *a, int n);
 /* ---- misc Tier A ---------------------------------------------------- */
 void mm_pause   (MMFLOAT ms);
 void mm_error_s (const char *mmstr);     /* the ERROR statement        */
+
+/* ---- running another program -----------------------------------------
+ * Collect an argv, then run it and wait.  A non-zero exit is a BASIC
+ * error, as a failed MMBasic command would be.  This is what lets a
+ * BASIC command hand real work to a separate binary - SAVE IMAGE and
+ * LOAD IMAGE are the first - without bcrun or the calling program
+ * carrying the code for it. */
+void mm_run_begin(void);
+void mm_run_arg  (const char *mmstr);
+void mm_run_arg_i(MMINTEGER v);
+void mm_run_arg_f(MMFLOAT v);
+MMINTEGER mm_run_exec(void);
 void mm_timer_set(MMFLOAT ms);           /* TIMER = n, milliseconds    */
 void mm_set_date(const char *d);         /* DATE$ =                    */
 void mm_set_time(const char *t);         /* TIME$ =                    */

@@ -377,6 +377,46 @@ void statement_inner(void)
         emit(sfmt("mm_mode(%s);", as_int(n)));
         return;
     }
+    if (strcmp(up, "SYSTEM") == 0
+        || ((strcmp(up, "SAVE") == 0 || strcmp(up, "LOAD") == 0)
+            && is_kw("IMAGE", 1))) {
+        /* SYSTEM prog$ [, arg ...]        run a program and wait
+           SAVE IMAGE f$ [, x, y, w, h]    both are programs
+           LOAD IMAGE f$ [, x, y]
+
+           An argv, not a command line: nothing to quote and no shell
+           in the middle.  MMBasic has no SYSTEM - it is firmware with
+           nothing to run - so that spelling is ours, but SAVE IMAGE
+           and LOAD IMAGE are the interpreter's own and are simply
+           handed to /usr/bin/saveimage and /usr/bin/loadimage. */
+        const char *prog = NULL;
+        int first = 1;
+
+        if (strcmp(up, "SYSTEM") == 0) {
+            cv.i++;
+        } else {
+            cv.i += 2;
+            prog = (strcmp(up, "SAVE") == 0) ? "saveimage" : "loadimage";
+        }
+        emit("mm_run_begin();");
+        if (prog != NULL)
+            emit(sfmt("mm_run_arg(%s);", c_string_literal(prog)));
+        for (;;) {
+            struct val v;
+            if (!first && !accept_op(","))
+                break;
+            v = expr();
+            if (v.ty == TY_S)
+                emit(sfmt("mm_run_arg(%s);", v.code));
+            else if (v.ty == TY_I)
+                emit(sfmt("mm_run_arg_i(%s);", v.code));
+            else
+                emit(sfmt("mm_run_arg_f(%s);", v.code));
+            first = 0;
+        }
+        emit("mm_run_exec();");
+        return;
+    }
     if (strcmp(up, "CIRCLE") == 0) {
         /* CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
            The geometry is mmb_gfx.h's, not the runtime's.  MMBasic

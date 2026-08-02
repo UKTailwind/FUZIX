@@ -2175,6 +2175,40 @@ class Conv(object):
             n = self.expr()
             self.emit('mm_mode(%s);' % self.as_int(n))
             return
+        if up == 'SYSTEM' or (up in ('SAVE', 'LOAD') and self.is_kw('IMAGE', 1)):
+            # SYSTEM prog$ [, arg ...]        run a program and wait
+            # SAVE IMAGE f$ [, x, y, w, h]    both are programs
+            # LOAD IMAGE f$ [, x, y]
+            #
+            # An argv, not a command line: nothing to quote and no
+            # shell in the middle.  MMBasic has no SYSTEM - it is
+            # firmware with nothing to run - so that spelling is ours,
+            # but SAVE IMAGE and LOAD IMAGE are the interpreter's own
+            # and are simply handed to /usr/bin/saveimage and
+            # /usr/bin/loadimage.
+            if up == 'SYSTEM':
+                self.i += 1
+                prog = None
+            else:
+                self.i += 2
+                prog = 'saveimage' if up == 'SAVE' else 'loadimage'
+            self.emit('mm_run_begin();')
+            if prog is not None:
+                self.emit('mm_run_arg(%s);' % c_string_literal(prog))
+            first = True
+            while True:
+                if not first and not self.accept_op(','):
+                    break
+                v = self.expr()
+                if v[1] == TY_S:
+                    self.emit('mm_run_arg(%s);' % v[0])
+                elif v[1] == TY_I:
+                    self.emit('mm_run_arg_i(%s);' % v[0])
+                else:
+                    self.emit('mm_run_arg_f(%s);' % v[0])
+                first = False
+            self.emit('mm_run_exec();')
+            return
         if up == 'CIRCLE':
             # CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
             # The geometry is mmb_gfx.h's, not the runtime's.  MMBasic
