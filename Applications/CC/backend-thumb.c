@@ -440,9 +440,27 @@ static unsigned t_builder_len(unsigned op)
 	case BC_ZEXT8: case BC_ZEXT16: case BC_ZEXT32:
 	case BC_TRUNC64:
 	case BC_NEG: case BC_NOT:
-	case BC_NEG64: case BC_NOT64:
-	case BC_NEGD:
+	case BC_NOT64:
 		return 1;
+	/*
+	 * NOT LISTED, and they must not be: BC_NEG64 and BC_NEGD both use
+	 * r2 as a scratch (movs r2,#0 / sbcs, and movs r2,#1 / lsls / eors)
+	 * and r2:r3 is where push/op fusion parks the left operand.  A
+	 * window containing either one hands the operator a destroyed
+	 * operand.
+	 *
+	 * That is not theoretical.  It shipped, and it produced a compare
+	 * against a unary minus that was neither equal, less than NOR
+	 * greater than - the signature of garbage arriving in r2:r3 - so
+	 * `If i = -p Then` silently never fired.  The hidden-line test in
+	 * the ripple benchmark plotted 102 pixels instead of 19364 and the
+	 * only visible symptom was a picture with most of it missing.
+	 *
+	 * BC_LOAD64 is in the list above because it was rewritten to load
+	 * the high word first and need no scratch at all, for exactly this
+	 * reason - see its comment.  Anything added here must satisfy the
+	 * same rule: it may use r0 and r1, and nothing else.
+	 */
 	case BC_CONST8:
 	case BC_LOCAL8:
 		return 2;

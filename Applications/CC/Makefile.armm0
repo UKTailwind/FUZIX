@@ -39,6 +39,16 @@ all: bcrun bcdump ccbc mmbc
 bcrun: bcrun.o
 	$(LINKER) $(CRT0) bcrun.o -o $@ $(LINKER_OPT) $(LINKER_TAIL)
 
+# MM_PC3 selects the real hardware implementations in mmb_runtime.c -
+# the graphics calls that talk to the kernel through /dev/sys.  Without
+# it the file compiles its HOST fallbacks, where mm_pixel is an empty
+# function: a translated program then draws nothing at all and reports a
+# plausible time, because the calls still happen and still cost.  That
+# is exactly what shipped, so it is worth being blunt about it.  The
+# fallbacks exist so the host gates can run a program that draws;
+# nothing else should ever get them.
+bcrun.o: CCOPTS += -DMM_PC3
+
 # The MMBasic -> C translator (masters in the mmb2c repo, synced by
 # fcc/sync-mmbc.sh; byte-identical to mmb2c.py by that repo's gates).
 # MMBC_ARENA: pools live in one PSRAM arena allocation - the second
