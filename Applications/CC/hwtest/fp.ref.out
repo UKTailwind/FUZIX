@@ -1,0 +1,28 @@
+sizes 8 4
+f 175 125 37 600
+fneg -15
+fcmp 0 1 0 1 0 1
+f2d 150
+d2f 350
+i2d -70
+u2d 4000
+i2f -70
+d2i 9 9 9
+d2i- -9
+f2c 4
+ll2d 5000
+d2ll 0 -1294967296
+pluseq 125
+minuseq 120
+muleq 240
+diveq 60
+fpluseq 175
+glob 25 125
+arr 0 25 50 75
+struct 15 25 7
+call 250 250
+call4 10875
+truth 1 1 0 1
+if-true
+if-false
+prec 123456789

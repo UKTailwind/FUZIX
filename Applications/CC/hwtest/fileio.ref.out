@@ -1,0 +1,21 @@
+wrote 12
+read 5 [hello]
+chars 104 101 108 108 111 -1 119 111 114 108 100 -1
+eof 1
+getc 104
+line [hello
+]line [world
+]piece [hel]
+piece [lo
+]
+piece [wor]
+piece [ld
+]
+seek 6 5 [world]
+rewound 0
+after append 18
+fprintf [42 xy 1.500000
+]fputc [ab]
+before middle after
+missing 1
+removed 1

@@ -1,0 +1,8 @@
+str : 'Pico Computer 3' len 15
+cmp : 0 -42
+chr : Computer 3
+atoi: 1234
+set : ========
+heap: first block / second block
+big : 3999 bytes, last-1 'x'
+file: read 11 bytes: hello file

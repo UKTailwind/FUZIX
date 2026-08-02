@@ -34,7 +34,7 @@ COUNT=65536
 
 set -e
 [ -r "$SRC" ] || { echo "no base image at $SRC" >&2; exit 1; }
-for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc; do
+for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc saveimage loadimage mmedit; do
 	[ -r "$CC/hwtest/$f.s" ] || {
 		echo "missing $CC/hwtest/$f.s - cross build and strip first" >&2
 		exit 1; }
@@ -83,7 +83,12 @@ echo "--- installing"
 	# mmbc: the MMBasic -> C translator (mmb2c.py rewritten in C,
 	# byte-identical by that repo's gates) - BASIC self-hosts:
 	#   mmbc prog.bas ; cc prog.c ; ./prog.bc
-	for f in cpp bcrun bcdump mmbc; do
+	# saveimage and loadimage are what SAVE IMAGE and LOAD IMAGE run:
+	# whole operations, so they are programs rather than runtime, and
+	# they cost a BASIC program nothing.  Useful from the shell too.
+	# mmedit is the MMBasic editor ported to Fuzix (Applications/mmedit):
+	# the machine edits its own BASIC as well as translating it.
+	for f in cpp bcrun bcdump mmbc saveimage loadimage mmedit; do
 		echo "bget $CC/hwtest/$f.s $f"
 		echo "chmod 755 $f"
 	done

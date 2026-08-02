@@ -1,0 +1,12 @@
+size 8
+add 400
+mul 375
+sub 1000
+div 600
+neg -15
+i2d 21
+d2i 9
+cmp 1 0 1 0
+zero 1 1
+prec 123456789
+call 250
