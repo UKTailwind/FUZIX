@@ -268,6 +268,11 @@ static void w_st_med_f(void) { A = dput(mm_st_med_f(PF(0), I(1))); }
 static void w_pause(void)    { mm_pause(D(0)); A = 0; }
 static void w_error_s(void)  { mm_error_s(Ps(0)); A = 0; }
 static void w_timer_set(void){ mm_timer_set(D(0)); A = 0; }
+static void w_run_begin(void) { mm_run_begin(); A = 0; }
+static void w_run_arg(void)   { mm_run_arg(Ps(0)); A = 0; }
+static void w_run_arg_i(void) { mm_run_arg_i(LL(0)); A = 0; }
+static void w_run_arg_f(void) { mm_run_arg_f(D(0)); A = 0; }
+static void w_run_exec(void)  { A = mm_run_exec(); }
 static void w_set_date(void) { mm_set_date(Ps(0)); A = 0; }
 static void w_set_time(void) { mm_set_time(Ps(0)); A = 0; }
 
@@ -458,6 +463,11 @@ static const struct mmwrap {
 	{ "mm_pause",		w_pause },
 	{ "mm_error_s",		w_error_s },
 	{ "mm_timer_set",	w_timer_set },
+	{ "mm_run_begin",	w_run_begin },
+	{ "mm_run_arg",		w_run_arg },
+	{ "mm_run_arg_i",	w_run_arg_i },
+	{ "mm_run_arg_f",	w_run_arg_f },
+	{ "mm_run_exec",	w_run_exec },
 	{ "mm_set_date",	w_set_date },
 	{ "mm_set_time",	w_set_time },
 	{ "mm_pixel",		w_pixel },

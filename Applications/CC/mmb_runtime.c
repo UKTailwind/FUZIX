@@ -1876,6 +1876,66 @@ void mm_pause(MMFLOAT ms)
 #endif
 }
 
+/* ---- running another program -----------------------------------------
+ *
+ * MMBasic is firmware and has nothing to run; this is a Fuzix machine
+ * and has a filesystem full of programs, so a BASIC command that wants
+ * real work done can hand it to one.  SAVE IMAGE and LOAD IMAGE are
+ * the first, and neither costs bcrun or the calling program a byte,
+ * because the code is in a separate binary cross compiled with gcc.
+ *
+ * The arguments are collected into an argv rather than a command line:
+ * no quoting to get wrong, no shell process in the middle, and a
+ * number can be converted here instead of the program having to parse
+ * whatever the translator felt like emitting.
+ *
+ * Swap is 8MB of PSRAM on this machine (config.h), not the SD card, so
+ * the fork costs tens of milliseconds rather than seconds.
+ */
+#define MM_RUN_MAXARG   16
+#define MM_RUN_TEXT     256
+
+static char *mm_run_argv[MM_RUN_MAXARG + 1];
+static char  mm_run_text[MM_RUN_TEXT];
+static int   mm_run_nargs;
+static int   mm_run_used;
+
+void mm_run_begin(void)
+{
+    mm_run_nargs = 0;
+    mm_run_used = 0;
+}
+
+/* Every argument lands as text; the caller says what it started as. */
+static void mm_run_push(const char *s, int n)
+{
+    if (mm_run_nargs >= MM_RUN_MAXARG || mm_run_used + n + 1 > MM_RUN_TEXT) {
+        mm_error("too many arguments to run a program with");
+        return;
+    }
+    mm_run_argv[mm_run_nargs++] = &mm_run_text[mm_run_used];
+    memcpy(&mm_run_text[mm_run_used], s, (size_t)n);
+    mm_run_used += n;
+    mm_run_text[mm_run_used++] = '\0';
+}
+
+void mm_run_arg(const char *mmstr)
+{
+    mm_run_push(mm_cstr(mmstr), (int)mm_slen(mmstr));
+}
+
+/* STR$ of it, so a number reaches the program written the way BASIC
+ * would have written it. */
+void mm_run_arg_i(MMINTEGER v)
+{
+    mm_run_arg(mm_str_i(v, 0, MM_AUTO_PRECISION, "\001 "));
+}
+
+void mm_run_arg_f(MMFLOAT v)
+{
+    mm_run_arg(mm_str_f(v, 0, MM_AUTO_PRECISION, "\001 "));
+}
+
 void mm_error_s(const char *mmstr)
 {
     static char msg[MM_STRSZ];
@@ -2177,6 +2237,69 @@ void mm_cls(void)
  * The ioctl numbers are duplicated from the platform's pico_ioctl.h
  * rather than included, so the runtime does not need the FUZIX tree on
  * the include path.  Keep them in step.  */
+
+/*
+ * Run what was collected and wait for it.
+ *
+ * A non-zero exit is a BASIC error, which is how MMBasic behaves when
+ * a command cannot do what it was asked: SAVE IMAGE on a full disc
+ * should stop the program, not return quietly and let it carry on
+ * believing the file exists.
+ *
+ * Under MM_FCC without MM_HOSTED the runtime is compiled INTO the
+ * program by fcc and there is no fork to call - that is the gate's
+ * path, not the board's, where mm_run_exec is native inside bcrun.
+ * It says so rather than pretending to have run something.
+ */
+#if defined(MM_FCC) && !defined(MM_HOSTED)
+
+MMINTEGER mm_run_exec(void)
+{
+    mm_error("running a program needs the native runtime");
+    return -1;
+}
+
+#else
+
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+MMINTEGER mm_run_exec(void)
+{
+    int status = 0;
+    pid_t pid;
+
+    if (mm_run_nargs == 0) {
+        mm_error("no program named");
+        return -1;
+    }
+    mm_run_argv[mm_run_nargs] = NULL;
+    fflush(stdout);             /* the child shares the console */
+
+    pid = fork();
+    if (pid < 0) {
+        mm_error("cannot start a program");
+        return -1;
+    }
+    if (pid == 0) {
+        execvp(mm_run_argv[0], mm_run_argv);
+        _exit(127);             /* only reached if exec failed */
+    }
+    while (waitpid(pid, &status, 0) < 0)
+        ;
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
+        mm_error("no such program");
+        return -1;
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        mm_error("the program reported a failure");
+        return -1;
+    }
+    return 0;
+}
+
+#endif
 
 /* The current drawing colour.  MMBasic keeps one, and PIXEL, LINE and
  * the rest draw in it whenever no colour is given; only COLOUR changes
