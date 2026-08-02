@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.4 — August 2026"
+date: "Release v0.5 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -48,6 +48,32 @@ Headline specification as configured here:
   from the keyboard
 * A self-hosted C89 compiler generating native ARM code, and an
   MMBasic translator in front of it — both run on the machine itself
+* MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
+  translated, compiled and run without leaving the machine
+
+## New in v0.5
+
+* **MMBasic draws.** `MODE`, `COLOUR`, `PIXEL`, `LINE`, `CIRCLE` and
+  `RGB()` are translated and run on the HDMI display — a whole shape
+  crosses into the kernel in one call, so a 640-point line costs one
+  syscall rather than 640.
+* **`SAVE IMAGE` and `LOAD IMAGE`**, with MMBasic's BMP decoder:
+  1/4/8/16/24/32-bit files, RLE4 and RLE8, and its dithering modes.
+* **`SYSTEM`** — a BASIC program can run another program and wait for
+  it, which is how `SAVE IMAGE` and `LOAD IMAGE` are built.
+* **`mmedit`**, MMBasic's editor, ported.
+* **`TIMER` is a float** off a 64-bit microsecond clock, and **`RND`
+  returns 53 bits** from splitmix64 rather than 15 from the C library.
+* The SD root filesystem is now **built from source** by
+  `mksdimage.sh` — it had no build recipe before — and is **64000
+  blocks** rather than the 65535 that sat on `blkno_t`'s ceiling.
+* A **filesystem corruption fixed** that had been destroying cards
+  under repeated large-file rewrites: `f_trunc` freed a file's double
+  indirect block and left the inode still pointing at it. It bit any
+  file over 273 blocks. See the release notes.
+* **Panic messages now reach the serial port.** They were being
+  truncated to about eleven characters by an interrupt-driven UART
+  that stopped with the machine.
 
 # Installing Fuzix
 
@@ -80,6 +106,14 @@ The image lays the card out as three partitions:
 | 1         | 64 MB | FAT        | File interchange with Windows/macOS/Linux |
 | 2         | 32 MB | Fuzix root | The Unix filesystem (boot device `hdb2`) |
 | 3         | 4 MB  | 0x7F       | Reserved for future on-card swap         |
+
+The root filesystem is 64000 blocks of 512 bytes. That is a little
+short of the 65536-sector partition on purpose: block numbers are
+16-bit, so 65535 is the ceiling, and the "no such block" marker is
+65535 as well — leaving room below both keeps a stray value
+recognisable as wrong rather than pointing at a real sector. From
+v0.5 the filesystem is built from source by `mksdimage.sh`, so the
+card can be reproduced rather than merely copied.
 
 Partition 1 ships unformatted: format it as **FAT or FAT32 (not
 exFAT)** in Windows before first use — see section 6. Partition 2 is
@@ -689,6 +723,83 @@ at the end along with any implied global variables.
 
 Appendix C lists what is covered.
 
+## Graphics
+
+A translated program draws on the HDMI display with MMBasic's own
+statements:
+
+```basic
+MODE 2
+COLOUR RGB(YELLOW)
+LINE 0, 0, 319, 239
+CIRCLE 160, 120, 60, , , RGB(WHITE), RGB(BLUE)
+PIXEL 10, 10, RGB(RED)
+```
+
+Two modes are available, chosen to match the VGA builds of MMBasic and
+the first two HDMI modes:
+
+| `MODE` | Resolution | Colours |
+|--------|------------|---------|
+| `MODE 1` | 640×480 | monochrome |
+| `MODE 2` | 320×240 | 16, from MMBasic's RGB121 set |
+
+`RGB()` takes the usual named colours and `RGB(r,g,b)`. `COLOUR` sets
+the current drawing colour, which every statement uses when no colour
+is given. `LINE`, `CIRCLE` and the rest take MMBasic's argument order,
+including the blank arguments — `CIRCLE x, y, r, , , fill` is written
+exactly as MMBasic writes it.
+
+The drawing primitives live in `mmb_gfx.h` as static functions, so a
+program that never draws a circle does not carry the circle code: `cc`
+discards a file-scope static nothing calls. And a whole shape crosses
+into the kernel in a single call, so a 640-point line is one syscall,
+not 640 — measured at 71 µs against 433 µs for the naive version.
+
+The geometry is MMBasic's, copied rather than re-derived, down to the
+dotted appearance of a stretched ellipse. If a picture differs from
+MMBasic's, that is a bug worth reporting.
+
+**One caution.** In `MODE 1` the console and the graphics share a
+single framebuffer, so anything printed — including the cursor —
+appears on the picture. It is visible in a `SAVE IMAGE` of the whole
+screen as a difference in the top text line. Restricting the saved
+region avoids it; directing program output elsewhere is planned.
+
+## Running another program: `SYSTEM`, `SAVE IMAGE`, `LOAD IMAGE`
+
+`SYSTEM` runs a program and waits for it:
+
+```basic
+SYSTEM "sum", "a.bmp", "b.bmp"
+```
+
+Each argument is passed separately, so no shell quoting is involved
+and a filename with a space in it needs no special care.
+
+`SAVE IMAGE` and `LOAD IMAGE` are built on it — they run the
+`saveimage` and `loadimage` programs described in the applications
+list, which means a BASIC program that never touches an image pays
+nothing for them:
+
+```basic
+SAVE IMAGE "shot.bmp"                      ' the whole screen
+SAVE IMAGE "part.bmp", 160, 120, 320, 240  ' x, y, w, h
+LOAD IMAGE "shot.bmp"                      ' at 0,0
+LOAD IMAGE "shot.bmp", 160, 120            ' at x,y
+```
+
+`LOAD IMAGE` takes MMBasic's full syntax including the dither mode and
+the source rectangle:
+
+```
+LOAD IMAGE fname$ [,x] [,y] [,mode] [,ximage] [,yimage] [,wimage] [,himage]
+```
+
+The decoder is MMBasic's, so it reads 1, 4, 8, 16, 24 and 32-bit BMPs,
+`BI_BITFIELDS`, and RLE4/RLE8 compression. Dithering is *optional*, as
+in MMBasic — omit the mode and the image is mapped without it.
+
 ## Practical notes
 
 * One `.bas` file per program, because `cc` compiles one file per
@@ -702,6 +813,40 @@ Appendix C lists what is covered.
   written C, so `bcdump` disassembles them and `BCRUN_BYTECODE=1`
   forces interpretation for comparison.
 
+
+# `mmedit`: MMBasic's editor
+
+MMBasic's full-screen editor is ported and runs as an ordinary Fuzix
+program, so BASIC is written, translated, compiled and run without
+leaving the machine:
+
+```
+# mmedit prog.bas
+```
+
+It is the editor from the firmware, with the same keys:
+
+| Key | |
+|-----|-----|
+| `ESC` | leave the editor |
+| `F1` | save |
+| `F2` | save and exit (so a wrapper can run the program) |
+| `F3` / `F6` | find / find again |
+| `F4` | mark — then the cursor keys extend the selection |
+| `F5` | paste |
+| `F7` / `F8` | replace / replace again |
+| `F9` / `F10` | read a file in / write the selection out |
+| `F12` or `Ctrl-A` | beautify: re-indent and case the keywords |
+
+In mark mode the legend changes: `DEL` deletes, `F4` cuts, `F5`
+copies, `F10` exports the selection to a file. The status line shows
+line, column and INS/OVR, and the function key legend shortens itself
+to fit the terminal width.
+
+The editor works over the serial port as well as on the HDMI console —
+it drives a VT100, and the console emits VT100 function key sequences.
+Files with CRLF line endings are accepted; the CRs are stripped on
+load, which matters because most files arrive from a PC.
 
 # The FAT partition and the `fat` command
 
@@ -728,6 +873,98 @@ subdirectories included):
 a file *out* of Fuzix, use the serial port, or write it with
 `doswrite` (the venerable Minix FAT12/16 tool, also included) if the
 partition is FAT16.
+
+# Moving files over the serial port
+
+The FAT partition carries files *in*, but `fat` is read-only, so it
+cannot carry anything back *out*. The serial console can do both, in
+either direction, with nothing on the board but `uue` and `uud` — and
+it is the only route that needs no card swapping.
+
+The idea is older than the machine: `uuencode` turns any file into
+printable text, and printable text survives a terminal. Both tools are
+in `/bin`:
+
+```
+# uue FILE            writes FILE.uue - the encoded text
+# uud FILE.uue        decodes it back, recreating the original name
+```
+
+## Sending a file to the board
+
+On the PC, encode the file, then have the board read the text into a
+file and decode it:
+
+```
+# cat > prog.uue          (now paste or send the encoded text)
+^D
+# uud prog.uue
+# ls -l prog.bas
+```
+
+**The one thing that will bite you is flow control.** The terminal
+input queue is 132 bytes. Sending encoded text as fast as the port
+will take it overruns that queue and loses characters silently — a
+62-character line sent every 25 ms still loses roughly 60% of the
+text, and the damage only shows up as a corrupt file at the end. Two
+ways to avoid it:
+
+* **Let the terminal pace it.** Any sender with a per-line delay *and*
+  a wait for the echo will do. The delay alone is not enough.
+* **Use the supplied script.** `devtools/uusend.py` in the source tree
+  does exactly this: it types the text one line at a time and waits
+  for each line to echo before sending the next, so at most one line
+  is ever in flight. It then runs `uud` for you.
+
+```
+python uusend.py local.bas prog.bas --port=COM11
+```
+
+Note that `uusend.py` takes a **bare** remote filename — it drives one
+`ucp`-style session with `cd` and plain names, so `mv` the file
+afterwards if it belongs somewhere else.
+
+## Fetching a file from the board
+
+The other direction is easier, because the board is the slow end:
+
+```
+# uue report.txt
+# cat report.uue
+```
+
+Capture the session to a file in your terminal program, cut away
+anything before `begin` and after `end`, and decode it on the PC.
+
+## Programs to use
+
+**Linux (and macOS, and WSL):**
+
+* `uuencode` / `uudecode` come from the **sharutils** package
+  (`apt install sharutils`). macOS has `uuencode` built in.
+* For the terminal, **picocom** (simplest), **minicom** (its
+  `Ctrl-A S` menu includes an `ascii-xfer` that paces lines), or
+  **screen /dev/ttyUSB0 115200**.
+* If sharutils is awkward, Python needs no install:
+  `python3 -c "import binascii,sys; ..."` — or just use
+  `devtools/uusend.py`, which does the encoding itself.
+
+**Windows:**
+
+* **Tera Term** is the pick — free, and its *File → Send file* has a
+  per-line delay setting under *Setup → Serial port* (set a transmit
+  delay of a few ms per character or 30–50 ms per line). This is the
+  easiest reliable route without scripting.
+* **PuTTY** works for capture (*Session → Logging*) but has no
+  paced file send; pasting a large file into it will lose characters.
+* **RealTerm** can send a file with a configurable delay, and is good
+  at capturing binary.
+* For the encode/decode step, Windows has no built-in `uuencode`. Use
+  **WSL** (then it is the Linux instructions), **Python** for
+  Windows, or **UUDeview**, which still builds and runs.
+
+Whatever you use, the check at the end is the same: `sum` the file on
+both machines and compare. On the board, `sum FILE`.
 
 # The filesystem and included software
 
@@ -764,7 +1001,8 @@ below.
 
 ## Applications
 
-**Editors:** `vi` (levee), `ue` (a WordStar-diamond micro-Emacs:
+**Editors:** `mmedit` (MMBasic's own full-screen editor — see its
+chapter), `vi` (levee), `ue` (a WordStar-diamond micro-Emacs:
 Ctrl-W write, Ctrl-Q quit), `ed`, `fleamacs`.
 
 **Shell & core:** Bourne `sh` (plus `fsh`), and the classic set —
@@ -779,7 +1017,23 @@ make cron at mail write wall`
 **Machine tools:** `picoctl` (keyboard layout, reboot to the
 flasher), `picogpio`/`gpiotool`, `gfxtest` (display test card),
 `setdate` (DS3231), `flashrom`, `setboot`, `dosread`/`doswrite`
-(FAT12/16 floppy-era transfers), `fat`.
+(FAT12/16 floppy-era transfers), `fat`, `uue`/`uud` (serial file
+transfer — see that chapter).
+
+**Images:** `saveimage` writes any part of the screen as a 24-bit BMP,
+`loadimage` puts one back:
+
+```
+# saveimage shot.bmp                     the whole screen
+# saveimage part.bmp 160 120 320 240     x y w h
+# loadimage shot.bmp                     at 0,0
+# loadimage tiger.bmp 0 0 4              with dither mode 4
+```
+
+`loadimage` is MMBasic's BMP decoder, so it reads 1/4/8/16/24/32-bit
+files, `BI_BITFIELDS`, and RLE4/RLE8, and dithers only when asked.
+These are the programs `SAVE IMAGE` and `LOAD IMAGE` run, and they are
+just as useful from the shell.
 
 **Languages:** `bbcbasic`, `cc` (the on-board C compiler — see its
 own chapter, with `cpp`, `bcrun` and `bcdump`), `fforth` (a complete
@@ -857,12 +1111,14 @@ translate time, not at run time.
 | `FUNCTION` | `GOSUB` | `GOTO` | `IF` |
 | `INC` | `INPUT` | `KILL` | `LET` |
 | `LINE` | `LOCAL` | `LONGSTRING` | `LOOP` |
-| `MATH` | `MKDIR` | `NEXT` | `ON` |
-| `OPEN` | `OPTION` | `PAUSE` | `PRINT` |
-| `RANDOMIZE` | `READ` | `RENAME` | `RESTORE` |
-| `RETURN` | `RMDIR` | `SEEK` | `SELECT` |
-| `SORT` | `STATIC` | `SUB` | `TIME$` |
-| `TIMER` | `WEND` | `WHILE` |  |
+| `CIRCLE` | `COLOUR` | `LOAD IMAGE` | `MATH` |
+| `MKDIR` | `MODE` | `NEXT` | `ON` |
+| `OPEN` | `OPTION` | `PAUSE` | `PIXEL` |
+| `PRINT` | `RANDOMIZE` | `READ` | `RENAME` |
+| `RESTORE` | `RETURN` | `RMDIR` | `SAVE IMAGE` |
+| `SEEK` | `SELECT` | `SORT` | `STATIC` |
+| `SUB` | `SYSTEM` | `TIME$` | `TIMER` |
+| `WEND` | `WHILE` |  |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -905,11 +1161,18 @@ the usual control flow.
 
 ## Not covered
 
-Everything to do with the firmware's own hardware - display, sound,
-GPIO, I2C, SPI, one-wire, interrupts, `SETPIN`, `PIN`, `PORT` - along
-with the editor, `RUN`, `LIST`, `EDIT`, `LOAD`, `SAVE` and the rest of
-the immediate-mode environment. Some of the hardware statements are the
-subject of current work; the immediate-mode ones will never apply, as a
-translated program is compiled and run, not typed at a prompt.
+Sound, GPIO, I2C, SPI, one-wire, interrupts, `SETPIN`, `PIN` and
+`PORT` - along with the editor, `RUN`, `LIST`, `EDIT`, `LOAD`, `SAVE`
+and the rest of the immediate-mode environment. The hardware
+statements are the subject of current work — the display arrived in
+v0.5 — while the immediate-mode ones will never apply, since a
+translated program is compiled and run rather than typed at a prompt.
+(`mmedit` provides the editing they existed for.)
+
+Of the graphics, `MODE`, `COLOUR`, `PIXEL`, `LINE`, `CIRCLE` and
+`RGB()` are done; `BOX`, `TRIANGLE`, `TEXT` and the array form of
+`PIXEL` are not yet. In `MODE 2` a program's `PRINT` output does not
+yet share the screen with the graphics as it does in MMBasic, and
+there is no `OPTION CONSOLE` to steer it; both are next.
 
 \newpage
