@@ -2175,7 +2175,206 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
     return (r < 0) ? 0 : (MMINTEGER)r;  /* off-screen reads black */
 }
 
+/*
+ * MM.HRES / MM.VRES - the drawable size of the screen.
+ *
+ * MMBasic overlays these onto fun_tilde; here they are the geometry the
+ * kernel already reports for GFXIOC_INFO, so they follow a mode change
+ * without the program having to know anything.  On the text console
+ * that is the full 640x480 the console occupies.
+ */
+#define MM_GFXIOC_INFO 0x000E
+
+struct mm_gfx_info {
+    unsigned short width, height, stride;
+    unsigned char bpp, mode;
+};
+
+static MMINTEGER mm_gfx_dim(int want_h)
+{
+    struct mm_gfx_info gi;
+
+    if (mm_gfx_open() < 0)
+        return 0;
+    if (ioctl(mm_gfx_fd, MM_GFXIOC_INFO, &gi) < 0)
+        return 0;
+    return want_h ? (MMINTEGER)gi.height : (MMINTEGER)gi.width;
+}
+
+MMINTEGER mm_hres(void) { return mm_gfx_dim(0); }
+MMINTEGER mm_vres(void) { return mm_gfx_dim(1); }
+
+/*
+ * Batched drawing.
+ *
+ * The geometry lives HERE, not in the kernel: a line, a circle, a
+ * polygon is arithmetic over a run of points or a run of spans, and the
+ * kernel only has to know how to store those two things.  It costs no
+ * kernel memory, and because this is compiled into bcrun it costs no
+ * per-program memory either - every translated program shares one copy.
+ *
+ * Measured on the PC3: one ioctl per point is 1.39us, so a 312 point
+ * line costs 433us that way and 71us batched.  A horizontal run is
+ * 104ns per point against a diagonal's 228 - the difference is pure
+ * memory locality against a framebuffer core1 is reading for scanout -
+ * which is why the axis-aligned cases below become a single rectangle
+ * instead, where the kernel fills whole bytes at a time.
+ */
+#define MM_GFXIOC_PIXELS   0x0014
+#define MM_GFXIOC_RECTS    0x0015
+#define MM_GFXIOC_RECT     0x0012
+#define MM_BATCH           512          /* items per crossing */
+
+struct mm_gfx_pt { short x, y; };
+struct mm_gfx_rc { short x1, y1, x2, y2; };
+struct mm_gfx_batch {
+    unsigned short count;
+    unsigned short flags;
+    void *items;
+    void *colours;
+};
+
+static struct mm_gfx_pt mm_ptbuf[MM_BATCH];
+
+/* Set the one current colour, if it is not already that. */
+static void mm_gfx_setcol(MMINTEGER rgb)
+{
+    if (rgb != mm_gfx_col) {
+        ioctl(mm_gfx_fd, MM_GFXIOC_COLOUR, (void *)(long)(rgb & 0xFFFFFF));
+        mm_gfx_col = rgb;
+    }
+}
+
+static void mm_gfx_flush_pts(int n)
+{
+    struct mm_gfx_batch b;
+
+    if (n <= 0)
+        return;
+    b.count = (unsigned short)n;
+    b.flags = 0;
+    b.items = mm_ptbuf;
+    b.colours = 0;
+    ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
+}
+
+static void mm_gfx_rect(int x1, int y1, int x2, int y2)
+{
+    struct mm_gfx_rc r;
+
+    r.x1 = (short)x1; r.y1 = (short)y1;
+    r.x2 = (short)x2; r.y2 = (short)y2;
+    ioctl(mm_gfx_fd, MM_GFXIOC_RECT, &r);
+}
+
+/*
+ * A line.  Axis-aligned ones are a rectangle - that is what makes a
+ * horizontal run ten times cheaper than plotting it point by point, and
+ * it is what MMBasic's DrawLine does for the same reason.  The rest is
+ * Bresenham into the batch buffer, flushed every MM_BATCH points so a
+ * long line cannot outrun it and one ioctl cannot hold the cpu for an
+ * unbounded time.
+ */
+void mm_line(MMINTEGER x1, MMINTEGER y1, MMINTEGER x2, MMINTEGER y2,
+             MMINTEGER rgb)
+{
+    int ax = (int)x1, ay = (int)y1, bx = (int)x2, by = (int)y2;
+    int dx, dy, sx, sy, err, n = 0;
+
+    if (mm_gfx_open() < 0)
+        return;
+    mm_gfx_setcol(rgb);
+
+    if (ay == by || ax == bx) {         /* one span, whole bytes */
+        mm_gfx_rect(ax, ay, bx, by);
+        return;
+    }
+
+    dx = bx - ax; sx = dx < 0 ? -1 : 1; if (dx < 0) dx = -dx;
+    dy = by - ay; sy = dy < 0 ? -1 : 1; if (dy < 0) dy = -dy;
+    err = (dx > dy ? dx : -dy) / 2;
+
+    for (;;) {
+        mm_ptbuf[n].x = (short)ax;
+        mm_ptbuf[n].y = (short)ay;
+        if (++n == MM_BATCH) {
+            mm_gfx_flush_pts(n);
+            n = 0;
+        }
+        if (ax == bx && ay == by)
+            break;
+        {
+            int e2 = err;
+            if (e2 > -dx) { err -= dy; ax += sx; }
+            if (e2 < dy)  { err += dx; ay += sy; }
+        }
+    }
+    mm_gfx_flush_pts(n);
+}
+
+/*
+ * MMBasic's PIXEL x%(), y%(), c%() - the array form.
+ *
+ * The caller hands over the arrays as MMFLOAT or MMINTEGER, with a
+ * stride, exactly as MMBasic's getargaddress reports them; converting
+ * to the kernel's packed int16 items is this side's job, because the
+ * type knowledge is here and it cuts the crossing from 24 bytes per
+ * point to 4.  colours may be NULL for "all in the current colour",
+ * which is MMBasic's scalar-colour case.
+ */
+void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
+               const MMFLOAT *yf, const MMINTEGER *yi,
+               const MMFLOAT *cf, const MMINTEGER *ci,
+               MMINTEGER count)
+{
+    static unsigned long colbuf[MM_BATCH];
+    struct mm_gfx_batch b;
+    MMINTEGER i;
+    int n = 0;
+
+    if (mm_gfx_open() < 0 || count <= 0)
+        return;
+
+    for (i = 0; i < count; i++) {
+        mm_ptbuf[n].x = (short)(xi ? xi[i] : (MMINTEGER)xf[i]);
+        mm_ptbuf[n].y = (short)(yi ? yi[i] : (MMINTEGER)yf[i]);
+        if (cf || ci)
+            colbuf[n] = (unsigned long)
+                ((ci ? ci[i] : (MMINTEGER)cf[i]) & 0xFFFFFF);
+        n++;
+        if (n == MM_BATCH || i + 1 == count) {
+            b.count = (unsigned short)n;
+            b.flags = 0;
+            b.items = mm_ptbuf;
+            b.colours = (cf || ci) ? (void *)colbuf : 0;
+            ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
+            n = 0;
+        }
+    }
+}
+
 #else   /* host: no display, but translated programs must still run */
+
+void mm_line(MMINTEGER x1, MMINTEGER y1, MMINTEGER x2, MMINTEGER y2,
+             MMINTEGER rgb)
+{
+    (void)x1; (void)y1; (void)x2; (void)y2; (void)rgb;
+}
+
+/* The host has no display, but a program that asks how big it is must
+ * still get a sane answer rather than zero - the PC3 console size, so
+ * the same program lays out identically under the gates. */
+MMINTEGER mm_hres(void) { return 640; }
+MMINTEGER mm_vres(void) { return 480; }
+
+void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
+               const MMFLOAT *yf, const MMINTEGER *yi,
+               const MMFLOAT *cf, const MMINTEGER *ci,
+               MMINTEGER count)
+{
+    (void)xf; (void)xi; (void)yf; (void)yi; (void)cf; (void)ci; (void)count;
+}
+
 
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb)
 {

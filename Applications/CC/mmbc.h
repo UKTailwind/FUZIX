@@ -223,6 +223,9 @@ struct conv {
     struct tok toks[MAXTOKS]; int ntoks;
     int i;
     int tmp_used;
+    /* depth of single-line IF bodies being emitted: END SUB means
+     * "return now" in there, not "the routine ends here" */
+    int inline_depth;
     int uses_clear;
 };
 

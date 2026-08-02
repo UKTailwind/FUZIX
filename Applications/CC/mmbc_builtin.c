@@ -266,6 +266,10 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval(sfmt("mm_field(%s, %s, %s, %s)", a0, a1, delim, quote),
                      TY_S);
     }
+    if (strcmp(up, "MM.HRES") == 0)
+        return mkval("mm_hres()", TY_I);
+    if (strcmp(up, "MM.VRES") == 0)
+        return mkval("mm_vres()", TY_I);
     if (strcmp(up, "PIXEL") == 0) {
         /* PIXEL(x, y) reads a pixel back AS RGB888 - the kernel
            primitive maps the mode's own colour numbering back out,

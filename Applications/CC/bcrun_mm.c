@@ -276,6 +276,10 @@ static void w_set_time(void) { mm_set_time(Ps(0)); A = 0; }
 static void w_pixel(void)    { mm_pixel(LL(0), LL(2), LL(4)); A = 0; }
 static void w_pixel_get(void){ A = mm_pixel_get(LL(0), LL(2)); }
 static void w_cls(void)      { mm_cls(); A = 0; }
+static void w_line(void)     { mm_line(LL(0), LL(2), LL(4), LL(6), LL(8));
+                               A = 0; }
+static void w_hres(void)     { A = mm_hres(); }
+static void w_vres(void)     { A = mm_vres(); }
 
 /* LONGSTRING */
 static void w_ls_len(void)   { A = mm_ls_len(PI(0)); }
@@ -450,6 +454,9 @@ static const struct mmwrap {
 	{ "mm_pixel",		w_pixel },
 	{ "mm_pixel_get",	w_pixel_get },
 	{ "mm_cls",		w_cls },
+	{ "mm_line",		w_line },
+	{ "mm_hres",		w_hres },
+	{ "mm_vres",		w_vres },
 	{ "mm_ls_len",		w_ls_len },
 	{ "mm_ls_clear",	w_ls_clear },
 	{ "mm_ls_append",	w_ls_append },
