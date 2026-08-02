@@ -477,16 +477,17 @@ void statement_inner(void)
         x2 = expr();
         expect_op(",");
         y2 = expr();
-        if (is_op(",", 0)) {
-            struct val w;
-            cv.i++;
-            w = expr();
-            if (strcmp(w.code, "1LL") != 0 && strcmp(w.code, "1") != 0)
-                cv_warn("LINE width is not supported yet; drawn 1 pixel wide");
-            if (is_op(",", 0)) {
-                cv.i++;
-                col = as_int(expr());
+        if (accept_op(",")) {
+            /* x1..y2 are required; the optional ones after them may
+               each be left blank, so LINE x1,y1,x2,y2,,c is how a
+               colour is given without a width. */
+            if (!is_op(",", 0)) {
+                struct val w = expr();
+                if (strcmp(w.code, "1LL") != 0 && strcmp(w.code, "1") != 0)
+                    cv_warn("LINE width is not supported yet; drawn 1 pixel wide");
             }
+            if (accept_op(","))
+                col = as_int(expr());
         }
         a = as_int(x1);
         b = as_int(y1);

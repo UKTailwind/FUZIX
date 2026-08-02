@@ -2251,13 +2251,15 @@ class Conv(object):
             self.expect_op(',')
             y2 = self.expr()
             col = 'MM_CUR'
-            if self.is_op(','):
-                self.i += 1
-                w = self.expr()
-                if not (w[0].strip() in ('1LL', '1')):
-                    self.warn("LINE width is not supported yet; drawn 1 pixel wide")
-                if self.is_op(','):
-                    self.i += 1
+            if self.accept_op(','):
+                # x1..y2 are required; the optional ones after them may
+                # each be left blank, so LINE x1,y1,x2,y2,,c is how a
+                # colour is given without a width.
+                if not self.is_op(','):
+                    w = self.expr()
+                    if not (w[0].strip() in ('1LL', '1')):
+                        self.warn("LINE width is not supported yet; drawn 1 pixel wide")
+                if self.accept_op(','):
                     col = self.as_int(self.expr())
             self.emit('mm_line(%s, %s, %s, %s, %s);'
                       % (self.as_int(x1), self.as_int(y1),
