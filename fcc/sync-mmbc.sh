@@ -14,7 +14,11 @@ cp "$M"/mmbc/mmbc_*.c "$M"/mmbc/mmbc.h "$M"/mmbc/mmbc_expr.h "$FCC/"
 # BASIC samples for the SD image (/root/cc): the acceptance program
 # and a small one
 cp "$M/tests/solar_eclipse.bas" "$M/tests/solar_eclipse.in" \
-   "$M/tests/t1.bas" "$M/tests/bench.bas" "$FCC/hwtest/"
+   "$M/tests/t1.bas" "$M/tests/bench.bas" \
+   "$M/tests/ripple.bas" "$M/tests/sombrero.bas" "$M/tests/pixart.bas" \
+   "$M/tests/circle.bas" "$M/tests/circrnd.bas" "$M/tests/palette.bas" \
+   "$M/tests/saveimg.bas" "$M/tests/imgtrip.bas" "$M/tests/imgfmt.bas" \
+   "$FCC/hwtest/"
 # The FCC-view headers the generated C needs (math.h maps to bcrun
 # natives); installed into /usr/lib/cc/include by mkccimage.sh
 # alongside mmb_runtime.h (synced by sync-runtime.sh)
