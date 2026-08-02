@@ -1801,18 +1801,32 @@ MM_STAT_BODY(f, MMFLOAT)
 #if defined(MM_FCC) && !defined(MM_HOSTED)
 /* Microseconds since start, native in the bytecode interpreter: the
  * PC3 kernel's clock on the board, gettimeofday on the development
- * machine.  31 bits, so TIMER wraps after about 35 minutes - known
- * phase 0 limitation.  The hosted build defines its own static
- * time_us() from the same sources before including this file. */
-long time_us();
+ * machine.  All 64 bits of it: the libcall's older time_us() returns
+ * only 31, which wraps after about 35 minutes, and TIMER has to be
+ * able to run for longer than that.  The hosted build defines its own
+ * static version from the same sources before including this file. */
+MMINTEGER time_us64();
 #endif
+
+/* Microseconds since start.  MMBasic's TIMER is (now - offset) / 1000
+ * in floating point, so the fraction has to survive: keeping the base
+ * in microseconds rather than milliseconds is exactly what gives TIMER
+ * its decimal places. */
+static MMINTEGER mm_us_now(void)
+{
+#if defined(MM_FCC) || defined(MM_HOSTED)
+    return time_us64();
+#else
+    return (MMINTEGER)((double)clock() * 1000000.0 / (double)CLOCKS_PER_SEC);
+#endif
+}
 
 void mm_pause(MMFLOAT ms)
 {
 #if defined(MM_FCC) || defined(MM_HOSTED)
-    long end = time_us() + (long)(ms * 1000.0);
+    MMINTEGER end = mm_us_now() + (MMINTEGER)(ms * 1000.0);
     if (ms < 0) return;
-    while (time_us() < end) { }
+    while (mm_us_now() < end) { }
 #elif defined(_POSIX_C_SOURCE) && !defined(_WIN32)
     struct timespec ts;
     if (ms < 0) ms = 0;
@@ -1832,20 +1846,15 @@ void mm_error_s(const char *mmstr)
     mm_error(mm_cstr(msg));
 }
 
+/* Microseconds, not milliseconds: see mm_us_now above. */
 static MMINTEGER mm_timer_base = 0;
 static MMINTEGER mm_clock_off  = 0;      /* DATE$= / TIME$= adjustment */
 MMINTEGER mm_clock_offset(void) { return mm_clock_off; }
 
-static MMINTEGER mm_ms_now(void)
+void mm_timer_set(MMFLOAT ms)
 {
-#if defined(MM_FCC) || defined(MM_HOSTED)
-    return (MMINTEGER)(time_us() / 1000);
-#else
-    return (MMINTEGER)((double)clock() * 1000.0 / (double)CLOCKS_PER_SEC);
-#endif
+    mm_timer_base = mm_us_now() - (MMINTEGER)(ms * 1000.0);
 }
-
-void mm_timer_set(MMINTEGER ms) { mm_timer_base = mm_ms_now() - ms; }
 
 void mm_set_date(const char *d)
 {
@@ -2105,9 +2114,9 @@ void mm_end(void)
     exit(0);
 }
 
-MMINTEGER mm_timer(void)
+MMFLOAT mm_timer(void)
 {
-    return mm_ms_now() - mm_timer_base;
+    return (MMFLOAT)(mm_us_now() - mm_timer_base) / 1000.0;
 }
 
 /* CLS.  Clearing through the console rather than the framebuffer keeps

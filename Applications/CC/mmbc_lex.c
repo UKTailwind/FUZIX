@@ -348,3 +348,34 @@ char *clabel(const char *name)
 {
     return dots_to_dunder("L_", name);
 }
+
+/* True when an emitted expression is a C constant expression.
+ *
+ * An array is declared in C with its bounds written into the type, so a
+ * DIM bound has to fold at compile time.  CONST substitutes its value
+ * textually and literals are literals, so the test is simply whether
+ * any letter in the text belongs to something other than a number: a
+ * variable arrives as v_<name>, a call as mm_<name>. */
+int const_c_expr(const char *text)
+{
+    int i = 0;
+
+    while (text[i]) {
+        int c = text[i];
+        if (is_digit_c(c)) {
+            i++;                       /* a numeric literal, with any */
+            while (text[i] && ((is_alpha(text[i]) && text[i] != '_')
+                               || is_digit_c(text[i])
+                               || text[i] == '.'
+                               || ((text[i] == '+' || text[i] == '-')
+                                   && (text[i - 1] == 'e'
+                                       || text[i - 1] == 'E'))))
+                i++;                   /* 0x prefix, exponent or suffix */
+            continue;
+        }
+        if (is_alpha(c))               /* is_alpha covers '_' as well */
+            return 0;
+        i++;
+    }
+    return 1;
+}

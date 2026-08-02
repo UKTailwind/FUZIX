@@ -67,6 +67,7 @@ char *c_string_literal(const char *s);
 char *split_suffix(const char *word, int *ty);  /* ty out: TY_* or TY_NONE */
 char *cvar(const char *name);
 char *clabel(const char *name);
+int const_c_expr(const char *text);
 char *upper(const char *s);
 char *lower(const char *s);
 
@@ -244,6 +245,7 @@ void *xrealloc(void *p, size_t n);
 /* ---- conv plumbing (mmbc_sym.c) ---- */
 
 void cv_err(const char *fmt, ...);          /* self.err - raises */
+void cv_note(const char *fmt, ...);         /* self.note - records, no raise */
 void cv_warn(const char *fmt, ...);         /* self.warn - dedupes */
 struct tok *peek(int k);
 int at_end(void);

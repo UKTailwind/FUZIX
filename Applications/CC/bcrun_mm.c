@@ -38,16 +38,15 @@
  *	the PC3 kernel's clock through /dev/sys on the board, wall clock
  *	on the development machine.  Defined before the runtime is
  *	included so its MM_HOSTED branches pick it up.
+ *
+ *	All 64 bits: TIMER is a float in MMBasic, so the runtime keeps its
+ *	base in microseconds, and the 31-bit ADVAL(-9) those used to come
+ *	from wraps every 36 minutes - which would send TIMER backwards in
+ *	the middle of a program.
  */
-static long time_us(void)
+static long long time_us64(void)
 {
-	long t = lib_adval(-9);
-	if (t < 0) {
-		struct timeval tv;
-		gettimeofday(&tv, NULL);
-		t = (long)((tv.tv_sec * 1000000L + tv.tv_usec) & 0x7FFFFFFF);
-	}
-	return t;
+	return lib_us64();
 }
 
 /*
@@ -268,7 +267,7 @@ static void w_st_med_f(void) { A = dput(mm_st_med_f(PF(0), I(1))); }
 /* misc Tier A */
 static void w_pause(void)    { mm_pause(D(0)); A = 0; }
 static void w_error_s(void)  { mm_error_s(Ps(0)); A = 0; }
-static void w_timer_set(void){ mm_timer_set(LL(0)); A = 0; }
+static void w_timer_set(void){ mm_timer_set(D(0)); A = 0; }
 static void w_set_date(void) { mm_set_date(Ps(0)); A = 0; }
 static void w_set_time(void) { mm_set_time(Ps(0)); A = 0; }
 
@@ -311,7 +310,7 @@ static void w_gosub_pop(void){ A = mm_gosub_pop(); }
 /* misc */
 static void w_error(void)    { mm_error(Pa(0)); }
 static void w_end(void)      { mm_end(); }
-static void w_timer(void)    { A = mm_timer(); }
+static void w_timer(void)    { A = dput(mm_timer()); }
 
 /* ---- name table ----------------------------------------------------- */
 

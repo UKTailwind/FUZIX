@@ -1222,6 +1222,34 @@ static long lib_adval(int sel)
 	return ioctl(fd, PICOIOC_ADVAL, &n);
 }
 
+/*
+ *	Microseconds since boot, all 64 bits.  ADVAL(-9) returns only 31
+ *	of them in the ioctl result and so wraps every 36 minutes; -10 is
+ *	the same counter written back through an 8-byte buffer whose low
+ *	word carried the selector.  A kernel that predates -10 returns 0
+ *	and writes nothing, which leaves the sentinel in place - hence
+ *	the compare rather than a check of the ioctl result.  Falls back
+ *	to the wall clock so the same program times on the development
+ *	machine as well as on the PC3.
+ */
+static long long lib_us64(void)
+{
+	int fd = sys_open();
+	union { long long v; int sel; } u;	/* low word = the selector */
+
+	if (fd >= 0) {
+		u.v = -10;
+		ioctl(fd, PICOIOC_ADVAL, &u);
+		if (u.v != -10)
+			return u.v;
+	}
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		return (long long)tv.tv_sec * 1000000LL + tv.tv_usec;
+	}
+}
+
 /* ---- string and memory, all working in the program's address space -- */
 
 static unsigned long vstrlen(unsigned long a)
@@ -1682,6 +1710,8 @@ static void libcall(unsigned idx)
 				   & 0x7FFFFFFF);
 		}
 		A = t;
+	} else if (!strcmp(name, "time_us64")) {
+		A = lib_us64();
 
 	} else {
 		unsigned d = parse_eqop(name);
