@@ -11,6 +11,9 @@ extern void rawuart_putc(uint8_t devn, uint8_t c);
  * fires, so output runs on manual kicks, and a lost kick would
  * otherwise stop the console permanently. */
 extern void rawuart_tx_poll(void);
+/* Poll the transmit ring empty without relying on the interrupt: for
+ * panic() and plt_monitor(), where the interrupt will never run again. */
+extern void rawuart_flush_polled(void);
 extern ttyready_t rawuart_ready(uint8_t devn);
 extern void rawuart_sleeping(uint8_t devn);
 extern int rawuart_getc(uint8_t devn);

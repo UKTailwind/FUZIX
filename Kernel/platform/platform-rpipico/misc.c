@@ -14,6 +14,7 @@
 #include <pico/bootrom.h>
 #include <hardware/watchdog.h>
 #include <hardware/exception.h>
+#include "rawuart.h"
 
 uint8_t sys_cpu = A_ARM;
 uint8_t sys_cpu_feat = AF_CORTEX_M0;
@@ -31,13 +32,19 @@ void program_vectors(uint16_t* pageptr) {}
 
 void plt_reboot(void)
 {
+    rawuart_flush_polled();     /* say it before the watchdog bites */
     multicore_reset_core1();
     watchdog_reboot(0, 0, 0);
 }
 
 void plt_monitor(void)
 {
-    sleep_ms(1); // wait to print any remaining messages
+    /* This is where panic() ends up, so getting the message out is the
+     * entire job.  It used to be sleep_ms(1) "wait to print any
+     * remaining messages" - about eleven characters at 115200, against
+     * panic lines of well over a hundred, and nothing at all if the
+     * transmit interrupt cannot run.  Poll the ring out instead. */
+    rawuart_flush_polled();
     multicore_reset_core1();
     for(;;) { sleep_until(at_the_end_of_time); }
 }

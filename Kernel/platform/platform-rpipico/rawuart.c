@@ -486,6 +486,46 @@ void rawuart_tx_poll(void)
 	}
 }
 
+/*
+ *	Drain everything queued, by polling, with interrupts irrelevant.
+ *
+ *	The ring is normally drained by the transmit interrupt - but panic()
+ *	and plt_monitor() stop the machine, and an interrupt that never runs
+ *	again cannot deliver the one message that matters.  plt_monitor used
+ *	to allow for this with sleep_ms(1), which at 115200 baud is about
+ *	ELEVEN CHARACTERS; a panic line is well over a hundred.  So every
+ *	panic on this port has been arriving truncated or not at all, and a
+ *	silent hang has been indistinguishable from a hang that said exactly
+ *	what was wrong.  Chasing the 2026-08-02 filesystem corruption, that
+ *	cost several runs that produced no diagnostic whatsoever.
+ *
+ *	Disabling the transmit interrupt first is what makes this safe to do
+ *	from here: the ring must only ever have ONE consumer advancing tail
+ *	(see the note in rawuart_putc), and this makes it us.
+ */
+void rawuart_flush_polled(void)
+{
+	unsigned w;
+
+	for (w = 0; w < 2; w++) {
+		uart_inst_t *uart;
+
+		if (!rawuart_irq_installed[w])
+			continue;
+		uart = rawuart_instance(w);
+		uart_set_irq_enables(uart, true, false);
+		while (!txring_empty(w)) {
+			while (!uart_is_writable(uart))
+				tight_loop_contents();
+			txring_pump(uart, w);
+		}
+		/* the shift register too, not just the FIFO - the last
+		   character is still on the wire when the FIFO reads empty */
+		while (uart_get_hw(uart)->fr & UART_UARTFR_BUSY_BITS)
+			tight_loop_contents();
+	}
+}
+
 /* True when interrupts are enabled here, so the transmit interrupt can
  * be relied on to drain the ring.  It cannot when putc is reached from
  * tty_interrupt(), because timer_tick_cb holds di() across the tick. */
