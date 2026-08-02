@@ -114,8 +114,20 @@ echo "--- installing"
 
 # Not "set -e" territory: see the note above about ucp's exit status
 set +e
-"$R/Standalone/ucp" "$P2" < "$W/cmds"
+"$R/Standalone/ucp" "$P2" < "$W/cmds" 2>&1 | tee "$W/ucp.log"
 set -e
+
+# ucp does NOT stop on a failed command. A "cd" into a directory that
+# does not exist prints "cd: error number 2" and carries on, dropping
+# every following file into whatever directory it was already in - which
+# still fsck's clean and still gzips, so the first sign is a card that
+# cannot find cc. That happened when /usr/bin did not exist. Refuse the
+# image instead.
+if grep -q "error number" "$W/ucp.log"; then
+	echo "ucp reported an error - the image is wrong:" >&2
+	grep -n "error number" "$W/ucp.log" >&2
+	exit 1
+fi
 
 echo "--- fsck after"
 "$R/Standalone/fsck" -a "$P2"

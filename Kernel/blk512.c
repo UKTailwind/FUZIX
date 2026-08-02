@@ -37,6 +37,45 @@ uint_fast8_t bwritei(inoptr ino)
     return 0;
 }
 
+#ifdef CONFIG_SB_TRIPWIRE
+/*
+ *	bmap tripwire - the last unguarded step.
+ *
+ *	Every read and write of a file goes through bmap, and whatever
+ *	block number it returns is used with nothing checking it. For a
+ *	451 block file almost all of those numbers come out of an INDIRECT
+ *	block, i.e. out of ordinary file data on the disk - so a single
+ *	corrupt data block turns into writes landing on arbitrary blocks,
+ *	which is how a free list chain block ends up zeroed and blk_alloc
+ *	reports "corrupt".
+ *
+ *	ino_blocks_check() covers i_addr[] but cannot see inside an
+ *	indirect block. This does: it names the inode, the logical block
+ *	and the physical block, at the moment before it is used.
+ */
+static blkno_t bmap_check(inoptr ip, blkno_t bn, blkno_t nb, const char *what)
+{
+    register struct mount *mnt;
+
+    if (nb == 0 || nb == NULLBLK)
+        return nb;
+    mnt = fs_tab_get(ip->c_dev);
+    if (mnt == NULL || mnt->m_fs.s_mounted == 0)
+        return nb;
+    if (nb < mnt->m_fs.s_isize || nb >= mnt->m_fs.s_fsize) {
+        kprintf("\nbmap tripwire(%s): dev %u inode %u logical %u -> block %u"
+                " outside %u..%u (size %u)\n",
+                what, ip->c_dev, ip->c_num, (unsigned)bn, (unsigned)nb,
+                (unsigned)mnt->m_fs.s_isize, (unsigned)mnt->m_fs.s_fsize,
+                (unsigned)ip->c_node.i_size);
+        panic("bmapblk");
+    }
+    return nb;
+}
+#else
+#define bmap_check(ip, bn, nb, what) (nb)
+#endif
+
 /*
  * Bmap defines the structure of file system storage by returning
  * the physical block number on a device given the inode and the
@@ -50,6 +89,8 @@ blkno_t bmap(inoptr ip, blkno_t bn, unsigned int rwflg)
     blkno_t nb;
     int sh;
     uint16_t dev;
+    blkno_t bn0 = bn;           /* bn is decremented below; keep the original
+                                   so a tripwire can name the logical block */
 
     if(getmode(ip) == MODE_R(F_BDEV))
         return(bn);
@@ -66,7 +107,7 @@ blkno_t bmap(inoptr ip, blkno_t bn, unsigned int rwflg)
             ip->c_node.i_addr[bn] = nb;
             ip->c_flags |= CDIRTY;
         }
-        return(nb);
+        return bmap_check(ip, bn0, nb, "direct");
     }
 
     /* addresses 18 and 19 have single and double indirect blocks.
@@ -91,6 +132,7 @@ blkno_t bmap(inoptr ip, blkno_t bn, unsigned int rwflg)
         ip->c_node.i_addr[20-j] = nb;
         ip->c_flags |= CDIRTY;
     }
+    bmap_check(ip, bn0, nb, "indirect root");
 
     /* fetch through the indirect blocks
     */
@@ -113,6 +155,9 @@ blkno_t bmap(inoptr ip, blkno_t bn, unsigned int rwflg)
             blkfromk(&nb, bp, i * sizeof(blkno_t), sizeof(blkno_t));
             bawrite(bp);
         }
+        /* nb came out of a data block on the disk: the one number in
+           this whole path that nothing else validates */
+        bmap_check(ip, bn0, nb, j == 1 ? "double indirect" : "indirect");
         sh -= 8;
     }
     return(nb);

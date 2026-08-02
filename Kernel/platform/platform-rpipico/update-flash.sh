@@ -1,12 +1,16 @@
 #!/bin/sh
 set -e
 
-IMG=filesystem.img
-
-FSSIZE=2547
+# Parameterised so mksdimage.sh can build the SD root from the same
+# recipe: this is the only description of a working Fuzix root in the
+# tree, and the SD root was otherwise an artefact nobody could rebuild.
+# Defaults are the flash device; mksdimage.sh overrides all three.
+IMG=${IMG:-filesystem.img}
+FSSIZE=${FSSIZE:-2547}
+ISIZE=${ISIZE:-32}
 
 rm -f ${IMG}
-../../../Standalone/mkfs ${IMG} 32 $FSSIZE
+../../../Standalone/mkfs ${IMG} ${ISIZE} $FSSIZE
 ../../../Standalone/ucp ${IMG} <<EOF
 cd /
 mkdir bin
@@ -33,6 +37,12 @@ mkdir /var/run
 cd /usr
 mkdir lib
 chmod 0755 lib
+# /usr/bin is empty on the flash device but MUST exist: mkccimage.sh
+# cd's into it to install the compiler, and ucp's cd failing is not
+# fatal - it carries on and drops every binary into whatever directory
+# it was already in, which looks like a successful build.
+mkdir bin
+chmod 0755 bin
 
 cd /
 cd /dev
