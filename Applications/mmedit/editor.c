@@ -59,6 +59,10 @@ struct mmb_option Option = { 1, 4, 0, 0 };
 
 static bool_t edit_is_bas;
 static int multilinecomment = false;
+/* Set while mark mode paints the highlight.  MMBasic's tile renderer
+ * read it to suppress its own colouring; nothing reads it here, but the
+ * ported code sets it and it costs a byte to keep the port honest. */
+static bool_t markmode;
 static unsigned char inpbuf[STRINGSIZE];
 static unsigned char tknbuf[STRINGSIZE];
 
@@ -976,14 +980,1208 @@ int find_longest_line_length(const char *text, int *linein)
     return max_length;
 }
 
-/* mark mode - not ported yet.  It is 800 self-contained lines and the
- * only thing that fills the clipboard, so it says so rather than doing
- * nothing silently. */
+/* Mark mode - MMBasic's, Editor.c 7402-8208.
+ *
+ * F4 enters it from the main loop; the cursor keys move the far end of
+ * the selection while txtp holds the anchor, and F4/F5 cut or copy the
+ * span into the clipboard the caller passed in.  Everything here is
+ * buffer arithmetic and VT100 output, so it arrives almost unchanged:
+ * the mouse blocks are gone, the ESC handler no longer peeks for a
+ * TeraTerm mouse report (inkey() reassembles sequences itself, so it
+ * would only ever eat the next keystroke), and F10 export writes with
+ * open/write instead of MMBasic's file layer - no CR added, this being
+ * a Unix filesystem.
+ *
+ * This is also the first thing to exercise restoreColourFromLineStart:
+ * un-highlighting has to put the syntax colour back for a character in
+ * the middle of a line, which means replaying the colour state machine
+ * from the start of that line.
+ */
 void MarkMode(unsigned char *cb, unsigned char *buf)
 {
-    (void)cb;
-    (void)buf;
-    editDisplayMsg((unsigned char *)" MARK MODE NOT PORTED YET ");
+    unsigned char *p, *mark, *oldmark;
+    int c = -1, x, y, i, oldx, oldy, txtpx, txtpy, errmsg = false;
+    int edx_save = edx, edy_save = edy;
+    PrintFunctKeys(MARK);
+    oldmark = mark = txtp;
+    txtpx = oldx = curx;
+    txtpy = oldy = cury;
+    while (1)
+    {
+        c = MMInkey();
+        if (c != -1 && errmsg)
+        {
+            PrintFunctKeys(MARK);
+            errmsg = false;
+        }
+        switch (c)
+        {
+        case ESC:
+            /* MMBasic peeked for a TeraTerm mouse report here.  Removed
+             * for the same reason as in FullScreenEditor: inkey()
+             * reassembles escape sequences itself, so a sequence never
+             * arrives as a bare ESC, and peeking would swallow the
+             * first byte of the user's next keystroke instead. */
+            curx = txtpx;
+            cury = txtpy; // just an escape key
+            edx = edx_save;
+            edy = edy_save;
+            SCursor(curx, cury);
+            return;
+
+        case CTRLKEY('E'):
+        case UP:
+            if (cury <= 0 && edy == 0)
+                continue; // at very top of file
+            p = mark;
+            if (*p == '\n')
+                p--; // step back over the terminator if we are right at the end of the line
+            while (p != EdBuff && *p != '\n')
+                p--; // move to the beginning of the line
+            if (p != EdBuff)
+            {
+                p--; // step over the terminator to the end of the previous line
+                for (i = 0; p != EdBuff && *p != '\n'; p--, i++)
+                    ; // move to the beginning of that line
+                if (*p == '\n')
+                    p++; // and position at the start
+            }
+            mark = p;
+            for (i = 0; i < edx + curx && *mark != 0 && *mark != '\n'; i++, mark++)
+                ; // move the cursor to the preferred absolute column
+            {
+                int need_redraw = 0;
+                if (i >= edx + VWidth - SCROLLCHARS)
+                {
+                    edx = i - (VWidth - 1 - SCROLLCHARS);
+                    need_redraw = 1;
+                }
+                else if (edx > 0 && i < edx + SCROLLCHARS)
+                {
+                    edx = (i > SCROLLCHARS) ? i - SCROLLCHARS : 0;
+                    need_redraw = 1;
+                }
+                curx = i - edx;
+                if (cury > 0)
+                    cury--;
+                else if (edy > 0)
+                {
+                    edy--;
+                    need_redraw = 1;
+                }
+                if (need_redraw)
+                {
+                    printScreen();
+                    PrintFunctKeys(MARK);
+                }
+            }
+            break;
+
+        case CTRLKEY('X'):
+        case DOWN:
+            for (p = mark; *p != 0 && *p != '\n'; p++)
+                ; // move to the end of this line
+            if (*p == 0)
+                continue; // skip if it is at the end of the file
+            mark = p + 1; // step over the line terminator to the start of the next line
+            for (i = 0; i < edx + curx && *mark != 0 && *mark != '\n'; i++, mark++)
+                ; // move the cursor to the preferred absolute column
+            {
+                int need_redraw = 0;
+                if (i >= edx + VWidth - SCROLLCHARS)
+                {
+                    edx = i - (VWidth - 1 - SCROLLCHARS);
+                    need_redraw = 1;
+                }
+                else if (edx > 0 && i < edx + SCROLLCHARS)
+                {
+                    edx = (i > SCROLLCHARS) ? i - SCROLLCHARS : 0;
+                    need_redraw = 1;
+                }
+                curx = i - edx;
+                if (cury < VHeight - 1)
+                    cury++;
+                else if (edy + VHeight < nbrlines)
+                {
+                    edy++;
+                    need_redraw = 1;
+                }
+                if (need_redraw)
+                {
+                    printScreen();
+                    PrintFunctKeys(MARK);
+                }
+            }
+            break;
+
+        case CTRLKEY('S'):
+        case LEFT:
+            if (curx == 0 && edx == 0)
+                continue;
+            mark--;
+            if (edx > 0 && curx <= SCROLLCHARS)
+            {
+                edx--;
+                printLine(edy + cury);
+            }
+            else
+                curx--;
+            break;
+
+        case CTRLKEY('D'):
+        case RIGHT:
+            if (*mark == 0 || *mark == '\n')
+                continue;
+            mark++;
+            if (curx >= VWidth - 1 - SCROLLCHARS)
+            {
+                edx++;
+                printLine(edy + cury);
+            }
+            else
+                curx++;
+            break;
+
+        case CTRLKEY('U'):
+        case HOME:
+            if (mark == EdBuff)
+                break;
+            if (*mark == '\n')
+                mark--; // step back over the terminator if we are right at the end of the line
+            while (mark != EdBuff && *mark != '\n')
+                mark--; // move to the beginning of the line
+            if (*mark == '\n')
+                mark++; // skip if no more lines above this one
+            if (edx != 0)
+            {
+                edx = 0;
+                printScreen();
+                PrintFunctKeys(MARK);
+            }
+            curx = 0;
+            break;
+
+        case CTRLKEY('K'):
+        case END:
+            if (*mark == 0)
+                break;
+            for (p = mark; *p != 0 && *p != '\n'; p++)
+                ; // move to the end of this line
+            mark = p;
+            {
+                int abs_col = 0;
+                unsigned char *q = mark;
+                while (q > EdBuff && *(q - 1) != '\n')
+                {
+                    abs_col++;
+                    q--;
+                }
+                if (abs_col > VWidth - 1)
+                {
+                    edx = abs_col - (VWidth - 1 - SCROLLCHARS);
+                    printScreen();
+                    PrintFunctKeys(MARK);
+                }
+                else if (edx != 0)
+                {
+                    edx = 0;
+                    printScreen();
+                    PrintFunctKeys(MARK);
+                }
+                curx = abs_col - edx;
+            }
+            break;
+
+        case CTRLKEY('P'):
+        case PUP:
+            if (edy == 0)
+            {
+                // Already at top, move mark to beginning of file
+                mark = EdBuff;
+                cury = 0;
+                curx = 0;
+            }
+            else
+            {
+                // Scroll up by VHeight lines
+                int scrollamt = (edy >= VHeight) ? VHeight : edy;
+                edy -= scrollamt;
+                // Move mark up by scrollamt lines
+                for (i = 0; i < scrollamt && mark != EdBuff; i++)
+                {
+                    if (*mark == '\n')
+                        mark--;
+                    while (mark != EdBuff && *mark != '\n')
+                        mark--;
+                    if (*mark == '\n' && mark != EdBuff)
+                        mark--;
+                    while (mark != EdBuff && *mark != '\n')
+                        mark--;
+                    if (*mark == '\n')
+                        mark++;
+                }
+                // Position at start of line
+                while (mark != EdBuff && *(mark - 1) != '\n')
+                    mark--;
+                for (i = 0; i < edx + curx && *mark != 0 && *mark != '\n'; i++, mark++)
+                    ;
+                if (i >= edx + VWidth - SCROLLCHARS)
+                    edx = i - (VWidth - 1 - SCROLLCHARS);
+                else if (edx > 0 && i < edx + SCROLLCHARS)
+                    edx = (i > SCROLLCHARS) ? i - SCROLLCHARS : 0;
+                curx = i - edx;
+                printScreen();
+                PrintFunctKeys(MARK);
+            }
+            break;
+
+        case CTRLKEY('L'):
+        case PDOWN:
+            if (edy + VHeight >= nbrlines)
+            {
+                // Already showing end, move mark to end of file
+                while (*mark)
+                    mark++;
+                cury = VHeight - 1;
+            }
+            else
+            {
+                // Scroll down by VHeight lines
+                int scrollamt = VHeight;
+                if (edy + VHeight + scrollamt > nbrlines)
+                    scrollamt = nbrlines - edy - VHeight;
+                edy += scrollamt;
+                // Move mark down by scrollamt lines
+                for (i = 0; i < scrollamt && *mark; i++)
+                {
+                    while (*mark && *mark != '\n')
+                        mark++;
+                    if (*mark == '\n')
+                        mark++;
+                }
+                // Position at column
+                for (i = 0; i < edx + curx && *mark != 0 && *mark != '\n'; i++, mark++)
+                    ;
+                if (i >= edx + VWidth - SCROLLCHARS)
+                    edx = i - (VWidth - 1 - SCROLLCHARS);
+                else if (edx > 0 && i < edx + SCROLLCHARS)
+                    edx = (i > SCROLLCHARS) ? i - SCROLLCHARS : 0;
+                curx = i - edx;
+                printScreen();
+                PrintFunctKeys(MARK);
+            }
+            break;
+
+        case CTRLKEY('Y'):
+        case CTRLKEY('T'):
+        case F5:
+        case F4:
+        case CTRLKEY('B'):
+        case F10:
+            if (c != F10 && (txtp - mark > MAXCLIP || mark - txtp > MAXCLIP))
+            {
+                editDisplayMsg((unsigned char *)" MARKED TEXT EXCEEDS BUFFER SIZE");
+                errmsg = true;
+                SCursor(curx, cury);
+                continue;
+            }
+            if (c != F10)
+            {
+                if (mark <= txtp)
+                {
+                    p = mark;
+                    while (p < txtp)
+                        *cb++ = *p++;
+                }
+                else
+                {
+                    p = txtp;
+                    while (p <= mark - 1)
+                        *cb++ = *p++;
+                }
+                *cb = 0;
+            }
+            if (c == F5 || c == CTRLKEY('Y') || c == F10)
+            {
+                // For F10, also export to file before returning
+                if (c == F10)
+                {
+                    GetInputString((unsigned char *)"Export to file: ");
+                    if (*inpbuf != 0 && *inpbuf != ESC)
+                    {
+                        int fd = open((char *)inpbuf,
+                                      O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (fd < 0)
+                            editDisplayMsg((unsigned char *)" CANNOT CREATE FILE ");
+                        else
+                        {
+                            /* The marked span, low to high.  cb has been
+                             * advanced by the copy above, so recompute it
+                             * rather than trusting that pointer - and no
+                             * CR is added, because this is a Unix file. */
+                            unsigned char *cp = (mark <= txtp) ? mark : txtp;
+                            unsigned char *cpend = (mark <= txtp) ? txtp : mark;
+                            int len = (int)(cpend - cp);
+                            char msg[40];
+
+                            if (len > 0 && write(fd, cp, len) != len)
+                                editDisplayMsg((unsigned char *)" WRITE FAILED ");
+                            else
+                            {
+                                sprintf(msg, " EXPORTED %d CHARS ", len);
+                                editDisplayMsg((unsigned char *)msg);
+                            }
+                            close(fd);
+                        }
+                    }
+                }
+                // Calculate line number of txtp and adjust edy if needed
+                int ln;
+                unsigned char *pp;
+                for (pp = EdBuff, ln = 0; pp < txtp; pp++)
+                    if (*pp == '\n')
+                        ln++;
+                // If txtp is off-screen, adjust edy to center it
+                if (ln < edy || ln >= edy + VHeight)
+                {
+                    edy = ln - VHeight / 2;
+                    if (edy < 0)
+                        edy = 0;
+                    if (edy + VHeight > nbrlines)
+                        edy = (nbrlines > VHeight) ? nbrlines - VHeight : 0;
+                }
+                cury = ln - edy;
+                PositionCursor(txtp);
+                return;
+            }
+            // fall through
+
+        case CTRLKEY(']'):
+        case DEL:
+            if (mark < txtp)
+            {
+                p = txtp;
+                txtp = mark;
+                mark = p; // swap txtp and mark
+            }
+            for (p = txtp; p < mark; p++)
+                if (*p == '\n')
+                    nbrlines--;
+            for (p = txtp; *mark;)
+                *p++ = *mark++;
+            *p++ = 0;
+            *p++ = 0;
+            TextChanged = true;
+            // Calculate line number of txtp and adjust edy if needed
+            {
+                int ln;
+                unsigned char *pp;
+                for (pp = EdBuff, ln = 0; pp < txtp; pp++)
+                    if (*pp == '\n')
+                        ln++;
+                // If txtp is off-screen, adjust edy to center it
+                if (ln < edy || ln >= edy + VHeight)
+                {
+                    edy = ln - VHeight / 2;
+                    if (edy < 0)
+                        edy = 0;
+                    if (edy + VHeight > nbrlines)
+                        edy = (nbrlines > VHeight) ? nbrlines - VHeight : 0;
+                }
+                cury = ln - edy;
+            }
+            PositionCursor(txtp);
+            return;
+        case 9999:
+            break;
+        default:
+            continue;
+        }
+
+        x = curx;
+        y = cury;
+        markmode = true;
+
+        // Calculate visible line range
+        unsigned char *visStart, *visEnd;
+        int ln;
+        for (visStart = EdBuff, ln = 0; ln < edy && *visStart; visStart++)
+            if (*visStart == '\n')
+                ln++;
+        for (visEnd = visStart, ln = 0; ln < VHeight && *visEnd; visEnd++)
+            if (*visEnd == '\n')
+                ln++;
+
+        // Determine the marked range (low to high)
+        unsigned char *markLow = (mark < txtp) ? mark : txtp;
+        unsigned char *markHigh = (mark < txtp) ? txtp : mark;
+
+        // first unmark the area not marked as a result of the keystroke (only visible portion)
+        // col tracks the absolute text column so we clip output to [edx, edx+VWidth)
+        if (oldmark < mark)
+        {
+            p = oldmark;
+            int col = 0;
+            {
+                unsigned char *q = p;
+                while (q > EdBuff && *(q - 1) != '\n')
+                {
+                    col++;
+                    q--;
+                }
+            }
+            if (p >= visStart && p < visEnd)
+            {
+                while (p < mark && *p != '\n' && col < edx)
+                {
+                    col++;
+                    p++;
+                }
+                if (p < mark && p >= visStart && p < visEnd && *p != '\n')
+                {
+                    PositionCursor(p);
+                    if (Option.ColourCode)
+                        restoreColourFromLineStart(p);
+                }
+            }
+            while (p < mark)
+            {
+                if (p >= visStart && p < visEnd)
+                {
+                    if (*p == '\n')
+                    {
+                        col = 0;
+                        p++;
+                        while (p < mark && p < visEnd && *p != '\n' && col < edx)
+                        {
+                            col++;
+                            p++;
+                        }
+                        if (p < mark && p >= visStart && p < visEnd && *p != '\n')
+                        {
+                            PositionCursor(p);
+                            if (Option.ColourCode)
+                                restoreColourFromLineStart(p);
+                        }
+                        continue;
+                    }
+                    if (col >= edx && col < edx + VWidth)
+                    {
+                        if (Option.ColourCode)
+                            SetColour(p, true);
+                        MX470PutC(*p);
+                        SSputchar(*p, 0);
+                    }
+                }
+                if (*p == '\n')
+                    col = 0;
+                else
+                    col++;
+                p++;
+            }
+        }
+        else if (oldmark > mark)
+        {
+            p = mark;
+            int col = 0;
+            {
+                unsigned char *q = p;
+                while (q > EdBuff && *(q - 1) != '\n')
+                {
+                    col++;
+                    q--;
+                }
+            }
+            if (p >= visStart && p < visEnd)
+            {
+                while (oldmark > p && *p != '\n' && col < edx)
+                {
+                    col++;
+                    p++;
+                }
+                if (oldmark > p && p >= visStart && p < visEnd && *p != '\n')
+                {
+                    PositionCursor(p);
+                    if (Option.ColourCode)
+                        restoreColourFromLineStart(p);
+                }
+            }
+            while (oldmark > p)
+            {
+                if (p >= visStart && p < visEnd)
+                {
+                    if (*p == '\n')
+                    {
+                        col = 0;
+                        p++;
+                        while (oldmark > p && p < visEnd && *p != '\n' && col < edx)
+                        {
+                            col++;
+                            p++;
+                        }
+                        if (oldmark > p && p >= visStart && p < visEnd && *p != '\n')
+                        {
+                            PositionCursor(p);
+                            if (Option.ColourCode)
+                                restoreColourFromLineStart(p);
+                        }
+                        continue;
+                    }
+                    if (col >= edx && col < edx + VWidth)
+                    {
+                        if (Option.ColourCode)
+                            SetColour(p, true);
+                        MX470PutC(*p);
+                        SSputchar(*p, 0);
+                    }
+                }
+                if (*p == '\n')
+                    col = 0;
+                else
+                    col++;
+                p++;
+            }
+        }
+        oldmark = mark;
+        oldx = x;
+        oldy = y;
+
+        // now draw the marked area (only visible portion)
+        if (markLow < markHigh)
+        {
+            // Find where to start drawing (intersection of marked range and visible range)
+            unsigned char *drawStart = (markLow > visStart) ? markLow : visStart;
+            unsigned char *drawEnd = (markHigh < visEnd) ? markHigh : visEnd;
+
+            if (drawStart < drawEnd)
+            {
+                PrintString(Option.ColourCode ? "\033[44m" : "\033[0m\033[7m");
+                MX470Display(REVERSE_VIDEO);
+                p = drawStart;
+                int col = 0;
+                {
+                    unsigned char *q = p;
+                    while (q > EdBuff && *(q - 1) != '\n')
+                    {
+                        col++;
+                        q--;
+                    }
+                }
+                while (p < drawEnd && *p != '\n' && col < edx)
+                {
+                    col++;
+                    p++;
+                }
+                if (p < drawEnd && *p != '\n')
+                    PositionCursor(p);
+                while (p < drawEnd)
+                {
+                    if (*p == '\n')
+                    {
+                        col = 0;
+                        p++;
+                        while (p < drawEnd && *p != '\n' && col < edx)
+                        {
+                            col++;
+                            p++;
+                        }
+                        if (p < drawEnd && *p != '\n')
+                            PositionCursor(p);
+                        continue;
+                    }
+                    if (col >= edx && col < edx + VWidth)
+                    {
+                        MX470PutC(*p);
+                        SSputchar(*p, 0);
+                    }
+                    col++;
+                    p++;
+                }
+                MX470Display(REVERSE_VIDEO);
+            }
+        }
+        markmode = false;
+        PrintString("\033[0m"); // normal video
+
+        oldx = x;
+        oldy = y;
+        oldmark = mark;
+        PositionCursor(mark);
+    }
+}
+/* The beautifier - MMBasic's, Editor.c 5536-6105.
+ *
+ * Re-indents block structures two spaces per level: IF/ELSE/ELSEIF/END
+ * IF, FOR/NEXT, DO/LOOP, SELECT CASE/CASE/END SELECT, SUB, FUNCTION and
+ * TYPE.  A single-line IF (statements after THEN) keeps the prevailing
+ * indent without opening a block.
+ *
+ * It arrives verbatim - it touches nothing but EdBuff and
+ * editDisplayMsg, so there was nothing to adapt.  STRUCTENABLED is
+ * defined below because MMBasic 6.x has TYPE and its own editor indents
+ * those blocks; mmbc not translating TYPE yet is beside the point, the
+ * editor is for MMBasic source in general.
+ */
+#define STRUCTENABLED 1
+
+static int beautify_token_match(const char *up, int idx, const char *kw)
+{
+    int klen = (int)strlen(kw);
+    for (int i = 0; i < klen; i++)
+    {
+        if (up[idx + i] != kw[i])
+            return 0;
+    }
+    char nxt = up[idx + klen];
+    return (nxt == 0 || nxt == ' ' || nxt == '\t' || nxt == ':');
+}
+
+/* Returns non-zero if the buffer contains any blank line that is NOT
+ * immediately preceded by an END SUB / END FUNCTION line.  Used by the
+ * F12 handler to decide whether to prompt the user about preserving
+ * blank lines. */
+static int beautify_has_stray_blanks(void)
+{
+    unsigned char *p = EdBuff;
+    int prev_was_end_sub_or_func = 0;
+    while (*p)
+    {
+        unsigned char *line_start = p;
+        unsigned char *eol = p;
+        while (*eol && *eol != '\n')
+            eol++;
+
+        unsigned char *t = line_start;
+        while (t < eol && (*t == ' ' || *t == '\t'))
+            t++;
+        int blank = (t >= eol);
+
+        if (blank)
+        {
+            if (!prev_was_end_sub_or_func)
+                return 1;
+            prev_was_end_sub_or_func = 0; /* don't allow a 2nd freebie */
+        }
+        else
+        {
+            char up[16] = {0};
+            int ulen = 0;
+            for (unsigned char *q = t; q < eol && ulen < (int)sizeof(up) - 1; q++)
+            {
+                char ch = (char)*q;
+                if (ch >= 'a' && ch <= 'z')
+                    ch = (char)(ch - 32);
+                up[ulen++] = ch;
+            }
+            prev_was_end_sub_or_func =
+                (beautify_token_match(up, 0, "END") &&
+                 (beautify_token_match(up, 4, "SUB") ||
+                  beautify_token_match(up, 4, "FUNCTION")));
+        }
+        p = eol + (*eol == '\n' ? 1 : 0);
+    }
+    return 0;
+}
+
+static void editBeautify(int edit_buff_size, int keep_blanks)
+{
+    int line_number_base = 0; /* if >0, programs uses line numbers and this
+                               * is the column at which statements start
+                               * (= longest line-number width + 1).        */
+    /* ---- Pass 1: optionally remove blank/whitespace-only lines, and at the
+     *               same time work out whether the program is line-numbered.
+     *               It is considered numbered iff the first non-blank,
+     *               non-comment line begins with a run of digits followed by
+     *               whitespace, ':' or end-of-line.  When that is the case
+     *               we record the width of the longest such leading number
+     *               so that all subsequent lines can be aligned past it.
+     *               When keep_blanks is non-zero we leave blank lines in
+     *               place (they are still emitted to the output buffer) but
+     *               otherwise behave identically.                          */
+    {
+        unsigned char *src = EdBuff;
+        unsigned char *dst = EdBuff;
+        int saw_first = 0;
+        int numbered_program = 0;
+        int max_num_len = 0;
+        int prev_emitted_blank = 0;
+        while (*src)
+        {
+            unsigned char *line_start = src;
+            unsigned char *eol = src;
+            while (*eol && *eol != '\n')
+                eol++;
+            unsigned char *t = line_start;
+            while (t < eol && (*t == ' ' || *t == '\t'))
+                t++;
+            int blank = (t >= eol);
+            int line_len = (int)(eol - line_start) + (*eol == '\n' ? 1 : 0);
+            if (blank)
+            {
+                if (keep_blanks && !prev_emitted_blank)
+                {
+                    /* Emit a single normalised blank line ('\n').  Because
+                     * dst <= line_start (we only ever shrink), writing one
+                     * byte is always safe. */
+                    *dst++ = '\n';
+                    prev_emitted_blank = 1;
+                }
+                /* otherwise: drop the blank line entirely */
+            }
+            else
+            {
+                /* Is this line a comment-only line? */
+                int is_cmt = 0;
+                if (*t == '\'')
+                    is_cmt = 1;
+                else if ((eol - t) >= 3 &&
+                         (t[0] == 'R' || t[0] == 'r') &&
+                         (t[1] == 'E' || t[1] == 'e') &&
+                         (t[2] == 'M' || t[2] == 'm') &&
+                         ((eol - t) == 3 || t[3] == ' ' || t[3] == '\t'))
+                    is_cmt = 1;
+
+                /* Measure leading line-number, if any. */
+                int num_len = 0;
+                {
+                    const unsigned char *r = t;
+                    while (r < eol && *r >= '0' && *r <= '9')
+                        r++;
+                    if (r > t && (r >= eol || *r == ' ' || *r == '\t' ||
+                                  *r == ':'))
+                        num_len = (int)(r - t);
+                }
+                if (!saw_first && !is_cmt)
+                {
+                    saw_first = 1;
+                    if (num_len > 0)
+                        numbered_program = 1;
+                }
+                if (numbered_program && num_len > max_num_len)
+                    max_num_len = num_len;
+
+                if (dst != line_start)
+                    memmove(dst, line_start, line_len);
+                dst += line_len;
+                prev_emitted_blank = 0;
+            }
+            src = line_start + line_len;
+        }
+        *dst = 0;
+        if (numbered_program)
+            line_number_base = max_num_len + 1;
+    }
+
+    /* ---- Pass 2: insert one blank line after each END SUB / END FUNCTION
+     *               (except at end of buffer).  Inserting after the end of
+     *               a routine - rather than before its SUB/FUNCTION header -
+     *               keeps any leading comment block attached to the routine
+     *               that it documents.                                     */
+    {
+        unsigned char *p = EdBuff;
+        while (*p)
+        {
+            unsigned char *line_start = p;
+            unsigned char *eol = p;
+            while (*eol && *eol != '\n')
+                eol++;
+
+            unsigned char *s = line_start;
+            while (s < eol && (*s == ' ' || *s == '\t'))
+                s++;
+
+            char up[16] = {0};
+            int ulen = 0;
+            for (unsigned char *q = s; q < eol && ulen < (int)sizeof(up) - 1; q++)
+            {
+                char ch = (char)*q;
+                if (ch >= 'a' && ch <= 'z')
+                    ch = (char)(ch - 32);
+                up[ulen++] = ch;
+            }
+
+            int is_end_sub_or_func = (beautify_token_match(up, 0, "END") &&
+                                      (beautify_token_match(up, 4, "SUB") ||
+                                       beautify_token_match(up, 4, "FUNCTION")));
+
+            /* Move to start of the next line. */
+            unsigned char *next_line = eol + (*eol == '\n' ? 1 : 0);
+
+            if (is_end_sub_or_func && *next_line)
+            {
+                /* If the next line is already blank, no need to insert one. */
+                int next_is_blank = 0;
+                {
+                    unsigned char *u = next_line;
+                    while (*u == ' ' || *u == '\t')
+                        u++;
+                    if (*u == '\n' || *u == 0)
+                        next_is_blank = 1;
+                }
+                if (!next_is_blank)
+                {
+                    /* Insert a single '\n' at next_line.  Need 1 byte of room. */
+                    unsigned char *bufend = next_line;
+                    while (*bufend)
+                        bufend++;
+                    if ((bufend - EdBuff) + 1 >= edit_buff_size - 10)
+                    {
+                        editDisplayMsg((unsigned char *)" BEAUTIFY: BUFFER FULL ");
+                        return;
+                    }
+                    int tail_len = (int)(bufend - next_line) + 1; /* incl. NUL */
+                    memmove(next_line + 1, next_line, tail_len);
+                    *next_line = '\n';
+                    next_line++;
+                }
+            }
+
+            p = next_line;
+        }
+    }
+
+    /* ---- Pass 3: re-indent each line based on block structure ---- */
+    int level = 0;
+    unsigned char *p = EdBuff;
+
+    while (*p)
+    {
+        unsigned char *line_start = p;
+
+        /* Find current end-of-line and the existing leading whitespace */
+        unsigned char *eol = p;
+        while (*eol && *eol != '\n')
+            eol++;
+
+        unsigned char *s = line_start;
+        while (s < eol && (*s == ' ' || *s == '\t'))
+            s++;
+
+        /* Build a small uppercase token buffer for keyword sniffing */
+        char up[40] = {0};
+        int ulen = 0;
+        for (unsigned char *q = s; q < eol && ulen < (int)sizeof(up) - 1; q++)
+        {
+            char ch = (char)*q;
+            if (ch >= 'a' && ch <= 'z')
+                ch = (char)(ch - 32);
+            up[ulen++] = ch;
+        }
+
+        int dedent_self = 0;
+        int indent_after = 0;
+        int is_blank = (s >= eol);
+        int is_comment = 0;
+        int is_label = 0;
+        int is_line_number = 0;
+        int line_number_len = 0;
+        if (!is_blank)
+        {
+            if (*s == '\'')
+                is_comment = 1;
+            else if (ulen >= 3 && up[0] == 'R' && up[1] == 'E' && up[2] == 'M' &&
+                     (ulen == 3 || up[3] == ' ' || up[3] == '\t'))
+                is_comment = 1;
+            else if (*s >= '0' && *s <= '9')
+            {
+                /* Detect a leading line number: a run of digits followed by
+                 * whitespace, end-of-line or ':'.  Treated like a label so
+                 * that classic line-numbered BASIC is not pushed off to the
+                 * right by surrounding block structure. */
+                const unsigned char *r = s;
+                while (r < eol && *r >= '0' && *r <= '9')
+                    r++;
+                if (r > s && (r >= eol || *r == ' ' || *r == '\t' || *r == ':'))
+                {
+                    is_line_number = 1;
+                    line_number_len = (int)(r - s);
+                }
+            }
+            else
+            {
+                /* Detect a leading label: identifier ([A-Za-z_][A-Za-z0-9_]*)
+                 * immediately followed by ':'.  Such lines are kept flush
+                 * left so that targets of GOTO/GOSUB stay visible even when
+                 * they appear inside an indented block. */
+                unsigned char c0 = *s;
+                if ((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z') ||
+                    c0 == '_')
+                {
+                    const unsigned char *r = s + 1;
+                    while (r < eol)
+                    {
+                        unsigned char ch = *r;
+                        if ((ch >= 'A' && ch <= 'Z') ||
+                            (ch >= 'a' && ch <= 'z') ||
+                            (ch >= '0' && ch <= '9') || ch == '_')
+                            r++;
+                        else
+                            break;
+                    }
+                    if (r < eol && *r == ':')
+                        is_label = 1;
+                }
+            }
+        }
+
+        if (!is_blank && !is_comment)
+        {
+            /* Walk the line statement-by-statement, splitting at ':' outside
+             * string literals and stopping at the start of any trailing
+             * comment.  For each statement classify whether it opens
+             * (FOR, DO, SUB, FUNCTION, TYPE, SELECT CASE, multi-line IF),
+             * closes (NEXT, LOOP, END IF / ENDIF, END SELECT / SUB / FUNCTION /
+             * TYPE) or is a middle clause (ELSE, ELSEIF, CASE).  Accumulate
+             * the net indent change for the line so that single-line forms
+             * such as  FOR i=1 TO 9:a(i)=i:NEXT  cancel out and do not
+             * indent following lines.                                       */
+            const unsigned char *q = s;
+            /* Skip a leading line number so that the keyword classifier
+             * sees the actual statement (e.g. DO/LOOP/SUB/END SUB) that
+             * follows the digits. */
+            if (is_line_number)
+                q = s + line_number_len;
+            int first_stmt = 1;
+            int in_str = 0;
+            while (q < eol)
+            {
+                while (q < eol && (*q == ' ' || *q == '\t'))
+                    q++;
+                const unsigned char *stmt_start = q;
+                const unsigned char *stmt_end = NULL;
+
+                while (q < eol)
+                {
+                    char ch = (char)*q;
+                    if (ch == '"')
+                        in_str = !in_str;
+                    else if (ch == '\'' && !in_str)
+                    {
+                        stmt_end = q;
+                        q = eol; /* trailing comment ends scanning */
+                        break;
+                    }
+                    else if (ch == ':' && !in_str)
+                        break;
+                    q++;
+                }
+                if (stmt_end == NULL)
+                    stmt_end = q;
+                if (q < eol && *q == ':')
+                    q++;
+
+                if (stmt_end <= stmt_start)
+                {
+                    first_stmt = 0;
+                    continue;
+                }
+
+                char kw[16] = {0};
+                int klen = 0;
+                for (const unsigned char *r = stmt_start;
+                     r < stmt_end && klen < (int)sizeof(kw) - 1; r++)
+                {
+                    char ch = (char)*r;
+                    if (ch >= 'a' && ch <= 'z')
+                        ch = (char)(ch - 32);
+                    kw[klen++] = ch;
+                }
+
+                int open_kw = 0, close_kw = 0, middle_kw = 0;
+
+                if (beautify_token_match(kw, 0, "ENDIF") ||
+                    beautify_token_match(kw, 0, "NEXT") ||
+                    beautify_token_match(kw, 0, "LOOP") ||
+                    (beautify_token_match(kw, 0, "END") &&
+                     (beautify_token_match(kw, 4, "IF") ||
+                      beautify_token_match(kw, 4, "SELECT") ||
+                      beautify_token_match(kw, 4, "FUNCTION") ||
+                      beautify_token_match(kw, 4, "SUB")
+#ifdef STRUCTENABLED
+                      || beautify_token_match(kw, 4, "TYPE")
+#endif
+                          )))
+                    close_kw = 1;
+                else if (beautify_token_match(kw, 0, "ELSE") ||
+                         beautify_token_match(kw, 0, "ELSEIF") ||
+                         beautify_token_match(kw, 0, "CASE"))
+                    middle_kw = 1;
+
+                if (beautify_token_match(kw, 0, "FOR") ||
+                    beautify_token_match(kw, 0, "DO") ||
+                    beautify_token_match(kw, 0, "FUNCTION") ||
+                    beautify_token_match(kw, 0, "SUB")
+#ifdef STRUCTENABLED
+                    || beautify_token_match(kw, 0, "TYPE")
+#endif
+                    || (beautify_token_match(kw, 0, "SELECT") &&
+                        beautify_token_match(kw, 7, "CASE")))
+                    open_kw = 1;
+                else if (beautify_token_match(kw, 0, "IF"))
+                {
+                    int found_after = -1;
+                    for (const unsigned char *r = stmt_start + 2;
+                         r + 4 < stmt_end; r++)
+                    {
+                        if ((r[0] == ' ' || r[0] == '\t') &&
+                            (r[1] == 'T' || r[1] == 't') &&
+                            (r[2] == 'H' || r[2] == 'h') &&
+                            (r[3] == 'E' || r[3] == 'e') &&
+                            (r[4] == 'N' || r[4] == 'n'))
+                        {
+                            const unsigned char *after = r + 5;
+                            if (after == stmt_end || *after == ' ' || *after == '\t')
+                            {
+                                found_after = (int)(after - stmt_start);
+                                break;
+                            }
+                        }
+                    }
+                    if (found_after >= 0)
+                    {
+                        const unsigned char *a = stmt_start + found_after;
+                        while (a < stmt_end && (*a == ' ' || *a == '\t'))
+                            a++;
+                        if (a >= stmt_end)
+                            open_kw = 1;
+                    }
+                }
+
+                if (first_stmt)
+                {
+                    if (close_kw)
+                        dedent_self = 1;
+                    else if (middle_kw)
+                    {
+                        dedent_self = 1;
+                        indent_after += 1;
+                    }
+                    if (open_kw)
+                        indent_after += 1;
+                }
+                else
+                {
+                    if (close_kw)
+                        indent_after -= 1;
+                    else if (open_kw)
+                        indent_after += 1;
+                    /* middle clauses inside a colon-joined line are
+                     * structurally unusual; treat as no-op.                */
+                }
+
+                first_stmt = 0;
+            }
+        }
+
+        int line_indent = level - dedent_self;
+        if (line_indent < 0)
+            line_indent = 0;
+        int want_spaces;
+        if (is_blank)
+            want_spaces = 0;
+        else if (is_label)
+            want_spaces = 0; /* labels stay flush left */
+        else if (is_line_number)
+            want_spaces = 0; /* digits go to col 0; gap fixed up below */
+        else
+            want_spaces = line_number_base + line_indent * 2;
+        int have_spaces = (int)(s - line_start);
+
+        /* Adjust leading whitespace in place by shifting the tail of the buffer */
+        if (want_spaces != have_spaces)
+        {
+            int diff = want_spaces - have_spaces; /* >0 grow, <0 shrink */
+
+            /* Find end of buffer (NUL terminator) */
+            unsigned char *bufend = s;
+            while (*bufend)
+                bufend++;
+            int tail_len = (int)(bufend - s); /* bytes from s through, not incl. NUL */
+
+            if (diff > 0)
+            {
+                /* Need to grow: ensure there's room (10-byte slack like editInsertChar) */
+                if ((bufend - EdBuff) + diff >= edit_buff_size - 10)
+                {
+                    editDisplayMsg((unsigned char *)" BEAUTIFY: BUFFER FULL ");
+                    return;
+                }
+                /* Shift tail (including NUL) right by diff */
+                memmove(s + diff, s, tail_len + 1);
+            }
+            else
+            {
+                /* Shrink: shift tail (including NUL) left by -diff */
+                memmove(s + diff, s, tail_len + 1);
+            }
+
+            /* Fill new leading spaces */
+            for (int i = 0; i < want_spaces; i++)
+                line_start[i] = ' ';
+
+            /* Recompute eol after shift */
+            eol = line_start + want_spaces;
+            while (*eol && *eol != '\n')
+                eol++;
+        }
+        else
+        {
+            /* Same width - just rewrite spaces (in case some were tabs) */
+            for (int i = 0; i < want_spaces; i++)
+                line_start[i] = ' ';
+        }
+
+        /* For numbered lines, normalise the gap between the line number and
+         * the following statement so the statement aligns at
+         * line_number_base + line_indent*2 (with a minimum of one space). */
+        if (is_line_number)
+        {
+            unsigned char *num_end = line_start + line_number_len;
+            unsigned char *gap_end = num_end;
+            while (*gap_end == ' ' || *gap_end == '\t')
+                gap_end++;
+            if (*gap_end != 0 && *gap_end != '\n')
+            {
+                int have_gap = (int)(gap_end - num_end);
+                int target_col = line_number_base + line_indent * 2;
+                int want_gap = target_col - line_number_len;
+                if (want_gap < 1)
+                    want_gap = 1;
+                int diff = want_gap - have_gap;
+                if (diff != 0)
+                {
+                    unsigned char *bufend = gap_end;
+                    while (*bufend)
+                        bufend++;
+                    int tail_len = (int)(bufend - gap_end);
+                    if (diff > 0 &&
+                        (bufend - EdBuff) + diff >= edit_buff_size - 10)
+                    {
+                        editDisplayMsg((unsigned char *)" BEAUTIFY: BUFFER FULL ");
+                        return;
+                    }
+                    memmove(gap_end + diff, gap_end, tail_len + 1);
+                }
+                for (int i = 0; i < want_gap; i++)
+                    num_end[i] = ' ';
+                eol = num_end + want_gap;
+                while (*eol && *eol != '\n')
+                    eol++;
+            }
+        }
+
+        /* Advance to the character after the newline (or end) */
+        p = eol;
+        if (*p == '\n')
+            p++;
+
+        if (dedent_self)
+            level--;
+        if (indent_after)
+            level++;
+        if (level < 0)
+            level = 0;
+    }
 }
 
 void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
@@ -1722,12 +2920,50 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
             case F11:
                 break;
 
-            /* F12 / Ctrl-A is MMBasic's beautifier - 500 lines of block
-             * re-indentation, not ported yet. */
+            // F12 / Ctrl-A - Beautify (re-indent block structures)
             case CTRLKEY('A'):
             case F12:
-                editDisplayMsg((unsigned char *)" BEAUTIFY NOT PORTED YET ");
-                break;
+            {
+                int keep_blanks = 0;
+                if (beautify_has_stray_blanks())
+                {
+                    /* Prompt the user.  Y (default) keeps blank lines,
+                     * N removes them. */
+                    editDisplayMsg((unsigned char *)" KEEP BLANK LINES? (Y/N) ");
+                    while (1)
+                    {
+                        int kc = MMgetchar();
+                        if (kc == 'y' || kc == 'Y' || kc == '\r' || kc == '\n')
+                        {
+                            keep_blanks = 1;
+                            break;
+                        }
+                        if (kc == 'n' || kc == 'N')
+                        {
+                            keep_blanks = 0;
+                            break;
+                        }
+                        if (kc == ESC)
+                        {
+                            /* Cancel beautify entirely. */
+                            PrintStatus();
+                            goto beautify_done;
+                        }
+                    }
+                }
+                editBeautify(edit_buff_size, keep_blanks);
+                TextChanged = true;
+                /* After buffer rewrite, restore cursor to start of buffer */
+                txtp = EdBuff;
+                edx = edy = curx = cury = 0;
+                nbrlines = buf_count_lines();
+                printScreen();
+                PositionCursor(txtp);
+                PrintStatus();
+                editDisplayMsg((unsigned char *)" BEAUTIFIED ");
+            beautify_done:;
+            }
+            break;
 
             // a normal character
             default:
