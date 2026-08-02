@@ -1408,7 +1408,11 @@ void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, uint16_t nblock)
 /* Validblk panics if the given block number is not a valid
  *  data block for the given device.
  */
+#ifdef CONFIG_SB_TRIPWIRE
+void validblk_at(uint16_t dev, register blkno_t num, const char *who)
+#else
 void validblk(uint16_t dev, register blkno_t num)
+#endif
 {
     register struct mount *mnt;
 
@@ -1419,8 +1423,22 @@ void validblk(uint16_t dev, register blkno_t num)
         return;
     }
 
-    if(num < mnt->m_fs.s_isize || num >= mnt->m_fs.s_fsize)
+    if(num < mnt->m_fs.s_isize || num >= mnt->m_fs.s_fsize) {
+#ifdef CONFIG_SB_TRIPWIRE
+        /* Which caller, and what the number was, separates the two
+           ways this happens: blk_alloc means the free list handed out
+           a bad block - and since the superblock's copy is checked at
+           every operation, a bad one there means the refill read from
+           disk brought in garbage.  blk_free means an INODE holds a
+           bad block pointer, which is a different fault entirely. */
+        kprintf("\nvalidblk(%s): dev %u blk %u outside %u..%u"
+                " (nfree %u, tfree %u)\n",
+                who, mnt->m_dev, (unsigned)num,
+                (unsigned)mnt->m_fs.s_isize, (unsigned)mnt->m_fs.s_fsize,
+                (unsigned)mnt->m_fs.s_nfree, (unsigned)mnt->m_fs.s_tfree);
+#endif
         panic(PANIC_VALIDBLK_INV);
+    }
 }
 
 

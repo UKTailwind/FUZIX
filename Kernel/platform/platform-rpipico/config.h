@@ -278,6 +278,11 @@ extern uint8_t progbase[USERMEM];
  * and no memory.  See sb_validate() in filesys.c. */
 #define CONFIG_SB_TRIPWIRE
 
+/* Assert the two things blk_op's single global cannot survive: a
+ * transfer starting inside another one, and swap I/O aimed anywhere but
+ * the swap device.  See the tripwire note in dev/blkdev.c. */
+#define CONFIG_BLK_TRIPWIRE
+
 #define MAX_BLKDEV	4
 
 #define CONFIG_SMALL

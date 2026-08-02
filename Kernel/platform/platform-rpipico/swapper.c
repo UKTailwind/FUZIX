@@ -387,8 +387,45 @@ uint_fast8_t plt_canswapon(uint16_t devno)
     return (devno >> 8) == 0;
 }
 
+/* Swap round-trip tripwire.
+ *
+ * The swap device is the XIP-mapped PSRAM, cached WRITE-BACK (psram.c
+ * sets XIP_CTRL_WRITABLE_M1).  A swapped-out process therefore lives in
+ * dirty cache lines until something writes them through, and anything
+ * that invalidates that cache without cleaning it first loses them -
+ * see the QMI/XIP note in config.h.  A process swapped back in from
+ * lines that were dropped comes back subtly wrong, and because its
+ * udata rides along in the same image (UDATA_BLKS of it, holding
+ * u_block, u_dptr, u_nblock and the open file table) the first thing a
+ * damaged process does is write a perfectly valid file block to the
+ * WRONG LBA.  That destroys a filesystem while leaving the in-memory
+ * superblock untouched, which is exactly the corruption seen here and
+ * exactly why the superblock tripwire stays silent through it.
+ *
+ * So checksum what goes out and check what comes back.  One sum per
+ * swap slot rather than per block: 124 bytes, and the blocks are
+ * written and read in the same order, so accumulating across them costs
+ * one pass over memory we are already copying.
+ */
+#define SWAP_TRIPWIRE 1
+#if SWAP_TRIPWIRE
+static uint32_t swap_sum[MAX_SWAPS];
+
+static uint32_t sum_words(uint32_t sum, const void *base, unsigned len)
+{
+    const uint32_t *w = base;
+    const uint32_t *e = w + len / 4;
+    while (w < e)
+        sum = (sum << 1 | sum >> 31) ^ *w++;
+    return sum;
+}
+#endif
+
 int swapout(ptptr p)
 {
+#if SWAP_TRIPWIRE
+	uint32_t sum = 0;
+#endif
 #ifdef DEBUG
 	kprintf("swapping out %d (%d)\n", get_slot(p), p->p_pid);
 #endif
@@ -419,12 +456,18 @@ int swapout(ptptr p)
         blockindex = b - allocation_map;
         p = (void*)PROGBASE + blockindex*BLOCKSIZE;
 
+#if SWAP_TRIPWIRE
+        sum = sum_words(sum, p, BLOCKSIZE);
+#endif
         if (swapwrite(SWAPDEV, swaparea + (i*(BLOCKSIZE>>BLKSHIFT)),
             BLOCKSIZE, (uaddr_t)p, 1) != BLOCKSIZE)
             panic("swapout: write failed");
 
         b->slot = b->block = 0xff;
     }
+#if SWAP_TRIPWIRE
+	swap_sum[map] = sum;
+#endif
 
 	p->p_page = 0;
 	p->p_page2 = map;
@@ -437,6 +480,9 @@ int swapout(ptptr p)
 void swapin(ptptr p, uint16_t map)
 {
     uint16_t swaparea = map * SWAP_SIZE;
+#if SWAP_TRIPWIRE
+    uint32_t sum = 0;
+#endif
 
     int slot = get_slot(p);
     int blocks = get_proc_size_blocks(p);
@@ -459,10 +505,21 @@ void swapin(ptptr p, uint16_t map)
         if (swapread(SWAPDEV, swaparea + (i*(BLOCKSIZE>>BLKSHIFT)),
             BLOCKSIZE, (uaddr_t)p, 1) != BLOCKSIZE)
             panic("swapin: read failed");
+#if SWAP_TRIPWIRE
+        sum = sum_words(sum, p, BLOCKSIZE);
+#endif
 
         b->slot = slot;
         b->block = i;
     }
+#if SWAP_TRIPWIRE
+    if (sum != swap_sum[map]) {
+        kprintf("\nswap tripwire: pid %d slot %d area %u came back changed"
+                " (%x, wrote %x)\n",
+                p->p_pid, slot, swaparea, sum, swap_sum[map]);
+        panic("swapsum");
+    }
+#endif
 
     p->p_page = 1;
     p->p_page2 = 0;

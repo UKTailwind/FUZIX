@@ -96,10 +96,54 @@ static int translate_lba(uint_fast8_t minor)
     return 0;
 }
 
+#ifdef CONFIG_BLK_TRIPWIRE
+/*
+ *	Block layer tripwire.
+ *
+ *	blk_op is one global shared by every block device AND by swap, and
+ *	blkdev_transfer walks it destructively.  Two things would therefore
+ *	be invisible until a filesystem turned up destroyed hours later:
+ *	a transfer starting while another is still walking blk_op (the
+ *	second one's lba/addr overwrite the first, which then finishes the
+ *	rest of its sectors into the wrong place), and a swap transfer
+ *	aimed at anything other than the swap device (200K of process
+ *	image written straight over a filesystem).
+ *
+ *	Both are impossible by design, which is exactly why they are worth
+ *	asserting: the design assumption is that no driver here sleeps
+ *	mid-transfer, and it is not enforced anywhere.
+ */
+static uint8_t blk_busy;
+static uint8_t blk_busy_minor;
+static uint8_t blk_busy_raw;
+static uint32_t blk_busy_lba;
+#endif
+
 static int blkdev_transfer(uint_fast8_t minor, uint_fast8_t rawflag)
 {
     uint_fast8_t n;
     uint16_t count = 0;
+
+#ifdef CONFIG_BLK_TRIPWIRE
+    if (blk_busy) {
+        kprintf("\nblkdev re-entered: minor %u raw %u, inside minor %u raw %u lba %u\n",
+                (unsigned)minor, (unsigned)rawflag,
+                (unsigned)blk_busy_minor, (unsigned)blk_busy_raw,
+                (unsigned)blk_busy_lba);
+        panic("blkre");
+    }
+    /* swap_dev is a full device number; the block devices all share one
+       major, so the low byte is the minor we are being asked for */
+    if (rawflag == 2 && swap_dev != 0xFFFF
+        && minor != (uint_fast8_t)(swap_dev & 0xFF)) {
+        kprintf("\nswap I/O to minor %u, swap device is minor %u\n",
+                (unsigned)minor, (unsigned)(swap_dev & 0xFF));
+        panic("blkswap");
+    }
+    blk_busy = 1;
+    blk_busy_minor = minor;
+    blk_busy_raw = rawflag;
+#endif
 
     /* we trust that blkdev_open() has already verified that this minor number is valid */
     blk_op.blkdev = &blkdev_table[minor >> 4];
@@ -111,8 +155,12 @@ static int blkdev_transfer(uint_fast8_t minor, uint_fast8_t rawflag)
             break;
         case 1:
             /* read some number of 512-byte sectors directly to user memory */
-            if (d_blkoff(BLKSHIFT))
+            if (d_blkoff(BLKSHIFT)) {
+#ifdef CONFIG_BLK_TRIPWIRE
+                blk_busy = 0;
+#endif
                 return -1;
+            }
             break;
 #if defined(SWAPDEV) || defined(PAGEDEV)
         case 2:
@@ -131,6 +179,9 @@ static int blkdev_transfer(uint_fast8_t minor, uint_fast8_t rawflag)
     if (translate_lba(minor))
         goto xferfail;
 
+#ifdef CONFIG_BLK_TRIPWIRE
+    blk_busy_lba = blk_op.lba;
+#endif
     while(blk_op.nblock){
         n = blk_op.blkdev->transfer();
         if(n == 0)
@@ -141,8 +192,14 @@ static int blkdev_transfer(uint_fast8_t minor, uint_fast8_t rawflag)
 	blk_op.lba += n;
     }
 
+#ifdef CONFIG_BLK_TRIPWIRE
+    blk_busy = 0;
+#endif
     return count << BLKSHIFT; /* 10/10, would transfer sectors again */
 xferfail:
+#ifdef CONFIG_BLK_TRIPWIRE
+    blk_busy = 0;
+#endif
     udata.u_error = EIO;
     return -1;
 }

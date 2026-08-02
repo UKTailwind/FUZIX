@@ -1046,7 +1046,13 @@ extern int f_trunc_blocks(inoptr ino, uint16_t nblock);
 extern int f_trunc(inoptr ino);
 extern void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, uint16_t nblock);
 extern blkno_t bmap(inoptr ip, blkno_t bn, unsigned int rwflg);
+#ifdef CONFIG_SB_TRIPWIRE
+/* names the caller in the panic - see validblk_at() in filesys.c */
+extern void validblk_at(uint16_t dev, blkno_t num, const char *who);
+#define validblk(dev, num) validblk_at((dev), (num), __func__)
+#else
 extern void validblk(uint16_t dev, blkno_t num);
+#endif
 extern inoptr getinode(uint_fast8_t uindex);
 extern bool super(void);
 extern bool esuper(void);
