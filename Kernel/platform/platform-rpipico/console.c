@@ -148,24 +148,58 @@ static void cell_colours(uint8_t *fg, uint8_t *bg)
 static uint16_t con_gfx_stride, con_gfx_h;
 static uint8_t con_gfx_bpp;
 
-/* The colours are the console's own (concolours[], RGB332) expanded
- * back to RGB888 for display_gfx_map, so text keeps the same palette in
- * a graphics mode that it has on the text console - rather than a
- * second table that could drift away from the first. */
-static uint32_t con_rgb888(uint8_t v)
+/*
+ * ANSI colour index to RGB888, fully saturated.
+ *
+ * NOT the console's own concolours[]: that is an RGB332 set whose
+ * "white" is ANSI 7, a light grey (5,5,2 out of 7,7,3).  MODE 2's
+ * palette is RGB121 - red in {0,7}, green in {0,2,4,7}, blue in {0,3} -
+ * and contains no greys at all, so the nearest entry to that light grey
+ * comes out as (7,4,3), a pink.  Text rendered pink instead of white.
+ *
+ * An ANSI index is one bit per primary, so building the colour straight
+ * from those bits gives the eight saturated colours, and every one of
+ * them exists exactly in the RGB121 palette.  No table, and white is
+ * white.  Bright (SGR 1) adds nothing a saturated palette can show, so
+ * it is ignored here rather than faked.
+ */
+static uint32_t con_ansi888(uint8_t idx)
 {
-    uint32_t r = (v >> 5) & 7, g = (v >> 2) & 7, b = v & 3;
-
-    return ((r * 36) << 16) | ((g * 36) << 8) | (b * 85);
+    return ((idx & 1) ? 0xFF0000u : 0u) |
+           ((idx & 2) ? 0x00FF00u : 0u) |
+           ((idx & 4) ? 0x0000FFu : 0u);
 }
+
+/*
+ * Cached, because this is per CHARACTER and display_gfx_map() searches
+ * all sixteen palette entries: uncached it was 32 comparisons for every
+ * glyph, on top of the blit, and tty echo runs in interrupt context.
+ * The key is the whole of the colour state, so any SGR change misses
+ * the cache and recomputes; console_gfx() clears it so a mode change
+ * (with a different palette) cannot serve a stale pair.
+ */
+static uint8_t con_gfx_key = 0xFF, con_gfx_cfg, con_gfx_cbg;
 
 static void con_gfx_colours(uint8_t *fg, uint8_t *bg)
 {
-    uint8_t f, b;
+    uint8_t key = (con_ink & 7) | ((con_paper & 7) << 3)
+                | (con_inverse ? 0x40 : 0);
 
-    cell_colours(&f, &b);
-    *fg = display_gfx_map(con_rgb888(f));
-    *bg = display_gfx_map(con_rgb888(b));
+    if (key != con_gfx_key) {
+        uint8_t f = con_ink & 7;
+        uint8_t p = con_paper & 7;
+
+        if (con_inverse) {
+            uint8_t t = f;
+            f = p;
+            p = t;
+        }
+        con_gfx_cfg = display_gfx_map(con_ansi888(f));
+        con_gfx_cbg = display_gfx_map(con_ansi888(p));
+        con_gfx_key = key;
+    }
+    *fg = con_gfx_cfg;
+    *bg = con_gfx_cbg;
 }
 
 static void con_gfx_plot(int y, int x, uint8_t c)
@@ -717,6 +751,7 @@ void console_gfx(int active)
     conbusy = 0;
     conpend = 0;
     cursor_px = -1;
+    con_gfx_key = 0xFF;         /* new palette: drop the cached pair */
 
     if (active) {
         uint16_t w;
