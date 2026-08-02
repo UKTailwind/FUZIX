@@ -96,10 +96,10 @@ feature-complete against MMBasic's bar the file manager.  What follows
 is kept as the record of how they were ported; the remaining work is
 the numbered list after it.
 
-Fast loop worth reusing for any further editor work: it builds and runs
-on Linux unchanged, so
- plus a pty
-driver finds a fault in seconds without touching the board.
+Fast loop worth reusing for any further editor work: the editor builds
+and runs on Linux unchanged, so an ASan build of
+`mmedit.c shim.c editor.c keywords.c` driven through a pty finds a
+fault in seconds without touching the board.
 
 Mark mode was also the first code to exercise
 restoreColourFromLineStart: un-highlighting has to restore the syntax
@@ -107,30 +107,23 @@ colour for a character mid-line, which replays the colour state machine
 from the start of that line.  It had been ported with SetColour and had
 never run.
 
-WHAT WAS PORTED:
+WHAT WAS PORTED: mark mode (Editor.c 7402-8208) and the beautifier
+(5536-6105), the same way as the rest - take the region verbatim,
+delete the mouse and tile blocks, let mmb_compat.h supply the names.
+Two things needed adapting: the ESC handler no longer peeks for a
+TeraTerm mouse report, because inkey() reassembles escape sequences
+itself and peeking would eat the next keystroke; and F10 export writes
+with open/write rather than MMBasic's file layer.
 
-1. **Mark mode (F4)** - Editor.c 7402-8208, ~800 self-contained lines,
-   currently a stub that says so on screen.  It is the only thing that
-   fills the clipboard, so F5 paste, F7/F8 replace and F10 export are
-   all waiting on it.  Port it the same way the rest went: take the
-   region verbatim, delete the mouse and tile blocks, and let
-   mmb_compat.h supply the names.  The one thing to watch is that
-   MarkMode drives `restoreColourFromLineStart`, which is already
-   ported and is the only caller of it - so the colour state machine
-   gets exercised for the first time by this.
-2. **Beautify (F12 / Ctrl-A)** - Editor.c 5536-6105 (`editBeautify`
-   plus `beautify_has_stray_blanks`), the block re-indenter.  Also
-   stubbed and announced.  Self-contained: it rewrites the buffer and
-   the caller resets the cursor to the top.
+STILL TO DO on the editor, in whatever order suits:
 
-Then, in whatever order suits:
+1. **A soak from the USB keyboard.**  Everything so far was driven down
+   the serial console with devtools/fzkeys.py.
+2. **The file manager**, if it is ever wanted - 5,217 lines, and out of
+   scope from the start.
 
-3. **A pixel-bound demo** (plasma or fire) to measure the other end of
-   the graphics range: ripple is arithmetic-bound, so it flatters the
-   ioctl-per-pixel path.  See PC3-GFX-DESIGN.md.
-4. **DrawBitmap and DrawRectangle in mmbc**, so BASIC can reach the
-   primitives the kernel now has.
-5. **A soak of the editor from the USB keyboard.**
+The graphics work moved on from here; see PC3-GFX-DESIGN.md and the
+project memory for the batched drawing architecture and what is next.
 
 **Before touching the editor again, know that the "editor lockup" was
 not the editor.** It was `switchin` returning to a resumed process with
