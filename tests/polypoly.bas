@@ -4,7 +4,10 @@
 ' compare against.
 Timer =0
 CLS
-pn=3'poly number >=3
+' CONST, not a plain variable: mmb2c fixes array sizes when it
+' translates, so a DIM bound has to fold at compile time.  5 is the
+' size the 9.99 ms MMBasic figure was taken at.
+Const pn=5'poly number >=3
 
 Dim px(pn),py(pn),dx(pn),dy(pn)
 

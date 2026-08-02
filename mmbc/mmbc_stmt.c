@@ -491,7 +491,7 @@ void statement_inner(void)
         cv.i += 2;
         v = expr();
         if (strcmp(up, "TIMER") == 0)
-            emit(sfmt("mm_timer_set(%s);", as_int(v)));
+            emit(sfmt("mm_timer_set(%s);", as_flt(v)));
         else if (v.ty != TY_S)
             cv_err("%s = needs a string", up);
         else

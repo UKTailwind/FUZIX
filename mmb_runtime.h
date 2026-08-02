@@ -277,7 +277,7 @@ MMFLOAT mm_st_med_f (const MMFLOAT   *a, int n);
 /* ---- misc Tier A ---------------------------------------------------- */
 void mm_pause   (MMFLOAT ms);
 void mm_error_s (const char *mmstr);     /* the ERROR statement        */
-void mm_timer_set(MMINTEGER ms);         /* TIMER = n                  */
+void mm_timer_set(MMFLOAT ms);           /* TIMER = n, milliseconds    */
 void mm_set_date(const char *d);         /* DATE$ =                    */
 void mm_set_time(const char *t);         /* TIME$ =                    */
 
@@ -355,7 +355,7 @@ void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
 /* ---- misc ----------------------------------------------------------- */
 void mm_error(const char *msg);     /* prints and exits                */
 void mm_end  (void);                /* the END statement               */
-MMINTEGER mm_timer(void);           /* ms since start                  */
+MMFLOAT mm_timer(void);             /* ms since TIMER=, with fraction  */
 
 #ifdef __cplusplus
 }

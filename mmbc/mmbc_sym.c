@@ -38,6 +38,22 @@ void cv_err(const char *fmt, ...)
     mm_error("line %d: %s", cv.lineno, buf);
 }
 
+/* self.note: an error that must not stop the parse.  Recorded exactly
+ * as cv_err would record it, but the statement is allowed to finish so
+ * one bad line does not cascade into twenty. */
+void cv_note(const char *fmt, ...)
+{
+    char buf[400];
+    char text[448];
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    snprintf(text, sizeof(text), "line %d: %s", cv.lineno, buf);
+    errors_add_dedup(text);
+}
+
 /* self.warn: "line %d: %s", appended once */
 void cv_warn(const char *fmt, ...)
 {

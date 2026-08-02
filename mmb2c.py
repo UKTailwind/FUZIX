@@ -341,6 +341,30 @@ def clabel(name):
     return 'L_' + name.replace('.', '__')
 
 
+def const_c_expr(text):
+    """True when an emitted expression is a C constant expression.
+
+    An array is declared in C with its bounds written into the type, so
+    a DIM bound has to fold at compile time.  CONST substitutes its
+    value textually and literals are literals, so the test is simply
+    whether any letter in the text belongs to something other than a
+    number: a variable arrives as v_<name>, a call as mm_<name>."""
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c.isdigit():
+            i += 1                     # a numeric literal, with any
+            while i < n and (text[i].isalnum() or text[i] == '.'
+                             or (text[i] in '+-' and text[i - 1] in 'eE')):
+                i += 1                 # 0x prefix, exponent or suffix
+            continue
+        if c.isalpha() or c == '_':
+            return False
+        i += 1
+    return True
+
+
 # ----------------------------------------------------------------- the guts
 
 class Conv(object):
@@ -393,6 +417,14 @@ class Conv(object):
     # -- error reporting ------------------------------------------------
     def err(self, msg):
         raise MMError("line %d: %s" % (self.lineno, msg))
+
+    def note(self, msg):
+        """An error that must not stop the parse: recorded exactly as
+        err() would record it, but the statement is allowed to finish so
+        one bad line does not cascade into twenty."""
+        text = "line %d: %s" % (self.lineno, msg)
+        if text not in self.errors:
+            self.errors.append(text)
 
     def warn(self, msg):
         text = "line %d: %s" % (self.lineno, msg)
@@ -1035,7 +1067,7 @@ class Conv(object):
         if up == 'TAB':
             return ('mm_tab(%s)' % n(0), TY_S)
         if up == 'TIMER':
-            return ('mm_timer()', TY_I)
+            return ('mm_timer()', TY_F)
         if up == 'DATE$':
             return ('mm_date_str()', TY_S)
         if up == 'TIME$':
@@ -1732,7 +1764,22 @@ class Conv(object):
                 dims = []
                 while True:
                     v = self.expr()
-                    dims.append('(%s) + 1' % self.as_int(v))
+                    b = self.as_int(v)
+                    # Only the declaration pass matters: it is the one
+                    # that captures the bounds, and the one where a
+                    # CONST still carries its literal text (by the emit
+                    # pass it has become the #define's name).
+                    if self.mode == 'decl' and not const_c_expr(b):
+                        # Report it once and carry on with a bound that
+                        # at least compiles, so the whole program is not
+                        # buried under "'px' is not an array" for every
+                        # later line.
+                        self.note("the size of '%s' is worked out while the "
+                                  "program runs, and mmb2c fixes array sizes "
+                                  "when it translates.  Give the bound as a "
+                                  "literal or a CONST" % canon)
+                        b = '0'
+                    dims.append('(%s) + 1' % b)
                     if not self.accept_op(','):
                         break
                 self.expect_op(')')
@@ -2214,7 +2261,7 @@ class Conv(object):
             self.i += 2
             v = self.expr()
             if up == 'TIMER':
-                self.emit('mm_timer_set(%s);' % self.as_int(v))
+                self.emit('mm_timer_set(%s);' % self.as_flt(v))
             elif v[1] != TY_S:
                 self.err("%s = needs a string" % up)
             else:

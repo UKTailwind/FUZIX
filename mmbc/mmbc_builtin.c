@@ -177,7 +177,7 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
     if (strcmp(up, "TAB") == 0)
         return mkval(sfmt("mm_tab(%s)", n(0)), TY_S);
     if (strcmp(up, "TIMER") == 0)
-        return mkval("mm_timer()", TY_I);
+        return mkval("mm_timer()", TY_F);
     if (strcmp(up, "DATE$") == 0)
         return mkval("mm_date_str()", TY_S);
     if (strcmp(up, "TIME$") == 0)

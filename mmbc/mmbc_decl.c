@@ -547,8 +547,24 @@ void do_declare(const char *kw)
         if (accept_op("(")) {
             for (;;) {
                 struct val v = expr();
+                const char *b = as_int(v);
+                /* Only the declaration pass matters: it is the one that
+                 * captures the bounds, and the one where a CONST still
+                 * carries its literal text (by the emit pass it has
+                 * become the #define's name). */
+                if (cv.mode == M_DECL && !const_c_expr(b)) {
+                    /* Report it once and carry on with a bound that at
+                     * least compiles, so the whole program is not
+                     * buried under "'px' is not an array" for every
+                     * later line. */
+                    cv_note("the size of '%s' is worked out while the "
+                            "program runs, and mmb2c fixes array sizes "
+                            "when it translates.  Give the bound as a "
+                            "literal or a CONST", canon);
+                    b = "0";
+                }
                 GROW(dims, ndims, cdims);
-                dims[ndims++] = sfmt("(%s) + 1", as_int(v));
+                dims[ndims++] = sfmt("(%s) + 1", b);
                 if (!accept_op(","))
                     break;
             }
