@@ -17,6 +17,11 @@ extern unsigned quoted_string(int *len);
 extern unsigned copy_string(unsigned label, unsigned maxlen, unsigned pad,
                                 unsigned literal);
 
+/* Dead static elimination: see the comment in lex.c */
+extern unsigned out_off;
+extern void prescan_names(void);
+extern unsigned name_used_once(unsigned id);
+
 extern void out_write(void);
 extern void out_flush(void);
 extern unsigned long out_tell(void);

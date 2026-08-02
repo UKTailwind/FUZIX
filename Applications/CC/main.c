@@ -45,6 +45,9 @@ static unsigned functype[2] = {
 
 int main(int argc, char *argv[])
 {
+	/* Counts the names before parsing, so that a file scope static
+	   nothing mentions twice can be parsed and not generated. */
+	prescan_names();
 	next_token();
 	init_nodes();
 	/* A function with no type info returning INT */

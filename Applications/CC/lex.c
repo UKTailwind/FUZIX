@@ -39,10 +39,138 @@ static int in_byte(void)
 	return EOF;
 }
 
+/*
+ *	Which names are used more than once.
+ *
+ *	A function with external linkage has to be generated whatever we
+ *	think of it: something we cannot see may call it. A file scope
+ *	static is different - everything that could possibly reach it is
+ *	in this one translation unit - so if its name occurs exactly once
+ *	in the whole token stream, that occurrence being its own
+ *	definition, then nothing calls it, nothing takes its address, and
+ *	the code need never be generated at all. There is no linker on
+ *	this target to work that out later.
+ *
+ *	Counting names rather than resolving references costs one extra
+ *	pass over a file we already have open, and it errs the safe way:
+ *	a forward declaration, a recursive call, even an unrelated struct
+ *	member of the same name all push the count up and the function is
+ *	kept. It can waste code, never lose it.
+ *
+ *	Two saturating bits per name - none, one, more. A name past the
+ *	end of the table counts as "more", so a program with more names
+ *	than this loses the optimisation and nothing else.
+ */
+#define NAMES_TRACKED	16384
+static unsigned char name_count[NAMES_TRACKED / 4];
+static unsigned prescan_done;
+
+static void name_bump(unsigned id)
+{
+	unsigned i = id - T_SYMBOL;
+	unsigned sh;
+
+	if (i >= NAMES_TRACKED)
+		return;
+	sh = (i & 3) * 2;
+	if (((name_count[i >> 2] >> sh) & 3) != 3)
+		name_count[i >> 2] += 1 << sh;
+}
+
+unsigned name_used_once(unsigned id)
+{
+	unsigned i = id - T_SYMBOL;
+
+	if (!prescan_done || id < T_SYMBOL || i >= NAMES_TRACKED)
+		return 0;
+	return ((name_count[i >> 2] >> ((i & 3) * 2)) & 3) == 1;
+}
+
+/*
+ *	Walk the token stream once counting names, then rewind. The shape
+ *	of this loop has to match next_token() and copy_string() exactly
+ *	or it falls out of step: tokens are two bytes, five of them carry
+ *	a four byte value and three carry eight, T_LINE carries a line
+ *	number and sometimes a file name, and T_STRING carries a byte
+ *	stream in which 255 quotes the byte after it.
+ *
+ *	If stdin will not seek - someone has piped into cc1 rather than
+ *	giving it the file the driver does - the pass is simply skipped
+ *	and every static is generated as before.
+ */
+void prescan_names(void)
+{
+	int c;
+	unsigned t, i;
+
+	if (lseek(0, 0, SEEK_CUR) < 0)
+		return;
+
+	for (;;) {
+		c = in_byte();
+		if (c == EOF)
+			break;
+		t = c;
+		c = in_byte();
+		if (c == EOF)
+			break;
+		t |= c << 8;
+
+		if (t >= T_SYMBOL) {
+			name_bump(t);
+			continue;
+		}
+		switch (t) {
+		case T_LINE:
+			in_byte();
+			c = in_byte();
+			/* bit 15 of the line number: a file name follows */
+			if (c != EOF && (c & 0x80))
+				for (i = 0; i < 32; i++)
+					if (in_byte() <= 0)
+						break;
+			break;
+		case T_INTVAL:
+		case T_UINTVAL:
+		case T_LONGVAL:
+		case T_ULONGVAL:
+		case T_FLOATVAL:
+			for (i = 0; i < 4; i++)
+				in_byte();
+			break;
+		case T_LONGLONGVAL:
+		case T_ULONGLONGVAL:
+		case T_DOUBLEVAL:
+			for (i = 0; i < 8; i++)
+				in_byte();
+			break;
+		case T_STRING:
+			while ((c = in_byte()) > 0)
+				if (c == 0xFF)
+					in_byte();
+			break;
+		}
+	}
+
+	if (lseek(0, 0, SEEK_SET) < 0)
+		fatal("seek error");
+	inlen = 0;
+	prescan_done = 1;
+}
+
 static unsigned char outbuf[128];
 static unsigned char *outptr = outbuf;
 static unsigned int outlen;
 static unsigned int outrecord = 0;
+
+/*
+ *	Set while a function that will not be generated is parsed. It
+ *	still has to be parsed - for its errors, and to consume its
+ *	tokens - so the output side is turned off rather than the parse
+ *	being skipped. Everything cc1 emits goes through out_byte,
+ *	out_block and out_seek, so these three are the whole of it.
+ */
+unsigned out_off;
 
 void out_write(void)
 {
@@ -81,6 +209,8 @@ unsigned long out_tell(void)
 /* Go to a given record/offset from before */
 void out_seek(unsigned long pos)
 {
+	if (out_off)
+		return;
 	out_write();
 	out_record_read(pos >> 8);
 	outlen = pos & 0xFF;
@@ -90,6 +220,8 @@ void out_seek(unsigned long pos)
 /* Add bytes at the current position */
 void out_byte(unsigned char c)
 {
+	if (out_off)
+		return;
 	if (outlen == 128)
 		out_flush();
 	*outptr++ = c;
@@ -99,6 +231,8 @@ void out_byte(unsigned char c)
 void out_block(void *pv, unsigned len)
 {
 	unsigned char *p = pv;
+	if (out_off)
+		return;
 	while(len) {
 		unsigned n;
 

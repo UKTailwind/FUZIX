@@ -467,6 +467,7 @@ void function_body(unsigned st, unsigned name, unsigned type)
 	unsigned long hrw;
 	unsigned *p;
 	unsigned n;
+	unsigned dead;
 
 	func_flags = 0;
 
@@ -487,6 +488,19 @@ void function_body(unsigned st, unsigned name, unsigned type)
 
 	if (st == S_AUTO || st == S_EXTERN)
 		error("invalid storage class");
+
+	/*
+	 * A file scope static whose name occurs exactly once in the token
+	 * stream - here, in its own definition - can have no caller and
+	 * nothing can have taken its address, so parse it for its errors
+	 * and generate nothing. That is what lets a header carry a
+	 * library of helpers and a program pay only for the ones it uses;
+	 * with no linker there is nothing to strip it later.
+	 */
+	dead = (st == S_STATIC && name_used_once(name));
+	if (dead)
+		out_off++;
+
 	func_tag = next_tag++;
 	header(H_FUNCTION, func_tag, name);
 	hrw = mark_header();
@@ -524,4 +538,7 @@ void function_body(unsigned st, unsigned name, unsigned type)
 
 	rewrite_header(hrw, H_FRAME, frame_size(), func_flags);
 	check_labels();
+
+	if (dead)
+		out_off--;
 }
