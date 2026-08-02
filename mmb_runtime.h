@@ -336,6 +336,21 @@ void mm_mid_assign(char *dst, MMINTEGER start, MMINTEGER num, const char *repl);
 void mm_cls(void);
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb);
 MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y);
+/* A line.  Axis-aligned ones become a single span in the kernel, which
+ * is an order of magnitude cheaper than plotting them point by point. */
+void mm_line(MMINTEGER x1, MMINTEGER y1, MMINTEGER x2, MMINTEGER y2,
+             MMINTEGER rgb);
+/* MM.HRES / MM.VRES - the drawable size, straight from the kernel, so
+ * it follows a mode change without the program knowing anything. */
+MMINTEGER mm_hres(void);
+MMINTEGER mm_vres(void);
+/* MMBasic's PIXEL x%(), y%(), c%().  Either the float or the integer
+ * pointer of each pair is used, whichever the array actually is; pass
+ * NULL for both colour pointers to draw in the current colour. */
+void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
+               const MMFLOAT *yf, const MMINTEGER *yi,
+               const MMFLOAT *cf, const MMINTEGER *ci,
+               MMINTEGER count);
 
 /* ---- misc ----------------------------------------------------------- */
 void mm_error(const char *msg);     /* prints and exits                */

@@ -86,6 +86,7 @@ BUILTINS = {
     'DATETIME$': (1, 1), 'DAY$': (1, 1), 'EPOCH': (1, 1),
     'BIN2STR$': (2, 3), 'STR2BIN': (2, 3), 'RGB': (1, 3), 'MATH': (1, 1),
     'PIXEL': (2, 2),
+    'MM.HRES': (0, 0), 'MM.VRES': (0, 0),
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
     'LINSTR': (2, 3), 'LCOMPARE': (2, 2), 'LINPUT': (3, 3),
@@ -385,6 +386,9 @@ class Conv(object):
         self.i = 0
         self.tmp_used = False
         self.uses_clear = False
+        # depth of single-line IF bodies being emitted: END SUB means
+        # "return now" in there, not "the routine ends here"
+        self.inline = 0
 
     # -- error reporting ------------------------------------------------
     def err(self, msg):
@@ -1082,6 +1086,10 @@ class Conv(object):
             quote = s(3) if len(args) > 3 else '"\\000" ""'
             return ('mm_field(%s, %s, %s, %s)'
                     % (s(0), n(1), delim, quote), TY_S)
+        if up == 'MM.HRES':
+            return ('mm_hres()', TY_I)
+        if up == 'MM.VRES':
+            return ('mm_vres()', TY_I)
         if up == 'PIXEL':
             # PIXEL(x, y) reads a pixel back AS RGB888 - the kernel
             # primitive maps the mode's own colour numbering back out,
@@ -2134,6 +2142,35 @@ class Conv(object):
             self.emit('mm_pixel(%s, %s, %s);'
                       % (self.as_int(x), self.as_int(y), col))
             return
+        if up == 'LINE':
+            # LINE x1, y1, x2, y2 [, width [, colour]]
+            #
+            # The geometry is in the runtime, not the kernel: an
+            # axis-aligned line becomes one span and the rest is
+            # Bresenham into a batch, so the whole line crosses into the
+            # kernel once.  Measured 433us point-by-point against 71us
+            # batched for a 312 point diagonal.
+            self.i += 1
+            x1 = self.expr()
+            self.expect_op(',')
+            y1 = self.expr()
+            self.expect_op(',')
+            x2 = self.expr()
+            self.expect_op(',')
+            y2 = self.expr()
+            col = '0xFFFFFFLL'
+            if self.is_op(','):
+                self.i += 1
+                w = self.expr()
+                if not (w[0].strip() in ('1LL', '1')):
+                    self.warn("LINE width is not supported yet; drawn 1 pixel wide")
+                if self.is_op(','):
+                    self.i += 1
+                    col = self.as_int(self.expr())
+            self.emit('mm_line(%s, %s, %s, %s, %s);'
+                      % (self.as_int(x1), self.as_int(y1),
+                         self.as_int(x2), self.as_int(y2), col))
+            return
         if up == 'PAUSE':
             self.i += 1
             v = self.expr()
@@ -2882,12 +2919,16 @@ class Conv(object):
 
     def inline_statements(self):
         depth = len(self.blocks)
-        while not self.at_end() and not self.is_kw('ELSE'):
-            if self.accept_op(':'):
-                continue
-            self.statement()
-            if len(self.blocks) != depth:
-                self.err("a single line IF cannot open a multi-line block")
+        self.inline += 1
+        try:
+            while not self.at_end() and not self.is_kw('ELSE'):
+                if self.accept_op(':'):
+                    continue
+                self.statement()
+                if len(self.blocks) != depth:
+                    self.err("a single line IF cannot open a multi-line block")
+        finally:
+            self.inline -= 1
 
     def do_elseif(self):
         if not self.blocks or self.blocks[-1][0] != 'if':
@@ -3160,6 +3201,17 @@ class Conv(object):
         self.emit('goto %s;' % clabel(canon))
 
     def do_end(self):
+        # Inside a single-line IF, END SUB means RETURN NOW, not "the
+        # routine's text stops here" - `If done Then End Sub` is the
+        # ordinary MMBasic way to leave a SUB early, and closing the
+        # block there would end the routine in the middle of itself.
+        if self.inline:
+            if self.accept_kw('SUB'):
+                self.emit('mm_release(__mark); return;')
+                return
+            if self.accept_kw('FUNCTION'):
+                self.emit('mm_release(__mark); return __ret;')
+                return
         if self.accept_kw('SUB'):
             self.close_routine(False)
             return

@@ -398,6 +398,44 @@ void statement_inner(void)
         emit(sfmt("mm_pixel(%s, %s, %s);", xs, ys, col));
         return;
     }
+    if (strcmp(up, "LINE") == 0) {
+        /* LINE x1, y1, x2, y2 [, width [, colour]]
+         *
+         * The geometry is in the runtime, not the kernel: an
+         * axis-aligned line becomes one span and the rest is Bresenham
+         * into a batch, so the whole line crosses into the kernel once.
+         * Measured 433us point-by-point against 71us batched for a 312
+         * point diagonal. */
+        struct val x1, y1, x2, y2;
+        const char *col = "0xFFFFFFLL";
+        const char *a, *b, *c2, *d;
+
+        cv.i++;
+        x1 = expr();
+        expect_op(",");
+        y1 = expr();
+        expect_op(",");
+        x2 = expr();
+        expect_op(",");
+        y2 = expr();
+        if (is_op(",", 0)) {
+            struct val w;
+            cv.i++;
+            w = expr();
+            if (strcmp(w.code, "1LL") != 0 && strcmp(w.code, "1") != 0)
+                cv_warn("LINE width is not supported yet; drawn 1 pixel wide");
+            if (is_op(",", 0)) {
+                cv.i++;
+                col = as_int(expr());
+            }
+        }
+        a = as_int(x1);
+        b = as_int(y1);
+        c2 = as_int(x2);
+        d = as_int(y2);
+        emit(sfmt("mm_line(%s, %s, %s, %s, %s);", a, b, c2, d, col));
+        return;
+    }
     if (strcmp(up, "PAUSE") == 0) {
         struct val v;
         cv.i++;
@@ -1422,6 +1460,7 @@ static void inline_statements(void)
 {
     int depth = cv.nblocks;
 
+    cv.inline_depth++;
     while (!at_end() && !is_kw("ELSE", 0)) {
         if (accept_op(":"))
             continue;
@@ -1429,6 +1468,7 @@ static void inline_statements(void)
         if (cv.nblocks != depth)
             cv_err("a single line IF cannot open a multi-line block");
     }
+    cv.inline_depth--;
 }
 
 static void do_elseif(void)
@@ -1851,6 +1891,20 @@ static void do_goto(void)
 
 static void do_end(void)
 {
+    /* Inside a single-line IF, END SUB means RETURN NOW, not "the
+     * routine's text stops here" -  is the
+     * ordinary MMBasic way to leave a SUB early, and closing the block
+     * there would end the routine in the middle of itself. */
+    if (cv.inline_depth) {
+        if (accept_kw("SUB")) {
+            emit("mm_release(__mark); return;");
+            return;
+        }
+        if (accept_kw("FUNCTION")) {
+            emit("mm_release(__mark); return __ret;");
+            return;
+        }
+    }
     if (accept_kw("SUB")) {
         close_routine(0);
         return;
