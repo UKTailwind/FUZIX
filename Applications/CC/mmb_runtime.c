@@ -391,14 +391,51 @@ MMFLOAT mm_fix(MMFLOAT v) { return (v < 0.0) ? ceil(v) : floor(v); }
 
 MMINTEGER mm_sgn(MMFLOAT v) { return v > 0.0 ? 1 : (v < 0.0 ? -1 : 0); }
 
+/*
+ * RND.
+ *
+ * MMBasic on the RP2350 is get_rand_32() / 2^32 - the hardware
+ * generator, thirty two bits of it.  The C library's rand() is no
+ * substitute: Fuzix caps RAND_MAX at 32767, so it would hand back one
+ * of only 32768 values and RND would come in visible steps of 1/32768.
+ *
+ * So the generator is here rather than in the library.  splitmix64 is
+ * five lines, has a full 2^64 period, and its output is good enough
+ * to be the standard way of seeding much larger generators.  The
+ * result takes the top 53 bits, which is every value a double can hold
+ * in [0, 1) - finer than the interpreter's 32 bits rather than
+ * coarser, and it can never return 1.
+ *
+ * Unlike the interpreter's, this is seedable, so RANDOMIZE n really
+ * does repeat a sequence and a run on the board can be compared
+ * against the same program on the development machine.
+ */
 static int mm_seeded = 0;
+static unsigned long long mm_rng_state;
 
-void mm_randomize(MMINTEGER seed) { srand((unsigned)seed); mm_seeded = 1; }
+void mm_randomize(MMINTEGER seed)
+{
+    mm_rng_state = (unsigned long long)seed;
+    mm_seeded = 1;
+}
+
+static unsigned long long mm_rng_next(void)
+{
+    unsigned long long z;
+
+    mm_rng_state += 0x9E3779B97F4A7C15ULL;
+    z = mm_rng_state;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+}
 
 MMFLOAT mm_rnd(void)
 {
-    if (!mm_seeded) { srand((unsigned)time(NULL)); mm_seeded = 1; }
-    return (MMFLOAT)rand() / ((MMFLOAT)RAND_MAX + 1.0);
+    if (!mm_seeded)
+        mm_randomize((MMINTEGER)time(NULL));
+    /* 2^53, the last integer a double counts to one at a time */
+    return (MMFLOAT)(mm_rng_next() >> 11) * (1.0 / 9007199254740992.0);
 }
 
 /* ================= string functions ================================ */
