@@ -377,6 +377,40 @@ void statement_inner(void)
         emit(sfmt("mm_mode(%s);", as_int(n)));
         return;
     }
+    if (strcmp(up, "CIRCLE") == 0) {
+        /* CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
+           The geometry is mmb_gfx.h's, not the runtime's.  MMBasic
+           treats an omitted argument as the default, so a bare comma
+           is legal in every position. */
+        const char *x, *y, *r;
+        const char *lw = "1LL", *asp = "1.0";
+        const char *col = "MM_CUR", *fill = "MM_CUR";
+
+        cv.i++;
+        x = as_int(expr());
+        expect_op(",");
+        y = as_int(expr());
+        expect_op(",");
+        r = as_int(expr());
+        if (accept_op(",")) {
+            if (!is_op(",", 0))
+                lw = as_int(expr());
+            if (accept_op(",")) {
+                if (!is_op(",", 0))
+                    asp = as_flt(expr());
+                if (accept_op(",")) {
+                    if (!is_op(",", 0))
+                        col = as_int(expr());
+                    if (accept_op(","))
+                        fill = as_int(expr());
+                }
+            }
+        }
+        cv.uses_gfx = 1;
+        emit(sfmt("mmg_circle(%s, %s, %s, %s, %s, %s, %s);",
+                  x, y, r, lw, col, fill, asp));
+        return;
+    }
     if (strcmp(up, "COLOUR") == 0 || strcmp(up, "COLOR") == 0) {
         /* COLOUR fg [, bg].  Everything that draws without being given
            a colour uses fg.  bg is remembered but nothing reads it yet

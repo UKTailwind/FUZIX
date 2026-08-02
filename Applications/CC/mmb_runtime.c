@@ -2330,6 +2330,61 @@ static void mm_gfx_rect(int x1, int y1, int x2, int y2)
 }
 
 /*
+ * The two entry points every drawing primitive that is NOT here is
+ * built from: a run of points, and a run of rectangles, both in one
+ * colour.  Circle, box, triangle, polygon and the rest are geometry
+ * over these, and geometry lives in a header the program includes -
+ * so it costs nothing in bcrun, which every program pays for, and
+ * lands in the program only when it is used.  See mmb_gfx.h.
+ *
+ * The caller's array is handed to the kernel as it stands; two shorts
+ * per point and four per rectangle is the layout GFXIOC_PIXELS and
+ * GFXIOC_RECTS already read.  Nothing is copied.  Long runs are split
+ * so that one ioctl cannot hold the cpu for an unbounded time.
+ */
+void mm_plot(const short *xy, MMINTEGER n, MMINTEGER rgb)
+{
+    struct mm_gfx_batch b;
+    MMINTEGER done = 0;
+
+    if (n <= 0 || mm_gfx_open() < 0)
+        return;
+    mm_gfx_setcol(rgb);
+    b.flags = 0;
+    b.colours = 0;
+    while (done < n) {
+        MMINTEGER k = n - done;
+        if (k > MM_BATCH)
+            k = MM_BATCH;
+        b.count = (unsigned short)k;
+        b.items = (void *)(xy + done * 2);
+        ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
+        done += k;
+    }
+}
+
+void mm_fill(const short *xyxy, MMINTEGER n, MMINTEGER rgb)
+{
+    struct mm_gfx_batch b;
+    MMINTEGER done = 0;
+
+    if (n <= 0 || mm_gfx_open() < 0)
+        return;
+    mm_gfx_setcol(rgb);
+    b.flags = 0;
+    b.colours = 0;
+    while (done < n) {
+        MMINTEGER k = n - done;
+        if (k > MM_BATCH)
+            k = MM_BATCH;
+        b.count = (unsigned short)k;
+        b.items = (void *)(xyxy + done * 4);
+        ioctl(mm_gfx_fd, MM_GFXIOC_RECTS, &b);
+        done += k;
+    }
+}
+
+/*
  * A line.  Axis-aligned ones are a rectangle - that is what makes a
  * horizontal run ten times cheaper than plotting it point by point, and
  * it is what MMBasic's DrawLine does for the same reason.  The rest is
@@ -2440,6 +2495,16 @@ void mm_mode(MMINTEGER n)
 
 MMINTEGER mm_hres(void) { return mm_host_mode == 2 ? 320 : 640; }
 MMINTEGER mm_vres(void) { return mm_host_mode == 2 ? 240 : 480; }
+
+void mm_plot(const short *xy, MMINTEGER n, MMINTEGER rgb)
+{
+    (void)xy; (void)n; (void)rgb;
+}
+
+void mm_fill(const short *xyxy, MMINTEGER n, MMINTEGER rgb)
+{
+    (void)xyxy; (void)n; (void)rgb;
+}
 
 void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
                const MMFLOAT *yf, const MMINTEGER *yi,

@@ -71,6 +71,9 @@ echo "--- installing"
 	# what mmbc-generated C includes: the runtime's interface and the
 	# FCC-view headers (math.h etc. map to bcrun natives)
 	echo "get $CC/mmb_runtime.h mmb_runtime.h"
+	# the geometry primitives, included only by a program that draws:
+	# static functions, so cc1 drops the ones it does not call
+	echo "get $CC/mmb_gfx.h mmb_gfx.h"
 	for f in "$CC"/hosttest/fcc-include/*.h; do
 		echo "get $f $(basename "$f")"
 	done

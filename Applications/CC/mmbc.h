@@ -228,6 +228,7 @@ struct conv {
      * "return now" in there, not "the routine ends here" */
     int inline_depth;
     int uses_clear;
+    int uses_gfx;
 };
 
 extern struct conv cv;

@@ -283,6 +283,12 @@ static void w_mode(void)     { mm_mode(LL(0)); A = 0; }
 static void w_colour(void)   { mm_colour(LL(0), LL(2)); A = 0; }
 static void w_fg(void)       { A = mm_fg(); }
 static void w_bg(void)       { A = mm_bg(); }
+/* The arrays belong to the program, so they arrive as VM offsets and
+   the kernel is handed the real address inside mem. */
+static void w_plot(void)     { mm_plot((const short *)Pa(0), LL(1), LL(3));
+                               A = 0; }
+static void w_fill(void)     { mm_fill((const short *)Pa(0), LL(1), LL(3));
+                               A = 0; }
 
 /* LONGSTRING */
 static void w_ls_len(void)   { A = mm_ls_len(PI(0)); }
@@ -464,6 +470,8 @@ static const struct mmwrap {
 	{ "mm_colour",		w_colour },
 	{ "mm_fg",		w_fg },
 	{ "mm_bg",		w_bg },
+	{ "mm_plot",		w_plot },
+	{ "mm_fill",		w_fill },
 	{ "mm_ls_len",		w_ls_len },
 	{ "mm_ls_clear",	w_ls_clear },
 	{ "mm_ls_append",	w_ls_append },

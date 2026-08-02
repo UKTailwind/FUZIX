@@ -361,6 +361,13 @@ void mm_line(MMINTEGER x1, MMINTEGER y1, MMINTEGER x2, MMINTEGER y2,
  * it follows a mode change without the program knowing anything. */
 MMINTEGER mm_hres(void);
 MMINTEGER mm_vres(void);
+/* The two batched primitives everything in mmb_gfx.h is built from: a
+ * run of points (two shorts each) and a run of rectangles (four), both
+ * drawn in one colour.  The array is passed to the kernel as it stands
+ * - that layout is what the batch ioctls already read - so a circle
+ * crosses into the kernel a handful of times, not once per pixel. */
+void mm_plot(const short *xy, MMINTEGER n, MMINTEGER rgb);
+void mm_fill(const short *xyxy, MMINTEGER n, MMINTEGER rgb);
 /* MMBasic's PIXEL x%(), y%(), c%().  Either the float or the integer
  * pointer of each pair is used, whichever the array actually is; pass
  * NULL for both colour pointers to draw in the current colour. */
