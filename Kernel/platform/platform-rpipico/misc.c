@@ -161,6 +161,41 @@ int plt_dev_ioctl(uarg_t request, char *data)
         return display_gfx_rect(gr.x1, gr.y1, gr.x2, gr.y2,
                                 display_gfx_curcol());
     }
+    if (request == GFXIOC_PIXELS || request == GFXIOC_RECTS)
+    {
+        /* One shape, one crossing.  The arrays are read where they lie,
+         * blessed once by valaddr_r - the same trick GFXIOC_BITMAP uses,
+         * and the reason a 640 point line costs 2.5K of transfer rather
+         * than a copy into a kernel buffer there is no room for. */
+        struct gfx_batch gb;
+        int isz, bytes;
+
+        if (uget(data, &gb, sizeof(gb)))
+            return -1;
+        if (gb.count == 0)
+            return 0;
+        if (gb.count > GFX_BATCH_MAX || gb.flags) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        isz = (request == GFXIOC_PIXELS) ? (int)sizeof(struct gfx_pt)
+                                         : (int)sizeof(struct gfx_rc);
+        bytes = (int)gb.count * isz;
+        if (valaddr_r(gb.items, bytes) != (usize_t)bytes) {
+            udata.u_error = EFAULT;
+            return -1;
+        }
+        if (gb.colours) {
+            int cb = (int)gb.count * 4;
+            if (valaddr_r(gb.colours, cb) != (usize_t)cb) {
+                udata.u_error = EFAULT;
+                return -1;
+            }
+        }
+        if (request == GFXIOC_PIXELS)
+            return display_gfx_pixels(gb.items, gb.count, gb.colours);
+        return display_gfx_rects(gb.items, gb.count, gb.colours);
+    }
     if (request == GFXIOC_BITMAP)
     {
         /* The bits are read where they lie.  Copying them in would want

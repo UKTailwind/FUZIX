@@ -60,6 +60,14 @@ int display_gfx_getpixel(int x, int y);
  * Bitmap takes an explicit foreground and background, so it needs both
  * converted; bc < 0 means transparent, as MMBasic's -1 does. */
 uint8_t display_gfx_map(uint32_t rgb888);
+
+/* Batched: a whole shape in one call, so userland geometry pays the
+ * syscall once instead of per point.  col NULL = the current colour;
+ * otherwise one RGB888 per item, cached against the last value. */
+struct gfx_pt;
+struct gfx_rc;
+int display_gfx_pixels(const struct gfx_pt *pt, int n, const uint32_t *col);
+int display_gfx_rects(const struct gfx_rc *rc, int n, const uint32_t *col);
 int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
                        int fc, int bc, const uint8_t *bitmap);
 

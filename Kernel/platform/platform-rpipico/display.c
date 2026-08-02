@@ -34,6 +34,9 @@
 #include "picosdk.h"
 #include "config.h"
 #include "display.h"
+/* struct gfx_pt / gfx_rc: the batched drawing items are part of the
+ * userland interface, so their definition lives with the ioctls. */
+#include "pico_ioctl.h"
 
 #include <hardware/dma.h>
 #include <hardware/resets.h>
@@ -901,6 +904,88 @@ int display_gfx_rect(int x1, int y1, int x2, int y2, int c)
                     row[x >> 3] &= ~(0x80 >> (x & 7));
             }
         }
+    }
+    return 0;
+}
+
+/* A run of points in one call.  This is the batched form the geometry
+ * in userland draws through, so the setup - which mode, how wide, how
+ * deep - is hoisted out of the loop and paid once for the whole shape,
+ * where display_gfx_pixel pays it per call.
+ *
+ * col may be NULL for "all in the current colour".  When it is not,
+ * the map from RGB888 to the mode's own colour is cached against the
+ * last value: a constant-colour run maps once, and 4bpp mapping is a
+ * sixteen-way nearest-match that would otherwise dominate.
+ */
+int display_gfx_pixels(const struct gfx_pt *pt, int n, const uint32_t *col)
+{
+    enum gexp ex = gfx_exp;
+    int w = gfx_width(ex);
+    int h = (ex == EXP_CONSOLE) ? DISP_HEIGHT : gfx_rows;
+    int stride = (ex == EXP_CONSOLE) ? DISP_STRIDE : gfx_stride;
+    int four = (gfx_bpp(ex) == 4);
+    uint32_t last = 0;
+    int c = gfx_curcol;
+    int i, x, y;
+
+    if (!w)
+        return -1;
+    if (col && n > 0) {
+        last = col[0];
+        c = display_gfx_map(last);
+    }
+
+    for (i = 0; i < n; i++) {
+        if (col && col[i] != last) {
+            last = col[i];
+            c = display_gfx_map(last);
+        }
+        x = pt[i].x;
+        y = pt[i].y;
+        if (x < 0 || y < 0 || x >= w || y >= h)
+            continue;               /* off-screen is dropped, not an error */
+        if (four) {
+            uint8_t *p = &disp_fb[y * stride + (x >> 1)];
+            if (x & 1)
+                *p = (*p & 0xF0) | (c & 15);
+            else
+                *p = (*p & 0x0F) | ((c & 15) << 4);
+        } else {
+            uint8_t *p = &disp_fb[y * stride + (x >> 3)];
+            if (c)
+                *p |= 0x80 >> (x & 7);
+            else
+                *p &= ~(0x80 >> (x & 7));
+        }
+    }
+    return 0;
+}
+
+/* A run of rectangles - the other half of the batched pair, and what a
+ * filled circle or polygon turns into: one span per scan line.  The
+ * span loop dominates, so this reuses display_gfx_rect rather than
+ * hoisting anything, which keeps it to a few dozen bytes of kernel. */
+int display_gfx_rects(const struct gfx_rc *rc, int n, const uint32_t *col)
+{
+    uint32_t last = 0;
+    int c = gfx_curcol;
+    int i, r;
+
+    if (!gfx_width(gfx_exp))
+        return -1;
+    if (col && n > 0) {
+        last = col[0];
+        c = display_gfx_map(last);
+    }
+    for (i = 0; i < n; i++) {
+        if (col && col[i] != last) {
+            last = col[i];
+            c = display_gfx_map(last);
+        }
+        r = display_gfx_rect(rc[i].x1, rc[i].y1, rc[i].x2, rc[i].y2, c);
+        if (r < 0)
+            return r;
     }
     return 0;
 }

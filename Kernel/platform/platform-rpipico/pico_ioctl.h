@@ -89,6 +89,50 @@ struct gfx_rect {
 };
 #define GFXIOC_RECT   0x0012
 
+/* A whole shape in ONE ioctl: a run of points, or a run of rectangles.
+ *
+ * The crossing costs 1.3us and a pixel store costs 15ns, so anything
+ * with more than a handful of points is dominated by the syscall, not
+ * the drawing.  Batching moves the geometry - lines, circles, polygons,
+ * arcs - out into userland, where it costs no kernel memory and can be
+ * written once in a shared runtime rather than per program.  What is
+ * left in the kernel is two primitives that never have to grow.
+ *
+ * It is also MMBasic's own array API rather than an invention:
+ * PIXEL x%(), y%(), c%() maps onto GFXIOC_PIXELS directly, colour array
+ * and all.  A filled circle becomes one run of spans plus one run of
+ * points, which is how MMBasic draws it too.
+ *
+ * Coordinates are int16 rather than the packed form GFXIOC_PIXEL uses:
+ * that packing exists only because it has to fit in an ioctl ARGUMENT,
+ * and its nine bits of y stop at 511 - short of the 768 the BBC modes
+ * scan out.  In an array there is no such pressure, and signed values
+ * let a caller hand over off-screen points and let the kernel clip.
+ *
+ * colours may be NULL, meaning "all in the current colour"; otherwise
+ * it is one RGB888 per item, as MMBasic's colour array is.  The mapping
+ * to the mode's own colours caches the last value, so a constant-colour
+ * run pays for it once.
+ */
+struct gfx_pt {
+	int16_t x, y;
+};
+struct gfx_rc {
+	int16_t x1, y1, x2, y2;
+};
+struct gfx_batch {
+	uint16_t count;
+	uint16_t flags;		/* reserved, must be zero */
+	void *items;		/* struct gfx_pt[] or gfx_rc[] */
+	void *colours;		/* uint32 RGB888 per item, or NULL */
+};
+#define GFXIOC_PIXELS 0x0014
+#define GFXIOC_RECTS  0x0015
+/* Bounds the kernel's work per call.  A caller with more chunks; the
+ * runtime does that invisibly, and it keeps one ioctl from holding the
+ * cpu for an unbounded time. */
+#define GFX_BATCH_MAX 1024
+
 /* Draw a 1-bit source bitmap, scaled, with its own foreground and
  * background - MMBasic's DrawBitmap, and how text reaches the screen.
  * Both colours are RGB888; bg = -1 leaves the paper alone, which is
