@@ -2277,6 +2277,21 @@ MMINTEGER mm_run_exec(void)
     mm_run_argv[mm_run_nargs] = NULL;
     fflush(stdout);             /* the child shares the console */
 
+    /*
+     * And flush the KERNEL's buffers, which fflush does not touch.
+     *
+     * A fork here swaps this process out - bcrun plus a loaded program
+     * is around 200K - and the filesystem corruption seen after SAVE
+     * IMAGE points at dirty blocks still sitting in the buffer cache
+     * when that happens.  Syncing either side of the child costs
+     * nothing on a command that runs once and removes the window.
+     *
+     * If this is what it turns out to be, the real fault is in the
+     * kernel's buffer and swap interaction and belongs there; this is
+     * a userland mitigation, not the fix.
+     */
+    sync();
+
     pid = fork();
     if (pid < 0) {
         mm_error("cannot start a program");
@@ -2288,6 +2303,7 @@ MMINTEGER mm_run_exec(void)
     }
     while (waitpid(pid, &status, 0) < 0)
         ;
+    sync();                     /* and whatever the child wrote */
     if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
         mm_error("no such program");
         return -1;
