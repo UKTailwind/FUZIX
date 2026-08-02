@@ -270,6 +270,14 @@ extern uint8_t progbase[USERMEM];
 #define NBUFS    20       /* Number of block buffers */
 #define NMOUNTS	 4	  /* Number of mounts at a time */
 
+/* Check the superblock's invariants at every filesystem operation and
+ * panic naming the field that is wrong.  Filesystem corruption here has
+ * twice been found only by fsck afterwards, with nothing left to say
+ * what did it; this stops the machine at the first operation after the
+ * damage instead.  Costs a scan of two 50 entry arrays per operation
+ * and no memory.  See sb_validate() in filesys.c. */
+#define CONFIG_SB_TRIPWIRE
+
 #define MAX_BLKDEV	4
 
 #define CONFIG_SMALL

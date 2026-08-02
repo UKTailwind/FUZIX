@@ -596,6 +596,80 @@ nogood:
  * Used when freeing and allocating blocks and inodes.
  */
 
+#ifdef CONFIG_SB_TRIPWIRE
+/*
+ *	Superblock tripwire.
+ *
+ *	Filesystem corruption on this port has twice been discovered long
+ *	after the fact, by blk_alloc or i_alloc finding nonsense and by
+ *	fsck afterwards - by which time the damage is done and there is
+ *	nothing left to say who did it.  This checks the superblock's
+ *	invariants at every filesystem operation instead, so the first
+ *	operation after the damage stops the machine with the field named
+ *	rather than the hundredth one destroying a file.
+ *
+ *	It checks invariants rather than comparing against a saved copy:
+ *	half of a superblock changes legitimately on every allocation, so
+ *	a byte compare would cry wolf constantly, and it would cost 900
+ *	bytes of kernel memory this platform does not have spare.
+ *
+ *	Everything below must hold for any superblock the kernel is
+ *	willing to allocate from.  If one does not, the filesystem is
+ *	already damaged and going further writes the damage to the card.
+ */
+static void sb_validate(struct mount *mnt, const char *where)
+{
+    fsptr fs = &mnt->m_fs;
+    const char *why = NULL;
+    uint16_t bad = 0;
+    int i;
+
+    if (fs->s_mounted != SMOUNTED) {
+        why = "magic"; bad = fs->s_mounted;
+    } else if (fs->s_isize < 2 || fs->s_isize >= fs->s_fsize) {
+        why = "isize"; bad = fs->s_isize;
+    } else if (fs->s_nfree > FILESYS_TABSIZE) {
+        why = "nfree"; bad = fs->s_nfree;
+    } else if (fs->s_ninode < 0 || fs->s_ninode > FILESYS_TABSIZE) {
+        why = "ninode"; bad = (uint16_t)fs->s_ninode;
+    } else if (fs->s_tfree > fs->s_fsize) {
+        why = "tfree"; bad = fs->s_tfree;
+    } else {
+        /* A free block must be zero (the end of the list) or lie in
+           the data area - never in the superblock or the inodes. */
+        for (i = 0; i < fs->s_nfree; i++) {
+            blkno_t b = fs->s_free[i];
+            if (b && (b < fs->s_isize || b >= fs->s_fsize)) {
+                why = "free"; bad = b;
+                break;
+            }
+        }
+        if (!why) {
+            for (i = 0; i < fs->s_ninode; i++) {
+                uint16_t n = fs->s_inode[i];
+                if (n < 2 || n >= (uint16_t)((fs->s_isize - 2) * 8)) {
+                    why = "inode"; bad = n;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (why) {
+        kprintf("\nsuperblock tripwire: dev %u bad %s = %u at %s\n",
+                mnt->m_dev, why, bad, where);
+        kprintf("  mounted %u isize %u fsize %u nfree %u ninode %d\n",
+                mnt->m_fs.s_mounted, mnt->m_fs.s_isize, mnt->m_fs.s_fsize,
+                mnt->m_fs.s_nfree, mnt->m_fs.s_ninode);
+        kprintf("  tfree %u tinode %u fmod %u\n",
+                mnt->m_fs.s_tfree, mnt->m_fs.s_tinode, mnt->m_fs.s_fmod);
+        panic("superblock");
+    }
+}
+#else
+#define sb_validate(mnt, where) do { } while (0)
+#endif
+
 fsptr getdev(uint16_t dev)
 {
     register struct mount *mnt;
@@ -608,6 +682,9 @@ fsptr getdev(uint16_t dev)
         /* Return needed to persuade SDCC all is ok */
         return NULL;
     }
+    /* Every filesystem operation comes through here, so this is the
+       one place that sees them all. */
+    sb_validate(mnt, "getdev");
     if (!(mnt->m_flags & MS_RDONLY)) {
         rdtime(&t);
         mnt->m_fs.s_time = t.low;
