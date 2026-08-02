@@ -138,14 +138,24 @@ static void mmg_circle(int x, int y, int radius, int w, MMINTEGER c,
 		do {
 			A = (a * asp) >> 10;
 			B = (b * asp) >> 10;
-			mmg_pt(pts, &np, c, A + x, b + y);
-			mmg_pt(pts, &np, c, B + x, a + y);
-			mmg_pt(pts, &np, c, x - A, b + y);
-			mmg_pt(pts, &np, c, x - B, a + y);
-			mmg_pt(pts, &np, c, B + x, y - a);
-			mmg_pt(pts, &np, c, A + x, y - b);
-			mmg_pt(pts, &np, c, x - A, y - b);
-			mmg_pt(pts, &np, c, x - B, y - a);
+			/*
+			 * The interpreter's own guard, and it is not
+			 * decoration: the loop always runs one pass more
+			 * than the border is thick, and that last pass
+			 * must step the Bresenham state without drawing.
+			 * Without it lw 1 draws radius r AND r-1, and a
+			 * circle comes out two pixels thick everywhere.
+			 */
+			if (w) {
+				mmg_pt(pts, &np, c, A + x, b + y);
+				mmg_pt(pts, &np, c, B + x, a + y);
+				mmg_pt(pts, &np, c, x - A, b + y);
+				mmg_pt(pts, &np, c, x - B, a + y);
+				mmg_pt(pts, &np, c, B + x, y - a);
+				mmg_pt(pts, &np, c, A + x, y - b);
+				mmg_pt(pts, &np, c, x - A, y - b);
+				mmg_pt(pts, &np, c, x - B, y - a);
+			}
 			if (P < 0) {
 				P += 3 + (a << 1);
 				a++;
