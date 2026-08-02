@@ -144,6 +144,28 @@ static uint8_t bbc_rgb332[16] = {
     0x6D, 0x60, 0x0C, 0x6C, 0x01, 0x61, 0x0D, 0x24
 };
 
+/*
+ * MODE 7 is what a translated MMBasic program draws in, and MMBasic's
+ * own 4bpp screen is RGB121: one bit of red, two of green, one of
+ * blue, so its sixteen colours are the corners of a regular cube
+ * (Draw.c colours[16]).  Reduced to RGB332 here.
+ *
+ * This is not decoration.  The interpreter converts a colour by pure
+ * bit extraction - RGB121.h, ((c & 0x800000) >> 20) | ((c & 0xC000) >>
+ * 13) | ((c & 0x80) >> 7) - so every one of the sixteen comes up
+ * equally often for arbitrary input.  display_gfx_map takes the
+ * nearest palette entry instead, which honours a palette the program
+ * has changed; over a regular cube the two agree on every RGB332
+ * value, so with this table a translated program picks exactly the
+ * colours MMBasic would.  Against the BBC set below - eight saturated
+ * colours and eight darker companions - they do not agree at all, and
+ * a program drawing in arbitrary colours reached only a handful.
+ */
+static uint8_t rgb121_rgb332[16] = {
+    0x00, 0x03, 0x08, 0x0B, 0x10, 0x13, 0x1C, 0x1F,
+    0xE0, 0xE3, 0xE8, 0xEB, 0xF0, 0xF3, 0xFC, 0xFF
+};
+
 /* Mask applied to a physical colour number in this expander: MODE 7
  * reaches all 16, every BBC mode only the authentic 8. */
 static uint8_t gfx_physmask(enum gexp ex)
@@ -643,7 +665,9 @@ int display_gfx_mode(int mode)
         console_gfx(0);         /* clears and repaints the console */
     } else {
         for (i = 0; i < 16; i++)
-            gfx_pal[i] = bbc_rgb332[defpal[pal][i] & gfx_physmask(exp)];
+            gfx_pal[i] = (exp == EXP_4BPP_X2)
+                ? rgb121_rgb332[defpal[pal][i] & 15]
+                : bbc_rgb332[defpal[pal][i] & gfx_physmask(exp)];
         /* Palette, table and framebuffer all ready BEFORE core1 is
          * told to use them - gfx_exp is the handover, and nothing the
          * expanders read may still be stale when it changes. */
@@ -662,12 +686,15 @@ int display_gfx_mode(int mode)
 
 /* Set logical colour -> physical colour.  Modes 0-5 take the authentic
  * BBC 0-7 (8-15 flash on real hardware; here they map steady); MODE 7
- * takes all 16. */
+ * takes all 16, from the RGB121 set it defaults to - so that physical
+ * colour n means the same thing before and after a change. */
 void display_gfx_pal(uint8_t logical, uint8_t physical)
 {
     enum gexp ex = gfx_exp;
 
-    gfx_pal[logical & 15] = bbc_rgb332[physical & gfx_physmask(ex)];
+    gfx_pal[logical & 15] = (ex == EXP_4BPP_X2)
+        ? rgb121_rgb332[physical & 15]
+        : bbc_rgb332[physical & gfx_physmask(ex)];
     gfx_lut_rebuild(ex);
 }
 
@@ -864,7 +891,7 @@ int display_gfx_rect(int x1, int y1, int x2, int y2, int c)
     int w = gfx_width(ex);
     int h = (ex == EXP_CONSOLE) ? DISP_HEIGHT : gfx_rows;
     int stride = (ex == EXP_CONSOLE) ? DISP_STRIDE : gfx_stride;
-    int x, y, t;
+    int x, y, t, xe;
 
     if (!w)
         return -1;
@@ -886,13 +913,19 @@ int display_gfx_rect(int x1, int y1, int x2, int y2, int c)
                 row[x >> 1] = (row[x >> 1] & 0xF0) | (c & 15);
                 x++;
             }
-            /* whole bytes are two pixels at a time */
-            while (x + 1 <= x2) {
-                row[x >> 1] = both;
-                x += 2;
+            xe = x2;
+            if ((x2 & 1) == 0 && x <= x2) {
+                /* even right edge: high nibble only */
+                row[x2 >> 1] = (row[x2 >> 1] & 0x0F) | ((c & 15) << 4);
+                xe = x2 - 1;
             }
-            if (x <= x2)        /* even right edge: high nibble only */
-                row[x >> 1] = (row[x >> 1] & 0x0F) | ((c & 15) << 4);
+            /* What is left starts on a byte and ends on one, so it is
+             * a memset - which is the point.  A span was being filled
+             * a byte at a time, half the speed of the interpreter's
+             * DrawRectangle16 doing exactly this, and filling is most
+             * of the work in anything that draws solid shapes. */
+            if (x <= xe)
+                memset(&row[x >> 1], both, (unsigned)(((xe - x) >> 1) + 1));
         }
     } else {
         for (y = y1; y <= y2; y++) {
