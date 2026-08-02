@@ -207,6 +207,13 @@ void conv_write(FILE *f)
         fprintf(f, " * warning: %s\n", cv.warnings[k]);
     fprintf(f, " */\n\n");
     fprintf(f, "#include \"mmb_runtime.h\"\n");
+    /* The geometry primitives are static functions in a header, so they
+       land in the program rather than in bcrun - and only the ones it
+       calls, because cc1 drops a static nothing names.  One flag for
+       the whole header: it is included when the program uses any of
+       them, and the compiler sorts out which. */
+    if (cv.uses_gfx)
+        fprintf(f, "#include \"mmb_gfx.h\"\n");
     fprintf(f, "#include <math.h>\n");
     fprintf(f, "#include <string.h>\n");
     fprintf(f, "#include <stdlib.h>\n\n");
