@@ -43,8 +43,22 @@ extern void kbd_push(uint8_t c);    /* usbkbd.c input ring */
 #define FONT_FIRST 32
 #define FONT_H     12
 
-#define CON_COLS DISP_COLS   /* 80 */
-#define CON_ROWS DISP_ROWS   /* 40 */
+/* The terminal's geometry is not fixed: the text console is 80x40 of
+ * 8x12 cells, and a graphics mode gives whatever its resolution allows
+ * (MODE 2 - 320x240 - is 40x20).  Everything in the engine below works
+ * in cells and reads these, so the same CSI parser, scrolling and
+ * clamping serve both. */
+static int16_t con_cols = DISP_COLS;
+static int16_t con_rows = DISP_ROWS;
+
+/* Set while a graphics mode owns the framebuffer.  It used to mean "the
+ * console renders nothing"; it now means "render as pixels, not tiles",
+ * so a program that changes MODE keeps its console - which is what
+ * MMBasic does, and what PRINT in MODE 2 needs. */
+static volatile uint8_t con_gfx_active;
+
+#define CON_COLS con_cols
+#define CON_ROWS con_rows
 
 /* ANSI colours 0-7 dim, 8-15 bright, in SGR order */
 static const uint8_t concolours[16] = {
@@ -114,6 +128,110 @@ static void cell_colours(uint8_t *fg, uint8_t *bg)
     }
 }
 
+/*
+ * Rendering in a graphics mode.
+ *
+ * The text console is TILED: disp_fb holds one byte per 8 pixels of
+ * glyph and disp_tile_fg/bg carry an RGB332 pair per cell, which the
+ * console expander combines.  A graphics mode has no tiles - disp_fb is
+ * pixels - so the same characters have to be drawn AS pixels, which is
+ * what MMBasic does when you PRINT in a graphics mode.
+ *
+ * display_gfx_bitmap already blits a 1-bit source into whatever mode is
+ * live, and the console font is exactly that: one byte per row, MSB
+ * leftmost, 8x12 = 96 bits, so its bit order matches.  Colours go
+ * through display_gfx_map, which picks the nearest palette entry in a
+ * 4bpp mode and "anything not black is ink" in a 1bpp one.
+ */
+/* Geometry of the live graphics mode, read once at the mode change
+ * rather than per character: cursor and scroll both need the stride. */
+static uint16_t con_gfx_stride, con_gfx_h;
+static uint8_t con_gfx_bpp;
+
+/* The colours are the console's own (concolours[], RGB332) expanded
+ * back to RGB888 for display_gfx_map, so text keeps the same palette in
+ * a graphics mode that it has on the text console - rather than a
+ * second table that could drift away from the first. */
+static uint32_t con_rgb888(uint8_t v)
+{
+    uint32_t r = (v >> 5) & 7, g = (v >> 2) & 7, b = v & 3;
+
+    return ((r * 36) << 16) | ((g * 36) << 8) | (b * 85);
+}
+
+static void con_gfx_colours(uint8_t *fg, uint8_t *bg)
+{
+    uint8_t f, b;
+
+    cell_colours(&f, &b);
+    *fg = display_gfx_map(con_rgb888(f));
+    *bg = display_gfx_map(con_rgb888(b));
+}
+
+static void con_gfx_plot(int y, int x, uint8_t c)
+{
+    uint8_t fg, bg;
+
+    con_gfx_colours(&fg, &bg);
+    display_gfx_bitmap(x * DISP_CELL_W, y * FONT_H, DISP_CELL_W, FONT_H, 1,
+                       fg, bg, &font1[4 + (c - FONT_FIRST) * FONT_H]);
+}
+
+static void con_gfx_clear(int y, int x, int l)
+{
+    uint8_t fg, bg;
+
+    con_gfx_colours(&fg, &bg);
+    display_gfx_rect(x * DISP_CELL_W, y * FONT_H,
+                     (x + l) * DISP_CELL_W - 1, y * FONT_H + FONT_H - 1, bg);
+}
+
+/*
+ * The cursor inverts its cell.  Inverting the BYTES does it for both
+ * depths: at 4bpp a byte is two pixels and ~b is 15-c in each nibble,
+ * at 1bpp ~b flips eight pixels.  A cell starts on a byte boundary
+ * either way (x*8 pixels is x*4 bytes at 4bpp, x bytes at 1bpp), and
+ * applying it twice restores the cell - which is the same contract the
+ * tiled cursor has.
+ */
+static void con_gfx_cursor(int y, int x)
+{
+    int row, i, n, off;
+
+    if (!con_gfx_stride)
+        return;
+    n = (DISP_CELL_W * con_gfx_bpp) / 8;   /* bytes in one row of the cell */
+    off = x * n;
+    if (off + n > con_gfx_stride)
+        return;
+    for (row = 0; row < FONT_H; row++) {
+        uint8_t *p;
+
+        if ((y * FONT_H + row) >= con_gfx_h)
+            break;
+        p = &disp_fb[(y * FONT_H + row) * con_gfx_stride + off];
+        for (i = 0; i < n; i++)
+            p[i] = ~p[i];
+    }
+}
+
+static void con_gfx_scroll(int down)
+{
+    int rowbytes, keep;
+
+    if (!con_gfx_stride)
+        return;
+    rowbytes = FONT_H * con_gfx_stride;
+    keep = (CON_ROWS - 1) * rowbytes;
+    if (down) {
+        memmove(disp_fb + rowbytes, disp_fb, keep);
+        con_gfx_clear(0, 0, CON_COLS);
+    } else {
+        memmove(disp_fb, disp_fb + rowbytes, keep);
+        con_gfx_clear(CON_ROWS - 1, 0, CON_COLS);
+    }
+}
+
 static void con_plot(int8_t y, int8_t x, uint8_t c)
 {
     uint8_t *fb = &disp_fb[(int)y * FONT_H * DISP_STRIDE + x];
@@ -123,6 +241,10 @@ static void con_plot(int8_t y, int8_t x, uint8_t c)
 
     if (c < FONT_FIRST)
         c = ' ';
+    if (con_gfx_active) {
+        con_gfx_plot(y, x, c);
+        return;
+    }
     glyph = &font1[4 + (c - FONT_FIRST) * FONT_H];
     for (row = 0; row < FONT_H; row++) {
         *fb = glyph[row];
@@ -139,6 +261,10 @@ static void con_clear_across(int8_t y, int8_t x, int16_t l)
     uint8_t fg, bg;
     int row, i;
 
+    if (con_gfx_active) {
+        con_gfx_clear(y, x, l);
+        return;
+    }
     for (row = 0; row < FONT_H; row++) {
         memset(fb, 0, l);
         fb += DISP_STRIDE;
@@ -158,6 +284,10 @@ static void con_clear_lines(int8_t y, int8_t ct)
 
 static void con_scroll_up(void)
 {
+    if (con_gfx_active) {
+        con_gfx_scroll(0);
+        return;
+    }
     memmove(disp_fb, disp_fb + FONT_H * DISP_STRIDE,
         (DISP_HEIGHT - FONT_H) * DISP_STRIDE);
     memmove(disp_tile_fg, disp_tile_fg + CON_COLS, (CON_ROWS - 1) * CON_COLS);
@@ -167,6 +297,10 @@ static void con_scroll_up(void)
 
 static void con_scroll_down(void)
 {
+    if (con_gfx_active) {
+        con_gfx_scroll(1);
+        return;
+    }
     memmove(disp_fb + FONT_H * DISP_STRIDE, disp_fb,
         (DISP_HEIGHT - FONT_H) * DISP_STRIDE);
     memmove(disp_tile_fg + CON_COLS, disp_tile_fg, (CON_ROWS - 1) * CON_COLS);
@@ -177,9 +311,15 @@ static void con_scroll_down(void)
 /* Cursor: swap the cell's fg/bg attributes */
 static void cursor_swap(int y, int x)
 {
-    uint8_t *fg = &disp_tile_fg[y * CON_COLS + x];
-    uint8_t *bg = &disp_tile_bg[y * CON_COLS + x];
-    uint8_t t = *fg;
+    uint8_t *fg, *bg, t;
+
+    if (con_gfx_active) {
+        con_gfx_cursor(y, x);
+        return;
+    }
+    fg = &disp_tile_fg[y * CON_COLS + x];
+    bg = &disp_tile_bg[y * CON_COLS + x];
+    t = *fg;
     *fg = *bg;
     *bg = t;
 }
@@ -557,30 +697,48 @@ static void charout(uint8_t c)
     }
 }
 
-/* While a BBC graphics mode owns the framebuffer the console renders
- * nothing (output still reaches the serial mirror); returning rebuilds
- * a clean screen. */
-static volatile uint8_t con_gfx_active;
-
+/*
+ * Handing the framebuffer to a graphics mode, or taking it back.
+ *
+ * The console used to fall silent for the duration - output still went
+ * to the serial mirror, but nothing appeared on screen.  MMBasic does
+ * not do that: text and graphics share the screen in a graphics mode,
+ * and a program's PRINT is expected to show.  So this now re-points the
+ * renderer at pixels and re-reads the geometry (MODE 2's 320x240 is
+ * 40x20 cells against the text console's 80x40), and the terminal
+ * engine carries on unchanged.
+ *
+ * Called with the new mode already live, so display_gfx_geom() answers
+ * for the mode we are entering rather than the one we are leaving.
+ */
 void console_gfx(int active)
 {
     con_gfx_active = active;
-    if (!active) {
-        conbusy = 0;
-        conpend = 0;
-        cursor_px = -1;
-        con_reset();
-        con_cursor_on();
+    conbusy = 0;
+    conpend = 0;
+    cursor_px = -1;
+
+    if (active) {
+        uint16_t w;
+        uint8_t mode;
+
+        display_gfx_geom(&w, &con_gfx_h, &con_gfx_stride, &con_gfx_bpp,
+                         &mode);
+        con_cols = w ? w / DISP_CELL_W : DISP_COLS;
+        con_rows = con_gfx_h ? con_gfx_h / FONT_H : DISP_ROWS;
+    } else {
+        con_gfx_stride = 0;
+        con_cols = DISP_COLS;
+        con_rows = DISP_ROWS;
     }
+    con_reset();
+    con_cursor_on();
 }
 
 static void con_output(uint8_t c)
 {
     irqflags_t irq;
     uint8_t cq;
-
-    if (con_gfx_active)
-        return;
 
     irq = di();
     if (conbusy) {

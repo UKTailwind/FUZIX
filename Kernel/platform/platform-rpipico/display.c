@@ -673,10 +673,15 @@ int display_gfx_mode(int mode)
          * expanders read may still be stale when it changes. */
         gfx_lut_rebuild(exp);
         memset(disp_fb, 0, (int)stride * rows);
-        console_gfx(1);
         gfx_exp = exp;
         __dmb();
         tim = newtim;
+        /* AFTER the handover, deliberately: the console now renders
+         * into the graphics framebuffer rather than falling silent, so
+         * it has to read the geometry of the mode being entered - and
+         * display_gfx_geom() answers for gfx_exp. Called before this,
+         * it sized the terminal from the mode we were leaving. */
+        console_gfx(1);
     }
 
     if (rebuild)

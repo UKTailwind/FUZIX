@@ -37,7 +37,7 @@ uint_fast8_t bwritei(inoptr ino)
     return 0;
 }
 
-#ifdef CONFIG_SB_TRIPWIRE
+#ifdef CONFIG_FS_TRIPWIRE_DEEP
 /*
  *	bmap tripwire - the last unguarded step.
  *

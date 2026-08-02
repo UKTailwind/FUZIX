@@ -1046,7 +1046,7 @@ extern int f_trunc_blocks(inoptr ino, uint16_t nblock);
 extern int f_trunc(inoptr ino);
 extern void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, uint16_t nblock);
 extern blkno_t bmap(inoptr ip, blkno_t bn, unsigned int rwflg);
-#ifdef CONFIG_SB_TRIPWIRE
+#ifdef CONFIG_FS_TRIPWIRE_DEEP
 /* names the caller in the panic - see validblk_at() in filesys.c */
 extern void validblk_at(uint16_t dev, blkno_t num, const char *who);
 /* checks an inode's block list as it is read and as it is written back,

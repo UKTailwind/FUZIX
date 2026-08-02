@@ -309,7 +309,7 @@ inoptr i_open(register uint16_t dev, uint16_t ino)
 
     if (breadi(dev, ino, &nindex->c_node))
         goto lost;
-#ifdef CONFIG_SB_TRIPWIRE
+#ifdef CONFIG_FS_TRIPWIRE_DEEP
     ino_blocks_check(dev, ino, &nindex->c_node, "read");
 #endif
 
@@ -599,7 +599,7 @@ nogood:
  * Used when freeing and allocating blocks and inodes.
  */
 
-#ifdef CONFIG_SB_TRIPWIRE
+#ifdef CONFIG_FS_TRIPWIRE_DEEP
 /*
  *	Superblock tripwire.
  *
@@ -1227,7 +1227,7 @@ void wr_inode(register inoptr ino)
     blkno_t blkno;
 */
     magic(ino);
-#ifdef CONFIG_SB_TRIPWIRE
+#ifdef CONFIG_FS_TRIPWIRE_DEEP
     ino_blocks_check(ino->c_dev, ino->c_num, &ino->c_node, "write");
 #endif
 
@@ -1442,7 +1442,7 @@ void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, uint16_t nblock)
 /* Validblk panics if the given block number is not a valid
  *  data block for the given device.
  */
-#ifdef CONFIG_SB_TRIPWIRE
+#ifdef CONFIG_FS_TRIPWIRE_DEEP
 /*
  *	Inode block-list tripwire.
  *
@@ -1506,7 +1506,7 @@ void validblk(uint16_t dev, register blkno_t num)
     }
 
     if(num < mnt->m_fs.s_isize || num >= mnt->m_fs.s_fsize) {
-#ifdef CONFIG_SB_TRIPWIRE
+#ifdef CONFIG_FS_TRIPWIRE_DEEP
         /* Which caller, and what the number was, separates the two
            ways this happens: blk_alloc means the free list handed out
            a bad block - and since the superblock's copy is checked at

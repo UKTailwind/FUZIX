@@ -443,7 +443,13 @@ uint_fast8_t plt_canswapon(uint16_t devno)
  * written and read in the same order, so accumulating across them costs
  * one pass over memory we are already copying.
  */
-#define SWAP_TRIPWIRE 1
+/* OFF since the corruption was found. It did its job: it never fired,
+ * which is what ruled out the swap device and the XIP write-back cache
+ * and sent the search to the filesystem, where the fault turned out to
+ * be f_trunc leaving i_addr[19] pointing at a freed block. Costs one
+ * sum per swap slot plus a pass over each 4K block; turn it back on if
+ * swap integrity is ever in question again. */
+#define SWAP_TRIPWIRE 0
 #if SWAP_TRIPWIRE
 static uint32_t swap_sum[MAX_SWAPS];
 
