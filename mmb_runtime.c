@@ -2319,7 +2319,10 @@ static int mm_fb_cls(void);
  * showing and leave the buffer filling up with everything ever drawn
  * into it.  mm_fb_cls says whether it took the clear; if not, this is
  * the console's own, which also resets the cursor and the colour
- * tiles - things a rectangle over the framebuffer would not. */
+ * tiles - things a rectangle over the framebuffer would not.
+ *
+ * MMBasic's CLS takes an optional colour (Draw.c cmd_cls, which floods
+ * WriteBuf with it).  Not here yet: this always uses the background. */
 void mm_cls(void)
 {
     if (mm_fb_cls())
