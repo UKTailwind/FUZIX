@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.5 — August 2026"
+date: "Release v0.6 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -37,9 +37,13 @@ boot banner names the detected board.
 Headline specification as configured here:
 
 * CPU at 375 MHz (the XGA-capable clock, as MMBasic uses)
-* 320 KB of program RAM managed as swap-backed 4 KB pages, with the
-  8 MB PSRAM as the swap device — up to 30 concurrent processes,
-  each up to 256 KB
+* 312 KB of program RAM managed as 4 KB pages, with the 8 MB PSRAM
+  behind it — up to 30 concurrent processes, and a single process may
+  use all of program RAM. A swapped-out process is a PSRAM allocation
+  the size of the process, not a slot on a device, so nothing is
+  reserved for one that does not exist
+* Programs get their heap from the PSRAM too, so a BASIC array or a C
+  `malloc` is limited by the 8 MB rather than by the process
 * Root filesystem on SD card; the on-board NAND flash holds a
   recovery system
 * 80×40 colour ANSI console on HDMI, mirrored to the USB-C serial
@@ -50,6 +54,40 @@ Headline specification as configured here:
   MMBasic translator in front of it — both run on the machine itself
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
+
+## New in v0.6
+
+This release is about memory. A translated BASIC program could not hold
+a framebuffer-sized array, and a large one could not be loaded at all;
+both are fixed, and the same work made everything faster.
+
+* **BASIC arrays and strings live in the PSRAM heap.** They used to sit
+  in the 48 KB the interpreter gave a program, so a 38,400 byte array —
+  one MODE 1 framebuffer — did not fit at all. Globals go in one block
+  taken once; `LOCAL` arrays and strings get a block per invocation,
+  freed on the way out, which is what makes recursion correct. Simple
+  variables stay where they are: they are the hot ones, and SRAM is
+  3.7× faster to reach than PSRAM.
+* **Programs are 15% faster.** A program address is now a machine
+  address rather than an offset into a 48 KB window, so every access
+  stops paying for the conversion. The solar eclipse went from 3.31 to
+  2.80 seconds, and the heap change above costs about half a percent
+  on top.
+* **A process may use all of program RAM.** The old 256 KB ceiling was
+  the size of a fixed swap slot, and swap has not worked that way for
+  a while.
+* **`SYSTEM`, `SAVE IMAGE` and `LOAD IMAGE` work from large programs
+  again.** `fork` needed the process resident twice over, so anything
+  past half of memory could not do it. The parent is now staged into
+  PSRAM instead.
+* **A memory leak fixed** that cost 132 KB — of 312 KB — every time a
+  program failed to start, for the rest of that boot.
+* **A C library bug fixed** that made `fread` and `fseek` disagree
+  about a file's position and quietly return the wrong bytes. It needed
+  a file small enough to fit one buffer, which is why it went unnoticed:
+  it took down the compiler on a 305-byte object while 100 KB ones were
+  fine. It is not specific to this machine and has been reported
+  upstream.
 
 ## New in v0.5
 
@@ -74,6 +112,8 @@ Headline specification as configured here:
 * **Panic messages now reach the serial port.** They were being
   truncated to about eleven characters by an interrupt-driven UART
   that stopped with the machine.
+
+\newpage
 
 # Installing Fuzix
 
@@ -105,7 +145,7 @@ The image lays the card out as three partitions:
 |-----------|-------|------------|------------------------------------------|
 | 1         | 64 MB | FAT        | File interchange with Windows/macOS/Linux |
 | 2         | 32 MB | Fuzix root | The Unix filesystem (boot device `hdb2`) |
-| 3         | 4 MB  | 0x7F       | Reserved for future on-card swap         |
+| 3         | 4 MB  | 0x7F       | Reserved                                 |
 
 The root filesystem is 64000 blocks of 512 bytes. That is a little
 short of the 65536-sector partition on purpose: block numbers are
@@ -193,8 +233,8 @@ programs - the console provides in-line editing and command history:
 | Backspace / Delete | delete left / at the cursor |
 | Ctrl-U | discard the line |
 
-The history (about 500 commands) lives in a small region of PSRAM
-reserved next to the swap space, so it costs no program memory; like
+The history (about 500 commands) lives in a small region reserved at
+the top of the PSRAM, so it costs no program memory; like
 the RAM disc it survives a reset but not a power cycle.  Programs
 that take the terminal raw (BBC BASIC, the editor) see every
 keystroke themselves as usual - BBC BASIC has its own line editor
@@ -209,6 +249,8 @@ and *EDIT.
 * `kill` from the shell works on anything; Fuzix pre-emption
   guarantees a spinning process can't lock you out.
 
+\newpage
+
 # The consoles
 
 Everything is mirrored: kernel and program output appear on the HDMI
@@ -219,6 +261,8 @@ from the USB keyboard and the serial line. TeraTerm is resized to
 While BBC BASIC has a graphics MODE on screen, the HDMI display
 belongs to the graphics; text output continues to the serial side as
 a plain stream, so a transcript survives even a full-screen game.
+
+\newpage
 
 # BBC BASIC
 
@@ -396,6 +440,8 @@ Not (yet) present, compared with an original machine or full BBCSDL:
 * `TIME` advances in 0.1 s steps (the kernel clock granularity)
 * Cassette/Econet/ROM filing systems, for obvious reasons
 
+\newpage
+
 # The C compiler
 
 The machine compiles C on its own, with no PC involved. `cc` is Alan
@@ -467,6 +513,11 @@ precision, `sin` `cos` `tan` `asin` `acos` `atan` `atan2` `sinh`
 `fmod`. Each of those is a native function inside `bcrun`, so it runs
 at machine speed whatever the calling code is.
 
+`malloc` takes its memory from the PSRAM, not from the program's own
+312 KB, so a C program can allocate far more than it could hold
+itself. It is asked for once when the program loads; set
+`BCRUN_HEAP` to a size in KB in the environment to change how much.
+
 The raw system calls `open` `creat` `close` `read` `write` `lseek`
 `unlink` are also linked in, but no header declares them — declare them
 yourself if you want them. Two extras reach the hardware: `time_us()`
@@ -522,6 +573,8 @@ hardware, not a cross-compiler.
 The bytecode is also a deliberately language-neutral intermediate form,
 so front ends for other languages can share the same back end and
 runtime. `mmbc`, the MMBasic translator described next, is the first.
+
+\newpage
 
 # MMBasic: the `mmbc` translator
 
@@ -656,7 +709,7 @@ wrote solar_eclipse.c
 # ./solar_eclipse.bc < solar_eclipse.in
 ...
 event duration          2.61100904 hours
-Time taken :     3.242  Seconds
+Time taken :     2.803  Seconds
 ```
 
 The same program takes 12.5 seconds under MMBasic and 8.8 seconds
@@ -688,6 +741,18 @@ characters, and `Dim string s length 40` the shorter form. Arrays index
 from `OPTION BASE` as they should, and `Bound()` reports their limits.
 `Sub` and `Function` work, including arrays passed by reference and
 modified in place.
+
+Arrays and strings live in the PSRAM heap, so what limits them is the
+8 MB rather than the size of a process. A framebuffer-sized array —
+`Dim Integer fb(4800)`, 38,408 bytes — is unremarkable now; before v0.6
+it would not fit at all. Simple variables stay in the program's own
+memory, where they are quicker to reach, which is the same split
+MMBasic itself makes and for the same reason.
+
+`LOCAL` arrays and strings get their own block for each call, released
+when the routine returns, so a recursive routine sees its own copy at
+every level. `STATIC` locals are unaffected — they are meant to outlive
+the call, so they stay where they were.
 
 The one thing to remember is that a translated program is a *program*,
 not an interactive session: there is no editor, no `RUN`, no immediate
@@ -814,6 +879,8 @@ in MMBasic — omit the mode and the image is mapped without it.
   forces interpretation for comparison.
 
 
+\newpage
+
 # `mmedit`: MMBasic's editor
 
 MMBasic's full-screen editor is ported and runs as an ordinary Fuzix
@@ -848,6 +915,8 @@ it drives a VT100, and the console emits VT100 function key sequences.
 Files with CRLF line endings are accepted; the CRs are stripped on
 load, which matters because most files arrive from a PC.
 
+\newpage
+
 # The FAT partition and the `fat` command
 
 Partition 1 of the SD card is ordinary FAT, readable and writable by
@@ -873,6 +942,8 @@ subdirectories included):
 a file *out* of Fuzix, use the serial port, or write it with
 `doswrite` (the venerable Minix FAT12/16 tool, also included) if the
 partition is FAT16.
+
+\newpage
 
 # Moving files over the serial port
 
@@ -966,6 +1037,8 @@ anything before `begin` and after `end`, and decode it on the PC.
 Whatever you use, the check at the end is the same: `sum` the file on
 both machines and compare. On the board, `sum FILE`.
 
+\newpage
+
 # The filesystem and included software
 
 ## Layout
@@ -991,13 +1064,16 @@ Key devices:
 | `/dev/tty2` | The GP0/GP1 serial port                          |
 | `/dev/hda`  | On-board NAND flash filesystem                   |
 | `/dev/hdb1`–`hdb3` | SD card partitions (root is `hdb2`)       |
-| `/dev/hdc`  | The 8 MB PSRAM (used as swap; see `free`)        |
 | `/dev/rtc`  | The DS3231 clock (`setdate` reads and sets it)   |
 | `/dev/sys`  | Platform control (graphics, sound, ADVAL ioctls) |
 
 `/etc/rc` runs at boot: filesystem check, clock from the DS3231,
-swap activation, keyboard layout. Edit it with any of the editors
-below.
+keyboard layout. Edit it with any of the editors below.
+
+There is no swap device to enable. The PSRAM is not a block device
+any more: the kernel takes an allocation the size of the process
+when it needs to swap one out, and programs take their heap from
+the same place. `free` reports both.
 
 ## Applications
 
@@ -1046,6 +1122,8 @@ complete Scott Adams `adv01`–`adv14` and Mysterious Adventures
 `invaders`, `2048`, `moo`, `ttt`, `fish`, `arithmetic`, `fortune`,
 `cowsay`, `wump`.
 
+\newpage
+
 # Appendix A: pin usage
 
 | GPIO       | Function                                             |
@@ -1068,6 +1146,8 @@ complete Scott Adams `adv01`–`adv14` and Mysterious Adventures
 
 All spare header pins remain ordinary 3.3 V GPIO. Do not apply 5 V
 to any GPIO.
+
+\newpage
 
 # Appendix B: boot options
 
