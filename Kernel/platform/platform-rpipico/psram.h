@@ -39,6 +39,23 @@ size_t psram_init(unsigned int cs_pin);
 /* Detected size in bytes (set at boot in main.c), 0 if absent */
 extern uint32_t psram_size;
 
+/*
+ * Bytes at the BOTTOM of the window claimed by linker-placed statics -
+ * anything marked with the SDK's __uninitialized_psram("group"), which
+ * the link puts between __psram_start__ and __psram_end__ starting at
+ * PSRAM_BASE.  Rounded up to 4K.
+ *
+ * The disc must start above this.  It used to begin at PSRAM_BASE + 0,
+ * so a linker-placed object would have been inside the swap device -
+ * silently, until swap wrote over it.  The full layout now reads:
+ *
+ *     [ 0                .. static end )   linker-placed statics
+ *     [ static end       .. disc end   )   PSRAM disc / swap
+ *     [ disc end         .. top - 64K  )   userland arena
+ *     [ top - 64K        .. top        )   kernel (lineedit)
+ */
+uint32_t psram_static_len(void);
+
 /* Register the PSRAM as a block device (hdc) */
 void psram_disc_init(void);
 

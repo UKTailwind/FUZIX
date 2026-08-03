@@ -21,6 +21,19 @@
 #define DISP_FB_POOL 40960
 
 extern uint8_t disp_fb[DISP_FB_POOL];
+
+/* The off-screen layer, in PSRAM (see display.c). Check display_fb2_ok()
+ * before touching it: a board without PSRAM has nowhere to put it.
+ *
+ * display_fb_select(1) points the DRAWING primitives at the layer -
+ * scanout is unaffected and always reads disp_fb - and
+ * display_fb_copy() blits it to the screen. MMBasic's FRAMEBUFFER
+ * WRITE/COPY, with the same draw-off-screen-then-show shape. */
+extern uint8_t disp_fb2[DISP_FB_POOL];
+int display_fb2_ok(void);
+int display_fb_select(int which);
+int display_fb_selected(void);
+int display_fb_copy(void);
 extern uint8_t disp_tile_fg[DISP_ROWS * DISP_COLS];
 extern uint8_t disp_tile_bg[DISP_ROWS * DISP_COLS];
 

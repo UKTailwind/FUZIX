@@ -128,6 +128,20 @@ struct gfx_batch {
 };
 #define GFXIOC_PIXELS 0x0014
 #define GFXIOC_RECTS  0x0015
+
+/* The off-screen layer - MMBasic's FRAMEBUFFER, in PSRAM.
+ *
+ * FBSEL takes 0 for the screen or 1 for the layer, and points the
+ * drawing primitives at it; scanout is unaffected and always shows
+ * disp_fb, so a picture built with FBSEL 1 appears only on FBCOPY.
+ * That is MMBasic's draw-off-screen-then-show shape, and the reason the
+ * layer can live in PSRAM at all: it is written and blitted, never
+ * scanned out.
+ *
+ * FBSEL 1 fails with EINVAL on a board with no PSRAM rather than
+ * quietly drawing nowhere. */
+#define GFXIOC_FBSEL  0x0016		/* int: 0 screen, 1 layer */
+#define GFXIOC_FBCOPY 0x0017		/* layer -> screen */
 /* Bounds the kernel's work per call.  A caller with more chunks; the
  * runtime does that invisibly, and it keeps one ioctl from holding the
  * cpu for an unbounded time. */

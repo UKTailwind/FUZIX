@@ -1,5 +1,21 @@
 cmake_minimum_required(VERSION 3.12)
 
+# Declare the 8 MiB PSRAM to the LINKER, so a variable marked with the
+# SDK's __uninitialized_psram("group") lands in the QMI window at
+# 0x11000000 and the link exports __psram_start__/__psram_end__.
+#
+# This is the linker region ONLY. We do not link hardware_psram: bring-up
+# stays with psram.c, which is vendored from the MicroPython rp2 port and
+# is what makes PSRAM reliable at this overclock. PICO_PSRAM_SIZE_BYTES is
+# read by nothing we compile (only hardware_psram/psram.c and the board
+# headers reference it), so there is no second initialiser to fight.
+#
+# Must be set before pico_sdk_init(): pico_standard_link configures
+# pico_psram_region.ld from it while the SDK is being pulled in.
+# Plain integer, not "(8 * 1024 * 1024)": CMake splits on the spaces and
+# the generated region reads LENGTH = (;8;*;1024;*;1024;).
+set(PICO_PSRAM_SIZE_BYTES 8388608)
+
 # Pull in SDK (must be before project)
 include(pico_sdk_import.cmake)
 

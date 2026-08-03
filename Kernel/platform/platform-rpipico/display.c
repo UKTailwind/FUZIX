@@ -34,6 +34,8 @@
 #include "picosdk.h"
 #include "config.h"
 #include "display.h"
+#include "psram.h"                      /* PSRAM_BASE, psram_size */
+#include <pico/platform/sections.h>     /* __uninitialized_psram */
 /* struct gfx_pt / gfx_rc: the batched drawing items are part of the
  * userland interface, so their definition lives with the ioctls. */
 #include "pico_ioctl.h"
@@ -89,6 +91,87 @@ static struct vtiming *tim = &tim_vga;
 /* The pool serves the console (38400 used) and the BBC modes (up to
  * 40960): they never coexist. */
 uint8_t disp_fb[DISP_FB_POOL];
+
+/*
+ * A second framebuffer, in PSRAM.
+ *
+ * MMBasic's FRAMEBUFFER command draws into an off-screen layer and
+ * blits it to the display, and the layer is firmware memory - the BASIC
+ * program never sees it as a variable.  There is nowhere in SRAM to put
+ * one: disp_fb is already 40,960 bytes and the kernel overran its
+ * region by 864 bytes just from putting the console into graphics
+ * modes.  Nor can it come out of the process image, where a translated
+ * BASIC program has only 48K of VM space in total.
+ *
+ * So it is placed in the PSRAM window by the linker, using the SDK's
+ * own mechanism (__uninitialized_psram, i.e. section
+ * .psram_uninitialised.*), which is what that mechanism is for.  It
+ * costs the disc 40K of swap and nothing else; psram_static_len() is
+ * how devpsram.c knows to start the disc above it.
+ *
+ * DISP_FB_POOL rather than 38,400 so a layer exists for every mode the
+ * pool serves, not just the one that prompted it.
+ *
+ * Drawing into PSRAM is a QMI transaction through a write-back XIP
+ * cache, so it is slower than SRAM - which is exactly why MMBasic's
+ * model is draw-then-COPY rather than scanning out from the layer.
+ * Scanout must stay on disp_fb: core1 DMAs from it line by line.
+ */
+uint8_t disp_fb2[DISP_FB_POOL] __uninitialized_psram("fb2");
+
+/* Present only if the window is really there and the link put the layer
+ * inside it - a board with no PSRAM links the same but has nowhere for
+ * it to live. */
+int display_fb2_ok(void)
+{
+    uint32_t a = (uint32_t)disp_fb2;
+
+    return psram_size &&
+           a >= PSRAM_BASE && a + DISP_FB_POOL <= PSRAM_BASE + psram_size;
+}
+
+/*
+ * Where the DRAWING primitives write.  Scanout is not switchable and
+ * never looks at this: core1 always DMAs out of disp_fb, so pointing
+ * this at the layer is exactly MMBasic's "FRAMEBUFFER WRITE F" - the
+ * picture is built off-screen and appears on the COPY.
+ */
+static uint8_t *gfx_draw = disp_fb;
+
+/* 0 = the screen, 1 = the PSRAM layer.  Returns -1 if asked for a layer
+ * this board cannot provide, rather than silently drawing nowhere. */
+int display_fb_select(int which)
+{
+    if (which == 0) {
+        gfx_draw = disp_fb;
+        return 0;
+    }
+    if (which == 1 && display_fb2_ok()) {
+        gfx_draw = disp_fb2;
+        return 0;
+    }
+    return -1;
+}
+
+int display_fb_selected(void)
+{
+    return gfx_draw == disp_fb2;
+}
+
+/* Blit the layer onto the screen - the whole live framebuffer, which is
+ * stride*rows for a graphics mode and the console's own size otherwise.
+ * One memcpy: the layer holds the mode's own layout, so no conversion. */
+int display_fb_copy(void)
+{
+    int n = display_gfx_fbsize();
+
+    if (!display_fb2_ok())
+        return -1;
+    if (n <= 0 || n > DISP_FB_POOL)
+        n = DISP_FB_POOL;
+    memcpy(disp_fb, disp_fb2, (unsigned)n);
+    return 0;
+}
 uint8_t disp_tile_fg[DISP_ROWS * DISP_COLS];
 uint8_t disp_tile_bg[DISP_ROWS * DISP_COLS];
 
@@ -837,13 +920,13 @@ int display_gfx_getpixel(int x, int y)
     if (!w || x < 0 || y < 0 || x >= w || y >= h)
         return -1;
     if (gfx_bpp(ex) == 4) {
-        v = disp_fb[y * stride + (x >> 1)];
+        v = gfx_draw[y * stride + (x >> 1)];
         return (int)rgb332_to_888(gfx_pal[(x & 1) ? (v & 15) : (v >> 4)]);
     }
     /* 1bpp: the bit chooses ink or paper, and the actual colour lives
      * in the cell's tile attributes - so read those rather than
      * pretending the console is black and white. */
-    v = disp_fb[y * stride + (x >> 3)];
+    v = gfx_draw[y * stride + (x >> 3)];
     if (ex == EXP_CONSOLE) {
         int cell = (y / DISP_CELL_H) * DISP_COLS + (x / DISP_CELL_W);
         uint8_t c = ((v >> (7 - (x & 7))) & 1) ? disp_tile_fg[cell]
@@ -871,13 +954,13 @@ int display_gfx_pixel(int x, int y, int c)
         return 0;               /* off-screen is not an error */
 
     if (gfx_bpp(ex) == 4) {
-        p = &disp_fb[y * stride + (x >> 1)];
+        p = &gfx_draw[y * stride + (x >> 1)];
         if (x & 1)
             *p = (*p & 0xF0) | (c & 15);        /* odd  -> low nibble */
         else
             *p = (*p & 0x0F) | ((c & 15) << 4); /* even -> high nibble */
     } else {
-        p = &disp_fb[y * stride + (x >> 3)];
+        p = &gfx_draw[y * stride + (x >> 3)];
         if (c)
             *p |= 0x80 >> (x & 7);              /* MSB = leftmost */
         else
@@ -912,7 +995,7 @@ int display_gfx_rect(int x1, int y1, int x2, int y2, int c)
     if (gfx_bpp(ex) == 4) {
         uint8_t both = ((c & 15) << 4) | (c & 15);
         for (y = y1; y <= y2; y++) {
-            uint8_t *row = &disp_fb[y * stride];
+            uint8_t *row = &gfx_draw[y * stride];
             x = x1;
             if (x & 1) {        /* odd left edge: low nibble only */
                 row[x >> 1] = (row[x >> 1] & 0xF0) | (c & 15);
@@ -934,7 +1017,7 @@ int display_gfx_rect(int x1, int y1, int x2, int y2, int c)
         }
     } else {
         for (y = y1; y <= y2; y++) {
-            uint8_t *row = &disp_fb[y * stride];
+            uint8_t *row = &gfx_draw[y * stride];
             for (x = x1; x <= x2; x++) {
                 if (c)
                     row[x >> 3] |= 0x80 >> (x & 7);
@@ -984,13 +1067,13 @@ int display_gfx_pixels(const struct gfx_pt *pt, int n, const uint32_t *col)
         if (x < 0 || y < 0 || x >= w || y >= h)
             continue;               /* off-screen is dropped, not an error */
         if (four) {
-            uint8_t *p = &disp_fb[y * stride + (x >> 1)];
+            uint8_t *p = &gfx_draw[y * stride + (x >> 1)];
             if (x & 1)
                 *p = (*p & 0xF0) | (c & 15);
             else
                 *p = (*p & 0x0F) | ((c & 15) << 4);
         } else {
-            uint8_t *p = &disp_fb[y * stride + (x >> 3)];
+            uint8_t *p = &gfx_draw[y * stride + (x >> 3)];
             if (c)
                 *p |= 0x80 >> (x & 7);
             else
@@ -1087,13 +1170,13 @@ int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
                     if (x < 0 || x >= w)
                         continue;
                     if (bpp == 4) {
-                        p = &disp_fb[y * stride + (x >> 1)];
+                        p = &gfx_draw[y * stride + (x >> 1)];
                         if (x & 1)
                             *p = (*p & 0xF0) | (c & 15);
                         else
                             *p = (*p & 0x0F) | ((c & 15) << 4);
                     } else {
-                        p = &disp_fb[y * stride + (x >> 3)];
+                        p = &gfx_draw[y * stride + (x >> 3)];
                         if (c)
                             *p |= 0x80 >> (x & 7);
                         else

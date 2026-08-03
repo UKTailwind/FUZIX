@@ -210,3 +210,24 @@ size_t __no_inline_not_in_flash_func(psram_init)(unsigned int cs_pin)
 
     return psram_size;
 }
+
+/*
+ *	How much of the bottom of the window the linker has already spent.
+ *
+ *	Variables marked __uninitialized_psram("group") are placed by
+ *	sections_psram.incl between these two symbols, which start at
+ *	PSRAM_BASE.  Both are always defined - the sections exist even
+ *	when empty - so this returns 0 on a build that places nothing.
+ *
+ *	Rounded up to 4K to match the arena's granularity and to keep the
+ *	disc's block arithmetic on a sensible boundary.
+ */
+extern char __psram_start__[];
+extern char __psram_end__[];
+
+uint32_t psram_static_len(void)
+{
+    uint32_t len = (uint32_t)__psram_end__ - (uint32_t)__psram_start__;
+
+    return (len + 4095u) & ~4095u;
+}

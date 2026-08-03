@@ -35,7 +35,9 @@ static uint_fast8_t psram_disc_transfer(void)
             blk_op.is_read ? "read" : "write");
         return 0;
     }
-    pd = (uint8_t *)PSRAM_BASE + (blk_op.lba << 9);
+    /* Block 0 is the first byte ABOVE the linker-placed statics, not the
+       bottom of the window - see psram_static_len(). */
+    pd = (uint8_t *)PSRAM_BASE + psram_static_len() + (blk_op.lba << 9);
 
     if (blk_op.is_read)
         memcpy(blk_op.addr, pd, 512);
@@ -51,22 +53,26 @@ static uint_fast8_t psram_disc_transfer(void)
 
 void psram_disc_resize(void)
 {
+    uint32_t stat = psram_static_len();
+
     if (!psram_blk)
         return;
-    if (arena_len > psram_size - PSRAM_RESERVE)
-        arena_len = psram_size - PSRAM_RESERVE;
+    if (arena_len > psram_size - PSRAM_RESERVE - stat)
+        arena_len = psram_size - PSRAM_RESERVE - stat;
     psram_blk->drive_lba_count =
-        (psram_size - PSRAM_RESERVE - arena_len) >> 9;
-    kprintf("PSRAM: disc %dKiB, arena %dKiB, kernel %dKiB\n",
-            (int)((psram_size - PSRAM_RESERVE - arena_len) >> 10),
-            (int)(arena_len >> 10), (int)(PSRAM_RESERVE >> 10));
+        (psram_size - PSRAM_RESERVE - arena_len - stat) >> 9;
+    kprintf("PSRAM: disc %dKiB, arena %dKiB, static %dKiB, kernel %dKiB\n",
+            (int)((psram_size - PSRAM_RESERVE - arena_len - stat) >> 10),
+            (int)(arena_len >> 10), (int)(stat >> 10),
+            (int)(PSRAM_RESERVE >> 10));
 }
 
 void psram_disc_init(void)
 {
     blkdev_t *blk;
+    uint32_t stat = psram_static_len();
 
-    if (psram_size <= PSRAM_RESERVE)
+    if (psram_size <= PSRAM_RESERVE + stat)
         return;
     blk = blkdev_alloc();
     if (!blk)
@@ -74,19 +80,22 @@ void psram_disc_init(void)
 
     /* Power-on PSRAM is random noise: clear the MBR and superblock
      * blocks so nothing mistakes it for a partitioned or filesystem
-     * device (swapon checks both before accepting a swap device). */
-    memset((void *)PSRAM_BASE, 0, 2048);
+     * device (swapon checks both before accepting a swap device).
+     * At the DISC's base, not the window's - clearing the window would
+     * wipe the linker-placed statics that now live below it. */
+    memset((void *)PSRAM_BASE + stat, 0, 2048);
 
     blk->transfer = psram_disc_transfer;
     psram_blk = blk;
-    /* three-way split: disc, then the userland arena, then the top
-     * PSRAM_RESERVE bytes for the kernel (lineedit.c) */
-    if (arena_len > psram_size - PSRAM_RESERVE)
-        arena_len = psram_size - PSRAM_RESERVE;
+    /* four-way split now: linker-placed statics at the bottom, then the
+     * disc, then the userland arena, then the top PSRAM_RESERVE bytes
+     * for the kernel (lineedit.c) */
+    if (arena_len > psram_size - PSRAM_RESERVE - stat)
+        arena_len = psram_size - PSRAM_RESERVE - stat;
     blk->drive_lba_count =
-        (psram_size - PSRAM_RESERVE - arena_len) >> 9;
-    kprintf("PSRAM disc %dKiB (arena %dKiB): ",
-            (int)((psram_size - PSRAM_RESERVE - arena_len) >> 10),
-            (int)(arena_len >> 10));
+        (psram_size - PSRAM_RESERVE - arena_len - stat) >> 9;
+    kprintf("PSRAM disc %dKiB (arena %dKiB, static %dKiB): ",
+            (int)((psram_size - PSRAM_RESERVE - arena_len - stat) >> 10),
+            (int)(arena_len >> 10), (int)(stat >> 10));
     blkdev_scan(blk, 0);
 }

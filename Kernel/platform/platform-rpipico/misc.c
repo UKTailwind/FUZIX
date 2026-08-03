@@ -229,6 +229,24 @@ int plt_dev_ioctl(uarg_t request, char *data)
                                             : display_gfx_map((uint32_t)gb.bg),
                                   gb.bits);
     }
+    if (request == GFXIOC_FBSEL)
+    {
+        /* data is the value itself, not a pointer: one int in, like
+           GFXIOC_MODE's neighbours. */
+        if (display_fb_select((int)(intptr_t)data)) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    if (request == GFXIOC_FBCOPY)
+    {
+        if (display_fb_copy()) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
     if (request == GFXIOC_INFO)
     {
         struct gfx_info gi;
