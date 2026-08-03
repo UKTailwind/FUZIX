@@ -229,6 +229,9 @@ struct conv {
     int inline_depth;
     int uses_clear;
     int uses_gfx;
+    /* set by global_decls when the program has any array or string:
+     * main() then has to allocate the block they live in */
+    int heap_used;
 };
 
 extern struct conv cv;
