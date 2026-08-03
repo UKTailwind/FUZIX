@@ -49,22 +49,32 @@ typedef int64_t MMINTEGER;
 /* ---- scratch buffers ---------------------------------------------- */
 char    *mm_tmp(void);              /* push a scratch buffer, set to "" */
 unsigned mm_mark(void);             /* current top of the scratch stack */
+void     mm_release(unsigned mark); /* pop back down to 'mark'          */
 
-/* One block for every array and string in the program.
+/* ---- the heap ------------------------------------------------------
  *
- * mmb2c puts them in a single struct and calls this once, so the whole
- * of a program's bulk data is one allocation - one free at exit, no
- * fragmentation, and sizeof does the sizing. Scalars stay in the
+ * One block for every array and string in the program.
+ *
+ * mmb2c puts them in a single struct and calls mm_heap once, so the
+ * whole of a program's bulk data is one allocation - one free at exit,
+ * no fragmentation, and sizeof does the sizing.  Scalars stay in the
  * process image, where they are 3.7x faster to reach (SRAM 44MB/s,
  * PSRAM 12MB/s measured).
  *
- * On the board this comes from the kernel's PSRAM heap, which is
- * outside the process image and so is not limited by bcrun's 48K of VM
- * address space - a 38,400 byte framebuffer array does not fit there at
- * all. Everywhere else it is malloc, so the generated C stays portable
- * and the host test gates keep working. Zeroed either way. */
+ * LOCAL arrays and strings get the same treatment per routine, one
+ * block per invocation, which is what makes recursion correct: each
+ * call has its own and gives it back on every path out.  They are
+ * separate names from mm_heap because their lifetimes are: mm_lheap is
+ * called on every invocation of a routine, so it must never be more
+ * expensive than an allocation, where mm_heap is called once and can
+ * afford to ask the kernel.
+ *
+ * Under bcrun both come from the VM heap, which is itself PSRAM.
+ * Everywhere else they are malloc, so the generated C stays portable
+ * and the host gates keep working.  Zeroed either way. */
 void *mm_heap(unsigned long n);
-void     mm_release(unsigned mark); /* pop back down to 'mark'          */
+void *mm_lheap(unsigned long n);
+void  mm_lfree(void *p);
 
 /* Park a value and return its address: how a by-reference argument is
  * built from an expression on a compiler with no compound literals

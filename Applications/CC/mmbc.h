@@ -151,6 +151,8 @@ struct routine {
     struct sym **statics; int nstatics, cstatics;
     int line;
     struct gtouch *gtouch; int ngtouch, cgtouch; /* global -> first line */
+    int heap_locals;            /* has LOCAL arrays or strings, so its
+                                 * invocations carry a heap block */
 };
 
 /* One record per label name; the Python keeps six dicts keyed the same

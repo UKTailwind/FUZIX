@@ -344,6 +344,30 @@ static void w_heap(void)
 	A = lib_malloc(n);
 	if (A)
 		memset(vptr(A), 0, n);	/* mm_heap zeroes; so must this */
+	else
+		mm_error("out of memory for arrays and strings");
+}
+
+/*
+ *	The same heap, per invocation, for a routine's LOCAL arrays and
+ *	strings.  Separate from w_heap only so the two can be tuned apart
+ *	later: this one runs on every call and w_heap runs once.
+ */
+static void w_lheap(void)
+{
+	unsigned long n = (unsigned long)(uint32_t)arg(0);
+
+	A = lib_malloc(n);
+	if (A)
+		memset(vptr(A), 0, n);
+	else
+		mm_error("out of memory for LOCAL arrays and strings");
+}
+
+static void w_lfree(void)
+{
+	lib_free((unsigned long)(uint32_t)arg(0));
+	A = 0;
 }
 
 /* ---- name table ----------------------------------------------------- */
@@ -528,6 +552,8 @@ static const struct mmwrap {
 	{ "mm_end",		w_end },
 	{ "mm_timer",		w_timer },
 	{ "mm_heap",		w_heap },
+	{ "mm_lheap",		w_lheap },
+	{ "mm_lfree",		w_lfree },
 	{ NULL,			NULL }
 };
 
