@@ -25,6 +25,9 @@
 #include <time.h>
 #ifdef __linux__
 #include <sys/mman.h>		/* executable code buffer for native fns */
+#ifdef MM_PC3
+#include <sys/ioctl.h>		/* the PSRAM heap request, once, at load */
+#endif
 #endif
 #include "bytecode.h"
 
@@ -1179,10 +1182,68 @@ static void lib_sprintf(void)
 
 static unsigned long heap_base, heap_top;
 
+/*
+ *	The heap does not have to be inside mem[] any more.
+ *
+ *	It used to be the gap between bss and the stack, which capped
+ *	every allocation a translated program made at whatever was left
+ *	of 48K - and mmb2c now puts all of a program's arrays and strings
+ *	in one such allocation.  A program address is a machine address
+ *	now, so heap_base and heap_top are just addresses: ask the kernel
+ *	for PSRAM once, here, and the same first-fit allocator serves
+ *	megabytes at exactly the cost it served kilobytes.
+ *
+ *	Once, and not per allocation, because the syscall is the
+ *	expensive part.  Measured on the PC2: an alloc/free pair through
+ *	the kernel is 5142ns, of which 3146 is the two ioctls; the same
+ *	pair here is 350ns.  Over the eclipse's 219,063 routine calls
+ *	that is the difference between per-call locals costing 40% and
+ *	costing 3%.
+ *
+ *	BCRUN_HEAP overrides the size in KB.  Falling back to the mem[]
+ *	gap is not an error: it is what the development host and any
+ *	board without PSRAM get, and small programs never notice.
+ */
+#define VM_HEAP_KB	512
+
+#ifdef MM_PC3
+#define PSRAMIOC_ALLOC	0x000A
+struct vm_psram_req {
+	unsigned long len;
+	unsigned long base;
+};
+
+static unsigned long psram_heap(unsigned long want)
+{
+	struct vm_psram_req rq;
+	int fd = open("/dev/sys", O_RDWR);
+
+	if (fd < 0)
+		return 0;
+	rq.len = want;
+	rq.base = 0;
+	if (ioctl(fd, PSRAMIOC_ALLOC, &rq) != 0)
+		rq.base = 0;
+	close(fd);
+	return rq.base;
+}
+#endif
+
 static void heap_init(unsigned long base)
 {
 	heap_base = (base + 3) & ~3UL;
 	heap_top = MEMTOP - STACKROOM;
+#ifdef MM_PC3
+	{
+		const char *e = getenv("BCRUN_HEAP");
+		unsigned long kb = e ? (unsigned long)atoi(e) : VM_HEAP_KB;
+		unsigned long region = kb ? psram_heap(kb << 10) : 0;
+		if (region) {
+			heap_base = region;
+			heap_top = region + (kb << 10);
+		}
+	}
+#endif
 	if (heap_top <= heap_base + HDR) {
 		heap_base = heap_top = 0;
 		return;
@@ -2084,6 +2145,10 @@ static void load(const char *path)
 
 /* ---- native code ---------------------------------------------------- */
 
+/* Declared here rather than beside prof_dump: native_enter below is
+   the only thing that counts a native entry, and it comes first. */
+static uint32_t prof_call, prof_libcall, prof_eqop, prof_enter;
+
 /*
  *	Mixed mode: a function whose first code byte is BC_NATIVE is
  *	Thumb machine code, entered here.  Register file per
@@ -2162,6 +2227,7 @@ static void libcall(unsigned idx);
 static int64_t native_enter(unsigned long off)
 {
 	unsigned long saved_sp = sp;
+	prof_enter++;
 	register uint32_t r0v asm("r0");
 	register uint32_t r1v asm("r1");
 	register uint32_t fn asm("r3") =
@@ -2241,7 +2307,6 @@ static unsigned long prof_site_n;
 static int prof_on;
 static uint32_t prof_op[256];		/* helper_op by opcode      */
 static uint32_t prof_lib[256];		/* helper_libcall by index  */
-static uint32_t prof_call, prof_libcall, prof_eqop, prof_enter;
 
 static void prof_dump(void)
 {

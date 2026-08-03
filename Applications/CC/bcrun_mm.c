@@ -331,33 +331,19 @@ static void w_end(void)      { mm_end(); }
 static void w_timer(void)    { A = dput(mm_timer()); }
 
 /*
- *	One block for every array and string in the program.
- *
- *	A VM pointer is 32 bits, so what this returns has to fit in 32.  On
- *	the board it does: the block comes from the kernel's PSRAM heap at
- *	0x11000000 and the program holds its address directly, which is the
- *	whole point - 48K of VM space could never hold a 38,400 byte array.
- *	On a 64-bit development host no native pointer fits, so the block
- *	comes out of the VM's own heap instead.  Same program, same output,
- *	a smaller ceiling.
+ *	One block for every array and string in the program, from the
+ *	VM heap - which is itself PSRAM on the board (see heap_init in
+ *	bcrun.c), so this is megabytes and costs no syscall.  It used to
+ *	go straight to the kernel here; that was one ioctl pair per call
+ *	and only tolerable because a program allocates once.
  */
-#if UINTPTR_MAX > 0xFFFFFFFFu
-#define MM_HEAP_IS_VM	1
-#else
-#define MM_HEAP_IS_VM	0
-#endif
-
 static void w_heap(void)
 {
 	unsigned long n = (unsigned long)(uint32_t)arg(0);
 
-	if (MM_HEAP_IS_VM) {
-		A = lib_malloc(n);
-		if (A)
-			memset(vptr(A), 0, n);	/* mm_heap zeroes; so must this */
-	} else {
-		A = (long)(unsigned long)(uintptr_t)mm_heap(n);
-	}
+	A = lib_malloc(n);
+	if (A)
+		memset(vptr(A), 0, n);	/* mm_heap zeroes; so must this */
 }
 
 /* ---- name table ----------------------------------------------------- */
