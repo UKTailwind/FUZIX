@@ -14,7 +14,7 @@ gap after each so cat can drain it.
 """
 import sys, time, serial, binascii, os
 
-PORT, BAUD = "COM11", 115200
+PORT, BAUD = os.environ.get("FZPORT", "COM11"), 115200
 
 
 def uuencode(data, name):
