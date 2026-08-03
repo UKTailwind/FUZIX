@@ -271,6 +271,27 @@ int plt_dev_ioctl(uarg_t request, char *data)
         return 0;
     }
 #endif
+    if (request == PSRAMIOC_REALLOC)
+    {
+        /* Grow or shrink an allocation. rq.base in, the NEW base out -
+         * which may differ, because newlib moves the block when it
+         * cannot extend in place. A caller holding interior pointers
+         * into the old block has to rebuild them; that is why this is
+         * a separate call and not something alloc does quietly. */
+        struct psram_req rq;
+        uint32_t b;
+        if (uget(data, &rq, sizeof(rq)))
+            return -1;
+        b = arena_realloc(udata.u_ptab, rq.base, rq.len);
+        if (!b) {
+            udata.u_error = ENOMEM;
+            return -1;
+        }
+        rq.base = b;
+        if (uput(&rq, data, sizeof(rq)))
+            return -1;
+        return 0;
+    }
     if (request == PSRAMIOC_ALLOC)
     {
         struct psram_req rq;

@@ -14,15 +14,20 @@ endif
 ifeq ($(SUBTARGET),pico_w)
 TOTALMEM=160
 endif
-# 316, not 320: the kernel needed a fourth K of the 512K and the top of
-# the pool was unreachable slack anyway (PROGSIZE caps a process at
-# 256K).  linker_overrides/memory_ram.incl must agree - it carves the
-# same split, and nothing checks that the two match.
+# 312, not 320: the kernel has taken two 4K bites out of the pool. The
+# first was to stop progbase floating; the second pays for the C
+# library's allocator, which is now the PSRAM heap (arena.c overrides
+# _sbrk) - malloc/free/realloc cost 2432 bytes of SRAM here because the
+# kernel is PICO_COPY_TO_RAM and library code is RAM-resident.
+# Both bites are cheap: PROGSIZE caps one process at 256K, so the top of
+# the pool was unreachable slack.
+# linker_overrides/memory_ram.incl must agree - it carves the same
+# split, and nothing checks that the two match.
 ifeq ($(SUBTARGET),pico2)
-TOTALMEM=316
+TOTALMEM=312
 endif
 ifeq ($(SUBTARGET),pico2_w)
-TOTALMEM=316
+TOTALMEM=312
 endif
 
 PICOTOOLFLAGS= --family rp2040

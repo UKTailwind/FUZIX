@@ -209,6 +209,11 @@ struct psram_stat {
 	uint32_t largest;
 };
 #define PSRAMIOC_ALLOC 0x000A		/* struct psram_req */
+/* Grow or shrink: base in, the NEW base out. It may MOVE - the
+ * allocator is newlib's and it copies when it cannot extend in place -
+ * so a caller holding interior pointers must rebuild them. This is what
+ * lets a client start small instead of guessing its maximum. */
+#define PSRAMIOC_REALLOC 0x000D		/* struct psram_req */
 #define PSRAMIOC_FREE  0x000B		/* uint32_t base */
 #define PSRAMIOC_STAT  0x000C		/* struct psram_stat */
 

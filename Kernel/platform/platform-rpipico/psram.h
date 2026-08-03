@@ -22,7 +22,13 @@
 struct p_tab;
 extern uint32_t arena_len;
 uint32_t arena_pool_base(void);
+uint32_t arena_pool_top(void);
 uint32_t arena_alloc(struct p_tab *owner, uint32_t len);
+/* Grow or shrink an allocation. The new base MAY DIFFER from the old -
+ * newlib moves the block when it cannot extend in place - so a caller
+ * holding interior pointers must rebuild them. 0 leaves the original
+ * untouched. This is what lets a client stop guessing its maximum. */
+uint32_t arena_realloc(struct p_tab *owner, uint32_t base, uint32_t len);
 int arena_free(struct p_tab *owner, uint32_t base);
 void arena_release(struct p_tab *owner);
 void arena_stat(uint32_t *total, uint32_t *freeb, uint32_t *largest);
