@@ -303,7 +303,8 @@ class Sym(object):
 
 class Routine(object):
     __slots__ = ('name', 'cname', 'is_func', 'ty', 'params', 'locals',
-                 'statics', 'line', 'gtouch', 'disp', 'local_order')
+                 'statics', 'line', 'gtouch', 'disp', 'local_order',
+                 'heap_locals')
 
     def __init__(self, name, is_func):
         self.name = name
@@ -316,6 +317,8 @@ class Routine(object):
         self.local_order = []     # names in declaration order, so the C
                                   # comes out the same on any Python
         self.statics = []         # list of Sym (subset of locals)
+        self.heap_locals = False  # has LOCAL arrays or strings, so its
+                                  # invocations carry a heap block
         self.line = 0
         self.gtouch = {}          # global name -> first line touched here
 
@@ -1970,6 +1973,20 @@ class Conv(object):
                       % (self.lineno, cblock_safe(reason)))
             self.emit('/*     %s */' % cblock_safe(text))
 
+    def routine_exit(self):
+        """What has to run on every path OUT of a routine.
+
+        Not the same thing as the release emitted after a statement or
+        round a loop condition: those wind the scratch pools back to
+        __mark and know nothing about the local block, which is not in
+        them.  Only leaving the routine gives the block back, so every
+        path out has to say so - and mm_error exits the process rather
+        than unwinding, so those are all of them.
+        """
+        if self.cur is not None and self.cur.heap_locals:
+            return 'mm_lfree(__L); mm_release(__mark);'
+        return 'mm_release(__mark);'
+
     def loop_cond(self, c):
         """A loop test is re-evaluated every time round, so it needs its
         own release point."""
@@ -3275,10 +3292,10 @@ class Conv(object):
     # -- EXIT / GOTO / END --------------------------------------------------
     def do_exit(self):
         if self.accept_kw('SUB'):
-            self.emit('mm_release(__mark); return;')
+            self.emit(self.routine_exit() + ' return;')
             return
         if self.accept_kw('FUNCTION'):
-            self.emit('mm_release(__mark); return __ret;')
+            self.emit(self.routine_exit() + ' return __ret;')
             return
         if self.accept_kw('FOR') or self.accept_kw('DO'):
             self.emit('break;')
@@ -3298,9 +3315,9 @@ class Conv(object):
                           "treated as EXIT %s" % (self.cur.name,
                           'FUNCTION' if self.cur.is_func else 'SUB'))
                 if self.cur.is_func:
-                    self.emit('mm_release(__mark); return __ret;')
+                    self.emit(self.routine_exit() + ' return __ret;')
                 else:
-                    self.emit('mm_release(__mark); return;')
+                    self.emit(self.routine_exit() + ' return;')
                 return
             self.err("bare EXIT is outside any loop, SUB or FUNCTION")
         self.err("unknown EXIT variant")
@@ -3335,10 +3352,10 @@ class Conv(object):
         # block there would end the routine in the middle of itself.
         if self.inline:
             if self.accept_kw('SUB'):
-                self.emit('mm_release(__mark); return;')
+                self.emit(self.routine_exit() + ' return;')
                 return
             if self.accept_kw('FUNCTION'):
-                self.emit('mm_release(__mark); return __ret;')
+                self.emit(self.routine_exit() + ' return __ret;')
                 return
         if self.accept_kw('SUB'):
             self.close_routine(False)
@@ -3372,6 +3389,9 @@ class Conv(object):
         self.raw(self.signature(r) + ' {')
         self.indent = 1
         self.emit('unsigned __mark = mm_mark(); (void)__mark;')
+        if r.heap_locals:
+            self.emit('struct mm_l_%s *__L = mm_lheap(sizeof *__L);'
+                      % r.cname)
         # hoist every local declaration to the top of the C function,
         # in declaration order so the output does not depend on the host
         # Python's dictionary ordering
@@ -3388,6 +3408,11 @@ class Conv(object):
         self.blocks.append(['routine', self.lineno])
 
     def emit_local_decl(self, s):
+        # An array or a string that is not STATIC lives in the
+        # invocation's heap block, declared once in its struct and
+        # zeroed by mm_lheap; there is nothing to declare here.
+        if not s.is_static and (s.is_array or s.ty == TY_S):
+            return
         pfx = 'static ' if s.is_static else ''
         if s.is_static and s.has_init:
             self.emit('static int __once_%s = 0;'
@@ -3445,9 +3470,9 @@ class Conv(object):
             self.err("END SUB/FUNCTION without SUB/FUNCTION")
         self.blocks.pop()
         if self.cur is not None and self.cur.is_func:
-            self.emit('mm_release(__mark); return __ret;')
+            self.emit(self.routine_exit() + ' return __ret;')
         else:
-            self.emit('mm_release(__mark);')
+            self.emit(self.routine_exit())
         self.indent = 0
         self.raw('}')
         self.cur = None
@@ -3524,6 +3549,45 @@ class Conv(object):
                 out.append('    ' + h)
             out.append('};')
             out.append('static struct mm_vars *H;')
+        return out
+
+    def local_structs(self):
+        """One struct per routine that has LOCAL arrays or strings.
+
+        At file scope rather than inside the function, because the FCC
+        view is C89 and a type declared in a block would be a different
+        type in every translation the compiler sees.  Routines come out
+        in sorted order for the same reason the globals do: the C must
+        not depend on the host Python's dictionary ordering.
+        """
+        out = []
+        names = list(self.routines.keys())
+        names.sort()
+        for nm in names:
+            r = self.routines[nm]
+            if not r.heap_locals:
+                continue
+            out.append('')
+            out.append('/* LOCAL arrays and strings of %s: one block per'
+                       ' invocation. */' % r.disp)
+            out.append('struct mm_l_%s {' % r.cname)
+            for lnm in r.local_order:
+                s = r.locals[lnm]
+                if s.is_param or s.is_static:
+                    continue
+                if not (s.is_array or s.ty == TY_S):
+                    continue
+                cn = cvar(lnm)
+                if s.is_array:
+                    dims = ''.join('[%s]' % d for d in s.dims)
+                    if s.ty == TY_S:
+                        out.append('    char %s%s[MM_STRSZ];' % (cn, dims))
+                    else:
+                        out.append('    %s %s%s;'
+                                   % (CTYPE[s.ty], cn, dims))
+                else:
+                    out.append('    char %s[MM_STRSZ];' % cn)
+            out.append('};')
         return out
 
     def report(self):
@@ -3611,6 +3675,8 @@ class Conv(object):
         wr('\n/* ---- global variables ---- */\n')
         for ln in self.global_decls():
             wr(ln + '\n')
+        for ln in self.local_structs():
+            wr(ln + '\n')
         if self.bnd_tables:
             wr('\n/* ---- array bounds tables (FCC has no compound'
                ' literals) ---- */\n')
@@ -3697,6 +3763,33 @@ def _heap_fixup(conv):
             s.acc = 'H->' + cvar(nm)
 
 
+def _local_heap_fixup(conv):
+    """LOCAL arrays and strings live in a block taken per invocation, so
+    every reference to one goes through __L.
+
+    The same rewrite _heap_fixup does for globals, per routine: the
+    emitter reads s.acc for every read and write, so setting it here is
+    the change.  Recursion is then correct for free - each invocation
+    allocates its own block and frees it on the way out, which is what
+    MMBasic does with LOCALs and what the C stack was doing for the
+    scalars all along.
+
+    STATIC locals keep their C storage: they outlive the invocation by
+    definition, so a per-invocation block is exactly the wrong home.
+    Parameters are the caller's, passed in, and are not ours to move.
+    """
+    for r in conv.routines.values():
+        heap = [nm for nm in r.local_order
+                if not r.locals[nm].is_param
+                and not r.locals[nm].is_static
+                and (r.locals[nm].is_array or r.locals[nm].ty == TY_S)]
+        if not heap:
+            continue
+        r.heap_locals = True
+        for nm in heap:
+            r.locals[nm].acc = '__L->' + cvar(nm)
+
+
 def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
     lines = []
     f = open(inpath, 'r')
@@ -3723,6 +3816,7 @@ def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
     for nm in consts:
         conv.globals[nm].acc = cvar(nm)
     _heap_fixup(conv)
+    _local_heap_fixup(conv)
     conv.tmpn = 0
     conv.out_main = []
     conv.out_body = []

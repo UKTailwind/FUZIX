@@ -124,6 +124,58 @@ static void global_decls(struct outbuf *o)
     }
 }
 
+/* One struct per routine that has LOCAL arrays or strings.
+ *
+ * At file scope rather than inside the function, because the FCC view
+ * is C89 and a type declared in a block would be a different type in
+ * every translation the compiler sees.  Routines come out in sorted
+ * order for the same reason the globals do: the C must not depend on
+ * the host Python's dictionary ordering. */
+static void local_structs(struct outbuf *o)
+{
+    int n, k, j, d;
+    const char **names = routine_names_sorted(&n);
+
+    for (k = 0; k < n; k++) {
+        struct routine *r = routine_get(names[k]);
+        if (r == NULL || !r->heap_locals)
+            continue;
+        ob_add(o, "");
+        ob_add(o, sfmt("/* LOCAL arrays and strings of %s: one block per"
+                       " invocation. */", r->disp));
+        ob_add(o, sfmt("struct mm_l_%s {", r->cname));
+        for (j = 0; j < r->nlocal_order; j++) {
+            struct sym *s = NULL;
+            const char *cn;
+            char *dims;
+            int q;
+            for (q = 0; q < r->nlocals; q++)
+                if (strcmp(r->locals[q]->name, r->local_order[j]) == 0) {
+                    s = r->locals[q];
+                    break;
+                }
+            if (s == NULL || s->is_param || s->is_static)
+                continue;
+            if (!(s->is_array || s->ty == TY_S))
+                continue;
+            cn = cvar(s->name);
+            if (s->is_array) {
+                dims = sstr("");
+                for (d = 0; d < s->ndims; d++)
+                    dims = sfmt("%s[%s]", dims, s->dims[d]);
+                if (s->ty == TY_S)
+                    ob_add(o, sfmt("    char %s%s[MM_STRSZ];", cn, dims));
+                else
+                    ob_add(o, sfmt("    %s %s%s;", ctype_of(s->ty), cn,
+                                   dims));
+            } else {
+                ob_add(o, sfmt("    char %s[MM_STRSZ];", cn));
+            }
+        }
+        ob_add(o, "};");
+    }
+}
+
 /* The --report text; also the top-of-file comment block. */
 void report_build(struct outbuf *o)
 {
@@ -267,6 +319,13 @@ void conv_write(FILE *f)
     global_decls(&gd);
     for (k = 0; k < gd.n; k++)
         fprintf(f, "%s\n", gd.lines[k]);
+    {
+        struct outbuf ls;
+        memset(&ls, 0, sizeof(ls));
+        local_structs(&ls);
+        for (k = 0; k < ls.n; k++)
+            fprintf(f, "%s\n", ls.lines[k]);
+    }
     if (cv.nbnds > 0) {
         struct bnd *tabs = salloc(sizeof(struct bnd) * (size_t)cv.nbnds);
         fprintf(f, "\n/* ---- array bounds tables (FCC has no compound"

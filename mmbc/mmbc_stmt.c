@@ -58,6 +58,23 @@ static void do_goto(void);
 static void do_end(void);
 static void open_routine(int is_func);
 static void emit_local_decl(struct sym *s);
+
+/*
+ * What has to run on every path OUT of a routine.
+ *
+ * Not the same thing as the release emitted after a statement or round
+ * a loop condition: those wind the scratch pools back to __mark and
+ * know nothing about the local block, which is not in them.  Only
+ * leaving the routine gives the block back, so every path out has to
+ * say so - and mm_error exits the process rather than unwinding, so
+ * those are all of them.
+ */
+static const char *routine_exit(void)
+{
+    if (cv.cur != NULL && cv.cur->heap_locals)
+        return "mm_lfree(__L); mm_release(__mark);";
+    return "mm_release(__mark);";
+}
 static void close_routine(int is_func);
 
 /* ---- local helpers ---- */
@@ -1912,11 +1929,11 @@ static void do_exit(void)
     int k;
 
     if (accept_kw("SUB")) {
-        emit("mm_release(__mark); return;");
+        emit(sfmt("%s return;", routine_exit()));
         return;
     }
     if (accept_kw("FUNCTION")) {
-        emit("mm_release(__mark); return __ret;");
+        emit(sfmt("%s return __ret;", routine_exit()));
         return;
     }
     if (accept_kw("FOR") || accept_kw("DO")) {
@@ -1942,9 +1959,9 @@ static void do_exit(void)
                     "treated as EXIT %s", cv.cur->name,
                     cv.cur->is_func ? "FUNCTION" : "SUB");
             if (cv.cur->is_func)
-                emit("mm_release(__mark); return __ret;");
+                emit(sfmt("%s return __ret;", routine_exit()));
             else
-                emit("mm_release(__mark); return;");
+                emit(sfmt("%s return;", routine_exit()));
             return;
         }
         cv_err("bare EXIT is outside any loop, SUB or FUNCTION");
@@ -1997,11 +2014,11 @@ static void do_end(void)
      * there would end the routine in the middle of itself. */
     if (cv.inline_depth) {
         if (accept_kw("SUB")) {
-            emit("mm_release(__mark); return;");
+            emit(sfmt("%s return;", routine_exit()));
             return;
         }
         if (accept_kw("FUNCTION")) {
-            emit("mm_release(__mark); return __ret;");
+            emit(sfmt("%s return __ret;", routine_exit()));
             return;
         }
     }
@@ -2047,6 +2064,9 @@ static void open_routine(int is_func)
     raw(sfmt("%s {", signature(r)));
     cv.indent = 1;
     emit("unsigned __mark = mm_mark(); (void)__mark;");
+    if (r->heap_locals)
+        emit(sfmt("struct mm_l_%s *__L = mm_lheap(sizeof *__L);",
+                  r->cname));
     /* hoist every local declaration to the top of the C function, in
      * declaration order so the output does not depend on the host
      * Python's dictionary ordering */
@@ -2068,6 +2088,12 @@ static void open_routine(int is_func)
 static void emit_local_decl(struct sym *s)
 {
     const char *pfx = s->is_static ? "static " : "";
+
+    /* An array or a string that is not STATIC lives in the invocation's
+     * heap block, declared once in its struct and zeroed by mm_lheap;
+     * there is nothing to declare here. */
+    if (!s->is_static && (s->is_array || s->ty == TY_S))
+        return;
 
     if (s->is_static && s->has_init)
         emit(sfmt("static int __once_%s = 0;", dunder("", s->name)));
@@ -2144,9 +2170,9 @@ static void close_routine(int is_func)
         cv_err("END SUB/FUNCTION without SUB/FUNCTION");
     cv.nblocks--;
     if (cv.cur != NULL && cv.cur->is_func)
-        emit("mm_release(__mark); return __ret;");
+        emit(sfmt("%s return __ret;", routine_exit()));
     else
-        emit("mm_release(__mark);");
+        emit(routine_exit());
     cv.indent = 0;
     raw("}");
     cv.cur = NULL;

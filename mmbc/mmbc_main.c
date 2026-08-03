@@ -140,6 +140,30 @@ static const char *convert(const char *inpath, const char *outpath,
         if (s->is_array || s->ty == TY_S)
             s->acc = pstr(sfmt("H->%s", cvar(s->name)));
     }
+    /* The same rewrite per routine for LOCAL arrays and strings, which
+     * live in a block taken per invocation - that is what makes
+     * recursion correct, each call having its own.  STATIC locals keep
+     * their C storage: they outlive the invocation by definition.
+     * Parameters are the caller's and are not ours to move. */
+    for (k = 0; k < cv.nroutines; k++) {
+        struct routine *r = cv.routines[k];
+        int j;
+        for (j = 0; j < r->nlocal_order; j++) {
+            struct sym *s = NULL;
+            int q;
+            for (q = 0; q < r->nlocals; q++)
+                if (strcmp(r->locals[q]->name, r->local_order[j]) == 0) {
+                    s = r->locals[q];
+                    break;
+                }
+            if (s == NULL || s->is_param || s->is_static)
+                continue;
+            if (!(s->is_array || s->ty == TY_S))
+                continue;
+            r->heap_locals = 1;
+            s->acc = pstr(sfmt("__L->%s", cvar(s->name)));
+        }
+    }
     cv.tmpn = 0;
     cv.out_main.n = 0;
     cv.out_body.n = 0;
