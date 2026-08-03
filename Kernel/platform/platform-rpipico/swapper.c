@@ -79,11 +79,11 @@ static struct mapentry* find_free_block(ptptr p)
         #ifdef DEBUG
             kprintf("alloc failed, finding a process to swap out");
         #endif
+        /* Silent: running out here is not necessarily a failure any
+           more - pagemap_alloc has a second way to place a forked
+           child - so the callers say so when it really is one. */
         if (!swapneeded(p, true))
-        {
-            kprintf("warning: out of memory\n");
             return NULL;
-        }
     }
 }
 
@@ -131,11 +131,15 @@ void pagemap_free(ptptr p)
 	p->p_page = 0;
 }
 
-int pagemap_alloc(ptptr p)
+/*
+ *	All or nothing.  The blocks taken before we ran out are given back:
+ *	newproc() abandons the slot on ENOMEM without calling pagemap_free,
+ *	and since the slot stays P_EMPTY nothing else ever will either, so
+ *	whatever we kept would be lost for the rest of the boot.  One
+ *	failed fork of bcrun used to cost 132K of a 312K machine.
+ */
+static int pagemap_alloc_resident(ptptr p)
 {
-	if (p == udata.u_ptab)
-		return 0;
-
     int blocks = get_proc_size_blocks(p);
     int slot = get_slot(p);
     #ifdef DEBUG
@@ -147,7 +151,15 @@ int pagemap_alloc(ptptr p)
     {
         struct mapentry* b = find_free_block(p);
         if (!b)
+        {
+            for (int j=0; j<i; j++)
+            {
+                struct mapentry* c = find_block(slot, j);
+                if (c)
+                    c->slot = c->block = 0xff;
+            }
             return ENOMEM;
+        }
         b->slot = slot;
         b->block = i;
     }
@@ -160,6 +172,65 @@ int pagemap_alloc(ptptr p)
 	return 0;
 }
 
+/*
+ *	Set by pagemap_alloc when a fork found no room for a second
+ *	resident copy, consumed by clonecurrentprocess.  Interrupts are off
+ *	from newproc() through dofork(), so one word is enough.
+ */
+static uint32_t fork_stage;
+
+/*
+ *	Where a swapped-out process's image lives, indexed by process slot.
+ *	Kept here rather than in p_page2 because that is a uint16_t and
+ *	cannot hold a pointer; p_page2 keeps its "is it swapped" role for
+ *	the generic kernel, and where the bytes are is our business.
+ *	Declared this early because clonecurrentprocess writes it too.
+ */
+static uint32_t swapaddr[PTABSIZE];
+
+int pagemap_alloc(ptptr p)
+{
+	if (p == udata.u_ptab)
+		return 0;
+
+	fork_stage = 0;
+
+	if (pagemap_alloc_resident(p) == 0)
+		return 0;
+
+	/* A process coming back IN from PSRAM has to have real memory:
+	   its image is already in the arena and there is nowhere else for
+	   it to go.  p_page2 marks it; newproc() memsets a new p_tab, so
+	   for a fresh child it is 0. */
+	if (p->p_page2 || !udata.u_ptab)
+	{
+		kprintf("warning: out of memory\n");
+		return ENOMEM;
+	}
+
+	/*
+	 *	A fork, with room for only one of the two images.  Parent and
+	 *	child are identical at this instant, so which of them is
+	 *	called the copy is free: stage the PARENT into PSRAM and let
+	 *	the child keep the resident blocks it is already executing in
+	 *	(clonecurrentprocess does the relabelling).
+	 *
+	 *	Without this, fork needs 2x the process resident and nothing
+	 *	larger than half of USERMEM can fork at all - bcrun with a
+	 *	program loaded is ~172K of a 312K machine, which is why every
+	 *	SAVE IMAGE ended in "cannot start a program".
+	 */
+	fork_stage = arena_alloc_raw(udata.u_ptab,
+				     (unsigned)get_proc_size_blocks(p) * BLOCKSIZE);
+	if (!fork_stage)
+	{
+		kprintf("warning: out of memory\n");
+		return ENOMEM;
+	}
+	p->p_page = 1;
+	return 0;
+}
+
 /* size does *not* include udata */
 int pagemap_realloc(struct exec *hdr, usize_t size)
 {
@@ -169,8 +240,9 @@ int pagemap_realloc(struct exec *hdr, usize_t size)
     int blocks = (int)alignup(size + UDATA_SIZE, BLOCKSIZE) / BLOCKSIZE;
     int slot = get_slot(p);
 
-    /* The whole process must fit its fixed-size swap slot: growing past
-     * PROGSIZE would make swapout overwrite the neighbouring slot. */
+    /* Swap is an allocation the size of the process now, not a fixed
+     * slot, so the only ceiling left is the address space a process can
+     * be resident in - which is all of it (see PROGSIZE in config.h). */
     if (blocks * BLOCKSIZE > PROGSIZE + UDATA_SIZE)
         return ENOMEM;
 
@@ -197,7 +269,20 @@ int pagemap_realloc(struct exec *hdr, usize_t size)
         {
             struct mapentry* b = find_free_block(p);
             if (!b)
+            {
+                /* Unwind: p_top still says oldblocks, so anything we
+                   kept would be invisible to contextswitch and to the
+                   next grow, which would then hand out a second block
+                   with the same index. */
+                for (int j=oldblocks; j<i; j++)
+                {
+                    struct mapentry* c = find_block(slot, j);
+                    if (c)
+                        c->slot = c->block = 0xff;
+                }
+                kprintf("warning: out of memory\n");
                 return ENOMEM;
+            }
             b->slot = slot;
             b->block = i;
         }
@@ -393,6 +478,41 @@ void clonecurrentprocess(ptptr p)
     int srcslot = get_slot(udata.u_ptab);
     int destslot = get_slot(p);
     int blocks = get_proc_size_blocks(p);
+
+    /*
+     *	Only one of the two images fits in RAM (see pagemap_alloc).  The
+     *	copy goes to PSRAM and is called the PARENT, because the blocks
+     *	we are executing in right now are the ones dofork returns into
+     *	as the child.  Nothing moves and nothing is freed - the resident
+     *	blocks just change their label.
+     *
+     *	The parent's udata rides along in block 0, and dofork saved its
+     *	stack pointer into it before calling us, so the image is a
+     *	complete swapped-out process: the ordinary swapin path brings it
+     *	back when it is next scheduled, by which time the child has run
+     *	and the room exists.
+     */
+    if (fork_stage)
+    {
+        ptptr parent = udata.u_ptab;
+        for (int i=0; i<blocks; i++)
+        {
+            struct mapentry* b = find_block(srcslot, i);
+            if (!b)
+                panic("missing block");
+            memcpy((void *)(fork_stage + (uint32_t)i * BLOCKSIZE),
+                   (void*)PROGBASE + (b - allocation_map)*BLOCKSIZE,
+                   BLOCKSIZE);
+            b->slot = destslot;
+        }
+        swapaddr[srcslot] = fork_stage;
+        sysinfo.swapusedk += ((unsigned)blocks * BLOCKSIZE) >> 10;
+        parent->p_page = 0;
+        parent->p_page2 = 1;    /* "swapped" - the address is ours */
+        fork_stage = 0;
+        return;
+    }
+
     for (int i=0; i<blocks; i++)
     {
         struct mapentry* b1 = find_block(srcslot, i);
@@ -485,9 +605,9 @@ static uint32_t sum_words(uint32_t sum, const void *base, unsigned len)
  *	The address is kept here, indexed by process slot, because
  *	p_page2 is a uint16_t and cannot hold a pointer.  p_page2 keeps
  *	its "is it swapped" role for the generic kernel; where the bytes
- *	are is the platform's business.
+ *	are is the platform's business.  (swapaddr[] itself is declared up
+ *	beside pagemap_alloc, which now also has to set it.)
  */
-static uint32_t swapaddr[PTABSIZE];
 
 int swapout(ptptr p)
 {

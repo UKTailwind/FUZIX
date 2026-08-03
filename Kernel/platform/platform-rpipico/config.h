@@ -190,12 +190,19 @@
 
 #define USERMEM ((TOTALMEM-NETMEM)*1024)
 
-/* 256K process ceiling (Pico Computer 3): resident memory is packed at
- * actual size in 4K chunks and swap I/O only covers up to u_break, so
- * small processes cost what they always did - the ceiling just permits
- * big applications (BBC BASIC, the C compiler passes with headroom).
- * With 8 MiB of PSRAM swap the slot count stays at 31. */
-#define PROGSIZE (262144 - UDATA_SIZE)
+/* The process ceiling is now all of user memory (Pico Computer 3).
+ * Resident memory is packed at actual size in 4K chunks, so small
+ * processes still cost what they always did; what changed is that swap
+ * is a PSRAM allocation the size of the process rather than a fixed
+ * slot, so nothing forces a limit below the address space a process can
+ * actually be resident in.  The old 262144 was the slot size - an
+ * 8-bit machine's decision - and it stopped bcrun loading a 140K
+ * translated BASIC program on a 312K machine with 8 MiB of PSRAM.
+ *
+ * A process this big leaves nothing else resident.  That is fine: the
+ * others swap, and fork stages the parent into PSRAM rather than
+ * needing two copies in RAM at once (see swapper.c). */
+#define PROGSIZE (USERMEM - UDATA_SIZE)
 extern uint8_t progbase[USERMEM];
 #define udata (*(struct u_data*)progbase)
 
