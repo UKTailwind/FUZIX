@@ -2,9 +2,9 @@
 
   python ctrl.py 03 04 0d
 """
-import sys, time, serial
+import os, sys, time, serial
 
-PORT, BAUD = "COM11", 115200
+PORT, BAUD = os.environ.get("FZPORT", "COM11"), 115200
 
 with serial.Serial(PORT, BAUD, timeout=0.3) as ser:
     time.sleep(0.3)

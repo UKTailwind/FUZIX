@@ -120,6 +120,12 @@ int plt_dev_ioctl(uarg_t request, char *data)
     }
 #endif
 #ifdef CONFIG_PC3_DISPLAY
+    /* Everything below draws through the CALLER's own write target, so
+     * point the primitives at it before any of them runs.  Unconditional
+     * rather than picked out per request: it is a compare and a store,
+     * and the one thing that must never happen is a drawing ioctl that
+     * was missed off the list landing in another process's layer. */
+    display_fb_enter(udata.u_ptab);
     if (request == GFXIOC_MODE)
     {
         int m;
@@ -229,11 +235,22 @@ int plt_dev_ioctl(uarg_t request, char *data)
                                             : display_gfx_map((uint32_t)gb.bg),
                                   gb.bits);
     }
-    if (request == GFXIOC_FBSEL)
+    if (request == GFXIOC_FBOPEN)
     {
         /* data is the value itself, not a pointer: one int in, like
            GFXIOC_MODE's neighbours. */
-        if (display_fb_select((int)(intptr_t)data)) {
+        int r = display_fb_open(udata.u_ptab, (int)(intptr_t)data);
+        if (r) {
+            /* EBUSY and EINVAL say different things, and a program that
+               cannot have the layer deserves to know which. */
+            udata.u_error = (r == -2) ? EBUSY : EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    if (request == GFXIOC_FBSEL)
+    {
+        if (display_fb_select(udata.u_ptab, (int)(intptr_t)data)) {
             udata.u_error = EINVAL;
             return -1;
         }
@@ -241,10 +258,15 @@ int plt_dev_ioctl(uarg_t request, char *data)
     }
     if (request == GFXIOC_FBCOPY)
     {
-        if (display_fb_copy()) {
+        if (display_fb_copy(udata.u_ptab, (int)(intptr_t)data)) {
             udata.u_error = EINVAL;
             return -1;
         }
+        return 0;
+    }
+    if (request == GFXIOC_VSYNC)
+    {
+        display_wait_vblank();
         return 0;
     }
     if (request == GFXIOC_INFO)
@@ -266,7 +288,10 @@ int plt_dev_ioctl(uarg_t request, char *data)
             udata.u_error = EINVAL;
             return -1;
         }
-        if (uget(gb.buf, disp_fb + gb.offset, gb.len))
+        /* Into the caller's write target, not disp_fb: BLIT is a drawing
+         * operation like the rest, so a shadow-buffer program keeps
+         * working when it is pointed at the layer. */
+        if (uget(gb.buf, display_fb_target() + gb.offset, gb.len))
             return -1;
         return 0;
     }
@@ -434,6 +459,12 @@ const uint8_t *plt_script_interp(void)
 void plt_exec_cleanup(void)
 {
     arena_release(udata.u_ptab);
+#ifdef CONFIG_PC3_DISPLAY
+    /* The new image did not create it and has no idea it is selected;
+     * leaving the claim would have it drawing into a layer it cannot
+     * show. */
+    display_fb_release(udata.u_ptab);
+#endif
 }
 
 usize_t valaddr(const uint8_t *base, usize_t size, uint_fast8_t is_write)

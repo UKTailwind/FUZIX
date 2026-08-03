@@ -131,17 +131,33 @@ struct gfx_batch {
 
 /* The off-screen layer - MMBasic's FRAMEBUFFER, in PSRAM.
  *
- * FBSEL takes 0 for the screen or 1 for the layer, and points the
- * drawing primitives at it; scanout is unaffected and always shows
- * disp_fb, so a picture built with FBSEL 1 appears only on FBCOPY.
- * That is MMBasic's draw-off-screen-then-show shape, and the reason the
- * layer can live in PSRAM at all: it is written and blitted, never
- * scanned out.
+ * Scanout is unaffected and always shows disp_fb, so a picture built in
+ * the layer appears only on FBCOPY.  That is MMBasic's
+ * draw-off-screen-then-show shape, and the reason the layer can live in
+ * PSRAM at all: it is written and blitted, never scanned out.
  *
- * FBSEL 1 fails with EINVAL on a board with no PSRAM rather than
- * quietly drawing nowhere. */
+ * There is one layer and it is OWNED.  FBOPEN 1 claims it - EBUSY if
+ * another process already has it, EINVAL on a board with no PSRAM - and
+ * FBOPEN 0 gives it back; so does exiting, exec'ing, or changing mode,
+ * because none of those leave a picture worth keeping.  MMBasic's
+ * CREATE and CLOSE F, which are a GetMemory/FreeMemory pair there and a
+ * claim on the one static layer here.
+ *
+ * The claim exists because the write target is PER PROCESS.  FBSEL 1
+ * points the drawing primitives at the layer for the CALLER only:
+ * anything else that draws - another program, the console repainting -
+ * still lands on the screen.  A single global target would mean a
+ * program that blocked with the layer selected had its picture written
+ * over by whatever ran next, and one that exited without deselecting
+ * left the whole machine drawing off-screen. */
+#define GFXIOC_FBOPEN 0x0018		/* int: 1 claim the layer, 0 release */
 #define GFXIOC_FBSEL  0x0016		/* int: 0 screen, 1 layer */
-#define GFXIOC_FBCOPY 0x0017		/* layer -> screen */
+#define GFXIOC_FBCOPY 0x0017		/* int: 0 layer->screen, 1 screen->layer */
+
+/* Block until the top of vertical blanking - MMBasic's FRAMEBUFFER WAIT,
+ * and what FRAMEBUFFER COPY ...,B does first.  No argument.  Bounded: if
+ * the scanout has stopped this returns rather than hanging the caller. */
+#define GFXIOC_VSYNC  0x0019
 /* Bounds the kernel's work per call.  A caller with more chunks; the
  * runtime does that invisibly, and it keeps one ioctl from holding the
  * cpu for an unbounded time. */

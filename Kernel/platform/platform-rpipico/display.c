@@ -135,41 +135,90 @@ int display_fb2_ok(void)
  * never looks at this: core1 always DMAs out of disp_fb, so pointing
  * this at the layer is exactly MMBasic's "FRAMEBUFFER WRITE F" - the
  * picture is built off-screen and appears on the COPY.
+ *
+ * It is DERIVED state, recomputed by display_fb_enter() at every
+ * graphics ioctl from who is calling.  The truth is the two variables
+ * below: which process holds the layer, and whether it is currently
+ * drawing into it.  Anyone else - another program, the console's own
+ * repaint - gets the screen, whatever the holder last asked for.
  */
+static struct p_tab *fb_owner;          /* NULL = the layer is free */
+static uint8_t fb_sel;                  /* owner is drawing into it */
 static uint8_t *gfx_draw = disp_fb;
 
-/* 0 = the screen, 1 = the PSRAM layer.  Returns -1 if asked for a layer
- * this board cannot provide, rather than silently drawing nowhere. */
-int display_fb_select(int which)
+void display_fb_enter(struct p_tab *who)
+{
+    gfx_draw = (fb_sel && fb_owner == who) ? disp_fb2 : disp_fb;
+}
+
+uint8_t *display_fb_target(void)
+{
+    return gfx_draw;
+}
+
+/*
+ * Claim or release the layer - MMBasic's FRAMEBUFFER CREATE and CLOSE F.
+ * There is one layer, so a second claimant is told so (-2) rather than
+ * quietly sharing a buffer with another program.  -1 means this board
+ * has no PSRAM to put one in.
+ */
+int display_fb_open(struct p_tab *who, int claim)
+{
+    if (!claim) {
+        display_fb_release(who);
+        return 0;
+    }
+    if (!display_fb2_ok())
+        return -1;
+    if (fb_owner && fb_owner != who)
+        return -2;
+    fb_owner = who;
+    return 0;
+}
+
+void display_fb_release(struct p_tab *who)
+{
+    if (fb_owner == who) {
+        fb_owner = NULL;
+        fb_sel = 0;
+        gfx_draw = disp_fb;
+    }
+}
+
+/* 0 = the screen, 1 = the layer.  Only its holder may select the layer;
+ * anyone else gets -1 rather than silently drawing nowhere. */
+int display_fb_select(struct p_tab *who, int which)
 {
     if (which == 0) {
+        if (fb_owner == who)
+            fb_sel = 0;
         gfx_draw = disp_fb;
         return 0;
     }
-    if (which == 1 && display_fb2_ok()) {
-        gfx_draw = disp_fb2;
-        return 0;
-    }
-    return -1;
+    if (which != 1 || fb_owner != who)
+        return -1;
+    fb_sel = 1;
+    gfx_draw = disp_fb2;
+    return 0;
 }
 
-int display_fb_selected(void)
-{
-    return gfx_draw == disp_fb2;
-}
-
-/* Blit the layer onto the screen - the whole live framebuffer, which is
- * stride*rows for a graphics mode and the console's own size otherwise.
- * One memcpy: the layer holds the mode's own layout, so no conversion. */
-int display_fb_copy(void)
+/* Blit between the layer and the screen - the whole live framebuffer,
+ * which is stride*rows for a graphics mode and the console's own size
+ * otherwise.  One memcpy: the layer holds the mode's own layout, so
+ * there is no conversion.  MMBasic's FRAMEBUFFER COPY, whose source and
+ * destination we can offer both ways round for the same memcpy. */
+int display_fb_copy(struct p_tab *who, int to_layer)
 {
     int n = display_gfx_fbsize();
 
-    if (!display_fb2_ok())
+    if (fb_owner != who || !display_fb2_ok())
         return -1;
     if (n <= 0 || n > DISP_FB_POOL)
         n = DISP_FB_POOL;
-    memcpy(disp_fb, disp_fb2, (unsigned)n);
+    if (to_layer)
+        memcpy(disp_fb2, disp_fb, (unsigned)n);
+    else
+        memcpy(disp_fb, disp_fb2, (unsigned)n);
     return 0;
 }
 uint8_t disp_tile_fg[DISP_ROWS * DISP_COLS];
@@ -666,6 +715,17 @@ static void gfx_wait_vblank(void)
         tight_loop_contents();
 }
 
+/* The same wait, for userland: MMBasic's FRAMEBUFFER WAIT, and what
+ * FRAMEBUFFER COPY ...,B does before it copies.  Line 0 exactly, which
+ * is MMBasic's own "while(v_scanline!=0)": a caller gets the whole
+ * blanking interval, and then the frame, before scanout reaches what it
+ * is about to overwrite.  A 38K copy outlasts blanking either way, so
+ * this reduces tearing rather than abolishing it. */
+void display_wait_vblank(void)
+{
+    gfx_wait_vblank();
+}
+
 /* Enter a graphics mode - BBC 0-5, or MODE 7 (320x240, 16 colours) -
  * or 0xFF back to the text console.  Returns the framebuffer size, or
  * -1 for a mode we do not have.
@@ -725,6 +785,15 @@ int display_gfx_mode(int mode)
     default:
         return -1;
     }
+
+    /* The layer holds a picture in the OLD mode's geometry, and nothing
+     * converts it - so it does not survive the change.  MMBasic's
+     * setmode() opens with closeframebuffer('A') for the same reason;
+     * this is that, and it is why a program creates its framebuffer
+     * after choosing its mode, never before. */
+    fb_owner = NULL;
+    fb_sel = 0;
+    gfx_draw = disp_fb;
 
     rebuild = (newtim != tim);
 

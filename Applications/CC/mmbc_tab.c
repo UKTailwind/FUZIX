@@ -35,6 +35,7 @@ static const struct builtin builtins[] = {
     { "STRING$", 2, 2 }, { "LTRIM$", 1, 1 }, { "RTRIM$", 1, 1 },
     { "FORMAT$", 1, 2 },
     { "DATE$", 0, 0 }, { "TIME$", 0, 0 }, { "CWD$", 0, 0 },
+    { "INKEY$", 0, 0 },
     { "EOF", 1, 1 }, { "LOC", 1, 1 }, { "LOF", 1, 1 }, { "INPUT$", 2, 2 },
     { "CHOICE", 3, 3 }, { "BOUND", 1, 2 }, { "TRIM$", 1, 3 },
     { "FIELD$", 2, 4 },
@@ -64,7 +65,7 @@ static const char *strfuncs[] = {
     "BIN$", "UCASE$", "LCASE$", "SPACE$", "STRING$", "LTRIM$",
     "RTRIM$", "TAB", "FORMAT$", "TRIM$", "FIELD$", "DATE$",
     "TIME$", "DATETIME$", "DAY$", "BIN2STR$", "INPUT$", "DIR$",
-    "CWD$", "LGETSTR$",
+    "CWD$", "INKEY$", "LGETSTR$",
     NULL
 };
 

@@ -831,6 +831,64 @@ appears on the picture. It is visible in a `SAVE IMAGE` of the whole
 screen as a difference in the top text line. Restricting the saved
 region avoids it; directing program output elsewhere is planned.
 
+## Animation: `FRAMEBUFFER`
+
+Drawing straight to the screen means the monitor shows the picture
+half-finished — the erase, then each shape appearing in turn. MMBasic's
+answer is to build the frame off-screen and show it in one go, and it
+is here:
+
+```basic
+MODE 2
+FRAMEBUFFER CREATE
+FRAMEBUFFER WRITE F
+DO
+  CLS
+  CIRCLE x, y, 20, , , 0, RGB(YELLOW)
+  FRAMEBUFFER COPY F, N, B
+LOOP WHILE INKEY$ = ""
+```
+
+| | |
+|---|---|
+| `FRAMEBUFFER CREATE` | make the off-screen buffer, blank |
+| `FRAMEBUFFER WRITE N` \| `F` | send drawing to the screen, or to the buffer |
+| `FRAMEBUFFER COPY s, d [, B]` | `s` and `d` each `N` or `F`; `B` starts at the top of the frame |
+| `FRAMEBUFFER CLOSE [F]` | give the buffer back |
+| `FRAMEBUFFER WAIT` | wait for the top of the frame |
+
+Everything that draws follows `WRITE`, `CLS` included — so `CLS` while
+writing to `F` clears the buffer, in the background colour, and leaves
+the picture on the screen alone.
+
+`CREATE` belongs **after** `MODE`. A mode change throws the buffer away,
+because what is in it is in the geometry of the mode being left and
+nothing converts it. That is MMBasic's rule too. You do not have to
+`CLOSE`: the buffer comes back automatically when the program ends.
+
+Only one program can hold the buffer at a time — a second one is told
+so rather than quietly sharing it — and only the program holding it
+draws into it. Anything else that draws while your program is between
+frames, a shell prompt included, still goes to the screen.
+
+**What it costs.** The buffer is in PSRAM, so drawing into it is about
+2.4× the cost of drawing on the screen — a full-screen fill measured
+1.49 ms direct against 3.63 ms buffered. The copy back is 38,400 bytes
+at about 53 MB/s, or **0.73 ms**. So a redraw-and-show frame costs
+somewhere near 4.4 ms against the 17 ms the display gives you, and
+`COPY ... ,B` holds the loop to the refresh rate: 59 frames a second,
+with room for roughly three times as much drawing before one is
+dropped.
+
+Not yet: `FRAMEBUFFER LAYER` and `FRAMEBUFFER MERGE`. There is one
+off-screen buffer and no transparent blit; both are refused by name
+rather than translated into something they are not.
+
+`INKEY$` returns the key that has been pressed, or `""` if none has,
+without waiting — which is how the loop above ends. It leaves the
+terminal as it found it, so `INPUT` still works afterwards and a
+program stopped with Ctrl-C does not take the shell's echo with it.
+
 ## Running another program: `SYSTEM`, `SAVE IMAGE`, `LOAD IMAGE`
 
 `SYSTEM` runs a program and waits for it:
@@ -1188,7 +1246,8 @@ translate time, not at run time.
 | `DATE$` | `DIM` | `DO` | `ELSE` |
 | `ELSEIF` | `END` | `ENDIF` | `ERASE` |
 | `ERROR` | `EXIT` | `FILES` | `FOR` |
-| `FUNCTION` | `GOSUB` | `GOTO` | `IF` |
+| `FRAMEBUFFER` | `FUNCTION` | `GOSUB` | `GOTO` |
+| `IF` |  |  |  |
 | `INC` | `INPUT` | `KILL` | `LET` |
 | `LINE` | `LOCAL` | `LONGSTRING` | `LOOP` |
 | `CIRCLE` | `COLOUR` | `LOAD IMAGE` | `MATH` |
@@ -1214,8 +1273,9 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `DATE$` | `DATETIME$` | `DAY$` | `DEG` |
 | `DIR$` | `EOF` | `EPOCH` | `EXP` |
 | `FIELD$` | `FIX` | `FORMAT$` | `HEX$` |
-| `INPUT$` | `INSTR` | `INT` | `LCASE$` |
-| `LCOMPARE` | `LEFT$` | `LEN` | `LGETBYTE` |
+| `INKEY$` | `INPUT$` | `INSTR` | `INT` |
+| `LCASE$` | `LCOMPARE` | `LEFT$` | `LEN` |
+| `LGETBYTE` |  |  |  |
 | `LGETSTR$` | `LINPUT` | `LINSTR` | `LLEN` |
 | `LOC` | `LOF` | `LOG` | `LTRIM$` |
 | `MATH` | `MAX` | `MID$` | `MIN` |
@@ -1249,10 +1309,13 @@ v0.5 — while the immediate-mode ones will never apply, since a
 translated program is compiled and run rather than typed at a prompt.
 (`mmedit` provides the editing they existed for.)
 
-Of the graphics, `MODE`, `COLOUR`, `PIXEL`, `LINE`, `CIRCLE` and
-`RGB()` are done; `BOX`, `TRIANGLE`, `TEXT` and the array form of
-`PIXEL` are not yet. In `MODE 2` a program's `PRINT` output does not
-yet share the screen with the graphics as it does in MMBasic, and
-there is no `OPTION CONSOLE` to steer it; both are next.
+Of the graphics, `MODE`, `COLOUR`, `PIXEL`, `LINE`, `CIRCLE`, `RGB()`
+and `FRAMEBUFFER` are done; `BOX`, `TRIANGLE`, `TEXT` and the array
+form of `PIXEL` are not yet, nor are `FRAMEBUFFER LAYER` and
+`FRAMEBUFFER MERGE`. In `MODE 2` a program's `PRINT` output does not
+yet share the screen with the graphics as it does in MMBasic — it goes
+to the console, and so to the screen even while drawing goes to the
+framebuffer — and there is no `OPTION CONSOLE` to steer it; both are
+next.
 
 \newpage

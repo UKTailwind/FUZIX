@@ -215,6 +215,7 @@ static void w_mkdir(void)    { mm_mkdir(Ps(0)); A = 0; }
 static void w_rmdir(void)    { mm_rmdir(Ps(0)); A = 0; }
 static void w_chdir(void)    { mm_chdir(Ps(0)); A = 0; }
 static void w_cwd(void)      { A = mm_off(mm_cwd()); }
+static void w_inkey(void)    { A = mm_off(mm_inkey()); }
 static void w_dir(void)      { A = mm_off(mm_dir(Ps(0), I(1), I(2))); }
 static void w_files(void)    { mm_files(Ps(0)); A = 0; }
 
@@ -297,6 +298,12 @@ static void w_plot(void)     { mm_plot((const short *)Pa(0), LL(1), LL(3));
                                A = 0; }
 static void w_fill(void)     { mm_fill((const short *)Pa(0), LL(1), LL(3));
                                A = 0; }
+/* FRAMEBUFFER - 0 is the screen, 1 the off-screen buffer */
+static void w_fb_create(void){ mm_fb_create(); A = 0; }
+static void w_fb_close(void) { mm_fb_close(); A = 0; }
+static void w_fb_write(void) { mm_fb_write(LL(0)); A = 0; }
+static void w_fb_copy(void)  { mm_fb_copy(LL(0), LL(2), LL(4)); A = 0; }
+static void w_fb_wait(void)  { mm_fb_wait(); A = 0; }
 
 /* LONGSTRING */
 static void w_ls_len(void)   { A = mm_ls_len(PI(0)); }
@@ -470,6 +477,7 @@ static const struct mmwrap {
 	{ "mm_rmdir",		w_rmdir },
 	{ "mm_chdir",		w_chdir },
 	{ "mm_cwd",		w_cwd },
+	{ "mm_inkey",		w_inkey },
 	{ "mm_dir",		w_dir },
 	{ "mm_files",		w_files },
 	{ "mm_data_init4",	w_data_init4 },
@@ -525,6 +533,11 @@ static const struct mmwrap {
 	{ "mm_bg",		w_bg },
 	{ "mm_plot",		w_plot },
 	{ "mm_fill",		w_fill },
+	{ "mm_fb_create",	w_fb_create },
+	{ "mm_fb_close",	w_fb_close },
+	{ "mm_fb_write",	w_fb_write },
+	{ "mm_fb_copy",		w_fb_copy },
+	{ "mm_fb_wait",		w_fb_wait },
 	{ "mm_ls_len",		w_ls_len },
 	{ "mm_ls_clear",	w_ls_clear },
 	{ "mm_ls_append",	w_ls_append },

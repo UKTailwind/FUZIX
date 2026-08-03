@@ -25,15 +25,43 @@ extern uint8_t disp_fb[DISP_FB_POOL];
 /* The off-screen layer, in PSRAM (see display.c). Check display_fb2_ok()
  * before touching it: a board without PSRAM has nowhere to put it.
  *
- * display_fb_select(1) points the DRAWING primitives at the layer -
- * scanout is unaffected and always reads disp_fb - and
- * display_fb_copy() blits it to the screen. MMBasic's FRAMEBUFFER
- * WRITE/COPY, with the same draw-off-screen-then-show shape. */
+ * This is MMBasic's FRAMEBUFFER "F", with the same draw-off-screen-then-
+ * show shape: selecting it points the DRAWING primitives at it, scanout
+ * is unaffected and always reads disp_fb, so the picture appears only on
+ * the copy.
+ *
+ * Which buffer the primitives write to is a property of the CALLING
+ * PROCESS, not of the machine: one process owns the layer at a time
+ * (display_fb_open), and every graphics ioctl re-points the primitives
+ * for whoever is making it (display_fb_enter). Without that, a program
+ * that selected the layer and then blocked would have the next process
+ * to draw - or the shell, or a repaint - land in its picture, and a
+ * program that exited without deselecting would leave the machine
+ * drawing off-screen with no way back.
+ *
+ * struct p_tab is Fuzix's process entry; display.h is included where
+ * kernel.h is not, so it stays incomplete here. */
+struct p_tab;
 extern uint8_t disp_fb2[DISP_FB_POOL];
 int display_fb2_ok(void);
-int display_fb_select(int which);
-int display_fb_selected(void);
-int display_fb_copy(void);
+/* claim (1) or give up (0) the layer.  0 ok, -1 no layer on this board,
+ * -2 another process holds it. */
+int display_fb_open(struct p_tab *who, int claim);
+/* 0 = the screen, 1 = the layer.  -1 if the caller has not claimed it. */
+int display_fb_select(struct p_tab *who, int which);
+/* Point the primitives at the caller's own target.  Called once per
+ * graphics ioctl; a process that owns nothing gets the screen. */
+void display_fb_enter(struct p_tab *who);
+/* Process gone (exit, exec) - drop any claim it held. */
+void display_fb_release(struct p_tab *who);
+/* to_layer 0: layer -> screen, 1: screen -> layer.  -1 unless the caller
+ * holds the layer. */
+int display_fb_copy(struct p_tab *who, int to_layer);
+/* Where the drawing primitives are currently pointed. */
+uint8_t *display_fb_target(void);
+/* Block until the top of vertical blanking (bounded: if the scanout has
+ * stopped this returns rather than hanging the caller). */
+void display_wait_vblank(void);
 extern uint8_t disp_tile_fg[DISP_ROWS * DISP_COLS];
 extern uint8_t disp_tile_bg[DISP_ROWS * DISP_COLS];
 

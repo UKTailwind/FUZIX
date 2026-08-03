@@ -413,6 +413,25 @@ void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
                const MMFLOAT *cf, const MMINTEGER *ci,
                MMINTEGER count);
 
+/* FRAMEBUFFER - draw off-screen, then show it in one go.  0 means the
+ * screen ("N") and 1 the off-screen buffer ("F"), in every argument
+ * below.  MMBasic's LAYER, MERGE and second buffers are not here yet.
+ *
+ * A mode change discards the buffer, so CREATE belongs after MODE.  It
+ * is also given up automatically when the program ends - nothing leaks
+ * if it never calls CLOSE. */
+void mm_fb_create(void);
+void mm_fb_close(void);
+void mm_fb_write(MMINTEGER which);
+/* wait: non-zero for MMBasic's ",B" - start at the top of the frame */
+void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait);
+void mm_fb_wait(void);
+
+/* INKEY$ - the key that has been pressed, or "" if none has.  Does not
+ * wait, and leaves the terminal as it found it, so INPUT still works
+ * and a program that stops does not take the shell's echo with it. */
+char *mm_inkey(void);
+
 /* ---- misc ----------------------------------------------------------- */
 void mm_error(const char *msg);     /* prints and exits                */
 void mm_end  (void);                /* the END statement               */

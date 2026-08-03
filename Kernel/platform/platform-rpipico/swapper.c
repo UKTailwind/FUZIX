@@ -5,6 +5,9 @@
 #include "config.h"
 #include "globals.h"
 #include "psram.h"
+#ifdef CONFIG_PC3_DISPLAY
+#include "display.h"
+#endif
 
 #undef DEBUG
 
@@ -115,6 +118,11 @@ void pagemap_free(ptptr p)
     /* the process is going away: its PSRAM arenas go with it, or a
        megabyte leaks with no OOM killer to recover it */
     arena_release(p);
+#ifdef CONFIG_PC3_DISPLAY
+    /* and so does the framebuffer layer, or the next program to ask for
+       one is told it is busy by a process that no longer exists */
+    display_fb_release(p);
+#endif
     int slot = get_slot(p);
     for (int i=0; i<NUM_ALLOCATION_BLOCKS; i++)
     {

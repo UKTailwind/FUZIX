@@ -1,115 +1,127 @@
-# FRAMEBUFFER: the plan
+# FRAMEBUFFER
 
-Written 2026-08-03, straight after v0.6, as the starting point for the
-next piece of work. Nothing here is built yet beyond what section 1
-describes.
+Written 2026-08-03 as a plan; rewritten the same day as a record, once
+it was built and measured on the board. Section 4 is the part worth
+keeping — it settles a design question the plan got wrong.
 
-## 1. What already exists
+## 1. What it is
 
-The kernel half is done and on the card:
+MMBasic's `FRAMEBUFFER` (Draw.c `cmd_framebuffer`), reduced to the "F"
+buffer:
 
-* `disp_fb[DISP_FB_POOL]` — the live screen. core1 DMAs scanlines out
-  of it, so **scanout is not switchable**; it always reads `disp_fb`.
-* `disp_fb2[DISP_FB_POOL] __uninitialized_psram("fb2")` in `display.c`
-  — one off-screen layer, placed in the PSRAM window by the linker.
-* `gfx_draw`, a pointer the drawing primitives write through
-  (`display.c` ~920–1180). `display_fb_select(0|1)` points it at the
-  screen or the layer; `display_fb_selected()` reports it.
-* `display_fb_copy()` — one `memcpy` of `display_gfx_fbsize()` bytes,
-  layer to screen.
-* `GFXIOC_FBSEL` (0x0016) and `GFXIOC_FBCOPY` (0x0017) in
-  `pico_ioctl.h` expose those two.
-* `DISP_FB_POOL` is 40960 — 320×256 at 4bpp, the largest mode the pool
-  serves. MODE 2 (320×240 at 4bpp) is 38400.
+    FRAMEBUFFER CREATE            make it, blank
+    FRAMEBUFFER WRITE N | F       drawing goes to the screen, or to it
+    FRAMEBUFFER COPY s, d [, B]   s and d each N or F; B waits for the
+                                  top of the frame first
+    FRAMEBUFFER CLOSE [F]         give it back
+    FRAMEBUFFER WAIT              wait for the top of the frame
 
-What does **not** exist: any BASIC-level `FRAMEBUFFER` command in
-`mmb2c`/`mmbc`, a second off-screen buffer, `COPY` with a choice of
-source and destination, freeing, or `MERGE`.
+`LAYER`, `MERGE` and the second buffers are **not** built. There is one
+off-screen buffer and no transparent blit; the translator refuses them
+by name rather than turning them into something they are not.
 
-## 2. What MMBasic actually does — the reference
+## 2. The kernel: the write target is per PROCESS
 
-From `Draw.c:cmd_framebuffer` in PicoMiteV6.00.02. Trust this over
-anything invented here.
+This was the whole of the difficulty, and it is not obvious from the
+BASIC side, where `CREATE` and `CLOSE` look like no-ops.
 
-    FRAMEBUFFER CREATE          FrameBuf = GetMemory(HRes*VRes/2)
-    FRAMEBUFFER LAYER           LayerBuf = GetMemory(HRes*VRes/2)
-    FRAMEBUFFER WRITE N|L|F     point WriteBuf at screen / layer / frame
-    FRAMEBUFFER COPY s, d [,B]  s and d each one of N, L, F
-    FRAMEBUFFER CLOSE F|L       FreeMemory, and fall back to the screen
-                                if the closed one was being written to
-    FRAMEBUFFER MERGE [c[,...]] layer onto the display, colour c
-                                treated as transparent
-    FRAMEBUFFER SYNC / WAIT     (PicoMite display-panel specific)
+`gfx_draw` — the pointer every drawing primitive writes through — is now
+**derived state**, recomputed by `display_fb_enter()` at the top of
+every graphics ioctl from *who is calling*. The truth is two variables
+in `display.c`:
 
-Points worth keeping:
+    static struct p_tab *fb_owner;   /* NULL = the layer is free */
+    static uint8_t fb_sel;           /* owner is drawing into it */
 
-* **Two buffers, not one.** F and L are separate and both optional.
-  Ours has a single hard-wired layer.
-* **They are ordinary heap allocations** — `GetMemory`/`FreeMemory` —
-  created on demand and freed on `CLOSE`. A program that never says
-  `FRAMEBUFFER CREATE` pays nothing.
-* `CREATE` on an existing buffer is an error ("Framebuffer already
-  exists"), not a silent no-op.
-* `WRITE F` with no `FrameBuf` is an error, so the failure is named
-  rather than drawing into nowhere.
-* `CLOSE` restores the write target if it was pointing at what is
-  being closed.
+Anything else that draws — another program, the console's own repaint —
+gets the screen, whatever the holder last asked for. A single global
+target would mean a program that blocked with the layer selected had
+its picture written over by whatever ran next, and one that exited
+without deselecting left the whole machine drawing off-screen with no
+way back.
 
-`MERGE`'s transparent-colour blit is the one genuinely new operation;
-everything else is selection and copying.
+So the layer is **owned**, one process at a time:
 
-## 3. The design question this raises
+* `GFXIOC_FBOPEN` (0x0018) claims it — `EBUSY` if another process has
+  it, `EINVAL` if the board has no PSRAM — and releases it.
+* `GFXIOC_FBSEL` (0x0016) points the primitives at it, for the caller
+  only, and only if the caller holds it.
+* `GFXIOC_FBCOPY` (0x0017) copies either way: 0 layer→screen,
+  1 screen→layer.
+* `GFXIOC_VSYNC` (0x0019) waits for the top of the frame. Bounded, so a
+  stopped scanout cannot hang the caller.
 
-`disp_fb2` is placed by the linker, which was right when it was one
-fixed layer but is wrong for MMBasic's model:
+Released in three places, and all three matter:
 
-* it costs 40 KB of PSRAM whether or not any program wants it (and
-  `psram_static_len()` makes the heap start above it);
-* there is exactly one, so `LAYER` and `CREATE` cannot both exist;
-* it cannot be freed.
+* `pagemap_free()` — exit. Without it the next program is told the
+  layer is busy by a process that no longer exists.
+* `plt_exec_cleanup()` — exec. The new image did not create it.
+* `display_gfx_mode()` — a mode change. What is in the buffer is in the
+  geometry of the mode being left and nothing converts it. MMBasic's
+  `setmode()` opens with `closeframebuffer('A')` for the same reason,
+  which is why `CREATE` belongs after `MODE`.
 
-Since v0.6 the kernel has a real PSRAM heap (`arena.c`, newlib
-`malloc`/`free` over an `_sbrk` that walks the PSRAM window), and
-processes already own arena allocations that are released on exit
-(`pagemap_free` → `arena_release`). **So the layer should be an
-ordinary arena allocation owned by the calling process**: created on
-demand, freed on `CLOSE` or on exit, and two of them possible.
+`GFXIOC_BLIT` writes through the same target, so a shadow-buffer
+program keeps working when pointed at the layer.
 
-That retires `__uninitialized_psram("fb2")` and the `psram_static_len()`
-reservation with it.
+## 3. The BASIC side
 
-## 4. Measure before building
+`mmb2c.py` first, mirrored into `mmbc`, `cgate.sh` byte-identical.
+Runtime calls in `mmb_runtime.c`: `mm_fb_create/close/write/copy/wait`.
+The rules — what is refused, and when — are common to every target, so
+a program behaves the same under the host gates as on the board; only
+five hardware hooks differ, and on the host they do nothing.
 
-The XIP cache is 16 KB and a MODE 2 buffer is 38,400 bytes, so a
-full-screen draw-then-copy **will not** behave like the eclipse's 3 KB
-of arrays, which fit the cache and cost nothing measurable.
+**`CLS` follows `WRITE`.** It was an ANSI escape to the console, and the
+console writes straight to `disp_fb` — so with `WRITE F` it cleared the
+*screen* and left the buffer accumulating every frame ever drawn. It
+now floods whatever is being drawn on, in the background colour, and
+falls back to the console's own clear (cursor and colour tiles) when
+that is the screen.
 
-Before committing to a design, measure on the board:
+Gated: `tests/framebuf.bas` and `tests/fbwrite.bas` check the refusals.
+That needed a harness addition — `mm_error` exits 1 and every gate
+insisted on 0 — so `tests/<name>.rc` now says what exit status is
+expected. `samples/fborbit.bas` is a real animation, and lives in
+`samples/` because it loops until a key and so has no finish for a gate
+to compare.
 
-1. a full-screen plot into `disp_fb` (SRAM) against the same into
-   `disp_fb2` (PSRAM) — `utils/linebench.c` and `utils/gfxtest.c` are
-   the closest existing harnesses;
-2. `display_fb_copy()`, i.e. a 38,400-byte PSRAM→SRAM `memcpy`, which
-   at the measured 12 MB/s is about 3.2 ms — a plausible frame cost,
-   but confirm it.
+## 4. What it costs — measured, and NOT what the plan expected
 
-If drawing into PSRAM turns out to be the dominant cost, the
-alternative worth weighing is keeping the off-screen buffer in SRAM
-and spending the 40 KB there instead: TOTALMEM is 312 KB and a process
-may now use all of it, so that trade is no longer free the way it was
-when `PROGSIZE` capped a process at 256 KB.
+`tests/fbdemo.bas` on the board, MODE 2, repeatable to the microsecond:
 
-## 5. Then the BASIC side
+    full-screen fill, straight to the screen (SRAM)    1.488 ms
+    the same fill into the buffer (PSRAM)              3.628 ms
+    copy the 38,400-byte buffer to the screen          0.726 ms
+    animation frame, drawn direct                      1.185 ms
+    animation frame, buffered with ",B"               17.06  ms
 
-`mmb2c.py` first (it is the reference), then mirror into `mmbc` and
-check with `mmbc/cgate.sh` — byte-identical output over the suite is
-the definition of correct. The runtime calls go in `mmb_runtime.c` with
-wrappers in `bcrun_mm.c`, exactly as the existing graphics primitives
-do, and the masters live in the mmb2c repo (`fcc/sync-runtime.sh`,
-`fcc/sync-mmbc.sh`).
+**The plan predicted ~3.2 ms for the copy, from the 12 MB/s measured for
+PSRAM. The real figure is 0.726 ms — 53 MB/s, 4.4× better.** That
+12 MB/s was scattered access. A bulk sequential read streams through the
+QMI and uses every byte of every cache line, so the 16 KB XIP cache
+being far smaller than the 38,400-byte buffer costs nothing here. The
+worry that shaped the whole plan does not apply to the copy at all.
 
-A gated test belongs in `mmb2c/tests/` with a `.expected`, like
-`localheap.bas`. It cannot check pixels, so it should check what is
-checkable: that `CREATE` twice is an error, that `WRITE F` without a
-buffer is an error, that `CLOSE` releases (allocate/free in a loop and
-survive), and that `COPY` moves what was drawn.
+Drawing into PSRAM *is* 2.4× the cost of drawing on the screen. But the
+total is what matters: **3.6 ms to draw + 0.7 ms to copy = 4.4 ms**
+against the 17 ms the display gives you. The 17.06 ms buffered figure is
+not slowness — it is `,B` holding the loop to the refresh, one frame per
+iteration with none dropped, and about three times as much drawing would
+fit before one was.
+
+**So the design question is settled: the buffer stays in PSRAM.** The
+alternative the plan floated — spend 40 KB of SRAM on it instead — would
+buy 2.1 ms a frame out of a 12.6 ms surplus.
+
+## 5. What is left
+
+* `LAYER` and `MERGE`, which need a second buffer and a
+  transparent-colour blit. Only then is there a reason to make the
+  buffers arena allocations owned by the process rather than the one
+  static `disp_fb2` — with a single F buffer, `CREATE`/`CLOSE` really
+  are just a claim on it, and `__uninitialized_psram("fb2")` earns its
+  40 KB.
+* `MODE 2` `PRINT` still goes to the console, and so to the screen, even
+  while drawing goes to the buffer. `OPTION CONSOLE` is the fix and is
+  already on the list.
