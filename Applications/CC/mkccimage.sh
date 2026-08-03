@@ -102,6 +102,12 @@ echo "--- installing"
 	for f in "$CC"/hwtest/*.bas "$CC"/hwtest/*.in; do
 		[ -r "$f" ] && echo "get $f $(basename "$f")"
 	done
+	# The board-side sample runner, so the C suite can be re-run on the
+	# machine itself without sending anything: sh rs.sh > out.txt.
+	# It deletes each object before compiling, because a cc that fails
+	# otherwise leaves the previous one in place and the suite reports
+	# a pass for a build that never happened.
+	echo "get $CC/hwtest/runsamples.sh rs.sh"
 	# rc with the swap size matching the arena split; it MUST be
 	# executable or init cannot run it, and a boot without rc has a
 	# read-only root whose strangest symptom is "cannot make pipe"

@@ -75,14 +75,9 @@ mknod hdb   60660 16
 mknod hdb1  60660 17
 mknod hdb2  60660 18
 mknod hdb3  60660 19
-# hdc is the PSRAM disc, and /etc/rc does "swapon /dev/hdc 14208". The
-# node was missing from this list, swapon failed silently, and the first
-# symptom was a 200K process failing to fork with "warning: out of
-# memory" - on a machine with 8MB of swap that was never enabled.
-mknod hdc   60660 32
-mknod hdc1  60660 33
-mknod hdc2  60660 34
-mknod hdc3  60660 35
+# No hdc. The PSRAM swap disc is gone: the kernel allocates a region the
+# size of the process out of the PSRAM heap and memcpy's into it, so
+# there is no device to name and nothing to swapon.
 mknod null  20666 1024
 mknod kmem  20660 1025
 mknod zero  20444 1026

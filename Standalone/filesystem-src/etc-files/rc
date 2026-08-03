@@ -3,8 +3,9 @@ fsck -a -y /
 setdate
 remount -n / rw
 prtroot >/etc/mtab
-# 8 MiB PSRAM disc as swap (harmless error if no PSRAM fitted)
-swapon /dev/hdc 16256
+# No swapon. Swap is not a device any more: the kernel allocates a
+# region the size of the process out of the PSRAM heap and memcpy's
+# into it, so nothing here has to know a size.
 # USB keyboard layout: us uk de fr es be
 picoctl keymap uk
 #Uncomment if you have multiple file systems

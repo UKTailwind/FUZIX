@@ -60,7 +60,7 @@ static void plot(int x, int y)
         shadow[y * gi.stride + (x >> 3)] |= 0x80 >> (x & 7);
         return;
     }
-    ioctl(fd, GFXIOC_PIXEL, (void *)GFX_PIXEL_PACK(x, y, 1));
+    ioctl(fd, GFXIOC_PIXEL, (void *)GFX_PIXEL_PACK(x, y));
 }
 
 int main(int argc, char *argv[])
