@@ -22,14 +22,22 @@ for src in "$M"/tests/*.bas; do
 		echo "FAIL  $b (build)"; tail -3 "$W/$b.build.log"
 		fail=$((fail + 1)); continue
 	fi
+	# A test may be about something the runtime must REFUSE, and
+	# mm_error prints and exits(1) - so "ran and stopped" is the pass
+	# for it, and its message is part of the expected output.  Those
+	# run with stderr merged; without a tests/<name>.rc it is 0 and
+	# the two streams stay apart, as every test used to be.
+	exprc=0
+	[ -f "$M/tests/$b.rc" ] && exprc=$(cat "$M/tests/$b.rc")
 	if [ -f "$inp" ]; then
 		timeout 120 "$BIN/bcrun" "$W/$b.bc" < "$inp" > "$W/$b.out" 2> "$W/$b.err"
 	else
 		timeout 120 "$BIN/bcrun" "$W/$b.bc" > "$W/$b.out" 2> "$W/$b.err"
 	fi
 	rc=$?
-	if [ $rc != 0 ]; then
-		echo "FAIL  $b (exit $rc)"; tail -2 "$W/$b.err"
+	[ "$exprc" != 0 ] && cat "$W/$b.err" >> "$W/$b.out"
+	if [ $rc != "$exprc" ]; then
+		echo "FAIL  $b (exit $rc, expected $exprc)"; tail -2 "$W/$b.err"
 		fail=$((fail + 1)); continue
 	fi
 	# elapsed-time lines can never match a canned file; the gcc

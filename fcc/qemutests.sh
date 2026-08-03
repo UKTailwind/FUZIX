@@ -82,13 +82,20 @@ for src in "$M"/tests/*.bas; do
 	ref=$W/$b.expected.f
 	filt "$exp" "$ref"
 
+	# A test may be about something the runtime must REFUSE, and
+	# mm_error prints and exits(1) - so "ran and stopped" is the pass
+	# for it.  tests/<name>.rc says which status is expected; without
+	# one, 0, as every test used to be.
+	exprc=0
+	[ -f "$M/tests/$b.rc" ] && exprc=$(cat "$M/tests/$b.rc")
+
 	bad=
 	RUNENV= run_one "$W/$b.bc" "$inp" "$W/$b.nat"
-	[ $? = 0 ] || bad="$bad native-exit"
+	[ $? = "$exprc" ] || bad="$bad native-exit"
 	RUNENV=BCRUN_BYTECODE=1 run_one "$W/$b.bc" "$inp" "$W/$b.bcode"
-	[ $? = 0 ] || bad="$bad bytecode-exit"
+	[ $? = "$exprc" ] || bad="$bad bytecode-exit"
 	RUNENV= run_one "$WR/$b.bc" "$inp" "$W/$b.rec"
-	[ $? = 0 ] || bad="$bad reclaim-exit"
+	[ $? = "$exprc" ] || bad="$bad reclaim-exit"
 
 	for w in nat bcode rec; do
 		filt "$W/$b.$w" "$W/$b.$w.f"

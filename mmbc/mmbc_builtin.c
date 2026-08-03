@@ -184,6 +184,14 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval("mm_time_str()", TY_S);
     if (strcmp(up, "CWD$") == 0)
         return mkval("mm_cwd()", TY_S);
+    if (strcmp(up, "INKEY$") == 0)
+        /* The key that has been pressed, or "" - MMBasic's INKEY$, and
+           how a graphics program watches for one without stopping to
+           wait.  Before this it was not a function at all: "Inkey$"
+           became an ordinary string variable, always empty, so LOOP
+           WHILE INKEY$="" was an exit that could never be taken and the
+           program had to be interrupted. */
+        return mkval("mm_inkey()", TY_S);
     if (strcmp(up, "CHR$") == 0)
         return mkval(sfmt("mm_chr(%s)", n(0)), TY_S);
     if (strcmp(up, "LEFT$") == 0) {

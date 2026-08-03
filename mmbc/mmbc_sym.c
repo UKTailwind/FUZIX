@@ -133,6 +133,20 @@ int accept_kw(const char *s)
     return 0;
 }
 
+/* Which framebuffer a FRAMEBUFFER argument names.  N is the screen and
+   F the off-screen buffer; MMBasic's L, T and 2 name buffers this
+   machine does not have yet, so they are refused here rather than
+   quietly becoming one of these two. */
+int fb_buf(void)
+{
+    if (accept_kw("N"))
+        return 0;
+    if (accept_kw("F"))
+        return 1;
+    cv_err("expected N or F");
+    return 0;
+}
+
 /* ELSE terminates a statement too (single-line IF). */
 int stmt_end(void)
 {

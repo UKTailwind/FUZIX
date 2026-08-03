@@ -394,6 +394,53 @@ void statement_inner(void)
         emit(sfmt("mm_mode(%s);", as_int(n)));
         return;
     }
+    if (strcmp(up, "FRAMEBUFFER") == 0) {
+        /* FRAMEBUFFER CREATE | CLOSE [F] | WRITE N|F |
+                       COPY s, d [, B] | WAIT
+
+           MMBasic's Draw.c cmd_framebuffer, reduced to the "F" buffer:
+           draw off-screen, then show it in one COPY.  The machine has
+           one off-screen buffer and no transparent blit, so LAYER and
+           MERGE are refused by name below rather than translated into
+           something that is not them.
+
+           A mode change discards the buffer, both here and in the
+           kernel, so CREATE belongs after MODE - which is also where
+           MMBasic wants it, setmode() closing every buffer. */
+        cv.i++;
+        if (accept_kw("CREATE")) {
+            emit("mm_fb_create();");
+            return;
+        }
+        if (accept_kw("CLOSE")) {
+            accept_kw("F");             /* the only one there is to close */
+            emit("mm_fb_close();");
+            return;
+        }
+        if (accept_kw("WRITE")) {
+            emit(sfmt("mm_fb_write(%d);", fb_buf()));
+            return;
+        }
+        if (accept_kw("COPY")) {
+            int s, d, b = 0;
+            s = fb_buf();
+            expect_op(",");
+            d = fb_buf();
+            if (accept_op(",")) {
+                if (!accept_kw("B"))
+                    cv_err("FRAMEBUFFER COPY takes only B here");
+                b = 1;
+            }
+            emit(sfmt("mm_fb_copy(%d, %d, %d);", s, d, b));
+            return;
+        }
+        if (accept_kw("WAIT")) {
+            emit("mm_fb_wait();");
+            return;
+        }
+        cv_err("only FRAMEBUFFER CREATE, CLOSE, WRITE, COPY and "
+               "WAIT are translated");
+    }
     if (strcmp(up, "SYSTEM") == 0
         || ((strcmp(up, "SAVE") == 0 || strcmp(up, "LOAD") == 0)
             && is_kw("IMAGE", 1))) {

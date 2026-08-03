@@ -28,6 +28,21 @@ $(BUILD)/%.c: tests/%.bas mmb2c.py | $(BUILD)
 $(BUILD)/%: $(BUILD)/%.c mmb_runtime.c mmb_runtime.h
 	$(CC) $(CFLAGS) -o $@ $< mmb_runtime.c $(LDLIBS)
 
+# samples/ holds the programs that need a screen or a keyboard, so they
+# are built but never run - see samples/README.md.  Building them is
+# still worth doing: it is what catches a translator change that breaks
+# a shape only they use.
+SAMPLES := $(basename $(notdir $(wildcard samples/*.bas)))
+
+.PHONY: samples
+samples: $(addprefix $(BUILD)/s_,$(SAMPLES))
+
+$(BUILD)/s_%.c: samples/%.bas mmb2c.py | $(BUILD)
+	$(PYTHON) mmb2c.py $< -o $@
+
+$(BUILD)/s_%: $(BUILD)/s_%.c mmb_runtime.c mmb_runtime.h
+	$(CC) $(CFLAGS) -o $@ $< mmb_runtime.c $(LDLIBS)
+
 # a test may come with  tests/<name>.in  (stdin) and
 # tests/<name>.expected (what it should print).  Volatile lines - the ones
 # that report elapsed time - are filtered out of both sides.

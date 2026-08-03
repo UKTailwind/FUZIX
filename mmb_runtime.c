@@ -22,6 +22,16 @@
 #include <ctype.h>
 #include <time.h>
 
+/* INKEY$ has to read the console without waiting, which means the line
+ * discipline - see mm_inkey.  Windows has no termios and answers the
+ * same question with _kbhit/_getch. */
+#if defined(_WIN32)
+#include <conio.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#endif
+
 /* ================= scratch buffers ================================= */
 
 #ifdef MM_HOSTED
@@ -2235,8 +2245,85 @@ MMFLOAT mm_timer(void)
  * the console IS the display - it renders ANSI into the framebuffer and
  * resets the per-cell colours, which poking disp_fb directly would not
  * do.  A graphics-mode CLS will need the framebuffer path instead. */
+/*
+ * INKEY$ - the key that has been pressed, or "" if none has.
+ *
+ * MMBasic reads a keyboard buffer the interpreter itself fills; here it
+ * is a read from the console that must not wait.  So the terminal is
+ * put into raw mode for the read and taken straight back out of it -
+ * not left there, deliberately:
+ *
+ *   - INPUT and LINE INPUT go through stdio and need the line
+ *     discipline to give them a line at a time, with editing;
+ *   - a program that ends, or is stopped with Ctrl-C, must not leave
+ *     the shell with no echo and no line editing.
+ *
+ * Two tcsetattr calls per key poll is nothing against a frame: the
+ * loop that uses this is drawing 38,400 bytes between them.
+ *
+ * A console that is not a terminal - the gates run with stdin from a
+ * file - reads nothing and says so, rather than consuming the input a
+ * program's INPUT statements are waiting for.
+ */
+char *mm_inkey(void)
+{
+    char *t = mm_tmp();
+
+#if defined(_WIN32)
+    if (_kbhit()) {
+        t[0] = 1;
+        t[1] = (char)_getch();
+    }
+#else
+    {
+        struct termios cooked, raw;
+        unsigned char c;
+        int n;
+
+        if (!isatty(0) || tcgetattr(0, &cooked) != 0)
+            return t;
+        raw = cooked;
+        raw.c_lflag &= ~(unsigned)(ICANON | ECHO);
+        raw.c_cc[VMIN] = 0;             /* return with whatever is there */
+        raw.c_cc[VTIME] = 0;            /* and do not wait for it */
+        if (tcsetattr(0, TCSANOW, &raw) != 0)
+            return t;
+        n = (int)read(0, &c, 1);
+        tcsetattr(0, TCSANOW, &cooked);
+        if (n == 1) {
+            t[0] = 1;
+            t[1] = (char)c;
+        }
+    }
+#endif
+    return t;
+}
+
+/* Both defined with the FRAMEBUFFER block at the end of the file.
+ *
+ * mm_fb_forget is called from both MODE implementations: a mode change
+ * discards the off-screen buffer, because its contents are in the
+ * geometry of the mode being left and nothing converts them.  MMBasic's
+ * setmode() opens with closeframebuffer('A') for exactly that reason,
+ * and the kernel drops its side of the claim in display_gfx_mode();
+ * this keeps the two in step, so a stale "already exists" cannot outlive
+ * the buffer.
+ *
+ * mm_fb_cls is called from mm_cls, just below. */
+static void mm_fb_forget(void);
+static int mm_fb_cls(void);
+
+/* CLS clears whatever is being DRAWN on, which is not always the
+ * screen: with FRAMEBUFFER WRITE F it is the off-screen buffer, and
+ * clearing the screen instead would both wipe the picture that is
+ * showing and leave the buffer filling up with everything ever drawn
+ * into it.  mm_fb_cls says whether it took the clear; if not, this is
+ * the console's own, which also resets the cursor and the colour
+ * tiles - things a rectangle over the framebuffer would not. */
 void mm_cls(void)
 {
+    if (mm_fb_cls())
+        return;
     fputs("\033[2J\033[H", stdout);
     fflush(stdout);
 }
@@ -2394,6 +2481,13 @@ void mm_lfree(void *p)
     free(p);
 }
 
+/* Defined with the FRAMEBUFFER block at the end of the file, and called
+ * from both MODE implementations: a mode change discards the off-screen
+ * buffer, because its contents are in the geometry of the mode being
+ * left and nothing converts them.  MMBasic's setmode() opens with
+ * closeframebuffer('A') for exactly that reason, and the kernel drops
+ * its side of the claim in display_gfx_mode(); this keeps the two in
+ * step, so a stale "already exists" cannot outlive the buffer. */
 #if defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
 
 #include <fcntl.h>
@@ -2459,6 +2553,7 @@ void mm_mode(MMINTEGER n)
      * that was live when it was set, so the cached value is now
      * meaningless: force the next draw to push again. */
     mm_gfx_col = -1;
+    mm_fb_forget();
 }
 
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb)
@@ -2725,6 +2820,7 @@ void mm_mode(MMINTEGER n)
         return;
     }
     mm_host_mode = n;
+    mm_fb_forget();
 }
 
 MMINTEGER mm_hres(void) { return mm_host_mode == 2 ? 320 : 640; }
@@ -2761,3 +2857,173 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
 }
 
 #endif
+
+/*
+ * FRAMEBUFFER - draw off-screen, show it in one go.
+ *
+ * MMBasic's Draw.c cmd_framebuffer, reduced to the "F" buffer:
+ *
+ *   FRAMEBUFFER CREATE            make it, blank
+ *   FRAMEBUFFER WRITE N | F       send drawing to the screen or to it
+ *   FRAMEBUFFER COPY s, d [, B]   s and d each N or F; B waits for the
+ *                                 top of the frame first
+ *   FRAMEBUFFER CLOSE [F]         give it back
+ *   FRAMEBUFFER WAIT              wait for the top of the frame
+ *
+ * LAYER, MERGE and the second buffers are not here yet; the translator
+ * says so by name rather than mistranslating them.
+ *
+ * The rules - what is an error, and when - are common to every target,
+ * so a program behaves the same under the host gates as on the board.
+ * Only the five hw hooks below differ, and on the host they do nothing:
+ * a translated program still RUNS there, it just has nowhere to draw.
+ */
+#define MM_FB_N 0
+#define MM_FB_F 1
+
+static int mm_fb_made;                  /* CREATE done, CLOSE not yet */
+static int mm_fb_wr = MM_FB_N;          /* where drawing goes now */
+
+#if defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
+
+#define MM_GFXIOC_FBSEL    0x0016
+#define MM_GFXIOC_FBCOPY   0x0017
+#define MM_GFXIOC_FBOPEN   0x0018
+#define MM_GFXIOC_VSYNC    0x0019
+
+/* The layer is owned: one process at a time holds it, and the kernel
+ * takes it back on exit, exec or a mode change.  So CREATE is a claim
+ * that can fail - no PSRAM on this board, or another program has it -
+ * which is why this one returns a value and the rest do not. */
+static int mm_fb_open_hw(int claim)
+{
+    if (mm_gfx_open() < 0)
+        return -1;
+    return ioctl(mm_gfx_fd, MM_GFXIOC_FBOPEN, (void *)(long)claim);
+}
+
+static void mm_fb_sel_hw(int which)
+{
+    if (mm_gfx_open() >= 0)
+        ioctl(mm_gfx_fd, MM_GFXIOC_FBSEL, (void *)(long)which);
+}
+
+static void mm_fb_copy_hw(int to_layer)
+{
+    if (mm_gfx_open() >= 0)
+        ioctl(mm_gfx_fd, MM_GFXIOC_FBCOPY, (void *)(long)to_layer);
+}
+
+static void mm_fb_wait_hw(void)
+{
+    if (mm_gfx_open() >= 0)
+        ioctl(mm_gfx_fd, MM_GFXIOC_VSYNC, (void *)0L);
+}
+
+/* Flood whatever is currently being drawn on.  One rectangle: the
+ * kernel fills whole bytes at a time, so this is a memset in disguise
+ * and costs one crossing however big the screen is. */
+static void mm_fb_paint_hw(MMINTEGER rgb)
+{
+    struct mm_gfx_info gi;
+
+    if (mm_gfx_open() < 0 || ioctl(mm_gfx_fd, MM_GFXIOC_INFO, &gi) < 0)
+        return;
+    mm_gfx_setcol(rgb);
+    mm_gfx_rect(0, 0, (int)gi.width - 1, (int)gi.height - 1);
+}
+
+/* CREATE hands back a blank buffer, as MMBasic's memset does.  The
+ * layer is static here and outlives the program that used it, so
+ * without this a new program would start with the last one's picture. */
+static void mm_fb_clear_hw(void)
+{
+    mm_fb_sel_hw(MM_FB_F);
+    mm_fb_paint_hw(0);
+    mm_fb_sel_hw(mm_fb_wr);             /* back where the program was */
+}
+
+#else   /* host: the rules still apply, there is just nothing behind them */
+
+static int mm_fb_open_hw(int claim)     { (void)claim; return 0; }
+static void mm_fb_sel_hw(int which)     { (void)which; }
+static void mm_fb_copy_hw(int to_lay)   { (void)to_lay; }
+static void mm_fb_wait_hw(void)         {}
+static void mm_fb_clear_hw(void)        {}
+static void mm_fb_paint_hw(MMINTEGER c) { (void)c; }
+
+#endif
+
+/* CLS while drawing off-screen is a flood of the buffer in the
+ * background colour, not the console's clear-screen - which would wipe
+ * the picture that is showing and leave the buffer accumulating.  On
+ * the screen it is the console's own, so the cursor and the colour
+ * tiles are reset too; that is what returning 0 asks for. */
+static int mm_fb_cls(void)
+{
+    if (mm_fb_wr == MM_FB_N)
+        return 0;
+    mm_fb_paint_hw(mm_bg());
+    return 1;
+}
+
+/* A mode change took it away underneath us (see the forward declaration
+ * near MODE).  Nothing to release: the kernel has already dropped it. */
+static void mm_fb_forget(void)
+{
+    mm_fb_made = 0;
+    mm_fb_wr = MM_FB_N;
+}
+
+void mm_fb_create(void)
+{
+    if (mm_fb_made) {
+        mm_error("Framebuffer already exists");
+        return;
+    }
+    if (mm_fb_open_hw(1) < 0) {
+        mm_error("Framebuffer not available");
+        return;
+    }
+    mm_fb_made = 1;
+    mm_fb_clear_hw();
+}
+
+/* Closing one that was never created is deliberately quiet - MMBasic's
+ * closeframebuffer simply finds nothing to free - because a program
+ * that tidies up unconditionally at the end is the normal shape. */
+void mm_fb_close(void)
+{
+    mm_fb_open_hw(0);           /* drops the claim AND the selection */
+    mm_fb_forget();
+}
+
+void mm_fb_write(MMINTEGER which)
+{
+    if (which == MM_FB_F && !mm_fb_made) {
+        mm_error("Frame buffer not created");
+        return;
+    }
+    mm_fb_sel_hw((int)which);
+    mm_fb_wr = (int)which;
+}
+
+void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait)
+{
+    if (src == dst) {
+        mm_error("FRAMEBUFFER COPY source and destination are the same");
+        return;
+    }
+    if (!mm_fb_made) {
+        mm_error("Frame buffer not created");
+        return;
+    }
+    if (wait)
+        mm_fb_wait_hw();
+    mm_fb_copy_hw(dst == MM_FB_F);
+}
+
+void mm_fb_wait(void)
+{
+    mm_fb_wait_hw();
+}

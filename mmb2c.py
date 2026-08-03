@@ -79,7 +79,7 @@ BUILTINS = {
     'UCASE$': (1, 1), 'LCASE$': (1, 1), 'SPACE$': (1, 1),
     'STRING$': (2, 2), 'LTRIM$': (1, 1), 'RTRIM$': (1, 1),
     'FORMAT$': (1, 2),
-    'DATE$': (0, 0), 'TIME$': (0, 0), 'CWD$': (0, 0),
+    'DATE$': (0, 0), 'TIME$': (0, 0), 'CWD$': (0, 0), 'INKEY$': (0, 0),
     'EOF': (1, 1), 'LOC': (1, 1), 'LOF': (1, 1), 'INPUT$': (2, 2),
     # these are parsed by hand because an argument may be a bare keyword
     'CHOICE': (3, 3), 'BOUND': (1, 2), 'TRIM$': (1, 3), 'FIELD$': (2, 4),
@@ -103,7 +103,7 @@ STRFUNCS = ('CHR$', 'LEFT$', 'RIGHT$', 'MID$', 'STR$', 'HEX$', 'OCT$',
             'BIN$', 'UCASE$', 'LCASE$', 'SPACE$', 'STRING$', 'LTRIM$',
             'RTRIM$', 'TAB', 'FORMAT$', 'TRIM$', 'FIELD$', 'DATE$',
             'TIME$', 'DATETIME$', 'DAY$', 'BIN2STR$', 'INPUT$', 'DIR$',
-            'CWD$', 'LGETSTR$')
+            'CWD$', 'INKEY$', 'LGETSTR$')
 
 # BIN2STR$ / STR2BIN type names -> the runtime's MM_B_* constants
 BINTYPES = ('INT64', 'UINT64', 'INT32', 'UINT32', 'INT16', 'UINT16',
@@ -475,6 +475,17 @@ class Conv(object):
             self.i += 1
             return True
         return False
+
+    def fb_buf(self):
+        # Which framebuffer a FRAMEBUFFER argument names.  N is the
+        # screen and F the off-screen buffer; MMBasic's L, T and 2 name
+        # buffers this machine does not have yet, so they are refused
+        # here rather than quietly becoming one of these two.
+        if self.accept_kw('N'):
+            return 0
+        if self.accept_kw('F'):
+            return 1
+        self.err("expected N or F")
 
     def stmt_end(self):
         # ELSE terminates a statement too, so that the PRINT in
@@ -1078,6 +1089,14 @@ class Conv(object):
             return ('mm_time_str()', TY_S)
         if up == 'CWD$':
             return ('mm_cwd()', TY_S)
+        if up == 'INKEY$':
+            # The key that has been pressed, or "" - MMBasic's INKEY$,
+            # and how a graphics program watches for one without
+            # stopping to wait.  Before this it was not a function at
+            # all: "Inkey$" became an ordinary string variable, always
+            # empty, so LOOP WHILE INKEY$="" was an exit that could
+            # never be taken and the program had to be interrupted.
+            return ('mm_inkey()', TY_S)
         if up == 'CHR$':
             return ('mm_chr(%s)' % n(0), TY_S)
         if up == 'LEFT$':
@@ -2192,6 +2211,46 @@ class Conv(object):
             n = self.expr()
             self.emit('mm_mode(%s);' % self.as_int(n))
             return
+        if up == 'FRAMEBUFFER':
+            # FRAMEBUFFER CREATE | CLOSE [F] | WRITE N|F |
+            #             COPY s, d [, B] | WAIT
+            #
+            # MMBasic's Draw.c cmd_framebuffer, reduced to the "F"
+            # buffer: draw off-screen, then show it in one COPY.  The
+            # machine has one off-screen buffer and no transparent
+            # blit, so LAYER and MERGE are refused by name below rather
+            # than translated into something that is not them.
+            #
+            # A mode change discards the buffer, both here and in the
+            # kernel, so CREATE belongs after MODE - which is also
+            # where MMBasic wants it, setmode() closing every buffer.
+            self.i += 1
+            if self.accept_kw('CREATE'):
+                self.emit('mm_fb_create();')
+                return
+            if self.accept_kw('CLOSE'):
+                self.accept_kw('F')     # the only one there is to close
+                self.emit('mm_fb_close();')
+                return
+            if self.accept_kw('WRITE'):
+                self.emit('mm_fb_write(%d);' % self.fb_buf())
+                return
+            if self.accept_kw('COPY'):
+                s = self.fb_buf()
+                self.expect_op(',')
+                d = self.fb_buf()
+                b = 0
+                if self.accept_op(','):
+                    if not self.accept_kw('B'):
+                        self.err("FRAMEBUFFER COPY takes only B here")
+                    b = 1
+                self.emit('mm_fb_copy(%d, %d, %d);' % (s, d, b))
+                return
+            if self.accept_kw('WAIT'):
+                self.emit('mm_fb_wait();')
+                return
+            self.err("only FRAMEBUFFER CREATE, CLOSE, WRITE, COPY and "
+                     "WAIT are translated")
         if up == 'SYSTEM' or (up in ('SAVE', 'LOAD') and self.is_kw('IMAGE', 1)):
             # SYSTEM prog$ [, arg ...]        run a program and wait
             # SAVE IMAGE f$ [, x, y, w, h]    both are programs

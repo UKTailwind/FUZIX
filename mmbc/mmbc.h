@@ -261,6 +261,7 @@ int is_kw(const char *s, int k);
 int accept_op(const char *s);
 void expect_op(const char *s);
 int accept_kw(const char *s);
+int fb_buf(void);                           /* self.fb_buf - N=0, F=1 */
 int stmt_end(void);
 void emit(const char *text);
 void raw(const char *text);
