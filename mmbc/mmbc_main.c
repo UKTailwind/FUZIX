@@ -127,6 +127,19 @@ static const char *convert(const char *inpath, const char *outpath,
         if (cv.globals[k]->is_const)
             cv.globals[k]->acc = pstr(cvar(cv.globals[k]->name));
     }
+    /* Arrays and strings live in the struct global_decls builds, so
+     * every reference to one goes through H.  The emitter reads acc for
+     * every read and write of a variable, so rewriting it here IS the
+     * change - nothing in the expression or statement code has to know.
+     * Done between the scan and emit passes, exactly as the const
+     * rewrite above. */
+    for (k = 0; k < cv.nglobals; k++) {
+        struct sym *s = cv.globals[k];
+        if (s->is_const)
+            continue;
+        if (s->is_array || s->ty == TY_S)
+            s->acc = pstr(sfmt("H->%s", cvar(s->name)));
+    }
     cv.tmpn = 0;
     cv.out_main.n = 0;
     cv.out_body.n = 0;

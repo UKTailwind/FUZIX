@@ -52,19 +52,47 @@ static void ob_add(struct outbuf *o, const char *line)
 }
 
 /* Returns the declaration lines for the non-const globals (scratch
- * outbuf, persistent lines), sorted by name. */
+ * outbuf, persistent lines), sorted by name.
+ *
+ * Scalars in the process image, arrays and strings on the heap.  This
+ * is how an interpreted BASIC has always done it - a fixed area for
+ * simple variables, everything bulky in the heap - and on this machine
+ * it is also what the memory wants.  Scalars are hot: loop counters
+ * touched every iteration, and SRAM is 3.7x faster than PSRAM (44MB/s
+ * against 12, measured with psbench).  Arrays and strings are bulk,
+ * walked sequentially, and they are what was filling bcrun's 48K of VM
+ * address space - a 38,400 byte array does not fit in it at all.
+ *
+ * One struct, one allocation.  So one free at exit with nothing to tidy
+ * up, no fragmentation, and sizeof does the sizing - there is no
+ * hand-computed maximum to drift out of step with the declarations as
+ * they change.
+ *
+ * Every array bound here is a compile-time constant (mmbc rejects a
+ * runtime bound by name), so sizeof covers everything that compiles.
+ * When variable bounds do arrive they want a growable tail after the
+ * fixed members, extended by realloc - which works precisely because
+ * access goes through H and the block may move.
+ *
+ * The member names come from cvar(), not s->acc: heap_fixup has already
+ * rewritten acc to "H->name" for exactly these symbols.
+ */
 static void global_decls(struct outbuf *o)
 {
     int n, k, d;
     const char **names = global_names_sorted(&n);
+    struct outbuf heap;
 
+    memset(&heap, 0, sizeof(heap));
     for (k = 0; k < n; k++) {
         struct sym *s = globals_get(names[k]);
         const char *note = "";
+        const char *cn;
         char *dims;
 
         if (s->is_const)
             continue;
+        cn = cvar(s->name);
         if (s->implied)
             note = sfmt("   /* implied, first seen line %d */", s->where);
         if (s->is_array) {
@@ -72,16 +100,27 @@ static void global_decls(struct outbuf *o)
             for (d = 0; d < s->ndims; d++)
                 dims = sfmt("%s[%s]", dims, s->dims[d]);
             if (s->ty == TY_S)
-                ob_add(o, sfmt("char %s%s[MM_STRSZ];%s", s->acc, dims,
-                               note));
+                ob_add(&heap, sfmt("char %s%s[MM_STRSZ];%s", cn, dims,
+                                   note));
             else
-                ob_add(o, sfmt("%s %s%s;%s", ctype_of(s->ty), s->acc,
-                               dims, note));
+                ob_add(&heap, sfmt("%s %s%s;%s", ctype_of(s->ty), cn,
+                                   dims, note));
         } else if (s->ty == TY_S) {
-            ob_add(o, sfmt("char %s[MM_STRSZ];%s", s->acc, note));
+            ob_add(&heap, sfmt("char %s[MM_STRSZ];%s", cn, note));
         } else {
-            ob_add(o, sfmt("%s %s;%s", ctype_of(s->ty), s->acc, note));
+            ob_add(o, sfmt("%s %s;%s", ctype_of(s->ty), cn, note));
         }
+    }
+    cv.heap_used = heap.n > 0;
+    if (heap.n > 0) {
+        ob_add(o, "");
+        ob_add(o, "/* Arrays and strings: one block, allocated once"
+                  " from the PSRAM heap. */");
+        ob_add(o, "struct mm_vars {");
+        for (k = 0; k < heap.n; k++)
+            ob_add(o, sfmt("    %s", heap.lines[k]));
+        ob_add(o, "};");
+        ob_add(o, "static struct mm_vars *H;");
     }
 }
 
@@ -283,6 +322,9 @@ void conv_write(FILE *f)
     fprintf(f, "\n/* ---- main program ---- */\n");
     fprintf(f, "int main(void)\n{\n");
     fprintf(f, "    unsigned __mark = mm_mark(); (void)__mark;\n");
+    if (cv.heap_used)
+        fprintf(f, "    H = mm_heap(sizeof *H);   "
+                   "/* arrays and strings */\n");
     if (cv.ndata > 0)
         fprintf(f, "    mm_data_init4(__mmb_data_kind, __mmb_data_f, "
                    "__mmb_data_i, __mmb_data_s, %d);\n", cv.ndata);
