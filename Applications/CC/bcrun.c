@@ -141,22 +141,54 @@ static void fault(const char *msg)
 
 /* ---- memory access, all bounds checked ---------------------------- */
 
+/*
+ *	A program address is an offset into mem[] - EXCEPT when it is
+ *	already a real address.
+ *
+ *	Programs can now hold memory the VM does not own: mmb2c puts every
+ *	array and string in one block taken from the kernel's PSRAM heap,
+ *	because 48K of VM address space cannot hold a 38,400 byte array
+ *	and never could. That block lives at 0x11000000 upwards, so the
+ *	two kinds cannot be confused - MEMSIZE is 48K, and nothing in
+ *	between is a valid anything.
+ *
+ *	Native code dereferences either kind directly; there is no MMU and
+ *	an address is an address. This only matters where the RUNTIME has
+ *	to touch a pointer the program gave it, which is what these do.
+ */
+static unsigned char *vptr(unsigned long a)
+{
+	if (a >= MEMSIZE)
+		return (unsigned char *)a;
+	return mem + a;
+}
+
+/* An offset must not straddle the end of mem[]; a real address is the
+ * kernel's business, and it bounds-checked it when it handed it out. */
+#define VM_OOB(a, n)	((a) < MEMSIZE && (a) + (n) >= MEMSIZE)
+/* the same for a run of n bytes, where n is a length not a last index */
+#define VM_OOBN(a, n)	((a) < MEMSIZE && (a) + (n) > MEMSIZE)
+
 static unsigned long rd32(unsigned long a)
 {
-	if (a + 3 >= MEMSIZE)
+	unsigned char *p;
+	if (VM_OOB(a, 3))
 		fault("bad address");
-	return mem[a] | ((unsigned long)mem[a + 1] << 8) |
-	    ((unsigned long)mem[a + 2] << 16) | ((unsigned long)mem[a + 3] << 24);
+	p = vptr(a);
+	return p[0] | ((unsigned long)p[1] << 8) |
+	    ((unsigned long)p[2] << 16) | ((unsigned long)p[3] << 24);
 }
 
 static void wr32(unsigned long a, unsigned long v)
 {
-	if (a + 3 >= MEMSIZE)
+	unsigned char *p;
+	if (VM_OOB(a, 3))
 		fault("bad address");
-	mem[a] = v;
-	mem[a + 1] = v >> 8;
-	mem[a + 2] = v >> 16;
-	mem[a + 3] = v >> 24;
+	p = vptr(a);
+	p[0] = v;
+	p[1] = v >> 8;
+	p[2] = v >> 16;
+	p[3] = v >> 24;
 }
 
 static uint64_t rd64(unsigned long a)
@@ -172,31 +204,35 @@ static void wr64(unsigned long a, uint64_t v)
 
 static unsigned rd16(unsigned long a)
 {
-	if (a + 1 >= MEMSIZE)
+	unsigned char *p;
+	if (VM_OOB(a, 1))
 		fault("bad address");
-	return mem[a] | (mem[a + 1] << 8);
+	p = vptr(a);
+	return p[0] | (p[1] << 8);
 }
 
 static void wr16(unsigned long a, unsigned v)
 {
-	if (a + 1 >= MEMSIZE)
+	unsigned char *p;
+	if (VM_OOB(a, 1))
 		fault("bad address");
-	mem[a] = v;
-	mem[a + 1] = v >> 8;
+	p = vptr(a);
+	p[0] = v;
+	p[1] = v >> 8;
 }
 
 static unsigned rd8(unsigned long a)
 {
-	if (a >= MEMSIZE)
+	if (VM_OOB(a, 0))
 		fault("bad address");
-	return mem[a];
+	return *vptr(a);
 }
 
 static void wr8(unsigned long a, unsigned v)
 {
-	if (a >= MEMSIZE)
+	if (VM_OOB(a, 0))
 		fault("bad address");
-	mem[a] = v;
+	*vptr(a) = v;
 }
 
 static void push(long v)
@@ -437,9 +473,15 @@ static char *getstr(unsigned long a)
 	static char buf[4][512];
 	static unsigned which;
 	char *b = buf[which++ & 3];
+	const unsigned char *s = vptr(a);
 	unsigned i = 0;
-	while (i < 511 && a + i < MEMSIZE && mem[a + i])
-		b[i] = mem[a + i], i++;
+	/* The mem[] bound applies only to an offset - a real address (a
+	   string in the PSRAM block) is not inside mem and stopping at
+	   MEMSIZE would truncate it to nothing. */
+	unsigned lim = (a >= MEMSIZE) ? 511 : (MEMSIZE - a > 511
+					       ? 511 : MEMSIZE - a);
+	while (i < lim && s[i])
+		b[i] = s[i], i++;
 	b[i] = 0;
 	return b;
 }
@@ -922,11 +964,11 @@ static void lib_fread(void)
 	int fd = fh(arg(3));
 	long got;
 
-	if (fd < 0 || size == 0 || b + size * n > MEMSIZE) {
+	if (fd < 0 || size == 0 || VM_OOBN(b, size * n)) {
 		A = 0;
 		return;
 	}
-	got = read(fd, mem + b, size * n);
+	got = read(fd, vptr(b), size * n);
 	if (got <= 0) {
 		file_eof[fd] = 1;
 		A = 0;
@@ -945,13 +987,13 @@ static void lib_fwrite(void)
 	int fd = fh(arg(3));
 	long put;
 
-	if (fd < 0 || size == 0 || b + size * n > MEMSIZE) {
+	if (fd < 0 || size == 0 || VM_OOBN(b, size * n)) {
 		A = 0;
 		return;
 	}
 	if (fd == 1)
 		fflush(stdout);		/* keep printf and fwrite in order */
-	put = write(fd, mem + b, size * n);
+	put = write(fd, vptr(b), size * n);
 	A = (put <= 0) ? 0 : put / (long) size;
 }
 
@@ -998,7 +1040,7 @@ static void lib_fgets(void)
 	long i = 0;
 	unsigned char c;
 
-	if (fd < 0 || n <= 0 || b + n > MEMSIZE) {
+	if (fd < 0 || n <= 0 || VM_OOBN(b, n)) {
 		A = 0;
 		return;
 	}
@@ -1262,9 +1304,9 @@ static unsigned long vstrlen(unsigned long a)
 
 static void vcopy(unsigned long d, unsigned long s, unsigned long n)
 {
-	if (d + n > MEMSIZE || s + n > MEMSIZE)
+	if (VM_OOBN(d, n) || VM_OOBN(s, n))
 		fault("bad address");
-	memmove(mem + d, mem + s, n);
+	memmove(vptr(d), vptr(s), n);
 }
 
 /*
@@ -1474,9 +1516,9 @@ static void lib_strrchr(void)
 static void lib_memset(void)
 {
 	unsigned long d = arg(0), n = arg(2);
-	if (d + n > MEMSIZE)
+	if (VM_OOBN(d, n))
 		fault("bad address");
-	memset(mem + d, (int)arg(1), n);
+	memset(vptr(d), (int)arg(1), n);
 	A = d;
 }
 
@@ -1489,9 +1531,9 @@ static void lib_memcpy(void)
 static void lib_memcmp(void)
 {
 	unsigned long a = arg(0), b = arg(1), n = arg(2);
-	if (a + n > MEMSIZE || b + n > MEMSIZE)
+	if (VM_OOBN(a, n) || VM_OOBN(b, n))
 		fault("bad address");
-	A = memcmp(mem + a, mem + b, n);
+	A = memcmp(vptr(a), vptr(b), n);
 }
 
 static void lib_putchar(void)
@@ -1684,12 +1726,12 @@ static void libcall(unsigned idx)
 		A = close((int)arg(0));
 	} else if (!strcmp(name, "read")) {
 		unsigned long b = arg(1), n = arg(2);
-		if (b + n > MEMSIZE) fault("bad address");
-		A = read((int)arg(0), mem + b, n);
+		if (VM_OOBN(b, n)) fault("bad address");
+		A = read((int)arg(0), vptr(b), n);
 	} else if (!strcmp(name, "write")) {
 		unsigned long b = arg(1), n = arg(2);
-		if (b + n > MEMSIZE) fault("bad address");
-		A = write((int)arg(0), mem + b, n);
+		if (VM_OOBN(b, n)) fault("bad address");
+		A = write((int)arg(0), vptr(b), n);
 	} else if (!strcmp(name, "lseek")) {
 		A = lseek((int)arg(0), arg(1), (int)arg(2));
 	} else if (!strcmp(name, "unlink")) {
