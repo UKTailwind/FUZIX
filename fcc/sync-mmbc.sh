@@ -19,7 +19,7 @@ cp "$M/tests/solar_eclipse.bas" "$M/tests/solar_eclipse.in" \
    "$M/tests/circle.bas" "$M/tests/circrnd.bas" "$M/tests/palette.bas" \
    "$M/tests/saveimg.bas" "$M/tests/imgtrip.bas" "$M/tests/imgfmt.bas" \
    "$M/tests/imgm1c.bas" "$M/tests/imgloop.bas" "$M/tests/forktest.bas" \
-   "$M/tests/wtest.bas" "$M/tests/rtest.bas" \
+   "$M/tests/wtest.bas" "$M/tests/rtest.bas" "$M/tests/localheap.bas" \
    "$FCC/hwtest/"
 # The FCC-view headers the generated C needs (math.h maps to bcrun
 # natives); installed into /usr/lib/cc/include by mkccimage.sh
