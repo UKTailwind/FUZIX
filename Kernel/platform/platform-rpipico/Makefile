@@ -19,8 +19,10 @@ endif
 # library's allocator, which is now the PSRAM heap (arena.c overrides
 # _sbrk) - malloc/free/realloc cost 2432 bytes of SRAM here because the
 # kernel is PICO_COPY_TO_RAM and library code is RAM-resident.
-# Both bites are cheap: PROGSIZE caps one process at 256K, so the top of
-# the pool was unreachable slack.
+# The first bite was cheap when PROGSIZE capped a process at 256K and the
+# top of the pool was unreachable slack.  It no longer does - a process
+# may use all of user memory - so both bites now come out of what a big
+# program could have had.
 # linker_overrides/memory_ram.incl must agree - it carves the same
 # split, and nothing checks that the two match.
 ifeq ($(SUBTARGET),pico2)

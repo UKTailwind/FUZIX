@@ -96,6 +96,6 @@ on the Windows host.
 * **Always remount read-only first** or the card needs an fsck on every
   boot.
 * The build needs `PICO_SDK_PATH=~/src/micropython/lib/pico-sdk` and
-  `-DPICO_BOARD=pico2 -DTOTALMEM=320`; it is *not* set in the
+  `-DPICO_BOARD=pico2 -DTOTALMEM=312`; it is *not* set in the
   environment, it lives in `build/CMakeCache.txt`. Do not delete that
   cache without network, or cmake will try to re-fetch the SDK.
