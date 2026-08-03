@@ -3469,27 +3469,61 @@ class Conv(object):
         return not self.errors
 
     def global_decls(self):
+        """Scalars in the process image, arrays and strings on the heap.
+
+        This is how an interpreted BASIC has always done it - a fixed
+        area for simple variables, everything bulky in the heap - and on
+        this machine it is also what the memory wants.  Scalars are hot:
+        loop counters touched every iteration, and SRAM is 3.7x faster
+        than PSRAM (44MB/s against 12, measured with psbench).  Arrays
+        and strings are bulk, walked sequentially, and they are what was
+        filling bcrun's 48K of VM address space - a 38,400 byte array
+        does not fit in it at all.
+
+        One struct, one allocation.  So one free at exit with nothing to
+        tidy up, no fragmentation, and sizeof does the sizing - there is
+        no hand-computed maximum to drift out of step with the
+        declarations as they change.
+
+        Every array bound here is a compile-time constant (mmb2c rejects
+        a runtime bound by name), so sizeof covers everything that
+        compiles.  When variable bounds do arrive they want a growable
+        tail after the fixed members, extended by realloc - which works
+        precisely because access goes through H and the block may move.
+        """
         out = []
+        heap = []
         names = list(self.globals.keys())
         names.sort()
         for nm in names:
             s = self.globals[nm]
             if s.is_const:
                 continue
+            cn = cvar(nm)
             note = ''
             if s.implied:
                 note = '   /* implied, first seen line %d */' % s.where
             if s.is_array:
                 dims = ''.join('[%s]' % d for d in s.dims)
                 if s.ty == TY_S:
-                    out.append('char %s%s[MM_STRSZ];%s' % (s.acc, dims, note))
+                    heap.append('char %s%s[MM_STRSZ];%s' % (cn, dims, note))
                 else:
-                    out.append('%s %s%s;%s'
-                               % (CTYPE[s.ty], s.acc, dims, note))
+                    heap.append('%s %s%s;%s'
+                                % (CTYPE[s.ty], cn, dims, note))
             elif s.ty == TY_S:
-                out.append('char %s[MM_STRSZ];%s' % (s.acc, note))
+                heap.append('char %s[MM_STRSZ];%s' % (cn, note))
             else:
-                out.append('%s %s;%s' % (CTYPE[s.ty], s.acc, note))
+                out.append('%s %s;%s' % (CTYPE[s.ty], cn, note))
+        self.heap_used = bool(heap)
+        if heap:
+            out.append('')
+            out.append('/* Arrays and strings: one block, allocated once'
+                       ' from the PSRAM heap. */')
+            out.append('struct mm_vars {')
+            for h in heap:
+                out.append('    ' + h)
+            out.append('};')
+            out.append('static struct mm_vars *H;')
         return out
 
     def report(self):
@@ -3626,6 +3660,8 @@ class Conv(object):
         wr('\n/* ---- main program ---- */\n')
         wr('int main(void)\n{\n')
         wr('    unsigned __mark = mm_mark(); (void)__mark;\n')
+        if getattr(self, 'heap_used', False):
+            wr('    H = mm_heap(sizeof *H);   /* arrays and strings */\n')
         if self.data:
             wr('    mm_data_init4(__mmb_data_kind, __mmb_data_f, '
                '__mmb_data_i, __mmb_data_s, %d);\n' % len(self.data))
@@ -3643,6 +3679,22 @@ def _const_fixup(conv):
         s = conv.globals[nm]
         if s.is_const:
             s.acc = cvar(nm)
+
+
+def _heap_fixup(conv):
+    """Arrays and strings live in the struct, so every reference to one
+    goes through H.
+
+    The emitter reads s.acc for every read and write of a variable, so
+    rewriting it here IS the change - nothing in the expression or
+    statement code has to know.  Done between the scan and emit passes,
+    the same way _const_fixup rewrites CONST access text."""
+    for nm in conv.globals:
+        s = conv.globals[nm]
+        if s.is_const:
+            continue
+        if s.is_array or s.ty == TY_S:
+            s.acc = 'H->' + cvar(nm)
 
 
 def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
@@ -3670,6 +3722,7 @@ def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
             consts[nm] = conv.globals[nm].acc
     for nm in consts:
         conv.globals[nm].acc = cvar(nm)
+    _heap_fixup(conv)
     conv.tmpn = 0
     conv.out_main = []
     conv.out_body = []
