@@ -2357,6 +2357,74 @@ void mm_colour(MMINTEGER fg, MMINTEGER bg)
 MMINTEGER mm_fg(void) { return mm_gfx_fg; }
 MMINTEGER mm_bg(void) { return mm_gfx_bg; }
 
+/*
+ * One block for every array and string the program declares.
+ *
+ * On the board this comes from the kernel's PSRAM heap rather than from
+ * the process image, and that is the whole point: bcrun gives a
+ * translated program 48K of VM address space in total, so a 38,400 byte
+ * array - a MODE 1 framebuffer - does not fit in it at all, and a
+ * program with a few hundred K of arrays never could. Out here the
+ * limit is the 8MB window.
+ *
+ * If the ioctl is not there (a kernel without it, or a board with no
+ * PSRAM fitted) this falls back to malloc rather than failing, so the
+ * same generated C runs on the host test gates and on hardware.
+ */
+#if defined(MM_PC3) || defined(__FUZIX__)
+
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+
+#define MM_PSRAMIOC_ALLOC 0x000A
+
+struct mm_psram_req {
+    unsigned long len;
+    unsigned long base;
+};
+
+void *mm_heap(unsigned long n)
+{
+    struct mm_psram_req rq;
+    int fd;
+    void *p;
+
+    if (n == 0)
+        n = 1;
+    fd = open("/dev/sys", O_RDWR);
+    if (fd >= 0) {
+        rq.len = n;
+        rq.base = 0;
+        if (ioctl(fd, MM_PSRAMIOC_ALLOC, &rq) == 0 && rq.base) {
+            close(fd);
+            return (void *)rq.base;   /* the kernel zeroed it */
+        }
+        close(fd);
+    }
+    p = malloc(n);
+    if (p == NULL)
+        mm_error("out of memory for arrays and strings");
+    else
+        memset(p, 0, n);
+    return p;
+}
+
+#else
+
+void *mm_heap(unsigned long n)
+{
+    void *p = malloc(n ? n : 1);
+
+    if (p == NULL)
+        mm_error("out of memory for arrays and strings");
+    else
+        memset(p, 0, n ? n : 1);
+    return p;
+}
+
+#endif
+
 #if defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
 
 #include <fcntl.h>
