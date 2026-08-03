@@ -60,7 +60,9 @@ static long long time_us64(void)
 
 /* The runtime's hosted islands read the DATA string table through
    these (it holds 32-bit VM pointers whatever the host width). */
-unsigned char *mm_vm_base(void) { return mem; }
+/* NULL, not mem: the DATA string table holds machine addresses like
+   everything else, so mm_d4_str's "base + entry" must add nothing. */
+unsigned char *mm_vm_base(void) { return NULL; }
 unsigned long mm_vm_rd32(unsigned long a) { return rd32(a); }
 
 #define MM_HOSTED 1
@@ -74,20 +76,21 @@ unsigned long mm_vm_rd32(unsigned long a) { return rd32(a); }
  *	runtime's own business (exactly as fread's was).  NULL passes
  *	through so optional index arrays keep working.
  */
+/*
+ *	Both identities now: a program address is a machine address (see
+ *	vptr in bcrun.c).  Kept as functions because the ~135 wrappers
+ *	below are written in terms of them, and because NULL still has to
+ *	survive the round trip in both directions.
+ */
 static char *mm_ptr(unsigned long off, unsigned long need)
 {
-	if (off == 0)
-		return NULL;
-	if (off >= MEMSIZE || off + need > MEMSIZE)
-		fault("bad address in mm runtime call");
-	return (char *)mem + off;
+	(void)need;
+	return (char *)(uintptr_t)off;
 }
 
 static long mm_off(const char *p)
 {
-	if (p == NULL)
-		return 0;
-	return (long)(unsigned long)((const unsigned char *)p - mem);
+	return (long)(unsigned long)(uintptr_t)p;
 }
 
 /* Argument fetchers by type; a double or an MMINTEGER takes two slots. */
@@ -327,6 +330,36 @@ static void w_error(void)    { mm_error(Pa(0)); }
 static void w_end(void)      { mm_end(); }
 static void w_timer(void)    { A = dput(mm_timer()); }
 
+/*
+ *	One block for every array and string in the program.
+ *
+ *	A VM pointer is 32 bits, so what this returns has to fit in 32.  On
+ *	the board it does: the block comes from the kernel's PSRAM heap at
+ *	0x11000000 and the program holds its address directly, which is the
+ *	whole point - 48K of VM space could never hold a 38,400 byte array.
+ *	On a 64-bit development host no native pointer fits, so the block
+ *	comes out of the VM's own heap instead.  Same program, same output,
+ *	a smaller ceiling.
+ */
+#if UINTPTR_MAX > 0xFFFFFFFFu
+#define MM_HEAP_IS_VM	1
+#else
+#define MM_HEAP_IS_VM	0
+#endif
+
+static void w_heap(void)
+{
+	unsigned long n = (unsigned long)(uint32_t)arg(0);
+
+	if (MM_HEAP_IS_VM) {
+		A = lib_malloc(n);
+		if (A)
+			memset(vptr(A), 0, n);	/* mm_heap zeroes; so must this */
+	} else {
+		A = (long)(unsigned long)(uintptr_t)mm_heap(n);
+	}
+}
+
 /* ---- name table ----------------------------------------------------- */
 
 /*
@@ -508,6 +541,7 @@ static const struct mmwrap {
 	{ "mm_error",		w_error },
 	{ "mm_end",		w_end },
 	{ "mm_timer",		w_timer },
+	{ "mm_heap",		w_heap },
 	{ NULL,			NULL }
 };
 
@@ -544,10 +578,10 @@ static unsigned long mmrt_reserve(unsigned long base)
 		return base;
 
 	base = (base + 7) & ~7UL;
-	if (base + MMRT_BYREFSZ + MMRT_POOLSZ + STACKROOM > MEMSIZE) {
+	if (base + MMRT_BYREFSZ + MMRT_POOLSZ + STACKROOM > MEMTOP) {
 		fprintf(stderr, "bcrun: no room for the mm runtime pool\n");
 		exit(1);
 	}
-	mm_hosted_bind((char *)mem + base + MMRT_BYREFSZ, mem + base);
+	mm_hosted_bind((char *)vptr(base + MMRT_BYREFSZ), vptr(base));
 	return base + MMRT_BYREFSZ + MMRT_POOLSZ;
 }

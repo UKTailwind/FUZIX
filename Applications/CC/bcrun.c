@@ -75,7 +75,35 @@ static unsigned char *code;
 /* Aligned, not by linker luck: the native mm runtime (and native code
    to come) dereference VM offsets through real pointers, so mem's own
    base must not break the alignment the offsets were given. */
+#if UINTPTR_MAX > 0xFFFFFFFFu
+/*
+ *	A VM address is 32 bits wide because the bytecode says so, and now
+ *	that it is also a machine address the backing store has to live
+ *	where 32 bits can name it.  On the board that is free - everything
+ *	is below 4G.  On a 64-bit development host it has to be asked for.
+ */
+static unsigned char *mem;
+
+static void mem_init(void)
+{
+	int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+#ifdef MAP_32BIT
+	flags |= MAP_32BIT;
+#endif
+	/* The hint is what does the work where MAP_32BIT does not exist;
+	   the check afterwards is what makes it honest either way. */
+	mem = mmap((void *)0x30000000UL, MEMSIZE, PROT_READ | PROT_WRITE,
+		   flags, -1, 0);
+	if (mem == MAP_FAILED || (uintptr_t)mem > 0xFFFFFFFFUL - MEMSIZE) {
+		fprintf(stderr, "bcrun: no low memory for the program's "
+				"address space\n");
+		exit(1);
+	}
+}
+#else
 static unsigned char mem[MEMSIZE] __attribute__((aligned(8)));
+#define mem_init()	do { } while (0)
+#endif
 static struct bc_header h;
 static struct bc_sym *sym;
 static char *strtab;
@@ -125,8 +153,8 @@ static int64_t fput(float f)
 	return S32(u.i);
 }
 
-/* Machine state. sp and fp are offsets into mem[], and the stack grows
-   down from the top. */
+/* Machine state. sp and fp are machine addresses, and the stack grows
+   down from the top of mem[]. */
 static int64_t A;
 static unsigned long pc;
 static unsigned long sp;
@@ -142,32 +170,38 @@ static void fault(const char *msg)
 /* ---- memory access, all bounds checked ---------------------------- */
 
 /*
- *	A program address is an offset into mem[] - EXCEPT when it is
- *	already a real address.
+ *	A program address IS a machine address.  There is one kind, and
+ *	mem[] is only where the loader happens to put data and bss.
  *
- *	Programs can now hold memory the VM does not own: mmb2c puts every
- *	array and string in one block taken from the kernel's PSRAM heap,
- *	because 48K of VM address space cannot hold a 38,400 byte array
- *	and never could. That block lives at 0x11000000 upwards, so the
- *	two kinds cannot be confused - MEMSIZE is 48K, and nothing in
- *	between is a valid anything.
+ *	It used to be an offset into mem[], which meant every access was
+ *	base+index.  That model broke the moment a program could hold
+ *	memory the VM does not own: mmb2c puts every array and string in
+ *	one block from the kernel's PSRAM heap, because 48K of VM address
+ *	space cannot hold a 38,400 byte array and never could.  Teaching
+ *	the C paths to recognise a real address was not enough - native
+ *	code reaches memory as "ldr r3, [r6, r2]" with r6 = mem, in
+ *	hardware, where no test can be inserted.  So the offset goes: the
+ *	loader relocates the program to where mem[] actually is, once, and
+ *	from then on an address is an address.  Native code needs no
+ *	change at all, because r6 becomes 0.
  *
- *	Native code dereferences either kind directly; there is no MMU and
- *	an address is an address. This only matters where the RUNTIME has
- *	to touch a pointer the program gave it, which is what these do.
+ *	Cost: nothing bounds-checks a program address any more.  That was
+ *	already true of every heap pointer, and the alternative was a
+ *	compare and branch on every load and store in generated code.
  */
+#define MEMBASE		((unsigned long)(uintptr_t)mem)
+#define MEMTOP		(MEMBASE + MEMSIZE)
+
 static unsigned char *vptr(unsigned long a)
 {
-	if (a >= MEMSIZE)
-		return (unsigned char *)a;
-	return mem + a;
+	return (unsigned char *)(uintptr_t)a;
 }
 
-/* An offset must not straddle the end of mem[]; a real address is the
- * kernel's business, and it bounds-checked it when it handed it out. */
-#define VM_OOB(a, n)	((a) < MEMSIZE && (a) + (n) >= MEMSIZE)
-/* the same for a run of n bytes, where n is a length not a last index */
-#define VM_OOBN(a, n)	((a) < MEMSIZE && (a) + (n) > MEMSIZE)
+/* Kept as names so the call sites still say what they mean, but there
+ * is nothing left to check: the heap a program may address extends
+ * beyond mem[] and only the kernel knows where it ends. */
+#define VM_OOB(a, n)	(0)
+#define VM_OOBN(a, n)	(0)
 
 static unsigned long rd32(unsigned long a)
 {
@@ -475,11 +509,8 @@ static char *getstr(unsigned long a)
 	char *b = buf[which++ & 3];
 	const unsigned char *s = vptr(a);
 	unsigned i = 0;
-	/* The mem[] bound applies only to an offset - a real address (a
-	   string in the PSRAM block) is not inside mem and stopping at
-	   MEMSIZE would truncate it to nothing. */
-	unsigned lim = (a >= MEMSIZE) ? 511 : (MEMSIZE - a > 511
-					       ? 511 : MEMSIZE - a);
+	unsigned lim = 511;		/* the buffer, nothing else */
+
 	while (i < lim && s[i])
 		b[i] = s[i], i++;
 	b[i] = 0;
@@ -683,10 +714,9 @@ static void out_flush(void)
 
 static void emit(char c)
 {
-	if (out_to_mem) {
-		if (out_at < MEMSIZE)
-			mem[out_at++] = (uint8_t) c;
-	} else if (out_fd == 1)
+	if (out_to_mem)
+		*vptr(out_at++) = (uint8_t) c;
+	else if (out_fd == 1)
 		putchar(c);		/* stays in step with printf */
 	else {
 		if (out_n == sizeof(out_buf))
@@ -1039,17 +1069,19 @@ static void lib_fgets(void)
 	int fd = fh(arg(2));
 	long i = 0;
 	unsigned char c;
+	unsigned char *p;
 
 	if (fd < 0 || n <= 0 || VM_OOBN(b, n)) {
 		A = 0;
 		return;
 	}
+	p = vptr(b);
 	while (i < n - 1) {
 		if (read(fd, &c, 1) != 1) {
 			file_eof[fd] = 1;
 			break;
 		}
-		mem[b + i++] = c;
+		p[i++] = c;
 		if (c == '\n')
 			break;
 	}
@@ -1057,7 +1089,7 @@ static void lib_fgets(void)
 		A = 0;			/* NULL */
 		return;
 	}
-	mem[b + i] = 0;
+	p[i] = 0;
 	A = (int64_t) b;
 }
 
@@ -1130,8 +1162,7 @@ static void lib_sprintf(void)
 	out_at = (unsigned long) arg(0);
 	out_len = 0;
 	do_format(1);
-	if (out_at < MEMSIZE)
-		mem[out_at] = 0;	/* terminate, not counted */
+	*vptr(out_at) = 0;		/* terminate, not counted */
 	out_to_mem = 0;
 	A = (int64_t) out_len;
 }
@@ -1151,7 +1182,7 @@ static unsigned long heap_base, heap_top;
 static void heap_init(unsigned long base)
 {
 	heap_base = (base + 3) & ~3UL;
-	heap_top = MEMSIZE - STACKROOM;
+	heap_top = MEMTOP - STACKROOM;
 	if (heap_top <= heap_base + HDR) {
 		heap_base = heap_top = 0;
 		return;
@@ -1296,10 +1327,7 @@ static long long lib_us64(void)
 
 static unsigned long vstrlen(unsigned long a)
 {
-	unsigned long n = 0;
-	while (a + n < MEMSIZE && mem[a + n])
-		n++;
-	return n;
+	return (unsigned long)strlen((const char *)vptr(a));
 }
 
 static void vcopy(unsigned long d, unsigned long s, unsigned long n)
@@ -1490,10 +1518,11 @@ static void lib_strchr(void)
 	unsigned long s = arg(0);
 	int c = (int)arg(1);
 	unsigned long i = 0, l = vstrlen(s);
+	const unsigned char *p = vptr(s);
 
 	A = 0;
 	for (; i <= l; i++)
-		if (mem[s + i] == c) {
+		if (p[i] == c) {
 			A = (long)(s + i);
 			break;
 		}
@@ -1504,10 +1533,11 @@ static void lib_strrchr(void)
 	unsigned long s = arg(0);
 	int c = (int)arg(1);
 	long i = (long)vstrlen(s);
+	const unsigned char *p = vptr(s);
 
 	A = 0;
 	for (; i >= 0; i--)
-		if (mem[s + i] == c) {
+		if (p[i] == c) {
 			A = (long)(s + i);
 			break;
 		}
@@ -1649,7 +1679,7 @@ static void libcall(unsigned idx)
 		unsigned long n = (unsigned long)arg(0) * (unsigned long)arg(1);
 		A = lib_malloc(n);
 		if (A)
-			memset(mem + A, 0, n);
+			memset(vptr(A), 0, n);
 	} else if (!strcmp(name, "free")) {
 		lib_free((unsigned long)arg(0));
 		A = 0;
@@ -1876,20 +1906,23 @@ static void load(const char *path)
 	 * there, so "abc" == (void *)0 was true. No real implementation
 	 * places an object at zero and C leans on that everywhere.
 	 */
-	database = NULLGUARD;
+	/* Absolute from here down: every program address the fixups
+	   produce comes through symval(), which adds one of these two, so
+	   rebasing them relocates the whole program in one place. */
+	database = MEMBASE + NULLGUARD;
 	/* Rounded up: cc2 aligns objects as offsets WITHIN bss, which
 	   only means anything if the segment base is itself aligned.
 	   Found by the qemu harness as a SIGBUS: an odd h_data put the
 	   whole bss segment - and its "8-aligned" int64 arrays - at an
 	   odd address, which x86 shrugged at and ARM does not. */
 	bssbase = (database + h.h_data + 7) & ~7UL;
-	if (bssbase + h.h_bss + STACKROOM > MEMSIZE) {
+	if (bssbase + h.h_bss + STACKROOM > MEMTOP) {
 		fprintf(stderr, "bcrun: program too large\n");
 		exit(1);
 	}
-	if (h.h_data && fread(mem + database, 1, h.h_data, f) != h.h_data)
+	if (h.h_data && fread(vptr(database), 1, h.h_data, f) != h.h_data)
 		fault("short data");
-	memset(mem + bssbase, 0, h.h_bss);
+	memset(vptr(bssbase), 0, h.h_bss);
 
 	/* Symbols first - fixups are streamed in a second pass below,
 	   one record at a time, so the fixup table never needs memory
@@ -2133,9 +2166,18 @@ static int64_t native_enter(unsigned long off)
 	register uint32_t r1v asm("r1");
 	register uint32_t fn asm("r3") =
 	    (uint32_t)(uintptr_t)(code + BC_NATIVE_ENTRY(off)) | 1;
-	register unsigned char *vsp asm("r4") = mem + sp;
+	register unsigned char *vsp asm("r4") = vptr(sp);
 	register void **hv asm("r5") = native_helpers;
-	register unsigned char *mb asm("r6") = mem;
+	/*
+	 *	Zero, and that is the whole of the native backend's share of
+	 *	the absolute-address change.  Generated code reaches memory
+	 *	as "ldr r3, [r6, r2]" and converts with "subs r2, r4, r6" /
+	 *	"adds r0, r6, r0"; with r6 = 0 those become plain absolute
+	 *	addressing and identities respectively, so every object
+	 *	already compiled stays correct.  r6 is now a spare register
+	 *	the backend could reclaim.
+	 */
+	register unsigned char *mb asm("r6") = NULL;
 
 	/*
 	 *	The explicit "+m" operands are not decoration.  The
@@ -2245,7 +2287,7 @@ static void prof_dump(void)
  */
 static int64_t helper_call(unsigned long target, unsigned char *vsp)
 {
-	sp = (unsigned long)(vsp - mem);
+	sp = (unsigned long)(uintptr_t)vsp;
 	prof_call++;
 	if (target & 0x80000000UL) {
 		libcall((unsigned)(target & 0x7FFFFFFFUL));
@@ -2275,7 +2317,7 @@ static int64_t helper_call(unsigned long target, unsigned char *vsp)
 
 static int64_t helper_libcall(unsigned long idx, unsigned char *vsp)
 {
-	sp = (unsigned long)(vsp - mem);
+	sp = (unsigned long)(uintptr_t)vsp;
 	prof_libcall++;
 	prof_lib[idx & 0xFF]++;
 	libcall((unsigned)idx);
@@ -2294,7 +2336,7 @@ static int64_t helper_libcall(unsigned long idx, unsigned char *vsp)
  */
 static int64_t helper_eqop(unsigned long idx, unsigned char *vsp, int64_t a)
 {
-	sp = (unsigned long)(vsp - mem);
+	sp = (unsigned long)(uintptr_t)vsp;
 	prof_eqop++;
 	A = a;
 	libcall((unsigned)idx);
@@ -2318,7 +2360,7 @@ static int64_t helper_eqop(unsigned long idx, unsigned char *vsp, int64_t a)
  */
 static int64_t helper_op(unsigned long op, unsigned char *vsp, int64_t a)
 {
-	unsigned long boff = (unsigned long)(vsp - mem);
+	unsigned long boff = (unsigned long)(uintptr_t)vsp;
 	unsigned long imm = op >> 16;	/* COPY/PUSHN length */
 	int64_t b;
 
@@ -2804,7 +2846,7 @@ static int64_t bc_exec(unsigned long entry)
 
 static int run(void)
 {
-	sp = MEMSIZE - 4;
+	sp = MEMTOP - 4;
 	/* Dispatch the entry exactly like a call site: h_entry points
 	   at main's BC_NATIVE marker when it was translated, and a
 	   BASIC program lives in its main line - entering through the
@@ -2851,6 +2893,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "usage: bcrun [-t] program.bc\n");
 		return 1;
 	}
+	mem_init();
 	force_bytecode = getenv("BCRUN_BYTECODE") != NULL;
 	prof_on = getenv("BCRUN_PROF") != NULL;
 	if (prof_on || getenv("BCRUN_SITES"))
