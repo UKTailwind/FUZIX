@@ -463,6 +463,32 @@ static uint32_t sum_words(uint32_t sum, const void *base, unsigned len)
 }
 #endif
 
+/*
+ *	Swap is a PSRAM ALLOCATION THE SIZE OF THE PROCESS.
+ *
+ *	It used to be a fixed slot on a block device:
+ *
+ *	    #define SWAP_SIZE ((PROGSIZE >> BLKSHIFT) + UDATA_BLKS)
+ *
+ *	256K per process whatever the process was, so a 12K shell
+ *	consumed 256K and 6912K of PSRAM bought 27 of them.  Worse, it is
+ *	why PROGSIZE exists at all: pagemap_realloc refuses to grow a
+ *	process past it because "swapout would overwrite the neighbouring
+ *	slot".  That 256K ceiling was the slot size, not an address-space
+ *	limit - an 8-bit machine's decision inherited by a 32-bit one.
+ *
+ *	Now each swapped process gets exactly the bytes it occupies, out
+ *	of the same heap as everything else, and the transfer is a memcpy
+ *	because the region is already mapped.  No block device, no
+ *	swapon, no LBA arithmetic, no bounds check to get wrong.
+ *
+ *	The address is kept here, indexed by process slot, because
+ *	p_page2 is a uint16_t and cannot hold a pointer.  p_page2 keeps
+ *	its "is it swapped" role for the generic kernel; where the bytes
+ *	are is the platform's business.
+ */
+static uint32_t swapaddr[PTABSIZE];
+
 int swapout(ptptr p)
 {
 #if SWAP_TRIPWIRE
@@ -475,18 +501,21 @@ int swapout(ptptr p)
 	uint16_t page = p->p_page;
 	if (!page)
 		panic(PANIC_ALREADYSWAP);
-    if (SWAPDEV == 0xffff)
-        return ENOMEM;
-
-	/* Are we out of swap ? */
-	int16_t map = swapmap_alloc();
-	if (map == -1)
-		return ENOMEM;
-
-	uint16_t swaparea = map * SWAP_SIZE;
 
     int slot = get_slot(p);
     int blocks = get_proc_size_blocks(p);
+    uint32_t region;
+    unsigned bytes = (unsigned)blocks * BLOCKSIZE;
+
+    if (!bytes)
+        return ENOMEM;
+    /* NOT zeroed: every byte is overwritten by the copy below, and a
+       200K memset through the QMI at 12MB/s would add 16ms to every
+       swapout for nothing. */
+    region = arena_alloc_raw(p, bytes);
+    if (!region)
+        return ENOMEM;
+
     for (int i=0; i<blocks; i++)
     {
         struct mapentry* b = find_block(slot, i);
@@ -501,18 +530,21 @@ int swapout(ptptr p)
 #if SWAP_TRIPWIRE
         sum = sum_words(sum, p, BLOCKSIZE);
 #endif
-        if (swapwrite(SWAPDEV, swaparea + (i*(BLOCKSIZE>>BLKSHIFT)),
-            BLOCKSIZE, (uaddr_t)p, 1) != BLOCKSIZE)
-            panic("swapout: write failed");
+        memcpy((void *)(region + (uint32_t)i * BLOCKSIZE), p, BLOCKSIZE);
 
         b->slot = b->block = 0xff;
     }
+    swapaddr[slot] = region;
+    /* swapmap_init used to keep these, in units of half a fixed slot.
+     * There are no slots now, so account the real bytes: what `free`
+     * shows is then the truth rather than a slot count. */
+    sysinfo.swapusedk += bytes >> 10;
 #if SWAP_TRIPWIRE
-	swap_sum[map] = sum;
+	swap_sum[slot] = sum;
 #endif
 
 	p->p_page = 0;
-	p->p_page2 = map;
+	p->p_page2 = 1;			/* "swapped" - the address is ours */
 	return 0;
 }
 
@@ -521,12 +553,16 @@ int swapout(ptptr p)
  */
 void swapin(ptptr p, uint16_t map)
 {
-    uint16_t swaparea = map * SWAP_SIZE;
+    int slot = get_slot(p);
+    uint32_t region = swapaddr[slot];
 #if SWAP_TRIPWIRE
     uint32_t sum = 0;
 #endif
 
-    int slot = get_slot(p);
+    used(map);				/* the address is ours, not a slot */
+    if (!region)
+        panic("swapin: no region");
+
     int blocks = get_proc_size_blocks(p);
     for (int i=0; i<blocks; i++)
     {
@@ -536,17 +572,15 @@ void swapin(ptptr p, uint16_t map)
 
         /* find_free_block returning NULL is survivable for brk (the
          * caller reports ENOMEM) but not here: dereferencing it turns
-         * into a swapread through a wild constant pointer - 4K of
-         * disc into the same innocent memory every time, which is
-         * exactly the class of corruption that must be a panic. */
+         * into a copy through a wild constant pointer - 4K into the
+         * same innocent memory every time, which is exactly the class
+         * of corruption that must be a panic. */
         if (!b)
             panic("swapin: no memory");
         blockindex = b - allocation_map;
         p = (void*)PROGBASE + blockindex*BLOCKSIZE;
 
-        if (swapread(SWAPDEV, swaparea + (i*(BLOCKSIZE>>BLKSHIFT)),
-            BLOCKSIZE, (uaddr_t)p, 1) != BLOCKSIZE)
-            panic("swapin: read failed");
+        memcpy(p, (void *)(region + (uint32_t)i * BLOCKSIZE), BLOCKSIZE);
 #if SWAP_TRIPWIRE
         sum = sum_words(sum, p, BLOCKSIZE);
 #endif
@@ -555,24 +589,36 @@ void swapin(ptptr p, uint16_t map)
         b->block = i;
     }
 #if SWAP_TRIPWIRE
-    if (sum != swap_sum[map]) {
-        kprintf("\nswap tripwire: pid %d slot %d area %u came back changed"
+    if (sum != swap_sum[slot]) {
+        kprintf("\nswap tripwire: pid %d slot %d came back changed"
                 " (%x, wrote %x)\n",
-                p->p_pid, slot, swaparea, sum, swap_sum[map]);
+                p->p_pid, slot, sum, swap_sum[slot]);
         panic("swapsum");
     }
 #endif
 
     p->p_page = 1;
     p->p_page2 = 0;
-    /* The slot is free again.  The generic kernel does this in
-     * swapper2(); this port swaps in from contextswitch() and never
-     * goes through swapper2(), so without this line every swap-in
-     * leaked one of the ~22 slots and a single multi-pass compile
-     * exhausted the pool - after which the NULL path above corrupted
-     * memory deterministically.  Found 2026-07-31 chasing a shell
-     * crash at a constant PC. */
-    swapmap_add(map);
+    /* Give the region back.  The old code returned a slot to swapmap
+     * here for the same reason, and forgetting it leaked one per
+     * swap-in until the pool ran dry - found 2026-07-31 chasing a shell
+     * crash at a constant PC.  A leak is now a leak of real memory, so
+     * it matters at least as much. */
+    arena_free(p, region);
+    swapaddr[slot] = 0;
+    sysinfo.swapusedk -= (uint16_t)(((uint32_t)blocks * BLOCKSIZE) >> 10);
+}
+
+/*
+ *	Total "swap" for sysinfo: there is no swap device, so the honest
+ *	number is the heap it comes out of.  Called once the PSRAM size
+ *	is known.
+ */
+void swap_report_size(void)
+{
+	uint32_t span = arena_pool_top() - arena_pool_base();
+
+	sysinfo.swapk = (uint16_t)(span >> 10);
 }
 
 arg_t brk_extend(uaddr_t addr)

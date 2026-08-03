@@ -3,10 +3,12 @@ fsck -a -y /
 setdate
 remount -n / rw
 prtroot >/etc/mtab
-# PSRAM disc as swap - 14208 sectors: the top 1 MiB is the userland
-# arena (PC3-PSRAM-ARENA.md) and 64K above that is the kernel's.
-# Harmless error if no PSRAM is fitted.
-swapon /dev/hdc 14208
+# No swapon. Swap is not a device any more: the kernel allocates a
+# region the size of the process out of the PSRAM heap and memcpy's
+# into it. Nothing here has to know a size, which is just as well - the
+# 14208 that used to be on this line had to agree with a split computed
+# in three other files, and a stale value would have had swap writing
+# through whatever came next.
 # USB keyboard layout: us uk de fr es be
 picoctl keymap uk
 # NOTE: keyboard auto-repeat (kbdrate) does NOT belong here - rc runs

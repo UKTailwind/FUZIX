@@ -149,7 +149,16 @@ void device_init(void)
     sd_rawinit();
     devsd_init();
 
-    psram_disc_init();
+    /* No PSRAM disc any more.  It existed to be a swap device, and
+     * swap is now a per-process allocation out of the PSRAM heap
+     * (swapout in swapper.c) - a memcpy into memory that is already
+     * mapped, with no block layer, no swapon, and no LBA arithmetic
+     * between the kernel and the bytes.  Removing it also hands the
+     * whole window to the heap instead of 1 MiB of it. */
+    {
+        extern void swap_report_size(void);
+        swap_report_size();     /* what `free` calls Swap: the heap */
+    }
 
     {
         /* console command history: lives in PSRAM reserved above */

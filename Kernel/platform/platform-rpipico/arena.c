@@ -72,21 +72,23 @@
 uint32_t arena_len = PSRAM_ARENA_DEFAULT;
 
 /*
- *	The heap's span, and it must stay ABOVE the disc.
+ *	The heap is now everything between the linker's statics and the
+ *	kernel's reserve at the top - about 7 MiB rather than the 1 MiB
+ *	the arena used to be given.
  *
- *	Not psram_static_len(): that is the bottom of the window, which
- *	is where the SWAP DISC starts.  Basing the heap there would have
- *	malloc handing out swap blocks - the same class of fault as the
- *	f_trunc bug, and just as silent.  The disc keeps
- *	[static end, this), lineedit keeps the top PSRAM_RESERVE, and the
- *	heap is what the arena always was.
+ *	It could only be widened once the SWAP DISC stopped occupying the
+ *	bottom of the window.  Swap is a per-process allocation out of
+ *	this same heap now (see swapout in swapper.c), so there is no
+ *	block device to collide with, no swapon size to agree with, and
+ *	no arbitrary split between "disc" and "arena" to choose.
  *
- *	Collapsing these three into one allocator is the next step, and
- *	it needs the disc to stop being a fixed extent first.
+ *	Getting this wrong is silent: an earlier version of this function
+ *	returned psram_static_len() while the disc was still there, which
+ *	would have had malloc handing out live swap blocks.
  */
 uint32_t arena_pool_base(void)
 {
-	return PSRAM_BASE + psram_size - PSRAM_RESERVE - arena_len;
+	return PSRAM_BASE + psram_static_len();
 }
 
 uint32_t arena_pool_top(void)
@@ -162,7 +164,16 @@ static struct arena_own *arena_find(struct p_tab *o, uint32_t base)
 	return NULL;
 }
 
-uint32_t arena_alloc(struct p_tab *owner, uint32_t len)
+/*
+ *	zero != 0 clears the region first.  Userland always gets zeroed
+ *	memory: PSRAM survives a warm reset and the previous run's
+ *	contents are nobody's business (the boot-udata bug taught that).
+ *
+ *	Swap does not, and must not.  Every byte is overwritten by the
+ *	copy that follows, and at 12MB/s through the QMI a 200K memset
+ *	would add 16ms to every swapout to no purpose.
+ */
+static uint32_t arena_alloc_z(struct p_tab *owner, uint32_t len, int zero)
 {
 	unsigned i;
 	void *p;
@@ -181,11 +192,22 @@ uint32_t arena_alloc(struct p_tab *owner, uint32_t len)
 	p = malloc(len);
 	if (!p)
 		return 0;
-	memset(p, 0, len);
+	if (zero)
+		memset(p, 0, len);
 	own[i].owner = owner;
 	own[i].base = (uint32_t)p;
 	own[i].len = len;
 	return (uint32_t)p;
+}
+
+uint32_t arena_alloc(struct p_tab *owner, uint32_t len)
+{
+	return arena_alloc_z(owner, len, 1);
+}
+
+uint32_t arena_alloc_raw(struct p_tab *owner, uint32_t len)
+{
+	return arena_alloc_z(owner, len, 0);
 }
 
 /*

@@ -24,6 +24,10 @@ extern uint32_t arena_len;
 uint32_t arena_pool_base(void);
 uint32_t arena_pool_top(void);
 uint32_t arena_alloc(struct p_tab *owner, uint32_t len);
+/* As arena_alloc but WITHOUT zeroing - for a caller that overwrites
+ * every byte immediately. Swap uses it: a 200K memset through the QMI
+ * at 12MB/s would add 16ms to every swapout for nothing. */
+uint32_t arena_alloc_raw(struct p_tab *owner, uint32_t len);
 /* Grow or shrink an allocation. The new base MAY DIFFER from the old -
  * newlib moves the block when it cannot extend in place - so a caller
  * holding interior pointers must rebuild them. 0 leaves the original
