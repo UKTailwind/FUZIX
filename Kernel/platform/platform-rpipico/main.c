@@ -173,8 +173,12 @@ int main(void)
      * MicroPython/MMBasic firmwares. The flash QMI divisor must be
      * re-capped immediately after; PSRAM timing derives from the final
      * clk_sys inside psram_init. */
-    set_sys_clock_khz(PC3_SYS_CLOCK_KHZ, true);
-    qmi_flash_timing(PC3_FLASH_MAX_HZ);
+    /* One call, and it must stay one call: the kernel executes from
+     * flash now, so the QMI divisor has to be safe THROUGH the clock
+     * change, not merely corrected after it.  Setting the clock first
+     * and fixing the divisor second - which is what this was - hangs
+     * the machine dead the moment the PLL relocks.  See pc3_clock_init. */
+    pc3_clock_init(PC3_SYS_CLOCK_KHZ, PC3_FLASH_MAX_HZ);
     psram_size = psram_init(PC3_PSRAM_CS_PIN);
 #endif
 

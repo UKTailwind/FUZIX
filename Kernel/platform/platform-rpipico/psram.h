@@ -41,6 +41,8 @@ extern const uint8_t script_interp_path[];
 
 /* Re-cap the flash (QMI CS0) divisor after clk_sys changes. */
 void qmi_flash_timing(uint32_t max_flash_hz);
+/* Raise clk_sys with XIP alive across the change - see psram.c. */
+void pc3_clock_init(uint32_t target_khz, uint32_t max_flash_hz);
 
 /* Bring up QSPI PSRAM on cs_pin (QMI CS1). Returns size in bytes, 0 if
  * absent. Timing derives from clk_sys, so raise the clock first. */

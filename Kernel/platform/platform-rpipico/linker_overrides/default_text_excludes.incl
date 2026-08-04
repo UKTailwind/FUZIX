@@ -37,14 +37,93 @@
  * Good candidates are cold: boot and init, mode switching, the console
  * escape parser, anything that runs once or at human speed.
  *
+ * And note that RAM is not automatically the fast choice here.  core1
+ * DMAs scanlines out of disp_fb continuously, so RAM bandwidth is
+ * contended, while the XIP cache is a separate path - a cached flash
+ * fetch can beat a contended RAM one.  MMBasic's experience is the
+ * same: pinning to RAM guarantees a floor, it does not guarantee a
+ * win.  So the way to decide is to move something and measure it, not
+ * to reason about it.
+ *
  * ---------------------------------------------------------------
- * STAGE 1: this list is EMPTY on purpose.
+ * Whole objects can be moved with file patterns, which is how the bulk
+ * of this is done; individual functions can be named where an object
+ * is mixed hot and cold.
  *
- * Everything is still in RAM, so the build behaves exactly as
- * PICO_COPY_TO_RAM did.  The mechanism is in place and behaviour has
- * not changed, which makes the next step a matter of adding one name at
- * a time and measuring, rather than one change that moves everything
- * and has to be debugged as a whole.
- *
- * See PC3-FLASH-PLAN.md for the triage.
+ * See PC3-FLASH-PLAN.md for the triage and the measurements.
  */
+
+/* ---- the filesystem: SD-backed, nowhere near the scanout ---- */
+*filesys.c.o(.text*)
+*inode.c.o(.text*)
+*devio.c.o(.text*)
+*blk512.c.o(.text*)
+*mbr.c.o(.text*)
+
+/* ---- system calls: entered from user code at human speed ---- */
+*syscall_fs.c.o(.text*)
+*syscall_fs2.c.o(.text*)
+*syscall_fs3.c.o(.text*)
+*syscall_other.c.o(.text*)
+*syscall_proc.c.o(.text*)
+*syscall_exec.c.o(.text*)
+*syscall_execelf32.c.o(.text*)
+*syscall_net.c.o(.text*)
+*network.c.o(.text*)
+*net_native.c.o(.text*)
+*elf.c.o(.text*)
+
+/* ---- boot and setup: once, before anything is timed ---- */
+*start.c.o(.text*)
+*devices.c.o(.text*)
+*sound.c.o(.text*)
+*board.c.o(.text*)
+*ds3231.c.o(.text*)
+*devgpio.c.o(.text*)
+
+/* ---- the console's escape machinery and line editing, which run at
+       terminal speed.  charout is per character so it is named back
+       into RAM below if it ever measures badly. ---- */
+*lineedit.c.o(.text*)
+*kbd_decode.c.o(.text*)
+
+/* ---- the kernel's printf: panics and boot messages ---- */
+*printf.c.o(.text*)
+*hexdump.c.o(.text*)
+
+/* ---- the console: the escape parser, the tile/glyph plotting and
+       charout.  charout is per CHARACTER, which is the one thing here
+       that could have shown up, and it does not: the font and the code
+       are both smaller than the 16K XIP cache, so a screen of text
+       reads them from flash once.  Measured below. ---- */
+*console.c.o(.text*)
+
+/* main.c is NOT here.  It raises clk_sys, and the code doing that
+ * cannot be fetched from the flash whose clock it is changing - even
+ * with pc3_clock_init doing the QMI work from RAM, the caller around
+ * it would be running from flash across the switch. */
+
+/* ---- SDK peripherals: NOT MOVED, and clocks.c is why. ----
+ *
+ * A batch of these was moved and the board hung stone dead - no boot,
+ * no console, not even a panic.  clocks.c is the one that cannot go:
+ * this board overclocks to 375 MHz, and set_sys_clock_khz reconfigures
+ * the system clock, which changes the QMI's flash timing.  Code doing
+ * that cannot be executing from the flash whose clock it is changing.
+ * The SDK marks its own such functions __not_in_flash_func for exactly
+ * this reason.
+ *
+ * flash.c is out for the same family of reasons - it is the flash
+ * driver and cannot run from what it erases.
+ *
+ * The rest (i2c, pio, gpio, adc, uart, spi) are probably fine and
+ * together are only about 3K.  They were moved as a speculative batch
+ * with clocks.c, so they are untested, and they are not worth the
+ * recovery cycle until something needs the space.
+ */
+
+/* ---- the SD card: polled SPI, not on the QMI at all ---- */
+*blkdev.c.o(.text*)
+*devsdspi.c.o(.text*)
+*devsd.c.o(.text*)
+*devsd_discard.c.o(.text*)

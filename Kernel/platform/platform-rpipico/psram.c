@@ -16,16 +16,23 @@
 #include "hardware/structs/ioqspi.h"
 #include "hardware/structs/qmi.h"
 #include "hardware/structs/xip_ctrl.h"
+#include "hardware/structs/pads_qspi.h"
 #include "hardware/clocks.h"
 #include "hardware/sync.h"
 #include "psram.h"
 
-/* Re-cap the flash divisor for the current clk_sys. Call with the other
- * core not running and nothing executing from flash (the kernel is
- * PICO_COPY_TO_RAM, so only the XIP window itself is at risk). */
-void __no_inline_not_in_flash_func(qmi_flash_timing)(uint32_t max_flash_hz)
+/*
+ * Re-cap the flash divisor for a given clk_sys.
+ *
+ * This used to say "call with nothing executing from flash - the kernel
+ * is PICO_COPY_TO_RAM, so only the XIP window itself is at risk". That
+ * is no longer true: the kernel now RUNS from flash, so the divisor has
+ * to be right across the clock change as well as after it, which is
+ * what pc3_clock_init below is for.
+ */
+static void __no_inline_not_in_flash_func(qmi_flash_timing_for)
+        (uint32_t clock_hz, uint32_t max_flash_hz)
 {
-    uint32_t clock_hz = clock_get_hz(clk_sys);
     uint32_t divisor = (clock_hz + max_flash_hz - 1) / max_flash_hz;
 
     /* Make sure flash is deselected - QMI doesn't have a busy flag */
@@ -41,6 +48,62 @@ void __no_inline_not_in_flash_func(qmi_flash_timing)(uint32_t max_flash_hz)
     /* Force a read through XIP to ensure the timing is applied */
     volatile uint32_t *ptr = (volatile uint32_t *)0x14000000;
     (void)*ptr;
+}
+
+void __no_inline_not_in_flash_func(qmi_flash_timing)(uint32_t max_flash_hz)
+{
+    qmi_flash_timing_for(clock_get_hz(clk_sys), max_flash_hz);
+}
+
+/*
+ * Raise clk_sys, keeping XIP alive across the change.
+ *
+ * The kernel executes from flash now, so instructions are being fetched
+ * through the QMI while the clock underneath it moves.  The divisor in
+ * force during the switch has to be safe for BOTH speeds, or the first
+ * fetch after the PLL relocks is at a flash clock far over spec and the
+ * machine simply stops - no panic, no console, which is exactly what
+ * happened when this was left as "set the clock, then fix the divisor".
+ *
+ * This is MMBasic's sequence (PicoMite.c, the set_sys_clock_khz
+ * wrapper), taken rather than re-derived: conservative timing for
+ * max(old, new) BEFORE the switch, then the relaxed timing for the new
+ * clock after it - and the QSPI pad drive set on both sides, because
+ * set_sys_clock can rewrite the pads.
+ *
+ * Must not be inlined into a caller that lives in flash.
+ */
+void __no_inline_not_in_flash_func(pc3_clock_init)(uint32_t target_khz,
+                                                   uint32_t max_flash_hz)
+{
+    uint32_t old_hz = clock_get_hz(clk_sys);
+    uint32_t new_hz = target_khz * 1000u;
+    uint32_t worst = (old_hz > new_hz) ? old_hz : new_hz;
+
+    /* Drive strength and slew for a fast QSPI clock - MMBasic's values */
+    pads_qspi_hw->io[0] = 0x67;
+    pads_qspi_hw->io[1] = 0x67;
+    pads_qspi_hw->io[2] = 0x67;
+    pads_qspi_hw->io[3] = 0x6B;
+    pads_qspi_hw->io[4] = 0x6B;
+    pads_qspi_hw->io[5] = 0x6B;
+
+    /* Safe for whichever of the two clocks is faster: the write happens
+     * at the old speed and has to survive until the new one is live. */
+    qmi_flash_timing_for(worst, max_flash_hz);
+    busy_wait_us(2);
+
+    set_sys_clock_khz(target_khz, true);
+
+    /* set_sys_clock can rewrite the QSPI pads, so put them back, and
+     * now relax the divisor to what the new clock actually needs. */
+    pads_qspi_hw->io[0] = 0x67;
+    pads_qspi_hw->io[1] = 0x67;
+    pads_qspi_hw->io[2] = 0x67;
+    pads_qspi_hw->io[3] = 0x6B;
+    pads_qspi_hw->io[4] = 0x6B;
+    pads_qspi_hw->io[5] = 0x6B;
+    qmi_flash_timing_for(new_hz, max_flash_hz);
 }
 
 static size_t __no_inline_not_in_flash_func(psram_detect)(void)

@@ -13,5 +13,21 @@
  * touch on the scanout path belongs in RAM whatever it is.
  *
  * Note that with -fdata-sections each object gets .rodata.<name>, so
- * this is per table, by name.
+ * this is per table, by name.  The trailing * on each catches the
+ * suffixes the compiler can add.
  */
+
+/* The six USB keyboard layouts, 808 bytes each.  Read once per
+ * keypress, which is as cold as anything gets. */
+*(.rodata.USkeyValue*)
+*(.rodata.UKkeyValue*)
+*(.rodata.DEkeyValue*)
+*(.rodata.FRkeyValue*)
+*(.rodata.ESkeyValue*)
+*(.rodata.BEkeyValue*)
+
+/* The console font, 2,692 bytes.  Read per glyph, not per pixel: the
+ * scanline expanders read disp_fb, which the glyph was drawn INTO, so
+ * the font is nowhere near the scanout deadline.  It is smaller than
+ * the 16K XIP cache, so a screen of text reads it from flash once. */
+*(.rodata.font1*)
