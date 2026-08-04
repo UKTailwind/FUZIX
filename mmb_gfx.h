@@ -174,10 +174,12 @@ static void mmg_ring(int x, int y, int r1, int r2, MMINTEGER c,
  *
  *	fill is MM_CUR for "no fill", matching the interpreter's -1.
  *
- *	Note what the single width outline does with an aspect other than
- *	1: A steps by the aspect, so a stretched outline is dotted. That
- *	is the interpreter's behaviour (Draw.c, the w <= 1 branch, eight
- *	DrawPixel calls a step) and it is reproduced rather than fixed.
+ *	A stretched outline (aspect > 1) used to come out dotted, here and
+ *	in the interpreter: A steps by the aspect, so consecutive points
+ *	of the circle algorithm are more than one pixel apart and single
+ *	pixels leave holes. The interpreter has since been fixed and this
+ *	is that fix - join consecutive points with short horizontal runs,
+ *	and bridge the gap the two octants leave at the 45 degree point.
  */
 static void mmg_circle(int x, int y, int radius, int w, MMINTEGER c,
 		       MMINTEGER fill, MMFLOAT aspect)
@@ -188,6 +190,7 @@ static void mmg_circle(int x, int y, int radius, int w, MMINTEGER c,
 	int a, b, P, A, B;
 	int asp = (int)(aspect * 1024.0);
 	int w1 = w, r1 = radius;
+	int stretched, lastA, lastB, lastb;
 	MMFLOAT aspect2;
 
 	if (radius <= 0 || w < 0)
@@ -250,11 +253,17 @@ static void mmg_circle(int x, int y, int radius, int w, MMINTEGER c,
 
 	w = w1;
 	radius = r1;
+	/* Stretched: consecutive points are more than a pixel apart, so
+	   they are joined with runs rather than plotted singly. */
+	stretched = (asp > 1024);
 
 	while (w >= 0 && radius > 0) {
 		a = 0;
 		b = radius;
 		P = 1 - radius;
+		lastA = 0;
+		lastB = (b * asp) >> 10;
+		lastb = b;
 		do {
 			A = (a * asp) >> 10;
 			B = (b * asp) >> 10;
@@ -267,15 +276,31 @@ static void mmg_circle(int x, int y, int radius, int w, MMINTEGER c,
 			 * circle comes out two pixels thick everywhere.
 			 */
 			if (w) {
-				mmg_pt(pts, &np, c, A + x, b + y);
-				mmg_pt(pts, &np, c, B + x, a + y);
-				mmg_pt(pts, &np, c, x - A, b + y);
-				mmg_pt(pts, &np, c, x - B, a + y);
-				mmg_pt(pts, &np, c, B + x, y - a);
-				mmg_pt(pts, &np, c, A + x, y - b);
-				mmg_pt(pts, &np, c, x - A, y - b);
-				mmg_pt(pts, &np, c, x - B, y - a);
+				if (stretched) {
+					/* A only rises and B only falls, so
+					   every run below is left to right */
+					mmg_rc(rcs, &nr, c, x + lastA, y + b, x + A, y + b);
+					mmg_rc(rcs, &nr, c, x - A, y + b, x - lastA, y + b);
+					mmg_rc(rcs, &nr, c, x + lastA, y - b, x + A, y - b);
+					mmg_rc(rcs, &nr, c, x - A, y - b, x - lastA, y - b);
+					mmg_rc(rcs, &nr, c, x + B, y + a, x + lastB, y + a);
+					mmg_rc(rcs, &nr, c, x - lastB, y + a, x - B, y + a);
+					mmg_rc(rcs, &nr, c, x + B, y - a, x + lastB, y - a);
+					mmg_rc(rcs, &nr, c, x - lastB, y - a, x - B, y - a);
+				} else {
+					mmg_pt(pts, &np, c, A + x, b + y);
+					mmg_pt(pts, &np, c, B + x, a + y);
+					mmg_pt(pts, &np, c, x - A, b + y);
+					mmg_pt(pts, &np, c, x - B, a + y);
+					mmg_pt(pts, &np, c, B + x, y - a);
+					mmg_pt(pts, &np, c, A + x, y - b);
+					mmg_pt(pts, &np, c, x - A, y - b);
+					mmg_pt(pts, &np, c, x - B, y - a);
+				}
 			}
+			lastA = A;
+			lastB = B;
+			lastb = b;
 			if (P < 0) {
 				P += 3 + (a << 1);
 				a++;
@@ -285,10 +310,22 @@ static void mmg_circle(int x, int y, int radius, int w, MMINTEGER c,
 				b--;
 			}
 		} while (a <= b);
+		if (w && stretched) {
+			/* The two octants stop short of each other at the
+			   45 degree point, leaving a gap of aspect-1
+			   pixels: bridge the last row of the flat octant. */
+			mmg_rc(rcs, &nr, c, x + lastA, y + lastb, x + lastB, y + lastb);
+			mmg_rc(rcs, &nr, c, x - lastB, y + lastb, x - lastA, y + lastb);
+			mmg_rc(rcs, &nr, c, x + lastA, y - lastb, x + lastB, y - lastb);
+			mmg_rc(rcs, &nr, c, x - lastB, y - lastb, x - lastA, y - lastb);
+		}
 		w--;
 		radius--;
 	}
-	mm_plot(pts, np, c);
+	if (stretched)
+		mm_fill(rcs, nr, c);
+	else
+		mm_plot(pts, np, c);
 }
 
 #endif /* MMB_GFX_H */
