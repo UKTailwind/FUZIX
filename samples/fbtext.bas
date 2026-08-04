@@ -35,8 +35,12 @@ Do
   Print @(0, 0) "frame "; frames
   Print @(0, 14) "ms    "; Int(t)
   Print @(0, 28) "per fr"; Int(t / (frames + 1))
-  ' mode 2 = swapped ink and paper, so this one is a label in reverse
-  Print @(160, 226, 2) " PRINT @ "
+  ' mode 2 = swapped ink and paper, so this one is a label in reverse.
+  ' Note the trailing semicolon: without it the newline takes the cursor
+  ' to y=238, which overflows the 240-line screen and scrolls the whole
+  ' buffer - correct, but a 38,400 byte PSRAM memmove every frame, worth
+  ' 2ms of the 4.6.  Text at the bottom of the screen wants no newline.
+  Print @(160, 226, 2) " PRINT @ ";
 
   FrameBuffer Copy F, N
   frames = frames + 1
