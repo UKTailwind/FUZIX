@@ -38,16 +38,22 @@ From this directory:
     make TARGET=rpipico SUBTARGET=pico2
 
 `SUBTARGET=pico2` is what selects the RP2350 and, with it,
-`TOTALMEM=312` — the amount of SRAM given to user processes. The
+`TOTALMEM=340` — the amount of SRAM given to user processes. The
 result is `build/fuzix.uf2`.
 
-312 rather than 320 because the kernel has taken two 4 KB bites out of
-the pool: one to stop `progbase` floating as the kernel's size changes,
-one to pay for the C library's allocator, which is the PSRAM heap
-(`arena.c` overrides `_sbrk`) and is RAM-resident because the kernel is
-`PICO_COPY_TO_RAM`. `linker_overrides/memory_ram.incl` carves the same
-split and **nothing checks that the two agree**, so change both or
-neither.
+340 of the 512 KB, because the kernel keeps the other 172. It used to
+keep more: it was built `PICO_COPY_TO_RAM`, which copied all 90,676
+bytes of `.text` into RAM at boot. Most of it now executes from flash
+(`linker_overrides/default_text_excludes.incl` names what may, and why
+some things may not), which freed 45 KB and let the pool grow from 312
+to 340.
+
+`linker_overrides/memory_ram.incl` carves the same split and **nothing
+checks that the two agree**, so change both or neither. The kernel
+currently uses 166,808 of its 176,128 bytes; when that runs out the
+answer is to move more code to flash rather than to take memory back
+from the pool. The failure is a loud `region RAM overflowed` at link
+time, which is what the split was designed to give.
 
 ## 3. The userland
 

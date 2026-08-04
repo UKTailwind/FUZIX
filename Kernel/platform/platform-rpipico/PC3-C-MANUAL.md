@@ -275,7 +275,7 @@ ioctl(sys, SNDIOC_ENV, envbytes); /* 14 bytes: N,T,PI1..3,PN1..3,AA,AD,AS,AR,ALA
 ioctl(sys, SNDIOC_QUIET, 0);      /* silence everything */
 ```
 
-`amp` is −15..0 for volume, or 1..16 to use `ENVELOPE n`. The channel
+`amp` is -15..0 for volume, or 1..16 to use `ENVELOPE n`. The channel
 word carries the `&1x` flush and `&Sxx` sync bits.
 
 # Joystick, ADC and the clock
@@ -288,9 +288,9 @@ int v = ioctl(sys, PICOIOC_ADVAL, (void *)n);
 |---|---|
 | 0 | joystick switches GP34–37, pressed = 1, bit 0 = GP34 |
 | 1–4 | ADC on GP41–44, 16-bit (12-bit shifted left 4) |
-| −5..−8 | free slots in sound queue 0–3 |
-| −9 | microsecond counter, 31 bits in the return value |
-| −10 | the full 64-bit counter: pass an 8-byte buffer whose low word holds −10 |
+| -5..-8 | free slots in sound queue 0–3 |
+| -9 | microsecond counter, 31 bits in the return value |
+| -10 | the full 64-bit counter: pass an 8-byte buffer whose low word holds -10 |
 
 # PSRAM
 

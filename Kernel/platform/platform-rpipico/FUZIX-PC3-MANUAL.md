@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.6 — August 2026"
+date: "Release v0.7 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -37,9 +37,9 @@ boot banner names the detected board.
 Headline specification as configured here:
 
 * CPU at 375 MHz (the XGA-capable clock, as MMBasic uses)
-* 312 KB of program RAM managed as 4 KB pages, with the 8 MB PSRAM
-  behind it — up to 30 concurrent processes, and a single process may
-  use all of program RAM. A swapped-out process is a PSRAM allocation
+* 340 KB of program RAM managed as 4 KB pages, with the 8 MB PSRAM
+  behind it — up to 64 concurrent processes, and a single process may
+  have about 292 KB of it. A swapped-out process is a PSRAM allocation
   the size of the process, not a slot on a device, so nothing is
   reserved for one that does not exist
 * Programs get their heap from the PSRAM too, so a BASIC array or a C
@@ -54,6 +54,51 @@ Headline specification as configured here:
   MMBasic translator in front of it — both run on the machine itself
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
+
+## New in v0.7
+
+Most of the kernel now executes from flash instead of being copied into
+RAM at boot, and the memory that frees goes to programs.
+
+* **340 KB of program RAM**, up from 312, and a single process can have
+  about **292 KB**. 90,676 bytes of kernel code used to be copied into
+  RAM at boot; 45,000 of them are gone, and what is left has room to
+  grow. Costs nothing measurable: the display DMAs out of RAM
+  continuously, so RAM bandwidth is contended while the flash cache is
+  a separate path.
+* **64 processes**, up from 30, with the open-file and inode tables
+  sized to match — the shell gives every background job its own
+  `/dev/null`, so the file table ran dry before the process table did.
+* **`FRAMEBUFFER`** — `CREATE`, `WRITE N|F`, `COPY s,d[,B]`, `CLOSE`,
+  `WAIT`. Draw off-screen and show the frame in one go. A
+  redraw-and-show frame costs about 4.4 ms against the 17 ms the
+  display gives you, and `COPY ...,B` holds a loop to the refresh rate.
+* **`PRINT @(x, y [, mode])`** puts text at a pixel position. In a
+  graphics mode `PRINT` now *draws* the characters, as MMBasic does,
+  rather than sending them to the console — so text follows the drawing
+  into the framebuffer instead of the console scrolling the display out
+  from under it. `mode` 1 draws over what is there, 2 swaps ink and
+  paper.
+* **`INKEY$`** — which was not implemented at all, and because it ends
+  in `$` was quietly being treated as an ordinary empty string
+  variable, so `LOOP UNTIL INKEY$ <> ""` could never exit.
+* **`PIXEL x(), y(), c()`** — the array form, one call for a whole run
+  of points instead of one syscall each.
+* **Text scrolls the same way everywhere.** A `PRINT` on the last line
+  scrolls in a graphics mode exactly as it does on the console, because
+  it is now literally the same code.
+* **A stretched ellipse outline is no longer dotted** — the fix from
+  MMBasic's own `DrawCircle`.
+* **`PRINT "x";` reaches the screen.** A partial line used to sit in a
+  buffer until the next newline, so a program printing "Calculating… "
+  and then working for half a minute showed nothing until it finished.
+* **BBC BASIC works again.** It sizes its workspace by asking for
+  memory until the kernel refuses; v0.6 let it take every last block,
+  leaving the shell nowhere to return to. A process may now grow only
+  as far as leaves room for the largest other one.
+* **The boot banner names the PC3 release**, alongside Fuzix's own
+  version — they are different numbers, and only one of them used to be
+  on screen.
 
 ## New in v0.6
 
@@ -514,7 +559,7 @@ precision, `sin` `cos` `tan` `asin` `acos` `atan` `atan2` `sinh`
 at machine speed whatever the calling code is.
 
 `malloc` takes its memory from the PSRAM, not from the program's own
-312 KB, so a C program can allocate far more than it could hold
+340 KB, so a C program can allocate far more than it could hold
 itself. It is asked for once when the program loads; set
 `BCRUN_HEAP` to a size in KB in the environment to change how much.
 
@@ -1309,13 +1354,15 @@ v0.5 — while the immediate-mode ones will never apply, since a
 translated program is compiled and run rather than typed at a prompt.
 (`mmedit` provides the editing they existed for.)
 
-Of the graphics, `MODE`, `COLOUR`, `PIXEL`, `LINE`, `CIRCLE`, `RGB()`
-and `FRAMEBUFFER` are done; `BOX`, `TRIANGLE`, `TEXT` and the array
-form of `PIXEL` are not yet, nor are `FRAMEBUFFER LAYER` and
-`FRAMEBUFFER MERGE`. In `MODE 2` a program's `PRINT` output does not
-yet share the screen with the graphics as it does in MMBasic — it goes
-to the console, and so to the screen even while drawing goes to the
-framebuffer — and there is no `OPTION CONSOLE` to steer it; both are
-next.
+Of the graphics, `MODE`, `COLOUR`, `PIXEL` (including the array form),
+`LINE`, `CIRCLE`, `RGB()`, `FRAMEBUFFER` and `PRINT @` are done; `BOX`,
+`TRIANGLE` and `TEXT` are not yet, nor are `FRAMEBUFFER LAYER` and
+`FRAMEBUFFER MERGE`.
+
+In a graphics mode a program's `PRINT` now draws the characters into
+whatever is being drawn on, as MMBasic does, so text goes into the
+framebuffer with everything else. What is still missing is
+`OPTION CONSOLE`, to say whether a program's output should go to the
+screen, the serial port, or both.
 
 \newpage
