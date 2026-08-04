@@ -303,8 +303,27 @@ void mm_float_to_str(char *p, MMFLOAT f, int m, int n, unsigned char ch)
  * multiple of 14 columns. */
 static int mm_charpos = 1;
 
+/* Defined with the graphics-text block further down: in a graphics mode
+ * PRINT draws glyphs into whatever is being drawn on, rather than
+ * sending characters to the console.  Returns non-zero when it took
+ * the character. */
+static int mm_gputc(int c);
+static void mm_gflush(void);
+
+/* The graphics text cursor and its pending run.  Common to both builds
+ * because CLS consults it - in a graphics mode CLS clears the write
+ * target rather than the console, and has to drop whatever PRINT had
+ * half-collected.  Only the drawing itself is platform-specific. */
+#define MM_GCELL_W      8               /* the kernel's font1 cell */
+#define MM_GCELL_H      12
+static int mm_gon;                      /* PRINT draws rather than tells */
+static int mm_gx, mm_gy;                /* the pixel cursor - CurrentX/Y */
+static int mm_gn;                       /* characters collected so far */
+
 void mm_putc(int c)
 {
+    if (mm_gputc(c))
+        return;
     putchar(c);
     if (c == '\r' || c == '\n') mm_charpos = 1;
     else if (c == '\t')         mm_charpos = (((mm_charpos - 1) / 14) + 1) * 14 + 1;
@@ -362,10 +381,16 @@ void mm_pr_tab(void) { mm_putc('\t'); }
  * would ever have caught it.  Folding the flush into the call that was
  * already being made leaves the generated code the same shape it was.
  */
-void mm_pr_se(const char *s)  { mm_pr_s(s);  fflush(stdout); }
-void mm_pr_ie(MMINTEGER v)    { mm_pr_i(v);  fflush(stdout); }
-void mm_pr_fe(MMFLOAT v)      { mm_pr_f(v);  fflush(stdout); }
-void mm_pr_tabe(void)         { mm_pr_tab(); fflush(stdout); }
+static void mm_pr_end(void)
+{
+    mm_gflush();                /* a graphics-mode line, drawn now */
+    fflush(stdout);             /* a console line, out of stdio's buffer */
+}
+
+void mm_pr_se(const char *s)  { mm_pr_s(s);  mm_pr_end(); }
+void mm_pr_ie(MMINTEGER v)    { mm_pr_i(v);  mm_pr_end(); }
+void mm_pr_fe(MMFLOAT v)      { mm_pr_f(v);  mm_pr_end(); }
+void mm_pr_tabe(void)         { mm_pr_tab(); mm_pr_end(); }
 
 /* TAB() is a string valued function in MMBasic, not a side effect */
 char *mm_tab(MMINTEGER col)
@@ -2253,6 +2278,7 @@ int mm_gosub_pop(void)
 void mm_error(const char *msg)
 {
     mm_close_all();
+    mm_gflush();
     fflush(stdout);
     fprintf(stderr, "\r\nError: %s\r\n", msg);
     exit(1);
@@ -2261,6 +2287,7 @@ void mm_error(const char *msg)
 void mm_end(void)
 {
     mm_close_all();
+    mm_gflush();
     fflush(stdout);
     exit(0);
 }
@@ -2556,6 +2583,134 @@ static void mm_gfx_setcol(MMINTEGER rgb)
 }
 
 /*
+ * ---- PRINT in a graphics mode -------------------------------------
+ *
+ * MMBasic does not send characters to a console in a graphics mode: it
+ * DRAWS them, through WriteBuf, at CurrentX/CurrentY (Draw.c
+ * GUIPrintChar).  That is what makes PRINT work with the framebuffer,
+ * and here it fixes two things at once.
+ *
+ * Before this, a PRINT in MODE 2 went to the console, and the console
+ * draws into the SCREEN framebuffer.  So a program drawing off-screen
+ * had the console's text land on the picture that was showing, and
+ * when the line wrapped the whole display scrolled out from under it -
+ * the cursor walking down the screen.
+ *
+ * Now the text goes through GFXIOC_TEXT, which draws through the
+ * caller's write target like every other primitive.  Text follows the
+ * drawing.
+ *
+ * Characters are buffered and drawn a run at a time: a counter redrawn
+ * every frame should cost one crossing, not one per digit.
+ */
+#define MM_GFX_TEXT_MAX 256
+static char mm_gbuf[MM_GFX_TEXT_MAX];   /* the pending run */
+static int mm_gscale = 1;
+static int mm_gpmode;                   /* MMBasic's PrintPixelMode */
+
+#define MM_GFX_TEXT     0x001A
+#define MM_GFX_SCROLL   0x001B
+
+struct mm_gfx_text {
+    short x, y;
+    unsigned char scale, pad;
+    long fg, bg;
+    unsigned short len;
+    void *str;
+};
+
+
+/* Draw what has been collected, and step the cursor past it. */
+static void mm_gflush(void)
+{
+    struct mm_gfx_text gt;
+    MMINTEGER fg = mm_gfx_fg, bg = mm_gfx_bg;
+
+    if (mm_gn <= 0)
+        return;
+    /* MMBasic's PrintPixelMode: 1 draws on whatever is there, 2 swaps
+     * ink and paper.  The rest of its set needs the modes the kernel
+     * primitive does not have yet, so they read as 0. */
+    if (mm_gpmode == 2) {
+        MMINTEGER t = fg; fg = bg; bg = t;
+    }
+    gt.x = (short)mm_gx;
+    gt.y = (short)mm_gy;
+    gt.scale = (unsigned char)mm_gscale;
+    gt.pad = 0;
+    gt.fg = (long)fg;
+    gt.bg = (mm_gpmode == 1) ? -1L : (long)bg;
+    gt.len = (unsigned short)mm_gn;
+    gt.str = mm_gbuf;
+    if (mm_gfx_open() >= 0)
+        ioctl(mm_gfx_fd, MM_GFX_TEXT, &gt);
+    mm_gx += mm_gn * MM_GCELL_W * mm_gscale;
+    mm_gn = 0;
+}
+
+static int mm_gputc(int c)
+{
+    if (!mm_gon)
+        return 0;                       /* not our business */
+    if (c == '\r')
+        return 1;                       /* the newline does the work */
+    if (c == '\n') {
+        int cell = MM_GCELL_H * mm_gscale;
+
+        mm_gflush();
+        mm_gx = 0;
+        mm_gy += cell;
+        /* Off the bottom: scroll, and stay on the last line - what the
+         * console does in every other mode.  It is the console's own
+         * scroll, through GFXIOC_SCROLL: one implementation, so a
+         * program printing past the bottom and the shell doing it move
+         * the picture the same way.  And it moves the WRITE TARGET, so
+         * a program drawing off-screen scrolls its own buffer rather
+         * than the screen everyone can see. */
+        if (mm_gy + cell > (int)mm_vres()) {
+            mm_gy -= cell;
+            if (mm_gfx_open() >= 0)
+                ioctl(mm_gfx_fd, MM_GFX_SCROLL,
+                      (void *)(long)((cell << 24) | (mm_gfx_bg & 0xFFFFFF)));
+        }
+        return 1;
+    }
+    if (c == '\t') {
+        int col = mm_gx / (MM_GCELL_W * mm_gscale);
+        int to = ((col / 14) + 1) * 14;
+        mm_gflush();
+        mm_gx = to * MM_GCELL_W * mm_gscale;
+        return 1;
+    }
+    mm_gbuf[mm_gn++] = (char)c;
+    if (mm_gn == MM_GFX_TEXT_MAX)
+        mm_gflush();
+    return 1;
+}
+
+/*
+ * PRINT @(x, y [, mode]) - MMBasic's fun_at (Draw.c).
+ *
+ * A function returning the empty string, so it composes inside PRINT
+ * exactly as MMBasic's does and needs no statement of its own:
+ *
+ *     PRINT @(0, 0) Str$(Timer - t)
+ *
+ * puts the text where it is told without moving anything else, which
+ * is the point - a counter redrawn in place, with nothing scrolling.
+ */
+char *mm_at(MMINTEGER x, MMINTEGER y, MMINTEGER mode)
+{
+    mm_gflush();                        /* the old position owns what is pending */
+    mm_gx = (int)x;
+    mm_gy = (int)y;
+    if (mode < 0 || mode > 7)
+        mode = 0;
+    mm_gpmode = (int)mode;
+    return mm_tmp();                    /* "" */
+}
+
+/*
  * MODE n.
  *
  * mmb2c numbers the modes the way the VGA PicoMite and the first two
@@ -2587,6 +2742,13 @@ void mm_mode(MMINTEGER n)
      * meaningless: force the next draw to push again. */
     mm_gfx_col = -1;
     mm_fb_forget();
+    /* In a graphics mode PRINT draws glyphs, as MMBasic does; MODE 1
+     * IS the console, which does it better - scrolling, a cursor, the
+     * colour tiles - so there it stays the console's job. */
+    mm_gn = 0;
+    mm_gon = (n == 2);
+    mm_gx = mm_gy = 0;
+    mm_gpmode = 0;
 }
 
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb)
@@ -2843,6 +3005,20 @@ void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
 
 #else   /* host: no display, but translated programs must still run */
 
+/* With no screen to draw on, PRINT stays on the console and @(x,y)
+ * remembers nothing - so a translated program produces the same text
+ * under the gates that it would have produced before graphics text
+ * existed, which is what makes the .expected files still mean
+ * something. */
+static void mm_gflush(void) {}
+static int mm_gputc(int c) { (void)c; return 0; }
+
+char *mm_at(MMINTEGER x, MMINTEGER y, MMINTEGER mode)
+{
+    (void)x; (void)y; (void)mode;
+    return mm_tmp();
+}
+
 void mm_line(MMINTEGER x1, MMINTEGER y1, MMINTEGER x2, MMINTEGER y2,
              MMINTEGER rgb)
 {
@@ -3002,11 +3178,31 @@ static void mm_fb_paint_hw(MMINTEGER c) { (void)c; }
  * the picture that is showing and leave the buffer accumulating.  On
  * the screen it is the console's own, so the cursor and the colour
  * tiles are reset too; that is what returning 0 asks for. */
+/*
+ * CLS clears whatever is being DRAWN on - MMBasic's cmd_cls, which
+ * floods WriteBuf.
+ *
+ * In a graphics mode that is always the write target, screen or
+ * off-screen buffer, and never the console: sending the console an
+ * ANSI clear here left the escape on the serial port and cleared the
+ * console's idea of the screen while PRINT was drawing glyphs into the
+ * target - the same split path PRINT used to have.  The text cursor
+ * goes back to the origin with it, as MMBasic's CurrentX/Y do.
+ *
+ * On the text console it stays the console's own clear, which also
+ * resets the cursor and the colour tiles - things a rectangle over the
+ * framebuffer would not do.
+ *
+ * MMBasic's CLS takes an optional colour; not here yet, so this always
+ * uses the background.
+ */
 static int mm_fb_cls(void)
 {
-    if (mm_fb_wr == MM_FB_N)
-        return 0;
+    if (!mm_gon && mm_fb_wr == MM_FB_N)
+        return 0;                       /* the console's job */
+    mm_gn = 0;                          /* drop anything half-collected */
     mm_fb_paint_hw(mm_bg());
+    mm_gx = mm_gy = 0;
     return 1;
 }
 

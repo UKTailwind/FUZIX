@@ -724,6 +724,29 @@ static void do_print(void)
             suppress_nl = 1;
             continue;
         }
+        if (is_op("@", 0)) {
+            /* PRINT @(x, y [, mode]) - MMBasic's fun_at.  It is a
+               FUNCTION returning "", not a statement, so it sits in the
+               item list like anything else and needs no line of its
+               own; MMBasic parses it the same way, which is why nothing
+               separates it from the text that follows. */
+            const char *x, *y, *mode = "0";
+            cv.i++;
+            expect_op("(");
+            x = as_int(expr());
+            expect_op(",");
+            y = as_int(expr());
+            if (accept_op(","))
+                mode = as_int(expr());
+            expect_op(")");
+            if (chan != NULL)
+                cv_err("PRINT @ positions text on the screen, so it "
+                       "cannot be used with a file channel");
+            emit(prcall(chan, "s", sfmt("mm_at(%s, %s, %s)", x, y, mode)));
+            last = last_line();
+            suppress_nl = 0;
+            continue;
+        }
         v = expr();
         suppress_nl = 0;
         if (v.ty == TY_S)

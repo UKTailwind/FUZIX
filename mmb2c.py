@@ -2490,6 +2490,29 @@ class Conv(object):
                 last = self.last_line()
                 suppress_nl = True
                 continue
+            if self.is_op('@'):
+                # PRINT @(x, y [, mode]) - MMBasic's fun_at.  It is a
+                # FUNCTION returning "", not a statement, so it sits in
+                # the item list like anything else and needs no line of
+                # its own; MMBasic parses it the same way, which is why
+                # nothing separates it from the text that follows.
+                self.i += 1
+                self.expect_op('(')
+                x = self.as_int(self.expr())
+                self.expect_op(',')
+                y = self.as_int(self.expr())
+                mode = '0'
+                if self.accept_op(','):
+                    mode = self.as_int(self.expr())
+                self.expect_op(')')
+                if chan is not None:
+                    self.err("PRINT @ positions text on the screen, so it "
+                             "cannot be used with a file channel")
+                self.emit(self.prcall(chan, 's',
+                                      'mm_at(%s, %s, %s)' % (x, y, mode)))
+                last = self.last_line()
+                suppress_nl = False
+                continue
             v = self.expr()
             suppress_nl = False
             if v[1] == TY_S:
