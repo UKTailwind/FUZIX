@@ -1,0 +1,17 @@
+/*
+ * WHAT MAY BE READ FROM FLASH - the read-only twin of
+ * default_text_excludes.incl, and the easier of the two.
+ *
+ * Named here means flash; left out means RAM.  Empty for stage 1, so
+ * nothing has moved yet.
+ *
+ * Constant tables are the cheapest win available: they are read, never
+ * written, and most are touched at human speed.  font1 alone is 2,680
+ * bytes and the keyboard maps are more.  The ones to leave in RAM are
+ * those read per pixel or per scanline - gfx_lut is built at run time
+ * so it is .data and never a candidate, but anything the expanders
+ * touch on the scanout path belongs in RAM whatever it is.
+ *
+ * Note that with -fdata-sections each object gets .rodata.<name>, so
+ * this is per table, by name.
+ */

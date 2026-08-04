@@ -1,0 +1,50 @@
+/*
+ * WHAT MAY EXECUTE FROM FLASH.
+ *
+ * The kernel used to be built PICO_COPY_TO_RAM, which put all 90,676
+ * bytes of .text into RAM at boot.  RAM is the scarce thing here - it
+ * is shared with the 308K process pool, and adding the text primitives
+ * needed 4K taken off that pool - while flash sits at 22% used.
+ *
+ * The SDK's own mechanism does the work: its .data section (RAM) ends
+ * with "*(.text*) ... *(.rodata*)" and the comment "stuff we exclude in
+ * ..._excludes files because we want it in RAM".  So this file names
+ * what goes to FLASH and everything it does not name falls through to
+ * RAM.  The first matching output section wins, and flash comes first
+ * in the script, so a name listed here is in flash and a name left out
+ * is in RAM.
+ *
+ * -ffunction-sections is on, so this is per FUNCTION, by name, with no
+ * source changes - which matters because 35 of the kernel's sources are
+ * shared Fuzix core files that every other port compiles, and cannot
+ * carry Pico SDK macros.
+ *
+ * ---------------------------------------------------------------
+ * THE RULE FOR WHAT BELONGS HERE
+ *
+ * A function may run from flash if a cache miss on it cannot hurt.  It
+ * must NOT be here if it is:
+ *
+ *   - on the scanout path.  core1 builds every scanline against a
+ *     deadline; a miss there is a visible glitch.
+ *   - an interrupt handler, or called from one.
+ *   - reached while flash is busy.  Flash and PSRAM share the QMI, so
+ *     kernel code fetched from XIP contends with the framebuffer layer
+ *     and bcrun's heap.
+ *   - part of the flash driver itself (rawflash, dhara, devflash): code
+ *     that erases or programs flash cannot be executing from it.
+ *
+ * Good candidates are cold: boot and init, mode switching, the console
+ * escape parser, anything that runs once or at human speed.
+ *
+ * ---------------------------------------------------------------
+ * STAGE 1: this list is EMPTY on purpose.
+ *
+ * Everything is still in RAM, so the build behaves exactly as
+ * PICO_COPY_TO_RAM did.  The mechanism is in place and behaviour has
+ * not changed, which makes the next step a matter of adding one name at
+ * a time and measuring, rather than one change that moves everything
+ * and has to be debugged as a whole.
+ *
+ * See PC3-FLASH-PLAN.md for the triage.
+ */

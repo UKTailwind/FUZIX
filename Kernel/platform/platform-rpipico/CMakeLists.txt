@@ -22,7 +22,21 @@ include(pico_sdk_import.cmake)
 project(fuzix C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_BUILD_TYPE Debug)
-set(PICO_COPY_TO_RAM 1)
+# NOT copy_to_ram any more.  That put all 90,676 bytes of .text into
+# RAM at boot, and RAM is the scarce thing here - it is shared with the
+# process pool, and the text primitives needed 4K taken off that pool -
+# while flash sits at 22% used.
+#
+# Placement is now per function, in linker_overrides/
+# default_text_excludes.incl and default_rodata_excludes.incl: a name
+# listed there runs from flash, anything not listed falls through to the
+# SDK's .data section and stays in RAM.  -ffunction-sections makes that
+# work by name with no source changes, which matters because 35 of the
+# sources below are shared Fuzix core files that other ports compile.
+#
+# Both lists are EMPTY to begin with, so this build is byte-for-byte
+# the same shape as copy_to_ram was.  See PC3-FLASH-PLAN.md.
+set(PICO_COPY_TO_RAM 0)
 
 # Hardware debugging kernel: TinyUSB-s enumeration trace on the console.
 #   make SUBTARGET=pico2 PC3_USB_TRACE=1
