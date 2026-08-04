@@ -16,27 +16,23 @@
  * exactly 0x80000.  There is no slack anywhere, so the two numbers
  * below only ever move against each other.
  *
- * The kernel took 4K once, when it had 192K and filled it, and another
- * 4K here for the text primitives - drawing a glyph at a pixel position
- * and the shared scroll (display_gfx_text, display_gfx_scroll), which
- * are what MMBasic's TEXT command and a graphics-mode PRINT are built
- * from.  The kernel is PICO_COPY_TO_RAM, so code costs RAM, and it was
- * 184 bytes short.
+ * The kernel is no longer PICO_COPY_TO_RAM.  Most of it executes from
+ * flash (linker_overrides/default_text_excludes.incl names what), which
+ * took kernel code in RAM from 90,676 bytes to 70,472 and left the
+ * region 47K larger than it needs to be.  That is where the pool grew
+ * from: 312K originally, 308K when the text primitives needed 4K, and
+ * 340K now.
  *
- * What it costs a process: the largest goes from about 264K to 260K.
- * (The cap is "leave room for the biggest neighbour to be resident" -
- * largest_neighbour() in swapper.c - not PROGSIZE, which is now the
- * whole pool.)
+ * The kernel currently uses 160,520 bytes of the 176,128 below, so
+ * there is about 15K of headroom.  If it runs out the link fails with
+ * "region RAM overflowed", which is the point - it is a loud error, not
+ * a silent relocation of user memory.  The valve when that happens is
+ * to move more code to flash rather than to take memory back from the
+ * pool.
  *
- * THE REAL FIX, when someone has time for it: .text is 90,676 bytes and
- * every one of them is copied into RAM at boot, while flash sits at
- * 115K of 512K used.  Dropping PICO_COPY_TO_RAM and marking only the
- * scanout and interrupt paths __not_in_flash_func() - the SDK's normal
- * idiom, and what MMBasic's own firmware does - would give back tens of
- * kilobytes rather than the four scraped together here.  It needs
- * measuring first: core1 renders each scanline on a deadline, and flash
- * shares the QMI with the PSRAM that holds the framebuffer layer and
- * bcrun's heap, so kernel cache misses would contend with them.
+ * A process ceiling is not PROGSIZE (which is the whole pool) but
+ * "leave room for the biggest neighbour to be resident" -
+ * largest_neighbour() in swapper.c.
  *
  * KEEP THIS IN STEP WITH TOTALMEM in the Makefile: config.h sizes
  * progbase[] from USERMEM and the two must describe the same region.
@@ -44,6 +40,6 @@
  */
 MEMORY
 {
-    RAM(rwx)     : ORIGIN = RAM_ORIGIN,           LENGTH = 0x33000
-    PROGPOOL(rw) : ORIGIN = RAM_ORIGIN + 0x33000, LENGTH = 308k
+    RAM(rwx)     : ORIGIN = RAM_ORIGIN,           LENGTH = 0x2B000
+    PROGPOOL(rw) : ORIGIN = RAM_ORIGIN + 0x2B000, LENGTH = 340k
 }

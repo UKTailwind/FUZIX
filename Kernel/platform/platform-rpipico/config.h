@@ -56,14 +56,33 @@
 #define CONFIG_RTC_FULL
 #define CONFIG_RTC_INTERVAL 50
 
-/* With 8 MiB of PSRAM swap behind /dev/hdc the process ceiling is swap
- * slots, not RAM: raise the table from the default 15 (MAX_SWAPS is 31,
- * so 30 processes always fit). The companion tables scale with it:
- * every background job holds open-file and inode slots (the stock 15/20
- * ran dry a few processes past the old limit). */
-#define PTABSIZE 30
-#define OFTSIZE 48
-#define ITABSIZE 40
+/* 64 processes.
+ *
+ * This was 30, chosen when swap was a fixed slot and MAX_SWAPS bounded
+ * how many processes could be out at once.  Neither is true now: a
+ * swapped process gets a PSRAM arena allocation of exactly its own
+ * size (swapper.c), and resident memory is packed in 4K chunks at
+ * actual size, so the table no longer reserves anything on behalf of a
+ * process that does not exist.  swapmap/MAX_SWAPS in Kernel/swap.c is
+ * a free list of fixed slots this platform stopped using.
+ *
+ * What it does cost is the table itself: p_tab is 96 bytes, so 64
+ * entries are 6,144 against 30's 2,880, plus 4 bytes each of swapaddr.
+ * About 3.4K of the kernel's headroom, which is affordable now that
+ * most of the kernel executes from flash.
+ *
+ * The companion tables scale with it - every background job holds
+ * open-file and inode slots, and the stock 15/20 ran dry a few
+ * processes past the old limit. */
+#define PTABSIZE 64
+/* Sized for 64 processes, not guessed: the shell gives every background
+ * job its own /dev/null on stdin, so the open-file table needs an entry
+ * per process before anything opens a real file.  At 48 it ran out at
+ * about 45 jobs - "cannot open /dev/null" and then ENFILE - which is
+ * what the old comment about companion tables was describing.  12 bytes
+ * an entry here and 80 an inode, so this costs under 3K. */
+#define OFTSIZE 128
+#define ITABSIZE 64
 
 /* HDMI display on HSTX: core1 is owned by the scanout, so the USB-device
  * console loop it used to run is disabled (the PC3's USB port faces the
