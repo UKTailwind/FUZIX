@@ -18,7 +18,11 @@
  * lost VBUS and so ignores enumeration from address 0.  Needed because
  * hcd_port_reset() is a no-op stub in the pico-sdk TinyUSB driver, so
  * enumeration never resets the port by itself.  No argument. */
-#define PICOIOC_USBRESET 0x000D
+/* 0x001C, not 0x000D: it collided with PSRAMIOC_REALLOC, and only
+ * harmlessly because PC3_NO_USB_BUS_RESET compiles this handler out.
+ * It is tested BEFORE the PSRAM calls, so re-enabling the bus reset
+ * would have silently shadowed realloc. */
+#define PICOIOC_USBRESET 0x001C
 
 /* Graphics (PC3: see PC3-GFX-DESIGN.md).  All on /dev/sys. */
 
