@@ -174,14 +174,48 @@ struct gfx_batch {
  */
 struct gfx_text {
 	int16_t x, y;		/* top-left, in pixels */
-	uint8_t scale;		/* 1 = the 8x12 cell */
-	uint8_t pad;
+	uint8_t scale;		/* 1 = one cell of the font */
+	uint8_t font;		/* 1..9, MMBasic's numbering; 0 means 1 */
 	int32_t fg;		/* RGB888 */
 	int32_t bg;		/* RGB888, or -1 for transparent */
 	uint16_t len;
 	void *str;
 };
 #define GFXIOC_TEXT   0x001A
+
+/* The metrics of one of the built-in fonts.  A caller laying text out -
+ * justifying it, centring it, deciding where the next line goes - needs
+ * the cell size, and it must not carry its own copy of that: the fonts
+ * are the kernel's, MMBasic's nine, and asking is one syscall against
+ * a wrong answer that shows up as text in the wrong place.
+ *
+ * width and height come back 0 for a font that does not exist.  first
+ * and count are the character range the font actually covers - font 6
+ * is the eleven digits and nothing else. */
+struct gfx_fontinfo {
+	uint8_t font;		/* in: 1..9 */
+	uint8_t width;		/* out: the cell, in pixels, at scale 1 */
+	uint8_t height;
+	uint8_t first;		/* out: first character in the font */
+	uint16_t count;		/* out: how many */
+	uint16_t nfonts;	/* out: how many fonts there are */
+};
+#define GFXIOC_FONTINFO 0x001D
+
+/* MMBasic's MAP - an arbitrary colour per palette entry, where
+ * GFXIOC_PAL only picks from a fixed set of physical colours.
+ *
+ * data = (index << 24) | rgb888, index 0-15.  Nothing changes on
+ * screen: the value is held until GFXIOC_MAPCTL applies it, so a whole
+ * new palette arrives at once rather than the picture recolouring in
+ * instalments.  16-colour modes only. */
+#define GFXIOC_MAP    0x001E
+
+/* data: 0 = SET, apply the collected palette during blanking; 1 =
+ * RESET, back to the mode's own defaults, live and pending together. */
+#define GFXIOC_MAPCTL 0x001F
+#define GFX_MAP_SET   0
+#define GFX_MAP_RESET 1
 /* Bounds one call's work, as GFX_BATCH_MAX does for the shape calls. */
 #define GFX_TEXT_MAX  256
 /* Scroll the write target.  data = (rows << 24) | RGB888: rows signed

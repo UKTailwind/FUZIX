@@ -43,6 +43,7 @@ static const struct builtin builtins[] = {
     { "BIN2STR$", 2, 3 }, { "STR2BIN", 2, 3 }, { "RGB", 1, 3 },
     { "MATH", 1, 1 },
     { "PIXEL", 2, 2 },
+    { "MAP", 1, 1 },
     { "MM.HRES", 0, 0 }, { "MM.VRES", 0, 0 },
     { "DIR$", 0, 2 },
     { "LLEN", 1, 1 }, { "LGETSTR$", 3, 3 }, { "LGETBYTE", 2, 2 },

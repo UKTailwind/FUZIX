@@ -31,3 +31,23 @@
  * the font is nowhere near the scanout deadline.  It is smaller than
  * the 16K XIP cache, so a screen of text reads it from flash once. */
 *(.rodata.font1*)
+
+/* The other eight of MMBasic's built-in fonts (fonts.c), about 25K
+ * between them.  THIS ENTRY IS WHAT MAKES THEM AFFORDABLE: leave any
+ * one of them out and it lands in RAM instead, where 25K is a quarter
+ * of what the kernel has and the link fails outright - which is how
+ * this was discovered rather than shipped.
+ *
+ * Same argument as font1: read per glyph, drawn into a buffer the
+ * scanout reads later, so nowhere near the deadline.  The largest is
+ * Inconsola at 9,124 bytes, still short of the 16K XIP cache, so a
+ * screen of one font reads it from flash once. */
+*(.rodata.Misc_12x20_LE*)
+*(.rodata.Hom_16x24_LE*)
+*(.rodata.Fnt_10x16*)
+*(.rodata.Inconsola*)
+*(.rodata.ArialNumFontPlus*)
+*(.rodata.F_6x8_LE*)
+*(.rodata.TinyFont*)
+*(.rodata.font8x10*)
+*(.rodata.font_table*)

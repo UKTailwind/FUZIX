@@ -87,6 +87,7 @@ add_executable(fuzix
 	arena.c
 	devpsram.c
 	display.c
+	fonts.c
 	ds3231.c
 	kbd_decode.c
 	usbkbd.c

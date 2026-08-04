@@ -112,14 +112,31 @@ int display_gfx_rects(const struct gfx_rc *rc, int n, const uint32_t *col);
 int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
                        int fc, int bc, const uint8_t *bitmap);
 
-/* A run of text at a PIXEL position, in the console's font - which is
- * MMBasic's font1, so a program's text matches the shell's.  Draws
- * through the caller's write target like every other primitive, which
- * is what lets PRINT reach the off-screen buffer.  Returns the x the
- * text ended at.  Character cell is 8x12 times scale. */
-#define GFX_TEXT_W 8
+/* MMBasic's MAP: an arbitrary RGB888 per palette entry, reduced to the
+ * RGB332 the scanout emits.  remap() collects, apply() moves the whole
+ * palette across during blanking, reset() restores the mode's own.
+ * 16-colour modes only; -1 otherwise, as MMBasic refuses the rest. */
+int display_gfx_remap(int index, uint32_t rgb888);
+int display_gfx_remap_apply(void);
+int display_gfx_remap_reset(void);
+
+/* The built-in fonts - MMBasic's nine, in flash (fonts.c).  Numbered
+ * from 1 as MMBasic numbers them; NULL for one that does not exist.
+ * Every metric is read out of the font's own four-byte header, so
+ * nothing anywhere carries a second idea of how big a font is. */
+const unsigned char *display_font(int font, int *w, int *h,
+                                  int *first, int *count);
+int display_font_count(void);
+
+/* A run of text at a PIXEL position.  Draws through the caller's write
+ * target like every other primitive, which is what lets PRINT reach the
+ * off-screen buffer.  Returns the x the text ended at.
+ *
+ * font 1 is the console's own, so a program's text matches the shell's;
+ * the cell is that font's width x height, times scale. */
+#define GFX_TEXT_W 8                    /* font 1's cell - the console's */
 #define GFX_TEXT_H 12
-int display_gfx_text(int x, int y, int scale, int fc, int bc,
+int display_gfx_text(int x, int y, int font, int scale, int fc, int bc,
                      const uint8_t *s, int len);
 /* Scroll the drawing target: rows > 0 up, < 0 down, vacated band
  * filled with fillc.  THE one implementation - the console's graphics

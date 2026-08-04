@@ -289,7 +289,7 @@ static void w_set_time(void) { mm_set_time(Ps(0)); A = 0; }
 /* graphics - every argument and result is RGB888, as in MMBasic */
 static void w_pixel(void)    { mm_pixel(LL(0), LL(2), LL(4)); A = 0; }
 static void w_pixel_get(void){ A = mm_pixel_get(LL(0), LL(2)); }
-static void w_cls(void)      { mm_cls(); A = 0; }
+static void w_cls(void)      { mm_cls(LL(0)); A = 0; }
 static void w_line(void)     { mm_line(LL(0), LL(2), LL(4), LL(6), LL(8));
                                A = 0; }
 static void w_hres(void)     { A = mm_hres(); }
@@ -309,6 +309,20 @@ static void w_fill(void)     { mm_fill((const short *)Pa(0), LL(1), LL(3));
 static void w_pixels(void)   { mm_pixels(PF(0), PI(1), PF(2), PI(3),
                                          PF(4), PI(5), LL(6), LL(8));
                                A = 0; }
+/* TEXT and FONT.  mm_fontinfo hands back the cell through two by-ref
+   integers, which is why it takes pointers where everything around it
+   takes values - the caller is mmg_text in mmb_gfx.h, not BASIC. */
+static void w_fontinfo(void) { A = mm_fontinfo(LL(0), PI(2), PI(3)); }
+static void w_font(void)     { mm_font(LL(0), LL(2)); A = 0; }
+static void w_gtext(void)    { mm_gtext(LL(0), LL(2), LL(4), LL(6),
+                                        LL(8), LL(10), Ps(12), LL(13));
+                               A = 0; }
+/* MAP - the palette.  mm_map collects an entry, mm_map_set applies the
+   lot during blanking, mm_map_get answers what a number stands for. */
+static void w_map(void)      { mm_map(LL(0), LL(2)); A = 0; }
+static void w_map_set(void)  { mm_map_set(); A = 0; }
+static void w_map_reset(void){ mm_map_reset(); A = 0; }
+static void w_map_get(void)  { A = mm_map_get(LL(0)); }
 /* FRAMEBUFFER - 0 is the screen, 1 the off-screen buffer */
 static void w_fb_create(void){ mm_fb_create(); A = 0; }
 static void w_fb_close(void) { mm_fb_close(); A = 0; }
@@ -550,6 +564,13 @@ static const struct mmwrap {
 	{ "mm_plot",		w_plot },
 	{ "mm_fill",		w_fill },
 	{ "mm_pixels",		w_pixels },
+	{ "mm_map",		w_map },
+	{ "mm_map_set",		w_map_set },
+	{ "mm_map_reset",	w_map_reset },
+	{ "mm_map_get",		w_map_get },
+	{ "mm_fontinfo",	w_fontinfo },
+	{ "mm_font",		w_font },
+	{ "mm_gtext",		w_gtext },
 	{ "mm_fb_create",	w_fb_create },
 	{ "mm_fb_close",	w_fb_close },
 	{ "mm_fb_write",	w_fb_write },

@@ -98,6 +98,12 @@
        reads them from flash once.  Measured below. ---- */
 *console.c.o(.text*)
 
+/* ---- the font table: two accessors, each called once per string
+       rather than once per pixel.  The fonts themselves are `const' and
+       so were never in RAM to begin with - that is the whole reason all
+       nine of MMBasic's could be brought across. ---- */
+*fonts.c.o(.text*)
+
 /* main.c is NOT here.  It raises clk_sys, and the code doing that
  * cannot be fetched from the flash whose clock it is changing - even
  * with pc3_clock_init doing the QMI work from RAM, the caller around

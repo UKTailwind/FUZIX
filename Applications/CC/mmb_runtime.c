@@ -314,8 +314,6 @@ static void mm_gflush(void);
  * because CLS consults it - in a graphics mode CLS clears the write
  * target rather than the console, and has to drop whatever PRINT had
  * half-collected.  Only the drawing itself is platform-specific. */
-#define MM_GCELL_W      8               /* the kernel's font1 cell */
-#define MM_GCELL_H      12
 static int mm_gon;                      /* PRINT draws rather than tells */
 static int mm_gx, mm_gy;                /* the pixel cursor - CurrentX/Y */
 static int mm_gn;                       /* characters collected so far */
@@ -2368,7 +2366,7 @@ char *mm_inkey(void)
  *
  * mm_fb_cls is called from mm_cls, just below. */
 static void mm_fb_forget(void);
-static int mm_fb_cls(void);
+static int mm_fb_cls(MMINTEGER rgb);
 
 /* CLS clears whatever is being DRAWN on, which is not always the
  * screen: with FRAMEBUFFER WRITE F it is the off-screen buffer, and
@@ -2378,14 +2376,43 @@ static int mm_fb_cls(void);
  * the console's own, which also resets the cursor and the colour
  * tiles - things a rectangle over the framebuffer would not.
  *
- * MMBasic's CLS takes an optional colour (Draw.c cmd_cls, which floods
- * WriteBuf with it).  Not here yet: this always uses the background. */
-void mm_cls(void)
+ * rgb is MMBasic's optional colour (Draw.c cmd_cls, which floods
+ * WriteBuf with it); MM_CUR means the one COLOUR set as the background,
+ * which is what a bare CLS uses.
+ *
+ * On the text console the colour cannot be honoured - there is nothing
+ * to flood, only an ANSI clear to send - so it is ignored rather than
+ * refused.  That case is a program that never entered a graphics mode;
+ * MMBasic would not have got this far, its CheckDisplay having stopped
+ * a CLS with no display at all. */
+void mm_cls(MMINTEGER rgb)
 {
-    if (mm_fb_cls())
+    if (mm_fb_cls(rgb))
         return;
     fputs("\033[2J\033[H", stdout);
     fflush(stdout);
+}
+
+/*
+ * The MAP() function - MMBasic's fun_map, which for a 16-colour mode
+ * spreads the four bits of the colour number back out into RGB888:
+ * one bit of red, two of green, one of blue.
+ *
+ * It answers for the DEFAULT palette and takes no notice of what MAP
+ * has since done to entry n, which looks odd until you see that it is
+ * the exact inverse of RGB121() - the fixed rule that turns a colour
+ * into an entry number.  So MAP(n) tells you which colour a program
+ * must ask for to land on entry n, which is the question worth asking
+ * before remapping it.
+ *
+ * Common to both builds: it is arithmetic, and the answer does not
+ * depend on there being a screen.
+ */
+MMINTEGER mm_map_get(MMINTEGER index)
+{
+    MMINTEGER n = index & 15;
+
+    return ((n & 8) << 20) | ((n & 6) << 13) | ((n & 1) << 7);
 }
 
 /* ---- graphics (PC3) --------------------------------------------------
@@ -2607,17 +2634,59 @@ static void mm_gfx_setcol(MMINTEGER rgb)
 static char mm_gbuf[MM_GFX_TEXT_MAX];   /* the pending run */
 static int mm_gscale = 1;
 static int mm_gpmode;                   /* MMBasic's PrintPixelMode */
+/* The font PRINT draws in, and its cell.  The cell is cached rather
+ * than asked for per character: it decides where the next line goes and
+ * when to scroll, so mm_gputc would otherwise make a syscall for every
+ * newline to learn something that changes only when FONT does. */
+static int mm_gfont = 1;
+static int mm_gcw = 8, mm_gch = 12;     /* font 1, until FONT says else */
 
 #define MM_GFX_TEXT     0x001A
+#define MM_GFX_FONTINFO 0x001D
 #define MM_GFX_SCROLL   0x001B
+#define MM_GFX_MAP      0x001E
+#define MM_GFX_MAPCTL   0x001F
 
 struct mm_gfx_text {
     short x, y;
-    unsigned char scale, pad;
+    unsigned char scale, font;
     long fg, bg;
     unsigned short len;
     void *str;
 };
+
+struct mm_gfx_fontinfo {
+    unsigned char font, width, height, first;
+    unsigned short count, nfonts;
+};
+
+/*
+ * The cell of a font, from the kernel's own table.
+ *
+ * Nothing here carries a copy of a font or of its metrics: the fonts
+ * are MMBasic's nine, they live in the kernel's flash, and the console
+ * draws from the same table.  A program that hardwired 8x12 would put
+ * its text in the wrong place the moment it asked for font 3.
+ */
+MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h)
+{
+    struct mm_gfx_fontinfo fi;
+
+    if (w) *w = 0;
+    if (h) *h = 0;
+    if (mm_gfx_open() < 0)
+        return -1;                      /* no display, not a bad font */
+    fi.font = (unsigned char)font;
+    fi.width = fi.height = fi.first = 0;
+    fi.count = fi.nfonts = 0;
+    if (ioctl(mm_gfx_fd, MM_GFX_FONTINFO, &fi) < 0)
+        return -1;                      /* a kernel without the call */
+    if (fi.width == 0)
+        return 0;                       /* no font of that number */
+    if (w) *w = fi.width;
+    if (h) *h = fi.height;
+    return fi.count;
+}
 
 
 /* Draw what has been collected, and step the cursor past it. */
@@ -2637,15 +2706,117 @@ static void mm_gflush(void)
     gt.x = (short)mm_gx;
     gt.y = (short)mm_gy;
     gt.scale = (unsigned char)mm_gscale;
-    gt.pad = 0;
+    gt.font = (unsigned char)mm_gfont;
     gt.fg = (long)fg;
     gt.bg = (mm_gpmode == 1) ? -1L : (long)bg;
     gt.len = (unsigned short)mm_gn;
     gt.str = mm_gbuf;
     if (mm_gfx_open() >= 0)
         ioctl(mm_gfx_fd, MM_GFX_TEXT, &gt);
-    mm_gx += mm_gn * MM_GCELL_W * mm_gscale;
+    mm_gx += mm_gn * mm_gcw * mm_gscale;
     mm_gn = 0;
+}
+
+/*
+ * MAP - see mmb_runtime.h.  The kernel is the authority on whether the
+ * live mode has a palette at all; MMBasic raises "Not valid in this
+ * mode" for the rest and so does this.
+ */
+void mm_map(MMINTEGER index, MMINTEGER rgb)
+{
+    if (mm_gfx_open() < 0)
+        return;
+    if (index < 0 || index > 15) {
+        char msg[64];
+
+        sprintf(msg, "MAP index must be 0 to 15, not %ld", (long)index);
+        mm_error(msg);
+    }
+    else if (ioctl(mm_gfx_fd, MM_GFX_MAP,
+                   (void *)(long)(((index & 0xFF) << 24)
+                                  | (rgb & 0xFFFFFF))) < 0)
+        mm_error("MAP needs a 16-colour mode");
+}
+
+void mm_map_set(void)
+{
+    if (mm_gfx_open() >= 0 &&
+        ioctl(mm_gfx_fd, MM_GFX_MAPCTL, (void *)0L) < 0)
+        mm_error("MAP needs a 16-colour mode");
+}
+
+void mm_map_reset(void)
+{
+    if (mm_gfx_open() >= 0 &&
+        ioctl(mm_gfx_fd, MM_GFX_MAPCTL, (void *)1L) < 0)
+        mm_error("MAP needs a 16-colour mode");
+}
+
+/*
+ * FONT #n [, scale] - MMBasic's SetFont, for PRINT.
+ *
+ * The cell is read back and kept, because it is what decides where the
+ * next line goes: a 24x32 font scrolls the screen after seven lines
+ * where font 1 manages nineteen.  An unknown font is left alone rather
+ * than leaving PRINT drawing nothing.
+ */
+void mm_font(MMINTEGER font, MMINTEGER scale)
+{
+    MMINTEGER w = 0, h = 0;
+
+    if (scale < 1)
+        scale = 1;
+    if (scale > 15)
+        scale = 15;
+    if (font >= 1 && mm_fontinfo(font, &w, &h) > 0 && w && h) {
+        mm_gflush();                    /* the old font owns what is pending */
+        mm_gfont = (int)font;
+        mm_gcw = (int)w;
+        mm_gch = (int)h;
+        mm_gscale = (int)scale;
+    }
+}
+
+/*
+ * TEXT's glyph run - see mmb_runtime.h.  Everything about WHERE it goes
+ * was settled by mmg_text before this was called; all that is left is
+ * the crossing, and moving the cursor to the far end the way MMBasic's
+ * GUIPrintChar does.
+ */
+void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
+              MMINTEGER fg, MMINTEGER bg, const char *s, MMINTEGER len)
+{
+    struct mm_gfx_text gt;
+    int r;
+
+    mm_gflush();                        /* the old position owns what is pending */
+    mm_gx = (int)x;
+    mm_gy = (int)y;
+    if (len <= 0 || mm_gfx_open() < 0)
+        return;
+    if (len > MM_GFX_TEXT_MAX)
+        len = MM_GFX_TEXT_MAX;
+    if (scale < 1)
+        scale = 1;
+    if (font < 1)
+        font = 1;
+    gt.x = (short)x;
+    gt.y = (short)y;
+    gt.scale = (unsigned char)scale;
+    gt.font = (unsigned char)font;
+    gt.fg = (long)((fg == MM_CUR) ? mm_gfx_fg : (fg & 0xFFFFFF));
+    gt.bg = (bg < 0) ? -1L : (long)(bg & 0xFFFFFF);
+    gt.len = (unsigned short)len;
+    gt.str = (void *)s;
+    /* GFXIOC_TEXT returns the x it ended at, which is the cursor
+     * position a following PRINT wants - and it is the kernel's own
+     * arithmetic in the kernel's own font, so nothing here needs to
+     * know how wide font 5 is.  A negative answer is the error return,
+     * or text drawn entirely off the left edge; leave the cursor alone
+     * for either. */
+    r = ioctl(mm_gfx_fd, MM_GFX_TEXT, &gt);
+    if (r >= 0)
+        mm_gx = r;
 }
 
 static int mm_gputc(int c)
@@ -2655,7 +2826,7 @@ static int mm_gputc(int c)
     if (c == '\r')
         return 1;                       /* the newline does the work */
     if (c == '\n') {
-        int cell = MM_GCELL_H * mm_gscale;
+        int cell = mm_gch * mm_gscale;
 
         mm_gflush();
         mm_gx = 0;
@@ -2676,10 +2847,10 @@ static int mm_gputc(int c)
         return 1;
     }
     if (c == '\t') {
-        int col = mm_gx / (MM_GCELL_W * mm_gscale);
+        int col = mm_gx / (mm_gcw * mm_gscale);
         int to = ((col / 14) + 1) * 14;
         mm_gflush();
-        mm_gx = to * MM_GCELL_W * mm_gscale;
+        mm_gx = to * mm_gcw * mm_gscale;
         return 1;
     }
     mm_gbuf[mm_gn++] = (char)c;
@@ -2707,6 +2878,36 @@ char *mm_at(MMINTEGER x, MMINTEGER y, MMINTEGER mode)
     if (mode < 0 || mode > 7)
         mode = 0;
     mm_gpmode = (int)mode;
+    /*
+     * And the console gets the same position, as a cursor move.
+     *
+     * UNCONDITIONALLY, which is what MMBasic does - fun_at ends by
+     * turning the pixel position into a row and column and sending
+     * ESC[r;cf to the serial console whatever mode the screen is in,
+     * because there the screen and the console are two outputs and
+     * both are meant to follow the @.
+     *
+     * In the text console it is the only thing that has any effect:
+     * PRINT goes to the console there, the pixel cursor above is read
+     * by nobody, and without this the position was silently ignored and
+     * the text walked down the screen as though the @ were not there.
+     *
+     * The cell is the console's own 8x12 rather than the FONT the
+     * graphics text is using - the interpreter assumes a size here too,
+     * and says so in a comment.
+     */
+    {
+        char buf[24];
+
+        sprintf(buf, "\033[%d;%df", (int)(y / 12) + 1, (int)(x / 8) + 1);
+        fputs(buf, stdout);
+        /* PrintPixelMode 2 and 5 swap ink and paper, and the console is
+         * told with reverse video.  MMBasic never turns it off again;
+         * copied as it stands rather than improved on. */
+        if (mode == 2 || mode == 5)
+            fputs("\033[7m", stdout);
+        fflush(stdout);
+    }
     return mm_tmp();                    /* "" */
 }
 
@@ -3019,6 +3220,41 @@ char *mm_at(MMINTEGER x, MMINTEGER y, MMINTEGER mode)
     return mm_tmp();
 }
 
+/* No display, so no fonts and no metrics to give - and -1 rather than
+ * 0 says exactly that.  0 would mean "there is no font 3", which TEXT
+ * reports as an error and MMBasic does too; a translated program using
+ * TEXT must run under the gates without drawing and without dying. */
+MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h)
+{
+    (void)font;
+    if (w) *w = 0;
+    if (h) *h = 0;
+    return -1;
+}
+
+void mm_font(MMINTEGER font, MMINTEGER scale)
+{
+    (void)font; (void)scale;
+}
+
+/* No screen, so no palette to remap - and silence rather than an error,
+ * for the same reason as everything else that draws here: a translated
+ * program has to run under the gates without a display. */
+void mm_map(MMINTEGER index, MMINTEGER rgb)
+{
+    (void)index; (void)rgb;
+}
+
+void mm_map_set(void)   {}
+void mm_map_reset(void) {}
+
+void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
+              MMINTEGER fg, MMINTEGER bg, const char *s, MMINTEGER len)
+{
+    (void)x; (void)y; (void)font; (void)scale;
+    (void)fg; (void)bg; (void)s; (void)len;
+}
+
 void mm_line(MMINTEGER x1, MMINTEGER y1, MMINTEGER x2, MMINTEGER y2,
              MMINTEGER rgb)
 {
@@ -3193,15 +3429,16 @@ static void mm_fb_paint_hw(MMINTEGER c) { (void)c; }
  * resets the cursor and the colour tiles - things a rectangle over the
  * framebuffer would not do.
  *
- * MMBasic's CLS takes an optional colour; not here yet, so this always
- * uses the background.
+ * rgb is MMBasic's optional colour, and MM_CUR - what a bare CLS passes
+ * - means the background COLOUR set, which is the interpreter's
+ * gui_bcolour default.
  */
-static int mm_fb_cls(void)
+static int mm_fb_cls(MMINTEGER rgb)
 {
     if (!mm_gon && mm_fb_wr == MM_FB_N)
         return 0;                       /* the console's job */
     mm_gn = 0;                          /* drop anything half-collected */
-    mm_fb_paint_hw(mm_bg());
+    mm_fb_paint_hw(rgb == MM_CUR ? mm_bg() : rgb);
     mm_gx = mm_gy = 0;
     return 1;
 }

@@ -876,6 +876,113 @@ appears on the picture. It is visible in a `SAVE IMAGE` of the whole
 screen as a difference in the top text line. Restricting the saved
 region avoids it; directing program output elsewhere is planned.
 
+## The sixteen colours: `MAP`
+
+`MODE 2` stores a colour *number* per pixel, 0 to 15, and `MAP` says
+what colour each number actually is. Change entry 8 and everything
+already drawn in colour 8 changes with it — without redrawing a single
+pixel. That is what makes fades, flashes and colour cycling free.
+
+```basic
+MAP(4) = RGB(255, 128, 0)      ' collect
+MAP SET                        ' ... and apply, all at once
+```
+
+| | |
+|---|---|
+| `MAP(n) = colour` | set entry `n`, 0 to 15. **Nothing changes yet** |
+| `MAP SET` | apply the collected palette, during the frame blanking |
+| `MAP RESET` | back to the mode's own sixteen |
+| `MAP MAXIMITE` | the original Colour Maximite's sixteen |
+| `MAP GRAYSCALE` | sixteen greys, 0 to 255 in steps of 17 (`GREYSCALE` too) |
+
+The two-step is the point, and it is MMBasic's own: applying a new
+palette one entry at a time shows the picture half recoloured, and
+`MAP SET` waits for the blanking so the change lands between frames.
+
+`MAP(n)` is also a **function**, giving the colour entry `n` stands for
+by default — which is the colour a program must ask for to land on that
+entry:
+
+```basic
+FOR i = 0 TO 15
+  LINE i * 20, 0, i * 20, 199, , MAP(i)     ' one line per entry
+NEXT i
+```
+
+It reports the default and takes no notice of any remapping, exactly as
+MMBasic does; it is the inverse of the fixed rule that turns a colour
+into an entry number. That rule is bit extraction — one bit of red, two
+of green, one of blue — and it does **not** depend on the palette, so
+remapping never moves where new drawing lands.
+
+`MAP` needs a 16-colour mode; in `MODE 1` it is an error.
+
+## Text on the picture: `TEXT` and `FONT`
+
+`TEXT` puts a string at a pixel position, justified how you ask, in any
+of nine fonts:
+
+```basic
+TEXT 160, 120, "Centred", "CM"
+TEXT 319, 0, "top right", "RT", 3
+TEXT 0, 100, "big and red", "LT", 5, 2, RGB(RED)
+TEXT 0, 200, "over the picture", "LT", 1, 1, RGB(WHITE), -1
+```
+
+    TEXT x, y, string$ [, alignment$] [, font] [, scale] [, colour] [, background]
+
+Everything after the string may be left out, and a blank argument takes
+the default, as everywhere in MMBasic. `background` of `-1` is
+transparent, which is how you write over a picture without a box of
+paper around the letters. With no colours given, `COLOUR`'s are used.
+
+`alignment$` is up to three letters and any of them may be omitted:
+
+| | letters | meaning |
+|---|---|---|
+| horizontal | `L` `C` `R` | x is the left, the centre, the right |
+| vertical | `T` `M` `B` | y is the top, the middle, the bottom |
+| orientation | `N` `V` | normal, or one character per line downwards |
+
+The other three orientations MMBasic offers — `I` inverted, `U` and `D`
+rotated — are **not yet drawn**; they are accepted and come out normal.
+
+The nine fonts are MMBasic's own, so a character looks the same here as
+it does there. They live in the PC3's flash, which is why there is no
+cost to having all of them:
+
+| font | cell | what it is |
+|---|---|---|
+| 1 | 8×12 | the console's own — the default |
+| 2 | 12×20 | |
+| 3 | 16×24 | |
+| 4 | 10×16 | |
+| 5 | 24×32 | |
+| 6 | 32×50 | **digits only** — a clock face, a score |
+| 7 | 6×8 | |
+| 8 | 4×6 | the smallest |
+| 9 | 8×10 | |
+
+`scale` is 1 to 15 and multiplies the cell, so font 1 at scale 2 is a
+16×24 character built from the 8×12 one.
+
+A character a font does not have prints as a blank cell. With font 6
+that is everything except `0` to `9`.
+
+`FONT` sets the font `PRINT` itself uses, in a graphics mode:
+
+```basic
+FONT 3, 1
+PRINT "large"
+```
+
+    FONT [#]n [, scale]
+
+This changes where the next line goes as well as how the letters look —
+a 24×32 font fills the screen in seven lines where font 1 takes
+nineteen — and scrolling follows it.
+
 ## Animation: `FRAMEBUFFER`
 
 Drawing straight to the screen means the monitor shows the picture
@@ -903,8 +1010,16 @@ LOOP WHILE INKEY$ = ""
 | `FRAMEBUFFER WAIT` | wait for the top of the frame |
 
 Everything that draws follows `WRITE`, `CLS` included — so `CLS` while
-writing to `F` clears the buffer, in the background colour, and leaves
-the picture on the screen alone.
+writing to `F` clears the buffer and leaves the picture on the screen
+alone.
+
+    CLS [colour]
+
+fills whatever is being drawn on. With no colour it uses the background
+from `COLOUR`, so `COLOUR RGB(WHITE), RGB(BLUE)` then `CLS` gives a blue
+screen; `CLS RGB(GREEN)` fills with green without changing what `COLOUR`
+set. Either way the text cursor goes back to the top left, as MMBasic's
+does.
 
 `CREATE` belongs **after** `MODE`. A mode change throws the buffer away,
 because what is in it is in the geometry of the mode being left and
@@ -1301,8 +1416,9 @@ translate time, not at run time.
 | `PRINT` | `RANDOMIZE` | `READ` | `RENAME` |
 | `RESTORE` | `RETURN` | `RMDIR` | `SAVE IMAGE` |
 | `SEEK` | `SELECT` | `SORT` | `STATIC` |
-| `SUB` | `SYSTEM` | `TIME$` | `TIMER` |
-| `WEND` | `WHILE` |  |  |
+| `SUB` | `SYSTEM` | `TEXT` | `TIME$` |
+| `TIMER` | `FONT` | `MAP` | `WEND` |
+| `WHILE` |  |  |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -1323,8 +1439,9 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `LGETBYTE` |  |  |  |
 | `LGETSTR$` | `LINPUT` | `LINSTR` | `LLEN` |
 | `LOC` | `LOF` | `LOG` | `LTRIM$` |
-| `MATH` | `MAX` | `MID$` | `MIN` |
-| `OCT$` | `PI` | `RAD` | `RGB` |
+| `MAP` | `MATH` | `MAX` | `MID$` |
+| `MIN` | `OCT$` | `PI` | `RAD` |
+| `RGB` |  |  |  |
 | `RIGHT$` | `RND` | `RTRIM$` | `SGN` |
 | `SIN` | `SPACE$` | `SQR` | `STR$` |
 | `STR2BIN` | `STRING$` | `TAB` | `TAN` |
@@ -1355,9 +1472,12 @@ translated program is compiled and run rather than typed at a prompt.
 (`mmedit` provides the editing they existed for.)
 
 Of the graphics, `MODE`, `COLOUR`, `PIXEL` (including the array form),
-`LINE`, `CIRCLE`, `RGB()`, `FRAMEBUFFER` and `PRINT @` are done; `BOX`,
-`TRIANGLE` and `TEXT` are not yet, nor are `FRAMEBUFFER LAYER` and
-`FRAMEBUFFER MERGE`.
+`LINE`, `CIRCLE`, `RGB()`, `FRAMEBUFFER`, `PRINT @`, `TEXT`, `FONT`,
+`CLS [colour]` and `MAP` (statement and function) are done; `BOX` and
+`TRIANGLE` are not yet, nor are `FRAMEBUFFER LAYER` and `FRAMEBUFFER
+MERGE`. `TEXT` draws in any of MMBasic's nine built-in fonts but only
+in its normal and vertical orientations — the three that rotate the
+character itself are accepted and drawn normally.
 
 In a graphics mode a program's `PRINT` now draws the characters into
 whatever is being drawn on, as MMBasic does, so text goes into the

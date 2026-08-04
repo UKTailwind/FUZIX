@@ -35,11 +35,8 @@
 #include "config.h"
 #include "display.h"
 #include "psram.h"                      /* PSRAM_BASE, psram_size */
-/* font1 is MMBasic's own 8x12, and the console's.  DECLARED, not
- * included: console_font.h defines the array, so including it here
- * would put a second 2,680-byte copy in a kernel that has a few
- * hundred bytes of RAM to spare. */
-extern const unsigned char font1[];
+/* The fonts themselves live in fonts.c, reached through display_font;
+ * this file no longer names font1 directly. */
 #include <pico/platform/sections.h>     /* __uninitialized_psram */
 /* struct gfx_pt / gfx_rc: the batched drawing items are part of the
  * userland interface, so their definition lives with the ioctls. */
@@ -262,6 +259,11 @@ enum gexp {
 };
 static volatile enum gexp gfx_exp = EXP_CONSOLE;
 static uint8_t gfx_pal[16];
+/* MMBasic's remap332: MAP(n)=c collects here and MAP SET moves the lot
+ * across in one go, during blanking.  The split is the whole point -
+ * writing the live table entry by entry recolours the picture in
+ * instalments, and a fade done that way is visibly wrong. */
+static uint8_t gfx_pal_pending[16];
 static uint16_t gfx_stride;                 /* source bytes per mode line */
 static uint16_t gfx_rows;                   /* source lines: 256, or 240 */
 static uint8_t gfx_mode_now = 0xFF;         /* the mode number as asked for */
@@ -284,23 +286,23 @@ static uint8_t bbc_rgb332[16] = {
 /*
  * MODE 7 is what a translated MMBasic program draws in, and MMBasic's
  * own 4bpp screen is RGB121: one bit of red, two of green, one of
- * blue, so its sixteen colours are the corners of a regular cube
- * (Draw.c colours[16]).  Reduced to RGB332 here.
+ * blue, so its sixteen colours are the corners of a regular cube.
  *
- * This is not decoration.  The interpreter converts a colour by pure
- * bit extraction - RGB121.h, ((c & 0x800000) >> 20) | ((c & 0xC000) >>
- * 13) | ((c & 0x80) >> 7) - so every one of the sixteen comes up
- * equally often for arbitrary input.  display_gfx_map takes the
- * nearest palette entry instead, which honours a palette the program
- * has changed; over a regular cube the two agree on every RGB332
- * value, so with this table a translated program picks exactly the
- * colours MMBasic would.  Against the BBC set below - eight saturated
- * colours and eight darker companions - they do not agree at all, and
- * a program drawing in arbitrary colours reached only a handful.
+ * These are MMBasic's HDMI defaults exactly - RGB332(MAP16DEF[i]) from
+ * HDMI.c, which is what mapreset() loads.  That is the right reference
+ * and its VGA table is not: there the sixteen values only pick a slot,
+ * because the colour itself is fixed by the output resistors.  Here, as
+ * on MMBasic's HDMI, the byte IS the colour that goes on the wire.
+ *
+ * The four with mid green - 4, 5, 12 and 13 - are the ones that make
+ * the difference: MAP16DEF uses 0x55 and 0xAA for the two middle green
+ * levels, which truncate to 2 and 5, where a 0/64/128/255 ramp gives 2
+ * and 4.  Those entries used to be a shade dark against the
+ * interpreter on the same chip.
  */
 static uint8_t rgb121_rgb332[16] = {
-    0x00, 0x03, 0x08, 0x0B, 0x10, 0x13, 0x1C, 0x1F,
-    0xE0, 0xE3, 0xE8, 0xEB, 0xF0, 0xF3, 0xFC, 0xFF
+    0x00, 0x03, 0x08, 0x0B, 0x14, 0x17, 0x1C, 0x1F,
+    0xE0, 0xE3, 0xE8, 0xEB, 0xF4, 0xF7, 0xFC, 0xFF
 };
 
 /* Mask applied to a physical colour number in this expander: MODE 7
@@ -308,6 +310,11 @@ static uint8_t rgb121_rgb332[16] = {
 static uint8_t gfx_physmask(enum gexp ex)
 {
     return (ex == EXP_4BPP_X2) ? 15 : 7;
+}
+
+static int gfx_bpp(enum gexp ex)
+{
+    return (ex == EXP_CONSOLE || ex == EXP_1BPP_5TO8) ? 1 : 4;
 }
 
 /* Built for the mode we are ABOUT to enter, so a live switch can have
@@ -822,7 +829,7 @@ int display_gfx_mode(int mode)
         console_gfx(0);         /* clears and repaints the console */
     } else {
         for (i = 0; i < 16; i++)
-            gfx_pal[i] = (exp == EXP_4BPP_X2)
+            gfx_pal[i] = gfx_pal_pending[i] = (exp == EXP_4BPP_X2)
                 ? rgb121_rgb332[defpal[pal][i] & 15]
                 : bbc_rgb332[defpal[pal][i] & gfx_physmask(exp)];
         /* Palette, table and framebuffer all ready BEFORE core1 is
@@ -854,10 +861,75 @@ void display_gfx_pal(uint8_t logical, uint8_t physical)
 {
     enum gexp ex = gfx_exp;
 
-    gfx_pal[logical & 15] = (ex == EXP_4BPP_X2)
+    gfx_pal[logical & 15] = gfx_pal_pending[logical & 15] =
+        (ex == EXP_4BPP_X2)
         ? rgb121_rgb332[physical & 15]
         : bbc_rgb332[physical & gfx_physmask(ex)];
     gfx_lut_rebuild(ex);
+}
+
+/*
+ * MMBasic's MAP - an arbitrary colour per palette entry, rather than
+ * VDU19's choice from a fixed set.
+ *
+ * MAP(n) = colour collects into gfx_pal_pending and changes nothing;
+ * MAP SET moves the whole palette across during blanking.  MMBasic
+ * splits it the same way (remap332 -> map16quads on SET, after
+ * `while (v_scanline != 0)`), and for the same reason: a fade or a
+ * cycle applied entry by entry to the live table shows the picture
+ * half recoloured.
+ *
+ * The stored value is RGB332 because that is what the scanout emits -
+ * gfx_pal IS the byte core1 puts on the wire - so this is MMBasic's own
+ * RGB332(): the top three bits of red and green and the top two of
+ * blue, truncated, not rounded.
+ *
+ * 16-colour modes only, as MMBasic allows it only in SCREENMODE2/3/5.
+ * The 1bpp modes have no palette to speak of and the console's tiles
+ * are a different mechanism entirely.
+ */
+int display_gfx_remap(int index, uint32_t rgb888)
+{
+    if (gfx_bpp(gfx_exp) != 4 || index < 0 || index > 15)
+        return -1;
+    gfx_pal_pending[index] = (uint8_t)((rgb888 >> 16 & 0xE0) |
+                                       (rgb888 >> 11 & 0x1C) |
+                                       (rgb888 >> 6 & 0x03));
+    return 0;
+}
+
+int display_gfx_remap_apply(void)
+{
+    int i;
+
+    if (gfx_bpp(gfx_exp) != 4)
+        return -1;
+    /* Blanking first: the LUT rebuild writes the table core1 is reading
+     * a scanline at a time, and doing that mid-frame tears the colours
+     * across the picture. */
+    display_wait_vblank();
+    for (i = 0; i < 16; i++)
+        gfx_pal[i] = gfx_pal_pending[i];
+    gfx_lut_rebuild(gfx_exp);
+    return 0;
+}
+
+/* MAP RESET - back to the mode's own defaults, live and pending alike,
+ * which is what MMBasic's mapreset() does to map and remap together. */
+int display_gfx_remap_reset(void)
+{
+    enum gexp ex = gfx_exp;
+    int i;
+
+    if (gfx_bpp(ex) != 4)
+        return -1;
+    display_wait_vblank();
+    for (i = 0; i < 16; i++)
+        gfx_pal[i] = gfx_pal_pending[i] = (ex == EXP_4BPP_X2)
+            ? rgb121_rgb332[i]
+            : bbc_rgb332[i & gfx_physmask(ex)];
+    gfx_lut_rebuild(ex);
+    return 0;
 }
 
 /* Current graphics framebuffer size (0 = console mode: the geometry is
@@ -891,11 +963,6 @@ static int gfx_width(enum gexp ex)
     case EXP_1BPP_5TO8:  return 640;
     }
     return 0;
-}
-
-static int gfx_bpp(enum gexp ex)
-{
-    return (ex == EXP_CONSOLE || ex == EXP_1BPP_5TO8) ? 1 : 4;
 }
 
 void display_gfx_geom(uint16_t *w, uint16_t *h, uint16_t *stride,
@@ -938,11 +1005,28 @@ uint8_t display_gfx_map(uint32_t rgb888)
         return rgb888 ? 1 : 0;
     }
 
-    /* 4bpp here is PALETTISED - gfx_pal[] maps 16 logical colours to
-     * RGB332 - so there is no fixed encoding to apply.  Reduce the
-     * request to RGB332 and take the nearest palette entry, which
-     * works whatever VDU19 has done to the palette.  16 comparisons,
-     * once per colour change. */
+    /*
+     * MODE 7 is MMBasic's MODE 2, and there the index for a colour is
+     * FIXED: RGB121() in the interpreter is pure bit extraction, taking
+     * no notice of the palette.  That is what makes MAP work - remap an
+     * entry and everything already drawn in it changes colour, while a
+     * program carries on naming colours the same way.
+     *
+     * Nearest-match cannot do that.  Once MAP has moved an entry, the
+     * nearest entry to red is no longer the one called red, so new
+     * drawing lands somewhere else and a palette cycle takes the
+     * picture apart.  The two agree exactly while the palette is the
+     * default RGB121 cube, so this costs nothing until MAP is used -
+     * and then it is the difference between working and not.
+     */
+    if (ex == EXP_4BPP_X2)
+        return (uint8_t)(((rgb888 & 0x800000) >> 20) |
+                         ((rgb888 & 0x00C000) >> 13) |
+                         ((rgb888 & 0x000080) >> 7));
+
+    /* The BBC modes keep nearest-match: their palette is a choice from
+     * a fixed set of physical colours (VDU19), there is no encoding to
+     * extract, and the set is not a regular cube. */
     r = (rgb888 >> 16) & 0xFF;
     g = (rgb888 >> 8) & 0xFF;
     b = rgb888 & 0xFF;
@@ -1267,10 +1351,10 @@ int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
  * A run of text at a PIXEL position - MMBasic's GUIPrintChar, which is
  * how PRINT reaches the screen in a graphics mode.
  *
- * The font is the console's own, and the console's own is MMBasic's
- * font1: 8x12, header [width][height][first][count], glyphs one byte
- * per row MSB first.  So this draws what the console draws, and a
- * program's text matches the shell's.
+ * Any of the built-in fonts (fonts.c), font 1 being the console's own -
+ * MMBasic's font1 - so a program's text matches the shell's.  The
+ * layout is MMBasic's throughout: header [width][height][first][count]
+ * then the glyphs, each width*height bits packed continuously.
  *
  * It goes through display_gfx_bitmap, so it writes to gfx_draw like
  * every other primitive - which is the whole point.  A program that has
@@ -1280,23 +1364,35 @@ int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
  * One call for the whole string rather than one per character: a
  * counter redrawn every frame is the case this exists for.
  */
-int display_gfx_text(int x, int y, int scale, int fc, int bc,
+int display_gfx_text(int x, int y, int font, int scale, int fc, int bc,
                      const uint8_t *s, int len)
 {
-    int i;
-    int w = font1[0], h = font1[1];
-    int first = font1[2], count = font1[3];
+    int i, w, h, first, count, glyph;
+    const uint8_t *fp = display_font(font, &w, &h, &first, &count);
 
+    if (!fp)
+        return -1;
     if (scale <= 0)
         scale = 1;
+    /* Bytes per glyph.  NOT h: that only holds for a font 8 pixels
+     * wide, and of the nine only two are. */
+    glyph = (w * h) / 8;
+
     for (i = 0; i < len; i++) {
         int c = s[i];
 
-        /* Anything not in the font prints as a space, as MMBasic does */
-        if (c < first || c >= first + count)
-            c = ' ';
-        display_gfx_bitmap(x, y, w, h, scale, fc, bc,
-                           &font1[4 + (c - first) * h]);
+        if (c < first || c >= first + count) {
+            /* Not in the font.  MMBasic fills the cell with the paper
+             * colour and moves on - which for font 6, whose 11 glyphs
+             * are the digits, is every other character.  Substituting a
+             * space would index off the end of that font. */
+            if (bc >= 0)
+                display_gfx_rect(x, y, x + w * scale - 1,
+                                 y + h * scale - 1, bc);
+        } else {
+            display_gfx_bitmap(x, y, w, h, scale, fc, bc,
+                               &fp[4 + (c - first) * glyph]);
+        }
         x += w * scale;
     }
     return x;

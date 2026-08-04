@@ -303,11 +303,59 @@ int plt_dev_ioctl(uarg_t request, char *data)
             udata.u_error = EFAULT;
             return -1;
         }
-        return display_gfx_text(gt.x, gt.y, gt.scale,
+        /* 0 means font 1, so a caller built before there were fonts to
+         * choose from still gets the console's.  Still returns the x the
+         * text ended at, which is what lets a caller lay a line out
+         * piece by piece; a font that does not exist is the one error. */
+        if (!display_font(gt.font ? gt.font : 1, 0, 0, 0, 0)) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return display_gfx_text(gt.x, gt.y, gt.font ? gt.font : 1, gt.scale,
                                 display_gfx_map((uint32_t)gt.fg),
                                 gt.bg < 0 ? -1
                                           : display_gfx_map((uint32_t)gt.bg),
                                 gt.str, (int)gt.len);
+    }
+    if (request == GFXIOC_MAP)
+    {
+        /* index and colour both fit the argument: 24 bits of RGB888 and
+         * the entry number in the top byte, so no uget. */
+        uint32_t v = (uint32_t)data;
+
+        if (display_gfx_remap((int)(v >> 24) & 0xFF, v & 0xFFFFFF)) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    if (request == GFXIOC_MAPCTL)
+    {
+        int r = ((int)(intptr_t)data == GFX_MAP_RESET)
+                ? display_gfx_remap_reset()
+                : display_gfx_remap_apply();
+        if (r) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    if (request == GFXIOC_FONTINFO)
+    {
+        struct gfx_fontinfo gf;
+        int w = 0, h = 0, first = 0, count = 0;
+
+        if (uget(data, &gf, sizeof(gf)))
+            return -1;
+        display_font(gf.font, &w, &h, &first, &count);
+        gf.width = (uint8_t)w;
+        gf.height = (uint8_t)h;
+        gf.first = (uint8_t)first;
+        gf.count = (uint16_t)count;
+        gf.nfonts = (uint16_t)display_font_count();
+        if (uput(&gf, data, sizeof(gf)))
+            return -1;
+        return 0;
     }
     if (request == GFXIOC_INFO)
     {

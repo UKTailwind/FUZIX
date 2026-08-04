@@ -277,6 +277,7 @@ struct sym *reference(const char *word, int as_array);
 void note_touch(const char *canon, struct sym *s);
 const char *as_int(struct val v);
 const char *as_flt(struct val v);
+const char *as_str(struct val v);
 struct val need_num(struct val v);
 void errors_add(const char *msg);            /* append, no dedupe */
 void errors_add_dedup(const char *msg);      /* the statement-site form */

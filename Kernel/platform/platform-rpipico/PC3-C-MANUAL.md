@@ -205,16 +205,73 @@ Bits are MSB-first, row-major — **exactly MMBasic's font packing**, so
 fonts interchange. `bg = -1` is transparent. Source up to
 `GFX_BITMAP_MAX`.
 
-For text there is no need to carry a font:
+For text there is no need to carry a font — there are nine of them in
+the kernel, MMBasic's own, and they are `const` so they live in flash
+and cost a program nothing:
 
 ```c
-struct gfx_text gt = { x, y, scale, 0, fg, bg, len, str };
+struct gfx_text gt = { x, y, scale, font, fg, bg, len, str };
 int endx = ioctl(sys, GFXIOC_TEXT, &gt);
 ```
 
-This draws a run of characters in the console's own font (MMBasic's
-`font1`, 8×12) and returns the x it ended at. `bg = -1` leaves the
-paper alone. Up to `GFX_TEXT_MAX` (256) characters, one crossing.
+This draws a run of characters and returns the x it ended at. `bg = -1`
+leaves the paper alone. Up to `GFX_TEXT_MAX` (256) characters, one
+crossing. `font` is 1..9 as MMBasic numbers them, and **0 means 1**, so
+code written before there were fonts to choose from still gets the
+console's:
+
+| font | cell | characters |
+|---|---|---|
+| 1 | 8×12 | 224 — the console's own |
+| 2 | 12×20 | 95 |
+| 3 | 16×24 | 95 |
+| 4 | 10×16 | 224 |
+| 5 | 24×32 | 95 |
+| 6 | 32×50 | 11 — the digits only |
+| 7 | 6×8 | 96 |
+| 8 | 4×6 | 96 |
+| 9 | 8×10 | 95 |
+
+A character the font does not have fills its cell with the paper
+colour, which is what MMBasic does. That is not a corner case: with
+font 6 it is every character that is not a digit.
+
+Ask for the cell rather than assuming it — laying text out against the
+wrong metrics is the whole failure mode here:
+
+```c
+struct gfx_fontinfo fi = { .font = 3 };
+ioctl(sys, GFXIOC_FONTINFO, &fi);
+/* fi.width, fi.height, fi.first, fi.count, fi.nfonts */
+```
+
+`fi.width` comes back 0 for a font that does not exist.
+
+## The palette
+
+A 4bpp mode stores a colour *number* per pixel and the palette says
+what each number is, so remapping recolours everything already drawn
+without touching a byte of the framebuffer. This is MMBasic's `MAP`.
+
+```c
+ioctl(sys, GFXIOC_MAP, (void *)((index << 24) | rgb888));   /* collect */
+ioctl(sys, GFXIOC_MAPCTL, (void *)GFX_MAP_SET);             /* apply   */
+ioctl(sys, GFXIOC_MAPCTL, (void *)GFX_MAP_RESET);           /* default */
+```
+
+`GFXIOC_MAP` changes nothing on screen: entries are collected and
+`GFX_MAP_SET` moves the whole palette across **during the vertical
+blanking**, so a new palette arrives between frames rather than
+recolouring the picture in instalments. 16-colour modes only.
+
+The colour stored is RGB332 — the byte the scanout puts on the wire —
+reduced by truncation, as MMBasic's `RGB332()` does.
+
+Note that this does not change which entry a colour lands on. In the
+320x240 mode that is fixed bit extraction (MMBasic's `RGB121`: one bit
+of red, two of green, one of blue), deliberately independent of the
+palette, so a program can remap freely and go on naming colours the
+same way.
 
 ```c
 ioctl(sys, GFXIOC_SCROLL, (void *)((rows << 24) | rgb888));

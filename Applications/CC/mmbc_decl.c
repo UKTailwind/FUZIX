@@ -193,8 +193,14 @@ void strip_line_number(void)
         place_label(t->text);
     }
     t = peek(0);
+    /* CLS is the one statement word that takes no arguments, so a ':'
+       after it separates statements and never starts a label.  Without
+       this "CLS : PRINT x" defines a label called CLS and drops the
+       clear without a word.  Every other statement word is followed by
+       an argument, so "NAME :" cannot arise for it. */
     if (t != NULL && t->kind == T_ID && is_op(":", 1)
-        && !kw_in(t->up) && builtin_get(t->up) == NULL) {
+        && !kw_in(t->up) && builtin_get(t->up) == NULL
+        && strcmp(t->up, "CLS") != 0) {
         char *canon = split_suffix(t->text, &sfx);
         if (routine_get(canon) == NULL && !routine_name_known(canon)) {
             cv.i += 2;
