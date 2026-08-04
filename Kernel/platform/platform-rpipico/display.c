@@ -35,6 +35,11 @@
 #include "config.h"
 #include "display.h"
 #include "psram.h"                      /* PSRAM_BASE, psram_size */
+/* font1 is MMBasic's own 8x12, and the console's.  DECLARED, not
+ * included: console_font.h defines the array, so including it here
+ * would put a second 2,680-byte copy in a kernel that has a few
+ * hundred bytes of RAM to spare. */
+extern const unsigned char font1[];
 #include <pico/platform/sections.h>     /* __uninitialized_psram */
 /* struct gfx_pt / gfx_rc: the batched drawing items are part of the
  * userland interface, so their definition lives with the ioctls. */
@@ -1254,6 +1259,88 @@ int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
                 }
             }
         }
+    }
+    return 0;
+}
+
+/*
+ * A run of text at a PIXEL position - MMBasic's GUIPrintChar, which is
+ * how PRINT reaches the screen in a graphics mode.
+ *
+ * The font is the console's own, and the console's own is MMBasic's
+ * font1: 8x12, header [width][height][first][count], glyphs one byte
+ * per row MSB first.  So this draws what the console draws, and a
+ * program's text matches the shell's.
+ *
+ * It goes through display_gfx_bitmap, so it writes to gfx_draw like
+ * every other primitive - which is the whole point.  A program that has
+ * selected the off-screen buffer gets its text there, instead of the
+ * console scribbling on the screen underneath the picture.
+ *
+ * One call for the whole string rather than one per character: a
+ * counter redrawn every frame is the case this exists for.
+ */
+int display_gfx_text(int x, int y, int scale, int fc, int bc,
+                     const uint8_t *s, int len)
+{
+    int i;
+    int w = font1[0], h = font1[1];
+    int first = font1[2], count = font1[3];
+
+    if (scale <= 0)
+        scale = 1;
+    for (i = 0; i < len; i++) {
+        int c = s[i];
+
+        /* Anything not in the font prints as a space, as MMBasic does */
+        if (c < first || c >= first + count)
+            c = ' ';
+        display_gfx_bitmap(x, y, w, h, scale, fc, bc,
+                           &font1[4 + (c - first) * h]);
+        x += w * scale;
+    }
+    return x;
+}
+
+/*
+ * Scroll the drawing target - the ONE implementation.
+ *
+ * rows > 0 moves the picture up, rows < 0 down, and the vacated band is
+ * filled with fillc.  The console calls this for its graphics modes and
+ * userland reaches it through GFXIOC_SCROLL, so a PRINT running off the
+ * bottom does the same thing whoever issued it.
+ *
+ * It moves gfx_draw, not disp_fb, which is the point: con_gfx_scroll
+ * used to memmove the SCREEN while con_gfx_plot and con_gfx_clear drew
+ * through the write target, so a console that scrolled while a program
+ * was drawing off-screen moved the wrong picture.  Nothing had noticed
+ * because nothing had yet printed with a framebuffer selected.
+ */
+int display_gfx_scroll(int rows, int fillc)
+{
+    enum gexp ex = gfx_exp;
+    int h = (ex == EXP_CONSOLE) ? DISP_HEIGHT : gfx_rows;
+    int stride = (ex == EXP_CONSOLE) ? DISP_STRIDE : gfx_stride;
+    int n = rows < 0 ? -rows : rows;
+    int keep;
+    uint8_t fill;
+
+    if (!stride || !rows)
+        return -1;
+    /* both nibbles, or all eight bits, of the incoming band */
+    fill = (gfx_bpp(ex) == 4) ? (uint8_t)((fillc & 15) | ((fillc & 15) << 4))
+                              : (uint8_t)(fillc ? 0xFF : 0);
+    if (n >= h) {
+        memset(gfx_draw, fill, (unsigned)(stride * h));
+        return 0;
+    }
+    keep = (h - n) * stride;
+    if (rows > 0) {
+        memmove(gfx_draw, gfx_draw + n * stride, (unsigned)keep);
+        memset(gfx_draw + keep, fill, (unsigned)(n * stride));
+    } else {
+        memmove(gfx_draw + n * stride, gfx_draw, (unsigned)keep);
+        memset(gfx_draw, fill, (unsigned)(n * stride));
     }
     return 0;
 }

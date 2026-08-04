@@ -220,6 +220,8 @@ static void w_rmdir(void)    { mm_rmdir(Ps(0)); A = 0; }
 static void w_chdir(void)    { mm_chdir(Ps(0)); A = 0; }
 static void w_cwd(void)      { A = mm_off(mm_cwd()); }
 static void w_inkey(void)    { A = mm_off(mm_inkey()); }
+/* PRINT @(x,y[,mode]) - returns the empty string, like MMBasic's */
+static void w_at(void)       { A = mm_off(mm_at(LL(0), LL(2), LL(4))); }
 static void w_dir(void)      { A = mm_off(mm_dir(Ps(0), I(1), I(2))); }
 static void w_files(void)    { mm_files(Ps(0)); A = 0; }
 
@@ -491,6 +493,7 @@ static const struct mmwrap {
 	{ "mm_chdir",		w_chdir },
 	{ "mm_cwd",		w_cwd },
 	{ "mm_inkey",		w_inkey },
+	{ "mm_at",		w_at },
 	{ "mm_dir",		w_dir },
 	{ "mm_files",		w_files },
 	{ "mm_data_init4",	w_data_init4 },

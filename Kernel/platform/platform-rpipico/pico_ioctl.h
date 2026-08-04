@@ -154,6 +154,45 @@ struct gfx_batch {
 #define GFXIOC_FBSEL  0x0016		/* int: 0 screen, 1 layer */
 #define GFXIOC_FBCOPY 0x0017		/* int: 0 layer->screen, 1 screen->layer */
 
+/* A run of text at a PIXEL position - MMBasic's PRINT in a graphics
+ * mode, which draws glyphs rather than sending characters to a console.
+ *
+ * This is what makes PRINT work with the off-screen buffer: it goes
+ * through the caller's write target like every other drawing call, so
+ * text lands wherever the drawing is going.  Sending it to the console
+ * instead - which is what happened before - put the shell's cursor on
+ * the picture and scrolled the whole display when the line wrapped.
+ *
+ * The font is the console's own 8x12, so program text and shell text
+ * match.  bg = -1 leaves the paper alone, which is MMBasic's
+ * transparent PRINT (its PrintPixelMode 1).  Returns the x coordinate
+ * the text ended at, so a caller can lay out a line piece by piece.
+ */
+struct gfx_text {
+	int16_t x, y;		/* top-left, in pixels */
+	uint8_t scale;		/* 1 = the 8x12 cell */
+	uint8_t pad;
+	int32_t fg;		/* RGB888 */
+	int32_t bg;		/* RGB888, or -1 for transparent */
+	uint16_t len;
+	void *str;
+};
+#define GFXIOC_TEXT   0x001A
+/* Bounds one call's work, as GFX_BATCH_MAX does for the shape calls. */
+#define GFX_TEXT_MAX  256
+/* Scroll the write target.  data = (rows << 24) | RGB888: rows signed
+ * in the top byte, positive up and negative down, and the colour the
+ * vacated band is filled with in the low 24 - RGB888 like every other
+ * call here, so a caller never needs to know the mode's own colour
+ * numbers.
+ *
+ * The SAME call the console makes for its own scrolling (con_gfx_scroll
+ * goes through display_gfx_scroll), so a program printing off the
+ * bottom of the screen and the shell doing it are one implementation.
+ * And it moves the WRITE TARGET, so a program drawing off-screen
+ * scrolls its own buffer rather than the screen. */
+#define GFXIOC_SCROLL 0x001B
+
 /* Block until the top of vertical blanking - MMBasic's FRAMEBUFFER WAIT,
  * and what FRAMEBUFFER COPY ...,B does first.  No argument.  Bounded: if
  * the scanout has stopped this returns rather than hanging the caller. */

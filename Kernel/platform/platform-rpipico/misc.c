@@ -269,6 +269,46 @@ int plt_dev_ioctl(uarg_t request, char *data)
         display_wait_vblank();
         return 0;
     }
+    if (request == GFXIOC_SCROLL)
+    {
+        /* rows in the top byte, signed; the colour to fill with in the
+         * low 24 as RGB888, like every other call here - the caller
+         * should not have to know the mode's own colour numbers. */
+        uint32_t v = (uint32_t)data;
+        int rows = (int)(int8_t)(v >> 24);
+
+        if (display_gfx_scroll(rows, display_gfx_map(v & 0xFFFFFF))) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    if (request == GFXIOC_TEXT)
+    {
+        /* The string is read where it lies, blessed once by valaddr_r -
+         * the same trick GFXIOC_BITMAP and the batch calls use, and the
+         * reason a line of text costs one crossing and no kernel
+         * buffer. */
+        struct gfx_text gt;
+
+        if (uget(data, &gt, sizeof(gt)))
+            return -1;
+        if (gt.len == 0)
+            return 0;
+        if (gt.len > GFX_TEXT_MAX || gt.scale == 0) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        if (valaddr_r(gt.str, gt.len) != (usize_t)gt.len) {
+            udata.u_error = EFAULT;
+            return -1;
+        }
+        return display_gfx_text(gt.x, gt.y, gt.scale,
+                                display_gfx_map((uint32_t)gt.fg),
+                                gt.bg < 0 ? -1
+                                          : display_gfx_map((uint32_t)gt.bg),
+                                gt.str, (int)gt.len);
+    }
     if (request == GFXIOC_INFO)
     {
         struct gfx_info gi;

@@ -249,21 +249,20 @@ static void con_gfx_cursor(int y, int x)
     }
 }
 
+/* One text line, through the shared scroll in display.c - the same one
+ * GFXIOC_SCROLL gives userland, so a program's PRINT running off the
+ * bottom and the console's do the same thing.  It moves the WRITE
+ * TARGET; this used to memmove disp_fb while con_gfx_plot and
+ * con_gfx_clear drew through the target, which would have scrolled the
+ * screen out from under a program drawing off-screen. */
 static void con_gfx_scroll(int down)
 {
-    int rowbytes, keep;
+    uint8_t fg, bg;
 
     if (!con_gfx_stride)
         return;
-    rowbytes = FONT_H * con_gfx_stride;
-    keep = (CON_ROWS - 1) * rowbytes;
-    if (down) {
-        memmove(disp_fb + rowbytes, disp_fb, keep);
-        con_gfx_clear(0, 0, CON_COLS);
-    } else {
-        memmove(disp_fb, disp_fb + rowbytes, keep);
-        con_gfx_clear(CON_ROWS - 1, 0, CON_COLS);
-    }
+    con_gfx_colours(&fg, &bg);
+    display_gfx_scroll(down ? -FONT_H : FONT_H, bg);
 }
 
 static void con_plot(int8_t y, int8_t x, uint8_t c)

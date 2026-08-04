@@ -425,6 +425,18 @@ void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
                const MMFLOAT *cf, const MMINTEGER *ci,
                MMINTEGER rgb, MMINTEGER count);
 
+/* PRINT @(x, y [, mode]) - MMBasic's fun_at.  Puts the text cursor at a
+ * PIXEL position and returns "", so it composes inside PRINT:
+ *
+ *     PRINT @(0, 0) Str$(Timer - t)
+ *
+ * In a graphics mode PRINT draws glyphs through whatever is being drawn
+ * on, so text follows the drawing into the framebuffer instead of going
+ * to the console - which draws on the screen and scrolls it.  mode is
+ * MMBasic's PrintPixelMode: 1 draws over what is there, 2 swaps ink and
+ * paper. */
+char *mm_at(MMINTEGER x, MMINTEGER y, MMINTEGER mode);
+
 /* FRAMEBUFFER - draw off-screen, then show it in one go.  0 means the
  * screen ("N") and 1 the off-screen buffer ("F"), in every argument
  * below.  MMBasic's LAYER, MERGE and second buffers are not here yet.

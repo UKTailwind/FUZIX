@@ -112,6 +112,21 @@ int display_gfx_rects(const struct gfx_rc *rc, int n, const uint32_t *col);
 int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
                        int fc, int bc, const uint8_t *bitmap);
 
+/* A run of text at a PIXEL position, in the console's font - which is
+ * MMBasic's font1, so a program's text matches the shell's.  Draws
+ * through the caller's write target like every other primitive, which
+ * is what lets PRINT reach the off-screen buffer.  Returns the x the
+ * text ended at.  Character cell is 8x12 times scale. */
+#define GFX_TEXT_W 8
+#define GFX_TEXT_H 12
+int display_gfx_text(int x, int y, int scale, int fc, int bc,
+                     const uint8_t *s, int len);
+/* Scroll the drawing target: rows > 0 up, < 0 down, vacated band
+ * filled with fillc.  THE one implementation - the console's graphics
+ * scroll calls it and GFXIOC_SCROLL hands it to userland, so a PRINT
+ * running off the bottom behaves the same whoever issued it. */
+int display_gfx_scroll(int rows, int fillc);
+
 /* Current geometry, for GFXIOC_INFO. */
 void display_gfx_geom(uint16_t *w, uint16_t *h, uint16_t *stride,
                       uint8_t *bpp, uint8_t *mode);

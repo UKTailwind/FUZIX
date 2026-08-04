@@ -26,10 +26,10 @@ endif
 # linker_overrides/memory_ram.incl must agree - it carves the same
 # split, and nothing checks that the two match.
 ifeq ($(SUBTARGET),pico2)
-TOTALMEM=312
+TOTALMEM=308
 endif
 ifeq ($(SUBTARGET),pico2_w)
-TOTALMEM=312
+TOTALMEM=308
 endif
 
 PICOTOOLFLAGS= --family rp2040
