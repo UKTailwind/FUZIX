@@ -618,6 +618,21 @@ struct sym *arrayref(int need_parens)
     return sym;
 }
 
+/* Does a whole array - written a() - start here?
+ *
+ * MMBasic decides PIXEL's two forms at run time, by asking whether the
+ * argument it was handed is an array (getargaddress reports a count).
+ * Here it has to be a question about the text, because the two forms
+ * compile to different calls; a() is the spelling MMBasic's own
+ * documentation uses for a whole array. */
+int is_array_arg(void)
+{
+    struct tok *t = peek(0);
+
+    return t != NULL && t->kind == T_ID
+           && is_op("(", 1) && is_op(")", 2);
+}
+
 /* (pointer to element 0, element count) for a whole array. */
 struct flat array_flat(struct sym *s)
 {

@@ -105,6 +105,16 @@ void mm_pr_s  (const char *s);      /* PRINT a string                  */
 void mm_pr_i  (MMINTEGER v);        /* PRINT an integer                */
 void mm_pr_f  (MMFLOAT v);          /* PRINT a float                   */
 void mm_pr_nl (void);               /* end of PRINT line               */
+/* The LAST item of a PRINT that ends in ; or , - print it and flush,
+ * so a partial line reaches the screen instead of waiting in stdio's
+ * buffer for the next newline.  Print-and-flush rather than a separate
+ * flush call: one extra statement in main is enough to tip a function
+ * out of native code on the board's compiler, which cost the KnivD
+ * benchmark a factor of 2.7 (see mm_pr_se in mmb_runtime.c). */
+void mm_pr_se (const char *s);
+void mm_pr_ie (MMINTEGER v);
+void mm_pr_fe (MMFLOAT v);
+void mm_pr_tabe(void);
 void mm_pr_tab(void);               /* the ',' separator = a tab       */
 int  mm_col   (void);               /* current console column, 0 based */
 char *mm_tab(MMINTEGER col);        /* TAB() - returns padding spaces  */
@@ -406,12 +416,14 @@ MMINTEGER mm_vres(void);
 void mm_plot(const short *xy, MMINTEGER n, MMINTEGER rgb);
 void mm_fill(const short *xyxy, MMINTEGER n, MMINTEGER rgb);
 /* MMBasic's PIXEL x%(), y%(), c%().  Either the float or the integer
- * pointer of each pair is used, whichever the array actually is; pass
- * NULL for both colour pointers to draw in the current colour. */
+ * pointer of each pair is used, whichever the array actually is.  With
+ * both colour pointers NULL the whole run is drawn in rgb, and MM_CUR
+ * there means whatever COLOUR last set - MMBasic's scalar-colour and
+ * no-colour cases. */
 void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
                const MMFLOAT *yf, const MMINTEGER *yi,
                const MMFLOAT *cf, const MMINTEGER *ci,
-               MMINTEGER count);
+               MMINTEGER rgb, MMINTEGER count);
 
 /* FRAMEBUFFER - draw off-screen, then show it in one go.  0 means the
  * screen ("N") and 1 the off-screen buffer ("F"), in every argument

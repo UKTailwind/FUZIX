@@ -184,6 +184,17 @@ void emit(const char *text)
     out_append(cv.out, ln);
 }
 
+/* Index of the line emit() just wrote, or -1 outside emission.
+ *
+ * For patching a call after the fact - see do_print, which turns the
+ * last item of a PRINT into its flushing variant. */
+int last_line(void)
+{
+    if (cv.mode != M_EMIT)
+        return -1;
+    return cv.out->n - 1;
+}
+
 void raw(const char *text)
 {
     if (cv.mode != M_EMIT)

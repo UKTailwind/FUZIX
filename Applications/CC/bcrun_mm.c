@@ -126,6 +126,10 @@ static void w_pr_s(void)     { mm_pr_s(Ps(0)); A = 0; }
 static void w_pr_i(void)     { mm_pr_i(LL(0)); A = 0; }
 static void w_pr_f(void)     { mm_pr_f(D(0)); A = 0; }
 static void w_pr_nl(void)    { mm_pr_nl(); A = 0; }
+static void w_pr_se(void)    { mm_pr_se(Ps(0)); A = 0; }
+static void w_pr_ie(void)    { mm_pr_ie(LL(0)); A = 0; }
+static void w_pr_fe(void)    { mm_pr_fe(D(0)); A = 0; }
+static void w_pr_tabe(void)  { mm_pr_tabe(); A = 0; }
 static void w_pr_tab(void)   { mm_pr_tab(); A = 0; }
 static void w_col(void)      { A = mm_col(); }
 static void w_tab(void)      { A = mm_off(mm_tab(LL(0))); }
@@ -298,6 +302,11 @@ static void w_plot(void)     { mm_plot((const short *)Pa(0), LL(1), LL(3));
                                A = 0; }
 static void w_fill(void)     { mm_fill((const short *)Pa(0), LL(1), LL(3));
                                A = 0; }
+/* PIXEL xa(), ya() [, c | ca()] - six array pointers, of which one of
+   each pair is null, then the scalar colour and the count. */
+static void w_pixels(void)   { mm_pixels(PF(0), PI(1), PF(2), PI(3),
+                                         PF(4), PI(5), LL(6), LL(8));
+                               A = 0; }
 /* FRAMEBUFFER - 0 is the screen, 1 the off-screen buffer */
 static void w_fb_create(void){ mm_fb_create(); A = 0; }
 static void w_fb_close(void) { mm_fb_close(); A = 0; }
@@ -404,6 +413,10 @@ static const struct mmwrap {
 	{ "mm_pr_i",		w_pr_i },
 	{ "mm_pr_f",		w_pr_f },
 	{ "mm_pr_nl",		w_pr_nl },
+	{ "mm_pr_se",		w_pr_se },
+	{ "mm_pr_ie",		w_pr_ie },
+	{ "mm_pr_fe",		w_pr_fe },
+	{ "mm_pr_tabe",	w_pr_tabe },
 	{ "mm_pr_tab",		w_pr_tab },
 	{ "mm_col",		w_col },
 	{ "mm_tab",		w_tab },
@@ -533,6 +546,7 @@ static const struct mmwrap {
 	{ "mm_bg",		w_bg },
 	{ "mm_plot",		w_plot },
 	{ "mm_fill",		w_fill },
+	{ "mm_pixels",		w_pixels },
 	{ "mm_fb_create",	w_fb_create },
 	{ "mm_fb_close",	w_fb_close },
 	{ "mm_fb_write",	w_fb_write },

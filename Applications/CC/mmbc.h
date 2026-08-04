@@ -264,6 +264,7 @@ int accept_kw(const char *s);
 int fb_buf(void);                           /* self.fb_buf - N=0, F=1 */
 int stmt_end(void);
 void emit(const char *text);
+int last_line(void);                        /* index of the line emit() wrote */
 void raw(const char *text);
 char *newtmp(const char *pfx);
 void out_append(struct outbuf *o, const char *persistent_line);

@@ -59,6 +59,69 @@ static int get_proc_size_blocks(ptptr p)
     return (uaddr_t)alignup(get_proc_size(p), BLOCKSIZE) / BLOCKSIZE;
 }
 
+/*
+ * The same measurement for a process that is NOT the running one.
+ *
+ * Sizing another process must not MODIFY, and get_proc_size() does:
+ * it carries init's fixup, "if (!p->p_top) udata.u_top = p->p_top =
+ * PROGLOAD + 512", and udata there is the CURRENT process.  Measuring
+ * a dormant process through it would write the running process's
+ * u_top - a store the kernel makes nowhere else.  One that has not
+ * been sized yet occupies nothing.
+ */
+static int other_proc_blocks(ptptr p)
+{
+    if (!p->p_top)
+        return 0;
+    return (int)((uaddr_t)alignup(p->p_top - PROGBASE, BLOCKSIZE)
+                 / BLOCKSIZE);
+}
+
+/*
+ * The largest process other than this one, in blocks.
+ *
+ * This is the room that has to be left: swapin() has nowhere to put an
+ * incoming image except resident blocks, and it cannot evict the
+ * process that is running to get them - so if one process takes the
+ * whole pool, nothing else can ever come back and the next context
+ * switch to it panics with "swapin: no memory".
+ *
+ * v0.5 was protected from that by accident.  PROGSIZE was a fixed 256K
+ * and pagemap_realloc refused to grow a process past it, which left
+ * 56K of the 312K pool for everyone else.  v0.6 raised PROGSIZE to the
+ * whole of USERMEM - deliberately, so that ONE process could use all of
+ * memory - and took the only reserve with it.
+ *
+ * bbcbasic is what found it: its startup probes with sbrk(4096) in a
+ * loop until the kernel refuses (bbccon.c, "capped: probe, not
+ * landgrab"), so it takes exactly as much as it is allowed to and the
+ * refusal is the whole mechanism.  Under v0.6 the refusal came only
+ * when the pool was empty.
+ *
+ * So the ceiling is now the thing it should always have been: not an
+ * arbitrary constant, but "leave room for the biggest neighbour to be
+ * resident alongside me".
+ */
+static int largest_neighbour(void)
+{
+    ptptr q;
+    int most = 0;
+
+    for (q = ptab; q < ptab + PTABSIZE; q++) {
+        int n;
+        /* A zombie has already had its blocks handed back by
+           pagemap_free and will never be swapped in again, so it needs
+           no room kept for it. */
+        if (q->p_status == P_EMPTY || q->p_status == P_ZOMBIE
+            || q == udata.u_ptab)
+            continue;
+        n = other_proc_blocks(q);
+        if (n > most)
+            most = n;
+    }
+    return most;
+}
+
 static struct mapentry* find_block(uint8_t slot, uint8_t block)
 {
     for (int i=0; i<NUM_ALLOCATION_BLOCKS; i++)
@@ -249,10 +312,23 @@ int pagemap_realloc(struct exec *hdr, usize_t size)
     int slot = get_slot(p);
 
     /* Swap is an allocation the size of the process now, not a fixed
-     * slot, so the only ceiling left is the address space a process can
-     * be resident in - which is all of it (see PROGSIZE in config.h). */
+     * slot, so the address-space ceiling is all of it (see PROGSIZE in
+     * config.h). */
     if (blocks * BLOCKSIZE > PROGSIZE + UDATA_SIZE)
         return ENOMEM;
+
+    /* But a GROW must leave room for the biggest other process to be
+     * resident, or it can never be swapped back in - see
+     * largest_neighbour().  Only growing is checked: shrinking, and a
+     * process that is already over the line because its neighbours
+     * appeared after it, must both still be able to proceed. */
+    if (blocks > oldblocks) {
+        int room = NUM_ALLOCATION_BLOCKS - largest_neighbour();
+        if (room < 1)
+            room = 1;
+        if (blocks > room)
+            return ENOMEM;
+    }
 
     #ifdef DEBUG
         kprintf("realloc %d from %d to %d blocks\n", get_slot(udata.u_ptab), oldblocks, blocks);

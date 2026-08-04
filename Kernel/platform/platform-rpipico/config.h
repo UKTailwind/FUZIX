@@ -294,7 +294,20 @@ extern uint8_t progbase[USERMEM];
 
 #define CONFIG_SMALL
 
-#define plt_copyright() /* */
+/*
+ * The Pico Computer 3 release, which is NOT the same number as FUZIX's.
+ *
+ * start.c prints "FUZIX version 0.5" from Kernel/version.c - upstream's
+ * own version, and correct - so a user who downloaded pc3-v0.6 and
+ * booted it saw 0.5 and reasonably concluded the wrong file had been
+ * published.  Both numbers are right; only one of them was on screen.
+ *
+ * Bump this when tagging a release; BUILDING-PC3.md says so too.
+ */
+#define PC3_RELEASE "0.7"
+#define plt_copyright() \
+	kprintf("Pico Computer 3, release %s (on FUZIX %s)\n", \
+		PC3_RELEASE, sysinfo.uname)
 #define swap_map(x) ((uint8_t*)(x))
 
 /* Prevent name clashes wish the Pico SDK */

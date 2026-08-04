@@ -343,6 +343,30 @@ void mm_pr_f(MMFLOAT v)
 void mm_pr_nl(void)  { mm_putc('\r'); mm_putc('\n'); }
 void mm_pr_tab(void) { mm_putc('\t'); }
 
+/*
+ * The last item of a PRINT that does not end in a newline - PRINT "x";
+ *
+ * MMBasic writes to the console, so a trailing semicolon means only
+ * "no newline"; the text is on screen either way.  Here it goes through
+ * stdio, which is line buffered on a terminal, so without a flush the
+ * text sits in the buffer until the NEXT newline - and a program that
+ * prints "Calculating... " and then works for half a minute shows
+ * nothing at all until it has finished.
+ *
+ * These are print-AND-flush rather than a separate mm_pr_flush() call
+ * after the item, and that is not cosmetic.  Emitting one extra
+ * statement into main cost the KnivD benchmark 32,400 grains against
+ * 12,150 - a factor of 2.7 - because on the BOARD's compiler the added
+ * call tips the function out of native code and into bytecode.  It does
+ * not happen on the host build, even with THUMB_RECLAIM=1, so no gate
+ * would ever have caught it.  Folding the flush into the call that was
+ * already being made leaves the generated code the same shape it was.
+ */
+void mm_pr_se(const char *s)  { mm_pr_s(s);  fflush(stdout); }
+void mm_pr_ie(MMINTEGER v)    { mm_pr_i(v);  fflush(stdout); }
+void mm_pr_fe(MMFLOAT v)      { mm_pr_f(v);  fflush(stdout); }
+void mm_pr_tabe(void)         { mm_pr_tab(); fflush(stdout); }
+
 /* TAB() is a string valued function in MMBasic, not a side effect */
 char *mm_tab(MMINTEGER col)
 {
@@ -1259,6 +1283,12 @@ static int mm_getc(MMINTEGER fnbr)
 static void mm_readline(MMINTEGER fnbr, char *dst)
 {
     int n = 0, c;
+
+    /* Never wait for input with output still in the buffer: an INPUT
+     * prompt is a PRINT with no newline, and the whole point of it is
+     * to be on screen BEFORE the program stops for an answer. */
+    if (fnbr == 0)
+        fflush(stdout);
     for (;;) {
         c = mm_getc(fnbr);
         if (c == EOF) break;
@@ -2319,7 +2349,10 @@ static int mm_fb_cls(void);
  * showing and leave the buffer filling up with everything ever drawn
  * into it.  mm_fb_cls says whether it took the clear; if not, this is
  * the console's own, which also resets the cursor and the colour
- * tiles - things a rectangle over the framebuffer would not. */
+ * tiles - things a rectangle over the framebuffer would not.
+ *
+ * MMBasic's CLS takes an optional colour (Draw.c cmd_cls, which floods
+ * WriteBuf with it).  Not here yet: this always uses the background. */
 void mm_cls(void)
 {
     if (mm_fb_cls())
@@ -2761,17 +2794,24 @@ void mm_line(MMINTEGER x1, MMINTEGER y1, MMINTEGER x2, MMINTEGER y2,
 /*
  * MMBasic's PIXEL x%(), y%(), c%() - the array form.
  *
- * The caller hands over the arrays as MMFLOAT or MMINTEGER, with a
- * stride, exactly as MMBasic's getargaddress reports them; converting
- * to the kernel's packed int16 items is this side's job, because the
- * type knowledge is here and it cuts the crossing from 24 bytes per
- * point to 4.  colours may be NULL for "all in the current colour",
- * which is MMBasic's scalar-colour case.
+ * The caller hands over the arrays as MMFLOAT or MMINTEGER, exactly as
+ * MMBasic's getargaddress reports them; converting to the kernel's
+ * packed int16 items is this side's job, because the type knowledge is
+ * here and it cuts the crossing from 24 bytes per point to 4.
+ *
+ * The colour may be an array (cf or ci), one value for every point, or
+ * a single rgb for all of them - MMBasic's nc>1 and nc==1 cases.  Pass
+ * MM_CUR as rgb with both pointers NULL for "whatever COLOUR last set".
+ *
+ * This is the call that makes a plotted picture affordable: a syscall
+ * costs 1.3us against 15ns for the pixel store, so a program plotting
+ * point by point spends almost all of its time crossing into the kernel
+ * and none of it drawing.
  */
 void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
                const MMFLOAT *yf, const MMINTEGER *yi,
                const MMFLOAT *cf, const MMINTEGER *ci,
-               MMINTEGER count)
+               MMINTEGER rgb, MMINTEGER count)
 {
     static unsigned long colbuf[MM_BATCH];
     struct mm_gfx_batch b;
@@ -2780,6 +2820,8 @@ void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
 
     if (mm_gfx_open() < 0 || count <= 0)
         return;
+    if (!cf && !ci)
+        mm_gfx_setcol(rgb);             /* one colour for the whole run */
 
     for (i = 0; i < count; i++) {
         mm_ptbuf[n].x = (short)(xi ? xi[i] : (MMINTEGER)xf[i]);
@@ -2839,9 +2881,10 @@ void mm_fill(const short *xyxy, MMINTEGER n, MMINTEGER rgb)
 void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
                const MMFLOAT *yf, const MMINTEGER *yi,
                const MMFLOAT *cf, const MMINTEGER *ci,
-               MMINTEGER count)
+               MMINTEGER rgb, MMINTEGER count)
 {
-    (void)xf; (void)xi; (void)yf; (void)yi; (void)cf; (void)ci; (void)count;
+    (void)xf; (void)xi; (void)yf; (void)yi; (void)cf; (void)ci;
+    (void)rgb; (void)count;
 }
 
 

@@ -116,7 +116,20 @@ raw image tool. The whole card is overwritten.
 **Both together.** The card's binaries are statically linked, so a new
 kernel with an old card still runs the old C library.
 
-## 7. The manual
+## 7. The release number
+
+Two version numbers are on screen at boot and they are different
+things:
+
+    FUZIX version 0.5                    upstream's, from Kernel/version.c
+    Pico Computer 3, release 0.7         ours, PC3_RELEASE in config.h
+
+Both are right. Before this they were not both printed, so a user who
+downloaded `pc3-v0.6` and booted it saw only `0.5` and concluded the
+wrong file had been published. **Bump `PC3_RELEASE` in `config.h` when
+tagging a release**; nothing checks that the tag and the constant agree.
+
+## 8. The manual
 
     pandoc FUZIX-PC3-MANUAL.md -o FUZIX-PC3-MANUAL.pdf
 
