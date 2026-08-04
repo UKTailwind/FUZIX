@@ -66,6 +66,7 @@ struct val emit_call(struct routine *r, struct arglist *args);
 const char *pass_arg(struct sym *p, struct arg *a, struct routine *r);
 
 struct sym *arrayref(int need_parens);      /* Python default: True */
+int is_array_arg(void);                     /* does "a()" start here? */
 struct flat array_flat(struct sym *s);
 struct flat lsref(void);
 const char *channel(void);

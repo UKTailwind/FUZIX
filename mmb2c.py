@@ -499,6 +499,15 @@ class Conv(object):
             return
         self.out.append('    ' * self.indent + text)
 
+    def last_line(self):
+        """Index of the line emit() just wrote, or None outside emission.
+
+        For patching a call after the fact - see do_print, which turns
+        the last item of a PRINT into its flushing variant."""
+        if self.mode != 'emit':
+            return None
+        return len(self.out) - 1
+
     def raw(self, text):
         if self.mode != 'emit':
             return
@@ -1410,6 +1419,18 @@ class Conv(object):
         elif need_parens:
             self.err("'%s' should be written %s()" % (t[1], t[1]))
         return sym
+
+    def is_array_arg(self):
+        """Does a whole array - written a() - start here?
+
+        MMBasic decides PIXEL's two forms at run time, by asking whether
+        the argument it was handed is an array (getargaddress reports a
+        count).  Here it has to be a question about the text, because
+        the two forms compile to different calls; a() is the spelling
+        MMBasic's own documentation uses for a whole array."""
+        t = self.peek()
+        return (t is not None and t[0] == T_ID
+                and self.is_op('(', 1) and self.is_op(')', 2))
 
     def array_flat(self, s):
         """(pointer to element 0, element count) for a whole array."""
@@ -2329,9 +2350,14 @@ class Conv(object):
             # PIXEL x, y, c     - c is RGB888, as everywhere in MMBasic;
             #                     the kernel primitive converts it to
             #                     whatever the current mode uses.
+            # PIXEL xa(), ya() [, c | ca()]   - a whole run of points
+            #
             # The function form PIXEL(x,y) is handled in the expression
             # parser; a statement never starts with the open bracket.
             self.i += 1
+            if self.is_array_arg():
+                self.do_pixels()
+                return
             x = self.expr()
             self.expect_op(',')
             y = self.expr()
@@ -2454,12 +2480,14 @@ class Conv(object):
             chan = self.channel()
             self.accept_op(',')          # the comma after #n is not a tab
         suppress_nl = False
+        last = None                  # where the last item was emitted
         while not self.stmt_end():
             if self.accept_op(';'):
                 suppress_nl = True
                 continue
             if self.accept_op(','):
                 self.emit(self.prcall(chan, 'tab', None))
+                last = self.last_line()
                 suppress_nl = True
                 continue
             v = self.expr()
@@ -2470,8 +2498,24 @@ class Conv(object):
                 self.emit(self.prcall(chan, 'i', v[0]))
             else:
                 self.emit(self.prcall(chan, 'f', v[0]))
+            last = self.last_line()
         if not suppress_nl:
             self.emit(self.prcall(chan, 'nl', None))
+        elif chan is None and last is not None:
+            # PRINT "x"; - no newline, but the text still belongs on
+            # screen now.  stdio is line buffered on a terminal, so
+            # without a flush it waits for the NEXT newline: a program
+            # that prints "Calculating... " and then works for half a
+            # minute shows nothing until it has finished.  A file
+            # channel needs no such thing and would only be slowed.
+            #
+            # The flush rides on the LAST item's call - mm_pr_s becomes
+            # mm_pr_se - rather than being a statement after it.  One
+            # extra statement in main cost the KnivD benchmark 32,400
+            # grains against 12,150, because on the board's compiler it
+            # tips the function out of native code; the host build does
+            # not do it, so no gate would have caught it.
+            self.out[last] = self.out[last].replace('(', 'e(', 1)
 
     def prcall(self, chan, what, arg):
         if chan is None:
@@ -2698,6 +2742,65 @@ class Conv(object):
         kind = {TY_I: 'i', TY_F: 'f', TY_S: 's'}[sym.ty]
         self.emit('mm_sort_%s(%s, %s, %s, (int)(%s), (int)(%s), (int)(%s));'
                   % (kind, ptr, idx, cnt, start, count, flags))
+
+    def shortest(self, counts):
+        """The smallest of some element counts, as a C expression.
+
+        Textually identical counts collapse to one term, which is the
+        usual case - the arrays are dimensioned together - so this
+        normally emits no comparison at all."""
+        seen = []
+        for c in counts:
+            if c not in seen:
+                seen.append(c)
+        e = seen[0]
+        for c in seen[1:]:
+            e = '((%s) < (%s) ? (%s) : (%s))' % (e, c, e, c)
+        return e
+
+    def do_pixels(self):
+        """PIXEL xa(), ya() [, c | ca()] - MMBasic's array form.
+
+        Draw.c cmd_pixel, the branch it takes when getargaddress reports
+        more than one element.  One call for the whole run: a syscall
+        costs 1.3us and a pixel store 15ns, so plotting point by point
+        spends its time crossing into the kernel rather than drawing.
+
+        One deviation from MMBasic, and only in a program that is
+        already wrong: it takes the count from the Y array and clamps it
+        to the colour array, so an X array shorter than Y is read past
+        its end.  This takes the shortest of the three.  For arrays
+        dimensioned together - every correct program - they agree."""
+        xs = self.arrayref()
+        xp, xn = self.array_flat(xs)
+        self.expect_op(',')
+        ys = self.arrayref()
+        yp, yn = self.array_flat(ys)
+        for s in (xs, ys):
+            if s.ty == TY_S:
+                self.err("PIXEL needs numeric coordinate arrays, and "
+                         "'%s' is a string array" % s.name)
+        cf, ci, rgb = 'NULL', 'NULL', 'MM_CUR'
+        counts = [xn, yn]
+        if self.accept_op(',') and not self.stmt_end():
+            if self.is_array_arg():
+                cs = self.arrayref()
+                cp, cn = self.array_flat(cs)
+                if cs.ty == TY_S:
+                    self.err("the PIXEL colour array must be numeric, and "
+                             "'%s' is a string array" % cs.name)
+                if cs.ty == TY_F:
+                    cf = cp
+                else:
+                    ci = cp
+                counts.append(cn)
+            else:
+                # a single colour for the whole run - MMBasic's nc == 1
+                rgb = self.as_int(self.expr())
+        xf, xi = (xp, 'NULL') if xs.ty == TY_F else ('NULL', xp)
+        yf, yi = (yp, 'NULL') if ys.ty == TY_F else ('NULL', yp)
+        self.emit('mm_pixels(%s, %s, %s, %s, %s, %s, %s, %s);'
+                  % (xf, xi, yf, yi, cf, ci, rgb, self.shortest(counts)))
 
     # -- INC / CAT / ERASE ---------------------------------------------------
     def do_inc(self):

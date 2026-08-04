@@ -21,6 +21,7 @@ static void do_return(void);
 static void do_read(void);
 static void do_restore(void);
 static void do_sort(void);
+static void do_pixels(void);
 static void do_inc(void);
 static void do_cat(void);
 static void do_erase(void);
@@ -538,6 +539,8 @@ void statement_inner(void)
            PIXEL x, y, c     - c is RGB888, as everywhere in MMBasic;
                                the kernel primitive converts it to
                                whatever the current mode uses.
+           PIXEL xa(), ya() [, c | ca()]   - a whole run of points
+
            The function form PIXEL(x,y) is handled in the expression
            parser; a statement never starts with the open bracket. */
         struct val x, y;
@@ -545,6 +548,10 @@ void statement_inner(void)
         const char *xs, *ys;
 
         cv.i++;
+        if (is_array_arg()) {
+            do_pixels();
+            return;
+        }
         x = expr();
         expect_op(",");
         y = expr();
@@ -699,6 +706,7 @@ static void do_print(void)
 {
     const char *chan = NULL;
     int suppress_nl = 0;
+    int last = -1;               /* where the last item was emitted */
 
     if (is_op("#", 0)) {
         chan = channel();
@@ -712,6 +720,7 @@ static void do_print(void)
         }
         if (accept_op(",")) {
             emit(prcall(chan, "tab", NULL));
+            last = last_line();
             suppress_nl = 1;
             continue;
         }
@@ -723,9 +732,35 @@ static void do_print(void)
             emit(prcall(chan, "i", v.code));
         else
             emit(prcall(chan, "f", v.code));
+        last = last_line();
     }
     if (!suppress_nl)
         emit(prcall(chan, "nl", NULL));
+    else if (chan == NULL && last >= 0) {
+        /* PRINT "x"; - no newline, but the text still belongs on screen
+           now.  stdio is line buffered on a terminal, so without a
+           flush it waits for the NEXT newline: a program that prints
+           "Calculating... " and then works for half a minute shows
+           nothing until it has finished.  A file channel needs no such
+           thing and would only be slowed.
+
+           The flush rides on the LAST item's call - mm_pr_s becomes
+           mm_pr_se - rather than being a statement after it.  One extra
+           statement in main cost the KnivD benchmark 32,400 grains
+           against 12,150, because on the board's compiler it tips the
+           function out of native code; the host build does not do it,
+           so no gate would have caught it. */
+        const char *ln = cv.out->lines[last];
+        const char *p = strchr(ln, '(');
+        if (p != NULL) {
+            char *nu = palloc(strlen(ln) + 2);
+            size_t pre = (size_t)(p - ln);
+            memcpy(nu, ln, pre);
+            nu[pre] = 'e';
+            strcpy(nu + pre + 1, p);
+            cv.out->lines[last] = nu;
+        }
+    }
 }
 
 static char *prcall(const char *chan, const char *what, const char *arg)
@@ -1029,6 +1064,92 @@ static void do_sort(void)
     kind = sym->ty == TY_I ? "i" : sym->ty == TY_F ? "f" : "s";
     emit(sfmt("mm_sort_%s(%s, %s, %s, (int)(%s), (int)(%s), (int)(%s));",
               kind, f.ptr, idx, f.cnt, start, count, flags));
+}
+
+/* -- PIXEL, the array form -------------------------------------------- */
+
+/* The smallest of some element counts, as a C expression.
+
+   Textually identical counts collapse to one term, which is the usual
+   case - the arrays are dimensioned together - so this normally emits
+   no comparison at all. */
+static const char *shortest(const char **counts, int n)
+{
+    const char *seen[3];
+    int nseen = 0, i, j;
+    const char *e;
+
+    for (i = 0; i < n; i++) {
+        for (j = 0; j < nseen; j++)
+            if (strcmp(seen[j], counts[i]) == 0)
+                break;
+        if (j == nseen)
+            seen[nseen++] = counts[i];
+    }
+    e = seen[0];
+    for (i = 1; i < nseen; i++)
+        e = sfmt("((%s) < (%s) ? (%s) : (%s))", e, seen[i], e, seen[i]);
+    return e;
+}
+
+/* PIXEL xa(), ya() [, c | ca()] - MMBasic's array form.
+
+   Draw.c cmd_pixel, the branch it takes when getargaddress reports more
+   than one element.  One call for the whole run: a syscall costs 1.3us
+   and a pixel store 15ns, so plotting point by point spends its time
+   crossing into the kernel rather than drawing.
+
+   One deviation from MMBasic, and only in a program that is already
+   wrong: it takes the count from the Y array and clamps it to the
+   colour array, so an X array shorter than Y is read past its end.
+   This takes the shortest of the three.  For arrays dimensioned
+   together - every correct program - they agree. */
+static void do_pixels(void)
+{
+    struct sym *xsym, *ysym;
+    struct flat xf, yf;
+    const char *cfp = "NULL", *cip = "NULL", *rgb = "MM_CUR";
+    const char *counts[3];
+    int ncounts = 0;
+    const char *xfp, *xip, *yfp, *yip;
+
+    xsym = arrayref(1);
+    xf = array_flat(xsym);
+    expect_op(",");
+    ysym = arrayref(1);
+    yf = array_flat(ysym);
+    if (xsym->ty == TY_S)
+        cv_err("PIXEL needs numeric coordinate arrays, and '%s' is a "
+               "string array", xsym->name);
+    if (ysym->ty == TY_S)
+        cv_err("PIXEL needs numeric coordinate arrays, and '%s' is a "
+               "string array", ysym->name);
+    counts[ncounts++] = xf.cnt;
+    counts[ncounts++] = yf.cnt;
+    if (accept_op(",") && !stmt_end()) {
+        if (is_array_arg()) {
+            struct sym *csym = arrayref(1);
+            struct flat cf = array_flat(csym);
+            if (csym->ty == TY_S)
+                cv_err("the PIXEL colour array must be numeric, and '%s' "
+                       "is a string array", csym->name);
+            if (csym->ty == TY_F)
+                cfp = cf.ptr;
+            else
+                cip = cf.ptr;
+            counts[ncounts++] = cf.cnt;
+        } else {
+            /* a single colour for the whole run - MMBasic's nc == 1 */
+            rgb = as_int(expr());
+        }
+    }
+    if (xsym->ty == TY_F) { xfp = xf.ptr; xip = "NULL"; }
+    else                  { xfp = "NULL"; xip = xf.ptr; }
+    if (ysym->ty == TY_F) { yfp = yf.ptr; yip = "NULL"; }
+    else                  { yfp = "NULL"; yip = yf.ptr; }
+    emit(sfmt("mm_pixels(%s, %s, %s, %s, %s, %s, %s, %s);",
+              xfp, xip, yfp, yip, cfp, cip, rgb,
+              shortest(counts, ncounts)));
 }
 
 /* -- INC / CAT / ERASE ----------------------------------------------- */
