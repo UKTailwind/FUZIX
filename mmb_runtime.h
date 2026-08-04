@@ -397,7 +397,36 @@ void mm_mode(MMINTEGER n);
 void mm_colour(MMINTEGER fg, MMINTEGER bg);
 MMINTEGER mm_fg(void);
 MMINTEGER mm_bg(void);
-void mm_cls(void);
+/* CLS [colour].  Floods whatever is being drawn on - the screen, or the
+ * off-screen buffer if one is selected - and puts the text cursor back
+ * at the origin.  MM_CUR is a bare CLS: use the background COLOUR set. */
+void mm_cls(MMINTEGER rgb);
+
+/* MAP - the sixteen colours the screen can show, as opposed to COLOUR,
+ * which picks among them.
+ *
+ * MODE 2 stores a colour NUMBER per pixel, and MAP says what colour
+ * each number is.  So changing entry 8 recolours everything already
+ * drawn in colour 8, without touching a pixel - which is what makes
+ * fades, flashes and colour cycling cost nothing.
+ *
+ * mm_map collects; nothing changes until mm_map_set moves the whole
+ * palette across during blanking.  MMBasic splits it exactly so
+ * (remap332 -> map16quads on SET) because applying a new palette entry
+ * by entry shows the picture half recoloured.
+ *
+ * The colour a program NAMES is unaffected: which entry an RGB888 maps
+ * to is fixed bit extraction (MMBasic's RGB121), not a search for the
+ * nearest entry, so a remapped palette never moves where new drawing
+ * lands. */
+void mm_map(MMINTEGER index, MMINTEGER rgb);
+void mm_map_set(void);
+void mm_map_reset(void);
+
+/* The MAP() function: the colour entry n stands for by default, which
+ * is MMBasic's fun_map - the inverse of the bit extraction above, and
+ * deliberately NOT affected by any remapping. */
+MMINTEGER mm_map_get(MMINTEGER index);
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb);
 MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y);
 /* A line.  Axis-aligned ones become a single span in the kernel, which
@@ -436,6 +465,43 @@ void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
  * MMBasic's PrintPixelMode: 1 draws over what is there, 2 swaps ink and
  * paper. */
 char *mm_at(MMINTEGER x, MMINTEGER y, MMINTEGER mode);
+
+/* The cell of a font, in pixels, straight from the kernel's own table -
+ * the same table the console draws from, so a program never carries a
+ * copy of a font or a hardwired idea of how big one is.  TEXT needs it
+ * because justification is arithmetic on the cell size.
+ *
+ * Fonts are numbered as MMBasic numbers them, from 1.  Returns the
+ * number of characters the font covers, and distinguishes two failures
+ * that must not be confused:
+ *
+ *      0   there is a display, but no font of that number - an error,
+ *          as it is in MMBasic
+ *     -1   there is no display at all, so the question is meaningless.
+ *          The host build, where a translated program must still run
+ *          and drawing is silently nothing. */
+MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h);
+
+/* FONT #n [, scale] - the font PRINT draws in, and how big.  Unlike
+ * TEXT's own font argument this one sticks, and it decides where PRINT
+ * puts the next line: a 24x32 font fills the screen in seven lines
+ * where font 1 takes nineteen. */
+void mm_font(MMINTEGER font, MMINTEGER scale);
+
+/* TEXT's glyph run: len characters at a PIXEL position, in a font and
+ * size and colours the caller chose rather than the ones COLOUR and
+ * FONT last set, and bg < 0 for MMBasic's transparent background.
+ *
+ * The cursor moves as MMBasic's GUIPrintChar moves CurrentX - to the far
+ * end of what was drawn - and CurrentX is the cursor PRINT @ sets, so a
+ * PRINT after a TEXT carries on from where the text finished.  Anything
+ * PRINT had half-collected belongs to the old position and is drawn
+ * before the cursor moves.
+ *
+ * Where the run BEGINS is all of the work, and none of it is here: see
+ * mmg_text in mmb_gfx.h. */
+void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
+              MMINTEGER fg, MMINTEGER bg, const char *s, MMINTEGER len);
 
 /* FRAMEBUFFER - draw off-screen, then show it in one go.  0 means the
  * screen ("N") and 1 the off-screen buffer ("F"), in every argument

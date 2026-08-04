@@ -63,6 +63,15 @@ KEYWORDS = (
     'CLEAR', 'PAUSE', 'ERROR', 'ARRAY', 'SAVE', 'PRESERVE', 'LONGSTRING',
 )
 
+# Statements that take no arguments at all, so a ':' after one is a
+# statement separator and never a label definition.
+#
+# The rest of the statement words do not need to be here: every one of
+# them is followed by an argument, so "NAME :" cannot arise.  CLS is the
+# only one that can stand alone, and without this "CLS : PRINT x"
+# defines a label called CLS and drops the clear without a word.
+BARE_STATEMENTS = ('CLS',)
+
 # Built-in functions we can translate.  name -> (minargs, maxargs)
 BUILTINS = {
     # name: (min args, max args)
@@ -85,7 +94,7 @@ BUILTINS = {
     'CHOICE': (3, 3), 'BOUND': (1, 2), 'TRIM$': (1, 3), 'FIELD$': (2, 4),
     'DATETIME$': (1, 1), 'DAY$': (1, 1), 'EPOCH': (1, 1),
     'BIN2STR$': (2, 3), 'STR2BIN': (2, 3), 'RGB': (1, 3), 'MATH': (1, 1),
-    'PIXEL': (2, 2),
+    'PIXEL': (2, 2), 'MAP': (1, 1),
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0),
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
@@ -629,6 +638,14 @@ class Conv(object):
             return '(MMFLOAT)(' + code + ')'
         self.err("string used where a number is required")
 
+    def as_str(self, v):
+        # An MMBasic string - length byte, data, NUL - not a C one.  The
+        # callee is expected to know that and use mm_slen/mm_cstr.
+        code, ty = v
+        if ty == TY_S:
+            return code
+        self.err("number used where a string is required")
+
     def need_num(self, v):
         if v[1] == TY_S:
             self.err("string used where a number is required")
@@ -1159,6 +1176,11 @@ class Conv(object):
             # primitive maps the mode's own colour numbering back out,
             # so nothing here knows about depths or palettes.
             return ('mm_pixel_get(%s, %s)' % (n(0), n(1)), TY_I)
+        if up == 'MAP':
+            # MAP(n) - the colour entry n stands for by default, which
+            # is what a program must ask for to land on that entry.
+            # Unaffected by remapping, as MMBasic's fun_map is.
+            return ('mm_map_get(%s)' % n(0), TY_I)
         self.err("built-in %s() is not supported yet" % up)
 
     # -- built-ins whose arguments are not ordinary expressions ----------
@@ -1574,7 +1596,8 @@ class Conv(object):
             self.place_label(t[1])
         t = self.peek()
         if t is not None and t[0] == T_ID and self.is_op(':', 1) \
-                and t[2] not in KEYWORDS and t[2] not in BUILTINS:
+                and t[2] not in KEYWORDS and t[2] not in BUILTINS \
+                and t[2] not in BARE_STATEMENTS:
             canon = split_suffix(t[1])[0]
             if canon not in self.routines \
                     and canon not in self.routine_names:
@@ -2221,8 +2244,15 @@ class Conv(object):
             self.uses_clear = True
             return
         if up == 'CLS':
+            # CLS [colour] - MMBasic floods the write buffer with it, so
+            # this clears the off-screen framebuffer when one is
+            # selected, not the screen.  No colour means the background
+            # COLOUR set, which MM_CUR asks for.
             self.i += 1
-            self.emit('mm_cls();')
+            col = 'MM_CUR'
+            if not self.stmt_end():
+                col = self.as_int(self.expr())
+            self.emit('mm_cls(%s);' % col)
             return
         if up == 'MODE':
             # MODE 1  640x480, one bit    MODE 2  320x240, 16 colours
@@ -2332,6 +2362,84 @@ class Conv(object):
             self.uses_gfx = True
             self.emit('mmg_circle(%s, %s, %s, %s, %s, %s, %s);'
                       % (x, y, r, lw, col, fill, asp))
+            return
+        if up == 'TEXT':
+            # TEXT x, y, string$ [, alignment$] [, font] [, scale]
+            #                    [, colour] [, background]
+            #
+            # Every argument after the string is optional and a bare
+            # comma is legal in any of them, as everywhere in MMBasic.
+            # The two colours default to COLOUR's - resolved HERE, by
+            # emitting mm_fg()/mm_bg(), because -1 is a colour TEXT
+            # accepts (transparent paper) and so cannot double as the
+            # "none given" sentinel the other statements use.
+            self.i += 1
+            x = self.as_int(self.expr())
+            self.expect_op(',')
+            y = self.as_int(self.expr())
+            self.expect_op(',')
+            s = self.as_str(self.expr())
+            just, font, scale = '0', '1LL', '1LL'
+            fc, bc = 'mm_fg()', 'mm_bg()'
+            if self.accept_op(','):
+                if not self.is_op(','):
+                    just = self.as_str(self.expr())
+                if self.accept_op(','):
+                    if not self.is_op(','):
+                        font = self.as_int(self.expr())
+                    if self.accept_op(','):
+                        if not self.is_op(','):
+                            scale = self.as_int(self.expr())
+                        if self.accept_op(','):
+                            if not self.is_op(','):
+                                fc = self.as_int(self.expr())
+                            if self.accept_op(','):
+                                bc = self.as_int(self.expr())
+            self.uses_gfx = True
+            self.emit('mmg_text(%s, %s, %s, %s, %s, %s, %s, %s);'
+                      % (x, y, s, just, font, scale, fc, bc))
+            return
+        if up == 'MAP':
+            # MAP(n) = colour     collect one entry
+            # MAP SET             apply the collected palette
+            # MAP RESET           back to the mode's own
+            # MAP MAXIMITE        the Colour Maximite's sixteen
+            # MAP GRAYSCALE       sixteen greys (GREYSCALE too)
+            #
+            # The function form MAP(n) is handled in the expression
+            # parser; only the statement form can be followed by '='.
+            self.i += 1
+            if self.accept_kw('SET'):
+                self.emit('mm_map_set();')
+                return
+            if self.accept_kw('RESET'):
+                self.emit('mm_map_reset();')
+                return
+            if self.accept_kw('MAXIMITE'):
+                self.uses_gfx = True
+                self.emit('mmg_map_maximite();')
+                return
+            if self.accept_kw('GRAYSCALE') or self.accept_kw('GREYSCALE'):
+                self.uses_gfx = True
+                self.emit('mmg_map_greyscale();')
+                return
+            self.expect_op('(')
+            n = self.as_int(self.expr())
+            self.expect_op(')')
+            self.expect_op('=')
+            c = self.as_int(self.expr())
+            self.emit('mm_map(%s, %s);' % (n, c))
+            return
+        if up == 'FONT':
+            # FONT [#]n [, scale] - the font PRINT draws in.  MMBasic
+            # allows the # and ignores it, as it does on file numbers.
+            self.i += 1
+            self.accept_op('#')
+            n = self.as_int(self.expr())
+            scale = '1LL'
+            if self.accept_op(','):
+                scale = self.as_int(self.expr())
+            self.emit('mm_font(%s, %s);' % (n, scale))
             return
         if up in ('COLOUR', 'COLOR'):
             # COLOUR fg [, bg].  Everything that draws without being
@@ -2508,6 +2616,13 @@ class Conv(object):
                 if chan is not None:
                     self.err("PRINT @ positions text on the screen, so it "
                              "cannot be used with a file channel")
+                # mm_at returns a string temporary, so the statement has
+                # to release the previous one.  Without this a PRINT @
+                # inside a loop runs out of temporaries after MM_TMPN
+                # turns and dies with "String expression too complex" -
+                # which is exactly the shape a counter redrawn every
+                # frame has.
+                self.tmp_used = True
                 self.emit(self.prcall(chan, 's',
                                       'mm_at(%s, %s, %s)' % (x, y, mode)))
                 last = self.last_line()

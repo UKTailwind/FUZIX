@@ -72,9 +72,11 @@ ordinary BASIC program that currently fails outright.
   compatible signatures.
 * **`JSON$`.** Needs a parser; `cJSON` is already vendored in the PicoMite
   tree under a permissive licence and could come along.
-* **`CLS`, `COLOUR`, `FONT`, console positioning.** Could emit ANSI escapes
-  and drive a VT100 terminal. Only worth it if you want the translated
-  program to paint a screen.
+* ~~**`CLS`, `COLOUR`, `FONT`, console positioning.**~~ **DONE**, and not
+  by driving a VT100 after all: on the PC3 they reach the display through
+  the kernel, so `CLS [colour]`, `COLOUR`, `FONT #n [,scale]` and
+  `PRINT @(x,y)` paint real pixels. On a host with no display they are
+  silently nothing, which is what keeps the gates meaningful.
 * **`CSUB`.** The BASIC embeds ARM machine code, which is meaningless here —
   but a `CSUB` *declaration* could map to an `extern` C function you link in
   yourself, which is arguably nicer than the original.
@@ -89,9 +91,15 @@ would be worse than the current clear error:
 * **Peripherals** — `PIN PORT PWM SERVO SETPIN I2C SPI ONEWIRE PIO ADC IR
   WS2812 STEPPER TMC22XX HUMID TEMPR DISTANCE PULSIN CAMERA KEYBOARD KEYPAD
   MOUSE GAMEPAD WII RTC WATCHDOG CPU FLASH SLEEP BITBANG BITSTREAM`
-* **Graphics and video** — every drawing command, `SPRITE BLIT TILE TILEMAP
-  FRAMEBUFFER MAP TURTLE MANDELBROT RAY DRAW3D GUI MODE FONT DEFINEFONT
-  RESOLUTION BACKLIGHT LCD TOUCH CLICK GETSCANLINE PIXEL`
+* **Graphics and video** — `SPRITE TILE TILEMAP MAP TURTLE MANDELBROT RAY
+  DRAW3D GUI DEFINEFONT RESOLUTION BACKLIGHT LCD TOUCH CLICK GETSCANLINE`
+
+  This entry used to say "every drawing command", and that is no longer
+  true: the PC3 kernel draws, so `MODE PIXEL LINE BOX CIRCLE CLS COLOUR
+  TEXT FONT FRAMEBUFFER BLIT` and `PRINT @` are translated and run on
+  hardware.  What remains here is the part that needs state a translator
+  has no place to keep - sprites, tile maps, a GUI toolkit - or hardware
+  the PC3 does not have.
 * **Sound** — `PLAY`
 * **Interrupts and background timing** — `SETTICK ON KEY ON PS2 INTERRUPT
   IRETURN MATH PID MATH SENSORFUSION ONESHOT`

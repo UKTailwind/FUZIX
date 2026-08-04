@@ -287,6 +287,12 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
 
         return mkval(sfmt("mm_pixel_get(%s, %s)", a0, a1), TY_I);
     }
+    if (strcmp(up, "MAP") == 0) {
+        /* MAP(n) - the colour entry n stands for by default, which is
+           what a program must ask for to land on that entry.
+           Unaffected by remapping, as MMBasic's fun_map is. */
+        return mkval(sfmt("mm_map_get(%s)", n(0)), TY_I);
+    }
     cv_err("built-in %s() is not supported yet", up);
     return mkval(NULL, TY_NONE);        /* not reached */
 

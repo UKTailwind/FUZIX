@@ -406,6 +406,16 @@ const char *as_flt(struct val v)
     return NULL;
 }
 
+/* An MMBasic string - length byte, data, NUL - not a C one.  The callee
+   is expected to know that and use mm_slen/mm_cstr. */
+const char *as_str(struct val v)
+{
+    if (v.ty == TY_S)
+        return v.code;
+    cv_err("number used where a string is required");
+    return NULL;
+}
+
 struct val need_num(struct val v)
 {
     if (v.ty == TY_S)

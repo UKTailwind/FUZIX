@@ -381,8 +381,16 @@ void statement_inner(void)
         return;
     }
     if (strcmp(up, "CLS") == 0) {
+        /* CLS [colour] - MMBasic floods the write buffer with it, so
+           this clears the off-screen framebuffer when one is selected,
+           not the screen.  No colour means the background COLOUR set,
+           which MM_CUR asks for. */
+        const char *col = "MM_CUR";
+
         cv.i++;
-        emit("mm_cls();");
+        if (!stmt_end())
+            col = as_int(expr());
+        emit(sfmt("mm_cls(%s);", col));
         return;
     }
     if (strcmp(up, "MODE") == 0) {
@@ -514,6 +522,101 @@ void statement_inner(void)
         cv.uses_gfx = 1;
         emit(sfmt("mmg_circle(%s, %s, %s, %s, %s, %s, %s);",
                   x, y, r, lw, col, fill, asp));
+        return;
+    }
+    if (strcmp(up, "TEXT") == 0) {
+        /* TEXT x, y, string$ [, alignment$] [, font] [, scale]
+                              [, colour] [, background]
+
+           Every argument after the string is optional and a bare comma
+           is legal in any of them, as everywhere in MMBasic.  The two
+           colours default to COLOUR's - resolved HERE, by emitting
+           mm_fg()/mm_bg(), because -1 is a colour TEXT accepts
+           (transparent paper) and so cannot double as the "none given"
+           sentinel the other statements use. */
+        const char *x, *y, *s;
+        const char *just = "0", *font = "1LL", *scale = "1LL";
+        const char *fc = "mm_fg()", *bc = "mm_bg()";
+
+        cv.i++;
+        x = as_int(expr());
+        expect_op(",");
+        y = as_int(expr());
+        expect_op(",");
+        s = as_str(expr());
+        if (accept_op(",")) {
+            if (!is_op(",", 0))
+                just = as_str(expr());
+            if (accept_op(",")) {
+                if (!is_op(",", 0))
+                    font = as_int(expr());
+                if (accept_op(",")) {
+                    if (!is_op(",", 0))
+                        scale = as_int(expr());
+                    if (accept_op(",")) {
+                        if (!is_op(",", 0))
+                            fc = as_int(expr());
+                        if (accept_op(","))
+                            bc = as_int(expr());
+                    }
+                }
+            }
+        }
+        cv.uses_gfx = 1;
+        emit(sfmt("mmg_text(%s, %s, %s, %s, %s, %s, %s, %s);",
+                  x, y, s, just, font, scale, fc, bc));
+        return;
+    }
+    if (strcmp(up, "MAP") == 0) {
+        /* MAP(n) = colour     collect one entry
+           MAP SET             apply the collected palette
+           MAP RESET           back to the mode's own
+           MAP MAXIMITE        the Colour Maximite's sixteen
+           MAP GRAYSCALE       sixteen greys (GREYSCALE too)
+
+           The function form MAP(n) is handled in the expression
+           parser; only the statement form can be followed by '='. */
+        const char *n, *c;
+
+        cv.i++;
+        if (accept_kw("SET")) {
+            emit("mm_map_set();");
+            return;
+        }
+        if (accept_kw("RESET")) {
+            emit("mm_map_reset();");
+            return;
+        }
+        if (accept_kw("MAXIMITE")) {
+            cv.uses_gfx = 1;
+            emit("mmg_map_maximite();");
+            return;
+        }
+        if (accept_kw("GRAYSCALE") || accept_kw("GREYSCALE")) {
+            cv.uses_gfx = 1;
+            emit("mmg_map_greyscale();");
+            return;
+        }
+        expect_op("(");
+        n = as_int(expr());
+        expect_op(")");
+        expect_op("=");
+        c = as_int(expr());
+        emit(sfmt("mm_map(%s, %s);", n, c));
+        return;
+    }
+    if (strcmp(up, "FONT") == 0) {
+        /* FONT [#]n [, scale] - the font PRINT draws in.  MMBasic
+           allows the # and ignores it, as it does on file numbers. */
+        const char *n;
+        const char *scale = "1LL";
+
+        cv.i++;
+        accept_op("#");
+        n = as_int(expr());
+        if (accept_op(","))
+            scale = as_int(expr());
+        emit(sfmt("mm_font(%s, %s);", n, scale));
         return;
     }
     if (strcmp(up, "COLOUR") == 0 || strcmp(up, "COLOR") == 0) {
@@ -742,6 +845,12 @@ static void do_print(void)
             if (chan != NULL)
                 cv_err("PRINT @ positions text on the screen, so it "
                        "cannot be used with a file channel");
+            /* mm_at returns a string temporary, so the statement has to
+               release the previous one.  Without this a PRINT @ inside
+               a loop runs out of temporaries after MM_TMPN turns and
+               dies with "String expression too complex" - which is
+               exactly the shape a counter redrawn every frame has. */
+            cv.tmp_used = 1;
             emit(prcall(chan, "s", sfmt("mm_at(%s, %s, %s)", x, y, mode)));
             last = last_line();
             suppress_nl = 0;
