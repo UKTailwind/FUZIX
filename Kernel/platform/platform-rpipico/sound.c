@@ -14,11 +14,19 @@
  * ping-pong 256-sample buffers and the completion IRQ (DMA_IRQ_0,
  * core0) remixes the freed half.  Mixing costs well under 0.1% of a
  * core.  Everything lives in RAM.
+ *
+ * The same DMA chain has a second mode - see "PCM streaming" below -
+ * where the IRQ copies a process's decoded PCM out of a PSRAM ring
+ * instead of synthesising.  That is what plays MP3s and WAVs, and it
+ * is the reason the output stage was worth building this way rather
+ * than MMBasic's: the DMA does not care which of the two filled the
+ * buffer, so nothing in the chain changes.  See PC3-MP3-PLAN.md.
  */
 
 #include <kernel.h>
 #include <kdata.h>
 #include <printf.h>
+#include <stdlib.h>
 #include "picosdk.h"
 #include "config.h"
 #include "sound.h"
@@ -30,7 +38,25 @@
 #define SND_BCLK  10            /* LRCLK is BCLK+1 = GP11 */
 #define SND_DATA  22
 #define SND_RATE  22050
-#define SND_NBUF  256           /* samples per half-buffer */
+/*
+ * Frames per half-buffer, and it is a BUS decision as much as a memory
+ * one.  This was 256 - a 1K half - which is fine for the synth, because
+ * that computes its samples one at a time with phase and envelope
+ * arithmetic in between and its writes trickle out over the whole
+ * interval.  PCM streaming does the identical byte count as a flat-out
+ * memcpy, and a saturated 1K burst every 5.8 ms was enough to put
+ * flecks on the display: core1 builds every scanline in software and
+ * DMAs it out of disp_fb continuously, so RAM bandwidth is contended
+ * (default_text_excludes.incl says so in as many words).
+ *
+ * MicroPython's machine_i2s.c runs a 256 byte DMA buffer - 128 bytes a
+ * half - and says the size was "empirically determined... a tradeoff
+ * between memory use and interrupt frequency".  64 frames is 256 bytes
+ * a half: a quarter of the old burst, while keeping 1.45 ms of slack at
+ * 44100 against interrupt latency, where MicroPython's 128 bytes would
+ * leave only 0.73 ms and this kernel does disable interrupts in places.
+ */
+#define SND_NBUF  64            /* stereo frames per half-buffer */
 #define SND_QLEN  8             /* notes per channel queue */
 
 /* MicroPython machine_i2s 16-bit stereo write program (2 side-set
@@ -271,6 +297,209 @@ static void __not_in_flash_func(snd_fill)(int16_t *buf)
     }
 }
 
+/* --- PCM streaming -------------------------------------------------------
+ *
+ * The second mode for the buffer filler: instead of synthesising the BBC
+ * channels, copy PCM a process has already decoded.  This is what
+ * MicroPython's machine_i2s.c does - the DMA chain is untouched and the
+ * completion IRQ's whole job is feed_dma(), one block out of a ring, or
+ * silence when the ring is dry.
+ *
+ * The ring is in PSRAM (the kernel's heap IS the PSRAM window, see
+ * arena.c) because there is nowhere else: kernel SRAM has single-digit
+ * kilobytes spare, and the ring wants a quarter of a megabyte.  At
+ * 44100 stereo the stream is 176.4 KB/s, so 256K is about 1.5 seconds -
+ * chosen against the ~25 ms a process can be swapped out for, plus SD
+ * latency, rather than against the ~93 ms MMBasic and MicroPython use.
+ * Neither of those has to survive being swapped out; a Fuzix process
+ * does.
+ *
+ * Allocated on the first open and never freed.  A machine that never
+ * plays anything pays nothing, and there is no ownership question: a
+ * player that dies without closing leaves the ring to drain to silence,
+ * and the next open takes the state machine over.
+ *
+ * head and tail are free-running byte counters; used = head - tail in
+ * unsigned arithmetic, which is exact across wrap and needs no spare
+ * slot to tell full from empty.  Only the IRQ moves tail and only the
+ * ioctl moves head, so neither needs a lock.
+ */
+
+#define PCM_RING_BYTES (256u * 1024u)
+
+static uint8_t *pcm_ring;
+static volatile uint32_t pcm_head, pcm_tail;
+static volatile uint32_t pcm_underruns;
+static volatile uint8_t pcm_active, pcm_started;
+static uint8_t pcm_channels = 2;
+
+/* Set the state machine clock for a sample rate.  Two samples a frame,
+ * sixteen bits each, two PIO instructions a bit = 64 clocks a frame.
+ * Integer only: the kernel is built with float trapped
+ * (pico_set_float_implementation none), so the SDK's float clkdiv call
+ * would not link, let alone run. */
+static void pcm_set_rate(uint32_t rate)
+{
+    uint32_t sys = clock_get_hz(clk_sys);
+    uint32_t div256 = (uint32_t)(((uint64_t)sys * 256) / (rate * 64));
+
+    pio_sm_set_clkdiv_int_frac(snd_pio, snd_sm, div256 >> 8, div256 & 0xFF);
+    pio_sm_clkdiv_restart(snd_pio, snd_sm);
+}
+
+/* n bytes out of the ring, in at most two spans. */
+static void __not_in_flash_func(pcm_take)(void *dst, uint32_t n)
+{
+    uint32_t off = pcm_tail % PCM_RING_BYTES;
+    uint32_t first = PCM_RING_BYTES - off;
+
+    if (first > n)
+        first = n;
+    memcpy(dst, pcm_ring + off, first);
+    if (n > first)
+        memcpy((uint8_t *)dst + first, pcm_ring, n - first);
+    pcm_tail += n;
+}
+
+static void __not_in_flash_func(pcm_fill)(int16_t *buf)
+{
+    uint32_t used = pcm_head - pcm_tail;
+    uint32_t framesz = (pcm_channels == 2) ? 4 : 2;
+    uint32_t need = SND_NBUF * framesz;
+    uint32_t got = (used < need) ? used : need;
+    int i, frames;
+
+    /*
+     * A SHORT buffer must still be consumed, and the first version of
+     * this did not do that: it filled with silence and left the data
+     * where it was, so the last few milliseconds of every stream - less
+     * than one 1K half-buffer - could never drain.  A player waiting
+     * for the queue to empty before closing then waited forever, which
+     * is exactly what pcmtest did.
+     *
+     * So take whatever is there, pad the rest with silence, and only
+     * call it an underrun when there was nothing at all to play: that
+     * is when the hardware actually emitted a gap.  A run that is
+     * merely short in its final block is the normal end of a stream.
+     */
+    got -= got % framesz;               /* never split a frame */
+    if (got < need)
+        memset(buf, 0, SND_NBUF * 2 * sizeof(int16_t));
+    if (got == 0) {
+        /* Not an underrun before the stream has started.  The DMA is
+         * consuming from the moment OPEN returns, while the player is
+         * still generating or decoding its first block, so an empty
+         * ring at that point means "not begun" and not "starved" -
+         * counting it reported six every run and made the number
+         * useless for the thing it exists to measure. */
+        if (pcm_started)
+            pcm_underruns++;
+        return;
+    }
+    pcm_started = 1;
+    frames = (int)(got / framesz);
+
+    if (pcm_channels == 2) {
+        pcm_take(buf, got);
+        return;
+    }
+
+    /* Mono: duplicate into both channels here rather than in the
+     * player, so a mono file costs the decoder nothing and halves the
+     * ring traffic (machine_i2s.c does the same).  Expanded in place,
+     * so it needs no second buffer - an IRQ has no stack to spare for
+     * one.
+     *
+     * The samples MUST land in the LOWER half and be expanded
+     * backwards.  Reading buf[i] and writing buf[2i] and buf[2i+1] is
+     * safe because every write from a later iteration is at 2i+2 or
+     * above, which is past i for any i.  The first version of this put
+     * them in the TOP half and read buf[SND_NBUF + i], where that
+     * inequality does not hold: i = 255 writes buf[510] and buf[511],
+     * which is precisely what i = 254 then reads.  Every sample but
+     * the first was garbage, and it sounded like it. */
+    pcm_take(buf, got);
+    for (i = frames - 1; i >= 0; i--) {
+        int16_t v = buf[i];
+        buf[i * 2] = v;
+        buf[i * 2 + 1] = v;
+    }
+}
+
+/* Take the state machine for a stream at this rate.  The BBC synth's
+ * note tables assume SND_RATE, so the two are mutually exclusive -
+ * which is what MMBasic does too. */
+int sound_pcm_open(uint32_t rate, int channels)
+{
+    if (rate < 8000 || rate > 48000 || (channels != 1 && channels != 2))
+        return -1;
+    if (pcm_ring == NULL) {
+        pcm_ring = malloc(PCM_RING_BYTES);
+        if (pcm_ring == NULL)
+            return -1;
+    }
+    sound_quiet();
+    pcm_head = pcm_tail = 0;
+    pcm_underruns = 0;
+    pcm_started = 0;
+    pcm_channels = (uint8_t)channels;
+    pcm_set_rate(rate);
+    pcm_active = 1;
+    return 0;
+}
+
+/* Copy from the caller into the ring, as much as fits.  Returns the
+ * number of bytes taken, which the caller must honour - a short write
+ * means the ring is full and the player should come back later, not
+ * that anything is wrong. */
+int sound_pcm_write(const uint8_t *ubuf, uint32_t len)
+{
+    uint32_t used, space, off, first;
+
+    if (!pcm_active)
+        return -1;
+    used = pcm_head - pcm_tail;
+    space = PCM_RING_BYTES - used;
+    if (len > space)
+        len = space;
+    /* Never accept a partial frame.  Everything downstream assumes
+     * head - tail is a whole number of frames, and a single odd byte
+     * would swap the channels for the rest of the stream. */
+    len -= len % (uint32_t)((pcm_channels == 2) ? 4 : 2);
+    if (len == 0)
+        return 0;
+
+    off = pcm_head % PCM_RING_BYTES;
+    first = PCM_RING_BYTES - off;
+    if (first > len)
+        first = len;
+    if (uget((void *)ubuf, pcm_ring + off, first))
+        return -1;
+    if (len > first && uget((void *)(ubuf + first), pcm_ring, len - first))
+        return -1;
+    pcm_head += len;
+    return (int)len;
+}
+
+void sound_pcm_stat(uint32_t *space, uint32_t *queued, uint32_t *under)
+{
+    uint32_t used = pcm_head - pcm_tail;
+
+    *space = pcm_active ? PCM_RING_BYTES - used : 0;
+    *queued = used;
+    *under = pcm_underruns;
+}
+
+/* Stops at once and drops whatever is still queued.  A player that
+ * wants the tail played out polls sound_pcm_stat until nothing is
+ * queued and closes then. */
+void sound_pcm_close(void)
+{
+    pcm_active = 0;
+    pcm_head = pcm_tail = 0;
+    pcm_set_rate(SND_RATE);
+}
+
 /* --- DMA plumbing --------------------------------------------------------- */
 
 static void __not_in_flash_func(snd_dma_irq)(void)
@@ -279,13 +508,19 @@ static void __not_in_flash_func(snd_dma_irq)(void)
         dma_hw->ints0 = 1u << dmach_a;
         dma_channel_set_read_addr(dmach_a, sndbuf[0], false);
         dma_channel_set_trans_count(dmach_a, SND_NBUF, false);
-        snd_fill(sndbuf[0]);
+        if (pcm_active)
+            pcm_fill(sndbuf[0]);
+        else
+            snd_fill(sndbuf[0]);
     }
     if (dma_hw->ints0 & (1u << dmach_b)) {
         dma_hw->ints0 = 1u << dmach_b;
         dma_channel_set_read_addr(dmach_b, sndbuf[1], false);
         dma_channel_set_trans_count(dmach_b, SND_NBUF, false);
-        snd_fill(sndbuf[1]);
+        if (pcm_active)
+            pcm_fill(sndbuf[1]);
+        else
+            snd_fill(sndbuf[1]);
     }
 }
 

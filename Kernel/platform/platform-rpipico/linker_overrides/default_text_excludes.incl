@@ -118,6 +118,26 @@
        nine of MMBasic's could be brought across. ---- */
 *fonts.c.o(.text*)
 
+/* ---- THE SCANOUT PATH IN FLASH: TRIED, AND IT KILLS THE DISPLAY ----
+ *
+ * disp_dma_irq and disp_fill_loop were moved here, on the reasoning
+ * that MMBasic and MicroPython both run their interpreter from flash
+ * through the XIP cache - so core0's instruction fetches never touch
+ * SRAM there - while Fuzix executes user processes from the pool IN
+ * main SRAM and starves core1.  Idle, it was clean and stable.  Under
+ * load the picture vanished ENTIRELY the instant the program started.
+ *
+ * The reason is four paragraphs up this file: flash and PSRAM share the
+ * QMI.  The load was mp3bench, which keeps 32K of decoder state in the
+ * PSRAM arena and works it continuously, so core0's PSRAM traffic and
+ * core1's instruction fetches were competing for one controller and
+ * core1 simply stopped being fetched.
+ *
+ * So the rule at the top of this file stands, but for a sharper reason
+ * than it gives: not "a cache miss might hurt" but "the scanout path
+ * must not depend on the QMI, because anything using PSRAM will take
+ * it away". ---- */
+
 /* main.c is NOT here.  It raises clk_sys, and the code doing that
  * cannot be fetched from the flash whose clock it is changing - even
  * with pc3_clock_init doing the QMI work from RAM, the caller around

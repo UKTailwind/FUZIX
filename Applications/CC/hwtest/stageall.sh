@@ -25,7 +25,13 @@ stage cpp       "$R/Applications/cpp/cpp"
 stage mmedit    "$R/Applications/mmedit/mmedit"
 stage saveimage "$R/Kernel/platform/platform-rpipico/utils/saveimage"
 stage loadimage "$R/Kernel/platform/platform-rpipico/utils/loadimage"
+# playmp3 is what PLAY MP3 runs, on the same terms as the image pair.
+# It is the ONE program on the card built with the hardware FPU
+# (utils/Makefile says why), so a rebuild that quietly dropped those
+# flags would still stage, still install, and stutter - see
+# PC3-MP3-PLAN.md.
+stage playmp3   "$R/Kernel/platform/platform-rpipico/utils/playmp3"
 
 ls -l "$S"/cc0.s "$S"/cc1.s "$S"/cc2.s "$S"/ccbc.s "$S"/bcrun.s \
       "$S"/bcdump.s "$S"/mmbc.s "$S"/cpp.s "$S"/mmedit.s \
-      "$S"/saveimage.s "$S"/loadimage.s
+      "$S"/saveimage.s "$S"/loadimage.s "$S"/playmp3.s

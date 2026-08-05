@@ -46,6 +46,7 @@
 #include <hardware/resets.h>
 #include <hardware/structs/hstx_ctrl.h>
 #include <hardware/structs/hstx_fifo.h>
+#include <hardware/structs/bus_ctrl.h>
 #include <pico/multicore.h>
 
 /* --- video timing -------------------------------------------------------- */
@@ -92,7 +93,10 @@ static struct vtiming *tim = &tim_vga;
 /* --- Video memory -------------------------------------------------------- */
 /* The pool serves the console (38400 used) and the BBC modes (up to
  * 40960): they never coexist. */
-uint8_t disp_fb[DISP_FB_POOL];
+/* Aligned because the console expander reads it a WORD at a time
+ * (MMBasic's HDMIloopX does the same). DISP_STRIDE is 80, a multiple of
+ * four, so every row start is aligned once the base is. */
+uint8_t disp_fb[DISP_FB_POOL] __attribute__((aligned(4)));
 
 /*
  * A second framebuffer, in PSRAM.
@@ -228,6 +232,16 @@ uint8_t disp_tile_bg[DISP_ROWS * DISP_COLS];
 
 /* RGB332 expanded scanlines.  Word-aligned: the expanders write them
  * through uint32_t stores. */
+/*
+ * KEEP THIS IN MAIN SRAM, striped.  Moving it to SCRATCH_Y was tried
+ * and was the worst result of the lot: short lines, and blue and green
+ * flecking.  The striping is a feature - main SRAM is eight banks
+ * interleaved by word, so a high-bandwidth stream spreads across all
+ * eight and several masters proceed in parallel.  A scratch bank is ONE
+ * bank: putting the DMA's 18.4 MB/s scanout read there serialised it
+ * against core0's stack, which lives in the same bank, and starved the
+ * HSTX FIFO outright.
+ */
 static uint8_t disp_lines[2][1024] __attribute__((aligned(4)));
 
 static uint32_t vblank_line_vsync_off[7];
@@ -385,67 +399,153 @@ static void gfx_lut_rebuild(enum gexp ex)
     }
 }
 
+/*
+ * Everything the scanline interrupt needs, flattened out of the timing
+ * struct once.  This is the hottest code in the machine: at 640x480 it
+ * runs 525 lines x 60 Hz = 31,500 times a SECOND, on the core that must
+ * not be late.
+ *
+ * It used to dereference tim five times per interrupt and finish with
+ * "v_scanline = (v_scanline + 1) % tim->vtotal" - a hardware divide,
+ * every scanline, to wrap a counter that only ever needs comparing
+ * against a constant.  Both are gone: plain values, and a compare.
+ *
+ * Written only by disp_cache_timing(), which runs before core1 is
+ * launched.  tim itself only changes on a "rebuild" mode switch, and
+ * that path stops and restarts scanout around the change.
+ */
+static int t_vsync_start, t_vsync_end, t_blanking, t_hact_words, t_vtotal;
+
+static void disp_cache_timing(void)
+{
+    t_vsync_start = tim->vfp;
+    t_vsync_end   = tim->vfp + tim->vsync;
+    t_blanking    = tim->vfp + tim->vsync + tim->vbp;
+    t_hact_words  = tim->hact / 4;      /* 4 RGB332 pixels per word */
+    t_vtotal      = tim->vtotal;
+}
+
 /* --- DMA IRQ (runs on core1): post the next scanline --------------------- */
 static void __not_in_flash_func(disp_dma_irq)(void)
 {
     uint ch_num = dma_pong ? dmach_pong : dmach_ping;
     dma_channel_hw_t *ch = &dma_hw->ch[ch_num];
+    int line = v_scanline;
+
     dma_hw->ints1 = 1u << ch_num;
     dma_pong = !dma_pong;
 
-    int blanking = tim->vfp + tim->vsync + tim->vbp;
-
-    if (v_scanline >= tim->vfp && v_scanline < (tim->vfp + tim->vsync)) {
+    if (line >= t_vsync_start && line < t_vsync_end) {
         ch->read_addr = (uintptr_t)vblank_line_vsync_on;
         ch->transfer_count = count_of(vblank_line_vsync_on);
-    } else if (v_scanline < blanking) {
+    } else if (line < t_blanking) {
         ch->read_addr = (uintptr_t)vblank_line_vsync_off;
         ch->transfer_count = count_of(vblank_line_vsync_off);
     } else if (!vactive_cmdlist_posted) {
         ch->read_addr = (uintptr_t)vactive_line;
         ch->transfer_count = count_of(vactive_line);
         vactive_cmdlist_posted = true;
+        return;                         /* line does not advance here */
     } else {
-        ch->read_addr = (uintptr_t)disp_lines[v_scanline & 1];
-        ch->transfer_count = tim->hact / 4; /* 4 RGB332 px per word */
+        ch->read_addr = (uintptr_t)disp_lines[line & 1];
+        ch->transfer_count = t_hact_words;
         vactive_cmdlist_posted = false;
     }
 
-    if (!vactive_cmdlist_posted) {
-        v_scanline = (v_scanline + 1) % tim->vtotal;
-    }
+    /* Wrap by comparison, not by division. */
+    if (++line >= t_vtotal)
+        line = 0;
+    v_scanline = line;
 }
 
 /* --- core1 fill loop: expand one scanline into RGB332 -------------------- */
 static void __not_in_flash_func(disp_fill_loop)(void)
 {
+    /*
+     * The timing is read ONCE, into registers, and never touched again.
+     * This used to evaluate "tim->vtotal - tim->vact" and "tim->vact"
+     * per scanline: a load of the tim pointer plus three loads through
+     * it, four memory accesses every line, on the one path in this
+     * system with a hard deadline.  Nothing here may cost more than it
+     * has to - the margin is a single line, about 25us at 640x480, and
+     * the expander below has to fill 640 bytes inside it.
+     *
+     * Safe because tim is invariant for the life of this loop: it only
+     * changes when display_gfx_mode decides "rebuild", and that path
+     * brackets the change with disp_scanout_stop/start, which is to say
+     * it kills and relaunches core1 around it.
+     *
+     * gfx_exp is NOT hoisted, and must not be.  A mode change that
+     * keeps the same video timing does not restart scanout - it waits
+     * for vblank and hands over live, with gfx_exp as the handover
+     * flag - so this loop has to keep re-reading it.
+     */
+    const int vblank = tim->vtotal - tim->vact;
+    const int vact = tim->vact;
     int last_line = 2;
     for (;;) {
         if (v_scanline != last_line) {
             last_line = v_scanline;
-            int active = last_line - (tim->vtotal - tim->vact);
-            if (active < 0 || active >= tim->vact)
+            int active = last_line - vblank;
+            if (active < 0 || active >= vact)
                 continue;
+
+            /*
+             * NO __dmb() here, though MMBasic has one at the top of
+             * every expander in HDMIloopX.  Tried, and it made things
+             * WORSE - end-of-line artefacts in more colours - because
+             * on this port core1 is time-limited, and a barrier that
+             * drains outstanding transactions costs more than the
+             * tearing it prevents.  MMBasic can afford it; we cannot,
+             * yet.  Revisit if core1 ever gains real headroom.
+             */
             uint8_t *p = disp_lines[last_line & 1];
 
             switch (gfx_exp) {
             case EXP_CONSOLE: {
-                const uint8_t *s = &disp_fb[active * DISP_STRIDE];
-                const uint8_t *fg = &disp_tile_fg[(active / DISP_CELL_H) * DISP_COLS];
-                const uint8_t *bg = &disp_tile_bg[(active / DISP_CELL_H) * DISP_COLS];
-                for (int t = 0; t < DISP_COLS; t++) {
-                    uint8_t b = s[t];
-                    uint8_t f = fg[t];
-                    uint8_t k = bg[t];
-                    p[0] = (b & 0x80) ? f : k;
-                    p[1] = (b & 0x40) ? f : k;
-                    p[2] = (b & 0x20) ? f : k;
-                    p[3] = (b & 0x10) ? f : k;
-                    p[4] = (b & 0x08) ? f : k;
-                    p[5] = (b & 0x04) ? f : k;
-                    p[6] = (b & 0x02) ? f : k;
-                    p[7] = (b & 0x01) ? f : k;
-                    p += 8;
+                /*
+                 * MMBasic's HDMIloopBTH640, SCREENMODE1 - its 640x480
+                 * RGB332 tiled text expander, which is this mode
+                 * exactly - copied as literally as the bit order
+                 * allows.  Hundreds of hours went into these loops and
+                 * some of the choices are empirical, so the shape is
+                 * taken as given rather than re-derived:
+                 *
+                 *  - BYTE granular, one tile at a time.  A 32-pixel
+                 *    word unroll was tried here and MMBasic tried it
+                 *    too; MMBasic's own comment records dropping it,
+                 *    because it hardcodes the width and assumes a row
+                 *    stride divisible by four, which 720x400 (90 bytes
+                 *    a row) is not.
+                 *  - The tile colours are read INDEXED, fcol[i] and
+                 *    bcol[i], not through incremented pointers, and not
+                 *    hoisted into locals.  That is MMBasic's form and
+                 *    it is faster here than the alternatives.
+                 *  - One mask and a shift, rather than eight different
+                 *    mask constants.
+                 *
+                 * The single deviation: MMBasic shifts RIGHT and tests
+                 * bit 0, because its framebuffer is LSB-first within a
+                 * byte.  Ours is MSB-first, so this shifts LEFT and
+                 * tests bit 7 - the mirror image, same instruction
+                 * count, our pixel order preserved.
+                 */
+                const uint8_t *fcol =
+                    &disp_tile_fg[(active / DISP_CELL_H) * DISP_COLS];
+                const uint8_t *bcol =
+                    &disp_tile_bg[(active / DISP_CELL_H) * DISP_COLS];
+                const uint8_t *dd = &disp_fb[active * DISP_STRIDE];
+
+                for (int i = 0; i < DISP_COLS; i++) {
+                    uint8_t d = dd[i];
+                    *p++ = (d & 0x80) ? fcol[i] : bcol[i]; d <<= 1;
+                    *p++ = (d & 0x80) ? fcol[i] : bcol[i]; d <<= 1;
+                    *p++ = (d & 0x80) ? fcol[i] : bcol[i]; d <<= 1;
+                    *p++ = (d & 0x80) ? fcol[i] : bcol[i]; d <<= 1;
+                    *p++ = (d & 0x80) ? fcol[i] : bcol[i]; d <<= 1;
+                    *p++ = (d & 0x80) ? fcol[i] : bcol[i]; d <<= 1;
+                    *p++ = (d & 0x80) ? fcol[i] : bcol[i]; d <<= 1;
+                    *p++ = (d & 0x80) ? fcol[i] : bcol[i];
                 }
                 break;
             }
@@ -635,6 +735,37 @@ static void __not_in_flash_func(disp_core1_entry)(void)
 /* --- scanout start/stop (mode switching) --------------------------------- */
 static void disp_scanout_start(void)
 {
+    /*
+     * CORE1 outranks everything on the bus.  It is the master with the
+     * hard deadline, and the deadline is one scanline: disp_lines[] is
+     * a pair, so core1 has to software-expand line N+1 while the DMA is
+     * still sending line N.  At 640x480 that is about 25us, and the
+     * console path alone writes 640 bytes through a bit-unpacking loop
+     * to get there.  Delay core1 and the DMA ships a half-written
+     * buffer - wrong pixels, while sync stays perfect, because sync
+     * comes from a separate command list that never misses.  That is
+     * exactly the flecking MP3 playback provoked, once core0 started
+     * doing a memcpy out of PSRAM in an interrupt.
+     *
+     * bus_ctrl_hw->priority is left at the RESET DEFAULT, where every
+     * master arbitrates equally - which is what MMBasic's HDMI path and
+     * MicroPython both do.
+     *
+     * Three settings were tried while the display was flecking under
+     * load, and none of them was the answer.  DMA_R alone (0x100, the
+     * value MMBasic uses in its VGA and LCD branches but NOT under
+     * "#ifdef HDMI") was markedly worse: it promotes every DMA master,
+     * including the audio channels, above the one processor that must
+     * not be late.  PROC1 alone was no better.  PROC1|DMA_R|DMA_W gave
+     * fewer short lines but heavy flecking.
+     *
+     * The actual cause was elsewhere entirely - the MP3 decoder's
+     * working set was in the PSRAM arena, and taking it out fixed the
+     * display outright.  So nothing is set here: a register poke kept
+     * only because it once seemed to help, against a problem since
+     * removed, is worse than no poke at all.
+     */
+    disp_cache_timing();        /* before core1 can take an interrupt */
     v_scanline = 2;
     dma_pong = false;
     vactive_cmdlist_posted = false;

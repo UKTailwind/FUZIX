@@ -34,7 +34,7 @@ COUNT=65536
 
 set -e
 [ -r "$SRC" ] || { echo "no base image at $SRC" >&2; exit 1; }
-for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc saveimage loadimage mmedit; do
+for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc saveimage loadimage mmedit playmp3; do
 	[ -r "$CC/hwtest/$f.s" ] || {
 		echo "missing $CC/hwtest/$f.s - cross build and strip first" >&2
 		exit 1; }

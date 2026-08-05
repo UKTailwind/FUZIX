@@ -167,6 +167,44 @@ int main(void)
      * same thing for the same reason. */
     __asm volatile("mrc p4, #0, r0, c0, c0, #1" : : : "r0");
 
+    /* Grant CP10 and CP11 - the M33's SINGLE precision FPU - for the
+     * MP3 decoder (PC3-MP3-PLAN.md).  minimp3's inner loops are float,
+     * and measured on this board soft float decodes at 0.59x real time
+     * against the 1.0x it has to beat; -O2 moved that to 0.60x, because
+     * the cost is libgcc's soft-float calls and not code the optimiser
+     * can reach.  The DCP above does not help - it is double precision.
+     *
+     * No FP context is saved anywhere, and that is deliberate rather
+     * than an oversight:
+     *
+     *   - Nothing in the kernel uses the FPU.  float is trapped by
+     *     pico_set_float_implementation(fuzix none), and the proof is
+     *     that these bits were CLEAR until now and the machine ran - an
+     *     FP instruction on any executed kernel path would have taken a
+     *     UsageFault the first time round.
+     *   - With exactly one FP process, nobody else executes an FP
+     *     instruction, so S0-S31 survive a context switch untouched.
+     *     There is one I2S engine, so the audio device lock is also the
+     *     FPU lock.
+     *
+     * ASPEN and LSPEN are cleared for the same reason.  Left set, the
+     * first FP instruction sets CONTROL.FPCA and every exception entry
+     * from then on pushes an EXTENDED frame - 104 bytes rather than 32,
+     * with lazy stacking reserving the space whether or not it fills
+     * it - which lands on the user stack at every syscall and on
+     * anything in tricks.S that assumes the short frame.  Cleared, the
+     * hardware never allocates it and the frame layout is unchanged.
+     *
+     * The assumption this rests on is BUILD discipline, not something
+     * the code can enforce: exactly one Makefile rule (mp3bench.o, and
+     * in due course playmp3) may carry -mfpu.  A second program built
+     * with it would corrupt the first's decoder state silently - wrong
+     * audio, not a crash. */
+    *(volatile uint32_t *)0xE000ED88 |= (3u << 20) | (3u << 22);
+    __asm volatile("dsb; isb");
+    *(volatile uint32_t *)0xE000EF34 &= ~((1u << 31) | (1u << 30));
+    __asm volatile("dsb; isb");
+
 #ifdef PC3_SYS_CLOCK_KHZ
     /* Pico Computer 3: raise clk_sys before anything derives a divisor
      * from it (uart, spi). clk_peri follows clk_sys, as in the PC3's

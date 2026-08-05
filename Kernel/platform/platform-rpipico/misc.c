@@ -537,6 +537,53 @@ int plt_dev_ioctl(uarg_t request, char *data)
         sound_quiet();
         return 0;
     }
+    if (request == SNDIOC_PCMOPEN)
+    {
+        extern int sound_pcm_open(uint32_t, int);
+        struct snd_pcm p;
+        if (uget(data, &p, sizeof(p)))
+            return -1;
+        if (p.bits != 16) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        if (sound_pcm_open(p.rate, p.channels)) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    if (request == SNDIOC_PCMWRITE)
+    {
+        extern int sound_pcm_write(const uint8_t *, uint32_t);
+        struct snd_buf b;
+        int n;
+        if (uget(data, &b, sizeof(b)))
+            return -1;
+        /* sound_pcm_write ugets from b.base itself, so the caller's
+         * buffer is validated there and not copied twice. */
+        n = sound_pcm_write((const uint8_t *)b.base, b.len);
+        if (n < 0) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return n;
+    }
+    if (request == SNDIOC_PCMSTAT)
+    {
+        extern void sound_pcm_stat(uint32_t *, uint32_t *, uint32_t *);
+        struct snd_stat st;
+        sound_pcm_stat(&st.space, &st.queued, &st.underruns);
+        if (uput(&st, data, sizeof(st)))
+            return -1;
+        return 0;
+    }
+    if (request == SNDIOC_PCMCLOSE)
+    {
+        extern void sound_pcm_close(void);
+        sound_pcm_close();
+        return 0;
+    }
 #endif
     return -1;
 }

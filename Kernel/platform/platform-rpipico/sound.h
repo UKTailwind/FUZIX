@@ -15,4 +15,18 @@ void sound_envelope(const uint8_t *e);
 
 void sound_quiet(void);
 
+/* PCM streaming: hand the I2S engine decoded samples instead of the
+ * BBC synth.  Mutually exclusive with SOUND/ENVELOPE - open takes the
+ * state machine and silences the synth.  16-bit signed, interleaved if
+ * stereo; mono is duplicated to both channels by the driver.
+ *
+ * open returns 0 or -1 (bad arguments, or no PSRAM for the ring).
+ * write returns the bytes ACCEPTED, which may be less than asked for
+ * when the ring is full, or -1 if no stream is open.
+ * stat reports the ring in bytes, and the underrun count since open. */
+int sound_pcm_open(uint32_t rate, int channels);
+int sound_pcm_write(const uint8_t *ubuf, uint32_t len);
+void sound_pcm_stat(uint32_t *space, uint32_t *queued, uint32_t *under);
+void sound_pcm_close(void);
+
 #endif

@@ -309,6 +309,50 @@ struct snd_cmd {
 /* silence everything, flush all queues */
 #define SNDIOC_QUIET  0x0008
 
+/*
+ * PCM streaming: play samples a process has already decoded, instead
+ * of the BBC synth.  The I2S engine is one piece of hardware, so a
+ * stream and SOUND/ENVELOPE are mutually exclusive - OPEN takes the
+ * state machine and silences the synth, CLOSE hands it back.  MMBasic
+ * behaves the same way.
+ *
+ * Samples are 16-bit signed, interleaved left/right if stereo; mono is
+ * duplicated to both channels by the driver, so a mono file costs the
+ * player nothing.  See PC3-MP3-PLAN.md.
+ *
+ * The usual loop is: OPEN, then WRITE whatever STAT says there is room
+ * for, and at the end poll STAT until "queued" reaches zero before
+ * CLOSE - CLOSE itself is immediate and drops the tail.
+ */
+struct snd_pcm {
+	uint32_t rate;			/* 8000..48000 */
+	uint16_t channels;		/* 1 or 2 */
+	uint16_t bits;			/* 16; anything else is refused */
+};
+#define SNDIOC_PCMOPEN 0x0021	/* struct snd_pcm */
+
+/* data -> struct snd_buf.  Returns the bytes ACCEPTED, which may be
+ * fewer than asked for: the ring was full, and the player should come
+ * back rather than treat it as an error. */
+struct snd_buf {
+	void *base;
+	uint32_t len;			/* bytes, not samples */
+};
+#define SNDIOC_PCMWRITE 0x0022
+
+/* data -> struct snd_stat, filled in.  underruns counts buffers the
+ * IRQ had to fill with silence since OPEN; it is the objective test of
+ * whether the buffering is deep enough, and the reason to prefer it to
+ * "it sounded all right". */
+struct snd_stat {
+	uint32_t space;			/* bytes free in the ring */
+	uint32_t queued;		/* bytes waiting to play */
+	uint32_t underruns;
+};
+#define SNDIOC_PCMSTAT 0x0023
+
+#define SNDIOC_PCMCLOSE 0x0024
+
 /* BBC ADVAL (PC3): data -> int selector, returns the reading.
  *   0      joystick switches GP34-37 (pulled up, active low),
  *          pressed = 1: bit0 GP34, bit1 GP35, bit2 GP36, bit3 GP37
