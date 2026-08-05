@@ -317,6 +317,10 @@ static void w_font(void)     { mm_font(LL(0), LL(2)); A = 0; }
 static void w_gtext(void)    { mm_gtext(LL(0), LL(2), LL(4), LL(6),
                                         LL(8), LL(10), Ps(12), LL(13));
                                A = 0; }
+/* GPIO - one crossing for all of SETPIN and PIN; the statements
+   themselves are static functions in mmb_gpio.h, so a program that
+   touches no pins carries none of them. */
+static void w_gpio(void)     { A = mm_gpio(LL(0), LL(2), LL(4)); }
 /* MAP - the palette.  mm_map collects an entry, mm_map_set applies the
    lot during blanking, mm_map_get answers what a number stands for. */
 static void w_map(void)      { mm_map(LL(0), LL(2)); A = 0; }
@@ -564,6 +568,7 @@ static const struct mmwrap {
 	{ "mm_plot",		w_plot },
 	{ "mm_fill",		w_fill },
 	{ "mm_pixels",		w_pixels },
+	{ "mm_gpio",		w_gpio },
 	{ "mm_map",		w_map },
 	{ "mm_map_set",		w_map_set },
 	{ "mm_map_reset",	w_map_reset },

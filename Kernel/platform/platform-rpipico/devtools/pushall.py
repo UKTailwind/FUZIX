@@ -41,11 +41,18 @@ HEADERS = [
      "/usr/lib/cc/include/mmb_runtime.h"),
     (os.path.join(CC, "mmb_gfx.h"), "mmb_gfx.h",
      "/usr/lib/cc/include/mmb_gfx.h"),
+    (os.path.join(CC, "mmb_gpio.h"), "mmb_gpio.h",
+     "/usr/lib/cc/include/mmb_gpio.h"),
 ]
+# The STRIPPED binaries, which stageall.sh has already produced in
+# hwtest/ - the same files the card image installs.  Stripping here
+# instead would mean running the cross toolchain, and this script runs
+# on the Windows side where the serial port is, while the toolchain
+# lives in WSL.  So: build, stageall.sh, then this.
 BINARIES = [
-    (os.path.join(CC, "bcrun"), "bcrun", "/usr/bin/bcrun"),
-    (os.path.join(CC, "mmbc"), "mmbc", "/usr/bin/mmbc"),
-    (os.path.join(MMEDIT, "mmedit"), "mmedit", "/usr/bin/mmedit"),
+    (os.path.join(CC, "hwtest", "bcrun.s"), "bcrun", "/usr/bin/bcrun"),
+    (os.path.join(CC, "hwtest", "mmbc.s"), "mmbc", "/usr/bin/mmbc"),
+    (os.path.join(CC, "hwtest", "mmedit.s"), "mmedit", "/usr/bin/mmedit"),
 ]
 
 
@@ -74,11 +81,9 @@ def main():
 
     for src, name, dest in BINARIES:
         if not os.path.exists(src):
-            print("skipping %s - not built" % name)
+            print("skipping %s - run stageall.sh first" % name)
             continue
-        stripped = os.path.join(TMP, name + ".stripped")
-        subprocess.run([STRIP, src, "-o", stripped], check=True)
-        send(stripped, name)
+        send(src, name)
         # chmod before the mv: a half-sent binary should never be the
         # one sitting in /usr/bin.
         shell("chmod +x " + name, "mv %s %s" % (name, dest))

@@ -305,6 +305,8 @@ void conv_write(FILE *f)
        them, and the compiler sorts out which. */
     if (cv.uses_gfx)
         fprintf(f, "#include \"mmb_gfx.h\"\n");
+    if (cv.uses_gpio)
+        fprintf(f, "#include \"mmb_gpio.h\"\n");
     fprintf(f, "#include <math.h>\n");
     fprintf(f, "#include <string.h>\n");
     fprintf(f, "#include <stdlib.h>\n\n");

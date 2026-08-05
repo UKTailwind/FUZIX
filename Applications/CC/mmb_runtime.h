@@ -522,6 +522,31 @@ void mm_fb_wait(void);
  * and a program that stops does not take the shell's echo with it. */
 char *mm_inkey(void);
 
+/* ---- GPIO ------------------------------------------------------------
+ *
+ * The one crossing.  SETPIN and PIN themselves are in mmb_gpio.h as
+ * static functions, so a program that touches no pins carries none of
+ * it; this is here only because the on-board cc has no ioctl.
+ *
+ * op is one of the three below.  Returns the pin's level for a read, 0
+ * for a write or a direction change, and -1 if the kernel refused -
+ * which for a pin number it does not have is what SETPIN reports. */
+#define MM_GPIO_DIR 0                   /* val: 0 input, 1 output      */
+#define MM_GPIO_PUT 1                   /* val: 0 low, 1 high          */
+#define MM_GPIO_GET 2
+MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
+
+/* The ioctls, from the kernel's gpio.h.  Duplicated rather than
+ * included, as the graphics numbers are, so the runtime does not need
+ * the FUZIX tree on its include path.  Keep them in step. */
+#define MM_GPIOC_SET     0x0531
+#define MM_GPIOC_SETRW   0x0534
+#define MM_GPIOC_GETBYTE 0x0533
+
+/* RP2350B.  Not 28: that is the RP2040's count, and it put the PC3's
+ * own DS3231 alarm on GP32 out of reach. */
+#define MM_GPIO_NPINS 48
+
 /* ---- misc ----------------------------------------------------------- */
 void mm_error(const char *msg);     /* prints and exits                */
 void mm_end  (void);                /* the END statement               */

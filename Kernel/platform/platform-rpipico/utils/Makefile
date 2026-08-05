@@ -4,7 +4,7 @@ USERCPU=armm0
 VERBOSE=1
 include $(FUZIX_ROOT)/Target/rules.$(USERCPU)
 
-UTILS = allocbench.c forkroom.c picoctl.c picogpio.c gfxtest.c bufs.c arenatest.c exectest.c wraptest.c keydump.c psbench.c memprobe.c syscallbench.c ripple.c bmtest.c linebench.c saveimage.c loadimage.c
+UTILS = gpioin.c allocbench.c forkroom.c picoctl.c picogpio.c gpiotog.c gfxtest.c bufs.c arenatest.c exectest.c wraptest.c keydump.c psbench.c memprobe.c syscallbench.c ripple.c bmtest.c linebench.c saveimage.c loadimage.c
 UTILSBIN = $(UTILS:.c=)
 
 .PHONY: all clean
