@@ -567,6 +567,48 @@ void statement_inner(void)
                   x, y, s, just, font, scale, fc, bc));
         return;
     }
+    if (strcmp(up, "SETPIN") == 0) {
+        /* SETPIN pin, DIN|DOUT
+
+           The pin is the GPIO number, not MMBasic's connector-pin
+           numbering: the GPIO number is what the PC3 schematic, the
+           kernel and every other tool on this machine use, and a
+           second numbering for one statement would confuse more than
+           the incompatibility does. */
+        const char *pin;
+        const char *mode;
+
+        cv.i++;
+        pin = as_int(expr());
+        expect_op(",");
+        if (accept_kw("DOUT"))
+            mode = "MMG_PIN_DOUT";
+        else if (accept_kw("DIN"))
+            mode = "MMG_PIN_DIN";
+        else {
+            cv_err("SETPIN takes DIN or DOUT");
+            return;
+        }
+        cv.uses_gpio = 1;
+        emit(sfmt("mmg_setpin(%s, %s);", pin, mode));
+        return;
+    }
+    if (strcmp(up, "PIN") == 0 && is_op("(", 1)) {
+        /* PIN(n) = value.  The reading form is a function, handled in
+           the expression parser; a statement starting with PIN can
+           only be the assignment. */
+        const char *pin, *val;
+
+        cv.i++;
+        expect_op("(");
+        pin = as_int(expr());
+        expect_op(")");
+        expect_op("=");
+        val = as_int(expr());
+        cv.uses_gpio = 1;
+        emit(sfmt("mmg_pin_put(%s, %s);", pin, val));
+        return;
+    }
     if (strcmp(up, "MAP") == 0) {
         /* MAP(n) = colour     collect one entry
            MAP SET             apply the collected palette

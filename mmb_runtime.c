@@ -1921,11 +1921,42 @@ static MMINTEGER mm_us_now(void)
 #endif
 }
 
+/*
+ * PAUSE.
+ *
+ * MMBasic's is a busy loop, and on firmware with nothing else to run
+ * that is the right answer: it costs nothing and it is exact.
+ *
+ * Here it would be antisocial.  This machine runs several programs at
+ * once, and a spinning PAUSE starves every one of them - two BASIC
+ * programs blinking an LED each would fight for the processor rather
+ * than take turns, and a background player would stall whenever the
+ * foreground paused.  So the bulk of the wait is SLEPT, and the
+ * process gives up the CPU for it.
+ *
+ * _pause(), which is what usleep() reaches, counts in DECISECONDS.
+ * Sleeping a whole PAUSE through it would round 5 ms up to 100 - so
+ * the whole deciseconds are slept and only the remainder is spun,
+ * which is at most 99 ms of spin however long the pause.  PAUSE 300
+ * costs no CPU at all; PAUSE 5 keeps the accuracy a program expects.
+ *
+ * usleep may return early on a signal, so the sleep is a loop against
+ * a deadline rather than a single call.
+ */
 void mm_pause(MMFLOAT ms)
 {
 #if defined(MM_FCC) || defined(MM_HOSTED)
-    MMINTEGER end = mm_us_now() + (MMINTEGER)(ms * 1000.0);
+    MMINTEGER end;
+    MMINTEGER left;
+
     if (ms < 0) return;
+    end = mm_us_now() + (MMINTEGER)(ms * 1000.0);
+    for (;;) {
+        left = end - mm_us_now();
+        if (left < 100000L)             /* under a decisecond: spin it */
+            break;
+        usleep((unsigned long)(left / 100000L) * 100000UL);
+    }
     while (mm_us_now() < end) { }
 #elif defined(_POSIX_C_SOURCE) && !defined(_WIN32)
     struct timespec ts;
@@ -3204,7 +3235,59 @@ void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
     }
 }
 
+/*
+ * ---- GPIO ----------------------------------------------------------
+ *
+ * ONE primitive, deliberately.  SETPIN and PIN are shaped in
+ * mmb_gpio.h, where they are static functions the compiler discards
+ * from a program that does not use them; everything that has to be
+ * here is the crossing itself, because the on-board cc has no ioctl.
+ *
+ * /dev/gpio is opened once and kept: a pin toggled in a loop should
+ * cost one syscall, not three.
+ *
+ * No claiming, and none needed.  The kernel is non-preemptive so this
+ * ioctl is atomic against other processes, and the driver reaches the
+ * hardware through the RP2350's atomic set/clear registers, so two
+ * programs on two pins cannot disturb each other.  Measured, on GP2
+ * and GP3, before any of this was written.
+ */
+static int mm_gpio_fd = -2;             /* -2 = not tried yet */
+
+MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
+{
+    struct { unsigned char pin, val; } gr;
+    int r;
+
+    if (mm_gpio_fd == -2)
+        mm_gpio_fd = open("/dev/gpio", O_RDWR);
+    if (mm_gpio_fd < 0)
+        return -1;
+    gr.pin = (unsigned char)pin;
+    gr.val = (unsigned char)val;
+    switch (op) {
+    case MM_GPIO_DIR:
+        r = ioctl(mm_gpio_fd, MM_GPIOC_SETRW, &gr);
+        break;
+    case MM_GPIO_PUT:
+        r = ioctl(mm_gpio_fd, MM_GPIOC_SET, &gr);
+        break;
+    default:
+        return ioctl(mm_gpio_fd, MM_GPIOC_GETBYTE, &gr);
+    }
+    return r ? -1 : 0;
+}
+
 #else   /* host: no display, but translated programs must still run */
+
+/* No pins either.  Silent, like everything else that touches hardware
+ * here, so a program using SETPIN and PIN runs under the gates: a read
+ * answers 0 rather than failing. */
+MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
+{
+    (void)op; (void)pin; (void)val;
+    return 0;
+}
 
 /* With no screen to draw on, PRINT stays on the console and @(x,y)
  * remembers nothing - so a translated program produces the same text

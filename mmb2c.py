@@ -94,7 +94,7 @@ BUILTINS = {
     'CHOICE': (3, 3), 'BOUND': (1, 2), 'TRIM$': (1, 3), 'FIELD$': (2, 4),
     'DATETIME$': (1, 1), 'DAY$': (1, 1), 'EPOCH': (1, 1),
     'BIN2STR$': (2, 3), 'STR2BIN': (2, 3), 'RGB': (1, 3), 'MATH': (1, 1),
-    'PIXEL': (2, 2), 'MAP': (1, 1),
+    'PIXEL': (2, 2), 'MAP': (1, 1), 'PIN': (1, 1),
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0),
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
@@ -423,6 +423,7 @@ class Conv(object):
         self.tmp_used = False
         self.uses_clear = False
         self.uses_gfx = False
+        self.uses_gpio = False
         # depth of single-line IF bodies being emitted: END SUB means
         # "return now" in there, not "the routine ends here"
         self.inline = 0
@@ -1181,6 +1182,11 @@ class Conv(object):
             # is what a program must ask for to land on that entry.
             # Unaffected by remapping, as MMBasic's fun_map is.
             return ('mm_map_get(%s)' % n(0), TY_I)
+        if up == 'PIN':
+            # PIN(n) - the level on a pin set to DIN.  The assigning
+            # form PIN(n) = v is a statement.
+            self.uses_gpio = True
+            return ('mmg_pin_get(%s)' % n(0), TY_I)
         self.err("built-in %s() is not supported yet" % up)
 
     # -- built-ins whose arguments are not ordinary expressions ----------
@@ -2398,6 +2404,39 @@ class Conv(object):
             self.uses_gfx = True
             self.emit('mmg_text(%s, %s, %s, %s, %s, %s, %s, %s);'
                       % (x, y, s, just, font, scale, fc, bc))
+            return
+        if up == 'SETPIN':
+            # SETPIN pin, DIN|DOUT
+            #
+            # The pin is the GPIO number, not MMBasic's connector-pin
+            # numbering: the GPIO number is what the PC3 schematic, the
+            # kernel and every other tool on this machine use, and a
+            # second numbering for one statement would confuse more
+            # than the incompatibility does.
+            self.i += 1
+            pin = self.as_int(self.expr())
+            self.expect_op(',')
+            if self.accept_kw('DOUT'):
+                mode = 'MMG_PIN_DOUT'
+            elif self.accept_kw('DIN'):
+                mode = 'MMG_PIN_DIN'
+            else:
+                self.err("SETPIN takes DIN or DOUT")
+            self.uses_gpio = True
+            self.emit('mmg_setpin(%s, %s);' % (pin, mode))
+            return
+        if up == 'PIN' and self.is_op('(', 1):
+            # PIN(n) = value.  The reading form is a function, handled
+            # in the expression parser; a statement starting with PIN
+            # can only be the assignment.
+            self.i += 1
+            self.expect_op('(')
+            pin = self.as_int(self.expr())
+            self.expect_op(')')
+            self.expect_op('=')
+            val = self.as_int(self.expr())
+            self.uses_gpio = True
+            self.emit('mmg_pin_put(%s, %s);' % (pin, val))
             return
         if up == 'MAP':
             # MAP(n) = colour     collect one entry
@@ -3962,6 +4001,8 @@ class Conv(object):
         # uses any of them, and the compiler sorts out which.
         if self.uses_gfx:
             wr('#include "mmb_gfx.h"\n')
+        if self.uses_gpio:
+            wr('#include "mmb_gpio.h"\n')
         wr('#include <math.h>\n')
         wr('#include <string.h>\n')
         wr('#include <stdlib.h>\n\n')

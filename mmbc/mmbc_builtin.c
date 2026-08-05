@@ -287,6 +287,12 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
 
         return mkval(sfmt("mm_pixel_get(%s, %s)", a0, a1), TY_I);
     }
+    if (strcmp(up, "PIN") == 0) {
+        /* PIN(n) - the level on a pin set to DIN.  The assigning form
+           PIN(n) = v is a statement. */
+        cv.uses_gpio = 1;
+        return mkval(sfmt("mmg_pin_get(%s)", n(0)), TY_I);
+    }
     if (strcmp(up, "MAP") == 0) {
         /* MAP(n) - the colour entry n stands for by default, which is
            what a program must ask for to land on that entry.

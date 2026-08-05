@@ -8,5 +8,5 @@
 M=$(cd "$(dirname "$0")/.." && pwd)
 FCC=${FCC:-/home/peter/src/FUZIX/Applications/CC}
 
-cp "$M/mmb_runtime.c" "$M/mmb_runtime.h" "$M/mmb_gfx.h" "$FCC/"
-echo "synced mmb_runtime.c mmb_runtime.h mmb_gfx.h -> $FCC"
+cp "$M/mmb_runtime.c" "$M/mmb_runtime.h" "$M/mmb_gfx.h" "$M/mmb_gpio.h" "$FCC/"
+echo "synced mmb_runtime.c mmb_runtime.h mmb_gfx.h mmb_gpio.h -> $FCC"
