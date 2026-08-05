@@ -324,6 +324,9 @@ void mm_run_arg  (const char *mmstr);
 void mm_run_arg_i(MMINTEGER v);
 void mm_run_arg_f(MMFLOAT v);
 MMINTEGER mm_run_exec(void);
+/* Start it and do NOT wait - PLAY MP3, where the music has to carry on
+ * while the BASIC program does.  Returns the pid. */
+MMINTEGER mm_run_bg(void);
 void mm_timer_set(MMFLOAT ms);           /* TIMER = n, milliseconds    */
 void mm_set_date(const char *d);         /* DATE$ =                    */
 void mm_set_time(const char *t);         /* TIME$ =                    */

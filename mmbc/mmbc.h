@@ -232,6 +232,7 @@ struct conv {
     int uses_clear;
     int uses_gfx;
     int uses_gpio;
+    int uses_play;              /* PLAY: emit the volume it remembers */
     /* set by global_decls when the program has any array or string:
      * main() then has to allocate the block they live in */
     int heap_used;

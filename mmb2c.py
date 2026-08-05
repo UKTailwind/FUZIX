@@ -424,6 +424,7 @@ class Conv(object):
         self.uses_clear = False
         self.uses_gfx = False
         self.uses_gpio = False
+        self.uses_play = False
         # depth of single-line IF bodies being emitted: END SUB means
         # "return now" in there, not "the routine ends here"
         self.inline = 0
@@ -2342,6 +2343,44 @@ class Conv(object):
                 first = False
             self.emit('mm_run_exec();')
             return
+        if up == 'PLAY':
+            # PLAY MP3 f$          play a file, in the BACKGROUND
+            # PLAY VOLUME n        0-100, remembered for later PLAYs
+            #
+            # MMBasic's PLAY VOLUME takes a level per channel; this
+            # takes one, because the volume reaches playmp3 as an
+            # argument and playmp3 applies it to both.  Left and right
+            # separately would mean a second argument that does nothing
+            # yet, which is worse than not offering it.
+            #
+            # MP3 does NOT wait.  playmp3 is a separate process feeding
+            # the kernel's ring, so the BASIC program carries on while
+            # the music plays - the thing MMBasic needs checkWAVinput()
+            # in its interpreter loop to manage, and which costs us
+            # nothing.  That also means mm_run_exec cannot be used: it
+            # waits.
+            self.uses_play = True
+            if self.is_kw('VOLUME', 1):
+                self.i += 2
+                v = self.expr()
+                if v[1] == TY_S:
+                    self.err('PLAY VOLUME wants a number')
+                self.emit('mm_play_volume = (int)(%s);' % v[0])
+                self.emit('if (mm_play_volume < 0) mm_play_volume = 0;')
+                self.emit('if (mm_play_volume > 100) mm_play_volume = 100;')
+                return
+            if self.is_kw('MP3', 1):
+                self.i += 2
+                v = self.expr()
+                if v[1] != TY_S:
+                    self.err('PLAY MP3 wants a file name')
+                self.emit('mm_run_begin();')
+                self.emit('mm_run_arg(%s);' % c_string_literal('playmp3'))
+                self.emit('mm_run_arg(%s);' % v[0])
+                self.emit('mm_run_arg_i(mm_play_volume);')
+                self.emit('mm_run_bg();')
+                return
+            self.err('only PLAY MP3 and PLAY VOLUME are translated')
         if up == 'CIRCLE':
             # CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
             # The geometry is mmb_gfx.h's, not the runtime's.  MMBasic
@@ -4006,6 +4045,13 @@ class Conv(object):
         wr('#include <math.h>\n')
         wr('#include <string.h>\n')
         wr('#include <stdlib.h>\n\n')
+        # PLAY VOLUME sets this and every later PLAY passes it on,
+        # which is what makes the volume stick across statements the
+        # way MMBasic's does.  Emitted only when the program plays
+        # something, so nothing else carries it - the same bargain as
+        # the two headers above.
+        if self.uses_play:
+            wr('static int mm_play_volume = 80;\n\n')
         wr('/* ---- constants ---- */\n')
         names = list(self.globals.keys())
         names.sort()

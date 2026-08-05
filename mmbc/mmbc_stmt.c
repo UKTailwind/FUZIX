@@ -490,6 +490,48 @@ void statement_inner(void)
         emit("mm_run_exec();");
         return;
     }
+    if (strcmp(up, "PLAY") == 0) {
+        /* PLAY MP3 f$          play a file, in the BACKGROUND
+           PLAY VOLUME n        0-100, remembered for later PLAYs
+
+           MMBasic's PLAY VOLUME takes a level per channel; this takes
+           one, because the volume reaches playmp3 as an argument and
+           playmp3 applies it to both.  Left and right separately would
+           mean a second argument that does nothing yet, which is worse
+           than not offering it.
+
+           MP3 does NOT wait.  playmp3 is a separate process feeding the
+           kernel's ring, so the BASIC program carries on while the
+           music plays - the thing MMBasic needs checkWAVinput() in its
+           interpreter loop to manage, and which costs us nothing.  That
+           also means mm_run_exec cannot be used: it waits. */
+        cv.uses_play = 1;
+        if (is_kw("VOLUME", 1)) {
+            struct val v;
+            cv.i += 2;
+            v = expr();
+            if (v.ty == TY_S)
+                cv_err("PLAY VOLUME wants a number");
+            emit(sfmt("mm_play_volume = (int)(%s);", v.code));
+            emit("if (mm_play_volume < 0) mm_play_volume = 0;");
+            emit("if (mm_play_volume > 100) mm_play_volume = 100;");
+            return;
+        }
+        if (is_kw("MP3", 1)) {
+            struct val v;
+            cv.i += 2;
+            v = expr();
+            if (v.ty != TY_S)
+                cv_err("PLAY MP3 wants a file name");
+            emit("mm_run_begin();");
+            emit(sfmt("mm_run_arg(%s);", c_string_literal("playmp3")));
+            emit(sfmt("mm_run_arg(%s);", v.code));
+            emit("mm_run_arg_i(mm_play_volume);");
+            emit("mm_run_bg();");
+            return;
+        }
+        cv_err("only PLAY MP3 and PLAY VOLUME are translated");
+    }
     if (strcmp(up, "CIRCLE") == 0) {
         /* CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
            The geometry is mmb_gfx.h's, not the runtime's.  MMBasic

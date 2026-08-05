@@ -2478,6 +2478,12 @@ MMINTEGER mm_run_exec(void)
     return -1;
 }
 
+MMINTEGER mm_run_bg(void)
+{
+    mm_error("running a program needs the native runtime");
+    return -1;
+}
+
 #else
 
 #include <sys/types.h>
@@ -2539,6 +2545,45 @@ MMINTEGER mm_run_exec(void)
         return -1;
     }
     return 0;
+}
+
+/*
+ * The same argv, started and NOT waited for: PLAY MP3 returns at once
+ * and the music carries on while the BASIC program runs.  That is the
+ * whole point of playback being a separate process - MMBasic has to
+ * refill its audio buffers from the interpreter's idle loop, and this
+ * does not.
+ *
+ * The child is left for init to reap.  A BASIC program has no job
+ * control and nothing to wait on; the alternative is carrying a SIGCHLD
+ * handler in every translated program to collect one pid.
+ *
+ * Returns the pid so a future PLAY STOP has something to signal.
+ */
+MMINTEGER mm_run_bg(void)
+{
+    pid_t pid;
+
+    if (mm_run_nargs == 0) {
+        mm_error("no program named");
+        return -1;
+    }
+    mm_run_argv[mm_run_nargs] = NULL;
+    fflush(stdout);
+#if defined(MM_PC3) || defined(__FUZIX__)
+    sync();                     /* fork swaps us out - see above */
+#endif
+
+    pid = fork();
+    if (pid < 0) {
+        mm_error("cannot start a program");
+        return -1;
+    }
+    if (pid == 0) {
+        execvp(mm_run_argv[0], mm_run_argv);
+        _exit(127);
+    }
+    return (MMINTEGER)pid;
 }
 
 #endif

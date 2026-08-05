@@ -310,6 +310,12 @@ void conv_write(FILE *f)
     fprintf(f, "#include <math.h>\n");
     fprintf(f, "#include <string.h>\n");
     fprintf(f, "#include <stdlib.h>\n\n");
+    /* PLAY VOLUME sets this and every later PLAY passes it on, which is
+       what makes the volume stick across statements the way MMBasic's
+       does.  Emitted only when the program plays something, so nothing
+       else carries it - the same bargain as the two headers above. */
+    if (cv.uses_play)
+        fprintf(f, "static int mm_play_volume = 80;\n\n");
     fprintf(f, "/* ---- constants ---- */\n");
     names = global_names_sorted(&n);
     for (k = 0; k < n; k++) {
