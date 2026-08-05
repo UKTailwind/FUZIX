@@ -74,6 +74,10 @@ echo "--- installing"
 	# the geometry primitives, included only by a program that draws:
 	# static functions, so cc1 drops the ones it does not call
 	echo "get $CC/mmb_gfx.h mmb_gfx.h"
+	# SETPIN and PIN, on the same terms - and easy to forget: a card
+	# without this compiles every program that draws and fails only on
+	# the ones that touch a pin, long after the change that added it.
+	echo "get $CC/mmb_gpio.h mmb_gpio.h"
 	for f in "$CC"/hosttest/fcc-include/*.h; do
 		echo "get $f $(basename "$f")"
 	done

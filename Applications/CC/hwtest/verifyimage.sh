@@ -77,6 +77,7 @@ done
 echo "--- the headers the generated C includes"
 same /usr/lib/cc/include/mmb_runtime.h "$R/Applications/CC/mmb_runtime.h"
 same /usr/lib/cc/include/mmb_gfx.h     "$R/Applications/CC/mmb_gfx.h"
+same /usr/lib/cc/include/mmb_gpio.h    "$R/Applications/CC/mmb_gpio.h"
 
 echo "--- /root/cc"
 list /root/cc | sed -n '3,$p' | awk '{ printf "  %-20s %s\n", $NF, $(NF-5) }'
