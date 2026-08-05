@@ -317,6 +317,19 @@ int plt_dev_ioctl(uarg_t request, char *data)
                                           : display_gfx_map((uint32_t)gt.bg),
                                 gt.str, (int)gt.len);
     }
+    if (request == PICOIOC_LIBM)
+    {
+        /* The address of the table, for a program to call through.
+         * Nothing is copied and nothing is validated beyond the write:
+         * what comes back is a kernel flash address, and the caller
+         * checks the magic and version before trusting it. */
+        extern const struct pc3_libm *plt_libm(void);
+        const void *p = (const void *)plt_libm();
+
+        if (uput(&p, data, sizeof(p)))
+            return -1;
+        return 0;
+    }
     if (request == GFXIOC_MAP)
     {
         /* index and colour both fit the argument: 24 bits of RGB888 and

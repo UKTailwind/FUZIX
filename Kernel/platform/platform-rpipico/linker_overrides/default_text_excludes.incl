@@ -98,6 +98,20 @@
        reads them from flash once.  Measured below. ---- */
 *console.c.o(.text*)
 
+/* ---- the shared maths library.
+ *
+ * This is here for USERLAND, not for the kernel, which does no
+ * floating point of its own: libm_table.c exports it so that every
+ * program can call one copy instead of linking its own 13K (see that
+ * file).  In RAM it overflowed the region by 14,432 bytes; in flash it
+ * costs nothing that matters, which is the entire point of sharing it.
+ *
+ * Nothing on the scanout path or in an interrupt calls these, and a
+ * BASIC program's sin() is not on a deadline. ---- */
+*libm.a:*(.text*)
+*double_math.c.o(.text*)
+*libm_table.c.o(.text*)
+
 /* ---- the font table: two accessors, each called once per string
        rather than once per pixel.  The fonts themselves are `const' and
        so were never in RAM to begin with - that is the whole reason all

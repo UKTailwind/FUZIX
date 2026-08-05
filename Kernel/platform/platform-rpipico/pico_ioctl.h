@@ -202,6 +202,39 @@ struct gfx_fontinfo {
 };
 #define GFXIOC_FONTINFO 0x001D
 
+/* The shared maths library.  data -> a void * that receives the
+ * address of the table below; from there a program CALLS the entries
+ * directly, because there is no MMU here and kernel flash is in the
+ * same address space.  See libm_table.c for why, and for the errno
+ * contract - these do not report domain errors.
+ *
+ * Check the magic and the version before using it.  An old binary on a
+ * new kernel must fail rather than call the wrong slot. */
+#define PICOIOC_LIBM  0x0020
+
+#define PC3_LIBM_MAGIC   0x50433350UL   /* "PC3P" */
+#define PC3_LIBM_VERSION 1
+#define PC3_LIBM_NFN     19
+
+/* The order IS the ABI - append only. */
+enum {
+	PC3_LIBM_SIN = 0, PC3_LIBM_COS,   PC3_LIBM_TAN,
+	PC3_LIBM_ASIN,    PC3_LIBM_ACOS,  PC3_LIBM_ATAN,
+	PC3_LIBM_SINH,    PC3_LIBM_COSH,  PC3_LIBM_TANH,
+	PC3_LIBM_SQRT,    PC3_LIBM_EXP,   PC3_LIBM_LOG,
+	PC3_LIBM_LOG10,   PC3_LIBM_FLOOR, PC3_LIBM_CEIL,
+	PC3_LIBM_FABS,
+	/* two-argument from here */
+	PC3_LIBM_POW,     PC3_LIBM_ATAN2, PC3_LIBM_FMOD
+};
+
+struct pc3_libm {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t count;
+	void *fn[PC3_LIBM_NFN];
+};
+
 /* MMBasic's MAP - an arbitrary colour per palette entry, where
  * GFXIOC_PAL only picks from a fixed set of physical colours.
  *

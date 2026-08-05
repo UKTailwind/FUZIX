@@ -88,6 +88,7 @@ add_executable(fuzix
 	devpsram.c
 	display.c
 	fonts.c
+	libm_table.c
 	ds3231.c
 	kbd_decode.c
 	usbkbd.c
@@ -154,7 +155,7 @@ target_link_libraries(fuzix
 )
 
 pico_set_float_implementation(fuzix none)
-pico_set_double_implementation(fuzix none)
+pico_set_double_implementation(fuzix pico)
 pico_add_linker_script_override_path(fuzix ${CMAKE_CURRENT_LIST_DIR}/linker_overrides)
 pico_add_extra_outputs(fuzix)
 

@@ -104,9 +104,58 @@ static void mem_init(void)
 	}
 }
 #else
+/*
+ *	SIZED TO THE PROGRAM, not to MEMSIZE.
+ *
+ *	This used to be a static 49,152-byte array, and it was the single
+ *	biggest thing in a running bcrun: 154,469 bytes of process image,
+ *	of which 48K was this whether the program needed it or not.  Two
+ *	BASIC programs then nearly filled the 340K pool.
+ *
+ *	Almost none of it was wanted.  On the board the HEAP is in PSRAM
+ *	(heap_init below), so this has to hold only the null guard, the
+ *	program's data and bss, and the stack - a few hundred bytes plus
+ *	STACKROOM for a program that blinks an LED.
+ *
+ *	malloc, so it grows the process through sbrk -> brk_extend ->
+ *	pagemap_realloc, which is the same path BBC BASIC uses to size
+ *	its workspace.  MEMSIZE survives as the CAP.
+ */
+#ifdef MM_PC3
+static unsigned char *mem;		/* sized in load(), see there */
+#else
+/* Everywhere else the heap is still in here, so it stays the full
+   fixed size - see the note in load(). */
 static unsigned char mem[MEMSIZE] __attribute__((aligned(8)));
+#endif
 #define mem_init()	do { } while (0)
 #endif
+
+/*
+ *	How much of mem[] was actually obtained.  MEMTOP is derived from
+ *	it rather than from MEMSIZE, because the two are no longer the
+ *	same thing.
+ */
+static unsigned long memsize = MEMSIZE;
+
+/*
+ *	Spare room above everything else, so that a PSRAM heap which does
+ *	not answer leaves the program something rather than nothing.  On
+ *	the board heap_init moves the heap out to PSRAM and this is never
+ *	touched.
+ */
+#define MEM_SLACK	2048
+
+/*
+ *	The by-ref and string-temp pools mmrt_reserve carves out of VM
+ *	memory between bss and the heap.  Defined with them in
+ *	bcrun_mm.c, which is included at the end of this file - sizing
+ *	mem[] has to know about them, and the alternative was repeating
+ *	MM_TMPN * MM_STRSZ here and watching the two drift apart.  It
+ *	was 4,240 bytes against a 4,096-byte guess, which cost a board
+ *	round trip to discover.
+ */
+static unsigned long mmrt_bytes(void);
 static struct bc_header h;
 static struct bc_sym *sym;
 static char *strtab;
@@ -193,7 +242,7 @@ static void fault(const char *msg)
  *	compare and branch on every load and store in generated code.
  */
 #define MEMBASE		((unsigned long)(uintptr_t)mem)
-#define MEMTOP		(MEMBASE + MEMSIZE)
+#define MEMTOP		(MEMBASE + memsize)
 
 static unsigned char *vptr(unsigned long a)
 {
@@ -1455,32 +1504,111 @@ static int64_t bc_strtoll(const char *s, char **end, int base, int uns)
  *	program spends its time in here and in the string runtime, not in
  *	the bytecode.
  */
-static const struct mfn {
+/*
+ *	Not const: on the board these are filled from the kernel's shared
+ *	libm at startup (mfns_share).
+ *
+ *	And EMPTY there, which is the point.  Naming sin here would make
+ *	the linker keep bcrun's own copy of it and of the range reducers
+ *	behind it - __rem_pio2 and __rem_pio2_large are 2.9K between them
+ *	- in every process, for functions the kernel already has and
+ *	executes faster.  Left null, nothing references them and they are
+ *	dropped.
+ *
+ *	Off the board there is no kernel to ask, so the local ones stay.
+ */
+#ifdef MM_PC3
+#define MFN(f)	NULL
+#else
+#define MFN(f)	f
+#endif
+
+static struct mfn {
 	const char *name;
 	double (*f1)(double);
 	double (*f2)(double, double);
 } mfns[] = {
-	{ "sin",   sin,   NULL  },
-	{ "cos",   cos,   NULL  },
-	{ "tan",   tan,   NULL  },
-	{ "asin",  asin,  NULL  },
-	{ "acos",  acos,  NULL  },
-	{ "atan",  atan,  NULL  },
-	{ "sinh",  sinh,  NULL  },
-	{ "cosh",  cosh,  NULL  },
-	{ "tanh",  tanh,  NULL  },
-	{ "sqrt",  sqrt,  NULL  },
-	{ "exp",   exp,   NULL  },
-	{ "log",   log,   NULL  },
-	{ "log10", log10, NULL  },
-	{ "floor", floor, NULL  },
-	{ "ceil",  ceil,  NULL  },
-	{ "fabs",  fabs,  NULL  },
-	{ "pow",   NULL,  pow   },
-	{ "atan2", NULL,  atan2 },
-	{ "fmod",  NULL,  fmod  },
+	{ "sin",   MFN(sin),   NULL  },
+	{ "cos",   MFN(cos),   NULL  },
+	{ "tan",   MFN(tan),   NULL  },
+	{ "asin",  MFN(asin),  NULL  },
+	{ "acos",  MFN(acos),  NULL  },
+	{ "atan",  MFN(atan),  NULL  },
+	{ "sinh",  MFN(sinh),  NULL  },
+	{ "cosh",  MFN(cosh),  NULL  },
+	{ "tanh",  MFN(tanh),  NULL  },
+	{ "sqrt",  MFN(sqrt),  NULL  },
+	{ "exp",   MFN(exp),   NULL  },
+	{ "log",   MFN(log),   NULL  },
+	{ "log10", MFN(log10), NULL  },
+	{ "floor", MFN(floor), NULL  },
+	{ "ceil",  MFN(ceil),  NULL  },
+	{ "fabs",  MFN(fabs),  NULL  },
+	{ "pow",   NULL,  MFN(pow) },
+	{ "atan2", NULL,  MFN(atan2) },
+	{ "fmod",  NULL,  MFN(fmod) },
 	{ NULL,    NULL,  NULL  }
 };
+
+#if defined(MM_PC3) && !defined(MM_HOSTED_ONLY)
+/*
+ *	Point the maths table at the kernel's shared copy.
+ *
+ *	The kernel exports one libm from flash (libm_table.c) so that
+ *	every program could call it instead of linking 13K of its own.
+ *	Whether that is a good idea is a question about SPEED, because
+ *	the shared copy runs from XIP flash: a tight sin/cos loop
+ *	measured 2.7x slower than a program's own RAM copy.  A real
+ *	program does other work between maths calls, so the honest
+ *	number comes from a real program.
+ *
+ *	Hence the switch rather than a decision: BCRUN_SHAREDM=1 makes
+ *	the SAME binary dispatch to the kernel's copy, so the two can be
+ *	compared without changing anything else.  Off, nothing moves.
+ */
+#define PICOIOC_LIBM	0x0020
+#define PC3_LIBM_MAGIC	0x50433350UL
+#define PC3_LIBM_VERSION 1
+
+struct pc3_libm_v {
+	unsigned long magic;
+	unsigned short version, count;
+	void *fn[19];
+};
+
+static void mfns_share(void)
+{
+	const struct pc3_libm_v *t;
+	void *p = 0;
+	unsigned i;
+	int fd;
+
+	fd = sys_open();
+	if (fd < 0 || ioctl(fd, PICOIOC_LIBM, &p) < 0)
+		p = NULL;
+	t = (const struct pc3_libm_v *)p;
+	/*
+	 * Fatal, not a fallback.  mfns[] is empty in this build, so there
+	 * is nothing to fall back TO - and even if there were, quietly
+	 * using it would hide the 21% the shared copy is worth (eclipse
+	 * 2.82s -> 2.23s) behind a program that merely still works.
+	 */
+	if (t == NULL || t->magic != PC3_LIBM_MAGIC ||
+	    t->version != PC3_LIBM_VERSION || t->count != 19) {
+		fprintf(stderr, "bcrun: this kernel has no shared libm "
+				"(needs PICOIOC_LIBM v%d)\n", PC3_LIBM_VERSION);
+		exit(1);
+	}
+	/* mfns[] is in the table's order by construction - the sixteen
+	   one-argument functions, then the three two-argument ones. */
+	for (i = 0; i < 16; i++)
+		mfns[i].f1 = (double (*)(double))t->fn[i];
+	for (i = 16; i < 19; i++)
+		mfns[i].f2 = (double (*)(double, double))t->fn[i];
+}
+#else
+#define mfns_share()	do { } while (0)
+#endif
 
 static int lib_math_find(const char *name)
 {
@@ -1970,6 +2098,42 @@ static void load(const char *path)
 	/* Absolute from here down: every program address the fixups
 	   produce comes through symval(), which adds one of these two, so
 	   rebasing them relocates the whole program in one place. */
+#if defined(MM_PC3) && UINTPTR_MAX <= 0xFFFFFFFFu
+	/*
+	 * Now that the header is read, ask for exactly what this program
+	 * needs.  The +8 covers the alignment bssbase applies below; the
+	 * slack is the heap that is only used if PSRAM does not answer.
+	 *
+	 * MM_PC3 ONLY, and that is the whole basis of it: there the heap
+	 * is moved out to PSRAM by heap_init, so mem[] holds nothing but
+	 * the guard, data, bss and the stack.  Everywhere else - the
+	 * qemu harness, the development host - the heap is still IN
+	 * mem[], and sizing it to data+bss+stack leaves a program with
+	 * four kilobytes of heap.  Which is exactly what happened: 16 of
+	 * 17 qemu tests failed the moment this was not conditional.
+	 */
+	{
+		unsigned long need = NULLGUARD + h.h_data + 8 + h.h_bss
+				     + mmrt_bytes() + STACKROOM + MEM_SLACK;
+		const char *e = getenv("BCRUN_MEM");
+
+		if (e)
+			need = (unsigned long)atoi(e) << 10;
+		if (need > MEMSIZE)
+			need = MEMSIZE;
+		mem = malloc(need + 8);
+		if (mem == NULL) {
+			fprintf(stderr, "bcrun: no room for a %lu byte "
+					"program space\n", need);
+			exit(1);
+		}
+		/* 8-aligned by hand: cc2 aligns objects as offsets within
+		   the segments, which only means anything if the base is
+		   aligned too - an odd base gave a SIGBUS on ARM once. */
+		mem = (unsigned char *)(((uintptr_t)mem + 7) & ~(uintptr_t)7);
+		memsize = need;
+	}
+#endif
 	database = MEMBASE + NULLGUARD;
 	/* Rounded up: cc2 aligns objects as offsets WITHIN bss, which
 	   only means anything if the segment base is itself aligned.
@@ -2959,6 +3123,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	mem_init();
+	mfns_share();
 	force_bytecode = getenv("BCRUN_BYTECODE") != NULL;
 	prof_on = getenv("BCRUN_PROF") != NULL;
 	if (prof_on || getenv("BCRUN_SITES"))

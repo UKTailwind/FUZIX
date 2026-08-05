@@ -51,3 +51,10 @@
 *(.rodata.TinyFont*)
 *(.rodata.font8x10*)
 *(.rodata.font_table*)
+
+/* The maths library's tables, and the export table itself.  Same
+ * argument as the fonts: read-only, read at human speed, and shared by
+ * every program rather than linked into each one. */
+*libm.a:*(.rodata*)
+*double_math.c.o(.rodata*)
+*(.rodata.libm_table*)

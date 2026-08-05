@@ -634,6 +634,18 @@ static void (*mm_wrap_lookup(const char *name))(void)
  *	first: it holds doubles and the base is rounded to 8).  Returns
  *	the first address the heap may use.
  */
+/*
+ *	What mmrt_reserve will want, for whoever has to size mem[] before
+ *	this file is reached.  Always counted rather than only when the
+ *	program imports an mm_* name: it is four kilobytes, every
+ *	translated BASIC program imports one, and a sizing rule that
+ *	depends on the symbol table is a rule that will be wrong once.
+ */
+static unsigned long mmrt_bytes(void)
+{
+	return MMRT_BYREFSZ + MMRT_POOLSZ;
+}
+
 static unsigned long mmrt_reserve(unsigned long base)
 {
 	unsigned long i;
