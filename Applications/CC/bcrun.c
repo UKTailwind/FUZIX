@@ -1843,6 +1843,219 @@ static void lib_puts(void)
 }
 
 /*
+ *	The rest of the runtime, converted from libcall's old strcmp
+ *	chain into bindable functions.  The chain never memoised - only
+ *	lib_fast/math/eqop did - so every malloc or rand paid ~30 failed
+ *	strcmps per CALL, and the names had to stay resident to pay them.
+ *	As table entries they bind once (at load, see lib_bind_all), the
+ *	symbol and string tables can be freed, and an unknown name is
+ *	refused before the program runs instead of mid-run.
+ */
+static void lc_rewind(void)
+{
+	int fd = fh(arg(0));
+	if (fd >= 0) {
+		lseek(fd, 0, SEEK_SET);
+		file_eof[fd] = 0;
+	}
+	A = 0;
+}
+
+static void lc_fflush(void)
+{
+	fflush(stdout);
+	A = 0;
+}
+
+static void lc_remove(void)
+{
+	A = unlink(getstr((unsigned long)arg(0)));
+}
+
+static void lc_rename(void)
+{
+	A = rename(getstr((unsigned long)arg(0)),
+		   getstr((unsigned long)arg(1)));
+}
+
+static void lc_exit(void)
+{
+	exit((int)arg(0));
+}
+
+static void lc_malloc(void)
+{
+	A = lib_malloc((unsigned long)arg(0));
+}
+
+static void lc_calloc(void)
+{
+	unsigned long n = (unsigned long)arg(0) * (unsigned long)arg(1);
+	A = lib_malloc(n);
+	if (A)
+		memset(vptr(A), 0, n);
+}
+
+static void lc_free(void)
+{
+	lib_free((unsigned long)arg(0));
+	A = 0;
+}
+
+static void lc_realloc(void)
+{
+	unsigned long old = (unsigned long)arg(0);
+	unsigned long n = (unsigned long)arg(1);
+	long np = lib_malloc(n);
+	if (np && old) {
+		unsigned long osz = rd32(old - HDR) - HDR;
+		vcopy((unsigned long)np, old, osz < n ? osz : n);
+		lib_free(old);
+	}
+	A = np;
+}
+
+static void lc_atoi(void)
+{
+	A = atoi(getstr((unsigned long)arg(0)));
+}
+
+static void lc_atol(void)
+{
+	A = atol(getstr((unsigned long)arg(0)));
+}
+
+static void lc_atof(void)
+{
+	A = dput(atof(getstr((unsigned long)arg(0))));
+}
+
+static void lc_strtod(void)
+{
+	/* The end pointer the caller sees must be an address in the
+	   program's space, so it is rebuilt from the host one as an
+	   offset from the start of the string. */
+	unsigned long s = (unsigned long)arg(0);
+	unsigned long ep = (unsigned long)arg(1);
+	char *str = getstr(s), *end;
+	double d = strtod(str, &end);
+	if (ep)
+		wr32(ep, s + (unsigned long)(end - str));
+	A = dput(d);
+}
+
+/* Fuzix libc has no 64-bit strtoll, so parse here - one
+   implementation for every host. */
+static void lc_strtol_any(int uns)
+{
+	unsigned long s = (unsigned long)arg(0);
+	unsigned long ep = (unsigned long)arg(1);
+	int base = (int)arg(2);
+	char *str = getstr(s), *end;
+	A = bc_strtoll(str, &end, base, uns);
+	if (ep)
+		wr32(ep, s + (unsigned long)(end - str));
+}
+
+static void lc_strtol(void)  { lc_strtol_any(0); }
+static void lc_strtoul(void) { lc_strtol_any(1); }
+
+static void lc_abs(void)
+{
+	long v = arg(0);
+	A = v < 0 ? -v : v;
+}
+
+static void lc_llabs(void)
+{
+	long long v = argll(0);
+	A = v < 0 ? -v : v;
+}
+
+static void lc_rand(void)
+{
+	A = rand() & 0x7FFFFFFF;
+}
+
+static void lc_srand(void)
+{
+	srand((unsigned)arg(0));
+	A = 0;
+}
+
+static void lc_time(void)
+{
+	long t = (long)time(NULL);
+	if (arg(0))
+		wr32((unsigned long)arg(0), (unsigned long)t);
+	A = t;
+}
+
+static void lc_open(void)
+{
+	A = open(getstr((unsigned long)arg(0)), (int)arg(1), 0666);
+}
+
+static void lc_creat(void)
+{
+	A = creat(getstr((unsigned long)arg(0)), 0666);
+}
+
+static void lc_close(void)
+{
+	A = close((int)arg(0));
+}
+
+static void lc_read(void)
+{
+	unsigned long b = arg(1), n = arg(2);
+	if (VM_OOBN(b, n)) fault("bad address");
+	A = read((int)arg(0), vptr(b), n);
+}
+
+static void lc_write(void)
+{
+	unsigned long b = arg(1), n = arg(2);
+	if (VM_OOBN(b, n)) fault("bad address");
+	A = write((int)arg(0), vptr(b), n);
+}
+
+static void lc_lseek(void)
+{
+	A = lseek((int)arg(0), arg(1), (int)arg(2));
+}
+
+static void lc_unlink(void)
+{
+	A = unlink(getstr((unsigned long)arg(0)));
+}
+
+static void lc_adval(void)
+{
+	A = lib_adval((int)arg(0));
+}
+
+static void lc_time_us(void)
+{
+	/* 31 bits of the SDK's time_us_64, via the kernel. Falls back
+	 * to a host clock so the same program benchmarks on the
+	 * development machine as well as on the PC3. */
+	long t = lib_adval(-9);
+	if (t < 0) {
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		t = (long)((tv.tv_sec * 1000000L + tv.tv_usec)
+			   & 0x7FFFFFFF);
+	}
+	A = t;
+}
+
+static void lc_time_us64(void)
+{
+	A = lib_us64();
+}
+
+/*
  *	First-call binding.  libbind (function), mathbind (mfns index+1)
  *	and eqbind (parsed descriptor) memoise per symbol index, so the
  *	name is examined once per program run, not once per call - the
@@ -1867,197 +2080,95 @@ static const struct {
 	{ "fputs", lib_fputs }, { "feof", lib_feof },
 	{ "fseek", lib_fseek }, { "ftell", lib_ftell },
 	{ "putchar", lib_putchar }, { "puts", lib_puts },
+	{ "rewind", lc_rewind }, { "fflush", lc_fflush },
+	{ "remove", lc_remove }, { "rename", lc_rename },
+	{ "exit", lc_exit },
+	{ "malloc", lc_malloc }, { "calloc", lc_calloc },
+	{ "free", lc_free }, { "realloc", lc_realloc },
+	{ "atoi", lc_atoi }, { "atol", lc_atol }, { "atof", lc_atof },
+	{ "strtod", lc_strtod },
+	{ "strtol", lc_strtol }, { "strtoll", lc_strtol },
+	{ "strtoul", lc_strtoul }, { "strtoull", lc_strtoul },
+	{ "abs", lc_abs }, { "labs", lc_abs }, { "llabs", lc_llabs },
+	{ "rand", lc_rand }, { "srand", lc_srand }, { "time", lc_time },
+	{ "open", lc_open }, { "creat", lc_creat }, { "close", lc_close },
+	{ "read", lc_read }, { "write", lc_write }, { "lseek", lc_lseek },
+	{ "unlink", lc_unlink },
+	{ "adval", lc_adval }, { "time_us", lc_time_us },
+	{ "time_us64", lc_time_us64 },
 	{ NULL, NULL }
 };
 
 static unsigned char *mathbind;		/* symbol -> mfns index + 1 */
 static unsigned short *eqbind;		/* symbol -> eqop descriptor */
 
-static void libcall(unsigned idx)
+/*
+ *	Bind one library symbol into libbind/mathbind/eqbind by name.
+ *	Returns 0 for a name the runtime does not provide.  Called for
+ *	every symbol at load time (lib_bind_all) - after which the
+ *	symbol and string tables are freed - or lazily on first call
+ *	under BCRUN_LAZYBIND=1.
+ */
+static int lib_resolve(unsigned idx)
 {
-	const char *name;
+	const char *name = strtab + sym[idx].s_name;
 	unsigned i;
 	int mi;
-
-	if (idx >= h.h_nsym)
-		fault("bad library index");
-	if (libbind[idx]) {
-		libbind[idx]();
-		return;
-	}
-	if (mathbind[idx]) {
-		math_exec(mathbind[idx] - 1);
-		return;
-	}
-	if (eqbind[idx]) {
-		exec_eqop(eqbind[idx]);
-		return;
-	}
-	name = strtab + sym[idx].s_name;
+	unsigned d;
 
 	if (name[0] == 'm' && name[1] == 'm' && name[2] == '_') {
 		void (*fn)(void) = mm_wrap_lookup(name);
 		if (fn) {
 			libbind[idx] = fn;
-			fn();
-			return;
+			return 1;
 		}
 	}
 	for (i = 0; lib_fast[i].name; i++) {
 		if (!strcmp(lib_fast[i].name, name)) {
 			libbind[idx] = lib_fast[i].fn;
-			lib_fast[i].fn();
-			return;
+			return 1;
 		}
 	}
 	mi = lib_math_find(name);
 	if (mi >= 0) {
 		mathbind[idx] = mi + 1;
-		math_exec(mi);
-		return;
+		return 1;
 	}
+	d = parse_eqop(name);
+	if (d) {
+		eqbind[idx] = d;
+		return 1;
+	}
+	return 0;
+}
 
-	if (!strcmp(name, "rewind")) {
-		int fd = fh(arg(0));
-		if (fd >= 0) {
-			lseek(fd, 0, SEEK_SET);
-			file_eof[fd] = 0;
+static void libcall(unsigned idx)
+{
+	if (idx >= h.h_nsym)
+		fault("bad library index");
+	for (;;) {
+		if (libbind[idx]) {
+			libbind[idx]();
+			return;
 		}
-		A = 0;
-	} else if (!strcmp(name, "fflush")) {
-		fflush(stdout);
-		A = 0;
-	} else if (!strcmp(name, "remove")) {
-		A = unlink(getstr((unsigned long)arg(0)));
-	} else if (!strcmp(name, "rename")) {
-		A = rename(getstr((unsigned long)arg(0)),
-			   getstr((unsigned long)arg(1)));
-	} else if (!strcmp(name, "exit")) {
-		exit((int)arg(0));
-
-	/* --- memory --------------------------------------------------- */
-	} else if (!strcmp(name, "malloc")) {
-		A = lib_malloc((unsigned long)arg(0));
-	} else if (!strcmp(name, "calloc")) {
-		unsigned long n = (unsigned long)arg(0) * (unsigned long)arg(1);
-		A = lib_malloc(n);
-		if (A)
-			memset(vptr(A), 0, n);
-	} else if (!strcmp(name, "free")) {
-		lib_free((unsigned long)arg(0));
-		A = 0;
-	} else if (!strcmp(name, "realloc")) {
-		unsigned long old = (unsigned long)arg(0);
-		unsigned long n = (unsigned long)arg(1);
-		long np = lib_malloc(n);
-		if (np && old) {
-			unsigned long osz = rd32(old - HDR) - HDR;
-			vcopy((unsigned long)np, old, osz < n ? osz : n);
-			lib_free(old);
+		if (mathbind[idx]) {
+			math_exec(mathbind[idx] - 1);
+			return;
 		}
-		A = np;
-
-	/* strings, memory and mathematics bind through the tables above */
-
-	/* --- conversion ----------------------------------------------- */
-	} else if (!strcmp(name, "atoi")) {
-		A = atoi(getstr((unsigned long)arg(0)));
-	} else if (!strcmp(name, "atol")) {
-		A = atol(getstr((unsigned long)arg(0)));
-	} else if (!strcmp(name, "atof")) {
-		A = dput(atof(getstr((unsigned long)arg(0))));
-	} else if (!strcmp(name, "strtod")) {
-		/* The end pointer the caller sees must be an address in the
-		   program's space, so it is rebuilt from the host one as an
-		   offset from the start of the string. */
-		unsigned long s = (unsigned long)arg(0);
-		unsigned long ep = (unsigned long)arg(1);
-		char *str = getstr(s), *end;
-		double d = strtod(str, &end);
-		if (ep)
-			wr32(ep, s + (unsigned long)(end - str));
-		A = dput(d);
-	} else if (!strcmp(name, "strtol") || !strcmp(name, "strtoll") ||
-		   !strcmp(name, "strtoul") || !strcmp(name, "strtoull")) {
-		unsigned long s = (unsigned long)arg(0);
-		unsigned long ep = (unsigned long)arg(1);
-		int base = (int)arg(2);
-		char *str = getstr(s), *end;
-		/* Fuzix libc has no 64-bit strtoll, so parse here - one
-		   implementation for every host. */
-		A = bc_strtoll(str, &end, base, name[5] == 'u');
-		if (ep)
-			wr32(ep, s + (unsigned long)(end - str));
-	} else if (!strcmp(name, "abs")) {
-		long v = arg(0);
-		A = v < 0 ? -v : v;
-	} else if (!strcmp(name, "labs")) {
-		long v = arg(0);
-		A = v < 0 ? -v : v;
-	} else if (!strcmp(name, "llabs")) {
-		long long v = argll(0);
-		A = v < 0 ? -v : v;
-
-	/* --- pseudo-random and time ------------------------------------ */
-	} else if (!strcmp(name, "rand")) {
-		A = rand() & 0x7FFFFFFF;
-	} else if (!strcmp(name, "srand")) {
-		srand((unsigned)arg(0));
-		A = 0;
-	} else if (!strcmp(name, "time")) {
-		long t = (long)time(NULL);
-		if (arg(0))
-			wr32((unsigned long)arg(0), (unsigned long)t);
-		A = t;
-
-	/* --- files, straight onto the host's descriptors --------------- */
-	} else if (!strcmp(name, "open")) {
-		A = open(getstr((unsigned long)arg(0)), (int)arg(1), 0666);
-	} else if (!strcmp(name, "creat")) {
-		A = creat(getstr((unsigned long)arg(0)), 0666);
-	} else if (!strcmp(name, "close")) {
-		A = close((int)arg(0));
-	} else if (!strcmp(name, "read")) {
-		unsigned long b = arg(1), n = arg(2);
-		if (VM_OOBN(b, n)) fault("bad address");
-		A = read((int)arg(0), vptr(b), n);
-	} else if (!strcmp(name, "write")) {
-		unsigned long b = arg(1), n = arg(2);
-		if (VM_OOBN(b, n)) fault("bad address");
-		A = write((int)arg(0), vptr(b), n);
-	} else if (!strcmp(name, "lseek")) {
-		A = lseek((int)arg(0), arg(1), (int)arg(2));
-	} else if (!strcmp(name, "unlink")) {
-		A = unlink(getstr((unsigned long)arg(0)));
-
-	/* --- platform ------------------------------------------------- */
-	} else if (!strcmp(name, "adval")) {
-		A = lib_adval((int)arg(0));
-	} else if (!strcmp(name, "time_us")) {
-		/* 31 bits of the SDK's time_us_64, via the kernel. Falls back
-		 * to a host clock so the same program benchmarks on the
-		 * development machine as well as on the PC3. */
-		long t = lib_adval(-9);
-		if (t < 0) {
-			struct timeval tv;
-			gettimeofday(&tv, NULL);
-			t = (long)((tv.tv_sec * 1000000L + tv.tv_usec)
-				   & 0x7FFFFFFF);
+		if (eqbind[idx]) {
+			exec_eqop(eqbind[idx]);
+			return;
 		}
-		A = t;
-	} else if (!strcmp(name, "time_us64")) {
-		A = lib_us64();
-
-	} else {
-		unsigned d = parse_eqop(name);
-		if (!d) {
+		/* only reachable under BCRUN_LAZYBIND: eager binding
+		   resolved or refused every symbol at load */
+		if (strtab == NULL || !lib_resolve(idx)) {
 			fprintf(stderr,
-				"bcrun: no runtime function \"%s\"\n", name);
+				"bcrun: no runtime function \"%s\"\n",
+				strtab ? strtab + sym[idx].s_name : "?");
 			exit(1);
 		}
-		eqbind[idx] = d;
-		exec_eqop(d);
 	}
+
 }
 
 /* ---- loader -------------------------------------------------------- */
@@ -2380,6 +2491,33 @@ static void load(const char *path)
 		}
 	}
 	fclose(f);
+
+	/*
+	 *	Bind every library symbol now, then free the names: after
+	 *	this point a library call is a table lookup by index and
+	 *	the symbol and string tables - kept for the whole run until
+	 *	now, ~12K on a big program - go back to the heap.  A name
+	 *	the runtime does not provide is refused HERE, with the
+	 *	program named, instead of exit(1) in the middle of a run
+	 *	that happened to reach it.  BCRUN_LAZYBIND=1 restores
+	 *	first-call binding (and keeps the tables) for A/B.
+	 */
+	if (!getenv("BCRUN_LAZYBIND")) {
+		for (i = 0; i < h.h_nsym; i++) {
+			if (sym[i].s_type != BC_SYM_LIB)
+				continue;
+			if (!lib_resolve((unsigned)i)) {
+				fprintf(stderr,
+					"%s: no runtime function \"%s\"\n",
+					path, strtab + sym[i].s_name);
+				exit(1);
+			}
+		}
+		free(strtab);
+		strtab = NULL;
+		free(sym);
+		sym = NULL;
+	}
 }
 
 /* ---- native code ---------------------------------------------------- */

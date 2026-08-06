@@ -98,12 +98,34 @@ NOT the filesystem, NOT a panic; evidence and suspects in
 platform-rpipico/NOTES-console-wedge.md, with dnull.py as the
 discriminator.  Kernel-side fix is its own piece of work.
 
+## 2026-08-06: inline BC_COPY (P4) and eager binding (R4)
+
+* P4 (THUMB_NOICOPY disables): constant-length copies <= 64 bytes
+  inline as ldr/str pairs - dst from the stack, src in A, A becomes
+  dst, exactly the interpreter's case.  BCRUN_PROF on dhry: the last
+  per-iteration runtime crossing (op c0) is gone; helper_call is 64
+  for the whole 400k-run program, all startup.  Objects grow ~80B.
+* R4 (BCRUN_LAZYBIND=1 restores first-call binding): libcall's strcmp
+  chain - which never memoised, so every malloc/rand paid ~30 failed
+  strcmps per CALL - is now lc_* table entries; every library symbol
+  binds at load and the symbol + string tables are freed (~12K back
+  on an eclipse-sized program).  A name the runtime does not provide
+  is refused at load, program named, instead of exit(1) mid-run.
+  Behaviour change to know about: a program that merely REFERENCES a
+  missing function now refuses to load even if it never calls it.
+
+Gates: all.sh 31 eager AND 31 lazy, thumb/gate 8/8, qemudiff 10/10,
+mmb2c qemutests 17/17, ctest 165.  Board pending (port busy with
+local-compile testing): stage is cc2.p4 + bcrun.r4 in the CC dir,
+board ladder in /tmp/ccperf-board (dhry-noic vs dhry-new isolates
+P4; the r4 bcrun measures R4 + chain-bind speedup on old objects).
+
 ## Next candidates (from the review, in payoff order)
 
 1. LOCAL;PUSH elision for stores whose slot is provably unread - needs
    DUP/SWAP/inlined-eqop consumer analysis first (they read the top
    slot); without it this is the silent-wrong-answer class.
-2. Memory R1/R3/R4 from the review (ELF reloc segment freed, lazy
-   profiling arrays, eager bind) - R2 (libm shims) is done above.
+2. Memory R1/R3 from the review (ELF reloc segment freed, lazy
+   profiling arrays) - R2 and R4 are done above.
 3. The console-wedge kernel investigation (NOTES-console-wedge.md) -
    instrumentation plan is written; do it before the next release.
