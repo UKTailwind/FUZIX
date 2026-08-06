@@ -187,7 +187,15 @@ typedef uint32_t blkno_t;    /* FS32: 32-bit block numbers, fs to 2TB */
 #include "blk512.h"
 #endif
 
-#define BLKOVERSIZE32	0xFE	/* Bits 25+ mean we exceeded the file size */
+/* The offset guard in writei()/ftruncate().  Classic value was 0xFE -
+ * "bits 25+ mean we exceeded the (32MB) file size" - and it fired
+ * SIGXFSZ, whose default action KILLS the process.  On FS32 32MB is an
+ * ordinary offset: the first thing to write past it was fsck-fuzix
+ * rebuilding a 256MB card's free list, and the repair tool died
+ * mid-repair.  FS32's real limits are enforced elsewhere (bmap returns
+ * NULLBLK past THREE_IND_END for files; blkdev bounds partitions), so
+ * the only job left for this mask is the off_t sign bit. */
+#define BLKOVERSIZE32	0x80
 
 /* State of the block. We have some free bits here if we need them */
 #define BF_FREE		0
