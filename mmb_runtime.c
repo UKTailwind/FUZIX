@@ -2484,6 +2484,19 @@ MMINTEGER mm_run_bg(void)
     return -1;
 }
 
+MMINTEGER mm_play_start(void)
+{
+    mm_error("running a program needs the native runtime");
+    return -1;
+}
+
+/* Nothing can have been started, so there is nothing to stop.  Silence
+ * is the right answer to PLAY STOP, not an error. */
+MMINTEGER mm_play_stop(void)
+{
+    return 0;
+}
+
 #else
 
 #include <sys/types.h>
@@ -2584,6 +2597,106 @@ MMINTEGER mm_run_bg(void)
         _exit(127);
     }
     return (MMINTEGER)pid;
+}
+
+/* ---- PLAY ------------------------------------------------------------
+ *
+ * There is one I2S engine, so there is at most one player process, and
+ * the KERNEL is what enforces that: SNDIOC_PCMOPEN fails with EBUSY for
+ * a second one, and SNDIOC_PCMOWNER says whose it is (sound.c).  Asking
+ * it rather than remembering what fork returned buys both statements
+ * something:
+ *
+ *   - PLAY MP3 can refuse before it forks, the way MMBasic's PLAY does
+ *     ("Sound output in use for $"), instead of starting a player that
+ *     dies with a message on stderr that the BASIC program never sees;
+ *   - PLAY STOP stops the music whoever started it.  A player left
+ *     running by a program that was Ctrl-C'd is exactly when PLAY STOP
+ *     is reached for, and that pid was never in this process.
+ *
+ * The ioctl number is duplicated from the platform's pico_ioctl.h - see
+ * the note above the graphics block - and off the board there is no
+ * such device, so nothing is ever playing.
+ */
+#if defined(MM_PC3) || defined(__FUZIX__)
+
+#include <fcntl.h>
+#include <sys/ioctl.h>
+
+#define MM_SNDIOC_PCMOWNER 0x0025
+
+static int mm_snd_fd = -2;              /* -2 = not tried yet */
+
+static int mm_play_owner(void)
+{
+    int who;
+
+    if (mm_snd_fd == -2)
+        mm_snd_fd = open("/dev/sys", O_RDWR);
+    if (mm_snd_fd < 0)
+        return 0;
+    who = ioctl(mm_snd_fd, MM_SNDIOC_PCMOWNER, 0);
+    return who > 0 ? who : 0;
+}
+
+#else
+
+static int mm_play_owner(void) { return 0; }
+
+#endif
+
+#include <signal.h>
+
+static pid_t mm_play_pid;               /* the player THIS program started */
+
+MMINTEGER mm_play_start(void)
+{
+    MMINTEGER pid;
+
+    /* Collect the last one first.  waitpid returns non-zero once it has
+     * gone - or -1 if it was never ours - and without this every PLAY
+     * MP3 in a program would leave a zombie behind for the run. */
+    if (mm_play_pid > 0 && waitpid(mm_play_pid, NULL, WNOHANG) != 0)
+        mm_play_pid = 0;
+
+    if (mm_play_owner()) {
+        mm_error("sound output in use");
+        return -1;
+    }
+    pid = mm_run_bg();
+    if (pid > 0)
+        mm_play_pid = (pid_t)pid;
+    return pid;
+}
+
+MMINTEGER mm_play_stop(void)
+{
+    int who = mm_play_owner();
+    int i;
+
+    if (who) {
+        kill((pid_t)who, SIGINT);       /* playmp3 closes tidily on it */
+        /*
+         * Wait for the DEVICE, not for the process: the next statement
+         * is quite likely another PLAY MP3, and that would be refused
+         * while the old player still holds the stream.  Half a second
+         * is many times what it takes - playmp3 notices between one
+         * 2048 frame block and the next.
+         *
+         * Then SIGKILL, because PLAY STOP must stop the music even if
+         * the player is wedged.  Nothing is left stuck by that: the
+         * kernel hands the stream back when its owner dies.
+         */
+        for (i = 0; i < 5 && mm_play_owner() == who; i++)
+            mm_pause(100.0);
+        if (mm_play_owner() == who)
+            kill((pid_t)who, SIGKILL);
+    }
+    if (mm_play_pid > 0) {
+        waitpid(mm_play_pid, NULL, WNOHANG);
+        mm_play_pid = 0;
+    }
+    return 0;
 }
 
 #endif

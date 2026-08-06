@@ -100,7 +100,13 @@ would be worse than the current clear error:
   hardware.  What remains here is the part that needs state a translator
   has no place to keep - sprites, tile maps, a GUI toolkit - or hardware
   the PC3 does not have.
-* **Sound** — `PLAY`
+* **Sound** — `PLAY TONE WAV FLAC MOD MIDI SAMPLE EFFECT PAUSE NEXT PREVIOUS`
+
+  Not all of `PLAY`, though: `PLAY MP3`, `PLAY VOLUME` and `PLAY STOP` are
+  translated and play real audio on the PC3, where the decoder is a
+  separate process and the kernel owns the I2S engine.  What remains
+  needs the interpreter's idle loop - MMBasic refills its audio buffers
+  from there - or a synthesiser the kernel does not have.
 * **Interrupts and background timing** — `SETTICK ON KEY ON PS2 INTERRUPT
   IRETURN MATH PID MATH SENSORFUSION ONESHOT`
 * **Editor and REPL** — `EDIT LIST NEW RUN SAVE LOAD AUTOSAVE FM MEMORY

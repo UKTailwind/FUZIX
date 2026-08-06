@@ -327,6 +327,13 @@ MMINTEGER mm_run_exec(void);
 /* Start it and do NOT wait - PLAY MP3, where the music has to carry on
  * while the BASIC program does.  Returns the pid. */
 MMINTEGER mm_run_bg(void);
+/* PLAY MP3 and PLAY STOP.  start is mm_run_bg plus the rule that there
+ * is only one sound output: it refuses when something is already
+ * playing, as MMBasic's PLAY does.  stop signals whatever the KERNEL
+ * says is playing - which need not be a player this program started -
+ * and returns when the sound output is free again. */
+MMINTEGER mm_play_start(void);
+MMINTEGER mm_play_stop(void);
 void mm_timer_set(MMFLOAT ms);           /* TIMER = n, milliseconds    */
 void mm_set_date(const char *d);         /* DATE$ =                    */
 void mm_set_time(const char *t);         /* TIME$ =                    */

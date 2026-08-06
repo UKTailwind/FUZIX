@@ -2346,6 +2346,7 @@ class Conv(object):
         if up == 'PLAY':
             # PLAY MP3 f$          play a file, in the BACKGROUND
             # PLAY VOLUME n        0-100, remembered for later PLAYs
+            # PLAY STOP            stop whatever is playing
             #
             # MMBasic's PLAY VOLUME takes a level per channel; this
             # takes one, because the volume reaches playmp3 as an
@@ -2359,6 +2360,16 @@ class Conv(object):
             # in its interpreter loop to manage, and which costs us
             # nothing.  That also means mm_run_exec cannot be used: it
             # waits.
+            # STOP is first because MMBasic's cmd_play tests it first,
+            # before it even checks that audio is configured: stopping
+            # what is not playing is never an error.  It carries no
+            # volume, so it does not set uses_play - a program whose
+            # only PLAY is a STOP would then declare a variable it
+            # never reads.
+            if self.is_kw('STOP', 1):
+                self.i += 2
+                self.emit('mm_play_stop();')
+                return
             self.uses_play = True
             if self.is_kw('VOLUME', 1):
                 self.i += 2
@@ -2378,9 +2389,9 @@ class Conv(object):
                 self.emit('mm_run_arg(%s);' % c_string_literal('playmp3'))
                 self.emit('mm_run_arg(%s);' % v[0])
                 self.emit('mm_run_arg_i(mm_play_volume);')
-                self.emit('mm_run_bg();')
+                self.emit('mm_play_start();')
                 return
-            self.err('only PLAY MP3 and PLAY VOLUME are translated')
+            self.err('only PLAY MP3, PLAY VOLUME and PLAY STOP are translated')
         if up == 'CIRCLE':
             # CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
             # The geometry is mmb_gfx.h's, not the runtime's.  MMBasic

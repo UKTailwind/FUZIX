@@ -493,6 +493,7 @@ void statement_inner(void)
     if (strcmp(up, "PLAY") == 0) {
         /* PLAY MP3 f$          play a file, in the BACKGROUND
            PLAY VOLUME n        0-100, remembered for later PLAYs
+           PLAY STOP            stop whatever is playing
 
            MMBasic's PLAY VOLUME takes a level per channel; this takes
            one, because the volume reaches playmp3 as an argument and
@@ -505,6 +506,16 @@ void statement_inner(void)
            music plays - the thing MMBasic needs checkWAVinput() in its
            interpreter loop to manage, and which costs us nothing.  That
            also means mm_run_exec cannot be used: it waits. */
+        /* STOP is first because MMBasic's cmd_play tests it first,
+           before it even checks that audio is configured: stopping what
+           is not playing is never an error.  It carries no volume, so
+           it does not set uses_play - a program whose only PLAY is a
+           STOP would then declare a variable it never reads. */
+        if (is_kw("STOP", 1)) {
+            cv.i += 2;
+            emit("mm_play_stop();");
+            return;
+        }
         cv.uses_play = 1;
         if (is_kw("VOLUME", 1)) {
             struct val v;
@@ -527,10 +538,10 @@ void statement_inner(void)
             emit(sfmt("mm_run_arg(%s);", c_string_literal("playmp3")));
             emit(sfmt("mm_run_arg(%s);", v.code));
             emit("mm_run_arg_i(mm_play_volume);");
-            emit("mm_run_bg();");
+            emit("mm_play_start();");
             return;
         }
-        cv_err("only PLAY MP3 and PLAY VOLUME are translated");
+        cv_err("only PLAY MP3, PLAY VOLUME and PLAY STOP are translated");
     }
     if (strcmp(up, "CIRCLE") == 0) {
         /* CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
