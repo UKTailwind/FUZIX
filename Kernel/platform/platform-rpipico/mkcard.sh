@@ -19,9 +19,13 @@
 # The classic 32MB ceiling is gone; ROOT_MB is bounded by the card and
 # by how long a card write takes, nothing else.
 #
-#   p1  0x0C  FAT, for interchange       FAT_MB   (default 64)
-#   p2  0x83  FS32 Fuzix root (hdb2)     ROOT_MB  (default 32)
+#   p1  0x0C  FAT, for interchange       FAT_MB   (default 128)
+#   p2  0x83  FS32 Fuzix root (hdb2)     ROOT_MB  (default 800)
 #   p3  0x7F  reserved                   RES_MB   (default 4)
+#
+# The defaults total 933MiB = 978,321,408 bytes: sized for a 1GB card
+# taking 10^9 bytes as the floor a "1GB" card can be trusted to have,
+# with ~22MB spare for cards that run small.
 #
 # Partition 1 is left unformatted on purpose: the manual tells the user
 # to format it from Windows, because mkfs.vfat here and Windows' own
@@ -35,8 +39,8 @@ set -e
 R=$(cd "$(dirname "$0")/../../.." && pwd)
 OUT=$R/Images/rpipico/pc3-sd.img
 
-FAT_MB=${FAT_MB:-64}
-ROOT_MB=${ROOT_MB:-32}
+FAT_MB=${FAT_MB:-128}
+ROOT_MB=${ROOT_MB:-800}
 RES_MB=${RES_MB:-4}
 
 P1_START=2048

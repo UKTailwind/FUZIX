@@ -36,7 +36,12 @@ p2geom "$OUT"
 START=$P2_START
 COUNT=$P2_COUNT
 FSSIZE=$COUNT       # FS32: may fill the partition exactly, no NULLBLK margin
-INODES=${INODES:-2048}  # FS32 mkfs takes an inode count directly
+# Inodes scale with the partition unless overridden: one per 64 blocks
+# (average 32K per file), clamped to [2048, 65535] - the format's
+# d_ino cap.  The old 32MB root's 2048 falls out of the same rule.
+INODES=${INODES:-$((COUNT / 64))}
+[ "$INODES" -lt 2048 ] && INODES=2048
+[ "$INODES" -gt 65535 ] && INODES=65535
 
 echo "--- building a $FSSIZE block root ($INODES inodes) at sector $START"
 cd "$P"
