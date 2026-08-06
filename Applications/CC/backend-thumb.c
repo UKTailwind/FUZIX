@@ -301,6 +301,15 @@ static int t_nostrslot(void)
 	return cached;
 }
 
+/* THUMB_NOICOPY=1 keeps BC_COPY on helper_op, for A/B */
+static int t_noicopy(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = getenv("THUMB_NOICOPY") ? 1 : 0;
+	return cached;
+}
+
 
 /*
  *	THUMB_SKIP=name[,name...] keeps the named functions in bytecode.
@@ -2534,11 +2543,55 @@ static int t_span(unsigned long start, unsigned long end)
 			break;
 
 		/* ---- CP-H (stage 7): aggregates and switch ---------- */
-		case BC_COPY:
+		case BC_COPY: {
+			/* Small constant-length copies inline: dst is the
+			   stacked word, src is A, A becomes dst - exactly
+			   the interpreter's case.  Plain ldr/str pairs, not
+			   ldm/stm: the immediate forms take unaligned
+			   addresses, and a struct copy is either disjoint
+			   or exact-overlap so a forward copy is memmove
+			   here.  r2/r3 are free - BC_COPY is neither a
+			   builder nor fusable, so no window spans it.
+			   Larger copies keep the helper_op round trip. */
+			unsigned len = t_rd16(o + 1);
+			if (!t_noicopy() && len <= 64) {
+				unsigned k = 0;
+				t16(0x6822);	/* ldr  r2, [r4] - dst  */
+				t16(0x3404);	/* adds r4, #4          */
+				for (; k + 4 <= len; k += 4) {
+					t16(0x6803 | ((k >> 2) << 6));
+						/* ldr  r3, [r0, #k] */
+					t16(0x6013 | ((k >> 2) << 6));
+						/* str  r3, [r2, #k] */
+				}
+				if (len & 2) {
+					t16(0x8803 | ((k >> 1) << 6));
+						/* ldrh r3, [r0, #k] */
+					t16(0x8013 | ((k >> 1) << 6));
+						/* strh r3, [r2, #k] */
+					k += 2;
+				}
+				if (len & 1) {
+					if (k <= 31) {
+						t16(0x7803 | (k << 6));
+						/* ldrb r3, [r0, #k] */
+						t16(0x7013 | (k << 6));
+						/* strb r3, [r2, #k] */
+					} else {
+						t32(0xF890, 0x3000 | k);
+						t32(0xF882, 0x3000 | k);
+					}
+				}
+				t16(0x4610);	/* mov r0, r2 - A = dst */
+				t_d = -4;
+				o += 3;
+				break;
+			}
 			/* length rides in the op word's high half */
-			t_helperop(op | ((unsigned long)t_rd16(o + 1) << 16), 4);
+			t_helperop(op | ((unsigned long)len << 16), 4);
 			o += 3;
 			break;
+		}
 		case BC_PUSHN: {
 			unsigned len = t_rd16(o + 1);
 			unsigned n = (len < 4) ? 4 : ((len + 3) & ~3U);
