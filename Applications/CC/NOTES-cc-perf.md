@@ -157,6 +157,27 @@ P5 keeps its place on code size (-280B eclipse) and the dhry point.
 
 **Session final: 102,842 -> 166,834 D/s, +62.2%, 44.0% of gcc -O2.**
 
+## 2026-08-06 late: 64-bit and double compound assigns inline
+
+User-spotted quick win: t_eqop inlined only widths 1/2/4, and
+MMINTEGER is 8 bytes, MMFLOAT a double - so NO MMBasic counter ever
+hit the inline path; every BASIC loop iteration crossed helper_eqop.
+Now inline: 8-byte add/sub/and/or/xor (pre+post, the carry-pair
+forms; mul/div/rem/shifts stay on the helper) and the double
+pre-forms pluseqd/minuseqd/muleqd through the DCP slots (the address
+stays on the stack across the call).  diveqd deliberately stays on
+the helper: exec_eqop guards /= 0.0 to 0.0 where IEEE says infinity.
+
+Board: eclipse 2.3400 -> 2.2772 s (-2.7%, the first real eclipse
+gain from translator work; profile shows eqop crossings 0); grains
+recompiled 48,142 -> 49,653 (+3.1%, +32.1% on the day); dhry
+unaffected (already inlined at width 4).  All outputs identical;
+full gate stack green including the eclipse 3-way referee.  cc2-only
+- no bcrun or kernel change.
+
+The same profile names the next frontier: helper_call 215,250 per
+eclipse run, all mm_* dispatcher crossings.
+
 ## Next candidates (from the review, in payoff order)
 
 1. LOCAL;PUSH elision for stores whose slot is provably unread - needs

@@ -1231,6 +1231,100 @@ static int t_eqop(const char *name)
 	}
 	if (!e->base)
 		return 0;
+
+	/*
+	 *	The 8-byte integer forms.  MMINTEGER is 64-bit, so EVERY
+	 *	MMBasic counter is one of these - a BASIC FOR loop paid a
+	 *	helper_eqop crossing per iteration while C's int loops ran
+	 *	inline.  The carry-pair forms only; 64-bit mul/div/rem and
+	 *	the shifts stay on the helper.  Contract per exec_eqop:
+	 *	old = [addr] (8 bytes), amount = A untruncated, result
+	 *	stored back, A = result (old for the post forms).
+	 */
+	if (name[blen] == '8' &&
+	    (name[blen + 1] == 's' || name[blen + 1] == 'u') &&
+	    !name[blen + 2]) {
+		unsigned k8 = e->kind;
+
+		switch (k8) {
+		case 0: case 1: case 5: case 6: case 7:
+		case 10: case 11:
+			break;
+		default:
+			return 0;
+		}
+		t16(0x6822);		/* ldr  r2, [r4] - address  */
+		t16(0x3404);		/* adds r4, #4              */
+		t16(0x1992);		/* adds r2, r2, r6          */
+		t16(0x6813);		/* ldr  r3, [r2]   - old lo */
+		t32(0xF8D2, 0xC004);	/* ldr.w r12, [r2, #4] - hi */
+		switch (k8) {
+		case 0: case 10:
+			t16(0x1818);		/* adds r0, r3, r0    */
+			t32(0xEB41, 0x010C);	/* adc.w r1, r1, r12  */
+			break;
+		case 1: case 11:
+			t16(0x1A18);		/* subs r0, r3, r0    */
+			t32(0xEB6C, 0x0101);	/* sbc.w r1, r12, r1  */
+			break;
+		case 5:
+			t16(0x4018);		/* ands r0, r3        */
+			t32(0xEA0C, 0x0101);	/* and.w r1, r12, r1  */
+			break;
+		case 6:
+			t16(0x4318);		/* orrs r0, r3        */
+			t32(0xEA4C, 0x0101);	/* orr.w r1, r12, r1  */
+			break;
+		case 7:
+			t16(0x4058);		/* eors r0, r3        */
+			t32(0xEA8C, 0x0101);	/* eor.w r1, r12, r1  */
+			break;
+		}
+		t16(0x6010);		/* str  r0, [r2]            */
+		t16(0x6051);		/* str  r1, [r2, #4]        */
+		if (k8 >= 10) {
+			t16(0x4618);	/* mov  r0, r3 - A = old    */
+			t16(0x4661);	/* mov  r1, r12             */
+		}
+		return 1;
+	}
+
+	/*
+	 *	The double pre-forms, through the DCP slots: a float FOR
+	 *	loop's `t += step`.  The address stays ON the stack across
+	 *	the call (the aeabi routine touches nothing of ours), so
+	 *	no register survives it and none needs to.  diveqd stays
+	 *	on the helper: exec_eqop guards /= 0.0 to 0.0 where IEEE
+	 *	says infinity, and the two paths must not disagree.  The
+	 *	post forms would need the old value saved across the call;
+	 *	nothing emits them.
+	 */
+	if (name[blen] == 'd' && !name[blen + 1]) {
+		unsigned slot;
+
+		switch (e->kind) {
+		case 0: slot = NHS_DADD; break;
+		case 1: slot = NHS_DSUB; break;
+		case 2: slot = NHS_DMUL; break;
+		default:
+			return 0;
+		}
+		t32(0xF8D4, 0xC000);	/* ldr.w r12, [r4] - peek   */
+		t16(0x44B4);		/* add  r12, r6             */
+		t16(0x4602);		/* mov  r2, r0 - amt right  */
+		t16(0x460B);		/* mov  r3, r1              */
+		t32(0xF8DC, 0x0000);	/* ldr.w r0, [r12] - old lo */
+		t32(0xF8DC, 0x1004);	/* ldr.w r1, [r12, #4]      */
+		t32(0xF8D5, 0xC000 | (slot * 4));
+		t16(0x47E0);		/* blx  r12                 */
+		t16(0x6822);		/* ldr  r2, [r4] - again    */
+		t16(0x3404);		/* adds r4, #4 - pop now    */
+		t16(0x1992);		/* adds r2, r2, r6          */
+		t16(0x6010);		/* str  r0, [r2]            */
+		t16(0x6051);		/* str  r1, [r2, #4]        */
+		return 1;
+	}
+
 	if (name[blen] < '1' || name[blen] > '4' || name[blen] == '3')
 		return 0;
 	sz = name[blen] - '0';
