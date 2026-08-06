@@ -58,7 +58,16 @@ uint16_t umove(uint16_t n)
 	return udata.u_done;
 }
 
-static uint16_t mapcalc(inoptr ino, usize_t *size, uint_fast8_t m)
+/* blkno_t, NOT the classic uint16_t.  bmap() returns a 32-bit block
+ * number and this sat between it and every read and write in the
+ * system, silently truncating.  Below block 65536 nothing shows; the
+ * first thing past it was fsck rebuilding a 256MB card's free list
+ * through the raw device, and every chain write above that line
+ * landed at (block - 65536) - 1099 blocks of the inode area
+ * overwritten with free-list chains, found by diffing the card
+ * against the pristine image.  The FIXME at blkdev.c's u_block
+ * assignment predicted this class; this was the instance. */
+static blkno_t mapcalc(inoptr ino, usize_t *size, uint_fast8_t m)
 {
 	*size = min(udata.u_count, BLKSIZE - uoff());
 	/* We know offset is positive at this point. The cast makes
