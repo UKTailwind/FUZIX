@@ -31,7 +31,11 @@ trap 'rm -rf "$W"' EXIT
 [ -r "$IMG" ] || { echo "no $IMG - build it first" >&2; exit 1; }
 [ -x "$UCP" ] || { echo "no $UCP - make -C Standalone" >&2; exit 1; }
 
-dd if="$IMG" of="$W/p2.img" bs=512 skip=133120 count=65536 status=none
+# Geometry from the image's own MBR - never a copy of mkcard.sh's numbers
+. "$R/Kernel/platform/platform-rpipico/p2geom.sh"
+p2geom "$IMG"
+
+dd if="$IMG" of="$W/p2.img" bs=512 skip=$P2_START count=$P2_COUNT status=none
 
 # ls one directory of the image
 list() {

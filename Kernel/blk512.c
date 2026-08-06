@@ -13,26 +13,33 @@ blkno_t inode_blocks(inoptr i)
     return (i->c_node.i_size + BLKMASK) >> BLKSHIFT;
 }
 
-/* Read an inode */
+/* Read an inode: FS32 packs two 256-byte inodes per block.  The
+   in-core dinode omits the trailing reserved bytes, so the slot
+   arithmetic uses DINODE_SIZE and the copies use sizeof. */
 uint_fast8_t breadi(uint16_t dev, uint16_t ino, void *ptr)
 {
-    struct blkbuf *buf = bread(dev, (ino >> 3) + 2, 0);
+    struct blkbuf *buf = bread(dev, (ino >> 1) + 2, 0);
     if (buf == NULL)
         return 1;
-    blktok(ptr, buf, sizeof(struct dinode) * (ino & 7), sizeof(struct dinode));
+    blktok(ptr, buf, DINODE_SIZE * (ino & 1), sizeof(struct dinode));
     brelse(buf);
     return 0;
 }
 
-/* Write an inode */
+/* Write an inode, keeping the on-disk reserved tail zero as the
+   format requires */
 uint_fast8_t bwritei(inoptr ino)
 {
-    blkno_t blkno = (ino->c_num >> 3) + 2;
+    static const uint8_t dino_zero[DINODE_SIZE - sizeof(struct dinode)];
+    blkno_t blkno = (ino->c_num >> 1) + 2;
     struct blkbuf *buf = bread(ino->c_dev, blkno, 0);
     if (buf == NULL)
         return 1;
-    blkfromk(&ino->c_node, buf, sizeof(struct dinode) * (ino->c_num & 0x07),
+    blkfromk(&ino->c_node, buf, DINODE_SIZE * (ino->c_num & 1),
             sizeof(struct dinode));
+    blkfromk((void *)dino_zero, buf,
+            DINODE_SIZE * (ino->c_num & 1) + sizeof(struct dinode),
+            sizeof(dino_zero));
     bfree(buf, 2);
     return 0;
 }
@@ -97,9 +104,9 @@ blkno_t bmap(inoptr ip, blkno_t bn, unsigned int rwflg)
 
     dev = ip->c_dev;
 
-    /* blocks 0..17 are direct blocks
+    /* blocks 0..DIRECT_BLOCKS-1 are direct blocks
     */
-    if(bn < 18) {
+    if(bn < DIRECT_BLOCKS) {
         nb = ip->c_node.i_addr[bn];
         if(nb == 0) {
             if(rwflg ||(nb = blk_alloc(dev))==0)
@@ -110,39 +117,52 @@ blkno_t bmap(inoptr ip, blkno_t bn, unsigned int rwflg)
         return bmap_check(ip, bn0, nb, "direct");
     }
 
-    /* addresses 18 and 19 have single and double indirect blocks.
-     * the first step is to determine how many levels of indirection.
+    /* i_addr[DIRECT_BLOCKS..+2] are the single, double and triple
+     * indirect roots.  An indirect block holds IND_PER_BLOCK = 128
+     * 32-bit pointers, so each level consumes 7 bits of bn.
+     * Determine the level, the root slot, and the shift that extracts
+     * the top index.
      */
-    bn -= 18;
-    sh = 0;
-    j = 2;
-    if(bn & 0xff00){       /* bn > 255  so double indirect */
-        sh = 8;
-        bn -= 256;
-        j = 1;
+    bn -= DIRECT_BLOCKS;
+    if(bn < IND_PER_BLOCK) {
+        j = 1;                  /* levels of indirection to walk */
+        sh = 0;
+        i = DIRECT_BLOCKS;
+    } else if(bn < IND_PER_BLOCK + (blkno_t)IND_PER_BLOCK * IND_PER_BLOCK) {
+        bn -= IND_PER_BLOCK;
+        j = 2;
+        sh = 7;
+        i = DIRECT_BLOCKS + 1;
+    } else {
+        bn -= IND_PER_BLOCK + (blkno_t)IND_PER_BLOCK * IND_PER_BLOCK;
+        if (bn >= (blkno_t)IND_PER_BLOCK * IND_PER_BLOCK * IND_PER_BLOCK)
+            return NULLBLK;     /* beyond THREE_IND_END */
+        j = 3;
+        sh = 14;
+        i = DIRECT_BLOCKS + 2;
     }
 
-    /* fetch the address from the inode
+    /* fetch the root from the inode
      * Create the first indirect block if needed.
      */
-    if(!(nb = ip->c_node.i_addr[20-j]))
+    if(!(nb = ip->c_node.i_addr[i]))
     {
         if(rwflg || !(nb = blk_alloc(dev)))
             return(NULLBLK);
-        ip->c_node.i_addr[20-j] = nb;
+        ip->c_node.i_addr[i] = nb;
         ip->c_flags |= CDIRTY;
     }
     bmap_check(ip, bn0, nb, "indirect root");
 
     /* fetch through the indirect blocks
     */
-    for(; j<=2; j++) {
+    for(; j > 0; j--) {
         bp = bread(dev, nb, 0);
         if (bp == NULL) {
             corrupt_fs(ip->c_dev);
             return 0;
         }
-        i = (bn >> sh) & 0xff;
+        i = (bn >> sh) & (IND_PER_BLOCK - 1);
         nb = *(blkno_t *)blkptr(bp, (sizeof(blkno_t)) * i, sizeof(blkno_t));
         if (nb)
             brelse(bp);
@@ -157,8 +177,8 @@ blkno_t bmap(inoptr ip, blkno_t bn, unsigned int rwflg)
         }
         /* nb came out of a data block on the disk: the one number in
            this whole path that nothing else validates */
-        bmap_check(ip, bn0, nb, j == 1 ? "double indirect" : "indirect");
-        sh -= 8;
+        bmap_check(ip, bn0, nb, j > 1 ? "mid indirect" : "indirect");
+        sh -= 7;
     }
     return(nb);
 }

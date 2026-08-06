@@ -5,12 +5,16 @@ set -e
 # recipe: this is the only description of a working Fuzix root in the
 # tree, and the SD root was otherwise an artefact nobody could rebuild.
 # Defaults are the flash device; mksdimage.sh overrides all three.
+#
+# FS32: mkfs's second argument is an INODE COUNT, not a block count of
+# inodes.  256 matches what the old "32 blocks of 8" gave the flash
+# root.
 IMG=${IMG:-filesystem.img}
 FSSIZE=${FSSIZE:-2547}
-ISIZE=${ISIZE:-32}
+INODES=${INODES:-256}
 
 rm -f ${IMG}
-../../../Standalone/mkfs ${IMG} ${ISIZE} $FSSIZE
+../../../Standalone/mkfs ${IMG} ${INODES} $FSSIZE
 ../../../Standalone/ucp ${IMG} <<EOF
 cd /
 mkdir bin

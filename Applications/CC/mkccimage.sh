@@ -11,9 +11,10 @@
 #   (cd ../cpp && make -f Makefile.armm0 FUZIX_ROOT=... USERCPU=armm0)
 #   then strip each into hwtest/<name>.s
 #
-# Partition 2 of the image is the Fuzix root: sector 133120, 65536
-# sectors of 512 bytes. It is extracted, written into with ucp, fsck'd
-# and put back.
+# Partition 2 of the image is the Fuzix root; its geometry is read
+# from the image's own MBR (p2geom.sh - mkcard.sh is the only place
+# the layout is stated).  It is extracted, written into with ucp,
+# fsck'd and put back.
 #
 # Two things about ucp that will otherwise waste an afternoon: "get"
 # creates the destination with basename(), i.e. in ucp's own current
@@ -29,11 +30,13 @@ OUT=$R/Images/rpipico/pc3-sd-cc.img
 W=${W:-/tmp/mkccimage}
 P2=$W/p2.img
 
-START=133120
-COUNT=65536
-
 set -e
 [ -r "$SRC" ] || { echo "no base image at $SRC" >&2; exit 1; }
+
+. "$R/Kernel/platform/platform-rpipico/p2geom.sh"
+p2geom "$SRC"
+START=$P2_START
+COUNT=$P2_COUNT
 for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc saveimage loadimage mmedit playmp3; do
 	[ -r "$CC/hwtest/$f.s" ] || {
 		echo "missing $CC/hwtest/$f.s - cross build and strip first" >&2

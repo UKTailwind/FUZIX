@@ -62,8 +62,8 @@ typedef uint16_t nlink_t;
 typedef int16_t pid_t;
 typedef uint16_t ino_t;
 
-typedef uint16_t fsblkcnt_t;
-typedef uint16_t fsfilcnt_t;
+typedef uint32_t fsblkcnt_t;	/* FS32: block counts exceed 16 bits */
+typedef uint16_t fsfilcnt_t;	/* inode numbers stay 16-bit (d_ino) */
 
 #if defined(NO_64BIT)
 typedef uint32_t time_t;

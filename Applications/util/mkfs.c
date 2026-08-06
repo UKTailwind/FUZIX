@@ -1,21 +1,14 @@
 /**************************************************
 UZI (Unix Z80 Implementation) Utilities:  mkfs.c
-***************************************************/
 
-/* This utility creates an UZI file system for a defined block device.
- * the format is:
- *                  mkfs device isize fsize
- * where: device is the logical block on which to install a filesystem
- *        isize is the number of 512-byte blocks (less two reserved for
- *            system use) to use for storing 64-byte i-nodes
- *        fsize is the total number of 512-byte blocks to assign to the
- *            filesystem.  Space available for storage of data is therefore
- *            fsize-isize blocks.
- *
- * Revisions:
- *   Based on UZI280 version (minor changes from original UZI.  HFB
- *   Modified for use under UZI.                                HP
- */
+FS32 version.  The format is defined by
+Kernel/platform/platform-rpipico/FS32-FORMAT.md.
+
+Usage changed from classic: the second argument is an INODE COUNT, not
+a block count of inodes - "mkfs /dev/hdb3 2048 65536".  The struct
+definitions come from <sys/super.h> so this cannot drift from the
+libc's view of the superblock.
+***************************************************/
 
 #include <stdio.h>
 #include <string.h>
@@ -32,12 +25,24 @@ struct dinode {
     uint16_t i_nlink;
     uint16_t i_uid;
     uint16_t i_gid;
-    off_t    i_size;
+    uint32_t i_size;
     uint32_t   i_atime;		/* Breaks in 2038 */
     uint32_t   i_mtime;		/* Need to hide some extra bits ? */
     uint32_t   i_ctime;		/* 24 bytes */
-    blkno_t  i_addr[20];
-};               /* Exactly 64 bytes long! */
+    uint8_t  i_timeh[3];
+    uint8_t  i_pad;
+    blkno_t  i_addr[FS32_DIRECT_BLOCKS + 3];
+    uint8_t  i_reserved[56];
+};               /* Exactly 256 bytes long! */
+
+struct fblk {
+    int16_t     f_nfree;
+    uint16_t    f_pad;
+    blkno_t     f_free[50];
+};
+
+_Static_assert(sizeof(struct dinode) == FS32_DINODE_SIZE,
+	       "FS32 dinode must be 256 bytes");
 
 #define FILENAME_LEN	30
 #define DIR_LEN		32
@@ -51,15 +56,13 @@ uint8_t fast=0;     /* flag for fast formatting option */
 
 int dev;
 
-#define ROOTINODE 1       /* Inode # of / for all mounted filesystems. */
-
-direct dirbuf[64] = { {ROOTINODE, "."}, {ROOTINODE, ".."} };
-struct dinode inode[8];
+direct dirbuf[16] = { {ROOTINODE, "."}, {ROOTINODE, ".."} };
+struct dinode inode[FS32_IPERBLK];
 struct fuzix_filesys_kernel fs_tab;
 
-void dwrite(uint16_t blk, char *addr)
+void dwrite(blkno_t blk, char *addr)
 {
-    if (lseek(dev, blk * 512L, 0) == -1) {
+    if (lseek(dev, (off_t) blk * 512, 0) == -1) {
         perror("lseek");
         exit(1);
     }
@@ -72,7 +75,7 @@ void dwrite(uint16_t blk, char *addr)
 char *zerobuf(void)
 {
     static char buf[512];
-    
+
     memset(buf, 0, 512);
     return buf;
 }
@@ -90,9 +93,9 @@ int yes(void)
     return (1);
 }
 
-void mkfs(uint16_t fsize, uint16_t isize)
+void mkfs(uint32_t fsize, uint32_t isize, uint16_t inodes)
 {
-    uint16_t j;
+    uint32_t j;
     char *zeros;
     time_t t = time(NULL);
 
@@ -102,8 +105,10 @@ void mkfs(uint16_t fsize, uint16_t isize)
 
     if (!fast) {
 	    for (j = 0; j < fsize; ++j) {
-	            putchar('.');
-	            fflush(stdout);
+	            if ((j & 255) == 0) {
+	                putchar('.');
+	                fflush(stdout);
+	            }
 		    dwrite(j, zeros);
             }
     } else {
@@ -116,22 +121,32 @@ void mkfs(uint16_t fsize, uint16_t isize)
 
     /* Initialize the super-block */
     fs_tab.s_mounted = SMOUNTED;	/* Magic number */
+    fs_tab.s_version = FS32_VERSION;
     fs_tab.s_isize = isize;
     fs_tab.s_fsize = fsize;
     fs_tab.s_nfree = 1;
     fs_tab.s_free[0] = 0;
     fs_tab.s_tfree = 0;
     fs_tab.s_ninode = 0;
-    fs_tab.s_tinode = (8 * (isize - 2)) - 2;
+    fs_tab.s_tinode = inodes - 2;
+    fs_tab.s_shift = 0;
     fs_tab.s_time = t;
     fs_tab.s_timeh = (t >> 31) >> 1;	/* Mutter .. C standards .. mutter */
 
-    /* Free each block, building the free list */
+    /* Free each block, building the free list.  Chain blocks are the
+       explicit fblk struct (FS32-FORMAT.md), never a memory overlay. */
 
     printf("\nBuilding free list...\n");
     for (j = fsize - 1; j > isize; --j) {
 	if (fs_tab.s_nfree == 50) {
-	    dwrite(j, (char *) &fs_tab.s_nfree);
+	    struct fblk f;
+	    static char fbuf[512];
+	    memset(fbuf, 0, sizeof(fbuf));
+	    memset(&f, 0, sizeof(f));
+	    f.f_nfree = fs_tab.s_nfree;
+	    memcpy(f.f_free, fs_tab.s_free, sizeof(f.f_free));
+	    memcpy(fbuf, &f, sizeof(f));
+	    dwrite(j, fbuf);
 	    fs_tab.s_nfree = 0;
 	}
 	++fs_tab.s_tfree;
@@ -157,8 +172,14 @@ void mkfs(uint16_t fsize, uint16_t isize)
     dwrite(isize, (char *) dirbuf);
 
     sync();
-    /* Write out super block */
-    dwrite(1, (char *) &fs_tab);
+    /* Write out super block: the in-core kernel struct is 332 bytes;
+       pad the block with zeros as the format requires. */
+    {
+        static char sbuf[512];
+        memset(sbuf, 0, sizeof(sbuf));
+        memcpy(sbuf, &fs_tab, sizeof(fs_tab));
+        dwrite(1, sbuf);
+    }
 
     sync();
     printf("Done.\n");
@@ -166,14 +187,14 @@ void mkfs(uint16_t fsize, uint16_t isize)
 
 void printopts(void)
 {
-	fprintf( stderr, "usage: mkfs [options] device isize fsize\n");
+	fprintf( stderr, "usage: mkfs [options] device inodes fsize\n");
 	exit(-1);
 }
 
 
 int main(int argc, char *argv[])
 {
-    uint16_t fsize, isize;
+    uint32_t fsize, isize, inodes;
     struct stat statbuf;
     int option;
 
@@ -190,8 +211,8 @@ int main(int argc, char *argv[])
 
     if (argc-optind < 3)
         printopts();
-    
-    
+
+
     if (stat(argv[optind], &statbuf) != 0) {
         fprintf(stderr, "mkfs: can't stat %s\n", argv[optind]);
         exit(-1);
@@ -202,16 +223,22 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
-    isize = (uint16_t) atoi(argv[optind+1]);
-    fsize = (uint16_t) atoi(argv[optind+2]);
+    inodes = (uint32_t) atol(argv[optind+1]);
+    fsize = (uint32_t) atol(argv[optind+2]);
 
-    if (fsize < 3 || isize < 2 || isize >= fsize) {
+    if (inodes < 2 || inodes > 65535) {
+	fprintf(stderr, "mkfs: bad inode count (2..65535)\n");
+	exit(-1);
+    }
+    isize = 2 + ((inodes + 1) >> 1);	/* first data block */
+
+    if (fsize < isize + 2) {
 	fprintf(stderr, "mkfs: bad parameter values\n");
 	exit(-1);
     }
 
-    printf("Making filesystem on device %s with isize %u fsize %u. Confirm? ",
-	   argv[optind], isize, fsize);
+    printf("Making FS32 filesystem on device %s with %lu inodes fsize %lu. Confirm? ",
+	   argv[optind], (unsigned long) inodes, (unsigned long) fsize);
     if (!yes())
 	exit(-1);
 
@@ -221,10 +248,7 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
-    mkfs(fsize, isize);
+    mkfs(fsize, isize, (uint16_t) inodes);
 
     exit(0);
 }
-
-
-

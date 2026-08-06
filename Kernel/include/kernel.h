@@ -176,7 +176,7 @@ struct tms {
 typedef int32_t off_t;	/* 32MB file and fs size limit */
 typedef uint32_t uoff_t;	/* Internal use so we can keep the compiler happy */
 
-typedef uint16_t blkno_t;    /* Can have 65536 512-byte blocks in filesystem */
+typedef uint32_t blkno_t;    /* FS32: 32-bit block numbers, fs to 2TB */
 #define NULLBLK ((blkno_t)-1)
 
 #if (BLKSIZE == 400)
@@ -242,6 +242,15 @@ extern void blkzero(struct blkbuf *buf);
    keep live (i_addr[0] for the dev ptr) and the 36 we don't (or 32/32 for
    speed). We'd then be able to drop half the bits for an open inode onto
    disk safely */
+/* FS32 on-disk inode: exactly 256 bytes on disk, two per block, never
+   straddling a block.  i_addr is 40 direct + single + double + triple
+   indirect (DIRECT_BLOCKS et al in blk512.h).  Offsets fixed by
+   FS32-FORMAT.md.
+   The IN-CORE struct deliberately omits the trailing 56 reserved
+   bytes: with ITABSIZE in-core inodes that padding would cost 3.5K of
+   SRAM holding constant zeros.  breadi skips it and bwritei writes
+   zeros in its place; DINODE_SIZE is the on-disk slot size. */
+#define DINODE_SIZE 256
 typedef struct dinode {
     uint16_t i_mode;
     uint16_t i_nlink;		/* Note we have 64K inodes so we never overflow */
@@ -251,8 +260,13 @@ typedef struct dinode {
     uint32_t   i_atime;		/* Breaks in 2038 */
     uint32_t   i_mtime;		/* Need to hide some extra bits ? */
     uint32_t   i_ctime;		/* 24 bytes */
-    blkno_t  i_addr[20];
-} dinode;               /* Exactly 64 bytes long! */
+    uint8_t  i_timeh[3];	/* bits 32-39 of a/m/ctime; 0 in v1 */
+    uint8_t  i_pad;		/* must be 0 */
+    blkno_t  i_addr[DIRECT_BLOCKS + 3];
+} dinode;               /* 200 bytes in core, 256 on disk */
+
+_Static_assert(sizeof(dinode) == DINODE_SIZE - 56,
+	       "FS32 in-core dinode is the on-disk one minus reserve");
 
 /* We use the Linux one for compatibility. There's no real Unix 'standard'
    for such things */
@@ -328,55 +342,52 @@ typedef struct direct {
 
 
 /*
- * Superblock structure
+ * FS32 superblock structure: exactly one 512-byte block, in memory and
+ * on disk, offsets fixed by FS32-FORMAT.md.  Every field is naturally
+ * aligned so there is no implicit padding on any target we build.
+ * (The old filesys_user tail - label, geometry - is gone: nothing on
+ * this port used it and FS32 declares those bytes reserved.)
  */
 #define FILESYS_TABSIZE 50
 typedef struct filesys { /* note: exists in mem and on disk */
-    uint16_t      s_mounted;
-    uint16_t      s_isize;
-    uint16_t      s_fsize;
-    uint16_t      s_nfree;
-    blkno_t       s_free[FILESYS_TABSIZE];
-    int16_t       s_ninode;
-    uint16_t      s_inode[FILESYS_TABSIZE];
-    uint8_t       s_fmod;
+    uint16_t      s_mounted;	/* 0: magic 0xFB32 */
+    uint16_t      s_version;	/* 2: FS32_VERSION */
+    uint32_t      s_isize;	/* 4: first data block */
+    uint32_t      s_fsize;	/* 8: total blocks */
+    blkno_t       s_tfree;	/* 12: total free blocks */
+    int16_t       s_nfree;	/* 16: valid entries in s_free */
+    uint16_t      s_tinode;	/* 18: total free inodes */
+    blkno_t       s_free[FILESYS_TABSIZE];	/* 20 */
+    int16_t       s_ninode;	/* 220 */
+    uint16_t      s_inode[FILESYS_TABSIZE];	/* 222 */
+    uint8_t       s_fmod;	/* 322 */
     /* 0 is 'legacy' and never written to disk */
 #define FMOD_GO_CLEAN	0	/* Write a clean to the disk (internal) */
 #define FMOD_DIRTY	1	/* Mounted or uncleanly unmounted from r/w */
 #define FMOD_CLEAN	2	/* Clean. Used internally to mean don't
 				   update the super block */
-    uint8_t       s_timeh;	/* bits 32-40: FIXME - wire up */
-    uint32_t      s_time;
-    blkno_t       s_tfree;
-    uint16_t      s_tinode;
-    uint8_t	  s_shift;	/* Extent size */
+    uint8_t       s_timeh;	/* 323: bits 32-40: FIXME - wire up */
+    uint32_t      s_time;	/* 324 */
+    uint8_t	  s_shift;	/* 328: must be 0 in FS32 v1 */
+    uint8_t	  s_pad0[3];	/* 329 */
+    /* On disk bytes 332..511 are reserved, written as zero.  They are
+       deliberately NOT in the in-core struct: NMOUNTS copies of 180
+       constant zeros is SRAM this platform does not have spare.  sync()
+       zeroes them on the way out. */
 } filesys, *fsptr;
 
-/*
- * Superblock with userspace fields that are not kept in the kernel
- * mount table.
- */
-struct filesys_user {
-    struct filesys s_fs;
-    /* Allow for some kernel expansion */
-    uint8_t	  s_reserved;
-    uint16_t	  s_reserved2[16];
-    /* This is only used by userspace */
-    uint16_t	  s_props;	/* Property bits indicating which are valid */
-#define S_PROP_LABEL	1
-#define S_PROP_GEO	2
-    /* For now only one property set - geometry. We'll eventually use this
-       when we don't know physical geometry and need to handle stuff with
-       tools etc */
-    uint8_t	  s_label_name[32];
+/* Free-list chain block: written as this explicit struct, never as a
+   memory overlay from &s_nfree - the overlay's shape was an accident
+   of the old struct packing (FS32-FORMAT.md, "Free list"). */
+typedef struct fblk {
+    int16_t       f_nfree;	/* 1..50 */
+    uint16_t      f_pad;	/* 0 */
+    blkno_t       f_free[FILESYS_TABSIZE];
+} fblk;
 
-    uint16_t      s_geo_heads;	/* If 0/0/0 is specified and valid it means */
-    uint16_t	  s_geo_cylinders; /* pure LBA - no idea of geometry */
-    uint16_t	  s_geo_sectors;
-    uint8_t	  s_geo_skew;	/* Soft skew if present (for hard sectored media) */
-                                /* Gives the skew (1/2/3/4/5/... etc) */
-    uint8_t	  s_geo_secsize;/* Physical sector size in log2 form*/
-};
+_Static_assert(sizeof(struct filesys) == 332,
+	       "FS32 superblock in-core region ends at 332");
+_Static_assert(sizeof(struct fblk) == 204, "FS32 free chain block layout");
 
 typedef struct oft {
     off_t     o_ptr;      /* File position pointer */
@@ -1042,9 +1053,9 @@ extern void i_deref(inoptr ino);
 extern void corrupt_fs(uint16_t devno);
 extern void wr_inode(inoptr ino);
 extern bool isdevice(inoptr ino);
-extern int f_trunc_blocks(inoptr ino, uint16_t nblock);
+extern int f_trunc_blocks(inoptr ino, blkno_t nblock);
 extern int f_trunc(inoptr ino);
-extern void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, uint16_t nblock);
+extern void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, blkno_t nkeep);
 extern blkno_t bmap(inoptr ip, blkno_t bn, unsigned int rwflg);
 #ifdef CONFIG_FS_TRIPWIRE_DEEP
 /* names the caller in the panic - see validblk_at() in filesys.c */

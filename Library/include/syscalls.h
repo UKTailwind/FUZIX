@@ -36,20 +36,25 @@ struct _uzisysinfoblk {
  */
 #define __FILESYS_TABSIZE 50
 
+/* FS32 superblock as _statfs delivers it: the kernel's in-core struct,
+   332 bytes, followed by the mount flags word.  Must match the
+   kernel's struct filesys field for field (FS32-FORMAT.md). */
 struct _uzifilesys {
-    int16_t       s_mounted;
-    uint16_t      s_isize;
-    uint16_t      s_fsize;
-    uint16_t      s_nfree;
-    uint16_t      s_free[__FILESYS_TABSIZE];
+    uint16_t      s_mounted;	/* magic 0xFB32 */
+    uint16_t      s_version;
+    uint32_t      s_isize;
+    uint32_t      s_fsize;
+    uint32_t      s_tfree;
+    int16_t       s_nfree;
+    uint16_t      s_tinode;
+    uint32_t      s_free[__FILESYS_TABSIZE];
     int16_t       s_ninode;
     uint16_t      s_inode[__FILESYS_TABSIZE];
     uint8_t       s_fmod;
     uint8_t       s_timeh;
     uint32_t      s_time;
-    uint16_t      s_tfree;
-    uint16_t      s_tinode;
     uint8_t	  s_shift;
+    uint8_t	  s_pad0[3];
 };
 
 struct _sockio {

@@ -56,21 +56,25 @@ static void perform_fsck_exec(const char *path)
 }
 
 /* Rather than exec a whole binary to do trivial checks for the usual case we
-   do a clean check before we run fsck.fuzix. Anything odd or hard we punt */
+   do a clean check before we run fsck.fuzix. Anything odd or hard we punt.
+   The superblock is BLOCK 1: the classic version read from offset 0 and so
+   never saw a valid magic - it always punted, safely but slowly. */
 static int is_clean(const char *path)
 {
-	static struct fuzix_filesys fs;
+	static struct fuzix_filesys_kernel fs;
 	int fd;
 
 	fd = open(path, O_RDONLY);
 	if (fd == -1)
 		return 0;
-	if (read(fd, &fs, sizeof(fs)) != sizeof(fs)) {
+	if (lseek(fd, 512L, SEEK_SET) == -1 ||
+	    read(fd, &fs, sizeof(fs)) != sizeof(fs)) {
 		close(fd);
 		return 0;
 	}
-	if (close(fd) || fs.s_fs.s_mounted != SMOUNTED ||
-		fs.s_fs.s_fmod != FMOD_CLEAN)
+	if (close(fd) || fs.s_mounted != SMOUNTED ||
+		fs.s_version != FS32_VERSION ||
+		fs.s_fmod != FMOD_CLEAN)
 		return 0;
 	return 1;
 }

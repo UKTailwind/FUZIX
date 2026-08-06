@@ -14,15 +14,11 @@
 # just wired to the 2547 block flash device; it is now parameterised and
 # this drives it.
 #
-# 64000 BLOCKS, NOT 65535.  blkno_t is uint16_t, so 65535 is the literal
-# ceiling - mkfs casts the size to uint16_t and 65536 wraps to 0.  Worse,
-# NULLBLK is ((blkno_t)-1) = 65535, which put the "no such block"
-# sentinel exactly on the filesystem's upper bound, and since the
-# partition is 65536 sectors, sector 65535 physically exists: anything
-# that let a NULLBLK reach the block layer wrote a real sector instead
-# of being refused.  64000 puts clear air between the last data block,
-# the sentinel and the end of the partition.  The partition is unchanged
-# at 65536 sectors, so no partition table edit is needed.
+# FS32: the filesystem may fill the partition exactly.  The classic
+# format needed 64000 of the 65536 sectors kept clear because 16-bit
+# NULLBLK (65535) was a physically real sector; FS32's sentinel is
+# 0xFFFFFFFF and unreachable, so that margin - and the corruption mode
+# it guarded against - is gone (see FS32-FORMAT.md).
 
 set -e
 
@@ -31,18 +27,20 @@ P=$R/Kernel/platform/platform-rpipico
 OUT=$R/Images/rpipico/pc3-sd.img
 FS=$R/Images/rpipico/filesys.img
 
-# Card layout (PC3-DEVNOTES.md): p1 = 64M FAT placeholder, p2 = 32M
-# Fuzix root (boot "hdb2"), p3 = 4M type 0x7F.
-START=133120
-COUNT=65536
-FSSIZE=64000
-ISIZE=256           # 2048 inodes, matching the root this replaces
-
+# Card layout comes from the image's own MBR (mkcard.sh wrote it):
+# p1 FAT, p2 FS32 Fuzix root (boot "hdb2"), p3 reserved.
 [ -r "$OUT" ] || { echo "no card image at $OUT to write into" >&2; exit 1; }
 
-echo "--- building a $FSSIZE block root (isize $ISIZE)"
+. "$P/p2geom.sh"
+p2geom "$OUT"
+START=$P2_START
+COUNT=$P2_COUNT
+FSSIZE=$COUNT       # FS32: may fill the partition exactly, no NULLBLK margin
+INODES=${INODES:-2048}  # FS32 mkfs takes an inode count directly
+
+echo "--- building a $FSSIZE block root ($INODES inodes) at sector $START"
 cd "$P"
-IMG="$FS" FSSIZE=$FSSIZE ISIZE=$ISIZE sh ./update-flash.sh
+IMG="$FS" FSSIZE=$FSSIZE INODES=$INODES sh ./update-flash.sh
 
 # mkfs sizes the file to the filesystem, which is smaller than the
 # partition.  Pad so the dd below cannot leave the tail of the old

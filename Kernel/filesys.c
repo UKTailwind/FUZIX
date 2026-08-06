@@ -576,9 +576,13 @@ inoptr newfile(register inoptr pino, uint8_t *name)
     nindex->c_node.i_mode = F_REG;   /* For the time being */
     nindex->c_node.i_nlink = 1;
     nindex->c_node.i_size = 0;
-    for (j = 0; j < 20; j++) {
-        nindex->c_node.i_addr[j] = 0;
-    }
+    /* All pointers, and the reserved regions the format requires to be
+       written as zero - the slot may hold stale bytes from a previous
+       life of this inode on disk. */
+    memset(nindex->c_node.i_addr, 0, sizeof(nindex->c_node.i_addr));
+    memset(nindex->c_node.i_timeh, 0, sizeof(nindex->c_node.i_timeh));
+    nindex->c_node.i_pad = 0;
+    /* The on-disk reserved tail is not in core; bwritei zeroes it */
     wr_inode(nindex);
     if (!ch_link(pino, (uint8_t *)"", name, nindex)) {
         i_deref(nindex);
@@ -624,11 +628,13 @@ static void sb_validate(struct mount *mnt, const char *where)
 {
     fsptr fs = &mnt->m_fs;
     const char *why = NULL;
-    uint16_t bad = 0;
+    uint32_t bad = 0;
     int i;
 
     if (fs->s_mounted != SMOUNTED) {
         why = "magic"; bad = fs->s_mounted;
+    } else if (fs->s_version != FS32_VERSION) {
+        why = "version"; bad = fs->s_version;
     } else if (fs->s_isize < 2 || fs->s_isize >= fs->s_fsize) {
         why = "isize"; bad = fs->s_isize;
     } else if (fs->s_nfree > FILESYS_TABSIZE) {
@@ -650,7 +656,7 @@ static void sb_validate(struct mount *mnt, const char *where)
         if (!why) {
             for (i = 0; i < fs->s_ninode; i++) {
                 uint16_t n = fs->s_inode[i];
-                if (n < 2 || n >= (uint16_t)((fs->s_isize - 2) * 8)) {
+                if (n < 2 || n >= (fs->s_isize - 2) * INO_PER_BLOCK) {
                     why = "inode"; bad = n;
                     break;
                 }
@@ -760,7 +766,7 @@ tryagain:
         if(!(dev->s_tinode))
             goto corrupt;
         ino = dev->s_inode[--dev->s_ninode];
-        if(ino < 2 || ino >=(dev->s_isize-2)*8)
+        if(ino < 2 || ino >=(dev->s_isize-2)*INO_PER_BLOCK)
             goto corrupt;
         /*
          * The free list is a cache written by whoever last had the
@@ -795,7 +801,7 @@ tryagain:
             goto corrupt;
         for(j=0; j < INO_PER_BLOCK; j++) {
             /* Optimisation: add offsetof and use that to reduce blkptr range */
-            di = blkptr(buf, sizeof(struct dinode) * j, sizeof(struct dinode));
+            di = blkptr(buf, DINODE_SIZE * j, sizeof(struct dinode));
             if(!(di->i_mode || di->i_nlink)) {
                 register inoptr itp;
                 ino = INO_PER_BLOCK * (blk - 2) + j;
@@ -874,7 +880,7 @@ void i_free(uint16_t devno, uint16_t ino)
     if(baddev(dev = getdev(devno)))
         return;
 
-    if(ino < 2 || ino >=(dev->s_isize-2)*8)
+    if(ino < 2 || ino >=(dev->s_isize-2)*INO_PER_BLOCK)
         panic(PANIC_IFREE_BADI);
 
     /*
@@ -960,29 +966,15 @@ blkno_t blk_alloc(uint16_t devno)
         if (buf == NULL)
             goto corrupt;
         /*
-         * sizeof(dev->s_nfree), NOT sizeof(int).
-         *
-         * s_nfree is a uint16_t. On the 8 and 16 bit targets Fuzix
-         * grew up on, int is two bytes and the two agree; here int is
-         * four, so this copied two bytes too many - and what sits
-         * immediately after s_free[] in struct filesys is s_ninode.
-         *
-         * blk_free() wrote the same over-long field, so the two spare
-         * bytes on disk hold whatever s_ninode was when that free list
-         * block was written. Refilling the block list therefore
-         * restored a stale inode free list count, and every already
-         * popped slot in s_inode[] above the real count came back to
-         * life - naming inodes that were by then live files. That is
-         * the inode double free, and it is why it only appeared under
-         * heavy block allocation and never showed an i_free() call.
-         *
-         * Offsets 0..101 are unchanged, so existing filesystems and the
-         * host side tools still interoperate; only the two bytes past
-         * the block list are no longer touched.
+         * The chain block is the explicit fblk layout of
+         * FS32-FORMAT.md - count at 0, pad at 2, entries at 4 - never
+         * the classic memory-overlay from &s_nfree, whose shape was an
+         * accident of struct packing (and in the new superblock
+         * s_tinode sits between the two fields, so the overlay would
+         * be wrong as well as fragile).  Two copies, one per field.
          */
-        blktok(&dev->s_nfree, buf, 0,
-            sizeof(dev->s_nfree) + FILESYS_TABSIZE * sizeof(blkno_t));
-        /* This assumes no padding: this is an UZI era assumption */
+        blktok(&dev->s_nfree, buf, 0, sizeof(dev->s_nfree));
+        blktok(dev->s_free, buf, 4, sizeof(dev->s_free));
         brelse(buf);
     }
 
@@ -1036,14 +1028,15 @@ void blk_free(uint16_t devno, blkno_t blk)
     if(dev->s_nfree == FILESYS_TABSIZE) {
         buf = bread(devno, blk, 1);
         if (buf) {
-            /* nfree must directly preceed the blocks and without padding. That's
-               the assumption UZI always had.
-               sizeof(dev->s_nfree), NOT sizeof(int): s_nfree is a
-               uint16_t and int is four bytes on a 32bit target, so
-               "sizeof(int)" copied two bytes too many. See the matching
-               read in blk_alloc() for what that cost. */
-            blkfromk(&dev->s_nfree, buf, 0,
-                sizeof(dev->s_nfree) + FILESYS_TABSIZE * sizeof(blkno_t));
+            /* Explicit fblk layout: count at 0, pad at 2, entries at
+               4.  See the matching read in blk_alloc().  Zero the
+               whole block first: the rewrite buffer holds whatever
+               block it last cached, and writing only the fblk region
+               would leak 300 bytes of somebody's data into a free
+               block. */
+            blkzero(buf);
+            blkfromk(&dev->s_nfree, buf, 0, sizeof(dev->s_nfree));
+            blkfromk(dev->s_free, buf, 4, sizeof(dev->s_free));
             bawrite(buf);
             dev->s_nfree = 0;
         } else
@@ -1258,91 +1251,74 @@ uint16_t devnum(inoptr ino)
  *	very important so that they end up on the freelist in the
  *	order we want to allocate them.
  */
-int f_trunc_blocks(register inoptr ino, uint16_t nblock)
+int f_trunc_blocks(register inoptr ino, blkno_t nblock)
 {
     register uint16_t dev;
     register int_fast8_t j;
-    uint16_t map1 = 0;
-    uint16_t map2 = 0;
+    blkno_t keep;
+    uint_fast8_t dkeep;
 
     if (ino->c_flags & CRDONLY) {
         udata.u_error = EROFS;
         return -1;
     }
 
-    /* Block offsets are
-        0-17 direct
-        18 256 blocks (18-273)
-        19 256 * 256 blocks (274-65810)
-
-        (We only allow 65535 block offset in order to keep a lot of stuff
-         uint16_t - FIXME to fix u writei())
-
-        We don't support triple indirect blocks.
+    /* FS32 block offsets are
+        0..39                direct
+        40..167              single indirect
+        168..16551           double indirect
+        16552..2113703       triple indirect
 
         When we are called nblock is the number of blocks that will
-        remain in the file when we truncate it
+        remain in the file when we truncate it.
 
-        We set map1 to the number of blocks we must purge for single
-        indirect. We set map2 for the number of blocks we must purge
-        of double indirect.
+        For each indirect tree we hand freeblk() the number of DATA
+        blocks to RETAIN in that subtree; it frees everything above
+        that, zeroes the pointers to what it freed, and frees the root
+        itself only when nothing is retained.  A fully-retained tree is
+        not touched at all.
 
-        freeblk frees full subblocks above the block passed, and then frees
-        blocks >> 8 on the last iteration to partially clear the last set
+        (The classic version packed per-level purge counts into a
+        uint16 and its internal-buffer variant freed the retained
+        children too - partial truncate was broken upstream.  This
+        rewrite is the fix as well as the port; see FS32-FORMAT.md.)
+
+        History note: full truncation leaving a root pointer behind was
+        the 2026-08-02 corruption - SAVE IMAGE rewriting a 451-block
+        file reused a freed double-indirect root.  The "keep == 0 ->
+        clear the pointer" lines below are that lesson, now applied to
+        all three roots.
     */
 
-    if (nblock > 17 && nblock < 274)
-        map1 = (nblock - 18) << 8;
-    else if (nblock > 273)
-        map2 = nblock - 273;
     dev = ino->c_dev;
 
-    /* FIXME: ideally zero the indirect pointers before we write the
-       free lists */
+    /* Triple indirect: data blocks TWO_IND_END.. */
+    keep = nblock > TWO_IND_END ? nblock - TWO_IND_END : 0;
+    if (keep < (blkno_t)IND_PER_BLOCK * IND_PER_BLOCK * IND_PER_BLOCK) {
+        freeblk(dev, ino->c_node.i_addr[DIRECT_BLOCKS + 2], 3, keep);
+        if (keep == 0)
+            ino->c_node.i_addr[DIRECT_BLOCKS + 2] = 0;
+    }
 
-    /*
-     * First deallocate the double indirect blocks.
-     *
-     * freeblk() frees the block it is given, root included, so when
-     * nothing is retained (map2 == 0, which is EVERY f_trunc() - it
-     * always passes nblock 0) i_addr[19] must be cleared. The test used
-     * to be "if (map2)", the exact opposite, so a full truncation left
-     * i_addr[19] pointing at a block it had just put on the free list.
-     *
-     * That is the filesystem corruption chased on 2026-08-02. Rewriting
-     * the file - SAVE IMAGE opening with O_TRUNC and writing 451 blocks
-     * straight back - reaches logical block 274, bmap finds i_addr[19]
-     * still set and reuses the freed block as the double indirect root,
-     * by then reallocated as somebody's data or as a free list chain
-     * block. Hence block numbers like 50 and 65442 appearing in a file's
-     * block list, blk_free() panicking on them, and a chain block
-     * coming back zeroed because blk_alloc had handed it out twice.
-     *
-     * It only bites files longer than 273 blocks, which is why it
-     * survived on machines with small discs.
-     *
-     * Note the single indirect line below already had the right sense -
-     * the two tests were opposites, and its "???? should this just be if
-     * map1" says the doubt was known.
-     */
-    freeblk(dev, ino->c_node.i_addr[19], 2, map2);
-    if (map2 == 0)
-        ino->c_node.i_addr[19] = 0;
+    /* Double indirect: data blocks ONE_IND_END..TWO_IND_END-1 */
+    keep = nblock > ONE_IND_END ? nblock - ONE_IND_END : 0;
+    if (keep < (blkno_t)IND_PER_BLOCK * IND_PER_BLOCK) {
+        freeblk(dev, ino->c_node.i_addr[DIRECT_BLOCKS + 1], 2, keep);
+        if (keep == 0)
+            ino->c_node.i_addr[DIRECT_BLOCKS + 1] = 0;
+    }
 
-    /* Also deallocate the indirect blocks. With nblock > 273 the whole
-       single indirect range is retained, so it must not be touched at
-       all - freeblk(.., map1 == 0) would free the lot. */
-    if (nblock < 274) {
-        freeblk(dev, ino->c_node.i_addr[18], 1, map1);
-        if (map1 == 0)
-            ino->c_node.i_addr[18] = 0;
+    /* Single indirect: data blocks DIRECT_BLOCKS..ONE_IND_END-1 */
+    keep = nblock > DIRECT_BLOCKS ? nblock - DIRECT_BLOCKS : 0;
+    if (keep < IND_PER_BLOCK) {
+        freeblk(dev, ino->c_node.i_addr[DIRECT_BLOCKS], 1, keep);
+        if (keep == 0)
+            ino->c_node.i_addr[DIRECT_BLOCKS] = 0;
     }
 
     /* Finally, free the direct blocks */
-    /* FIXME: use pointers for efficiency ? */
-    /* At this point nblock is definitely < 0x8000 so forcing a signed
-       compare does what we want */
-    for(j = 17; j >= (int)nblock; --j) {
+    dkeep = nblock > DIRECT_BLOCKS ? DIRECT_BLOCKS : (uint_fast8_t)nblock;
+    for(j = DIRECT_BLOCKS - 1; j >= (int_fast8_t)dkeep; --j) {
         freeblk(dev, ino->c_node.i_addr[j], 0, 0);
         ino->c_node.i_addr[j] = 0;
     }
@@ -1371,32 +1347,60 @@ int f_trunc(regptr inoptr ino)
 
    This is annoying and it would be nice one day to find a clean solution */
 
+/*
+ * nkeep is the number of DATA blocks to retain in the subtree below
+ * blk.  Children wholly below the boundary are never touched; the
+ * child straddling it recurses with the remainder; everything above is
+ * freed and its pointer zeroed, so a retained root never keeps a
+ * pointer to a freed block (the 2026-08-02 corruption class).  The
+ * root itself is freed only when nkeep == 0.
+ *
+ * (The classic version freed the retained children too and always
+ * freed the root - partial truncate was broken upstream.  Its external
+ * variant also read entries through an uninitialised pointer.)
+ */
 #ifdef CONFIG_BLKBUF_EXTERNAL
-void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, uint16_t nblock)
+void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, blkno_t nkeep)
 {
     struct blkbuf *buf;
-    regptr blkno_t *bn;
+    blkno_t e;
     int16_t j;
-    int_fast8_t nblock1 = nblock >> 8;
 
     if(!blk)
         return;
 
     if(level){
+        blkno_t cap = 1;	/* data blocks per child subtree */
+        uint_fast8_t l;
+        int16_t kfull;
+        blkno_t rem;
+
+        for (l = 1; l < level; l++)
+            cap *= IND_PER_BLOCK;
+        kfull = nkeep / cap;
+        rem = nkeep % cap;
+
         buf = bread(dev, blk, 0);
         if (buf == NULL) {
             corrupt_fs(dev);
             return;
         }
-        for(j = BLKSIZE / 2 - 1; j >= nblock1; --j) {
-            uint8_t b = 0;
-            if (j == nblock1)
-                b = nblock & 0xFF;
-            blktok(&bn, buf, j * sizeof(blkno_t), sizeof(blkno_t));
-            freeblk(dev, bn[j], level - 1, b);
+        for(j = IND_PER_BLOCK - 1; j >= kfull; --j) {
+            blkno_t ck = (j == kfull) ? rem : 0;
+            blktok(&e, buf, j * sizeof(blkno_t), sizeof(blkno_t));
+            freeblk(dev, e, level - 1, ck);
+            if (ck == 0 && e) {
+                e = 0;
+                blkfromk(&e, buf, j * sizeof(blkno_t), sizeof(blkno_t));
+            }
+        }
+        if (nkeep) {
+            bawrite(buf);
+            return;		/* root retained */
         }
         brelse(buf);
-    }
+    } else if (nkeep)
+        return;			/* retained data block */
 #ifdef CONFIG_TRIM
     d_ioctl(dev, HDIO_TRIM, (void*)&blk);
 #endif
@@ -1405,33 +1409,45 @@ void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, uint16_t nblock)
 
 #else
 
-void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, uint16_t nblock)
+void freeblk(uint16_t dev, blkno_t blk, uint_fast8_t level, blkno_t nkeep)
 {
     struct blkbuf *buf;
     regptr blkno_t *bn;
     int16_t j;
-    int_fast8_t nblock1 = nblock >> 8;
 
     if(!blk)
         return;
 
     if(level){
+        blkno_t cap = 1;	/* data blocks per child subtree */
+        uint_fast8_t l;
+        int16_t kfull;
+        blkno_t rem;
+
+        for (l = 1; l < level; l++)
+            cap *= IND_PER_BLOCK;
+        kfull = nkeep / cap;
+        rem = nkeep % cap;
+
         buf = bread(dev, blk, 0);
         if (buf == NULL) {
             corrupt_fs(dev);
             return;
         }
         bn = blkptr(buf, 0, BLKSIZE);
-        for(j = BLKSIZE / 2 - 1; j >= 0; --j) {
-            /* When we hit nblock1 we are doing the final partial clear, so
-               only tell the child freeblk to do a partial clear */
-            uint_fast8_t b = 0;
-            if (j == nblock1)
-                b = nblock & 0xFF;
-            freeblk(dev, bn[j], level-1, b);
+        for(j = IND_PER_BLOCK - 1; j >= kfull; --j) {
+            blkno_t ck = (j == kfull) ? rem : 0;
+            freeblk(dev, bn[j], level - 1, ck);
+            if (ck == 0)
+                bn[j] = 0;
+        }
+        if (nkeep) {
+            bawrite(buf);
+            return;		/* root retained */
         }
         brelse(buf);
-    }
+    } else if (nkeep)
+        return;			/* retained data block */
 #ifdef CONFIG_TRIM
     d_ioctl(dev, HDIO_TRIM, (void*)&blk);
 #endif
@@ -1475,7 +1491,7 @@ void ino_blocks_check(uint16_t dev, uint16_t inum, const dinode *d,
     if (mnt == NULL || mnt->m_fs.s_mounted == 0)
         return;
 
-    for (i = 0; i < 20; i++) {
+    for (i = 0; i < DIRECT_BLOCKS + 3; i++) {
         blkno_t b = d->i_addr[i];
         if (b == 0)
             continue;
@@ -1673,8 +1689,13 @@ struct mount *fmount(uint16_t dev, register inoptr ino, uint16_t flags)
 #endif
 
     /* See if there really is a filesystem on the device */
-    if(fp->s_mounted != SMOUNTED  ||  fp->s_isize >= fp->s_fsize ||
-        fp->s_shift > FS_MAX_SHIFT) {
+    if (fp->s_mounted == SMOUNTED_CLASSIC) {
+        kputs("mount: classic (pre-FS32) filesystem - reformat needed\n");
+        udata.u_error = EINVAL;
+        return NULL;
+    }
+    if(fp->s_mounted != SMOUNTED || fp->s_version != FS32_VERSION ||
+        fp->s_isize >= fp->s_fsize || fp->s_shift != 0) {
         udata.u_error = EINVAL;
         return NULL;
     }

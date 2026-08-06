@@ -167,3 +167,31 @@
 *devsdspi.c.o(.text*)
 *devsd.c.o(.text*)
 *devsd_discard.c.o(.text*)
+
+/* ---- /dev/sys ioctls: every one runs at human speed ---- */
+*misc.c.o(.text*)
+
+/* ---- the swapper: core0 only, nowhere near the scanout.  Its work
+ * is memcpy between the pool and PSRAM, which goes through the QMI
+ * regardless of where the code lives; the 1.7K of code itself fits
+ * the XIP cache.  Moved for the same FS32 RAM squeeze as the batch
+ * below. ---- */
+*swapper.c.o(.text*)
+
+/* ---- the SDK peripheral batch, moved when FS32 needed the space.
+ *
+ * This is the "not worth the recovery cycle until something needs the
+ * space" batch from the note above, minus the members the rules
+ * exclude: clocks.c and flash.c stay for the reasons given there,
+ * uart.c stays because rawuart's receive interrupt calls into it, and
+ * psram.c stays because it configures the QMI it would be fetched
+ * through.  What moves is configuration-speed code: i2c (DS3231 and
+ * the user i2c ioctls), pio and gpio setup, adc conversion setup, and
+ * the spi block driver under the SD card (whose C callers already run
+ * from flash).  ~6K.  FS32's 256-byte in-core inodes are what needed
+ * it: ITABSIZE x 192 extra bytes overflowed RAM by 10K. ---- */
+*hardware_i2c/i2c.c.o(.text*)
+*hardware_pio/pio.c.o(.text*)
+*hardware_gpio/gpio.c.o(.text*)
+*hardware_adc/adc.c.o(.text*)
+*hardware_spi/spi.c.o(.text*)

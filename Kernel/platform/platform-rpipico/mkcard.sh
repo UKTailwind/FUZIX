@@ -2,7 +2,8 @@
 #
 # Create the empty partitioned card image that mksdimage.sh writes into.
 #
-#   sh mkcard.sh            -> Images/rpipico/pc3-sd.img
+#   sh mkcard.sh                          -> Images/rpipico/pc3-sd.img
+#   ROOT_MB=256 sh mkcard.sh              -> the same with a 256MB root
 #
 # WHY THIS EXISTS: mksdimage.sh refuses to run without an existing
 # pc3-sd.img, and nothing in the tree made one.  The root filesystem
@@ -11,19 +12,21 @@
 # only in whatever image happened to be on the disk.  Now both are
 # recipes.
 #
-# The layout is the one the manual documents and the kernel expects.
-# Partition 2 starting at sector 133120 is not decorative: mksdimage.sh
-# and mkccimage.sh both dd the root filesystem to that sector, and the
-# boot device name "hdb2" refers to it.
+# FS32: the layout is PARAMETERISED and this file is its only
+# authority.  Everything downstream (mksdimage.sh, mkccimage.sh,
+# verifyimage.sh) reads partition 2's geometry back out of the image's
+# own MBR via p2geom.sh, so there is nothing to keep in step by hand.
+# The classic 32MB ceiling is gone; ROOT_MB is bounded by the card and
+# by how long a card write takes, nothing else.
 #
-#   p1  0x0C  LBA   2048  131072 sectors   64 MB  FAT, for interchange
-#   p2  0x83  LBA 133120   65536 sectors   32 MB  Fuzix root (hdb2)
-#   p3  0x7F  LBA 198656    8192 sectors    4 MB  reserved
+#   p1  0x0C  FAT, for interchange       FAT_MB   (default 64)
+#   p2  0x83  FS32 Fuzix root (hdb2)     ROOT_MB  (default 32)
+#   p3  0x7F  reserved                   RES_MB   (default 4)
 #
-# Total 206848 sectors = 105,906,176 bytes.  Partition 1 is left
-# unformatted on purpose: the manual tells the user to format it from
-# Windows, because mkfs.vfat here and Windows' own formatter do not
-# always agree about what the Pico's FAT reader will accept.
+# Partition 1 is left unformatted on purpose: the manual tells the user
+# to format it from Windows, because mkfs.vfat here and Windows' own
+# formatter do not always agree about what the Pico's FAT reader will
+# accept.
 #
 # This DESTROYS any existing pc3-sd.img, so it refuses if one is there.
 
@@ -31,7 +34,18 @@ set -e
 
 R=$(cd "$(dirname "$0")/../../.." && pwd)
 OUT=$R/Images/rpipico/pc3-sd.img
-SECTORS=206848
+
+FAT_MB=${FAT_MB:-64}
+ROOT_MB=${ROOT_MB:-32}
+RES_MB=${RES_MB:-4}
+
+P1_START=2048
+P1_SIZE=$((FAT_MB * 2048))
+P2_START=$((P1_START + P1_SIZE))
+P2_SIZE=$((ROOT_MB * 2048))
+P3_START=$((P2_START + P2_SIZE))
+P3_SIZE=$((RES_MB * 2048))
+SECTORS=$((P3_START + P3_SIZE))
 
 if [ -e "$OUT" ]; then
 	echo "$OUT already exists - remove it first if you mean to rebuild" >&2
@@ -40,16 +54,16 @@ fi
 
 mkdir -p "$(dirname "$OUT")"
 
-echo "--- creating $SECTORS sectors"
+echo "--- creating $SECTORS sectors (FAT ${FAT_MB}M, root ${ROOT_MB}M, reserved ${RES_MB}M)"
 dd if=/dev/zero of="$OUT" bs=512 count=$SECTORS status=none
 
 echo "--- partition table"
-sfdisk --quiet "$OUT" <<'EOF'
+sfdisk --quiet "$OUT" <<EOF
 label: dos
 unit: sectors
-start=2048,   size=131072, type=c
-start=133120, size=65536,  type=83
-start=198656, size=8192,   type=7f
+start=$P1_START, size=$P1_SIZE, type=c
+start=$P2_START, size=$P2_SIZE, type=83
+start=$P3_START, size=$P3_SIZE, type=7f
 EOF
 
 echo "--- what landed"

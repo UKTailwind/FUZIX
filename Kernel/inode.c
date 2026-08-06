@@ -388,7 +388,16 @@ void sync(void)
 				m->m_fs.s_fmod = FMOD_CLEAN;
 			buf = bread(m->m_dev, 1, 1);
 			if (buf) {
+				/* The on-disk superblock is a whole block:
+				   the in-core struct then the reserved
+				   region, which the format requires written
+				   as zero (and the rewrite buffer holds
+				   whatever block it last cached). */
+				static const uint8_t sb_zero[BLKSIZE -
+					sizeof(struct filesys)];
 				blkfromk(&m->m_fs, buf, 0, sizeof(struct filesys));
+				blkfromk((void *)sb_zero, buf,
+					sizeof(struct filesys), sizeof(sb_zero));
 				bfree(buf, 2);
 			}
 		}
