@@ -539,30 +539,36 @@ int plt_dev_ioctl(uarg_t request, char *data)
     }
     if (request == SNDIOC_PCMOPEN)
     {
-        extern int sound_pcm_open(uint32_t, int);
+        extern int sound_pcm_open(uint32_t, int, uint16_t);
         struct snd_pcm p;
+        int r;
         if (uget(data, &p, sizeof(p)))
             return -1;
         if (p.bits != 16) {
             udata.u_error = EINVAL;
             return -1;
         }
-        if (sound_pcm_open(p.rate, p.channels)) {
-            udata.u_error = EINVAL;
+        /* The stream belongs to a PROCESS, not to a file handle: the
+         * pid is what a dead owner can be detected by, and what BASIC's
+         * PLAY STOP has to signal. */
+        r = sound_pcm_open(p.rate, p.channels, udata.u_ptab->p_pid);
+        if (r) {
+            udata.u_error = (r == -2) ? EBUSY : EINVAL;
             return -1;
         }
         return 0;
     }
     if (request == SNDIOC_PCMWRITE)
     {
-        extern int sound_pcm_write(const uint8_t *, uint32_t);
+        extern int sound_pcm_write(const uint8_t *, uint32_t, uint16_t);
         struct snd_buf b;
         int n;
         if (uget(data, &b, sizeof(b)))
             return -1;
         /* sound_pcm_write ugets from b.base itself, so the caller's
          * buffer is validated there and not copied twice. */
-        n = sound_pcm_write((const uint8_t *)b.base, b.len);
+        n = sound_pcm_write((const uint8_t *)b.base, b.len,
+                            udata.u_ptab->p_pid);
         if (n < 0) {
             udata.u_error = EINVAL;
             return -1;
@@ -580,9 +586,14 @@ int plt_dev_ioctl(uarg_t request, char *data)
     }
     if (request == SNDIOC_PCMCLOSE)
     {
-        extern void sound_pcm_close(void);
-        sound_pcm_close();
+        extern void sound_pcm_close(uint16_t);
+        sound_pcm_close(udata.u_ptab->p_pid);
         return 0;
+    }
+    if (request == SNDIOC_PCMOWNER)
+    {
+        extern uint16_t sound_pcm_owner(void);
+        return (int)sound_pcm_owner();
     }
 #endif
     return -1;

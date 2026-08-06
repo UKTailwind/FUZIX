@@ -185,7 +185,13 @@ int main(void)
      *   - With exactly one FP process, nobody else executes an FP
      *     instruction, so S0-S31 survive a context switch untouched.
      *     There is one I2S engine, so the audio device lock is also the
-     *     FPU lock.
+     *     FPU lock - and it is a real lock: SNDIOC_PCMOPEN fails with
+     *     EBUSY while another process holds the stream (sound.c).
+     *     The exception is mp3bench, which is FP and deliberately takes
+     *     no sound ioctl at all, so running it while music plays is the
+     *     one way to have two FP processes.  They would corrupt each
+     *     other's S registers - a wrong benchmark and bad audio, not a
+     *     fault - and it is a diagnostic nobody runs by accident.
      *
      * ASPEN and LSPEN are cleared for the same reason.  Left set, the
      * first FP instruction sets CONTROL.FPCA and every exception entry

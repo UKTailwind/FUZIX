@@ -20,13 +20,23 @@ void sound_quiet(void);
  * state machine and silences the synth.  16-bit signed, interleaved if
  * stereo; mono is duplicated to both channels by the driver.
  *
- * open returns 0 or -1 (bad arguments, or no PSRAM for the ring).
+ * There is one I2S engine, so the stream belongs to ONE process at a
+ * time: open, write and close all carry the caller's pid, and a second
+ * process asking for it is refused rather than allowed to interleave
+ * its samples with the first one's.
+ *
+ * open returns 0, -1 (bad arguments, or no PSRAM for the ring), or -2
+ * when another process holds the stream.
  * write returns the bytes ACCEPTED, which may be less than asked for
- * when the ring is full, or -1 if no stream is open.
- * stat reports the ring in bytes, and the underrun count since open. */
-int sound_pcm_open(uint32_t rate, int channels);
-int sound_pcm_write(const uint8_t *ubuf, uint32_t len);
+ * when the ring is full, or -1 if the caller does not hold the stream.
+ * close by anyone else is ignored.
+ * stat reports the ring in bytes, and the underrun count since open;
+ * anyone may ask.
+ * owner returns the pid holding the stream, or 0 if it is free. */
+int sound_pcm_open(uint32_t rate, int channels, uint16_t owner);
+int sound_pcm_write(const uint8_t *ubuf, uint32_t len, uint16_t owner);
 void sound_pcm_stat(uint32_t *space, uint32_t *queued, uint32_t *under);
-void sound_pcm_close(void);
+void sound_pcm_close(uint16_t owner);
+uint16_t sound_pcm_owner(void);
 
 #endif

@@ -284,6 +284,8 @@ static void w_run_arg_i(void) { mm_run_arg_i(LL(0)); A = 0; }
 static void w_run_arg_f(void) { mm_run_arg_f(D(0)); A = 0; }
 static void w_run_exec(void)  { A = mm_run_exec(); }
 static void w_run_bg(void)    { A = mm_run_bg(); }
+static void w_play_start(void){ A = mm_play_start(); }
+static void w_play_stop(void) { A = mm_play_stop(); }
 static void w_set_date(void) { mm_set_date(Ps(0)); A = 0; }
 static void w_set_time(void) { mm_set_time(Ps(0)); A = 0; }
 
@@ -555,6 +557,8 @@ static const struct mmwrap {
 	{ "mm_run_arg_f",	w_run_arg_f },
 	{ "mm_run_exec",	w_run_exec },
 	{ "mm_run_bg",		w_run_bg },
+	{ "mm_play_start",	w_play_start },
+	{ "mm_play_stop",	w_play_stop },
 	{ "mm_set_date",	w_set_date },
 	{ "mm_set_time",	w_set_time },
 	{ "mm_pixel",		w_pixel },

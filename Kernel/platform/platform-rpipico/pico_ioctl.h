@@ -353,6 +353,18 @@ struct snd_stat {
 
 #define SNDIOC_PCMCLOSE 0x0024
 
+/* Returns the pid playing, or 0 if the sound output is free.  There is
+ * one I2S engine, so the stream belongs to one process at a time: OPEN
+ * fails with EBUSY for anyone else, and WRITE and CLOSE from anyone
+ * else are refused - two players sharing the ring interleaved their
+ * samples and it sounded exactly as bad as that suggests.
+ *
+ * The pid is what makes the rule usable from outside: BASIC's PLAY STOP
+ * signals it, and PLAY MP3 refuses to start when it is not zero.  A
+ * player that died without closing is not counted - the kernel hands
+ * the stream back when its owner is gone. */
+#define SNDIOC_PCMOWNER 0x0025
+
 /* BBC ADVAL (PC3): data -> int selector, returns the reading.
  *   0      joystick switches GP34-37 (pulled up, active low),
  *          pressed = 1: bit0 GP34, bit1 GP35, bit2 GP36, bit3 GP37

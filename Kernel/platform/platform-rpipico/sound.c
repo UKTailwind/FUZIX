@@ -315,9 +315,16 @@ static void __not_in_flash_func(snd_fill)(int16_t *buf)
  * does.
  *
  * Allocated on the first open and never freed.  A machine that never
- * plays anything pays nothing, and there is no ownership question: a
- * player that dies without closing leaves the ring to drain to silence,
- * and the next open takes the state machine over.
+ * plays anything pays nothing.
+ *
+ * The RING is shared but the STREAM is not: it belongs to one pid at a
+ * time.  The first version left it open to anyone, and two players
+ * really did interleave their samples into it - it sounded like it, and
+ * whichever finished first closed the stream under the other, which
+ * then got EINVAL on every write.  So open refuses a second process
+ * (EBUSY) and only the owner may write or close.  A player that dies
+ * without closing is not a deadlock: pcm_reap notices the pid is gone
+ * and hands the state machine back.
  *
  * head and tail are free-running byte counters; used = head - tail in
  * unsigned arithmetic, which is exact across wrap and needs no spare
@@ -332,6 +339,7 @@ static volatile uint32_t pcm_head, pcm_tail;
 static volatile uint32_t pcm_underruns;
 static volatile uint8_t pcm_active, pcm_started;
 static uint8_t pcm_channels = 2;
+static uint16_t pcm_owner;              /* the pid holding the stream */
 
 /* Set the state machine clock for a sample rate.  Two samples a frame,
  * sixteen bits each, two PIO instructions a bit = 64 clocks a frame.
@@ -426,13 +434,47 @@ static void __not_in_flash_func(pcm_fill)(int16_t *buf)
     }
 }
 
+/* Hand the state machine back to the synth. */
+static void pcm_release(void)
+{
+    pcm_active = 0;
+    pcm_owner = 0;
+    pcm_head = pcm_tail = 0;
+    pcm_set_rate(SND_RATE);
+}
+
+/* Release a stream whose owner is gone.  A ZOMBIE counts as gone: it
+ * has exited, it is only waiting to be reaped, and it will not be
+ * writing any more samples.  Without this a player killed with SIGKILL
+ * - or one that faulted - would lock the audio device out for everyone
+ * until the machine was rebooted, and lock out SOUND with it. */
+static void pcm_reap(void)
+{
+    ptptr p;
+
+    if (!pcm_active)
+        return;
+    for (p = ptab; p < ptab_end; ++p)
+        if (p->p_pid == pcm_owner && p->p_status != P_EMPTY &&
+            p->p_status != P_ZOMBIE)
+            return;
+    pcm_release();
+}
+
 /* Take the state machine for a stream at this rate.  The BBC synth's
  * note tables assume SND_RATE, so the two are mutually exclusive -
- * which is what MMBasic does too. */
-int sound_pcm_open(uint32_t rate, int channels)
+ * which is what MMBasic does too.
+ *
+ * Returns -2 when another process is playing.  Reopening one's own
+ * stream is allowed and restarts it, which is what a player that
+ * changes sample rate mid-file would need. */
+int sound_pcm_open(uint32_t rate, int channels, uint16_t owner)
 {
     if (rate < 8000 || rate > 48000 || (channels != 1 && channels != 2))
         return -1;
+    pcm_reap();
+    if (pcm_active && pcm_owner != owner)
+        return -2;
     if (pcm_ring == NULL) {
         pcm_ring = malloc(PCM_RING_BYTES);
         if (pcm_ring == NULL)
@@ -444,19 +486,29 @@ int sound_pcm_open(uint32_t rate, int channels)
     pcm_started = 0;
     pcm_channels = (uint8_t)channels;
     pcm_set_rate(rate);
-    pcm_active = 1;
+    pcm_owner = owner;
+    pcm_active = 1;             /* last: the IRQ reads this */
     return 0;
+}
+
+/* Who is playing, or 0.  The one thing a program outside the player can
+ * usefully ask: BASIC's PLAY STOP signals this pid, and PLAY MP3
+ * refuses to start when it is not zero. */
+uint16_t sound_pcm_owner(void)
+{
+    pcm_reap();
+    return pcm_active ? pcm_owner : 0;
 }
 
 /* Copy from the caller into the ring, as much as fits.  Returns the
  * number of bytes taken, which the caller must honour - a short write
  * means the ring is full and the player should come back later, not
  * that anything is wrong. */
-int sound_pcm_write(const uint8_t *ubuf, uint32_t len)
+int sound_pcm_write(const uint8_t *ubuf, uint32_t len, uint16_t owner)
 {
     uint32_t used, space, off, first;
 
-    if (!pcm_active)
+    if (!pcm_active || pcm_owner != owner)
         return -1;
     used = pcm_head - pcm_tail;
     space = PCM_RING_BYTES - used;
@@ -492,12 +544,16 @@ void sound_pcm_stat(uint32_t *space, uint32_t *queued, uint32_t *under)
 
 /* Stops at once and drops whatever is still queued.  A player that
  * wants the tail played out polls sound_pcm_stat until nothing is
- * queued and closes then. */
-void sound_pcm_close(void)
+ * queued and closes then.
+ *
+ * Ignored from anyone but the owner, which is the other half of the
+ * lock: a stale close - a second player exiting after being refused -
+ * must not silence the process that legitimately holds the stream. */
+void sound_pcm_close(uint16_t owner)
 {
-    pcm_active = 0;
-    pcm_head = pcm_tail = 0;
-    pcm_set_rate(SND_RATE);
+    if (!pcm_active || pcm_owner != owner)
+        return;
+    pcm_release();
 }
 
 /* --- DMA plumbing --------------------------------------------------------- */
@@ -532,6 +588,13 @@ int sound_cmd(uint16_t chan, int16_t amp, uint16_t pitch, uint16_t dur)
     struct schan *c = &ch[cn];
     struct note n;
     irqflags_t irq;
+
+    /* A player that died without closing would otherwise leave the
+     * synth muted for good - the IRQ would go on filling from an empty
+     * PCM ring.  Nothing else here cares about the stream: while a live
+     * player holds it, SOUND queues notes that are heard when it ends,
+     * which is what this did before there was a lock at all. */
+    pcm_reap();
 
     if (chan & 0x10) {                  /* flush */
         irq = di();

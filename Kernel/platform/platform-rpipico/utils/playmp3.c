@@ -26,7 +26,9 @@
  * That also means this is one of exactly two programs allowed to carry
  * -mfpu, and it holds the PCM stream while it runs - the audio device
  * lock doubles as the FPU lock, because no FP context is saved across
- * a context switch.
+ * a context switch.  The kernel enforces that lock: SNDIOC_PCMOPEN
+ * fails with EBUSY while another process holds the stream, so two of
+ * these cannot run at once.
  */
 
 #include <stdio.h>
@@ -35,6 +37,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
+#include <errno.h>
 #include <sys/ioctl.h>
 
 #include "../pico_ioctl.h"
@@ -216,8 +219,15 @@ int main(int argc, char *argv[])
 	cfg.channels = (unsigned short)chans;
 	cfg.bits = 16;
 	if (ioctl(sfd, SNDIOC_PCMOPEN, &cfg) < 0) {
-		fprintf(stderr, "playmp3: cannot start audio at %lu Hz\n",
-			(unsigned long)mp3->sampleRate);
+		/* There is one I2S engine and one owner of it.  Say which of
+		 * the two things went wrong: "busy" sent people looking at
+		 * the sample rate for a fault that was a second player. */
+		if (errno == EBUSY)
+			fprintf(stderr, "playmp3: sound output in use by pid %d\n",
+				ioctl(sfd, SNDIOC_PCMOWNER, 0));
+		else
+			fprintf(stderr, "playmp3: cannot start audio at %lu Hz\n",
+				(unsigned long)mp3->sampleRate);
 		return 1;
 	}
 	printf("%s: %lu Hz, %d channel%s, volume %d\n", argv[1],
