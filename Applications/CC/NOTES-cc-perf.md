@@ -178,6 +178,45 @@ full gate stack green including the eclipse 3-way referee.  cc2-only
 The same profile names the next frontier: helper_call 215,250 per
 eclipse run, all mm_* dispatcher crossings.
 
+## 2026-08-06 night: register caching of the hottest local (P6 v1)
+
+The review's regalloc-lite, first increment: ONE 32-bit local per
+function lives in r7 for the whole span (low register, full 16-bit
+ALU, already in native_enter's clobber list - no bcrun change, no
+version bump; the function saves it with push {r7,lr}, same two
+bytes as before).  No spill state exists: memory never holds the
+variable after the ENTER-time warm load, so eligibility is
+everything - the collect walk classifies every LOCAL by FRAME
+OFFSET (v minus a new TRUE stack-depth counter, t_vdepth), and any
+use outside LOCAL;LOAD32 / pended-write / width-4 eqop escapes the
+offset.  Reads become one mov; writes and compound assigns are
+ANNOTATED BY CONSUMER OFFSET during classification and the emitter
+keys on those offsets, never on tracker-slot survival.
+
+That annotation design is the lesson of the round: the first cut
+keyed the cached store on t_track.slot and the 3-way referee caught
+Int_2_Loc = 9-for-13 in dhrystone main - an inner value push
+overwrites the single slot fact, the store fell back to memory,
+reads kept coming from r7.  The consumer-offset rework fixed it AND
+widened eligibility (writes from call results, short-circuit RHS).
+Two more classifier lessons: pendings must be created at the PUSH,
+not the LOCAL (the by-depth sweep killed them at birth), and a
+read span's leading LOCAL is a legitimate landing site (the loop
+back-edge lands exactly there - checking it cost main its counter).
+
+Knobs: THUMB_NOREGC (off switch), THUMB_REGCFN=name (bisection),
+THUMB_REGCDBG=1/2 (choices / full tables).  Divergence anywhere =
+bail to bytecode, never silent.  Scope note: 32-bit locals only, so
+MMBasic's 64-bit counters are untouched - this round is for C code;
+the 64-bit pair extension (r8:r9) is the follow-on.
+
+Gates: all.sh 31, thumb/gate 8/8, qemudiff 10/10, mmb2c qemutests
+17/17 (dhry 12/12 native), ctest 165, regbisect all-ok.  qemu wall
+~1% (it flattens exactly what this targets: ldr->mov and the
+in-register eqop).  BOARD NUMBER PENDING - cc2.stripped (39,776)
+staged, /tmp/ccperf-board rebuilt, no runtime or kernel change
+needed.
+
 ## Next candidates (from the review, in payoff order)
 
 1. LOCAL;PUSH elision for stores whose slot is provably unread - needs
