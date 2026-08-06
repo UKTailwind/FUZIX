@@ -115,10 +115,22 @@ discriminator.  Kernel-side fix is its own piece of work.
   missing function now refuses to load even if it never calls it.
 
 Gates: all.sh 31 eager AND 31 lazy, thumb/gate 8/8, qemudiff 10/10,
-mmb2c qemutests 17/17, ctest 165.  Board pending (port busy with
-local-compile testing): stage is cc2.p4 + bcrun.r4 in the CC dir,
-board ladder in /tmp/ccperf-board (dhry-noic vs dhry-new isolates
-P4; the r4 bcrun measures R4 + chain-bind speedup on old objects).
+mmb2c qemutests 17/17, ctest 165.
+
+Board, 2026-08-06 late (cc2.p4 + bcrun.r4 installed; outputs
+identical throughout): R4 is Dhrystone-neutral as expected (141,708
+vs 141,733 - its chain calls were startup-only there) and trims the
+eclipse to 2.3196 s; P4 delivered **165,688 D/s - +16.9%, four times
+its estimate** - the per-iteration 48-byte struct copy through the
+marshal + helper_op switch + memmove cost far more than modelled.
+The board-compiled dhry.bc is byte-identical to the host build and
+now finishes its 300,000 runs in under Dhrystone's two-second
+reporting floor ("Please increase number of runs" - raise DHRY_RUNS
+for on-board rate numbers).
+
+**Session total: 102,842 -> 165,688 D/s, +61.1%, 43.7% of gcc -O2**
+(from 27.1% this morning).  Every step board-verified with
+byte-identical outputs.
 
 ## Next candidates (from the review, in payoff order)
 
