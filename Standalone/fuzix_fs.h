@@ -1,5 +1,12 @@
 #define __UZIFS_DOT_H__
 
+#include <stdint.h>
+#include <stddef.h>
+
+#ifndef BLKSIZE
+#define BLKSIZE 512	/* FS32 default; the 400-block tools define theirs */
+#endif
+
 #define FILENAME_LEN 30
 #define ROOTDEV 0
 #define ROOTINODE 1
@@ -11,10 +18,23 @@
 #define DIR_PAD 8
 #define IPERBLK	6
 #elif (BLKSIZE == 512)
-#define SMOUNTED 12742   /* Magic number to specify mounted filesystem */
-#define SMOUNTED_WRONGENDIAN 50737   /* byteflipped */
+/* FS32 (see Kernel/platform/platform-rpipico/FS32-FORMAT.md): 512-byte
+ * blocks, 32-bit block numbers, 256-byte inodes.  The classic 64-byte
+ * inode format has magic 12742; an FS32 implementation must refuse it
+ * with a message naming the classic format, not a bare error. */
+#define SMOUNTED 0xFB32   /* Magic number to specify mounted filesystem */
+#define SMOUNTED_WRONGENDIAN 0x32FB   /* byteflipped */
+#define SMOUNTED_CLASSIC 12742	/* the pre-FS32 format, refused by name */
+#define FS32_VERSION 1
 #define DIR_LEN	32
-#define IPERBLK 8
+#define IPERBLK 2
+/* Pointer geometry.  All implementations use these names; the format
+ * document is the authority on the values. */
+#define DIRECT_BLOCKS	40
+#define IND_PER_BLOCK	128	/* BLKSIZE / sizeof(uint32_t) */
+#define ONE_IND_END	(DIRECT_BLOCKS + IND_PER_BLOCK)		   /* 168 */
+#define TWO_IND_END	(ONE_IND_END + IND_PER_BLOCK*IND_PER_BLOCK) /* 16552 */
+#define THREE_IND_END	(TWO_IND_END + 128UL*128*128)	 /* 2113704 blocks */
 #endif
 #define CMAGIC   24721
 #define UFTSIZE 10
@@ -76,7 +96,11 @@ typedef struct direct {
 #endif
 } direct;
 
-typedef uint16_t blkno_t;    /* Can have 65536 blocks in filesystem */
+#if (BLKSIZE == 400)
+typedef uint16_t blkno_t;    /* classic 400-block format: 16-bit */
+#else
+typedef uint32_t blkno_t;    /* FS32: 32-bit block numbers, fs to 2TB */
+#endif
 
 typedef struct blkbuf {
     uint8_t     bf_data[512];    /* This MUST be first ! */
@@ -84,22 +108,45 @@ typedef struct blkbuf {
     blkno_t     bf_blk;
     char        bf_dirty;
     char        bf_busy;
-    uint16_t      bf_time;         /* LRU time stamp */
+    uint32_t    bf_time;         /* LRU time stamp; 32-bit, see bufclock */
 } blkbuf;
 
 typedef blkbuf *bufptr;
 
+#if (BLKSIZE == 400)
+/* Classic 64-byte inode, kept for the 400-block tools */
 typedef struct dinode {
     uint16_t i_mode;
     uint16_t i_nlink;
     uint16_t i_uid;
     uint16_t i_gid;
-    uint32_t    i_size;
-    uint32_t   i_atime;
-    uint32_t   i_mtime;
-    uint32_t   i_ctime;
+    uint32_t i_size;
+    uint32_t i_atime;
+    uint32_t i_mtime;
+    uint32_t i_ctime;
     blkno_t  i_addr[20];
 } dinode;               /* Exactly 64 bytes long! */
+#else
+/* FS32 on-disk inode: exactly 256 bytes, two per block, never
+ * straddling a block.  i_addr is 40 direct + single + double + triple
+ * indirect (DIRECT_BLOCKS et al above).  Every field is naturally
+ * aligned so the on-disk bytes are the struct bytes on x86-64 and ARM
+ * EABI alike. */
+typedef struct dinode {
+    uint16_t i_mode;
+    uint16_t i_nlink;
+    uint16_t i_uid;
+    uint16_t i_gid;
+    uint32_t i_size;
+    uint32_t i_atime;
+    uint32_t i_mtime;
+    uint32_t i_ctime;
+    uint8_t  i_timeh[3];	/* bits 32-39 of a/m/ctime; 0 in v1 */
+    uint8_t  i_pad;		/* must be 0 */
+    blkno_t  i_addr[DIRECT_BLOCKS + 3];
+    uint8_t  i_reserved[56];	/* written 0, ignored on read */
+} dinode;               /* Exactly 256 bytes long! */
+#endif
 
 /* Bit masks for i_mode and st_mode */
 
@@ -136,6 +183,8 @@ typedef struct cinode {
     char       c_dirty;           /* Modified flag. */
 } cinode, *inoptr;
 
+#if (BLKSIZE == 400)
+/* Classic superblock, kept for the 400-block tools */
 typedef struct filesys {
     uint16_t    s_mounted;
     uint16_t    s_isize;
@@ -152,6 +201,47 @@ typedef struct filesys {
     uint8_t	s_shift;
     inoptr      s_mntpt;
 } filesys, *fsptr;
+#else
+/* FS32 superblock: the first 332 bytes of block 1, all fields
+ * naturally aligned, offsets fixed by FS32-FORMAT.md.  s_mntpt is
+ * in-core only and sits beyond the on-disk region. */
+typedef struct filesys {
+    uint16_t    s_mounted;	/* 0: magic 0xFB32 */
+    uint16_t    s_version;	/* 2: FS32_VERSION */
+    uint32_t    s_isize;	/* 4: first data block */
+    uint32_t    s_fsize;	/* 8: total blocks */
+    blkno_t     s_tfree;	/* 12: total free blocks */
+    int16_t     s_nfree;	/* 16: valid entries in s_free */
+    uint16_t    s_tinode;	/* 18: total free inodes */
+    blkno_t     s_free[50];	/* 20 */
+    int16_t     s_ninode;	/* 220 */
+    uint16_t    s_inode[50];	/* 222 */
+    uint8_t     s_fmod;		/* 322 */
+    uint8_t	s_timeh;	/* 323: top bits of time */
+    uint32_t    s_time;		/* 324 */
+    uint8_t	s_shift;	/* 328: must be 0 */
+    uint8_t	s_pad0[3];	/* 329 */
+    uint8_t	s_reserved[180];/* 332: written 0, ignored on read */
+    inoptr      s_mntpt;	/* in-core only, never on disk */
+} filesys, *fsptr;
+
+#define FS32_SUPER_DISKSIZE 512	/* bytes of the struct that go to disk */
+
+/* Free-list chain block: written as this explicit struct, never as the
+ * classic memory-overlay from &s_nfree (FS32-FORMAT.md, "Free list"). */
+typedef struct fblk {
+    int16_t     f_nfree;	/* 1..50 */
+    uint16_t    f_pad;		/* 0 */
+    blkno_t     f_free[50];
+} fblk;
+
+#ifndef FS32_NO_ASSERTS
+_Static_assert(sizeof(dinode) == 256, "FS32 dinode must be 256 bytes");
+_Static_assert(sizeof(fblk) == 204, "FS32 free chain block layout");
+_Static_assert(offsetof(struct filesys, s_reserved) == 332,
+	       "FS32 superblock layout");
+#endif
+#endif /* BLKSIZE != 400 */
 
 #define EPERM           1               /* Not owner */
 #define ENOENT          2               /* No such file or directory */

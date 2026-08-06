@@ -33,7 +33,12 @@ static char *month[] = { "Jan", "Feb", "Mar", "Apr",
 	"Sep", "Oct", "Nov", "Dec"
 };
 
-static uint16_t bufclock = 0;	/* Time-stamp counter for LRU */
+/* 32-bit, NOT the classic uint16: a single bget of a >32MB file makes
+ * more than 65535 buffer touches, the 16-bit clock wraps, every
+ * buffer's age goes negative and freebuf() finds "no free buffers"
+ * with nine of ten free.  Classic images could not hold a file big
+ * enough to hit this; FS32 images can. */
+static uint32_t bufclock = 0;	/* Time-stamp counter for LRU */
 static struct blkbuf bufpool[NBUFS];
 
 static struct cinode i_tab[ITABSIZE];
@@ -247,7 +252,7 @@ int main(int argc, char *argval[])
 					      fsys.s_isize) - fsys.s_tfree,
 					     fsys.s_tfree);
 					printf("%u inodes used, %u free\n",
-					       (8 * (fsys.s_isize - 2) -
+					       (IPERBLK * (fsys.s_isize - 2) -
 						fsys.s_tinode),
 					       fsys.s_tinode);
 				}
@@ -1306,7 +1311,7 @@ static int fuzix_mknod(char *name, int16_t mode, int16_t dev)
 
 	/* Initialize mode and dev */
 	ino->c_node.i_mode = swizzle16(mode & ~udata.u_mask);
-	ino->c_node.i_addr[0] = swizzle16(isdevice(ino) ? dev : 0);
+	ino->c_node.i_addr[0] = swizzle32(isdevice(ino) ? (blkno_t) dev : 0);
 	setftime(ino, A_TIME | M_TIME | C_TIME);
 	wr_inode(ino);
 
@@ -1335,8 +1340,10 @@ static void fuzix_sync(void)
 			ino->c_dirty = 0;
 		}
 
-	/* Write out modified super blocks */
-	/* This fills the rest of the super block with garbage. */
+	/* Write out modified super blocks.  Only the on-disk region:
+	   sizeof(struct filesys) now exceeds a block (s_mntpt), and the
+	   classic full-struct copy overran the 512-byte buffer into the
+	   blkbuf header fields behind it. */
 
 	for (j = 0; j < NDEVS; ++j) {
 		if (swizzle16(fs_tab[j].s_mounted) == SMOUNTED
@@ -1344,7 +1351,7 @@ static void fuzix_sync(void)
 			fs_tab[j].s_fmod = 0;
 			buf = bread(j, 1, 1);
 			memcpy(buf, (char *) &fs_tab[j],
-			       sizeof(struct filesys));
+			       FS32_SUPER_DISKSIZE);
 			bfree((bufptr) buf, 2);
 		}
 	}
@@ -1416,7 +1423,7 @@ static void stcpy(inoptr ino, struct uzi_stat *buf)
 	b->st_uid = swizzle16(ino->c_node.i_uid);
 	b->st_gid = swizzle16(ino->c_node.i_gid);
 
-	b->st_rdev = swizzle16(ino->c_node.i_addr[0]);
+	b->st_rdev = swizzle16((uint16_t) swizzle32(ino->c_node.i_addr[0]));
 
 	b->st_size = swizzle32(ino->c_node.i_size);
 	b->fst_atime = swizzle32(ino->c_node.i_atime);
@@ -1649,7 +1656,7 @@ static inoptr i_open(register int dev, register unsigned ino)
 	}
 
 	if (ino < ROOTINODE
-	    || ino >= (swizzle16(fs_tab[dev].s_isize) - 2) * 8) {
+	    || ino >= (swizzle32(fs_tab[dev].s_isize) - 2) * IPERBLK) {
 		printf("i_open: bad inode number\n");
 		return (NULLINODE);
 	}
@@ -1678,8 +1685,8 @@ static inoptr i_open(register int dev, register unsigned ino)
 		return (NULLINODE);
 	}
 
-	buf = (struct dinode *) bread(dev, (ino >> 3) + 2, 0);
-	memcpy(&(nindex->c_node), &(buf[ino & 0x07]), 64);
+	buf = (struct dinode *) bread(dev, (ino >> 1) + 2, 0);
+	memcpy(&(nindex->c_node), &(buf[ino & 0x01]), sizeof(struct dinode));
 	brelse((bufptr) buf);
 
 	nindex->c_dev = dev;
@@ -1839,7 +1846,6 @@ static int namecomp(char *n1, char *n2)
 static inoptr newfile(inoptr pino, char *name)
 {
 	register inoptr nindex;
-	register int j;
 
 	ifnot(nindex = i_open(pino->c_dev, 0))
 	    goto nogood;
@@ -1851,8 +1857,14 @@ static inoptr newfile(inoptr pino, char *name)
 	nindex->c_node.i_mode = swizzle16(F_REG);	/* For the time being */
 	nindex->c_node.i_nlink = swizzle16(1);
 	nindex->c_node.i_size = 0;
-	for (j = 0; j < 20; j++)
-		nindex->c_node.i_addr[j] = 0;
+	/* All pointers, and the reserved region the format requires to be
+	   written as zero - the slot may hold stale bytes from a previous
+	   life of this inode on disk. */
+	memset(nindex->c_node.i_addr, 0, sizeof(nindex->c_node.i_addr));
+	memset(nindex->c_node.i_timeh, 0, sizeof(nindex->c_node.i_timeh));
+	nindex->c_node.i_pad = 0;
+	memset(nindex->c_node.i_reserved, 0,
+	       sizeof(nindex->c_node.i_reserved));
 	wr_inode(nindex);
 
 	ifnot(ch_link(pino, "", filename(name), nindex)) {
@@ -1920,7 +1932,7 @@ static unsigned i_alloc(int devno)
 		i = swizzle16(dev->s_ninode);
 		ino = swizzle16(dev->s_inode[--i]);
 		dev->s_ninode = swizzle16(i);
-		if (ino < 2 || ino >= (swizzle16(dev->s_isize) - 2) * 8)
+		if (ino < 2 || ino >= (swizzle32(dev->s_isize) - 2) * IPERBLK)
 			goto corrupt;
 		dev->s_tinode = swizzle16(swizzle16(dev->s_tinode) - 1);
 		return (ino);
@@ -1930,12 +1942,12 @@ static unsigned i_alloc(int devno)
 
 	fuzix_sync();		/* Make on-disk inodes consistent */
 	k = 0;
-	for (blk = 2; blk < swizzle16(dev->s_isize); blk++) {
+	for (blk = 2; blk < swizzle32(dev->s_isize); blk++) {
 		buf = (struct dinode *) bread(devno, blk, 0);
-		for (j = 0; j < 8; j++) {
+		for (j = 0; j < IPERBLK; j++) {
 			ifnot(buf[j].i_mode || buf[j].i_nlink)
 			    dev->s_inode[k++] =
-			    swizzle16(8 * (blk - 2) + j);
+			    swizzle16(IPERBLK * (blk - 2) + j);
 			if (k == 50) {
 				brelse((bufptr) buf);
 				goto done;
@@ -1975,7 +1987,7 @@ static void i_free(int devno, unsigned ino)
 	if (baddev(dev = getdev(devno)))
 		return;
 
-	if (ino < 2 || ino >= (swizzle16(dev->s_isize) - 2) * 8)
+	if (ino < 2 || ino >= (swizzle32(dev->s_isize) - 2) * IPERBLK)
 		panic("i_free: bad ino");
 
 	dev->s_tinode = swizzle16(swizzle16(dev->s_tinode) + 1);
@@ -1996,7 +2008,6 @@ static blkno_t blk_alloc(int devno)
 	register fsptr dev;
 	register blkno_t newno;
 	blkno_t *buf;		/*, *bread(); -- HP */
-	register int j;
 	int i;
 
 	if (baddev(dev = getdev(devno)))
@@ -2006,7 +2017,7 @@ static blkno_t blk_alloc(int devno)
 		goto corrupt;
 
 	i = swizzle16(dev->s_nfree);
-	newno = swizzle16(dev->s_free[--i]);
+	newno = swizzle32(dev->s_free[--i]);
 	dev->s_nfree = swizzle16(i);
 	ifnot(newno) {
 		if (dev->s_tfree != 0)
@@ -2016,22 +2027,21 @@ static blkno_t blk_alloc(int devno)
 		return (0);
 	}
 
-	/* See if we must refill the s_free array */
+	/* See if we must refill the s_free array.  The chain block is
+	   the explicit fblk struct (FS32-FORMAT.md, "Free list"). */
 
 	ifnot(dev->s_nfree) {
-		buf = (blkno_t *) bread(devno, newno, 0);
-		dev->s_nfree = buf[0];
-		for (j = 0; j < 50; j++) {
-			dev->s_free[j] = buf[j + 1];
-		}
-		brelse((bufptr) buf);
+		fblk *f = (fblk *) bread(devno, newno, 0);
+		dev->s_nfree = f->f_nfree;
+		memcpy(dev->s_free, f->f_free, sizeof(dev->s_free));
+		brelse((bufptr) f);
 	}
 
 	validblk(devno, newno);
 
 	ifnot(dev->s_tfree)
 	    goto corrupt;
-	dev->s_tfree = swizzle16(swizzle16(dev->s_tfree) - 1);
+	dev->s_tfree = swizzle32(swizzle32(dev->s_tfree) - 1);
 
 	/* Zero out the new block */
 	buf = (blkno_t *) bread(devno, newno, 2);
@@ -2066,16 +2076,22 @@ static void blk_free(int devno, blkno_t blk)
 	validblk(devno, blk);
 
 	if (dev->s_nfree == swizzle16(50)) {
+		/* Write the explicit fblk struct, never the classic
+		   memory-overlay from &s_nfree (FS32-FORMAT.md). */
+		fblk f;
+		memset(&f, 0, sizeof(f));
+		f.f_nfree = dev->s_nfree;
+		memcpy(f.f_free, dev->s_free, sizeof(f.f_free));
 		buf = bread(devno, blk, 1);
-		/* 50 entries in s_free + s_nfree */
-		memcpy(buf, &(dev->s_nfree), 52 * sizeof(uint16_t));
+		memset(buf, 0, 512);
+		memcpy(buf, &f, sizeof(f));
 		bawrite((bufptr) buf);
 		dev->s_nfree = 0;
 	}
 
-	dev->s_tfree = swizzle16(swizzle16(dev->s_tfree) + 1);
+	dev->s_tfree = swizzle32(swizzle32(dev->s_tfree) + 1);
 	b = swizzle16(dev->s_nfree);
-	dev->s_free[b++] = swizzle16(blk);
+	dev->s_free[b++] = swizzle32(blk);
 	dev->s_nfree = swizzle16(b);
 }
 
@@ -2190,9 +2206,9 @@ static void wr_inode(inoptr ino)
 
 	magic(ino);
 
-	blkno = (ino->c_num >> 3) + 2;
+	blkno = (ino->c_num >> 1) + 2;
 	buf = (struct dinode *) bread(ino->c_dev, blkno, 0);
-	memcpy(&buf[ino->c_num & 0x07], &ino->c_node, 64);
+	memcpy(&buf[ino->c_num & 0x01], &ino->c_node, sizeof(struct dinode));
 	bfree((bufptr) buf, 2);
 	ino->c_dirty = 0;
 }
@@ -2216,15 +2232,14 @@ static void f_trunc(inoptr ino)
 
 	dev = ino->c_dev;
 
-	/* First deallocate the double indirect blocks */
-	freeblk(dev, swizzle16(ino->c_node.i_addr[19]), 2);
-
-	/* Also deallocate the indirect blocks */
-	freeblk(dev, swizzle16(ino->c_node.i_addr[18]), 1);
+	/* Deepest first: triple, double, single indirect trees */
+	freeblk(dev, swizzle32(ino->c_node.i_addr[DIRECT_BLOCKS + 2]), 3);
+	freeblk(dev, swizzle32(ino->c_node.i_addr[DIRECT_BLOCKS + 1]), 2);
+	freeblk(dev, swizzle32(ino->c_node.i_addr[DIRECT_BLOCKS]), 1);
 
 	/* Finally, free the direct blocks */
-	for (j = 17; j >= 0; --j)
-		freeblk(dev, swizzle16(ino->c_node.i_addr[j]), 0);
+	for (j = DIRECT_BLOCKS - 1; j >= 0; --j)
+		freeblk(dev, swizzle32(ino->c_node.i_addr[j]), 0);
 
 	memset((char *) ino->c_node.i_addr, 0, sizeof(ino->c_node.i_addr));
 
@@ -2244,8 +2259,8 @@ static void freeblk(int dev, blkno_t blk, int level)
 
 	if (level) {
 		buf = (blkno_t *) bread(dev, blk, 0);
-		for (j = 255; j >= 0; --j)
-			freeblk(dev, swizzle16(buf[j]), level - 1);
+		for (j = IND_PER_BLOCK - 1; j >= 0; --j)
+			freeblk(dev, swizzle32(buf[j]), level - 1);
 		brelse((bufptr) buf);
 	}
 
@@ -2275,66 +2290,73 @@ static blkno_t bmap(inoptr ip, blkno_t bn, int rwflg)
 	dev = ip->c_dev;
 
 	/*
-	 * blocks 0..17 are direct blocks
+	 * blocks 0..DIRECT_BLOCKS-1 are direct blocks
 	 */
-	if (bn < 18) {
-		nb = swizzle16(ip->c_node.i_addr[bn]);
+	if (bn < DIRECT_BLOCKS) {
+		nb = swizzle32(ip->c_node.i_addr[bn]);
 		if (nb == 0) {
 			if (rwflg || (nb = blk_alloc(dev)) == 0)
 				return (NULLBLK);
-			ip->c_node.i_addr[bn] = swizzle16(nb);
+			ip->c_node.i_addr[bn] = swizzle32(nb);
 			ip->c_dirty = 1;
 		}
 		return (nb);
 	}
 
 	/*
-	 * addresses 18 and 19 have single and double indirect blocks.
-	 * the first step is to determine how many levels of indirection.
+	 * i_addr[DIRECT_BLOCKS..+2] are the single, double and triple
+	 * indirect roots.  An indirect block holds IND_PER_BLOCK = 128
+	 * 32-bit pointers, so each level consumes 7 bits of bn.
+	 * Determine the level, the root slot, and the shift that
+	 * extracts the top index.
 	 */
-	bn -= 18;
-	sh = 0;
-	j = 2;
-	if (bn & 0xff00) {	/* bn > 255  so double indirect */
-		sh = 8;
-		bn -= 256;
-		j = 1;
+	bn -= DIRECT_BLOCKS;
+	if (bn < IND_PER_BLOCK) {
+		j = 1;		/* levels of indirection to walk */
+		sh = 0;
+		i = DIRECT_BLOCKS;
+	} else if (bn < IND_PER_BLOCK + (blkno_t) IND_PER_BLOCK * IND_PER_BLOCK) {
+		bn -= IND_PER_BLOCK;
+		j = 2;
+		sh = 7;
+		i = DIRECT_BLOCKS + 1;
+	} else {
+		bn -= IND_PER_BLOCK + (blkno_t) IND_PER_BLOCK * IND_PER_BLOCK;
+		if (bn >= (blkno_t) IND_PER_BLOCK * IND_PER_BLOCK * IND_PER_BLOCK)
+			return (NULLBLK);	/* beyond THREE_IND_END */
+		j = 3;
+		sh = 14;
+		i = DIRECT_BLOCKS + 2;
 	}
 
 	/*
-	 * fetch the address from the inode
+	 * fetch the root from the inode.
 	 * Create the first indirect block if needed.
 	 */
-	ifnot(nb = swizzle16(ip->c_node.i_addr[20 - j])) {
+	ifnot(nb = swizzle32(ip->c_node.i_addr[i])) {
 		if (rwflg || !(nb = blk_alloc(dev)))
 			return (NULLBLK);
-		ip->c_node.i_addr[20 - j] = swizzle16(nb);
+		ip->c_node.i_addr[i] = swizzle32(nb);
 		ip->c_dirty = 1;
 	}
 
 	/*
 	 * fetch through the indirect blocks
 	 */
-	for (; j <= 2; j++) {
+	for (; j > 0; j--) {
 		bp = (bufptr) bread(dev, nb, 0);
-		/******
-                if(bp->bf_error) {
-                        brelse(bp);
-                        return((blkno_t)0);
-                }
-                ******/
-		i = (bn >> sh) & 0xff;
-		if ((nb = swizzle16(((blkno_t *) bp)[i])) != 0)
+		i = (bn >> sh) & (IND_PER_BLOCK - 1);
+		if ((nb = swizzle32(((blkno_t *) bp)[i])) != 0)
 			brelse(bp);
 		else {
 			if (rwflg || !(nb = blk_alloc(dev))) {
 				brelse(bp);
 				return (NULLBLK);
 			}
-			((blkno_t *) bp)[i] = swizzle16(nb);
+			((blkno_t *) bp)[i] = swizzle32(nb);
 			bawrite(bp);
 		}
-		sh -= 8;
+		sh -= 7;
 	}
 	return (nb);
 }
@@ -2353,8 +2375,8 @@ static void validblk(int dev, blkno_t num)
 	if (devptr->s_mounted == 0)
 		panic("validblk: not mounted");
 
-	if (num < swizzle16(devptr->s_isize)
-	    || num >= swizzle16(devptr->s_fsize))
+	if (num < swizzle32(devptr->s_isize)
+	    || num >= swizzle32(devptr->s_fsize))
 		panic("validblk: invalid blk");
 }
 
@@ -2416,17 +2438,26 @@ static int fmount(int dev, inoptr ino)
 	uint8_t *buf;
 	register struct filesys *fp;
 
-	/* Dev 0 blk 1 */
+	/* Dev 0 blk 1.  Copy only the on-disk region: the in-core struct
+	   carries s_mntpt beyond it, and sizeof(struct filesys) is now
+	   larger than a block. */
 	fp = fs_tab + dev;
 	buf = bread(dev, 1, 0);
-	memcpy(fp, buf, sizeof(struct filesys));
+	memcpy(fp, buf, FS32_SUPER_DISKSIZE);
 	brelse((bufptr) buf);
 
 	/* See if there really is a filesystem on the device */
 	if (fp->s_mounted == SMOUNTED_WRONGENDIAN)
 		swizzling = 1;
+	if (swizzle16(fp->s_mounted) == SMOUNTED_CLASSIC) {
+		fprintf(stderr,
+			"classic (pre-FS32) filesystem - reformat needed\n");
+		return (-1);
+	}
 	if (swizzle16(fp->s_mounted) != SMOUNTED ||
-	    swizzle16(fp->s_isize) >= swizzle16(fp->s_fsize))
+	    swizzle16(fp->s_version) != FS32_VERSION ||
+	    fp->s_shift != 0 ||
+	    swizzle32(fp->s_isize) >= swizzle32(fp->s_fsize))
 		return (-1);
 
 	fp->s_mntpt = ino;
@@ -2557,7 +2588,7 @@ static bufptr freebuf(void)
 {
 	register bufptr bp;
 	register bufptr oldest;
-	register int oldtime;
+	register uint32_t oldtime;
 
 	/* Try to find a non-busy buffer and write out the data if it is dirty */
 	oldest = NULL;
@@ -2568,8 +2599,13 @@ static bufptr freebuf(void)
 			oldtime = bufclock - bp->bf_time;
 		}
 	}
-	ifnot(oldest)
+	ifnot(oldest) {
+	    for (bp = bufpool; bp < bufpool + NBUFS; ++bp)
+		fprintf(stderr, "buf dev %d blk %u busy %d dirty %d\n",
+			bp->bf_dev, (unsigned) bp->bf_blk,
+			bp->bf_busy, bp->bf_dirty);
 	    panic("no free buffers");
+	}
 
 	if (oldest->bf_dirty) {
 		if (bdwrite(oldest->bf_blk, oldest->bf_data) == -1)
