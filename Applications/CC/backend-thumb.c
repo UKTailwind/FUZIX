@@ -272,6 +272,15 @@ static int t_nor4(void)
 	return cached;
 }
 
+/* THUMB_NOCFOLD=1 turns constant-operand folding off, for A/B */
+static int t_nocfold(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = getenv("THUMB_NOCFOLD") ? 1 : 0;
+	return cached;
+}
+
 /*
  *	THUMB_SKIP=name[,name...] keeps the named functions in bytecode.
  *	A debugging knob: when a whole-program build misbehaves and the
@@ -1174,6 +1183,180 @@ static int t_eqop(const char *name)
 }
 
 /*
+ *	Constant right operand: PUSH ; CONSTk ; OP32 never needs the
+ *	stack at all.  The left operand is already in A, so the whole
+ *	shape runs in registers - an immediate form where one exists
+ *	(add/sub/cmp imm, shift by imm5, and/or/xor imm8, the uxtb/uxth
+ *	masks), and otherwise the constant is built in r2 and the
+ *	operator takes it from there, which still beats the fused
+ *	five-instruction round trip whatever the constant is.  Operand
+ *	order is preserved throughout (left in r0, k on the right), so
+ *	the compare conditions are the same table the stacked form uses
+ *	and t_boolbranch fuses the following jump exactly as before.
+ *
+ *	Declined when a branch can land on the constant or the operator
+ *	(the landing site would find the push missing).  The window has
+ *	no net stack effect and reads nothing through r4, so a pending
+ *	slot fact survives by construction.  Like the reload elisions
+ *	this runs during the collect walk too: the only swallowed op
+ *	that can resolve a target is the jump t_boolbranch consumes,
+ *	and t_boolbranch marks it.
+ *
+ *	Returns the offset to resume at (t_d and tmap maintained), or
+ *	0 to decline.
+ */
+static unsigned long t_cfold(unsigned long o, unsigned long start,
+			     unsigned long end)
+{
+	static const unsigned char ccm[] = {
+		0, 1, 11, 3, 12, 8, 13, 9, 10, 2
+	};	/* eq ne lt lo gt hi le ls ge hs */
+	unsigned long p = o + 1, k, opoff, neg;
+	unsigned cop, op2;
+
+	if (t_nocfold())
+		return 0;
+	if (p >= end)
+		return 0;
+	cop = codebuf[p];
+	if (cop == BC_CONST8) {
+		if (p + 1 >= end)
+			return 0;
+		k = (unsigned long)(long)(signed char)codebuf[p + 1]
+		    & 0xFFFFFFFFUL;
+		opoff = p + 2;
+	} else if (cop == BC_CONST16) {
+		if (p + 2 >= end)
+			return 0;
+		k = (unsigned long)(long)(short)t_rd16(p + 1)
+		    & 0xFFFFFFFFUL;
+		opoff = p + 3;
+	} else if (cop == BC_CONST32) {
+		if (p + 4 >= end)
+			return 0;
+		k = t_rd32c(p + 1);
+		opoff = p + 5;
+	} else
+		return 0;
+	if (opoff >= end)
+		return 0;
+	if ((t_targets[(p - start) >> 3] & (1 << ((p - start) & 7))) ||
+	    (t_targets[(opoff - start) >> 3] & (1 << ((opoff - start) & 7))))
+		return 0;
+	op2 = codebuf[opoff];
+	neg = (0UL - k) & 0xFFFFFFFFUL;
+
+	switch (op2) {
+	case BC_ADD:
+	case BC_SUB: {
+		unsigned sub = (op2 == BC_SUB);
+		unsigned long imm = k;
+		if (imm > 4095 && neg <= 4095) {
+			imm = neg;
+			sub = !sub;
+		}
+		if (imm <= 255)
+			t16((sub ? 0x3800 : 0x3000) | (unsigned)imm);
+		else if (imm <= 4095)
+			t_addsubw(sub, 0, 0, (unsigned)imm);
+		else {
+			t_constr(2, k);
+			t16(sub ? 0x1A80 : 0x1810);
+					/* subs/adds r0, r0, r2 */
+		}
+		break;
+	}
+	case BC_AND:
+		if (k == 0xFFUL) {
+			t16(0xB2C0);	/* uxtb r0, r0 */
+			break;
+		}
+		if (k == 0xFFFFUL) {
+			t16(0xB280);	/* uxth r0, r0 */
+			break;
+		}
+		if (k <= 255) {
+			t32(0xF010, (unsigned)k);	/* ands r0, #k */
+			break;
+		}
+		t_constr(2, k);
+		t16(0x4010);		/* ands r0, r2 */
+		break;
+	case BC_OR:
+		if (k <= 255) {
+			t32(0xF050, (unsigned)k);	/* orrs r0, #k */
+			break;
+		}
+		t_constr(2, k);
+		t16(0x4310);		/* orrs r0, r2 */
+		break;
+	case BC_XOR:
+		if (k <= 255) {
+			t32(0xF090, (unsigned)k);	/* eors r0, #k */
+			break;
+		}
+		t_constr(2, k);
+		t16(0x4050);		/* eors r0, r2 */
+		break;
+	case BC_SHL:
+	case BC_SHRS:
+	case BC_SHRU:
+		if (k >= 1 && k <= 31) {
+			t16((op2 == BC_SHL ? 0x0000 :
+			     op2 == BC_SHRU ? 0x0800 : 0x1000) |
+			    ((unsigned)k << 6));
+					/* lsls/lsrs/asrs r0, r0, #k */
+		} else if (k) {
+			/* shift counts use the register's bottom byte,
+			   exactly as the stacked form's .W shift did */
+			t_constr(2, k);
+			t16(op2 == BC_SHL ? 0x4090 :
+			    op2 == BC_SHRU ? 0x40D0 : 0x4110);
+					/* lsls/lsrs/asrs r0, r2 */
+		}			/* k == 0: identity */
+		break;
+	case BC_MUL:
+		t_constr(2, k);
+		t16(0x4350);		/* muls r0, r2 */
+		break;
+	case BC_DIVS:
+	case BC_DIVU:
+		t_constr(2, k);
+		t32(op2 == BC_DIVS ? 0xFB90 : 0xFBB0, 0xF0F2);
+					/* s/udiv r0, r0, r2 */
+		break;
+	case BC_REMS:
+	case BC_REMU:
+		t_constr(2, k);
+		t32(op2 == BC_REMS ? 0xFB90 : 0xFBB0, 0xF3F2);
+					/* s/udiv r3, r0, r2 */
+		t32(0xFB03, 0x0012);	/* mls r0, r3, r2, r0 */
+		break;
+	case BC_EQ:  case BC_NE:
+	case BC_LTS: case BC_LTU:
+	case BC_GTS: case BC_GTU:
+	case BC_LES: case BC_LEU:
+	case BC_GES: case BC_GEU:
+		tmap[p - start] = tlen;
+		tmap[opoff - start] = tlen;
+		if (k <= 255)
+			t16(0x2800 | (unsigned)k);	/* cmp r0, #k */
+		else {
+			t_constr(2, k);
+			t16(0x4290);			/* cmp r0, r2 */
+		}
+		t_d = 0;
+		return t_boolbranch(opoff, ccm[op2 - BC_EQ], start, end);
+	default:
+		return 0;
+	}
+	tmap[p - start] = tlen;
+	tmap[opoff - start] = tlen;
+	t_d = 0;
+	return opoff + 1;
+}
+
+/*
  *	One pass over the function's bytecode.  Dry: compute sizes and
  *	fill tmap.  Wet: emit, using the completed tmap for branch
  *	displacements.  Both passes run the same code so the sizes cannot
@@ -1307,7 +1490,17 @@ static int t_span(unsigned long start, unsigned long end)
 		}
 
 		/* ---- CP-B: stack, locals, loads, stores, addresses -- */
-		case BC_PUSH:
+		case BC_PUSH: {
+			/* constant right operand: no stack round trip,
+			   no parked register - see t_cfold.  A PUSH can
+			   never sit inside a fused window (it is not a
+			   builder), so r2 is free for the constant. */
+			unsigned long nl = t_cfold(o, start, end);
+			if (nl) {
+				o = nl;
+				break;
+			}
+		}
 			if (t_fuse_scan(o, 4, start, end)) {
 				t16(0x3C04);	/* subs r4, #4      */
 				t16(0x4602);	/* mov  r2, r0      */

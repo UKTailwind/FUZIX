@@ -17,11 +17,10 @@ rm -f "$W/d.ir"
 "$CC/host-armm0/cc1" < "$W/d.tok" 1<> "$W/d.ir" 2>/dev/null || exit 1
 for v in new old; do
 	rm -f "$W/$v.bc"
-	env=""
-	[ $v = old ] && export THUMB_NOR4=1
+	[ $v = old ] && export THUMB_NOR4=1 THUMB_NOCFOLD=1
 	THUMB_VERBOSE=1 "$CC/host-armm0/cc2" .symtmp armm0 0 \
 		< "$W/d.ir" 1<> "$W/$v.bc" 2> "$W/$v.log" || exit 1
-	unset THUMB_NOR4
+	unset THUMB_NOR4 THUMB_NOCFOLD
 done
 echo "== native span bytes per function (old -> new)"
 paste <(grep 'native:' "$W/old.log") <(grep 'native:' "$W/new.log") |
