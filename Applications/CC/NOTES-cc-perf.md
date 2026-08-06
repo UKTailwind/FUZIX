@@ -52,14 +52,58 @@ headroom (a function's native span must fit THUMB_MAXFN).
 qemu wall time had predicted -9%; the board gave -11.9%.  qemu
 understates memory-traffic wins - expect this again.
 
+## 2026-08-06: string fast slots + word-wise strings + libm shims
+
+One bcrun resend carrying three things (board now runs it;
+/usr/bin/bcrun.prev is the rollback):
+
+* ns_strcpy/ns_strcmp/ns_strlen: word-at-a-time (uint32_t, NOT
+  unsigned long - the 64-bit-host trap struck AGAIN and libtest
+  caught it), used by BOTH the interpreter's lib_* wrappers and the
+  new version-4 helper slots 17-20, so the two paths cannot disagree.
+* Translator: strcpy/strcmp/strlen/memcpy calls BL their slot
+  directly - args load straight off the VM stack into r0-r2, no
+  helper_call, no name dispatch.  They arrive as BC_CALL on a
+  BC_SYM_LIB symbol (helper_call's tagged path), NOT as BC_LIBCALL -
+  the profile had said so (libcall=0) and the first attempt hooked
+  the wrong case.  Objects that use a slot carry BC_VERSION_NATIVE4;
+  plain objects stay v3 and run on the old bcrun.  Old bcrun refuses
+  v4 cleanly ("version 4, expected 1" - board-verified).
+  THUMB_NOSTRSLOT=1 builds v3-compatible objects.
+* bcrun_mm: pow/atan2/log10/sqrt shimmed through the shared kernel
+  libm table (mfns 16/17/12/9).  The kernel table already exported
+  all four - NO kernel flash was needed - bcrun just also called
+  them directly, relinking ~5.1K of private copies per process.
+
+## Board results, 2026-08-06 evening (all outputs verified identical)
+
+| Dhrystone 2.1, 400k runs | old bcrun | new bcrun |
+|---|---|---|
+| pc3-shape object (v3) | 102,842 | 111,933 (+8.8% runtime alone) |
+| all folds, dispatcher (v3) | 118,264 | 130,400 |
+| all folds + v4 slots | - | **141,733** |
+
+**Session total: 102,842 -> 141,733 D/s (+37.8%), 37.4% of gcc -O2.**
+Compiler-side rewrites and runtime improvements compose; the runtime
+half reaches every EXISTING object too: KnivD grains (old object,
+BASIC) 37,600 -> **48,042 (+27.8%)**.
+
+Eclipse: 2.3022 -> 2.3283 s (-1.1%) - the one debit: print formatting
+now calls flash pow/log10.  Accepted against 5.1K/process; revisit
+only if formatting-heavy programs complain.  bcrun image 82,980 ->
+77,876 stripped.
+
+Session cost note: two intermittent console wedges during transfers -
+NOT the filesystem, NOT a panic; evidence and suspects in
+platform-rpipico/NOTES-console-wedge.md, with dnull.py as the
+discriminator.  Kernel-side fix is its own piece of work.
+
 ## Next candidates (from the review, in payoff order)
 
-1. String/memory fast slots (strcpy/strcmp/memcpy/strlen through
-   helper-vector slots like the DCP ops) + word-wise lib_strcmp -
-   ~18% of the remaining Dhrystone gap is library crossings.  Touches
-   bcrun: needs a board bcrun resend, unlike everything above.
-2. LOCAL;PUSH elision for stores whose slot is provably unread - needs
+1. LOCAL;PUSH elision for stores whose slot is provably unread - needs
    DUP/SWAP/inlined-eqop consumer analysis first (they read the top
    slot); without it this is the silent-wrong-answer class.
-3. Memory R1-R3 from the review (ELF reloc segment freed, mm libm
-   shims, lazy profiling arrays) - independent of the translator work.
+2. Memory R1/R3/R4 from the review (ELF reloc segment freed, lazy
+   profiling arrays, eager bind) - R2 (libm shims) is done above.
+3. The console-wedge kernel investigation (NOTES-console-wedge.md) -
+   instrumentation plan is written; do it before the next release.

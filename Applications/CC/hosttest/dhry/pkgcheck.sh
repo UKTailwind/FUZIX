@@ -6,7 +6,7 @@ W=/tmp/ccperf-board
 Q="qemu-arm $CC/qemu-armm0/bcrun"
 cd "$W" || exit 1
 SEIN=/home/peter/src/mmb2c/tests/solar_eclipse.in
-for f in dhry-base.bc dhry-r4.bc dhry-cf.bc dhry-new.bc; do
+for f in dhry-base.bc dhry-r4.bc dhry-cf.bc dhry-nos.bc dhry-new.bc; do
 	$Q "$f" > "$f.out" 2>&1 || { echo "RUN FAIL $f"; exit 1; }
 	[ -s "$f.out" ] || { echo "EMPTY $f"; exit 1; }
 done
@@ -17,8 +17,10 @@ done
 grep -v -i -e microsec -e dhrystones -e 'begins\|ends' dhry-base.bc.out > a
 grep -v -i -e microsec -e dhrystones -e 'begins\|ends' dhry-r4.bc.out > b
 grep -v -i -e microsec -e dhrystones -e 'begins\|ends' dhry-cf.bc.out > b2
+grep -v -i -e microsec -e dhrystones -e 'begins\|ends' dhry-nos.bc.out > b3
 grep -v -i -e microsec -e dhrystones -e 'begins\|ends' dhry-new.bc.out > c
-diff a b && diff a b2 && diff a c && echo "DHRY IDENTICAL ($(wc -l < a) lines)"
+diff a b && diff a b2 && diff a b3 && diff a c &&
+	echo "DHRY IDENTICAL ($(wc -l < a) lines)"
 grep -v -i -e 'time' se-base.bc.out > d
 grep -v -i -e 'time' se-new.bc.out > e
 diff d e && echo "ECLIPSE IDENTICAL ($(wc -l < d) lines)"

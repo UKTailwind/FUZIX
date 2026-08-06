@@ -32,6 +32,10 @@
    helper-vector slots 4+ (bcrun.c native_helpers) - an older bcrun
    must reject these objects instead of jumping through garbage */
 #define BC_VERSION_NATIVE3 3
+/* 4: the string family (strcpy/strcmp/strlen/memcpy) as direct
+   helper-vector slots 17-20.  Emitted only when a function actually
+   uses one, so plain objects stay version 3 and run on older bcruns */
+#define BC_VERSION_NATIVE4 4
 
 /*
  *	Machine model

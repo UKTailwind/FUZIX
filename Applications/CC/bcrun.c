@@ -1448,6 +1448,93 @@ static void vcopy(unsigned long d, unsigned long s, unsigned long n)
 }
 
 /*
+ *	Word-at-a-time strcpy/strcmp/strlen.  These are both the
+ *	interpreter's string family (through the lib_* wrappers below)
+ *	and the version-4 fast helper slots the translator BLs into
+ *	directly, so the two paths cannot disagree about semantics.
+ *	strcmp keeps the byte-difference return of the original loop.
+ *	The zero-in-word test is the usual (w - 0x01010101) & ~w & 0x80..
+ */
+/* uint32_t, NOT unsigned long: the zero-in-word masks are 32-bit
+   patterns, and unsigned long is 64 bits on the development host -
+   a NUL in the upper half of a 64-bit word sails straight past the
+   test.  The suite caught it (strlen 17 for a 15-byte string).  The
+   same class of bug is in STATE.md twice; this makes three. */
+static char *ns_strcpy(char *d, const char *s)
+{
+	char *d0 = d;
+
+	if ((((uintptr_t)d | (uintptr_t)s) & 3) == 0) {
+		uint32_t *dw = (uint32_t *)d;
+		const uint32_t *sw = (const uint32_t *)s;
+		uint32_t w;
+
+		for (;;) {
+			w = *sw;
+			if ((w - 0x01010101UL) & ~w & 0x80808080UL)
+				break;
+			*dw++ = w;
+			sw++;
+		}
+		d = (char *)dw;
+		s = (const char *)sw;
+	}
+	while ((*d++ = *s++) != 0)
+		;
+	return d0;
+}
+
+static int ns_strcmp(const char *a, const char *b)
+{
+	if ((((uintptr_t)a | (uintptr_t)b) & 3) == 0) {
+		const uint32_t *aw = (const uint32_t *)a;
+		const uint32_t *bw = (const uint32_t *)b;
+
+		for (;;) {
+			uint32_t x = *aw;
+
+			if (x != *bw)
+				break;
+			if ((x - 0x01010101UL) & ~x & 0x80808080UL)
+				return 0;
+			aw++;
+			bw++;
+		}
+		a = (const char *)aw;
+		b = (const char *)bw;
+	}
+	while (*a && *a == *b) {
+		a++;
+		b++;
+	}
+	return (int)(unsigned char)*a - (int)(unsigned char)*b;
+}
+
+static unsigned long ns_strlen(const char *s)
+{
+	const char *s0 = s;
+
+	if (((uintptr_t)s & 3) == 0) {
+		const uint32_t *sw = (const uint32_t *)s;
+
+		while (!((*sw - 0x01010101UL) & ~*sw & 0x80808080UL))
+			sw++;
+		s = (const char *)sw;
+	}
+	while (*s)
+		s++;
+	return (unsigned long)(s - s0);
+}
+
+/* The memcpy slot: lib_memcpy has always been memmove underneath
+   (vcopy), so the fast slot is too - same answer for the overlapping
+   copies that memcpy proper would be allowed to garble. */
+static void *ns_memcpy(void *d, const void *s, unsigned long n)
+{
+	return memmove(d, s, n);
+}
+
+/*
  *	64-bit strtol, both signednesses.  Fuzix libc stops at 32 bits,
  *	so this is done here once for every host rather than sometimes
  *	by the C library.  C90 strtol rules: optional space, optional
@@ -1636,13 +1723,13 @@ static void math_exec(unsigned i)
  */
 static void lib_strlen(void)
 {
-	A = (long)vstrlen((unsigned long)arg(0));
+	A = (long)ns_strlen((const char *)vptr((unsigned long)arg(0)));
 }
 
 static void lib_strcpy(void)
 {
-	unsigned long d = arg(0), s = arg(1);
-	vcopy(d, s, vstrlen(s) + 1);
+	unsigned long d = arg(0);
+	ns_strcpy((char *)vptr(d), (const char *)vptr(arg(1)));
 	A = d;
 }
 
@@ -1666,21 +1753,8 @@ static void lib_strcat(void)
 
 static void lib_strcmp(void)
 {
-	unsigned long a = (unsigned long)arg(0), b = (unsigned long)arg(1);
-	unsigned ca, cb;
-
-	for (;;) {
-		ca = rd8(a++);
-		cb = rd8(b++);
-		if (ca != cb) {
-			A = (int)ca - (int)cb;
-			return;
-		}
-		if (!ca) {
-			A = 0;
-			return;
-		}
-	}
+	A = ns_strcmp((const char *)vptr(arg(0)),
+		      (const char *)vptr(arg(1)));
 }
 
 static void lib_strncmp(void)
@@ -2046,7 +2120,8 @@ static void load(const char *path)
 	   slots 4+ (direct DCP arithmetic) - same rule, older bcrun
 	   must refuse it. */
 	if (h.h_version != BC_VERSION && h.h_version != BC_VERSION_NATIVE
-	    && h.h_version != BC_VERSION_NATIVE3) {
+	    && h.h_version != BC_VERSION_NATIVE3
+	    && h.h_version != BC_VERSION_NATIVE4) {
 		fprintf(stderr, "%s: version %u, expected %u\n", path,
 			h.h_version, BC_VERSION);
 		exit(1);
@@ -2381,6 +2456,21 @@ static void *native_helpers[] = {
 	(void *)__aeabi_ul2d,	/* 14 */
 	(void *)__aeabi_d2lz,	/* 15 */
 	(void *)__aeabi_d2ulz,	/* 16 */
+	/*
+	 *	Version 4: the string family as direct slots.  A translated
+	 *	strcpy/strcmp/strlen/memcpy loads its arguments straight off
+	 *	the VM stack and BLs here - no helper_call, no name dispatch,
+	 *	no byte-assembled arg() reads.  Arguments are machine
+	 *	addresses (absolute addressing), so these are the same
+	 *	functions the interpreter's lib_* wrappers use.  Append only;
+	 *	an object that uses a slot carries BC_VERSION_NATIVE4, so a
+	 *	bcrun without this table refuses it at load rather than
+	 *	jumping through slot 17 of a 17-entry table.
+	 */
+	(void *)ns_strcpy,	/* 17 */
+	(void *)ns_strcmp,	/* 18 */
+	(void *)ns_strlen,	/* 19 */
+	(void *)ns_memcpy,	/* 20 */
 #endif
 };
 

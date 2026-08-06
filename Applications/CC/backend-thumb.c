@@ -290,6 +290,18 @@ static int t_norfold(void)
 	return cached;
 }
 
+/* THUMB_NOSTRSLOT=1 keeps the string family on the dispatcher, for
+   A/B - and for building objects an older (pre-version-4) bcrun can
+   still load */
+static int t_nostrslot(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = getenv("THUMB_NOSTRSLOT") ? 1 : 0;
+	return cached;
+}
+
+
 /*
  *	THUMB_SKIP=name[,name...] keeps the named functions in bytecode.
  *	A debugging knob: when a whole-program build misbehaves and the
@@ -677,6 +689,56 @@ static void t_helperop(unsigned long op, unsigned pops)
 #define NHS_UL2D	14
 #define NHS_D2LZ	15
 #define NHS_D2ULZ	16
+/* version 4: the string family (see native_helpers in bcrun.c) */
+#define NHS_STRCPY	17
+#define NHS_STRCMP	18
+#define NHS_STRLEN	19
+#define NHS_MEMCPY	20
+
+/* The string libcalls with direct helper slots: slot and argument
+   count, or -1.  Matched by name exactly like the eqop family - a
+   program-defined function of the same name is a BC_CALL, never a
+   BC_LIBCALL, so only true library binds arrive here. */
+static int t_str_slot(const char *name, unsigned *nargs)
+{
+	if (!strcmp(name, "strcpy")) { *nargs = 2; return NHS_STRCPY; }
+	if (!strcmp(name, "strcmp")) { *nargs = 2; return NHS_STRCMP; }
+	if (!strcmp(name, "strlen")) { *nargs = 1; return NHS_STRLEN; }
+	if (!strcmp(name, "memcpy")) { *nargs = 3; return NHS_MEMCPY; }
+	return -1;
+}
+
+/*
+ *	Emit a string-family call as a direct BL through its version-4
+ *	helper slot: the arguments are machine addresses sitting on the
+ *	VM stack, exactly what the C function takes, so they load
+ *	straight into r0-r2.  The stack is untouched - BC_ARGS pops
+ *	afterwards, as it does on the dispatcher path.  Marks the object
+ *	version 4 when the function commits (wet pass), so an older
+ *	bcrun refuses it at load instead of indexing past its table.
+ *	Returns 0 if this symbol is not one of the family.
+ */
+static int t_strslot_emit(unsigned s)
+{
+	unsigned na;
+	int slot;
+
+	if (t_nostrslot())
+		return 0;
+	slot = t_str_slot(bc_symname[s], &na);
+	if (slot < 0)
+		return 0;
+	t16(0x6820);			/* ldr r0, [r4]     */
+	if (na >= 2)
+		t16(0x6861);		/* ldr r1, [r4, #4] */
+	if (na >= 3)
+		t16(0x68A2);		/* ldr r2, [r4, #8] */
+	t32(0xF8D5, 0xC000 | (slot * 4));	/* ldr.w r12, [r5, #] */
+	t16(0x47E0);			/* blx r12          */
+	if (!t_dry)
+		have_strslot = 1;
+	return 1;
+}
 
 static unsigned t_addrsym(unsigned long at, unsigned *symp);
 static unsigned t_rd16(unsigned long off);
@@ -2055,6 +2117,12 @@ static int t_span(unsigned long start, unsigned long end)
 				o += 3;
 				break;
 			}
+			/* string family: direct slot, no dispatcher */
+			if (t_strslot_emit(s)) {
+				t_d = 0;
+				o += 3;
+				break;
+			}
 			/* Anything else - printf, the mm runtime, libm -
 			   goes through the C side, arguments all on the
 			   stack.  sp syncs from r4 via the second
@@ -2104,6 +2172,16 @@ static int t_span(unsigned long start, unsigned long end)
 					t_blw((long)tent -
 					      (long)(t_base + 2 + tlen + 4));
 				t16(0x3404);	/* adds r4, #4        */
+				o += 5;
+				break;
+			}
+			/* A library callee arrives as a CALL on a
+			   BC_SYM_LIB symbol (helper_call's tagged-index
+			   path); the string family skips all of that
+			   and BLs its slot */
+			if (ad == 0 && symtab[s].s_type == BC_SYM_LIB &&
+			    t_strslot_emit(s)) {
+				t_d = 0;
 				o += 5;
 				break;
 			}

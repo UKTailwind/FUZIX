@@ -166,6 +166,8 @@ static unsigned long entry;
    end of this file) shadows every function and commits native code
    when the whole span is covered. */
 static int have_native;
+/* a committed function BLs a version-4 helper slot (string family) */
+static int have_strslot;
 static void thumb_fn_begin(const char *name);
 static void thumb_commit(void);
 
@@ -891,7 +893,8 @@ void gen_end(void)
 			fixtab[i].f_offset += datalen;
 
 	memcpy(h.h_magic, BC_MAGIC, 4);
-	h.h_version = have_native ? BC_VERSION_NATIVE3 : BC_VERSION;
+	h.h_version = have_strslot ? BC_VERSION_NATIVE4 :
+		      have_native ? BC_VERSION_NATIVE3 : BC_VERSION;
 	h.h_pad = 0;
 	h.h_nsym = nsym;
 	h.h_code = codelen;

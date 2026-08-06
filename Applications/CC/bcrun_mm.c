@@ -58,6 +58,25 @@ static long long time_us64(void)
 #define strtoll(s, e, b)  bc_strtoll((s), (e), (b), 0)
 #define strtoull(s, e, b) ((unsigned long long)bc_strtoll((s), (e), (b), 1))
 
+/*
+ *	The runtime's own maths goes through the shared table too.  The
+ *	kernel exports one libm from flash (mfns_share fills mfns[] from
+ *	it at startup, fatally if absent), but these four are also called
+ *	DIRECTLY below - mm_pow, mm_atan3, the float formatter, the
+ *	statistics reducers - which made the linker keep private copies
+ *	of pow, atan2, log10 and sqrt plus their internals (__log1p,
+ *	scalbn, atan): ~5K in every process, duplicating functions the
+ *	kernel already runs from flash with the DCP.  Routing the direct
+ *	calls through mfns[] drops them.  Index by position: the mfns
+ *	order is the table ABI (sqrt 9, log10 12, pow 16, atan2 17).
+ *	On the hosts mfns[] holds the local functions, so this is an
+ *	identity there.
+ */
+#define sqrt(x)      ((mfns[9].f1)(x))
+#define log10(x)     ((mfns[12].f1)(x))
+#define pow(x, y)    ((mfns[16].f2)((x), (y)))
+#define atan2(y, x)  ((mfns[17].f2)((y), (x)))
+
 /* The runtime's hosted islands read the DATA string table through
    these (it holds 32-bit VM pointers whatever the host width). */
 /* NULL, not mem: the DATA string table holds machine addresses like
