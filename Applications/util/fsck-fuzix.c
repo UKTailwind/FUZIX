@@ -781,9 +781,14 @@ static void ckdir(uint16_t inum, uint16_t pnum, char *name)
     --depth;
 }
 
-static void linkmaperr(void)
+/* The classic version panicked with a bare "linkmap" here, which says
+   nothing about which inode or which way round the inconsistency is.
+   Name it and keep checking: fsck's job is a report, not a halt. */
+static void linkmaperr(uint16_t n, struct dinode *ino)
 {
-    panic("linkmap");
+    printf("linkmap: inode %u mode 0%o nlink %u map %d\n",
+           n, ino->i_mode, ino->i_nlink, linkmap[n]);
+    error |= 4;
 }
 
 /* Pass 5 compares the link counts found in pass 4 with the inodes. */
@@ -798,12 +803,14 @@ static void pass5(void)
 
         if (ino.i_mode == 0) {
             if (linkmap[n] != -1)
-                linkmaperr();
+                linkmaperr(n, &ino);
             continue;
         }
 
-        if (linkmap[n] == -1 && ino.i_mode != 0)
-            linkmaperr();
+        if (linkmap[n] == -1 && ino.i_mode != 0) {
+            linkmaperr(n, &ino);
+            continue;
+        }
 
         if (linkmap[n] > 0 && ino.i_nlink != linkmap[n]) {
             printf("Inode %u has link count %u should be %u. Fix? ",
