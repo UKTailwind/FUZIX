@@ -2697,8 +2697,11 @@ static uint32_t *prof_site;
 static unsigned long prof_site_n;
 
 static int prof_on;
-static uint32_t prof_op[256];		/* helper_op by opcode      */
-static uint32_t prof_lib[256];		/* helper_libcall by index  */
+/* Allocated only under BCRUN_PROF (review item R3): 2K of bss in
+   every process for arrays only the profiler reads was the last
+   always-resident diagnostic. prof_site was already lazy. */
+static uint32_t *prof_op;		/* helper_op by opcode      */
+static uint32_t *prof_lib;		/* helper_libcall by index  */
 
 static void prof_dump(void)
 {
@@ -2722,11 +2725,11 @@ static void prof_dump(void)
 		"libcall %lu, eqop %lu\n",
 		(unsigned long)prof_enter, (unsigned long)prof_call,
 		(unsigned long)prof_libcall, (unsigned long)prof_eqop);
-	for (i = 0; i < 256; i++)
+	for (i = 0; prof_op && i < 256; i++)
 		if (prof_op[i])
 			fprintf(stderr, "op %02x %lu\n", i,
 				(unsigned long)prof_op[i]);
-	for (i = 0; i < 256; i++)
+	for (i = 0; prof_lib && i < 256; i++)
 		if (prof_lib[i])
 			fprintf(stderr, "lib %u %lu\n", i,
 				(unsigned long)prof_lib[i]);
@@ -2776,7 +2779,8 @@ static int64_t helper_libcall(unsigned long idx, unsigned char *vsp)
 {
 	sp = (unsigned long)(uintptr_t)vsp;
 	prof_libcall++;
-	prof_lib[idx & 0xFF]++;
+	if (prof_lib)
+		prof_lib[idx & 0xFF]++;
 	libcall((unsigned)idx);
 	return A;
 }
@@ -2822,7 +2826,8 @@ static int64_t helper_op(unsigned long op, unsigned char *vsp, int64_t a)
 	int64_t b;
 
 	op &= 0xFFFF;
-	prof_op[op & 0xFF]++;
+	if (prof_op)
+		prof_op[op & 0xFF]++;
 	switch (op) {
 	/*
 	 * Aggregates carry their length in the op word's high half - the
@@ -3354,6 +3359,10 @@ int main(int argc, char *argv[])
 	mfns_share();
 	force_bytecode = getenv("BCRUN_BYTECODE") != NULL;
 	prof_on = getenv("BCRUN_PROF") != NULL;
+	if (prof_on) {
+		prof_op = calloc(256, sizeof(uint32_t));
+		prof_lib = calloc(256, sizeof(uint32_t));
+	}
 	if (prof_on || getenv("BCRUN_SITES"))
 		atexit(prof_dump);	/* mm_end() exits through here */
 	load(argv[i]);

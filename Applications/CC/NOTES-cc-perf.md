@@ -132,12 +132,32 @@ for on-board rate numbers).
 (from 27.1% this morning).  Every step board-verified with
 byte-identical outputs.
 
+## 2026-08-06: P5 (r4-pair elision), R1 withdrawn, R3 done
+
+* P5 (THUMB_NORSKIP disables): the fused-window r4 pair goes when the
+  window holds no LOCAL - the only builder that reads r4.  Virtual
+  depth nets to zero across the window so every key/slot fact stays
+  aligned with physical r4.  Mostly the 64-bit/double shapes the
+  operand folds do not take; eclipse object -280 bytes, outputs
+  identical, all gates green.  Board number pending.
+* R1 WITHDRAWN - the loader already recycles the ELF reloc segment
+  (stack window overlays its head, u_break = stacktop puts its tail
+  in the heap).  The review's ~13.7K was an overcount; correction
+  recorded in REVIEW-2026-08-06.md.  Leave-it-alone verdict.
+* R3: prof_op/prof_lib allocated only under BCRUN_PROF - bcrun bss
+  12,752 -> 10,712 (-2,040) in every process.
+
+Staged for the next board window: bcrun.stripped (78,820: R3+R4) and
+cc2.stripped (35,324: P4+P5) are the canonical artifacts now;
+/tmp/ccperf-board rebuilt, THUMB_NORSKIP is the P5 A/B knob.
+
 ## Next candidates (from the review, in payoff order)
 
 1. LOCAL;PUSH elision for stores whose slot is provably unread - needs
    DUP/SWAP/inlined-eqop consumer analysis first (they read the top
    slot); without it this is the silent-wrong-answer class.
-2. Memory R1/R3 from the review (ELF reloc segment freed, lazy
-   profiling arrays) - R2 and R4 are done above.
-3. The console-wedge kernel investigation (NOTES-console-wedge.md) -
+2. The console-wedge kernel investigation (NOTES-console-wedge.md) -
    instrumentation plan is written; do it before the next release.
+3. Stage-10e style re-profile of the eclipse under the new runtime -
+   its remaining 2.3s is DCP arithmetic and formatting; measure
+   before guessing further.
