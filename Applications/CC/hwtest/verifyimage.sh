@@ -70,7 +70,7 @@ done
 
 echo "--- the programs"
 same /usr/bin/cc "$S/ccbc.s"
-for f in cpp bcrun bcdump mmbc mmedit saveimage loadimage; do
+for f in cpp bcrun bcdump mmbc mmedit saveimage loadimage playmp3; do
 	same "/usr/bin/$f" "$S/$f.s"
 done
 

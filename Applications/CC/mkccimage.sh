@@ -92,7 +92,13 @@ echo "--- installing"
 	# they cost a BASIC program nothing.  Useful from the shell too.
 	# mmedit is the MMBasic editor ported to Fuzix (Applications/mmedit):
 	# the machine edits its own BASIC as well as translating it.
-	for f in cpp bcrun bcdump mmbc saveimage loadimage mmedit; do
+	# playmp3 is what PLAY MP3 runs, on the same bargain as the image
+	# pair - and it was left OUT of this list for a whole release: the
+	# file existed, stageall.sh staged it, the check above insisted on
+	# it, and nothing installed it.  PLAY MP3 on a fresh card reported
+	# "no such program".  Any name added here must be added to
+	# hwtest/verifyimage.sh too, which agreed with the omission.
+	for f in cpp bcrun bcdump mmbc saveimage loadimage mmedit playmp3; do
 		echo "bget $CC/hwtest/$f.s $f"
 		echo "chmod 755 $f"
 	done
