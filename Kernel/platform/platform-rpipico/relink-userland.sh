@@ -17,6 +17,22 @@ set -e
 R=$(cd "$(dirname "$0")/../../.." && pwd)
 MK="FUZIX_ROOT=$R USERCPU=armm0"
 
+# The C LIBRARY first, from clean.  This script's whole reason to exist
+# is "a stale .o linked against the old libc looks like a successful
+# rebuild" - and then it relinked everything against a libc it never
+# rebuilt.  That shipped the first FS32 card with a df whose stale
+# statvfs.o kept the classic 232-byte superblock buffer: the kernel's
+# 334-byte _statfs reply smashed its stack and the machine went down
+# with a wild jump.  The library is not optional.
+echo "=== Library/libs (clean)"
+( cd "$R/Library/libs" && rm -f *.o syslibarmm0.lib cursesarmm0.lib \
+  && make -f Makefile.armm0 $MK all ) \
+	> /tmp/relink.$$.log 2>&1 || {
+		echo "LIBC FAILED - tail of the log:" >&2
+		tail -20 /tmp/relink.$$.log >&2
+		exit 1
+	}
+
 for d in Applications/util Applications/V7/cmd Applications/V7/games \
          Applications/MWC/cmd Applications/cave Applications/cursesgames \
          Applications/games Applications/levee Applications/bbcbasic \
