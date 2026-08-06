@@ -377,6 +377,10 @@ chmod 0755 wall
 
 bget ../../../Applications/levee/levee
 chmod 0755 levee
+# levee IS the vi on this machine, and "vi" is what a hand reaches for.
+# A hard link, not a second copy: same inode, one directory entry, no
+# extra card space.  (Fuzix has no symbolic links.)
+ln levee vi
 
 cd /usr/man/man1
 bget ../../../Applications/levee/levee.1
