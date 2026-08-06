@@ -147,9 +147,15 @@ byte-identical outputs.
 * R3: prof_op/prof_lib allocated only under BCRUN_PROF - bcrun bss
   12,752 -> 10,712 (-2,040) in every process.
 
-Staged for the next board window: bcrun.stripped (78,820: R3+R4) and
-cc2.stripped (35,324: P4+P5) are the canonical artifacts now;
-/tmp/ccperf-board rebuilt, THUMB_NORSKIP is the P5 A/B knob.
+Board, 2026-08-06 night (bcrun.p5 + cc2.p5 installed, and the
+console-hardened kernel flashed - see NOTES-console-wedge.md):
+Dhrystone 166,834 D/s (+0.7% from P5; its dhry windows are few).
+Eclipse 2.34s, P5-object vs pre-P5-object IDENTICAL to 4 digits -
+P5's elided pairs are ~4 instructions around a ~60-cycle DCP call,
+and the day's eclipse numbers (2.30-2.34) are runtime-noise wide.
+P5 keeps its place on code size (-280B eclipse) and the dhry point.
+
+**Session final: 102,842 -> 166,834 D/s, +62.2%, 44.0% of gcc -O2.**
 
 ## Next candidates (from the review, in payoff order)
 

@@ -64,3 +64,36 @@ rxring lost/got and a tx pump counter, and log a SECOND report 5s
 later: whether the counters moved between the two reports is the
 single fact that separates "saturated and flowing" (false stall,
 suspect 1) from "IRQ genuinely dead" (real wedge, mechanism unknown).
+
+## 2026-08-06 late: hardened, wedge eliminated by construction
+
+A third wedge (~36s after boot, same [u0 ...] signature) settled it.
+Two facts sharpened first: the report fires from rawuart_ready after
+~2M process-context spins WITH INTERRUPTS ENABLED - so the stranded
+pending bit is real, not sampler aliasing - and suspect 1 is
+withdrawn.  And plt_rtc_secs' I2C-under-di() only runs HOURLY
+(RTC_SYNC_SECS), so it fits the 4.5h wedge but not the ~30s ones;
+the ~30s masked window remains unidentified (update daemon flush is
+the open candidate).
+
+Rather than keep chasing the stranding mechanism, rawuart.c now
+survives it (kernel build Aug 6 2026 19:21):
+
+* the ISR DRAINS both directions instead of taking one character per
+  entry - one pending bit covers a whole backlog;
+* the tick is a full polled rescue: it drains the rx FIFO into the
+  ring, pumps the tx ring, and clears the error latches every 5ms.
+  The tick provably survived all three wedges (tk counted in every
+  report), so lost interrupt delivery now degrades the console to
+  polled (32 bytes / 5ms each way) instead of killing it.
+
+Board-verified: full-rate transfers no longer wedge.  Residual, seen
+once: a multi-ms masked window still LOSES characters (a 78,820-byte
+transfer arrived 45 short; uusend printed its echo-timeout warning
+and the retry was clean).  The stranding mechanism itself is still
+unexplained - the polled rescue makes it harmless, not understood.
+
+Remaining refinements, host side first: uusend should verify the
+echo per line and RESEND the damaged line instead of just warning;
+the second-report instrumentation above is still worth having the
+day the mechanism is hunted for real.

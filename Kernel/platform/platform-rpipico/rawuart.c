@@ -132,44 +132,49 @@ static void txring_pump(uart_inst_t *uart, unsigned w)
 	t->tail = (t->tail + 1) & (TXRING - 1);
 }
 
+/* Take one character from the FIFO into the ring; on overflow drop
+   the oldest, as MMBasic does.  Called with the ISR excluded - from
+   the ISR itself, or from tick context where PRIMASK is held. */
+static void rxring_take(uart_inst_t *uart, unsigned which)
+{
+	struct rxring *r = &rxring[which];
+	unsigned char c = (unsigned char)uart_getc(uart);
+
+	r->got++;
+	r->buf[r->head] = c;
+	r->head = (r->head + 1) & (RXRING - 1);
+	if (r->head == r->tail) {
+		r->tail = (r->tail + 1) & (RXRING - 1);
+		r->lost++;
+	}
+}
+
 /*
- *	Handler copied from MMBasic (PicoMite io/Serial.c on_uart_irq0):
- *	take one character per interrupt into the ring, and on overflow
- *	drop the oldest. No ICR or IFLS handling - reading the data
- *	register is what clears the receive and receive-timeout sources,
- *	and the SDK's defaults for the FIFO trigger level are fine. This
- *	is deliberately the shape of code that is already proven on this
- *	silicon rather than anything cleverer.
+ *	Shape from MMBasic (PicoMite io/Serial.c on_uart_irq0), with one
+ *	amendment learned from three console wedges: DRAIN, do not sip.
+ *	The NVIC holds ONE pending bit however much arrived, and this
+ *	machine has real multi-millisecond interrupts-off windows (the
+ *	tick itself, the hourly RTC I2C transaction, filesystem flushes).
+ *	One character per entry serviced steady-state typing but turned
+ *	every masked window into a backlog serviced one interrupt at a
+ *	time.  The rings are the elastic; empty the hardware into them.
+ *	No ICR or IFLS handling here - reading the data register clears
+ *	the receive and receive-timeout sources; the error latches are
+ *	cleared by the tick (rawuart_tx_poll).
  */
 static void rawuart_rx_irq(unsigned which)
 {
 	uart_inst_t *uart = uart_get_instance(which == 0 ?
 					      DEV_UART_0_INSTANCE :
 					      DEV_UART_1_INSTANCE);
-	struct rxring *r = &rxring[which];
 
-	if (uart_is_readable(uart)) {
-		unsigned char c = (unsigned char)uart_getc(uart);
-		r->got++;
-		r->buf[r->head] = c;
-		r->head = (r->head + 1) & (RXRING - 1);
-		if (r->head == r->tail) {
-			/* overflowed: discard the oldest, as MMBasic does */
-			r->tail = (r->tail + 1) & (RXRING - 1);
-			r->lost++;
-		}
-	}
+	while (uart_is_readable(uart))
+		rxring_take(uart, which);
 
-	/*
-	 * Transmit, exactly as MMBasic does it: ONE byte per interrupt, and
-	 * when the ring runs dry turn the transmit interrupt off so it
-	 * stops asking.  This is the whole of it - see rawuart_putc for the
-	 * producer, which is the half that has to be right.
-	 */
 	if (uart_is_writable(uart)) {
-		if (!txring_empty(which))
+		while (!txring_empty(which) && uart_is_writable(uart))
 			txring_pump(uart, which);
-		else
+		if (txring_empty(which))
 			uart_set_irq_enables(uart, true, false);
 	}
 }
@@ -478,11 +483,48 @@ void rawuart_tx_poll(void)
 	for (w = 0; w < 2; w++) {
 		uart_inst_t *uart;
 
-		if (!rawuart_irq_installed[w] || txring_empty(w))
+		if (!rawuart_irq_installed[w])
 			continue;
 		uart = rawuart_instance(w);
-		uart_set_irq_enables(uart, true, true);
-		irq_set_pending((uart == uart0) ? UART0_IRQ : UART1_IRQ);
+
+		/*
+		 * Polled rescue, both directions - not just a re-kick.
+		 *
+		 * All three console wedges showed the same terminal
+		 * state: uart interrupt enabled, PENDING, not active,
+		 * never delivered - while the tick kept running (tk
+		 * counted in every [u0 ...] report).  The mechanism
+		 * that strands the pending bit is still not understood;
+		 * what IS proven is that this context stays alive.  So
+		 * make it able to move the port on its own: drain the
+		 * receive FIFO into the ring and pump the transmit ring
+		 * into the FIFO right here.  If delivery is ever lost
+		 * again the console degrades to polled at tick
+		 * granularity (32 bytes / 5ms each way at worst)
+		 * instead of dying - and uusend paces on the echo, so
+		 * even a transfer survives that.  PRIMASK is held in
+		 * tick context, so head and tail cannot interleave
+		 * with the interrupt handler.
+		 */
+		while (uart_is_readable(uart))
+			rxring_take(uart, w);
+
+		/* Clear the error latches (OE/BE/PE/FE): nothing else
+		   ever writes ICR, so a single overrun otherwise leaves
+		   OERIS raised for ever and every later report reads
+		   like a fresh overrun. */
+		uart_get_hw(uart)->icr = (1u << 10) | (1u << 9) |
+					 (1u << 8) | (1u << 7);
+
+		if (txring_empty(w))
+			continue;
+		while (uart_is_writable(uart) && !txring_empty(w))
+			txring_pump(uart, w);
+		if (!txring_empty(w)) {
+			uart_set_irq_enables(uart, true, true);
+			irq_set_pending((uart == uart0) ? UART0_IRQ
+							: UART1_IRQ);
+		}
 	}
 }
 
