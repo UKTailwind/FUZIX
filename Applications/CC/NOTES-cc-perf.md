@@ -213,9 +213,15 @@ the 64-bit pair extension (r8:r9) is the follow-on.
 Gates: all.sh 31, thumb/gate 8/8, qemudiff 10/10, mmb2c qemutests
 17/17 (dhry 12/12 native), ctest 165, regbisect all-ok.  qemu wall
 ~1% (it flattens exactly what this targets: ldr->mov and the
-in-register eqop).  BOARD NUMBER PENDING - cc2.stripped (39,776)
-staged, /tmp/ccperf-board rebuilt, no runtime or kernel change
-needed.
+in-register eqop).
+
+Board, 2026-08-06 22:40 (same IR, on vs off, 2M runs): 166,864 ->
+**172,248 D/s, +3.2%**, outputs identical; the off side reproduces
+the P5-era number to 0.02%.  On-board compile with the regcache cc2
+is byte-identical to the host build.
+
+**Session total: 102,842 -> 172,248 D/s, +67.5% - 45.4% of gcc -O2,
+INSIDE the review's predicted 45-58% band for the non-rewrite path.**
 
 ## Next candidates (from the review, in payoff order)
 
