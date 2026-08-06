@@ -22,15 +22,27 @@ PUSH;CONSTk;OP32 runs entirely in registers: add/sub/cmp immediates,
 shifts by imm5, and/or/xor imm8, uxtb/uxth masks, constant built in
 r2 otherwise.  Commit e784166a9.
 
+## 2026-08-06: memory right operands  (THUMB_NORFOLD disables)
+
+PUSH;LOCALn;LOADx;OP32 - and the ADDR global form - load the right
+operand straight into r2 and run the operator without touching the
+stack: `a+b` is ldr r2 / adds, the gcc shape.  The LOCAL offset is
+rebased for the push that no longer happens (v-4, v < 4 declines).
+
 ## Board results, 2026-08-06 (all outputs verified identical)
 
 | Dhrystone 2.1, 400,000 runs | D/s | vs base |
 |---|---|---|
-| base = pc3 shape (both knobs set) | 102,842 | - |
+| base = pc3 shape (all knobs set) | 102,842 | - |
 | + direct [r4,#off] | 110,487 | +7.4% |
-| + constant folding (branch default) | 116,776 | **+13.5%** |
+| + constant folding | 116,776 | +13.5% |
+| + memory right operands (branch default) | 118,264 | **+15.0%** |
 
-Now 30.8% of gcc -O2, from 27.1%.
+Now 31.2% of gcc -O2, from 27.1%.  The rfold increment is small on
+Dhrystone (+1.3%): cfold had already taken the constant shapes, and
+much of what remains is call/string traffic, exactly as the review's
+attribution said.  Diminishing returns on the operand-shape axis -
+the next big slice is the library crossings.
 
 Eclipse (DCP-double dominated, as predicted): 2.3165 -> 2.3022 s,
 -0.6%.  Object sizes: dhry 15,910 -> 14,952 (-6.0%); eclipse
@@ -42,16 +54,12 @@ understates memory-traffic wins - expect this again.
 
 ## Next candidates (from the review, in payoff order)
 
-1. Local right operand: PUSH;LOCALn;LOADx;OP - the other half of the
-   binary-operator round trip (ldr r2,[r4,#n-4]; op r0,r0,r2), turns
-   `a+b` into the 3-instruction gcc shape.  Needs the reversed-operand
-   encodings cfold already introduced.
-2. LOCAL;PUSH elision for stores whose slot is provably unread - needs
-   DUP/SWAP/inlined-eqop consumer analysis first (they read the top
-   slot); without it this is the silent-wrong-answer class.
-3. String/memory fast slots (strcpy/strcmp/memcpy/strlen through
+1. String/memory fast slots (strcpy/strcmp/memcpy/strlen through
    helper-vector slots like the DCP ops) + word-wise lib_strcmp -
    ~18% of the remaining Dhrystone gap is library crossings.  Touches
    bcrun: needs a board bcrun resend, unlike everything above.
-4. Memory R1-R3 from the review (ELF reloc segment freed, mm libm
+2. LOCAL;PUSH elision for stores whose slot is provably unread - needs
+   DUP/SWAP/inlined-eqop consumer analysis first (they read the top
+   slot); without it this is the silent-wrong-answer class.
+3. Memory R1-R3 from the review (ELF reloc segment freed, mm libm
    shims, lazy profiling arrays) - independent of the translator work.

@@ -35,8 +35,9 @@ bld() {
 	echo "$out: $(stat -c %s "$W/$out") bytes"
 }
 
-bld dhry-base.bc THUMB_NOR4=1 THUMB_NOCFOLD=1
-bld dhry-r4.bc   THUMB_NOCFOLD=1
+bld dhry-base.bc THUMB_NOR4=1 THUMB_NOCFOLD=1 THUMB_NORFOLD=1
+bld dhry-r4.bc   THUMB_NOCFOLD=1 THUMB_NORFOLD=1
+bld dhry-cf.bc   THUMB_NORFOLD=1
 bld dhry-new.bc  IGNORE=0
 
 # The eclipse the same three ways, via the mmb2c pipeline if present

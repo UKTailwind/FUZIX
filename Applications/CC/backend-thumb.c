@@ -281,6 +281,15 @@ static int t_nocfold(void)
 	return cached;
 }
 
+/* THUMB_NORFOLD=1 turns memory right-operand folding off, for A/B */
+static int t_norfold(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = getenv("THUMB_NORFOLD") ? 1 : 0;
+	return cached;
+}
+
 /*
  *	THUMB_SKIP=name[,name...] keeps the named functions in bytecode.
  *	A debugging knob: when a whole-program build misbehaves and the
@@ -1356,6 +1365,157 @@ static unsigned long t_cfold(unsigned long o, unsigned long start,
 	return opoff + 1;
 }
 
+/* The reversed-operand operator forms the register folds share: left
+   in r0, right in r2, result in r0.  Compares are not here - they
+   need the boolbranch tail.  t_rfold_ok says whether an opcode is
+   coverable without emitting anything, so a fold can check before it
+   commits its first instruction. */
+static int t_rfold_ok(unsigned op2)
+{
+	switch (op2) {
+	case BC_ADD: case BC_SUB: case BC_MUL:
+	case BC_DIVS: case BC_DIVU: case BC_REMS: case BC_REMU:
+	case BC_AND: case BC_OR: case BC_XOR:
+	case BC_SHL: case BC_SHRS: case BC_SHRU:
+	case BC_EQ:  case BC_NE:
+	case BC_LTS: case BC_LTU: case BC_GTS: case BC_GTU:
+	case BC_LES: case BC_LEU: case BC_GES: case BC_GEU:
+		return 1;
+	}
+	return 0;
+}
+
+static void t_op_r0r2(unsigned op2)
+{
+	switch (op2) {
+	case BC_ADD:  t16(0x1810); break;	/* adds r0, r2, r0 */
+	case BC_SUB:  t16(0x1A80); break;	/* subs r0, r0, r2 */
+	case BC_MUL:  t16(0x4350); break;	/* muls r0, r2     */
+	case BC_AND:  t16(0x4010); break;	/* ands r0, r2     */
+	case BC_OR:   t16(0x4310); break;	/* orrs r0, r2     */
+	case BC_XOR:  t16(0x4050); break;	/* eors r0, r2     */
+	case BC_SHL:  t16(0x4090); break;	/* lsls r0, r2     */
+	case BC_SHRS: t16(0x4110); break;	/* asrs r0, r2     */
+	case BC_SHRU: t16(0x40D0); break;	/* lsrs r0, r2     */
+	case BC_DIVS: t32(0xFB90, 0xF0F2); break;
+	case BC_DIVU: t32(0xFBB0, 0xF0F2); break;
+	case BC_REMS:
+		t32(0xFB90, 0xF3F2);	/* sdiv r3, r0, r2    */
+		t32(0xFB03, 0x0012);	/* mls  r0, r3, r2, r0 */
+		break;
+	case BC_REMU:
+		t32(0xFBB0, 0xF3F2);
+		t32(0xFB03, 0x0012);
+		break;
+	}
+}
+
+/*
+ *	Memory right operand: PUSH ; LOCALn ; LOADx ; OP32, and the
+ *	global form with ADDR in place of LOCALn.  The left operand
+ *	stays in A and the right is loaded straight into r2, so the
+ *	whole binary operator runs without touching the stack - `a+b`
+ *	is ldr r2 / adds, the shape gcc emits.  The LOCAL offset is
+ *	encoded relative to r4 after the push that no longer happens,
+ *	so it addresses off the current r4 at v-4; v < 4 would name
+ *	the pushed slot itself and declines.  Same fold set, operand
+ *	order and boolbranch tail as t_cfold; same landing-site rule
+ *	over every swallowed op.  r2 (r3 for the rem forms) is free by
+ *	the same argument as t_cfold: a PUSH is not a builder, so this
+ *	window can never sit inside a fused one.
+ */
+static unsigned long t_rfold(unsigned long o, unsigned long start,
+			     unsigned long end)
+{
+	static const unsigned char ccm[] = {
+		0, 1, 11, 3, 12, 8, 13, 9, 10, 2
+	};	/* eq ne lt lo gt hi le ls ge hs */
+	unsigned long p = o + 1, v = 0, ad = 0, loff, opoff;
+	unsigned lop, op2, lkind, sym = 0;
+	int global = 0;
+
+	if (t_norfold())
+		return 0;
+	if (p >= end)
+		return 0;
+	if (codebuf[p] == BC_LOCAL8) {
+		if (p + 1 >= end)
+			return 0;
+		v = codebuf[p + 1];
+		loff = p + 2;
+	} else if (codebuf[p] == BC_LOCAL16) {
+		if (p + 2 >= end)
+			return 0;
+		v = t_rd16(p + 1);
+		loff = p + 3;
+	} else if (codebuf[p] == BC_ADDR) {
+		if (p + 4 >= end)
+			return 0;
+		if (!t_addrsym(p + 1, &sym))
+			return 0;
+		if (ntpool >= TPOOLMAX)
+			return 0;
+		ad = t_rd32c(p + 1);
+		global = 1;
+		loff = p + 5;
+	} else
+		return 0;
+	if (!global && (v < 4 || v - 4 > 4095))
+		return 0;
+	if (loff >= end)
+		return 0;
+	lop = codebuf[loff];
+	switch (lop) {
+	case BC_LOAD8S:  lkind = R4_LDRSB; break;
+	case BC_LOAD8U:  lkind = R4_LDRB;  break;
+	case BC_LOAD16S: lkind = R4_LDRSH; break;
+	case BC_LOAD16U: lkind = R4_LDRH;  break;
+	case BC_LOAD32:  lkind = R4_LDR32; break;
+	default:
+		return 0;
+	}
+	opoff = loff + 1;
+	if (opoff >= end)
+		return 0;
+	if ((t_targets[(p - start) >> 3] & (1 << ((p - start) & 7))) ||
+	    (t_targets[(loff - start) >> 3] & (1 << ((loff - start) & 7))) ||
+	    (t_targets[(opoff - start) >> 3] &
+	     (1 << ((opoff - start) & 7))))
+		return 0;
+	op2 = codebuf[opoff];
+	if (!t_rfold_ok(op2))
+		return 0;
+
+	/* right operand into r2 */
+	if (global) {
+		if (!t_dry) {
+			tpooltab[ntpool].sym = sym;
+			tpooltab[ntpool].site = tlen;
+		}
+		ntpool++;
+		t_mov16(0, 2, ad & 0xFFFF);
+		t_mov16(1, 2, (ad >> 16) & 0xFFFF);
+		switch (lkind) {
+		case R4_LDRSB: t16(0x56B2); break;  /* ldrsb r2,[r6,r2] */
+		case R4_LDRB:  t16(0x5CB2); break;  /* ldrb  r2,[r6,r2] */
+		case R4_LDRSH: t16(0x5EB2); break;  /* ldrsh r2,[r6,r2] */
+		case R4_LDRH:  t16(0x5AB2); break;  /* ldrh  r2,[r6,r2] */
+		case R4_LDR32: t16(0x58B2); break;  /* ldr   r2,[r6,r2] */
+		}
+	} else
+		t_r4mem(lkind, 2, v - 4);
+	tmap[p - start] = tlen;
+	tmap[loff - start] = tlen;
+	tmap[opoff - start] = tlen;
+	t_d = 0;
+	if (op2 >= BC_EQ && op2 <= BC_GEU) {
+		t16(0x4290);			/* cmp r0, r2 */
+		return t_boolbranch(opoff, ccm[op2 - BC_EQ], start, end);
+	}
+	t_op_r0r2(op2);
+	return opoff + 1;
+}
+
 /*
  *	One pass over the function's bytecode.  Dry: compute sizes and
  *	fill tmap.  Wet: emit, using the completed tmap for branch
@@ -1491,11 +1651,14 @@ static int t_span(unsigned long start, unsigned long end)
 
 		/* ---- CP-B: stack, locals, loads, stores, addresses -- */
 		case BC_PUSH: {
-			/* constant right operand: no stack round trip,
-			   no parked register - see t_cfold.  A PUSH can
-			   never sit inside a fused window (it is not a
-			   builder), so r2 is free for the constant. */
+			/* constant or memory right operand: no stack
+			   round trip, no parked register - see t_cfold
+			   and t_rfold.  A PUSH can never sit inside a
+			   fused window (it is not a builder), so r2 is
+			   free for the right operand. */
 			unsigned long nl = t_cfold(o, start, end);
+			if (!nl)
+				nl = t_rfold(o, start, end);
 			if (nl) {
 				o = nl;
 				break;
