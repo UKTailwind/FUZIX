@@ -310,6 +310,15 @@ static int t_noicopy(void)
 	return cached;
 }
 
+/* THUMB_NORSKIP=1 keeps the r4 adjust pair in fused windows, for A/B */
+static int t_norskip(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = getenv("THUMB_NORSKIP") ? 1 : 0;
+	return cached;
+}
+
 
 /*
  *	THUMB_SKIP=name[,name...] keeps the named functions in bytecode.
@@ -472,6 +481,20 @@ static void t_mark_target(unsigned long addr)
  */
 static unsigned long t_fuse_at;		/* offset of the fused operator */
 static unsigned char t_fuse_width;
+/*
+ *	P5: the r4 pair itself goes when the window contains no LOCAL -
+ *	the only builder that reads r4.  Everything else in a window
+ *	works purely in A, so if the push does not move r4 and the
+ *	operator does not move it back, nothing in between can tell,
+ *	and the virtual stack depth nets to zero across the window so
+ *	every key/slot fact stays aligned with the physical r4.
+ *	t_fuse_nolocal is decided by the scan (identically in every
+ *	walk); t_fuse_elided carries it from the push to the operator;
+ *	t_fusel is what the operator site reads after t_fused().
+ */
+static unsigned char t_fuse_nolocal;
+static unsigned char t_fuse_elided;
+static unsigned char t_fusel;
 
 /* A builder leaves the right operand in A and touches neither r2/r3
    nor the VM stack; the length is the op's encoded size.  Anything not
@@ -569,6 +592,7 @@ static int t_fuse_scan(unsigned long o, unsigned width,
 	unsigned long p = o + 1;
 	unsigned n = 0;
 	unsigned len;
+	unsigned nolocal = 1;
 
 	if (t_nofuse())
 		return 0;
@@ -581,8 +605,12 @@ static int t_fuse_scan(unsigned long o, unsigned width,
 		if (t_fusable_op(op, width)) {
 			t_fuse_at = p;
 			t_fuse_width = (unsigned char)width;
+			t_fuse_nolocal = (unsigned char)
+			    (nolocal && !t_norskip());
 			return 1;
 		}
+		if (op == BC_LOCAL8 || op == BC_LOCAL16)
+			nolocal = 0;
 		len = t_builder_len(op);
 		if (!len)
 			return 0;
@@ -592,12 +620,18 @@ static int t_fuse_scan(unsigned long o, unsigned width,
 	return 0;
 }
 
-/* True when the operator at o is the one a fusable push parked for. */
+/* True when the operator at o is the one a fusable push parked for.
+   t_fusel says whether that push skipped its half of the r4 pair, so
+   the operator must skip its half too. */
 static int t_fused(unsigned long o, unsigned width)
 {
-	if (t_fuse_at != o || t_fuse_width != width)
+	if (t_fuse_at != o || t_fuse_width != width) {
+		t_fusel = 0;
 		return 0;
+	}
 	t_fuse_at = 0;
+	t_fusel = t_fuse_elided;
+	t_fuse_elided = 0;
 	return 1;
 }
 
@@ -933,10 +967,13 @@ static void t_dcpbin(unsigned slot, int fused)
 		t16(0x6820);	/* ldr  r0, [r4, #0] - left low   */
 		t16(0x6861);	/* ldr  r1, [r4, #4] - left high  */
 	}
-	t16(0x3408);		/* adds r4, #8  - pop the operand */
+	/* a fused push that skipped its r4 half (t_fusel) never made
+	   the slot this pop would take back */
+	if (!(fused && t_fusel))
+		t16(0x3408);	/* adds r4, #8  - pop the operand */
 	t32(0xF8D5, 0xC000 | (slot * 4));	/* ldr.w r12, [r5, #] */
 	t16(0x47E0);		/* blx  r12                       */
-	t_d = -8;
+	t_d = (fused && t_fusel) ? 0 : -8;
 }
 
 /* conversion: A is already the argument in r0/r1 */
@@ -1603,6 +1640,8 @@ static int t_span(unsigned long start, unsigned long end)
 	t_epoch = 0;	/* every walk must evolve identically */
 	t_seamn = 0;
 	t_fuse_at = 0;	/* no push is parked across a walk */
+	t_fuse_elided = 0;
+	t_fusel = 0;
 	while (o < end) {
 		unsigned op = codebuf[o];
 
@@ -1736,9 +1775,17 @@ static int t_span(unsigned long start, unsigned long end)
 			}
 		}
 			if (t_fuse_scan(o, 4, start, end)) {
-				t16(0x3C04);	/* subs r4, #4      */
-				t16(0x4602);	/* mov  r2, r0      */
-				t_d = 4;
+				if (t_fuse_nolocal) {
+					/* LOCAL-free window: r4 never
+					   moves, depth nets to zero */
+					t16(0x4602);	/* mov r2, r0 */
+					t_fuse_elided = 1;
+					t_d = 0;
+				} else {
+					t16(0x3C04);	/* subs r4, #4 */
+					t16(0x4602);	/* mov  r2, r0 */
+					t_d = 4;
+				}
 				t_keep = 1;
 				t_track.slot.kind = 0;
 				o++;
@@ -2047,7 +2094,8 @@ static int t_span(unsigned long start, unsigned long end)
 			   still on the stack */
 			if (!t_fused(o, 4))
 				t16(0x6822);	/* ldr  r2, [r4] */
-			t16(0x3404);		/* adds r4, #4   */
+			if (!t_fusel)
+				t16(0x3404);	/* adds r4, #4   */
 			switch (op) {
 			case BC_ADD:  t16(0x1810); break;  /* adds r0,r2,r0 */
 			case BC_SUB:  t16(0x1A10); break;  /* subs r0,r2,r0 */
@@ -2069,7 +2117,7 @@ static int t_span(unsigned long start, unsigned long end)
 			case BC_SHRS: t32(0xFA42, 0xF000); break;
 			case BC_SHRU: t32(0xFA22, 0xF000); break;
 			}
-			t_d = -4;
+			t_d = t_fusel ? 0 : -4;
 			o++;
 			break;
 		case BC_NEG:
@@ -2228,9 +2276,11 @@ static int t_span(unsigned long start, unsigned long end)
 			};	/* eq ne lt lo gt hi le ls ge hs */
 			if (!t_fused(o, 4))
 				t16(0x6822);	/* ldr  r2, [r4]   */
-			t16(0x3404);		/* adds r4, #4     */
+			if (!t_fusel)
+				t16(0x3404);	/* adds r4, #4     */
 			t16(0x4282);		/* cmp  r2, r0     */
-			t_d = -4;	/* fall-through keeps facts; the taken
+			t_d = t_fusel ? 0 : -4;
+					/* fall-through keeps facts; the taken
 					   path lands on a marked target */
 			o = t_boolbranch(o, cc[op - BC_EQ], start, end);
 			break;
@@ -2319,10 +2369,17 @@ static int t_span(unsigned long start, unsigned long end)
 		}
 		case BC_PUSH64:
 			if (t_fuse_scan(o, 8, start, end)) {
-				t16(0x3C08);	/* subs r4, #8       */
-				t16(0x4602);	/* mov  r2, r0       */
-				t16(0x460B);	/* mov  r3, r1       */
-				t_d = 8;
+				if (t_fuse_nolocal) {
+					t16(0x4602);	/* mov r2, r0 */
+					t16(0x460B);	/* mov r3, r1 */
+					t_fuse_elided = 1;
+					t_d = 0;
+				} else {
+					t16(0x3C08);	/* subs r4, #8 */
+					t16(0x4602);	/* mov  r2, r0 */
+					t16(0x460B);	/* mov  r3, r1 */
+					t_d = 8;
+				}
 				t_keep = 1;
 				t_track.slot.kind = 0;
 				o++;
@@ -2369,7 +2426,8 @@ static int t_span(unsigned long start, unsigned long end)
 				t16(0x6822);	/* ldr  r2, [r4]     */
 				t16(0x6863);	/* ldr  r3, [r4, #4] */
 			}
-			t16(0x3408);		/* adds r4, #8       */
+			if (!t_fusel)
+				t16(0x3408);	/* adds r4, #8       */
 			switch (op) {
 			case BC_ADD64:
 				t16(0x1810);	/* adds r0, r2, r0 */
@@ -2429,7 +2487,8 @@ static int t_span(unsigned long start, unsigned long end)
 				t16(0x6822);	/* ldr  r2, [r4]     */
 				t16(0x6863);	/* ldr  r3, [r4, #4] */
 			}
-			t16(0x3408);		/* adds r4, #8       */
+			if (!t_fusel)
+				t16(0x3408);	/* adds r4, #8       */
 			t16(0x4042);		/* eors r2, r0       */
 			t16(0x404B);		/* eors r3, r1       */
 			t16(0x431A);		/* orrs r2, r3       */
@@ -2452,7 +2511,8 @@ static int t_span(unsigned long start, unsigned long end)
 				t16(0x6822);	/* ldr  r2, [r4]     */
 				t16(0x6863);	/* ldr  r3, [r4, #4] */
 			}
-			t16(0x3408);		/* adds r4, #8       */
+			if (!t_fusel)
+				t16(0x3408);	/* adds r4, #8       */
 			if (swap) {
 				t16(0x1A80);	/* subs r0, r0, r2   */
 				t16(0x4199);	/* sbcs r1, r3       */
