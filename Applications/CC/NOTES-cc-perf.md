@@ -223,6 +223,25 @@ is byte-identical to the host build.
 **Session total: 102,842 -> 172,248 D/s, +67.5% - 45.4% of gcc -O2,
 INSIDE the review's predicted 45-58% band for the non-rewrite path.**
 
+## 2026-08-06 late night: the r8:r9 pair cache - built, measured, OFF
+
+The 64-bit extension of regcache: one 8-byte local per function in
+r8:r9 (type-blind - MMINTEGER and MMFLOAT counters both), width
+tracking in the classifier, STORE64/eqop-8/eqop-d annotation with
+the same kind gating as the memory inlines, mov-bridged high-reg
+arithmetic, wide push.w {(r7,)r8,r9,lr} preamble with t_psize
+threading through the self-BL math.  All gates green both ways;
+28 eclipse functions take a pair pick.
+
+Board verdict, and the honest one: eclipse 2.277 -> 2.274 (noise),
+grains 49,653 -> 49,492 (-0.3%, real - the runs are 0.01%-tight).
+The eqop inlining had already banked the counter win (the helper
+crossing); the residual register benefit does not clear the
+high-register bridging + preamble + per-call warm loads on this
+ISA.  **Default OFF (THUMB_REGC8=1 enables); the correct machinery
+is kept for workloads or ISAs where the balance differs.**  A
+leave-it-alone result, bought with evidence.
+
 ## Next candidates (from the review, in payoff order)
 
 1. LOCAL;PUSH elision for stores whose slot is provably unread - needs

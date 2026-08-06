@@ -332,6 +332,25 @@ static int t_noregc(void)
 }
 
 /*
+ *	THUMB_REGC8=1 enables the r8:r9 pair cache for the hottest
+ *	8-byte local.  OFF by default on the evidence: the eqop
+ *	inlining already banked the 64-bit counter win (the helper
+ *	crossing), and what remains - mov-bridged high-register
+ *	arithmetic, the wide push/pop preamble, two warm loads per
+ *	call - measured board-neutral on the eclipse (2.277 -> 2.274)
+ *	and slightly negative on grains (49,653 -> 49,492).  Kept
+ *	correct and gated for machines or workloads where the balance
+ *	differs.
+ */
+static int t_regc8(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = getenv("THUMB_REGC8") ? 1 : 0;
+	return cached;
+}
+
+/*
  *	Register caching of the hottest local (regalloc-lite).
  *
  *	One 32-bit local per function lives in r7 for the whole span:
@@ -375,6 +394,8 @@ struct tlc {
 	long fo;
 	unsigned short reads, eqops, writes;
 	unsigned char esc;
+	unsigned char w;	/* access width: 0 unset, 4 or 8; a mix
+				   escapes */
 };
 static struct tlc t_lctab[TLC_MAX];
 static unsigned t_lcn;
@@ -410,7 +431,18 @@ static unsigned long t_lc_armoff, t_lc_armstart;
 static int t_lcbad;		/* this function cannot cache      */
 static long t_vdepth;		/* true bytecode stack depth        */
 static long t_vd;		/* this op's true delta, or T_DUNK  */
-static long t_cfo = -1;		/* cached frame offset, -1 = none   */
+static long t_cfo = -1;		/* r7-cached 32-bit local, -1 none  */
+static long t_cfo8 = -1;	/* r8:r9-cached 8-byte local        */
+static unsigned t_psize = 2;	/* preamble bytes: 2, or 4 with the
+				   wide push {r7, r8, r9, lr}       */
+
+static void t_lc_setw(struct tlc *p, unsigned w)
+{
+	if (p->w && p->w != w)
+		p->esc = 1;
+	else
+		p->w = (unsigned char)w;
+}
 
 static void t_lc_wr(unsigned long off, long fo, unsigned eq)
 {
@@ -424,17 +456,15 @@ static void t_lc_wr(unsigned long off, long fo, unsigned eq)
 	t_lcwrn++;
 }
 
-/* is this offset an annotated consumer of the CACHED local? */
-static int t_lc_wr_here(unsigned long off)
+/* the annotated consumer at this offset: its frame offset, or -1 */
+static long t_lc_wr_fo(unsigned long off)
 {
 	unsigned i;
 
-	if (t_cfo < 0)
-		return 0;
 	for (i = 0; i < t_lcwrn; i++)
-		if (t_lcwr[i].off == off && t_lcwr[i].fo == t_cfo)
-			return 1;
-	return 0;
+		if (t_lcwr[i].off == off)
+			return t_lcwr[i].fo;
+	return -1;
 }
 
 static struct tlc *t_lc_find(long fo)
@@ -451,6 +481,7 @@ static struct tlc *t_lc_find(long fo)
 	t_lctab[t_lcn].fo = fo;
 	t_lctab[t_lcn].reads = t_lctab[t_lcn].eqops = t_lctab[t_lcn].writes = 0;
 	t_lctab[t_lcn].esc = 0;
+	t_lctab[t_lcn].w = 0;
 	return &t_lctab[t_lcn++];
 }
 
@@ -1081,10 +1112,13 @@ static unsigned long t_seam(unsigned long o, unsigned long start,
 		return 0;
 	if (!t_addr_eq(&k2, &t_track.slot))
 		return 0;
-	/* the cached local lives in r7, not memory: the seam's reload
-	   elision and its slot bookkeeping both reason about memory,
-	   so it stands down and the plain cached paths handle it */
+	/* the cached locals live in registers, not memory: the seam's
+	   reload elision and its slot bookkeeping both reason about
+	   memory, so it stands down and the plain cached paths handle
+	   them */
 	if (t_cfo >= 0 && (k1.fo == t_cfo || k2.fo == t_cfo))
+		return 0;
+	if (t_cfo8 >= 0 && (k1.fo == t_cfo8 || k2.fo == t_cfo8))
 		return 0;
 	for (i2 = o + 1; i2 <= p4; i2++)
 		if (t_targets[(i2 - start) >> 3] & (1 << ((i2 - start) & 7)))
@@ -1215,6 +1249,8 @@ static void t_r4mem(unsigned kind, unsigned rt, unsigned long off)
 		0xF8D4, 0xF8B4, 0xF894, 0xF9B4, 0xF994,
 		0xF8C4, 0xF8A4, 0xF884
 	};
+	if (rt > 7)
+		goto wide;	/* the 16-bit forms take r0-r7 only */
 	switch (kind) {
 	case R4_LDR32:
 	case R4_STR32:
@@ -1241,6 +1277,7 @@ static void t_r4mem(unsigned kind, unsigned rt, unsigned long off)
 		}
 		break;
 	}
+wide:
 	t32(wide[kind], (rt << 12) | (unsigned)off);
 }
 
@@ -1670,6 +1707,95 @@ static int t_eqop_r7(const char *name)
 }
 
 /*
+ *	The pair-cached compound assigns: the 8-byte local lives in
+ *	r8:r9, so the old value bridges to r2:r3 (high registers have
+ *	no 16-bit ALU forms), the new value computes in r0:r1 exactly
+ *	as the stacked 64-bit ALU does, and moves back.  The integer
+ *	carry-pair kinds, plus the double pre-forms through the DCP
+ *	slots - the same sets the memory inlines cover, and the
+ *	classifier escapes everything else.
+ */
+static int t_eqop_r89(const char *name)
+{
+	const struct teqop *e;
+	unsigned blen, kind;
+
+	for (e = teqops; e->base; e++) {
+		blen = strlen(e->base);
+		if (strncmp(name, e->base, blen) == 0)
+			break;
+	}
+	if (!e->base)
+		return 0;
+	kind = e->kind;
+	if (name[blen] == '8' &&
+	    (name[blen + 1] == 's' || name[blen + 1] == 'u') &&
+	    !name[blen + 2]) {
+		switch (kind) {
+		case 0: case 1: case 5: case 6: case 7:
+		case 10: case 11:
+			break;
+		default:
+			return 0;
+		}
+		t16(0x3404);		/* adds r4, #4 - drop the slot */
+		t16(0x4642);		/* mov  r2, r8 - old lo        */
+		t16(0x464B);		/* mov  r3, r9 - old hi        */
+		switch (kind) {
+		case 0: case 10:
+			t16(0x1810);		/* adds r0, r2, r0  */
+			t16(0x4159);		/* adcs r1, r3      */
+			break;
+		case 1: case 11:
+			t16(0x1A10);		/* subs r0, r2, r0  */
+			t32(0xEB63, 0x0101);	/* sbc.w r1, r3, r1 */
+			break;
+		case 5:
+			t16(0x4010);		/* ands r0, r2      */
+			t16(0x4019);		/* ands r1, r3      */
+			break;
+		case 6:
+			t16(0x4310);		/* orrs r0, r2      */
+			t16(0x4319);		/* orrs r1, r3      */
+			break;
+		case 7:
+			t16(0x4050);		/* eors r0, r2      */
+			t16(0x4059);		/* eors r1, r3      */
+			break;
+		}
+		t16(0x4680);		/* mov r8, r0        */
+		t16(0x4689);		/* mov r9, r1        */
+		if (kind >= 10) {
+			t16(0x4610);	/* mov r0, r2 - A = old */
+			t16(0x4619);	/* mov r1, r3           */
+		}
+		return 1;
+	}
+	if (name[blen] == 'd' && !name[blen + 1]) {
+		unsigned slot;
+
+		switch (kind) {
+		case 0: slot = NHS_DADD; break;
+		case 1: slot = NHS_DSUB; break;
+		case 2: slot = NHS_DMUL; break;
+		default:
+			return 0;
+		}
+		t16(0x3404);		/* adds r4, #4 - drop the slot */
+		t16(0x4602);		/* mov r2, r0 - amt right      */
+		t16(0x460B);		/* mov r3, r1                  */
+		t16(0x4640);		/* mov r0, r8 - old left       */
+		t16(0x4649);		/* mov r1, r9                  */
+		t32(0xF8D5, 0xC000 | (slot * 4));
+		t16(0x47E0);		/* blx r12                     */
+		t16(0x4680);		/* mov r8, r0 - result cached  */
+		t16(0x4689);		/* mov r9, r1                  */
+		return 1;
+	}
+	return 0;
+}
+
+/*
  *	Constant right operand: PUSH ; CONSTk ; OP32 never needs the
  *	stack at all.  The left operand is already in A, so the whole
  *	shape runs in registers - an immediate form where one exists
@@ -2072,15 +2198,27 @@ static int t_span(unsigned long start, unsigned long end)
 			   again. */
 			if (op == BC_ENTER && o == start && t_cfo >= 0)
 				t_r4mem(R4_LDR32, 7, (unsigned long)t_cfo);
+			if (op == BC_ENTER && o == start && t_cfo8 >= 0) {
+				t_r4mem(R4_LDR32, 8,
+					(unsigned long)t_cfo8);
+				t_r4mem(R4_LDR32, 9,
+					(unsigned long)t_cfo8 + 4);
+			}
 			o += 3;
 			break;
 		}
 		case BC_RET:
-			/* the preamble pushed lr (and r7 when a local
-			   is cached) on the real machine stack, so
-			   calls can clobber both freely */
-			t16(t_cfo >= 0 ? 0xBD80 : 0xBD00);
-					/* pop {pc} / pop {r7, pc} */
+			/* the preamble pushed lr - and the cache
+			   registers this function uses - on the real
+			   machine stack, so calls can clobber them
+			   freely */
+			if (t_cfo8 >= 0)
+				t32(0xE8BD, 0x8300 |
+				    (t_cfo >= 0 ? 0x80 : 0));
+				  /* pop.w {(r7,) r8, r9, pc} */
+			else
+				t16(t_cfo >= 0 ? 0xBD80 : 0xBD00);
+				  /* pop {pc} / pop {r7, pc}  */
 			o++;
 			break;
 		case BC_ARGS: {
@@ -2281,12 +2419,15 @@ static int t_span(unsigned long start, unsigned long end)
 				unsigned nxt = (o + sz < end) ?
 				    codebuf[o + sz] : BC_NOP;
 				if (me.fo < 0 || (me.fo & 3) ||
-				    me.fo > 4092)
+				    me.fo > 4084)
 					t_lc_escape(me.fo);
-				else if (nxt == BC_LOAD32) {
+				else if (nxt == BC_LOAD32 ||
+					 nxt == BC_LOAD64) {
 					struct tlc *p = t_lc_find(me.fo);
 					if (p) {
 						p->reads++;
+						t_lc_setw(p,
+						    nxt == BC_LOAD32 ? 4 : 8);
 						t_lc_span(o, o + sz + 1,
 							  me.fo);
 					}
@@ -2297,20 +2438,27 @@ static int t_span(unsigned long start, unsigned long end)
 				} else
 					t_lc_escape(me.fo);
 			}
-			/* the cached local: a read is one mov; a write or
-			   compound assign starts with LOCAL;PUSH exactly
-			   as before (the address may be materialised -
-			   nothing ever reads or writes through it, the
-			   consumer redirects to r7).  Anything else here
-			   means the walks diverged: bail to bytecode
-			   rather than touch stale memory. */
-			if (t_cfo >= 0 && me.fo == t_cfo) {
+			/* the cached locals: a read is one mov (a pair for
+			   the 8-byte one); a write or compound assign
+			   starts with LOCAL;PUSH exactly as before (the
+			   address may be materialised - nothing ever
+			   reads or writes through it, the consumer
+			   redirects to the register).  Anything else
+			   here means the walks diverged: bail to
+			   bytecode rather than touch stale memory. */
+			if ((t_cfo >= 0 && me.fo == t_cfo) ||
+			    (t_cfo8 >= 0 && me.fo == t_cfo8)) {
+				int pair = (me.fo == t_cfo8);
 				unsigned nxt = (o + sz < end) ?
 				    codebuf[o + sz] : BC_NOP;
-				if (nxt == BC_LOAD32 &&
+				if (nxt == (pair ? BC_LOAD64 : BC_LOAD32) &&
 				    !(t_targets[(o + sz - start) >> 3] &
 				      (1 << ((o + sz - start) & 7)))) {
-					t16(0x4638);	/* mov r0, r7 */
+					if (pair) {
+						t16(0x4640); /* mov r0, r8 */
+						t16(0x4649); /* mov r1, r9 */
+					} else
+						t16(0x4638); /* mov r0, r7 */
 					tmap[o + sz - start] = tlen;
 					t_track.a_is.kind = 0;
 					t_d = 0;
@@ -2479,7 +2627,8 @@ static int t_span(unsigned long start, unsigned long end)
 			   variable - no memory write, no mirror seed,
 			   and the seam (which reasons about memory) is
 			   skipped */
-			if (op == BC_STORE32 && t_lc_wr_here(o)) {
+			if (op == BC_STORE32 && t_cfo >= 0 &&
+			    t_lc_wr_fo(o) == t_cfo) {
 				t16(0x3404);	/* adds r4, #4 */
 				t16(0x4607);	/* mov  r7, r0 */
 				t_d = -4;
@@ -2487,11 +2636,11 @@ static int t_span(unsigned long start, unsigned long end)
 				o++;
 				break;
 			}
-			/* a narrow store consuming the cached local's
-			   address slot would be a walk divergence */
-			if (t_cfo >= 0 && t_track.slot.kind == 3
-			    && t_track.slot_depth == 0
-			    && t_track.slot.fo == t_cfo)
+			/* a store consuming either cached local's address
+			   slot without an annotation is a divergence */
+			if (t_track.slot.kind == 3 && t_track.slot_depth == 0
+			    && ((t_cfo >= 0 && t_track.slot.fo == t_cfo) ||
+				(t_cfo8 >= 0 && t_track.slot.fo == t_cfo8)))
 				return 0;
 			if (!t_nor4() && t_track.slot.kind == 3
 			    && t_track.slot_depth == 0
@@ -2678,18 +2827,47 @@ static int t_span(unsigned long start, unsigned long end)
 			if (ntref >= TPOOLMAX)
 				return 0;
 			/* classification: an eqop consuming a pending
-			   address slot is the read-modify-write pattern;
-			   cacheable only at width 4 */
+			   address slot is the read-modify-write pattern.
+			   Cacheable: every width-4 kind (r7), the 8-byte
+			   carry-pair kinds and the double pre-forms
+			   (r8:r9) - exactly the sets the emitters
+			   cover; anything else escapes the offset */
 			if (t_collect && t_eqop_name(bc_symname[s])) {
 				int pt = t_lc_pend_top();
 				if (pt >= 0) {
 					const char *nm = bc_symname[s];
-					unsigned nl = strlen(nm);
+					const struct teqop *e;
+					unsigned bl2, wch, ok = 0, w = 0;
 					struct tlc *p =
 					    t_lc_find(t_lcpend[pt].fo);
-					if (nl >= 2 && nm[nl - 2] == '4' &&
-					    p && !p->esc) {
+					for (e = teqops; e->base; e++) {
+						bl2 = strlen(e->base);
+						if (!strncmp(nm, e->base,
+							     bl2))
+							break;
+					}
+					wch = e->base ? nm[bl2] : 0;
+					if (wch == '4') {
+						ok = 1;
+						w = 4;
+					} else if (wch == '8') {
+						switch (e->kind) {
+						case 0: case 1: case 5:
+						case 6: case 7:
+						case 10: case 11:
+							ok = 1;
+							w = 8;
+						}
+					} else if (wch == 'd') {
+						switch (e->kind) {
+						case 0: case 1: case 2:
+							ok = 1;
+							w = 8;
+						}
+					}
+					if (ok && p && !p->esc) {
 						p->eqops++;
+						t_lc_setw(p, w);
 						t_lc_wr(o,
 							t_lcpend[pt].fo, 1);
 					} else
@@ -2697,21 +2875,35 @@ static int t_span(unsigned long start, unsigned long end)
 					t_lcpendn--;
 				}
 			}
-			/* an annotated compound assign of the cached
-			   local runs entirely on r7 */
-			if (t_lc_wr_here(o)) {
-				if (!t_eqop_r7(bc_symname[s]))
-					return 0;
-				t_d = T_DUNK;	/* facts die as ever */
-				t_vd = -4;
-				o += 3;
-				break;
+			/* an annotated compound assign of a cached local
+			   runs entirely in registers */
+			{
+				long wfo = t_lc_wr_fo(o);
+
+				if (wfo >= 0 && t_cfo >= 0 &&
+				    wfo == t_cfo) {
+					if (!t_eqop_r7(bc_symname[s]))
+						return 0;
+					t_d = T_DUNK;
+					t_vd = -4;
+					o += 3;
+					break;
+				}
+				if (wfo >= 0 && t_cfo8 >= 0 &&
+				    wfo == t_cfo8) {
+					if (!t_eqop_r89(bc_symname[s]))
+						return 0;
+					t_d = T_DUNK;
+					t_vd = -4;
+					o += 3;
+					break;
+				}
 			}
-			/* an eqop consuming the cached local's address
+			/* an eqop consuming either cached local's address
 			   slot without an annotation is a divergence */
-			if (t_cfo >= 0 && t_track.slot.kind == 3
-			    && t_track.slot_depth == 0
-			    && t_track.slot.fo == t_cfo
+			if (t_track.slot.kind == 3 && t_track.slot_depth == 0
+			    && ((t_cfo >= 0 && t_track.slot.fo == t_cfo) ||
+				(t_cfo8 >= 0 && t_track.slot.fo == t_cfo8))
 			    && t_eqop_name(bc_symname[s]))
 				return 0;
 			if (t_eqop(bc_symname[s])) {
@@ -2794,7 +2986,8 @@ static int t_span(unsigned long start, unsigned long end)
 					t32(0, 0);
 				else
 					t_blw((long)tent -
-					      (long)(t_base + 2 + tlen + 4));
+					      (long)(t_base + t_psize +
+						     tlen + 4));
 				t16(0x3404);	/* adds r4, #4        */
 				o += 5;
 				break;
@@ -2902,15 +3095,32 @@ static int t_span(unsigned long start, unsigned long end)
 			if (t_collect) {
 				int pt = t_lc_pend_top();
 				if (pt >= 0) {
-					t_lc_escape(t_lcpend[pt].fo);
+					struct tlc *p =
+					    t_lc_find(t_lcpend[pt].fo);
+					if (p) {
+						p->writes++;
+						t_lc_setw(p, 8);
+						t_lc_wr(o,
+							t_lcpend[pt].fo, 0);
+					}
 					t_lcpendn--;
 				}
 			}
-			/* a 64-bit store into the cached 32-bit local
-			   would be a walk divergence */
-			if (t_cfo >= 0 && t_track.slot.kind == 3
-			    && t_track.slot_depth == 0
-			    && t_track.slot.fo == t_cfo)
+			/* an annotated store of the pair-cached local */
+			if (t_cfo8 >= 0 && t_lc_wr_fo(o) == t_cfo8) {
+				t16(0x3404);	/* adds r4, #4 */
+				t16(0x4680);	/* mov  r8, r0 */
+				t16(0x4689);	/* mov  r9, r1 */
+				t_d = -4;
+				t_keep = 1;
+				o++;
+				break;
+			}
+			/* a store consuming either cached local's address
+			   slot without an annotation is a divergence */
+			if (t_track.slot.kind == 3 && t_track.slot_depth == 0
+			    && ((t_cfo >= 0 && t_track.slot.fo == t_cfo) ||
+				(t_cfo8 >= 0 && t_track.slot.fo == t_cfo8)))
 				return 0;
 			if (!t_nor4() && t_track.slot.kind == 3
 			    && t_track.slot_depth == 0
@@ -3457,6 +3667,8 @@ static void thumb_commit(void)
 	t_lcwrn = 0;
 	t_lcbad = 0;
 	t_cfo = -1;
+	t_cfo8 = -1;
+	t_psize = 2;
 	t_lc_armoff = ~0UL;
 	t_dry = 1;
 	t_collect = 1;
@@ -3498,8 +3710,8 @@ static void thumb_commit(void)
 	}
 	if (!t_noregc() && !t_lcbad && end > fn_start &&
 	    codebuf[fn_start] == BC_ENTER) {
-		int best = -1;
-		long bests = 0;
+		int best4 = -1, best8 = -1;
+		long bests4 = 0, bests8 = 0;
 		unsigned i, j;
 
 		for (i = 0; i < t_lcn; i++) {
@@ -3507,7 +3719,7 @@ static void thumb_commit(void)
 			long score;
 
 			if (p->esc || p->fo < 0 || (p->fo & 3) ||
-			    p->fo > 4092)
+			    p->fo > 4084 || !p->w)
 				continue;
 			if (p->reads + p->eqops == 0)
 				continue;
@@ -3528,19 +3740,28 @@ static void thumb_commit(void)
 						break;
 					}
 			}
-			if (score > bests) {
-				bests = score;
-				best = (int)i;
+			if (p->w == 4 && score > bests4) {
+				bests4 = score;
+				best4 = (int)i;
+			} else if (p->w == 8 && t_regc8() &&
+				   score > bests8) {
+				bests8 = score;
+				best8 = (int)i;
 			}
 		}
-		if (best >= 0) {
-			t_cfo = t_lctab[best].fo;
-			if (getenv("THUMB_REGCDBG"))
-				fprintf(stderr,
-					"regcache: %s fo=%ld score=%ld\n",
-					bc_symname[fn_sym], t_cfo, bests);
-		}
+		if (best4 >= 0)
+			t_cfo = t_lctab[best4].fo;
+		if (best8 >= 0)
+			t_cfo8 = t_lctab[best8].fo;
+		if ((best4 >= 0 || best8 >= 0) &&
+		    getenv("THUMB_REGCDBG"))
+			fprintf(stderr,
+				"regcache: %s fo=%ld score=%ld "
+				"fo8=%ld score8=%ld\n",
+				bc_symname[fn_sym], t_cfo, bests4,
+				t_cfo8, bests8);
 	}
+	t_psize = (t_cfo8 >= 0) ? 4 : 2;
 
 	tlen = 0;
 	ntpool = 0;
@@ -3620,13 +3841,24 @@ static void thumb_commit(void)
 	}
 	while (codelen < entry)
 		cbyte(BC_NOP);
-	/* Preamble: save lr - and r7 when this function caches a local
-	   in it - on the real machine stack, so call sites can clobber
-	   both; BC_RET translates to the matching pop.  Same two bytes
-	   either way, so tmap, branch offsets and the direct-BL entry
-	   math are all unaffected. */
-	cbyte(t_cfo >= 0 ? 0x80 : 0x00);
-	cbyte(0xB5);			/* push {lr} / push {r7, lr} */
+	/* Preamble: save lr - and whichever cache registers this
+	   function uses - on the real machine stack, so call sites can
+	   clobber them; BC_RET translates to the matching pop.  The
+	   pair cache needs the wide push (r8/r9 have no 16-bit form),
+	   which is why the self-BL offset math carries t_psize.  tmap
+	   and in-span branch offsets are tbuf-relative and unaffected
+	   either way. */
+	if (t_cfo8 >= 0) {
+		unsigned hw2 = 0x4300 | (t_cfo >= 0 ? 0x80 : 0);
+
+		cbyte(0x2D);
+		cbyte(0xE9);		/* push.w {(r7,) r8, r9, lr} */
+		cbyte(hw2 & 0xFF);
+		cbyte(hw2 >> 8);
+	} else {
+		cbyte(t_cfo >= 0 ? 0x80 : 0x00);
+		cbyte(0xB5);		/* push {lr} / push {r7, lr} */
+	}
 	base = codelen;
 	for (i = 0; i < tlen; i++)
 		cbyte(tbuf[i]);
