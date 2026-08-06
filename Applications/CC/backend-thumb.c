@@ -263,6 +263,15 @@ static int t_nofuse(void)
 	return cached;
 }
 
+/* THUMB_NOR4=1 turns the direct [r4,#off] frame access off, for A/B */
+static int t_nor4(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = getenv("THUMB_NOR4") ? 1 : 0;
+	return cached;
+}
+
 /*
  *	THUMB_SKIP=name[,name...] keeps the named functions in bytecode.
  *	A debugging knob: when a whole-program build misbehaves and the
@@ -849,6 +858,57 @@ static void t_dcpconv(unsigned slot)
 	t_d = 0;
 }
 
+/*
+ *	rt, [r4, #off] load/store, shortest encoding.  The 16-bit forms
+ *	exist only for the unsigned loads and the stores, and only for
+ *	small aligned offsets; the signed loads are always .W.  The
+ *	caller has already checked off <= 4095 - nothing here can fail,
+ *	so the dry and wet walks cannot disagree about having emitted it.
+ */
+#define R4_LDR32	0
+#define R4_LDRH		1
+#define R4_LDRB		2
+#define R4_LDRSH	3
+#define R4_LDRSB	4
+#define R4_STR32	5
+#define R4_STRH		6
+#define R4_STRB		7
+
+static void t_r4mem(unsigned kind, unsigned rt, unsigned long off)
+{
+	static const unsigned short wide[] = {
+		0xF8D4, 0xF8B4, 0xF894, 0xF9B4, 0xF994,
+		0xF8C4, 0xF8A4, 0xF884
+	};
+	switch (kind) {
+	case R4_LDR32:
+	case R4_STR32:
+		if (off <= 124 && !(off & 3)) {
+			t16((kind == R4_LDR32 ? 0x6800 : 0x6000) |
+			    ((unsigned)(off >> 2) << 6) | 0x20 | rt);
+			return;
+		}
+		break;
+	case R4_LDRH:
+	case R4_STRH:
+		if (off <= 62 && !(off & 1)) {
+			t16((kind == R4_LDRH ? 0x8800 : 0x8000) |
+			    ((unsigned)(off >> 1) << 6) | 0x20 | rt);
+			return;
+		}
+		break;
+	case R4_LDRB:
+	case R4_STRB:
+		if (off <= 31) {
+			t16((kind == R4_LDRB ? 0x7800 : 0x7000) |
+			    ((unsigned)off << 6) | 0x20 | rt);
+			return;
+		}
+		break;
+	}
+	t32(wide[kind], (rt << 12) | (unsigned)off);
+}
+
 /* add/sub rd, rn, #imm12 (T4 ADDW/SUBW, no flags) */
 static void t_addsubw(unsigned sub, unsigned rd, unsigned rn, unsigned imm12)
 {
@@ -1325,6 +1385,58 @@ static int t_span(unsigned long start, unsigned long end)
 				o += sz + 1;
 				break;
 			}
+			/* Direct frame access: LOCALn feeding straight
+			   into a load reads the slot off r4 in one
+			   instruction instead of materialising the VM
+			   offset in A and re-adding the base - the
+			   address is r4+v by construction, whatever r6
+			   holds.  Declined if a branch can land on the
+			   load (it would arrive expecting A to hold the
+			   address).  For the 4- and 8-byte forms A ends
+			   up mirroring mem[local] - the same fact a
+			   store through the slot seeds - so consecutive
+			   reads of one local collapse further. */
+			if (!t_nor4() && o + sz < end && v <= 4095
+			    && !(t_targets[(o + sz - start) >> 3] &
+				 (1 << ((o + sz - start) & 7)))) {
+				unsigned lop = codebuf[o + sz];
+				unsigned fk = 0;
+				int fuse = 1;
+				switch (lop) {
+				case BC_LOAD8S:  fk = R4_LDRSB; break;
+				case BC_LOAD8U:  fk = R4_LDRB;  break;
+				case BC_LOAD16S: fk = R4_LDRSH; break;
+				case BC_LOAD16U: fk = R4_LDRH;  break;
+				case BC_LOAD32:  fk = R4_LDR32; break;
+				case BC_LOAD64:
+					fk = R4_LDR32;
+					if (v > 4091)
+						fuse = 0;
+					break;
+				default:
+					fuse = 0;
+				}
+				if (fuse) {
+					if (lop == BC_LOAD64) {
+						t_r4mem(R4_LDR32, 1, v + 4);
+						t_r4mem(R4_LDR32, 0, v);
+					} else
+						t_r4mem(fk, 0, v);
+					tmap[o + sz - start] = tlen;
+					t_track.a_is.kind = 0;
+					if (lop == BC_LOAD32 ||
+					    lop == BC_LOAD64) {
+						t_track.a_valid = 1;
+						t_track.a_key = me;
+						t_track.a_width =
+						    (lop == BC_LOAD32) ? 4 : 8;
+						t_keep = 1;
+					}
+					t_d = 0;
+					o += sz + 1;
+					break;
+				}
+			}
 			/* A = the VM offset of sp+v: the native sp is a
 			   pointer, so subtract the base back out */
 			t16(0x1BA0);		/* subs r0, r4, r6  */
@@ -1370,15 +1482,39 @@ static int t_span(unsigned long start, unsigned long end)
 			break;
 		case BC_STORE8:
 		case BC_STORE16:
-		case BC_STORE32:
-			t16(0x6822);		/* ldr  r2, [r4]    */
-			t16(0x3404);		/* adds r4, #4      */
-			if (op == BC_STORE8)
-				t16(0x54B0);	/* strb r0, [r6, r2] */
-			else if (op == BC_STORE16)
-				t16(0x52B0);	/* strh r0, [r6, r2] */
-			else
-				t16(0x50B0);	/* str  r0, [r6, r2] */
+		case BC_STORE32: {
+			/* When the address on top of the stack is a
+			   frame slot the tracker followed from its
+			   LOCAL;PUSH (the same fact the seam trusts),
+			   pop it unread and store straight off r4: the
+			   slot sits at r4+k once the address is popped.
+			   Same stack effect, same A, one memory access
+			   fewer.  Every fact downstream - the mirror
+			   seed, the seam - holds unchanged. */
+			unsigned long k = 0;
+			int direct = 0;
+			if (!t_nor4() && t_track.slot.kind == 3
+			    && t_track.slot_depth == 0
+			    && t_track.slot.sym == t_epoch) {
+				k = t_track.slot.k +
+				    (unsigned long)(t_depth - 4);
+				direct = (k <= 4095);
+			}
+			if (direct) {
+				t16(0x3404);	/* adds r4, #4      */
+				t_r4mem(op == BC_STORE8 ? R4_STRB :
+					op == BC_STORE16 ? R4_STRH :
+					R4_STR32, 0, k);
+			} else {
+				t16(0x6822);	/* ldr  r2, [r4]    */
+				t16(0x3404);	/* adds r4, #4      */
+				if (op == BC_STORE8)
+					t16(0x54B0);	/* strb r0, [r6, r2] */
+				else if (op == BC_STORE16)
+					t16(0x52B0);	/* strh r0, [r6, r2] */
+				else
+					t16(0x50B0);	/* str  r0, [r6, r2] */
+			}
 			if (op == BC_STORE32) {
 				unsigned long nl = t_seam(o, start, end, 4);
 				if (nl) {
@@ -1407,6 +1543,7 @@ static int t_span(unsigned long start, unsigned long end)
 			t_keep = 1;
 			o++;
 			break;
+		}
 		case BC_ADDR: {
 			unsigned s;
 			unsigned long ad = t_rd32c(o + 1);
@@ -1698,12 +1835,28 @@ static int t_span(unsigned long start, unsigned long end)
 			t_d = 0;
 			o++;
 			break;
-		case BC_STORE64:
-			t16(0x6822);		/* ldr  r2, [r4]     */
-			t16(0x3404);		/* adds r4, #4       */
-			t16(0x1992);		/* adds r2, r2, r6   */
-			t16(0x6010);		/* str  r0, [r2]     */
-			t16(0x6051);		/* str  r1, [r2, #4] */
+		case BC_STORE64: {
+			/* the direct frame form, as the 32-bit stores */
+			unsigned long k = 0;
+			int direct = 0;
+			if (!t_nor4() && t_track.slot.kind == 3
+			    && t_track.slot_depth == 0
+			    && t_track.slot.sym == t_epoch) {
+				k = t_track.slot.k +
+				    (unsigned long)(t_depth - 4);
+				direct = (k <= 4091);
+			}
+			if (direct) {
+				t16(0x3404);	/* adds r4, #4       */
+				t_r4mem(R4_STR32, 0, k);
+				t_r4mem(R4_STR32, 1, k + 4);
+			} else {
+				t16(0x6822);	/* ldr  r2, [r4]     */
+				t16(0x3404);	/* adds r4, #4       */
+				t16(0x1992);	/* adds r2, r2, r6   */
+				t16(0x6010);	/* str  r0, [r2]     */
+				t16(0x6051);	/* str  r1, [r2, #4] */
+			}
 			{
 				unsigned long nl = t_seam(o, start, end, 8);
 				if (nl) {
@@ -1720,6 +1873,7 @@ static int t_span(unsigned long start, unsigned long end)
 			t_keep = 1;
 			o++;
 			break;
+		}
 		case BC_PUSH64:
 			if (t_fuse_scan(o, 8, start, end)) {
 				t16(0x3C08);	/* subs r4, #8       */
