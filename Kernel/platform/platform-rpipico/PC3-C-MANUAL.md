@@ -5,7 +5,8 @@
 
 Everything a C programmer needs to reach the facilities this port adds
 to Fuzix: the graphics modes, the off-screen framebuffer, text at pixel
-positions, sound, the joystick and ADC, and the 8 MiB of PSRAM.
+positions, sound — both the BBC synthesiser and streamed PCM — the
+shared maths library, the joystick and ADC, and the 8 MiB of PSRAM.
 
 None of it is a library call. The kernel owns the hardware and exposes
 it through **ioctls on `/dev/sys`**, so everything below is the same
@@ -86,6 +87,15 @@ document assumes this path.**
 Ask for more stack with `-z stack-size=N` if you recurse; the default
 is 8 KB and the ELF loader honours the request up to 64 KB.
 
+**Floating point is soft float, and that is not negotiable for most
+programs.** The RP2350's FPU is granted, but no FP register state is
+saved across a context switch, so exactly one process on the machine
+may execute FP instructions. That process is the audio player, and it
+holds the sound device for as long as it runs — the device lock *is*
+the FPU lock. Do not add `-mfpu` to anything else. For maths that has
+to be fast, use the shared library below: it is double precision, it
+runs on the DCP, and it costs no lock.
+
 ## Worked examples on disc
 
 Read these before writing anything; they are all short.
@@ -99,6 +109,9 @@ Read these before writing anything; they are all short.
 | `utils/saveimage.c`, `loadimage.c` | reading and writing the screen |
 | `utils/memprobe.c` | how much memory a process can actually have |
 | `utils/allocbench.c` | the cost of a PSRAM arena allocation |
+| `utils/pcmtest.c` | the PCM sound sink, from a generated tone |
+| `utils/playmp3.c` | a complete decoder: file → PCM → the ring |
+| `utils/libmbench.c` | the shared maths library against the local one |
 
 # The memory a program gets
 
@@ -335,6 +348,78 @@ ioctl(sys, SNDIOC_QUIET, 0);      /* silence everything */
 `amp` is -15..0 for volume, or 1..16 to use `ENVELOPE n`. The channel
 word carries the `&1x` flush and `&Sxx` sync bits.
 
+## Playing your own samples
+
+The same I2S engine will take decoded PCM instead of the synthesiser.
+Open the stream, write 16-bit frames as fast as the ring will take
+them, and the driver's DMA does the rest — nothing has to be refilled
+from a main loop, which is what lets music carry on while another
+program runs.
+
+```c
+struct snd_pcm cfg = { .rate = 44100, .channels = 2, .bits = 16 };
+struct snd_buf sb;
+struct snd_stat st;
+
+if (ioctl(sys, SNDIOC_PCMOPEN, &cfg) < 0)   /* EBUSY: someone else has it */
+        ...
+sb.base = samples; sb.len = nbytes;
+n = ioctl(sys, SNDIOC_PCMWRITE, &sb);       /* returns bytes ACCEPTED */
+ioctl(sys, SNDIOC_PCMSTAT, &st);            /* space, queued, underruns */
+ioctl(sys, SNDIOC_PCMCLOSE, 0);
+```
+
+* A **short write is normal**, not an error: it means the ring is full
+  and you should come back. The ring holds 256 KB, about 1.5 seconds at
+  44100 stereo — deep on purpose, because a Fuzix process can be
+  swapped out for tens of milliseconds and the audio must not notice.
+* **Mono is expanded by the driver**, so a mono source costs you
+  nothing and halves the traffic into the ring.
+* `underruns` counts half-buffers the interrupt had to fill with
+  silence. It is the objective test of whether your buffering is deep
+  enough, and much better than "it sounded all right".
+* To play the tail out, poll `PCMSTAT` until `queued` is zero and close
+  then; `PCMCLOSE` itself is immediate and drops whatever is left.
+
+**One process at a time.** There is one I2S engine, so the stream
+belongs to whoever opened it: a second `PCMOPEN` gets `EBUSY`, and
+writes and closes from anyone else are refused. This is deliberate —
+two players sharing the ring interleave their samples, and it sounds
+precisely as bad as that suggests.
+
+```c
+int who = ioctl(sys, SNDIOC_PCMOWNER, 0);   /* the pid playing, or 0 */
+```
+
+`SNDIOC_PCMOWNER` is how a program that did not start the player can
+find it: send it `SIGINT` to stop the music tidily. A player that dies
+without closing strands nothing — the kernel hands the stream back when
+its owner is gone, so `SIGKILL` is safe too.
+
+`SOUND` and PCM are mutually exclusive, as they are in MMBasic: opening
+the stream silences the synthesiser and closing it hands the state
+machine back.
+
+# The shared maths library
+
+`sin`, `cos`, `exp` and the rest live in kernel flash and are called
+**directly** — there is no MMU, so kernel flash is in the same address
+space as your program. Ask for the table once:
+
+```c
+void *tbl;
+ioctl(sys, PICOIOC_LIBM, &tbl);      /* check magic and version first */
+```
+
+It is double precision and uses the RP2350's DCP, which makes it about
+**2.7× faster** than the soft-float library linked into a program, and
+it costs nothing in program memory. `libm_table.c` documents the layout
+and the errno contract (these do not report domain errors).
+
+Check the magic and version before calling anything. An old binary on a
+new kernel must fail rather than call the wrong slot — that is what the
+version is for.
+
 # Joystick, ADC and the clock
 
 ```c
@@ -415,6 +500,8 @@ to suspect; `BCRUN_BYTECODE=1` forces bytecode so you can compare.
         pico_ioctl.h          every ioctl, and the authority
         display.c/.h          modes, primitives, the framebuffer
         console.c             the terminal, and the font
+        sound.c               the synthesiser and the PCM sink
+        libm_table.c          the shared maths library and its ABI
         swapper.c             the process pool
         psram.c, arena.c      PSRAM and the arena allocator
         utils/                the worked examples above

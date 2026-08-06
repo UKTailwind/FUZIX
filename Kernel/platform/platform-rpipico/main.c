@@ -187,11 +187,13 @@ int main(void)
      *     There is one I2S engine, so the audio device lock is also the
      *     FPU lock - and it is a real lock: SNDIOC_PCMOPEN fails with
      *     EBUSY while another process holds the stream (sound.c).
-     *     The exception is mp3bench, which is FP and deliberately takes
-     *     no sound ioctl at all, so running it while music plays is the
-     *     one way to have two FP processes.  They would corrupt each
-     *     other's S registers - a wrong benchmark and bad audio, not a
-     *     fault - and it is a diagnostic nobody runs by accident.
+     *     The one way past it is mp3bench built with FPU=1, which is
+     *     not how it ships - the shipped build is soft float - and
+     *     which deliberately takes no sound ioctl, so it holds no
+     *     lock.  Run that while music plays and there are two FP
+     *     processes: they corrupt each other's S registers, which is a
+     *     wrong benchmark and bad audio rather than a fault, and it
+     *     takes a deliberate rebuild to arrange.
      *
      * ASPEN and LSPEN are cleared for the same reason.  Left set, the
      * first FP instruction sets CONTROL.FPCA and every exception entry

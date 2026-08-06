@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.7 — August 2026"
+date: "Release v0.8 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -54,6 +54,46 @@ Headline specification as configured here:
   MMBasic translator in front of it — both run on the machine itself
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
+
+## New in v0.8
+
+This release gives the machine music, pins, and MMBasic's own text.
+
+* **MP3 playback.** `PLAY MP3 f$` plays a file *while your program
+  carries on running* — the decoder is a separate process feeding a
+  deep buffer in the kernel, so nothing has to be refilled from a main
+  loop. `PLAY VOLUME n` sets the level and is remembered; `PLAY STOP`
+  stops whatever is playing, including a player left behind by a
+  program you interrupted. A translated BASIC benchmark still runs at
+  **89% of full speed** with music playing.
+* **`SETPIN` and `PIN`** — all forty-eight GPIOs of the RP2350B, not
+  the 28 an RP2040 has. `SETPIN n, DIN|DOUT`, `PIN(n) = v` and the
+  `PIN(n)` function.
+* **`TEXT`, `FONT` and all nine of MMBasic's fonts**, held in flash so
+  they cost no RAM at all. `TEXT` takes the full alignment and scale
+  arguments.
+* **`MAP`, statement and function**, with `CLS [colour]`: the sixteen
+  colours can be remapped exactly as in MMBasic, and the defaults are
+  now MMBasic's own HDMI values rather than an approximation.
+* **`PAUSE` gives the CPU up** instead of spinning, so a program that
+  waits no longer holds the machine — and the fraction of a second it
+  cannot sleep is bounded at 99 ms however long the pause.
+* **Programs are much smaller.** MMBasic's scratch memory is now sized
+  per program rather than fixed, taking a translated program's static
+  data from 61,904 bytes to 12,748.
+* **Maths runs on the DCP.** `SIN`, `COS`, `EXP` and the rest are
+  shared out of kernel flash and use the RP2350's double-precision
+  co-processor: about **2.7× faster** than the copy that used to be
+  linked into every program, and it costs no program memory.
+* **A C library fix that reaches everything.** `<limits.h>` declared
+  `INT_MAX` as 32767 on a machine whose `int` is 32 bits. Any program
+  that compared against it — or sized a buffer with it — was working
+  from a number two thousand times too small. Every binary on the card
+  has been rebuilt.
+
+The kernel and the card are a matched pair, as always: the card's
+programs are statically linked, so a new kernel with an old card runs
+the old C library.
 
 ## New in v0.7
 
@@ -395,6 +435,11 @@ authentic 100 Hz. Pitch follows the BBC scale: 4 units per semitone,
 89 = A4 = 440 Hz. Durations are in 20ths of a second; 255 means
 "until further notice". `SOUND` blocks BBC-style when a queue is
 full (Esc still works).
+
+There is one audio output, so the synthesiser and MP3 playback are
+mutually exclusive — as they are in MMBasic. While a track is playing,
+notes are queued and heard when it ends; `PLAY STOP`, or `kill`ing
+`playmp3`, gives the synthesiser the hardware back at once.
 
 ## ADVAL: joystick, analogue inputs, sound queues
 
@@ -1083,6 +1128,92 @@ The decoder is MMBasic's, so it reads 1, 4, 8, 16, 24 and 32-bit BMPs,
 `BI_BITFIELDS`, and RLE4/RLE8 compression. Dithering is *optional*, as
 in MMBasic — omit the mode and the image is mapped without it.
 
+## Music: `PLAY MP3`, `PLAY VOLUME`, `PLAY STOP`
+
+```basic
+PLAY VOLUME 70
+PLAY MP3 "/root/mp3/whiter.mp3"
+' the program carries straight on, and the music plays
+FOR i% = 1 TO 20
+  PRINT "still working"; i%
+  PAUSE 500
+NEXT i%
+PLAY STOP
+```
+
+`PLAY MP3` does **not** wait. The decoder is a separate program feeding
+a 1.5-second buffer in the kernel, and the sound hardware empties that
+buffer by DMA, so playback needs nothing from your program once it has
+started. MMBasic has to refill its audio from the interpreter's idle
+loop; here there is no idle loop to do it in, and no cost when there is
+nothing to play. A translated benchmark measured **89% of its full
+speed** with a track playing.
+
+`PLAY VOLUME n` takes 0 to 100 and is remembered, so every later
+`PLAY MP3` uses it until it is changed again. Out-of-range values are
+clamped rather than refused. The default is 80. The scale is
+logarithmic, so 50 is a comfortable half rather than a whisper.
+
+`PLAY STOP` stops whatever is playing. It asks the kernel which
+process holds the sound output rather than remembering what it started,
+so it also stops a player left running by a program that was stopped
+with Ctrl-C — which is the situation it is most often wanted for.
+Stopping when nothing is playing is not an error, as in MMBasic.
+
+There is one sound output, so there is one player:
+
+```
+Error: sound output in use
+```
+
+is what `PLAY MP3` gives if something is already playing. Use
+`PLAY STOP` first. (This is MMBasic's "Sound output in use for ..."
+under a shorter name.) The rule is enforced by the kernel rather than
+by convention: two decoders writing into the same buffer interleave
+their samples, and it sounds like it.
+
+Files play at their own sample rate — 8 kHz to 48 kHz, mono or stereo,
+and a mono file costs nothing extra because the driver duplicates the
+channels itself. Copy MP3s onto the FAT partition from a PC and bring
+them over with `fat get`, as with any other file.
+
+`PLAY` and BBC BASIC's `SOUND` share one piece of hardware and are
+mutually exclusive, exactly as they are in MMBasic. Starting a track
+silences the synthesiser; stopping it hands the hardware back.
+
+## Pins: `SETPIN` and `PIN`
+
+```basic
+SETPIN 2, DOUT
+SETPIN 3, DIN
+PIN(2) = 1
+IF PIN(3) = 1 THEN PRINT "high"
+```
+
+All **forty-eight** GPIOs of the RP2350B are available — the wider part
+is why the PC3 can put the real-time clock's alarm on GP32, which a
+28-pin RP2040 could not reach.
+
+`n` is the **GPIO number**, not MMBasic's connector-pin numbering. The
+GPIO number is what the schematic, the kernel, and every other tool on
+this machine use, and inventing a second numbering for one statement
+would cause more confusion than the incompatibility does.
+
+`SETPIN` takes `DIN` and `DOUT`. MMBasic's other modes — analogue,
+frequency, counting, interrupts — are not translated, and are reported
+by name.
+
+**Nothing stops you claiming a pin that is already in use**: there is
+no reservation list, so `SETPIN 10, DOUT` will happily take a pin the
+audio hardware is driving and the results will be exactly as bad as
+that sounds. Appendix A lists what the board uses. A pin number outside
+0–47 gives `Invalid pin`.
+
+Every read and write is a call into the kernel — comparable to drawing
+one pixel, which is over a microsecond. That is ample for a switch or
+an LED and nowhere near enough to bit-bang a protocol; write that in C,
+or use the hardware that already exists for it.
+
 ## Practical notes
 
 * One `.bas` file per program, because `cc` compiles one file per
@@ -1329,6 +1460,20 @@ files, `BI_BITFIELDS`, and RLE4/RLE8, and dithers only when asked.
 These are the programs `SAVE IMAGE` and `LOAD IMAGE` run, and they are
 just as useful from the shell.
 
+**Sound:** `playmp3` plays an MP3 file through the audio DAC:
+
+```
+# playmp3 track.mp3            volume 80 by default
+# playmp3 track.mp3 40         0 to 100
+# playmp3 track.mp3 &          in the background, and carry on working
+```
+
+It decodes at about six times real time and takes almost nothing from
+whatever else is running. This is the program `PLAY MP3` runs, and one
+plays at a time — a second is refused by name and pid rather than
+allowed to talk over the first. Stop one with `kill -2` (or, from
+BASIC, `PLAY STOP`).
+
 **Languages:** `bbcbasic`, `cc` (the on-board C compiler — see its
 own chapter, with `cpp`, `bcrun` and `bcdump`), `fforth` (a complete
 ANS Forth), the `as09`/`ld09` assembler pair, and `dc`.
@@ -1401,24 +1546,24 @@ translate time, not at run time.
 |   |   |   |   |
 |---|---|---|---|
 | `?` | `ARRAY` | `CALL` | `CASE` |
-| `CAT` | `CHDIR` | `CLEAR` | `CLOSE` |
+| `CAT` | `CHDIR` | `CIRCLE` | `CLEAR` |
+| `CLOSE` | `CLS` | `COLOR` | `COLOUR` |
 | `CONST` | `CONTINUE` | `COPY` | `DATA` |
 | `DATE$` | `DIM` | `DO` | `ELSE` |
 | `ELSEIF` | `END` | `ENDIF` | `ERASE` |
-| `ERROR` | `EXIT` | `FILES` | `FOR` |
-| `FRAMEBUFFER` | `FUNCTION` | `GOSUB` | `GOTO` |
-| `IF` |  |  |  |
-| `INC` | `INPUT` | `KILL` | `LET` |
-| `LINE` | `LOCAL` | `LONGSTRING` | `LOOP` |
-| `CIRCLE` | `COLOUR` | `LOAD IMAGE` | `MATH` |
-| `MKDIR` | `MODE` | `NEXT` | `ON` |
-| `OPEN` | `OPTION` | `PAUSE` | `PIXEL` |
-| `PRINT` | `RANDOMIZE` | `READ` | `RENAME` |
-| `RESTORE` | `RETURN` | `RMDIR` | `SAVE IMAGE` |
-| `SEEK` | `SELECT` | `SORT` | `STATIC` |
+| `ERROR` | `EXIT` | `FILES` | `FONT` |
+| `FOR` | `FRAMEBUFFER` | `FUNCTION` | `GOSUB` |
+| `GOTO` | `IF` | `INC` | `INPUT` |
+| `KILL` | `LET` | `LINE` | `LOAD` |
+| `LOCAL` | `LONGSTRING` | `LOOP` | `MAP` |
+| `MATH` | `MKDIR` | `MODE` | `NEXT` |
+| `ON` | `OPEN` | `OPTION` | `PAUSE` |
+| `PIN` | `PIXEL` | `PLAY` | `PRINT` |
+| `RANDOMIZE` | `READ` | `RENAME` | `RESTORE` |
+| `RETURN` | `RMDIR` | `SAVE` | `SEEK` |
+| `SELECT` | `SETPIN` | `SORT` | `STATIC` |
 | `SUB` | `SYSTEM` | `TEXT` | `TIME$` |
-| `TIMER` | `FONT` | `MAP` | `WEND` |
-| `WHILE` |  |  |  |
+| `TIMER` | `WEND` | `WHILE` |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -1436,12 +1581,11 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `FIELD$` | `FIX` | `FORMAT$` | `HEX$` |
 | `INKEY$` | `INPUT$` | `INSTR` | `INT` |
 | `LCASE$` | `LCOMPARE` | `LEFT$` | `LEN` |
-| `LGETBYTE` |  |  |  |
-| `LGETSTR$` | `LINPUT` | `LINSTR` | `LLEN` |
-| `LOC` | `LOF` | `LOG` | `LTRIM$` |
-| `MAP` | `MATH` | `MAX` | `MID$` |
-| `MIN` | `OCT$` | `PI` | `RAD` |
-| `RGB` |  |  |  |
+| `LGETBYTE` | `LGETSTR$` | `LINPUT` | `LINSTR` |
+| `LLEN` | `LOC` | `LOF` | `LOG` |
+| `LTRIM$` | `MAP` | `MATH` | `MAX` |
+| `MID$` | `MIN` | `OCT$` | `PI` |
+| `PIN` | `PIXEL` | `RAD` | `RGB` |
 | `RIGHT$` | `RND` | `RTRIM$` | `SGN` |
 | `SIN` | `SPACE$` | `SQR` | `STR$` |
 | `STR2BIN` | `STRING$` | `TAB` | `TAN` |
@@ -1463,13 +1607,12 @@ the usual control flow.
 
 ## Not covered
 
-Sound, GPIO, I2C, SPI, one-wire, interrupts, `SETPIN`, `PIN` and
-`PORT` - along with the editor, `RUN`, `LIST`, `EDIT`, `LOAD`, `SAVE`
-and the rest of the immediate-mode environment. The hardware
-statements are the subject of current work — the display arrived in
-v0.5 — while the immediate-mode ones will never apply, since a
-translated program is compiled and run rather than typed at a prompt.
-(`mmedit` provides the editing they existed for.)
+I2C, SPI, one-wire, `PORT`, and the interrupt statements — along with
+the editor, `RUN`, `LIST`, `EDIT` and the rest of the immediate-mode
+environment. The hardware statements are the subject of current work;
+the immediate-mode ones will never apply, since a translated program is
+compiled and run rather than typed at a prompt. (`mmedit` provides the
+editing they existed for.)
 
 Of the graphics, `MODE`, `COLOUR`, `PIXEL` (including the array form),
 `LINE`, `CIRCLE`, `RGB()`, `FRAMEBUFFER`, `PRINT @`, `TEXT`, `FONT`,
@@ -1478,6 +1621,16 @@ Of the graphics, `MODE`, `COLOUR`, `PIXEL` (including the array form),
 MERGE`. `TEXT` draws in any of MMBasic's nine built-in fonts but only
 in its normal and vertical orientations — the three that rotate the
 character itself are accepted and drawn normally.
+
+Of the pins, `SETPIN n, DIN|DOUT`, `PIN(n) =` and `PIN(n)` are done for
+all forty-eight GPIOs; the analogue, frequency, counting and interrupt
+modes of `SETPIN` are not.
+
+Of the sound, `PLAY MP3`, `PLAY VOLUME` and `PLAY STOP` are done —
+`PLAY TONE`, `WAV`, `FLAC`, `MOD`, `MIDI`, `SAMPLE` and `EFFECT` are
+not, and neither is the four-channel `SOUND` synthesiser the kernel
+provides to BBC BASIC. `PLAY VOLUME` takes one level rather than one
+per channel.
 
 In a graphics mode a program's `PRINT` now draws the characters into
 whatever is being drawn on, as MMBasic does, so text goes into the
