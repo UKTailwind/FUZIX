@@ -382,8 +382,27 @@ struct-array parameters and initialisers, and the two firmware
 defects (whole-struct assignment into/out of a nested member overruns
 in the interpreter).  The firmware's own Testfiles/StructTest.bas:
 58 tests PASS on the host, every FAIL a designed refusal, zero
-unexplained.  All prior gates stayed green; struct tests stay out of
-tests/ until the mmbc mirror reaches byte-identity (in progress).
+unexplained.
+
+**mmbc mirror + board verification DONE, same day.**  A subagent
+ported the whole feature into the C translator to byte-identity
+(cgate 0 with the struct tests INSIDE the suite, the firmware's seven
+struct Testfiles diff 0 in both modes); tests/type.bas (the layout
+constants: Seg 56, all-string Tags 31) and tests/structtest.bas (the
+firmware's own suite, verbatim) joined all three gates — 20 host ok,
+fcctests 20/20, qemutests 21/21.  Two board-only potholes on the way:
+cc1's NUM_STRUCT_FIELD (50) was smaller than StructTest's mm_vars, so
+it is 128 now; and the Fuzix libc has no %lld, so the ARM mmbc
+silently dropped a printf argument the host build printed — caught
+because type.bas would not compile on the card, fixed by %ld casts
+(the values are all small).  Final state on hardware, fully
+self-hosted (board mmbc → board cc → board bcrun): type.bas prints
+the identical fifteen lines including 16/56/31/120, and
+StructTest.bas gives the identical 81-line refusal report and the
+same 58 PASS / 45 FAIL.  Side-by-side on a real MMBasic machine
+pending — run tests/type.bas and tests/structtest.bas there; type's
+"sizes:" line must read 16 56 31 120, and every test our port PASSes
+must PASS there with the same values.
 
 ## Section 4 — ON ERROR SKIP/IGNORE, MM.ERRNO, MM.ERRMSG$
 
