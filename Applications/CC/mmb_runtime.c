@@ -135,6 +135,26 @@ void mm_ssetc(char *d, const char *cstr)
     mm_ssetn(d, cstr, (int)n);
 }
 
+/*
+ * Assign into a STRING member of a TYPE.  A member is LENGTH+1 bytes
+ * in the firmware's layout - length byte plus characters, no trailing
+ * NUL - and the byte after it belongs to the next member, so this is
+ * mm_sset with the member's own capacity and the NUL written only
+ * when the string is short enough to leave room.  Reads of a member
+ * go through mm_scopy, which restores the every-string-has-a-NUL
+ * invariant the rest of the runtime assumes.
+ */
+void mm_ssetm(char *d, int cap, const char *s)
+{
+    int n = mm_slen(s);
+    if (cap < 0) cap = 0;
+    if (cap > MM_STRLEN) cap = MM_STRLEN;
+    if (n > cap) n = cap;
+    d[0] = (char)(unsigned char)n;
+    if (n) memmove(d + 1, s + 1, (size_t)n);
+    if (n < cap) d[n + 1] = 0;
+}
+
 char *mm_scopy(const char *s)
 {
     char *t = mm_tmp();

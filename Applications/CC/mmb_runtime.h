@@ -95,6 +95,8 @@ MMINTEGER *mm_byref_i(MMINTEGER v);
 void   mm_sset (char *d, const char *s);            /* d = s           */
 void   mm_ssetc(char *d, const char *cstr);         /* from C string   */
 void   mm_ssetn(char *d, const char *raw, int n);   /* from raw bytes  */
+void   mm_ssetm(char *d, int cap, const char *s);   /* TYPE member: bounded,
+                                                       NUL only if room */
 char  *mm_scat (const char *a, const char *b);      /* a + b  -> temp  */
 int    mm_scmp (const char *a, const char *b);      /* <0, 0, >0       */
 char  *mm_scopy(const char *s);                     /* s -> temp       */

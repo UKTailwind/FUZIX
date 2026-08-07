@@ -133,6 +133,7 @@ static void w_byref_i(void)  { A = mm_off((char *)mm_byref_i(LL(0))); }
 
 /* core string ops */
 static void w_sset(void)     { mm_sset(Ps(0), Ps(1)); A = 0; }
+static void w_ssetm(void)    { mm_ssetm(Ps(0), I(1), Ps(2)); A = 0; }
 static void w_ssetc(void)    { mm_ssetc(Ps(0), Pa(1)); A = 0; }
 static void w_ssetn(void)    { mm_ssetn(Ps(0), Pa(1), I(2)); A = 0; }
 static void w_scat(void)     { A = mm_off(mm_scat(Ps(0), Ps(1))); }
@@ -445,6 +446,7 @@ static const struct mmwrap {
 	{ "mm_byref_f",		w_byref_f },
 	{ "mm_byref_i",		w_byref_i },
 	{ "mm_sset",		w_sset },
+	{ "mm_ssetm",		w_ssetm },
 	{ "mm_ssetc",		w_ssetc },
 	{ "mm_ssetn",		w_ssetn },
 	{ "mm_scat",		w_scat },
