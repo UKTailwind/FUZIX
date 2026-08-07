@@ -34,8 +34,13 @@ stmts = sorted(set(stmts))
 tbl = text[text.index("BUILTINS = {"):]
 tbl = tbl[:tbl.index("\n}")]
 funcs = {}
-for name, lo, hi in re.findall(r"'([A-Z0-9$]+)': \((\d+), (\d+)\)", tbl):
+# the dot matters: without it MM.HRES and friends were silently dropped
+for name, lo, hi in re.findall(r"'([A-Z0-9.$]+)': \((\d+), (\d+)\)", tbl):
     funcs[name] = (int(lo), int(hi))
+# STRUCT(SIZEOF/OFFSET/TYPE) takes a keyword rather than an expression, so
+# it is parsed by hand and never reaches BUILTINS - the same blind spot
+# TYPE has above
+funcs['STRUCT'] = (2, 2)
 
 mathfn = re.search(r"MATHFUNCS = \{([^}]*)\}", text).group(1)
 mathfn = sorted(re.findall(r"'([A-Z0-9]+)'", mathfn))
