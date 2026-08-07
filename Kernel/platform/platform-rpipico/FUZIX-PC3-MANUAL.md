@@ -1697,9 +1697,10 @@ translate time, not at run time.
 | `PLAY` | `PRINT` | `RANDOMIZE` | `RBOX` |
 | `READ` | `RENAME` | `RESTORE` | `RETURN` |
 | `RMDIR` | `SAVE` | `SEEK` | `SELECT` |
-| `SETPIN` | `SORT` | `STATIC` | `SUB` |
-| `SYSTEM` | `TEXT` | `TIME$` | `TIMER` |
-| `TRIANGLE` | `WEND` | `WHILE` |  |
+| `SETPIN` | `SORT` | `STATIC` | `STRUCT` |
+| `SUB` | `SYSTEM` | `TEXT` | `TIME$` |
+| `TIMER` | `TRIANGLE` | `TYPE` | `WEND` |
+| `WHILE` |  |  |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -1724,9 +1725,9 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `PIN` | `PIXEL` | `RAD` | `RGB` |
 | `RIGHT$` | `RND` | `RTRIM$` | `SGN` |
 | `SIN` | `SPACE$` | `SQR` | `STR$` |
-| `STR2BIN` | `STRING$` | `TAB` | `TAN` |
-| `TIME$` | `TIMER` | `TRIM$` | `UCASE$` |
-| `VAL` |  |  |  |
+| `STR2BIN` | `STRING$` | `STRUCT` | `TAB` |
+| `TAN` | `TIME$` | `TIMER` | `TRIM$` |
+| `UCASE$` | `VAL` |  |  |
 
 ## MATH() sub-functions
 
@@ -1740,6 +1741,26 @@ Whole-array (one number out of an array): `MAX`, `MEAN`, `MEDIAN`, `MIN`, `SD`, 
 to the dimensions MMBasic allows. `DIM`, `LOCAL`, `STATIC`, `CONST`,
 `OPTION BASE`, `SUB` and `FUNCTION` with by-reference arguments, and
 the usual control flow.
+
+**Structures** (MMBasic's `TYPE ... END TYPE`, documented in full in
+the PicoMite structures manual) are translated with the firmware's
+byte layout reproduced exactly — `STRUCT(SIZEOF "t")` answers the
+same number here and on a PicoMite. Members may be `INTEGER`, `INT`,
+`FLOAT`, `STRING [LENGTH n]`, arrays of those, or an earlier TYPE;
+member access works to the full nesting depth
+(`data(2).items(1).values(4)` included), structure variables, arrays,
+`LOCAL`s and by-reference parameters all work, whole structures
+assign with `=`, and `STRUCT COPY`, `STRUCT CLEAR` and `STRUCT SWAP`
+are in. `STRUCT(SIZEOF/OFFSET/TYPE)` fold to constants when the names
+are literal strings.
+
+Not translated (each says so rather than mistranslating):
+`STRUCT SORT/SAVE/LOAD/PRINT/EXTRACT/INSERT`, `STRUCT(FIND)`, a
+`FUNCTION` returning a structure, whole structure arrays as
+parameters, and initialisers on structure arrays. Assigning a whole
+structure into or out of a *nested* member is refused deliberately:
+the interpreter copies the outer type's size there and overruns
+memory, and a clean error beats reproducing that.
 
 ## Not covered
 
