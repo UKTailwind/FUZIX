@@ -422,7 +422,9 @@ class Conv(object):
         self.i = 0
         self.tmp_used = False
         self.uses_clear = False
-        self.uses_gfx = False
+        self.uses_circle = False
+        self.uses_text = False
+        self.uses_mappal = False
         self.uses_gpio = False
         self.uses_play = False
         # depth of single-line IF bodies being emitted: END SUB means
@@ -2394,7 +2396,7 @@ class Conv(object):
             self.err('only PLAY MP3, PLAY VOLUME and PLAY STOP are translated')
         if up == 'CIRCLE':
             # CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
-            # The geometry is mmb_gfx.h's, not the runtime's.  MMBasic
+            # The geometry is mmb_gfx_circle.h's, not the runtime's.  MMBasic
             # treats an omitted argument as the default, so a bare
             # comma is legal in every position.
             self.i += 1
@@ -2415,7 +2417,7 @@ class Conv(object):
                             col = self.as_int(self.expr())
                         if self.accept_op(','):
                             fill = self.as_int(self.expr())
-            self.uses_gfx = True
+            self.uses_circle = True
             self.emit('mmg_circle(%s, %s, %s, %s, %s, %s, %s);'
                       % (x, y, r, lw, col, fill, asp))
             return
@@ -2451,7 +2453,7 @@ class Conv(object):
                                 fc = self.as_int(self.expr())
                             if self.accept_op(','):
                                 bc = self.as_int(self.expr())
-            self.uses_gfx = True
+            self.uses_text = True
             self.emit('mmg_text(%s, %s, %s, %s, %s, %s, %s, %s);'
                       % (x, y, s, just, font, scale, fc, bc))
             return
@@ -2505,11 +2507,11 @@ class Conv(object):
                 self.emit('mm_map_reset();')
                 return
             if self.accept_kw('MAXIMITE'):
-                self.uses_gfx = True
+                self.uses_mappal = True
                 self.emit('mmg_map_maximite();')
                 return
             if self.accept_kw('GRAYSCALE') or self.accept_kw('GREYSCALE'):
-                self.uses_gfx = True
+                self.uses_mappal = True
                 self.emit('mmg_map_greyscale();')
                 return
             self.expect_op('(')
@@ -4044,13 +4046,18 @@ class Conv(object):
             wr(' * warning: ' + w + '\n')
         wr(' */\n\n')
         wr('#include "mmb_runtime.h"\n')
-        # The geometry primitives are static functions in a header, so
-        # they land in the program rather than in bcrun - and only the
-        # ones it calls, because cc1 drops a static nothing names.  One
-        # flag for the whole header: it is included when the program
-        # uses any of them, and the compiler sorts out which.
-        if self.uses_gfx:
-            wr('#include "mmb_gfx.h"\n')
+        # The geometry primitives are static functions in headers, so
+        # they land in the program rather than in bcrun - one header
+        # per primitive, one flag per header, because cc1's dead-static
+        # rule counts names rather than reachability and cannot drop a
+        # recursive primitive an included header carries.  The include
+        # IS the granularity, so it must be exact.
+        if self.uses_circle:
+            wr('#include "mmb_gfx_circle.h"\n')
+        if self.uses_text:
+            wr('#include "mmb_gfx_text.h"\n')
+        if self.uses_mappal:
+            wr('#include "mmb_gfx_map.h"\n')
         if self.uses_gpio:
             wr('#include "mmb_gpio.h"\n')
         wr('#include <math.h>\n')

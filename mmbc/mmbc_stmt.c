@@ -545,7 +545,7 @@ void statement_inner(void)
     }
     if (strcmp(up, "CIRCLE") == 0) {
         /* CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
-           The geometry is mmb_gfx.h's, not the runtime's.  MMBasic
+           The geometry is mmb_gfx_circle.h's, not the runtime's.  MMBasic
            treats an omitted argument as the default, so a bare comma
            is legal in every position. */
         const char *x, *y, *r;
@@ -572,7 +572,7 @@ void statement_inner(void)
                 }
             }
         }
-        cv.uses_gfx = 1;
+        cv.uses_circle = 1;
         emit(sfmt("mmg_circle(%s, %s, %s, %s, %s, %s, %s);",
                   x, y, r, lw, col, fill, asp));
         return;
@@ -615,7 +615,7 @@ void statement_inner(void)
                 }
             }
         }
-        cv.uses_gfx = 1;
+        cv.uses_text = 1;
         emit(sfmt("mmg_text(%s, %s, %s, %s, %s, %s, %s, %s);",
                   x, y, s, just, font, scale, fc, bc));
         return;
@@ -683,12 +683,12 @@ void statement_inner(void)
             return;
         }
         if (accept_kw("MAXIMITE")) {
-            cv.uses_gfx = 1;
+            cv.uses_mappal = 1;
             emit("mmg_map_maximite();");
             return;
         }
         if (accept_kw("GRAYSCALE") || accept_kw("GREYSCALE")) {
-            cv.uses_gfx = 1;
+            cv.uses_mappal = 1;
             emit("mmg_map_greyscale();");
             return;
         }

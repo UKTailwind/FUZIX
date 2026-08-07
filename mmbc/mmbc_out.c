@@ -298,13 +298,18 @@ void conv_write(FILE *f)
         fprintf(f, " * warning: %s\n", cv.warnings[k]);
     fprintf(f, " */\n\n");
     fprintf(f, "#include \"mmb_runtime.h\"\n");
-    /* The geometry primitives are static functions in a header, so they
-       land in the program rather than in bcrun - and only the ones it
-       calls, because cc1 drops a static nothing names.  One flag for
-       the whole header: it is included when the program uses any of
-       them, and the compiler sorts out which. */
-    if (cv.uses_gfx)
-        fprintf(f, "#include \"mmb_gfx.h\"\n");
+    /* The geometry primitives are static functions in headers, so they
+       land in the program rather than in bcrun - one header per
+       primitive, one flag per header, because cc1's dead-static rule
+       counts names rather than reachability and cannot drop a
+       recursive primitive an included header carries.  The include IS
+       the granularity, so it must be exact. */
+    if (cv.uses_circle)
+        fprintf(f, "#include \"mmb_gfx_circle.h\"\n");
+    if (cv.uses_text)
+        fprintf(f, "#include \"mmb_gfx_text.h\"\n");
+    if (cv.uses_mappal)
+        fprintf(f, "#include \"mmb_gfx_map.h\"\n");
     if (cv.uses_gpio)
         fprintf(f, "#include \"mmb_gpio.h\"\n");
     fprintf(f, "#include <math.h>\n");
