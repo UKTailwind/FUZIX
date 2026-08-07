@@ -139,7 +139,10 @@ MATHARRAY = ('SUM', 'MEAN', 'SD', 'MAX', 'MIN', 'MEDIAN')
 
 OPS3 = ()
 OPS2 = ('<=', '>=', '<>', '=<', '=>', '><', '<<', '>>')
-OPS1 = '+-*/\\^=<>(),;:?@#'
+# '.' is an operator ONLY when it survives identifier scanning - dots
+# inside a name are eaten greedily by is_idchar, so a '.' token can
+# only arise after ')' and the like: the arr(i).member form.
+OPS1 = '+-*/\\^=<>(),;:?@#.'
 
 
 def is_alpha(c):
@@ -291,12 +294,13 @@ def c_string_literal(s):
 class Sym(object):
     __slots__ = ('name', 'ty', 'acc', 'dims', 'is_const', 'is_array',
                  'is_param', 'byref', 'is_static', 'where', 'implied',
-                 'declared_in', 'disp', 'has_init')
+                 'declared_in', 'disp', 'has_init', 'stype')
 
     def __init__(self, name, ty, acc):
         self.name = name          # canonical: lower case, no suffix
         self.disp = name          # as the programmer spelled it
         self.ty = ty
+        self.stype = None         # canonical TYPE name when a struct
         self.acc = acc            # C text used to read/write it
         self.dims = None          # list of C size expressions
         self.is_const = False
@@ -308,6 +312,71 @@ class Sym(object):
         self.implied = False
         self.has_init = False
         self.declared_in = ''     # '' = main line, else routine name
+
+
+class TypeMember(object):
+    """One member of a TYPE.  esize is the element size in bytes and
+    count the number of elements (1 unless the member is an array), so
+    offset + esize * count is where the next member starts from."""
+    __slots__ = ('name', 'disp', 'ty', 'stype', 'slen', 'dims',
+                 'count', 'offset', 'esize')
+
+    def __init__(self, name):
+        self.name = name
+        self.disp = name
+        self.ty = None            # TY_* for plain members, None for struct
+        self.stype = None         # canonical type name for struct members
+        self.slen = 255           # STRING members: LENGTH
+        self.dims = None          # list of int bounds, or None
+        self.count = 1
+        self.offset = 0
+        self.esize = 0
+
+
+class TypeDef(object):
+    """A TYPE ... END TYPE definition, laid out exactly as the firmware
+    lays it out (ParseStructMember + GetStructAlignment): numeric and
+    struct members start 8-aligned, strings are unaligned, and the
+    total is rounded to 8 only when something numeric is inside.  See
+    TYPE-SPEC.md for the full contract."""
+    __slots__ = ('name', 'disp', 'members', 'byname', 'total', 'numeric',
+                 'where')
+
+    def __init__(self, name):
+        self.name = name
+        self.disp = name
+        self.members = []
+        self.byname = {}
+        self.total = 0
+        self.numeric = False      # anything numeric anywhere inside
+        self.where = 0
+
+    def add(self, m, types):
+        if m.ty == TY_S:
+            m.esize = m.slen + 1
+        elif m.stype is not None:
+            inner = types[m.stype]
+            m.esize = inner.total
+            if inner.numeric:
+                self.numeric = True
+        else:
+            m.esize = 8
+            self.numeric = True
+        off = self.total
+        if (m.ty in (TY_I, TY_F) or m.stype is not None) and off % 8:
+            off = (off // 8 + 1) * 8
+        m.offset = off
+        m.count = 1
+        if m.dims is not None:
+            for d in m.dims:
+                m.count *= d + 1
+        self.total = off + m.esize * m.count
+        self.members.append(m)
+        self.byname[m.name] = m
+
+    def close(self):
+        if self.numeric and self.total % 8:
+            self.total = (self.total // 8 + 1) * 8
 
 
 class Routine(object):
@@ -422,6 +491,9 @@ class Conv(object):
         self.i = 0
         self.tmp_used = False
         self.uses_clear = False
+        self.types = {}           # canonical name -> TypeDef
+        self.type_order = []      # registration order, for emission
+        self.in_type = False      # inside TYPE...END TYPE in this pass
         self.uses_circle = False
         self.uses_box = False
         self.uses_rbox = False
@@ -636,6 +708,8 @@ class Conv(object):
             return code
         if ty == TY_F:
             return 'mm_toint(' + code + ')'
+        if isinstance(ty, tuple):
+            self.err("a whole structure cannot be used in an expression")
         self.err("string used where a number is required")
 
     def as_flt(self, v):
@@ -644,6 +718,8 @@ class Conv(object):
             return code
         if ty == TY_I:
             return '(MMFLOAT)(' + code + ')'
+        if isinstance(ty, tuple):
+            self.err("a whole structure cannot be used in an expression")
         self.err("string used where a number is required")
 
     def as_str(self, v):
@@ -652,7 +728,138 @@ class Conv(object):
         code, ty = v
         if ty == TY_S:
             return code
+        if isinstance(ty, tuple):
+            self.err("a whole structure cannot be used in an expression")
         self.err("number used where a string is required")
+
+    # -- structure member access -----------------------------------------
+    #
+    # A dotted identifier is ONE token (dots are name characters), so
+    # p.x arrives whole and the firmware's rule applies at lookup time:
+    # split at the first dot, and if the prefix names a struct variable
+    # the rest is a member path.  Indices interrupt a path as separate
+    # tokens - v.a(i).b is  ID('v.a') '(' i ')' '.' ID('b')  - which is
+    # why the walker below alternates between parts of the current
+    # token and fresh tokens fetched after ')' when a '.' follows.
+
+    def member_path(self, base, tyname, parts, sfx):
+        """Walk a member path from a struct lvalue.  Returns
+        ('num', code, ty) | ('str', ptrcode, slen) |
+        ('struct', code, tyname, via_member)."""
+        via = False
+        while True:
+            if not parts:
+                if self.is_op('.'):
+                    self.i += 1
+                    t = self.nxt()
+                    if t[0] != T_ID:
+                        self.err("member name expected after '.'")
+                    canon, sfx = split_suffix(t[1])
+                    parts = canon.split('.')
+                    continue
+                return ('struct', base, tyname, via)
+            td = self.types[tyname]
+            name = parts.pop(0)
+            m = td.byname.get(name)
+            if m is None:
+                self.err("'%s' is not a member of TYPE '%s'"
+                         % (name, td.disp))
+            via = True
+            code = base + '.m_' + name
+            lin = None
+            if m.dims is not None:
+                # the index can only follow the LAST part of the token
+                if not parts and self.is_op('('):
+                    lin = self.member_index(m)
+                elif m.stype is not None:
+                    self.err("an array of nested structures needs an "
+                             "index")
+                else:
+                    self.err("array member '%s' needs an index" % name)
+            elif not parts and self.is_op('(') and m.stype is None:
+                self.err("member '%s' is not an array" % name)
+            if m.stype is not None:
+                if lin is not None:
+                    code += '[(int)(%s)]' % lin
+                if parts or self.is_op('.'):
+                    base = code
+                    tyname = m.stype
+                    continue
+                return ('struct', code, m.stype, True)
+            # a plain member ends the walk
+            if parts:
+                self.err("'%s' is not a nested structure" % name)
+            if m.ty == TY_S:
+                if lin is not None:
+                    code = '(%s + (int)(%s) * %d)' % (code, lin,
+                                                      m.slen + 1)
+                if sfx is not None and sfx != TY_S:
+                    self.err("member '%s' is a STRING" % name)
+                return ('str', code, m.slen)
+            if lin is not None:
+                code += '[(int)(%s)]' % lin
+            if sfx is not None and sfx != m.ty:
+                self.err("member '%s' is %s" % (name, TYNAME[m.ty]))
+            return ('num', code, m.ty)
+
+    def member_index(self, m):
+        """( i [, j ...] ) on a member array -> the linear index, the
+        same linearisation MMBasic uses."""
+        self.expect_op('(')
+        idx = []
+        while True:
+            idx.append(self.as_int(self.expr()))
+            if not self.accept_op(','):
+                break
+        self.expect_op(')')
+        if len(idx) != len(m.dims):
+            self.err("member '%s' has %d dimension(s), %d given"
+                     % (m.name, len(m.dims), len(idx)))
+        lin = '(%s)' % idx[0]
+        mult = 1
+        for k in range(1, len(idx)):
+            mult *= m.dims[k - 1] + 1
+            lin += ' + (%s) * %d' % (idx[k], mult)
+        return lin
+
+    def struct_head(self, word):
+        """The dotted-identifier entry: split at the first dot and
+        return (sym, parts, sfx) when the prefix is a struct variable,
+        else None (the name stays a plain dotted variable)."""
+        canon, sfx = split_suffix(word)
+        if '.' not in canon:
+            return None
+        head = canon.split('.', 1)[0]
+        s = self.lookup(head)
+        if s is None or s.stype is None:
+            return None
+        if self.lookup(canon) is not None:
+            self.err("'%s' is shadowed by struct variable '%s' - the "
+                     "firmware would make it unreachable" % (canon, head))
+        self.note_touch(head, s)
+        return (s, canon.split('.')[1:], sfx)
+
+    def struct_base(self, s):
+        """The C lvalue for a struct variable, consuming an element
+        index when it is an array."""
+        if s.is_array:
+            if not self.is_op('('):
+                self.err("struct array '%s' needs an index here"
+                         % s.name)
+            return self.index(s)
+        return s.acc
+
+    def member_value(self, res):
+        """member_path result -> an expression (code, ty).  A string
+        member is copied to a scratch temp: member strings have no
+        trailing NUL (the firmware's layout has no room for one), and
+        the copy restores the invariant every consumer assumes."""
+        if res[0] == 'num':
+            return (res[1], res[2])
+        if res[0] == 'str':
+            self.tmp_used = True
+            return ('mm_scopy(%s)' % res[1], TY_S)
+        return (res[1], ('TM' if res[3] else 'T', res[2]))
 
     def need_num(self, v):
         if v[1] == TY_S:
@@ -825,11 +1032,30 @@ class Conv(object):
             args = self.call_args(True)
             return self.emit_call(r, args)
 
+        if up == 'STRUCT' and self.is_op('('):
+            return self.struct_fn()
+
         if up in BUILTINS and (BUILTINS[up][0] == 0 or self.is_op('(')):
             return self.call_builtin(up)
 
+        sh = self.struct_head(word)
+        if sh is not None:
+            s2, parts, sfx2 = sh
+            base = self.struct_base(s2)
+            return self.member_value(
+                self.member_path(base, s2.stype, parts, sfx2))
+
         as_array = self.is_op('(')
         s = self.reference(word, as_array)
+        if s.stype is not None:
+            if as_array and not s.is_array:
+                self.err("'%s' is not an array" % canon)
+            if s.is_array and not as_array:
+                self.err("struct array '%s' used without an index"
+                         % canon)
+            base = self.index(s) if as_array else s.acc
+            return self.member_value(
+                self.member_path(base, s.stype, [], sfx))
         if as_array:
             if not s.is_array:
                 self.err("'%s' is not an array" % canon)
@@ -839,6 +1065,45 @@ class Conv(object):
         if s.is_array:
             self.err("array '%s' used without an index" % canon)
         return (s.acc, s.ty)
+
+    def struct_fn(self):
+        """STRUCT(SIZEOF t$) / STRUCT(OFFSET t$, m$) / STRUCT(TYPE
+        t$, m$) - the layout is fixed at translation time, so with
+        literal names these are compile-time constants.  STRUCT(FIND)
+        needs a runtime search and is not translated yet."""
+        self.expect_op('(')
+        t = self.nxt()
+        sel = t[2] if t[0] == T_ID else ''
+        if sel == 'FIND':
+            self.err("STRUCT(FIND ...) is not translated yet")
+        if sel not in ('SIZEOF', 'OFFSET', 'TYPE'):
+            self.err("unknown STRUCT( selector '%s'" % t[1])
+        a = self.nxt()
+        if a[0] != T_STR:
+            self.err("STRUCT(%s ...) takes a literal string type name "
+                     "here" % sel)
+        tc = a[1].lower()
+        td = self.types.get(tc)
+        if td is None:
+            self.err("structure type '%s' not found" % a[1])
+        if sel == 'SIZEOF':
+            self.expect_op(')')
+            return ('%dLL' % td.total, TY_I)
+        self.expect_op(',')
+        b = self.nxt()
+        if b[0] != T_STR:
+            self.err("STRUCT(%s ...) takes a literal member name here"
+                     % sel)
+        m = td.byname.get(b[1].lower())
+        if m is None:
+            self.err("member '%s' not found in structure '%s'"
+                     % (b[1], a[1]))
+        self.expect_op(')')
+        if sel == 'OFFSET':
+            return ('%dLL' % m.offset, TY_I)
+        if m.stype is not None:
+            return ('0LL', TY_I)      # the firmware masks T_STRUCT out
+        return ('%dLL' % {TY_F: 1, TY_S: 2, TY_I: 4}[m.ty], TY_I)
 
     def index(self, s):
         """Consume ( i [, j ...] ) and build the C subscript."""
@@ -942,6 +1207,26 @@ class Conv(object):
         return (text, r.ty if r.is_func else None)
 
     def pass_arg(self, p, a, r):
+        if p.stype is not None:
+            # always by reference, exactly as the firmware passes them
+            if a is None:
+                self.err("a structure argument to '%s' cannot be "
+                         "omitted" % r.name)
+            if a[0] == 'var':
+                if a[1].stype != p.stype:
+                    self.err("structure type mismatch in call to '%s'"
+                             % r.name)
+                return '&' + a[1].acc
+            if a[0] == 'val':
+                code, ty = a[2]
+                if not isinstance(ty, tuple) or ty[1] != p.stype:
+                    self.err("structure type mismatch in call to '%s'"
+                             % r.name)
+                return '&' + code
+            self.err("'%s' expects a structure here" % r.name)
+        if a is not None and a[0] == 'var' and a[1].stype is not None:
+            self.err("a structure cannot be passed to a plain "
+                     "parameter of '%s'" % r.name)
         if p.is_array:
             if a is None:
                 self.err("array argument to '%s' cannot be omitted" % r.name)
@@ -1549,8 +1834,161 @@ class Conv(object):
                     and toks[k + 1][0] == T_ID:
                 self.routine_names[split_suffix(toks[k + 1][1])[0]] = 1
 
+    def pass_types(self):
+        """Register every TYPE ... END TYPE before anything else needs
+        one - the firmware does the same in its pre-run scan, which is
+        what lets a DIM textually precede its TYPE.  Nested member
+        types still resolve in textual order, exactly as the firmware
+        registers them."""
+        self.mode = 'types'
+        td = None
+        for idx in range(len(self.lines)):
+            self.lineno = idx + 1
+            try:
+                self.toks = tokenize(self.lines[idx], self.lineno)
+            except MMError:
+                continue
+            self.i = 0
+            t = self.peek()
+            if t is not None and t[0] == T_NUM and t[2] == 'I':
+                self.i += 1                      # line number
+            while not self.at_end():
+                if self.accept_op(':'):
+                    continue
+                try:
+                    td = self.type_statement(td)
+                except MMError as e:
+                    self.errors.append(str(e))
+                    self.skip_statement()
+        if td is not None:
+            self.errors.append("line %d: TYPE '%s' has no matching END "
+                               "TYPE" % (td.where, td.disp))
+
+    def type_statement(self, td):
+        """One statement of the types pass.  Returns the open TypeDef,
+        or None outside a block."""
+        t = self.peek()
+        if t is None:
+            return td
+        up = t[2] if t[0] == T_ID else t[1]
+        if td is None:
+            if up == 'TYPE' and self.peek(1) is not None \
+                    and self.peek(1)[0] == T_ID \
+                    and (self.peek(2) is None
+                         or self.peek(2) == (T_OP, ':', ':')):
+                self.i += 1
+                name = self.nxt()
+                canon, sfx = split_suffix(name[1])
+                if sfx is not None or '.' in canon:
+                    self.err("invalid TYPE name '%s'" % name[1])
+                if canon in self.types:
+                    self.err("TYPE '%s' already defined" % name[1])
+                if len(self.types) >= 32:
+                    self.err("too many structure types (32 is the "
+                             "firmware's limit)")
+                td = TypeDef(canon)
+                td.disp = name[1]
+                td.where = self.lineno
+                return td
+            self.skip_statement()
+            return None
+        # inside a block
+        if up == 'END' and self.is_kw('TYPE', 1):
+            self.i += 2
+            if not td.members:
+                self.err("TYPE '%s' has no members" % td.disp)
+            td.close()
+            self.types[td.name] = td
+            self.type_order.append(td.name)
+            return None
+        if up == 'TYPE':
+            self.err("nested TYPE is not allowed")
+        return self.type_member(td)
+
+    def type_member(self, td):
+        """member [ (d1[,d2...]) ] AS INTEGER|INT|FLOAT|
+        STRING [LENGTH n] | <earlier typename>"""
+        t = self.nxt()
+        if t[0] != T_ID:
+            self.err("member declaration expected inside TYPE")
+        canon, sfx = split_suffix(t[1])
+        if sfx is not None:
+            self.err("a TYPE member takes no type suffix; use AS")
+        if '.' in canon:
+            self.err("a TYPE member name cannot contain '.'")
+        if canon in td.byname:
+            # the firmware misses this check and the duplicate becomes
+            # unreachable dead space - refuse it instead
+            self.err("member '%s' declared twice in TYPE '%s'"
+                     % (t[1], td.disp))
+        if len(td.members) >= 16:
+            self.err("too many members in TYPE '%s' (16 is the "
+                     "firmware's limit)" % td.disp)
+        m = TypeMember(canon)
+        m.disp = t[1]
+        if self.accept_op('('):
+            m.dims = []
+            while True:
+                d = self.nxt()
+                if d[0] != T_NUM or d[2] != 'I':
+                    self.err("a member array dimension must be a "
+                             "literal integer")
+                m.dims.append(int(d[1]))
+                if not self.accept_op(','):
+                    break
+            self.expect_op(')')
+        if not self.accept_kw('AS'):
+            self.err("invalid member definition in TYPE (missing AS)")
+        w = self.nxt()
+        if w[0] != T_ID:
+            self.err("member type expected")
+        if w[2] in ('INTEGER', 'INT'):
+            m.ty = TY_I
+        elif w[2] == 'FLOAT':
+            m.ty = TY_F
+        elif w[2] == 'STRING':
+            m.ty = TY_S
+            if self.accept_kw('LENGTH'):
+                n = self.nxt()
+                if n[0] != T_NUM or n[2] != 'I':
+                    self.err("LENGTH takes a literal integer")
+                ln = int(n[1])
+                if ln < 1 or ln > 255:
+                    self.err("LENGTH must be 1..255")
+                m.slen = ln
+        else:
+            tc = split_suffix(w[1])[0]
+            if tc not in self.types:
+                self.err("unknown type '%s' in TYPE definition (a "
+                         "nested type must be defined earlier in the "
+                         "file)" % w[1])
+            m.stype = tc
+        td.add(m, self.types)
+        return td
+
+    def skip_type_block(self, up):
+        """TYPE blocks are fully processed by pass_types; every later
+        pass just steps over them.  Returns True when the statement was
+        part of a block."""
+        if self.in_type:
+            if up == 'END' and self.is_kw('TYPE', 1):
+                self.i += 2
+                self.in_type = False
+            else:
+                self.skip_statement()
+            return True
+        if up == 'TYPE' and self.peek(1) is not None \
+                and self.peek(1)[0] == T_ID \
+                and (self.peek(2) is None
+                     or self.peek(2) == (T_OP, ':', ':')):
+            self.i += 2
+            self.in_type = True
+            return True
+        return False
+
     def pass_declarations(self):
         self.mode = 'decl'
+        self.in_type = False
         self.cur = None
         for idx in range(len(self.lines)):
             self.lineno = idx + 1
@@ -1627,6 +2065,8 @@ class Conv(object):
             return
         up = t[2] if t[0] == T_ID else t[1]
 
+        if self.skip_type_block(up):
+            return
         if up == 'OPTION':
             self.i += 1
             self.do_option()
@@ -1722,6 +2162,12 @@ class Conv(object):
                     break
         # trailing  AS <type>  for functions
         if self.accept_kw('AS'):
+            w = self.peek()
+            if w is not None and w[0] == T_ID \
+                    and split_suffix(w[1])[0] in self.types:
+                r.ty = TY_F         # keep later passes coherent
+                self.err("a FUNCTION returning a TYPE is not "
+                         "translated yet")
             ty = self.type_word()
             if sfx is not None and sfx != ty:
                 self.err("return type conflicts with the name suffix")
@@ -1746,19 +2192,39 @@ class Conv(object):
             dims = ['0'] * nd       # a rank hint only: the real rank comes
                                     # from the array the caller passes
         ty = sfx
+        stype = None
         if self.accept_kw('AS'):
-            ty2 = self.type_word()
-            if ty is not None and ty != ty2:
-                self.err("parameter type conflict")
-            ty = ty2
+            w = self.peek()
+            if w is not None and w[0] == T_ID \
+                    and w[2] not in ('INTEGER', 'FLOAT', 'STRING') \
+                    and split_suffix(w[1])[0] in self.types:
+                self.i += 1
+                stype = split_suffix(w[1])[0]
+                if sfx is not None:
+                    self.err("parameter type conflict")
+                if dims is not None:
+                    self.err("whole arrays of structures as parameters "
+                             "are not translated yet")
+                ty = TY_I
+            else:
+                ty2 = self.type_word()
+                if ty is not None and ty != ty2:
+                    self.err("parameter type conflict")
+                ty = ty2
         if ty is None:
             ty = self.opt_default
         s = Sym(canon, ty, '')
+        s.stype = stype
         s.is_param = True
         s.byref = byref
         s.where = self.lineno
         s.declared_in = r.name
-        if dims is not None:
+        if stype is not None:
+            # a struct parameter is always by reference, as the
+            # firmware has it - BYVAL is ignored for structs there too
+            s.byref = True
+            s.acc = '(*p_%s)' % canon.replace('.', '__')
+        elif dims is not None:
             s.is_array = True
             s.dims = dims
             s.acc = 'p_' + canon.replace('.', '__')
@@ -1864,25 +2330,47 @@ class Conv(object):
                         break
                 self.expect_op(')')
             ty = sfx if sfx is not None else group_ty
+            stype = None
             if self.accept_kw('AS'):
-                ty2 = self.type_word()
-                if ty is not None and ty != ty2:
-                    self.err("conflicting types for '%s'" % canon)
-                ty = ty2
-            if ty is None:
-                ty = self.opt_default
-            if ty is None:
-                self.err("OPTION DEFAULT NONE: '%s' needs a type" % canon)
+                w = self.peek()
+                if w is not None and w[0] == T_ID \
+                        and w[2] not in ('INTEGER', 'FLOAT', 'STRING') \
+                        and split_suffix(w[1])[0] in self.types:
+                    self.i += 1
+                    stype = split_suffix(w[1])[0]
+                    if sfx is not None:
+                        self.err("'%s' has a type suffix but is "
+                                 "declared AS a TYPE" % canon)
+                    if static:
+                        self.err("STATIC of a TYPE is not translated "
+                                 "yet; use DIM or LOCAL")
+                else:
+                    ty2 = self.type_word()
+                    if ty is not None and ty != ty2:
+                        self.err("conflicting types for '%s'" % canon)
+                    ty = ty2
+            if stype is None:
+                if ty is None:
+                    ty = self.opt_default
+                if ty is None:
+                    self.err("OPTION DEFAULT NONE: '%s' needs a type"
+                             % canon)
 
             if self.mode == 'decl':
-                s = self.declare(canon, ty, scope, dims, static)
+                s = self.declare(canon, ty if stype is None else TY_I,
+                                 scope, dims, static)
+                if stype is not None:
+                    s.stype = stype
             else:
                 s = self.lookup(canon)
 
             if self.accept_op('='):
-                if s is not None:
-                    s.has_init = True
-                self.emit_initialiser(s, static)
+                if s is not None and s.stype is not None:
+                    self.struct_initialiser(s)
+                else:
+                    if s is not None:
+                        s.has_init = True
+                    self.emit_initialiser(s, static)
 
             if not self.accept_op(','):
                 break
@@ -1965,6 +2453,7 @@ class Conv(object):
 
     def walk(self, mode):
         self.mode = mode
+        self.in_type = False
         self.gosub_n = 0
         self.cur = None
         self.indent = 1
@@ -2086,6 +2575,12 @@ class Conv(object):
             return
         up = t[2] if t[0] == T_ID else t[1]
 
+        if self.skip_type_block(up):
+            return
+        if up == 'STRUCT':
+            self.i += 1
+            self.do_struct()
+            return
         if up == 'OPTION':
             self.i += 1
             self.do_option()
@@ -3175,6 +3670,10 @@ class Conv(object):
                 break
 
     def zero_of(self, sym):
+        if sym.stype is not None:
+            if sym.is_array:
+                return 'memset(%s, 0, sizeof %s);' % (sym.acc, sym.acc)
+            return 'memset(&%s, 0, sizeof %s);' % (sym.acc, sym.acc)
         if sym.is_array:
             ptr, cnt = self.array_flat(sym)
             if sym.ty == TY_S:
@@ -3492,8 +3991,33 @@ class Conv(object):
                 self.emit('__ret = %s;' % self.as_flt(v))
             return
 
+        sh = self.struct_head(t[1])
+        if sh is not None:
+            s2, parts, sfx2 = sh
+            base = self.struct_base(s2)
+            self.assign_member(self.member_path(base, s2.stype, parts,
+                                                sfx2))
+            return
+
         is_arr = self.is_op('(')
         s = self.reference(t[1], False)
+        if s.stype is not None:
+            if is_arr:
+                if not s.is_array:
+                    self.err("'%s' is not an array" % canon)
+                target = self.index(s)
+            else:
+                if s.is_array:
+                    self.err("cannot assign to whole struct array '%s'"
+                             % canon)
+                target = s.acc
+            if self.is_op('.'):
+                self.assign_member(self.member_path(target, s.stype,
+                                                    [], None))
+                return
+            self.expect_op('=')
+            self.assign_struct(target, s.stype)
+            return
         if is_arr:
             if not s.is_array:
                 self.err("'%s' is not an array" % canon)
@@ -3514,6 +4038,164 @@ class Conv(object):
             self.emit('%s = %s;' % (target, self.as_int(v)))
         else:
             self.emit('%s = %s;' % (target, self.as_flt(v)))
+
+    def assign_member(self, res):
+        """... = expr  where the target is a structure member."""
+        self.expect_op('=')
+        if res[0] == 'num':
+            v = self.expr()
+            if res[2] == TY_I:
+                self.emit('%s = %s;' % (res[1], self.as_int(v)))
+            else:
+                self.emit('%s = %s;' % (res[1], self.as_flt(v)))
+            return
+        if res[0] == 'str':
+            v = self.expr()
+            if v[1] != TY_S:
+                self.err("cannot assign a number to a string member")
+            # bounded, and no trailing NUL when full: a member string
+            # is LENGTH+1 bytes in the firmware's layout and the byte
+            # after it belongs to the next member
+            self.emit('mm_ssetm(%s, %d, %s);' % (res[1], res[2], v[0]))
+            return
+        # a whole nested structure: the firmware memcpy's the OUTER
+        # type's size here and overruns - refused, not reproduced
+        self.err("assigning a whole structure into a member is not "
+                 "supported (the firmware overruns memory here); "
+                 "assign the member's own members instead")
+
+    def assign_struct(self, target, tyname):
+        """target = <struct lvalue> - whole-structure copy."""
+        v = self.expr()
+        ty = v[1]
+        if not isinstance(ty, tuple):
+            self.err("a structure can only be assigned a structure of "
+                     "the same TYPE")
+        if ty[0] == 'TM':
+            self.err("assigning a whole structure from a nested member "
+                     "is not supported (the firmware over-reads "
+                     "memory here)")
+        if ty[1] != tyname:
+            self.err("structure types must match (TYPE '%s' vs '%s')"
+                     % (tyname, ty[1]))
+        self.emit('%s = %s;' % (target, v[0]))
+
+    def struct_operand(self):
+        """A STRUCT-verb operand: v, arr(i) or arr().  Returns
+        (kind, code, sym) with kind 'one' or 'all'."""
+        t = self.nxt()
+        if t[0] != T_ID:
+            self.err("structure variable expected")
+        canon, sfx = split_suffix(t[1])
+        if '.' in canon:
+            self.err("STRUCT works on whole structures, not members")
+        s = self.lookup(canon)
+        if s is None or s.stype is None:
+            self.err("'%s' is not a structure variable" % t[1])
+        self.note_touch(canon, s)
+        if s.is_array:
+            self.expect_op('(')
+            if self.accept_op(')'):
+                return ('all', s.acc, s)
+            first = self.as_int(self.expr())
+            parts = ['(int)(%s)' % first]
+            while self.accept_op(','):
+                parts.append('(int)(%s)' % self.as_int(self.expr()))
+            self.expect_op(')')
+            if len(parts) != len(s.dims):
+                self.err("'%s' has %d dimension(s)" % (canon,
+                                                       len(s.dims)))
+            return ('one',
+                    s.acc + ''.join('[' + p + ']' for p in parts), s)
+        return ('one', s.acc, s)
+
+    def do_struct(self):
+        """STRUCT COPY|CLEAR|SWAP - the rest of the verbs need the
+        interpreter's machinery or a raw-file runtime entry and are
+        refused for now."""
+        t = self.nxt()
+        verb = t[2] if t[0] == T_ID else ''
+        if verb == 'COPY':
+            src = self.struct_operand()
+            if not self.accept_kw('TO'):
+                self.err("STRUCT COPY src TO dst")
+            dst = self.struct_operand()
+            if src[2].stype != dst[2].stype:
+                self.err("structure types must match")
+            if src[0] != dst[0]:
+                self.err("both operands must be arrays or both single "
+                         "structures")
+            if src[0] == 'all':
+                self.emit('memcpy(%s, %s, sizeof %s);'
+                          % (dst[1], src[1], src[1]))
+            else:
+                self.emit('%s = %s;' % (dst[1], src[1]))
+            return
+        if verb == 'CLEAR':
+            op = self.struct_operand()
+            if op[0] == 'all':
+                self.emit('memset(%s, 0, sizeof %s);' % (op[1], op[1]))
+            else:
+                self.emit('memset(&%s, 0, sizeof %s);' % (op[1], op[1]))
+            return
+        if verb == 'SWAP':
+            a = self.struct_operand()
+            self.expect_op(',')
+            b = self.struct_operand()
+            if a[2].stype != b[2].stype:
+                self.err("structure types must match")
+            if a[0] == 'all' or b[0] == 'all':
+                self.err("STRUCT SWAP takes single structures")
+            self.emit('{ struct t_%s __ts = %s; %s = %s; %s = __ts; }'
+                      % (a[2].stype, a[1], a[1], b[1], b[1]))
+            return
+        if verb in ('SORT', 'SAVE', 'LOAD', 'PRINT', 'EXTRACT',
+                    'INSERT'):
+            self.err("STRUCT %s is not translated yet" % verb)
+        self.err("unknown STRUCT subcommand '%s'" % t[1])
+
+    def struct_initialiser(self, s):
+        """DIM v AS T = (v1, v2, ...) - values flattened in member
+        order.  Emitted as ordinary member assignments; the firmware
+        does not length-check string values here, this does."""
+        if s is not None and s.is_array:
+            self.err("an initialiser on a struct ARRAY is not "
+                     "translated yet")
+        self.expect_op('(')
+        td = self.types[s.stype] if s is not None else None
+        k = 0
+        while True:
+            if td is None or k >= len(td.members):
+                self.err("too many initialisation values")
+            m = td.members[k]
+            k += 1
+            if m.stype is not None:
+                self.err("a nested-struct member cannot appear in an "
+                         "initialiser (the firmware rejects it too)")
+            n = m.count
+            for e in range(n):
+                v = self.expr()
+                if self.mode == 'emit':
+                    code = '%s.m_%s' % (s.acc, m.name)
+                    if m.ty == TY_S:
+                        if m.dims is not None:
+                            code = '(%s + %d)' % (code, e * (m.slen + 1))
+                        self.emit('mm_ssetm(%s, %d, %s);'
+                                  % (code, m.slen, self.as_str(v)))
+                    else:
+                        if m.dims is not None:
+                            code += '[%d]' % e
+                        self.emit('%s = %s;'
+                                  % (code, self.as_int(v) if m.ty == TY_I
+                                     else self.as_flt(v)))
+                if e < n - 1:
+                    self.expect_op(',')
+            if not self.accept_op(','):
+                break
+        self.expect_op(')')
+        if td is not None and k < len(td.members):
+            self.err("not enough initialisation values for TYPE '%s'"
+                     % td.disp)
 
     # -- IF ---------------------------------------------------------------
     def cond(self):
@@ -3899,10 +4581,11 @@ class Conv(object):
         self.blocks.append(['routine', self.lineno])
 
     def emit_local_decl(self, s):
-        # An array or a string that is not STATIC lives in the
-        # invocation's heap block, declared once in its struct and
+        # An array, a string or a structure that is not STATIC lives in
+        # the invocation's heap block, declared once in its struct and
         # zeroed by mm_lheap; there is nothing to declare here.
-        if not s.is_static and (s.is_array or s.ty == TY_S):
+        if not s.is_static and (s.is_array or s.ty == TY_S
+                                or s.stype is not None):
             return
         pfx = 'static ' if s.is_static else ''
         if s.is_static and s.has_init:
@@ -3932,6 +4615,9 @@ class Conv(object):
             parts.append('char *__ret')
         for p in r.params:
             nm = 'p_' + p.name.replace('.', '__')
+            if p.stype is not None:
+                parts.append('struct t_%s *%s' % (p.stype, nm))
+                continue
             if p.is_array:
                 if p.ty == TY_S:
                     parts.append('char (*%s)[MM_STRSZ]' % nm)
@@ -4019,7 +4705,12 @@ class Conv(object):
             note = ''
             if s.implied:
                 note = '   /* implied, first seen line %d */' % s.where
-            if s.is_array:
+            if s.stype is not None:
+                dims = ''.join('[%s]' % d for d in s.dims) \
+                    if s.is_array else ''
+                heap.append('struct t_%s %s%s;%s'
+                            % (s.stype, cn, dims, note))
+            elif s.is_array:
                 dims = ''.join('[%s]' % d for d in s.dims)
                 if s.ty == TY_S:
                     heap.append('char %s%s[MM_STRSZ];%s' % (cn, dims, note))
@@ -4066,10 +4757,16 @@ class Conv(object):
                 s = r.locals[lnm]
                 if s.is_param or s.is_static:
                     continue
-                if not (s.is_array or s.ty == TY_S):
+                if not (s.is_array or s.ty == TY_S
+                        or s.stype is not None):
                     continue
                 cn = cvar(lnm)
-                if s.is_array:
+                if s.stype is not None:
+                    dims = ''.join('[%s]' % d for d in s.dims) \
+                        if s.is_array else ''
+                    out.append('    struct t_%s %s%s;'
+                               % (s.stype, cn, dims))
+                elif s.is_array:
                     dims = ''.join('[%s]' % d for d in s.dims)
                     if s.ty == TY_S:
                         out.append('    char %s%s[MM_STRSZ];' % (cn, dims))
@@ -4178,6 +4875,39 @@ class Conv(object):
         # the two headers above.
         if self.uses_play:
             wr('static int mm_play_volume = 80;\n\n')
+        if self.type_order:
+            wr('/* ---- TYPE definitions: the firmware layout, byte for'
+               ' byte (TYPE-SPEC.md).\n')
+            wr(' * Numeric members start 8-aligned, strings are packed,'
+               ' a nested member\n')
+            wr(' * always starts 8-aligned - the explicit pads carry the'
+               ' difference\n')
+            wr(' * where C alignment alone would not. ---- */\n')
+            for tn in self.type_order:
+                td = self.types[tn]
+                wr('struct t_%s {\n' % tn)
+                pos = 0
+                padn = 0
+                for m in td.members:
+                    if m.offset > pos:
+                        wr('    unsigned char __p%d[%d];\n'
+                           % (padn, m.offset - pos))
+                        padn += 1
+                    if m.stype is not None:
+                        decl = 'struct t_%s m_%s' % (m.stype, m.name)
+                        if m.dims is not None:
+                            decl += '[%d]' % m.count
+                    elif m.ty == TY_S:
+                        decl = 'char m_%s[%d]' % (m.name,
+                                                  m.esize * m.count)
+                    else:
+                        decl = '%s m_%s' % (CTYPE[m.ty], m.name)
+                        if m.dims is not None:
+                            decl += '[%d]' % m.count
+                    wr('    %s;\n' % decl)
+                    pos = m.offset + m.esize * m.count
+                wr('};    /* %d bytes */\n' % td.total)
+            wr('\n')
         wr('/* ---- constants ---- */\n')
         names = list(self.globals.keys())
         names.sort()
@@ -4272,7 +5002,7 @@ def _heap_fixup(conv):
         s = conv.globals[nm]
         if s.is_const:
             continue
-        if s.is_array or s.ty == TY_S:
+        if s.is_array or s.ty == TY_S or s.stype is not None:
             s.acc = 'H->' + cvar(nm)
 
 
@@ -4295,7 +5025,8 @@ def _local_heap_fixup(conv):
         heap = [nm for nm in r.local_order
                 if not r.locals[nm].is_param
                 and not r.locals[nm].is_static
-                and (r.locals[nm].is_array or r.locals[nm].ty == TY_S)]
+                and (r.locals[nm].is_array or r.locals[nm].ty == TY_S
+                     or r.locals[nm].stype is not None)]
         if not heap:
             continue
         r.heap_locals = True
@@ -4319,6 +5050,7 @@ def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
     conv.lenient = lenient
     conv.fcc = fcc
     conv.pass_routine_names()
+    conv.pass_types()
     conv.pass_declarations()
     conv.walk('scan')
     # constants become #define, so fix their access text before emitting
