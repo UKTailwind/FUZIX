@@ -317,6 +317,16 @@ int plt_dev_ioctl(uarg_t request, char *data)
                                           : display_gfx_map((uint32_t)gt.bg),
                                 gt.str, (int)gt.len);
     }
+    if (request == PICOIOC_BOARD)
+    {
+        /* 2 or 3, the number in the name the banner prints. */
+        extern int board_is_pc2(void);
+        int n = board_is_pc2() ? 2 : 3;
+
+        if (uput(&n, data, sizeof(n)))
+            return -1;
+        return 0;
+    }
     if (request == PICOIOC_LIBM)
     {
         /* The address of the table, for a program to call through.

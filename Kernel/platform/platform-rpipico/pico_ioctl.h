@@ -212,6 +212,13 @@ struct gfx_fontinfo {
  * new kernel must fail rather than call the wrong slot. */
 #define PICOIOC_LIBM  0x0020
 
+/* Which machine this is.  data -> an int that receives 2 or 3, the same
+ * answer the boot banner prints, from the same detection (the DS3231's
+ * 32 kHz on GP27).  A program that wants to name itself - MMBasic's
+ * MM.DEVICE$ does - has no other way to ask: board_name() lived in the
+ * kernel and only the banner ever called it. */
+#define PICOIOC_BOARD 0x0021
+
 #define PC3_LIBM_MAGIC   0x50433350UL   /* "PC3P" */
 #define PC3_LIBM_VERSION 1
 #define PC3_LIBM_NFN     19
