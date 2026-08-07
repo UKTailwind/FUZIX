@@ -117,7 +117,7 @@ static void mmg_rbox(int x, int y, int wdt, int hgt, int radius,
 	   outside the range, not a clamp.  Width and height may be
 	   negative, exactly as BOX. */
 	if (radius < 0 || radius > 100)
-		mm_error("Invalid radius");
+		MM_RAISE("Invalid radius");
 	x2 = x + wdt + (wdt > 0 ? -1 : 1);
 	y2 = y + hgt + (hgt > 0 ? -1 : 1);
 	mmg_rbox_c(x, y, x2, y2, radius, c, fill);

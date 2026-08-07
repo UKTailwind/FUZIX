@@ -27,7 +27,7 @@ static void mmg_box(int x, int y, int wdt, int hgt, int lw,
 	/* cmd_box takes the line width with getint(0, 100), which is a
 	   hard error outside the range, not a clamp. */
 	if (lw < 0 || lw > 100)
-		mm_error("Invalid line width");
+		MM_RAISE("Invalid line width");
 	if (wdt == 0 || hgt == 0)
 		return;
 	x2 = x + wdt + (wdt > 0 ? -1 : 1);

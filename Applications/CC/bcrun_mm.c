@@ -302,6 +302,15 @@ static void w_st_med_f(void) { A = dput(mm_st_med_f(PF(0), I(1))); }
 /* misc Tier A */
 static void w_pause(void)    { mm_pause(D(0)); A = 0; }
 static void w_error_s(void)  { mm_error_s(Ps(0)); A = 0; }
+/* ON ERROR: the state pair lives in the PROGRAM's memory so a guard in
+   generated code is a load, not a call through here.  Pa(0) translates
+   the program address the way every by-reference argument is. */
+static void w_err_bind(void) { mm_err_bind((int *)Pa(0)); A = 0; }
+static void w_on_error(void) { mm_on_error(I(0), LL(1)); A = 0; }
+static void w_errno(void)    { A = mm_errno(); }
+/* through a scratch temp: MM.ERRMSG$ lives in bcrun's own memory, and a
+   program can only be handed a pointer inside the VM's address space */
+static void w_errmsg(void)   { A = mm_off(mm_scopy(mm_errmsg())); }
 static void w_timer_set(void){ mm_timer_set(D(0)); A = 0; }
 static void w_run_begin(void) { mm_run_begin(); A = 0; }
 static void w_run_arg(void)   { mm_run_arg(Ps(0)); A = 0; }
@@ -581,6 +590,10 @@ static const struct mmwrap {
 	{ "mm_st_med_f",	w_st_med_f },
 	{ "mm_pause",		w_pause },
 	{ "mm_error_s",		w_error_s },
+	{ "mm_err_bind",	w_err_bind },
+	{ "mm_on_error",	w_on_error },
+	{ "mm_errno",		w_errno },
+	{ "mm_errmsg",		w_errmsg },
 	{ "mm_timer_set",	w_timer_set },
 	{ "mm_run_begin",	w_run_begin },
 	{ "mm_run_arg",		w_run_arg },

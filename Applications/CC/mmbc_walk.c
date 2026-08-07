@@ -164,6 +164,23 @@ void statement(void)
         && !failed)
         out_insert(out_at_entry, where,
                    pstr(sfmt("%*smm_release(__mark);", ind * 4, "")));
+    /* Clear the poison and count the statement, where the interpreter
+     * does it: AFTER the statement (MMBasic.c:1867).  Before would count
+     * a statement that calls a SUB ahead of the SUB's own statements, and
+     * the count inside would be one short.  A statement that opened or
+     * closed a block has emitted a brace by now, so its guard goes in
+     * front instead - for an opener that is the same thing, and for a
+     * closer it lands where the closing keyword executes anyway. */
+    if (cv.mode == M_EMIT && cv.uses_onerror && cv.out == out_at_entry
+        && !failed) {
+        const char *guard =
+            pstr(sfmt("%*sif (__mm_e[1]) { __mm_e[0] = 0;"
+                      " if (__mm_e[1] > 0) __mm_e[1]--; }", ind * 4, ""));
+        if (cv.nblocks == nblocks_snap && cv.out->n > where)
+            out_append(out_at_entry, guard);
+        else
+            out_insert(out_at_entry, where, guard);
+    }
     cv.tmp_used = outer || cv.tmp_used;
     if (failed)
         skip_out(where, out_at_entry, ind, blocks_snap, nblocks_snap,

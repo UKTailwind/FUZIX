@@ -64,12 +64,12 @@ static void mmg_arc(int x, int y, int r1, int r2, int rad1, int rad2,
 		r1--;
 	}
 	if (r2 < r1)
-		mm_error("Inner radius < outer");
+		MM_RAISE("Inner radius < outer");
 
 	rad1 = mmg_arc_norm(rad1);
 	rad2 = mmg_arc_norm(rad2);
 	if (rad1 == rad2)
-		mm_error("Radials");
+		MM_RAISE("Radials");
 	if (rad2 < rad1)
 		rad2 += 360;
 
