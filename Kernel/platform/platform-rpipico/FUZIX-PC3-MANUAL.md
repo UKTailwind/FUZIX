@@ -86,6 +86,14 @@ compiled code substantially faster.
 * **`vi`.** The editor has always been on the card, but only under its
   own name, `levee`. It now answers to `vi` as well: one file, two
   names, no extra space.
+* **`mmedit`'s function keys work from a serial terminal.** They always
+  worked from a USB keyboard on the HDMI console, but a terminal such
+  as TeraTerm spells F1–F4 differently — `ESC [ 11 ~` where the console
+  sends `ESC O P` — and the editor silently ignored the spelling it did
+  not know. Since the editor is driven almost entirely by function
+  keys, that made it close to unusable over the serial port. It now
+  accepts every sequence MMBasic's own `MMInkey` accepts, including
+  the shifted forms.
 
 ## New in v0.8
 

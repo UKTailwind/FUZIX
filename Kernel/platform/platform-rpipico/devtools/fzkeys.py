@@ -10,11 +10,15 @@ without anyone looking at the monitor.
 
 Keys use Python escapes: \\x1b for ESC, \\r for Return, \\x1bOP for F1.
 """
+import os
 import sys
 import time
 import serial
 
-PORT, BAUD = "COM11", 115200
+# FZPORT like fzsh/ctrl/uusend: the CH340 does not come back on the same
+# number after a re-plug or a switch move, and this was the one helper
+# still hardcoded, which made it unusable on the day the board moved.
+PORT, BAUD = os.environ.get("FZPORT", "COM11"), 115200
 
 
 # QUIET GAP, and why it is this long.

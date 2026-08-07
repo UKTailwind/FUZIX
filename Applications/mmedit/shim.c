@@ -244,6 +244,18 @@ static int decode_csi(void)
             case 3:  k = K_DEL; break;
             case 5:  k = K_PUP; break;
             case 6:  k = K_PDOWN; break;
+            /* F1-F4 have two spellings and we only knew one.  Our own
+             * console sends the DEC form, ESC O P..S, handled below -
+             * but TeraTerm and every VT220-style terminal send these,
+             * and mmedit swallowed them as unknown, so on a serial
+             * terminal none of the function keys the editor is driven
+             * by did anything at all.  The whole table below is
+             * MMBasic's MMInkey (PicoMite.c), which is the authority
+             * for what this editor expects. */
+            case 11: k = K_F1; break;
+            case 12: k = K_F2; break;
+            case 13: k = K_F3; break;
+            case 14: k = K_F4; break;
             case 15: k = K_F5; break;
             case 17: k = K_F6; break;
             case 18: k = K_F7; break;
@@ -252,6 +264,18 @@ static int decode_csi(void)
             case 21: k = K_F10; break;
             case 23: k = K_F11; break;
             case 24: k = K_F12; break;
+            /* The shifted spellings, also MMInkey's.  These already
+             * carry the shift, so they are returned as they stand -
+             * the ";2" modifier path below is a different terminal's
+             * way of saying the same thing and the two never combine. */
+            case 25: return K_SHIFT(K_F3);
+            case 26: return K_SHIFT(K_F4);
+            case 28: return K_SHIFT(K_F5);
+            case 29: return K_SHIFT(K_F6);
+            case 31: return K_SHIFT(K_F7);
+            case 32: return K_SHIFT(K_F8);
+            case 33: return K_SHIFT(K_F9);
+            case 34: return K_SHIFT(K_F10);
             default: return 0;          /* unknown: swallow, never emit junk */
             }
             break;
@@ -283,6 +307,11 @@ int inkey(void)
         case 'Q': return K_F2;
         case 'R': return K_F3;
         case 'S': return K_F4;
+        case 'T': return K_F5;      /* MMInkey takes ESC O P..T, not P..S */
+        case '2':                   /* ESC O 2 R = shift-F3, MMInkey again */
+            if (readb() == 'R')
+                return K_SHIFT(K_F3);
+            return 0;
         default:  return 0;
         }
     }
