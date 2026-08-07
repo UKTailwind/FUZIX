@@ -357,12 +357,33 @@ Section 2 is closed.
 
 ## Section 3 — TYPE / structures
 
-`TYPE…END TYPE` → C struct.  The only section that touches the
-tokenizer: `a.b` currently lexes as one identifier (dots are legal in
-MMBasic names), so the symbol table must be consulted during lexing.
-Both translators change in lockstep; the type tests join the suite.
-STRUCT verbs (COPY/CLEAR/SWAP at least) ride along as struct assignment
-and memset.
+`TYPE…END TYPE` → C struct.  The tokenizer fear turned out smaller
+than COVERAGE.md predicted: a dotted name is already ONE token, so the
+firmware's own rule (split at the first dot at lookup time, prefix
+wins if it names a struct variable) needed no lexer change at all —
+only `.` as an operator for the `arr(i).member` case.  Both
+translators change in lockstep; the type tests join the suite.
+
+**Python side DONE 2026-08-07 (d6ebede).**  Semantics distilled from
+the firmware into `TYPE-SPEC.md` (a subagent swept PrepareProgramExt,
+ParseStructMember, ResolveStructMember, cmd_struct and fun_struct —
+and found seven errata in the official structures manual, which were
+fixed and its PDF rebuilt the same day).  The firmware's byte layout
+is reproduced exactly, explicit pads and all; member strings are
+Pascal fields with no trailing NUL, hence the new bounded runtime
+setter `mm_ssetm` (reads go through `mm_scopy`).  Working: member
+access to full nesting depth incl. member arrays and
+`data(2).items(1).values(4)`, whole-struct assignment (safe cases),
+struct parameters by reference, LOCAL structs (per-invocation block,
+recursion correct), scalar initialisers, STRUCT COPY/CLEAR/SWAP, and
+compile-time STRUCT(SIZEOF/OFFSET/TYPE).  Refused with messages:
+SORT/SAVE/LOAD/PRINT/EXTRACT/INSERT/FIND, struct-returning functions,
+struct-array parameters and initialisers, and the two firmware
+defects (whole-struct assignment into/out of a nested member overruns
+in the interpreter).  The firmware's own Testfiles/StructTest.bas:
+58 tests PASS on the host, every FAIL a designed refusal, zero
+unexplained.  All prior gates stayed green; struct tests stay out of
+tests/ until the mmbc mirror reaches byte-identity (in progress).
 
 ## Section 4 — ON ERROR SKIP/IGNORE, MM.ERRNO, MM.ERRMSG$
 

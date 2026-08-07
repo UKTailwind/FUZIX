@@ -116,6 +116,7 @@ static const char *convert(const char *inpath, const char *outpath,
     cv.indent = 1;
 
     pass_routine_names();
+    pass_types();
     pass_declarations();
     walk(M_SCAN);
     /* constants become #define, so fix their access text before
@@ -137,7 +138,7 @@ static const char *convert(const char *inpath, const char *outpath,
         struct sym *s = cv.globals[k];
         if (s->is_const)
             continue;
-        if (s->is_array || s->ty == TY_S)
+        if (s->is_array || s->ty == TY_S || s->stype != NULL)
             s->acc = pstr(sfmt("H->%s", cvar(s->name)));
     }
     /* The same rewrite per routine for LOCAL arrays and strings, which
@@ -158,7 +159,7 @@ static const char *convert(const char *inpath, const char *outpath,
                 }
             if (s == NULL || s->is_param || s->is_static)
                 continue;
-            if (!(s->is_array || s->ty == TY_S))
+            if (!(s->is_array || s->ty == TY_S || s->stype != NULL))
                 continue;
             r->heap_locals = 1;
             s->acc = pstr(sfmt("__L->%s", cvar(s->name)));

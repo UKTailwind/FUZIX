@@ -32,6 +32,11 @@
 #define TY_I 'i'                /* MMINTEGER (int64_t) */
 #define TY_S 's'                /* string, MMBasic layout [len][data][NUL] */
 #define TY_NONE 0               /* Python None */
+/* The Python types a struct value as a TUPLE ('T'|'TM', tyname); every
+ * isinstance(ty, tuple) test becomes ty == TY_T here, with the tuple's
+ * members carried in struct val's stype ('T'/'TM' second half) and tm
+ * ('TM' = reached via a member) fields. */
+#define TY_T 'T'
 
 const char *ctype_of(int ty);   /* CTYPE[]  */
 const char *tyname_of(int ty);  /* TYNAME[] */
@@ -119,7 +124,10 @@ int matharray_in(const char *up);
 
 /* ---- values: what every expression routine returns ---- */
 
-struct val { const char *code; int ty; };
+/* stype/tm are only meaningful when ty == TY_T (the Python's tuple
+ * type); everywhere else they are left zeroed by mkval and never
+ * read. */
+struct val { const char *code; int ty; const char *stype; int tm; };
 
 /* ---- symbols ---- */
 
@@ -127,6 +135,7 @@ struct sym {
     const char *name;           /* canonical: lower case, no suffix */
     const char *disp;           /* as the programmer spelled it */
     int ty;
+    const char *stype;          /* canonical TYPE name when a struct */
     const char *acc;            /* C text used to read/write it */
     const char **dims;          /* C size expressions */
     int ndims;
@@ -136,6 +145,78 @@ struct sym {
     int has_init;
     const char *declared_in;    /* "" = main line, else routine name */
 };
+
+/* ---- TYPE ... END TYPE (mmbc_type.c) ----
+ *
+ * One member of a TYPE.  esize is the element size in bytes and count
+ * the number of elements (1 unless the member is an array), so
+ * offset + esize * count is where the next member starts from.
+ * Python `m.dims is None` <-> has_dims == 0.  The counts are long
+ * long: Python ints are unbounded and the emission formats print the
+ * arithmetic results. */
+#define MAXMDIMS 16     /* Python list is unbounded; hard error past this */
+
+struct typemember {
+    const char *name;
+    const char *disp;
+    int ty;                     /* TY_* for plain members, TY_NONE (None)
+                                 * for struct */
+    const char *stype;          /* canonical type name for struct members */
+    long long slen;             /* STRING members: LENGTH */
+    long long dims[MAXMDIMS];   /* list of int bounds */
+    int ndims;
+    int has_dims;
+    long long count;
+    long long offset;
+    long long esize;
+};
+
+/* A TYPE ... END TYPE definition, laid out exactly as the firmware
+ * lays it out (ParseStructMember + GetStructAlignment): numeric and
+ * struct members start 8-aligned, strings are unaligned, and the
+ * total is rounded to 8 only when something numeric is inside.  See
+ * TYPE-SPEC.md for the full contract.
+ *
+ * members doubles as the Python's byname dict (linear lookup); 16 is
+ * the firmware's limit, enforced in type_member before add. */
+#define MAXMEMBERS 16
+
+struct typedef_rec {
+    const char *name;
+    const char *disp;
+    struct typemember *members[MAXMEMBERS];
+    int nmembers;
+    long long total;
+    int numeric;                /* anything numeric anywhere inside */
+    int where;
+};
+
+/* member_path result: the Python's
+ *   ('num', code, ty) | ('str', ptrcode, slen) |
+ *   ('struct', code, tyname, via_member) */
+#define MP_NUM 0
+#define MP_STR 1
+#define MP_STRUCT 2
+
+struct mpres {
+    int kind;
+    const char *code;
+    int ty;                     /* MP_NUM */
+    long long slen;             /* MP_STR */
+    const char *tyname;         /* MP_STRUCT */
+    int via;                    /* MP_STRUCT */
+};
+
+/* struct_head result: the Python's (sym, parts, sfx) */
+struct shead {
+    struct sym *s;
+    const char **parts; int nparts;
+    int sfx;                    /* TY_* or TY_NONE (None) */
+};
+
+/* struct_operand result: the Python's (kind, code, sym), kind
+ * 'one' -> all == 0, 'all' -> all == 1 */
+struct sopnd { int all; const char *code; struct sym *s; };
 
 struct gtouch { const char *name; int line; };
 
@@ -197,6 +278,7 @@ struct block { const char *kind; const char *a, *b, *c, *d;
 #define M_SCAN 0
 #define M_DECL 1
 #define M_EMIT 2
+#define M_TYPES 3               /* the Python's mode 'types' */
 
 struct conv {
     const char *srcname;
@@ -226,6 +308,12 @@ struct conv {
     struct tok toks[MAXTOKS]; int ntoks;
     int i;
     int tmp_used;
+    /* TYPE ... END TYPE: the Python's self.types dict and
+     * self.type_order list collapse into one array - names are only
+     * entered at END TYPE, exactly when type_order is appended, so
+     * registration order IS the dict's insertion order. */
+    struct typedef_rec **types; int ntypes, ctypes;
+    int in_type;                /* inside TYPE...END TYPE in this pass */
     /* depth of single-line IF bodies being emitted: END SUB means
      * "return now" in there, not "the routine ends here" */
     int inline_depth;
@@ -311,6 +399,22 @@ void decl_param(struct routine *r);
 void do_option(void);
 void do_declare(const char *kw);
 void do_const(void);
+
+/* ---- TYPE / structures (mmbc_type.c) ---- */
+
+struct typedef_rec *types_get(const char *canon);   /* self.types.get */
+void pass_types(void);
+int skip_type_block(const char *up);
+struct mpres member_path(const char *base, const char *tyname,
+                         const char **parts, int nparts, int sfx);
+int struct_head(const char *word, struct shead *out); /* 1 = struct */
+const char *struct_base(struct sym *s);
+struct val member_value(struct mpres res);
+struct val struct_fn(void);
+void do_struct(void);
+void assign_member(struct mpres res);
+void assign_struct(const char *target, const char *tyname);
+void struct_initialiser(struct sym *s);
 
 /* ---- statement walk (mmbc_walk.c / mmbc_stmt.c) ---- */
 

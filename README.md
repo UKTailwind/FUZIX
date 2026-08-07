@@ -149,7 +149,12 @@ labels · `END` · `SUB`/`FUNCTION` including recursion and string returns
 `SORT` · `CONTINUE FOR|DO` · `INC` · `CAT` · `ON n GOTO|GOSUB` ·
 `GOSUB`/`RETURN` · `ERROR` · `PAUSE` · `TIMER =` / `DATE$ =` / `TIME$ =`
 · `ARRAY SET|ADD` · `MATH SET|SCALE|ADD|RANDOMIZE` · `ERASE` / `CLEAR` ·
-the `LONGSTRING` family.
+the `LONGSTRING` family · `TYPE…END TYPE` structures (the firmware's
+byte layout exactly — members `INTEGER|INT|FLOAT|STRING [LENGTH n]`,
+nested types, member arrays; variables, arrays, `LOCAL`s and
+by-reference parameters; member access to full depth,
+`data(2).items(1).values(4)` included; whole-struct assignment;
+`STRUCT COPY|CLEAR|SWAP`; compile-time `STRUCT(SIZEOF|OFFSET|TYPE)`).
 
 On the PC3 (where the kernel owns the display, sound and GPIO) also:
 graphics — `MODE` · `CLS` · `COLOUR` · `PIXEL` (scalar and array forms,
@@ -392,9 +397,12 @@ reproduces the August 2017 eclipse to the second.
 
 ## Not yet
 
-Statements: `TYPE` structures, `REDIM`, `OPTION ESCAPE` backslash
+Statements: `REDIM`, `OPTION ESCAPE` backslash
 escapes, multi-dimensional array parameters, `ON ERROR IGNORE|SKIP`, and
-the `LONGSTRING AES128` / `BASE64` members.
+the `LONGSTRING AES128` / `BASE64` members.  Of the structures feature,
+`STRUCT SORT/SAVE/LOAD/PRINT/EXTRACT/INSERT`, `STRUCT(FIND)`,
+struct-returning functions and struct-array parameters/initialisers
+are refused with messages; everything else in `TYPE-SPEC.md` is in.
 
 Functions that need the Pico itself or the interpreter's own machinery,
 and which a plain C translation cannot honestly provide: `PORT

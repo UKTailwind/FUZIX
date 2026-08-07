@@ -392,6 +392,8 @@ const char *as_int(struct val v)
         return v.code;
     if (v.ty == TY_F)
         return sfmt("mm_toint(%s)", v.code);
+    if (v.ty == TY_T)
+        cv_err("a whole structure cannot be used in an expression");
     cv_err("string used where a number is required");
     return NULL;
 }
@@ -402,6 +404,8 @@ const char *as_flt(struct val v)
         return v.code;
     if (v.ty == TY_I)
         return sfmt("(MMFLOAT)(%s)", v.code);
+    if (v.ty == TY_T)
+        cv_err("a whole structure cannot be used in an expression");
     cv_err("string used where a number is required");
     return NULL;
 }
@@ -412,6 +416,8 @@ const char *as_str(struct val v)
 {
     if (v.ty == TY_S)
         return v.code;
+    if (v.ty == TY_T)
+        cv_err("a whole structure cannot be used in an expression");
     cv_err("number used where a string is required");
     return NULL;
 }

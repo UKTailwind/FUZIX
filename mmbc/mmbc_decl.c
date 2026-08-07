@@ -102,6 +102,7 @@ void pass_declarations(void)
     volatile int idx;
 
     cv.mode = M_DECL;
+    cv.in_type = 0;
     cv.cur = NULL;
     for (idx = 0; idx < src_nlines; idx++) {
         jmp_buf jb, *saved = err_jmp;
@@ -224,6 +225,8 @@ void decl_statement(void)
         return;
     up = (t->kind == T_ID) ? t->up : t->text;
 
+    if (skip_type_block(up))
+        return;
     if (strcmp(up, "OPTION") == 0) {
         cv.i++;
         do_option();
@@ -381,7 +384,17 @@ void decl_routine(int is_func)
     }
     /* trailing  AS <type>  for functions */
     if (accept_kw("AS")) {
-        int ty = type_word();
+        struct tok *w = peek(0);
+        int ty;
+        if (w != NULL && w->kind == T_ID) {
+            int wsfx;
+            if (types_get(split_suffix(w->text, &wsfx)) != NULL) {
+                r->ty = TY_F;   /* keep later passes coherent */
+                cv_err("a FUNCTION returning a TYPE is not "
+                       "translated yet");
+            }
+        }
+        ty = type_word();
         if (sfx != TY_NONE && sfx != ty)
             cv_err("return type conflicts with the name suffix");
         r->ty = ty;
@@ -395,6 +408,7 @@ void decl_param(struct routine *r)
     char *canon;
     int sfx, ty, nd = 0;
     int has_dims = 0;
+    const char *stype = NULL;
     struct sym *s;
 
     if (accept_kw("BYVAL"))
@@ -416,10 +430,27 @@ void decl_param(struct routine *r)
     }
     ty = sfx;
     if (accept_kw("AS")) {
-        int ty2 = type_word();
-        if (ty != TY_NONE && ty != ty2)
-            cv_err("parameter type conflict");
-        ty = ty2;
+        struct tok *w = peek(0);
+        int wsfx;
+        if (w != NULL && w->kind == T_ID
+            && strcmp(w->up, "INTEGER") != 0
+            && strcmp(w->up, "FLOAT") != 0
+            && strcmp(w->up, "STRING") != 0
+            && types_get(split_suffix(w->text, &wsfx)) != NULL) {
+            cv.i += 1;
+            stype = pstr(split_suffix(w->text, &wsfx));
+            if (sfx != TY_NONE)
+                cv_err("parameter type conflict");
+            if (has_dims)
+                cv_err("whole arrays of structures as parameters "
+                       "are not translated yet");
+            ty = TY_I;
+        } else {
+            int ty2 = type_word();
+            if (ty != TY_NONE && ty != ty2)
+                cv_err("parameter type conflict");
+            ty = ty2;
+        }
     }
     if (ty == TY_NONE)
         ty = cv.opt_default;
@@ -428,12 +459,18 @@ void decl_param(struct routine *r)
     s->name = pstr(canon);
     s->disp = s->name;
     s->ty = ty;
+    s->stype = stype;
     s->acc = "";
     s->is_param = 1;
     s->byref = byref;
     s->where = cv.lineno;
     s->declared_in = r->name;
-    if (has_dims) {
+    if (stype != NULL) {
+        /* a struct parameter is always by reference, as the
+         * firmware has it - BYVAL is ignored for structs there too */
+        s->byref = 1;
+        s->acc = pstr(sfmt("(*%s)", pfx_dunder("p_", canon)));
+    } else if (has_dims) {
         int k;
         s->is_array = 1;
         s->ndims = nd;
@@ -544,6 +581,7 @@ void do_declare(const char *kw)
         int sfx, ty;
         const char **dims = NULL;
         int ndims = 0, cdims = 0;
+        const char *stype = NULL;
         struct sym *s;
 
         t = nxt();
@@ -578,25 +616,53 @@ void do_declare(const char *kw)
         }
         ty = (sfx != TY_NONE) ? sfx : group_ty;
         if (accept_kw("AS")) {
-            int ty2 = type_word();
-            if (ty != TY_NONE && ty != ty2)
-                cv_err("conflicting types for '%s'", canon);
-            ty = ty2;
+            struct tok *w = peek(0);
+            int wsfx;
+            if (w != NULL && w->kind == T_ID
+                && strcmp(w->up, "INTEGER") != 0
+                && strcmp(w->up, "FLOAT") != 0
+                && strcmp(w->up, "STRING") != 0
+                && types_get(split_suffix(w->text, &wsfx)) != NULL) {
+                cv.i += 1;
+                stype = split_suffix(w->text, &wsfx);
+                if (sfx != TY_NONE)
+                    cv_err("'%s' has a type suffix but is "
+                           "declared AS a TYPE", canon);
+                if (is_static)
+                    cv_err("STATIC of a TYPE is not translated "
+                           "yet; use DIM or LOCAL");
+            } else {
+                int ty2 = type_word();
+                if (ty != TY_NONE && ty != ty2)
+                    cv_err("conflicting types for '%s'", canon);
+                ty = ty2;
+            }
         }
-        if (ty == TY_NONE)
-            ty = cv.opt_default;
-        if (ty == TY_NONE)
-            cv_err("OPTION DEFAULT NONE: '%s' needs a type", canon);
+        if (stype == NULL) {
+            if (ty == TY_NONE)
+                ty = cv.opt_default;
+            if (ty == TY_NONE)
+                cv_err("OPTION DEFAULT NONE: '%s' needs a type",
+                       canon);
+        }
 
-        if (cv.mode == M_DECL)
-            s = declare(canon, ty, scope, dims, ndims, is_static);
-        else
+        if (cv.mode == M_DECL) {
+            s = declare(canon, stype == NULL ? ty : TY_I,
+                        scope, dims, ndims, is_static);
+            if (stype != NULL)
+                s->stype = pstr(stype);
+        } else {
             s = sym_lookup(canon);
+        }
 
         if (accept_op("=")) {
-            if (s != NULL)
-                s->has_init = 1;
-            emit_initialiser(s, is_static);
+            if (s != NULL && s->stype != NULL) {
+                struct_initialiser(s);
+            } else {
+                if (s != NULL)
+                    s->has_init = 1;
+                emit_initialiser(s, is_static);
+            }
         }
 
         if (!accept_op(","))

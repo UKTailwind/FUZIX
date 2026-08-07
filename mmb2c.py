@@ -4146,7 +4146,10 @@ class Conv(object):
                 self.err("structure types must match")
             if a[0] == 'all' or b[0] == 'all':
                 self.err("STRUCT SWAP takes single structures")
-            self.emit('{ struct t_%s __ts = %s; %s = %s; %s = __ts; }'
+            # no initialised declaration: the fcc front end takes
+            # struct assignment but not struct initialisers
+            self.emit('{ struct t_%s __ts; __ts = %s; %s = %s; '
+                      '%s = __ts; }'
                       % (a[2].stype, a[1], a[1], b[1], b[1]))
             return
         if verb in ('SORT', 'SAVE', 'LOAD', 'PRINT', 'EXTRACT',
