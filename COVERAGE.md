@@ -4,9 +4,15 @@ A sweep of every command and function in the PicoMite manual — 166 distinct
 command keywords, 91 distinct function keywords — sorted by whether a plain
 C translation can honestly reproduce the behaviour.
 
-Where we are now: **60 of the 91 function keywords** and **36 of the 166
-command keywords** are translated. The command figure looks worse than it is;
-roughly 75 of those keywords are graphics, sound or peripheral drivers.
+Where we are now: **71 function keywords** and **~50 command keywords**
+are translated (2026-08-07 count, including the graphics, GPIO and PLAY
+work below). The command figure looks worse than it is; a large share of
+the remainder is peripheral drivers this machine has no path to.
+
+A full re-review against the firmware's own keyword tables — including
+which build category every remaining keyword belongs in — is in
+`REVIEW-COVERAGE-2026-08-07.md`, which supersedes the triage below where
+they disagree.
 
 `CHOICE` is already in, as of the built-ins round — `CHOICE(a=b, 4, 5)`
 compiles to a C ternary with the branch types checked, and the string form
@@ -50,7 +56,7 @@ ordinary BASIC program that currently fails outright.
 | **`REDIM [PRESERVE]`** | Requires heap-allocated arrays instead of the current static ones — a genuine change to the array model, and it would put `malloc` into generated code that currently has none. Worth doing only if you actually use it. |
 | **`MATH` matrix and vector** — `M_MULT M_INVERSE M_TRANSPOSE M_DETERMINANT V_CROSS V_NORMALISE MAGNITUDE DOTPRODUCT CORREL CHI CROSSING`, plus `MATH CRC` and `BASE64` | Pure arithmetic, no platform dependency. Each is small; the set is large. Good candidates to add on demand rather than all at once. |
 | **`ARRAY SLICE` / `ARRAY INSERT`, `MATH C_*`** | Index arithmetic over known dimensions. Mechanical. |
-| **`INKEY$`, `KEYDOWN`** | Non-blocking console reads need `termios` on POSIX (or `conio` on Windows) — same treatment as the directory functions: guarded, with a clean runtime error when the build excludes them. |
+| ~~**`INKEY$`**~~ **DONE** (`mm_inkey()`, termios-guarded, returns MMBasic's key codes) · **`KEYDOWN`** | `KEYDOWN` needs a key-state table from the kernel, which INKEY$'s one-byte read does not provide — a small kernel ioctl plus a wrapper when wanted. |
 | **`ON ERROR SKIP/IGNORE`, `MM.ERRNO`, `MM.ERRMSG$`** | Cross-cutting: today `mm_error()` prints and exits. Soft failure means either `setjmp`/`longjmp` or a checked error flag after every runtime call. Doable, but it touches everything, so it deserves its own pass. |
 
 ---
@@ -58,8 +64,9 @@ ordinary BASIC program that currently fails outright.
 ## Tier C — possible, but I would want your steer first
 
 * **`MM.` read-only variables** (`MM.DEVICE$`, `MM.VER`, `MM.CMDLINE$`,
-  `MM.HRES`, `MM.ERRNO`…). Trivial to add; the question is what they should
+  `MM.ERRNO`…). Trivial to add; the question is what they should
   *say* off-Pico. `MM.DEVICE$` = `"mmb2c"`? `MM.CMDLINE$` from `argv`?
+  `MM.HRES` and `MM.VRES` are DONE — they ask the kernel.
 * **`VAR SAVE` / `VAR RESTORE` / `VAR CLEAR`.** Flash-backed variables map
   naturally onto a small file. Identical from the program's point of view,
   and now cheap given the file layer exists.
@@ -88,16 +95,23 @@ ordinary BASIC program that currently fails outright.
 A C translation cannot honestly provide these, and pretending otherwise
 would be worse than the current clear error:
 
-* **Peripherals** — `PIN PORT PWM SERVO SETPIN I2C SPI ONEWIRE PIO ADC IR
+* **Peripherals** — `PORT PWM SERVO I2C SPI ONEWIRE PIO ADC IR
   WS2812 STEPPER TMC22XX HUMID TEMPR DISTANCE PULSIN CAMERA KEYBOARD KEYPAD
   MOUSE GAMEPAD WII RTC WATCHDOG CPU FLASH SLEEP BITBANG BITSTREAM`
+
+  No longer all of them: `SETPIN pin, DIN|DOUT`, `PIN(n) =` and the
+  `PIN(n)` function are translated (mmb_gpio.h, `/dev/gpio`), using GPIO
+  numbers rather than connector-pin numbers.
 * **Graphics and video** — `SPRITE TILE TILEMAP MAP TURTLE MANDELBROT RAY
   DRAW3D GUI DEFINEFONT RESOLUTION BACKLIGHT LCD TOUCH CLICK GETSCANLINE`
 
   This entry used to say "every drawing command", and that is no longer
-  true: the PC3 kernel draws, so `MODE PIXEL LINE BOX CIRCLE CLS COLOUR
-  TEXT FONT FRAMEBUFFER BLIT` and `PRINT @` are translated and run on
-  hardware.  What remains here is the part that needs state a translator
+  true: the PC3 kernel draws, so `MODE PIXEL LINE CIRCLE CLS COLOUR
+  TEXT FONT MAP FRAMEBUFFER` and `PRINT @` are translated and run on
+  hardware.  (An earlier version of this entry also claimed `BOX` and
+  `BLIT`; neither is implemented yet — `BOX` is Section 2 of
+  `REVIEW-COVERAGE-2026-08-07.md`, `BLIT` needs a block pixel-read
+  ioctl.)  What remains here is the part that needs state a translator
   has no place to keep - sprites, tile maps, a GUI toolkit - or hardware
   the PC3 does not have.
 * **Sound** — `PLAY TONE WAV FLAC MOD MIDI SAMPLE EFFECT PAUSE NEXT PREVIOUS`

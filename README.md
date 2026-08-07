@@ -84,8 +84,11 @@ s[1..len] the characters
 s[len+1]  a NUL the runtime maintains, not part of the string
 ```
 
-A string variable is `char x[MM_STRSZ]` (257 bytes); nothing is ever
-malloc'd. String literals compile to their own length byte:
+A string variable is `char x[MM_STRSZ]` (257 bytes). Scalars live in
+static storage; global arrays and strings live in one `mm_heap` block
+(PSRAM on the PC3) allocated once at startup, and a `LOCAL` array gets
+`mm_lheap`/`mm_lfree` per invocation — so generated code still contains
+no `malloc` of its own. String literals compile to their own length byte:
 `"Hello"` becomes `"\005" "hello"` — two adjacent literals so the length
 byte can never be swallowed by a following hex digit.
 
@@ -148,6 +151,21 @@ labels · `END` · `SUB`/`FUNCTION` including recursion and string returns
 · `ARRAY SET|ADD` · `MATH SET|SCALE|ADD|RANDOMIZE` · `ERASE` / `CLEAR` ·
 the `LONGSTRING` family.
 
+On the PC3 (where the kernel owns the display, sound and GPIO) also:
+graphics — `MODE` · `CLS` · `COLOUR` · `PIXEL` (scalar and array forms,
+and the function) · `LINE` · `CIRCLE` · `TEXT` · `FONT` ·
+`MAP` (`SET|RESET|MAXIMITE|GRAYSCALE`, `MAP(n)=` and the function) ·
+`FRAMEBUFFER CREATE|CLOSE|WRITE|COPY|WAIT` · `PRINT @(x,y)` ·
+`MM.HRES` / `MM.VRES`; GPIO — `SETPIN pin, DIN|DOUT` · `PIN(n)=` ·
+`PIN(n)` (GPIO numbering, not connector pins); sound — `PLAY MP3` ·
+`PLAY VOLUME` · `PLAY STOP` (the decoder is a separate spawned process);
+and the spawns — `SYSTEM prog$[, args]` · `SAVE IMAGE` · `LOAD IMAGE`.
+On a host with no display the graphics calls are silently nothing, which
+is what keeps the test gates meaningful.  `CIRCLE`, `TEXT` and the `MAP`
+palettes are static functions in per-feature headers, so a program pays
+only for the primitives it uses; the rest cross into the kernel through
+bcrun.
+
 Operators follow the manual's precedence table, including `\`, `MOD`, `^`,
 `<<`, `>>`, bitwise `AND`/`OR`/`XOR`, logical `NOT`, bitwise `INV`, and
 integer-vs-float promotion (`/` always produces a float).
@@ -167,6 +185,7 @@ integer-vs-float promotion (`/` always produces a float).
 | files | `EOF LOC LOF INPUT$ DIR$ CWD$` |
 | array stats | `MATH(SUM/MEAN/SD/MAX/MIN/MEDIAN a())`, with `MAX`/`MIN` writing back the optional index |
 | long strings | `LLEN LGETSTR$ LGETBYTE LINSTR LCOMPARE LINPUT` |
+| console / graphics | `INKEY$` (non-blocking, MMBasic key codes) `PIXEL(x,y) MAP(n) PIN(n) MM.HRES MM.VRES` |
 | misc | `CHOICE TAB RGB` (including the colour-name shortcuts) |
 
 A `SUB` or `FUNCTION` you define always wins over a built-in of the same
@@ -377,10 +396,12 @@ escapes, multi-dimensional array parameters, `ON ERROR IGNORE|SKIP`, and
 the `LONGSTRING AES128` / `BASE64` members.
 
 Functions that need the Pico itself or the interpreter's own machinery,
-and which a plain C translation cannot honestly provide: `PIN PIXEL PORT
-PULSIN DISTANCE TEMPR SPI PIO DEVICE TOUCH CLICK SPRITE GETSCANLINE MAP
-KEYDOWN INKEY$ GPS DRAW3D` (hardware), `JSON$` and the wildcard/bulk forms
+and which a plain C translation cannot honestly provide: `PORT
+PULSIN DISTANCE TEMPR SPI PIO DEVICE TOUCH CLICK SPRITE GETSCANLINE
+KEYDOWN GPS DRAW3D` (hardware), `JSON$` and the wildcard/bulk forms
 of `KILL` and `COPY`, `EVAL CALL PEEK STRUCT` (interpreter internals), and the array, matrix, complex-number, CRC and PID members of `MATH(...)`.
+(`PIN`, `PIXEL`, `MAP` and `INKEY$` used to be in this list; on the PC3
+they are translated — see "Currently translated" above.)
 
 `COVERAGE.md` triages every remaining keyword in the manual. Anything not
 recognised produces an error naming the line and the construct, rather
