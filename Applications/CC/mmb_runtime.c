@@ -149,7 +149,9 @@ void mm_ssetm(char *d, int cap, const char *s)
     int n = mm_slen(s);
     if (cap < 0) cap = 0;
     if (cap > MM_STRLEN) cap = MM_STRLEN;
-    if (n > cap) n = cap;
+    /* the firmware raises this, it does not truncate - proven on a
+       real PicoMite, which errored where an early draft trimmed */
+    if (n > cap) mm_error("String too long");
     d[0] = (char)(unsigned char)n;
     if (n) memmove(d + 1, s + 1, (size_t)n);
     if (n < cap) d[n + 1] = 0;
