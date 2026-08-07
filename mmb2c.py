@@ -97,6 +97,7 @@ BUILTINS = {
     'PIXEL': (2, 2), 'MAP': (1, 1), 'PIN': (1, 1),
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0),
     'MM.ERRNO': (0, 0), 'MM.ERRMSG$': (0, 0),
+    'MM.VER': (0, 0), 'MM.DEVICE$': (0, 0), 'MM.CMDLINE$': (0, 0),
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
     'LINSTR': (2, 3), 'LCOMPARE': (2, 2), 'LINPUT': (3, 3),
@@ -507,6 +508,7 @@ class Conv(object):
         # set in the scan pass, so statements BEFORE the ON ERROR line are
         # guarded too - the armed window is a run-time thing
         self.uses_onerror = False
+        self.uses_cmdline = False       # MM.CMDLINE$: main takes argv
         # depth of single-line IF bodies being emitted: END SUB means
         # "return now" in there, not "the routine ends here"
         self.inline = 0
@@ -1495,6 +1497,15 @@ class Conv(object):
             return ('mm_errno()', TY_I)
         if up == 'MM.ERRMSG$':
             return ('mm_errmsg()', TY_S)
+        if up == 'MM.VER':
+            return ('mm_ver()', TY_F)
+        if up == 'MM.DEVICE$':
+            return ('mm_device()', TY_S)
+        if up == 'MM.CMDLINE$':
+            # the only thing that needs main's arguments, so main only
+            # takes them when a program asks
+            self.uses_cmdline = True
+            return ('mm_cmdline()', TY_S)
         if up == 'PIXEL':
             # PIXEL(x, y) reads a pixel back AS RGB888 - the kernel
             # primitive maps the mode's own colour numbering back out,
@@ -5076,8 +5087,13 @@ class Conv(object):
         for ln in self.out_body:
             wr(ln + '\n')
         wr('\n/* ---- main program ---- */\n')
-        wr('int main(void)\n{\n')
+        if self.uses_cmdline:
+            wr('int main(int argc, char **argv)\n{\n')
+        else:
+            wr('int main(void)\n{\n')
         wr('    unsigned __mark = mm_mark(); (void)__mark;\n')
+        if self.uses_cmdline:
+            wr('    mm_argv_bind(argc, argv);\n')
         if self.uses_onerror:
             wr('    mm_err_bind(__mm_e);\n')
         if getattr(self, 'heap_used', False):

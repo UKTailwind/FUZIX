@@ -464,8 +464,13 @@ void conv_write(FILE *f)
     for (k = 0; k < cv.out_body.n; k++)
         fprintf(f, "%s\n", cv.out_body.lines[k]);
     fprintf(f, "\n/* ---- main program ---- */\n");
-    fprintf(f, "int main(void)\n{\n");
+    if (cv.uses_cmdline)
+        fprintf(f, "int main(int argc, char **argv)\n{\n");
+    else
+        fprintf(f, "int main(void)\n{\n");
     fprintf(f, "    unsigned __mark = mm_mark(); (void)__mark;\n");
+    if (cv.uses_cmdline)
+        fprintf(f, "    mm_argv_bind(argc, argv);\n");
     if (cv.uses_onerror)
         fprintf(f, "    mm_err_bind(__mm_e);\n");
     if (cv.heap_used)

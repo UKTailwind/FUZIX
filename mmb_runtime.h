@@ -591,6 +591,15 @@ void mm_on_error(int mode, MMINTEGER n);   /* 0 abort 1 clear 2 ignore 3 skip */
 MMINTEGER mm_errno(void);           /* MM.ERRNO                        */
 char *mm_errmsg(void);              /* MM.ERRMSG$                      */
 
+/* The PC3 release, as major.mmpp so the fields compare as one number
+ * (0.10 reads higher than 0.09).  BUMP THIS WITH PC3_RELEASE in the
+ * kernel's config.h - the release recipe in BUILDING-PC3.md says so. */
+#define MM_RELEASE 0.10
+MMFLOAT mm_ver(void);               /* MM.VER                          */
+char *mm_device(void);              /* MM.DEVICE$                      */
+char *mm_cmdline(void);             /* MM.CMDLINE$                     */
+void mm_argv_bind(int argc, char **argv);
+
 #define MM_RAISE(msg)      do { mm_error(msg); return; } while (0)
 #define MM_RAISEV(msg, v)  do { mm_error(msg); return (v); } while (0)
 

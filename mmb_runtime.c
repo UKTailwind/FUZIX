@@ -2459,6 +2459,57 @@ void mm_on_error(int mode, MMINTEGER n)
     }
 }
 
+/* MM.VER, MM.DEVICE$, MM.CMDLINE$ ------------------------------------ *
+ *
+ * MMBasic answers MM.VER with its own version as major.mmpp, so the
+ * fields compare as one number.  Ours is the PC3 release: 0.10 is 0.10,
+ * and 0.9 was 0.09, so a later release always reads higher.  Keep
+ * MM_RELEASE in step with PC3_RELEASE in the kernel's config.h - the
+ * release recipe in BUILDING-PC3.md says so.
+ */
+MMFLOAT mm_ver(void) { return MM_RELEASE; }
+
+static char mm_devbuf[MM_STRSZ];
+
+/* "Fuzix on PC2" / "Fuzix on PC3" - what this machine is, not what it is
+   compatible with.  A program testing for "PicoMite" is asking whether
+   it is talking to the interpreter, and it is not. */
+static char *mm_dev_name(int n)
+{
+    char t[16];
+
+    t[0] = 'F'; t[1] = 'u'; t[2] = 'z'; t[3] = 'i'; t[4] = 'x';
+    t[5] = ' '; t[6] = 'o'; t[7] = 'n'; t[8] = ' ';
+    t[9] = 'P'; t[10] = 'C'; t[11] = (char)('0' + (n < 2 || n > 9 ? 3 : n));
+    t[12] = 0;
+    mm_ssetc(mm_devbuf, t);
+    return mm_devbuf;
+}
+
+/* MM.CMDLINE$: the arguments the program was started with, space
+   separated, exactly as the shell handed them over.  Bound from main
+   when the program asks for it - the generated main takes no arguments
+   otherwise, and every program that does not use this stays as it was. */
+static char mm_cmdbuf[MM_STRSZ];
+
+void mm_argv_bind(int argc, char **argv)
+{
+    char t[MM_STRLEN + 1];
+    int i, n = 0;
+
+    for (i = 1; i < argc && argv[i] != NULL; i++) {
+        int k = 0;
+        if (n && n < MM_STRLEN)
+            t[n++] = ' ';
+        while (argv[i][k] && n < MM_STRLEN)
+            t[n++] = argv[i][k++];
+    }
+    t[n] = 0;
+    mm_ssetc(mm_cmdbuf, t);
+}
+
+char *mm_cmdline(void) { return mm_cmdbuf; }
+
 MMINTEGER mm_errno(void) { return mm_errno_v; }
 char     *mm_errmsg(void) { return mm_errmsg_v; }
 
@@ -3516,6 +3567,7 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
  * that is the full 640x480 the console occupies.
  */
 #define MM_GFXIOC_INFO 0x000E
+#define MM_PICOIOC_BOARD 0x0021         /* pico_ioctl.h is the authority */
 
 struct mm_gfx_info {
     unsigned short width, height, stride;
@@ -3535,6 +3587,18 @@ static MMINTEGER mm_gfx_dim(int want_h)
 
 MMINTEGER mm_hres(void) { return mm_gfx_dim(0); }
 MMINTEGER mm_vres(void) { return mm_gfx_dim(1); }
+
+/* Which machine, from the kernel's own detection (PICOIOC_BOARD returns
+   the number the boot banner prints).  If it cannot be asked, say 3:
+   that is what the port is for, and a wrong name beats no answer. */
+char *mm_device(void)
+{
+    int n = 3;
+
+    if (mm_gfx_open() >= 0)
+        (void)ioctl(mm_gfx_fd, MM_PICOIOC_BOARD, &n);
+    return mm_dev_name(n);
+}
 
 /*
  * Batched drawing.
@@ -3867,6 +3931,10 @@ void mm_mode(MMINTEGER n)
 
 MMINTEGER mm_hres(void) { return mm_host_mode == 2 ? 320 : 640; }
 MMINTEGER mm_vres(void) { return mm_host_mode == 2 ? 240 : 480; }
+
+/* No kernel to ask on the host, and the gates compare output: say PC3,
+   which is what the board build says when the ioctl is missing too. */
+char *mm_device(void) { return mm_dev_name(3); }
 
 void mm_plot(const short *xy, MMINTEGER n, MMINTEGER rgb)
 {

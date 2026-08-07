@@ -330,6 +330,7 @@ struct conv {
     /* set in the scan pass, so statements BEFORE the ON ERROR line are
        guarded too - the armed window is a run-time thing */
     int uses_onerror;
+    int uses_cmdline;          /* MM.CMDLINE$: main takes argv */
     /* set by global_decls when the program has any array or string:
      * main() then has to allocate the block they live in */
     int heap_used;
