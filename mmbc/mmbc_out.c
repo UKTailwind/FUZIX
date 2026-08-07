@@ -361,26 +361,26 @@ void conv_write(FILE *f)
                 struct typemember *m = td->members[j];
                 const char *decl;
                 if (m->offset > pos) {
-                    fprintf(f, "    unsigned char __p%d[%lld];\n",
-                            padn, m->offset - pos);
+                    fprintf(f, "    unsigned char __p%d[%ld];\n",
+                            padn, (long)(m->offset - pos));
                     padn++;
                 }
                 if (m->stype != NULL) {
                     decl = sfmt("struct t_%s m_%s", m->stype, m->name);
                     if (m->has_dims)
-                        decl = sfmt("%s[%lld]", decl, m->count);
+                        decl = sfmt("%s[%ld]", decl, (long)m->count);
                 } else if (m->ty == TY_S) {
-                    decl = sfmt("char m_%s[%lld]", m->name,
-                                m->esize * m->count);
+                    decl = sfmt("char m_%s[%ld]", m->name,
+                                (long)(m->esize * m->count));
                 } else {
                     decl = sfmt("%s m_%s", ctype_of(m->ty), m->name);
                     if (m->has_dims)
-                        decl = sfmt("%s[%lld]", decl, m->count);
+                        decl = sfmt("%s[%ld]", decl, (long)m->count);
                 }
                 fprintf(f, "    %s;\n", decl);
                 pos = m->offset + m->esize * m->count;
             }
-            fprintf(f, "};    /* %lld bytes */\n", td->total);
+            fprintf(f, "};    /* %ld bytes */\n", (long)td->total);
         }
         fprintf(f, "\n");
     }

@@ -142,7 +142,7 @@ static const char *member_index(struct typemember *m)
     mult = 1;
     for (k = 1; k < n; k++) {
         mult *= m->dims[k - 1] + 1;
-        lin = sfmt("%s + (%s) * %lld", lin, idx[k], mult);
+        lin = sfmt("%s + (%s) * %ld", lin, idx[k], (long)mult);
     }
     return lin;
 }
@@ -221,8 +221,8 @@ struct mpres member_path(const char *base, const char *tyname,
             cv_err("'%s' is not a nested structure", name);
         if (m->ty == TY_S) {
             if (lin != NULL)
-                code = sfmt("(%s + (int)(%s) * %lld)", code, lin,
-                            m->slen + 1);
+                code = sfmt("(%s + (int)(%s) * %ld)", code, lin,
+                            (long)(m->slen + 1));
             if (sfx != TY_NONE && sfx != TY_S)
                 cv_err("member '%s' is a STRING", name);
             res.kind = MP_STR;
@@ -346,7 +346,7 @@ struct val struct_fn(void)
         cv_err("structure type '%s' not found", a->text);
     if (strcmp(sel, "SIZEOF") == 0) {
         expect_op(")");
-        v.code = sfmt("%lldLL", td->total);
+        v.code = sfmt("%ldLL", (long)td->total);
         return v;
     }
     expect_op(",");
@@ -360,7 +360,7 @@ struct val struct_fn(void)
                b->text, a->text);
     expect_op(")");
     if (strcmp(sel, "OFFSET") == 0) {
-        v.code = sfmt("%lldLL", m->offset);
+        v.code = sfmt("%ldLL", (long)m->offset);
         return v;
     }
     if (m->stype != NULL) {
@@ -605,7 +605,7 @@ void assign_member(struct mpres res)
         /* bounded, and no trailing NUL when full: a member string is
          * LENGTH+1 bytes in the firmware's layout and the byte after
          * it belongs to the next member */
-        emit(sfmt("mm_ssetm(%s, %lld, %s);", res.code, res.slen,
+        emit(sfmt("mm_ssetm(%s, %ld, %s);", res.code, (long)res.slen,
                   v.code));
         return;
     }
@@ -775,13 +775,13 @@ void struct_initialiser(struct sym *s)
                 const char *code = sfmt("%s.m_%s", s->acc, m->name);
                 if (m->ty == TY_S) {
                     if (m->has_dims)
-                        code = sfmt("(%s + %lld)", code,
-                                    e * (m->slen + 1));
-                    emit(sfmt("mm_ssetm(%s, %lld, %s);",
-                              code, m->slen, as_str(v)));
+                        code = sfmt("(%s + %ld)", code,
+                                    (long)(e * (m->slen + 1)));
+                    emit(sfmt("mm_ssetm(%s, %ld, %s);",
+                              code, (long)m->slen, as_str(v)));
                 } else {
                     if (m->has_dims)
-                        code = sfmt("%s[%lld]", code, e);
+                        code = sfmt("%s[%ld]", code, (long)e);
                     emit(sfmt("%s = %s;", code,
                               m->ty == TY_I ? as_int(v) : as_flt(v)));
                 }
