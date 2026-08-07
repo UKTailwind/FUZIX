@@ -86,6 +86,16 @@ rest of the drawing statements, and structures.
   support. Neither the host runner nor qemu enforces that, so the
   crash existed only on real hardware. The arena is now rounded so
   the stack is always 8-byte aligned.
+* **`ON ERROR SKIP`/`IGNORE`, with `MM.ERRNO` and `MM.ERRMSG$`.** A
+  program can survive an error instead of stopping at it, exactly as it
+  can on a PicoMite — and the errors themselves now fire where the
+  interpreter fires them. That was the larger half of the work: float
+  division by zero used to answer `inf` rather than stopping, `SQR(-1)`
+  and `LOG(0)` answered `nan` and `-inf`, string concatenation past 255
+  characters truncated instead of erroring, and `ASC("")` errored where
+  a PicoMite returns 0. Each of those was a program that behaved
+  differently here and said nothing about it. There is a section on all
+  of this below.
 * **`mmedit` colours the new statements correctly.** `Box`, `RBox`,
   `Triangle`, `Arc`, `Type`, `End Type`, `Struct` and `Struct(` now
   show as translatable (cyan) rather than interpreter-only (blue).
@@ -1759,7 +1769,8 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `LGETBYTE` | `LGETSTR$` | `LINPUT` | `LINSTR` |
 | `LLEN` | `LOC` | `LOF` | `LOG` |
 | `LTRIM$` | `MAP` | `MATH` | `MAX` |
-| `MID$` | `MIN` | `OCT$` | `PI` |
+| `MID$` | `MIN` | `MM.ERRMSG$` | `MM.ERRNO` |
+| `MM.HRES` | `MM.VRES` | `OCT$` | `PI` |
 | `PIN` | `PIXEL` | `RAD` | `RGB` |
 | `RIGHT$` | `RND` | `RTRIM$` | `SGN` |
 | `SIN` | `SPACE$` | `SQR` | `STR$` |
@@ -1799,6 +1810,33 @@ parameters, and initialisers on structure arrays. Assigning a whole
 structure into or out of a *nested* member is refused deliberately:
 the interpreter copies the outer type's size there and overruns
 memory, and a clean error beats reproducing that.
+
+## Errors, and surviving them
+
+Every error a program can hit is a check the runtime makes *before* it
+does the thing — the same order the interpreter uses. Nothing is left to
+the hardware to notice: dividing by zero as a float would otherwise
+answer `inf` rather than stopping, and this processor does not trap
+integer division by zero at all.
+
+`ON ERROR SKIP [n]`, `ON ERROR IGNORE`, `ON ERROR CLEAR` and
+`ON ERROR ABORT` work as they do on a PicoMite, with `MM.ERRNO` and
+`MM.ERRMSG$` reporting what happened. A statement that fails while an
+error is being skipped is abandoned where it failed: the assignment does
+not happen, the rest of the `PRINT` does not print, and execution
+resumes at the next statement — in the `SUB` it happened in, if that is
+where it was. The count works as it does there too, `SKIP n` covering
+the next n statements.
+
+Two limits worth knowing. A statement that jumps away (`GOTO`, `EXIT`)
+does not count against `SKIP n`, so a count that spans one runs one
+statement further than it would on a PicoMite. And running out of memory
+ends the program whatever `ON ERROR` says — there is nothing sensible to
+carry on with, and a program limping along on a failed allocation would
+fail somewhere far less obvious.
+
+`ON ERROR RESTART` reboots the machine on a PicoMite; a compiled program
+has no equivalent, so `mmbc` refuses it by name rather than guessing.
 
 ## Not covered
 

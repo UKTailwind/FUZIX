@@ -186,7 +186,7 @@ Regenerate and paste when coverage changes. Everything *below* the
 tables — what is done and not done in graphics, pins and sound — is
 written by hand and the generator knows nothing about it, so replacing
 the whole appendix with the generator's output throws that away. Check
-the tables against `--check` (81 statements, 73 functions, 5 scalar and
+the tables against `--check` (81 statements, 78 functions, 5 scalar and
 6 array `MATH` at v0.10) rather than pasting blind.
 
 ## What is not in this repository
