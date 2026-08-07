@@ -180,7 +180,9 @@ struct val e_mul(void)
             struct val r = e_unary();
 
             if (strcmp(op, "/") == 0) {
-                v = mkval(sfmt("((%s) / (%s))", as_flt(v), as_flt(r)),
+                /* op_div checks the divisor first - a bare C '/' gave
+                   inf where MMBasic errors. */
+                v = mkval(sfmt("mm_fdiv(%s, %s)", as_flt(v), as_flt(r)),
                           TY_F);
             } else if (strcmp(op, "\\") == 0) {
                 v = mkval(sfmt("mm_idiv(%s, %s)", as_int(v), as_int(r)),

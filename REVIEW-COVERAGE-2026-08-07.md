@@ -429,6 +429,89 @@ runtime calls, so it gets its own section and a dedicated test that
 exercises every failure path the manual documents.  MM.VER, MM.DEVICE$,
 MM.CMDLINE$ and the trivial MM.INFO selectors ride along.
 
+### Mechanism: why not setjmp/longjmp
+
+The firmware's own model is `longjmp(ErrNext, 1)` out of `error()`
+(MMBasic.c:5632) into a `setjmp` that `ExecuteProgram` takes per
+statement (MMBasic.c:1852-1868).  That is not available to us: bcrun
+has no setjmp at all, and a jump would have to cross two worlds —
+`call_target` dispatches bytecode calls iteratively (push pc, set pc)
+but native functions through `native_enter`, a real ARM call on the
+host C stack.  With most functions going native, an error five BASIC
+calls deep sits under five real ARM frames.  Resuming would mean
+implementing setjmp/longjmp in the ARM backend and the VM, in both
+execution modes — a large hardware-only risk of exactly the kind that
+produced the STRD alignment fault.
+
+Instead: a **poison flag**.  `mm_error` sets MM.ERRNO/MM.ERRMSG$, sets
+the flag and returns when armed; the flag means "unwinding to the end
+of the current BASIC statement" and is honoured in three places, all
+emitted only when the program contains ON ERROR — a statement epilogue
+(the resume point, the skip decrement, the flag clear), a commit guard
+(the store happens only if the statement survived) and a function-entry
+guard (a callee entered with poison set returns at once, which is
+observably identical to MMBasic never entering it, and burns no skip
+count).  `goto`, not `break`: `EXIT DO` emits a real `break` that a
+`do{...}while(0)` wrapper would swallow.  The flag lives in the
+PROGRAM's memory (`mm_err_bind(&__mm_err)` at startup, runtime writes
+through the translated pointer as it already does for by-reference
+parameters), so a guard is a load and a branch, not a libcall.
+
+Block headers reproduce the firmware's quirk exactly, because the
+translator knows the form: MMBasic resumes at the textually next
+statement, so an erroring condition in a MULTI-LINE `IF` falls into the
+THEN body while a single-line `IF ... THEN stmt` skips the lot —
+`(__mm_err ? 1 : cond)` against `(!__mm_err && cond)`.  Same for
+`WHILE`/`DO WHILE`, which fall into the body.
+
+Nothing unwinds, so — unlike the firmware, which has to
+`ClearTempMemory`/`ClearVars` on its jump leg — no scratch stack or
+LOCAL block leaks.  `ON ERROR RESTART` (soft-resets the machine) is
+refused with an mmbc error: a compiled program has no equivalent.
+Ctrl-C stays outside all of this, as it is in the firmware, where abort
+goes through `CheckAbort()` and not `error()`.
+
+### Phase A — the checks have to fire before they can be skipped
+
+An error that is never raised cannot be skipped, so the section opens
+with a sweep of every check the firmware makes and we do not
+(`error()` in Operators.c/Functions.c/MATHS.c against `mm_error()` in
+mmb_runtime.c, resolving `StandardError(n)` through `errorstring[]`).
+It found real divergences that predate this section:
+
+* **Float `/` was a bare C divide** — `PRINT 1/0` printed `inf` where a
+  PicoMite errors.  No hardware trap would have caught it either: IEEE
+  returns inf, and the M33 does not trap integer divide-by-zero unless
+  `CCR.DIV_0_TRP` is set.  Now `mm_fdiv`, which tests first exactly as
+  `op_div` does.
+* **`mm_scat` truncated at 255** where `op_add` raises "String too
+  long" — the same mistake `mm_ssetm` made in Section 3, which the
+  board caught.
+* **SQR/LOG/ASIN/ACOS emitted raw C library calls**, so `SQR(-1)` and
+  `LOG(0)` returned nan/-inf instead of "Negative argument" and
+  "Divide by zero".  ASIN/ACOS also special-case the endpoints in the
+  firmware so the answers there are exact.
+* **`ASC("")` errored here and returns 0 there** — a legal PicoMite
+  program died on this one.
+* **Message texts**: ours said "Division by zero" where the firmware
+  says "Divide by zero"; BIN2STR$/STR2BIN had invented wordings where
+  the firmware uses "Overflow" and "String length".  Invisible while an
+  error only ended the program — MM.ERRMSG$ makes the text a value a
+  program can read.
+
+Deferred with reasons: the firmware's `Overflow` checks on float
+`+ * ^ /` (`fret == INFINITY` — note `+inf` only, so `-1e308*10` does
+NOT error there) are a compare on the hot path of every float
+operation, and go in only if the board benchmark says they are free.
+Type checks that a typed translator makes at compile time (BIT "Not an
+integer", BYTE "Not a string", MID$/MATH "Argument count") do not
+apply.  MATH's array-shape errors belong with the MATH backlog in
+Section 7.
+
+`tests/checks.bas` covers the non-erroring side of every fix (exact
+values only) and is a side-by-side program: it must print the same
+lines on a real PicoMite.
+
 ## Section 5 — PLAY WAV / FLAC / MODFILE, PLAY PAUSE / RESUME
 
 Clone the playmp3 pattern: one cross-compiled player per format

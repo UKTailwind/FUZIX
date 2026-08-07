@@ -170,7 +170,9 @@ char *mm_scat(const char *a, const char *b)
     int la = mm_slen(a), lb = mm_slen(b), n;
     if (la > MM_STRLEN) la = MM_STRLEN;
     n = la + lb;
-    if (n > MM_STRLEN) { n = MM_STRLEN; lb = n - la; }
+    /* op_add raises rather than trimming (Operators.c:131) - the same
+       mistake mm_ssetm made, and the board caught that one too. */
+    if (n > MM_STRLEN) mm_error("String too long");
     if (la) memcpy(t + 1, a + 1, (size_t)la);
     if (lb > 0) memcpy(t + 1 + la, b + 1, (size_t)lb);
     t[0] = (char)(unsigned char)n;
@@ -443,19 +445,68 @@ MMINTEGER mm_toint(MMFLOAT v)
     return (MMINTEGER)(v + 0.5);
 }
 
+/* The firmware's wording, exactly: "Divide by zero", not "Division by".
+   It was invisible while an error only ever ended the program; MM.ERRMSG$
+   makes the text a value a program can read and compare. */
 MMINTEGER mm_idiv(MMINTEGER a, MMINTEGER b)
 {
-    if (b == 0) mm_error("Division by zero");
+    if (b == 0) mm_error("Divide by zero");
     return a / b;
 }
 
 MMINTEGER mm_mod(MMINTEGER a, MMINTEGER b)
 {
-    if (b == 0) mm_error("Division by zero");
+    if (b == 0) mm_error("Divide by zero");
     return a % b;
 }
 
+/* Float division is a runtime call for one reason: op_div (Operators.c:101)
+   tests the divisor BEFORE dividing.  Emitting a bare C '/' gave inf where
+   the interpreter errors - and no hardware trap would have caught it either
+   (IEEE returns inf, and the M33 does not trap integer divide-by-zero
+   unless CCR.DIV_0_TRP is set).  Every MMBasic error is a check that runs
+   first; that is also what makes ON ERROR SKIP possible at all. */
+MMFLOAT mm_fdiv(MMFLOAT a, MMFLOAT b)
+{
+    if (b == 0.0) mm_error("Divide by zero");
+    return a / b;
+}
+
 MMFLOAT mm_pow(MMFLOAT a, MMFLOAT b) { return pow(a, b); }
+
+/* Domain checks, all of them the firmware's own (Functions.c).  Without
+   these SQR(-1) and LOG(0) quietly returned nan/-inf here and errored on
+   a PicoMite - the divergence class that outranks a missing feature. */
+MMFLOAT mm_sqr(MMFLOAT v)
+{
+    if (v < 0.0) mm_error("Negative argument");
+    return sqrt(v);
+}
+
+MMFLOAT mm_log(MMFLOAT v)
+{
+    if (v == 0.0) mm_error("Divide by zero");
+    if (v < 0.0) mm_error("Negative argument");
+    return log(v);
+}
+
+/* fun_asin/fun_acos special-case the endpoints rather than trusting the
+   library at the limit of the domain, so the answers there are exact. */
+MMFLOAT mm_asin(MMFLOAT v)
+{
+    if (v < -1.0 || v > 1.0) mm_error("Number out of bounds");
+    if (v == 1.0) return 3.14159265358979323846 / 2.0;
+    if (v == -1.0) return -3.14159265358979323846 / 2.0;
+    return asin(v);
+}
+
+MMFLOAT mm_acos(MMFLOAT v)
+{
+    if (v < -1.0 || v > 1.0) mm_error("Number out of bounds");
+    if (v == 1.0) return 0.0;
+    if (v == -1.0) return 3.14159265358979323846;
+    return acos(v);
+}
 
 /* MATH(ATAN3 y, x) - atan2 folded into the range 0 .. 2*pi */
 MMFLOAT mm_atan3(MMFLOAT y, MMFLOAT x)
@@ -519,9 +570,11 @@ MMFLOAT mm_rnd(void)
 
 /* ================= string functions ================================ */
 
+/* fun_asc returns 0 for the empty string - it does not error.  We used to
+   error, so a program that is legal on a PicoMite died here. */
 MMINTEGER mm_asc(const char *s)
 {
-    if (mm_slen(s) == 0) mm_error("Empty string in ASC()");
+    if (mm_slen(s) == 0) return 0;
     return (MMINTEGER)(unsigned char)s[1];
 }
 
@@ -1098,7 +1151,7 @@ char *mm_bin2str(int type, MMFLOAT fv, MMINTEGER iv, int big)
         default:          lo = 0;             hi = 0;            break;
         }
         if (hi != 0 && (iv < lo || iv > hi))
-            mm_error("BIN2STR$: value will not fit the requested type");
+            mm_error("Overflow");
         for (i = 0; i < n; i++) raw[i] = (unsigned char)((u >> (8 * i)) & 0xFF);
     }
     if (big) { for (i = 0; i < n / 2; i++)
@@ -1112,7 +1165,7 @@ MMFLOAT mm_str2bin_f(int type, const char *s, int big)
     unsigned char raw[8];
     int n = (type == MM_B_SINGLE) ? 4 : 8, i;
     float f32; double f64;
-    if (mm_slen(s) != n) mm_error("STR2BIN: wrong string length");
+    if (mm_slen(s) != n) mm_error("String length");
     memcpy(raw, s + 1, (size_t)n);
     if (big) { for (i = 0; i < n / 2; i++)
                    { unsigned char c = raw[i]; raw[i] = raw[n-1-i]; raw[n-1-i] = c; } }
@@ -1131,7 +1184,7 @@ MMINTEGER mm_str2bin_i(int type, const char *s, int big)
     case MM_B_INT16: case MM_B_UINT16: n = 2; break;
     default:                           n = 1; break;
     }
-    if (mm_slen(s) != n) mm_error("STR2BIN: wrong string length");
+    if (mm_slen(s) != n) mm_error("String length");
     memcpy(raw, s + 1, (size_t)n);
     if (big) { for (i = 0; i < n / 2; i++)
                    { unsigned char c = raw[i]; raw[i] = raw[n-1-i]; raw[n-1-i] = c; } }

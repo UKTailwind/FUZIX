@@ -947,7 +947,9 @@ class Conv(object):
                 op = self.nxt()[1]
                 r = self.e_unary()
                 if op == '/':
-                    v = ('((%s) / (%s))'
+                    # op_div checks the divisor first, so this cannot be a
+                    # bare C '/': that returned inf where MMBasic errors.
+                    v = ('mm_fdiv(%s, %s)'
                          % (self.as_flt(v), self.as_flt(r)), TY_F)
                 elif op == '\\':
                     v = ('mm_idiv(%s, %s)'
@@ -1358,9 +1360,11 @@ class Conv(object):
             return ('mm_sgn(%s)' % f(0), TY_I)
         if up in ('SQR', 'SIN', 'COS', 'TAN', 'ATN', 'LOG', 'EXP',
                   'ASIN', 'ACOS'):
-            cf = {'SQR': 'sqrt', 'SIN': 'sin', 'COS': 'cos', 'TAN': 'tan',
-                  'ATN': 'atan', 'LOG': 'log', 'EXP': 'exp',
-                  'ASIN': 'asin', 'ACOS': 'acos'}[up]
+            # SQR/LOG/ASIN/ACOS carry the firmware's domain checks, so they
+            # go through the runtime; the rest have none and stay direct.
+            cf = {'SQR': 'mm_sqr', 'SIN': 'sin', 'COS': 'cos', 'TAN': 'tan',
+                  'ATN': 'atan', 'LOG': 'mm_log', 'EXP': 'exp',
+                  'ASIN': 'mm_asin', 'ACOS': 'mm_acos'}[up]
             return ('%s(%s)' % (cf, f(0)), TY_F)
         if up == 'ATAN2':
             return ('atan2(%s, %s)' % (f(0), f(1)), TY_F)
