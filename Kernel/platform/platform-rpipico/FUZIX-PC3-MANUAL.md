@@ -1333,17 +1333,26 @@ load, which matters because most files arrive from a PC.
 
 ## The other editor: `vi`
 
-`mmedit` is for BASIC. For everything else — a shell script, a C file,
-`/etc/motd` — there is a `vi`:
+`mmedit` is for BASIC. For small text files — a shell script,
+`/etc/motd`, a short C file — there is a `vi`:
 
 ```
 # vi hello.c
 ```
 
-It is Levee, David Parsons' small vi clone, and it has the modal
-editing, the `:` commands and the usual movement keys. It has been on
-the card since the beginning under its own name, `levee`, which still
-works: `vi` and `levee` are two names for one file.
+It is Levee, David Parsons' small vi clone, with modal editing, the
+`:` commands and the usual movement keys. It has been on the card
+since the beginning under its own name, `levee`, which still works:
+`vi` and `levee` are two names for one file.
+
+**Its edit buffer is 4 KB.** Open something larger and it says
+`[overflow]` on the status line and holds the file **read-only** —
+you can look and move around, but `:w` answers "File is readonly"
+rather than writing a truncated file back. That is the safe behaviour
+of the two, but it does mean Levee is not the tool for a source file
+of any size. `mmedit` has no such limit and is perfectly good for
+plain text, so for anything bigger than a few hundred lines, use it
+instead.
 
 \newpage
 
