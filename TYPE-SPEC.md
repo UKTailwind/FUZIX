@@ -53,8 +53,11 @@ END TYPE
 * DIM v AS T = (v1, v2, ...): values flattened in member order, member
   arrays expanded, struct arrays element after element.  Nested-struct
   members in an initialiser are REJECTED by the firmware.  The firmware
-  does not length-check string values (overrun) — mmb2c truncates or
-  errors instead.
+  does not length-check string values in INITIALISERS (overrun) —
+  mmb2c errors instead.
+* Assigning an over-length string to a LENGTH-n member raises
+  "String too long" — PROVEN on a real PicoMite 2026-08-07 (an early
+  draft truncated; the board said otherwise).  mm_ssetm errors.
 * CONST of a struct: no.
 
 ## Member access (MMBasic.c:4556-4614, ResolveStructMember :3899-4194)

@@ -55,10 +55,11 @@ Print "copy: "; p.x; p.y; q.x; q.y
 Dim s As Seg = ("diag", 1, 2, 3, 4)
 Print "init: "; s.name; s.startX; s.startY; s.endX; s.endY
 
-' bounded member strings: LENGTH 9 truncates
+' bounded member strings: an exact fit is legal; one byte over raises
+' "String too long", exactly as the firmware does (board-proven)
 Dim t As Tags
 t.a = "alpha"
-t.b = "0123456789overflow"
+t.b = "012345678"
 Print "bound: "; t.a; " "; t.b; Len(t.b)
 
 ' arrays of structs, member arrays, chains
