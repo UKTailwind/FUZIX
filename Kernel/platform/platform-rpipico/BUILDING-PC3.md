@@ -49,11 +49,23 @@ some things may not), which freed 45 KB and let the pool grow from 312
 to 340.
 
 `linker_overrides/memory_ram.incl` carves the same split and **nothing
-checks that the two agree**, so change both or neither. The kernel
-currently uses 166,808 of its 176,128 bytes; when that runs out the
-answer is to move more code to flash rather than to take memory back
-from the pool. The failure is a loud `region RAM overflowed` at link
-time, which is what the split was designed to give.
+checks that the two agree**, so change both or neither.
+
+**The kernel's RAM is effectively full.** As of 2026-08-07 it uses
+175,792 of its 176,128 bytes — **336 bytes spare**, where a year's
+worth of these notes used to say 9,320. Assume any new kernel array,
+buffer or statically allocated struct will not fit, and that the next
+one to be added is the one that fails. The failure is at least loud: a
+`region RAM overflowed` at link time, which is exactly what the split
+was designed to produce. The answer when it happens is to move more
+code to flash — add functions to `default_text_excludes.incl` — rather
+than to take memory back from the process pool. To see where you
+stand:
+
+    arm-none-eabi-nm build/fuzix.elf | grep __bss_end__
+
+against the RAM length in `build/fuzix.elf.map`'s memory configuration
+(0x2b000).
 
 ## 3. The userland
 
@@ -62,10 +74,14 @@ reaches them only by rebuilding them:
 
     sh relink-userland.sh
 
-That covers `Applications/util`, `V7`, `MWC`, the games, `levee`,
-`bbcbasic`, `mmedit`, `cpp`, `CC`, and this platform's own `utils`. It
-deletes the objects first — a stale `.o` links against the old library
-and looks like a successful build.
+It rebuilds **the C library itself first, from clean**, and then
+`Applications/util`, `V7`, `MWC`, the games, `levee`, `bbcbasic`,
+`mmedit`, `cpp`, `CC`, and this platform's own `utils`. Objects are
+deleted before each — a stale `.o` links against the old library and
+looks like a successful build. The libc step is not optional and was
+not always there: without it the script relinked everything against a
+library it never rebuilt, which shipped a card whose `df` still had the
+old, too-small superblock buffer and brought the machine down.
 
 Then stage the compiler and the two image programs for installation:
 
@@ -85,17 +101,30 @@ giving `Images/rpipico/pc3-sd-cc.img` and a `.gz` beside it.
 `mkcard.sh` refuses to overwrite an existing image, so remove
 `pc3-sd.img` first if you mean to rebuild it.
 
-The layout, which the kernel and both scripts assume:
+The layout as shipped, for a 1 GB card:
 
-    p1  0x0C  LBA   2048  131072 sectors   64 MB  FAT, for interchange
-    p2  0x83  LBA 133120   65536 sectors   32 MB  Fuzix root  (hdb2)
-    p3  0x7F  LBA 198656    8192 sectors    4 MB  reserved
+    p1  0x0C  LBA    2048   262144 sectors  128 MB  FAT, for interchange
+    p2  0x83  LBA  264192  1638400 sectors  800 MB  Fuzix root  (hdb2)
+    p3  0x7F  LBA 1902592     8192 sectors    4 MB  reserved
 
-Partition 2 starting at sector 133120 is not decorative: both image
-scripts `dd` the filesystem to that sector, and the boot device name
-`hdb2` refers to it. The root filesystem itself is 64000 blocks, not
-65536 — block numbers are 16 bit and 65535 is also the "no such block"
-marker, so the filesystem stops clear of both.
+**`mkcard.sh` is the only place that layout is written down.** It takes
+`FAT_MB`, `ROOT_MB` and `RES_MB` (128 / 800 / 4 by default, 933 MiB in
+total, which fits any card sold as 1 GB), and everything downstream
+reads the geometry back out of the image's own MBR through
+`p2geom.sh` — `mksdimage.sh`, `mkccimage.sh` and `verifyimage.sh` all
+do. Nothing but `mkcard.sh` should ever contain a sector number.
+
+The root filesystem fills partition 2 exactly, and its inode count
+scales with it: `mksdimage.sh` allocates one inode per 64 blocks —
+25,600 for the 800 MB root — clamped to the format's own 65,535 limit,
+and `INODES=n` overrides it.
+
+It did not always fill the partition. Under the old format a block
+number was 16 bits, so 65535 was both the last possible block and the
+"no such block" marker, and the filesystem stopped clear of both at
+64000 blocks. FS32's marker is 0xFFFFFFFF and unreachable, so the
+margin is unnecessary; see `FS32-FORMAT.md`, which is the authority for
+the on-disk format.
 
 Partition 1 is left unformatted on purpose; the manual tells the user
 to format it as FAT/FAT32 from Windows.
@@ -116,11 +145,14 @@ Kernel: hold BOOT, click RESET, release BOOT, and copy `fuzix.uf2` to
 the drive that appears. From a running system, `sync; remount -n / ro;
 sync` then `picoctl flash` gets there without touching the board.
 
-Card: write `pc3-sd-cc.img` to an SD card of 128 MB or more with any
+Card: write `pc3-sd-cc.img` to an SD card of **1 GB or more** with any
 raw image tool. The whole card is overwritten.
 
-**Both together.** The card's binaries are statically linked, so a new
-kernel with an old card still runs the old C library.
+**Both together, and from v0.9 the machine insists.** The card's
+binaries are statically linked, so a new kernel with an old card runs
+the old C library — and since the FS32 change the two formats refuse
+each other outright: a v0.9 kernel will not mount a pre-v0.9 card and
+names it as the reason, rather than misreading it.
 
 ## 7. The release number
 
@@ -135,9 +167,27 @@ downloaded `pc3-v0.6` and booted it saw only `0.5` and concluded the
 wrong file had been published. **Bump `PC3_RELEASE` in `config.h` when
 tagging a release**; nothing checks that the tag and the constant agree.
 
-## 8. The manual
+## 8. The manuals
+
+There are two, and both are plain pandoc:
 
     pandoc FUZIX-PC3-MANUAL.md -o FUZIX-PC3-MANUAL.pdf
+    pandoc PC3-C-MANUAL.md     -o PC3-C-MANUAL.pdf
+
+**Appendix C of the user manual is half generated.** Its two tables —
+the statements and functions `mmbc` translates — come from the
+translator's own dispatch and `BUILTINS` tables, so they cannot drift
+from what the program actually does:
+
+    python3 ../../../../mmb2c/fcc/coverage.py            # the markdown
+    python3 ../../../../mmb2c/fcc/coverage.py --check    # just the counts
+
+Regenerate and paste when coverage changes. Everything *below* the
+tables — what is done and not done in graphics, pins and sound — is
+written by hand and the generator knows nothing about it, so replacing
+the whole appendix with the generator's output throws that away. Check
+the tables against `--check` (75 statements, 73 functions, 5 scalar and
+6 array `MATH` at v0.9) rather than pasting blind.
 
 ## What is not in this repository
 

@@ -55,6 +55,38 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
+## New in v0.9
+
+This release takes the 32 MB limit off the filesystem and makes
+compiled code substantially faster.
+
+* **A 2 TB disk format.** Block numbers are 32-bit and inodes 256
+  bytes, in place of the 16-bit block number that capped a filesystem
+  at 32 MB. The shipped card now has an 800 MB root rather than 32 MB,
+  a single file can reach 1 GB, and the format itself goes to 2 TB.
+  **Old cards and new kernels do not mix**: each refuses the other by
+  name rather than misreading it, so flash the kernel and write the
+  card in the same sitting.
+* **Compiled code is over 60% faster.** Dhrystone 2.1, compiled on the
+  machine, went from 102,842 to 166,834 per second — 44% of the same
+  benchmark cross-compiled by `gcc -O2` for this chip. Almost none of
+  that came from generating cleverer instructions; it came from
+  *keeping hot code native*. Library symbols are bound once at load
+  instead of being looked up on every call, the hottest local in a
+  function is held in a register, and compound assignment on 64-bit
+  and double values is inlined rather than calling out to the runtime
+  — that last one had been costing every MMBasic `FOR` loop a crossing
+  out of native code on every single iteration.
+* **The console survives a lost UART interrupt.** Three console wedges
+  during large serial transfers shared one state: the interrupt
+  enabled and pending, but never delivered. Why delivery is lost is
+  still not understood, but it is no longer fatal — the handler now
+  drains both directions and the 5 ms tick is a full polled rescue, so
+  the console degrades to polled instead of dying.
+* **`vi`.** The editor has always been on the card, but only under its
+  own name, `levee`. It now answers to `vi` as well: one file, two
+  names, no extra space.
+
 ## New in v0.8
 
 This release gives the machine music, pins, and MMBasic's own text.
@@ -218,27 +250,44 @@ Flashing does not touch the SD card.
 
 ## Writing the SD card
 
-Fuzix boots from a ready-made card image, `pc3-sd.img` (about
-101 MB). Write it to a card of 128 MB or larger with any raw-image
-tool — Raspberry Pi Imager ("use custom image"), Win32DiskImager,
-balenaEtcher, or `dd` on Linux/macOS. **The whole card is
-overwritten.**
+Fuzix boots from a ready-made card image, `pc3-sd.img` (978 MB, about
+4.9 MB compressed for download). Write it to a card of **1 GB or
+larger** with any raw-image tool — Raspberry Pi Imager ("use custom
+image"), Win32DiskImager, balenaEtcher, or `dd` on Linux/macOS. **The
+whole card is overwritten.**
 
 The image lays the card out as three partitions:
 
-| Partition | Size  | Type       | Purpose                                  |
-|-----------|-------|------------|------------------------------------------|
-| 1         | 64 MB | FAT        | File interchange with Windows/macOS/Linux |
-| 2         | 32 MB | Fuzix root | The Unix filesystem (boot device `hdb2`) |
-| 3         | 4 MB  | 0x7F       | Reserved                                 |
+| Partition | Size   | Type       | Purpose                                  |
+|-----------|--------|------------|------------------------------------------|
+| 1         | 128 MB | FAT        | File interchange with Windows/macOS/Linux |
+| 2         | 800 MB | Fuzix root | The Unix filesystem (boot device `hdb2`) |
+| 3         | 4 MB   | 0x7F       | Reserved                                 |
 
-The root filesystem is 64000 blocks of 512 bytes. That is a little
-short of the 65536-sector partition on purpose: block numbers are
-16-bit, so 65535 is the ceiling, and the "no such block" marker is
-65535 as well — leaving room below both keeps a stray value
-recognisable as wrong rather than pointing at a real sector. From
-v0.5 the filesystem is built from source by `mksdimage.sh`, so the
-card can be reproduced rather than merely copied.
+The root filesystem is 1,638,400 blocks of 512 bytes with 25,600
+inodes, and it fills its partition exactly.
+
+It did not always. Before v0.9 a block number was 16 bits, so 65535
+was at once the highest block a filesystem could have and the marker
+meaning "no such block" — and the filesystem was deliberately held to
+64000 blocks, short of its own partition, so that a stray value could
+be recognised as wrong instead of pointing at a real sector. That is
+what limited the root to 32 MB. From v0.9 the format is **FS32**:
+32-bit block numbers and 256-byte inodes, with a "no such block"
+marker that cannot be a real block at all. The margin is gone, and
+with it the ceiling — a filesystem can now be up to 2 TB and a single
+file up to 1 GB.
+
+**A v0.9 kernel and a v0.9 card go together.** The two formats are
+not interchangeable and neither pretends otherwise: a v0.9 kernel
+refuses an older card by name at the `bootdev:` prompt, and an older
+kernel refuses a v0.9 one. Flash `fuzix.uf2` and write the card in
+the same sitting.
+
+Since v0.5 the filesystem has been built from source by
+`mksdimage.sh`, so the card can be reproduced rather than merely
+copied. `mkcard.sh` decides the layout, and its `FAT_MB` and `ROOT_MB`
+settings are the only place the partition sizes are written down.
 
 Partition 1 ships unformatted: format it as **FAT or FAT32 (not
 exFAT)** in Windows before first use — see section 6. Partition 2 is
@@ -642,13 +691,23 @@ runs the native code and keeps the interpreter for whatever did not
 translate. Nothing needs to be asked for — it is simply what the
 compiler does.
 
-Dhrystone 2.1, compiled on the machine, runs at about **90,000
-Dhrystones/second**, which is a quarter of the same benchmark
-cross-compiled by `gcc -O2` for the same chip (379,000). Individual
-loops do better: a sieve, a shell sort and an xorshift generator all
-land within a factor of two or three of gcc, and double-precision
-arithmetic uses the RP2350's hardware co-processor through the same
-routines the rest of the system uses.
+Dhrystone 2.1, compiled on the machine, runs at about **167,000
+Dhrystones/second** — 44% of the same benchmark cross-compiled by
+`gcc -O2` for the same chip (379,000). Individual loops do better: a
+sieve, a shell sort and an xorshift generator all land within a factor
+of two or three of gcc, and double-precision arithmetic uses the
+RP2350's hardware co-processor through the same routines the rest of
+the system uses.
+
+That figure has moved a long way and is still moving: the same
+benchmark ran at 3,808/second on the original pure interpreter and
+90,000 as recently as v0.8. Most of the recent ground came from
+keeping the hot code in native form rather than from generating better
+instructions — binding every library symbol once at load, caching the
+hottest local in a register, and inlining the compound assignments
+(`i += n`) on the 64-bit and double types that every MMBasic loop
+counter uses. Each of those had been quietly leaving native code and
+crossing back into the C runtime once per iteration.
 
 A program can be forced to interpret with `BCRUN_BYTECODE=1` in the
 environment, which is how the native code is checked against the
@@ -1263,6 +1322,20 @@ The editor works over the serial port as well as on the HDMI console —
 it drives a VT100, and the console emits VT100 function key sequences.
 Files with CRLF line endings are accepted; the CRs are stripped on
 load, which matters because most files arrive from a PC.
+
+## The other editor: `vi`
+
+`mmedit` is for BASIC. For everything else — a shell script, a C file,
+`/etc/motd` — there is a `vi`:
+
+```
+# vi hello.c
+```
+
+It is Levee, David Parsons' small vi clone, and it has the modal
+editing, the `:` commands and the usual movement keys. It has been on
+the card since the beginning under its own name, `levee`, which still
+works: `vi` and `levee` are two names for one file.
 
 \newpage
 

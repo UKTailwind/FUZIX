@@ -507,4 +507,5 @@ to suspect; `BCRUN_BYTECODE=1` forces bytecode so you can compare.
         utils/                the worked examples above
         PC3-GFX-DESIGN.md     why the graphics interface is shaped as it is
         PC3-FLASH-PLAN.md     what runs from flash and what may not
+        FS32-FORMAT.md        the on-disk filesystem format, and its authority
         BUILDING-PC3.md       building the kernel and the card
