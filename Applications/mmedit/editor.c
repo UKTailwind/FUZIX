@@ -853,7 +853,13 @@ void GetInputString(unsigned char *prompt)
     PrintString((char *)prompt);
     MX470Cursor(0, (VResEdit / gui_font_height) * gui_font_height - gui_font_height);
     MX470PutS((char *)prompt, gui_fcolour, gui_bcolour);
-    for (i = 0; i < VWidth - strlen((char *)prompt); i++)
+    /* (int)strlen: MMBasic writes VWidth - strlen(prompt), which is int
+       minus size_t and so unsigned - a prompt longer than the screen is
+       wide underflows to a huge count and the editor sits there printing
+       spaces.  It cannot happen at 80 columns, where every prompt fits,
+       but a narrow terminal would hang the editor rather than truncate
+       the padding. */
+    for (i = 0; i < VWidth - (int)strlen((char *)prompt); i++)
     {
         SSputchar(' ', 1);
         MX470PutC(' ');
@@ -865,7 +871,15 @@ void GetInputString(unsigned char *prompt)
     while (1)
     { // get the input
         unsigned char ch = MMgetchar();
-        if (ch == '\r')
+        /* Both spellings of Enter.  MMBasic only needed CR because its
+           console gave it one; here the two consoles disagree - a serial
+           terminal sends CR, and the USB keyboard's map sends LF (10,
+           keyboard_maps.h) - so this prompt accepted Enter from TeraTerm
+           and ignored it from the keyboard on the machine's own screen.
+           F3 was where it showed: the prompt appeared, the search string
+           typed and echoed, and Enter did nothing while ESC still
+           cancelled.  The editor's main loop has always taken both. */
+        if (ch == '\r' || ch == '\n')
             break;
         if (ch == 0xb3 || ch == F3 || ch == ESC)
         {
