@@ -2307,6 +2307,15 @@ static void load(const char *path)
 			need = (unsigned long)atoi(e) << 10;
 		if (need > MEMSIZE)
 			need = MEMSIZE;
+		/* Round to 8: run() puts the initial stack at MEMTOP - 4,
+		   so an unrounded size misaligns EVERY frame in the
+		   program.  The M33 shrugs at unaligned words, so it all
+		   quietly works until native runtime code does an STRD
+		   through a by-ref frame local - mm_fontinfo, first
+		   reached by TEXT - and that is an UNALIGNED UsageFault
+		   escalated to a HardFault, which is a panic here.  The
+		   static mem[] build never sees this: 48K is 0 mod 8. */
+		need = (need + 7) & ~7UL;
 		mem = malloc(need + 8);
 		if (mem == NULL) {
 			fprintf(stderr, "bcrun: no room for a %lu byte "
