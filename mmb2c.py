@@ -96,6 +96,7 @@ BUILTINS = {
     'BIN2STR$': (2, 3), 'STR2BIN': (2, 3), 'RGB': (1, 3), 'MATH': (1, 1),
     'PIXEL': (2, 2), 'MAP': (1, 1), 'PIN': (1, 1),
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0),
+    'MM.ERRNO': (0, 0), 'MM.ERRMSG$': (0, 0),
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
     'LINSTR': (2, 3), 'LCOMPARE': (2, 2), 'LINPUT': (3, 3),
@@ -503,6 +504,9 @@ class Conv(object):
         self.uses_mappal = False
         self.uses_gpio = False
         self.uses_play = False
+        # set in the scan pass, so statements BEFORE the ON ERROR line are
+        # guarded too - the armed window is a run-time thing
+        self.uses_onerror = False
         # depth of single-line IF bodies being emitted: END SUB means
         # "return now" in there, not "the routine ends here"
         self.inline = 0
@@ -605,6 +609,25 @@ class Conv(object):
     def newtmp(self, pfx):
         self.tmpn += 1
         return '__%s%d' % (pfx, self.tmpn)
+
+    def store(self, target, val, ty):
+        """A numeric assignment, guarded when the program uses ON ERROR.
+
+        The interpreter never performs the assignment whose expression
+        failed - it jumps away before the store.  Here the expression has
+        already run, so the value goes to a temporary first and is
+        committed only if the statement survived.  Testing the flag before
+        evaluating would be too early: the flag is what evaluating sets.
+
+        String assignment needs none of this: it goes through mm_sset,
+        which checks for itself."""
+        ctype = 'MMINTEGER' if ty == TY_I else 'MMFLOAT'
+        if not self.uses_onerror:
+            self.emit('%s = %s;' % (target, val))
+            return
+        tmp = self.newtmp('cv')
+        self.emit('{ %s %s = %s;' % (ctype, tmp, val))
+        self.emit('  if (!__mm_e[0]) %s = %s; }' % (target, tmp))
 
     # ==================================================================
     #  symbol lookup / creation - this is where implied globals appear
@@ -1468,6 +1491,10 @@ class Conv(object):
             return ('mm_hres()', TY_I)
         if up == 'MM.VRES':
             return ('mm_vres()', TY_I)
+        if up == 'MM.ERRNO':
+            return ('mm_errno()', TY_I)
+        if up == 'MM.ERRMSG$':
+            return ('mm_errmsg()', TY_S)
         if up == 'PIXEL':
             # PIXEL(x, y) reads a pixel back AS RGB888 - the kernel
             # primitive maps the mode's own colour numbering back out,
@@ -2516,6 +2543,28 @@ class Conv(object):
                     and self.out is out_at_entry and failed is None:
                 out_at_entry.insert(where,
                                     '    ' * ind + 'mm_release(__mark);')
+            # Clear the poison and count the statement, exactly where the
+            # interpreter does it: AFTER the statement (MMBasic.c:1867,
+            # which is where SKIP n's "+1" goes).  It has to be after and
+            # not before, or a statement that calls a SUB would have been
+            # counted before the SUB's own statements ran, and the count
+            # inside would be one short of the interpreter's.
+            #
+            # A statement that opened or closed a block is the exception:
+            # by now it has emitted a brace, and the guard would land
+            # inside it.  Those go in front instead - for an opener that
+            # is the same thing (it runs once, either side), and for a
+            # closer it lands at the end of the block, which is where the
+            # closing keyword executes anyway.
+            if self.mode == 'emit' and self.uses_onerror \
+                    and self.out is out_at_entry and failed is None:
+                guard = ('    ' * ind
+                         + 'if (__mm_e[1]) { __mm_e[0] = 0;'
+                           ' if (__mm_e[1] > 0) __mm_e[1]--; }')
+                if self.blocks == blocks_at_entry and len(self.out) > where:
+                    out_at_entry.append(guard)
+                else:
+                    out_at_entry.insert(where, guard)
             self.tmp_used = outer or self.tmp_used
         if failed is not None:
             self.skip_out(where, out_at_entry, ind, blocks_at_entry,
@@ -3216,13 +3265,7 @@ class Conv(object):
             return
         if up == 'ON' and self.is_kw('ERROR', 1):
             self.i += 2
-            w = self.peek()
-            kw = w[2] if (w is not None and w[0] == T_ID) else ''
-            self.skip_statement()
-            if kw in ('IGNORE', 'SKIP', 'RESTART'):
-                self.err("ON ERROR %s needs soft error handling, which is "
-                         "not in yet; only ABORT and CLEAR are translated"
-                         % kw)
+            self.do_on_error()
             return
         if up == 'ON' and self.peek(1) is not None \
                 and not self.is_kw('ERROR', 1) and not self.is_kw('KEY', 1) \
@@ -3688,6 +3731,29 @@ class Conv(object):
             return '%s[0] = 0; %s[1] = 0;' % (sym.acc, sym.acc)
         return '%s = 0;' % sym.acc
 
+    # -- ON ERROR ------------------------------------------------------------
+    def do_on_error(self):
+        """ABORT | CLEAR | IGNORE | SKIP [n]  (cmd_on, Commands.c:8299).
+
+        SKIP with no count is 2 and SKIP n is n+1, because the ON ERROR
+        statement decrements the counter itself at its own end - so the
+        count reaches the next statement intact."""
+        w = self.peek()
+        kw = w[2] if (w is not None and w[0] == T_ID) else ''
+        if kw == 'RESTART':
+            self.err("ON ERROR RESTART reboots the machine; a compiled "
+                     "program has no equivalent")
+        if kw not in ('ABORT', 'CLEAR', 'IGNORE', 'SKIP'):
+            self.err("ON ERROR ABORT|CLEAR|IGNORE|SKIP [n]")
+        self.i += 1
+        mode = {'ABORT': 0, 'CLEAR': 1, 'IGNORE': 2, 'SKIP': 3}[kw]
+        self.uses_onerror = True
+        if kw == 'SKIP' and self.peek() is not None and not self.is_op(':'):
+            n = self.as_int(self.expr())
+        else:
+            n = '1'
+        self.emit('mm_on_error(%d, %s);' % (mode, n))
+
     # -- ON nbr GOTO ---------------------------------------------------------
     def do_on_goto(self):
         v = self.expr()
@@ -3990,9 +4056,9 @@ class Conv(object):
                     self.err("function '%s' returns a string" % canon)
                 self.emit('mm_sset(__ret, %s);' % v[0])
             elif ty == TY_I:
-                self.emit('__ret = %s;' % self.as_int(v))
+                self.store('__ret', self.as_int(v), TY_I)
             else:
-                self.emit('__ret = %s;' % self.as_flt(v))
+                self.store('__ret', self.as_flt(v), TY_F)
             return
 
         sh = self.struct_head(t[1])
@@ -4039,9 +4105,9 @@ class Conv(object):
                 self.err("cannot assign a number to string '%s'" % canon)
             self.emit('mm_sset(%s, %s);' % (target, v[0]))
         elif s.ty == TY_I:
-            self.emit('%s = %s;' % (target, self.as_int(v)))
+            self.store(target, self.as_int(v), TY_I)
         else:
-            self.emit('%s = %s;' % (target, self.as_flt(v)))
+            self.store(target, self.as_flt(v), TY_F)
 
     def assign_member(self, res):
         """... = expr  where the target is a structure member."""
@@ -4211,6 +4277,21 @@ class Conv(object):
             self.err("a string cannot be used as a condition")
         return '(%s) != 0' % v[0]
 
+    def poisoned_cond(self, c, enter):
+        """What a block header does when its own condition raised.
+
+        The interpreter resumes at the textually next statement, so the
+        answer depends on the form the translator is looking at, which is
+        the one thing it knows and the interpreter does not have to: for a
+        multi-line IF or a loop the next statement is inside the body, so
+        it is entered; for a single-line IF the next statement is the next
+        line, so the whole statement is skipped."""
+        if not self.uses_onerror:
+            return c
+        if enter:
+            return '__mm_e[0] ? 1 : (%s)' % c
+        return '!__mm_e[0] && (%s)' % c
+
     def do_if(self):
         c = self.cond()
         if not self.accept_kw('THEN'):
@@ -4219,13 +4300,17 @@ class Conv(object):
             else:
                 self.err("IF without THEN")
         if self.stmt_end():
-            # block IF
-            self.emit('if (%s) {' % c)
+            # block IF.  A condition that failed leaves the interpreter
+            # resuming at the textually next statement - which for a
+            # MULTI-LINE IF is the first statement of the THEN body.  So
+            # the poisoned condition is TRUE here, and false below.
+            self.emit('if (%s) {' % self.poisoned_cond(c, True))
             self.indent += 1
             self.blocks.append(['if', self.lineno])
             return
-        # single line IF
-        self.emit('if (%s) {' % c)
+        # single line IF: the next statement is the next LINE, so a failed
+        # condition skips the whole thing
+        self.emit('if (%s) {' % self.poisoned_cond(c, False))
         self.indent += 1
         if self.is_kw('GOTO'):
             self.i += 1
@@ -4585,6 +4670,15 @@ class Conv(object):
                 self.emit('__ret[0] = 0; __ret[1] = 0;')
             else:
                 self.emit('%s __ret = 0;' % CTYPE[r.ty])
+        if self.uses_onerror:
+            # Entered with an error already recorded - which means an
+            # argument expression raised - so do nothing and go back.  The
+            # interpreter never gets here at all: it jumps away before the
+            # call.  Returning at once is the same thing observably, and
+            # it spends none of the skip count on statements in here.
+            ret = ' return __ret;' if r.is_func else ' return;'
+            self.emit('if (__mm_e[0]) { %s%s }'
+                      % (self.routine_exit(), ret))
         self.blocks.append(['routine', self.lineno])
 
     def emit_local_decl(self, s):
@@ -4953,6 +5047,14 @@ class Conv(object):
             for kind, f, i, sv in self.data:
                 wr('    %s,\n' % sv)
             wr('};\n')
+        if self.uses_onerror:
+            wr('\n/* ---- ON ERROR state, read by the guards below ---- *\n')
+            wr(' * [0] is the poison: an error has been recorded and the\n')
+            wr(' * rest of this statement is skipped.  [1] is the skip\n')
+            wr(' * count, MMBasic\'s OptionErrorSkip: 0 abort, -1 ignore.\n')
+            wr(' * It lives here rather than in the runtime so a guard is\n')
+            wr(' * a load and a branch instead of a library call. */\n')
+            wr('static int __mm_e[2];\n')
         wr('\n/* ---- forward declarations ---- */\n')
         if self.uses_clear:
             wr('static void __mmb_clear(void);\n')
@@ -4976,6 +5078,8 @@ class Conv(object):
         wr('\n/* ---- main program ---- */\n')
         wr('int main(void)\n{\n')
         wr('    unsigned __mark = mm_mark(); (void)__mark;\n')
+        if self.uses_onerror:
+            wr('    mm_err_bind(__mm_e);\n')
         if getattr(self, 'heap_used', False):
             wr('    H = mm_heap(sizeof *H);   /* arrays and strings */\n')
         if self.data:

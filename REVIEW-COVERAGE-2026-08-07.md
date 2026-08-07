@@ -512,6 +512,48 @@ Section 7.
 values only) and is a side-by-side program: it must print the same
 lines on a real PicoMite.
 
+**Phase A done 2026-08-07** (mmb2c `51e15e5`, FUZIX `44012bb0e`): all of
+the above in both translators, cgate 0, make check 21 ok, xcheck 4896/0,
+fcctests 21/21, qemutests 22/22.
+
+### Phase B — the machinery
+
+Done the same day.  `mm_error` records and returns while armed; the
+three guards go in only when the program contains ON ERROR, and a
+program that does not is **byte-identical to what it was before** (t7,
+solar_eclipse, circle, box and structtest all diff clean against the
+previous translator), so nothing already measured moves.
+
+The part that was not obvious from the design: **every raise site in the
+runtime had been written assuming `mm_error` never comes back**.  87 of
+them, and the ones that mattered were not the arithmetic checks but the
+ones that would carry on using the value they had just rejected —
+`mm_byte` indexing a string with the index it refused, `mm_open` seeking
+the NULL it had failed to open, `mm_tmp` handing out a pool slot past
+the end, `mm_ch` returning a channel that is not open to `fputc`.  They
+all leave through `MM_RAISE`/`MM_RAISEV` now, and `mm_ch`/`mm_ls_file`
+return NULL with every caller checking.  Out of memory is the one thing
+that stays fatal whatever ON ERROR says (`mm_fatal`): there is no
+benign array base to return, and a NULL one would fault somewhere else
+entirely.
+
+Side effects are stopped at the funnels — `mm_putc`, `mm_ssetn`,
+`mm_ssetm`, `mm_outc` — so a PRINT that fails half way prints what it
+had printed and no more, exactly as the interpreter's jump does.
+
+`tests/onerror.bas` is in all five gates and is the side-by-side
+program for this section.  It covers: the assignment whose expression
+failed leaving the variable alone, SKIP lasting exactly one statement,
+SKIP n covering n, IGNORE persisting until CLEAR, MM.ERRNO/MM.ERRMSG$
+values, the rest of a failed PRINT being skipped, an error inside a SUB
+resuming at the SUB's next statement while the caller carries on, and a
+FUNCTION whose result expression failed.
+
+Known and documented divergences: a statement that jumps away (GOTO,
+EXIT) does not decrement the skip count, and declarations that emit no
+code are not counted.  Both only matter for SKIP n with n > 1 spanning
+them.
+
 ## Section 5 — PLAY WAV / FLAC / MODFILE, PLAY PAUSE / RESUME
 
 Clone the playmp3 pattern: one cross-compiled player per format

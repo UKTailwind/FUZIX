@@ -46,6 +46,7 @@ static const struct builtin builtins[] = {
     { "MAP", 1, 1 },
     { "PIN", 1, 1 },
     { "MM.HRES", 0, 0 }, { "MM.VRES", 0, 0 },
+    { "MM.ERRNO", 0, 0 }, { "MM.ERRMSG$", 0, 0 },
     { "DIR$", 0, 2 },
     { "LLEN", 1, 1 }, { "LGETSTR$", 3, 3 }, { "LGETBYTE", 2, 2 },
     { "LINSTR", 2, 3 }, { "LCOMPARE", 2, 2 }, { "LINPUT", 3, 3 },

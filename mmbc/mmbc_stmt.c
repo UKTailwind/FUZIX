@@ -26,6 +26,7 @@ static void do_inc(void);
 static void do_cat(void);
 static void do_erase(void);
 static void do_on_goto(void);
+static void do_on_error(void);
 static void do_array_cmd(void);
 static void do_open(void);
 static void do_close(void);
@@ -39,6 +40,7 @@ static void do_callstmt(void);
 static void do_mid_assign(void);
 static const char *lvalue_from_here(void);
 static void do_assign(void);
+static void store(const char *target, const char *val, int ty);
 static char *cond(void);
 static void do_if(void);
 static void inline_statements(void);
@@ -941,17 +943,8 @@ void statement_inner(void)
         return;
     }
     if (strcmp(up, "ON") == 0 && is_kw("ERROR", 1)) {
-        struct tok *w;
-        const char *kw;
         cv.i += 2;
-        w = peek(0);
-        kw = (w != NULL && w->kind == T_ID) ? w->up : "";
-        skip_statement();
-        if (strcmp(kw, "IGNORE") == 0 || strcmp(kw, "SKIP") == 0
-            || strcmp(kw, "RESTART") == 0)
-            cv_err("ON ERROR %s needs soft error handling, which is "
-                   "not in yet; only ABORT and CLEAR are translated",
-                   kw);
+        do_on_error();
         return;
     }
     if (strcmp(up, "ON") == 0 && peek(1) != NULL
@@ -1577,6 +1570,41 @@ char *zero_of(struct sym *sym)
     return sfmt("%s = 0;", sym->acc);
 }
 
+/* -- ON ERROR --------------------------------------------------------- */
+
+/* ABORT | CLEAR | IGNORE | SKIP [n]  (cmd_on, Commands.c:8299).  SKIP with
+ * no count is 2 and SKIP n is n+1, because the ON ERROR statement
+ * decrements the counter itself at its own end - so the count reaches the
+ * next statement intact. */
+static void do_on_error(void)
+{
+    struct tok *w = peek(0);
+    const char *kw = (w != NULL && w->kind == T_ID) ? w->up : "";
+    const char *n = "1";
+    int mode;
+
+    if (strcmp(kw, "RESTART") == 0)
+        cv_err("ON ERROR RESTART reboots the machine; a compiled "
+               "program has no equivalent");
+    if (strcmp(kw, "ABORT") == 0)
+        mode = 0;
+    else if (strcmp(kw, "CLEAR") == 0)
+        mode = 1;
+    else if (strcmp(kw, "IGNORE") == 0)
+        mode = 2;
+    else if (strcmp(kw, "SKIP") == 0)
+        mode = 3;
+    else {
+        cv_err("ON ERROR ABORT|CLEAR|IGNORE|SKIP [n]");
+        return;
+    }
+    cv.i += 1;
+    cv.uses_onerror = 1;
+    if (mode == 3 && peek(0) != NULL && !is_op(":", 0))
+        n = as_int(expr());
+    emit(sfmt("mm_on_error(%d, %s);", mode, n));
+}
+
 /* -- ON nbr GOTO ----------------------------------------------------- */
 
 #define MAXTARGETS 128
@@ -2008,9 +2036,9 @@ static void do_assign(void)
                 cv_err("function '%s' returns a string", canon);
             emit(sfmt("mm_sset(__ret, %s);", v.code));
         } else if (ty == TY_I) {
-            emit(sfmt("__ret = %s;", as_int(v)));
+            store("__ret", as_int(v), TY_I);
         } else {
-            emit(sfmt("__ret = %s;", as_flt(v)));
+            store("__ret", as_flt(v), TY_F);
         }
         return;
     }
@@ -2062,10 +2090,51 @@ static void do_assign(void)
             cv_err("cannot assign a number to string '%s'", canon);
         emit(sfmt("mm_sset(%s, %s);", target, v.code));
     } else if (s->ty == TY_I) {
-        emit(sfmt("%s = %s;", target, as_int(v)));
+        store(target, as_int(v), TY_I);
     } else {
-        emit(sfmt("%s = %s;", target, as_flt(v)));
+        store(target, as_flt(v), TY_F);
     }
+}
+
+/* A numeric assignment, guarded when the program uses ON ERROR.
+ *
+ * The interpreter never performs the assignment whose expression failed -
+ * it jumps away before the store.  Here the expression has already run,
+ * so the value goes to a temporary first and is committed only if the
+ * statement survived.  Testing the flag before evaluating would be too
+ * early: the flag is what evaluating sets.
+ *
+ * String assignment needs none of this: it goes through mm_sset, which
+ * checks for itself. */
+static void store(const char *target, const char *val, int ty)
+{
+    const char *ctype = (ty == TY_I) ? "MMINTEGER" : "MMFLOAT";
+    char *tmp;
+
+    if (!cv.uses_onerror) {
+        emit(sfmt("%s = %s;", target, val));
+        return;
+    }
+    tmp = newtmp("cv");
+    emit(sfmt("{ %s %s = %s;", ctype, tmp, val));
+    emit(sfmt("  if (!__mm_e[0]) %s = %s; }", target, tmp));
+}
+
+/* What a block header does when its own condition raised.
+ *
+ * The interpreter resumes at the textually next statement, so the answer
+ * depends on the form the translator is looking at, which is the one
+ * thing it knows and the interpreter does not have to: for a multi-line
+ * IF or a loop the next statement is inside the body, so it is entered;
+ * for a single-line IF the next statement is the next line, so the whole
+ * statement is skipped. */
+static char *poisoned_cond(const char *c, int enter)
+{
+    if (!cv.uses_onerror)
+        return (char *)c;
+    if (enter)
+        return sfmt("__mm_e[0] ? 1 : (%s)", c);
+    return sfmt("!__mm_e[0] && (%s)", c);
 }
 
 /* -- IF -------------------------------------------------------------- */
@@ -2091,14 +2160,18 @@ static void do_if(void)
         }
     }
     if (stmt_end()) {
-        /* block IF */
-        emit(sfmt("if (%s) {", c));
+        /* block IF.  A condition that failed leaves the interpreter
+           resuming at the textually next statement - which for a
+           MULTI-LINE IF is the first statement of the THEN body.  So the
+           poisoned condition is TRUE here, and false below. */
+        emit(sfmt("if (%s) {", poisoned_cond(c, 1)));
         cv.indent++;
         push_block("if", NULL, 0);
         return;
     }
-    /* single line IF */
-    emit(sfmt("if (%s) {", c));
+    /* single line IF: the next statement is the next LINE, so a failed
+       condition skips the whole thing */
+    emit(sfmt("if (%s) {", poisoned_cond(c, 0)));
     cv.indent++;
     if (is_kw("GOTO", 0)) {
         cv.i++;
@@ -2627,6 +2700,14 @@ static void open_routine(int is_func)
         else
             emit(sfmt("%s __ret = 0;", ctype_of(r->ty)));
     }
+    if (cv.uses_onerror)
+        /* Entered with an error already recorded - which means an
+           argument expression raised - so do nothing and go back.  The
+           interpreter never gets here at all: it jumps away before the
+           call.  Returning at once is the same thing observably, and it
+           spends none of the skip count on statements in here. */
+        emit(sfmt("if (__mm_e[0]) { %s%s }", routine_exit(),
+                  r->is_func ? " return __ret;" : " return;"));
     push_block("routine", NULL, 0);
 }
 

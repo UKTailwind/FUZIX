@@ -32,6 +32,20 @@
 #include <unistd.h>
 #endif
 
+/* ================= error state ===================================== *
+ *
+ * Declared here because the output and store paths below test it: with
+ * ON ERROR SKIP armed, mm_error RETURNS, and everything the rest of the
+ * failed statement would have done has to not happen.  See mm_error.
+ */
+static int *mm_est;                     /* [0] poison, [1] skip count   */
+
+/* "an error has been recorded and this statement is being abandoned" */
+static int mm_poisoned(void)
+{
+    return mm_est != NULL && mm_est[0] != 0;
+}
+
 /* ================= scratch buffers ================================= */
 
 #ifdef MM_HOSTED
@@ -51,7 +65,7 @@ char *mm_tmp(void)
 {
     char *p;
     if (mm_pool_top >= MM_TMPN)
-        mm_error("String expression too complex - raise MM_TMPN");
+        MM_RAISEV("String expression too complex - raise MM_TMPN", mm_ssink());
     p = mm_pool[mm_pool_top++];
     p[0] = 0;
     p[1] = 0;
@@ -99,7 +113,7 @@ void mm_release(unsigned mark)
 MMFLOAT *mm_byref_f(MMFLOAT v)
 {
     if (mm_byref_top >= MM_BYREFN)
-        mm_error("Expression too complex - raise MM_BYREFN");
+        MM_RAISEV("Expression too complex - raise MM_BYREFN", mm_fsink());
     mm_byref_pool[mm_byref_top].f = v;
     return &mm_byref_pool[mm_byref_top++].f;
 }
@@ -107,7 +121,7 @@ MMFLOAT *mm_byref_f(MMFLOAT v)
 MMINTEGER *mm_byref_i(MMINTEGER v)
 {
     if (mm_byref_top >= MM_BYREFN)
-        mm_error("Expression too complex - raise MM_BYREFN");
+        MM_RAISEV("Expression too complex - raise MM_BYREFN", mm_isink());
     mm_byref_pool[mm_byref_top].i = v;
     return &mm_byref_pool[mm_byref_top++].i;
 }
@@ -116,6 +130,7 @@ MMINTEGER *mm_byref_i(MMINTEGER v)
 
 void mm_ssetn(char *d, const char *raw, int n)
 {
+    if (mm_poisoned()) return;
     if (n < 0) n = 0;
     if (n > MM_STRLEN) n = MM_STRLEN;
     d[0] = (char)(unsigned char)n;
@@ -146,12 +161,13 @@ void mm_ssetc(char *d, const char *cstr)
  */
 void mm_ssetm(char *d, int cap, const char *s)
 {
+    if (mm_poisoned()) return;
     int n = mm_slen(s);
     if (cap < 0) cap = 0;
     if (cap > MM_STRLEN) cap = MM_STRLEN;
     /* the firmware raises this, it does not truncate - proven on a
        real PicoMite, which errored where an early draft trimmed */
-    if (n > cap) mm_error("String too long");
+    if (n > cap) MM_RAISE("String too long");
     d[0] = (char)(unsigned char)n;
     if (n) memmove(d + 1, s + 1, (size_t)n);
     if (n < cap) d[n + 1] = 0;
@@ -172,7 +188,7 @@ char *mm_scat(const char *a, const char *b)
     n = la + lb;
     /* op_add raises rather than trimming (Operators.c:131) - the same
        mistake mm_ssetm made, and the board caught that one too. */
-    if (n > MM_STRLEN) mm_error("String too long");
+    if (n > MM_STRLEN) MM_RAISEV("String too long", t);
     if (la) memcpy(t + 1, a + 1, (size_t)la);
     if (lb > 0) memcpy(t + 1 + la, b + 1, (size_t)lb);
     t[0] = (char)(unsigned char)n;
@@ -344,6 +360,7 @@ static int mm_gn;                       /* characters collected so far */
 
 void mm_putc(int c)
 {
+    if (mm_poisoned()) return;
     if (mm_gputc(c))
         return;
     putchar(c);
@@ -450,13 +467,13 @@ MMINTEGER mm_toint(MMFLOAT v)
    makes the text a value a program can read and compare. */
 MMINTEGER mm_idiv(MMINTEGER a, MMINTEGER b)
 {
-    if (b == 0) mm_error("Divide by zero");
+    if (b == 0) MM_RAISEV("Divide by zero", 0);
     return a / b;
 }
 
 MMINTEGER mm_mod(MMINTEGER a, MMINTEGER b)
 {
-    if (b == 0) mm_error("Divide by zero");
+    if (b == 0) MM_RAISEV("Divide by zero", 0);
     return a % b;
 }
 
@@ -468,7 +485,7 @@ MMINTEGER mm_mod(MMINTEGER a, MMINTEGER b)
    first; that is also what makes ON ERROR SKIP possible at all. */
 MMFLOAT mm_fdiv(MMFLOAT a, MMFLOAT b)
 {
-    if (b == 0.0) mm_error("Divide by zero");
+    if (b == 0.0) MM_RAISEV("Divide by zero", 0.0);
     return a / b;
 }
 
@@ -479,14 +496,14 @@ MMFLOAT mm_pow(MMFLOAT a, MMFLOAT b) { return pow(a, b); }
    a PicoMite - the divergence class that outranks a missing feature. */
 MMFLOAT mm_sqr(MMFLOAT v)
 {
-    if (v < 0.0) mm_error("Negative argument");
+    if (v < 0.0) MM_RAISEV("Negative argument", 0.0);
     return sqrt(v);
 }
 
 MMFLOAT mm_log(MMFLOAT v)
 {
-    if (v == 0.0) mm_error("Divide by zero");
-    if (v < 0.0) mm_error("Negative argument");
+    if (v == 0.0) MM_RAISEV("Divide by zero", 0.0);
+    if (v < 0.0) MM_RAISEV("Negative argument", 0.0);
     return log(v);
 }
 
@@ -494,7 +511,7 @@ MMFLOAT mm_log(MMFLOAT v)
    library at the limit of the domain, so the answers there are exact. */
 MMFLOAT mm_asin(MMFLOAT v)
 {
-    if (v < -1.0 || v > 1.0) mm_error("Number out of bounds");
+    if (v < -1.0 || v > 1.0) MM_RAISEV("Number out of bounds", 0.0);
     if (v == 1.0) return 3.14159265358979323846 / 2.0;
     if (v == -1.0) return -3.14159265358979323846 / 2.0;
     return asin(v);
@@ -502,7 +519,7 @@ MMFLOAT mm_asin(MMFLOAT v)
 
 MMFLOAT mm_acos(MMFLOAT v)
 {
-    if (v < -1.0 || v > 1.0) mm_error("Number out of bounds");
+    if (v < -1.0 || v > 1.0) MM_RAISEV("Number out of bounds", 0.0);
     if (v == 1.0) return 0.0;
     if (v == -1.0) return 3.14159265358979323846;
     return acos(v);
@@ -765,7 +782,8 @@ char *mm_bin(MMINTEGER v, MMINTEGER w) { return mm_base(v, w,  2); }
 
 MMINTEGER mm_byte(const char *s, MMINTEGER n)
 {
-    if (n < 1 || n > mm_slen(s)) mm_error("Index out of bounds in BYTE()");
+    if (n < 1 || n > mm_slen(s))
+        MM_RAISEV("Index out of bounds in BYTE()", 0);
     return (MMINTEGER)(unsigned char)s[n];
 }
 
@@ -880,7 +898,7 @@ char *mm_format(MMFLOAT val, const char *fmtstr)
     size_t pre;
     char *t;
 
-    if (!pct) mm_error("FORMAT$: no format specifier");
+    if (!pct) MM_RAISEV("FORMAT$: no format specifier", mm_ssink());
     pre = (size_t)(pct - fmt);
     memcpy(o, fmt, pre);
     o += pre;
@@ -899,7 +917,8 @@ char *mm_format(MMFLOAT val, const char *fmtstr)
     }
     while (*q == 'l' || *q == 'L' || *q == 'h') q++;
     type = (unsigned char)*q;
-    if (!strchr("gGfFeE", type)) mm_error("FORMAT$: bad conversion type");
+    if (!strchr("gGfFeE", type))
+        MM_RAISEV("FORMAT$: bad conversion type", mm_ssink());
     upper = (type == 'E' || type == 'G' || type == 'F');
     if (*q) q++;
     if (prec > 30) prec = 30;
@@ -1049,9 +1068,10 @@ MMINTEGER mm_epoch_str(const char *ds)
     for (n = 0; n < 3; n++) {
         int v = 0, got = 0;
         while (*q >= '0' && *q <= '9') { v = v * 10 + (*q++ - '0'); got = 1; }
-        if (!got) mm_error("Invalid date");
+        if (!got) MM_RAISEV("Invalid date", 0);
         vals[n] = v;
-        if (n < 2) { if (*q == '-' || *q == '/') q++; else mm_error("Invalid date"); }
+        if (n < 2) { if (*q == '-' || *q == '/') q++;
+                     else MM_RAISEV("Invalid date", 0); }
     }
     a = vals[0]; b = vals[1]; c = vals[2];
     while (*q == ' ') q++;
@@ -1151,7 +1171,7 @@ char *mm_bin2str(int type, MMFLOAT fv, MMINTEGER iv, int big)
         default:          lo = 0;             hi = 0;            break;
         }
         if (hi != 0 && (iv < lo || iv > hi))
-            mm_error("Overflow");
+            MM_RAISEV("Overflow", mm_ssink());
         for (i = 0; i < n; i++) raw[i] = (unsigned char)((u >> (8 * i)) & 0xFF);
     }
     if (big) { for (i = 0; i < n / 2; i++)
@@ -1165,7 +1185,7 @@ MMFLOAT mm_str2bin_f(int type, const char *s, int big)
     unsigned char raw[8];
     int n = (type == MM_B_SINGLE) ? 4 : 8, i;
     float f32; double f64;
-    if (mm_slen(s) != n) mm_error("String length");
+    if (mm_slen(s) != n) MM_RAISEV("String length", 0.0);
     memcpy(raw, s + 1, (size_t)n);
     if (big) { for (i = 0; i < n / 2; i++)
                    { unsigned char c = raw[i]; raw[i] = raw[n-1-i]; raw[n-1-i] = c; } }
@@ -1184,7 +1204,7 @@ MMINTEGER mm_str2bin_i(int type, const char *s, int big)
     case MM_B_INT16: case MM_B_UINT16: n = 2; break;
     default:                           n = 1; break;
     }
-    if (mm_slen(s) != n) mm_error("String length");
+    if (mm_slen(s) != n) MM_RAISEV("String length", 0);
     memcpy(raw, s + 1, (size_t)n);
     if (big) { for (i = 0; i < n / 2; i++)
                    { unsigned char c = raw[i]; raw[i] = raw[n-1-i]; raw[n-1-i] = c; } }
@@ -1209,18 +1229,20 @@ FILE *mm_ls_file(MMINTEGER fnbr);
 FILE *mm_ls_file(MMINTEGER fnbr)
 {
     if (fnbr < 1 || fnbr > MM_MAXFILES || mm_chan[fnbr].mode == 0)
-        mm_error("File number is not open");
+        MM_RAISEV("File number is not open", NULL);
     return mm_chan[fnbr].f;
 }
 
+/* NULL when it refuses: with ON ERROR armed mm_error comes back, and
+   each caller would otherwise hand stdio a channel that is not open. */
 static MMChan *mm_ch(MMINTEGER fnbr, int forwrite)
 {
-    if (fnbr < 1 || fnbr > MM_MAXFILES) mm_error("Invalid file number");
-    if (mm_chan[fnbr].mode == 0) mm_error("File number is not open");
+    if (fnbr < 1 || fnbr > MM_MAXFILES) MM_RAISEV("Invalid file number", NULL);
+    if (mm_chan[fnbr].mode == 0) MM_RAISEV("File number is not open", NULL);
     if (forwrite && mm_chan[fnbr].mode == MM_F_INPUT)
-        mm_error("File is open for INPUT");
+        MM_RAISEV("File is open for INPUT", NULL);
     if (!forwrite && mm_chan[fnbr].mode == MM_F_OUTPUT)
-        mm_error("File is open for OUTPUT");
+        MM_RAISEV("File is open for OUTPUT", NULL);
     return &mm_chan[fnbr];
 }
 
@@ -1228,8 +1250,8 @@ void mm_open(const char *fname, int mode, MMINTEGER fnbr)
 {
     const char *m;
     FILE *f;
-    if (fnbr < 1 || fnbr > MM_MAXFILES) mm_error("Invalid file number");
-    if (mm_chan[fnbr].mode != 0) mm_error("File number is already open");
+    if (fnbr < 1 || fnbr > MM_MAXFILES) MM_RAISE("Invalid file number");
+    if (mm_chan[fnbr].mode != 0) MM_RAISE("File number is already open");
     switch (mode) {
     case MM_F_INPUT:  m = "rb";  break;
     case MM_F_OUTPUT: m = "wb";  break;
@@ -1244,7 +1266,7 @@ void mm_open(const char *fname, int mode, MMINTEGER fnbr)
         static char msg[MM_STRLEN + 32];
         strcpy(msg, "Cannot open ");
         strcat(msg, mm_cstr(fname));
-        mm_error(msg);
+        MM_RAISE(msg);
     }
     if (mode == MM_F_RANDOM) fseek(f, 0, SEEK_END); /* "positioned at the
                                                        end of the file" */
@@ -1254,7 +1276,7 @@ void mm_open(const char *fname, int mode, MMINTEGER fnbr)
 
 void mm_close(MMINTEGER fnbr)
 {
-    if (fnbr < 1 || fnbr > MM_MAXFILES) mm_error("Invalid file number");
+    if (fnbr < 1 || fnbr > MM_MAXFILES) MM_RAISE("Invalid file number");
     if (mm_chan[fnbr].mode == 0) return;
     fclose(mm_chan[fnbr].f);
     mm_chan[fnbr].f = NULL;
@@ -1272,8 +1294,11 @@ void mm_close_all(void)
 
 static void mm_outc(MMINTEGER fnbr, int c)
 {
+    MMChan *ch;
+    if (mm_poisoned()) return;
     if (fnbr == 0) { mm_putc(c); return; }
-    fputc(c, mm_ch(fnbr, 1)->f);
+    ch = mm_ch(fnbr, 1);
+    if (ch) fputc(c, ch->f);
 }
 
 void mm_fpr_s(MMINTEGER fnbr, const char *s)
@@ -1316,7 +1341,11 @@ MMINTEGER mm_eof(MMINTEGER fnbr)
     int c;
 #endif
     if (fnbr == 0) return 0;
-    f = mm_ch(fnbr, 0)->f;
+    {
+        MMChan *ch = mm_ch(fnbr, 0);
+        if (!ch) return 0;
+        f = ch->f;
+    }
 #ifdef MM_FCC
     /* The bytecode runtime's files are plain descriptors with no
        pushback, but on Fuzix they are all seekable: EOF is simply "at
@@ -1349,7 +1378,7 @@ MMINTEGER mm_lof(MMINTEGER fnbr)
     long here, end;
     if (fnbr == 0) return 0;
     if (fnbr < 1 || fnbr > MM_MAXFILES || mm_chan[fnbr].mode == 0)
-        mm_error("File number is not open");
+        MM_RAISEV("File number is not open", 0);
     f = mm_chan[fnbr].f;
     fflush(f);
     here = ftell(f);
@@ -1362,7 +1391,7 @@ MMINTEGER mm_lof(MMINTEGER fnbr)
 void mm_seek(MMINTEGER fnbr, MMINTEGER pos)
 {
     if (fnbr < 1 || fnbr > MM_MAXFILES || mm_chan[fnbr].mode == 0)
-        mm_error("File number is not open");
+        MM_RAISE("File number is not open");
     if (pos < 1) pos = 1;
     fflush(mm_chan[fnbr].f);
     fseek(mm_chan[fnbr].f, (long)(pos - 1), SEEK_SET);
@@ -1374,8 +1403,10 @@ void mm_seek(MMINTEGER fnbr, MMINTEGER pos)
 
 static int mm_getc(MMINTEGER fnbr)
 {
+    MMChan *ch;
     if (fnbr == 0) return fgetc(stdin);
-    return fgetc(mm_ch(fnbr, 0)->f);
+    ch = mm_ch(fnbr, 0);
+    return ch ? fgetc(ch->f) : -1;
 }
 
 static void mm_readline(MMINTEGER fnbr, char *dst)
@@ -1393,7 +1424,7 @@ static void mm_readline(MMINTEGER fnbr, char *dst)
         if (c == '\r') continue;
         if (c == '\n') break;
         if (n < MM_STRLEN) dst[++n] = (char)c;
-        else mm_error("Line is too long");
+        else { mm_error("Line is too long"); break; }
     }
     dst[0] = (char)(unsigned char)n;
     dst[n + 1] = 0;
@@ -1465,9 +1496,9 @@ void mm_kill(const char *fname)
 #ifdef MM_HOSTED
     /* Fuzix libc has no ISO C remove(); unlink is already declared by
      * bcrun's own headers in the hosted translation unit. */
-    if (unlink(mm_cstr(fname)) != 0) mm_error("Cannot delete the file");
+    if (unlink(mm_cstr(fname)) != 0) MM_RAISE("Cannot delete the file");
 #else
-    if (remove(mm_cstr(fname)) != 0) mm_error("Cannot delete the file");
+    if (remove(mm_cstr(fname)) != 0) MM_RAISE("Cannot delete the file");
 #endif
 }
 
@@ -1482,9 +1513,9 @@ void mm_copy(const char *from, const char *to)
     FILE *b;
     char buf[512];
     size_t n;
-    if (!a) mm_error("Cannot open the source file");
+    if (!a) MM_RAISE("Cannot open the source file");
     b = fopen(mm_cstr(to), "wb");
-    if (!b) { fclose(a); mm_error("Cannot open the destination file"); }
+    if (!b) { fclose(a); MM_RAISE("Cannot open the destination file"); }
     while ((n = fread(buf, 1, sizeof buf, a)) > 0) fwrite(buf, 1, n, b);
     fclose(a);
     fclose(b);
@@ -1506,27 +1537,27 @@ void mm_copy(const char *from, const char *to)
 void mm_mkdir(const char *path)
 {
 #ifdef _WIN32
-    if (_mkdir(mm_cstr(path)) != 0) mm_error("Cannot create the directory");
+    if (_mkdir(mm_cstr(path)) != 0) MM_RAISE("Cannot create the directory");
 #else
-    if (mkdir(mm_cstr(path), 0777) != 0) mm_error("Cannot create the directory");
+    if (mkdir(mm_cstr(path), 0777) != 0) MM_RAISE("Cannot create the directory");
 #endif
 }
 
 void mm_rmdir(const char *path)
 {
 #ifdef _WIN32
-    if (_rmdir(mm_cstr(path)) != 0) mm_error("Cannot remove the directory");
+    if (_rmdir(mm_cstr(path)) != 0) MM_RAISE("Cannot remove the directory");
 #else
-    if (rmdir(mm_cstr(path)) != 0) mm_error("Cannot remove the directory");
+    if (rmdir(mm_cstr(path)) != 0) MM_RAISE("Cannot remove the directory");
 #endif
 }
 
 void mm_chdir(const char *path)
 {
 #ifdef _WIN32
-    if (_chdir(mm_cstr(path)) != 0) mm_error("Cannot change directory");
+    if (_chdir(mm_cstr(path)) != 0) MM_RAISE("Cannot change directory");
 #else
-    if (chdir(mm_cstr(path)) != 0) mm_error("Cannot change directory");
+    if (chdir(mm_cstr(path)) != 0) MM_RAISE("Cannot change directory");
 #endif
 }
 
@@ -1766,13 +1797,13 @@ char *mm_read_s(void)
 void mm_read_save(void)
 {
     if (mm_dsp >= (int)(sizeof mm_dstack / sizeof mm_dstack[0]))
-        mm_error("Too many nested READ SAVE");
+        MM_RAISE("Too many nested READ SAVE");
     mm_dstack[mm_dsp++] = mm_dptr;
 }
 
 void mm_read_unsave(void)
 {
-    if (mm_dsp <= 0) mm_error("READ RESTORE without READ SAVE");
+    if (mm_dsp <= 0) MM_RAISE("READ RESTORE without READ SAVE");
     mm_dptr = mm_dstack[--mm_dsp];
 }
 
@@ -2299,6 +2330,7 @@ void mm_ls_print(MMINTEGER fnbr, const MMINTEGER *a, int nl)
         for (i = 0; i < n; i++) mm_putc((unsigned char)p[i]);
     } else {
         FILE *f = mm_ls_file(fnbr);
+        if (!f) return;
         for (i = 0; i < n; i++) fputc((unsigned char)p[i], f);
     }
     if (nl) mm_fpr_nl(fnbr);
@@ -2313,7 +2345,7 @@ char *mm_ls_getstr(const MMINTEGER *a, MMINTEGER start, MMINTEGER len)
     avail = n - start + 1;
     if (len < 0 || len > avail) len = avail;
     if (len > MM_STRLEN)
-        mm_error("LGETSTR$ result is longer than 255 characters");
+        MM_RAISEV("LGETSTR$ result is longer than 255 characters", mm_ssink());
     mm_ssetn(t, MM_LS_DATA((MMINTEGER *)a) + (start - 1), (int)len);
     return t;
 }
@@ -2351,11 +2383,14 @@ MMINTEGER mm_ls_compare(const MMINTEGER *a, const MMINTEGER *b)
 MMINTEGER mm_ls_input(MMINTEGER *a, int cells, MMINTEGER fnbr, MMINTEGER n)
 {
     MMINTEGER got;
-    if (fnbr < 1) mm_error("LINPUT only works with a file");
+    if (fnbr < 1) MM_RAISEV("LINPUT only works with a file", 0);
     if (n < 0) n = 0;
     mm_ls_fit(cells, n);
-    got = (MMINTEGER)fread(MM_LS_DATA(a), 1, (size_t)n,
-                           mm_ls_file(fnbr));
+    {
+        FILE *f = mm_ls_file(fnbr);
+        if (!f) return 0;
+        got = (MMINTEGER)fread(MM_LS_DATA(a), 1, (size_t)n, f);
+    }
     a[0] = got;
     return got;
 }
@@ -2367,7 +2402,7 @@ static int mm_gsp = 0;
 
 void mm_gosub_push(int site)
 {
-    if (mm_gsp >= MM_MAXGOSUB) mm_error("Too many nested GOSUB");
+    if (mm_gsp >= MM_MAXGOSUB) MM_RAISE("Too many nested GOSUB");
     mm_gstack[mm_gsp++] = site;
 }
 
@@ -2379,7 +2414,59 @@ int mm_gosub_pop(void)
 
 /* ================= misc ============================================ */
 
-void mm_error(const char *msg)
+/* ---- ON ERROR SKIP / IGNORE ---------------------------------------- *
+ *
+ * The firmware longjmps out of error() into a setjmp ExecuteProgram takes
+ * per statement (MMBasic.c:1852).  We cannot: bcrun has no setjmp, and a
+ * jump would have to unwind real ARM frames belonging to natively
+ * compiled BASIC functions.  So mm_error records and returns, and the
+ * generated code skips the rest of the statement - same observable
+ * behaviour, no unwinding, and therefore none of the temp-memory and
+ * local-frame cleanup the interpreter has to do on its jump leg.
+ */
+static int  mm_errno_v;
+static char mm_errmsg_v[MM_ERRMSG + 2];    /* Pascal, MAXERRMSG as there */
+
+void mm_err_bind(int *state)
+{
+    mm_est = state;
+    if (state) { state[0] = 0; state[1] = 0; }
+    mm_errno_v = 0;
+    mm_errmsg_v[0] = 0;
+    mm_errmsg_v[1] = 0;
+}
+
+static int mm_armed(void)
+{
+    /* -1 (IGNORE) and any positive count are armed; RESTART's >100000 is
+       not translated at all, so the firmware's upper test has no twin. */
+    return mm_est != NULL && mm_est[1] != 0;
+}
+
+void mm_on_error(int mode, MMINTEGER n)
+{
+    if (!mm_est) return;
+    if (mode == 0) { mm_est[1] = 0; return; }   /* ABORT keeps the error */
+    mm_errno_v = 0;                             /* the rest clear it     */
+    mm_errmsg_v[0] = 0;
+    mm_errmsg_v[1] = 0;
+    switch (mode) {
+    case 1: break;                              /* CLEAR                 */
+    case 2: mm_est[1] = -1; break;              /* IGNORE                */
+    /* SKIP n is n+1: the ON ERROR statement decrements it itself, so
+       the count reaches the next statement intact (Commands.c:8325). */
+    default: mm_est[1] = (int)n + 1; break;
+    }
+}
+
+MMINTEGER mm_errno(void) { return mm_errno_v; }
+char     *mm_errmsg(void) { return mm_errmsg_v; }
+
+/* Not everything is skippable.  Running out of memory leaves nothing
+   sensible to return - a NULL array base would fault somewhere else
+   entirely - so the allocators end the program whatever ON ERROR says,
+   and the manual states it. */
+void mm_fatal(const char *msg)
 {
     mm_close_all();
     mm_gflush();
@@ -2387,6 +2474,40 @@ void mm_error(const char *msg)
     fprintf(stderr, "\r\nError: %s\r\n", msg);
     exit(1);
 }
+
+void mm_error(const char *msg)
+{
+    if (mm_armed()) {
+        int n;
+        /* The first error wins, exactly as the jump would have: a
+           function that raises and keeps running to its return must not
+           overwrite the message the program is about to read. */
+        if (mm_est[0]) return;
+        if (mm_errno_v == 0) mm_errno_v = 16;   /* MMBasic's generic     */
+        n = (int)strlen(msg);
+        if (n > MM_ERRMSG) n = MM_ERRMSG;       /* truncated as there    */
+        mm_errmsg_v[0] = (char)(unsigned char)n;
+        memcpy(mm_errmsg_v + 1, msg, (size_t)n);
+        mm_errmsg_v[n + 1] = 0;
+        mm_est[0] = 1;                          /* poison                */
+        return;
+    }
+    mm_close_all();
+    mm_gflush();
+    fflush(stdout);
+    fprintf(stderr, "\r\nError: %s\r\n", msg);
+    exit(1);
+}
+
+/* Sinks: a raise site returns one of these, so a caller that keeps
+   running to the end of its statement writes somewhere harmless. */
+static char      mm_sink_s[MM_STRSZ];
+static MMFLOAT   mm_sink_f;
+static MMINTEGER mm_sink_i;
+
+char *mm_ssink(void) { mm_sink_s[0] = 0; mm_sink_s[1] = 0; return mm_sink_s; }
+MMFLOAT   *mm_fsink(void) { mm_sink_f = 0.0; return &mm_sink_f; }
+MMINTEGER *mm_isink(void) { mm_sink_i = 0; return &mm_sink_i; }
 
 void mm_end(void)
 {
@@ -2961,7 +3082,7 @@ void *mm_heap(unsigned long n)
     void *p = malloc(n ? n : (unsigned long)1);
 
     if (p == NULL)
-        mm_error("out of memory for arrays and strings");
+        mm_fatal("out of memory for arrays and strings");
     else
         memset(p, 0, n ? n : (unsigned long)1);
     return p;
@@ -2972,7 +3093,7 @@ void *mm_lheap(unsigned long n)
     void *p = malloc(n ? n : (unsigned long)1);
 
     if (p == NULL)
-        mm_error("out of memory for LOCAL arrays and strings");
+        mm_fatal("out of memory for LOCAL arrays and strings");
     else
         memset(p, 0, n ? n : (unsigned long)1);
     return p;

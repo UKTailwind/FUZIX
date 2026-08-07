@@ -1,0 +1,11 @@
+skip1:  99 errno  16 [Divide by zero]
+cleared:  0 []
+skip2:  7  16
+ignore: still here [Divide by zero]
+afterclear:  0
+part: next: still running
+  sub: r= 0
+  sub: reached the end
+aftersub:  16
+func:  0
+done

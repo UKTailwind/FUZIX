@@ -434,6 +434,15 @@ void conv_write(FILE *f)
             fprintf(f, "    %s,\n", cv.data[k].sv);
         fprintf(f, "};\n");
     }
+    if (cv.uses_onerror) {
+        fprintf(f, "\n/* ---- ON ERROR state, read by the guards below ---- *\n");
+        fprintf(f, " * [0] is the poison: an error has been recorded and the\n");
+        fprintf(f, " * rest of this statement is skipped.  [1] is the skip\n");
+        fprintf(f, " * count, MMBasic's OptionErrorSkip: 0 abort, -1 ignore.\n");
+        fprintf(f, " * It lives here rather than in the runtime so a guard is\n");
+        fprintf(f, " * a load and a branch instead of a library call. */\n");
+        fprintf(f, "static int __mm_e[2];\n");
+    }
     fprintf(f, "\n/* ---- forward declarations ---- */\n");
     if (cv.uses_clear)
         fprintf(f, "static void __mmb_clear(void);\n");
@@ -457,6 +466,8 @@ void conv_write(FILE *f)
     fprintf(f, "\n/* ---- main program ---- */\n");
     fprintf(f, "int main(void)\n{\n");
     fprintf(f, "    unsigned __mark = mm_mark(); (void)__mark;\n");
+    if (cv.uses_onerror)
+        fprintf(f, "    mm_err_bind(__mm_e);\n");
     if (cv.heap_used)
         fprintf(f, "    H = mm_heap(sizeof *H);   "
                    "/* arrays and strings */\n");

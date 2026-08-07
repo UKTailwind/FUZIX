@@ -115,7 +115,7 @@ static void mmg_text(int x, int y, const char *s, const char *just,
 		scale = 15;
 	if (just && mm_slen(just) &&
 	    !mmg_just(mm_cstr(just), &jh, &jv, &jo))
-		mm_error("Justification");
+		MM_RAISE("Justification");
 	/* Negative is "there is no display", which is the host build: draw
 	   nothing and say nothing, as every other primitive does there.
 	   Zero is a font the kernel really does not have, and MMBasic
@@ -123,7 +123,7 @@ static void mmg_text(int x, int y, const char *s, const char *just,
 	if (mm_fontinfo(font, &cw, &ch) < 0)
 		return;
 	if (!cw)
-		mm_error("Invalid font");
+		MM_RAISE("Invalid font");
 
 	w = (int)cw * scale;		/* one cell, scaled - GetFontWidth */
 	h = (int)ch * scale;

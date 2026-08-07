@@ -32,6 +32,11 @@ typedef int64_t MMINTEGER;
 /* storage = length byte + data + trailing NUL */
 #define MM_STRSZ (MM_STRLEN + 2)
 
+/* MAXERRMSG in the firmware (configuration.h:382): MM.ERRMSG$ is
+ * truncated to this, so a program comparing the text sees the same
+ * cut-off here. */
+#define MM_ERRMSG 64
+
 /* Number of scratch buffers used for string expression temporaries.
  * Each costs MM_STRSZ bytes of static RAM.  They are handed out as a
  * stack: every generated function takes a mark on entry and every
@@ -565,8 +570,36 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
  * own DS3231 alarm on GP32 out of reach. */
 #define MM_GPIO_NPINS 48
 
-/* ---- misc ----------------------------------------------------------- */
-void mm_error(const char *msg);     /* prints and exits                */
+/* ---- errors, and ON ERROR SKIP/IGNORE ------------------------------- *
+ *
+ * mm_error prints and exits - EXCEPT while ON ERROR SKIP/IGNORE is armed,
+ * when it records the error and RETURNS.  That is the whole reason for
+ * the macros below: a raise site can no longer assume it never comes
+ * back, and code written on that assumption would carry on using the very
+ * value it just rejected.  Every raise in the runtime therefore leaves
+ * its function through MM_RAISE/MM_RAISEV.
+ *
+ * The state lives in the PROGRAM's memory, bound once at startup, so a
+ * guard in generated code is a load and a branch rather than a libcall:
+ *   state[0]  poison - "unwinding to the end of this statement"
+ *   state[1]  the OptionErrorSkip counter: 0 abort, -1 ignore, n>0 count
+ */
+void mm_error(const char *msg);
+void mm_fatal(const char *msg);     /* never skippable: out of memory  */
+void mm_err_bind(int *state);       /* generated code hands us its pair */
+void mm_on_error(int mode, MMINTEGER n);   /* 0 abort 1 clear 2 ignore 3 skip */
+MMINTEGER mm_errno(void);           /* MM.ERRNO                        */
+char *mm_errmsg(void);              /* MM.ERRMSG$                      */
+
+#define MM_RAISE(msg)      do { mm_error(msg); return; } while (0)
+#define MM_RAISEV(msg, v)  do { mm_error(msg); return (v); } while (0)
+
+/* Somewhere real to write when a raise has already happened and the
+ * caller keeps running to the end of its statement. */
+char      *mm_ssink(void);          /* a writable empty string         */
+MMFLOAT   *mm_fsink(void);
+MMINTEGER *mm_isink(void);
+
 void mm_end  (void);                /* the END statement               */
 MMFLOAT mm_timer(void);             /* ms since TIMER=, with fraction  */
 
