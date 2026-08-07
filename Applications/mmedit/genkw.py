@@ -71,12 +71,16 @@ for name, lo, hi in re.findall(r"'([A-Z0-9$]+)': \((\d+), (\d+)\)", tbl):
     supported.add(name)
 for m in re.finditer(r"MATHFUNCS = \{([^}]*)\}", text):
     supported.update(re.findall(r"'([A-Z0-9]+)'", m.group(1)))
-# operators and structural words the translator always handles
+# operators and structural words the translator always handles.
+# TYPE blocks are dispatched through skip_type_block/pass_types rather
+# than an `up ==` test in statement_inner, so the scan above cannot see
+# them - they are listed here like the other block-structure words.
 supported.update(["AND", "OR", "NOT", "XOR", "MOD", "INV", "THEN", "TO",
                   "STEP", "AS", "ELSE", "ELSEIF", "END IF", "END SUB",
                   "END FUNCTION", "END SELECT", "CASE ELSE", "SELECT CASE",
                   "EXIT DO", "EXIT FOR", "EXIT SUB", "EXIT FUNCTION",
-                  "LOOP", "UNTIL", "WHILE", "WEND", "NEXT"])
+                  "LOOP", "UNTIL", "WHILE", "WEND", "NEXT",
+                  "TYPE", "END TYPE"])
 
 
 def is_supported(nm):

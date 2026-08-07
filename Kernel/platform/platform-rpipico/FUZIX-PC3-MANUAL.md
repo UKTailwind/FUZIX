@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.8 — August 2026"
+date: "Release v0.10 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -54,6 +54,44 @@ Headline specification as configured here:
   MMBasic translator in front of it — both run on the machine itself
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
+
+## New in v0.10
+
+This release fills in the MMBasic translator's two largest gaps: the
+rest of the drawing statements, and structures.
+
+* **`BOX`, `RBOX`, `TRIANGLE` and `ARC` translate.** With `CIRCLE`,
+  `TEXT` and `MAP` already in, the PicoMite drawing set is now
+  covered. Each primitive is a header of static C functions, one
+  header per primitive, so a compiled program carries only the
+  primitives it actually uses — the compiler discards the rest. The
+  same headers are callable from plain C; the C manual documents them.
+* **`TYPE ... END TYPE` — MMBasic structures.** Nested types, member
+  arrays, structure arrays, `LOCAL`s, by-reference parameters,
+  whole-structure assignment, `STRUCT COPY`/`CLEAR`/`SWAP`, and
+  `STRUCT(SIZEOF/OFFSET/TYPE)` folded to compile-time constants. The
+  firmware's byte layout is reproduced exactly — sizes, offsets,
+  padding and the length-byte string format — so `STRUCT(SIZEOF "t")`
+  answers the same number here and on a PicoMite, and assigning an
+  over-length string to a `LENGTH n` member raises `String too long`
+  just as the firmware does. Verified side by side against a real
+  PicoMite running the firmware's own structure test suite: every
+  feature implemented here passes identically there. What does not
+  translate is refused by name rather than mistranslated; the
+  translator chapter lists it.
+* **A class of board-only crashes in compiled programs is fixed.**
+  `bcrun` could size a program's memory arena so that the stack ended
+  up misaligned for the ARM's paired-register stores, and the
+  Cortex-M33 faults on those regardless of its unaligned-access
+  support. Neither the host runner nor qemu enforces that, so the
+  crash existed only on real hardware. The arena is now rounded so
+  the stack is always 8-byte aligned.
+* **`mmedit` colours the new statements correctly.** `Box`, `RBox`,
+  `Triangle`, `Arc`, `Type`, `End Type`, `Struct` and `Struct(` now
+  show as translatable (cyan) rather than interpreter-only (blue).
+* **The kernel's crash report leads with `r4`–`r7`** — the registers
+  that actually locate the fault in compiled code — so a report copied
+  from the screen is useful even when cut short.
 
 ## New in v0.9
 
