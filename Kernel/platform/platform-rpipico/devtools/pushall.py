@@ -1,13 +1,14 @@
 """Push everything that has to move together when BASIC support changes.
 
   python pushall.py            # build nothing, send what is already built
-  python pushall.py --headers  # only the two cc headers
+  python pushall.py --headers  # only the cc headers
 
-Add a statement, or change mmb_runtime.c/.h or mmb_gfx.h, and FIVE
-things on the board are involved:
+Add a statement, or change mmb_runtime.c/.h or the mmb_gfx*.h set, and
+these things on the board are involved:
 
     /usr/lib/cc/include/mmb_runtime.h   what the on-board cc reads
-    /usr/lib/cc/include/mmb_gfx.h       ditto
+    /usr/lib/cc/include/mmb_gfx*.h      ditto - one header per primitive
+                                        (pts/circle/text/map + umbrella)
     /usr/bin/bcrun                      the runtime is compiled INTO it
     /usr/bin/mmbc                       the translator
     /usr/bin/mmedit                     its keyword colouring
@@ -41,6 +42,14 @@ HEADERS = [
      "/usr/lib/cc/include/mmb_runtime.h"),
     (os.path.join(CC, "mmb_gfx.h"), "mmb_gfx.h",
      "/usr/lib/cc/include/mmb_gfx.h"),
+    (os.path.join(CC, "mmb_gfx_pts.h"), "mmb_gfx_pts.h",
+     "/usr/lib/cc/include/mmb_gfx_pts.h"),
+    (os.path.join(CC, "mmb_gfx_circle.h"), "mmb_gfx_circle.h",
+     "/usr/lib/cc/include/mmb_gfx_circle.h"),
+    (os.path.join(CC, "mmb_gfx_text.h"), "mmb_gfx_text.h",
+     "/usr/lib/cc/include/mmb_gfx_text.h"),
+    (os.path.join(CC, "mmb_gfx_map.h"), "mmb_gfx_map.h",
+     "/usr/lib/cc/include/mmb_gfx_map.h"),
     (os.path.join(CC, "mmb_gpio.h"), "mmb_gpio.h",
      "/usr/lib/cc/include/mmb_gpio.h"),
 ]

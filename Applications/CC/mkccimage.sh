@@ -75,8 +75,14 @@ echo "--- installing"
 	# FCC-view headers (math.h etc. map to bcrun natives)
 	echo "get $CC/mmb_runtime.h mmb_runtime.h"
 	# the geometry primitives, included only by a program that draws:
-	# static functions, so cc1 drops the ones it does not call
-	echo "get $CC/mmb_gfx.h mmb_gfx.h"
+	# static functions, one header per primitive so a program carries
+	# exactly the primitives it names (cc1's dead-static rule counts
+	# names, not reachability, so the include is the granularity).
+	# mmb_gfx.h is the umbrella kept for hand-written C.
+	for f in mmb_gfx.h mmb_gfx_pts.h mmb_gfx_circle.h mmb_gfx_text.h \
+			mmb_gfx_map.h; do
+		echo "get $CC/$f $f"
+	done
 	# SETPIN and PIN, on the same terms - and easy to forget: a card
 	# without this compiles every program that draws and fails only on
 	# the ones that touch a pin, long after the change that added it.

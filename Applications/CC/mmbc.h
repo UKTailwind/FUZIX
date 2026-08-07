@@ -230,7 +230,9 @@ struct conv {
      * "return now" in there, not "the routine ends here" */
     int inline_depth;
     int uses_clear;
-    int uses_gfx;
+    int uses_circle;
+    int uses_text;
+    int uses_mappal;
     int uses_gpio;
     int uses_play;              /* PLAY: emit the volume it remembers */
     /* set by global_decls when the program has any array or string:

@@ -52,6 +52,16 @@ What you get:
   `strtol`/`strtod`, `open`/`close`/`read`/`write`/`lseek`/`creat`/
   `remove`/`rename`/`unlink`, `exit`, `rand`/`srand`, `time`.
 * two of our own: **`adval(n)`** and **`time_us()`** / **`time_us64()`**.
+* the MMBasic runtime, callable from plain C: `mmb_runtime.h` declares
+  the `mm_*` entry points `bcrun` resolves by name — PRINT and
+  formatting, strings, files, and the graphics crossings — and the
+  drawing primitives are static functions in one header per primitive:
+  `mmb_gfx_circle.h`, `mmb_gfx_text.h`, `mmb_gfx_map.h` (batch helpers
+  in `mmb_gfx_pts.h`; `mmb_gfx.h` is the umbrella that includes the
+  lot; `mmb_gpio.h` is SETPIN/PIN). Include only what you draw: the
+  compiler drops an unused static, but the rule counts names rather
+  than reachability, so a recursive primitive survives inside any
+  header that carries it — the include is the granularity.
 
 Because names resolve at load time, **declaring a function is all the
 header you need**:
@@ -63,8 +73,10 @@ extern long time_us(void);       /* no header required */
 The catch: **`ioctl` is not in that table**. A `bcrun` program cannot
 call it, so it cannot reach the graphics or PSRAM ioctls directly. What
 it gets instead is `adval()` and `time_us()`, which `bcrun` implements
-on its behalf. To drive the display from a `bcrun` program, write
-MMBasic and let `mmbc` translate it — the runtime does the ioctls.
+on its behalf. To drive the display from a `bcrun` program, either
+write MMBasic and let `mmbc` translate it, or call the `mm_*` runtime
+and the `mmb_gfx_*.h` primitives from C directly (the bullet above) —
+either way the runtime does the ioctls.
 
 ## Cross-compiled: native ARM binaries
 

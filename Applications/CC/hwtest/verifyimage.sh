@@ -80,8 +80,10 @@ done
 
 echo "--- the headers the generated C includes"
 same /usr/lib/cc/include/mmb_runtime.h "$R/Applications/CC/mmb_runtime.h"
-same /usr/lib/cc/include/mmb_gfx.h     "$R/Applications/CC/mmb_gfx.h"
-same /usr/lib/cc/include/mmb_gpio.h    "$R/Applications/CC/mmb_gpio.h"
+for f in mmb_gfx.h mmb_gfx_pts.h mmb_gfx_circle.h mmb_gfx_text.h \
+		mmb_gfx_map.h mmb_gpio.h; do
+	same "/usr/lib/cc/include/$f" "$R/Applications/CC/$f"
+done
 
 echo "--- /root/cc"
 list /root/cc | sed -n '3,$p' | awk '{ printf "  %-20s %s\n", $NF, $(NF-5) }'

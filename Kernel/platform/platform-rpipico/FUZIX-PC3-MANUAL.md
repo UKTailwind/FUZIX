@@ -985,9 +985,15 @@ is given. `LINE`, `CIRCLE` and the rest take MMBasic's argument order,
 including the blank arguments — `CIRCLE x, y, r, , , fill` is written
 exactly as MMBasic writes it.
 
-The drawing primitives live in `mmb_gfx.h` as static functions, so a
-program that never draws a circle does not carry the circle code: `cc`
-discards a file-scope static nothing calls. And a whole shape crosses
+The drawing primitives live in headers as static functions, one header
+per primitive — `mmb_gfx_circle.h`, `mmb_gfx_text.h`, `mmb_gfx_map.h`,
+over the shared batch helpers in `mmb_gfx_pts.h` — and the translator
+includes exactly the ones the program uses, so a program that never
+draws a circle does not carry the circle code. (`cc` discards a
+file-scope static nothing calls, but that rule counts names rather
+than reachability, so a recursive primitive survives inside any header
+that carries it — which is why the include, not the static, is the
+unit that matters.) And a whole shape crosses
 into the kernel in a single call, so a 640-point line is one syscall,
 not 640 — measured at 71 µs against 433 µs for the naive version.
 
