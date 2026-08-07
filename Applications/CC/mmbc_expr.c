@@ -20,6 +20,8 @@ static struct val mkval(const char *code, int ty)
     struct val v;
     v.code = code;
     v.ty = ty;
+    v.stype = NULL;
+    v.tm = 0;
     return v;
 }
 
@@ -208,7 +210,10 @@ struct val e_unary(void)
 
         cv.i += 1;
         v = need_num(e_unary());
-        return mkval(sfmt("(-(%s))", v.code), v.ty);
+        /* the Python passes v's type through whole (it can be the
+         * struct tuple), so mutate the code and keep the rest */
+        v.code = sfmt("(-(%s))", v.code);
+        return v;
     }
     if (is_op("+", 0)) {
         cv.i += 1;
@@ -258,7 +263,9 @@ struct val e_primary(void)
         cv.i += 1;
         v = expr();
         expect_op(")");
-        return mkval(sfmt("(%s)", v.code), v.ty);
+        /* type carried through whole (it can be the struct tuple) */
+        v.code = sfmt("(%s)", v.code);
+        return v;
     }
     if (t->kind == T_ID)
         return e_name();
@@ -276,10 +283,9 @@ struct val e_name(void)
     char *canon = split_suffix(word, &sfx);
     struct routine *r;
     const struct builtin *b;
+    struct shead sh;
     int as_array;
     struct sym *s;
-
-    (void)sfx;                          /* the Python discards it too */
 
     /* the current function's own name = its return value */
     if (cv.cur != NULL && cv.cur->is_func
@@ -302,12 +308,30 @@ struct val e_name(void)
         return emit_call(r, &args);
     }
 
+    if (strcmp(up, "STRUCT") == 0 && is_op("(", 0))
+        return struct_fn();
+
     b = builtin_get(up);
     if (b != NULL && (b->minargs == 0 || is_op("(", 0)))
         return call_builtin(up);
 
+    if (struct_head(word, &sh)) {
+        const char *base = struct_base(sh.s);
+        return member_value(member_path(base, sh.s->stype,
+                                        sh.parts, sh.nparts, sh.sfx));
+    }
+
     as_array = is_op("(", 0);
     s = reference(word, as_array);
+    if (s->stype != NULL) {
+        const char *base;
+        if (as_array && !s->is_array)
+            cv_err("'%s' is not an array", canon);
+        if (s->is_array && !as_array)
+            cv_err("struct array '%s' used without an index", canon);
+        base = as_array ? index_of(s) : s->acc;
+        return member_value(member_path(base, s->stype, NULL, 0, sfx));
+    }
     if (as_array) {
         if (!s->is_array)
             cv_err("'%s' is not an array", canon);
@@ -483,6 +507,30 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r)
 {
     if (a != NULL && a->kind == ARG_NONE)
         a = NULL;
+    if (p->stype != NULL) {
+        /* always by reference, exactly as the firmware passes them */
+        if (a == NULL)
+            cv_err("a structure argument to '%s' cannot be "
+                   "omitted", r->name);
+        if (a->kind == ARG_VAR) {
+            if (a->s->stype == NULL
+                || strcmp(a->s->stype, p->stype) != 0)
+                cv_err("structure type mismatch in call to '%s'",
+                       r->name);
+            return sfmt("&%s", a->s->acc);
+        }
+        if (a->kind == ARG_VAL) {
+            struct val v = a->v;
+            if (v.ty != TY_T || strcmp(v.stype, p->stype) != 0)
+                cv_err("structure type mismatch in call to '%s'",
+                       r->name);
+            return sfmt("&%s", v.code);
+        }
+        cv_err("'%s' expects a structure here", r->name);
+    }
+    if (a != NULL && a->kind == ARG_VAR && a->s->stype != NULL)
+        cv_err("a structure cannot be passed to a plain "
+               "parameter of '%s'", r->name);
     if (p->is_array) {
         struct sym *s;
         const char *bnd;

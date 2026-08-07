@@ -13,8 +13,13 @@
 /* Maximum number of goto labels per function (not switches), 4 bytes each */
 #define MAXLABEL		256
 /* Maximum number of fields per structure, 6 bytes per entry on stack, per
-   recursive struct definition */
-#define NUM_STRUCT_FIELD	50
+   recursive struct definition.  mmbc puts every BASIC array, string and
+   structure into one mm_vars struct, so this is really "how many bulk
+   variables may a BASIC program have" - 50 was hit by the firmware's
+   own StructTest.bas.  128 costs ~1.5K of cc1 stack per textually
+   nested struct DEFINITION, and definitions do not nest in generated
+   code. */
+#define NUM_STRUCT_FIELD	128
 /* Number of switch entries within the current scope. 4 bytes per entry */
 #define NUM_SWITCH		128
 /* Number of constants from enum. 4 bytes per entry */

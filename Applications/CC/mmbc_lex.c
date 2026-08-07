@@ -101,7 +101,10 @@ static char *char_repr(int c)
 
 static const char *ops2[] = { "<=", ">=", "<>", "=<", "=>", "><",
                               "<<", ">>", NULL };
-static const char ops1[] = "+-*/\\^=<>(),;:?@#";
+/* '.' is an operator ONLY when it survives identifier scanning - dots
+ * inside a name are eaten greedily by is_idchar, so a '.' token can
+ * only arise after ')' and the like: the arr(i).member form. */
+static const char ops1[] = "+-*/\\^=<>(),;:?@#.";
 
 static void addtok(struct tok *out, int *nt, int lineno,
                    int kind, const char *text, const char *up)

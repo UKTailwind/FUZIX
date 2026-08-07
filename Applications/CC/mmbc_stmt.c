@@ -164,6 +164,13 @@ void statement_inner(void)
         return;
     up = (t->kind == T_ID) ? t->up : t->text;
 
+    if (skip_type_block(up))
+        return;
+    if (strcmp(up, "STRUCT") == 0) {
+        cv.i++;
+        do_struct();
+        return;
+    }
     if (strcmp(up, "OPTION") == 0) {
         cv.i++;
         do_option();
@@ -1551,6 +1558,12 @@ static void do_erase(void)
 
 char *zero_of(struct sym *sym)
 {
+    if (sym->stype != NULL) {
+        if (sym->is_array)
+            return sfmt("memset(%s, 0, sizeof %s);", sym->acc,
+                        sym->acc);
+        return sfmt("memset(&%s, 0, sizeof %s);", sym->acc, sym->acc);
+    }
     if (sym->is_array) {
         struct flat f = array_flat(sym);
         if (sym->ty == TY_S)
@@ -1976,6 +1989,7 @@ static void do_assign(void)
     struct sym *s;
     struct val v;
     const char *target;
+    struct shead sh;
     int is_arr;
 
     if (t->kind != T_ID)
@@ -2001,8 +2015,35 @@ static void do_assign(void)
         return;
     }
 
+    if (struct_head(t->text, &sh)) {
+        const char *base = struct_base(sh.s);
+        assign_member(member_path(base, sh.s->stype, sh.parts,
+                                  sh.nparts, sh.sfx));
+        return;
+    }
+
     is_arr = is_op("(", 0);
     s = reference(t->text, 0);
+    if (s->stype != NULL) {
+        if (is_arr) {
+            if (!s->is_array)
+                cv_err("'%s' is not an array", canon);
+            target = index_of(s);
+        } else {
+            if (s->is_array)
+                cv_err("cannot assign to whole struct array '%s'",
+                       canon);
+            target = s->acc;
+        }
+        if (is_op(".", 0)) {
+            assign_member(member_path(target, s->stype, NULL, 0,
+                                      TY_NONE));
+            return;
+        }
+        expect_op("=");
+        assign_struct(target, s->stype);
+        return;
+    }
     if (is_arr) {
         if (!s->is_array)
             cv_err("'%s' is not an array", canon);
@@ -2135,7 +2176,7 @@ static void do_for(void)
     char *canon;
     struct sym *s;
     struct val start, limit;
-    struct val step = { NULL, TY_NONE };
+    struct val step = { NULL, TY_NONE, NULL, 0 };
     int has_step = 0;
     const char *ct;
     const char *(*conv)(struct val);
@@ -2593,10 +2634,11 @@ static void emit_local_decl(struct sym *s)
 {
     const char *pfx = s->is_static ? "static " : "";
 
-    /* An array or a string that is not STATIC lives in the invocation's
-     * heap block, declared once in its struct and zeroed by mm_lheap;
-     * there is nothing to declare here. */
-    if (!s->is_static && (s->is_array || s->ty == TY_S))
+    /* An array, a string or a structure that is not STATIC lives in
+     * the invocation's heap block, declared once in its struct and
+     * zeroed by mm_lheap; there is nothing to declare here. */
+    if (!s->is_static && (s->is_array || s->ty == TY_S
+                          || s->stype != NULL))
         return;
 
     if (s->is_static && s->has_init)
@@ -2637,6 +2679,11 @@ char *signature(struct routine *r)
         struct sym *p = r->params[k];
         char *nm = dunder("p_", p->name);
         const char *part;
+        if (p->stype != NULL) {
+            part = sfmt("struct t_%s *%s", p->stype, nm);
+            joined = joined ? sfmt("%s, %s", joined, part) : part;
+            continue;
+        }
         if (p->is_array) {
             if (p->ty == TY_S)
                 part = sfmt("char (*%s)[MM_STRSZ]", nm);

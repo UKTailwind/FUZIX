@@ -95,7 +95,14 @@ static void global_decls(struct outbuf *o)
         cn = cvar(s->name);
         if (s->implied)
             note = sfmt("   /* implied, first seen line %d */", s->where);
-        if (s->is_array) {
+        if (s->stype != NULL) {
+            dims = sstr("");
+            if (s->is_array)
+                for (d = 0; d < s->ndims; d++)
+                    dims = sfmt("%s[%s]", dims, s->dims[d]);
+            ob_add(&heap, sfmt("struct t_%s %s%s;%s", s->stype, cn,
+                               dims, note));
+        } else if (s->is_array) {
             dims = sstr("");
             for (d = 0; d < s->ndims; d++)
                 dims = sfmt("%s[%s]", dims, s->dims[d]);
@@ -156,10 +163,17 @@ static void local_structs(struct outbuf *o)
                 }
             if (s == NULL || s->is_param || s->is_static)
                 continue;
-            if (!(s->is_array || s->ty == TY_S))
+            if (!(s->is_array || s->ty == TY_S || s->stype != NULL))
                 continue;
             cn = cvar(s->name);
-            if (s->is_array) {
+            if (s->stype != NULL) {
+                dims = sstr("");
+                if (s->is_array)
+                    for (d = 0; d < s->ndims; d++)
+                        dims = sfmt("%s[%s]", dims, s->dims[d]);
+                ob_add(o, sfmt("    struct t_%s %s%s;", s->stype, cn,
+                               dims));
+            } else if (s->is_array) {
                 dims = sstr("");
                 for (d = 0; d < s->ndims; d++)
                     dims = sfmt("%s[%s]", dims, s->dims[d]);
@@ -329,6 +343,47 @@ void conv_write(FILE *f)
        else carries it - the same bargain as the two headers above. */
     if (cv.uses_play)
         fprintf(f, "static int mm_play_volume = 80;\n\n");
+    if (cv.ntypes > 0) {
+        int j;
+        fprintf(f, "/* ---- TYPE definitions: the firmware layout,"
+                   " byte for byte (TYPE-SPEC.md).\n");
+        fprintf(f, " * Numeric members start 8-aligned, strings are"
+                   " packed, a nested member\n");
+        fprintf(f, " * always starts 8-aligned - the explicit pads"
+                   " carry the difference\n");
+        fprintf(f, " * where C alignment alone would not. ---- */\n");
+        for (k = 0; k < cv.ntypes; k++) {
+            struct typedef_rec *td = cv.types[k];
+            long long pos = 0;
+            int padn = 0;
+            fprintf(f, "struct t_%s {\n", td->name);
+            for (j = 0; j < td->nmembers; j++) {
+                struct typemember *m = td->members[j];
+                const char *decl;
+                if (m->offset > pos) {
+                    fprintf(f, "    unsigned char __p%d[%lld];\n",
+                            padn, m->offset - pos);
+                    padn++;
+                }
+                if (m->stype != NULL) {
+                    decl = sfmt("struct t_%s m_%s", m->stype, m->name);
+                    if (m->has_dims)
+                        decl = sfmt("%s[%lld]", decl, m->count);
+                } else if (m->ty == TY_S) {
+                    decl = sfmt("char m_%s[%lld]", m->name,
+                                m->esize * m->count);
+                } else {
+                    decl = sfmt("%s m_%s", ctype_of(m->ty), m->name);
+                    if (m->has_dims)
+                        decl = sfmt("%s[%lld]", decl, m->count);
+                }
+                fprintf(f, "    %s;\n", decl);
+                pos = m->offset + m->esize * m->count;
+            }
+            fprintf(f, "};    /* %lld bytes */\n", td->total);
+        }
+        fprintf(f, "\n");
+    }
     fprintf(f, "/* ---- constants ---- */\n");
     names = global_names_sorted(&n);
     for (k = 0; k < n; k++) {

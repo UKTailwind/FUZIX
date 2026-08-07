@@ -30,6 +30,7 @@ void walk(int mode)
     volatile int idx;
 
     cv.mode = mode;
+    cv.in_type = 0;
     cv.gosub_n = 0;
     cv.cur = NULL;
     cv.indent = 1;
