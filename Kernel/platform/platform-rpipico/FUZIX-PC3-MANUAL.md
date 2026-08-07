@@ -1345,14 +1345,20 @@ It is Levee, David Parsons' small vi clone, with modal editing, the
 since the beginning under its own name, `levee`, which still works:
 `vi` and `levee` are two names for one file.
 
-**Its edit buffer is 4 KB.** Open something larger and it says
-`[overflow]` on the status line and holds the file **read-only** —
-you can look and move around, but `:w` answers "File is readonly"
-rather than writing a truncated file back. That is the safe behaviour
-of the two, but it does mean Levee is not the tool for a source file
-of any size. `mmedit` has no such limit and is perfectly good for
-plain text, so for anything bigger than a few hundred lines, use it
-instead.
+**Its edit buffer is 64 KB**, which is enough for any source file you
+are likely to write on the machine. Levee's own default is 4 KB — it
+was written for 8-bit micros, where that was a fair share of the
+machine — and this port raises it, since a process here may have most
+of a 340 KB pool to itself.
+
+Open something larger than the buffer and Levee says `[overflow]` on
+the status line and holds the file **read-only**: you can look and
+move around, but `:w` answers "File is readonly" rather than writing a
+truncated file back. That is the safe way round, and worth knowing as
+the signal that a file is too big rather than that something is wrong.
+
+One difference from a full `vi` to watch: `cw` on the last word of a
+line joins the following line onto it.
 
 \newpage
 

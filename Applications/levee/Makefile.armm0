@@ -19,8 +19,17 @@ levee: $(OBJS) $(CRT0)
 	$(LINKER) -o levee.debug $(CRT0) $(OBJS) $(LINKER_OPT)
 	$(STRIP) $(STRIP_OPT) -o $@ $@.debug
 
+# SIZE is levee's whole edit buffer, and its default of 4096 makes the
+# editor useless for anything but a short script: a larger file opens
+# READ-ONLY with "[overflow]" and :w answers "File is readonly".  It is
+# #ifndef-guarded in levee.h precisely so a port can choose, and this
+# one can afford to - core[] is BSS in a process that may have ~292K of
+# a 340K pool, and levee is short-lived.  64K covers any source file
+# anyone will reasonably edit on the machine.  Every index into the
+# buffer is a plain int, which is 32 bits here, so the arithmetic has
+# room to spare.
 .c.o:
-	$(CC) $(CFLAGS) $(COPT) -c -DVT52=0 -DANSI=1 -o $@ $<
+	$(CC) $(CFLAGS) $(COPT) -c -DVT52=0 -DANSI=1 -DSIZE=65536 -o $@ $<
 
 clean:
 	rm -rf $(OBJS) *.lst *.sym *.map *.noi *.lk *.ihx *.tmp *~ *.o *.rel *.asm
