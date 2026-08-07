@@ -110,8 +110,12 @@ void fatal_exception_handler(struct extended_exception_frame* eh)
     kprintf("user mode relative: pc=%p lr=%p pid=%d\n",
         eh->pc-PROGLOAD, eh->lr-PROGLOAD,
         udata.u_ptab ? udata.u_ptab->p_pid : -1);
-    kprintf(" r0=%p r1=%p  r2=%p  r3=%p\n", eh->r0, eh->r1, eh->r2, eh->r3);
+    /* r4-r7 first: the console TX can die partway through this dump,
+     * and the callee-saved set is where a faulting pointer usually
+     * still lives (it did - r5, the strd that found the unaligned VM
+     * stack).  r0-r3 are argument scratch and go second. */
     kprintf(" r4=%p r5=%p  r6=%p  r7=%p\n", eh->r4, eh->r5, eh->r6, eh->r7);
+    kprintf(" r0=%p r1=%p  r2=%p  r3=%p\n", eh->r0, eh->r1, eh->r2, eh->r3);
     kprintf(" r8=%p r9=%p r10=%p r11=%p\n", eh->r8, eh->r9, eh->r10, eh->r11);
     kprintf("r12=%p sp=%p  lr=%p  pc=%p\n", eh->r12, eh->sp, eh->lr, eh->pc);
     kprintf("PROGBASE=%p PROGLOAD=%p PROGTOP=%p\n", PROGBASE, PROGLOAD, PROGTOP);
