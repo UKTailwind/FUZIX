@@ -343,12 +343,17 @@ angles).  Shared normalising rect helpers joined `mmb_gfx_pts.h` —
 DrawRBox hands DrawRectangle right-to-left spans, and the batched
 crossing does not normalise.
 
-**Implemented 2026-08-07 (same day, after Section 1 closed).**  All
-four primitives in both translators, `tests/box.bas` and
-`tests/tri.bas` with .expected files in all three gates: make check
-18 ok, cgate 0, fcctests 18/18, qemutests 19/19.  box.bc 11,796 via
-fcc carrying exactly `mmb_gfx_box.h` + `mmb_gfx_rbox.h`.  Board
-verification pending.
+**Implemented and verified 2026-08-07 (same day, after Section 1
+closed).**  All four primitives in both translators, `tests/box.bas`
+and `tests/tri.bas` with .expected files in all three gates: make
+check 18 ok, cgate 0, fcctests 18/18, qemutests 19/19.  box.bc 11,796
+via fcc carrying exactly `mmb_gfx_box.h` + `mmb_gfx_rbox.h`; 8,552
+compiled self-hosted on the board.  Verified on hardware AND
+side-by-side: the user ran the same two .bas files on a real MMBasic
+machine and both screens matched — "both perfect" — including the
+negative-size box, the zero-height guard, the bare-comma defaults,
+the radius-0 RBOX, the collinear triangle and the arc across north.
+Section 2 is closed.
 
 ## Section 3 — TYPE / structures
 
