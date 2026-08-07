@@ -242,6 +242,33 @@ ISA.  **Default OFF (THUMB_REGC8=1 enables); the correct machinery
 is kept for workloads or ISAs where the balance differs.**  A
 leave-it-alone result, bought with evidence.
 
+## 2026-08-07: the eqop audit - clean
+
+hosttest/samples/eqtort.c exercises every compound-assign base at
+every width (1/2/4/8/f/d, signed and unsigned, pre and post) in
+loops hot enough that the register caches take the counters: PASS
+against gcc, and byte-identical 3-way (native / forced-bytecode /
+reclaim) at all three regcache settings (dhry/eqcheck.sh).  The
+picks confirm the interesting cases: tint's counter runs 14 eqops
+on r7; tll's x is correctly REFUSED caching because it also uses
+the helper-path kinds, while its accumulator caches - mixed
+cached/helper eqops in one function, all agreeing.
+
+Found and documented, not fixed: `x %= 0` (and plain % by zero)
+diverges - native emits sdiv+mls, which on ARM yields the old value
+exactly as gcc-compiled native code does, while the interpreter
+guards to 0.  C leaves it undefined, the divergence predates this
+whole exercise, and the native behaviour is the one that matches
+real compilers; recorded here so nobody rediscovers it as a bug.
+Still on the helper by design: 64-bit mul/div/rem/shift eqops
+(no heat evidence), diveqd (the /0.0 guard parity), the double
+post-forms and every float ('f') form - the classifier escapes
+cached locals from all of them, which eqtort now proves.
+
+The harness gained: eqtort.c, eqcheck.sh (3-way at every cache
+setting), eqdbg.sh (pick dump), and the one-line lesson that cc2's
+.symtmp is cc1's output - the two passes must run in one directory.
+
 ## Next candidates (from the review, in payoff order)
 
 1. LOCAL;PUSH elision for stores whose slot is provably unread - needs
