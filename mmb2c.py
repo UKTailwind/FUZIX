@@ -423,6 +423,10 @@ class Conv(object):
         self.tmp_used = False
         self.uses_clear = False
         self.uses_circle = False
+        self.uses_box = False
+        self.uses_rbox = False
+        self.uses_triangle = False
+        self.uses_arc = False
         self.uses_text = False
         self.uses_mappal = False
         self.uses_gpio = False
@@ -2421,6 +2425,102 @@ class Conv(object):
             self.emit('mmg_circle(%s, %s, %s, %s, %s, %s, %s);'
                       % (x, y, r, lw, col, fill, asp))
             return
+        if up in ('BOX', 'RBOX'):
+            # BOX  x, y, w, h [, lw     [, colour [, fill]]]
+            # RBOX x, y, w, h [, radius [, colour [, fill]]]
+            #
+            # cmd_box / cmd_rbox: width and height may be negative and
+            # the box is drawn the other way; the line width (or the
+            # corner radius) defaults to 1 (or 10); the colours default
+            # to the current foreground and to no fill.  A bare comma
+            # is legal in every optional position, as everywhere.
+            is_rbox = (up == 'RBOX')
+            self.i += 1
+            x = self.as_int(self.expr())
+            self.expect_op(',')
+            y = self.as_int(self.expr())
+            self.expect_op(',')
+            w = self.as_int(self.expr())
+            self.expect_op(',')
+            h = self.as_int(self.expr())
+            lw = '10LL' if is_rbox else '1LL'
+            col, fill = 'MM_CUR', 'MM_CUR'
+            if self.accept_op(','):
+                if not self.is_op(','):
+                    lw = self.as_int(self.expr())
+                if self.accept_op(','):
+                    if not self.is_op(','):
+                        col = self.as_int(self.expr())
+                    if self.accept_op(','):
+                        fill = self.as_int(self.expr())
+            if is_rbox:
+                self.uses_rbox = True
+                self.emit('mmg_rbox(%s, %s, %s, %s, %s, %s, %s);'
+                          % (x, y, w, h, lw, col, fill))
+            else:
+                self.uses_box = True
+                self.emit('mmg_box(%s, %s, %s, %s, %s, %s, %s);'
+                          % (x, y, w, h, lw, col, fill))
+            return
+        if up == 'TRIANGLE':
+            # TRIANGLE x1, y1, x2, y2, x3, y3 [, colour [, fill]]
+            #
+            # SAVE and RESTORE need the interpreter's blit buffers, so
+            # only the drawing form is translated.  The colour may be a
+            # bare comma, as everywhere.
+            self.i += 1
+            if self.accept_kw('SAVE') or self.accept_kw('RESTORE'):
+                self.err("only the drawing form of TRIANGLE is "
+                         "translated")
+            x1 = self.as_int(self.expr())
+            self.expect_op(',')
+            y1 = self.as_int(self.expr())
+            self.expect_op(',')
+            x2 = self.as_int(self.expr())
+            self.expect_op(',')
+            y2 = self.as_int(self.expr())
+            self.expect_op(',')
+            x3 = self.as_int(self.expr())
+            self.expect_op(',')
+            y3 = self.as_int(self.expr())
+            col, fill = 'MM_CUR', 'MM_CUR'
+            if self.accept_op(','):
+                if not self.is_op(','):
+                    col = self.as_int(self.expr())
+                if self.accept_op(','):
+                    fill = self.as_int(self.expr())
+            self.uses_triangle = True
+            self.emit('mmg_triangle(%s, %s, %s, %s, %s, %s, %s, %s);'
+                      % (x1, y1, x2, y2, x3, y3, col, fill))
+            return
+        if up == 'ARC':
+            # ARC x, y, r1 [, r2], rad1, rad2 [, colour]
+            #
+            # An omitted r2 - a bare comma - is a one pixel wide arc at
+            # r1, which cmd_arc expresses as r2 = r1, r1 - 1; MM_CUR
+            # carries the omission to the header.  The angles are
+            # MMBasic's compass degrees: 0 up, clockwise.
+            self.i += 1
+            x = self.as_int(self.expr())
+            self.expect_op(',')
+            y = self.as_int(self.expr())
+            self.expect_op(',')
+            r1 = self.as_int(self.expr())
+            self.expect_op(',')
+            r2 = 'MM_CUR'
+            if not self.is_op(','):
+                r2 = self.as_int(self.expr())
+            self.expect_op(',')
+            a1 = self.as_int(self.expr())
+            self.expect_op(',')
+            a2 = self.as_int(self.expr())
+            col = 'MM_CUR'
+            if self.accept_op(','):
+                col = self.as_int(self.expr())
+            self.uses_arc = True
+            self.emit('mmg_arc(%s, %s, %s, %s, %s, %s, %s);'
+                      % (x, y, r1, r2, a1, a2, col))
+            return
         if up == 'TEXT':
             # TEXT x, y, string$ [, alignment$] [, font] [, scale]
             #                    [, colour] [, background]
@@ -4054,6 +4154,14 @@ class Conv(object):
         # IS the granularity, so it must be exact.
         if self.uses_circle:
             wr('#include "mmb_gfx_circle.h"\n')
+        if self.uses_box:
+            wr('#include "mmb_gfx_box.h"\n')
+        if self.uses_rbox:
+            wr('#include "mmb_gfx_rbox.h"\n')
+        if self.uses_triangle:
+            wr('#include "mmb_gfx_triangle.h"\n')
+        if self.uses_arc:
+            wr('#include "mmb_gfx_arc.h"\n')
         if self.uses_text:
             wr('#include "mmb_gfx_text.h"\n')
         if self.uses_mappal:

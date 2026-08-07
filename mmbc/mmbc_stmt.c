@@ -577,6 +577,115 @@ void statement_inner(void)
                   x, y, r, lw, col, fill, asp));
         return;
     }
+    if (strcmp(up, "BOX") == 0 || strcmp(up, "RBOX") == 0) {
+        /* BOX  x, y, w, h [, lw     [, colour [, fill]]]
+           RBOX x, y, w, h [, radius [, colour [, fill]]]
+
+           cmd_box / cmd_rbox: width and height may be negative and the
+           box is drawn the other way; the line width (or the corner
+           radius) defaults to 1 (or 10); the colours default to the
+           current foreground and to no fill.  A bare comma is legal in
+           every optional position, as everywhere. */
+        int is_rbox = (strcmp(up, "RBOX") == 0);
+        const char *x, *y, *w, *h;
+        const char *lw, *col = "MM_CUR", *fill = "MM_CUR";
+
+        lw = is_rbox ? "10LL" : "1LL";
+        cv.i++;
+        x = as_int(expr());
+        expect_op(",");
+        y = as_int(expr());
+        expect_op(",");
+        w = as_int(expr());
+        expect_op(",");
+        h = as_int(expr());
+        if (accept_op(",")) {
+            if (!is_op(",", 0))
+                lw = as_int(expr());
+            if (accept_op(",")) {
+                if (!is_op(",", 0))
+                    col = as_int(expr());
+                if (accept_op(","))
+                    fill = as_int(expr());
+            }
+        }
+        if (is_rbox) {
+            cv.uses_rbox = 1;
+            emit(sfmt("mmg_rbox(%s, %s, %s, %s, %s, %s, %s);",
+                      x, y, w, h, lw, col, fill));
+        } else {
+            cv.uses_box = 1;
+            emit(sfmt("mmg_box(%s, %s, %s, %s, %s, %s, %s);",
+                      x, y, w, h, lw, col, fill));
+        }
+        return;
+    }
+    if (strcmp(up, "TRIANGLE") == 0) {
+        /* TRIANGLE x1, y1, x2, y2, x3, y3 [, colour [, fill]]
+
+           SAVE and RESTORE need the interpreter's blit buffers, so
+           only the drawing form is translated.  The colour may be a
+           bare comma, as everywhere. */
+        const char *x1, *y1, *x2, *y2, *x3, *y3;
+        const char *col = "MM_CUR", *fill = "MM_CUR";
+
+        cv.i++;
+        if (accept_kw("SAVE") || accept_kw("RESTORE")) {
+            cv_err("only the drawing form of TRIANGLE is translated");
+            return;
+        }
+        x1 = as_int(expr());
+        expect_op(",");
+        y1 = as_int(expr());
+        expect_op(",");
+        x2 = as_int(expr());
+        expect_op(",");
+        y2 = as_int(expr());
+        expect_op(",");
+        x3 = as_int(expr());
+        expect_op(",");
+        y3 = as_int(expr());
+        if (accept_op(",")) {
+            if (!is_op(",", 0))
+                col = as_int(expr());
+            if (accept_op(","))
+                fill = as_int(expr());
+        }
+        cv.uses_triangle = 1;
+        emit(sfmt("mmg_triangle(%s, %s, %s, %s, %s, %s, %s, %s);",
+                  x1, y1, x2, y2, x3, y3, col, fill));
+        return;
+    }
+    if (strcmp(up, "ARC") == 0) {
+        /* ARC x, y, r1 [, r2], rad1, rad2 [, colour]
+
+           An omitted r2 - a bare comma - is a one pixel wide arc at
+           r1, which cmd_arc expresses as r2 = r1, r1 - 1; MM_CUR
+           carries the omission to the header.  The angles are
+           MMBasic's compass degrees: 0 up, clockwise. */
+        const char *x, *y, *r1, *a1, *a2;
+        const char *r2 = "MM_CUR", *col = "MM_CUR";
+
+        cv.i++;
+        x = as_int(expr());
+        expect_op(",");
+        y = as_int(expr());
+        expect_op(",");
+        r1 = as_int(expr());
+        expect_op(",");
+        if (!is_op(",", 0))
+            r2 = as_int(expr());
+        expect_op(",");
+        a1 = as_int(expr());
+        expect_op(",");
+        a2 = as_int(expr());
+        if (accept_op(","))
+            col = as_int(expr());
+        cv.uses_arc = 1;
+        emit(sfmt("mmg_arc(%s, %s, %s, %s, %s, %s, %s);",
+                  x, y, r1, r2, a1, a2, col));
+        return;
+    }
     if (strcmp(up, "TEXT") == 0) {
         /* TEXT x, y, string$ [, alignment$] [, font] [, scale]
                               [, colour] [, background]

@@ -10,5 +10,7 @@ FCC=${FCC:-/home/peter/src/FUZIX/Applications/CC}
 
 cp "$M/mmb_runtime.c" "$M/mmb_runtime.h" \
    "$M/mmb_gfx.h" "$M/mmb_gfx_pts.h" "$M/mmb_gfx_circle.h" \
+   "$M/mmb_gfx_box.h" "$M/mmb_gfx_rbox.h" "$M/mmb_gfx_triangle.h" \
+   "$M/mmb_gfx_arc.h" \
    "$M/mmb_gfx_text.h" "$M/mmb_gfx_map.h" "$M/mmb_gpio.h" "$FCC/"
 echo "synced mmb_runtime.[ch] mmb_gfx*.h mmb_gpio.h -> $FCC"

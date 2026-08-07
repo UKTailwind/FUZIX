@@ -106,14 +106,13 @@ would be worse than the current clear error:
   DRAW3D GUI DEFINEFONT RESOLUTION BACKLIGHT LCD TOUCH CLICK GETSCANLINE`
 
   This entry used to say "every drawing command", and that is no longer
-  true: the PC3 kernel draws, so `MODE PIXEL LINE CIRCLE CLS COLOUR
-  TEXT FONT MAP FRAMEBUFFER` and `PRINT @` are translated and run on
-  hardware.  (An earlier version of this entry also claimed `BOX` and
-  `BLIT`; neither is implemented yet — `BOX` is Section 2 of
-  `REVIEW-COVERAGE-2026-08-07.md`, `BLIT` needs a block pixel-read
-  ioctl.)  What remains here is the part that needs state a translator
-  has no place to keep - sprites, tile maps, a GUI toolkit - or hardware
-  the PC3 does not have.
+  true: the PC3 kernel draws, so `MODE PIXEL LINE CIRCLE BOX RBOX
+  TRIANGLE ARC CLS COLOUR TEXT FONT MAP FRAMEBUFFER` and `PRINT @` are
+  translated and run on hardware (`TRIANGLE` in its drawing form;
+  `SAVE`/`RESTORE` need the interpreter's blit buffers).  `BLIT` still
+  needs a block pixel-read ioctl.  What remains here is the part that
+  needs state a translator has no place to keep - sprites, tile maps, a
+  GUI toolkit - or hardware the PC3 does not have.
 * **Sound** — `PLAY TONE WAV FLAC MOD MIDI SAMPLE EFFECT PAUSE NEXT PREVIOUS`
 
   Not all of `PLAY`, though: `PLAY MP3`, `PLAY VOLUME` and `PLAY STOP` are

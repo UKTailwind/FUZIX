@@ -153,7 +153,8 @@ the `LONGSTRING` family.
 
 On the PC3 (where the kernel owns the display, sound and GPIO) also:
 graphics — `MODE` · `CLS` · `COLOUR` · `PIXEL` (scalar and array forms,
-and the function) · `LINE` · `CIRCLE` · `TEXT` · `FONT` ·
+and the function) · `LINE` · `CIRCLE` · `BOX` · `RBOX` · `TRIANGLE`
+(drawing form; `SAVE`/`RESTORE` are refused) · `ARC` · `TEXT` · `FONT` ·
 `MAP` (`SET|RESET|MAXIMITE|GRAYSCALE`, `MAP(n)=` and the function) ·
 `FRAMEBUFFER CREATE|CLOSE|WRITE|COPY|WAIT` · `PRINT @(x,y)` ·
 `MM.HRES` / `MM.VRES`; GPIO — `SETPIN pin, DIN|DOUT` · `PIN(n)=` ·
@@ -161,10 +162,10 @@ and the function) · `LINE` · `CIRCLE` · `TEXT` · `FONT` ·
 `PLAY VOLUME` · `PLAY STOP` (the decoder is a separate spawned process);
 and the spawns — `SYSTEM prog$[, args]` · `SAVE IMAGE` · `LOAD IMAGE`.
 On a host with no display the graphics calls are silently nothing, which
-is what keeps the test gates meaningful.  `CIRCLE`, `TEXT` and the `MAP`
-palettes are static functions in per-feature headers, so a program pays
-only for the primitives it uses; the rest cross into the kernel through
-bcrun.
+is what keeps the test gates meaningful.  `CIRCLE`, `BOX`, `RBOX`,
+`TRIANGLE`, `ARC`, `TEXT` and the `MAP` palettes are static functions
+in per-feature headers (`mmb_gfx_*.h`), so a program pays only for the
+primitives it uses; the rest cross into the kernel through bcrun.
 
 Operators follow the manual's precedence table, including `\`, `MOD`, `^`,
 `<<`, `>>`, bitwise `AND`/`OR`/`XOR`, logical `NOT`, bitwise `INV`, and

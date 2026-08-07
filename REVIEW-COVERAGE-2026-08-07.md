@@ -331,14 +331,24 @@ palette.bc completed silently, fbtext.bc animated 600 frames in
 per-feature headers live on board and host, both translators, all
 gates, sizes and behaviour confirmed on hardware.
 
-## Section 2 — BOX, RBOX, TRIANGLE, ARC (and LINE PLOT/GRAPH if wanted)
+## Section 2 — BOX, RBOX, TRIANGLE, ARC
 
 New per-feature headers in the Section-1 pattern, geometry taken from
-Draw.c so pixels match the interpreter: `mmb_gfx_box.h` (BOX, RBOX —
-spans via `mmg_rc`), `mmb_gfx_triangle.h`, `mmb_gfx_arc.h`.  BOX first —
-it is the most-missed primitive and COVERAGE.md used to (wrongly) claim
-it.  Tests: one .bas per primitive with pixel-count comparison against
-MMBasic on the same hardware, per the CIRCLE precedent.
+Draw.c so pixels match the interpreter: `mmb_gfx_box.h` (edge + fill
+rectangles), `mmb_gfx_rbox.h` (Bresenham corner arcs, the firmware's
+own recursion for the filled outline), `mmb_gfx_triangle.h`
+(CalcLineInternal scanline fill + mm_line outline; SAVE/RESTORE
+refused), `mmb_gfx_arc.h` (ring-sector scanline sweep, compass
+angles).  Shared normalising rect helpers joined `mmb_gfx_pts.h` —
+DrawRBox hands DrawRectangle right-to-left spans, and the batched
+crossing does not normalise.
+
+**Implemented 2026-08-07 (same day, after Section 1 closed).**  All
+four primitives in both translators, `tests/box.bas` and
+`tests/tri.bas` with .expected files in all three gates: make check
+18 ok, cgate 0, fcctests 18/18, qemutests 19/19.  box.bc 11,796 via
+fcc carrying exactly `mmb_gfx_box.h` + `mmb_gfx_rbox.h`.  Board
+verification pending.
 
 ## Section 3 — TYPE / structures
 
