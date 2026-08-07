@@ -2351,6 +2351,138 @@ MMFLOAT mm_timer(void)
  * file - reads nothing and says so, rather than consuming the input a
  * program's INPUT statements are waiting for.
  */
+/*
+ * The key codes INKEY$ hands back, which are MMBasic's own
+ * (Hardware_Includes.h).  A program written for the PicoMite tests
+ * INKEY$ against CHR$(&H80) for UP and CHR$(&H91) for F1, and it has
+ * to mean the same thing here.
+ */
+#define MMK_UP     0x80
+#define MMK_DOWN   0x81
+#define MMK_LEFT   0x82
+#define MMK_RIGHT  0x83
+#define MMK_INSERT 0x84
+#define MMK_HOME   0x86
+#define MMK_END    0x87
+#define MMK_PUP    0x88
+#define MMK_PDOWN  0x89
+#define MMK_DEL    0x7F
+#define MMK_F1     0x91
+#define MMK_F3     0x93
+#define MMK_F5     0x95
+#define MMK_F6     0x96
+#define MMK_F7     0x97
+#define MMK_F9     0x99
+#define MMK_F11    0x9B
+
+#if !defined(_WIN32)
+/*
+ * A terminal sends an arrow or a function key as an escape sequence;
+ * MMBasic's INKEY$ hands back ONE code for it, because MMInkey()
+ * reassembles it first.  Without this a translated program saw ESC,
+ * '[', 'A' as three separate INKEY$ results where the PicoMite gives
+ * one - which is worse than the key not working, because the program
+ * looks like it should work and quietly does something else.
+ *
+ * This is MMInkey() from PicoMite.c: the same sequences, the same
+ * codes, and the same rule for anything unrecognised - the bytes are
+ * queued and handed back one at a time behind the ESC, so nothing is
+ * ever swallowed.
+ */
+static unsigned char mm_kq[4];          /* pushback, MMInkey's c1..c4 */
+static int mm_kqn;
+
+static void mm_kpush(int a, int b, int c, int d)
+{
+    mm_kqn = 0;
+    if (a >= 0) mm_kq[mm_kqn++] = (unsigned char)a;
+    if (b >= 0) mm_kq[mm_kqn++] = (unsigned char)b;
+    if (c >= 0) mm_kq[mm_kqn++] = (unsigned char)c;
+    if (d >= 0) mm_kq[mm_kqn++] = (unsigned char)d;
+}
+
+/* One byte, or -1.  The caller has already set VTIME, which is what
+   decides whether this waits for the rest of a sequence. */
+static int mm_rd1(void)
+{
+    unsigned char c;
+
+    return (int)read(0, &c, 1) == 1 ? (int)c : -1;
+}
+
+static int mm_esc_decode(void)
+{
+    int c, tc, ttc;
+
+    c = mm_rd1();
+    if (c < 0)
+        return 0x1b;                    /* a real Escape */
+
+    if (c == 'O') {                     /* ESC O P..T, the DEC spelling */
+        c = mm_rd1();
+        if (c >= 'P' && c <= 'T')
+            return MMK_F1 + (c - 'P');
+        if (c == '2') {
+            tc = mm_rd1();
+            if (tc == 'R')
+                return MMK_F3 + 0x20;   /* shift-F3 */
+            mm_kpush('O', c, tc, -1);
+            return 0x1b;
+        }
+        mm_kpush('O', c, -1, -1);
+        return 0x1b;
+    }
+    if (c != '[') {
+        mm_kpush(c, -1, -1, -1);
+        return 0x1b;
+    }
+
+    c = mm_rd1();
+    if (c >= 'A' && c <= 'D') {         /* A=up B=down C=right D=left */
+        static const unsigned char arrows[] = {
+            MMK_UP, MMK_DOWN, MMK_RIGHT, MMK_LEFT
+        };
+        return arrows[c - 'A'];
+    }
+    if (c < '1' || c > '6') {
+        mm_kpush('[', c, -1, -1);
+        return 0x1b;
+    }
+
+    tc = mm_rd1();
+    if (tc == '~') {                    /* ESC [ n ~ */
+        static const unsigned char edit[] = {
+            MMK_HOME, MMK_INSERT, MMK_DEL, MMK_END, MMK_PUP, MMK_PDOWN
+        };
+        return edit[c - '1'];
+    }
+
+    ttc = mm_rd1();
+    if (ttc == '~') {                   /* ESC [ nn ~ */
+        if (c == '1') {
+            if (tc >= '1' && tc <= '5')
+                return MMK_F1 + (tc - '1');     /* 11~..15~ = F1..F5 */
+            if (tc >= '7' && tc <= '9')
+                return MMK_F6 + (tc - '7');     /* 17~..19~ = F6..F8 */
+        } else if (c == '2') {
+            if (tc >= '0' && tc <= '1')
+                return MMK_F9 + (tc - '0');     /* 20~ 21~ = F9 F10 */
+            if (tc >= '3' && tc <= '4')
+                return MMK_F11 + (tc - '3');    /* 23~ 24~ = F11 F12 */
+            if (tc >= '5' && tc <= '6')
+                return MMK_F3 + 0x20 + (tc - '5');
+            if (tc >= '8' && tc <= '9')
+                return MMK_F5 + 0x20 + (tc - '8');
+        } else if (c == '3') {
+            if (tc >= '1' && tc <= '4')
+                return MMK_F7 + 0x20 + (tc - '1');
+        }
+    }
+    mm_kpush('[', c, tc, ttc);
+    return 0x1b;
+}
+#endif
+
 char *mm_inkey(void)
 {
     char *t = mm_tmp();
@@ -2363,8 +2495,17 @@ char *mm_inkey(void)
 #else
     {
         struct termios cooked, raw;
-        unsigned char c;
-        int n;
+        int c;
+
+        if (mm_kqn) {                   /* an unrecognised sequence, byte by byte */
+            int i;
+            t[0] = 1;
+            t[1] = (char)mm_kq[0];
+            for (i = 1; i < mm_kqn; i++)
+                mm_kq[i - 1] = mm_kq[i];
+            mm_kqn--;
+            return t;
+        }
 
         if (!isatty(0) || tcgetattr(0, &cooked) != 0)
             return t;
@@ -2374,9 +2515,19 @@ char *mm_inkey(void)
         raw.c_cc[VTIME] = 0;            /* and do not wait for it */
         if (tcsetattr(0, TCSANOW, &raw) != 0)
             return t;
-        n = (int)read(0, &c, 1);
+        c = mm_rd1();
+        if (c == 0x1b) {
+            /* Only now is it worth waiting: the rest of a sequence is
+             * already on its way, and 100ms is both long enough for a
+             * slow line and the gap that tells a bare ESC from the
+             * start of one.  A program polling INKEY$ in a loop never
+             * reaches here unless a key was actually pressed. */
+            raw.c_cc[VTIME] = 1;
+            if (tcsetattr(0, TCSANOW, &raw) == 0)
+                c = mm_esc_decode();
+        }
         tcsetattr(0, TCSANOW, &cooked);
-        if (n == 1) {
+        if (c >= 0) {
             t[0] = 1;
             t[1] = (char)c;
         }
