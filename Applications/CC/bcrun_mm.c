@@ -165,7 +165,12 @@ static void w_float_to_str(void)   { mm_float_to_str(Pa(0), D(1), I(3), I(4),
 static void w_toint(void)    { A = mm_toint(D(0)); }
 static void w_idiv(void)     { A = mm_idiv(LL(0), LL(2)); }
 static void w_mod(void)      { A = mm_mod(LL(0), LL(2)); }
+static void w_fdiv(void)     { A = dput(mm_fdiv(D(0), D(2))); }
 static void w_pow(void)      { A = dput(mm_pow(D(0), D(2))); }
+static void w_sqr(void)      { A = dput(mm_sqr(D(0))); }
+static void w_log(void)      { A = dput(mm_log(D(0))); }
+static void w_asin(void)     { A = dput(mm_asin(D(0))); }
+static void w_acos(void)     { A = dput(mm_acos(D(0))); }
 static void w_atan3(void)    { A = dput(mm_atan3(D(0), D(2))); }
 static void w_rnd(void)      { A = dput(mm_rnd()); }
 static void w_randomize(void){ mm_randomize(LL(0)); A = 0; }
@@ -470,7 +475,12 @@ static const struct mmwrap {
 	{ "mm_toint",		w_toint },
 	{ "mm_idiv",		w_idiv },
 	{ "mm_mod",		w_mod },
+	{ "mm_fdiv",		w_fdiv },
 	{ "mm_pow",		w_pow },
+	{ "mm_sqr",		w_sqr },
+	{ "mm_log",		w_log },
+	{ "mm_asin",		w_asin },
+	{ "mm_acos",		w_acos },
 	{ "mm_atan3",		w_atan3 },
 	{ "mm_rnd",		w_rnd },
 	{ "mm_randomize",	w_randomize },

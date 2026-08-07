@@ -95,9 +95,11 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval(sfmt("mm_sgn(%s)", f(0)), TY_I);
     {
         static const struct { const char *name; const char *cf; } m[] = {
-            { "SQR", "sqrt" }, { "SIN", "sin" }, { "COS", "cos" },
-            { "TAN", "tan" }, { "ATN", "atan" }, { "LOG", "log" },
-            { "EXP", "exp" }, { "ASIN", "asin" }, { "ACOS", "acos" },
+            /* SQR/LOG/ASIN/ACOS carry the firmware's domain checks and
+               so go through the runtime; the rest have none. */
+            { "SQR", "mm_sqr" }, { "SIN", "sin" }, { "COS", "cos" },
+            { "TAN", "tan" }, { "ATN", "atan" }, { "LOG", "mm_log" },
+            { "EXP", "exp" }, { "ASIN", "mm_asin" }, { "ACOS", "mm_acos" },
             { NULL, NULL }
         };
         int k;

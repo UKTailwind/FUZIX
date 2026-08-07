@@ -136,7 +136,13 @@ void mm_float_to_str  (char *p, MMFLOAT f, int m, int n, unsigned char ch);
 MMINTEGER mm_toint(MMFLOAT v);      /* round to nearest, as MMBasic    */
 MMINTEGER mm_idiv (MMINTEGER a, MMINTEGER b);   /*  \   */
 MMINTEGER mm_mod  (MMINTEGER a, MMINTEGER b);   /* MOD  */
+MMFLOAT   mm_fdiv (MMFLOAT a, MMFLOAT b);       /*  /   */
 MMFLOAT   mm_pow  (MMFLOAT a, MMFLOAT b);       /*  ^   */
+/* the firmware's domain checks, not the C library's silent nan */
+MMFLOAT   mm_sqr  (MMFLOAT v);
+MMFLOAT   mm_log  (MMFLOAT v);
+MMFLOAT   mm_asin (MMFLOAT v);
+MMFLOAT   mm_acos (MMFLOAT v);
 MMFLOAT   mm_atan3(MMFLOAT y, MMFLOAT x);       /* MATH(ATAN3 y, x)      */
 MMFLOAT   mm_rnd  (void);
 void      mm_randomize(MMINTEGER seed);
