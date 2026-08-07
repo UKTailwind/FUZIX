@@ -94,6 +94,19 @@ compiled code substantially faster.
   keys, that made it close to unusable over the serial port. It now
   accepts every sequence MMBasic's own `MMInkey` accepts, including
   the shifted forms.
+* **`INKEY$` returns MMBasic's key codes.** A terminal sends an arrow
+  or a function key as a several-byte escape sequence; MMBasic hands
+  back one code for it, and until now a translated program here saw
+  the raw bytes one at a time instead. So `IF INKEY$ = CHR$(&H80)` —
+  the way every PicoMite program tests for cursor-up — quietly never
+  matched. `INKEY$` now reassembles the sequence and returns the same
+  single code the PicoMite does: `&H80`–`&H83` for the cursor keys,
+  `&H91`–`&H9C` for F1–F12, and the editing cluster besides. Anything
+  it does not recognise is handed back byte by byte, as before, so
+  nothing is swallowed.
+* **`vi` can edit a real file.** Levee shipped with a 4 KB buffer — a
+  fair share of an 8-bit micro, and not of this machine. It is now
+  64 KB.
 
 ## New in v0.8
 
@@ -1160,6 +1173,24 @@ rather than translated into something they are not.
 without waiting — which is how the loop above ends. It leaves the
 terminal as it found it, so `INPUT` still works afterwards and a
 program stopped with Ctrl-C does not take the shell's echo with it.
+
+A cursor or function key reaches a terminal as an escape sequence of
+several bytes, and `INKEY$` reassembles it and gives back the single
+code MMBasic gives, so the PicoMite idiom works unchanged:
+
+```basic
+DO
+  k$ = INKEY$
+  IF k$ = CHR$(&H80) THEN PRINT "up"
+  IF k$ = CHR$(&H91) THEN PRINT "F1"
+LOOP UNTIL k$ = "q"
+```
+
+The codes are MMBasic's: `&H80`–`&H83` for up, down, left and right,
+`&H84` insert, `&H86` home, `&H87` end, `&H88`/`&H89` page up and
+down, `&H7F` delete, and `&H91`–`&H9C` for F1 to F12. A sequence it
+does not recognise comes back byte by byte behind its escape, so
+nothing is lost — and a bare `ESC` is still `CHR$(27)`.
 
 ## Running another program: `SYSTEM`, `SAVE IMAGE`, `LOAD IMAGE`
 
