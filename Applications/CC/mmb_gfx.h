@@ -12,6 +12,10 @@
  */
 
 #include "mmb_gfx_circle.h"
+#include "mmb_gfx_box.h"
+#include "mmb_gfx_rbox.h"
+#include "mmb_gfx_triangle.h"
+#include "mmb_gfx_arc.h"
 #include "mmb_gfx_text.h"
 #include "mmb_gfx_map.h"
 

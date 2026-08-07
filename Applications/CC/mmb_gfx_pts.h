@@ -35,6 +35,19 @@
 #include "mmb_runtime.h"
 
 /*
+ *	The helpers below are shared by several primitives, so any one
+ *	primitive's include leaves some of them uncalled.  cc1 generates
+ *	nothing for those; gcc generates nothing either but says so, and
+ *	the attribute quiets it.  MM_FCC keeps the attribute away from
+ *	the fcc pipeline, whose cc0 does not read attributes.
+ */
+#if !defined(MM_FCC) && defined(__GNUC__)
+#define MMG_UNUSED	__attribute__((unused))
+#else
+#define MMG_UNUSED
+#endif
+
+/*
  *	Items buffered before crossing into the kernel. Points cost two
  *	shorts and rectangles four, so this is 128 and 256 bytes of the
  *	caller's stack; both live in the primitive's own frame rather
@@ -42,7 +55,7 @@
  */
 #define MMG_BATCH	32
 
-static void mmg_pt(short *b, int *n, MMINTEGER c, int x, int y)
+static MMG_UNUSED void mmg_pt(short *b, int *n, MMINTEGER c, int x, int y)
 {
 	b[*n * 2] = (short)x;
 	b[*n * 2 + 1] = (short)y;
@@ -52,7 +65,7 @@ static void mmg_pt(short *b, int *n, MMINTEGER c, int x, int y)
 	}
 }
 
-static void mmg_rc(short *b, int *n, MMINTEGER c, int x1, int y1,
+static MMG_UNUSED void mmg_rc(short *b, int *n, MMINTEGER c, int x1, int y1,
 		   int x2, int y2)
 {
 	b[*n * 4] = (short)x1;
@@ -63,6 +76,41 @@ static void mmg_rc(short *b, int *n, MMINTEGER c, int x1, int y1,
 		mm_fill(b, *n, c);
 		*n = 0;
 	}
+}
+
+/*
+ *	The same, normalising first.  MMBasic's DrawRectangle accepts its
+ *	corners in either order - DrawRBox hands it right-to-left spans -
+ *	and normalises inside; the batched crossing does not, so any
+ *	caller reproducing firmware geometry goes through this.
+ */
+static MMG_UNUSED void mmg_rectn(short *b, int *n, MMINTEGER c, int x1, int y1,
+		      int x2, int y2)
+{
+	int t;
+
+	if (x2 < x1) { t = x1; x1 = x2; x2 = t; }
+	if (y2 < y1) { t = y1; y1 = y2; y2 = t; }
+	mmg_rc(b, n, c, x1, y1, x2, y2);
+}
+
+/*
+ *	One rectangle, one crossing.  For the primitives that draw a
+ *	handful of rectangles in different colours (BOX is at most five),
+ *	batching per colour costs more code than it saves syscalls.
+ */
+static MMG_UNUSED void mmg_rect1(MMINTEGER c, int x1, int y1, int x2, int y2)
+{
+	short r[4];
+	int t;
+
+	if (x2 < x1) { t = x1; x1 = x2; x2 = t; }
+	if (y2 < y1) { t = y1; y1 = y2; y2 = t; }
+	r[0] = (short)x1;
+	r[1] = (short)y1;
+	r[2] = (short)x2;
+	r[3] = (short)y2;
+	mm_fill(r, 1, c);
 }
 
 #endif /* MMB_GFX_PTS_H */

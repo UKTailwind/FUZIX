@@ -46,6 +46,14 @@ HEADERS = [
      "/usr/lib/cc/include/mmb_gfx_pts.h"),
     (os.path.join(CC, "mmb_gfx_circle.h"), "mmb_gfx_circle.h",
      "/usr/lib/cc/include/mmb_gfx_circle.h"),
+    (os.path.join(CC, "mmb_gfx_box.h"), "mmb_gfx_box.h",
+     "/usr/lib/cc/include/mmb_gfx_box.h"),
+    (os.path.join(CC, "mmb_gfx_rbox.h"), "mmb_gfx_rbox.h",
+     "/usr/lib/cc/include/mmb_gfx_rbox.h"),
+    (os.path.join(CC, "mmb_gfx_triangle.h"), "mmb_gfx_triangle.h",
+     "/usr/lib/cc/include/mmb_gfx_triangle.h"),
+    (os.path.join(CC, "mmb_gfx_arc.h"), "mmb_gfx_arc.h",
+     "/usr/lib/cc/include/mmb_gfx_arc.h"),
     (os.path.join(CC, "mmb_gfx_text.h"), "mmb_gfx_text.h",
      "/usr/lib/cc/include/mmb_gfx_text.h"),
     (os.path.join(CC, "mmb_gfx_map.h"), "mmb_gfx_map.h",
@@ -72,7 +80,10 @@ def run(args):
 
 
 def send(local, remote):
-    run(["uusend.py", local, remote, "0"])
+    # 5 ms per line, not 0: full-rate transfers overran the rx FIFO
+    # three times on 2026-08-07 (the ri=0470 wedge) and a paced one
+    # has not wedged yet.  ~9 s extra on the biggest binary.
+    run(["uusend.py", local, remote, "5"])
 
 
 def shell(*cmds):

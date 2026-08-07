@@ -986,8 +986,10 @@ including the blank arguments — `CIRCLE x, y, r, , , fill` is written
 exactly as MMBasic writes it.
 
 The drawing primitives live in headers as static functions, one header
-per primitive — `mmb_gfx_circle.h`, `mmb_gfx_text.h`, `mmb_gfx_map.h`,
-over the shared batch helpers in `mmb_gfx_pts.h` — and the translator
+per primitive — `mmb_gfx_circle.h`, `mmb_gfx_box.h`, `mmb_gfx_rbox.h`,
+`mmb_gfx_triangle.h`, `mmb_gfx_arc.h`, `mmb_gfx_text.h`,
+`mmb_gfx_map.h`, over the shared batch helpers in `mmb_gfx_pts.h` —
+and the translator
 includes exactly the ones the program uses, so a program that never
 draws a circle does not carry the circle code. (`cc` discards a
 file-scope static nothing calls, but that rule counts names rather
@@ -1678,25 +1680,26 @@ translate time, not at run time.
 
 |   |   |   |   |
 |---|---|---|---|
-| `?` | `ARRAY` | `CALL` | `CASE` |
-| `CAT` | `CHDIR` | `CIRCLE` | `CLEAR` |
-| `CLOSE` | `CLS` | `COLOR` | `COLOUR` |
-| `CONST` | `CONTINUE` | `COPY` | `DATA` |
-| `DATE$` | `DIM` | `DO` | `ELSE` |
-| `ELSEIF` | `END` | `ENDIF` | `ERASE` |
-| `ERROR` | `EXIT` | `FILES` | `FONT` |
-| `FOR` | `FRAMEBUFFER` | `FUNCTION` | `GOSUB` |
-| `GOTO` | `IF` | `INC` | `INPUT` |
-| `KILL` | `LET` | `LINE` | `LOAD` |
-| `LOCAL` | `LONGSTRING` | `LOOP` | `MAP` |
-| `MATH` | `MKDIR` | `MODE` | `NEXT` |
-| `ON` | `OPEN` | `OPTION` | `PAUSE` |
-| `PIN` | `PIXEL` | `PLAY` | `PRINT` |
-| `RANDOMIZE` | `READ` | `RENAME` | `RESTORE` |
-| `RETURN` | `RMDIR` | `SAVE` | `SEEK` |
-| `SELECT` | `SETPIN` | `SORT` | `STATIC` |
-| `SUB` | `SYSTEM` | `TEXT` | `TIME$` |
-| `TIMER` | `WEND` | `WHILE` |  |
+| `?` | `ARC` | `ARRAY` | `BOX` |
+| `CALL` | `CASE` | `CAT` | `CHDIR` |
+| `CIRCLE` | `CLEAR` | `CLOSE` | `CLS` |
+| `COLOR` | `COLOUR` | `CONST` | `CONTINUE` |
+| `COPY` | `DATA` | `DATE$` | `DIM` |
+| `DO` | `ELSE` | `ELSEIF` | `END` |
+| `ENDIF` | `ERASE` | `ERROR` | `EXIT` |
+| `FILES` | `FONT` | `FOR` | `FRAMEBUFFER` |
+| `FUNCTION` | `GOSUB` | `GOTO` | `IF` |
+| `INC` | `INPUT` | `KILL` | `LET` |
+| `LINE` | `LOAD` | `LOCAL` | `LONGSTRING` |
+| `LOOP` | `MAP` | `MATH` | `MKDIR` |
+| `MODE` | `NEXT` | `ON` | `OPEN` |
+| `OPTION` | `PAUSE` | `PIN` | `PIXEL` |
+| `PLAY` | `PRINT` | `RANDOMIZE` | `RBOX` |
+| `READ` | `RENAME` | `RESTORE` | `RETURN` |
+| `RMDIR` | `SAVE` | `SEEK` | `SELECT` |
+| `SETPIN` | `SORT` | `STATIC` | `SUB` |
+| `SYSTEM` | `TEXT` | `TIME$` | `TIMER` |
+| `TRIANGLE` | `WEND` | `WHILE` |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -1748,12 +1751,14 @@ compiled and run rather than typed at a prompt. (`mmedit` provides the
 editing they existed for.)
 
 Of the graphics, `MODE`, `COLOUR`, `PIXEL` (including the array form),
-`LINE`, `CIRCLE`, `RGB()`, `FRAMEBUFFER`, `PRINT @`, `TEXT`, `FONT`,
-`CLS [colour]` and `MAP` (statement and function) are done; `BOX` and
-`TRIANGLE` are not yet, nor are `FRAMEBUFFER LAYER` and `FRAMEBUFFER
-MERGE`. `TEXT` draws in any of MMBasic's nine built-in fonts but only
-in its normal and vertical orientations — the three that rotate the
-character itself are accepted and drawn normally.
+`LINE`, `CIRCLE`, `BOX`, `RBOX`, `TRIANGLE` (its drawing form —
+`SAVE`/`RESTORE` need the interpreter's blit buffers), `ARC`, `RGB()`,
+`FRAMEBUFFER`, `PRINT @`, `TEXT`, `FONT`, `CLS [colour]` and `MAP`
+(statement and function) are done; `BLIT` is not yet, nor are
+`FRAMEBUFFER LAYER` and `FRAMEBUFFER MERGE`. `TEXT` draws in any of
+MMBasic's nine built-in fonts but only in its normal and vertical
+orientations — the three that rotate the character itself are accepted
+and drawn normally.
 
 Of the pins, `SETPIN n, DIN|DOUT`, `PIN(n) =` and `PIN(n)` are done for
 all forty-eight GPIOs; the analogue, frequency, counting and interrupt

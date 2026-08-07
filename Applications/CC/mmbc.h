@@ -231,6 +231,10 @@ struct conv {
     int inline_depth;
     int uses_clear;
     int uses_circle;
+    int uses_box;
+    int uses_rbox;
+    int uses_triangle;
+    int uses_arc;
     int uses_text;
     int uses_mappal;
     int uses_gpio;

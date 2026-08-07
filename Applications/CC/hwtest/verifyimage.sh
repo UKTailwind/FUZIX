@@ -80,8 +80,9 @@ done
 
 echo "--- the headers the generated C includes"
 same /usr/lib/cc/include/mmb_runtime.h "$R/Applications/CC/mmb_runtime.h"
-for f in mmb_gfx.h mmb_gfx_pts.h mmb_gfx_circle.h mmb_gfx_text.h \
-		mmb_gfx_map.h mmb_gpio.h; do
+for f in mmb_gfx.h mmb_gfx_pts.h mmb_gfx_circle.h mmb_gfx_box.h \
+		mmb_gfx_rbox.h mmb_gfx_triangle.h mmb_gfx_arc.h \
+		mmb_gfx_text.h mmb_gfx_map.h mmb_gpio.h; do
 	same "/usr/lib/cc/include/$f" "$R/Applications/CC/$f"
 done
 

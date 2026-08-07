@@ -306,6 +306,14 @@ void conv_write(FILE *f)
        the granularity, so it must be exact. */
     if (cv.uses_circle)
         fprintf(f, "#include \"mmb_gfx_circle.h\"\n");
+    if (cv.uses_box)
+        fprintf(f, "#include \"mmb_gfx_box.h\"\n");
+    if (cv.uses_rbox)
+        fprintf(f, "#include \"mmb_gfx_rbox.h\"\n");
+    if (cv.uses_triangle)
+        fprintf(f, "#include \"mmb_gfx_triangle.h\"\n");
+    if (cv.uses_arc)
+        fprintf(f, "#include \"mmb_gfx_arc.h\"\n");
     if (cv.uses_text)
         fprintf(f, "#include \"mmb_gfx_text.h\"\n");
     if (cv.uses_mappal)

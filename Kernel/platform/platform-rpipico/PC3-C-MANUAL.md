@@ -56,9 +56,11 @@ What you get:
   the `mm_*` entry points `bcrun` resolves by name — PRINT and
   formatting, strings, files, and the graphics crossings — and the
   drawing primitives are static functions in one header per primitive:
-  `mmb_gfx_circle.h`, `mmb_gfx_text.h`, `mmb_gfx_map.h` (batch helpers
-  in `mmb_gfx_pts.h`; `mmb_gfx.h` is the umbrella that includes the
-  lot; `mmb_gpio.h` is SETPIN/PIN). Include only what you draw: the
+  `mmb_gfx_circle.h`, `mmb_gfx_box.h`, `mmb_gfx_rbox.h`,
+  `mmb_gfx_triangle.h`, `mmb_gfx_arc.h`, `mmb_gfx_text.h`,
+  `mmb_gfx_map.h` (batch helpers in `mmb_gfx_pts.h`; `mmb_gfx.h` is
+  the umbrella that includes the lot; `mmb_gpio.h` is SETPIN/PIN).
+  Include only what you draw: the
   compiler drops an unused static, but the rule counts names rather
   than reachability, so a recursive primitive survives inside any
   header that carries it — the include is the granularity.

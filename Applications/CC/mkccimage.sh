@@ -79,8 +79,9 @@ echo "--- installing"
 	# exactly the primitives it names (cc1's dead-static rule counts
 	# names, not reachability, so the include is the granularity).
 	# mmb_gfx.h is the umbrella kept for hand-written C.
-	for f in mmb_gfx.h mmb_gfx_pts.h mmb_gfx_circle.h mmb_gfx_text.h \
-			mmb_gfx_map.h; do
+	for f in mmb_gfx.h mmb_gfx_pts.h mmb_gfx_circle.h mmb_gfx_box.h \
+			mmb_gfx_rbox.h mmb_gfx_triangle.h mmb_gfx_arc.h \
+			mmb_gfx_text.h mmb_gfx_map.h; do
 		echo "get $CC/$f $f"
 	done
 	# SETPIN and PIN, on the same terms - and easy to forget: a card
