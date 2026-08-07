@@ -25,6 +25,9 @@ for m in re.finditer(r"up == '([A-Z$?]+)'", body):
 for m in re.finditer(r"up in \(([^)]*)\)", body):
     for w in re.findall(r"'([A-Z$?]+)'", m.group(1)):
         stmts.append(w)
+# TYPE blocks are dispatched through skip_type_block rather than an
+# `up ==` test in statement_inner, so the scan above cannot see them
+stmts.append('TYPE')
 stmts = sorted(set(stmts))
 
 # ---- functions: the BUILTINS table -----------------------------------
