@@ -242,6 +242,23 @@ binaries, plus the small kernel ioctls marked †.
 
 # The plan
 
+**Status at the end of the 2026-08-07 session: Sections 1, 2 and 3 are
+CLOSED** — implemented in both translators (cgate 0 throughout), all
+host gates green (make check 20 ok, xcheck 0, fcctests 20/20,
+qemutests 21/21), board-verified self-hosted on the PC2, and Sections
+2 and 3 signed off side-by-side against a real MMBasic machine.  The
+side-by-side caught one silent divergence (over-length member strings
+must raise "String too long", not truncate) — fixed, board-verified.
+Incidental fixes along the way, all committed: the bcrun unaligned
+VM-stack HardFault (mem size now rounds to 8), cc1 NUM_STRUCT_FIELD
+50→128, the fault dump prints r4-r7 first, and the no-%lld-in-Fuzix-
+libc trap.  On the card now: bcrun 79,476 (bcrun.prev = rollback),
+mmbc 91,564, current cc0/cc1/cc2, all mmb headers incl. mm_ssetm, and
+the test set box/tri/type/structtest.bas.  Docs, both manuals and
+their PDFs are current; the PicoMite structures-manual errata are
+fixed upstream in d:\Dropbox\PicoMite\PicoMite\docs (uncommitted -
+the user manages that repo).  NEXT: Section 4.
+
 Process: one section at a time.  A section is not done until (a) the
 host gates pass — `make run`, `make xcheck`, `mmbc/cgate.sh` at total 0,
 `fcc/fccbuild.sh` clean on the affected tests — and (b) the change is
