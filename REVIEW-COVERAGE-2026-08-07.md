@@ -650,6 +650,47 @@ VAR SAVE, JSON$, ARRAY SLICE/INSERT, REDIM, CALL(name$), RUN/CHAIN,
 FLUSH, wildcard file ops, LOAD BMP/PNG/JPG.  Pull items forward when a
 real program wants them; each follows the pattern its category dictates.
 
+### MATH: where the four we have live, and where the other 34 must not
+
+Measured 2026-08-08 on the armm0 bcrun.  `MATH` as a STATEMENT is 38
+sub-commands in the firmware and 4 here — `SET`, `ADD`, `SCALE`,
+`RANDOMIZE`, the ones that walk an array element by element, with
+`ARRAY` accepted as a spelling.  They are **category 1**: `mm_arr_set_*`,
+`mm_arr_add_*`, `mm_arr_scale_*` and `mm_randomize` in mmb_runtime.c
+with their `w_arr_*` wrappers, all inside bcrun.
+
+    the four, with wrappers      876 bytes
+    bcrun .text                84,249 bytes
+
+so about 1% of bcrun, and **every process pays it** whether it says
+MATH or not — a running .bc is a bcrun process against the 340K pool,
+so bcrun's text is subtracted from what every program has to work in.
+
+For these four that is the right trade: they are small, and a loop
+setting or scaling a whole array wants to be native rather than
+something the bytecode walks.
+
+**For the other 34 it would be badly wrong.** The firmware's MATHS.c is
+4,562 lines: matrix inverse, FFT, quaternions, sensor fusion, AES.  That
+is a great deal of code that very few programs touch, and in bcrun it
+would shrink the pool for every process on the machine to benefit almost
+none of them.  They are category 2 — a header of static functions, where
+cc1's dead-code elimination means a program that never names
+`MATH M_INVERSE` carries none of it.
+
+**One header per block**, not one `mmb_math.h`: `mmb_math_matrix.h`,
+`_vector.h`, `_quat.h`, `_complex.h`, `_fft.h`.  The dead-static rule
+counts NAMES rather than reachability, so anything a header defines that
+a table or a recursion keeps alive survives into every program that
+includes it — the include is the granularity.  That is the lesson
+Section 1 paid for with the circle extent tables, and a maths header is
+exactly the shape to repeat it with.
+
+Whether the existing four should move out to match is marginal and the
+answer is probably no: it would take 876 bytes off every process and add
+about the same to each program that uses them.  Leave them, and start
+the header pattern with the new blocks.
+
 ---
 
 *Reports corrected as part of this review (2026-08-07): COVERAGE.md no
