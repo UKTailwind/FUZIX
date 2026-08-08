@@ -478,7 +478,20 @@ ioctl(sys, PSRAMIOC_STAT, &st);      /* total, free, largest */
 ```c
 ioctl(sys, PICOIOC_FLASH, 0);            /* reboot into BOOTSEL */
 ioctl(sys, PICOIOC_KBDMAP, "uk");        /* US UK DE FR ES BE */
+
+int board;
+ioctl(sys, PICOIOC_BOARD, &board);       /* 2 or 3 */
 ```
+
+`PICOIOC_BOARD` answers which machine this is — the same number the boot
+banner prints, from the same detection (the DS3231's 32 kHz on GP27). It
+exists because there was no other way to ask: the kernel knew, and only
+the banner ever said. A program that wants to name itself needs it —
+MMBasic's `MM.DEVICE$` is the first caller, and reports `Fuzix on PC2`
+or `Fuzix on PC3`.
+
+An older kernel does not have it, so check the return value and pick a
+default rather than trusting whatever was in the variable.
 
 # Traps worth knowing
 

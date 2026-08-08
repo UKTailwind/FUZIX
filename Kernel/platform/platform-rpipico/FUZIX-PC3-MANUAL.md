@@ -96,6 +96,18 @@ rest of the drawing statements, and structures.
   a PicoMite returns 0. Each of those was a program that behaved
   differently here and said nothing about it. There is a section on all
   of this below.
+* **The machine can say what it is.** `MM.VER` gives the release as a
+  number (0.10 reads higher than 0.09), `MM.DEVICE$` gives
+  `Fuzix on PC2` or `Fuzix on PC3` — detected, not assumed — and
+  `MM.CMDLINE$` gives the arguments the program was started with, so a
+  translated program can be used as a proper command. `MM.DEVICE$`
+  needed a new kernel call: which board this is was something the kernel
+  knew and only the boot banner ever said.
+* **`mmedit`'s Find works from the machine's own keyboard.** `F3` opened
+  the prompt and then ignored Enter, because a serial terminal sends CR
+  where the USB keyboard sends LF and the prompt only accepted the
+  first. Every prompt now takes either, so `F3`, `F10` and the rest
+  behave the same on the HDMI console as over a serial line.
 * **`mmedit` colours the new statements correctly.** `Box`, `RBox`,
   `Triangle`, `Arc`, `Type`, `End Type`, `Struct` and `Struct(` now
   show as translatable (cyan) rather than interpreter-only (blue).
@@ -1769,14 +1781,15 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `LGETBYTE` | `LGETSTR$` | `LINPUT` | `LINSTR` |
 | `LLEN` | `LOC` | `LOF` | `LOG` |
 | `LTRIM$` | `MAP` | `MATH` | `MAX` |
-| `MID$` | `MIN` | `MM.ERRMSG$` | `MM.ERRNO` |
-| `MM.HRES` | `MM.VRES` | `OCT$` | `PI` |
-| `PIN` | `PIXEL` | `RAD` | `RGB` |
-| `RIGHT$` | `RND` | `RTRIM$` | `SGN` |
-| `SIN` | `SPACE$` | `SQR` | `STR$` |
-| `STR2BIN` | `STRING$` | `STRUCT` | `TAB` |
-| `TAN` | `TIME$` | `TIMER` | `TRIM$` |
-| `UCASE$` | `VAL` |  |  |
+| `MID$` | `MIN` | `MM.CMDLINE$` | `MM.DEVICE$` |
+| `MM.ERRMSG$` | `MM.ERRNO` | `MM.HRES` | `MM.VER` |
+| `MM.VRES` | `OCT$` | `PI` | `PIN` |
+| `PIXEL` | `RAD` | `RGB` | `RIGHT$` |
+| `RND` | `RTRIM$` | `SGN` | `SIN` |
+| `SPACE$` | `SQR` | `STR$` | `STR2BIN` |
+| `STRING$` | `STRUCT` | `TAB` | `TAN` |
+| `TIME$` | `TIMER` | `TRIM$` | `UCASE$` |
+| `VAL` |  |  |  |
 
 ## MATH() sub-functions
 
