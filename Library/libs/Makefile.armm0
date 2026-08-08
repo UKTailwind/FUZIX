@@ -67,7 +67,10 @@ SRC_C += regexp.c
 SRC_C += strcpy.c strlen.c abs.c atof.c atoi.c atol.c labs.c
 SRC_C += strcat.c strchr.c strcmp.c strcspn.c strncat.c strncmp.c
 SRC_C += strncpy.c strpbrk.c strrchr.c strspn.c strstr.c strtok.c strtok_r.c
-SRC_C += memchr.c memcmp.c memcpy.c memset.c memmove.c
+# memcpy and memset are the word-wise versions for this target; the
+# generic memcpy.c/memset.c are byte loops, right for an 8-bit machine
+# and nine cycles a byte here
+SRC_C += memchr.c memcmp.c memcpy_armm0.c memset_armm0.c memmove.c
 
 SRC_CT += termcap.c tgetent.c
 
