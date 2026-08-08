@@ -68,6 +68,7 @@ int is_digit_c(int c);          /* is_digit clashes with some libcs */
 int is_idchar(int c);
 int is_hexd(int c);
 char *cblock_safe(const char *text);
+int nonzero_literal(const char *code);
 char *c_string_literal(const char *s);
 char *split_suffix(const char *word, int *ty);  /* ty out: TY_* or TY_NONE */
 char *cvar(const char *name);
