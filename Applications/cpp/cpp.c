@@ -24,7 +24,6 @@
  *
  * TODO:
  *    #asm -> asm("...") translation.
- *    ?: in #if expressions
  *    Complete #line directive.
  *    \n in "\n" in a stringized argument.
  *    Comments in stringized arguments should be deleted.
@@ -97,6 +96,7 @@ static int do_proc_if(int);
 static void do_proc_include(void);
 static void do_proc_define(void);
 static void do_proc_undef(void);
+static void do_proc_line(void);
 static void do_proc_else(void);
 static void do_proc_endif(void);
 static void do_proc_tail(void);
@@ -671,7 +671,14 @@ static int do_preproc(void)
 {
 	int val, no_match = 0;
 
-	if ((val = get_onetok(SKIP_SPACE)) == TK_WORD) {
+	/*
+	 * The directive NAME is not subject to macro replacement - only
+	 * what follows it is.  Read with substitution, "#define line 1000"
+	 * turned the next "#line line" into "#1000 1000", which matched no
+	 * directive at all: the line was silently passed through as text
+	 * and the file quietly kept its own numbering.
+	 */
+	if ((val = gettok_nosub()) == TK_WORD) {
 		if (strcmp(curword, "ifdef") == 0)
 			do_proc_if(0);
 		else if (strcmp(curword, "ifndef") == 0)
@@ -708,9 +715,7 @@ static int do_preproc(void)
 				pgetc();
 				/* Ignore #pragma ? */
 			} else if (strcmp(curword, "line") == 0) {
-				do_proc_copy_hashline();
-				pgetc();
-				/* Ignore #line for now. */
+				do_proc_line();
 			} else if (strcmp(curword, "asm") == 0) {
 				alltok |= 0x100;
 				return do_proc_copy_hashline();
@@ -735,6 +740,41 @@ static int do_preproc(void)
 
 	*curword = 0;		/* Just in case */
 	return 0;
+}
+
+/*
+ * #line N ["file"]
+ *
+ * The arguments are macro expanded, which is why this cannot copy the
+ * raw line the way #pragma does: after "#define line 1000" the
+ * directive "#line line" has to set 1000, and the tokeniser is what
+ * performs the substitution.
+ *
+ * c_lineno counts the line being read and is advanced by the newline
+ * character itself (chget_raw), so the number is stored AFTER that
+ * newline has been consumed - at which point c_lineno names the line
+ * about to be read, which is the one #line is talking about.
+ *
+ * The optional file name is accepted and skipped: renaming the file
+ * would also have to unwind at the end of an #include, and nothing
+ * needs it yet.
+ */
+static void do_proc_line(void)
+{
+	int tok;
+	long n = -1;
+
+	tok = get_onetok(SKIP_SPACE);
+	if (tok == TK_NUM)
+		n = strtol(curword, (void *) 0, 10);
+	else
+		cerror("Expected a line number after #line");
+
+	while (tok != '\n' && tok != EOF)
+		tok = get_onetok(SKIP_SPACE);
+
+	if (n >= 0)
+		c_lineno = n;
 }
 
 static int do_proc_copy_hashline(void)
@@ -1148,6 +1188,13 @@ static int_type get_expression(int prio)
 			if (prio >= 1)
 				return lvalue;
 			break;
+		case '?':
+			/* The conditional binds looser than every operator
+			   above, so only the outermost call may take it:
+			   "a || b ? c : d" is "(a || b) ? c : d". */
+			if (prio >= 1)
+				return lvalue;
+			break;
 		}
 		switch (curtok) {
 		case '*':
@@ -1225,7 +1272,34 @@ static int_type get_expression(int prio)
 			lvalue = (lvalue || rvalue);
 			break;
 
-		case '?':	/* XXX: To add */
+		case '?':
+			/*
+			 * The middle operand is a full expression, so it
+			 * parses at priority 0 and stops at the ':' - which
+			 * is not an operator here, so it lands in curtok.
+			 * The right operand parses at 0 as well, which is
+			 * what makes the conditional right associative:
+			 * "a ? b : c ? d : e" is "a ? b : (c ? d : e)".
+			 *
+			 * Both arms are evaluated where C evaluates only
+			 * the chosen one.  Nothing in this evaluator has a
+			 * side effect and division by zero is already
+			 * guarded below, so the value is the same either
+			 * way - "(-1 ? 3 : (0/0))" is 3, not an error.
+			 */
+			{
+				int_type tval, fval;
+
+				tval = get_expression(0);
+				if (curtok != ':') {
+					cerror("Expected ':'");
+					no_op = 1;
+					break;
+				}
+				fval = get_expression(0);
+				lvalue = lvalue ? tval : fval;
+			}
+			break;
 
 		default:
 			no_op = 1;
@@ -1310,6 +1384,15 @@ static int_type get_exp_value(void)
 				else
 					curtok = get_onetok(SKIP_SPACE);
 			}
+		} else if (strcmp("__LINE__", curword) == 0) {
+			/* is_ckey() turns __LINE__ into TK_LINE, but only
+			   in gettok(); the #if evaluator reads through
+			   get_onetok(), so the word arrived here and took
+			   the "unknown name is zero" rule below - which
+			   made "#if __LINE__ == 42" false everywhere and
+			   #line impossible to test. */
+			value = c_lineno;
+			curtok = get_onetok(SKIP_SPACE);
 		} else
 			curtok = get_onetok(SKIP_SPACE);
 
