@@ -519,15 +519,37 @@ MMINTEGER mm_toint(MMFLOAT v)
 /* The firmware's wording, exactly: "Divide by zero", not "Division by".
    It was invisible while an error only ever ended the program; MM.ERRMSG$
    makes the text a value a program can read and compare. */
+/*
+ * Both integers are 64 bits wide, and their VALUES almost never are.
+ *
+ * The M33 divides 32-bit integers in one SDIV instruction; a 64-bit
+ * divide is a call into libgcc's shift-and-subtract __aeabi_ldivmod,
+ * and there is nothing else on this chip to reach for - the SIO
+ * hardware divider was RP2040 only (the SDK's pico_divider picks its
+ * compiler implementation for RP2350), the bootrom exports no division,
+ * and the DCP is float and double only.  So the fast path is the
+ * narrowing test, which gcc turns into two compares against the sign
+ * bit and then the hardware instruction.
+ *
+ * -1 stays on the slow path both ways round: INT32_MIN / -1 does not
+ * fit in 32 bits, and neither the quotient nor the remainder would be
+ * what the wide division answers.
+ */
+#define MM_FITS32(x)  ((MMINTEGER)(int32_t)(x) == (x))
+
 MMINTEGER mm_idiv(MMINTEGER a, MMINTEGER b)
 {
     if (b == 0) MM_RAISEV("Divide by zero", 0);
+    if (b != -1 && MM_FITS32(a) && MM_FITS32(b))
+        return (MMINTEGER)((int32_t)a / (int32_t)b);
     return a / b;
 }
 
 MMINTEGER mm_mod(MMINTEGER a, MMINTEGER b)
 {
     if (b == 0) MM_RAISEV("Divide by zero", 0);
+    if (b != -1 && MM_FITS32(a) && MM_FITS32(b))
+        return (MMINTEGER)((int32_t)a % (int32_t)b);
     return a % b;
 }
 
