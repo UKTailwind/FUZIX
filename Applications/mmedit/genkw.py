@@ -67,7 +67,9 @@ for m in re.finditer(r"up in \(([^)]*)\)", body):
         supported.add(w)
 tbl = text[text.index("BUILTINS = {"):]
 tbl = tbl[:tbl.index("\n}")]
-for name, lo, hi in re.findall(r"'([A-Z0-9$]+)': \((\d+), (\d+)\)", tbl):
+# the dot matters: without it MM.HRES and the rest never matched, and
+# every MM.xxx read as untranslatable (fcc/coverage.py had the same bug)
+for name, lo, hi in re.findall(r"'([A-Z0-9.$]+)': \((\d+), (\d+)\)", tbl):
     supported.add(name)
 for m in re.finditer(r"MATHFUNCS = \{([^}]*)\}", text):
     supported.update(re.findall(r"'([A-Z0-9]+)'", m.group(1)))
@@ -80,7 +82,13 @@ supported.update(["AND", "OR", "NOT", "XOR", "MOD", "INV", "THEN", "TO",
                   "END FUNCTION", "END SELECT", "CASE ELSE", "SELECT CASE",
                   "EXIT DO", "EXIT FOR", "EXIT SUB", "EXIT FUNCTION",
                   "LOOP", "UNTIL", "WHILE", "WEND", "NEXT",
-                  "TYPE", "END TYPE"])
+                  "TYPE", "END TYPE",
+                  # OPTION's second words that do_option reads, the type
+                  # names DIM takes, and the modes OPEN takes - none of
+                  # them commands, all of them translated
+                  "BASE", "EXPLICIT", "DEFAULT", "SELECT",
+                  "INTEGER", "FLOAT", "STRING",
+                  "OUTPUT", "APPEND", "RANDOM"])
 
 
 def is_supported(nm):
@@ -123,15 +131,34 @@ emit("commandtbl", cmds)
 emit("tokentbl", toks)
 
 print("""/* MMBasic rewrites these to other tokens during tokenise(), so they are
- * in neither table and would otherwise not be coloured. */
-const char *const overlaid_functions[] = {
-    "MM.DEVICE$(", "MM.FONTHEIGHT", "MM.FONTWIDTH", "MM.HRES", "MM.VRES",
-    "MM.ERRNO", "MM.ERRMSG$", "MM.INFO$(", "MM.INFO(", "MM.VER",
-    "MM.CMDLINE$", "MM.HPOS", "MM.VPOS", "MM.WATCHDOG"
-};
-const int MMEND = (int)(sizeof(overlaid_functions) /
-                        sizeof(overlaid_functions[0]));
+ * in neither table and would otherwise not be coloured.  They carry the
+ * supported flag like everything else: the editor used to paint the lot
+ * as translatable, which said MM.WATCHDOG and MM.INFO$ would compile. */""")
+emit("overlaid_functions",
+     ["MM.DEVICE$(", "MM.FONTHEIGHT", "MM.FONTWIDTH", "MM.HRES", "MM.VRES",
+      "MM.ERRNO", "MM.ERRMSG$", "MM.INFO$(", "MM.INFO(", "MM.VER",
+      "MM.CMDLINE$", "MM.HPOS", "MM.VPOS", "MM.WATCHDOG"])
+print("""const int MMEND = (int)(sizeof(overlaid_functions) /
+                        sizeof(overlaid_functions[0])) - 1;
 """)
+
+print("""/* Rewritten to other tokens during tokenise() as well, but ordinary
+ * functions rather than the MM.xxx set. */""")
+emit("hidden_functions",
+     ["BIN$(", "OCT$(", "HEX$(", "LCASE$(", "UCASE$(", "LEFT$(", "RIGHT$(",
+      "MIN(", "MAX(", "MM.INFO$("])
+
+print("""/* The second word of a two-word command.  Only OPTION's are listed:
+ * mmb2c reads BASE, EXPLICIT and DEFAULT and skips the rest. */""")
+emit("twokeyword_tbl",
+     ["BASE", "EXPLICIT", "DEFAULT", "BREAK", "AUTORUN", "BAUDRATE",
+      "DISPLAY"])
+
+print("""/* Type names and the OPEN modes - words that are not commands but
+ * read as keywords wherever they appear. */""")
+emit("special_keywords",
+     ["SELECT", "INTEGER", "FLOAT", "STRING", "DISPLAY", "SDCARD", "OUTPUT",
+      "APPEND", "WRITE", "SLAVE", "TARGET", "PROGRAM"])
 
 # MMBasic's loops run to Size - 1, so the published size counts the
 # terminator the way its own tables do.

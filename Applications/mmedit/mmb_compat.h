@@ -175,7 +175,10 @@ extern const struct mmb_keyword commandtbl[];
 extern const struct mmb_keyword tokentbl[];
 extern const int CommandTableSize;      /* MMBasic's are size+1 - see below */
 extern const int TokenTableSize;
-extern const char *const overlaid_functions[];
+extern const struct mmb_keyword overlaid_functions[];
+extern const struct mmb_keyword hidden_functions[];
+extern const struct mmb_keyword twokeyword_tbl[];
+extern const struct mmb_keyword special_keywords[];
 extern const int MMEND;
 
 #endif

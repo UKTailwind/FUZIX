@@ -375,14 +375,76 @@ const struct mmb_keyword tokentbl[] = {
 };
 
 /* MMBasic rewrites these to other tokens during tokenise(), so they are
- * in neither table and would otherwise not be coloured. */
-const char *const overlaid_functions[] = {
-    "MM.DEVICE$(", "MM.FONTHEIGHT", "MM.FONTWIDTH", "MM.HRES", "MM.VRES",
-    "MM.ERRNO", "MM.ERRMSG$", "MM.INFO$(", "MM.INFO(", "MM.VER",
-    "MM.CMDLINE$", "MM.HPOS", "MM.VPOS", "MM.WATCHDOG"
+ * in neither table and would otherwise not be coloured.  They carry the
+ * supported flag like everything else: the editor used to paint the lot
+ * as translatable, which said MM.WATCHDOG and MM.INFO$ would compile. */
+const struct mmb_keyword overlaid_functions[] = {
+    { "MM.DEVICE$(", 1 },
+    { "MM.FONTHEIGHT", 0 },
+    { "MM.FONTWIDTH", 0 },
+    { "MM.HRES", 1 },
+    { "MM.VRES", 1 },
+    { "MM.ERRNO", 1 },
+    { "MM.ERRMSG$", 1 },
+    { "MM.INFO$(", 0 },
+    { "MM.INFO(", 0 },
+    { "MM.VER", 1 },
+    { "MM.CMDLINE$", 1 },
+    { "MM.HPOS", 0 },
+    { "MM.VPOS", 0 },
+    { "MM.WATCHDOG", 0 },
+    { NULL, 0 }
 };
+
 const int MMEND = (int)(sizeof(overlaid_functions) /
-                        sizeof(overlaid_functions[0]));
+                        sizeof(overlaid_functions[0])) - 1;
+
+/* Rewritten to other tokens during tokenise() as well, but ordinary
+ * functions rather than the MM.xxx set. */
+const struct mmb_keyword hidden_functions[] = {
+    { "BIN$(", 1 },
+    { "OCT$(", 1 },
+    { "HEX$(", 1 },
+    { "LCASE$(", 1 },
+    { "UCASE$(", 1 },
+    { "LEFT$(", 1 },
+    { "RIGHT$(", 1 },
+    { "MIN(", 1 },
+    { "MAX(", 1 },
+    { "MM.INFO$(", 0 },
+    { NULL, 0 }
+};
+
+/* The second word of a two-word command.  Only OPTION's are listed:
+ * mmb2c reads BASE, EXPLICIT and DEFAULT and skips the rest. */
+const struct mmb_keyword twokeyword_tbl[] = {
+    { "BASE", 1 },
+    { "EXPLICIT", 1 },
+    { "DEFAULT", 1 },
+    { "BREAK", 0 },
+    { "AUTORUN", 0 },
+    { "BAUDRATE", 0 },
+    { "DISPLAY", 0 },
+    { NULL, 0 }
+};
+
+/* Type names and the OPEN modes - words that are not commands but
+ * read as keywords wherever they appear. */
+const struct mmb_keyword special_keywords[] = {
+    { "SELECT", 1 },
+    { "INTEGER", 1 },
+    { "FLOAT", 1 },
+    { "STRING", 1 },
+    { "DISPLAY", 0 },
+    { "SDCARD", 0 },
+    { "OUTPUT", 1 },
+    { "APPEND", 1 },
+    { "WRITE", 0 },
+    { "SLAVE", 0 },
+    { "TARGET", 0 },
+    { "PROGRAM", 0 },
+    { NULL, 0 }
+};
 
 const int CommandTableSize = 227;
 const int TokenTableSize = 128;

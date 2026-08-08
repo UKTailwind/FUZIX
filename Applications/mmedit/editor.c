@@ -181,7 +181,6 @@ static void keyword_colour(int supported, int DoVT100)
 void SetColour(unsigned char *p, int DoVT100)
 {
     int i;
-    unsigned char **pp;
     static int intext = false;
     static int incomment = false;
     static int inkeyword = false;
@@ -192,31 +191,12 @@ void SetColour(unsigned char *p, int DoVT100)
     if (!Option.ColourCode)
         return;
 
-    // this is a list of keywords that can come after the OPTION and GUI commands
-    // the list must be terminated with a NULL
-    char *twokeywordtbl[] = {
-        "BASE", "EXPLICIT", "DEFAULT", "BREAK", "AUTORUN", "BAUDRATE", "DISPLAY",
-#if defined(GUICONTROLS)
-        "BUTTON", "SWITCH", "CHECKBOX", "RADIO", "LED", "FRAME", "NUMBERBOX", "SPINBOX", "TEXTBOX", "DISPLAYBOX", "CAPTION", "DELETE",
-        "DISABLE", "HIDE", "ENABLE", "SHOW", "FCOLOUR", "BCOLOUR", "REDRAW", "BEEP", "INTERRUPT",
-#endif
-        NULL};
-
-    // this is a list of common keywords that should be highlighted as such
-    // the list must be terminated with a NULL
-    char *specialkeywords[] = {
-        "SELECT", "INTEGER", "FLOAT", "STRING", "DISPLAY", "SDCARD", "OUTPUT", "APPEND", "WRITE", "SLAVE", "TARGET", "PROGRAM",
-        //        ".PROGRAM", ".END PROGRAM", ".SIDE", ".LABEL" , ".LINE",".WRAP", ".WRAP TARGET",
-        NULL};
-
-    // these functions are rewritten to other tokens during tokenise() (see MMBasic.c)
-    // so they no longer have their own entry in the command or token tables and would
-    // otherwise not be colour coded.  The MM.xxx functions handled by fun_tilde() are
-    // dealt with separately below using the overlaid_functions[] table.
-    // the list must be terminated with a NULL
-    char *hiddenfunctions[] = {
-        "BIN$(", "OCT$(", "HEX$(", "LCASE$(", "UCASE$(", "LEFT$(", "RIGHT$(", "MIN(", "MAX(", "MM.INFO$(",
-        NULL};
+    /* The OPTION second words, the type names and OPEN modes, the
+     * functions tokenise() rewrites, and the MM.xxx set: all four lists
+     * are generated in keywords.c now, each name carrying whether mmbc
+     * can translate it.  They used to be written out here and painted
+     * as keywords whatever they were, which told the reader that
+     * MM.WATCHDOG, MM.INFO$ and OPTION BAUDRATE would compile. */
 
     // cmdfile everything back to normal
     if (p == NULL)
@@ -409,55 +389,41 @@ void SetColour(unsigned char *p, int DoVT100)
         // check for the second keyword in two keyword commands
         if (p == twokeyword)
         {
-            for (pp = (unsigned char **)twokeywordtbl; *pp; pp++)
-                if (EditCompStr((char *)p, (char *)*pp))
-                    break;
-            if (*pp)
-            {
-                gui_fcolour = GUI_C_KEYWORD;
-                if (DoVT100)
-                    PrintString(VT100_C_KEYWORD);
-                inkeyword = true;
-                return;
-            }
+            for (i = 0; twokeyword_tbl[i].name; i++)
+                if (EditCompStr((char *)p, (char *)twokeyword_tbl[i].name))
+                {
+                    keyword_colour(twokeyword_tbl[i].supported, DoVT100);
+                    inkeyword = true;
+                    return;
+                }
         }
         if (p >= twokeyword)
             twokeyword = NULL;
 
         // check for a range of common keywords
-        for (pp = (unsigned char **)specialkeywords; *pp; pp++)
-            if (EditCompStr((char *)p, (char *)*pp))
-                break;
-        if (*pp)
-        {
-            gui_fcolour = GUI_C_KEYWORD;
-            if (DoVT100)
-                PrintString(VT100_C_KEYWORD);
-            inkeyword = true;
-            return;
-        }
+        for (i = 0; special_keywords[i].name; i++)
+            if (EditCompStr((char *)p, (char *)special_keywords[i].name))
+            {
+                keyword_colour(special_keywords[i].supported, DoVT100);
+                inkeyword = true;
+                return;
+            }
 
         // check for functions that tokenise() rewrites to other tokens
-        for (pp = (unsigned char **)hiddenfunctions; *pp; pp++)
-            if (EditCompStr((char *)p, (char *)*pp))
-                break;
-        if (*pp)
-        {
-            gui_fcolour = GUI_C_KEYWORD;
-            if (DoVT100)
-                PrintString(VT100_C_KEYWORD);
-            inkeyword = true;
-            return;
-        }
+        for (i = 0; hidden_functions[i].name; i++)
+            if (EditCompStr((char *)p, (char *)hidden_functions[i].name))
+            {
+                keyword_colour(hidden_functions[i].supported, DoVT100);
+                inkeyword = true;
+                return;
+            }
 
         // check for the MM.xxx functions handled by fun_tilde(); these are rewritten
         // to the ~() token during tokenise() so are not in the token table either
         for (i = 0; i < MMEND; i++)
-            if (EditCompStr((char *)p, (char *)overlaid_functions[i]))
+            if (EditCompStr((char *)p, (char *)overlaid_functions[i].name))
             {
-                gui_fcolour = GUI_C_KEYWORD;
-                if (DoVT100)
-                    PrintString(VT100_C_KEYWORD);
+                keyword_colour(overlaid_functions[i].supported, DoVT100);
                 inkeyword = true;
                 return;
             }
