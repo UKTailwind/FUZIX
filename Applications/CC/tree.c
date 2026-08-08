@@ -990,7 +990,12 @@ struct node *constify(struct node *n)
 			} else if (l->type & UNSIGNED)
 				value /= r->value;
 			else
-				value = (signed long)value / r->value;
+				/* BOTH sides, and at cval_t's width: casting
+				   only the left one converted it straight
+				   back to unsigned, so -7 / 2 folded to
+				   9223372036854775804, and "signed long" is
+				   32 bits on the board (see cval_t) */
+				value = (scval_t)value / (scval_t)r->value;
 			break;
 		case T_PERCENT:
 			if (r->value == 0) {
@@ -999,7 +1004,7 @@ struct node *constify(struct node *n)
 			} else if (l->type & UNSIGNED)
 				value %= r->value;
 			else
-				value = (signed long)value % r->value;
+				value = (scval_t)value % (scval_t)r->value;
 			break;
 		case T_ANDAND:
 			value = value && r->value;
@@ -1023,31 +1028,31 @@ struct node *constify(struct node *n)
 			if (l->type & UNSIGNED)
 				value >>= r->value;
 			else
-				value = ((signed long)value) >> r->value;
+				value = ((scval_t)value) >> r->value;
 			break;
 		case T_LT:
 			if (l->type & UNSIGNED)
 				value = value < r->value;
 			else
-				value = (signed long)value < (signed long )r->value;
+				value = (scval_t)value < (scval_t)r->value;
 			break;
 		case T_LTEQ:
 			if (l->type & UNSIGNED)
 				value = value <= r->value;
 			else
-				value = (signed long)value <= (signed long )r->value;
+				value = (scval_t)value <= (scval_t)r->value;
 			break;
 		case T_GT:
 			if (l->type & UNSIGNED)
 				value = value > r->value;
 			else
-				value = (signed long)value > (signed long )r->value;
+				value = (scval_t)value > (scval_t)r->value;
 			break;
 		case T_GTEQ:
 			if (l->type & UNSIGNED)
 				value = value >= r->value;
 			else
-				value = (signed long)value >= (signed long )r->value;
+				value = (scval_t)value >= (scval_t)r->value;
 			break;
 		default:
 			return NULL;

@@ -44,10 +44,12 @@
  *	type to carry.
  */
 typedef unsigned long long cval_t;
+typedef signed long long scval_t;
 
 #else
 
 typedef unsigned long cval_t;
+typedef signed long scval_t;
 
 #endif
 
