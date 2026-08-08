@@ -1545,6 +1545,115 @@ static void gen_substrings(char *macname, char *data_str, int arg_count, int is_
 #endif
 }
 
+/* Is the next thing in a macro body a '##', ignoring blanks? */
+static int next_is_paste(const char *p)
+{
+	while (*p == ' ' || *p == '\t')
+		p++;
+	return (p[0] == '#' && p[1] == '#');
+}
+
+/*
+ * Macro replace an argument before it is substituted into the body.
+ *
+ * C89 6.8.3.1: a parameter is replaced by its argument after the
+ * argument has been macro expanded - unless the parameter is an
+ * operand of '#' or '##', which take it as written.  Without this the
+ * argument NAMES were pasted: with "#define CAT(x,y) x ## y" and
+ * "#define XCAT(x,y) CAT(x,y)", XCAT(FOO,BAR) gave FOOBAR where C
+ * gives foobar, because CAT saw FOO and BAR rather than what they
+ * stand for.
+ *
+ * Object-like macros only.  A function-like macro inside an argument
+ * is still substituted as written: expanding it needs the call parsed
+ * and run through gen_substrings from here, and this reader is built
+ * around pushing text back into the input rather than expanding a
+ * string in place.  That remains a gap - a narrower one than pasting
+ * the wrong token, and the rescan that follows substitution still
+ * expands such a call in every position except an operand of '##'.
+ *
+ * Iterates to a fixpoint so "#define A B" "#define B c" resolves, with
+ * a pass cap so a pair that refer to each other stops rather than
+ * spinning.
+ */
+static char *expand_arg_text(const char *in)
+{
+	char *cur;
+	int pass;
+
+	cur = xmalloc(strlen(in) + 1);
+	strcpy(cur, in);
+
+	for (pass = 0; pass < 32; pass++) {
+		char *out = xmalloc(4);
+		int len = 4, cc = 0, changed = 0;
+		int in_quote = 0, quote_char = 0;
+		char *p = cur;
+
+		*out = '\0';
+		while (*p) {
+			char word[WORDSIZE];
+			int wl = 0;
+			const char *s;
+
+			if (in_quote) {
+				if (*p == '\\' && p[1]) {
+					if (cc + 3 > len) {
+						len += 20;
+						out = xrealloc(out, len);
+					}
+					out[cc++] = *p++;
+					out[cc++] = *p++;
+					continue;
+				}
+				if (*p == quote_char)
+					in_quote = 0;
+			} else if (*p == '"' || *p == '\'') {
+				in_quote = 1;
+				quote_char = *p;
+			} else if ((*p >= 'A' && *p <= 'Z')
+				   || (*p >= 'a' && *p <= 'z')
+				   || *p == '_' || *p == '$') {
+				struct define_item *d;
+
+				while (((*p >= '0' && *p <= '9')
+					|| (*p >= 'A' && *p <= 'Z')
+					|| (*p >= 'a' && *p <= 'z')
+					|| *p == '_' || *p == '$')
+				       && wl < WORDSIZE - 1)
+					word[wl++] = *p++;
+				word[wl] = '\0';
+				d = read_entry(word);
+				if (d != 0 && d->arg_count == -1
+				    && !(d->flags & F_INUSE)) {
+					s = d->value;
+					changed = 1;
+				} else
+					s = word;
+				if (cc + (int) strlen(s) + 2 > len) {
+					len += strlen(s) + 20;
+					out = xrealloc(out, len);
+				}
+				strcpy(out + cc, s);
+				cc += strlen(s);
+				unlock_entry(d);
+				continue;
+			}
+			if (cc + 2 > len) {
+				len += 20;
+				out = xrealloc(out, len);
+			}
+			out[cc++] = *p++;
+		}
+		out[cc] = '\0';
+		free(cur);
+		cur = out;
+		if (!changed)
+			break;
+	}
+	return cur;
+}
+
 static char *insert_substrings(char *data_str, struct arg_store *arg_list, int arg_count)
 {
 	int ac, ch;
@@ -1555,6 +1664,8 @@ static char *insert_substrings(char *data_str, struct arg_store *arg_list, int a
 	int in_quote = 0;
 	int quote_char = 0;
 	int ansi_stringize = 0;
+	int paste_prev = 0;	/* the text just consumed was a '##' */
+	char *expanded = 0;
 
 #if CPP_DEBUG
 	fprintf(stderr, "\n### Macro substitution in '%s'\n", data_str);
@@ -1611,6 +1722,7 @@ static char *insert_substrings(char *data_str, struct arg_store *arg_list, int a
 						data_str--;
 						cerror("'##' operator at end of macro");
 					}
+					paste_prev = 1;
 					continue;
 				}
 				data_str++;
@@ -1679,12 +1791,27 @@ static char *insert_substrings(char *data_str, struct arg_store *arg_list, int a
 			cerror("'#' operator should be followed by a macro argument name");
 		}
 
+		/*
+		 * An argument is macro replaced before substitution unless
+		 * it is an operand of '##' - either side - or of '#', which
+		 * is handled above and leaves s pointing at its own text.
+		 */
+		if (s != curword && !paste_prev && !next_is_paste(data_str)) {
+			expanded = expand_arg_text(s);
+			s = expanded;
+		}
+		paste_prev = 0;
+
 		if (cc + 2 + strlen(s) > len) {
 			len += strlen(s) + 20;
 			rv = xrealloc(rv, len);
 		}
 		strcpy(rv + cc, s);
 		cc = strlen(rv);
+		if (expanded) {
+			free(expanded);
+			expanded = 0;
+		}
 	}
 
 	rv[cc] = '\0';

@@ -79,4 +79,30 @@
 #error a macro named like a directive must not break directives
 #endif
 
+/* ---- an argument is expanded before substitution, but not when it
+        is an operand of ## --------------------------------------- */
+
+#define CATN(x,y) x ## y
+#define XCATN(x,y) CATN(x,y)
+#define ONE 1
+#define TWO 2
+#define ONETWO 99
+
+/* CATN's own parameters ARE operands of ##, so they paste as written:
+   ONE ## TWO is ONETWO, which the rescan then finds is 99. */
+#if CATN(ONE,TWO) != 99
+#error a ## operand must not be expanded before it is pasted
+#endif
+
+/* XCATN's are not, so they expand first and CATN pastes 1 and 2. */
+#if XCATN(ONE,TWO) != 12
+#error an argument must be expanded before substitution
+#endif
+
+/* the same through two levels of indirection */
+#define YCATN(x,y) XCATN(x,y)
+#if YCATN(ONE,TWO) != 12
+#error expansion through two levels
+#endif
+
 int pptest_ok;
