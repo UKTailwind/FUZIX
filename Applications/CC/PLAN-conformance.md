@@ -16,6 +16,40 @@ answers *wrongly*: everything left either refuses to compile or, in
 
 ---
 
+## On the board — 160 of 175, and why the host cannot tell you this
+
+2026-08-08.  **The host run does not use our preprocessor.**  ctest.sh
+preprocesses with `gcc -E` (see `run_one`, and the same is true of
+mmb2c's `fcc/fccbuild.sh`), while the board's `ccbc` runs
+`/usr/bin/cpp`.  So "165 of 175" measures cc0/cc1/cc2/bcrun only, and
+cpp had **no gate at all** until the suite was run on hardware.
+
+It had four C89 gaps, two of them TODOs in its own header since
+forever: `?:` in `#if` expressions, `#line` read and discarded, the
+directive NAME being macro replaced (so `#define line 1000` made the
+next `#line line` unrecognisable), `__LINE__` evaluating to zero in
+`#if`, and macro arguments not expanded before substitution
+(`XCAT(FOO,BAR)` pasted the names).  Fixed in `640597d97` and
+`d6cadf8ef`; **`Applications/cpp/cpptest.sh` is now its gate** and
+should be run after any change there.
+
+Board result after those fixes: **160 of 175**.  The 15 remaining are
+the 10 above plus five that only the board sees, all correct refusals:
+
+| test | what |
+|---|---|
+| 00084, 00097 | variadic macros (`__VA_ARGS__`) — C99 |
+| 00212 | `long long` — C99 |
+| 00202 | `##` against an empty argument; gcc `-std=c89 -pedantic-errors` rejects it too |
+| 00206 | `#pragma push_macro`/`pop_macro` — a GNU/MSVC extension, deliberately not implemented: not C89, and it means copying variable-length entries out of a hash table that pages to disk |
+
+To re-run on hardware: the C89 subset goes over as a plain tar (no gzip
+on the board; `tar -x -f`), and the runner must be plain Bourne —
+`cmp` has no `-s`, `rm -f` still reports missing files, there is no
+`sed`.  A copy lives on the card at `/root/ct` with `ctb3.sh`.
+
+---
+
 ## The 10 that remain
 
 ### A. Genuine C89 gap — 1
