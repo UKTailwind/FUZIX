@@ -2145,6 +2145,11 @@ static char *cond(void)
 
     if (v.ty == TY_S)
         cv_err("a string cannot be used as a condition");
+    /* a comparison is already a truth value: wrapping it in "!= 0"
+       made the backend compare the compare, every time the condition
+       ran */
+    if (boolean_expr(v.code))
+        return (char *)v.code;
     return sfmt("(%s) != 0", v.code);
 }
 
