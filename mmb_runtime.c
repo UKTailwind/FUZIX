@@ -3215,10 +3215,59 @@ void *mm_heap(unsigned long n)
     return p;
 }
 
+/*
+ * LOCAL frames come out of a bump arena in the image.
+ *
+ * A SUB or FUNCTION with LOCAL strings or arrays keeps them in a frame
+ * taken on entry and given back on return, so this is one malloc and
+ * one free per CALL - and a SUB called inside a loop pays it every
+ * time round.  The frames nest exactly as the calls do (routine_exit
+ * emits the free on every path, and an MMBasic error returns rather
+ * than unwinding), so a stack serves them: allocation is an add and
+ * release is a store.
+ *
+ * Slots in the image rather than the heap, and for the allocator's
+ * sake rather than the memory's: PSRAM is around 2.5x slower than SRAM
+ * on a miss, but a frame is small and the XIP cache in front of PSRAM
+ * absorbs it - measured, strings in the image against strings in the
+ * heap differ by 0.3% even with 256K sweeping through the cache
+ * between touches.  It is malloc that costs, not the memory it hands
+ * back.
+ *
+ * This is the HOSTED path only, and worth 2.2x there.  Under bcrun the
+ * name resolves to bcrun_mm.c's w_lheap, which allocates from the VM
+ * heap and never reaches this file - so the board's LOCAL frames were
+ * never paying malloc at all.  What they were paying was the libc
+ * memset that zeroes the frame, a byte loop until the ARM port got a
+ * word-wise one (FUZIX Library/libs/memset_armm0.c): 13.25us per call
+ * down to 3.77us, where this arena moved the board not at all.
+ *
+ * Overspill is the ordinary heap, unchanged: a LOCAL array of any size
+ * and a nest deeper than the arena both fall through to malloc, so
+ * nothing that worked before stops working.
+ */
+#ifndef MM_LARENA
+#define MM_LARENA 4096
+#endif
+
+static union { double align; char b[MM_LARENA]; } mm_lpool;
+static unsigned long mm_ltop;
+
 void *mm_lheap(unsigned long n)
 {
-    void *p = malloc(n ? n : (unsigned long)1);
+    /* n ? n : 1 before rounding, so a zero-size frame still takes a
+       slot: at need == 0 with a full arena the pointer would be the
+       end of it, and the memset below would write past the array */
+    unsigned long need = ((n ? n : 1ul) + 7ul) & ~7ul;
+    void *p;
 
+    if (need <= (unsigned long)MM_LARENA - mm_ltop) {
+        p = mm_lpool.b + mm_ltop;
+        mm_ltop += need;
+        memset(p, 0, (size_t)(n ? n : (unsigned long)1));
+        return p;
+    }
+    p = malloc(n ? n : (unsigned long)1);
     if (p == NULL)
         mm_fatal("out of memory for LOCAL arrays and strings");
     else
@@ -3228,6 +3277,10 @@ void *mm_lheap(unsigned long n)
 
 void mm_lfree(void *p)
 {
+    if ((char *)p >= mm_lpool.b && (char *)p < mm_lpool.b + MM_LARENA) {
+        mm_ltop = (unsigned long)((char *)p - mm_lpool.b);
+        return;
+    }
     free(p);
 }
 
