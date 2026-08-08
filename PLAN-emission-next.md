@@ -1,103 +1,143 @@
-# The next two emission changes — main-line native, and honest float literals
+# What is done, and what is outstanding
 
-2026-08-08.  Follow-on from the codegen review and the bare-comparison
-work (`38467a4`).  Both issues below came out of measuring that change
-on the board: bench gained 0.3% where the host interpreter said 15%,
-and the reason reranked the whole queue.
+Started 2026-08-08 as a note about two emission changes; it now covers
+the whole line of work that came out of them, because the interesting
+findings were not in the emitter at all.  Newest state at the top of
+each section.
 
-**Outcome, written after the work: issue 2 shipped (`8b55ccc`); issue 1
-was void — the premise was wrong, and the section now records why.**
+## Shipped, each measured on the board
 
-## Issue 1 — the main line can never go native — WRONG, see below
+| change | where | measured |
+|---|---|---|
+| 32-bit SDIV fast path in `mm_idiv`/`mm_mod` | mmb2c `65421d4`, FUZIX `e045f41d5` | bench +0.9%, eclipse −2.25% |
+| word-wise `memcpy`/`memset` for the ARM libc | FUZIX `d1e7e7945` | LOCAL-string calls 3.1× (13.25 → 3.77 µs) |
+| four C89 gaps in `cpp` | FUZIX `640597d97`, `d6cadf8ef` | board conformance 156 → 160 of 175 |
+| cc1 signed constant folding (`-7/2` folded unsigned) | FUZIX `e18b966cd` | correctness |
+| `as_flt` writes an int literal as a float | mmb2c `8b55ccc`, FUZIX `07a65eb22` | bytecode identical; frees ON ERROR programs from `mm_fdiv` |
+| LOCAL frames from a bump arena | mmb2c `65421d4`+ | 2.2× hosted; nothing on the board (bcrun overrides `mm_lheap`) |
 
-The claim was that bcrun's Thumb translator refuses `main` by design
-(`fn_is_main`, backend-thumb.c), so the main program of every
-translated BASIC program runs permanently interpreted, and a
-`__mmb_main()` wrapper would let it go native.
+**Killed on the evidence, do not re-propose:**
 
-### What is actually true
+* The `__mmb_main` wrapper. `main` has been Thumb-translated and
+  entered natively since `962483175`, which is in v0.9 — `fn_is_main`
+  only suppresses *reclaim*.  `THUMB_VERBOSE=1` says `native: main` for
+  43 of 44 test programs.
+* Inlining `MOD` and `\` by a literal divisor: measured **0.12%
+  slower** on an adjacent A/B (51517 vs 51580 grains).  Both forms end
+  in the same libgcc 64-bit division and the inline one adds the
+  translator's helper routing.  It did expose the cc1 fold bug above.
 
-`fn_is_main` does one thing only:
+## Outstanding
 
-    reclaim = thumb_reclaim() && !fn_is_main;
+### 1. Finish landing memmove  — do this first, the board is behind
 
-It suppresses *reclaim* — main keeps its bytecode instead of having the
-native code written over it — because the loader may still need that
-bytecode as an alias.  It does not suppress translation, and never did.
+`memmove_armm0.c` is written and tested (7056 overlap and alignment
+cases against a byte-loop oracle) but **not committed**, and two board
+binaries are older than the tree:
 
-Worse for the premise, bcrun has entered main natively since
-`962483175` ("CC: enter main native", 2026-07-31, in v0.9 and every
-release after).  Its entry path says so in as many words:
+| binary | tree | board |
+|---|---|---|
+| `bcrun` | 86556 | 86276 — no word-wise memmove |
+| `mmbc` | 94792 | 94276 — built against the old libc |
 
-    /* Dispatch the entry exactly like a call site: h_entry points
-       at main's BC_NATIVE marker when it was translated, and a
-       BASIC program lives in its main line - entering through the
-       bytecode quietly interpreted the whole program while every
-       benchmark with the work in called functions stayed fast. */
+`memmove` matters more than its name suggests: bcrun's `ns_memcpy` —
+the native slot a translated program's `memcpy` calls — routes through
+it, because a compiled program may hand it overlapping regions.  So
+compiled code's block copies are still byte-at-a-time on the board.
 
-Measured, not read: `THUMB_VERBOSE=1` over the whole test suite reports
-`native: main` for 43 of the 44 programs — bench 1166 bc -> 2468 bytes,
-the eclipse 1407 -> 2916.  The single exception is `structtest`, whose
-main line is 32,556 bytecodes and bails with `size policy`: the
-THUMB_MAXFN ceiling, which a wrapper does not move — the same span
-would sit in the wrapper.
+Steps: `git add Library/libs/memmove_armm0.c Library/libs/Makefile.armm0`;
+send `bcrun` and `mmbc`; keep `.prev`; re-run `bubblet.bc` (78.81 ms is
+the reference) and `sh /root/ct/ctb3.sh /root/t9`; then commit the six
+installed binaries (`bcrun cc0 cc1 cc2 ccbc mmbc` under Applications/CC
+and `cpp` under Applications/cpp) as the builds on the card.
 
-So there is nothing to gain here and the wrapper is dropped.
+### 2. Measure what the new libc did to compile times
 
-### What this means for the bare-comparison measurement
+Never taken.  The eclipse compiled in **7 s** (`date; cc
+solar_eclipse.c; date`) with the pre-libc toolchain; cc0/cc1/cc2 were
+installed after that, so the comparison is still owed.  The board's RTC
+is fine for this — the "oscillator was stopped" line is the 32 kHz pin,
+which this board does not connect.
 
-bench's 0.3% was never main-vs-SUB.  Its main line was already native,
-so the comparison diamonds were already cheap native branch pairs; the
-15% was the host *interpreter*, where each diamond is dispatched.  The
-board reading was the honest one all along.
+### 3. The rest of the byte-loop libc
 
-### What is left of the idea
+`memcmp`, `strlen`, `strcmp`, `strcpy`, `strcat` are still the generic
+8-bit versions.  Ranked by who pays:
 
-Only the cliff: a main line (or a SUB) over the translated-size ceiling
-falls back to the interpreter wholesale, and structtest is proof that
-BASIC can write one.  That is the queue's "function splitting for
-over-cliff routines" item, which needs to split spans, not rename them.
+* `memcmp` — every MMBasic string comparison goes through it.
+* `strlen`/`strcmp` — the compiler's symbol tables.  Note bcrun already
+  has word-wise `ns_strcmp`/`ns_strlen` natives, so this is about
+  cc0/cc1/cc2/mmbc rather than compiled programs.
+* `strcpy`/`strcat` — smaller.
 
-## Issue 2 — `(MMFLOAT)(3600LL)` defeats the literal-divisor test — SHIPPED
+Same shape as the others: a `_armm0.c` beside the generic one, swapped
+in `Makefile.armm0`, and **`ar d syslibarmm0.lib <old>.o`** after, or
+the stale member wins the link (that trap cost an hour).
+`Library/tests/memtest_armm0.c` is the pattern for the oracle test.
 
-`as_flt()` on an integer value wrapped it in a cast, so BASIC `x/3600`
-emitted `mm_fdiv(x, (MMFLOAT)(3600LL))`: `nonzero_literal()` saw a cast,
-not a number, and the provably-safe division still went through the
-checked call.  Twelve sites in the eclipse alone.
+### 4. What is left in cpp
 
-Since the checks became ON ERROR-only, untrapped programs no longer pay
-this (they emit bare `/` everywhere), so the issue was confined to
-**programs that use ON ERROR** — narrower, but exactly the programs
-that pay for every check, and the fix also shrinks the emitted text.
+`Applications/cpp/cpptest.sh` is the gate now — run it after any change
+there.  Known remaining gaps, all recorded rather than hidden:
 
-### What shipped (`8b55ccc`)
+* A **function-like** macro inside an argument is substituted as
+  written; `expand_arg_text()` only expands object-like ones.  The
+  rescan after substitution still expands such a call everywhere except
+  as an operand of `##`.
+* Variadic macros (`__VA_ARGS__`) — C99, out of scope for a C89
+  compiler.  c-testsuite 00084 and 00097.
+* `#pragma push_macro`/`pop_macro` — a GNU/MSVC extension, deliberately
+  not implemented: it is not C89, and it means copying variable-length
+  entries out of a hash table that pages to disk.  c-testsuite 00206.
+* `#line`'s optional file name is parsed and ignored; applying it would
+  also have to unwind at the end of an `#include`.
 
-`float_form_of_int_literal()` beside `nonzero_literal()` in both
-translators: a plain decimal integer literal is emitted as the float it
-becomes — `3600LL` -> `3600.0`, the same double either way, since up to
-fifteen digits every integer is exact.  Refused, keeping the cast: more
-than fifteen digits (strtod rounding is then the compiler's business,
-not ours), hex from `&H` (`0x10.0` is not a number), and a leading zero
-(C reads that as octal).
+### 5. The mmbc emission queue
 
-Measured: the eclipse and bench compile to **byte-identical bytecode** —
-cc1 folded the cast anyway, so the only change there is emitted text —
-while a trapping program with literal divisors loses its `mm_fdiv`
-calls and its .bc shrinks 2% (3169 -> 3103 bytes), digits unchanged.
-Gates: cgate 0 both modes, make check 22 ok, fcctests 22/22, qemutests
-23/23.  No board run: identical bytecode cannot run differently.
+Still unexamined: `mm_mark`/`mm_release` elision in routines with no
+temporaries; int narrowing of loop counters; splitting SUBs that are
+over the translated-size ceiling (`structtest`'s 32,556-bytecode main
+line is the only one in the suite that bails, with `size policy`).
 
-## The board recipe, for whatever comes next
+Rejected with reasons: `var = var + k` → `+=` (the eqop libcall
+measured *faster*); `x^2` → `x*x` and INT() round-trip elision (both
+change results, and different is worse than missing).
 
-1. `fcc/sync-mmbc.sh`, build mmbc via
-   `make -f Makefile.armm0 FUZIX_ROOT=... USERCPU=armm0 mmbc`, strip,
-   uusend, install over `/usr/bin/mmbc` keeping `mmbc.prev`.
-2. Retranslate and recompile bench + solar_eclipse ON the board;
-   digits byte-identical; numbers fresh-boot, screen output.
-   References: v0.9 = 49499 grains / 2.311 s; current = 51579 / 2.069.
-3. Commits: mmb2c first, then the FUZIX sync commit with the board
-   numbers in the message.  The ARM mmbc binary is committed in the
-   FUZIX tree as installed.
+### 6. The long-session slowdown, parked
 
-The serial console moves; FZPORT names the port (COM14 today).  One
-fzsh command per long compile — typeahead races the dots otherwise.
+Not reproduced.  Bubble measured 78.812 ms on a fresh boot and 78.809
+ms after a session of heavy compiling; bench was 52,052 grains before
+and after a full eclipse compile.  So the cross-run "heap fragmentation"
+hypothesis has no support from these two workloads.
+
+If a user reports it again, the first place to look is the swapper: with
+no MMU every process must run at the same address, so `pagemap_switch`
+physically `memcpy`s 4K blocks on every context switch to put the
+running process at the bottom of memory (platform-rpipico/swapper.c).
+Counters there — blocks copied and swapped per switch, free-block runs —
+would settle it in one measurement.  Note the user's report was of a
+graphics program losing 15% (85 → 98 ms) after *editing and compiling*,
+which my fixed-frame variant did not show.
+
+### 7. Fold the board suite into the release checks
+
+The c-testsuite now lives on the card at `/root/ct` with its runner
+`ctb3.sh`, and `/root/t9` holds just the interesting failures.  It is
+the only thing that has ever exercised `cpp`, and it found four bugs
+the host gate structurally cannot see, so a release should run it.
+
+Constraints of that environment, learned the hard way: the runner must
+be plain Bourne — no `$(( ))`, no `${x%y}`; `cmp` has **no -s** and an
+unknown option makes it fail, which reads as a mismatch on every test;
+`rm -f` still reports a missing file; there is no `sed` and no gzip, so
+the suite goes over as a plain 338K tar and `tar -x -f` is the spelling.
+A long run needs the console held open for its whole duration
+(`scratchpad/runlong.py`) — closing the port hangs up the tty and takes
+the job with it — and the marker waited for must not appear in the
+command line, or the echo of the command ends the wait immediately.
+
+## Board reference numbers
+
+v0.9: 49,499 grains / 2.311 s.  Current: bench 52,052 grains, solar
+eclipse 2.022 s (screen output, fresh boot), bubble 78.81 ms per frame,
+board conformance 160 of 175.
