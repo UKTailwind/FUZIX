@@ -604,6 +604,93 @@ static struct node *fold_float_unary(struct node *n, struct node *r,
 	}
 }
 
+/*
+ *	A value binary folding cannot promise: NaN and infinity, whose
+ *	payloads and canonical forms differ between the host that folds
+ *	and the target that would have computed, and denormals, which the
+ *	RP2350's DCP flushes to zero where the host's arithmetic does not.
+ *	Everything normal (and zero) is exactly rounded under IEEE754, so
+ *	for those host-folded and target-computed bits are identical.
+ */
+static unsigned fp_unsafe(cval_t v, unsigned t)
+{
+	if (type_sizeof(t) == 8) {
+		unsigned exp = (v >> 52) & 0x7FF;
+		return exp == 0x7FF ||
+		       (exp == 0 && (v & 0xFFFFFFFFFFFFFULL) != 0);
+	} else {
+		uint32_t b = (uint32_t)v;
+		unsigned exp = (b >> 23) & 0xFF;
+		return exp == 0xFF || (exp == 0 && (b & 0x7FFFFF) != 0);
+	}
+}
+
+/*
+ *	Binary folding where the operands are floating point.  The same
+ *	rule as the unary case: the values are IEEE754 bit patterns, and
+ *	nothing in the integer switch may touch them.  FLOAT slipped
+ *	through IS_INTORPTR() into that switch for years, so 1.5f + 2.5f
+ *	folded to the sum of two bit patterns - a NaN - and a comparison
+ *	of two negative float constants came out backwards.
+ *
+ *	Division by a floating zero is defined behaviour (an infinity),
+ *	not the integer trap the switch below preserves - but it is left
+ *	to runtime anyway, like every non-finite or denormal operand or
+ *	result, so folding never changes what a program computes.
+ */
+static struct node *fold_float_binary(struct node *n, struct node *l,
+				      struct node *r, unsigned op)
+{
+	double a, b, d;
+	cval_t bits;
+
+	if (l->op != T_CONSTANT || r->op != T_CONSTANT)
+		return NULL;
+	if (!IS_FLOATING(l->type) || !IS_FLOATING(r->type))
+		return NULL;
+	if ((l->flags | r->flags) & LVAL)
+		return NULL;
+	if (fp_unsafe(l->value, l->type) || fp_unsafe(r->value, r->type))
+		return NULL;
+	a = fp_unpack(l->value, l->type);
+	b = fp_unpack(r->value, r->type);
+	switch (op) {
+	case T_PLUS:
+		d = a + b;
+		break;
+	case T_MINUS:
+		d = a - b;
+		break;
+	case T_STAR:
+		d = a * b;
+		break;
+	case T_SLASH:
+		if (b == 0.0)
+			return NULL;
+		d = a / b;
+		break;
+	/* A relational result is an integer, exactly as the runtime's
+	   compare-and-bool sequence leaves it */
+	case T_LT:
+		return replace_constant(n, CINT, a < b);
+	case T_LTEQ:
+		return replace_constant(n, CINT, a <= b);
+	case T_GT:
+		return replace_constant(n, CINT, a > b);
+	case T_GTEQ:
+		return replace_constant(n, CINT, a >= b);
+	default:
+		return NULL;
+	}
+	/* n->type, not the operand type: the promoted type of the
+	   operation, which is also the precision the runtime would have
+	   computed at */
+	bits = fp_pack(d, n->type);
+	if (fp_unsafe(bits, n->type))
+		return NULL;
+	return replace_constant(n, n->type, bits);
+}
+
 #else
 
 /*
@@ -618,6 +705,14 @@ static struct node *fold_float_unary(struct node *n, struct node *r,
 		r->value ^= ((cval_t)1) << (8 * type_sizeof(r->type) - 1);
 		return r;
 	}
+	return NULL;
+}
+
+/* No double in the compiler: fold nothing, but keep floating operands
+   out of the integer switch all the same */
+static struct node *fold_float_binary(struct node *n, struct node *l,
+				      struct node *r, unsigned op)
+{
 	return NULL;
 }
 
@@ -823,6 +918,12 @@ struct node *constify(struct node *n)
 				return NULL;
 			n->left = l;
 		}
+		/* Floating point folds by value, and must be picked off
+		   BEFORE the integer test below: FLOAT (0x80) passes
+		   IS_INTORPTR(), and the switch would add IEEE bit
+		   patterns as if they were numbers */
+		if (IS_FLOATING(lt) || IS_FLOATING(r->type))
+			return fold_float_binary(n, l, r, op);
 		/* Only do constant work with simple types */
 		if (!IS_INTORPTR(lt))
 			return NULL;
