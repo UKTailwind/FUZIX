@@ -187,6 +187,23 @@ def nonzero_literal(code):
         return False
 
 
+def float_form_of_int_literal(code):
+    """A plain decimal integer literal, written as a float.
+
+    '3600LL' becomes '3600.0' - the same double either way, since up to
+    15 digits every integer is exact - but nonzero_literal can read it,
+    so dividing by it needs no zero test.  Hex (from &H) keeps its cast,
+    '0x10.0' being no number, and so does a leading zero, which C reads
+    as octal.  None for anything that is not simply digits."""
+    t = code.strip().rstrip('Ll')
+    if not t or len(t) > 15 or (len(t) > 1 and t[0] == '0'):
+        return None
+    for ch in t:
+        if not is_digit(ch):
+            return None
+    return t + '.0'
+
+
 def boolean_expr(code):
     """True when an emitted expression is already 0-or-1: a single
     comparison at the top of its tree.  Only then may a condition skip
@@ -810,7 +827,8 @@ class Conv(object):
         if ty == TY_F:
             return code
         if ty == TY_I:
-            return '(MMFLOAT)(' + code + ')'
+            f = float_form_of_int_literal(code)
+            return f if f is not None else '(MMFLOAT)(' + code + ')'
         if isinstance(ty, tuple):
             self.err("a whole structure cannot be used in an expression")
         self.err("string used where a number is required")
