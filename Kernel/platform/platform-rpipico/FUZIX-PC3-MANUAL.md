@@ -96,6 +96,13 @@ rest of the drawing statements, and structures.
   a PicoMite returns 0. Each of those was a program that behaved
   differently here and said nothing about it. There is a section on all
   of this below.
+* **The arithmetic checks are paid for only by programs that can use
+  them.** A program with no `ON ERROR` cannot trap an error, so `mmbc`
+  compiles its float divisions to the machine's own divide and its
+  `SQR`/`LOG`/`ASIN`/`ACOS` to direct libm calls — full speed, C
+  answers (`inf`/`nan`) if the argument was bad. The moment `ON ERROR`
+  appears, every one of those becomes the checked, trappable statement
+  the interpreter has. "What `ON ERROR` costs", below, has the numbers.
 * **The machine can say what it is.** `MM.VER` gives the release as a
   number (0.10 reads higher than 0.09), `MM.DEVICE$` gives
   `Fuzix on PC2` or `Fuzix on PC3` — detected, not assumed — and
@@ -1826,11 +1833,22 @@ memory, and a clean error beats reproducing that.
 
 ## Errors, and surviving them
 
-Every error a program can hit is a check the runtime makes *before* it
-does the thing — the same order the interpreter uses. Nothing is left to
-the hardware to notice: dividing by zero as a float would otherwise
-answer `inf` rather than stopping, and this processor does not trap
-integer division by zero at all.
+In a program that uses `ON ERROR`, every error it can hit is a check
+the runtime makes *before* it does the thing — the same order the
+interpreter uses. Nothing is left to the hardware to notice: dividing
+by zero as a float would otherwise answer `inf` rather than stopping,
+and this processor does not trap integer division by zero at all.
+
+A program with no `ON ERROR` anywhere is compiled without the
+arithmetic checks — see "What `ON ERROR` costs" below. Its float
+divisions and `SQR`/`LOG`/`ASIN`/`ACOS` take what C gives: `inf` or
+`nan`, flowing onward through the sums. There is no sensible recovery
+from arithmetic like that — the program has a bug to fix either way —
+so the choice is between stopping with a message (a trapping program)
+and full speed (everything else). Integer division and `MOD` are the
+exception, checked in every program: C leaves integer division by zero
+undefined, and the silent zero this processor answers is not a number
+to limp onward with.
 
 `ON ERROR SKIP [n]`, `ON ERROR IGNORE`, `ON ERROR CLEAR` and
 `ON ERROR ABORT` work as they do on a PicoMite, with `MM.ERRNO` and
@@ -1857,6 +1875,25 @@ fail somewhere far less obvious.
 
 `ON ERROR RESTART` reboots the machine on a PicoMite; a compiled program
 has no equivalent, so `mmbc` refuses it by name rather than guessing.
+
+### What `ON ERROR` costs
+
+The checks are real work in real loops. With `ON ERROR` present, every
+float division whose divisor is not a nonzero literal becomes a runtime
+call that tests the divisor first, and `SQR`, `LOG`, `ASIN` and `ACOS`
+go through checked wrappers instead of straight to libm — that is what
+makes their errors trappable statements. Measured on the machine from a
+fresh boot: the grains benchmark, whose inner loop divides by a
+variable and takes a logarithm every pass, pays about 12%; the solar
+eclipse predictor, dominated by plain arithmetic, about 2%. The string
+checks (concatenation past 255 characters, `ASC` of an empty string)
+are part of string calls that happen anyway and stay on in every
+program; they cost a comparison, not a call.
+
+`ON ERROR` earns its keep trapping things that genuinely can fail at
+run time — an I2C transfer that may not be acknowledged, a file that
+may not exist — not arithmetic. If a program traps errors out of
+habit, leaving `ON ERROR` out buys the checks back.
 
 ## Not covered
 

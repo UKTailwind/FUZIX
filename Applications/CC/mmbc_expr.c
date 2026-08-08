@@ -180,15 +180,18 @@ struct val e_mul(void)
             struct val r = e_unary();
 
             if (strcmp(op, "/") == 0) {
-                /* op_div checks the divisor first - a bare C '/' gave
-                   inf where MMBasic errors.  Unless the divisor is a
-                   literal that is not zero, when the answer is known
-                   here and the check would be a library call on the
-                   board for nothing: dividing by 180, 86400 or pi is
-                   most of the division a real program does. */
+                /* op_div checks the divisor first where a bare C '/'
+                   answers inf.  The check exists so ON ERROR can trap
+                   the error; a program with no ON ERROR has nothing to
+                   trap it with - a divide by zero there is a bug the
+                   program needs fixing either way - so only trapping
+                   programs pay the runtime call.  A literal divisor
+                   that is not zero needs no check in either world:
+                   dividing by 180, 86400 or pi is most of the division
+                   a real program does. */
                 const char *rd = as_flt(r);
 
-                if (nonzero_literal(rd))
+                if (nonzero_literal(rd) || !cv.uses_onerror)
                     v = mkval(sfmt("((%s) / (%s))", as_flt(v), rd), TY_F);
                 else
                     v = mkval(sfmt("mm_fdiv(%s, %s)", as_flt(v), rd),

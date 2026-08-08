@@ -94,19 +94,27 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
     if (strcmp(up, "SGN") == 0)
         return mkval(sfmt("mm_sgn(%s)", f(0)), TY_I);
     {
-        static const struct { const char *name; const char *cf; } m[] = {
-            /* SQR/LOG/ASIN/ACOS carry the firmware's domain checks and
-               so go through the runtime; the rest have none. */
-            { "SQR", "mm_sqr" }, { "SIN", "sin" }, { "COS", "cos" },
-            { "TAN", "tan" }, { "ATN", "atan" }, { "LOG", "mm_log" },
-            { "EXP", "exp" }, { "ASIN", "mm_asin" }, { "ACOS", "mm_acos" },
-            { NULL, NULL }
+        static const struct { const char *name; const char *chk;
+                              const char *raw; } m[] = {
+            /* SQR/LOG/ASIN/ACOS carry the firmware's domain checks so
+               that ON ERROR can trap them; with no ON ERROR in the
+               program the checks have no customer and the calls go
+               straight to libm.  The rest have no checks and are
+               always direct. */
+            { "SQR", "mm_sqr", "sqrt" }, { "SIN", "sin", "sin" },
+            { "COS", "cos", "cos" }, { "TAN", "tan", "tan" },
+            { "ATN", "atan", "atan" }, { "LOG", "mm_log", "log" },
+            { "EXP", "exp", "exp" }, { "ASIN", "mm_asin", "asin" },
+            { "ACOS", "mm_acos", "acos" },
+            { NULL, NULL, NULL }
         };
         int k;
 
         for (k = 0; m[k].name; k++)
             if (strcmp(up, m[k].name) == 0)
-                return mkval(sfmt("%s(%s)", m[k].cf, f(0)), TY_F);
+                return mkval(sfmt("%s(%s)",
+                                  cv.uses_onerror ? m[k].chk : m[k].raw,
+                                  f(0)), TY_F);
     }
     if (strcmp(up, "ATAN2") == 0) {
         const char *a0 = f(0);
