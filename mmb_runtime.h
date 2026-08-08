@@ -588,6 +588,9 @@ void mm_error(const char *msg);
 void mm_fatal(const char *msg);     /* never skippable: out of memory  */
 void mm_err_bind(int *state);       /* generated code hands us its pair */
 void mm_on_error(int mode, MMINTEGER n);   /* 0 abort 1 clear 2 ignore 3 skip */
+/* Write or discard the PRINT line held while armed - the statement
+ * guard calls it at the end of every statement.  See mm_putc. */
+void mm_pr_commit(void);
 MMINTEGER mm_errno(void);           /* MM.ERRNO                        */
 char *mm_errmsg(void);              /* MM.ERRMSG$                      */
 

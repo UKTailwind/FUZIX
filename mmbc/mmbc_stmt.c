@@ -2708,6 +2708,13 @@ static void open_routine(int is_func)
            spends none of the skip count on statements in here. */
         emit(sfmt("if (__mm_e[0]) { %s%s }", routine_exit(),
                   r->is_func ? " return __ret;" : " return;"));
+    if (cv.uses_onerror)
+        /* The SUB/FUNCTION line is itself a statement the interpreter
+           executes and counts on every call, so entering costs one of
+           the skip count.  Without this our count ran one statement
+           further into a called routine than a real PicoMite's did. */
+        emit("if (__mm_e[1]) { mm_pr_commit(); __mm_e[0] = 0;"
+             " if (__mm_e[1] > 0) __mm_e[1]--; }");
     push_block("routine", NULL, 0);
 }
 

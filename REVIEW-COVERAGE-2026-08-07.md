@@ -550,9 +550,33 @@ resuming at the SUB's next statement while the caller carries on, and a
 FUNCTION whose result expression failed.
 
 Known and documented divergences: a statement that jumps away (GOTO,
-EXIT) does not decrement the skip count, and declarations that emit no
-code are not counted.  Both only matter for SKIP n with n > 1 spanning
-them.
+EXIT) does not decrement the skip count.  It only matters for SKIP n
+with n > 1 spanning one.
+
+**Side-by-side on a real PicoMite, 2026-08-08 - it found two things
+nothing else could.**  checks.bas matched outright.  onerror.bas
+disagreed twice, and the interpreter was right both times:
+
+* **PRINT is all or nothing.**  `PRINT "part: "; 1/0; " never"` printed
+  nothing there and `part: ` here.  cmd_print builds the whole line into
+  one buffer and writes it at the end (Commands.c:1060), so the error
+  takes the buffer with it.  Printing item by item, as we did, left
+  everything before the failure on the screen.  Now, while armed, output
+  goes to a line buffer that the statement guard commits or discards -
+  only while armed, so a program without ON ERROR still writes straight
+  through and is byte-identical to before.
+* **Entering a SUB costs skip count.**  `ON ERROR SKIP 2` then a call
+  whose third statement fails: the interpreter stopped, we skipped it.
+  The SUB line itself is a statement it executes and counts, and we
+  counted only the LOCAL - so our count reached one statement further
+  into the callee than the interpreter's.  A guard at routine entry
+  fixes it, and the program now stops exactly where the PicoMite does.
+
+Both were invisible to every host gate and to the board: the code was
+self-consistent and wrong.  tests/onerror.bas now ends deliberately with
+the count-exhaustion case, so the abort and its message are part of the
+expected output (tests/onerror.rc = 1).  The fcc gate then caught a
+missing mm_pr_commit wrapper in bcrun before the hardware did.
 
 ## Section 5 — PLAY WAV / FLAC / MODFILE, PLAY PAUSE / RESUME
 

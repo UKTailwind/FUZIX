@@ -2570,7 +2570,7 @@ class Conv(object):
             if self.mode == 'emit' and self.uses_onerror \
                     and self.out is out_at_entry and failed is None:
                 guard = ('    ' * ind
-                         + 'if (__mm_e[1]) { __mm_e[0] = 0;'
+                         + 'if (__mm_e[1]) { mm_pr_commit(); __mm_e[0] = 0;'
                            ' if (__mm_e[1] > 0) __mm_e[1]--; }')
                 if self.blocks == blocks_at_entry and len(self.out) > where:
                     out_at_entry.append(guard)
@@ -4690,6 +4690,13 @@ class Conv(object):
             ret = ' return __ret;' if r.is_func else ' return;'
             self.emit('if (__mm_e[0]) { %s%s }'
                       % (self.routine_exit(), ret))
+            # The SUB/FUNCTION line is itself a statement the interpreter
+            # executes and counts on every call, so entering costs one of
+            # the skip count.  Without this our count ran one statement
+            # further into a called routine than a real PicoMite's did -
+            # which is exactly where the side-by-side disagreed.
+            self.emit('if (__mm_e[1]) { mm_pr_commit(); __mm_e[0] = 0;'
+                      ' if (__mm_e[1] > 0) __mm_e[1]--; }')
         self.blocks.append(['routine', self.lineno])
 
     def emit_local_decl(self, s):

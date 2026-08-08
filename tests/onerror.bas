@@ -1,6 +1,7 @@
-' ON ERROR SKIP / IGNORE, MM.ERRNO and MM.ERRMSG$.  Every line here has
-' a counterpart on a real PicoMite: run it there and the output must be
-' identical.
+' ON ERROR SKIP / IGNORE, MM.ERRNO and MM.ERRMSG$.  Every line has a
+' counterpart on a real PicoMite: run it there and the output must be
+' identical, ERROR MESSAGE INCLUDED - the last case deliberately runs
+' the skip count out and stops the program, as it does there.
 Option Explicit
 Option Default None
 
@@ -14,7 +15,6 @@ On Error Skip
 f = 1 / 0
 Print "skip1: "; f; " errno "; MM.Errno; " ["; MM.Errmsg$; "]"
 
-' and the protection lasts exactly one statement
 On Error Clear
 Print "cleared: "; MM.Errno; " ["; MM.Errmsg$; "]"
 
@@ -25,7 +25,7 @@ i = 1 \ 0
 i = 2 \ 0
 Print "skip2: "; i; " "; MM.Errno
 
-' IGNORE stays on until ABORT
+' IGNORE stays on until CLEAR or ABORT
 On Error Ignore
 f = Sqr(-1)
 f = Log(0)
@@ -34,14 +34,15 @@ Print "ignore: "; s; " ["; MM.Errmsg$; "]"
 On Error Clear
 Print "afterclear: "; MM.Errno
 
-' the rest of a failed statement is skipped - nothing after the failure
-' prints, exactly as the interpreter jumps away
+' A PRINT that fails part way prints NOTHING, not the items before the
+' failure: the interpreter builds the whole line and the error takes the
+' buffer with it.  So "part: " must not appear.
 On Error Skip
 Print "part: "; 1 / 0; " never"
 Print "next: still running"
 
 ' an error inside a SUB resumes at the SUB's next statement, and the
-' caller carries on normally
+' caller carries on
 Sub Risky(n As Integer)
   Local Integer r
   r = 10 \ n
@@ -49,18 +50,25 @@ Sub Risky(n As Integer)
   Print "  sub: reached the end"
 End Sub
 
-On Error Skip 2
+On Error Ignore
 Risky 0
 Print "aftersub: "; MM.Errno
 
-' a function whose expression fails returns without the assignment
+' a function whose result expression fails returns without the
+' assignment, so the caller gets the unset default
 Function Half(n As Float) As Float
   Half = n / 0
 End Function
 
-On Error Skip 2
 f = Half(8)
 Print "func: "; f
-
 On Error Abort
 Print "done"
+
+' LAST, because it stops the program.  Entering a SUB costs skip count -
+' the SUB line and the LOCAL are statements the interpreter executes and
+' counts - so SKIP 2 does not reach the third statement inside it and
+' the error is real.  Proven on a real PicoMite, which stops here.
+On Error Skip 2
+Risky 0
+Print "not reached"

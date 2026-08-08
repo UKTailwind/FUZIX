@@ -358,9 +358,63 @@ static int mm_gon;                      /* PRINT draws rather than tells */
 static int mm_gx, mm_gy;                /* the pixel cursor - CurrentX/Y */
 static int mm_gn;                       /* characters collected so far */
 
+/* PRINT is all or nothing while ON ERROR is armed ------------------- *
+ *
+ * cmd_print builds the whole line into one buffer and writes it at the
+ * end (Commands.c:1060), so an expression that fails half way through
+ * takes the buffer with it and the line never appears.  Printing item by
+ * item, as this does, left the items before the failure on the screen -
+ * proven on a real PicoMite, which printed nothing where we printed
+ * "part: ".
+ *
+ * So while armed, output goes to a line buffer that the statement guard
+ * commits or discards.  Only while armed: the ordinary path stays a
+ * direct write, and a program that never says ON ERROR is untouched.
+ */
+#define MM_PRBUF 512
+static char mm_prbuf[MM_PRBUF];
+static int  mm_prn;
+static int  mm_prover;                  /* the buffer filled: see below */
+
+static int mm_arming(void)
+{
+    return mm_est != NULL && mm_est[1] != 0;
+}
+
+void mm_pr_commit(void)
+{
+    int i;
+
+    if (!mm_poisoned()) {
+        for (i = 0; i < mm_prn; i++) {
+            if (!mm_gputc((unsigned char)mm_prbuf[i]))
+                putchar(mm_prbuf[i]);
+        }
+    }
+    mm_prn = 0;
+    mm_prover = 0;
+}
+
 void mm_putc(int c)
 {
     if (mm_poisoned()) return;
+    if (mm_arming() && !mm_prover) {
+        if (mm_prn < MM_PRBUF) {
+            mm_prbuf[mm_prn++] = (char)c;
+            /* the column still has to track what WILL be written */
+            if (c == '\r' || c == '\n') mm_charpos = 1;
+            else if (c == '\t')
+                mm_charpos = (((mm_charpos - 1) / 14) + 1) * 14 + 1;
+            else                        mm_charpos++;
+            return;
+        }
+        /* More than one buffer's worth in a single statement: write what
+           there is and go straight through for the rest.  The firmware
+           grows its buffer instead; the difference shows only if such a
+           statement then fails, and a truncated line beats a lost one. */
+        mm_prover = 1;
+        mm_pr_commit();
+    }
     if (mm_gputc(c))
         return;
     putchar(c);
