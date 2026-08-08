@@ -5,117 +5,99 @@ work (`38467a4`).  Both issues below came out of measuring that change
 on the board: bench gained 0.3% where the host interpreter said 15%,
 and the reason reranked the whole queue.
 
-## Issue 1 — the main line can never go native
+**Outcome, written after the work: issue 2 shipped (`8b55ccc`); issue 1
+was void — the premise was wrong, and the section now records why.**
 
-bcrun's Thumb translator refuses `main` by design (`fn_is_main`,
-backend-thumb.c: the entry point is reached through the interpreter),
-and mmbc puts the whole BASIC main line inside C `main()`.  So the main
-program of every translated BASIC program is **permanently
-interpreted**, at ~15-30 cycles of dispatch per bytecode op, while any
-SUB that fits under the ~40K translated-size ceiling runs native.
+## Issue 1 — the main line can never go native — WRONG, see below
 
-bench.bas is one loop in the main line: every one of its iterations
-pays interpreter dispatch on every op.  That is why removing the
-comparison diamonds moved the host interpreter 15% but the board only
-0.3% — the board's SUB-heavy programs were already mostly native, and
-the main-line ones were mostly libcalls.  The interpreted main line is
-where the remaining dispatch overhead lives.
+The claim was that bcrun's Thumb translator refuses `main` by design
+(`fn_is_main`, backend-thumb.c), so the main program of every
+translated BASIC program runs permanently interpreted, and a
+`__mmb_main()` wrapper would let it go native.
 
-### Solution
+### What is actually true
 
-Emit the main-line statements into their own function and have `main`
-call it:
+`fn_is_main` does one thing only:
 
-    static void __mmb_main(void);
-    int main(void) {
-        /* heap init, DATA init, __mm_e binding - as today */
-        __mmb_main();
-        /* channel close, flush - as today */
-        return 0;
-    }
-    static void __mmb_main(void) {
-        unsigned __mark = mm_mark(); (void)__mark;
-        /* the translated main line, verbatim */
-    }
+    reclaim = thumb_reclaim() && !fn_is_main;
 
-`__mmb_main` is then an ordinary function: translated to Thumb at load
-if it fits, interpreted if it does not — today's behaviour, so a giant
-main line loses nothing.  `main` itself stays interpreted and shrinks
-to a handful of calls that run once.
+It suppresses *reclaim* — main keeps its bytecode instead of having the
+native code written over it — because the loader may still need that
+bytecode as an alias.  It does not suppress translation, and never did.
 
-Details that need care:
+Worse for the premise, bcrun has entered main natively since
+`962483175` ("CC: enter main native", 2026-07-31, in v0.9 and every
+release after).  Its entry path says so in as many words:
 
-* `__mark` moves into the wrapper (statement `mm_release(__mark)`
-  references it lexically).
-* The main line's variables are BASIC globals already — nothing moves.
-  `H` stays file-scope; `mm_heap` setup stays in `main`.
-* GOSUB labels and the return switch are statements — they travel into
-  the wrapper together.  The refusal of cross-routine GOSUB already
-  guarantees no label escapes.
-* `END` emits the runtime exit and works from any depth; the implicit
-  end-of-program becomes plain `return` (the wrapper is void — check
-  write()'s tail emission and the `return 0` it prints today).
-* ON ERROR: `mm_err_bind` stays in `main` before the call; the
-  wrapper's guarded statements reference `__mm_e` (file-scope pointer)
-  exactly as SUB bodies do today.
-* mmbc's report/global_decls ordering must not change — the wrapper is
-  emitted where the main body is emitted today, plus a forward
-  declaration beside the other prototypes.
+    /* Dispatch the entry exactly like a call site: h_entry points
+       at main's BC_NATIVE marker when it was translated, and a
+       BASIC program lives in its main line - entering through the
+       bytecode quietly interpreted the whole program while every
+       benchmark with the work in called functions stayed fast. */
 
-Acceptance: all gates (cgate 0 both modes, fcctests, qemutests), then
-the board per the benchmark method note — fresh boot, screen output,
-on-board mmbc+cc.  bench grains is the number to watch: its ~4K main
-span should translate (expansion ~2.4-3.8x, well under 40K), and the
-interpreter-to-native jump on its non-libcall ops is the prize.  The
-eclipse should not move (its main is 85 lines of setup; the work is in
-SUBs) — digits byte-identical as always.  `THUMB_VERBOSE=1` names any
-bail and its reason if grains does not move.
+Measured, not read: `THUMB_VERBOSE=1` over the whole test suite reports
+`native: main` for 43 of the 44 programs — bench 1166 bc -> 2468 bytes,
+the eclipse 1407 -> 2916.  The single exception is `structtest`, whose
+main line is 32,556 bytecodes and bails with `size policy`: the
+THUMB_MAXFN ceiling, which a wrapper does not move — the same span
+would sit in the wrapper.
 
-## Issue 2 — `(MMFLOAT)(3600LL)` defeats the literal-divisor test
+So there is nothing to gain here and the wrapper is dropped.
 
-`as_flt()` on an integer value wraps it in a cast, so BASIC `x/3600`
-emits `mm_fdiv(x, (MMFLOAT)(3600LL))`: `nonzero_literal()` sees a cast,
-not a number, and the provably-safe division still goes through the
+### What this means for the bare-comparison measurement
+
+bench's 0.3% was never main-vs-SUB.  Its main line was already native,
+so the comparison diamonds were already cheap native branch pairs; the
+15% was the host *interpreter*, where each diamond is dispatched.  The
+board reading was the honest one all along.
+
+### What is left of the idea
+
+Only the cliff: a main line (or a SUB) over the translated-size ceiling
+falls back to the interpreter wholesale, and structtest is proof that
+BASIC can write one.  That is the queue's "function splitting for
+over-cliff routines" item, which needs to split spans, not rename them.
+
+## Issue 2 — `(MMFLOAT)(3600LL)` defeats the literal-divisor test — SHIPPED
+
+`as_flt()` on an integer value wrapped it in a cast, so BASIC `x/3600`
+emitted `mm_fdiv(x, (MMFLOAT)(3600LL))`: `nonzero_literal()` saw a cast,
+not a number, and the provably-safe division still went through the
 checked call.  Twelve sites in the eclipse alone.
 
 Since the checks became ON ERROR-only, untrapped programs no longer pay
-this (they emit bare `/` everywhere), so the issue is now confined to
+this (they emit bare `/` everywhere), so the issue was confined to
 **programs that use ON ERROR** — narrower, but exactly the programs
 that pay for every check, and the fix also shrinks the emitted text.
 
-### Solution
+### What shipped (`8b55ccc`)
 
-In `as_flt()` (both translators), when the value's code is a plain
-decimal integer literal — digits with an optional `LL` suffix, the same
-shape `is_literal_number()` recognises — emit it as a float literal
-instead of a cast: `3600LL` becomes `3600.0`.  Bit-identical value
-(both are the double 3600.0), and `nonzero_literal()` then reads it
-directly.  Hex (`0x...LL`, from `&H`) keeps the cast — appending `.0`
-to hex is not a number.  cc1 folds the cast today anyway, so the .bc
-for non-divisor uses is unchanged; only the ON ERROR divisor sites gain
-the inline `/`.
+`float_form_of_int_literal()` beside `nonzero_literal()` in both
+translators: a plain decimal integer literal is emitted as the float it
+becomes — `3600LL` -> `3600.0`, the same double either way, since up to
+fifteen digits every integer is exact.  Refused, keeping the cast: more
+than fifteen digits (strtod rounding is then the compiler's business,
+not ours), hex from `&H` (`0x10.0` is not a number), and a leading zero
+(C reads that as octal).
 
-## Plan
+Measured: the eclipse and bench compile to **byte-identical bytecode** —
+cc1 folded the cast anyway, so the only change there is emitted text —
+while a trapping program with literal divisors loses its `mm_fdiv`
+calls and its .bc shrinks 2% (3169 -> 3103 bytes), digits unchanged.
+Gates: cgate 0 both modes, make check 22 ok, fcctests 22/22, qemutests
+23/23.  No board run: identical bytecode cannot run differently.
 
-Order: issue 2 first (small, self-contained, re-cuts the emitted-text
-baseline once), then issue 1 (structural).  For each:
+## The board recipe, for whatever comes next
 
-1. mmb2c.py change, then the mirror in mmbc/ (`mmbc_expr.c` for
-   as_flt; `mmbc_out.c`/`mmbc_stmt.c` for the wrapper emission —
-   find write()'s main head/tail and the prototype block).
-2. Gates: mmbc host build, cgate.sh **0** over the suite in both
-   modes, fcctests 22/22, qemutests 23/23.  make-run's SYSTEM-spawn
-   failures are pre-existing; diff the failure pattern against a
-   stashed baseline, nothing new.
-3. Board: `fcc/sync-mmbc.sh`, build mmbc via
+1. `fcc/sync-mmbc.sh`, build mmbc via
    `make -f Makefile.armm0 FUZIX_ROOT=... USERCPU=armm0 mmbc`, strip,
    uusend, install over `/usr/bin/mmbc` keeping `mmbc.prev`.
-   Retranslate and recompile bench + solar_eclipse ON the board;
+2. Retranslate and recompile bench + solar_eclipse ON the board;
    digits byte-identical; numbers fresh-boot, screen output.
    References: v0.9 = 49499 grains / 2.311 s; current = 51579 / 2.069.
-4. Commits: mmb2c first, then the FUZIX sync commit with the board
-   numbers in the message.  ARM mmbc binary is committed in the FUZIX
-   tree as installed.
+3. Commits: mmb2c first, then the FUZIX sync commit with the board
+   numbers in the message.  The ARM mmbc binary is committed in the
+   FUZIX tree as installed.
 
 The serial console moves; FZPORT names the port (COM14 today).  One
 fzsh command per long compile — typeahead races the dots otherwise.
