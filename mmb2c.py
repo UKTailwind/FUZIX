@@ -187,6 +187,54 @@ def nonzero_literal(code):
         return False
 
 
+def boolean_expr(code):
+    """True when an emitted expression is already 0-or-1: a single
+    comparison at the top of its tree.  Only then may a condition skip
+    the '(...) != 0' wrapper; everything else keeps it, including the
+    AND/OR combinations (bitwise on integers in MMBasic) and bare
+    numbers.  Textual, like nonzero_literal: a comparison operator at
+    parenthesis depth 1 of the emitted form is the top of the tree,
+    string literals are skipped, '->' and shifts are not comparisons,
+    and a '?' at depth 1 is a ternary whose value needs the test."""
+    n = len(code)
+    if n == 0 or code[0] != '(':
+        return False
+    depth = 0
+    seen = False
+    i = 0
+    while i < n:
+        ch = code[i]
+        if ch == '"':
+            i += 1
+            while i < n and code[i] != '"':
+                if code[i] == '\\':
+                    i += 1
+                i += 1
+        elif ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+        elif depth == 1:
+            if ch == '?':
+                return False
+            if ch == '<' or ch == '>':
+                nxt = code[i + 1] if i + 1 < n else ''
+                if nxt == ch:
+                    i += 1
+                elif ch == '>' and i > 0 and code[i - 1] == '-':
+                    pass
+                else:
+                    seen = True
+                    if nxt == '=':
+                        i += 1
+            elif (ch == '=' or ch == '!') and i + 1 < n \
+                    and code[i + 1] == '=':
+                seen = True
+                i += 1
+        i += 1
+    return seen and depth == 0
+
+
 def cblock_safe(text):
     """Make text safe to sit inside a C /* */ comment."""
     out = text.replace('*/', '* /')
@@ -945,7 +993,10 @@ class Conv(object):
                     self.err("cannot compare a string with a number")
                 v = ('(mm_scmp(%s, %s) %s 0)' % (v[0], r[0], cop), TY_I)
             else:
-                v = ('((%s) %s (%s) ? 1 : 0)' % (v[0], cop, r[0]), TY_I)
+                # a C comparison is already the 1 or 0 MMBasic defines;
+                # the old '? 1 : 0' was a branch diamond the compiler
+                # never folded, paid on every comparison
+                v = ('((%s) %s (%s))' % (v[0], cop, r[0]), TY_I)
 
     def e_unary_not(self):
         t = self.peek()
@@ -953,7 +1004,7 @@ class Conv(object):
             self.i += 1
             v = self.e_unary_not()
             if t[2] == 'NOT':
-                return ('((%s) == 0 ? 1 : 0)' % self.as_flt(v), TY_I)
+                return ('((%s) == 0)' % self.as_flt(v), TY_I)
             return ('(~(%s))' % self.as_int(v), TY_I)
         return self.e_shift()
 
@@ -4325,6 +4376,11 @@ class Conv(object):
         v = self.expr()
         if v[1] == TY_S:
             self.err("a string cannot be used as a condition")
+        # a comparison is already a truth value: wrapping it in '!= 0'
+        # made the backend compare the compare, every time the
+        # condition ran
+        if boolean_expr(v[0]):
+            return v[0]
         return '(%s) != 0' % v[0]
 
     def poisoned_cond(self, c, enter):

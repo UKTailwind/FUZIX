@@ -96,6 +96,62 @@ int nonzero_literal(const char *code)
     return seen;              /* all zeros (0, 0.0, 0e0) is not "nonzero" */
 }
 
+/* True when an emitted expression is already 0-or-1: a single
+ * comparison at the top of its tree.  Only then may a condition skip
+ * the "(...) != 0" wrapper; everything else keeps it, including the
+ * AND/OR combinations (bitwise on integers in MMBasic) and bare
+ * numbers.  Textual, like nonzero_literal: a comparison operator at
+ * parenthesis depth 1 of the emitted form is the top of the tree,
+ * string literals are skipped, "->" and shifts are not comparisons,
+ * and a '?' at depth 1 is a ternary whose value needs the test. */
+int boolean_expr(const char *code)
+{
+    int n = (int)strlen(code);
+    int depth = 0;
+    int seen = 0;
+    int i;
+
+    if (n == 0 || code[0] != '(')
+        return 0;
+    for (i = 0; i < n; i++) {
+        char ch = code[i];
+
+        if (ch == '"') {
+            i++;
+            while (i < n && code[i] != '"') {
+                if (code[i] == '\\')
+                    i++;
+                i++;
+            }
+        } else if (ch == '(') {
+            depth++;
+        } else if (ch == ')') {
+            depth--;
+        } else if (depth == 1) {
+            if (ch == '?')
+                return 0;
+            if (ch == '<' || ch == '>') {
+                char nxt = i + 1 < n ? code[i + 1] : 0;
+
+                if (nxt == ch) {
+                    i++;
+                } else if (ch == '>' && i > 0 && code[i - 1] == '-') {
+                    ;
+                } else {
+                    seen = 1;
+                    if (nxt == '=')
+                        i++;
+                }
+            } else if ((ch == '=' || ch == '!') && i + 1 < n
+                       && code[i + 1] == '=') {
+                seen = 1;
+                i++;
+            }
+        }
+    }
+    return seen && depth == 0;
+}
+
 char *cblock_safe(const char *text)
 {
     size_t n = strlen(text);

@@ -106,7 +106,10 @@ struct val e_compare(void)
             v = mkval(sfmt("(mm_scmp(%s, %s) %s 0)", v.code, r.code, cop),
                       TY_I);
         } else {
-            v = mkval(sfmt("((%s) %s (%s) ? 1 : 0)", v.code, cop, r.code),
+            /* a C comparison is already the 1 or 0 MMBasic defines;
+               the old "? 1 : 0" was a branch diamond the compiler
+               never folded, paid on every comparison */
+            v = mkval(sfmt("((%s) %s (%s))", v.code, cop, r.code),
                       TY_I);
         }
     }
@@ -123,7 +126,7 @@ struct val e_unary_not(void)
         cv.i += 1;
         v = e_unary_not();
         if (strcmp(t->up, "NOT") == 0)
-            return mkval(sfmt("((%s) == 0 ? 1 : 0)", as_flt(v)), TY_I);
+            return mkval(sfmt("((%s) == 0)", as_flt(v)), TY_I);
         return mkval(sfmt("(~(%s))", as_int(v)), TY_I);
     }
     return e_shift();
