@@ -174,7 +174,8 @@ void statement(void)
     if (cv.mode == M_EMIT && cv.uses_onerror && cv.out == out_at_entry
         && !failed) {
         const char *guard =
-            pstr(sfmt("%*sif (__mm_e[1]) { __mm_e[0] = 0;"
+            pstr(sfmt("%*sif (__mm_e[1]) { mm_pr_commit();"
+                      " __mm_e[0] = 0;"
                       " if (__mm_e[1] > 0) __mm_e[1]--; }", ind * 4, ""));
         if (cv.nblocks == nblocks_snap && cv.out->n > where)
             out_append(out_at_entry, guard);

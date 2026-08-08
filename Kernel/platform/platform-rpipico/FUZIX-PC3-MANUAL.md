@@ -1828,6 +1828,13 @@ resumes at the next statement — in the `SUB` it happened in, if that is
 where it was. The count works as it does there too, `SKIP n` covering
 the next n statements.
 
+Two details that surprise people, both matching the interpreter. A
+`PRINT` that fails part way through prints **nothing at all** — not even
+the items before the failure — because the line is built whole and the
+error discards it. And calling a `SUB` spends skip count: the `SUB` line
+and any `LOCAL` are statements too, so `ON ERROR SKIP 2` before a call
+does not reach the third statement inside it.
+
 Two limits worth knowing. A statement that jumps away (`GOTO`, `EXIT`)
 does not count against `SKIP n`, so a count that spans one runs one
 statement further than it would on a PicoMite. And running out of memory

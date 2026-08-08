@@ -311,6 +311,7 @@ static void w_errno(void)    { A = mm_errno(); }
 /* through a scratch temp: MM.ERRMSG$ lives in bcrun's own memory, and a
    program can only be handed a pointer inside the VM's address space */
 static void w_errmsg(void)   { A = mm_off(mm_scopy(mm_errmsg())); }
+static void w_pr_commit(void){ mm_pr_commit(); A = 0; }
 static void w_ver(void)      { A = dput(mm_ver()); }
 static void w_device(void)   { A = mm_off(mm_scopy(mm_device())); }
 static void w_cmdline(void)  { A = mm_off(mm_scopy(mm_cmdline())); }
@@ -602,6 +603,7 @@ static const struct mmwrap {
 	{ "mm_on_error",	w_on_error },
 	{ "mm_errno",		w_errno },
 	{ "mm_errmsg",		w_errmsg },
+	{ "mm_pr_commit",	w_pr_commit },
 	{ "mm_ver",		w_ver },
 	{ "mm_device",		w_device },
 	{ "mm_cmdline",		w_cmdline },
