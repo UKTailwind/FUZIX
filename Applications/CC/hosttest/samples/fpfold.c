@@ -62,6 +62,13 @@ int main(void)
 	/* float promotes to double and folds at double */
 	printf("%d\n", 1.5f + 2.5 == 4.0);
 
+	/* a folded comparison is restamped with the operand's floating
+	   type by the expression builder, so it must carry a floating
+	   1.0 - integer 1 under DOUBLE reads back as a denormal, which
+	   the host's arithmetic kept and the DCP flushed to zero */
+	printf("%d\n", (1.0 < 2.0) * 1e300 == 1e300);
+	printf("%d\n", (2.0 < 1.0) * 1e300 == 0.0);
+
 	/* the refusals: all of these stay runtime and still agree with
 	   the oracle */
 	printf("%d\n", 1.0 / 0.0 > 1e300);	/* infinity */

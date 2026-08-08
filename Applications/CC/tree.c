@@ -557,12 +557,42 @@ static cval_t fp_pack(double d, unsigned t)
 	}
 }
 
+/* IEEE truthiness on the bit pattern: everything but +/-0 is true.
+   The same test the Thumb backend generates for a double condition,
+   and for the same reason: an arithmetic compare would go through
+   the DCP, which flushes denormals, and the machine that folds must
+   not disagree with the machine that runs. */
+static unsigned fp_iszero(cval_t v, unsigned t)
+{
+	if (type_sizeof(t) == 8)
+		return (v & 0x7FFFFFFFFFFFFFFFULL) == 0;
+	return ((uint32_t)v & 0x7FFFFFFF) == 0;
+}
+
 static struct node *fold_float_unary(struct node *n, struct node *r,
 				     unsigned op)
 {
 	unsigned rt = r->type;
 	unsigned lt = n->type;
 	double d;
+
+	/* An integer-typed constant can sit under a float-typed node -
+	   the tree above a folded subtree keeps the type it was built
+	   with.  Its value is then a number, not a bit pattern, and
+	   nothing below may unpack it.  A cast still belongs to the
+	   code below, which converts from the operand's real type;
+	   the boolean ops get the integer treatment here and the rest
+	   is left alone. */
+	if (!IS_FLOATING(rt) && op != T_CAST) {
+		if (op == T_BOOL) {
+			if (n->flags & NEEDCC)
+				return NULL;
+			return replace_constant(n, lt, r->value != 0);
+		}
+		if (op == T_BANG)
+			return replace_constant(n, lt, r->value == 0);
+		return NULL;
+	}
 
 	switch (op) {
 	case T_NEGATE:
@@ -571,11 +601,11 @@ static struct node *fold_float_unary(struct node *n, struct node *r,
 		r->value ^= ((cval_t)1) << (8 * type_sizeof(rt) - 1);
 		return r;
 	case T_BANG:
-		return replace_constant(n, lt, fp_unpack(r->value, rt) == 0.0);
+		return replace_constant(n, lt, fp_iszero(r->value, rt));
 	case T_BOOL:
 		if (n->flags & NEEDCC)
 			return NULL;
-		return replace_constant(n, lt, fp_unpack(r->value, rt) != 0.0);
+		return replace_constant(n, lt, !fp_iszero(r->value, rt));
 	case T_CAST:
 		if (IS_FLOATING(rt) && IS_FLOATING(lt)) {
 			if (type_sizeof(rt) == type_sizeof(lt))
@@ -669,16 +699,25 @@ static struct node *fold_float_binary(struct node *n, struct node *l,
 			return NULL;
 		d = a / b;
 		break;
-	/* A relational result is an integer, exactly as the runtime's
-	   compare-and-bool sequence leaves it */
+	/* A comparison node carries the PROMOTED OPERAND type in this
+	   compiler - expression building restamps it after the fold -
+	   so the folded result must be a floating 1.0 or 0.0 in that
+	   type.  A bare integer 1 under a floating type reads back as
+	   a denormal, which the host's arithmetic kept and the DCP
+	   flushed to zero: the same program folded differently on the
+	   two machines, and only the board could show it. */
 	case T_LT:
-		return replace_constant(n, CINT, a < b);
+		return replace_constant(n, l->type,
+					fp_pack(a < b ? 1.0 : 0.0, l->type));
 	case T_LTEQ:
-		return replace_constant(n, CINT, a <= b);
+		return replace_constant(n, l->type,
+					fp_pack(a <= b ? 1.0 : 0.0, l->type));
 	case T_GT:
-		return replace_constant(n, CINT, a > b);
+		return replace_constant(n, l->type,
+					fp_pack(a > b ? 1.0 : 0.0, l->type));
 	case T_GTEQ:
-		return replace_constant(n, CINT, a >= b);
+		return replace_constant(n, l->type,
+					fp_pack(a >= b ? 1.0 : 0.0, l->type));
 	default:
 		return NULL;
 	}
@@ -701,6 +740,8 @@ static struct node *fold_float_binary(struct node *n, struct node *l,
 static struct node *fold_float_unary(struct node *n, struct node *r,
 				     unsigned op)
 {
+	if (!IS_FLOATING(r->type))
+		return NULL;
 	if (op == T_NEGATE) {
 		r->value ^= ((cval_t)1) << (8 * type_sizeof(r->type) - 1);
 		return r;
