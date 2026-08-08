@@ -181,9 +181,18 @@ struct val e_mul(void)
 
             if (strcmp(op, "/") == 0) {
                 /* op_div checks the divisor first - a bare C '/' gave
-                   inf where MMBasic errors. */
-                v = mkval(sfmt("mm_fdiv(%s, %s)", as_flt(v), as_flt(r)),
-                          TY_F);
+                   inf where MMBasic errors.  Unless the divisor is a
+                   literal that is not zero, when the answer is known
+                   here and the check would be a library call on the
+                   board for nothing: dividing by 180, 86400 or pi is
+                   most of the division a real program does. */
+                const char *rd = as_flt(r);
+
+                if (nonzero_literal(rd))
+                    v = mkval(sfmt("((%s) / (%s))", as_flt(v), rd), TY_F);
+                else
+                    v = mkval(sfmt("mm_fdiv(%s, %s)", as_flt(v), rd),
+                              TY_F);
             } else if (strcmp(op, "\\") == 0) {
                 v = mkval(sfmt("mm_idiv(%s, %s)", as_int(v), as_int(r)),
                           TY_I);

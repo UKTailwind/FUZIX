@@ -66,6 +66,36 @@ char *lower(const char *s)
 }
 
 /* Make text safe to sit inside a C comment. */
+/* Is this emitted operand a number that cannot be zero?
+ *
+ * Only a plain literal counts - the text as it will appear in the C.  A
+ * divisor like 180.0 or 86400.0 needs no divide-by-zero test, and on the
+ * board that test is a call across the VM boundary, so knowing the
+ * answer here is worth the few lines. */
+int nonzero_literal(const char *code)
+{
+    const char *t = code;
+    const char *e;
+    int seen = 0;
+
+    while (*t == ' ' || *t == '\t')
+        t++;
+    e = t + strlen(t);
+    while (e > t && (e[-1] == 'L' || e[-1] == 'l'))
+        e--;
+    if (e == t)
+        return 0;
+    if (!(is_digit_c((unsigned char)*t) || (*t == '-' && e - t > 1)))
+        return 0;
+    for (; t < e; t++) {
+        if (!(is_digit_c((unsigned char)*t) || strchr(".eE+-", *t) != NULL))
+            return 0;
+        if (is_digit_c((unsigned char)*t) && *t != '0')
+            seen = 1;
+    }
+    return seen;              /* all zeros (0, 0.0, 0e0) is not "nonzero" */
+}
+
 char *cblock_safe(const char *text)
 {
     size_t n = strlen(text);

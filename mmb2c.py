@@ -167,6 +167,26 @@ class MMError(Exception):
     pass
 
 
+def nonzero_literal(code):
+    """Is this emitted operand a number that cannot be zero?
+
+    Only a plain literal counts - the text as it will appear in the C.
+    A divisor like 180.0 or 86400.0 needs no divide-by-zero test, and on
+    the board that test is a call across the VM boundary, so knowing the
+    answer here is worth the few lines."""
+    t = code.strip().rstrip('Ll')
+    if not t or (t[0] not in '0123456789'
+                 and not (t[0] == '-' and len(t) > 1)):
+        return False
+    for ch in t:
+        if ch not in '0123456789.eE+-':
+            return False
+    try:
+        return float(t) != 0.0
+    except ValueError:
+        return False
+
+
 def cblock_safe(text):
     """Make text safe to sit inside a C /* */ comment."""
     out = text.replace('*/', '* /')
@@ -974,8 +994,16 @@ class Conv(object):
                 if op == '/':
                     # op_div checks the divisor first, so this cannot be a
                     # bare C '/': that returned inf where MMBasic errors.
-                    v = ('mm_fdiv(%s, %s)'
-                         % (self.as_flt(v), self.as_flt(r)), TY_F)
+                    # Unless the divisor is a literal that is not zero, in
+                    # which case the answer is known here and the check is
+                    # a library call on the board for nothing.  Dividing
+                    # by 180, 86400 or pi is most of the division a real
+                    # program does.
+                    rd = self.as_flt(r)
+                    if nonzero_literal(rd):
+                        v = ('((%s) / (%s))' % (self.as_flt(v), rd), TY_F)
+                    else:
+                        v = ('mm_fdiv(%s, %s)' % (self.as_flt(v), rd), TY_F)
                 elif op == '\\':
                     v = ('mm_idiv(%s, %s)'
                          % (self.as_int(v), self.as_int(r)), TY_I)
