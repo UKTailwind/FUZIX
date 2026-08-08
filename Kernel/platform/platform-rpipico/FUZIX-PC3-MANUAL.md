@@ -1828,6 +1828,37 @@ Scalar: `ATAN3`, `COSH`, `LOG10`, `SINH`, `TANH`
 
 Whole-array (one number out of an array): `MAX`, `MEAN`, `MEDIAN`, `MIN`, `SD`, `SUM`
 
+## MATH sub-commands
+
+`MATH` is also a statement, and that is a different and much longer list
+in the interpreter. Four of it are translated — the ones that walk an
+array element by element, which is what most programs use it for:
+
+| | |
+|---|---|
+| `MATH SET v, a()` | every element of `a()` becomes `v` |
+| `MATH ADD a(), v, b()` | `b() = a() + v`, element by element |
+| `MATH SCALE a(), v, b()` | `b() = a() * v`, element by element |
+| `MATH RANDOMIZE [seed]` | seed the generator; no seed uses the clock |
+
+All four take integer, float or string arrays, except `SCALE`, which is
+numeric only — as it is there. `ARRAY` is accepted as a spelling of
+`MATH` for these.
+
+The rest are not translated, and each says so by name rather than being
+mistaken for something else: the matrix operations (`M_MULT`,
+`M_INVERSE`, `M_TRANSPOSE`, `M_PRINT`), the vector ones (`V_MULT`,
+`V_CROSS`, `V_NORMALISE`, `V_ROTATE`, `V_PRINT`), the quaternions
+(`Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`),
+the complex arithmetic (`C_ADD`, `C_SUB`, `C_MUL`, `C_DIV`, `C_AND`,
+`C_OR`, `C_XOR`), `FFT`, `WINDOW`, `SINC`, `INTERPOLATE`, `POWER`,
+`SHIFT`, `SLICE`, `INSERT`, `PID`, `SENSORFUSION` and `AES128`.
+
+They are a coherent block of work rather than a scattering of gaps —
+most are pure arithmetic over arrays with no hardware in them, so they
+would go in as a header of static functions and cost nothing to a
+program that does not use them.
+
 ## Types and structure
 
 `INTEGER` (64-bit), `FLOAT` (double), `STRING`, and arrays of each, up
