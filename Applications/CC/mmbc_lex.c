@@ -96,6 +96,40 @@ int nonzero_literal(const char *code)
     return seen;              /* all zeros (0, 0.0, 0e0) is not "nonzero" */
 }
 
+/* A plain decimal integer literal, written as a float.
+ *
+ * "3600LL" becomes "3600.0" - the same double either way, since up to 15
+ * digits every integer is exact - but nonzero_literal can read it, so
+ * dividing by it needs no zero test.  Hex (from &H) keeps its cast,
+ * "0x10.0" being no number, and so does a leading zero, which C reads as
+ * octal.  NULL for anything that is not simply digits. */
+const char *float_form_of_int_literal(const char *code)
+{
+    const char *t = code;
+    const char *e;
+    char buf[24];
+    int n, i;
+
+    while (*t == ' ' || *t == '\t')
+        t++;
+    e = t + strlen(t);
+    while (e > t && (e[-1] == ' ' || e[-1] == '\t'))
+        e--;
+    while (e > t && (e[-1] == 'L' || e[-1] == 'l'))
+        e--;
+    n = (int)(e - t);
+    if (n == 0 || n > 15 || (n > 1 && *t == '0'))
+        return NULL;
+    for (i = 0; i < n; i++)
+        if (!is_digit_c((unsigned char)t[i]))
+            return NULL;
+    memcpy(buf, t, (size_t)n);
+    buf[n] = '.';
+    buf[n + 1] = '0';
+    buf[n + 2] = '\0';
+    return sfmt("%s", buf);
+}
+
 /* True when an emitted expression is already 0-or-1: a single
  * comparison at the top of its tree.  Only then may a condition skip
  * the "(...) != 0" wrapper; everything else keeps it, including the

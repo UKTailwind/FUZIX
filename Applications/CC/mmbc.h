@@ -69,6 +69,7 @@ int is_idchar(int c);
 int is_hexd(int c);
 char *cblock_safe(const char *text);
 int nonzero_literal(const char *code);
+const char *float_form_of_int_literal(const char *code);
 int boolean_expr(const char *code);
 char *c_string_literal(const char *s);
 char *split_suffix(const char *word, int *ty);  /* ty out: TY_* or TY_NONE */

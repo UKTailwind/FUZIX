@@ -402,8 +402,10 @@ const char *as_flt(struct val v)
 {
     if (v.ty == TY_F)
         return v.code;
-    if (v.ty == TY_I)
-        return sfmt("(MMFLOAT)(%s)", v.code);
+    if (v.ty == TY_I) {
+        const char *f = float_form_of_int_literal(v.code);
+        return f != NULL ? f : sfmt("(MMFLOAT)(%s)", v.code);
+    }
     if (v.ty == TY_T)
         cv_err("a whole structure cannot be used in an expression");
     cv_err("string used where a number is required");
