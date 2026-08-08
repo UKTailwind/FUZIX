@@ -115,9 +115,17 @@ rest of the drawing statements, and structures.
   where the USB keyboard sends LF and the prompt only accepted the
   first. Every prompt now takes either, so `F3`, `F10` and the rest
   behave the same on the HDMI console as over a serial line.
+* **`mmedit` takes the screen back from a graphics mode.** Editing after
+  a program that ended in `MODE 2` meant typing into a console the
+  monitor was not showing. The editor now switches to `MODE 1` while it
+  runs and restores the mode when it leaves, so the program's screen
+  comes back as it was.
 * **`mmedit` colours the new statements correctly.** `Box`, `RBox`,
   `Triangle`, `Arc`, `Type`, `End Type`, `Struct` and `Struct(` now
-  show as translatable (cyan) rather than interpreter-only (blue).
+  show as translatable (cyan) rather than interpreter-only (blue), and
+  so do the `MM.` functions `mmbc` understands — while `MM.WATCHDOG`,
+  `MM.INFO` and the rest it does not are honestly blue, where the
+  editor used to call everything translatable.
 * **The kernel's crash report leads with `r4`–`r7`** — the registers
   that actually locate the fault in compiled code — so a report copied
   from the screen is useful even when cut short.
@@ -1432,10 +1440,26 @@ copies, `F10` exports the selection to a file. The status line shows
 line, column and INS/OVR, and the function key legend shortens itself
 to fit the terminal width.
 
+**The colour coding answers "will this compile?"** A keyword `mmbc` can
+translate is cyan; one only the interpreter knows is blue. That second
+colour is the useful one here, because a program is compiled rather than
+run as you type it, and it is worth seeing `MM.WATCHDOG` or `BLIT` in
+blue before you build rather than after. The lists come from the
+translator's own tables, so they cannot drift from what it does.
+
 The editor works over the serial port as well as on the HDMI console —
 it drives a VT100, and the console emits VT100 function key sequences.
 Files with CRLF line endings are accepted; the CRs are stripped on
 load, which matters because most files arrive from a PC.
+
+**It takes the screen back if a program left it in a graphics mode.**
+The editor draws on the text console, which is what `MODE 1` selects. A
+program that finished in `MODE 2` leaves the screen 320×240 in sixteen
+colours, and the console is then not what the monitor is showing — so
+the editor would be painting where nothing can be seen. `mmedit`
+switches to `MODE 1` on the way in and puts the old mode back on the way
+out, including when it is killed, so a program's screen survives a trip
+through the editor and comes back as it was.
 
 ## The other editor: `vi`
 
