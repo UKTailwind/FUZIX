@@ -242,22 +242,45 @@ binaries, plus the small kernel ioctls marked †.
 
 # The plan
 
-**Status at the end of the 2026-08-07 session: Sections 1, 2 and 3 are
-CLOSED** — implemented in both translators (cgate 0 throughout), all
-host gates green (make check 20 ok, xcheck 0, fcctests 20/20,
-qemutests 21/21), board-verified self-hosted on the PC2, and Sections
-2 and 3 signed off side-by-side against a real MMBasic machine.  The
-side-by-side caught one silent divergence (over-length member strings
-must raise "String too long", not truncate) — fixed, board-verified.
-Incidental fixes along the way, all committed: the bcrun unaligned
-VM-stack HardFault (mem size now rounds to 8), cc1 NUM_STRUCT_FIELD
-50→128, the fault dump prints r4-r7 first, and the no-%lld-in-Fuzix-
-libc trap.  On the card now: bcrun 79,476 (bcrun.prev = rollback),
-mmbc 91,564, current cc0/cc1/cc2, all mmb headers incl. mm_ssetm, and
-the test set box/tri/type/structtest.bas.  Docs, both manuals and
-their PDFs are current; the PicoMite structures-manual errata are
-fixed upstream in d:\Dropbox\PicoMite\PicoMite\docs (uncommitted -
-the user manages that repo).  NEXT: Section 4.
+**Status at the end of the 2026-08-08 session: Sections 1, 2, 3 and 4
+are CLOSED** — both translators (cgate 0 throughout), all host gates
+green (make check 22 ok, xcheck 4896/0, fcctests 22/22, qemutests
+23/23), board-verified self-hosted on the PC2, and every section signed
+off side-by-side against a real MMBasic machine.  The kernel is at
+release **0.10** and flashed.
+
+The side-by-side has now found a divergence in three sections running,
+each of them invisible to every gate and to the board because the
+implementation was self-consistent and wrong (see
+[[pc3-side-by-side-authority]] in the memory):
+
+| section | what it caught |
+|---|---|
+| 3 | over-length member strings must RAISE, not truncate |
+| 4 | `PRINT` is all or nothing - a statement that fails part way prints nothing |
+| 4 | entering a SUB costs skip count, so `SKIP 2` protects less than it looks |
+
+**On the card now** (each with a `.prev` rollback): bcrun 85,900, mmbc
+93,748, mmedit 33,840, current cc0/cc1/cc2, all mmb headers, the
+updated `/usr/lib/cc/include/mmb_runtime.h`, and the test set
+box/tri/type/structtest/checks/onerror/solar + mmv.  Both manuals and
+their PDFs are current; the PicoMite structures-manual errata are fixed
+upstream in d:\Dropbox\PicoMite\PicoMite\docs (uncommitted - the user
+manages that repo).
+
+**Performance, measured this session on the board** (solar eclipse,
+self-hosted): 2.3527s baseline → **2.2511s** after the literal-divisor
+fix, which is at or ahead of the v0.9 figure of 2.27s.  The regression
+was Phase A's own doing and is written up under Section 4.
+
+Two incidental fixes: mmedit's prompts ignored Enter from the USB
+keyboard (a serial terminal sends CR, the keyboard map sends LF, and
+`GetInputString` took only CR - so `F3` Find looked broken while every
+other key worked), and `PICOIOC_BOARD` was added to the kernel because
+which board this is was something only the boot banner could say.
+
+NEXT: Section 5 (PLAY WAV/FLAC/MODFILE and PAUSE/RESUME), or Section 6
+(the 1→2 migration) if a smaller bcrun matters more than more audio.
 
 Process: one section at a time.  A section is not done until (a) the
 host gates pass — `make run`, `make xcheck`, `mmbc/cgate.sh` at total 0,
@@ -499,10 +522,19 @@ It found real divergences that predate this section:
   error only ended the program — MM.ERRMSG$ makes the text a value a
   program can read.
 
-Deferred with reasons: the firmware's `Overflow` checks on float
-`+ * ^ /` (`fret == INFINITY` — note `+inf` only, so `-1e308*10` does
-NOT error there) are a compare on the hot path of every float
-operation, and go in only if the board benchmark says they are free.
+**The `Overflow` checks were tried and REJECTED, 2026-08-08.**  The
+firmware checks `fret == INFINITY` after float `+ * ^ /` (note `+inf`
+only, so `-1e308*10` does NOT error there).  Matching it means routing
+every float add and multiply through the runtime, and on the board that
+is a call across the VM boundary where there had been an inline FPU
+instruction.  Measured: the eclipse benchmark's object grew **31%**
+(135,942 → 177,888 bytes) before it even ran, and then it failed
+outright — which looks like a bug in the attempt (most likely the
+operand slots in the new wrappers) rather than anything about the
+firmware's semantics, but the size alone settled it.  Reverted whole.
+A program that overflows a double gets `inf` here and an error there;
+that is a documented gap, not a silent one, and it is cheap to revisit
+if a real program ever wants it.
 Type checks that a typed translator makes at compile time (BIT "Not an
 integer", BYTE "Not a string", MID$/MATH "Argument count") do not
 apply.  MATH's array-shape errors belong with the MATH backlog in
@@ -515,6 +547,21 @@ lines on a real PicoMite.
 **Phase A done 2026-08-07** (mmb2c `51e15e5`, FUZIX `44012bb0e`): all of
 the above in both translators, cgate 0, make check 21 ok, xcheck 4896/0,
 fcctests 21/21, qemutests 22/22.
+
+**And it cost 3.7%, which took a day to notice.**  Making float division
+a runtime call put a VM-boundary crossing where an inline divide had
+been, and the eclipse benchmark went 2.27s → 2.3527s.  The fix is that
+a literal divisor which is not zero cannot be zero: 42 of that
+program's 77 division sites divide by 180, 86400, 36525, 648000,
+298.257 or pi, and there the interpreter's own test could never fire
+either, so those emit a bare divide again.  A literal ZERO still goes
+through `mm_fdiv` and still errors.  Board: **2.2511s**, ahead of where
+v0.9 was, and the object is smaller too.
+
+The lesson is not "don't add the check" — the check is correct and the
+interpreter has it.  It is that a correctness fix on a hot path needs a
+measurement in the same sitting, because nothing in the gates will ever
+mention it.
 
 ### Phase B — the machinery
 
