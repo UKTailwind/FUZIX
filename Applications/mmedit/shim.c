@@ -24,6 +24,69 @@ int scr_rows = 40, scr_cols = 80;
 static struct termios saved;
 static int raw_active;
 
+/* --- the display mode ------------------------------------------------ *
+ *
+ * The editor draws on the text console, which is what MMBasic calls
+ * MODE 1 and the kernel calls 0xFF - its 640x480 one-bit surface.  A
+ * BASIC program that ended in MODE 2 leaves the screen 320x240 in 16
+ * colours, and editing on that is a mess: the console is not what is
+ * being scanned out, so the editor draws where nobody can see it.
+ *
+ * So take the console for the duration and give the mode back on the
+ * way out, whichever way out that is.  Kernel numbering, mirrored from
+ * the platform's pico_ioctl.h, which is the authority.
+ */
+#define GFXIOC_MODE   0x0003
+#define GFXIOC_INFO   0x000E
+#define GFX_CONSOLE   0xFF              /* MMBasic MODE 1 */
+
+struct gfx_info {
+    unsigned short width, height, stride;
+    unsigned char bpp, mode;
+};
+
+static int gfx_fd = -1;
+static int mode_saved = -1;             /* -1 = nothing to put back */
+
+/* The mode we found, or -1 if the question cannot be asked - an older
+   kernel without GFXIOC_INFO, or no /dev/sys at all.  Not an error: the
+   editor works fine on a console that cannot tell us about itself. */
+static int mode_get(void)
+{
+    struct gfx_info gi;
+
+    if (gfx_fd < 0)
+        gfx_fd = open("/dev/sys", O_RDWR);
+    if (gfx_fd < 0)
+        return -1;
+    if (ioctl(gfx_fd, GFXIOC_INFO, &gi) < 0)
+        return -1;
+    return gi.mode;
+}
+
+static void mode_set(int m)
+{
+    int k = m;
+
+    if (gfx_fd >= 0)
+        (void)ioctl(gfx_fd, GFXIOC_MODE, &k);
+}
+
+/* Called from term_close, so every exit path restores - including the
+   signal handler, which is the one that matters: a program killed in a
+   graphics mode would otherwise leave the machine unusable. */
+static void mode_restore(void)
+{
+    if (mode_saved >= 0) {
+        mode_set(mode_saved);
+        mode_saved = -1;
+    }
+    if (gfx_fd >= 0) {
+        close(gfx_fd);
+        gfx_fd = -1;
+    }
+}
+
 /* --- terminal ------------------------------------------------------------- */
 
 static void on_signal(int sig)
@@ -64,6 +127,18 @@ int term_open(void)
     signal(SIGHUP, on_signal);
     signal(SIGQUIT, on_signal);
 
+    /* Before the size question, not after: the geometry belongs to the
+       mode, and asking first would size the editor to the one we are
+       about to leave. */
+    {
+        int m = mode_get();
+
+        if (m >= 0 && m != GFX_CONSOLE) {
+            mode_saved = m;
+            mode_set(GFX_CONSOLE);
+        }
+    }
+
     if (ioctl(0, TIOCGWINSZ, &ws) == 0 && ws.ws_row && ws.ws_col) {
         scr_rows = ws.ws_row;
         scr_cols = ws.ws_col;
@@ -81,6 +156,7 @@ void term_close(void)
     scr_normal();
     scr_flush();
     tcsetattr(0, TCSANOW, &saved);
+    mode_restore();
 }
 
 /* --- output --------------------------------------------------------------- */
