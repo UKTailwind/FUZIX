@@ -992,15 +992,17 @@ class Conv(object):
                 op = self.nxt()[1]
                 r = self.e_unary()
                 if op == '/':
-                    # op_div checks the divisor first, so this cannot be a
-                    # bare C '/': that returned inf where MMBasic errors.
-                    # Unless the divisor is a literal that is not zero, in
-                    # which case the answer is known here and the check is
-                    # a library call on the board for nothing.  Dividing
-                    # by 180, 86400 or pi is most of the division a real
-                    # program does.
+                    # op_div checks the divisor first where a bare C '/'
+                    # answers inf.  The check exists so ON ERROR can trap
+                    # the error; a program with no ON ERROR has nothing
+                    # to trap it with - a divide by zero there is a bug
+                    # the program needs fixing either way - so only
+                    # trapping programs pay the runtime call.  A literal
+                    # divisor that is not zero needs no check in either
+                    # world: dividing by 180, 86400 or pi is most of the
+                    # division a real program does.
                     rd = self.as_flt(r)
-                    if nonzero_literal(rd):
+                    if nonzero_literal(rd) or not self.uses_onerror:
                         v = ('((%s) / (%s))' % (self.as_flt(v), rd), TY_F)
                     else:
                         v = ('mm_fdiv(%s, %s)' % (self.as_flt(v), rd), TY_F)
@@ -1413,11 +1415,20 @@ class Conv(object):
             return ('mm_sgn(%s)' % f(0), TY_I)
         if up in ('SQR', 'SIN', 'COS', 'TAN', 'ATN', 'LOG', 'EXP',
                   'ASIN', 'ACOS'):
-            # SQR/LOG/ASIN/ACOS carry the firmware's domain checks, so they
-            # go through the runtime; the rest have none and stay direct.
-            cf = {'SQR': 'mm_sqr', 'SIN': 'sin', 'COS': 'cos', 'TAN': 'tan',
-                  'ATN': 'atan', 'LOG': 'mm_log', 'EXP': 'exp',
-                  'ASIN': 'mm_asin', 'ACOS': 'mm_acos'}[up]
+            # SQR/LOG/ASIN/ACOS carry the firmware's domain checks so
+            # that ON ERROR can trap them; with no ON ERROR in the
+            # program the checks have no customer and the calls go
+            # straight to libm.  The rest have no checks and are always
+            # direct.
+            if self.uses_onerror:
+                cf = {'SQR': 'mm_sqr', 'SIN': 'sin', 'COS': 'cos',
+                      'TAN': 'tan', 'ATN': 'atan', 'LOG': 'mm_log',
+                      'EXP': 'exp', 'ASIN': 'mm_asin',
+                      'ACOS': 'mm_acos'}[up]
+            else:
+                cf = {'SQR': 'sqrt', 'SIN': 'sin', 'COS': 'cos',
+                      'TAN': 'tan', 'ATN': 'atan', 'LOG': 'log',
+                      'EXP': 'exp', 'ASIN': 'asin', 'ACOS': 'acos'}[up]
             return ('%s(%s)' % (cf, f(0)), TY_F)
         if up == 'ATAN2':
             return ('atan2(%s, %s)' % (f(0), f(1)), TY_F)
