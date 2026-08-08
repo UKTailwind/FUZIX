@@ -284,6 +284,16 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval("mm_errno()", TY_I);
     if (strcmp(up, "MM.ERRMSG$") == 0)
         return mkval("mm_errmsg()", TY_S);
+    if (strcmp(up, "MM.VER") == 0)
+        return mkval("mm_ver()", TY_F);
+    if (strcmp(up, "MM.DEVICE$") == 0)
+        return mkval("mm_device()", TY_S);
+    if (strcmp(up, "MM.CMDLINE$") == 0) {
+        /* the only thing that needs main's arguments, so main only takes
+           them when a program asks */
+        cv.uses_cmdline = 1;
+        return mkval("mm_cmdline()", TY_S);
+    }
     if (strcmp(up, "PIXEL") == 0) {
         /* PIXEL(x, y) reads a pixel back AS RGB888 - the kernel
            primitive maps the mode's own colour numbering back out,

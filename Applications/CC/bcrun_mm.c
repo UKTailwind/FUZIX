@@ -314,6 +314,11 @@ static void w_errmsg(void)   { A = mm_off(mm_scopy(mm_errmsg())); }
 static void w_ver(void)      { A = dput(mm_ver()); }
 static void w_device(void)   { A = mm_off(mm_scopy(mm_device())); }
 static void w_cmdline(void)  { A = mm_off(mm_scopy(mm_cmdline())); }
+/* The generated main passes its own argc/argv, which are meaningless
+   here - the entry is dispatched without them.  bcrun's are the real
+   ones, so they are what gets bound, and the generated C stays the same
+   in both worlds. */
+static void w_argv_bind(void) { mm_argv_bind(prog_argc, prog_argv); A = 0; }
 static void w_timer_set(void){ mm_timer_set(D(0)); A = 0; }
 static void w_run_begin(void) { mm_run_begin(); A = 0; }
 static void w_run_arg(void)   { mm_run_arg(Ps(0)); A = 0; }
@@ -600,6 +605,7 @@ static const struct mmwrap {
 	{ "mm_ver",		w_ver },
 	{ "mm_device",		w_device },
 	{ "mm_cmdline",		w_cmdline },
+	{ "mm_argv_bind",	w_argv_bind },
 	{ "mm_timer_set",	w_timer_set },
 	{ "mm_run_begin",	w_run_begin },
 	{ "mm_run_arg",		w_run_arg },

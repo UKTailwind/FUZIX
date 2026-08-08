@@ -3351,6 +3351,26 @@ static int run(void)
 	return (int)bc_exec(h.h_entry);
 }
 
+/*
+ *	The arguments the PROGRAM was given - everything after the .bc
+ *	name.  A translated program's main() is dispatched with no
+ *	arguments (see run()), so MM.CMDLINE$ cannot come from its own
+ *	argv the way it does in the hosted build; bcrun holds the real
+ *	command line and hands it over through w_argv_bind.
+ */
+static int prog_argc;
+static char **prog_argv;
+
+/*
+ *	The arguments the PROGRAM was given - everything after the .bc
+ *	name.  A translated program's main() is dispatched with no
+ *	arguments (see run()), so MM.CMDLINE$ cannot come from its own
+ *	argv the way it does in the hosted build; bcrun holds the real
+ *	command line and hands it over through w_argv_bind.
+ */
+static int prog_argc;
+static char **prog_argv;
+
 int main(int argc, char *argv[])
 {
 	int i = 1;
@@ -3374,6 +3394,10 @@ int main(int argc, char *argv[])
 	}
 	if (prof_on || getenv("BCRUN_SITES"))
 		atexit(prof_dump);	/* mm_end() exits through here */
+	prog_argc = argc - i;
+	prog_argv = argv + i;
+	prog_argc = argc - i;
+	prog_argv = argv + i;
 	load(argv[i]);
 	if (getenv("BCRUN_SITES")) {
 		prof_site_n = h.h_code;
