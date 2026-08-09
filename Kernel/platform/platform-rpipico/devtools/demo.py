@@ -110,6 +110,19 @@ def drain(ser, settle, limit=300.0):
     return text
 
 
+def watch(seconds):
+    """Let something animate for a fixed time.
+
+    Unlike beat(), --fast does NOT skip this: how long the thing runs is
+    part of what a rehearsal has to prove, not padding around it.
+    """
+    global DRY_SECONDS
+    if DRY:
+        DRY_SECONDS += seconds
+        return
+    time.sleep(seconds)
+
+
 def beat(seconds):
     """A reading pause.  Rehearsals skip these; the real take needs them."""
     global DRY_SECONDS
@@ -311,6 +324,31 @@ def sc_graphics(ser):
     clear_screen(ser)
 
 
+def sc_bubble(ser):
+    """Bubble Universe - colour, double-buffered, animating."""
+    # The only colour in the demonstration, and the only animation.  It
+    # runs MODE 2, builds a colour map, and plots through the ARRAY form
+    # of PIXEL into an off-screen framebuffer which it copies to the
+    # screen a frame at a time.  Far too long to type on camera, so it
+    # ships on the card with the other samples.
+    type_line(ser, "cd /root/cc", settle=SETTLE)
+    type_line(ser, "mmbc bubble.bas", settle=BUILD); beat(1)
+    type_line(ser, "cc bubble.c", settle=BUILD); beat(1)
+    # It counts 272 frames - twenty seconds at the measured 73.5ms - and
+    # stops on its own.  Driving the length from here instead, by
+    # sending a key after a wait, was the first try and ran well over:
+    # the program only tests Inkey$ once a frame and the keystroke has a
+    # tty queue and a frame's worth of plotting to get through first.
+    # A count in the program is exact and needs nothing from us.
+    #
+    # It finishes with Mode 1 of its own accord, so the text console
+    # comes back without help and no clear is needed afterwards.
+    type_line(ser, "./bubble.bc", settle=1, hold=SCENE)
+    watch(21)                 # its own 20, plus a moment to come back
+    drain(ser, RUN)
+    beat(3)
+
+
 def sc_eclipse(ser):
     """A real application: local circumstances of a solar eclipse."""
     type_line(ser, "cd /root/cc", settle=1)
@@ -390,6 +428,7 @@ SCENES = [
     ("c",        sc_c),
     ("edit",     sc_edit),
     ("graphics", sc_graphics),
+    ("bubble",   sc_bubble),
     ("eclipse",  sc_eclipse),
     ("multi",    sc_multi),
     ("bbc",      sc_bbc),
