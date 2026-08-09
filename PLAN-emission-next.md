@@ -71,7 +71,27 @@ there.  Known remaining gaps, all recorded rather than hidden:
 * `#line`'s optional file name is parsed and ignored; applying it would
   also have to unwind at the end of an `#include`.
 
-### 3a. Runaway recursion can still crash the machine — NATIVE PATH
+### 3a. Runaway recursion — DONE 2026-08-09 (FUZIX `82149b451`)
+
+Fixed by the first of the two options below: every translated function
+carries the test inline, five halfwords at the top, reading the floor
+from helper slot 21 and calling slot 22 below it. Native code implies
+object version 5.
+
+**Board-measured.** Unbounded recursion in a six-argument SUB stops with
+"stack overflow - recursion too deep?" and the machine carries on.
+Worst-case cost, a loop of 200,000 near-empty calls: 481.5 → 485.2 ms,
+**0.76%**, ~18 ns a call. ripple and the eclipse do not move.
+
+**And it corrects the depth record.** That shape stops at **~237**
+levels, and `BCRUN_BYTECODE=1` stops at exactly the same place — the
+paths now agree. The "255 levels" below was measured on the unguarded
+native path, which had been running past the floor and writing below
+the VM stack without saying so.
+
+The original note follows.
+
+### 3a (original). Runaway recursion can still crash the machine — NATIVE PATH
 
 The urgent half of what follows.  `bcrun.c` now has a `stack_floor` and
 `BC_ENTER` refuses to go below it, but **a translated function never
