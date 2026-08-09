@@ -80,6 +80,11 @@
 *board.c.o(.text*)
 *ds3231.c.o(.text*)
 *devgpio.c.o(.text*)
+/* /dev/i2c.  A transaction is ~300us of bus at 400kHz, so where the
+   dispatch runs is not measurable, and leaving these in RAM overflowed
+   it by 248 bytes the moment they were added. */
+*i2cuser.c.o(.text*)
+*devi2c.c.o(.text*)
 
 /* ---- the console's escape machinery and line editing, which run at
        terminal speed.  charout is per character so it is named back

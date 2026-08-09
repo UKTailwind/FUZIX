@@ -106,6 +106,11 @@
 
 /* We have a GPIO interface */
 #define CONFIG_DEV_GPIO
+/* /dev/i2c, minor 7 of the sys device: userland on I2C0, which is the
+   QWIIC socket.  i2cuser.c has the sharing argument; the short form is
+   that a non-preemptive kernel makes a transaction atomic for free, and
+   the hourly RTC poll in interrupt context skips rather than waits. */
+#define CONFIG_DEV_I2C
 /* Enable to make ^Z dump the inode table for debug */
 #undef CONFIG_IDUMP
 /* Enable to make ^A drop back into the monitor */

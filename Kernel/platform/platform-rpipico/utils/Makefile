@@ -4,7 +4,7 @@ USERCPU=armm0
 VERBOSE=1
 include $(FUZIX_ROOT)/Target/rules.$(USERCPU)
 
-UTILS = libmbench.c gpioin.c allocbench.c forkroom.c picoctl.c picogpio.c gpiotog.c gfxtest.c bufs.c arenatest.c exectest.c wraptest.c keydump.c psbench.c memprobe.c syscallbench.c ripple.c bmtest.c linebench.c saveimage.c loadimage.c mp3bench.c pcmtest.c playmp3.c
+UTILS = libmbench.c gpioin.c allocbench.c forkroom.c picoctl.c picogpio.c gpiotog.c gfxtest.c bufs.c arenatest.c exectest.c wraptest.c keydump.c psbench.c memprobe.c syscallbench.c ripple.c bmtest.c linebench.c saveimage.c loadimage.c mp3bench.c pcmtest.c playmp3.c i2ctest.c
 UTILSBIN = $(UTILS:.c=)
 
 # mp3bench is the ONE program here allowed near the hardware FPU, and

@@ -102,7 +102,9 @@ add_executable(fuzix
 	tricks.S
 	core1.c
 	devgpio.c
+	i2cuser.c
 	usbdescriptors.c
+	../../dev/devi2c.c
 	../../dev/blkdev.c
 	../../dev/mbr.c
 	../../dev/devsd_discard.c

@@ -58,7 +58,9 @@ static uint8_t rtc_quiet;      /* suppress diagnostics (IRQ-context poll) */
  * cycles - and every later transaction then times out. Clock the bus
  * with up to 9 SCL pulses until the slave releases SDA, then send a
  * STOP, then hand the pins back to the I2C block. */
-static void ds3231_bus_recover(void)
+uint8_t i2c0_user_busy;         /* userland holds the bus - see ds3231.h */
+
+void ds3231_bus_recover(void)
 {
     int i;
 
@@ -169,6 +171,15 @@ uint_fast8_t plt_rtc_secs(void)
     uint8_t r;
 
     if (!rtc_present)
+        return 255;
+    /*
+     * Userland has the bus.  Skip - do NOT wait, because there is
+     * nothing interrupt context can wait on and a half-finished user
+     * transaction is exactly what must not be walked into.  255 is
+     * "no data", which updatetod() already handles, and the cost is
+     * one hour of crystal drift.  See ds3231.h and PC3-IO-PLAN.md.
+     */
+    if (i2c0_user_busy)
         return 255;
     if (++calls < RTC_SYNC_CALLS)
         return 255;
