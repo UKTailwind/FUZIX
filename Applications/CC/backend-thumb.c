@@ -968,6 +968,51 @@ static void t_helperop(unsigned long op, unsigned pops)
 #define NHS_STRCMP	18
 #define NHS_STRLEN	19
 #define NHS_MEMCPY	20
+/* version 5: the stack guard.  21 is the floor as a value, 22 is what
+   to call on hitting it. */
+#define NHS_STACKFLOOR	21
+#define NHS_STACKFAULT	22
+
+/*
+ *	The stack guard, emitted at the top of every translated function
+ *	once its frame is taken.
+ *
+ *	    ldr  r2, [r5, #21*4]     the floor
+ *	    cmp  r4, r2
+ *	    bhs  1f
+ *	    ldr  r2, [r5, #22*4]     does not return
+ *	    blx  r2
+ *	 1:
+ *
+ *	Five halfwords, and three of them on the path that is always
+ *	taken.  r2 is free here: arguments arrive on the VM stack, not in
+ *	registers, and r2 is caller-clobbered across every call this
+ *	backend emits, so nothing can be live in it at a function's first
+ *	instruction.
+ *
+ *	Without this, unbounded recursion in a translated function
+ *	overwrites whatever is below the stack and takes the machine
+ *	down.  The interpreter has had the test in BC_ENTER for a while;
+ *	the trouble was that a small recursive routine is precisely what
+ *	gets translated, so the guarded path was the one that could not
+ *	be reached.
+ */
+static void t_stackguard(void)
+{
+	/* Encodings spelled out rather than written as final constants:
+	   the first cut of this had 0x42A4 for the compare, which is
+	   "cmp r4, r4" - always equal, so the branch was always taken
+	   and the fault was unreachable.  It assembled, it ran, and it
+	   guarded nothing. */
+	t16(0x6800 | (NHS_STACKFLOOR << 6) | (5 << 3) | 2);
+				/* ldr r2, [r5, #floor]  */
+	t16(0x4280 | (2 << 3) | 4);
+				/* cmp r4, r2            */
+	t16(0xD200 | 1);	/* bhs .+4 - over the two below */
+	t16(0x6800 | (NHS_STACKFAULT << 6) | (5 << 3) | 2);
+				/* ldr r2, [r5, #fault]  */
+	t16(0x4780 | (2 << 3));	/* blx r2 - does not return     */
+}
 
 /* The string libcalls with direct helper slots: slot and argument
    count, or -1.  Matched by name exactly like the eqop family - a
@@ -1009,8 +1054,6 @@ static int t_strslot_emit(unsigned s)
 		t16(0x68A2);		/* ldr r2, [r4, #8] */
 	t32(0xF8D5, 0xC000 | (slot * 4));	/* ldr.w r12, [r5, #] */
 	t16(0x47E0);			/* blx r12          */
-	if (!t_dry)
-		have_strslot = 1;
 	return 1;
 }
 
@@ -2191,6 +2234,14 @@ static int t_span(unsigned long start, unsigned long end)
 					return 0;
 				t_addsubw(op == BC_ENTER, 4, 4, n);
 			}
+			/* After the frame is taken, so what is tested is
+			   where the stack actually now is.  Emitted even
+			   for a frameless function: the caller has still
+			   pushed arguments and a return slot, so every
+			   level costs stack whether this one asks for
+			   locals or not. */
+			if (op == BC_ENTER && o == start)
+				t_stackguard();
 			/* warm the cached local from its frame slot -
 			   for an argument this is the caller's value,
 			   for a plain local it is garbage exactly as C

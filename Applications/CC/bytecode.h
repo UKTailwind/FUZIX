@@ -36,6 +36,13 @@
    helper-vector slots 17-20.  Emitted only when a function actually
    uses one, so plain objects stay version 3 and run on older bcruns */
 #define BC_VERSION_NATIVE4 4
+/* 5: every native function checks the VM stack against a floor on
+   entry, reading it from helper-vector slots 21-22.  Unlike 3 and 4
+   this is not opt-in - the guard is in every translated function - so
+   any object with native code in it is version 5, and an older bcrun
+   (which has no slot 21) must reject it rather than load a floor from
+   whatever follows the table. */
+#define BC_VERSION_NATIVE5 5
 
 /*
  *	Machine model

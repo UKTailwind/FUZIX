@@ -2185,6 +2185,19 @@ static unsigned long database, bssbase;
  */
 static unsigned long stack_floor;
 
+/*
+ *	Hand the floor to native code.  Defined beside native_helpers[],
+ *	which is a long way below this - the load path settles the floor
+ *	before the table is in scope, so it goes through here rather than
+ *	reaching into the array from up here.  A no-op where there is no
+ *	native code to guard.
+ */
+#if defined(__arm__) || defined(__thumb__)
+static void native_set_floor(unsigned long f);
+#else
+#define native_set_floor(f)	do { } while (0)
+#endif
+
 /* Resolve a symbol to whatever the machine needs it to be. */
 static unsigned long symval(unsigned s)
 {
@@ -2242,7 +2255,8 @@ static void load(const char *path)
 	   must refuse it. */
 	if (h.h_version != BC_VERSION && h.h_version != BC_VERSION_NATIVE
 	    && h.h_version != BC_VERSION_NATIVE3
-	    && h.h_version != BC_VERSION_NATIVE4) {
+	    && h.h_version != BC_VERSION_NATIVE4
+	    && h.h_version != BC_VERSION_NATIVE5) {
 		fprintf(stderr, "%s: version %u, expected %u\n", path,
 			h.h_version, BC_VERSION);
 		exit(1);
@@ -2389,6 +2403,11 @@ static void load(const char *path)
 	   heap_init moves the heap out to PSRAM and leaves this alone. */
 	if (heap_base >= MEMBASE && heap_top <= MEMTOP && heap_top > heap_base)
 		stack_floor = heap_top;
+	/* Native prologues read the floor from the helper vector.  A
+	   program address is a machine address, so the interpreter's
+	   floor serves both without conversion.  Zero leaves the check
+	   inert, exactly as it does in BC_ENTER. */
+	native_set_floor(stack_floor);
 
 	/* Apply fixups, streamed straight off the file: add the symbol's
 	   value to the 32bit field. */
@@ -2568,6 +2587,18 @@ static uint32_t prof_call, prof_libcall, prof_eqop, prof_enter;
 static int64_t helper_call(unsigned long target, unsigned char *vsp);
 static int64_t helper_libcall(unsigned long idx, unsigned char *vsp);
 static int64_t helper_op(unsigned long op, unsigned char *vsp, int64_t a);
+
+#if defined(__arm__) || defined(__thumb__)
+/*
+ *	Called from a native prologue that has just taken its frame and
+ *	found r4 below the floor.  It does not return - the program is
+ *	out of stack and there is nothing to carry on with.
+ */
+static void helper_stackfault(void)
+{
+	fault("stack overflow - recursion too deep?");
+}
+#endif
 static int64_t helper_eqop(unsigned long idx, unsigned char *vsp, int64_t a);
 
 #define NH_CALL		0
@@ -2634,8 +2665,28 @@ static void *native_helpers[] = {
 	(void *)ns_strcmp,	/* 18 */
 	(void *)ns_strlen,	/* 19 */
 	(void *)ns_memcpy,	/* 20 */
+	/*
+	 *	Version 5: the stack guard.  Slot 21 is a VALUE, not a
+	 *	function - the lowest machine address the VM stack may
+	 *	reach - and is filled in at load time once the heap has
+	 *	been placed.  Slot 22 is what a native prologue calls when
+	 *	it finds it has gone below it.  Zero here and patched
+	 *	below; a zero floor disables the check, exactly as it does
+	 *	in the interpreter's BC_ENTER.
+	 */
+	(void *)0,		/* 21 - stack floor, patched at load */
+	(void *)helper_stackfault,	/* 22 */
 #endif
 };
+
+#define NHS_STACKFLOOR	21
+
+#if defined(__arm__) || defined(__thumb__)
+static void native_set_floor(unsigned long f)
+{
+	native_helpers[NHS_STACKFLOOR] = (void *)(uintptr_t)f;
+}
+#endif
 
 static int64_t bc_exec(unsigned long entry);
 static void libcall(unsigned idx);
@@ -3286,16 +3337,18 @@ static int64_t bc_exec(unsigned long entry)
 		case BC_ENTER:
 			sp -= fetch16();
 			/*
-			 * The one place an interpreted frame is taken, so
-			 * the one place recursion can be told it has gone
-			 * too far rather than left to overwrite the data
-			 * below.  A translated function allocates its
-			 * frame with a bare "sub r4, #n" in its prologue
-			 * and calls itself with a direct BL, so it does
-			 * not pass here - covering that means instructions
-			 * on every native entry, which is a poor trade for
-			 * a guard.  Interpreted routines, and every
-			 * routine too large to translate, are covered.
+			 * Where an interpreted frame is taken, and so
+			 * where recursion is told it has gone too far
+			 * rather than left to overwrite the data below.
+			 * A translated function does not pass here - it
+			 * allocates its frame with a bare "sub r4, #n" -
+			 * so it carries the same test inline in its
+			 * prologue against helper slot 21.  That was
+			 * once judged a poor trade; it is not, because
+			 * a small recursive SUB is exactly what the
+			 * translator takes, so leaving it out left the
+			 * common case uncovered and it took the board
+			 * down, video and all.
 			 */
 			if (stack_floor && sp < stack_floor)
 				fault("stack overflow - recursion too deep?");
