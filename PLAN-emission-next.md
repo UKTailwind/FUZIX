@@ -92,7 +92,36 @@ there.  Known remaining gaps, all recorded rather than hidden:
 * `#line`'s optional file name is parsed and ignored; applying it would
   also have to unwind at the end of an `#include`.
 
-### 5. The mmbc emission queue
+### 5. Recursion is capped at nine levels by the temporary pool
+
+Found 2026-08-09 while testing the LOCAL arena under recursion.  A
+routine that builds a string expression can only recurse **9 levels**
+before "String expression too complex - raise MM_TMPN".
+
+The arena itself is fine - frames nest as the calls do, release is an
+absolute restore rather than a decrement, so arena and malloc'd frames
+interleave safely, and 40 levels are intact at arena sizes of 64, 4096
+and 65536.  The cap is the separate 16-slot string temporary pool, and
+the emitted code says why:
+
+    mm_release(__mark);
+    mm_sset(__L->v_tag, mm_scat(...));   /* temps taken here */
+    if (...) { f_descend(...); }         /* recurse - no release */
+
+`mm_release` is emitted before statements that USE temporaries, so the
+previous statement's temporaries are still live across the call.  Each
+level holds about two slots for the duration of everything below it.
+
+Fix: emit the release before a statement that calls a routine as well,
+which makes the depth irrelevant and costs nothing at run time - the
+release is two stores.  Both translators, byte-identical, cgate 0.  The
+alternative, raising MM_TMPN, costs 257 bytes of static RAM per slot
+and only moves the wall.
+
+A tree walk or a recursive-descent parser in BASIC hits this today, so
+it is worth more than its size suggests.
+
+### 6. The mmbc emission queue
 
 Still unexamined: `mm_mark`/`mm_release` elision in routines with no
 temporaries; int narrowing of loop counters; splitting SUBs that are
@@ -103,7 +132,7 @@ Rejected with reasons: `var = var + k` → `+=` (the eqop libcall
 measured *faster*); `x^2` → `x*x` and INT() round-trip elision (both
 change results, and different is worse than missing).
 
-### 6. The long-session slowdown, parked
+### 7. The long-session slowdown, parked
 
 Not reproduced.  Bubble measured 78.812 ms on a fresh boot and 78.809
 ms after a session of heavy compiling; bench was 52,052 grains before
@@ -119,7 +148,7 @@ would settle it in one measurement.  Note the user's report was of a
 graphics program losing 15% (85 → 98 ms) after *editing and compiling*,
 which my fixed-frame variant did not show.
 
-### 7. Fold the board suite into the release checks
+### 8. Fold the board suite into the release checks
 
 The c-testsuite now lives on the card at `/root/ct` with its runner
 `ctb3.sh`, and `/root/t9` holds just the interesting failures.  It is
