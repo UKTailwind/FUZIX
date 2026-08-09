@@ -11,6 +11,7 @@ each section.
 |---|---|---|
 | 32-bit SDIV fast path in `mm_idiv`/`mm_mod` | mmb2c `65421d4`, FUZIX `e045f41d5` | bench +0.9%, eclipse −2.25% |
 | word-wise `memcpy`/`memset` for the ARM libc | FUZIX `d1e7e7945` | LOCAL-string calls 3.1× (13.25 → 3.77 µs) |
+| then the whole string half from newlib instead | FUZIX `54279484c`, `8c442ec55`, `fbd73e456` | bench +6.0%, eclipse −3.4%, bubble −6.1%, compile 7→6 s |
 | four C89 gaps in `cpp` | FUZIX `640597d97`, `d6cadf8ef` | board conformance 156 → 160 of 175 |
 | cc1 signed constant folding (`-7/2` folded unsigned) | FUZIX `e18b966cd` | correctness |
 | `as_flt` writes an int literal as a float | mmb2c `8b55ccc`, FUZIX `07a65eb22` | bytecode identical; frees ON ERROR programs from `mm_fdiv` |
@@ -29,53 +30,31 @@ each section.
 
 ## Outstanding
 
-### 1. Finish landing memmove  — do this first, the board is behind
+### 1. What is left of the libc substitution
 
-`memmove_armm0.c` is written and tested (7056 overlap and alignment
-cases against a byte-loop oracle) but **not committed**, and two board
-binaries are older than the tree:
+Done, and the board and tree agree: every routine newlib can give this
+target without dragging its innards along now comes from there, 21
+objects, extracted from the toolchain's own libc.a at build time.  The
+word-wise C written the day before is gone - newlib's tuned assembly
+beat it, which is what the kernel has always used.
 
-| binary | tree | board |
-|---|---|---|
-| `bcrun` | 86556 | 86276 — no word-wise memmove |
-| `mmbc` | 94792 | 94276 — built against the old libc |
+What deliberately stays ours, with the reason, so it is not
+re-investigated: `strcasecmp` and the case/compare family (`_ctype_`),
+`strdup`/`strndup` (`_impure_ptr`, `_malloc_r`), `strerror`,
+`strsignal`, `strftime` and the whole `strto*` family (reentrancy
+structures), `strsep` (`__strtok_r`), `strtok` (`_impure_ptr`), and
+`strstr` — newlib's is 1488 bytes against a few dozen here for a
+function nothing hot calls.
 
-`memmove` matters more than its name suggests: bcrun's `ns_memcpy` —
-the native slot a translated program's `memcpy` calls — routes through
-it, because a compiled program may hand it overlapping regions.  So
-compiled code's block copies are still byte-at-a-time on the board.
+If any of those is ever wanted, the mechanical test is in
+`Library/libs/Makefile.armm0`: does the object define the routine, and
+does it reference nothing we cannot satisfy?  `nm` the archive
+afterwards and look for duplicate `T` symbols — that is how the double
+`memccpy` was caught. (`vfprintf` and `vfscanf` are doubled from
+`vfprintf.c` and `vfprintf_m.c` both being listed; that predates all of
+this and is left alone.)
 
-Steps: `git add Library/libs/memmove_armm0.c Library/libs/Makefile.armm0`;
-send `bcrun` and `mmbc`; keep `.prev`; re-run `bubblet.bc` (78.81 ms is
-the reference) and `sh /root/ct/ctb3.sh /root/t9`; then commit the six
-installed binaries (`bcrun cc0 cc1 cc2 ccbc mmbc` under Applications/CC
-and `cpp` under Applications/cpp) as the builds on the card.
-
-### 2. Measure what the new libc did to compile times
-
-Never taken.  The eclipse compiled in **7 s** (`date; cc
-solar_eclipse.c; date`) with the pre-libc toolchain; cc0/cc1/cc2 were
-installed after that, so the comparison is still owed.  The board's RTC
-is fine for this — the "oscillator was stopped" line is the 32 kHz pin,
-which this board does not connect.
-
-### 3. The rest of the byte-loop libc
-
-`memcmp`, `strlen`, `strcmp`, `strcpy`, `strcat` are still the generic
-8-bit versions.  Ranked by who pays:
-
-* `memcmp` — every MMBasic string comparison goes through it.
-* `strlen`/`strcmp` — the compiler's symbol tables.  Note bcrun already
-  has word-wise `ns_strcmp`/`ns_strlen` natives, so this is about
-  cc0/cc1/cc2/mmbc rather than compiled programs.
-* `strcpy`/`strcat` — smaller.
-
-Same shape as the others: a `_armm0.c` beside the generic one, swapped
-in `Makefile.armm0`, and **`ar d syslibarmm0.lib <old>.o`** after, or
-the stale member wins the link (that trap cost an hour).
-`Library/tests/memtest_armm0.c` is the pattern for the oracle test.
-
-### 4. What is left in cpp
+### 2. What is left in cpp
 
 `Applications/cpp/cpptest.sh` is the gate now — run it after any change
 there.  Known remaining gaps, all recorded rather than hidden:
@@ -92,7 +71,7 @@ there.  Known remaining gaps, all recorded rather than hidden:
 * `#line`'s optional file name is parsed and ignored; applying it would
   also have to unwind at the end of an `#include`.
 
-### 5. Recursion is capped at nine levels by the temporary pool
+### 3. Recursion is capped at nine levels by the temporary pool
 
 Found 2026-08-09 while testing the LOCAL arena under recursion.  A
 routine that builds a string expression can only recurse **9 levels**
@@ -121,7 +100,7 @@ and only moves the wall.
 A tree walk or a recursive-descent parser in BASIC hits this today, so
 it is worth more than its size suggests.
 
-### 6. The mmbc emission queue
+### 4. The mmbc emission queue
 
 Still unexamined: `mm_mark`/`mm_release` elision in routines with no
 temporaries; int narrowing of loop counters; splitting SUBs that are
@@ -132,7 +111,7 @@ Rejected with reasons: `var = var + k` → `+=` (the eqop libcall
 measured *faster*); `x^2` → `x*x` and INT() round-trip elision (both
 change results, and different is worse than missing).
 
-### 7. The long-session slowdown, parked
+### 5. The long-session slowdown, parked
 
 Not reproduced.  Bubble measured 78.812 ms on a fresh boot and 78.809
 ms after a session of heavy compiling; bench was 52,052 grains before
@@ -148,7 +127,7 @@ would settle it in one measurement.  Note the user's report was of a
 graphics program losing 15% (85 → 98 ms) after *editing and compiling*,
 which my fixed-frame variant did not show.
 
-### 8. Fold the board suite into the release checks
+### 6. Fold the board suite into the release checks
 
 The c-testsuite now lives on the card at `/root/ct` with its runner
 `ctb3.sh`, and `/root/t9` holds just the interesting failures.  It is
@@ -167,6 +146,13 @@ command line, or the echo of the command ends the wait immediately.
 
 ## Board reference numbers
 
-v0.9: 49,499 grains / 2.311 s.  Current: bench 52,052 grains, solar
-eclipse 2.022 s (screen output, fresh boot), bubble 78.81 ms per frame,
-board conformance 160 of 175.
+v0.9: 49,499 grains / 2.311 s.
+
+Current: bench **55,163** grains, solar eclipse **1.953 s**, bubble
+**74.03 ms** a frame, a LOCAL-string call 3.31 µs, the eclipse compiles
+in 6 s, board conformance 160 of 175.  Against v0.9 that is bench +11.4%
+and the eclipse −15.5%.
+
+Measure the way [[pc3-benchmark-method]] says: fresh boot, output to the
+screen, the two builds interleaved in one session, and `cmp` the .bc
+first if the claim is about the runtime.
