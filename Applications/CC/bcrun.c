@@ -2174,6 +2174,16 @@ static void libcall(unsigned idx)
 /* ---- loader -------------------------------------------------------- */
 
 static unsigned long database, bssbase;
+/*
+ *	The address the stack must not grow below.  Without it, a runaway
+ *	recursion walks sp down through the pools, bss and data, quietly
+ *	rewriting the program's own globals - every accessor checks the
+ *	VM address space but nothing checks the stack - and only faults
+ *	when it finally reaches address zero, long after the damage.
+ *	Set once the segments are placed; 0 until then, which disables
+ *	the test while the loader is still working.
+ */
+static unsigned long stack_floor;
 
 /* Resolve a symbol to whatever the machine needs it to be. */
 static unsigned long symval(unsigned s)
@@ -2372,7 +2382,13 @@ static void load(const char *path)
 	/* The heap is whatever is left between bss, the mm runtime's
 	   pools if this program uses it, and the stack.  Needs the
 	   symbol and string tables, hence down here. */
-	heap_init(mmrt_reserve(bssbase + h.h_bss));
+	stack_floor = mmrt_reserve(bssbase + h.h_bss);
+	heap_init(stack_floor);
+	/* On the host and in qemu the heap is what lies above that, and
+	   the stack must stop before IT, not before bss.  On the board
+	   heap_init moves the heap out to PSRAM and leaves this alone. */
+	if (heap_base >= MEMBASE && heap_top <= MEMTOP && heap_top > heap_base)
+		stack_floor = heap_top;
 
 	/* Apply fixups, streamed straight off the file: add the symbol's
 	   value to the 32bit field. */
@@ -3269,6 +3285,20 @@ static int64_t bc_exec(unsigned long entry)
 			break;
 		case BC_ENTER:
 			sp -= fetch16();
+			/*
+			 * The one place an interpreted frame is taken, so
+			 * the one place recursion can be told it has gone
+			 * too far rather than left to overwrite the data
+			 * below.  A translated function allocates its
+			 * frame with a bare "sub r4, #n" in its prologue
+			 * and calls itself with a direct BL, so it does
+			 * not pass here - covering that means instructions
+			 * on every native entry, which is a poor trade for
+			 * a guard.  Interpreted routines, and every
+			 * routine too large to translate, are covered.
+			 */
+			if (stack_floor && sp < stack_floor)
+				fault("stack overflow - recursion too deep?");
 			break;
 		case BC_LEAVE:
 			sp += fetch16();
