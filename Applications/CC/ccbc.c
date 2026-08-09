@@ -30,6 +30,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -60,6 +61,74 @@ static char tokfile[64];
 static char irfile[64];
 static char symfile[64];
 
+/*
+ *	Only one cc at a time.
+ *
+ *	The passes share a fixed scratch file, .symtmp, in the working
+ *	directory: two compiles running together delete it under one
+ *	another and one of them fails with "No such file or directory".
+ *	Naming it per-process would fix that particular collision, but not
+ *	the reason it is a bad idea here - a compile is most of the 340K
+ *	process pool, and two at once thrash it - so the lock is the
+ *	honest answer and it is machine-wide rather than per directory.
+ *
+ *	It has to survive a crash.  This machine does crash, and a lock
+ *	left behind by a dead compile would leave the board unable to
+ *	build anything at all, with no clue why.  So the file carries the
+ *	holder's pid and a lock whose holder is gone is taken over.
+ */
+#define LOCKFILE	"/tmp/cc.lock"
+
+static int held;		/* we own LOCKFILE and must remove it */
+
+static int lock_is_stale(void)
+{
+	char buf[16];
+	int fd = open(LOCKFILE, O_RDONLY);
+	int n;
+	pid_t owner;
+
+	if (fd < 0)			/* vanished under us: it is ours */
+		return 1;
+	n = read(fd, buf, sizeof(buf) - 1);
+	close(fd);
+	if (n <= 0)			/* truncated or empty - not a claim */
+		return 1;
+	buf[n] = 0;
+	owner = atoi(buf);
+	if (owner <= 0)
+		return 1;
+	/* Signal 0 checks for existence without sending anything. */
+	if (kill(owner, 0) == 0)
+		return 0;
+	return errno == ESRCH;
+}
+
+static void take_lock(void)
+{
+	char buf[16];
+	int fd, tries;
+
+	for (tries = 0; tries < 2; tries++) {
+		fd = open(LOCKFILE, O_WRONLY | O_CREAT | O_EXCL, 0600);
+		if (fd >= 0) {
+			sprintf(buf, "%u\n", (unsigned) getpid());
+			write(fd, buf, strlen(buf));
+			close(fd);
+			held = 1;
+			return;
+		}
+		if (errno != EEXIST)	/* no /tmp, read-only root: carry on
+					   rather than refuse to compile */
+			return;
+		if (!lock_is_stale())
+			break;
+		unlink(LOCKFILE);	/* the holder is gone; try again */
+	}
+	fprintf(stderr, "cc: another compile is running.\n");
+	exit(1);
+}
+
 static void cleanup(void)
 {
 	if (!keep) {
@@ -72,6 +141,10 @@ static void cleanup(void)
 	}
 	if (*symfile)
 		unlink(symfile);
+	if (held) {
+		unlink(LOCKFILE);
+		held = 0;
+	}
 }
 
 static void fatal(void)
@@ -245,6 +318,10 @@ int main(int argc, char *argv[])
 	basename_to(irfile, src, ".ir");
 	strcpy(symfile, ".symtmp");
 
+	/* Before the handlers, so an interrupt during the wait cannot make
+	   cleanup() remove a lock we never took. */
+	take_lock();
+
 	signal(SIGINT, onsig);
 	signal(SIGHUP, onsig);
 	signal(SIGTERM, onsig);
@@ -279,8 +356,18 @@ int main(int argc, char *argv[])
 	av[1] = NULL;
 	run(av, ppfile, tokfile);
 
+	/*
+	 * cc1 prints a dot per function.  They go to ITS stderr, and have
+	 * to: its stdout is the IR, so a dot written there would corrupt
+	 * the object.  That means a caller cannot redirect them away, and
+	 * "cc prog.c > /dev/null &" still scribbled over the screen.
+	 * Only the driver knows whether progress is wanted, so it decides
+	 * the usual way - if our own output is not going to a terminal,
+	 * nobody is watching it, and cc1 is told to keep quiet.
+	 */
 	av[0] = pass("cc1");
-	av[1] = NULL;
+	av[1] = isatty(1) ? NULL : "-q";
+	av[2] = NULL;
 	run(av, tokfile, irfile);
 
 	/* cc2 takes the symbol scratch file, the cpu, and a debug flag */

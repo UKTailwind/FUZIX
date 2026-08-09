@@ -16,6 +16,11 @@ unsigned voltrack;		/* Track possible volatiles */
 unsigned in_sizeof;		/* Set if we are in sizeof() */
 /* Set once we have written a progress dot, so we know to end the line */
 static unsigned progress;
+/* Set by -q.  The dots go to stderr because stdout carries the IR, so a
+   caller cannot redirect them away on their own - only suppress them,
+   and only the driver knows whether they are wanted.  cc passes -q when
+   its own stdout is not a terminal. */
+static unsigned quiet;
 
 /*
  *	A C program consists of a series of declarations that by default
@@ -31,10 +36,10 @@ static void toplevel(void)
 		voltrack = 0;
 		target_reginit();
 		declaration(S_EXTDEF);
-		/* For unix we should probably hide this, for CP/M it's
-		   going to be a nice to have */
-		write(2, ".", 1);
-		progress = 1;
+		if (!quiet) {
+			write(2, ".", 1);
+			progress = 1;
+		}
 	}
 }
 
@@ -45,6 +50,12 @@ static unsigned functype[2] = {
 
 int main(int argc, char *argv[])
 {
+	int i;
+
+	for (i = 1; i < argc; i++)
+		if (argv[i][0] == '-' && argv[i][1] == 'q' && argv[i][2] == 0)
+			quiet = 1;
+
 	/* Counts the names before parsing, so that a file scope static
 	   nothing mentions twice can be parsed and not generated. */
 	prescan_names();
@@ -53,12 +64,17 @@ int main(int argc, char *argv[])
 	/* A function with no type info returning INT */
 	deffunctype = make_function(CINT, functype);
 #ifdef DEBUG
-	if (argv[1]) {
-		debug = fopen(argv[1], "w");
+	/* The first non-option argument, so -q does not become a file
+	   called "-q" in a debug build. */
+	for (i = 1; i < argc; i++) {
+		if (argv[i][0] == '-')
+			continue;
+		debug = fopen(argv[i], "w");
 		if (debug == NULL) {
-			perror(argv[1]);
+			perror(argv[i]);
 			return 255;
 		}
+		break;
 	}
 #endif
 	while (token != T_EOF)
