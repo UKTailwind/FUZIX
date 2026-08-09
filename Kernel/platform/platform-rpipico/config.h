@@ -333,7 +333,7 @@ extern uint8_t progbase[USERMEM];
  */
 #define plt_copyright() \
 	kprintf("Pico Computer 3, release %s (on FUZIX %s)\n" \
-		"Copyright (c) 2026 Peter Mather <uktailwind@gmail.com>\n", \
+		"Copyright (c) 2026 Peter Mather\n", \
 		PC3_RELEASE, sysinfo.uname)
 #define swap_map(x) ((uint8_t*)(x))
 
