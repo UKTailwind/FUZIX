@@ -110,19 +110,6 @@ def drain(ser, settle, limit=300.0):
     return text
 
 
-def watch(seconds):
-    """Let something animate for a fixed time.
-
-    Unlike beat(), --fast does NOT skip this: how long the thing runs is
-    part of what a rehearsal has to prove, not padding around it.
-    """
-    global DRY_SECONDS
-    if DRY:
-        DRY_SECONDS += seconds
-        return
-    time.sleep(seconds)
-
-
 def beat(seconds):
     """A reading pause.  Rehearsals skip these; the real take needs them."""
     global DRY_SECONDS
@@ -343,9 +330,15 @@ def sc_bubble(ser):
     #
     # It finishes with Mode 1 of its own accord, so the text console
     # comes back without help and no clear is needed afterwards.
-    type_line(ser, "./bubble.bc", settle=1, hold=SCENE)
-    watch(21)                 # its own 20, plus a moment to come back
-    drain(ser, RUN)
+    # NO extra wait belongs here.  The program repositions the cursor
+    # once a frame, so it is never quiet for more than ~74ms while it
+    # runs, and type_line's own drain therefore spans the whole twenty
+    # seconds by itself and returns RUN after it stops.  The first
+    # version slept twenty seconds ON TOP of that, which is half a
+    # minute of dead air in the middle of the video.  A settle already
+    # waits out anything that keeps talking; only something SILENT
+    # while it works would need a wait of its own.
+    type_line(ser, "./bubble.bc", settle=RUN, hold=SCENE)
     beat(3)
 
 
