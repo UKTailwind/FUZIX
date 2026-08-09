@@ -38,17 +38,42 @@ import serial
 PORT = os.environ.get("FZPORT", "COM14")
 BAUD = 115200
 
-# Typing speed in characters per minute.  150 is an ordinary hand at a
-# keyboard - about 30 words a minute - and that is the point: it has to
-# look like someone typing, not like a paste appearing.  Much above 300
-# stops reading as typing on camera.
-CPM = float(os.environ.get("DEMO_CPM", "150"))
+# Typing speed in characters per minute.  It has to look like someone
+# typing rather than a paste appearing, which rules out the thousands a
+# serial line will happily do.  400 is a fast touch-typist and is where
+# this settled; 150 was the first try and made a twelve minute video of
+# an eight minute demonstration.
+CPM = float(os.environ.get("DEMO_CPM", "400"))
 CPS = 60.0 / CPM if CPM > 0 else 0.0                 # seconds per character
 READ = float(os.environ.get("DEMO_READ", "1.0"))     # reading-pause scale
 
 FAST = False
 DRY = False          # count the take instead of driving the board
 DRY_SECONDS = 0.0
+
+# Settle times.  These are QUIET time after the last byte, not how long
+# the command takes - a distinction that cost a whole take.  cc prints a
+# dot per function for the entire six or seven seconds it runs, so it is
+# never quiet while it works, and a settle of 25 was twenty-five seconds
+# of dead air AFTER the compile had finished.
+#
+# What BUILD actually has to clear is the pause between the compiler's
+# passes.  gapcheck.py measures it: the largest compile here (the solar
+# eclipse, 6.4 s) goes quiet for at most 2.09 s.  Four gives that most
+# of a second to grow and costs one second a compile; going under it
+# would let the next command be typed into the middle of a compile,
+# which is a ruined take rather than a slow one.
+SETTLE = 1.5          # an ordinary command that answers and stops
+BUILD = 4.0           # cc and mmbc: noisy throughout, so a short settle
+RUN = 3.0             # a program that prints and exits
+
+# How long to sit on a typed command before pressing Return.  The
+# default in type_line is the beat a person leaves anyway; SCENE is for
+# the commands that replace the whole screen - mmedit, bbcbasic,
+# fforth, a graphics program, a clear.  Without it the command and the
+# screen it summons arrive in the same frame, and the viewer never sees
+# what caused the change.
+SCENE = 2.0
 
 CLS = r"echo -e '\033[2J\033[H'"    # no clear(1) on this machine; this works
 F1 = b"\x1b[11~"                    # mmedit: save and exit (VT220 spelling)
@@ -171,7 +196,7 @@ def settled_on(ser, already, needle):
 
 def clear_screen(ser):
     """Wipe the screen, having given the viewer time to see what did it."""
-    type_line(ser, CLS, settle=1, hold=1.5)
+    type_line(ser, CLS, settle=1, hold=SCENE)
 
 
 def heredoc(ser, name, lines):
@@ -232,8 +257,8 @@ def sc_c(ser):
         '}',
     ])
     beat(2)
-    type_line(ser, "cc hello.c", settle=10); beat(1)
-    type_line(ser, "./hello.bc", settle=4); beat(5)
+    type_line(ser, "cc hello.c", settle=BUILD); beat(1)
+    type_line(ser, "./hello.bc", settle=RUN); beat(4)
     clear_screen(ser)
 
 
@@ -251,7 +276,7 @@ def sc_edit(ser):
     # thing worth seeing on camera - so add a line rather than just
     # opening the file, and watch it colour itself as it is typed.
     # Down to the end first: typing at line 1 would go INTO the For.
-    type_line(ser, "mmedit demo.bas", settle=3)
+    type_line(ser, "mmedit demo.bas", settle=3, hold=SCENE)
     beat(5)
     send_raw(ser, DOWN * 3 + END, settle=1)
     send_raw(ser, b"\r", settle=1)
@@ -262,9 +287,9 @@ def sc_edit(ser):
     beat(4)
     send_raw(ser, F1, settle=3)          # save and exit; it clears as it goes
     beat(2)
-    type_line(ser, "mmbc demo.bas", settle=4); beat(2)
-    type_line(ser, "cc demo.c", settle=12); beat(1)
-    type_line(ser, "./demo.bc", settle=4); beat(5)
+    type_line(ser, "mmbc demo.bas", settle=BUILD); beat(2)
+    type_line(ser, "cc demo.c", settle=BUILD); beat(1)
+    type_line(ser, "./demo.bc", settle=RUN); beat(4)
     clear_screen(ser)
 
 
@@ -273,31 +298,64 @@ def sc_graphics(ser):
     type_line(ser, "cd /root/cc", settle=1)
     # The first two lines of the file say what MMBasic takes to draw it,
     # so the comparison is on screen before the program runs.
-    type_line(ser, "head -3 ripple.bas", settle=2); beat(6)
-    type_line(ser, "mmbc ripple.bas", settle=4); beat(2)
-    type_line(ser, "cc ripple.c", settle=25); beat(2)
-    type_line(ser, "./ripple.bc", settle=12)
-    # The picture is the point, so hold on it - and then clear before
-    # anything else is typed.  Text and graphics share the framebuffer,
-    # so a prompt printed now lands ON the ripple and neither is legible.
-    beat(10)
+    type_line(ser, "head -3 ripple.bas", settle=SETTLE); beat(5)
+    type_line(ser, "mmbc ripple.bas", settle=BUILD); beat(1)
+    type_line(ser, "cc ripple.c", settle=BUILD); beat(1)
+    type_line(ser, "./ripple.bc", settle=RUN, hold=SCENE)
+    # Hold on the picture, then clear before anything else is typed:
+    # text and graphics share the framebuffer, so a prompt printed now
+    # lands ON the ripple and neither is legible.  It draws in a sixth
+    # of a second, so this pause is the whole of its screen time - but
+    # four seconds is enough to take it in, and it is a still image.
+    beat(4)
     clear_screen(ser)
 
 
 def sc_eclipse(ser):
     """A real application: local circumstances of a solar eclipse."""
     type_line(ser, "cd /root/cc", settle=1)
-    type_line(ser, "mmbc solar_eclipse.bas", settle=6); beat(2)
-    type_line(ser, "cc solar_eclipse.c", settle=30); beat(2)
-    type_line(ser, "cat solar_eclipse.in", settle=2); beat(5)
-    type_line(ser, "./solar_eclipse.bc < solar_eclipse.in", settle=20)
-    beat(8)
+    type_line(ser, "mmbc solar_eclipse.bas", settle=BUILD); beat(1)
+    type_line(ser, "cc solar_eclipse.c", settle=BUILD); beat(1)
+    type_line(ser, "cat solar_eclipse.in", settle=SETTLE); beat(4)
+    # The report scrolls past for several seconds under its own steam,
+    # so it needs far less holding afterwards than a still picture does.
+    type_line(ser, "./solar_eclipse.bc < solar_eclipse.in",
+              settle=RUN, hold=SCENE)
+    beat(3)
+    clear_screen(ser)
+
+
+def sc_multi(ser):
+    """Fifteen processes at once - the machine is properly multitasking."""
+    # Fifteen sleeps, not two compiles.  Parallel cc runs were the first
+    # try and were wrong twice over: they share a .symtmp in the working
+    # directory and trip over each other, and their progress dots do not
+    # go through "> /dev/null", so two of them overprint each other and
+    # the screen is unreadable.  sleep is silent, harmless, and fifteen
+    # of them make the point better than two of anything.
+    #
+    # killall is the System V one and takes a SIGNAL, not a name: the
+    # argument goes through atoi(), so "killall sleep" asks for signal
+    # 0 - the does-this-process-exist probe - and kills nothing, which
+    # is what it did on the first rehearsal.  Bare "killall" is the
+    # right invocation.  It signals everything except itself, its
+    # PARENT and init, so the shell this is running in survives by
+    # construction, and it is instant: eighteen processes to three with
+    # no wait.  Blunt, but only sleeps are running by this point.
+    type_line(ser, "cd /root", settle=SETTLE)
+    type_line(ser, "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; "
+                   "do sleep 60 & done", settle=SETTLE)
+    beat(2)
+    type_line(ser, "ps", settle=SETTLE); beat(7)
+    type_line(ser, "uptime", settle=SETTLE); beat(4)
+    type_line(ser, "killall", settle=SETTLE); beat(2)
+    type_line(ser, "ps", settle=SETTLE); beat(5)
     clear_screen(ser)
 
 
 def sc_bbc(ser):
     """BBC BASIC - R. T. Russell's, the full modern dialect."""
-    type_line(ser, "bbcbasic", settle=3); beat(3)
+    type_line(ser, "bbcbasic", settle=3, hold=SCENE); beat(3)
     type_line(ser, 'PRINT "Hello from BBC BASIC"', settle=2); beat(3)
     type_line(ser, "FOR I%=1 TO 5: PRINT I%, I%^2: NEXT", settle=2); beat(5)
     type_line(ser, "QUIT", settle=3); beat(2)
@@ -306,7 +364,7 @@ def sc_bbc(ser):
 
 def sc_forth(ser):
     """fforth - a third language, and a third way of thinking."""
-    type_line(ser, "fforth", settle=3); beat(3)
+    type_line(ser, "fforth", settle=3, hold=SCENE); beat(3)
     type_line(ser, ": SQUARES 6 1 DO I DUP * . LOOP ;", settle=2); beat(3)
     type_line(ser, "SQUARES", settle=2); beat(5)
     type_line(ser, "BYE", settle=3); beat(2)
@@ -322,7 +380,7 @@ def sc_down(ser):
     # take the initctl write, and reboot.c then falls through to
     # uadmin(A_REBOOT) - so the machine restarts instead of stopping,
     # which is exactly what the first dummy run did.
-    type_line(ser, "shutdown", settle=15, hold=1.5)
+    type_line(ser, "shutdown", settle=15, hold=SCENE)
     beat(4)
 
 
@@ -333,6 +391,7 @@ SCENES = [
     ("edit",     sc_edit),
     ("graphics", sc_graphics),
     ("eclipse",  sc_eclipse),
+    ("multi",    sc_multi),
     ("bbc",      sc_bbc),
     ("forth",    sc_forth),
     ("down",     sc_down),
