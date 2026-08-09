@@ -20,6 +20,7 @@ static void write_call(int n) {
   }
 
   fprintf(fp,
+		  "\t.syntax unified\n"
 		  "\t.code 16\n"
           "\t.text\n"
 		  "\t.thumb_func\n"
@@ -29,7 +30,16 @@ static void write_call(int n) {
           syscall_name[n]);
 
   fprintf(fp, "\tsvc #%d\n", n);
-  fprintf(fp, "\tb _syscall_ret\n");
+  /*
+   * b.w, not b: a plain Thumb branch to an external symbol takes the
+   * 11-bit encoding, which reaches +/-2K.  That held only while every
+   * binary stayed small - the moment the libc string routines were
+   * replaced with newlib's larger tuned ones, a link died with
+   * "relocation truncated to fit: R_ARM_THM_JUMP11 against
+   * _syscall_ret".  The wide form reaches +/-16MB and costs two bytes
+   * per stub actually used.
+   */
+  fprintf(fp, "\tb.w _syscall_ret\n");
 
   fclose(fp);
 }

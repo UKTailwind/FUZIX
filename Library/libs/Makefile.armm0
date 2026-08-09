@@ -147,7 +147,14 @@ OBJ_NEWLIB = libc_a-memcpy.o libc_a-memset.o libc_a-memmove.o \
 	     libc_a-strcat.o libc_a-strchr.o libc_a-strrchr.o \
 	     libc_a-strncmp.o libc_a-strncpy.o libc_a-strncat.o \
 	     libc_a-strcspn.o libc_a-strpbrk.o libc_a-strspn.o \
-	     libc_a-strnlen.o libc_a-strlcpy.o libc_a-strxfrm.o
+	     libc_a-strnlen.o libc_a-strlcpy.o libc_a-strlcat.o \
+	     libc_a-strxfrm.o
+#
+# strlcat is in that list because strlcpy.c defined BOTH of them, so
+# dropping the file from SRC_C to take newlib's strlcpy took strlcat
+# with it and the userland relink stopped on an undefined reference.
+# Removing a source file removes every symbol in it, not only the one
+# being replaced - check with nm before assuming otherwise.
 
 OBJ_ALL = $(OBJ_ASM) $(OBJ_DCP) $(OBJ_C) $(OBJ_LM) $(OBJ_HARD) $(OBJ_RL) \
 	  $(OBJ_NEWLIB)
