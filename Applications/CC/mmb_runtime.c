@@ -2639,7 +2639,7 @@ MMINTEGER *mm_isink(void) { mm_sink_i = 0; return &mm_sink_i; }
 void mm_end(void)
 {
     mm_close_all();
-    mm_gflush();
+    mm_gflush();                /* which drains the pixel queue too */
     fflush(stdout);
     exit(0);
 }
@@ -2988,6 +2988,16 @@ MMINTEGER mm_run_exec(void)
     }
     mm_run_argv[mm_run_nargs] = NULL;
     fflush(stdout);             /* the child shares the console */
+    /*
+     * And the child shares the SCREEN.  SAVE IMAGE reads the
+     * framebuffer in another process, so anything still queued here
+     * has not been drawn yet and would be missing from the file - the
+     * uniform rule covers graphics ioctls, and this is a crossing of a
+     * different kind.  Found by saving the same picture under both
+     * runtimes and comparing the BMPs, which nothing else would have
+     * shown.
+     */
+    mm_gflush();                /* drains the pixel queue too */
 
     /*
      * And flush the KERNEL's buffers, which fflush does not touch.
@@ -3291,6 +3301,14 @@ void mm_lfree(void *p)
  * closeframebuffer('A') for exactly that reason, and the kernel drops
  * its side of the claim in display_gfx_mode(); this keeps the two in
  * step, so a stale "already exists" cannot outlive the buffer. */
+/*
+ * Declared out here, in common scope, because the FRAMEBUFFER wrappers
+ * further down are common code and have to obey the same rule: no
+ * graphics ioctl while scalar PIXELs are queued.  The real one is with
+ * the batch machinery; the display-less build gets an empty one.
+ */
+static void mm_pix_drain(void);
+
 #if defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
 
 #include <fcntl.h>
@@ -3386,6 +3404,7 @@ struct mm_gfx_fontinfo {
  */
 MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h)
 {
+    mm_pix_drain();             /* geometry only, but the rule has no exemptions */
     struct mm_gfx_fontinfo fi;
 
     if (w) *w = 0;
@@ -3411,6 +3430,10 @@ static void mm_gflush(void)
     struct mm_gfx_text gt;
     MMINTEGER fg = mm_gfx_fg, bg = mm_gfx_bg;
 
+    /* Before the early return, not after it: mm_end and CLS call this
+     * to mean "put everything on the screen", and a pixel queue with no
+     * text pending would have been left sitting there. */
+    mm_pix_drain();             /* text overdraws pixels asked for first */
     if (mm_gn <= 0)
         return;
     /* MMBasic's PrintPixelMode: 1 draws on whatever is there, 2 swaps
@@ -3440,6 +3463,7 @@ static void mm_gflush(void)
  */
 void mm_map(MMINTEGER index, MMINTEGER rgb)
 {
+    mm_pix_drain();             /* palette collection order */
     if (mm_gfx_open() < 0)
         return;
     if (index < 0 || index > 15) {
@@ -3456,6 +3480,7 @@ void mm_map(MMINTEGER index, MMINTEGER rgb)
 
 void mm_map_set(void)
 {
+    mm_pix_drain();             /* palette applied after the pixels it recolours */
     if (mm_gfx_open() >= 0 &&
         ioctl(mm_gfx_fd, MM_GFX_MAPCTL, (void *)0L) < 0)
         mm_error("MAP needs a 16-colour mode");
@@ -3463,6 +3488,7 @@ void mm_map_set(void)
 
 void mm_map_reset(void)
 {
+    mm_pix_drain();             /* as mm_map_set */
     if (mm_gfx_open() >= 0 &&
         ioctl(mm_gfx_fd, MM_GFX_MAPCTL, (void *)1L) < 0)
         mm_error("MAP needs a 16-colour mode");
@@ -3539,6 +3565,12 @@ static int mm_gputc(int c)
 {
     if (!mm_gon)
         return 0;                       /* not our business */
+    /* The other half of "at most one queue is non-empty": mm_pixel
+     * flushes a pending text run before it appends, and this drains
+     * pending pixels before a character joins the text run.  With both,
+     * every drain lands its work in program order and no reasoning
+     * about interleavings is needed. */
+    mm_pix_drain();
     if (c == '\r')
         return 1;                       /* the newline does the work */
     if (c == '\n') {
@@ -3641,6 +3673,7 @@ char *mm_at(MMINTEGER x, MMINTEGER y, MMINTEGER mode)
  */
 void mm_mode(MMINTEGER n)
 {
+    mm_pix_drain();             /* queued pixels belong to the mode they were drawn in */
     int k;
 
     if (n == 1)
@@ -3668,20 +3701,19 @@ void mm_mode(MMINTEGER n)
     mm_gpmode = 0;
 }
 
-void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb)
-{
-    if (mm_gfx_open() < 0)
-        return;                         /* no display: draw nothing */
-    mm_gfx_setcol(rgb);
-    ioctl(mm_gfx_fd, MM_GFXIOC_PIXEL,
-          (void *)(long)MM_GFX_PACK((int)x, (int)y));
-}
+/* mm_pixel is with the batch machinery below: it is an append now. */
 
 MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
 {
     int r;
     if (mm_gfx_open() < 0)
         return 0;
+    /* Read after write: "PIXEL x,y,c : IF PIXEL(x,y) <> c" has to see
+     * c.  Drain and ask the kernel - never answer from the queue, which
+     * would mean duplicating its clipping and its colour reduction, and
+     * two implementations of that is a silent divergence waiting to
+     * happen. */
+    mm_pix_drain();
     r = ioctl(mm_gfx_fd, MM_GFXIOC_GETPIXEL,
               (void *)(long)MM_GFX_PACK((int)x, (int)y));
     return (r < 0) ? 0 : (MMINTEGER)r;  /* off-screen reads black */
@@ -3705,6 +3737,7 @@ struct mm_gfx_info {
 
 static MMINTEGER mm_gfx_dim(int want_h)
 {
+    mm_pix_drain();             /* geometry only, but the rule has no exemptions */
     struct mm_gfx_info gi;
 
     if (mm_gfx_open() < 0)
@@ -3722,6 +3755,7 @@ MMINTEGER mm_vres(void) { return mm_gfx_dim(1); }
    that is what the port is for, and a wrong name beats no answer. */
 char *mm_device(void)
 {
+    mm_pix_drain();             /* as above: a compare is cheaper than a rule with holes */
     int n = 3;
 
     if (mm_gfx_open() >= 0)
@@ -3784,6 +3818,115 @@ static void mm_gfx_rect(int x1, int y1, int x2, int y2)
 }
 
 /*
+ * ---- scalar PIXEL, batched ----------------------------------------
+ *
+ * A "PIXEL x,y,c" statement used to be one GFXIOC_PIXEL ioctl, and the
+ * crossing is essentially all of the cost: 1.3us for the ioctl against
+ * 15-50ns to store the pixel, over a 597ns trap floor.  Nothing inside
+ * the kernel handler can recover more than the floor.  GFXIOC_PIXELS
+ * already draws a whole run in one crossing with a colour per point,
+ * and the array form and the line drawer already use it - so scalar
+ * PIXEL joins them, and 512 points share one crossing: ~2.5ns each.
+ *
+ * The queue reuses mm_ptbuf.  That is safe for the same reason the
+ * ordering rule exists: every other user of that buffer has to drain
+ * the queue before it draws anyway, so sharing adds no constraint that
+ * ordering had not already imposed.
+ *
+ * What makes it observationally the same as MMBasic:
+ *
+ *  - the colour is resolved AT APPEND, so a later COLOUR cannot reach
+ *    back and change a pixel already asked for;
+ *  - no graphics ioctl is issued with the queue non-empty, so anything
+ *    that reads, overdraws, scrolls, switches mode or layer, or waits
+ *    for the raster sees the pixels first;
+ *  - the queue is bounded in TIME as well as depth, so a program that
+ *    plots a few points and then computes does not leave them
+ *    invisible.  The scanout is 58-60Hz, so a 10ms bound adds at most
+ *    one frame to a wait that already exists.
+ */
+#define MM_PIX_LATENCY_US 10000UL       /* at most one extra frame */
+#define MM_TIMERAWL       0x400B0028UL  /* RP2350 TIMER0, raw low word */
+
+static unsigned long mm_us_fast(void)
+{
+    return *(volatile unsigned long *)MM_TIMERAWL;
+}
+
+static unsigned long mm_colq[MM_BATCH]; /* RGB888 per queued point */
+static int mm_pixn;                     /* how many are queued */
+static unsigned long mm_pixt0;          /* fast-clock us at the first */
+static int mm_fastclk = -1;             /* -1 = not asked yet */
+
+/*
+ * The elapsed check runs on every append, so it cannot be a syscall -
+ * mm_us_now() is time_us64(), a libcall, and would eat the whole win.
+ * On this machine the microsecond counter is a plain load, and with no
+ * MMU a read is a read: it touches no kernel state, cannot be raced,
+ * and is the same pragmatism as the PICOIOC_LIBM table.
+ *
+ * Only where the kernel says this is a PC2 or PC3.  Anywhere else - the
+ * host build, the qemu gates, a machine not met yet - there is no fast
+ * clock and the queue stays one deep, which is exactly the behaviour
+ * this replaced.  The gates therefore run this same code, unbatched.
+ */
+static int mm_have_fastclk(void)
+{
+    if (mm_fastclk < 0) {
+        int n = 0;
+
+        mm_fastclk = 0;
+        if (mm_gfx_fd >= 0 &&
+            ioctl(mm_gfx_fd, MM_PICOIOC_BOARD, &n) >= 0 &&
+            (n == 2 || n == 3))
+            mm_fastclk = 1;
+    }
+    return mm_fastclk;
+}
+
+static void mm_pix_drain(void)
+{
+    struct mm_gfx_batch b;
+
+    if (mm_pixn <= 0)
+        return;
+    b.count = (unsigned short)mm_pixn;
+    b.flags = 0;
+    b.items = mm_ptbuf;
+    b.colours = mm_colq;
+    mm_pixn = 0;                        /* before the call: a failed
+                                           ioctl must not re-queue */
+    ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
+}
+
+void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb)
+{
+    if (mm_gfx_open() < 0)
+        return;                         /* no display: draw nothing */
+    if (mm_gn > 0)                      /* at most one queue is ever
+                                           non-empty - see mm_gputc */
+        mm_gflush();
+    if (rgb == MM_CUR)
+        rgb = mm_gfx_fg;                /* resolved now, not at drain */
+    /* Out of range stays out of range.  The old packed form masked to
+     * 10+9 bits, so PIXEL 1030,100 wrapped round and drew at x=6;
+     * MMBasic drops it.  The kernel clips anything inside short range,
+     * and this guard stops a far-off point casting back onto the
+     * screen. */
+    if (x >= -32768 && x <= 32767 && y >= -32768 && y <= 32767) {
+        if (mm_pixn == 0 && mm_have_fastclk())
+            mm_pixt0 = mm_us_fast();
+        mm_ptbuf[mm_pixn].x = (short)x;
+        mm_ptbuf[mm_pixn].y = (short)y;
+        mm_colq[mm_pixn] = (unsigned long)(rgb & 0xFFFFFF);
+        mm_pixn++;
+    }
+    if (mm_pixn >= MM_BATCH || !mm_have_fastclk() ||
+        (unsigned long)(mm_us_fast() - mm_pixt0) > MM_PIX_LATENCY_US)
+        mm_pix_drain();
+}
+
+/*
  * The two entry points every drawing primitive that is NOT here is
  * built from: a run of points, and a run of rectangles, both in one
  * colour.  Circle, box, triangle, polygon and the rest are geometry
@@ -3798,6 +3941,7 @@ static void mm_gfx_rect(int x1, int y1, int x2, int y2)
  */
 void mm_plot(const short *xy, MMINTEGER n, MMINTEGER rgb)
 {
+    mm_pix_drain();             /* draw order, and this reuses mm_ptbuf */
     struct mm_gfx_batch b;
     MMINTEGER done = 0;
 
@@ -3819,6 +3963,7 @@ void mm_plot(const short *xy, MMINTEGER n, MMINTEGER rgb)
 
 void mm_fill(const short *xyxy, MMINTEGER n, MMINTEGER rgb)
 {
+    mm_pix_drain();             /* draw order, and this reuses mm_ptbuf */
     struct mm_gfx_batch b;
     MMINTEGER done = 0;
 
@@ -3849,6 +3994,7 @@ void mm_fill(const short *xyxy, MMINTEGER n, MMINTEGER rgb)
 void mm_line(MMINTEGER x1, MMINTEGER y1, MMINTEGER x2, MMINTEGER y2,
              MMINTEGER rgb)
 {
+    mm_pix_drain();             /* draw order, and this reuses mm_ptbuf */
     int ax = (int)x1, ay = (int)y1, bx = (int)x2, by = (int)y2;
     int dx, dy, sx, sy, err, n = 0;
 
@@ -3905,6 +4051,7 @@ void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
                const MMFLOAT *cf, const MMINTEGER *ci,
                MMINTEGER rgb, MMINTEGER count)
 {
+    mm_pix_drain();             /* draw order, and this reuses mm_ptbuf */
     static unsigned long colbuf[MM_BATCH];
     struct mm_gfx_batch b;
     MMINTEGER i;
@@ -3977,6 +4124,11 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
 }
 
 #else   /* host: no display, but translated programs must still run */
+
+/* Nothing is ever queued here, so the rule costs a call the optimiser
+ * removes.  It exists so the common FRAMEBUFFER wrappers can obey it
+ * without knowing which build they are in. */
+static void mm_pix_drain(void) {}
 
 /* No pins either.  Silent, like everything else that touches hardware
  * here, so a program using SETPIN and PIN runs under the gates: a read
@@ -4238,6 +4390,7 @@ static void mm_fb_forget(void)
 
 void mm_fb_create(void)
 {
+    mm_pix_drain();             /* a layer claim must not strand queued pixels */
     if (mm_fb_made) {
         mm_error("Framebuffer already exists");
         return;
@@ -4255,12 +4408,14 @@ void mm_fb_create(void)
  * that tidies up unconditionally at the end is the normal shape. */
 void mm_fb_close(void)
 {
+    mm_pix_drain();             /* as mm_fb_create */
     mm_fb_open_hw(0);           /* drops the claim AND the selection */
     mm_fb_forget();
 }
 
 void mm_fb_write(MMINTEGER which)
 {
+    mm_pix_drain();             /* pixels land in the layer that was selected when they were queued */
     if (which == MM_FB_F && !mm_fb_made) {
         mm_error("Frame buffer not created");
         return;
@@ -4271,6 +4426,7 @@ void mm_fb_write(MMINTEGER which)
 
 void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait)
 {
+    mm_pix_drain();             /* a copy is a snapshot: what was drawn must be in it */
     if (src == dst) {
         mm_error("FRAMEBUFFER COPY source and destination are the same");
         return;
@@ -4286,5 +4442,6 @@ void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait)
 
 void mm_fb_wait(void)
 {
+    mm_pix_drain();             /* a program that waits for blanking expects its drawing to be there */
     mm_fb_wait_hw();
 }
