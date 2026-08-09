@@ -134,13 +134,6 @@ echo "--- installing"
 	echo "cd /etc"
 	echo "get $R/Kernel/platform/platform-rpipico/rc rc"
 	echo "chmod 755 rc"
-	# rc runs this as "sh /etc/rtcsync &".  A card with rc but no
-	# rtcsync just loses the hourly clock resync rather than failing
-	# visibly, so it is installed here beside rc rather than anywhere
-	# it could drift apart from it.  644 is right: it is read by sh,
-	# never exec'd - #! is not parsed on this machine.
-	echo "get $R/Kernel/platform/platform-rpipico/rtcsync rtcsync"
-	echo "chmod 644 rtcsync"
 	echo "df"
 	echo "exit"
 } > "$W/cmds"

@@ -50,6 +50,7 @@ static uint8_t tobcd(uint8_t v)
 }
 
 static uint8_t rtc_present;    /* found at init */
+static uint8_t rtc_quiet;      /* suppress diagnostics (IRQ-context poll) */
 
 /* Standard I2C bus recovery. The DS3231 is battery backed and never
  * resets: a transaction interrupted mid-bit (reboot at the wrong
@@ -95,38 +96,33 @@ static void ds3231_bus_recover(void)
     gpio_pull_up(DS3231_SCL);
 }
 
-/* Every transaction here now runs in PROCESS context - see
- * plt_rtc_secs() below - and the kernel is non-preemptive, so a syscall
- * that does not sleep is already atomic against every other process and
- * none of these sleep.  Interrupts stay ON: the reason they were held
- * was the IRQ-context poll that no longer exists, the timeout is 20ms
- * against a ~300us transaction so a tick landing mid-transfer cannot
- * cause a timeout, and holding them off for 300us (x3 retries, plus bus
- * recovery) hurt a 200Hz tick and the console for nothing.
- *
- * The retries stay.  They are for a wedged bus, which is a real
- * condition on a connector users can plug things into. */
+/* All bus transactions run with interrupts off and retry: the timer
+ * interrupt polls plt_rtc_secs() every few seconds (CONFIG_RTC_INTERVAL),
+ * so a process-context transaction on the same controller could
+ * otherwise be interleaved with an IRQ-context one and both aborted.
+ * A transaction is ~300us at 400kHz - acceptable with interrupts held. */
 static int ds3231_read_regs(uint8_t reg, uint8_t *buf, unsigned int n)
 {
     int tries, r1, r2;
+    irqflags_t irq;
 
     for (tries = 0; tries < 3; tries++) {
         if (tries) {    /* previous try failed: unwedge bus + controller */
             ds3231_bus_recover();
             i2c_init(DS3231_I2C, 400 * 1000);
         }
+        irq = di();
         r1 = i2c_write_timeout_us(DS3231_I2C, DS3231_ADDR, &reg, 1, true,
                                   DS3231_TIMEOUT_US);
         r2 = (r1 == 1) ?
              i2c_read_timeout_us(DS3231_I2C, DS3231_ADDR, buf, n, false,
                                  DS3231_TIMEOUT_US) : -1;
+        irqrestore(irq);
         if (r1 == 1 && r2 == (int)n)
             return 0;
     }
-    /* Always reported now.  The one caller that had to be silent was
-       the hourly interrupt-context poll, and it is gone; everything
-       left is a user asking for the time, where a failure is news. */
-    kprintf("ds3231: read reg %d fail (w=%d r=%d)\n", reg, r1, r2);
+    if (!rtc_quiet)
+        kprintf("ds3231: read reg %d fail (w=%d r=%d)\n", reg, r1, r2);
     return -1;
 }
 
@@ -134,6 +130,7 @@ static int ds3231_write_regs(uint8_t reg, const uint8_t *buf, unsigned int n)
 {
     uint8_t tmp[8];
     int tries, r1;
+    irqflags_t irq;
 
     if (n > sizeof(tmp) - 1)
         return -1;
@@ -144,8 +141,10 @@ static int ds3231_write_regs(uint8_t reg, const uint8_t *buf, unsigned int n)
             ds3231_bus_recover();
             i2c_init(DS3231_I2C, 400 * 1000);
         }
+        irq = di();
         r1 = i2c_write_timeout_us(DS3231_I2C, DS3231_ADDR, tmp, n + 1, false,
                                   DS3231_TIMEOUT_US);
+        irqrestore(irq);
         if (r1 == (int)(n + 1))
             return 0;
     }
@@ -153,38 +152,31 @@ static int ds3231_write_regs(uint8_t reg, const uint8_t *buf, unsigned int n)
     return -1;
 }
 
-/*
- *	NOTHING here touches the bus any more.
- *
- *	updatetod() calls this from timer_interrupt() to drift-correct the
- *	tick-driven clock, and it used to answer with a real I2C read
- *	about hourly.  That was a whole transaction in INTERRUPT context,
- *	on the controller the QWIIC connector is wired to - so the moment
- *	userland can drive that bus (PC3-IO-PLAN.md), an hourly interrupt
- *	could land in the middle of a user transaction and spoil both.
- *	Arbitration cannot fix it: interrupt context can neither take a
- *	sleeping lock nor wait for one that is held.
- *
- *	So the answer is deletion, not arbitration.  255 means "no data,
- *	skip", which updatetod already handles - it is what a machine with
- *	no RTC returns - and the kernel's drift correction goes with it.
- *
- *	What replaces it: /etc/rc reads the chip once at boot (setdate),
- *	which is where Linux does it too, and /etc/rtcsync resyncs on a
- *	timer from userland, in process context, where a lock is possible
- *	and a wedged bus is survivable.  The cost of the swap is that the
- *	correction is now a step rather than a continuous slide, and that
- *	the clock is crystal-accurate between steps - a few seconds a day.
- *
- *	This also retires a subtlety worth recording: the old sync period
- *	had to be a multiple of 3840s, because updatetod's expected-seconds
- *	counter wraps mod 256 while the chip's wraps mod 60, and lcm(256,60)
- *	kept them congruent so the computed slide was pure drift.  Nothing
- *	samples the chip on a schedule now, so nothing has to satisfy it.
- */
+/* Called from the timer interrupt every CONFIG_RTC_INTERVAL deciseconds
+ * (5s) to drift-correct the tick-driven system clock. System time runs
+ * from the crystal-derived tick; touching the I2C bus that often buys
+ * nothing, so resync about hourly as MMBasic does (255 = no data, skip).
+ * The interval must be a multiple of 3840s: updatetod's expected-seconds
+ * counter wraps mod 256 while the chip's wraps mod 60, and lcm(256,60)
+ * keeps the two congruent so the computed slide is pure drift. */
+#define RTC_SYNC_SECS  3840
+#define RTC_SYNC_CALLS (RTC_SYNC_SECS / (CONFIG_RTC_INTERVAL / 10))
+
 uint_fast8_t plt_rtc_secs(void)
 {
-    return 255;
+    static uint16_t calls;
+    uint8_t s;
+    uint8_t r;
+
+    if (!rtc_present)
+        return 255;
+    if (++calls < RTC_SYNC_CALLS)
+        return 255;
+    calls = 0;
+    rtc_quiet = 1;
+    r = ds3231_read_regs(REG_TIME, &s, 1) ? 255 : frombcd(s & 0x7F);
+    rtc_quiet = 0;
+    return r;
 }
 
 int plt_rtc_read(void)
@@ -194,14 +186,6 @@ int plt_rtc_read(void)
     uint8_t r[7];
     uint16_t year;
     uint16_t len = sizeof(struct cmos_rtc_wire);
-
-    /* No chip: say so at once.  Without this every read costs three
-       tries of a 20ms timeout plus two bus recoveries before failing,
-       and /etc/rc runs setdate on a machine that may not have one. */
-    if (!rtc_present) {
-        udata.u_error = EIO;
-        return -1;
-    }
 
     memset(&cmos, 0, sizeof(cmos));
     if (udata.u_count < len)
@@ -238,10 +222,6 @@ int plt_rtc_write(void)
     uint8_t st;
     uint16_t year;
 
-    if (!rtc_present) {
-        udata.u_error = EIO;
-        return -1;
-    }
     if (udata.u_count != sizeof(struct cmos_rtc_wire)) {
         udata.u_error = EINVAL;
         return -1;

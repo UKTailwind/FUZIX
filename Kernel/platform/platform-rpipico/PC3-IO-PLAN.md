@@ -68,14 +68,50 @@ for the transaction itself.  Three things remain:
   one: the kernel owns that address and `I2C_SLAVE` on it returns
   `EBUSY`, while the rest of the bus stays free.  Do the same.
 * **`plt_rtc_secs()` runs inside `timer_interrupt()`** and does a whole
-  I2C transaction from interrupt context.  That has to go before
-  userland shares the bus — it can land in the middle of a user
-  transaction.  The fix is deletion, not arbitration: return 255 and let
-  an hourly cron job set the clock.
+  I2C transaction from interrupt context.  Decided below.
 * **Bus hold across syscalls** (MMBasic's no-STOP option) is the one
   case needing a lease.  If exposed: owner in `p_tab`, auto-release on
   exit and exec — the `display_fb_open` pattern already in the tree —
   and a deadline, which MMBasic's `I2C OPEN` timeout already implies.
+
+#### The RTC in interrupt context — DECIDED 2026-08-09
+
+Three options, and the third is the one to build.
+
+1. **Delete it** — return 255 and resync hourly from a userland daemon.
+   **Tried, and reverted the same day.**  It works, but the daemon is a
+   resident background shell and *that* broke the shutdown path:
+   `/etc/rc.reboot` runs `killall`, which is SIGTERM, which a background
+   `sh` ignores — so the loop survived, kept the root busy, and
+   `remount % ro` failed with `EBUSY`.  The filesystem went down dirty
+   and the next boot was crippled.  A long-lived background shell is not
+   a safe thing to have on this machine, whatever it is for.
+2. **Keep it and lock I2C0 to the kernel**, giving userland I2C1 on
+   header pins.  Airtight, but it costs the QWIIC socket — GP20/21, with
+   the board's own pullups, and exactly where a user plugs a sensor.
+3. **Keep it, and let the poll SKIP when userland holds the bus** —
+   chosen.
+
+Option 3 is one test at the top of the poll:
+
+    if (i2c0_user_busy)
+            return 255;     /* skip this hour; never wait */
+
+`i2c0_user_busy` is set by the `/dev/i2c` driver around a userland
+transaction on I2C0.  Interrupt context then never waits, never takes a
+lock and never interleaves — it declines, and `updatetod()` already
+understands 255 because that is what a machine with no RTC answers.
+
+It is honest because the poll is *already* best-effort: hourly drift
+correction, where missing one costs an hour of crystal drift, i.e.
+milliseconds.  And a collision is nearly impossible in the first place —
+the kernel is non-preemptive, so the flag is only set while a syscall is
+in flight, about 300 µs, against a poll that comes once an hour.
+
+Keeps the drift correction, keeps QWIIC, needs no daemon.  **Build the
+flag with the driver that sets it, not before** — a check whose setter
+does not exist is untestable, and dead code that looks live is worse
+than no code.
 
 ## The interrupt problem
 
@@ -153,8 +189,8 @@ One at a time, each board-verified before the next, per the standing
 rule.  The first three are the ones that unlock real programs:
 
 1. **I2C** — biggest single win; QWIIC is on the front of the board and
-   every hobby sensor speaks it.  Needs the `plt_rtc_secs()` removal
-   first, which is a small, separable, and independently worthwhile fix.
+   every hobby sensor speaks it.  Carries the `i2c0_user_busy` flag with
+   it, per the decision above.
 2. **PWM + SERVO** — small, self-contained, immediately useful.
 3. **ADC generalisation** — mostly exists; finishing it is cheap.
 4. **The interrupt machinery** (5, 6, 7 together) — they share one

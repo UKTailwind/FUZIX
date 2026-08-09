@@ -2,12 +2,6 @@ umask 022
 fsck -a -y /
 setdate
 remount -n / rw
-# Hourly clock resync, in process context.  The kernel used to do this
-# from the timer interrupt and cannot once userland shares the I2C bus
-# - see ds3231.c's plt_rtc_secs() and /etc/rtcsync.
-# "sh /etc/rtcsync", not "/etc/rtcsync": #! lines are not parsed on this
-# machine, they run bcrun.  The file explains why.
-sh /etc/rtcsync &
 prtroot >/etc/mtab
 # No swapon. Swap is not a device any more: the kernel allocates a
 # region the size of the process out of the PSRAM heap and memcpy's
