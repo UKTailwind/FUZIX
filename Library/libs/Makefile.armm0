@@ -45,13 +45,16 @@ SRC_C += seekdir.c sendto.c  setbuffer.c setenv.c
 SRC_C += setlocale.c setvbuf.c settimeofday.c sgetl.c sigdisp.c
 SRC_C += sleep.c socket.c sprintf.c
 SRC_C += sputl.c stat.c statvfs.c stdio0.c stime.c
-SRC_C += strcasecmp.c strcasestr.c strdup.c stricmp.c strlcpy.c strncasecmp.c
-SRC_C += strnlen.c strnicmp.c strsep.c strxfrm.c strcoll.c strsignal.c
+# strcasecmp and friends stay ours: newlib's want _ctype_, strdup wants
+# _impure_ptr and _malloc_r, and dragging newlib's reentrancy machinery
+# in for them would cost far more than the routines are worth.
+SRC_C += strcasecmp.c strcasestr.c strdup.c stricmp.c strncasecmp.c
+SRC_C += strnicmp.c strsep.c strcoll.c strsignal.c
 SRC_C += strtod.c strtol.c swab.c swapon.c system.c
 SRC_C += telldir.c time.c tmpfile.c tmpnam.c ttyname.c
 SRC_C += tzset.c umount.c ungetc.c usleep.c utent.c utimes.c utsname.c
 SRC_C += vfork.c vfprintf.c vprintf.c wait.c xitoa.c pathconf.c
-SRC_C += gethostname.c sysconf.c confstr.c memccpy.c getpass.c
+SRC_C += gethostname.c sysconf.c confstr.c getpass.c
 # ctype
 SRC_C += isalnum.c isalpha.c isascii.c isblank.c iscntrl.c isdigit.c
 SRC_C += isgraph.c islower.c isprint.c ispunct.c isspace.c isupper.c
@@ -63,14 +66,13 @@ SRC_C += cfmakeraw.c cfspeed.c revoke.c
 SRC_C += fscanf.c scanf.c sscanf.c vfscanf.c vscanf.c vsscanf.c
 # Seems to give the compiler a hard time
 SRC_C += regexp.c
-# Pieces we inherit in other cases from the compiler library instead
-SRC_C += strcpy.c strlen.c abs.c atof.c atoi.c atol.c labs.c
-SRC_C += strcat.c strchr.c strcmp.c strcspn.c strncat.c strncmp.c
-SRC_C += strncpy.c strpbrk.c strrchr.c strspn.c strstr.c strtok.c strtok_r.c
-# memcpy, memset and memmove come from newlib - see OBJ_NEWLIB below.
-# The generic memcpy.c/memset.c/memmove.c here are byte loops: right on
-# an 8-bit machine, nine cycles a byte on this one.
-SRC_C += memchr.c memcmp.c
+# Pieces we inherit in other cases from the compiler library instead.
+# The block and string routines come from newlib instead - OBJ_NEWLIB
+# below - so what is left here is the ones newlib cannot give us: strstr
+# (1488 bytes of it, against a few dozen here, for a function nothing
+# hot calls) and the strtok pair, whose newlib form wants _impure_ptr.
+SRC_C += abs.c atof.c atoi.c atol.c labs.c
+SRC_C += strstr.c strtok.c strtok_r.c
 
 SRC_CT += termcap.c tgetent.c
 
@@ -127,7 +129,25 @@ OBJ_HARD = $(SRC_HARD:.c=.o)
 # libc.a the extraction fails and the link says "undefined memcpy",
 # which is the right kind of loud.
 NEWLIB_LIBC := $(shell $(CC) -mcpu=cortex-m33 -print-file-name=libc.a)
-OBJ_NEWLIB = libc_a-memcpy.o libc_a-memset.o libc_a-memmove.o
+
+# Everything newlib can give us without dragging its innards along.
+# The test applied to each: does the object define the routine, and does
+# it reference nothing outside this list?  That rules out strcasecmp and
+# strverscmp (_ctype_), strdup (_impure_ptr, _malloc_r), strerror and
+# the strto* family (__errno, reentrancy), and strsep (__strtok_r).
+#
+# memchr and strlen live in the "-stub" objects; the plainly named
+# libc_a-memchr.o and libc_a-strlen.o are empty, which is worth knowing
+# before wondering why the link still finds the byte loop.
+#
+# strcat needs strcpy and strrchr needs strchr - both are in the list.
+OBJ_NEWLIB = libc_a-memcpy.o libc_a-memset.o libc_a-memmove.o \
+	     libc_a-memcmp.o libc_a-memccpy.o libc_a-memchr-stub.o \
+	     libc_a-strlen-stub.o libc_a-strcmp.o libc_a-strcpy.o \
+	     libc_a-strcat.o libc_a-strchr.o libc_a-strrchr.o \
+	     libc_a-strncmp.o libc_a-strncpy.o libc_a-strncat.o \
+	     libc_a-strcspn.o libc_a-strpbrk.o libc_a-strspn.o \
+	     libc_a-strnlen.o libc_a-strlcpy.o libc_a-strxfrm.o
 
 OBJ_ALL = $(OBJ_ASM) $(OBJ_DCP) $(OBJ_C) $(OBJ_LM) $(OBJ_HARD) $(OBJ_RL) \
 	  $(OBJ_NEWLIB)
