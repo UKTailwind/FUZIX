@@ -71,7 +71,49 @@ there.  Known remaining gaps, all recorded rather than hidden:
 * `#line`'s optional file name is parsed and ignored; applying it would
   also have to unwind at the end of an `#include`.
 
-### 3. Recursion is capped at nine levels by the temporary pool
+### 3a. Runaway recursion can still crash the machine — NATIVE PATH
+
+The urgent half of what follows.  `bcrun.c` now has a `stack_floor` and
+`BC_ENTER` refuses to go below it, but **a translated function never
+passes `BC_ENTER`**: its prologue is a bare `sub r4, #n` and a
+self-call is a direct BL.  A small recursive SUB is exactly what the
+translator takes, so the common case is the uncovered one — a
+six-argument routine recursing without bound took the whole board down,
+video and all, with the check in place (2026-08-09).
+
+Two ways to cover it, neither a five-minute change, both wanting
+`qemutests`:
+
+* The prologue compares r4 against a floor and branches to a fault
+  helper — two or three instructions on every native entry.  The floor
+  could come from a new `native_helpers` slot (one `ldr`), or from r6,
+  which `native_enter` currently sets to 0 — but r6 is still used for
+  the absolute-addressing identities, so reclaiming it is not free.
+* `cc2` declines to translate a function that calls itself.  Simpler,
+  and recursion then runs interpreted and guarded — but it misses
+  mutual recursion, and it makes recursive code slow on purpose.
+
+Until one of them is done: **do not run unbounded-recursion probes on
+the board.**  A sane depth is safe and reports honestly; runaway
+recursion is undefined behaviour with the machine's video attached
+to it.
+
+### 3b. Recursion depth — DONE, 15 levels to 255
+
+`MM_BYREFN` was 16, and a by-ref argument slot cannot be released until
+the call returns, so `go n + 1` died at fifteen.  Now 256 (2K of the VM
+region), measured on the board at 255 levels for every shape — no
+LOCALs, scalar LOCALs, a LOCAL string, a string expression per level —
+with `bench` and the graphics frame unmoved.  The hosted build's
+separate nine-level wall is fixed too: the compound-literal path now
+asks for the same release the `--fcc` path always did.
+
+If more than 256 is ever wanted, the principled fix is to put by-ref
+temporaries in the routine's own LOCAL frame, which nests with the
+calls and spills to malloc — no wall at all, but an emitter change in
+both translators.
+
+### 3c. The original note: the temporary pool
 
 Found 2026-08-09 while testing the LOCAL arena under recursion.  A
 routine that builds a string expression can only recurse **9 levels**
