@@ -18,7 +18,16 @@ int devi2c_ioctl(uarg_t arg, char *data)
         udata.u_error = EMSGSIZE;
         return -1;
     }
-    if (valaddr(msg.data, msg.len, (msg.addr & 1)))
+    /*
+     * valaddr() returns the number of bytes that ARE addressable - the
+     * length on success, 0 on failure - and sets EFAULT itself.  The
+     * test here was "if (valaddr(...))", which rejects every transfer
+     * that valaddr accepts and passes only the ones it does not: with
+     * any non-zero length this driver could never have worked.  It
+     * fails as -1 with no u_error, which d_ioctl turns into ENOTTY, so
+     * it reads as "no such ioctl" rather than as a bug here.
+     */
+    if (valaddr(msg.data, msg.len, (msg.addr & 1)) != msg.len)
         return -1;
     if ((msg.addr & 1) == 0)
         uget(msg.data, buf, msg.len);
