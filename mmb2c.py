@@ -1429,6 +1429,14 @@ class Conv(object):
                 self.tmp_used = True
                 return 'mm_byref_%s(%s)' % ('i' if p.ty == TY_I else 'f',
                                             val)
+            # A compound literal needs no scratch slot, but the release
+            # this asks for is still wanted: whatever temporaries the
+            # PREVIOUS statement left behind would otherwise be held for
+            # the whole of the call, and in a recursive routine that is
+            # every level at once.  Nine levels was the wall; the --fcc
+            # path above never had it because the by-ref slot made the
+            # statement ask for a release anyway.
+            self.tmp_used = True
             return '(%s[]){ %s }' % (ct, val)
         return '(' + val + ')'
 

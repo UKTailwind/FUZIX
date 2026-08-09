@@ -87,8 +87,28 @@ void  mm_lfree(void *p);
  * string temporaries, so the value lives exactly as long as the call
  * statement it was built for - however long the callee runs.  At most
  * MM_BYREFN can be live at once (call nesting x by-ref args).        */
+/*
+ * 256 of them, because this is what bounds RECURSION.
+ *
+ * The slot cannot be released until the call returns - the callee is
+ * holding its address - so a recursive routine holds one per argument
+ * per level, all the way down.  At 16 a routine as ordinary as
+ * "go n + 1" died at fifteen levels with "Expression too complex",
+ * which is no depth at all: a balanced tree walk over a million nodes
+ * is twenty, quicksort on ten thousand items is forty.
+ *
+ * A slot is a union of MMFLOAT and MMINTEGER, so 256 costs 2K of the
+ * VM region - shared with bss, the stack and (off-board) the heap.
+ * That buys 256 levels of a one-expression call and 128 of a two,
+ * which covers what recursion is actually used for.
+ *
+ * The principled fix is to put these in the routine's own LOCAL frame,
+ * which nests with the calls and falls through to malloc when it runs
+ * out - no wall at all.  That is an emitter change in both
+ * translators; this is a constant.
+ */
 #ifndef MM_BYREFN
-#define MM_BYREFN 16
+#define MM_BYREFN 256
 #endif
 MMFLOAT   *mm_byref_f(MMFLOAT v);
 MMINTEGER *mm_byref_i(MMINTEGER v);
