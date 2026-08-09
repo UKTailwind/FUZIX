@@ -25,7 +25,10 @@
 long long time_us64(void);
 
 #define STRSZ	258
-#define BIGN	256			/* 256 * 258 = 64.5K */
+#define BIGN	64			/* 64 * 258 = 16.5K - the image is
+					   part of bcrun's own process, so
+					   more than this is "program too
+					   large" before it ever runs */
 
 static unsigned char image[BIGN][STRSZ];
 
@@ -105,8 +108,9 @@ int main(void)
 	}
 	printf("image %lx  heap %lx  (SRAM is 2xxxxxxx)\n",
 	       (unsigned long)image, (unsigned long)heap);
-	pair("4K/16sl",   heap, 16,  2000);
-	pair("16K/64sl",  heap, 64,  500);
-	pair("64K/256sl", heap, 256, 125);
+	pair("1K/4sl",   heap,  4, 8000);
+	pair("4K/16sl",  heap, 16, 2000);
+	pair("8K/32sl",  heap, 32, 1000);
+	pair("16K/64sl", heap, 64,  500);
 	return 0;
 }
