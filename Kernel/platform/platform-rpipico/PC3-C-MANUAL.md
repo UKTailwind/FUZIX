@@ -51,6 +51,12 @@ What you get:
   `realloc`/`free`, the `str*` and `mem*` family, `atoi`/`atof`/`atol`/
   `strtol`/`strtod`, `open`/`close`/`read`/`write`/`lseek`/`creat`/
   `remove`/`rename`/`unlink`, `exit`, `rand`/`srand`, `time`.
+  From v0.10 the `str*` and `mem*` family are **newlib's**, taken from
+  the ARM toolchain's own `libc.a` — tuned assembly rather than the
+  byte-at-a-time loops Fuzix ships generically. A `memcpy` that used to
+  run at about nine cycles a byte now moves a word at a time. Nothing
+  in a program needs changing to get it, but a program whose profile
+  was dominated by string work will be noticeably quicker.
 * two of our own: **`adval(n)`** and **`time_us()`** / **`time_us64()`**.
 * the MMBasic runtime, callable from plain C: `mmb_runtime.h` declares
   the `mm_*` entry points `bcrun` resolves by name — PRINT and
@@ -520,6 +526,20 @@ a threshold beyond which a function stops being compiled to native ARM
 and falls back to bytecode, which is worth 2–3× on a hot loop. If a
 small change makes a program suddenly slower, that is the first thing
 to suspect; `BCRUN_BYTECODE=1` forces bytecode so you can compare.
+
+**The preprocessor is the board's own.** Cross-compiled builds use
+`gcc -E`, so anything that works there is not evidence that it works
+here. C89 is what to expect: v0.10 fixed `?:` inside `#if`, `#line`,
+`__LINE__` inside `#if`, and argument expansion before `##` pastes —
+none of which had ever been tested, because no host build reaches this
+code. Measured C conformance on the board is 160 of 175 tests.
+
+**Unbounded recursion takes the machine down.** `bcrun` checks the
+stack on entry to a bytecode function and stops the program cleanly,
+but a function the compiler turned into native ARM has a three-
+instruction prologue with no check in it — and a small recursive
+function is exactly what gets translated. A missing terminating
+condition is a reset, not an error message.
 
 # Where things live
 

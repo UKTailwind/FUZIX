@@ -57,8 +57,9 @@ Headline specification as configured here:
 
 ## New in v0.10
 
-This release fills in the MMBasic translator's two largest gaps: the
-rest of the drawing statements, and structures.
+This release fills in the MMBasic translator's two largest gaps — the
+rest of the drawing statements, and structures — and makes the whole
+machine faster.
 
 * **`BOX`, `RBOX`, `TRIANGLE` and `ARC` translate.** With `CIRCLE`,
   `TEXT` and `MAP` already in, the PicoMite drawing set is now
@@ -129,6 +130,64 @@ rest of the drawing statements, and structures.
 * **The kernel's crash report leads with `r4`–`r7`** — the registers
   that actually locate the fault in compiled code — so a report copied
   from the screen is useful even when cut short.
+
+And a group of changes that make everything on the machine faster,
+without any program being written differently:
+
+* **The C library's string routines are newlib's.** Every program in
+  the userland — the compiler, the translator, `bcrun`, the editor,
+  your own C — was using the generic byte-at-a-time `memcpy`, `memset`,
+  `memmove`, `strlen`, `strcmp` and their relatives: about nine cycles
+  a byte on this processor. Twenty-one objects are now taken from the
+  ARM toolchain's own `libc.a` at build time, so the machine runs the
+  routines that were written and tuned for it. On identical bytecode:
+  the grains benchmark 52,052 → **55,163**, the solar eclipse predictor
+  2.022 → **1.953 s**, a graphics frame 78.81 → **74.03 ms**. The
+  compiler is a program in that userland too, so compiling the eclipse
+  went from 7 seconds to 6.
+* **Integer division uses the divide instruction.** MMBasic integers
+  are 64 bits wide and this processor's `SDIV` is 32, so every `\` and
+  `MOD` went through a software routine that is roughly twenty times
+  the cost of the instruction — even when both numbers were small.
+  When they both fit in 32 bits, which in practice is nearly always,
+  the instruction is used directly. The grains benchmark gains about
+  1%, the eclipse predictor 2%.
+* **`PIXEL` no longer pays a system call per point.** Plotting a point
+  cost about 1.3 µs of crossing into the kernel to store 15 ns of
+  pixel — 96% overhead. Points now queue and go across in one call, up
+  to 512 at a time or every 10 ms, whichever comes first, and any
+  other drawing statement flushes the queue first so the order on
+  screen is exactly the order in the program. A pure-`PIXEL` demo
+  (`ripple.bas`) went from 217 ms a frame at v0.9 to **171** — 21%.
+  A program that already builds its points into an array and plots
+  them with the array form of `PIXEL` is unaffected: that was, and
+  remains, the fastest way to plot a lot of points.
+  One deliberate behaviour change comes with this: a `PIXEL` outside
+  the screen is now **dropped**, as the interpreter drops it, where
+  before the coordinates wrapped and the point appeared somewhere
+  else. A program that relied on the wrapping will look different.
+* **Recursion goes 255 levels deep, not 15.** The old limit was
+  nothing to do with the stack. A by-reference argument occupies a slot
+  that cannot be released until the call returns, there were sixteen
+  slots, and so a routine that passed an argument by reference to
+  itself stopped at fifteen. There are now 256, which costs 2 KB and
+  is measured at 255 levels for every shape of recursive routine —
+  with locals, with local strings, with a string expression built at
+  each level. Beyond that a program stops with `Expression too
+  complex` rather than misbehaving. For scale: a recursive walk over a
+  million-node balanced tree is twenty levels deep. A program that
+  recurses without any terminating condition is still a program that
+  crashes the machine; the depth guard does not cover compiled
+  routines that the translator has turned into native code.
+* **Four C89 gaps in the preprocessor.** `?:` in an `#if`, the `#line`
+  directive, `__LINE__` inside an `#if`, and macro arguments being
+  expanded before `##` pastes them. The host build of the compiler uses
+  `gcc -E`, so the machine's own preprocessor had never been tested by
+  anything; it has its own test suite now. C conformance measured on
+  the machine goes from 156 to **160 of 175**.
+* **`cc1` folded signed constant division as unsigned.** `-7/2` in a
+  constant expression came out as an enormous positive number. Both
+  operands are now cast to a signed type before folding.
 
 ## New in v0.9
 
