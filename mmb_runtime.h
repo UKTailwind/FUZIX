@@ -577,6 +577,19 @@ char *mm_inkey(void);
 #define MM_GPIO_DIR 0                   /* val: 0 input, 1 output      */
 #define MM_GPIO_PUT 1                   /* val: 0 low, 1 high          */
 #define MM_GPIO_GET 2
+/* Claim a resource from the kernel's pin lock (pinlock.c): val is the
+ * class, PLK_PIN or PLK_ADC.  0, or -1 if it is not ours to have.
+ *
+ * This is the ONLY crossing SETPIN makes now, and it makes it once.
+ * The pin traffic itself is register stores in mmb_gpio.h, because an
+ * ioctl costs 1.488us on this machine against about ten nanoseconds for
+ * the store it would be wrapping.  The claim has to come through here
+ * rather than through <sys/pc3io.h>'s own wrapper for the reason this
+ * whole function exists: the on-board cc has no ioctl.
+ *
+ * DIR/PUT/GET above are kept for hand-written C and for the host build;
+ * translated programs no longer use them. */
+#define MM_GPIO_CLAIM 3
 MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
 
 /* The ioctls, from the kernel's gpio.h.  Duplicated rather than
@@ -585,6 +598,12 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
 #define MM_GPIOC_SET     0x0531
 #define MM_GPIOC_SETRW   0x0534
 #define MM_GPIOC_GETBYTE 0x0533
+/* pinlock, from the kernel's pico_ioctl.h - on /dev/sys, not /dev/gpio */
+#define MM_PLKIOC_CLAIM  0x0026
+/* and the classes it names.  PLK_PIN and PLK_ADC are all SETPIN needs;
+ * <sys/pc3io.h> has the rest. */
+#define MM_PLK_PIN       0
+#define MM_PLK_ADC       4
 
 /* RP2350B.  Not 28: that is the RP2040's count, and it put the PC3's
  * own DS3231 alarm on GP32 out of reach. */

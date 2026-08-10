@@ -1633,10 +1633,21 @@ class Conv(object):
             # Unaffected by remapping, as MMBasic's fun_map is.
             return ('mm_map_get(%s)' % n(0), TY_I)
         if up == 'PIN':
-            # PIN(n) - the level on a pin set to DIN.  The assigning
+            # PIN(n) - a digital level, a raw ADC count, or a voltage,
+            # depending on what SETPIN made the pin.  The assigning
             # form PIN(n) = v is a statement.
+            #
+            # FLOAT, always.  MMBasic decides this at run time (T_INT
+            # for digital and ARAW, T_NBR for AIN); generated C has to
+            # know when it is generated, and nothing here knows what
+            # mode a pin will be in - SETPIN's pin can be an expression
+            # and its mode can change.  One type has to cover both and
+            # it has to be the float, because a double holds 0, 1 and
+            # every 12-bit count exactly while an integer cannot hold
+            # 1.6523 volts.  Nothing observable changes for a digital
+            # program: PRINT PIN(2) prints "1" either way.
             self.uses_gpio = True
-            return ('mmg_pin_get(%s)' % n(0), TY_I)
+            return ('mmg_pin_get(%s)' % n(0), TY_F)
         self.err("built-in %s() is not supported yet" % up)
 
     # -- built-ins whose arguments are not ordinary expressions ----------
@@ -3240,6 +3251,12 @@ class Conv(object):
             # kernel and every other tool on this machine use, and a
             # second numbering for one statement would confuse more
             # than the incompatibility does.
+            #
+            # AIN and ARAW are the analogue modes and both need an ADC
+            # pin: on the RP2350B channel n is GP40+n, and the header
+            # brings out GP40-GP46.  ARAW reads the raw count, AIN the
+            # voltage through MMBasic's sort-and-discard filter - the
+            # difference is in mmg_pin_get, not here.
             self.i += 1
             pin = self.as_int(self.expr())
             self.expect_op(',')
@@ -3247,8 +3264,14 @@ class Conv(object):
                 mode = 'MMG_PIN_DOUT'
             elif self.accept_kw('DIN'):
                 mode = 'MMG_PIN_DIN'
+            elif self.accept_kw('AIN'):
+                mode = 'MMG_PIN_AIN'
+            elif self.accept_kw('ARAW'):
+                mode = 'MMG_PIN_ARAW'
+            elif self.accept_kw('OFF'):
+                mode = 'MMG_PIN_OFF'
             else:
-                self.err("SETPIN takes DIN or DOUT")
+                self.err("SETPIN takes DIN, DOUT, AIN, ARAW or OFF")
             self.uses_gpio = True
             self.emit('mmg_setpin(%s, %s);' % (pin, mode))
             return

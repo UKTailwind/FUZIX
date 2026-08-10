@@ -756,8 +756,14 @@ void statement_inner(void)
             mode = "MMG_PIN_DOUT";
         else if (accept_kw("DIN"))
             mode = "MMG_PIN_DIN";
+        else if (accept_kw("AIN"))
+            mode = "MMG_PIN_AIN";
+        else if (accept_kw("ARAW"))
+            mode = "MMG_PIN_ARAW";
+        else if (accept_kw("OFF"))
+            mode = "MMG_PIN_OFF";
         else {
-            cv_err("SETPIN takes DIN or DOUT");
+            cv_err("SETPIN takes DIN, DOUT, AIN, ARAW or OFF");
             return;
         }
         cv.uses_gpio = 1;

@@ -99,9 +99,27 @@ would be worse than the current clear error:
   WS2812 STEPPER TMC22XX HUMID TEMPR DISTANCE PULSIN CAMERA KEYBOARD KEYPAD
   MOUSE GAMEPAD WII RTC WATCHDOG CPU FLASH SLEEP BITBANG BITSTREAM`
 
-  No longer all of them: `SETPIN pin, DIN|DOUT`, `PIN(n) =` and the
-  `PIN(n)` function are translated (mmb_gpio.h, `/dev/gpio`), using GPIO
-  numbers rather than connector-pin numbers.
+  No longer all of them, and `ADC` is now half gone too:
+  `SETPIN pin, DIN|DOUT|AIN|ARAW|OFF`, `PIN(n) =` and the `PIN(n)`
+  function are translated (mmb_gpio.h), using GPIO numbers rather than
+  connector-pin numbers.  `AIN` returns volts through MMBasic's own
+  ten-sample sort-and-discard filter and `ARAW` the raw count; both need
+  an ADC pin, GP40-GP46 on the PC3's header.
+
+  Two things about this differ from MMBasic and are deliberate.
+  **`PIN()` is a float in every mode** where MMBasic returns an integer
+  for digital pins and `ARAW`: translated C fixes the type when it is
+  generated and nothing then knows what mode a pin will be in, so one
+  type has to cover both, and a double holds 0, 1 and every 12-bit
+  count exactly.  Nothing observable changes.  And **pins are owned** -
+  `SETPIN` claims from the kernel's pin lock, a pin another program
+  holds is refused, and the claim is released and the pin reset when
+  the program ends however it ends.
+
+  There is no syscall left on the pin path: the claim is one ioctl at
+  `SETPIN`, and after that a pin is a register access - about ten
+  nanoseconds against 1.5 us, which is the difference between being
+  able to bit-bang a protocol in BASIC and not.
 * **Graphics and video** — `SPRITE TILE TILEMAP MAP TURTLE MANDELBROT RAY
   DRAW3D GUI DEFINEFONT RESOLUTION BACKLIGHT LCD TOUCH CLICK GETSCANLINE`
 
