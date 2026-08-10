@@ -175,15 +175,23 @@ would be worse than the current clear error:
   point of having both and is MMBasic's (PicoMite.c:932-935).  Specific
   is checked before any-key, as there.
 
-  Two divergences, both named in the manual.  The console is looked at
-  **at most every 5ms** rather than every statement - looking is a
-  syscall and a poll site runs after every statement.  And keys arrive
-  **a line at a time**: the console is line-buffered, so nothing is
-  delivered until Enter and then the whole line fires in turn.  That
-  second one is not new to `ON KEY` - `INKEY$` has always behaved that
-  way on this port - but `ON KEY` is what made it obvious, and it is
-  what stops this being usable for a game's twitch input.  The fix is in
-  the tty driver, not in BASIC.
+  One divergence: the console is looked at **at most every 5ms** rather
+  than every statement - looking is a syscall and a poll site runs after
+  every statement.
+
+  And one DEFECT, found by testing this and not new to it: **`INKEY$`
+  has never seen a keystroke at the PC3 console**, so `ON KEY` inherits
+  that and only fires when a line is completed with Enter.  The cause is
+  the console line editor (`lineedit.c`), which swallows every keystroke
+  while the terminal is in `ICANON|ECHO` and releases the whole line at
+  Enter; `mm_inkey` flips to raw for the few microseconds of one read,
+  which is far too brief a window to catch a key typed at any other
+  moment.  Proven with a C probe on the board: isatty, tcgetattr and
+  tcsetattr all succeed, the raw mode reads back as set, and `read()`
+  then returns nothing for ten seconds of typing.  The fix is in the
+  runtime - hold raw rather than flipping per call, as BBC BASIC and the
+  editors already do - and needs a decision about `INPUT`, which wants
+  cooked mode and the editor.
 
   That leaves `ON PS2 INTERRUPT MATH PID SENSORFUSION ONESHOT` from this
   group, none of which have anything to notify on this machine.

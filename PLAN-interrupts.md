@@ -11,20 +11,39 @@ and "C" reached it.  The decimation is here as designed (5ms), and the
 decoded-key FIFO in front of mm_kq is what keeps the two forms' promises
 apart.
 
-**A THIRD DIVERGENCE, found by testing rather than by reading**, and the
-one that matters most: keys arrive A LINE AT A TIME.  The console is
-line-buffered and switching to raw inside mm_inkey does not release a
-partial line on this tty, so nothing is delivered until Enter - and then
-the whole line fires, one handler call per character.  The first board
-run typed six keys and got nothing until a CR released all six at once.
+**A DEFECT, found by testing rather than by reading, and it is not this
+facility's**: INKEY$ HAS NEVER SEEN A KEYSTROKE AT THE PC3 CONSOLE.  ON
+KEY inherits it and only fires when Enter completes a line, at which
+point the whole line fires one handler call per character.
 
-This is NOT new to ON KEY - INKEY$ has always behaved this way on this
-port - but ON KEY is what made it visible, and it is what stops the
-facility being usable for the twitch input a game wants.  Open question
-4 below ("ON KEY when stdin is a file or pipe") turns out to have a
-bigger sibling: ON KEY when stdin is a TTY does not deliver either,
-until the line ends.  The fix is in the tty driver, not in BASIC, and it
-would improve INKEY$ at the same time.
+Diagnosed properly rather than guessed at, because the first two guesses
+were both wrong.  It is NOT the kernel's canonical line discipline:
+tty_inproc does insq() on every character and only withholds the WAKEUP
+in canonical mode, while tty_read's remq() takes anything queued before
+it ever sleeps.  It is NOT a flush on the mode change: libc's tcsetattr
+maps TCSANOW to TCSETS, and only TCSETSF clears the queue.
+
+It is `lineedit.c` - the PC3's own console line editor, which gives the
+shell its history and cursor keys.  `lineedit_input()` swallows every
+keystroke while the tty is in `ICANON|ECHO`, buffers it, echoes it
+itself, and hands the finished line to tty_inproc only at Enter
+(lineedit.c:302-304, 319).  mm_inkey flips to raw for the few
+microseconds of ONE read and flips straight back, so the window is open
+only during the read and every key is typed outside it.
+
+Board proof, `utils/keyprobe.c`: isatty 1, tcgetattr ok, tcsetattr ok
+and the raw mode READS BACK as set (ICANON off, VMIN 0) - and then
+read() returns nothing across ten seconds of typing.  Every layer
+reports success and no byte arrives.
+
+THE FIX is in the runtime, not the kernel: a program that wants
+keystrokes should HOLD raw mode instead of flipping per call, which is
+what the line editor's own comment says raw-mode programs do ("BBC
+BASIC, editors see every byte untouched").  What needs deciding first is
+INPUT, which wants cooked mode AND the editor - mm_inkey's per-call flip
+exists precisely so INPUT is untouched.  The likely shape is: go raw on
+the first INKEY$ or armed ON KEY, and drop back to cooked around INPUT
+and LINE INPUT.
 
 One implementation trap worth keeping: mm_key_peek calls mm_inkey, which
 returns a STRING and therefore costs a scratch slot - and the poll calls
