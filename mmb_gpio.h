@@ -46,10 +46,12 @@
  *	__GNUC__ is defined while the compiler that has to swallow this is
  *	cc1.  Keying on __GNUC__ handed it __attribute__ and it said
  *	"missing semicolon" twenty times. */
+#ifndef MMG_FN
 #if defined(MM_FCC) || defined(MM_PC3)
 #define MMG_FN static
 #else
 #define MMG_FN static __inline__ __attribute__((unused))
+#endif
 #endif
 
 /*	The registers, but not the claim wrappers - PC3IO_NO_SYSCALLS
@@ -86,13 +88,13 @@ static int pc3_adc_read(int c) { (void)c; return 0; }
 MMG_FN int pc3_pwm_slice(int p) { return p < 32 ? ((p >> 1) & 7)
 					        : 8 + ((p >> 1) & 3); }
 MMG_FN int pc3_pwm_chan(int p) { return p & 1; }
-static void pc3_pwm_pin(int p) { (void)p; }
-static void pc3_pwm_level(int s, int c, unsigned long l)
+MMG_FN void pc3_pwm_pin(int p) { (void)p; }
+MMG_FN void pc3_pwm_level(int s, int c, unsigned long l)
 { (void)s; (void)c; (void)l; }
-static void pc3_pwm_config(int s, unsigned long d, unsigned long t,
+MMG_FN void pc3_pwm_config(int s, unsigned long d, unsigned long t,
 			   int ia, int ib, int ph)
 { (void)s; (void)d; (void)t; (void)ia; (void)ib; (void)ph; }
-static void pc3_pwm_enable(int s, int on) { (void)s; (void)on; }
+MMG_FN void pc3_pwm_enable(int s, int on) { (void)s; (void)on; }
 #endif
 
 /*	The one crossing.  mm_gpio does the ioctl because the on-board cc

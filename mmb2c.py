@@ -591,6 +591,7 @@ class Conv(object):
         self.uses_gpio = False
         self.uses_play = False
         self.uses_pwm = False
+        self.uses_i2c = False
         # set in the scan pass, so statements BEFORE the ON ERROR line are
         # guarded too - the armed window is a run-time thing
         self.uses_onerror = False
@@ -3281,6 +3282,9 @@ class Conv(object):
                 self.emit('mm_rtcreg(%s, %s, 1);'
                           % (reg, self.as_int(self.expr())))
             return
+        if up == 'I2C2':
+            self.do_i2c2()
+            return
         if up == 'SETTICK':
             self.do_settick()
             return
@@ -3372,8 +3376,23 @@ class Conv(object):
                 mode = 'MMG_PIN_PWM'
                 self.uses_pwm = True
             else:
-                self.err("SETPIN takes DIN, DOUT, AIN, ARAW, "
-                         "INTH, INTL, INTB, PWM or OFF")
+                # SETPIN sda, scl, I2C2 - the pin-PAIR form, which is
+                # how the second I2C controller gets pins at all.  It
+                # is reached here because what followed the comma was
+                # not a mode word but another pin.
+                scl = self.as_int(self.expr())
+                self.expect_op(',')
+                if not self.accept_kw('I2C2'):
+                    self.err("SETPIN takes DIN, DOUT, AIN, ARAW, "
+                             "INTH, INTL, INTB, PWM or OFF, or a pin "
+                             "pair followed by I2C2")
+                self.uses_i2c = True
+                # Remembered rather than acted on: MMBasic assigns the
+                # pins here and starts the controller at OPEN, and a
+                # program is entitled to do those in separate places.
+                self.emit('__mmi2c_sda = %s; __mmi2c_scl = %s;'
+                          % (pin, scl))
+                return
             self.uses_gpio = True
             if mode.startswith('MMG_PIN_INT'):
                 # SETPIN pin, INTH|INTL|INTB, handler [, PULLUP|PULLDOWN]
@@ -4896,6 +4915,62 @@ class Conv(object):
             return
         self.emit('mmi_onkey_sel(%s, %s);' % (code, self.int_target()))
 
+    def do_i2c2(self):
+        """I2C2 OPEN speed, timeout
+           I2C2 WRITE addr, option, count, d1 [, d2 ...]
+           I2C2 READ  addr, option, count, array()
+           I2C2 CLOSE
+
+        The second controller, on whatever header pins SETPIN gave it.
+        MMBasic's split: the fixed bus needs no OPEN because it has
+        fixed pins, and this one does because it has none."""
+        self.i += 1
+        self.uses_i2c = True
+        if self.accept_kw('CLOSE'):
+            self.emit('mmi2c_close();')
+            return
+        if self.accept_kw('OPEN'):
+            speed = self.as_int(self.expr())
+            self.expect_op(',')
+            tmo = self.as_int(self.expr())
+            self.emit('mmi2c_open(__mmi2c_sda, __mmi2c_scl, %s, %s);'
+                      % (speed, tmo))
+            return
+        wr = self.accept_kw('WRITE')
+        if not wr and not self.accept_kw('READ'):
+            self.err("I2C2 takes OPEN, WRITE, READ or CLOSE")
+        addr = self.as_int(self.expr())
+        self.expect_op(',')
+        opt = self.as_int(self.expr())
+        self.expect_op(',')
+        n = self.as_int(self.expr())
+        self.expect_op(',')
+        self.tmp_used = True
+        if wr:
+            # A list of values, each one byte.  MMBasic also takes an
+            # array or a string here; the list is what a register write
+            # actually looks like and is what this does.
+            vals = [self.as_int(self.expr())]
+            while self.accept_op(','):
+                vals.append(self.as_int(self.expr()))
+            self.emit('{ unsigned char __b[%d]; %s'
+                      % (len(vals),
+                         ' '.join('__b[%d] = (unsigned char)(%s);'
+                                  % (i, v) for i, v in enumerate(vals))))
+            self.emit('  mmi2c_write(%s, %s, %s, __b); }' % (addr, opt, n))
+        else:
+            # Into an integer array, which is what a multi-byte read
+            # wants and what MMBasic's own examples use.
+            s = self.arrayref()
+            if s.ty == TY_S:
+                self.err("I2C2 READ needs a numeric array, and '%s' is a "
+                         "string array" % s.name)
+            base, _cnt = self.array_flat(s)
+            self.emit('{ unsigned char __b[%s]; int __i;' % 'MMI2C_MAXLEN')
+            self.emit('  mmi2c_read(%s, %s, %s, __b);' % (addr, opt, n))
+            self.emit('  for (__i = 0; __i < (int)(%s); __i++)' % n)
+            self.emit('    (%s)[__i] = __b[__i]; }' % base)
+
     def settick_id(self):
         """SETTICK's optional trailing timer number, 1-4.  Absent is 1,
         which is MMBasic's irq = 0 when the argument is missing."""
@@ -5364,6 +5439,8 @@ class Conv(object):
             wr('#include "mmb_int.h"\n')
         if self.uses_pwm:
             wr('#include "mmb_pwm.h"\n')
+        if self.uses_i2c:
+            wr('#include "mmb_i2c.h"\n')
         wr('#include <math.h>\n')
         wr('#include <string.h>\n')
         wr('#include <stdlib.h>\n\n')
@@ -5453,6 +5530,10 @@ class Conv(object):
             wr(' * It lives here rather than in the runtime so a guard is\n')
             wr(' * a load and a branch instead of a library call. */\n')
             wr('static int __mm_e[2];\n')
+        if self.uses_i2c:
+            # SETPIN puts the pins here and OPEN reads them: MMBasic
+            # allows the two to be far apart in a program.
+            wr('static int __mmi2c_sda, __mmi2c_scl;\n')
         wr('\n/* ---- forward declarations ---- */\n')
         if self.uses_clear:
             wr('static void __mmb_clear(void);\n')

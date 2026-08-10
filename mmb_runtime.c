@@ -2609,11 +2609,81 @@ MMINTEGER mm_rtcreg(MMINTEGER reg, MMINTEGER val, MMINTEGER write)
         return -1;
     return rq.val;
 }
+/*
+ * I2C2.  The OPEN is a platform ioctl on /dev/sys; the transfers are
+ * the ordinary shared I2C_MSG on /dev/i2c, which is why only the open
+ * knows anything about pins.
+ */
+#define MM_PICOIOC_I2COPEN  0x002A
+#define MM_PICOIOC_I2CCLOSE 0x002B
+#define MM_I2C_MSG          0x0540      /* Kernel/include/i2c.h */
+
+static int mm_i2c_fd = -2;
+
+MMINTEGER mm_i2c_open(MMINTEGER sda, MMINTEGER scl, MMINTEGER khz)
+{
+    struct { unsigned char bus, sda, scl, pad; unsigned long khz; } rq;
+    int fd = mm_gfx_open();
+
+    if (fd < 0)
+        return -1;
+    rq.bus = 1;
+    rq.sda = (unsigned char)sda;
+    rq.scl = (unsigned char)scl;
+    rq.pad = 0;
+    rq.khz = (unsigned long)khz;
+    return ioctl(fd, MM_PICOIOC_I2COPEN, &rq) < 0 ? -1 : 0;
+}
+
+void mm_i2c_close(void)
+{
+    int fd = mm_gfx_open();
+
+    if (fd >= 0)
+        (void)ioctl(fd, MM_PICOIOC_I2CCLOSE, (void *)1);
+    if (mm_i2c_fd >= 0) {
+        close(mm_i2c_fd);
+        mm_i2c_fd = -2;
+    }
+}
+
+MMINTEGER mm_i2c_xfer(MMINTEGER addr, MMINTEGER read, MMINTEGER n,
+                      unsigned char *buf)
+{
+    struct { unsigned char bus, addr, len; unsigned char *data; } m;
+
+    if (mm_i2c_fd == -2)
+        mm_i2c_fd = open("/dev/i2c", O_RDWR);
+    if (mm_i2c_fd < 0)
+        return -1;
+    m.bus = 1;
+    m.addr = (unsigned char)(((addr & 0x7F) << 1) | (read ? 1 : 0));
+    m.len = (unsigned char)n;
+    m.data = buf;
+    return ioctl(mm_i2c_fd, MM_I2C_MSG, &m) < 0 ? -1 : 0;
+}
+
 #else
 MMINTEGER mm_rtcreg(MMINTEGER reg, MMINTEGER val, MMINTEGER write)
 {
     (void)reg; (void)val; (void)write;
     return -1;                          /* no clock here */
+}
+
+/* No second I2C controller off the board.  Silent like the rest of the
+ * host build: a program using I2C2 translates, compiles and runs, and
+ * every transfer says it failed rather than pretending it worked. */
+MMINTEGER mm_i2c_open(MMINTEGER sda, MMINTEGER scl, MMINTEGER khz)
+{
+    (void)sda; (void)scl; (void)khz;
+    return -1;
+}
+void mm_i2c_close(void) {}
+MMINTEGER mm_i2c_xfer(MMINTEGER addr, MMINTEGER read, MMINTEGER n,
+                      unsigned char *buf)
+{
+    (void)addr; (void)read; (void)n; (void)buf;
+    return -1;
 }
 #endif
 
