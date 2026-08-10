@@ -3259,6 +3259,9 @@ class Conv(object):
             self.emit('mmg_text(%s, %s, %s, %s, %s, %s, %s, %s);'
                       % (x, y, s, just, font, scale, fc, bc))
             return
+        if up == 'SETTICK':
+            self.do_settick()
+            return
         if up == 'SETPIN':
             # SETPIN pin, DIN|DOUT
             #
@@ -4781,6 +4784,46 @@ class Conv(object):
                 return
             self.err("bare EXIT is outside any loop, SUB or FUNCTION")
         self.err("unknown EXIT variant")
+
+    def settick_id(self):
+        """SETTICK's optional trailing timer number, 1-4.  Absent is 1,
+        which is MMBasic's irq = 0 when the argument is missing."""
+        if self.accept_op(','):
+            return self.as_int(self.expr())
+        return '1'
+
+    def do_settick(self):
+        """SETTICK period, handler [, n]
+           SETTICK 0, 0 [, n]          off
+           SETTICK PAUSE|RESUME [, n]
+
+        MMBasic counts milliseconds in an interrupt and fires when the
+        count passes the period; this keeps a microsecond deadline and
+        asks at the poll that is already happening.  The observable
+        rules are copied: four timers, missed periods dropped rather
+        than queued, and PAUSE freezing the time-to-go where it stands.
+        """
+        self.i += 1
+        self.uses_interrupts = True
+        if self.accept_kw('PAUSE'):
+            self.emit('mmi_settick_pause(%s, 0);' % self.settick_id())
+            return
+        if self.accept_kw('RESUME'):
+            self.emit('mmi_settick_pause(%s, 1);' % self.settick_id())
+            return
+        ms = self.as_int(self.expr())
+        self.expect_op(',')
+        # "SETTICK 0, 0" turns a timer off, and its handler slot is a
+        # literal 0 rather than a name - so the target is only resolved
+        # when there is one to resolve.
+        t = self.peek()
+        if t is not None and t[0] == T_NUM and t[1].strip('()') == '0':
+            self.nxt()
+            fn = '0'
+        else:
+            fn = self.int_handler()
+        self.emit('mmi_settick(%s, %s, %s);' % (ms, fn, self.settick_id()))
+        return
 
     def setpin_pull(self):
         """MMBasic's optional PULLUP / PULLDOWN on an input SETPIN.

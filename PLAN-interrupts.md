@@ -1,8 +1,26 @@
 # PLAN-interrupts: MMBasic software interrupts on the PC3 Fuzix port
 
-Status: **the PIN half is BUILT and board-verified** (2026-08-10);
-`SETTICK` and `ON KEY` remain design only.  Translator + runtime work;
-no kernel changes were needed, as predicted.
+Status: **PINS and SETTICK are BUILT and board-verified** (2026-08-10);
+`ON KEY` remains design only.  Translator + runtime work; no kernel
+changes were needed, as predicted.
+
+SETTICK holds a microsecond deadline off the fast clock rather than a
+millisecond counter, exactly as designed below.  Board: 20 x 100ms in
+1999.981ms, and a 10ms timer beside a 50ms one firing exactly 100 times
+in the second the slow one needed for twenty.  PAUSE freezes the
+time-to-go, RESUME rebuilds the deadline from it.
+
+**One divergence, named:** MMBasic fires when its millisecond count is
+*greater than* the period, so `SETTICK 100` runs at 101ms there and
+`SETTICK 16` - the 60fps case its own game guide suggests - at 17ms,
+about 6% slow.  A deadline has no such rounding, so this fires at the
+period asked for.  Replicating the extra millisecond would be
+replicating an artefact of the counter rather than a decision.
+
+The clock: `pc3_us64()` in `<sys/pc3io.h>` (TIMERAWH/TIMERAWL with the
+high/low/high loop), with `mm_us()` from the runtime as the fallback the
+host and the gates use - so `tests/settick.bas` counts real ticks under
+`make check`, `fcctests` and qemu rather than merely compiling.
 
 What shipped: `SETPIN pin, INTH|INTL|INTB, handler`, the per-statement
 poll gated on `uses_interrupts`, the no-nesting gate, one dispatch per

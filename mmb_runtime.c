@@ -2549,6 +2549,16 @@ void mm_int_err_push(void)
     mm_errmsg_v[1] = 0;
 }
 
+/* Microseconds since start, for SETTICK's deadlines.  Public because
+ * mmb_int.h needs a clock and mm_us_now is a static of this file; on the
+ * PC3 it reads TIMER0 directly instead (pc3_us64), so this is the
+ * fallback the host and the gates run on - which is what lets a tick
+ * test mean something before it reaches a board. */
+MMINTEGER mm_us(void)
+{
+    return mm_us_now();
+}
+
 void mm_int_err_pop(void)
 {
     mm_errno_v = mm_int_serrno;

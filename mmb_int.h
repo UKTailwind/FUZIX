@@ -40,7 +40,20 @@
  *	nothing. */
 #define MM_INT_NPIN	10
 
+/*	NBRSETTICKS - MMBasic's four, ids 1 to 4. */
+#define MM_INT_NTICK	4
+
 typedef void (*mm_int_fn)(void);
+
+/*	SETTICK's clock.  On the board the microsecond counter is three
+ *	loads (pc3_us64); everywhere else it is the runtime's, so the same
+ *	code runs under the gates with a real clock behind it and a tick
+ *	test means something before it reaches hardware. */
+#if defined(MM_PC3) || defined(__FUZIX__)
+#define MMI_US()	pc3_us64()
+#else
+#define MMI_US()	((long long)mm_us())
+#endif
 
 static struct {
 	unsigned char pin;
@@ -50,6 +63,29 @@ static struct {
 } mm_ipins[MM_INT_NPIN];
 
 static int mm_ipin_n;
+
+/*	The four SETTICK timers.  MMBasic counts milliseconds in an ISR
+ *	and fires when the count passes the period; this holds a DEADLINE
+ *	in microseconds instead, which needs no interrupt and no counter -
+ *	the poll is already happening, so asking "is it time yet" is one
+ *	comparison.
+ *
+ *	`left` is what PAUSE freezes: MMBasic stops incrementing the
+ *	counter, which leaves the time-to-go where it stands, and RESUME
+ *	starts it again from there.  A deadline has to be rebuilt from the
+ *	new now, so the remainder is what gets stored. */
+static struct {
+	unsigned char armed;		/* a handler is set */
+	unsigned char active;		/* not PAUSEd */
+	long long period;		/* us */
+	long long due;			/* us, absolute */
+	long long left;			/* us to go, while paused */
+	mm_int_fn fn;
+} mm_tick[MM_INT_NTICK];
+
+/*	How many ticks are armed, so the poll can skip reading the clock
+ *	entirely for a program that only uses pins. */
+static int mm_ntick_armed;
 
 /*	Non-zero when anything is armed.  The per-statement poll site is
  *	"if (__mm_int_armed) mm_int_poll();", so a program that has armed
@@ -145,7 +181,73 @@ MMG_FN void mmi_setpin_off(MMINTEGER pin)
 }
 
 /*
- *	check_interrupt + checkdetailinterrupts, restricted to pins.
+ *	SETTICK period, handler [, id]   -- period in MILLISECONDS
+ *	SETTICK 0, 0 [, id]              -- off
+ *
+ *	ids are 1-4 and out-of-range is MMBasic's error.  Arming sets the
+ *	first deadline one whole period away, as MMBasic's TickTimer = 0
+ *	does.
+ */
+MMG_FN void mmi_settick(MMINTEGER ms, mm_int_fn fn, MMINTEGER id)
+{
+	int i = (int)id - 1;
+
+	if (i < 0 || i >= MM_INT_NTICK) {
+		mm_error("Invalid tick number");
+		return;
+	}
+	if (ms <= 0) {			/* SETTICK 0, 0 - off */
+		if (mm_tick[i].armed) {
+			__mm_int_armed--;
+			mm_ntick_armed--;
+		}
+		mm_tick[i].armed = 0;
+		mm_tick[i].active = 0;
+		mm_tick[i].fn = 0;
+		return;
+	}
+	if (!mm_tick[i].armed) {
+		__mm_int_armed++;
+		mm_ntick_armed++;
+	}
+	mm_tick[i].armed = 1;
+	mm_tick[i].active = 1;
+	mm_tick[i].period = (long long)ms * 1000;
+	mm_tick[i].due = MMI_US() + mm_tick[i].period;
+	mm_tick[i].left = 0;
+	mm_tick[i].fn = fn;
+}
+
+/*	SETTICK PAUSE / RESUME [, id].  MMBasic freezes the count where it
+ *	stands and starts it again from there; a deadline has to be
+ *	rebuilt, so the time-to-go is what is kept. */
+MMG_FN void mmi_settick_pause(MMINTEGER id, MMINTEGER on)
+{
+	int i = (int)id - 1;
+
+	if (i < 0 || i >= MM_INT_NTICK) {
+		mm_error("Invalid tick number");
+		return;
+	}
+	if (!mm_tick[i].armed)
+		return;
+	if (!on) {			/* PAUSE */
+		if (mm_tick[i].active) {
+			mm_tick[i].left = mm_tick[i].due - MMI_US();
+			if (mm_tick[i].left < 0)
+				mm_tick[i].left = 0;
+			mm_tick[i].active = 0;
+		}
+	} else {			/* RESUME */
+		if (!mm_tick[i].active) {
+			mm_tick[i].due = MMI_US() + mm_tick[i].left;
+			mm_tick[i].active = 1;
+		}
+	}
+}
+
+/*
+ *	check_interrupt + checkdetailinterrupts: pins, then ticks.
  *
  *	ONE dispatch per call, as MMBasic does: the first hit wins and the
  *	next statement boundary picks up the next one.  The scan order is
@@ -172,6 +274,36 @@ MMG_FN void mm_int_poll(void)
 		    || (mm_ipins[i].edge == MMG_PIN_INTH && v > last)
 		    || (mm_ipins[i].edge == MMG_PIN_INTL && v < last)) {
 			mm_int_fire(mm_ipins[i].fn);
+			return;
+		}
+	}
+
+	/*	Ticks last, which is checkdetailinterrupts' own order
+	 *	(MM_Misc.c:10170) - so a pin edge and a tick due at the
+	 *	same moment dispatch the pin first and the tick at the
+	 *	next statement.
+	 *
+	 *	The clock is read once for all four, and only if one is
+	 *	armed: a program with pins but no ticks pays nothing here.
+	 */
+	if (mm_ntick_armed) {
+		long long now = MMI_US();
+
+		for (i = 0; i < MM_INT_NTICK; i++) {
+			if (!mm_tick[i].active || now < mm_tick[i].due)
+				continue;
+			/*	Catch up by whole periods, which KEEPS THE
+			 *	PHASE and drops the firings that were
+			 *	missed rather than queueing them - a
+			 *	handler that runs longer than its own
+			 *	period must not spiral.  MMBasic's
+			 *	"while (TickTimer > TickPeriod)
+			 *	TickTimer -= TickPeriod" is the same
+			 *	arithmetic from the other end. */
+			do {
+				mm_tick[i].due += mm_tick[i].period;
+			} while (mm_tick[i].due <= now);
+			mm_int_fire(mm_tick[i].fn);
 			return;
 		}
 	}

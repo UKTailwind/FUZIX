@@ -631,6 +631,9 @@ void mm_err_bind(int *state);       /* generated code hands us its pair */
  * interrupts never nest.  Used by mmb_int.h. */
 void mm_int_err_push(void);
 void mm_int_err_pop(void);
+/* Microseconds since start - SETTICK's clock off the board, where
+ * mmb_int.h reads TIMER0 itself. */
+MMINTEGER mm_us(void);
 void mm_on_error(int mode, MMINTEGER n);   /* 0 abort 1 clear 2 ignore 3 skip */
 /* Write or discard the PRINT line held while armed - the statement
  * guard calls it at the end of every statement.  See mm_putc. */

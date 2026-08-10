@@ -160,8 +160,17 @@ would be worse than the current clear error:
   Written IRETURN belongs to the label and line-number targets, which are
   refused - compiled code cannot jump into the middle of a function.
 
-  `SETTICK` and `ON KEY` are designed and not yet built; a program using
-  either still gets the clear error.
+  `SETTICK` is done too: all four timers, `PAUSE`/`RESUME`, `0, 0` to
+  turn one off, and MMBasic's catch-up - a handler slower than its own
+  period drops the missed firings rather than queueing them, keeping the
+  phase.  It holds a MICROSECOND DEADLINE where MMBasic counts
+  milliseconds in an interrupt, which is the one deliberate divergence
+  and it is in our favour: MMBasic fires when its count is *greater
+  than* the period, so `SETTICK 100` runs at 101ms there and at 100ms
+  here.  Board-measured: 20 x 100ms in 1999.98ms.
+
+  `ON KEY` is designed and not yet built; a program using it still gets
+  the clear error.
 * **Editor and REPL** — `EDIT LIST NEW RUN SAVE LOAD AUTOSAVE FM MEMORY
   LIBRARY XMODEM YMODEM CHAIN EXECUTE TRACE`
 * **`EVAL`** — evaluating a string as BASIC at run time needs the
