@@ -100,9 +100,9 @@ would be worse than the current clear error:
   MOUSE GAMEPAD WII RTC WATCHDOG CPU FLASH SLEEP BITBANG BITSTREAM`
 
   No longer all of them, and `ADC` is now half gone too:
-  `SETPIN pin, DIN|DOUT|AIN|ARAW|OFF`, `PIN(n) =` and the `PIN(n)`
-  function are translated (mmb_gpio.h), using GPIO numbers rather than
-  connector-pin numbers.  `AIN` returns volts through MMBasic's own
+  `SETPIN pin, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|OFF`, `PIN(n) =` and the
+  `PIN(n)` function are translated (mmb_gpio.h and mmb_int.h), using
+  GPIO numbers rather than connector-pin numbers.  `AIN` returns volts through MMBasic's own
   ten-sample sort-and-discard filter and `ARAW` the raw count; both need
   an ADC pin, GP40-GP46 on the PC3's header.
 
@@ -140,6 +140,24 @@ would be worse than the current clear error:
   from there - or a synthesiser the kernel does not have.
 * **Interrupts and background timing** — `SETTICK ON KEY ON PS2 INTERRUPT
   IRETURN MATH PID MATH SENSORFUSION ONESHOT`
+
+  The PIN half is done: `SETPIN pin, INTH|INTL|INTB, handler` translates,
+  with the handler an ordinary parameterless SUB.  It is MMBasic's own
+  algorithm - a POLL after every statement comparing each armed pin's
+  level against its level at the previous check (MM_Misc.c:10153) - so
+  the latency is one statement, a pulse shorter than a statement is
+  missed, interrupts do not nest, one fires per statement boundary, and
+  the error state is saved, cleared and restored round a handler.  See
+  PLAN-interrupts.md.
+
+  `IRETURN` is NOT translated and does not need to be: for a SUB target
+  MMBasic builds one itself as the return address of the GOSUB it fakes
+  (MM_Misc.c:10205), so END SUB performs the interrupt return there too.
+  Written IRETURN belongs to the label and line-number targets, which are
+  refused - compiled code cannot jump into the middle of a function.
+
+  `SETTICK` and `ON KEY` are designed and not yet built; a program using
+  either still gets the clear error.
 * **Editor and REPL** — `EDIT LIST NEW RUN SAVE LOAD AUTOSAVE FM MEMORY
   LIBRARY XMODEM YMODEM CHAIN EXECUTE TRACE`
 * **`EVAL`** — evaluating a string as BASIC at run time needs the

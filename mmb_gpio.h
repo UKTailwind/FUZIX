@@ -36,6 +36,22 @@
 
 #include "mmb_runtime.h"
 
+/*	A program that says SETPIN but never PIN(n) = v names only some of
+ *	these, and gcc warns about the rest.  The on-board cc has no
+ *	attributes and discards an unnamed static anyway, which is the
+ *	whole bargain this header rests on, so it just gets "static".
+ *
+ *	Keyed on which compiler compiles the OUTPUT, not on __GNUC__:
+ *	fccbuild.sh preprocesses with gcc -E and then feeds cc1, so
+ *	__GNUC__ is defined while the compiler that has to swallow this is
+ *	cc1.  Keying on __GNUC__ handed it __attribute__ and it said
+ *	"missing semicolon" twenty times. */
+#if defined(MM_FCC) || defined(MM_PC3)
+#define MMG_FN static
+#else
+#define MMG_FN static __inline__ __attribute__((unused))
+#endif
+
 /*	The registers, but not the claim wrappers - PC3IO_NO_SYSCALLS
  *	leaves out everything in that header needing open() and ioctl(),
  *	which the on-board cc does not have.  Claiming goes through
@@ -69,7 +85,7 @@ static int pc3_adc_read(int c) { (void)c; return 0; }
 
 /*	The one crossing.  mm_gpio does the ioctl because the on-board cc
  *	cannot; everything else on this page is a register. */
-static int mmg_claim(MMINTEGER pin, MMINTEGER cls)
+MMG_FN int mmg_claim(MMINTEGER pin, MMINTEGER cls)
 {
 	return (int)mm_gpio(MM_GPIO_CLAIM, pin, cls);
 }
@@ -83,6 +99,14 @@ static int mmg_claim(MMINTEGER pin, MMINTEGER cls)
 #define MMG_PIN_DOUT	2
 #define MMG_PIN_AIN	3
 #define MMG_PIN_ARAW	4
+/*	The three interrupt modes are DIGITAL INPUTS that also carry an
+ *	edge test - MMBasic's EXT_INT_HI/LO/BOTH sit in the digital list
+ *	in fun_pin, so PIN() on one reads the level exactly as DIN does.
+ *	The edge itself is polled, in mmb_int.h; nothing here knows about
+ *	handlers. */
+#define MMG_PIN_INTH	5
+#define MMG_PIN_INTL	6
+#define MMG_PIN_INTB	7
 
 static unsigned char mmg_mode[MM_GPIO_NPINS];
 
@@ -99,14 +123,14 @@ static unsigned char mmg_mode[MM_GPIO_NPINS];
 /*	RP2350B: ADC channel n is GP40+n.  The PC3's I/O header brings out
  *	GP34-GP46, so channels 0-6 are reachable; the kernel's claim is
  *	the authority on which, and refuses the rest. */
-static int mmg_adc_chan(MMINTEGER pin)
+MMG_FN int mmg_adc_chan(MMINTEGER pin)
 {
 	if (pin >= 40 && pin <= 47)
 		return (int)(pin - 40);
 	return -1;
 }
 
-static void mmg_setpin(MMINTEGER pin, MMINTEGER mode)
+MMG_FN void mmg_setpin(MMINTEGER pin, MMINTEGER mode)
 {
 	int ch;
 
@@ -135,7 +159,8 @@ static void mmg_setpin(MMINTEGER pin, MMINTEGER mode)
 		if (mode == MMG_PIN_DOUT)
 			pc3_pin_out((int)pin);
 		else
-			pc3_pin_in((int)pin, 0);	/* MMBasic's DIN floats */
+			pc3_pin_in((int)pin, 0);	/* MMBasic's DIN floats,
+						   and so do the INT modes */
 	}
 	mmg_mode[pin] = (unsigned char)mode;
 }
@@ -148,7 +173,7 @@ static void mmg_setpin(MMINTEGER pin, MMINTEGER mode)
  *	that was what the ioctl did; that was more forgiving and less
  *	honest - writing to an input is a bug in the BASIC, and saying so
  *	is the whole reason SETPIN exists. */
-static void mmg_pin_put(MMINTEGER pin, MMINTEGER val)
+MMG_FN void mmg_pin_put(MMINTEGER pin, MMINTEGER val)
 {
 	if (pin < 0 || pin >= MM_GPIO_NPINS)
 		mm_error("Invalid pin");
@@ -175,7 +200,7 @@ static void mmg_pin_put(MMINTEGER pin, MMINTEGER val)
  *	same, and MMBasic prints an integral float without a decimal
  *	point.
  */
-static MMFLOAT mmg_pin_get(MMINTEGER pin)
+MMG_FN MMFLOAT mmg_pin_get(MMINTEGER pin)
 {
 	int b[MMG_ANA_AVERAGE];
 	int i, j, ch, t;
@@ -187,8 +212,12 @@ static MMFLOAT mmg_pin_get(MMINTEGER pin)
 	switch (mmg_mode[pin]) {
 	case MMG_PIN_DIN:
 	case MMG_PIN_DOUT:
+	case MMG_PIN_INTH:
+	case MMG_PIN_INTL:
+	case MMG_PIN_INTB:
 		/*	MMBasic reads back an output pin too, and returns
-		 *	what it is driving. */
+		 *	what it is driving; an interrupt pin is a digital
+		 *	input and reads as one. */
 		return (MMFLOAT)pc3_pin_get((int)pin);
 
 	case MMG_PIN_ARAW:

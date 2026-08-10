@@ -2512,6 +2512,53 @@ void mm_err_bind(int *state)
     mm_errmsg_v[1] = 0;
 }
 
+/*
+ * The error state across an interrupt handler.
+ *
+ * MMBasic's GotAnInterrupt saves MMerrno, the error message and the
+ * ON ERROR SKIP counter, CLEARS all three, and cmd_ireturn puts them
+ * back (MM_Misc.c:10190-10198).  Both halves matter: a handler starts
+ * with MM.ERRNO 0 rather than inheriting whatever the interrupted code
+ * was carrying, and cannot leave its own error behind for the
+ * interrupted statement to trip over afterwards.
+ *
+ * ONE saved slot is enough, and that is not luck - interrupts never
+ * nest (mm_int_poll returns early inside a handler), so there can only
+ * ever be one interrupted context.
+ *
+ * It lives here rather than in mmb_int.h because the errno and the
+ * message are statics of this file; the skip counter is the generated
+ * program's own __mm_e, which mm_err_bind already gave us a pointer to.
+ */
+static int  mm_int_serrno;
+static char mm_int_serrmsg[MM_ERRMSG + 2];
+static int  mm_int_sskip[2];
+
+void mm_int_err_push(void)
+{
+    mm_int_serrno = mm_errno_v;
+    memcpy(mm_int_serrmsg, mm_errmsg_v, sizeof(mm_int_serrmsg));
+    if (mm_est) {
+        mm_int_sskip[0] = mm_est[0];
+        mm_int_sskip[1] = mm_est[1];
+        mm_est[0] = 0;
+        mm_est[1] = 0;
+    }
+    mm_errno_v = 0;
+    mm_errmsg_v[0] = 0;
+    mm_errmsg_v[1] = 0;
+}
+
+void mm_int_err_pop(void)
+{
+    mm_errno_v = mm_int_serrno;
+    memcpy(mm_errmsg_v, mm_int_serrmsg, sizeof(mm_errmsg_v));
+    if (mm_est) {
+        mm_est[0] = mm_int_sskip[0];
+        mm_est[1] = mm_int_sskip[1];
+    }
+}
+
 static int mm_armed(void)
 {
     /* -1 (IGNORE) and any positive count are armed; RESTART's >100000 is

@@ -593,6 +593,10 @@ class Conv(object):
         # set in the scan pass, so statements BEFORE the ON ERROR line are
         # guarded too - the armed window is a run-time thing
         self.uses_onerror = False
+        # likewise: an interrupt armed at line 100 has to be polled by
+        # the statements before it, so the poll sites are emitted for
+        # the whole program or none of it
+        self.uses_interrupts = False
         self.uses_cmdline = False       # MM.CMDLINE$: main takes argv
         # depth of single-line IF bodies being emitted: END SUB means
         # "return now" in there, not "the routine ends here"
@@ -2703,6 +2707,18 @@ class Conv(object):
                     out_at_entry.append(guard)
                 else:
                     out_at_entry.insert(where, guard)
+            # The interrupt poll goes AFTER the error bookkeeping, which
+            # is the interpreter's own order: statement, error
+            # bookkeeping, then check_interrupt (MMBasic.c:1852-1879).
+            # Same opener/closer placement rule as the guard above.
+            if self.mode == 'emit' and self.uses_interrupts \
+                    and self.out is out_at_entry and failed is None:
+                poll = ('    ' * ind
+                        + 'if (__mm_int_armed) mm_int_poll();')
+                if self.blocks == blocks_at_entry and len(self.out) > where:
+                    out_at_entry.append(poll)
+                else:
+                    out_at_entry.insert(where, poll)
             self.tmp_used = outer or self.tmp_used
         if failed is not None:
             self.skip_out(where, out_at_entry, ind, blocks_at_entry,
@@ -3270,9 +3286,28 @@ class Conv(object):
                 mode = 'MMG_PIN_ARAW'
             elif self.accept_kw('OFF'):
                 mode = 'MMG_PIN_OFF'
+            elif self.accept_kw('INTH'):
+                mode = 'MMG_PIN_INTH'
+            elif self.accept_kw('INTL'):
+                mode = 'MMG_PIN_INTL'
+            elif self.accept_kw('INTB'):
+                mode = 'MMG_PIN_INTB'
             else:
-                self.err("SETPIN takes DIN, DOUT, AIN, ARAW or OFF")
+                self.err("SETPIN takes DIN, DOUT, AIN, ARAW, "
+                         "INTH, INTL, INTB or OFF")
             self.uses_gpio = True
+            if mode.startswith('MMG_PIN_INT'):
+                # SETPIN pin, INTH|INTL|INTB, handler
+                self.expect_op(',')
+                self.uses_interrupts = True
+                self.emit('mmi_setpin_int(%s, %s, %s);'
+                          % (pin, mode, self.int_handler()))
+                return
+            if mode == 'MMG_PIN_OFF' and self.uses_interrupts:
+                # OFF has to disarm an interrupt as well as reset the
+                # pin.  Only a program that arms one carries this.
+                self.emit('mmi_setpin_off(%s);' % pin)
+                return
             self.emit('mmg_setpin(%s, %s);' % (pin, mode))
             return
         if up == 'PIN' and self.is_op('(', 1):
@@ -4742,6 +4777,33 @@ class Conv(object):
             self.err("bare EXIT is outside any loop, SUB or FUNCTION")
         self.err("unknown EXIT variant")
 
+    def int_handler(self):
+        """Resolve an interrupt target to the C function that is it.
+
+        MMBasic's GetIntAddress (MM_Misc.c:10250) takes a SUB name, a
+        label or a line number.  Only the SUB survives translation:
+        compiled code cannot jump into the middle of a function from a
+        poll site, so labels and line numbers are refused here with a
+        clear message rather than half-working - the ON ERROR RESTART
+        precedent.  The SUB is otherwise an ordinary generated function
+        and may still be called normally."""
+        t = self.nxt()
+        if t[0] != T_ID:
+            self.err("an interrupt handler must be the name of a SUB "
+                     "(MMBasic's labels and line numbers are not "
+                     "translated)")
+        canon, _ = split_suffix(t[1])
+        r = self.routines.get(canon)
+        if r is None:
+            self.err("no SUB called '%s' to handle the interrupt" % t[1])
+        if r.is_func:
+            self.err("'%s' is a FUNCTION; an interrupt handler must be "
+                     "a SUB" % t[1])
+        if r.params:
+            self.err("interrupt handler '%s' must take no parameters"
+                     % t[1])
+        return r.cname
+
     def note_goto(self, canon):
         depth = 0
         for blk in self.blocks:
@@ -5128,6 +5190,10 @@ class Conv(object):
             wr('#include "mmb_gfx_map.h"\n')
         if self.uses_gpio:
             wr('#include "mmb_gpio.h"\n')
+        # After mmb_gpio.h, which it uses to read the pins.  Only a
+        # program that arms an interrupt carries any of it.
+        if self.uses_interrupts:
+            wr('#include "mmb_int.h"\n')
         wr('#include <math.h>\n')
         wr('#include <string.h>\n')
         wr('#include <stdlib.h>\n\n')

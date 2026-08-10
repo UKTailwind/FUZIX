@@ -182,6 +182,20 @@ void statement(void)
         else
             out_insert(out_at_entry, where, guard);
     }
+    /* The interrupt poll goes AFTER the error bookkeeping, which is the
+     * interpreter's own order: statement, error bookkeeping, then
+     * check_interrupt (MMBasic.c:1852-1879).  Same opener/closer
+     * placement rule as the guard above. */
+    if (cv.mode == M_EMIT && cv.uses_interrupts && cv.out == out_at_entry
+        && !failed) {
+        const char *poll =
+            pstr(sfmt("%*sif (__mm_int_armed) mm_int_poll();",
+                      ind * 4, ""));
+        if (cv.nblocks == nblocks_snap && cv.out->n > where)
+            out_append(out_at_entry, poll);
+        else
+            out_insert(out_at_entry, where, poll);
+    }
     cv.tmp_used = outer || cv.tmp_used;
     if (failed)
         skip_out(where, out_at_entry, ind, blocks_snap, nblocks_snap,
