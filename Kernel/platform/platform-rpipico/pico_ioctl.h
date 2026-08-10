@@ -435,6 +435,28 @@ struct psram_stat {
 /* Userland has the same block in <sys/pc3io.h>, which programs include
    for the register access that goes with it; the guard lets a file
    include both in either order. */
+/* One DS3231 register - MMBasic's RTC GETREG / RTC SETREG.
+ *
+ * This is how an ALARM is armed, because MMBasic has no alarm command:
+ * write registers 0x07-0x0A with the match time, then set INTCN and
+ * A1IE in the control register 0x0E, and the chip pulls its INT line
+ * (GP32 on this board) low when the time comes.  SETPIN 32, INTL,
+ * handler then catches it.
+ *
+ * A kernel call rather than /dev/i2c, which refuses 0x68 outright: this
+ * chip is the system clock, so the access shares the kernel's own
+ * retry-and-unwedge path and its busy flag.  One refusal is kept - a
+ * write cannot set EOSC, because stopping a battery-backed oscillator
+ * outlives the power cycle and the machine comes back not knowing the
+ * time.  Everything else is the program's, as it is on a PicoMite. */
+struct rtc_reg {
+	uint8_t reg;			/* 0-255 */
+	uint8_t val;			/* in for a write, out for a read */
+	uint8_t write;			/* 0 = read, 1 = write */
+	uint8_t pad;
+};
+#define PICOIOC_RTCREG	0x0029
+
 #ifndef PC3_PINLOCK_ABI
 #define PC3_PINLOCK_ABI
 

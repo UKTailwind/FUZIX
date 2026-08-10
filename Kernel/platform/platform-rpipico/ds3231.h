@@ -25,4 +25,17 @@ void ds3231_bus_recover(void);
  */
 extern uint8_t i2c0_user_busy;
 
+/*
+ *	One DS3231 register for userland - MMBasic's RTC GETREG/SETREG,
+ *	and the only way to arm an alarm, because MMBasic has no alarm
+ *	command either: you write the alarm registers and the control
+ *	register yourself.  0 on success.
+ *
+ *	Not through /dev/i2c, which refuses 0x68 outright: this is the
+ *	system clock, so the access goes through the kernel's own
+ *	retry-and-unwedge path.  A write cannot set EOSC - stopping a
+ *	battery-backed oscillator outlives the power cycle.
+ */
+int ds3231_user_reg(uint8_t reg, uint8_t *val, int write);
+
 #endif

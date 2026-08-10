@@ -743,6 +743,32 @@ void statement_inner(void)
                   x, y, s, just, font, scale, fc, bc));
         return;
     }
+    if (strcmp(up, "RTC") == 0
+        && (is_kw("GETREG", 1) || is_kw("SETREG", 1))) {
+        /* RTC GETREG reg, var
+           RTC SETREG reg, value
+
+           MMBasic's own pair (I2C.c cmd_rtc), and the way an alarm is
+           armed there - it has no alarm command.  Write the match time
+           into 0x07-0x0A, then INTCN|A1IE into 0x0E, and the chip pulls
+           GP32 low when the time comes. */
+        int get;
+        const char *reg;
+
+        cv.i++;
+        get = accept_kw("GETREG");
+        if (!get)
+            accept_kw("SETREG");
+        reg = as_int(expr());
+        expect_op(",");
+        if (get) {
+            const char *tgt = lvalue_from_here();
+            emit(sfmt("%s = mm_rtcreg(%s, 0, 0);", tgt, reg));
+        } else {
+            emit(sfmt("mm_rtcreg(%s, %s, 1);", reg, as_int(expr())));
+        }
+        return;
+    }
     if (strcmp(up, "SETTICK") == 0) {
         do_settick();
         return;

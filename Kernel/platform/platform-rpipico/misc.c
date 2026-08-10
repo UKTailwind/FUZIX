@@ -329,6 +329,23 @@ int plt_dev_ioctl(uarg_t request, char *data)
             return -1;
         return 0;
     }
+    if (request == PICOIOC_RTCREG)
+    {
+        extern int ds3231_user_reg(uint8_t reg, uint8_t *val, int write);
+        struct rtc_reg rq;
+
+        if (uget(data, &rq, sizeof(rq)))
+            return -1;
+        if (ds3231_user_reg(rq.reg, &rq.val, rq.write != 0)) {
+            udata.u_error = EIO;
+            return -1;
+        }
+        /* The value is copied back either way: a read wants it, and a
+           write that was masked (EOSC) tells the caller what landed. */
+        if (uput(&rq, data, sizeof(rq)))
+            return -1;
+        return 0;
+    }
 #ifdef CONFIG_PC3_PINLOCK
     if (request == PLKIOC_CLAIM || request == PLKIOC_RELEASE ||
         request == PLKIOC_OWNER)

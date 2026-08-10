@@ -25,7 +25,8 @@
 #define DS3231_TIMEOUT_US 20000
 
 #define REG_TIME   0x00 /* sec min hour wday mday month year, BCD */
-#define REG_STATUS 0x0F /* bit 7 = oscillator stop flag */
+#define REG_CONTROL 0x0E /* bit 7 = EOSC (stop), 2 = INTCN, 0 = A1IE */
+#define REG_STATUS 0x0F /* bit 7 = oscillator stop flag, 0 = A1F */
 
 /* What userland's struct cmos_rtc actually looks like on ARM: its time_t
  * is int64_t, so the data union is 8-aligned (offset 8, total 16 bytes).
@@ -281,4 +282,48 @@ void ds3231_init(void)
     if (st & 0x80)
         kputs("DS3231 RTC: oscillator was stopped, time needs setting (setdate -w)\n");
     inittod();
+}
+
+/*
+ *	One register, read or written, for userland.
+ *
+ *	This is MMBasic's RTC GETREG / RTC SETREG (I2C.c cmd_rtc), and it
+ *	is how an ALARM is armed there: write the alarm registers 0x07 to
+ *	0x0A, then set INTCN and A1IE in the control register 0x0E, and
+ *	the DS3231 pulls its INT line - GP32 here - low when the time
+ *	matches.  There is no separate alarm command to copy because
+ *	MMBasic does not have one.
+ *
+ *	It has to be a kernel call rather than /dev/i2c: that driver
+ *	refuses address 0x68 outright, because the chip is the system
+ *	clock and a program writing its registers blind could stop it.
+ *	Here the writes go through the same retry-and-unwedge path as the
+ *	kernel's own, with one refusal kept.
+ *
+ *	EOSC - bit 7 of the control register - is masked out of a write.
+ *	Setting it stops the oscillator, and on a part with a battery that
+ *	is not a mistake that ends at the next power cycle: the clock
+ *	stays stopped until something clears it, and the machine boots
+ *	with no idea what time it is.  Everything else, including the time
+ *	itself and the whole alarm block, is the program's to change - as
+ *	it is on a PicoMite.
+ */
+int ds3231_user_reg(uint8_t reg, uint8_t *val, int write)
+{
+    int r;
+
+    if (!rtc_present)
+        return -1;
+    i2c0_user_busy = 1;
+    if (write) {
+        uint8_t v = *val;
+
+        if (reg == REG_CONTROL)
+            v &= (uint8_t)~0x80;        /* never stop the oscillator */
+        r = ds3231_write_regs(reg, &v, 1);
+    } else {
+        r = ds3231_read_regs(reg, val, 1);
+    }
+    i2c0_user_busy = 0;
+    return r;
 }

@@ -117,7 +117,7 @@ const struct mmb_keyword commandtbl[] = {
     { "SYNC", 0 },
     { "I2C", 0 },
     { "I2C2", 0 },
-    { "RTC", 0 },
+    { "RTC", 1 },
     { "Math", 1 },
     { "Memory", 0 },
     { "Option", 1 },

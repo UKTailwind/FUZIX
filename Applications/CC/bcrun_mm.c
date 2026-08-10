@@ -321,6 +321,9 @@ static void w_us(void)           { A = mm_us(); }
    does not want stays queued for INKEY$. */
 static void w_key_peek(void)     { A = mm_key_peek(); }
 static void w_key_drop(void)     { mm_key_drop(); A = 0; }
+/* RTC GETREG/SETREG - one DS3231 register, through the kernel because
+   /dev/i2c refuses the clock's own address. */
+static void w_rtcreg(void)       { A = mm_rtcreg(I(0), I(1), I(2)); }
 static void w_errno(void)    { A = mm_errno(); }
 /* through a scratch temp: MM.ERRMSG$ lives in bcrun's own memory, and a
    program can only be handed a pointer inside the VM's address space */
@@ -620,6 +623,7 @@ static const struct mmwrap {
 	{ "mm_us",		w_us },
 	{ "mm_key_peek",	w_key_peek },
 	{ "mm_key_drop",	w_key_drop },
+	{ "mm_rtcreg",	w_rtcreg },
 	{ "mm_errno",		w_errno },
 	{ "mm_errmsg",		w_errmsg },
 	{ "mm_pr_commit",	w_pr_commit },

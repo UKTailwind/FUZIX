@@ -1573,12 +1573,43 @@ PRINT PIN(32)                     ' 1 = not asserted
 SETPIN 32, INTL, WakeUp, PULLUP   ' fires when it does assert
 ```
 
-**Nothing can arm the alarm yet.** Setting a DS3231 alarm means
-writing its registers, and `/dev/i2c` refuses address 0x68 to protect
-the system clock from a program that could stop the oscillator on a
-battery-backed part. So this pin will read and interrupt correctly, and
-until the kernel offers a way to set the alarm there is nothing to make
-it fire. It is wired and reachable; it is not yet useful on its own.
+### Arming the alarm
+
+MMBasic has no alarm command — a program writes the chip's registers,
+and so does this:
+
+```basic
+SUB Alarm
+  hits = hits + 1
+  RTC SETREG 15, 0            ' clear the flag, or it never fires again
+END SUB
+
+RTC SETREG 7, 128             ' alarm 1 masks: match nothing = every second
+RTC SETREG 8, 128
+RTC SETREG 9, 128
+RTC SETREG 10, 128
+RTC SETREG 15, 0              ' clear any stale flag
+RTC SETREG 14, 5              ' INTCN | A1IE - drive INT, enable alarm 1
+
+SETPIN 32, INTL, Alarm, PULLUP
+```
+
+`RTC GETREG reg, var` and `RTC SETREG reg, value` reach any of the
+DS3231's registers, which is MMBasic's own interface (it has `GETREG`
+and `SETREG` and no alarm command). Register 7–10 are alarm 1, 0x0E is
+control, 0x0F is status. The chip's data sheet is the reference.
+
+**Your handler must clear the alarm flag.** The INT line stays low until
+it is, so an alarm that does not clear it fires once and then looks
+broken.
+
+Two things this cannot do. It will not stop the oscillator — a write to
+the control register comes back with `EOSC` masked out, because on a
+battery-backed part a stopped clock outlives the power cycle and the
+machine boots not knowing the time. And it is not `/dev/i2c`: that
+driver refuses address 0x68 outright, so this goes through the kernel's
+own path to the chip, sharing the retry and recovery the system clock
+already relies on.
 
 On a **Pico Computer 2** GP32 is the SD card's MISO instead, so the same
 kernel refuses to hand it out there — the board tells itself apart at
@@ -2221,11 +2252,12 @@ translate time, not at run time.
 | `OPTION` | `PAUSE` | `PIN` | `PIXEL` |
 | `PLAY` | `PRINT` | `PWM` | `RANDOMIZE` |
 | `RBOX` | `READ` | `RENAME` | `RESTORE` |
-| `RETURN` | `RMDIR` | `SAVE` | `SEEK` |
-| `SELECT` | `SERVO` | `SETPIN` | `SETTICK` |
-| `SORT` | `STATIC` | `STRUCT` | `SUB` |
-| `SYSTEM` | `TEXT` | `TIME$` | `TIMER` |
-| `TRIANGLE` | `TYPE` | `WEND` | `WHILE` |
+| `RETURN` | `RMDIR` | `RTC` | `SAVE` |
+| `SEEK` | `SELECT` | `SERVO` | `SETPIN` |
+| `SETTICK` | `SORT` | `STATIC` | `STRUCT` |
+| `SUB` | `SYSTEM` | `TEXT` | `TIME$` |
+| `TIMER` | `TRIANGLE` | `TYPE` | `WEND` |
+| `WHILE` |  |  |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
