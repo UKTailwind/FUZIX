@@ -1629,7 +1629,57 @@ Measured on the board: twenty ticks of 100 ms took **1999.98 ms**, and a
 10 ms timer running beside a 50 ms one fired exactly 100 times in the
 second the slow one took to reach twenty.
 
-That last figure is the one **deliberate divergence** from MMBasic, and
+## `ON KEY` — the console
+
+```basic
+SUB AnyKey
+  k$ = INKEY$                  ' the key is still there for you
+END SUB
+
+SUB QuitKey                    ' fires on "q" only, and eats it
+  finished = 1
+END SUB
+
+ON KEY AnyKey                  ' any key
+ON KEY 113, QuitKey            ' just this one
+ON KEY 113, 0                  ' that one off
+ON KEY 0                       ' the any-key one off
+```
+
+Two forms, and **what happens to the key is the difference between
+them** — this is MMBasic's design, not an accident of ours:
+
+* `ON KEY handler` fires while a key is *waiting*, and the key stays
+  waiting. Your handler reads it with `INKEY$`. If it doesn't, the
+  handler fires again at the next statement, because the key is still
+  there.
+* `ON KEY code, handler` fires only on that character code, and
+  **consumes** it. It never reaches `INKEY$`, so a key reserved for a
+  hot-key handler cannot also turn up in the program's ordinary input.
+
+The specific form is checked first, so with both armed the reserved key
+goes to its own handler and everything else goes to the general one.
+
+Two things to know before relying on it:
+
+**The console is checked at most every 5 ms**, not after every
+statement. Looking is a system call, and a poll site runs after every
+statement; checking each time would cost far more than most statements
+do. Five milliseconds is the kernel's own tick and far below what anyone
+can type or perceive, but it is a divergence from MMBasic, which looks
+every time.
+
+**Keys arrive a line at a time, not a keystroke at a time.** The console
+is line-buffered, so nothing is delivered until Enter is pressed — and
+then the whole line arrives at once and the handler fires for each
+character in turn. This is not new to `ON KEY`: `INKEY$` has always
+behaved this way here. It means `ON KEY` is usable for
+*command-at-a-time* input and not yet for the twitch response a game
+wants. Fixing it is a change to the tty driver, not to BASIC.
+
+## Timers and the deliberate divergence
+
+The 100 ms figure above is the one **deliberate divergence** from MMBasic, and
 it is in your favour. MMBasic counts milliseconds in an interrupt and
 fires when the count is *greater than* the period, so a `SETTICK 100`
 there actually runs at 101 ms and a 16 ms game timer at 17 ms — about
@@ -2036,10 +2086,10 @@ translate time, not at run time.
 | `PLAY` | `PRINT` | `RANDOMIZE` | `RBOX` |
 | `READ` | `RENAME` | `RESTORE` | `RETURN` |
 | `RMDIR` | `SAVE` | `SEEK` | `SELECT` |
-| `SETPIN` | `SORT` | `STATIC` | `STRUCT` |
-| `SUB` | `SYSTEM` | `TEXT` | `TIME$` |
-| `TIMER` | `TRIANGLE` | `TYPE` | `WEND` |
-| `WHILE` |  |  |  |
+| `SETPIN` | `SETTICK` | `SORT` | `STATIC` |
+| `STRUCT` | `SUB` | `SYSTEM` | `TEXT` |
+| `TIME$` | `TIMER` | `TRIANGLE` | `TYPE` |
+| `WEND` | `WHILE` |  |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -2221,7 +2271,18 @@ Of the pins, `SETPIN n, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|OFF`,
 `PIN(n) =` and `PIN(n)` are done; the frequency and counting modes of
 `SETPIN` are not. Interrupt handlers must be SUBs — MMBasic's label and
 line-number targets are refused, and with them `IRETURN`, which a SUB
-handler never needs. `SETTICK` and `ON KEY` are not translated yet. The analogue pair need an ADC pin (GP40–GP46 here), and `AIN` uses
+handler never needs.
+
+Of the interrupts, `SETPIN INTH|INTL|INTB`, `SETTICK` (all four timers,
+`PAUSE`, `RESUME`, off) and `ON KEY` (both forms) are done. They are
+MMBasic's poll, checked between statements, with its priority order and
+its no-nesting rule. Three divergences, all named where they are
+described: `SETTICK` fires at the period asked for rather than MMBasic's
+period-plus-a-millisecond; the console is checked at most every 5 ms;
+and keys reach a program only when a line is complete, which is the tty
+driver's doing and limits `ON KEY` to command-at-a-time input.
+`ON PS2`, `INTERRUPT`, `PID` and `SENSORFUSION` have nothing to notify
+on this machine. The analogue pair need an ADC pin (GP40–GP46 here), and `AIN` uses
 MMBasic's own ten-sample sort-and-discard filter. `PIN()` returns a
 float in every mode rather than MMBasic's integer for digital and
 `ARAW`, and pins are *owned*: `SETPIN` claims from the kernel, only the

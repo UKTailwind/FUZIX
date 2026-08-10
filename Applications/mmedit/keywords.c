@@ -127,7 +127,7 @@ const struct mmb_keyword commandtbl[] = {
     { "Time$", 1 },
     { "IReturn", 0 },
     { "Poke", 0 },
-    { "SetTick", 0 },
+    { "SetTick", 1 },
     { "WatchDog", 0 },
     { "CPU", 0 },
     { "Sort", 1 },

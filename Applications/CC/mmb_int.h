@@ -87,6 +87,30 @@ static struct {
  *	entirely for a program that only uses pins. */
 static int mm_ntick_armed;
 
+/*	ON KEY, both forms.
+ *
+ *	The any-key form fires while a key is WAITING and leaves it there
+ *	for INKEY$ inside the handler; the specific form fires on one code
+ *	and EATS it.  That asymmetry is MMBasic's (PicoMite.c:932-935,
+ *	where the console interrupt consumes the selected key and lets
+ *	every other one through) and it is the whole point of the pair.
+ */
+static mm_int_fn mm_key_any_fn;
+static mm_int_fn mm_key_sel_fn;
+static int mm_key_sel;			/* the code the specific form wants */
+
+/*	Looking at the console is a SYSCALL - termios and a read - and a
+ *	poll site runs after every statement, so checking each time would
+ *	cost more than most statements do.  It is checked at most once per
+ *	MM_INT_CON_US instead, timed off the clock that is already here.
+ *
+ *	5 ms is the kernel's own tick and far below anything a person can
+ *	type or notice, so the worst added latency is invisible; it is
+ *	named as a divergence anyway, because it IS one - MMBasic looks
+ *	every statement. */
+#define MM_INT_CON_US	5000
+static long long mm_key_next;		/* earliest us at which to look */
+
 /*	Non-zero when anything is armed.  The per-statement poll site is
  *	"if (__mm_int_armed) mm_int_poll();", so a program that has armed
  *	nothing yet pays one global load and a not-taken branch. */
@@ -246,8 +270,38 @@ MMG_FN void mmi_settick_pause(MMINTEGER id, MMINTEGER on)
 	}
 }
 
+/*	ON KEY handler   /   ON KEY 0   (off) */
+MMG_FN void mmi_onkey_any(mm_int_fn fn)
+{
+	if (fn && !mm_key_any_fn)
+		__mm_int_armed++;
+	else if (!fn && mm_key_any_fn)
+		__mm_int_armed--;
+	mm_key_any_fn = fn;
+}
+
+/*	ON KEY code, handler   /   ON KEY code, 0   /   ON KEY 0, ... (off)
+ *
+ *	MMBasic takes 0-255 and treats a zero code, or a zero handler, as
+ *	turning it off. */
+MMG_FN void mmi_onkey_sel(MMINTEGER code, mm_int_fn fn)
+{
+	if (code < 0 || code > 255) {
+		mm_error("Invalid key code");
+		return;
+	}
+	if (code == 0)
+		fn = 0;
+	if (fn && !mm_key_sel_fn)
+		__mm_int_armed++;
+	else if (!fn && mm_key_sel_fn)
+		__mm_int_armed--;
+	mm_key_sel_fn = fn;
+	mm_key_sel = (int)code;
+}
+
 /*
- *	check_interrupt + checkdetailinterrupts: pins, then ticks.
+ *	check_interrupt + checkdetailinterrupts: keys, pins, then ticks.
  *
  *	ONE dispatch per call, as MMBasic does: the first hit wins and the
  *	next statement boundary picks up the next one.  The scan order is
@@ -264,6 +318,41 @@ MMG_FN void mm_int_poll(void)
 
 	if (__mm_in_int)
 		return;
+
+	/*	Keys FIRST, and the specific form before the any-key one -
+	 *	checkdetailinterrupts' order (MM_Misc.c:9892-9903). */
+	if (mm_key_any_fn || mm_key_sel_fn) {
+		long long now = MMI_US();
+
+		if (now >= mm_key_next) {
+			int c;
+
+			mm_key_next = now + MM_INT_CON_US;
+			c = (int)mm_key_peek();
+			if (c) {
+				if (mm_key_sel_fn && c == mm_key_sel) {
+					/*	The selected key is EATEN -
+					 *	it never reaches INKEY$,
+					 *	which is what tells the two
+					 *	forms apart. */
+					mm_key_drop();
+					mm_int_fire(mm_key_sel_fn);
+					return;
+				}
+				if (mm_key_any_fn) {
+					/*	Left where it is: the
+					 *	handler reads it with
+					 *	INKEY$, and if it does not,
+					 *	this fires again - which is
+					 *	MMBasic's behaviour, not an
+					 *	oversight. */
+					mm_int_fire(mm_key_any_fn);
+					return;
+				}
+			}
+		}
+	}
+
 	for (i = 0; i < mm_ipin_n; i++) {
 		v = pc3_pin_get((int)mm_ipins[i].pin);
 		last = mm_ipins[i].last;

@@ -2863,9 +2863,83 @@ static int mm_esc_decode(void)
 }
 #endif
 
+/*
+ * Decoded keys waiting to be read, in front of mm_kq's raw bytes.
+ *
+ * ON KEY's SPECIFIC form has to look at a key to know whether it is the
+ * one - and MMBasic's console ISR consumes the selected key so it never
+ * reaches the buffer, while everything else does reach it
+ * (PicoMite.c:932-935).  There is no ISR here, so the poll decodes a key
+ * and, when it does not match, leaves it HERE for INKEY$ to find.  That
+ * is what keeps the two forms' promises: the selected key vanishes, any
+ * other key is still there for the program.
+ *
+ * Eight is generous: the poll never stacks them up, because it peeks at
+ * what is already waiting rather than decoding another.
+ */
+static int mm_kfifo[8];
+static int mm_kfn;
+
+/* The next decoded key without consuming it, or 0 for none.  Decodes one
+ * from the console only when the queue is empty. */
+MMINTEGER mm_key_peek(void)
+{
+    unsigned mark;
+    char *s;
+    int c;
+
+    if (mm_kfn)
+        return mm_kfifo[0];
+
+    /*
+     * WIND THE SCRATCH BACK.  mm_inkey returns a string, which costs a
+     * scratch slot, and this is called from the interrupt poll - after
+     * the statement's own release, and again a few milliseconds later,
+     * for as long as the program runs.  Leaving the slot behind empties
+     * the pool: "String expression too complex" out of a program with
+     * no string expression in it, which is exactly how it presented.
+     *
+     * The key is copied into the queue below first, so nothing points
+     * into the scratch by the time it is given back.
+     */
+    mark = mm_mark();
+    s = mm_inkey();
+    c = s[0] ? (unsigned char)s[1] : 0;
+    mm_release(mark);
+
+    if (!c)
+        return 0;
+    mm_kfifo[mm_kfn++] = c;
+    return mm_kfifo[0];
+}
+
+/* Take the peeked key away - ON KEY's selected key is consumed. */
+void mm_key_drop(void)
+{
+    int i;
+
+    if (!mm_kfn)
+        return;
+    for (i = 1; i < mm_kfn; i++)
+        mm_kfifo[i - 1] = mm_kfifo[i];
+    mm_kfn--;
+}
+
 char *mm_inkey(void)
 {
     char *t = mm_tmp();
+
+    /* Anything the ON KEY poll decoded and did not want comes back
+     * first, in order, ahead of the console itself. */
+    if (mm_kfn) {
+        int i;
+        t[0] = 1;
+        t[1] = (char)mm_kfifo[0];
+        for (i = 1; i < mm_kfn; i++)
+            mm_kfifo[i - 1] = mm_kfifo[i];
+        mm_kfn--;
+        return t;
+    }
 
 #if defined(_WIN32)
     if (_kbhit()) {
