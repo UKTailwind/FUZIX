@@ -324,6 +324,13 @@ static void w_key_drop(void)     { mm_key_drop(); A = 0; }
 /* RTC GETREG/SETREG - one DS3231 register, through the kernel because
    /dev/i2c refuses the clock's own address. */
 static void w_rtcreg(void)       { A = mm_rtcreg(I(0), I(1), I(2)); }
+/* I2C2 - the second controller.  Pa(2) is the caller's buffer; the
+   transfer is one whole transaction, which is why this stays a syscall
+   (300us of bus against a 1.5us crossing). */
+static void w_i2c_open(void)     { A = mm_i2c_open(I(0), I(1), I(2)); }
+static void w_i2c_close(void)    { mm_i2c_close(); A = 0; }
+static void w_i2c_xfer(void)
+{ A = mm_i2c_xfer(I(0), I(1), I(2), (unsigned char *)Pa(3)); }
 static void w_errno(void)    { A = mm_errno(); }
 /* through a scratch temp: MM.ERRMSG$ lives in bcrun's own memory, and a
    program can only be handed a pointer inside the VM's address space */
@@ -624,6 +631,9 @@ static const struct mmwrap {
 	{ "mm_key_peek",	w_key_peek },
 	{ "mm_key_drop",	w_key_drop },
 	{ "mm_rtcreg",	w_rtcreg },
+	{ "mm_i2c_open",	w_i2c_open },
+	{ "mm_i2c_close",	w_i2c_close },
+	{ "mm_i2c_xfer",	w_i2c_xfer },
 	{ "mm_errno",		w_errno },
 	{ "mm_errmsg",		w_errmsg },
 	{ "mm_pr_commit",	w_pr_commit },

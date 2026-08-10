@@ -648,6 +648,13 @@ void mm_key_drop(void);
  * Arming an alarm is writing these registers, which is what MMBasic
  * does too - it has no alarm command either. */
 MMINTEGER mm_rtcreg(MMINTEGER reg, MMINTEGER val, MMINTEGER write);
+/* I2C2 - the second controller on header pins.  open assigns the pins
+ * and starts it; xfer is one whole transaction, read or write, with no
+ * repeated START (the kernel interface has none).  0 on success. */
+MMINTEGER mm_i2c_open(MMINTEGER sda, MMINTEGER scl, MMINTEGER khz);
+MMINTEGER mm_i2c_xfer(MMINTEGER addr, MMINTEGER read, MMINTEGER n,
+                      unsigned char *buf);
+void mm_i2c_close(void);
 void mm_on_error(int mode, MMINTEGER n);   /* 0 abort 1 clear 2 ignore 3 skip */
 /* Write or discard the PRINT line held while armed - the statement
  * guard calls it at the end of every statement.  See mm_putc. */

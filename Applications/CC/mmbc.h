@@ -338,6 +338,7 @@ struct conv {
        program or none of it */
     int uses_interrupts;
     int uses_pwm;
+    int uses_i2c;
     int uses_cmdline;          /* MM.CMDLINE$: main takes argv */
     /* set by global_decls when the program has any array or string:
      * main() then has to allocate the block they live in */

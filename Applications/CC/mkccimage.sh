@@ -93,6 +93,8 @@ echo "--- installing"
 	echo "get $CC/mmb_int.h mmb_int.h"
 	# PWM: MMBasic's wrap-and-duty arithmetic and the slice mapping.
 	echo "get $CC/mmb_pwm.h mmb_pwm.h"
+	# I2C2 - the second controller, on header pins.
+	echo "get $CC/mmb_i2c.h mmb_i2c.h"
 	# The pin and ADC REGISTERS, which mmb_gpio.h reaches for directly
 	# now that pin work is not a syscall.  Flat, because that is the
 	# only shape this include directory has; a native program gets the

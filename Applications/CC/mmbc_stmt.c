@@ -16,6 +16,7 @@ static char *prcall(const char *chan, const char *what, const char *arg);
 static const char *int_handler(void);
 static const char *setpin_pull(void);
 static void do_settick(void);
+static void do_i2c2(void);
 static void do_on_key(void);
 static const char *int_target(void);
 static void do_longstring(void);
@@ -769,6 +770,10 @@ void statement_inner(void)
         }
         return;
     }
+    if (strcmp(up, "I2C2") == 0) {
+        do_i2c2();
+        return;
+    }
     if (strcmp(up, "SETTICK") == 0) {
         do_settick();
         return;
@@ -872,8 +877,21 @@ void statement_inner(void)
             cv.uses_pwm = 1;
         }
         else {
-            cv_err("SETPIN takes DIN, DOUT, AIN, ARAW, "
-                   "INTH, INTL, INTB, PWM or OFF");
+            /* SETPIN sda, scl, I2C2 - the pin-PAIR form, which is how
+               the second I2C controller gets pins at all.  Reached here
+               because what followed the comma was not a mode word but
+               another pin. */
+            const char *scl = as_int(expr());
+
+            expect_op(",");
+            if (!accept_kw("I2C2")) {
+                cv_err("SETPIN takes DIN, DOUT, AIN, ARAW, "
+                       "INTH, INTL, INTB, PWM or OFF, or a pin pair "
+                       "followed by I2C2");
+                return;
+            }
+            cv.uses_i2c = 1;
+            emit(sfmt("__mmi2c_sda = %s; __mmi2c_scl = %s;", pin, scl));
             return;
         }
         cv.uses_gpio = 1;
@@ -1302,6 +1320,83 @@ static void do_on_key(void)
     if (!fn)
         return;
     emit(sfmt("mmi_onkey_sel(%s, %s);", code, fn));
+}
+
+/* mmb2c.py's do_i2c2.
+
+     I2C2 OPEN speed, timeout
+     I2C2 WRITE addr, option, count, d1 [, d2 ...]
+     I2C2 READ  addr, option, count, array()
+     I2C2 CLOSE
+
+   The second controller, on whatever header pins SETPIN gave it.
+   MMBasic's split: the fixed bus needs no OPEN because it has fixed
+   pins, and this one does because it has none. */
+static void do_i2c2(void)
+{
+    const char *addr, *opt, *n;
+    int wr;
+
+    cv.i++;
+    cv.uses_i2c = 1;
+    if (accept_kw("CLOSE")) {
+        emit("mmi2c_close();");
+        return;
+    }
+    if (accept_kw("OPEN")) {
+        const char *speed = as_int(expr());
+        const char *tmo;
+        expect_op(",");
+        tmo = as_int(expr());
+        emit(sfmt("mmi2c_open(__mmi2c_sda, __mmi2c_scl, %s, %s);",
+                  speed, tmo));
+        return;
+    }
+    wr = accept_kw("WRITE");
+    if (!wr && !accept_kw("READ")) {
+        cv_err("I2C2 takes OPEN, WRITE, READ or CLOSE");
+        return;
+    }
+    addr = as_int(expr());
+    expect_op(",");
+    opt = as_int(expr());
+    expect_op(",");
+    n = as_int(expr());
+    expect_op(",");
+    cv.tmp_used = 1;
+    if (wr) {
+        /* A list of values, each one byte.  MMBasic also takes an array
+           or a string here; the list is what a register write actually
+           looks like and is what this does. */
+        const char *v[64];
+        int nv = 0, i;
+        char *s;
+
+        v[nv++] = as_int(expr());
+        while (accept_op(",") && nv < 64)
+            v[nv++] = as_int(expr());
+        s = sfmt("{ unsigned char __b[%d];", nv);
+        for (i = 0; i < nv; i++)
+            s = sfmt("%s __b[%d] = (unsigned char)(%s);", s, i, v[i]);
+        emit(s);
+        emit(sfmt("  mmi2c_write(%s, %s, %s, __b); }", addr, opt, n));
+    } else {
+        /* Into an integer array, which is what a multi-byte read wants
+           and what MMBasic's own examples use. */
+        struct sym *sy = arrayref(1);
+        const char *base;
+
+        if (sy->ty == TY_S) {
+            cv_err(sfmt("I2C2 READ needs a numeric array, and '%s' is a "
+                        "string array", sy->name));
+            return;
+        }
+        base = array_flat(sy).ptr;
+        emit("{ unsigned char __b[MMI2C_MAXLEN]; int __i;");
+        emit(sfmt("  mmi2c_read(%s, %s, %s, __b);", addr, opt, n));
+        emit(sfmt("  for (__i = 0; __i < (int)(%s); __i++)", n));
+        emit(sfmt("    (%s)[__i] = __b[__i]; }", base));
+    }
 }
 
 /* mmb2c.py's settick_id.  SETTICK's optional trailing timer number,

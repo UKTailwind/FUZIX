@@ -329,6 +329,31 @@ int plt_dev_ioctl(uarg_t request, char *data)
             return -1;
         return 0;
     }
+#ifdef CONFIG_DEV_I2C
+    if (request == PICOIOC_I2COPEN)
+    {
+        extern int plt_i2c_open(uint8_t bus, uint8_t sda, uint8_t scl,
+                                uint32_t khz);
+        struct i2c_open rq;
+        int r;
+
+        if (uget(data, &rq, sizeof(rq)))
+            return -1;
+        r = plt_i2c_open(rq.bus, rq.sda, rq.scl, rq.khz);
+        if (r) {
+            udata.u_error = -r;
+            return -1;
+        }
+        return 0;
+    }
+    if (request == PICOIOC_I2CCLOSE)
+    {
+        extern void plt_i2c_close(uint8_t bus);
+
+        plt_i2c_close((uint8_t)(intptr_t)data);
+        return 0;
+    }
+#endif
     if (request == PICOIOC_RTCREG)
     {
         extern int ds3231_user_reg(uint8_t reg, uint8_t *val, int write);

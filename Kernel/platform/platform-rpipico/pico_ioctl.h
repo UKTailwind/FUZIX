@@ -449,6 +449,33 @@ struct psram_stat {
  * write cannot set EOSC, because stopping a battery-backed oscillator
  * outlives the power cycle and the machine comes back not knowing the
  * time.  Everything else is the program's, as it is on a PicoMite. */
+/* Open the SECOND I2C controller on a pair of header pins - MMBasic's
+ * I2C2, which is why it needs opening at all: the fixed bus (I2C0,
+ * GP20/21, the QWIIC socket) is always there and needs no OPEN, while
+ * this one has no pins until a program says which.
+ *
+ * The pins must be an SDA/SCL pair the RP2350 can actually mux to I2C1:
+ * SDA where (pin & 3) == 2 and SCL where (pin & 3) == 3.  On the PC3's
+ * header that is GP38/GP39 and GP42/GP43.
+ *
+ * Transfers then go through the ordinary I2C_MSG ioctl on /dev/i2c with
+ * bus = 1.  THAT stays a syscall on purpose: a transaction is ~300us of
+ * bus time, so the 1.5us crossing is half a percent - the argument that
+ * moved pin work to userland does not apply here, and the SDK's
+ * controller code is proven where a hand-written one would not be.
+ *
+ * The pins are claimed through the pin lock, so they come back on exit
+ * like any other, and the controller is released with them. */
+struct i2c_open {
+	uint8_t bus;			/* 1; bus 0 is the fixed one */
+	uint8_t sda;
+	uint8_t scl;
+	uint8_t pad;
+	uint32_t khz;			/* 100, 400 or 1000 */
+};
+#define PICOIOC_I2COPEN	0x002A
+#define PICOIOC_I2CCLOSE 0x002B		/* uint8_t bus */
+
 struct rtc_reg {
 	uint8_t reg;			/* 0-255 */
 	uint8_t val;			/* in for a write, out for a read */
