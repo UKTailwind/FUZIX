@@ -1669,13 +1669,28 @@ do. Five milliseconds is the kernel's own tick and far below what anyone
 can type or perceive, but it is a divergence from MMBasic, which looks
 every time.
 
-**Keys arrive a line at a time, not a keystroke at a time.** The console
-is line-buffered, so nothing is delivered until Enter is pressed — and
+**Keys arrive a line at a time, not a keystroke at a time — and this is
+a defect, not a design.** Nothing is delivered until Enter is pressed;
 then the whole line arrives at once and the handler fires for each
-character in turn. This is not new to `ON KEY`: `INKEY$` has always
-behaved this way here. It means `ON KEY` is usable for
-*command-at-a-time* input and not yet for the twitch response a game
-wants. Fixing it is a change to the tty driver, not to BASIC.
+character in turn.
+
+The cause is the console's **line editor** (the thing that gives you
+history and cursor keys at the shell prompt). It takes every keystroke
+while the terminal is in cooked mode with echo, holds it in its own
+buffer, and hands the finished line to the system only when you press
+Enter. `INKEY$` switches the terminal to raw mode for the few
+microseconds of one read and switches it straight back — far too brief a
+window for a key that was typed at any other moment, which is all of
+them. So the key is already in the editor's buffer, and the read finds
+nothing.
+
+This is not new to `ON KEY`: **`INKEY$` has never seen a keystroke at
+this console**, and nothing had exercised it hard enough to notice.
+Until it is fixed, `ON KEY` is usable for command-at-a-time input and
+not for the twitch response a game wants. The fix belongs in the
+runtime — a program that wants keystrokes should hold the terminal in
+raw mode rather than flipping per call, which is exactly what the other
+raw-mode programs on this machine (BBC BASIC, the editors) already do.
 
 ## Timers and the deliberate divergence
 
