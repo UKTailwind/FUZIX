@@ -341,8 +341,20 @@ int main(int argc, char *argv[])
 		av[0] = (char *) cppcmd;
 		av[1] = "-E";
 		av[2] = incpath;
-		av[3] = src;
-		av[4] = NULL;
+		/*
+		 * This compiler only ever targets the machine it is running
+		 * on, so it says so.  Headers that have to choose between
+		 * real hardware and a host stub - mmb_gpio.h picking the pin
+		 * REGISTERS over a do-nothing stub - otherwise have nothing
+		 * to test: the cross builds define MM_PC3 for bcrun and
+		 * MM_FCC for the host gates, and until now the on-board cc
+		 * defined neither.  A generated program then compiled, ran,
+		 * and drove no pins at all, which is the worst way for this
+		 * to be wrong.
+		 */
+		av[3] = "-DMM_PC3";
+		av[4] = src;
+		av[5] = NULL;
 		run(av, NULL, ppfile);
 	} else {
 		fprintf(stderr, "cc: no %s - compiling without the "

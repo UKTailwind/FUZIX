@@ -254,8 +254,10 @@ This release gives the machine music, pins, and MMBasic's own text.
   program you interrupted. A translated BASIC benchmark still runs at
   **89% of full speed** with music playing.
 * **`SETPIN` and `PIN`** — all forty-eight GPIOs of the RP2350B, not
-  the 28 an RP2040 has. `SETPIN n, DIN|DOUT`, `PIN(n) = v` and the
-  `PIN(n)` function.
+  the 28 an RP2040 has. `SETPIN n, DIN|DOUT|AIN|ARAW|OFF`, `PIN(n) = v`
+  and the `PIN(n)` function, with analogue in volts or raw counts. Pins
+  are owned, and come back reset when your program ends; and a pin read
+  or write is a register access, not a system call.
 * **`TEXT`, `FONT` and all nine of MMBasic's fonts**, held in flash so
   they cost no RAM at all. `TEXT` takes the full alignment and scale
   arguments.
@@ -1428,6 +1430,11 @@ SETPIN 2, DOUT
 SETPIN 3, DIN
 PIN(2) = 1
 IF PIN(3) = 1 THEN PRINT "high"
+
+SETPIN 41, AIN                  ' analogue, in volts
+PRINT PIN(41)                   '   1.677936508
+SETPIN 41, ARAW                 ' analogue, raw
+PRINT PIN(41)                   '   2090
 ```
 
 All **forty-eight** GPIOs of the RP2350B are available — the wider part
@@ -1439,15 +1446,61 @@ GPIO number is what the schematic, the kernel, and every other tool on
 this machine use, and inventing a second numbering for one statement
 would cause more confusion than the incompatibility does.
 
-`SETPIN` takes `DIN` and `DOUT`. MMBasic's other modes — analogue,
-frequency, counting, interrupts — are not translated, and are reported
-by name.
+`SETPIN` takes:
 
-**Nothing stops you claiming a pin that is already in use**: there is
-no reservation list, so `SETPIN 10, DOUT` will happily take a pin the
-audio hardware is driving and the results will be exactly as bad as
-that sounds. Appendix A lists what the board uses. A pin number outside
-0–47 gives `Invalid pin`.
+| mode | what the pin becomes |
+|---|---|
+| `DIN`  | a digital input, floating (no pull-up or pull-down) |
+| `DOUT` | a digital output, driven by `PIN(n) = v` |
+| `AIN`  | an analogue input read as **volts** |
+| `ARAW` | an analogue input read as the **raw 0–4095 count** |
+| `OFF`  | not configured |
+
+MMBasic's remaining modes — frequency, counting, interrupts — are not
+translated, and are reported by name.
+
+`AIN` and `ARAW` need an ADC pin: on the RP2350B channel *n* is
+GP40+*n*, so **GP40–GP46** on the I/O header. Anything else gives
+`Pin cannot do that`.
+
+The two analogue modes differ only in what `PIN()` gives back. `ARAW`
+is a single conversion, which is what you want when you are going to do
+your own filtering or you care about speed. `AIN` is MMBasic's filter,
+step for step: ten readings, sorted, the top two and bottom two thrown
+away, and the remaining six averaged and scaled by 3.3 V. The point of
+it is the *discard* — one wild sample is dropped rather than smeared
+across the answer, which plain averaging would do. (MMBasic's
+`OPTION VCC` is not supported, so the scale is always 3.3 V.)
+
+`PIN()` returns a **float in every mode**, where MMBasic returns an
+integer for digital pins and `ARAW`. Nothing observable changes —
+`PRINT PIN(2)` still prints `1`, and comparisons and array indices
+behave the same — because a double holds 0, 1 and every 12-bit count
+exactly. The reason is that translated C has to know the type when it
+is generated, and nothing at that point knows what mode a pin will be
+in.
+
+**Pins are now owned.** `SETPIN` claims the pin from the kernel, and
+claiming one that another program holds gives `Pin cannot do that`
+rather than quietly fighting over it. The claim is released — and the
+pin **reset to an input** — when your program ends, however it ends,
+including being killed or crashing. So a program that dies driving a
+relay does not leave it driven.
+
+Only the I/O header can be claimed: **GP0–GP7, GP26 and GP34–GP46**.
+The rest belong to the board (display, SD card, PSRAM, sound, console,
+the DS3231), and asking for one gives `Pin cannot do that` instead of
+taking a pin the audio hardware is driving. Appendix A lists what the
+board uses. A pin number outside 0–47 gives `Invalid pin`.
+
+`PIN(n) = v` on a pin that is not a `DOUT` gives `Pin is not an
+output`, and reading a pin that has never been `SETPIN`ed gives `Pin is
+not an input` — both as MMBasic does.
+
+Pin work no longer costs a system call. `SETPIN` makes one, once, to
+claim; after that `PIN(n)` and `PIN(n) = v` are single register
+accesses, about ten nanoseconds against the 1.5 µs an ioctl costs.
+That is what makes bit-banging a protocol in BASIC possible at all.
 
 Every read and write is a call into the kernel — comparable to drawing
 one pixel, which is over a microsecond. That is ample for a switch or
@@ -2028,9 +2081,15 @@ MMBasic's nine built-in fonts but only in its normal and vertical
 orientations — the three that rotate the character itself are accepted
 and drawn normally.
 
-Of the pins, `SETPIN n, DIN|DOUT`, `PIN(n) =` and `PIN(n)` are done for
-all forty-eight GPIOs; the analogue, frequency, counting and interrupt
-modes of `SETPIN` are not.
+Of the pins, `SETPIN n, DIN|DOUT|AIN|ARAW|OFF`, `PIN(n) =` and `PIN(n)`
+are done; the frequency, counting and interrupt modes of `SETPIN` are
+not. The analogue pair need an ADC pin (GP40–GP46 here), and `AIN` uses
+MMBasic's own ten-sample sort-and-discard filter. `PIN()` returns a
+float in every mode rather than MMBasic's integer for digital and
+`ARAW`, and pins are *owned*: `SETPIN` claims from the kernel, only the
+I/O header may be claimed, and the pin is released and reset when the
+program ends however it ends. `OPTION VCC` is not supported, so `AIN`
+always scales by 3.3 V.
 
 Of the sound, `PLAY MP3`, `PLAY VOLUME` and `PLAY STOP` are done —
 `PLAY TONE`, `WAV`, `FLAC`, `MOD`, `MIDI`, `SAMPLE` and `EFFECT` are

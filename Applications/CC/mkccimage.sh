@@ -88,6 +88,12 @@ echo "--- installing"
 	# without this compiles every program that draws and fails only on
 	# the ones that touch a pin, long after the change that added it.
 	echo "get $CC/mmb_gpio.h mmb_gpio.h"
+	# The pin and ADC REGISTERS, which mmb_gpio.h reaches for directly
+	# now that pin work is not a syscall.  Flat, because that is the
+	# only shape this include directory has; a native program gets the
+	# same file from the C library as <sys/pc3io.h>.  One source, staged
+	# twice, so the two cannot drift.
+	echo "get $R/Library/include/sys/pc3io.h pc3io.h"
 	for f in "$CC"/hosttest/fcc-include/*.h; do
 		echo "get $f $(basename "$f")"
 	done

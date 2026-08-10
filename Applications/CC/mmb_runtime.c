@@ -4108,6 +4108,22 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
         mm_gpio_fd = open("/dev/gpio", O_RDWR);
     if (mm_gpio_fd < 0)
         return -1;
+    if (op == MM_GPIO_CLAIM) {
+        /* The pin lock lives on /dev/sys, not /dev/gpio - a different
+           device from the one cached above, so it gets its own fd. */
+        struct { unsigned char cls, idx, flags, pad; } rq;
+        static int sysfd = -2;
+
+        if (sysfd == -2)
+            sysfd = open("/dev/sys", O_RDWR);
+        if (sysfd < 0)
+            return -1;
+        rq.cls = (unsigned char)val;    /* PLK_PIN / PLK_ADC */
+        rq.idx = (unsigned char)pin;
+        rq.flags = 0;
+        rq.pad = 0;
+        return ioctl(sysfd, MM_PLKIOC_CLAIM, &rq) ? -1 : 0;
+    }
     gr.pin = (unsigned char)pin;
     gr.val = (unsigned char)val;
     switch (op) {

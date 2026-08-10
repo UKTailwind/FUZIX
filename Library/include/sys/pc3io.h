@@ -38,9 +38,18 @@
  *	can compile it too - the same discipline as mmb2c's mmb_gpio.h.
  */
 
+/*	PC3IO_NO_SYSCALLS: the registers WITHOUT the claim wrappers, for a
+ *	caller that has no open() or ioctl() to make them with.  That is
+ *	the on-board cc, whose generated code reaches the kernel only
+ *	through bcrun's natives - mmb2c's mmb_gpio.h defines this and
+ *	does its claiming through the runtime instead.  The registers are
+ *	shared either way, because two copies of the ISO trap below is
+ *	how two copies come to disagree. */
+#ifndef PC3IO_NO_SYSCALLS
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#endif
 
 /*	gcc must not warn about the ones a program does not use; the
  *	on-board cc has no attributes and discards unused statics anyway. */
@@ -141,6 +150,8 @@ struct pinlock_req {
 
 /* ---- claiming ---- */
 
+#ifndef PC3IO_NO_SYSCALLS
+
 /*	/dev/sys, opened once and kept.  A program that never claims
  *	anything never opens it. */
 PC3_FN int pc3_sysfd(void)
@@ -187,16 +198,28 @@ PC3_FN int pc3_owner(int cls, int idx)
 	return pc3_lockop(PLKIOC_OWNER, cls, idx);
 }
 
+#endif	/* PC3IO_NO_SYSCALLS */
+
 /* ---- pins ---- */
 
-/*	Point the pin at SIO so the registers below control it, and take
- *	it out of isolation.  Called LAST by pc3_pin_out and pc3_pin_in -
- *	see PC3_PAD_ISO - and separately by a pin coming back from a
- *	peripheral. */
+/*	Point the pin at SIO so the registers below control it, connect
+ *	the pad, and enable its input buffer.
+ *
+ *	This is the SDK's gpio_set_function, register for register, and
+ *	all three parts matter.  IE is the one that looks optional and is
+ *	not: the input buffer feeds GPIO_IN, so without it a pin reads a
+ *	steady 0 whatever is on the wire - including a pin this program
+ *	is itself driving high, which is how it was found.  OD is cleared
+ *	for the mirror-image reason; a pin left output-disabled by a
+ *	previous owner drives nothing and looks like a dead output.
+ *
+ *	Called LAST by pc3_pin_out and pc3_pin_in - see PC3_PAD_ISO - and
+ *	separately by a pin coming back from a peripheral. */
 PC3_FN void pc3_pin_sio(int pin)
 {
 	PC3_REG(PC3_GPIO_CTRL(pin)) = PC3_FUNC_SIO;
-	PC3_REG(PC3_PAD(pin) + PC3_CLR) = PC3_PAD_ISO;
+	PC3_REG(PC3_PAD(pin) + PC3_SET) = PC3_PAD_IE;
+	PC3_REG(PC3_PAD(pin) + PC3_CLR) = PC3_PAD_OD | PC3_PAD_ISO;
 }
 
 PC3_FN void pc3_pin_high(int pin)

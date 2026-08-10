@@ -312,10 +312,16 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval(sfmt("mm_pixel_get(%s, %s)", a0, a1), TY_I);
     }
     if (strcmp(up, "PIN") == 0) {
-        /* PIN(n) - the level on a pin set to DIN.  The assigning form
-           PIN(n) = v is a statement. */
+        /* PIN(n) - a digital level, a raw ADC count, or a voltage,
+           depending on what SETPIN made the pin.  The assigning form
+           PIN(n) = v is a statement.
+
+           FLOAT, always - see mmb2c.py's note.  MMBasic decides this
+           at run time; generated C cannot, because nothing here knows
+           what mode a pin will be in.  A double holds 0, 1 and every
+           12-bit count exactly; an integer cannot hold 1.6523 volts. */
         cv.uses_gpio = 1;
-        return mkval(sfmt("mmg_pin_get(%s)", n(0)), TY_I);
+        return mkval(sfmt("mmg_pin_get(%s)", n(0)), TY_F);
     }
     if (strcmp(up, "MAP") == 0) {
         /* MAP(n) - the colour entry n stands for by default, which is
