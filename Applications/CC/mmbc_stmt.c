@@ -15,6 +15,7 @@ static void do_print(void);
 static char *prcall(const char *chan, const char *what, const char *arg);
 static const char *int_handler(void);
 static const char *setpin_pull(void);
+static void do_settick(void);
 static void do_longstring(void);
 static const char *gosub_key(void);
 static void do_gosub(void);
@@ -740,6 +741,10 @@ void statement_inner(void)
                   x, y, s, just, font, scale, fc, bc));
         return;
     }
+    if (strcmp(up, "SETTICK") == 0) {
+        do_settick();
+        return;
+    }
     if (strcmp(up, "SETPIN") == 0) {
         /* SETPIN pin, DIN|DOUT
 
@@ -1146,6 +1151,59 @@ static char *prcall(const char *chan, const char *what, const char *arg)
 }
 
 /* -- LONGSTRING ------------------------------------------------------ */
+
+/* mmb2c.py's settick_id.  SETTICK's optional trailing timer number,
+   1-4.  Absent is 1, which is MMBasic's irq = 0 when the argument is
+   missing. */
+static const char *settick_id(void)
+{
+    if (accept_op(","))
+        return as_int(expr());
+    return "1";
+}
+
+/* mmb2c.py's do_settick.
+
+     SETTICK period, handler [, n]
+     SETTICK 0, 0 [, n]          off
+     SETTICK PAUSE|RESUME [, n]
+
+   MMBasic counts milliseconds in an interrupt and fires when the count
+   passes the period; this keeps a microsecond deadline and asks at the
+   poll that is already happening.  The observable rules are copied:
+   four timers, missed periods dropped rather than queued, and PAUSE
+   freezing the time-to-go where it stands. */
+static void do_settick(void)
+{
+    const char *ms, *fn;
+    struct tok *t;
+
+    cv.i++;
+    cv.uses_interrupts = 1;
+    if (accept_kw("PAUSE")) {
+        emit(sfmt("mmi_settick_pause(%s, 0);", settick_id()));
+        return;
+    }
+    if (accept_kw("RESUME")) {
+        emit(sfmt("mmi_settick_pause(%s, 1);", settick_id()));
+        return;
+    }
+    ms = as_int(expr());
+    expect_op(",");
+    /* "SETTICK 0, 0" turns a timer off, and its handler slot is a
+       literal 0 rather than a name - so the target is only resolved
+       when there is one to resolve. */
+    t = peek(0);
+    if (t && t->kind == T_NUM && strcmp(t->text, "0") == 0) {
+        nxt();
+        fn = "0";
+    } else {
+        fn = int_handler();
+        if (!fn)
+            return;
+    }
+    emit(sfmt("mmi_settick(%s, %s, %s);", ms, fn, settick_id()));
+}
 
 /* mmb2c.py's setpin_pull.  MMBasic's optional PULLUP / PULLDOWN on an
    input SETPIN.  Absent means neither, which is MMBasic's default

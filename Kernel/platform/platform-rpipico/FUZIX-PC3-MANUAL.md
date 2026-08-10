@@ -1598,6 +1598,46 @@ A program that arms no interrupt pays nothing at all: the per-statement
 poll is emitted only for programs that use the feature, exactly as the
 `ON ERROR` checks are.
 
+## `SETTICK` — periodic timers
+
+```basic
+SUB Every100
+  INC count
+END SUB
+
+SETTICK 100, Every100          ' every 100 ms
+SETTICK 100, Every100, 2       ' timer 2 of 4
+SETTICK PAUSE, 2               ' freeze it where it stands
+SETTICK RESUME, 2
+SETTICK 0, 0, 2                ' off
+```
+
+Four timers, numbered 1 to 4, period in milliseconds — MMBasic's
+`NBRSETTICKS`. The number is optional and defaults to 1. The handler is
+a parameterless SUB, as for pin interrupts, and everything said above
+about them applies here too: it runs between statements, it does not
+nest, and one interrupt is dispatched per statement boundary. A pin edge
+and a tick falling due at the same moment dispatch the pin first, which
+is MMBasic's scan order.
+
+**Missed ticks are dropped, not queued.** If a handler takes longer than
+its own period, the timer catches up by whole periods and fires once —
+so a slow handler cannot spiral into a backlog it never clears. The
+phase is kept, so the cadence does not drift.
+
+Measured on the board: twenty ticks of 100 ms took **1999.98 ms**, and a
+10 ms timer running beside a 50 ms one fired exactly 100 times in the
+second the slow one took to reach twenty.
+
+That last figure is the one **deliberate divergence** from MMBasic, and
+it is in your favour. MMBasic counts milliseconds in an interrupt and
+fires when the count is *greater than* the period, so a `SETTICK 100`
+there actually runs at 101 ms and a 16 ms game timer at 17 ms — about
+6% slow. This keeps a microsecond deadline instead of a millisecond
+counter and fires at the period you asked for. Nothing else about the
+behaviour differs; if you are porting a program whose timing was tuned
+against a PicoMite, it will run very slightly faster here.
+
 Every read and write is a call into the kernel — comparable to drawing
 one pixel, which is over a microsecond. That is ample for a switch or
 an LED and nowhere near enough to bit-bang a protocol; write that in C,

@@ -148,6 +148,14 @@ struct pinlock_req {
 #define PC3_RESETS_DONE	(PC3_RESETS + 0x08)
 #define PC3_RESET_ADC	0x00000001UL
 
+/*	TIMER0's free-running microsecond counter.  RAW, not the latching
+ *	TIMEHR/TIMELR pair: those latch as a side effect of reading, which
+ *	is shared state, and two readers can take each other's latch.  The
+ *	raw registers are a plain load and cannot be raced. */
+#define PC3_TIMER	0x400b0000UL
+#define PC3_TIMERAWH	(PC3_TIMER + 0x24)
+#define PC3_TIMERAWL	(PC3_TIMER + 0x28)
+
 /* ---- claiming ---- */
 
 #ifndef PC3IO_NO_SYSCALLS
@@ -199,6 +207,28 @@ PC3_FN int pc3_owner(int cls, int idx)
 }
 
 #endif	/* PC3IO_NO_SYSCALLS */
+
+/* ---- the microsecond clock ---- */
+
+/*	Microseconds since boot, all 64 bits, with no syscall: three loads
+ *	on this board against a libcall that would cost more than whatever
+ *	is being timed.
+ *
+ *	HIGH, LOW, HIGH AGAIN.  The two halves are separate registers and
+ *	the low one wraps every 71.6 minutes; read low-then-high and a
+ *	wrap in between gives an answer an hour out.  Reading the high
+ *	word again and retrying when it moved is the standard fix and the
+ *	loop runs twice at most, once every 71.6 minutes. */
+PC3_FN long long pc3_us64(void)
+{
+	unsigned long hi, lo;
+
+	do {
+		hi = PC3_REG(PC3_TIMERAWH);
+		lo = PC3_REG(PC3_TIMERAWL);
+	} while (hi != PC3_REG(PC3_TIMERAWH));
+	return ((long long)hi << 32) | lo;
+}
 
 /* ---- pins ---- */
 

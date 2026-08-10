@@ -314,6 +314,9 @@ static void w_on_error(void) { mm_on_error(I(0), LL(1)); A = 0; }
    pointer mm_err_bind already gave us. */
 static void w_int_err_push(void) { mm_int_err_push(); A = 0; }
 static void w_int_err_pop(void)  { mm_int_err_pop(); A = 0; }
+/* SETTICK's clock off the board.  On the PC3 the generated code reads
+   TIMER0 itself (pc3_us64) and never comes through here. */
+static void w_us(void)           { A = mm_us(); }
 static void w_errno(void)    { A = mm_errno(); }
 /* through a scratch temp: MM.ERRMSG$ lives in bcrun's own memory, and a
    program can only be handed a pointer inside the VM's address space */
@@ -610,6 +613,7 @@ static const struct mmwrap {
 	{ "mm_on_error",	w_on_error },
 	{ "mm_int_err_push",	w_int_err_push },
 	{ "mm_int_err_pop",	w_int_err_pop },
+	{ "mm_us",		w_us },
 	{ "mm_errno",		w_errno },
 	{ "mm_errmsg",		w_errmsg },
 	{ "mm_pr_commit",	w_pr_commit },
