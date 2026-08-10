@@ -179,19 +179,21 @@ would be worse than the current clear error:
   than every statement - looking is a syscall and a poll site runs after
   every statement.
 
-  And one DEFECT, found by testing this and not new to it: **`INKEY$`
-  has never seen a keystroke at the PC3 console**, so `ON KEY` inherits
-  that and only fires when a line is completed with Enter.  The cause is
-  the console line editor (`lineedit.c`), which swallows every keystroke
-  while the terminal is in `ICANON|ECHO` and releases the whole line at
-  Enter; `mm_inkey` flips to raw for the few microseconds of one read,
-  which is far too brief a window to catch a key typed at any other
-  moment.  Proven with a C probe on the board: isatty, tcgetattr and
-  tcsetattr all succeed, the raw mode reads back as set, and `read()`
-  then returns nothing for ten seconds of typing.  The fix is in the
-  runtime - hold raw rather than flipping per call, as BBC BASIC and the
-  editors already do - and needs a decision about `INPUT`, which wants
-  cooked mode and the editor.
+  Building this also FIXED `INKEY$`, which had never seen a keystroke at
+  the PC3 console.  The console line editor (`lineedit.c`) swallows
+  every key while the terminal is in `ICANON|ECHO` and releases the
+  whole line at Enter, and `mm_inkey` used to flip to raw for the few
+  microseconds of one read - a window open only DURING the read, while
+  every key is typed at some other moment.  The runtime now takes the
+  terminal on the first `INKEY$` or armed `ON KEY` and KEEPS it, giving
+  it back around `INPUT` (which wants the editor and the echo) and at
+  exit.  Board-verified: a whole sentence typed on the USB keyboard,
+  every character read as it was pressed.
+
+  The restore is registered with `atexit`, not just put in `mm_end` - a
+  translated program's `main` ends with a plain return, and leaving the
+  terminal raw hands the shell an instant EOF, which it takes for a
+  hangup and LOGS THE USER OUT.  Found the hard way.
 
   That leaves `ON PS2 INTERRUPT MATH PID SENSORFUSION ONESHOT` from this
   group, none of which have anything to notify on this machine.

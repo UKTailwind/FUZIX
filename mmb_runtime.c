@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <math.h>
 #include <ctype.h>
 #include <time.h>
@@ -1485,6 +1486,18 @@ static int mm_getc(MMINTEGER fnbr)
     return ch ? fgetc(ch->f) : -1;
 }
 
+/* The console's raw-mode hold, defined with INKEY$ far below.  Declared
+   here because INPUT has to give the console back for the duration, and
+   because leaving it raw at exit would hand the shell a terminal with
+   no echo and no line editing. */
+#if !defined(_WIN32)
+void mm_raw_release(void);
+static void mm_raw_resume(void);
+#else
+#define mm_raw_release() do { } while (0)
+#define mm_raw_resume()  do { } while (0)
+#endif
+
 static void mm_readline(MMINTEGER fnbr, char *dst)
 {
     int n = 0, c;
@@ -1492,8 +1505,13 @@ static void mm_readline(MMINTEGER fnbr, char *dst)
     /* Never wait for input with output still in the buffer: an INPUT
      * prompt is a PRINT with no newline, and the whole point of it is
      * to be on screen BEFORE the program stops for an answer. */
-    if (fnbr == 0)
+    if (fnbr == 0) {
         fflush(stdout);
+        /* Give the console back for the duration.  A line being typed
+         * wants the editor, the echo and the backspace handling that
+         * INKEY$ has to keep out of the way of - see mm_raw_hold. */
+        mm_raw_release();
+    }
     for (;;) {
         c = mm_getc(fnbr);
         if (c == EOF) break;
@@ -1504,6 +1522,8 @@ static void mm_readline(MMINTEGER fnbr, char *dst)
     }
     dst[0] = (char)(unsigned char)n;
     dst[n + 1] = 0;
+    if (fnbr == 0)
+        mm_raw_resume();        /* only if a key reader had it */
 }
 
 char *mm_getline(MMINTEGER fnbr)
@@ -2655,6 +2675,7 @@ void mm_fatal(const char *msg)
     mm_close_all();
     mm_gflush();
     fflush(stdout);
+    mm_raw_release();           /* the shell gets its terminal back */
     fprintf(stderr, "\r\nError: %s\r\n", msg);
     exit(1);
 }
@@ -2679,6 +2700,7 @@ void mm_error(const char *msg)
     mm_close_all();
     mm_gflush();
     fflush(stdout);
+    mm_raw_release();           /* the shell gets its terminal back */
     fprintf(stderr, "\r\nError: %s\r\n", msg);
     exit(1);
 }
@@ -2698,6 +2720,9 @@ void mm_end(void)
     mm_close_all();
     mm_gflush();                /* which drains the pixel queue too */
     fflush(stdout);
+    /* Never leave the shell a terminal with no echo and no line
+       editing, whatever this program was doing with the keyboard. */
+    mm_raw_release();
     exit(0);
 }
 
@@ -2788,6 +2813,104 @@ static int mm_rd1(void)
     unsigned char c;
 
     return (int)read(0, &c, 1) == 1 ? (int)c : -1;
+}
+
+/*
+ * THE CONSOLE HAS TO BE HELD, not borrowed.
+ *
+ * This used to switch the terminal to raw, read, and switch straight
+ * back - once per INKEY$.  On the PC3 that means INKEY$ NEVER SEES A
+ * KEYSTROKE, and it took a board probe to find out why.
+ *
+ * The console has a line editor in front of the tty (the thing that
+ * gives the shell its history and cursor keys).  It swallows every
+ * keystroke while the terminal is in ICANON|ECHO, buffers it, echoes it
+ * itself, and hands the finished line over only at Enter.  A window
+ * held open for the few microseconds of one read is open only DURING
+ * the read, while every key is typed at some other moment - so the
+ * editor had already taken it and the read found an empty queue.  Every
+ * layer reported success and no byte ever arrived, which is exactly why
+ * it stayed hidden (utils/keyprobe.c on the board).
+ *
+ * So the terminal is taken once and KEPT - which is what the line
+ * editor's own comment says raw-mode programs do, and what BBC BASIC
+ * and the editors on this machine already did.  Board-measured with
+ * ICANON off: a key is read in the same instant it is typed.
+ *
+ * INPUT is the exception and gives it back for the duration (see
+ * mm_readline): a line being typed wants the editor, the echo and the
+ * backspace handling, which is the whole reason the per-call flip
+ * existed in the first place.
+ */
+static struct termios mm_tty_cooked;    /* as we found it */
+static struct termios mm_tty_raw;       /* as we want it */
+static int mm_tty_held;                 /* we have it raw now */
+static int mm_tty_have;                 /* mm_tty_cooked is valid */
+static int mm_tty_want;                 /* a key reader asked for it */
+
+static int mm_raw_hold(void)
+{
+    if (mm_tty_held)
+        return 1;
+    if (!mm_tty_have) {
+        if (getenv("MM_RAWDEBUG"))
+            fprintf(stderr, "[rawhold: isatty=%d]\r\n", isatty(0));
+        if (!isatty(0) || tcgetattr(0, &mm_tty_cooked) != 0) {
+            if (getenv("MM_RAWDEBUG"))
+                fprintf(stderr, "[rawhold: no tty, errno %d]\r\n", errno);
+            return 0;
+        }
+        mm_tty_raw = mm_tty_cooked;
+        mm_tty_raw.c_lflag &= ~(unsigned)(ICANON | ECHO);
+        mm_tty_raw.c_cc[VMIN] = 0;      /* return with whatever is there */
+        mm_tty_raw.c_cc[VTIME] = 0;     /* and do not wait for it */
+        mm_tty_have = 1;
+    }
+    if (tcsetattr(0, TCSANOW, &mm_tty_raw) != 0) {
+        if (getenv("MM_RAWDEBUG"))
+            fprintf(stderr, "[rawhold: tcsetattr failed, errno %d]\r\n",
+                    errno);
+        return 0;
+    }
+    if (getenv("MM_RAWDEBUG")) {
+        struct termios back;
+        if (tcgetattr(0, &back) == 0)
+            fprintf(stderr, "[rawhold: held, lflag 0x%lx VMIN %d]\r\n",
+                    (unsigned long)back.c_lflag, (int)back.c_cc[VMIN]);
+    }
+    if (!mm_tty_want) {
+        /*
+         * ON EVERY EXIT, not just the tidy ones.  A translated program's
+         * main() ends with a plain return - it does not go through
+         * mm_end - so putting the restore only there left the terminal
+         * raw, and a raw terminal with VMIN=0 hands the shell an
+         * instant EOF: it took that for a hangup and LOGGED THE USER
+         * OUT.  atexit catches the plain return, exit(), and the error
+         * paths alike.
+         */
+        atexit(mm_raw_release);
+    }
+    mm_tty_held = 1;
+    mm_tty_want = 1;
+    return 1;
+}
+
+/* Give the console back - for an INPUT, and at exit.  Harmless if we
+   never took it. */
+void mm_raw_release(void)
+{
+    if (mm_tty_held) {
+        tcsetattr(0, TCSANOW, &mm_tty_cooked);
+        mm_tty_held = 0;
+    }
+}
+
+/* Take it again after an INPUT, but only if a key reader had it: a
+   program that only ever uses INPUT must be left exactly as it was. */
+static void mm_raw_resume(void)
+{
+    if (mm_tty_want && !mm_tty_held)
+        mm_raw_hold();
 }
 
 static int mm_esc_decode(void)
@@ -2948,7 +3071,7 @@ char *mm_inkey(void)
     }
 #else
     {
-        struct termios cooked, raw;
+        struct termios raw;
         int c;
 
         if (mm_kqn) {                   /* an unrecognised sequence, byte by byte */
@@ -2961,13 +3084,7 @@ char *mm_inkey(void)
             return t;
         }
 
-        if (!isatty(0) || tcgetattr(0, &cooked) != 0)
-            return t;
-        raw = cooked;
-        raw.c_lflag &= ~(unsigned)(ICANON | ECHO);
-        raw.c_cc[VMIN] = 0;             /* return with whatever is there */
-        raw.c_cc[VTIME] = 0;            /* and do not wait for it */
-        if (tcsetattr(0, TCSANOW, &raw) != 0)
+        if (!mm_raw_hold())
             return t;
         c = mm_rd1();
         if (c == 0x1b) {
@@ -2976,11 +3093,13 @@ char *mm_inkey(void)
              * slow line and the gap that tells a bare ESC from the
              * start of one.  A program polling INKEY$ in a loop never
              * reaches here unless a key was actually pressed. */
+            raw = mm_tty_raw;
             raw.c_cc[VTIME] = 1;
-            if (tcsetattr(0, TCSANOW, &raw) == 0)
+            if (tcsetattr(0, TCSANOW, &raw) == 0) {
                 c = mm_esc_decode();
+                tcsetattr(0, TCSANOW, &mm_tty_raw);
+            }
         }
-        tcsetattr(0, TCSANOW, &cooked);
         if (c >= 0) {
             t[0] = 1;
             t[1] = (char)c;

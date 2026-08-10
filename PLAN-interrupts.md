@@ -36,14 +36,28 @@ and the raw mode READS BACK as set (ICANON off, VMIN 0) - and then
 read() returns nothing across ten seconds of typing.  Every layer
 reports success and no byte arrives.
 
-THE FIX is in the runtime, not the kernel: a program that wants
-keystrokes should HOLD raw mode instead of flipping per call, which is
-what the line editor's own comment says raw-mode programs do ("BBC
-BASIC, editors see every byte untouched").  What needs deciding first is
-INPUT, which wants cooked mode AND the editor - mm_inkey's per-call flip
-exists precisely so INPUT is untouched.  The likely shape is: go raw on
-the first INKEY$ or armed ON KEY, and drop back to cooked around INPUT
-and LINE INPUT.
+**FIXED, 2026-08-10.**  The runtime takes the terminal on the first
+INKEY$ or armed ON KEY and KEEPS it (mm_raw_hold), gives it back for the
+duration of an INPUT - which wants the editor, the echo and the
+backspace handling - and restores it at exit.  That is what the line
+editor's own comment says raw-mode programs do, and what BBC BASIC and
+the editors here already did.
+
+Board-verified: a whole sentence typed on the USB keyboard and every
+character read by INKEY$ as it was pressed; then ON KEY delivering keys
+at the console with a SETTICK heartbeat running beside it.
+
+Two things that cost a cycle each and are worth keeping:
+
+  - the restore has to go through atexit(), not just mm_end().  A
+    translated program's main ends with a plain return, so mm_end is not
+    on the path - and a terminal left raw with VMIN=0 hands the shell an
+    instant EOF, which it takes for a hangup and LOGS THE USER OUT.
+    That is what it did.
+  - with ECHO off there is no evidence a key was ever pressed, so "read
+    nothing" and "nobody typed" look identical.  keyprobe.c clears
+    ICANON but LEAVES ECHO ON for exactly that reason: the echo proves
+    the key arrived, so a run that reads nothing is saying something.
 
 One implementation trap worth keeping: mm_key_peek calls mm_inkey, which
 returns a STRING and therefore costs a scratch slot - and the poll calls
