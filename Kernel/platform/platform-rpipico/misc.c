@@ -6,9 +6,11 @@
 #include "pico_ioctl.h"
 #include "config.h"
 #include "psram.h"
-#include <hardware/adc.h>
 #ifdef CONFIG_PC3_DISPLAY
 #include "display.h"
+#endif
+#ifdef CONFIG_PC3_PINLOCK
+#include "pinlock.h"
 #endif
 #include <pico/multicore.h>
 #include <pico/bootrom.h>
@@ -327,6 +329,33 @@ int plt_dev_ioctl(uarg_t request, char *data)
             return -1;
         return 0;
     }
+#ifdef CONFIG_PC3_PINLOCK
+    if (request == PLKIOC_CLAIM || request == PLKIOC_RELEASE ||
+        request == PLKIOC_OWNER)
+    {
+        struct pinlock_req rq;
+        int r;
+
+        if (uget(data, &rq, sizeof(rq)))
+            return -1;
+        /* flags is reserved: refuse a non-zero one now so it can mean
+           something later without an old binary silently getting it. */
+        if (rq.flags) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        if (request == PLKIOC_OWNER)
+            return pinlock_owner(rq.cls, rq.idx);
+        r = (request == PLKIOC_CLAIM)
+                ? pinlock_claim(udata.u_ptab, rq.cls, rq.idx)
+                : pinlock_free(udata.u_ptab, rq.cls, rq.idx);
+        if (r) {
+            udata.u_error = -r;
+            return -1;
+        }
+        return 0;
+    }
+#endif
     if (request == PICOIOC_LIBM)
     {
         /* The address of the table, for a program to call through.
@@ -465,37 +494,35 @@ int plt_dev_ioctl(uarg_t request, char *data)
     }
     if (request == PICOIOC_ADVAL)
     {
-        static uint8_t adv_ready;
         int n;
 
         if (uget(data, &n, sizeof(n)))
             return -1;
 
-        if (n >= 0 && n <= 4) {
-            int i;
-            if (!adv_ready) {
-                /* joystick switches: GP34-37, pulled up, active low */
-                for (i = 34; i <= 37; i++) {
-                    gpio_init(i);
-                    gpio_set_dir(i, false);
-                    gpio_set_input_enabled(i, true);
-                    gpio_pull_up(i);
-                    gpio_set_input_hysteresis_enabled(i, true);
-                }
-                adc_init();
-                for (i = 1; i <= 4; i++)
-                    adc_gpio_init(40 + i);
-                adv_ready = 1;
-            }
-            if (n == 0) {
-                /* pressed = 1: bit0 GP34, bit1 GP35, bit2 GP36, bit3 GP37 */
-                uint64_t all = gpio_get_all64();
-                return (int)((~(all >> 34)) & 15);
-            }
-            adc_select_input(n);        /* GP40+n = ADC input n */
-            adc_read();                 /* discard: mux settle */
-            return adc_read() << 4;     /* BBC 16-bit convention */
-        }
+        /*
+         * Selectors 0 (joystick, GP34-GP37) and 1-4 (ADC, GP41-GP44)
+         * USED TO BE HERE and are gone.  They were pin work, and all
+         * eight pins are on the I/O header, so they now belong to
+         * whoever claims them: userland configures the pads and reads
+         * the registers itself through <sys/pc3io.h>, and the kernel
+         * keeps only the ownership (pinlock.c).
+         *
+         * There was no way to keep both.  ADVAL's setup was a one-shot,
+         * and releasing a claimed pin RESETS it - so once any program
+         * had borrowed GP34, this code went on reading a pin it
+         * believed it had configured and the joystick returned 15,
+         * every switch pressed at once, until reboot.  Measured on the
+         * board, which is how it was found.
+         *
+         * Verified equivalent before removal: identical joystick
+         * readings, and a potentiometer on GP41 agreeing to one and a
+         * half counts of the twelve-bit converter (utils/adval.c, which
+         * read both paths side by side while both existed).
+         *
+         * What is left here is not pin work: the sound queue depths
+         * belong to the I2S engine, and the microsecond counter is a
+         * timer every benchmark on the machine reads.
+         */
 #ifdef CONFIG_PC3_SOUND
         if (n <= -5 && n >= -8) {
             extern int sound_qfree(int);
@@ -633,6 +660,11 @@ void plt_exec_cleanup(void)
      * leaving the claim would have it drawing into a layer it cannot
      * show. */
     display_fb_release(udata.u_ptab);
+#endif
+#ifdef CONFIG_PC3_PINLOCK
+    /* The new image did not claim these pins and does not know what they
+     * are wired to, so it must not inherit them driving. */
+    pinlock_release(udata.u_ptab);
 #endif
 }
 

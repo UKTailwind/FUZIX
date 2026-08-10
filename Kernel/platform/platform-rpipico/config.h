@@ -111,6 +111,11 @@
    that a non-preemptive kernel makes a transaction atomic for free, and
    the hourly RTC poll in interrupt context skips rather than waits. */
 #define CONFIG_DEV_I2C
+/* Ownership of the I/O header's pins and the peripheral blocks behind
+   them, so userland can drive them DIRECTLY (there is no MMU here) with
+   the kernel keeping only the arbitration and the cleanup.  pinlock.c
+   has the argument; PC3-IO-PLAN.md has the plan it belongs to. */
+#define CONFIG_PC3_PINLOCK
 /* Enable to make ^Z dump the inode table for debug */
 #undef CONFIG_IDUMP
 /* Enable to make ^A drop back into the monitor */

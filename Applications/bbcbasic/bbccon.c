@@ -15,6 +15,12 @@
 #include <string.h>
 #include <time.h>
 #include <math.h>
+#ifdef FUZIX
+/* ADVAL's joystick and analogue channels are header pins and are read
+   here, directly - see adval() below and Kernel/.../pinlock.c. */
+#include <sys/ioctl.h>
+#include <sys/pc3io.h>
+#endif
 #include "bbccon.h"
 #define HISTORY 100  // Number of items in command history
 #define ESCTIME 200  // Milliseconds to wait for escape sequence
@@ -634,12 +640,99 @@ int widths (unsigned char *s, int l)
 // ADVAL(n)
 #ifdef FUZIX
 #define SNDIOC_ADVAL  0x0009
+
+/*
+ * Selectors 0 and 1-4 are PIN WORK and are done here, not in the
+ * kernel: the joystick is four pulled-up switches on GP34-GP37 and the
+ * analogue channels are GP41-GP44, all of them on the I/O header.  This
+ * claims them through the pin lock and then reads the registers
+ * directly - see <sys/pc3io.h>.  Verified against the kernel's old
+ * readings on the same board: the joystick identical, and a
+ * potentiometer on GP41 agreeing to one and a half counts of the
+ * twelve-bit converter.
+ *
+ * Claimed on FIRST USE rather than at startup, so a BASIC program that
+ * never says ADVAL never takes eight header pins away from whatever
+ * else is running.  Nothing gives them back: exiting does that, and
+ * resets the pins, which is the point of the lock.
+ *
+ * A claim that fails (another program holds the pin) leaves that source
+ * reading 0 rather than stopping the program - ADVAL has always
+ * returned 0 for anything it could not answer.
+ */
+
+#define ADV_JOY_FIRST	34	/* GP34-GP37, pulled up, active low */
+
+static signed char adv_joy;	/* 0 untried, 1 ours, -1 refused */
+static signed char adv_adc;
+
+static int adval_joystick (void)
+{
+	int i, v = 0 ;
+
+	if (adv_joy == 0)
+	    {
+		adv_joy = 1 ;
+		for (i = 0; i < 4; i++)
+		    {
+			int pin = ADV_JOY_FIRST + i ;
+			if (pc3_claim (PLK_PIN, pin))
+			    {
+				adv_joy = -1 ;
+				break ;
+			    }
+			pc3_pin_in (pin, 1) ;	/* pulled up */
+			/* Hysteresis, as the kernel's version set: these
+			   are mechanical switches on a header, not a
+			   clean logic signal. */
+			PC3_REG (PC3_PAD (pin) + PC3_SET) = PC3_PAD_SCHMITT ;
+		    }
+	    }
+	if (adv_joy < 0)
+		return 0 ;
+	for (i = 0; i < 4; i++)
+		if (!pc3_pin_get (ADV_JOY_FIRST + i))
+			v |= 1 << i ;		/* pressed pulls it LOW */
+	return v ;
+}
+
+static int adval_adc (int chan)
+{
+	if (adv_adc == 0)
+	    {
+		int i ;
+		adv_adc = 1 ;
+		if (pc3_claim (PLK_ADC, 0))
+			adv_adc = -1 ;
+		else
+		    {
+			pc3_adc_enable () ;
+			for (i = 1; i <= 4; i++)
+			    {
+				if (pc3_claim (PLK_PIN, PC3_ADC_GPIO (i)))
+				    {
+					adv_adc = -1 ;
+					break ;
+				    }
+				pc3_adc_pin (i) ;
+			    }
+		    }
+	    }
+	if (adv_adc < 0)
+		return 0 ;
+	return pc3_adc_read (chan) << 4 ;	/* BBC's 16-bit convention */
+}
+
 long long adval (int n)
 {
 	extern int sndsys_fd (void) ;
 	int fd, r ;
 	if (n == -1)
 	    	return (kbdqr - kbdqw - 1) & 0xFF ;
+	if (n == 0)
+		return adval_joystick () ;
+	if (n >= 1 && n <= 4)
+		return adval_adc (n) ;
 	if (n == -9)
 	    {
 		/* Selector -10 on the wire: the kernel writes the 64-bit
@@ -657,7 +750,9 @@ long long adval (int n)
 		r = ioctl (fd, SNDIOC_ADVAL, &n) ;
 		return (r > 0) ? r : 0 ;
 	    }
-	if ((n >= 0 && n <= 4) || (n <= -5 && n >= -8))
+	/* -5..-8 are the sound engine's queue depths, which are the
+	   kernel's: it owns the I2S hardware. */
+	if (n <= -5 && n >= -8)
 	    {
 		fd = sndsys_fd () ;
 		if (fd >= 0)

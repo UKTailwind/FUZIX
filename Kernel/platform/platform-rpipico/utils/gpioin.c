@@ -19,37 +19,43 @@
 
 #include <sys/gpio.h>
 #include <sys/ioctl.h>
+#include <sys/pc3io.h>
 
 static int fd;
 
 /*
- * The joystick read - GP34-37 through PICOIOC_ADVAL, which is the path
- * that is KNOWN to work on the high bank: it enables the input, pulls
- * up, and reads with gpio_get_all64().  bit1 is GP35.
+ * The joystick read - GP34-GP37, pulled up and active low, read the way
+ * everything reads pins now: claim them, then the registers.  bit1 is
+ * GP35.
  *
  * Running it beside GPIOC_GETBYTE on the same pin is what separates
  * "my read is wrong" from "the output is not driving".
+ *
+ * This used to go through PICOIOC_ADVAL, and must not go back: those
+ * selectors are retired and answer 0, which in a diagnostic whose whole
+ * point is that "0" is ambiguous would be the worst possible bug.
  */
-#define PICOIOC_ADVAL 0x0009
-
 static void joy(const char *what)
 {
-	int sys, n = 0, r;
+	int i, v = 0, refused = 0;
 
-	sys = open("/dev/sys", O_RDWR, 0);
-	if (sys < 0) {
-		printf("%s: no /dev/sys\n", what);
+	for (i = 34; i <= 37; i++) {
+		if (pc3_claim(PLK_PIN, i)) {
+			refused = i;
+			break;
+		}
+		pc3_pin_in(i, 1);
+		PC3_REG(PC3_PAD(i) + PC3_SET) = PC3_PAD_SCHMITT;
+	}
+	if (refused) {
+		printf("%s -> cannot claim GP%d, errno %d\n", what, refused,
+		       errno);
 		return;
 	}
-	errno = 0;
-	r = ioctl(sys, PICOIOC_ADVAL, &n);
-	printf("%s -> %d", what, r);
-	if (r < 0)
-		printf("  errno %d", errno);
-	else
-		printf("   (bit1 = GP35, 1 = LOW/pressed)");
-	printf("\n");
-	close(sys);
+	for (i = 0; i < 4; i++)
+		if (!pc3_pin_get(34 + i))
+			v |= 1 << i;
+	printf("%s -> %d   (bit1 = GP35, 1 = LOW/pressed)\n", what, v);
 }
 
 static int req(int r, const char *what, uint8_t pin, uint8_t val)

@@ -1,5 +1,55 @@
 # The remaining kernel surface, and the interrupt problem
 
+> ## SUPERSEDED IN PART, 2026-08-10: the pin work left the kernel
+>
+> Most of the list below assumed each peripheral would get a driver and
+> an ioctl.  It will not.  There is no MMU on this board and the kernel
+> never drops privilege, so userland could always reach `IO_BANK0`,
+> `PADS_BANK0` and `SIO` — and an ioctl costs **1.488 µs** against about
+> ten nanoseconds for the store it would be wrapping.  A syscall per pin
+> edge was not a tax on bit-banging, it made bit-banging impossible.
+>
+> So the kernel keeps only what userland cannot do for itself:
+>
+> * **who owns what** — `pinlock.c`, one table, `PLKIOC_CLAIM` /
+>   `RELEASE` / `OWNER`, resources named `(class, index)` because pins
+>   are not the only thing two programs collide over: twelve PWM slices
+>   cover forty-eight pins, and there is one ADC for all channels;
+> * **putting it back** — release **resets** the resource, on exit and
+>   on exec, so a program killed while driving a relay does not leave it
+>   driven.  This is the only part a dead process cannot do.
+>
+> Userland gets `<sys/pc3io.h>`: claim wrappers plus the registers.
+> **Advisory, like `flock`** — with no MMU and no MPU a wild pointer can
+> still write `IO_BANK0`; what this stops is cooperating programs
+> colliding, which is the failure that actually happens here.
+>
+> **Done and board-verified:** the lock (`utils/locktest.c`, 25 checks
+> including SIGKILLing a process that holds a driven pin and watching
+> `GPIO_OE` clear); the header; and the **first retrofit** — `ADVAL`
+> selectors 0 and 1–4 deleted from the kernel and reimplemented in BBC
+> BASIC.  Proved by running both paths side by side on the same board
+> before deleting either: joystick identical, and a potentiometer on
+> GP41 agreeing to 1.5 counts of the twelve-bit converter.
+>
+> **What this deletes from the list below:** items 3 (ADC) and 6's pin
+> half are done; PWM/SERVO, SPI0 and I2C2 need **no kernel code** — a
+> claim and a userland driver.  What still needs the kernel is anything
+> interrupt-driven, because userland cannot install an ISR: pin
+> interrupts, `SETTICK`, `KEYDOWN`.  That is the interrupt section
+> below, and it stands unchanged.
+>
+> **Two traps, both of which produce code that looks right and does
+> nothing.**  `PADS_BANK0.ISO` **resets to 1** on the RP2350 — the pad is
+> disconnected until it is cleared, so a pull-up does nothing and a read
+> returns 0; this cost a debugging round when the kernel's old one-shot
+> stopped clearing it on our behalf.  And SIO's `GPIO_OUT`/`GPIO_OE` must
+> never be read-modify-written: they are shared with core1's display.
+>
+> **Retrofit order agreed:** infrastructure, then bring existing
+> functionality across, then new features.  ADVAL is done; `SETPIN`/`PIN`
+> in the mmb2c runtime (`mmb_gpio.h`, one crossing) is next.
+
 Reviewed from `mmb2c/REVIEW-COVERAGE-2026-08-07.md` on 2026-08-09.  That
 document marks with **†** every unimplemented MMBasic feature that also
 needs new kernel surface.  This gathers all of them into one list, so

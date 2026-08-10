@@ -8,6 +8,9 @@
 #ifdef CONFIG_PC3_DISPLAY
 #include "display.h"
 #endif
+#ifdef CONFIG_PC3_PINLOCK
+#include "pinlock.h"
+#endif
 
 #undef DEBUG
 
@@ -185,6 +188,12 @@ void pagemap_free(ptptr p)
     /* and so does the framebuffer layer, or the next program to ask for
        one is told it is busy by a process that no longer exists */
     display_fb_release(p);
+#endif
+#ifdef CONFIG_PC3_PINLOCK
+    /* and the I/O header, with the PINS THEMSELVES put back to inputs:
+       freeing the claim alone would leave a program that died driving a
+       relay still driving it */
+    pinlock_release(p);
 #endif
     int slot = get_slot(p);
     for (int i=0; i<NUM_ALLOCATION_BLOCKS; i++)

@@ -440,7 +440,53 @@ Check the magic and version before calling anything. An old binary on a
 new kernel must fail rather than call the wrong slot — that is what the
 version is for.
 
-# Joystick, ADC and the clock
+# Pins, the joystick and the ADC
+
+These are **not** syscalls. Claim what you want through the pin lock,
+then read and write the registers yourself — there is no MMU on this
+board, so a pin costs a store rather than the 1.488 µs an ioctl costs.
+`<sys/pc3io.h>` has the registers and the claim wrappers:
+
+```c
+#include <sys/pc3io.h>
+
+pc3_claim(PLK_PIN, 4);          /* one syscall, once */
+pc3_pin_out(4);
+pc3_pin_high(4);                /* one store */
+
+pc3_claim(PLK_PIN, 34);
+pc3_pin_in(34, 1);              /* pulled up */
+if (!pc3_pin_get(34)) ...       /* the joystick's bit 0, active low */
+
+pc3_claim(PLK_ADC, 0);
+pc3_claim(PLK_PIN, PC3_ADC_GPIO(1));
+pc3_adc_enable();
+pc3_adc_pin(1);
+v = pc3_adc_read(1) << 4;       /* ADVAL's 16-bit convention */
+```
+
+Claimable: header pins GP0–GP7, GP26, GP34–GP46; I2C1; SPI0; the twelve
+PWM slices; the ADC. Everything else belongs to the board. A claim you
+already hold succeeds; someone else's gives `EBUSY`; anything not on
+that list gives `EINVAL`. **Exiting releases everything and resets the
+pins**, so a program that dies driving a relay does not leave it driven —
+which is the reason the kernel is involved at all.
+
+Two traps, both of which produce code that looks right and does nothing:
+
+* **`PADS_BANK0.ISO` resets to 1.** Until it is cleared the pad is
+  disconnected — no drive, no read, and a pull-up does nothing. Every
+  setup function in the header clears it last. If you write your own,
+  do the same.
+* **Never read-modify-write SIO's `GPIO_OUT` or `GPIO_OE`.** They are
+  shared with the kernel and with core1's display. Use the SET/CLR/XOR
+  registers, and remember GP32–GP47 are a second bank whose registers
+  interleave with the first.
+
+`utils/locktest.c` exercises the whole thing, including killing a
+process that holds a pin and checking the pin comes back.
+
+# ADVAL, and the clock
 
 ```c
 int v = ioctl(sys, PICOIOC_ADVAL, (void *)n);
@@ -448,11 +494,13 @@ int v = ioctl(sys, PICOIOC_ADVAL, (void *)n);
 
 | n | reads |
 |---|---|
-| 0 | joystick switches GP34–37, pressed = 1, bit 0 = GP34 |
-| 1–4 | ADC on GP41–44, 16-bit (12-bit shifted left 4) |
+| 0, 1–4 | **gone** — joystick and ADC are pin work, see above |
 | -5..-8 | free slots in sound queue 0–3 |
 | -9 | microsecond counter, 31 bits in the return value |
 | -10 | the full 64-bit counter: pass an 8-byte buffer whose low word holds -10 |
+
+BASIC's `ADVAL(0)` and `ADVAL(1)`–`ADVAL(4)` are unchanged: BBC BASIC
+reads the pins itself now, and returns exactly what it used to.
 
 # PSRAM
 

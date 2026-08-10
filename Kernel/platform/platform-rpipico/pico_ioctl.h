@@ -373,9 +373,12 @@ struct snd_stat {
 #define SNDIOC_PCMOWNER 0x0025
 
 /* BBC ADVAL (PC3): data -> int selector, returns the reading.
- *   0      joystick switches GP34-37 (pulled up, active low),
- *          pressed = 1: bit0 GP34, bit1 GP35, bit2 GP36, bit3 GP37
- *   1-4    ADC GP41-GP44, 16-bit (12-bit ADC << 4)
+ *
+ *   Selectors 0 (joystick, GP34-GP37) and 1-4 (ADC, GP41-GP44) are
+ *   GONE.  They were pin work on I/O header pins, and userland now
+ *   claims those pins and reads them itself - <sys/pc3io.h>, with
+ *   ownership through PLKIOC_CLAIM below.  They return 0 here.
+ *
  *   -5..-8 sound channel 0-3 queue free slots
  *   -9     hardware microsecond counter, 31 bits in the return value
  *   -10    hardware microsecond counter, 64 bits: pass an 8-byte
@@ -405,5 +408,81 @@ struct psram_stat {
 #define PSRAMIOC_REALLOC 0x000D		/* struct psram_req */
 #define PSRAMIOC_FREE  0x000B		/* uint32_t base */
 #define PSRAMIOC_STAT  0x000C		/* struct psram_stat */
+
+/*
+ * Ownership of the I/O header - see pinlock.c and PC3-IO-PLAN.md.
+ *
+ * The point of this is what it does NOT do: it does not carry the
+ * traffic.  A program that has claimed GP4 drives GP4 itself, by
+ * storing to SIO, because there is no MMU on this board and never was -
+ * the same reason PICOIOC_LIBM hands out kernel function pointers and
+ * PSRAMIOC_ALLOC hands out a raw address.  An ordinary ioctl costs
+ * 1.488us here (see GFXIOC_PIXEL above) against about ten nanoseconds
+ * for the store it would be wrapping, so a syscall per pin edge is not
+ * a small tax, it is the entire cost.
+ *
+ * What the kernel keeps is the two things userland cannot do for
+ * itself: say who owns a pin, and put the pin BACK when that owner
+ * dies.  A program killed halfway through driving a relay cannot
+ * release it; the kernel can, and does, on exit and on exec.
+ *
+ * ADVISORY, like flock().  With no MMU and no MPU there is nothing to
+ * enforce with - a wild pointer can still write IO_BANK0 - so this
+ * stops cooperating programs colliding, which is the failure that
+ * actually happens on a single-user machine, and stops nothing else.
+ * Say so rather than letting the word "lock" imply protection.
+ */
+/* Userland has the same block in <sys/pc3io.h>, which programs include
+   for the register access that goes with it; the guard lets a file
+   include both in either order. */
+#ifndef PC3_PINLOCK_ABI
+#define PC3_PINLOCK_ABI
+
+struct pinlock_req {
+	uint8_t cls;			/* PLK_* below */
+	uint8_t idx;			/* pin, controller, or slice number */
+	uint8_t flags;			/* reserved, must be zero */
+	uint8_t pad;
+};
+
+/* The class is part of the name because a pin is not the only thing two
+ * programs can collide over.  Twelve PWM slices cover forty-eight pins,
+ * so two processes on DIFFERENT header pins can land on the same slice
+ * and fight over its wrap and divider; there is one ADC for all the
+ * channels; and a controller can be muxed to more than one pin pair.
+ * Locking pins alone would look right and still let all three through. */
+#define PLK_PIN		0		/* idx = GPIO number */
+#define PLK_I2C		1		/* idx = controller: 1 only, see below */
+#define PLK_SPI		2		/* idx = controller: 0 only, see below */
+#define PLK_PWM		3		/* idx = slice 0-11 */
+#define PLK_ADC		4		/* idx = 0, the one converter */
+#define PLK_PIO		5		/* refused for now */
+#define PLK_DMA		6		/* refused for now */
+
+/* What may be claimed, and why the rest may not:
+ *
+ *   pins    GP0-GP7, GP26, GP34-GP46 - the I/O header.  Everything else
+ *           belongs to the board (display, SD, PSRAM/QMI, I2S, UART,
+ *           the DS3231) and handing it out would be a way to hang the
+ *           machine from a BASIC program.
+ *   I2C     controller 1 only.  I2C0 is GP20/21 - the QWIIC socket AND
+ *           the DS3231 - and stays behind /dev/i2c, which arbitrates it
+ *           against the RTC poll in interrupt context.
+ *   SPI     controller 0 only.  SPI1 is the SD card.
+ *   PWM     all twelve slices; the kernel uses none.
+ *   ADC     the converter.  BBC BASIC's ADVAL shares it and will be
+ *           brought under this scheme rather than left to race.
+ *   PIO/DMA refused: the display and the sound engine hold state
+ *           machines and channels, and which ones has to be surveyed
+ *           before userland can be told any are free.  An honest EINVAL
+ *           beats a claim that appears to work.
+ */
+#define PLKIOC_CLAIM	0x0026		/* struct pinlock_req */
+#define PLKIOC_RELEASE	0x0027		/* struct pinlock_req */
+/* Returns the pid holding it, or 0 if free - SNDIOC_PCMOWNER's shape,
+ * and for the same reason: "who has GP4" is answerable from a shell. */
+#define PLKIOC_OWNER	0x0028		/* struct pinlock_req */
+
+#endif	/* PC3_PINLOCK_ABI */
 
 #endif

@@ -85,6 +85,12 @@
    it by 248 bytes the moment they were added. */
 *i2cuser.c.o(.text*)
 *devi2c.c.o(.text*)
+/* The I/O header's ownership table.  Claims happen at SETPIN speed and
+   the release sweep runs on the exit path next to freeing memory, so
+   nothing here is timed; the table itself is 192 bytes of .bss and stays
+   in RAM whatever this says. */
+*pinlock.c.o(.text*)
+*hardware_pwm/pwm.c.o(.text*)
 
 /* ---- the console's escape machinery and line editing, which run at
        terminal speed.  charout is per character so it is named back

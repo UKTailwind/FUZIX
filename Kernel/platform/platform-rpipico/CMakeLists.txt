@@ -103,6 +103,7 @@ add_executable(fuzix
 	core1.c
 	devgpio.c
 	i2cuser.c
+	pinlock.c
 	usbdescriptors.c
 	../../dev/devi2c.c
 	../../dev/blkdev.c
@@ -152,6 +153,7 @@ target_link_libraries(fuzix
 	hardware_flash
 	hardware_i2c
 	hardware_pio
+	hardware_pwm
 	hardware_spi
 	tinyusb_device
 )
