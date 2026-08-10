@@ -1669,28 +1669,30 @@ do. Five milliseconds is the kernel's own tick and far below what anyone
 can type or perceive, but it is a divergence from MMBasic, which looks
 every time.
 
-**Keys arrive a line at a time, not a keystroke at a time — and this is
-a defect, not a design.** Nothing is delivered until Enter is pressed;
-then the whole line arrives at once and the handler fires for each
-character in turn.
+**A program reading keys holds the terminal**, and that has visible
+consequences worth knowing.
 
-The cause is the console's **line editor** (the thing that gives you
-history and cursor keys at the shell prompt). It takes every keystroke
-while the terminal is in cooked mode with echo, holds it in its own
-buffer, and hands the finished line to the system only when you press
-Enter. `INKEY$` switches the terminal to raw mode for the few
-microseconds of one read and switches it straight back — far too brief a
-window for a key that was typed at any other moment, which is all of
-them. So the key is already in the editor's buffer, and the read finds
-nothing.
+The console has a line editor in front of it — the thing that gives you
+history and cursor keys at the shell prompt. It takes every keystroke
+while the terminal is in cooked mode with echo, and hands over a
+finished line only when you press Enter. A program that wants
+*keystrokes* has to stand it down, so the first `INKEY$` or armed
+`ON KEY` puts the terminal into raw mode and **keeps it there** for the
+rest of the program.
 
-This is not new to `ON KEY`: **`INKEY$` has never seen a keystroke at
-this console**, and nothing had exercised it hard enough to notice.
-Until it is fixed, `ON KEY` is usable for command-at-a-time input and
-not for the twitch response a game wants. The fix belongs in the
-runtime — a program that wants keystrokes should hold the terminal in
-raw mode rather than flipping per call, which is exactly what the other
-raw-mode programs on this machine (BBC BASIC, the editors) already do.
+While it is held:
+
+* **keys are not echoed** — nothing appears on screen unless your
+  program prints it. This is MMBasic's behaviour for `INKEY$` too.
+* **there is no line editing** — no backspace, no history, no cursor
+  keys. Each keystroke goes straight to the program.
+* **`INPUT` still works normally.** It gives the terminal back for the
+  duration of the question and takes it again afterwards, so a program
+  can mix `INKEY$` with `INPUT` and the typed answer is edited and
+  echoed as usual.
+* the terminal is **restored when the program ends**, however it ends.
+
+This is what BBC BASIC and the editors on this machine already do.
 
 ## Timers and the deliberate divergence
 

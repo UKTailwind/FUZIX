@@ -42,8 +42,21 @@ int main(void)
 	printf("  VMIN         = %d\n", (int)cooked.c_cc[VMIN]);
 	printf("  VTIME        = %d\n", (int)cooked.c_cc[VTIME]);
 
+	/*
+	 *	ICANON off but ECHO LEFT ON, which is deliberate on both
+	 *	counts.
+	 *
+	 *	Echo on means you can SEE the keys you type, so a run that
+	 *	reads nothing is telling you something - with echo off,
+	 *	"got 0" cannot be told apart from "nobody typed".
+	 *
+	 *	And it is the experiment: lineedit_input's gate is
+	 *	(ICANON|ECHO) BOTH set, so clearing ICANON alone should
+	 *	already stand the line editor down and let the keys through
+	 *	- which is the fix INKEY$ needs, tested before it is built.
+	 */
 	raw = cooked;
-	raw.c_lflag &= ~(unsigned)(ICANON | ECHO);
+	raw.c_lflag &= ~(unsigned)ICANON;
 	raw.c_cc[VMIN] = 0;
 	raw.c_cc[VTIME] = 0;
 	errno = 0;
@@ -62,7 +75,7 @@ int main(void)
 		       (int)back.c_cc[VMIN]);
 
 	printf("\nnow type - 100 reads, 100ms apart\n");
-	for (i = 0; i < 100; i++) {
+	for (i = 0; i < 150; i++) {
 		errno = 0;
 		n = (int)read(0, &c, 1);
 		if (n == 1) {
