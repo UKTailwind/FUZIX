@@ -95,11 +95,22 @@ ordinary BASIC program that currently fails outright.
 A C translation cannot honestly provide these, and pretending otherwise
 would be worse than the current clear error:
 
-* **Peripherals** — `PORT PWM SERVO I2C SPI ONEWIRE PIO ADC IR
+* **Peripherals** — `PORT SERVO I2C SPI ONEWIRE PIO IR
   WS2812 STEPPER TMC22XX HUMID TEMPR DISTANCE PULSIN CAMERA KEYBOARD KEYPAD
   MOUSE GAMEPAD WII RTC WATCHDOG CPU FLASH SLEEP BITBANG BITSTREAM`
 
-  No longer all of them, and `ADC` is now half gone too:
+  `PWM` and `ADC` have left this list.  `PWM slice, freq, duty [, duty2]`
+  and `PWM slice, OFF` translate, with `SETPIN pin, PWM` attaching a pin
+  - MMBasic's split, because one slice drives two pins.  The arithmetic
+  is cmd_pwm's step for step, including the halving loop that trades
+  counter bits for clock divider below ~5.7kHz and the negative-duty
+  polarity bit.  `SETPIN pin, PWM` claims the SLICE as well as the pin:
+  twelve slices cover forty-eight pins on the RP2350B, so GP34 and GP42
+  are one channel and a pin claim alone would not have caught it.
+  `PWM SYNC` is not translated.  Scope-verified on GP0 at 50Hz, 1kHz,
+  10kHz and 100kHz, and inverted.
+
+  The rest:
   `SETPIN pin, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|OFF`, `PIN(n) =` and the
   `PIN(n)` function are translated (mmb_gpio.h and mmb_int.h), using
   GPIO numbers rather than connector-pin numbers.  The input modes take

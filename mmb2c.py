@@ -590,6 +590,7 @@ class Conv(object):
         self.uses_mappal = False
         self.uses_gpio = False
         self.uses_play = False
+        self.uses_pwm = False
         # set in the scan pass, so statements BEFORE the ON ERROR line are
         # guarded too - the armed window is a run-time thing
         self.uses_onerror = False
@@ -3262,6 +3263,28 @@ class Conv(object):
         if up == 'SETTICK':
             self.do_settick()
             return
+        if up == 'PWM':
+            # PWM slice, frequency, duty1 [, duty2]
+            # PWM slice, OFF
+            #
+            # A SLICE, not a pin: one slice drives two pins, and SETPIN
+            # pin, PWM is what attaches a pin to it.  MMBasic is the
+            # same and for the same reason.
+            self.i += 1
+            self.uses_pwm = True
+            slice_ = self.as_int(self.expr())
+            self.expect_op(',')
+            if self.accept_kw('OFF'):
+                self.emit('mmp_pwm_off(%s);' % slice_)
+                return
+            freq = self.as_flt(self.expr())
+            self.expect_op(',')
+            d1 = self.as_flt(self.expr())
+            # The second channel is optional; -1 is MMBasic's "leave it
+            # alone", which here means a zero level on channel B.
+            d2 = self.as_flt(self.expr()) if self.accept_op(',') else '0.0'
+            self.emit('mmp_pwm(%s, %s, %s, %s);' % (slice_, freq, d1, d2))
+            return
         if up == 'SETPIN':
             # SETPIN pin, DIN|DOUT
             #
@@ -3295,9 +3318,12 @@ class Conv(object):
                 mode = 'MMG_PIN_INTL'
             elif self.accept_kw('INTB'):
                 mode = 'MMG_PIN_INTB'
+            elif self.accept_kw('PWM'):
+                mode = 'MMG_PIN_PWM'
+                self.uses_pwm = True
             else:
                 self.err("SETPIN takes DIN, DOUT, AIN, ARAW, "
-                         "INTH, INTL, INTB or OFF")
+                         "INTH, INTL, INTB, PWM or OFF")
             self.uses_gpio = True
             if mode.startswith('MMG_PIN_INT'):
                 # SETPIN pin, INTH|INTL|INTB, handler [, PULLUP|PULLDOWN]
@@ -5286,6 +5312,8 @@ class Conv(object):
         # program that arms an interrupt carries any of it.
         if self.uses_interrupts:
             wr('#include "mmb_int.h"\n')
+        if self.uses_pwm:
+            wr('#include "mmb_pwm.h"\n')
         wr('#include <math.h>\n')
         wr('#include <string.h>\n')
         wr('#include <stdlib.h>\n\n')

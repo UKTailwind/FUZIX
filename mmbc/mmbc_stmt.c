@@ -747,6 +747,32 @@ void statement_inner(void)
         do_settick();
         return;
     }
+    if (strcmp(up, "PWM") == 0) {
+        /* PWM slice, frequency, duty1 [, duty2]
+           PWM slice, OFF
+
+           A SLICE, not a pin: one slice drives two pins, and SETPIN
+           pin, PWM is what attaches a pin to it.  MMBasic is the same
+           and for the same reason. */
+        const char *sl, *freq, *d1, *d2;
+
+        cv.i++;
+        cv.uses_pwm = 1;
+        sl = as_int(expr());
+        expect_op(",");
+        if (accept_kw("OFF")) {
+            emit(sfmt("mmp_pwm_off(%s);", sl));
+            return;
+        }
+        freq = as_flt(expr());
+        expect_op(",");
+        d1 = as_flt(expr());
+        /* The second channel is optional; -1 is MMBasic's "leave it
+           alone", which here means a zero level on channel B. */
+        d2 = accept_op(",") ? as_flt(expr()) : "0.0";
+        emit(sfmt("mmp_pwm(%s, %s, %s, %s);", sl, freq, d1, d2));
+        return;
+    }
     if (strcmp(up, "SETPIN") == 0) {
         /* SETPIN pin, DIN|DOUT
 
@@ -777,9 +803,13 @@ void statement_inner(void)
             mode = "MMG_PIN_INTL";
         else if (accept_kw("INTB"))
             mode = "MMG_PIN_INTB";
+        else if (accept_kw("PWM")) {
+            mode = "MMG_PIN_PWM";
+            cv.uses_pwm = 1;
+        }
         else {
             cv_err("SETPIN takes DIN, DOUT, AIN, ARAW, "
-                   "INTH, INTL, INTB or OFF");
+                   "INTH, INTL, INTB, PWM or OFF");
             return;
         }
         cv.uses_gpio = 1;

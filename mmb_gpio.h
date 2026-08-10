@@ -81,6 +81,18 @@ static void pc3_adc_pin(int c) { (void)c; }
 static void pc3_adc_select(int c) { (void)c; }
 static int pc3_adc_conv(void) { return 0; }
 static int pc3_adc_read(int c) { (void)c; return 0; }
+/* The pin-to-slice arithmetic is real even here: it is arithmetic, and
+   the gates check that a program asks for the slice it means to. */
+MMG_FN int pc3_pwm_slice(int p) { return p < 32 ? ((p >> 1) & 7)
+					        : 8 + ((p >> 1) & 3); }
+MMG_FN int pc3_pwm_chan(int p) { return p & 1; }
+static void pc3_pwm_pin(int p) { (void)p; }
+static void pc3_pwm_level(int s, int c, unsigned long l)
+{ (void)s; (void)c; (void)l; }
+static void pc3_pwm_config(int s, unsigned long d, unsigned long t,
+			   int ia, int ib, int ph)
+{ (void)s; (void)d; (void)t; (void)ia; (void)ib; (void)ph; }
+static void pc3_pwm_enable(int s, int on) { (void)s; (void)on; }
 #endif
 
 /*	The one crossing.  mm_gpio does the ioctl because the on-board cc
@@ -107,6 +119,10 @@ MMG_FN int mmg_claim(MMINTEGER pin, MMINTEGER cls)
 #define MMG_PIN_INTH	5
 #define MMG_PIN_INTL	6
 #define MMG_PIN_INTB	7
+/*	PWM output.  MMBasic's SETPIN pin, PWM works out which channel
+ *	the pin is from the pin itself (External.c:1686) and so does this
+ *	- the mapping is arithmetic on the RP2350, not a table. */
+#define MMG_PIN_PWM	8
 
 static unsigned char mmg_mode[MM_GPIO_NPINS];
 
@@ -159,6 +175,18 @@ MMG_FN void mmg_setpin(MMINTEGER pin, MMINTEGER mode, MMINTEGER pull)
 		}
 		pc3_adc_enable();
 		pc3_adc_pin(ch);
+	} else if (mode == MMG_PIN_PWM) {
+		/*	The SLICE is claimed as well as the pin, and that is
+		 *	not belt and braces: twelve slices cover forty-eight
+		 *	pins here, so two programs on two different pins can
+		 *	land on one slice and fight over its wrap and
+		 *	divider.  GP34 and GP42 are the same channel. */
+		if (mmg_claim(pin, MM_PLK_PIN)
+		    || mmg_claim(pc3_pwm_slice((int)pin), MM_PLK_PWM)) {
+			mm_error("Pin cannot do that");
+			return;
+		}
+		pc3_pwm_pin((int)pin);
 	} else {
 		if (mmg_claim(pin, MM_PLK_PIN)) {
 			mm_error("Pin cannot do that");

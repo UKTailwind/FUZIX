@@ -338,6 +338,8 @@ void conv_write(FILE *f)
        that arms an interrupt carries any of it. */
     if (cv.uses_interrupts)
         fprintf(f, "#include \"mmb_int.h\"\n");
+    if (cv.uses_pwm)
+        fprintf(f, "#include \"mmb_pwm.h\"\n");
     fprintf(f, "#include <math.h>\n");
     fprintf(f, "#include <string.h>\n");
     fprintf(f, "#include <stdlib.h>\n\n");
