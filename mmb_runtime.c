@@ -2579,6 +2579,44 @@ MMINTEGER mm_us(void)
     return mm_us_now();
 }
 
+/*
+ * RTC GETREG / RTC SETREG - one DS3231 register.
+ *
+ * The kernel's call, not /dev/i2c, which refuses 0x68: the chip is the
+ * system clock.  Arming an ALARM is writing registers 0x07-0x0A and
+ * then INTCN|A1IE into 0x0E, which is exactly what a PicoMite program
+ * does - MMBasic has no alarm command to copy.
+ *
+ * -1 when there is no RTC, or on any host without one, so a program
+ * gets a clear answer rather than a plausible zero.
+ */
+#if defined(MM_PC3) || defined(__FUZIX__)
+#define MM_PICOIOC_RTCREG 0x0029        /* pico_ioctl.h is the authority */
+static int mm_gfx_open(void);           /* /dev/sys, opened once */
+
+MMINTEGER mm_rtcreg(MMINTEGER reg, MMINTEGER val, MMINTEGER write)
+{
+    struct { unsigned char reg, val, write, pad; } rq;
+    int fd = mm_gfx_open();
+
+    if (fd < 0)
+        return -1;
+    rq.reg = (unsigned char)reg;
+    rq.val = (unsigned char)val;
+    rq.write = (unsigned char)(write ? 1 : 0);
+    rq.pad = 0;
+    if (ioctl(fd, MM_PICOIOC_RTCREG, &rq) < 0)
+        return -1;
+    return rq.val;
+}
+#else
+MMINTEGER mm_rtcreg(MMINTEGER reg, MMINTEGER val, MMINTEGER write)
+{
+    (void)reg; (void)val; (void)write;
+    return -1;                          /* no clock here */
+}
+#endif
+
 void mm_int_err_pop(void)
 {
     mm_errno_v = mm_int_serrno;

@@ -641,6 +641,13 @@ MMINTEGER mm_us(void);
  * there" and the specific form's "the key is eaten" both true. */
 MMINTEGER mm_key_peek(void);
 void mm_key_drop(void);
+/* RTC GETREG / RTC SETREG - one DS3231 register.  write 0 reads and
+ * returns the value; write 1 writes val and returns it back (a write to
+ * the control register comes back with EOSC masked out, because the
+ * kernel will not let a program stop the clock).  -1 if there is no RTC.
+ * Arming an alarm is writing these registers, which is what MMBasic
+ * does too - it has no alarm command either. */
+MMINTEGER mm_rtcreg(MMINTEGER reg, MMINTEGER val, MMINTEGER write);
 void mm_on_error(int mode, MMINTEGER n);   /* 0 abort 1 clear 2 ignore 3 skip */
 /* Write or discard the PRINT line held while armed - the statement
  * guard calls it at the end of every statement.  See mm_putc. */

@@ -3260,6 +3260,27 @@ class Conv(object):
             self.emit('mmg_text(%s, %s, %s, %s, %s, %s, %s, %s);'
                       % (x, y, s, just, font, scale, fc, bc))
             return
+        if up == 'RTC' and (self.is_kw('GETREG', 1) or self.is_kw('SETREG', 1)):
+            # RTC GETREG reg, var
+            # RTC SETREG reg, value
+            #
+            # MMBasic's own pair (I2C.c cmd_rtc), and the way an alarm
+            # is armed there - it has no alarm command.  Write the
+            # match time into 0x07-0x0A, then INTCN|A1IE into 0x0E, and
+            # the chip pulls GP32 low when the time comes.
+            self.i += 1
+            get = self.accept_kw('GETREG')
+            if not get:
+                self.accept_kw('SETREG')
+            reg = self.as_int(self.expr())
+            self.expect_op(',')
+            if get:
+                tgt = self.lvalue_from_here()
+                self.emit('%s = mm_rtcreg(%s, 0, 0);' % (tgt, reg))
+            else:
+                self.emit('mm_rtcreg(%s, %s, 1);'
+                          % (reg, self.as_int(self.expr())))
+            return
         if up == 'SETTICK':
             self.do_settick()
             return

@@ -120,6 +120,17 @@ would be worse than the current clear error:
   stopped a servo on channel B every time channel A was set - two
   outputs share a slice, and SERVO is what makes that common.
 
+  `RTC GETREG reg, var` and `RTC SETREG reg, value` reach any DS3231
+  register, which is MMBasic's own interface - it has GETREG and SETREG
+  and NO alarm command, so arming an alarm is writing 0x07-0x0A and then
+  INTCN|A1IE into 0x0E, exactly as a PicoMite program does.  Not through
+  /dev/i2c, which refuses 0x68 because the chip is the system clock; the
+  kernel does it, and refuses one thing - a write cannot set EOSC, since
+  stopping a battery-backed oscillator outlives the power cycle.
+  Board-verified: eight once-a-second alarms caught on GP32.
+  `RTC GETTIME`/`SETTIME` are not translated - the system clock already
+  tracks the chip, and `setdate` is the way to set it.
+
   The rest:
   `SETPIN pin, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|OFF`, `PIN(n) =` and the
   `PIN(n)` function are translated (mmb_gpio.h and mmb_int.h), using
