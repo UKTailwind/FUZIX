@@ -130,7 +130,15 @@ MMG_FN int mmg_adc_chan(MMINTEGER pin)
 	return -1;
 }
 
-MMG_FN void mmg_setpin(MMINTEGER pin, MMINTEGER mode)
+/*	pull: MMBasic's optional PULLUP / PULLDOWN, 1 / -1, and 0 for
+ *	neither - which is its default (External.c:1918-1935, "option = 0"
+ *	when the argument is absent).  It applies to the input modes; the
+ *	others ignore it, as MMBasic does.
+ *
+ *	Hysteresis is not an option there and is not one here: every
+ *	digital input MMBasic configures gets the Schmitt trigger, and
+ *	pc3_pin_in does the same. */
+MMG_FN void mmg_setpin(MMINTEGER pin, MMINTEGER mode, MMINTEGER pull)
 {
 	int ch;
 
@@ -159,8 +167,7 @@ MMG_FN void mmg_setpin(MMINTEGER pin, MMINTEGER mode)
 		if (mode == MMG_PIN_DOUT)
 			pc3_pin_out((int)pin);
 		else
-			pc3_pin_in((int)pin, 0);	/* MMBasic's DIN floats,
-						   and so do the INT modes */
+			pc3_pin_in((int)pin, (int)pull);
 	}
 	mmg_mode[pin] = (unsigned char)mode;
 }

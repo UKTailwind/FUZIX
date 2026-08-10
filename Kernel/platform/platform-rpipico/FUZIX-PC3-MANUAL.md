@@ -1450,7 +1450,7 @@ would cause more confusion than the incompatibility does.
 
 | mode | what the pin becomes |
 |---|---|
-| `DIN`  | a digital input, floating (no pull-up or pull-down) |
+| `DIN`  | a digital input |
 | `DOUT` | a digital output, driven by `PIN(n) = v` |
 | `AIN`  | an analogue input read as **volts** |
 | `ARAW` | an analogue input read as the **raw 0–4095 count** |
@@ -1461,6 +1461,23 @@ would cause more confusion than the incompatibility does.
 
 MMBasic's remaining modes — frequency and counting — are not
 translated, and are reported by name.
+
+Input modes take MMBasic's optional pull:
+
+```basic
+SETPIN 2, DIN, PULLUP
+SETPIN 3, DIN, PULLDOWN
+SETPIN 35, INTL, Pressed, PULLUP      ' after the handler
+```
+
+Absent means neither, which is MMBasic's default — a floating input then
+reads whatever the wire is doing, and with nothing connected that is
+noise. A switch to ground wants `PULLUP`.
+
+**Hysteresis is always on for inputs.** It is not an option in MMBasic
+either: every digital input it configures gets the Schmitt trigger, and
+so does every one here. On a board with header pins and flying leads a
+slow or noisy edge is the normal case.
 
 `AIN` and `ARAW` need an ADC pin: on the RP2350B channel *n* is
 GP40+*n*, so **GP40–GP46** on the I/O header. Anything else gives
@@ -1490,11 +1507,35 @@ pin **reset to an input** — when your program ends, however it ends,
 including being killed or crashing. So a program that dies driving a
 relay does not leave it driven.
 
-Only the I/O header can be claimed: **GP0–GP7, GP26 and GP34–GP46**.
-The rest belong to the board (display, SD card, PSRAM, sound, console,
-the DS3231), and asking for one gives `Pin cannot do that` instead of
-taking a pin the audio hardware is driving. Appendix A lists what the
-board uses. A pin number outside 0–47 gives `Invalid pin`.
+Only the I/O header can be claimed: **GP0–GP7, GP26 and GP34–GP46**,
+plus **GP32**. The rest belong to the board (display, SD card, PSRAM,
+sound, console, the DS3231's I2C), and asking for one gives `Pin cannot
+do that` instead of taking a pin the audio hardware is driving. Appendix
+A lists what the board uses. A pin number outside 0–47 gives `Invalid
+pin`.
+
+GP32 is not on the header — it is the **DS3231's alarm output**, and an
+alarm nothing can read is not an alarm. It is open-drain and active low,
+so with a pull-up it reads 1 until the alarm asserts:
+
+```basic
+SETPIN 32, DIN, PULLUP
+PRINT PIN(32)                     ' 1 = not asserted
+
+SETPIN 32, INTL, WakeUp, PULLUP   ' fires when it does assert
+```
+
+**Nothing can arm the alarm yet.** Setting a DS3231 alarm means
+writing its registers, and `/dev/i2c` refuses address 0x68 to protect
+the system clock from a program that could stop the oscillator on a
+battery-backed part. So this pin will read and interrupt correctly, and
+until the kernel offers a way to set the alarm there is nothing to make
+it fire. It is wired and reachable; it is not yet useful on its own.
+
+On a **Pico Computer 2** GP32 is the SD card's MISO instead, so the same
+kernel refuses to hand it out there — the board tells itself apart at
+boot. This is the one pin whose availability depends on which machine
+you are running on.
 
 `PIN(n) = v` on a pin that is not a `DOUT` gives `Pin is not an
 output`, and reading a pin that has never been `SETPIN`ed gives `Pin is

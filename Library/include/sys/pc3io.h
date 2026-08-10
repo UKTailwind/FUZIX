@@ -287,7 +287,15 @@ PC3_FN void pc3_pin_in(int pin, int pull)
 	else
 		PC3_REG(PC3_SIO_HI_OE_CLR) = 1UL << (pin - 32);
 	PC3_REG(PC3_PAD(pin) + PC3_CLR) = PC3_PAD_OD | PC3_PAD_PUE | PC3_PAD_PDE;
-	PC3_REG(PC3_PAD(pin) + PC3_SET) = PC3_PAD_IE;
+	/*	Input buffer on, and HYSTERESIS with it.  MMBasic turns the
+	 *	Schmitt trigger on for every digital input it configures
+	 *	(External.c:841 and each of the interrupt modes), and this
+	 *	is a board with header pins and flying leads on them, where
+	 *	a slow or noisy edge is the normal case rather than the
+	 *	exceptional one.  The pad powers up with it set, but a
+	 *	previous owner may have cleared it, so say so explicitly
+	 *	rather than inheriting whatever was left. */
+	PC3_REG(PC3_PAD(pin) + PC3_SET) = PC3_PAD_IE | PC3_PAD_SCHMITT;
 	if (pull > 0)
 		PC3_REG(PC3_PAD(pin) + PC3_SET) = PC3_PAD_PUE;
 	else if (pull < 0)

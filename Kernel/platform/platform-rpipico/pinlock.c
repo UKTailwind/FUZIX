@@ -71,11 +71,37 @@ static struct {
  */
 #define HDR_PIN_MASK	(0xFFULL | (1ULL << 26) | (0x1FFFULL << 34))
 
+/*
+ *	GP32 is not on the header and is claimable anyway - it is the
+ *	DS3231's ALARM output, and an alarm nothing can read is not an
+ *	alarm.  With it, waking on the RTC is one line of BASIC:
+ *	SETPIN 32, INTL, WakeUp (the line is open-drain and active low).
+ *
+ *	ONLY ON A PC3, and that is not caution for its own sake: this same
+ *	kernel runs the Pico Computer 2, where GP32 is the SD card's MISO
+ *	(devsdspi.c, PC2_SD_RX).  Handing it to a BASIC program there
+ *	would let it take the card's data line, and releasing it would
+ *	reset the pin under a mounted filesystem.  board.c already knows
+ *	which machine this is.
+ *
+ *	The kernel reads the DS3231 over I2C and never touches this pin,
+ *	so there is nothing to arbitrate against - unlike I2C0 itself.
+ */
+#define RTC_ALARM_PIN	32
+
 static int claimable(uint8_t cls, uint8_t idx)
 {
+	extern int board_is_pc2(void);
+
 	switch (cls) {
 	case PLK_PIN:
-		return idx < 48 && ((HDR_PIN_MASK >> idx) & 1);
+		if (idx >= 48)
+			return 0;
+		if ((HDR_PIN_MASK >> idx) & 1)
+			return 1;
+		if (idx == RTC_ALARM_PIN)
+			return !board_is_pc2();
+		return 0;
 	case PLK_I2C:
 		/* I2C0 is GP20/21: the QWIIC socket and the DS3231 together.
 		   It stays behind /dev/i2c, which arbitrates it against the

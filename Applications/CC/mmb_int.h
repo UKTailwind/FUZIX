@@ -99,11 +99,12 @@ MMG_FN void mm_int_fire(mm_int_fn fn)
  *	zero and a pin already sitting high fires an edge that never
  *	happened.
  */
-MMG_FN void mmi_setpin_int(MMINTEGER pin, MMINTEGER edge, mm_int_fn fn)
+MMG_FN void mmi_setpin_int(MMINTEGER pin, MMINTEGER edge, mm_int_fn fn,
+			   MMINTEGER pull)
 {
 	int i;
 
-	mmg_setpin(pin, edge);		/* claims, configures, records mode */
+	mmg_setpin(pin, edge, pull);	/* claims, configures, records mode */
 	if (mmg_mode[pin] != (unsigned char)edge)
 		return;			/* it refused, and has said so */
 
@@ -140,7 +141,7 @@ MMG_FN void mmi_setpin_off(MMINTEGER pin)
 			break;
 		}
 	}
-	mmg_setpin(pin, MMG_PIN_OFF);
+	mmg_setpin(pin, MMG_PIN_OFF, 0);
 }
 
 /*
