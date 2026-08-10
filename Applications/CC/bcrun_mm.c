@@ -307,6 +307,13 @@ static void w_error_s(void)  { mm_error_s(Ps(0)); A = 0; }
    the program address the way every by-reference argument is. */
 static void w_err_bind(void) { mm_err_bind((int *)Pa(0)); A = 0; }
 static void w_on_error(void) { mm_on_error(I(0), LL(1)); A = 0; }
+/* The error state across an interrupt handler - MMBasic's
+   GotAnInterrupt/cmd_ireturn pair.  In here rather than in the
+   program's own memory because the errno and the message are the
+   runtime's statics; the ON ERROR skip pair is reached through the
+   pointer mm_err_bind already gave us. */
+static void w_int_err_push(void) { mm_int_err_push(); A = 0; }
+static void w_int_err_pop(void)  { mm_int_err_pop(); A = 0; }
 static void w_errno(void)    { A = mm_errno(); }
 /* through a scratch temp: MM.ERRMSG$ lives in bcrun's own memory, and a
    program can only be handed a pointer inside the VM's address space */
@@ -601,6 +608,8 @@ static const struct mmwrap {
 	{ "mm_error_s",		w_error_s },
 	{ "mm_err_bind",	w_err_bind },
 	{ "mm_on_error",	w_on_error },
+	{ "mm_int_err_push",	w_int_err_push },
+	{ "mm_int_err_pop",	w_int_err_pop },
 	{ "mm_errno",		w_errno },
 	{ "mm_errmsg",		w_errmsg },
 	{ "mm_pr_commit",	w_pr_commit },

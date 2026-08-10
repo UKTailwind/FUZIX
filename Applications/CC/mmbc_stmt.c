@@ -13,6 +13,7 @@
 
 static void do_print(void);
 static char *prcall(const char *chan, const char *what, const char *arg);
+static const char *int_handler(void);
 static void do_longstring(void);
 static const char *gosub_key(void);
 static void do_gosub(void);
@@ -762,11 +763,35 @@ void statement_inner(void)
             mode = "MMG_PIN_ARAW";
         else if (accept_kw("OFF"))
             mode = "MMG_PIN_OFF";
+        else if (accept_kw("INTH"))
+            mode = "MMG_PIN_INTH";
+        else if (accept_kw("INTL"))
+            mode = "MMG_PIN_INTL";
+        else if (accept_kw("INTB"))
+            mode = "MMG_PIN_INTB";
         else {
-            cv_err("SETPIN takes DIN, DOUT, AIN, ARAW or OFF");
+            cv_err("SETPIN takes DIN, DOUT, AIN, ARAW, "
+                   "INTH, INTL, INTB or OFF");
             return;
         }
         cv.uses_gpio = 1;
+        if (strncmp(mode, "MMG_PIN_INT", 11) == 0) {
+            /* SETPIN pin, INTH|INTL|INTB, handler */
+            const char *fn;
+            expect_op(",");
+            cv.uses_interrupts = 1;
+            fn = int_handler();
+            if (!fn)
+                return;
+            emit(sfmt("mmi_setpin_int(%s, %s, %s);", pin, mode, fn));
+            return;
+        }
+        if (strcmp(mode, "MMG_PIN_OFF") == 0 && cv.uses_interrupts) {
+            /* OFF has to disarm an interrupt as well as reset the pin.
+               Only a program that arms one carries this. */
+            emit(sfmt("mmi_setpin_off(%s);", pin));
+            return;
+        }
         emit(sfmt("mmg_setpin(%s, %s);", pin, mode));
         return;
     }
@@ -1115,6 +1140,50 @@ static char *prcall(const char *chan, const char *what, const char *arg)
 }
 
 /* -- LONGSTRING ------------------------------------------------------ */
+
+/* mmb2c.py's int_handler.  Resolve an interrupt target to the C
+   function that is it.
+
+   MMBasic's GetIntAddress (MM_Misc.c:10250) takes a SUB name, a label
+   or a line number.  Only the SUB survives translation: compiled code
+   cannot jump into the middle of a function from a poll site, so labels
+   and line numbers are refused here with a clear message rather than
+   half-working - the ON ERROR RESTART precedent.  The SUB is otherwise
+   an ordinary generated function and may still be called normally.
+
+   Returns NULL after cv_err, which does not return in the strict path
+   but does in the lenient one. */
+static const char *int_handler(void)
+{
+    struct tok *t = nxt();
+    struct routine *r;
+    char *canon;
+    int ty;
+
+    if (t->kind != T_ID) {
+        cv_err("an interrupt handler must be the name of a SUB "
+               "(MMBasic's labels and line numbers are not translated)");
+        return NULL;
+    }
+    canon = split_suffix(t->up, &ty);
+    r = routine_get(canon);
+    if (r == NULL) {
+        cv_err(sfmt("no SUB called '%s' to handle the interrupt",
+                    t->text));
+        return NULL;
+    }
+    if (r->is_func) {
+        cv_err(sfmt("'%s' is a FUNCTION; an interrupt handler must be "
+                    "a SUB", r->disp));
+        return NULL;
+    }
+    if (r->nparams) {
+        cv_err(sfmt("interrupt handler '%s' must take no parameters",
+                    r->disp));
+        return NULL;
+    }
+    return r->cname;
+}
 
 static void do_longstring(void)
 {

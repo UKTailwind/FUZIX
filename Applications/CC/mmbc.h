@@ -333,6 +333,10 @@ struct conv {
     /* set in the scan pass, so statements BEFORE the ON ERROR line are
        guarded too - the armed window is a run-time thing */
     int uses_onerror;
+    /* likewise: an interrupt armed at line 100 has to be polled by the
+       statements before it, so the poll sites are emitted for the whole
+       program or none of it */
+    int uses_interrupts;
     int uses_cmdline;          /* MM.CMDLINE$: main takes argv */
     /* set by global_decls when the program has any array or string:
      * main() then has to allocate the block they live in */

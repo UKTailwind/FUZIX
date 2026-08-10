@@ -334,6 +334,10 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_gfx_map.h\"\n");
     if (cv.uses_gpio)
         fprintf(f, "#include \"mmb_gpio.h\"\n");
+    /* After mmb_gpio.h, which it uses to read the pins.  Only a program
+       that arms an interrupt carries any of it. */
+    if (cv.uses_interrupts)
+        fprintf(f, "#include \"mmb_int.h\"\n");
     fprintf(f, "#include <math.h>\n");
     fprintf(f, "#include <string.h>\n");
     fprintf(f, "#include <stdlib.h>\n\n");

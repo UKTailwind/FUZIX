@@ -1454,9 +1454,12 @@ would cause more confusion than the incompatibility does.
 | `DOUT` | a digital output, driven by `PIN(n) = v` |
 | `AIN`  | an analogue input read as **volts** |
 | `ARAW` | an analogue input read as the **raw 0–4095 count** |
+| `INTH` | a digital input that calls a SUB on a **low-to-high** edge |
+| `INTL` | … on a **high-to-low** edge |
+| `INTB` | … on **either** edge |
 | `OFF`  | not configured |
 
-MMBasic's remaining modes — frequency, counting, interrupts — are not
+MMBasic's remaining modes — frequency and counting — are not
 translated, and are reported by name.
 
 `AIN` and `ARAW` need an ADC pin: on the RP2350B channel *n* is
@@ -1501,6 +1504,58 @@ Pin work no longer costs a system call. `SETPIN` makes one, once, to
 claim; after that `PIN(n)` and `PIN(n) = v` are single register
 accesses, about ten nanoseconds against the 1.5 µs an ioctl costs.
 That is what makes bit-banging a protocol in BASIC possible at all.
+
+## Pin interrupts
+
+```basic
+SUB Pressed
+  PRINT "GP35 went ";PIN(35)
+END SUB
+
+SETPIN 35, INTB, Pressed         ' either edge
+DO
+  ' ... ordinary work; the handler runs between statements
+LOOP
+```
+
+The handler is an ordinary `SUB` taking no parameters, and it ends with
+`END SUB`. **There is no `IRETURN` to write** — that is MMBasic's
+behaviour too, not a simplification: for a SUB target MMBasic builds an
+`IRETURN` of its own and uses it as the return address of the `GOSUB` it
+fakes, so `END SUB` performs the interrupt return. Written `IRETURN`
+only ever existed for targets given as a label or a line number, and
+those are not translated: compiled code cannot jump into the middle of a
+function, so a label or line number is refused with a clear message
+rather than half-working.
+
+**These are not hardware interrupts, and they are not in MMBasic
+either.** The whole facility is a poll. MMBasic's interpreter checks
+after every statement, and pin "interrupts" there are a comparison of
+the pin's level against its level at the previous check — there is no
+GPIO IRQ anywhere in it. This does the same thing at the same place, so
+the behaviour you get is the behaviour a PicoMite gives:
+
+* **Latency is one statement**, and a statement is atomic. Nothing ever
+  runs half a statement of your program.
+* **A pulse shorter than a statement is missed.** That is MMBasic's
+  documented limitation, replicated rather than "fixed".
+* **Interrupts never nest.** A handler's own statements are polled, but
+  the poll does nothing while a handler is running.
+* **One handler runs per statement boundary.** If two pins change at
+  once, the second fires at the next statement.
+* `MM.ERRNO` and `MM.ERRMSG$` are **saved, cleared and restored** around
+  a handler, so a handler starts clean and cannot leave an error behind
+  for the interrupted code to trip over.
+
+Up to ten pins may have interrupts, which is MMBasic's own limit. The
+level a handler reads with `PIN(n)` is the level *now*, not the level
+that triggered it — with a mechanical switch the two often differ,
+because contacts bounce faster than the handler starts. MMBasic reads it
+the same way.
+
+A program that arms no interrupt pays nothing at all: the per-statement
+poll is emitted only for programs that use the feature, exactly as the
+`ON ERROR` checks are.
 
 Every read and write is a call into the kernel — comparable to drawing
 one pixel, which is over a microsecond. That is ample for a switch or
@@ -2081,9 +2136,11 @@ MMBasic's nine built-in fonts but only in its normal and vertical
 orientations — the three that rotate the character itself are accepted
 and drawn normally.
 
-Of the pins, `SETPIN n, DIN|DOUT|AIN|ARAW|OFF`, `PIN(n) =` and `PIN(n)`
-are done; the frequency, counting and interrupt modes of `SETPIN` are
-not. The analogue pair need an ADC pin (GP40–GP46 here), and `AIN` uses
+Of the pins, `SETPIN n, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|OFF`,
+`PIN(n) =` and `PIN(n)` are done; the frequency and counting modes of
+`SETPIN` are not. Interrupt handlers must be SUBs — MMBasic's label and
+line-number targets are refused, and with them `IRETURN`, which a SUB
+handler never needs. `SETTICK` and `ON KEY` are not translated yet. The analogue pair need an ADC pin (GP40–GP46 here), and `AIN` uses
 MMBasic's own ten-sample sort-and-discard filter. `PIN()` returns a
 float in every mode rather than MMBasic's integer for digital and
 `ARAW`, and pins are *owned*: `SETPIN` claims from the kernel, only the

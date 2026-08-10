@@ -88,6 +88,9 @@ echo "--- installing"
 	# without this compiles every program that draws and fails only on
 	# the ones that touch a pin, long after the change that added it.
 	echo "get $CC/mmb_gpio.h mmb_gpio.h"
+	# SETPIN's interrupt modes: the poll, the table and the dispatch.
+	# Same terms - only a program that arms one names any of it.
+	echo "get $CC/mmb_int.h mmb_int.h"
 	# The pin and ADC REGISTERS, which mmb_gpio.h reaches for directly
 	# now that pin work is not a syscall.  Flat, because that is the
 	# only shape this include directory has; a native program gets the
