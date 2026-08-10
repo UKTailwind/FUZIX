@@ -1637,6 +1637,39 @@ not a recomputed duty.
 `PIN()` will not read a PWM pin — it is an output, and MMBasic refuses it
 too.
 
+**Giving only one duty leaves the other channel alone.** That is not a
+detail: two outputs share a slice, so `PWM 0, 1000, 25` must not stop
+whatever is running on channel B.
+
+## `SERVO`
+
+```basic
+SETPIN 0, PWM
+SERVO 0, 50                  ' centre
+SERVO 0, 0, 100              ' two servos on one slice, opposite ends
+SERVO 0, OFF
+```
+
+A servo is PWM at a fixed 50 Hz frame with the position expressed as a
+pulse width, so `SERVO` is `PWM` with one line of arithmetic in front of
+it — MMBasic's:
+
+| position | pulse | |
+|---|---|---|
+| `0`   | 1.0 ms | one end |
+| `50`  | 1.5 ms | centre |
+| `100` | 2.0 ms | the other end |
+| `-20` | 0.8 ms | over-travel |
+| `120` | 2.2 ms | over-travel |
+
+The range is -20 to 120, which is the over-travel most servos will
+accept; outside it you get `Invalid servo position`. Everything else is
+the `PWM` statement, including the rule that omitting the second
+position leaves that channel alone — which is what lets two servos share
+a slice.
+
+Scope-verified on GP0 at all five positions.
+
 ## `SETTICK` — periodic timers
 
 ```basic
@@ -2142,10 +2175,10 @@ translate time, not at run time.
 | `PLAY` | `PRINT` | `PWM` | `RANDOMIZE` |
 | `RBOX` | `READ` | `RENAME` | `RESTORE` |
 | `RETURN` | `RMDIR` | `SAVE` | `SEEK` |
-| `SELECT` | `SETPIN` | `SETTICK` | `SORT` |
-| `STATIC` | `STRUCT` | `SUB` | `SYSTEM` |
-| `TEXT` | `TIME$` | `TIMER` | `TRIANGLE` |
-| `TYPE` | `WEND` | `WHILE` |  |
+| `SELECT` | `SERVO` | `SETPIN` | `SETTICK` |
+| `SORT` | `STATIC` | `STRUCT` | `SUB` |
+| `SYSTEM` | `TEXT` | `TIME$` | `TIMER` |
+| `TRIANGLE` | `TYPE` | `WEND` | `WHILE` |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -2325,7 +2358,8 @@ and drawn normally.
 
 Of the pins, `SETPIN n, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|PWM|OFF`,
 `PIN(n) =` and `PIN(n)` are done, and `PWM slice, freq, duty [, duty2]`
-with `PWM slice, OFF`; the frequency and counting modes of `SETPIN`, and
+with `PWM slice, OFF`, and `SERVO slice, position [, position2]` with
+`SERVO slice, OFF`; the frequency and counting modes of `SETPIN`, and
 `PWM SYNC`, are not. Interrupt handlers must be SUBs — MMBasic's label and
 line-number targets are refused, and with them `IRETURN`, which a SUB
 handler never needs.

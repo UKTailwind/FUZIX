@@ -153,7 +153,7 @@ const struct mmb_keyword commandtbl[] = {
     { "Wii Classic", 0 },
     { "Wii Nunchuck", 0 },
     { "Wii", 0 },
-    { "Servo", 0 },
+    { "Servo", 1 },
     { "Mouse", 0 },
     { "Chain", 0 },
     { "_wrap target", 0 },
