@@ -55,6 +55,53 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
+## New in v0.11
+
+This release is about the **outside world**. The machine could already
+draw, make a noise and compile its own BASIC; what it could not do was
+control anything. It can now — and the pin work is between one and two
+orders of magnitude faster than the way it used to be done, because it
+stopped being a system call.
+
+* **Pins are owned, and come back.** `SETPIN` claims a pin from the
+  kernel, and the claim is released — with the pin **reset to an
+  input** — when your program ends, however it ends, including being
+  killed or crashing. A program that dies driving a relay no longer
+  leaves it driven. Claiming a pin another program holds is refused
+  rather than quietly fought over, and only the I/O header can be
+  claimed at all, so a BASIC program can no longer take a pin the SD
+  card or the display is using.
+* **A pin is now a register access, not a system call** — about ten
+  nanoseconds against 1.5 µs. That is what makes bit-banging a protocol
+  from BASIC possible at all, and it is why the rest of this list could
+  be built without adding kernel drivers for any of it.
+* **Analogue in**: `SETPIN n, AIN` reads volts, `ARAW` the raw count,
+  using MMBasic's own ten-sample sort-and-discard filter.
+* **Pin interrupts**: `SETPIN n, INTH|INTL|INTB, handler`, with the
+  handler an ordinary `SUB`.
+* **`SETTICK`** — four periodic timers, with `PAUSE`, `RESUME` and
+  catch-up that drops missed ticks rather than queueing them. Measured
+  at 1999.98 ms for twenty 100 ms ticks.
+* **`ON KEY`**, both forms — one that fires on any key and leaves it for
+  `INKEY$`, one that claims a single key and eats it.
+* **`INKEY$` works.** It never had, on this machine: the console's line
+  editor was taking every keystroke before a program could see it, and
+  nothing had exercised it hard enough to notice. A program reading keys
+  now holds the terminal, and gives it back for `INPUT` and at exit.
+* **`PWM`** and **`SERVO`**, with MMBasic's arithmetic and its
+  frequency range — 50 Hz to 100 kHz verified on a scope, and servo
+  positions from 0.8 ms to 2.2 ms.
+* **`PULLUP` and `PULLDOWN`** on the input modes, and hysteresis on
+  every input, as MMBasic does.
+* **GP32**, the DS3231's alarm line, is readable. (Setting an alarm is
+  not yet possible — see the pin section.)
+* **`/dev/i2c`** for C programs, sharing the QWIIC bus with the kernel's
+  own clock.
+
+Two things this exposed and fixed along the way: the compiler could be
+run twice at once and corrupt its own output, and its progress dots
+ignored redirection. Both are gone.
+
 ## New in v0.10
 
 This release fills in the MMBasic translator's two largest gaps — the
