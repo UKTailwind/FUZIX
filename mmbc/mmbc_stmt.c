@@ -16,6 +16,8 @@ static char *prcall(const char *chan, const char *what, const char *arg);
 static const char *int_handler(void);
 static const char *setpin_pull(void);
 static void do_settick(void);
+static void do_on_key(void);
+static const char *int_target(void);
 static void do_longstring(void);
 static const char *gosub_key(void);
 static void do_gosub(void);
@@ -989,6 +991,11 @@ void statement_inner(void)
         do_on_error();
         return;
     }
+    if (strcmp(up, "ON") == 0 && is_kw("KEY", 1)) {
+        cv.i += 2;
+        do_on_key();
+        return;
+    }
     if (strcmp(up, "ON") == 0 && peek(1) != NULL
         && !is_kw("ERROR", 1) && !is_kw("KEY", 1) && !is_kw("PS2", 1)) {
         cv.i++;
@@ -1152,6 +1159,57 @@ static char *prcall(const char *chan, const char *what, const char *arg)
 
 /* -- LONGSTRING ------------------------------------------------------ */
 
+/* mmb2c.py's int_target.  An interrupt target that may be a literal 0
+   meaning "off". */
+static const char *int_target(void)
+{
+    struct tok *t = peek(0);
+
+    if (t && t->kind == T_NUM && strcmp(t->text, "0") == 0) {
+        nxt();
+        return "0";
+    }
+    return int_handler();
+}
+
+/* mmb2c.py's do_on_key.
+
+     ON KEY handler          fires while a key is waiting
+     ON KEY 0                off
+     ON KEY code, handler    fires on that key, which is consumed
+     ON KEY code, 0          off
+
+   The two forms differ in what happens to the key, and that is the
+   point of having both: the any-key form leaves it for INKEY$ in the
+   handler, the specific form eats it (PicoMite.c:932-935).  MMBasic
+   tells them apart by the argument count; here the first item does it -
+   a name is a handler, a number is a key code. */
+static void do_on_key(void)
+{
+    struct tok *t;
+    const char *code, *fn;
+
+    cv.uses_interrupts = 1;
+    t = peek(0);
+    if (t && t->kind == T_ID) {
+        fn = int_handler();
+        if (!fn)
+            return;
+        emit(sfmt("mmi_onkey_any(%s);", fn));
+        return;
+    }
+    code = as_int(expr());
+    if (!accept_op(",")) {
+        /* "ON KEY 0" with nothing after it is the any-key form off. */
+        emit("mmi_onkey_any(0);");
+        return;
+    }
+    fn = int_target();
+    if (!fn)
+        return;
+    emit(sfmt("mmi_onkey_sel(%s, %s);", code, fn));
+}
+
 /* mmb2c.py's settick_id.  SETTICK's optional trailing timer number,
    1-4.  Absent is 1, which is MMBasic's irq = 0 when the argument is
    missing. */
@@ -1176,7 +1234,6 @@ static const char *settick_id(void)
 static void do_settick(void)
 {
     const char *ms, *fn;
-    struct tok *t;
 
     cv.i++;
     cv.uses_interrupts = 1;
@@ -1193,15 +1250,9 @@ static void do_settick(void)
     /* "SETTICK 0, 0" turns a timer off, and its handler slot is a
        literal 0 rather than a name - so the target is only resolved
        when there is one to resolve. */
-    t = peek(0);
-    if (t && t->kind == T_NUM && strcmp(t->text, "0") == 0) {
-        nxt();
-        fn = "0";
-    } else {
-        fn = int_handler();
-        if (!fn)
-            return;
-    }
+    fn = int_target();
+    if (!fn)
+        return;
     emit(sfmt("mmi_settick(%s, %s, %s);", ms, fn, settick_id()));
 }
 

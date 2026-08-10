@@ -3460,6 +3460,10 @@ class Conv(object):
             self.i += 2
             self.do_on_error()
             return
+        if up == 'ON' and self.is_kw('KEY', 1):
+            self.i += 2
+            self.do_on_key()
+            return
         if up == 'ON' and self.peek(1) is not None \
                 and not self.is_kw('ERROR', 1) and not self.is_kw('KEY', 1) \
                 and not self.is_kw('PS2', 1):
@@ -4785,6 +4789,37 @@ class Conv(object):
             self.err("bare EXIT is outside any loop, SUB or FUNCTION")
         self.err("unknown EXIT variant")
 
+    def int_target(self):
+        """An interrupt target that may be a literal 0 meaning "off"."""
+        t = self.peek()
+        if t is not None and t[0] == T_NUM and t[1].strip('()') == '0':
+            self.nxt()
+            return '0'
+        return self.int_handler()
+
+    def do_on_key(self):
+        """ON KEY handler          fires while a key is waiting
+           ON KEY 0                off
+           ON KEY code, handler    fires on that key, which is consumed
+           ON KEY code, 0          off
+
+        The two forms differ in what happens to the key, and that is the
+        point of having both: the any-key form leaves it for INKEY$ in
+        the handler, the specific form eats it (PicoMite.c:932-935).
+        MMBasic tells them apart by the argument count; here the first
+        item does it - a name is a handler, a number is a key code."""
+        self.uses_interrupts = True
+        t = self.peek()
+        if t is not None and t[0] == T_ID:
+            self.emit('mmi_onkey_any(%s);' % self.int_handler())
+            return
+        code = self.as_int(self.expr())
+        if not self.accept_op(','):
+            # "ON KEY 0" with nothing after it is the any-key form off.
+            self.emit('mmi_onkey_any(0);')
+            return
+        self.emit('mmi_onkey_sel(%s, %s);' % (code, self.int_target()))
+
     def settick_id(self):
         """SETTICK's optional trailing timer number, 1-4.  Absent is 1,
         which is MMBasic's irq = 0 when the argument is missing."""
@@ -4816,12 +4851,7 @@ class Conv(object):
         # "SETTICK 0, 0" turns a timer off, and its handler slot is a
         # literal 0 rather than a name - so the target is only resolved
         # when there is one to resolve.
-        t = self.peek()
-        if t is not None and t[0] == T_NUM and t[1].strip('()') == '0':
-            self.nxt()
-            fn = '0'
-        else:
-            fn = self.int_handler()
+        fn = self.int_target()
         self.emit('mmi_settick(%s, %s, %s);' % (ms, fn, self.settick_id()))
         return
 

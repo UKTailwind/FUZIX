@@ -1,8 +1,37 @@
 # PLAN-interrupts: MMBasic software interrupts on the PC3 Fuzix port
 
-Status: **PINS and SETTICK are BUILT and board-verified** (2026-08-10);
-`ON KEY` remains design only.  Translator + runtime work; no kernel
+Status: **BUILT and board-verified** (2026-08-10) - pins, SETTICK and
+ON KEY, the whole of phase 1.  Translator + runtime work; no kernel
 changes were needed, as predicted.
+
+ON KEY: both forms, specific checked before any-key, the selected key
+consumed and every other key left for INKEY$.  Board-verified at a real
+console - "A" fired the specific handler and never reached INKEY$, "B"
+and "C" reached it.  The decimation is here as designed (5ms), and the
+decoded-key FIFO in front of mm_kq is what keeps the two forms' promises
+apart.
+
+**A THIRD DIVERGENCE, found by testing rather than by reading**, and the
+one that matters most: keys arrive A LINE AT A TIME.  The console is
+line-buffered and switching to raw inside mm_inkey does not release a
+partial line on this tty, so nothing is delivered until Enter - and then
+the whole line fires, one handler call per character.  The first board
+run typed six keys and got nothing until a CR released all six at once.
+
+This is NOT new to ON KEY - INKEY$ has always behaved this way on this
+port - but ON KEY is what made it visible, and it is what stops the
+facility being usable for the twitch input a game wants.  Open question
+4 below ("ON KEY when stdin is a file or pipe") turns out to have a
+bigger sibling: ON KEY when stdin is a TTY does not deliver either,
+until the line ends.  The fix is in the tty driver, not in BASIC, and it
+would improve INKEY$ at the same time.
+
+One implementation trap worth keeping: mm_key_peek calls mm_inkey, which
+returns a STRING and therefore costs a scratch slot - and the poll calls
+it every 5ms for the life of the program.  Without winding the scratch
+back it empties the pool and the program dies with "String expression
+too complex" while containing no string expression at all.  The fcc gate
+caught it; the host, with a larger pool, did not.
 
 SETTICK holds a microsecond deadline off the fast clock rather than a
 millisecond counter, exactly as designed below.  Board: 20 x 100ms in

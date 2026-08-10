@@ -169,8 +169,24 @@ would be worse than the current clear error:
   than* the period, so `SETTICK 100` runs at 101ms there and at 100ms
   here.  Board-measured: 20 x 100ms in 1999.98ms.
 
-  `ON KEY` is designed and not yet built; a program using it still gets
-  the clear error.
+  `ON KEY` is done, both forms: the any-key form fires while a key is
+  waiting and LEAVES it for `INKEY$`, the specific form fires on one
+  code and EATS it so it never reaches `INKEY$`.  That asymmetry is the
+  point of having both and is MMBasic's (PicoMite.c:932-935).  Specific
+  is checked before any-key, as there.
+
+  Two divergences, both named in the manual.  The console is looked at
+  **at most every 5ms** rather than every statement - looking is a
+  syscall and a poll site runs after every statement.  And keys arrive
+  **a line at a time**: the console is line-buffered, so nothing is
+  delivered until Enter and then the whole line fires in turn.  That
+  second one is not new to `ON KEY` - `INKEY$` has always behaved that
+  way on this port - but `ON KEY` is what made it obvious, and it is
+  what stops this being usable for a game's twitch input.  The fix is in
+  the tty driver, not in BASIC.
+
+  That leaves `ON PS2 INTERRUPT MATH PID SENSORFUSION ONESHOT` from this
+  group, none of which have anything to notify on this machine.
 * **Editor and REPL** — `EDIT LIST NEW RUN SAVE LOAD AUTOSAVE FM MEMORY
   LIBRARY XMODEM YMODEM CHAIN EXECUTE TRACE`
 * **`EVAL`** — evaluating a string as BASIC at run time needs the

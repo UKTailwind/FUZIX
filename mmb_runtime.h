@@ -634,6 +634,12 @@ void mm_int_err_pop(void);
 /* Microseconds since start - SETTICK's clock off the board, where
  * mmb_int.h reads TIMER0 itself. */
 MMINTEGER mm_us(void);
+/* ON KEY: the next decoded key without consuming it (0 = none), and the
+ * consume.  A key the poll peeks and does not want stays queued for
+ * INKEY$, which is what makes the any-key form's "the key is still
+ * there" and the specific form's "the key is eaten" both true. */
+MMINTEGER mm_key_peek(void);
+void mm_key_drop(void);
 void mm_on_error(int mode, MMINTEGER n);   /* 0 abort 1 clear 2 ignore 3 skip */
 /* Write or discard the PRINT line held while armed - the statement
  * guard calls it at the end of every statement.  See mm_putc. */
