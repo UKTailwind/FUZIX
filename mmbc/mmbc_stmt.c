@@ -14,6 +14,7 @@
 static void do_print(void);
 static char *prcall(const char *chan, const char *what, const char *arg);
 static const char *int_handler(void);
+static const char *setpin_pull(void);
 static void do_longstring(void);
 static const char *gosub_key(void);
 static void do_gosub(void);
@@ -776,14 +777,15 @@ void statement_inner(void)
         }
         cv.uses_gpio = 1;
         if (strncmp(mode, "MMG_PIN_INT", 11) == 0) {
-            /* SETPIN pin, INTH|INTL|INTB, handler */
+            /* SETPIN pin, INTH|INTL|INTB, handler [, PULLUP|PULLDOWN] */
             const char *fn;
             expect_op(",");
             cv.uses_interrupts = 1;
             fn = int_handler();
             if (!fn)
                 return;
-            emit(sfmt("mmi_setpin_int(%s, %s, %s);", pin, mode, fn));
+            emit(sfmt("mmi_setpin_int(%s, %s, %s, %s);", pin, mode, fn,
+                      setpin_pull()));
             return;
         }
         if (strcmp(mode, "MMG_PIN_OFF") == 0 && cv.uses_interrupts) {
@@ -792,7 +794,11 @@ void statement_inner(void)
             emit(sfmt("mmi_setpin_off(%s);", pin));
             return;
         }
-        emit(sfmt("mmg_setpin(%s, %s);", pin, mode));
+        /* SETPIN pin, DIN [, PULLUP|PULLDOWN].  MMBasic allows the
+           option on the input modes only; the others take no third
+           argument and one is refused rather than ignored. */
+        emit(sfmt("mmg_setpin(%s, %s, %s);", pin, mode,
+                  strcmp(mode, "MMG_PIN_DIN") == 0 ? setpin_pull() : "0"));
         return;
     }
     if (strcmp(up, "PIN") == 0 && is_op("(", 1)) {
@@ -1140,6 +1146,23 @@ static char *prcall(const char *chan, const char *what, const char *arg)
 }
 
 /* -- LONGSTRING ------------------------------------------------------ */
+
+/* mmb2c.py's setpin_pull.  MMBasic's optional PULLUP / PULLDOWN on an
+   input SETPIN.  Absent means neither, which is MMBasic's default
+   (External.c:1918-1935 leaves option = 0).  Hysteresis is not an
+   option in either place - every digital input gets the Schmitt
+   trigger. */
+static const char *setpin_pull(void)
+{
+    if (!accept_op(","))
+        return "0";
+    if (accept_kw("PULLUP"))
+        return "1";
+    if (accept_kw("PULLDOWN"))
+        return "-1";
+    cv_err("SETPIN's last argument is PULLUP or PULLDOWN");
+    return "0";
+}
 
 /* mmb2c.py's int_handler.  Resolve an interrupt target to the C
    function that is it.

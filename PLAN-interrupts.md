@@ -22,11 +22,21 @@ Three corrections to what is written below:
   the label and line-number targets only - and those are refused here -
   so a handler is just a SUB ending in END SUB.
 * **MAXINTERRUPTS is 10**, not the "N" left open below; matched.
-* **`SETPIN 32, INTL, AlarmSub` for the DS3231 alarm will not work as
-  written.**  GP32 is not on the I/O header, so the pin lock refuses to
-  claim it.  Exposing the alarm needs GP32 adding to the claimable set
-  deliberately - it is the kernel's own RTC line - or a different
-  mechanism.
+* **`SETPIN 32, INTL, AlarmSub` for the DS3231 alarm now works** - but
+  it did not when this was written, and the fix was not just widening a
+  mask.  GP32 was outside the claimable set; it has been added, ON A
+  PC3 ONLY, because the same kernel runs the Pico Computer 2 where GP32
+  is the SD card's MISO.  Handing it out there would let a BASIC program
+  take the card's data line and reset it on exit.  `board_is_pc2()`
+  decides at claim time.
+
+  Board-verified as `SETPIN 32, DIN, PULLUP` reading 1, the open-drain
+  line idling high.  But **nothing can arm the alarm yet**: setting one
+  means writing the DS3231's registers, and `/dev/i2c` refuses 0x68 to
+  keep a program from stopping the oscillator on a battery-backed part.
+  So the pin reads and can interrupt, and there is nothing to make it
+  fire.  Closing that needs a kernel call to set an alarm - phase 2,
+  and a smaller job than it looks now the pin half is done.
 
 Original design proposal follows.  2026-08-10.
 

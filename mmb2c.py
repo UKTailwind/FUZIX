@@ -3297,18 +3297,23 @@ class Conv(object):
                          "INTH, INTL, INTB or OFF")
             self.uses_gpio = True
             if mode.startswith('MMG_PIN_INT'):
-                # SETPIN pin, INTH|INTL|INTB, handler
+                # SETPIN pin, INTH|INTL|INTB, handler [, PULLUP|PULLDOWN]
                 self.expect_op(',')
                 self.uses_interrupts = True
-                self.emit('mmi_setpin_int(%s, %s, %s);'
-                          % (pin, mode, self.int_handler()))
+                fn = self.int_handler()
+                self.emit('mmi_setpin_int(%s, %s, %s, %s);'
+                          % (pin, mode, fn, self.setpin_pull()))
                 return
             if mode == 'MMG_PIN_OFF' and self.uses_interrupts:
                 # OFF has to disarm an interrupt as well as reset the
                 # pin.  Only a program that arms one carries this.
                 self.emit('mmi_setpin_off(%s);' % pin)
                 return
-            self.emit('mmg_setpin(%s, %s);' % (pin, mode))
+            # SETPIN pin, DIN [, PULLUP|PULLDOWN].  MMBasic allows the
+            # option on the input modes only; the others take no third
+            # argument and one is refused rather than ignored.
+            pull = self.setpin_pull() if mode == 'MMG_PIN_DIN' else '0'
+            self.emit('mmg_setpin(%s, %s, %s);' % (pin, mode, pull))
             return
         if up == 'PIN' and self.is_op('(', 1):
             # PIN(n) = value.  The reading form is a function, handled
@@ -4776,6 +4781,20 @@ class Conv(object):
                 return
             self.err("bare EXIT is outside any loop, SUB or FUNCTION")
         self.err("unknown EXIT variant")
+
+    def setpin_pull(self):
+        """MMBasic's optional PULLUP / PULLDOWN on an input SETPIN.
+
+        Absent means neither, which is MMBasic's default (External.c:
+        1918-1935 leaves option = 0).  Hysteresis is not an option in
+        either place - every digital input gets the Schmitt trigger."""
+        if not self.accept_op(','):
+            return '0'
+        if self.accept_kw('PULLUP'):
+            return '1'
+        if self.accept_kw('PULLDOWN'):
+            return '-1'
+        self.err("SETPIN's last argument is PULLUP or PULLDOWN")
 
     def int_handler(self):
         """Resolve an interrupt target to the C function that is it.

@@ -102,7 +102,11 @@ would be worse than the current clear error:
   No longer all of them, and `ADC` is now half gone too:
   `SETPIN pin, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|OFF`, `PIN(n) =` and the
   `PIN(n)` function are translated (mmb_gpio.h and mmb_int.h), using
-  GPIO numbers rather than connector-pin numbers.  `AIN` returns volts through MMBasic's own
+  GPIO numbers rather than connector-pin numbers.  The input modes take
+  MMBasic's optional `PULLUP`/`PULLDOWN` (last argument, after the
+  handler for the interrupt forms), defaulting to neither as it does;
+  hysteresis is always on for inputs, which is not an option there
+  either.  `AIN` returns volts through MMBasic's own
   ten-sample sort-and-discard filter and `ARAW` the raw count; both need
   an ADC pin, GP40-GP46 on the PC3's header.
 
