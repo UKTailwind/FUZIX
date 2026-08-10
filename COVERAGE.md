@@ -95,7 +95,7 @@ ordinary BASIC program that currently fails outright.
 A C translation cannot honestly provide these, and pretending otherwise
 would be worse than the current clear error:
 
-* **Peripherals** — `PORT SERVO I2C SPI ONEWIRE PIO IR
+* **Peripherals** — `PORT I2C SPI ONEWIRE PIO IR
   WS2812 STEPPER TMC22XX HUMID TEMPR DISTANCE PULSIN CAMERA KEYBOARD KEYPAD
   MOUSE GAMEPAD WII RTC WATCHDOG CPU FLASH SLEEP BITBANG BITSTREAM`
 
@@ -109,6 +109,16 @@ would be worse than the current clear error:
   are one channel and a pin claim alone would not have caught it.
   `PWM SYNC` is not translated.  Scope-verified on GP0 at 50Hz, 1kHz,
   10kHz and 100kHz, and inverted.
+
+  `SERVO slice, position [, position2]` and `SERVO slice, OFF` too - a
+  50Hz frame with MMBasic's `duty = 5 + position * 0.05`, so 0 is a 1ms
+  pulse, 50 is 1.5ms and 100 is 2ms, over-travel -20 to 120.
+  Scope-verified at all five.
+
+  Omitting the second duty or position LEAVES THAT CHANNEL ALONE, as
+  MMBasic does.  The first version here zeroed it, which would have
+  stopped a servo on channel B every time channel A was set - two
+  outputs share a slice, and SERVO is what makes that common.
 
   The rest:
   `SETPIN pin, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|OFF`, `PIN(n) =` and the

@@ -1,4 +1,4 @@
-' PWM - SETPIN pin, PWM and the PWM statement.
+' PWM and SERVO - SETPIN pin, PWM, the PWM statement and SERVO.
 '
 ' There is no hardware under the gates, so nothing comes out of a pin;
 ' what this proves is that both translators agree, that the arithmetic
@@ -14,7 +14,8 @@ PRINT "pins set"
 PWM 1, 1000, 25, 75
 PRINT "1k"
 
-' 20kHz fits the counter without dividing at all.
+' 20kHz fits the counter without dividing at all.  One duty only, which
+' leaves channel B exactly where it was.
 PWM 1, 20000, 50
 PRINT "20k"
 
@@ -28,4 +29,17 @@ PRINT "50Hz"
 
 PWM 1, OFF
 PRINT "off"
+
+' SERVO: the same slice, positions rather than duty cycles.  0 is a 1ms
+' pulse, 50 is 1.5ms and 100 is 2ms, all in a 20ms frame.
+SERVO 1, 50
+PRINT "centre"
+SERVO 1, 0, 100
+PRINT "both ends"
+SERVO 1, -20
+PRINT "over-travel low"
+SERVO 1, 120
+PRINT "over-travel high"
+SERVO 1, OFF
+PRINT "servo off"
 PRINT "done"

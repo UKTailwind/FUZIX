@@ -754,7 +754,7 @@ void statement_inner(void)
            A SLICE, not a pin: one slice drives two pins, and SETPIN
            pin, PWM is what attaches a pin to it.  MMBasic is the same
            and for the same reason. */
-        const char *sl, *freq, *d1, *d2;
+        const char *sl, *freq, *d1, *d2, *have2;
 
         cv.i++;
         cv.uses_pwm = 1;
@@ -767,10 +767,48 @@ void statement_inner(void)
         freq = as_flt(expr());
         expect_op(",");
         d1 = as_flt(expr());
-        /* The second channel is optional; -1 is MMBasic's "leave it
-           alone", which here means a zero level on channel B. */
-        d2 = accept_op(",") ? as_flt(expr()) : "0.0";
-        emit(sfmt("mmp_pwm(%s, %s, %s, %s);", sl, freq, d1, d2));
+        /* Channel B is optional and OMITTING IT LEAVES IT ALONE - two
+           outputs share a slice, so setting one must not stop the
+           other.  The flag says whether it was given; there is no spare
+           value to use as a sentinel, because a negative duty already
+           means inverted. */
+        if (accept_op(",")) {
+            d2 = as_flt(expr());
+            have2 = "1";
+        } else {
+            d2 = "0.0";
+            have2 = "0";
+        }
+        emit(sfmt("mmp_pwm2(%s, %s, %s, %s, %s);", sl, freq, d1, d2,
+                  have2));
+        return;
+    }
+    if (strcmp(up, "SERVO") == 0) {
+        /* SERVO slice, position1 [, position2]
+           SERVO slice, OFF
+
+           PWM at a 50Hz frame with the position as a pulse width;
+           MMBasic's mapping is duty = 5 + position * 0.05, so 0 is 1ms,
+           50 is 1.5ms and 100 is 2ms. */
+        const char *sl, *p1, *p2, *have2;
+
+        cv.i++;
+        cv.uses_pwm = 1;
+        sl = as_int(expr());
+        expect_op(",");
+        if (accept_kw("OFF")) {
+            emit(sfmt("mmp_pwm_off(%s);", sl));
+            return;
+        }
+        p1 = as_flt(expr());
+        if (accept_op(",")) {
+            p2 = as_flt(expr());
+            have2 = "1";
+        } else {
+            p2 = "0.0";
+            have2 = "0";
+        }
+        emit(sfmt("mms_servo(%s, %s, %s, %s);", sl, p1, p2, have2));
         return;
     }
     if (strcmp(up, "SETPIN") == 0) {

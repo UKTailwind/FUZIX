@@ -4,4 +4,9 @@ pins set
 inverted
 50Hz
 off
+centre
+both ends
+over-travel low
+over-travel high
+servo off
 done

@@ -3280,10 +3280,39 @@ class Conv(object):
             freq = self.as_flt(self.expr())
             self.expect_op(',')
             d1 = self.as_flt(self.expr())
-            # The second channel is optional; -1 is MMBasic's "leave it
-            # alone", which here means a zero level on channel B.
-            d2 = self.as_flt(self.expr()) if self.accept_op(',') else '0.0'
-            self.emit('mmp_pwm(%s, %s, %s, %s);' % (slice_, freq, d1, d2))
+            # Channel B is optional and OMITTING IT LEAVES IT ALONE -
+            # two outputs share a slice, so setting one must not stop
+            # the other.  The flag says whether it was given; there is
+            # no spare value to use as a sentinel, because a negative
+            # duty already means inverted.
+            if self.accept_op(','):
+                d2, have2 = self.as_flt(self.expr()), '1'
+            else:
+                d2, have2 = '0.0', '0'
+            self.emit('mmp_pwm2(%s, %s, %s, %s, %s);'
+                      % (slice_, freq, d1, d2, have2))
+            return
+        if up == 'SERVO':
+            # SERVO slice, position1 [, position2]
+            # SERVO slice, OFF
+            #
+            # PWM at a 50Hz frame with the position as a pulse width;
+            # MMBasic's mapping is duty = 5 + position * 0.05, so 0 is
+            # 1ms, 50 is 1.5ms and 100 is 2ms.
+            self.i += 1
+            self.uses_pwm = True
+            slice_ = self.as_int(self.expr())
+            self.expect_op(',')
+            if self.accept_kw('OFF'):
+                self.emit('mmp_pwm_off(%s);' % slice_)
+                return
+            p1 = self.as_flt(self.expr())
+            if self.accept_op(','):
+                p2, have2 = self.as_flt(self.expr()), '1'
+            else:
+                p2, have2 = '0.0', '0'
+            self.emit('mms_servo(%s, %s, %s, %s);'
+                      % (slice_, p1, p2, have2))
             return
         if up == 'SETPIN':
             # SETPIN pin, DIN|DOUT
