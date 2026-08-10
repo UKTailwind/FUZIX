@@ -603,6 +603,7 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
 /* and the classes it names.  PLK_PIN and PLK_ADC are all SETPIN needs;
  * <sys/pc3io.h> has the rest. */
 #define MM_PLK_PIN       0
+#define MM_PLK_PWM       3
 #define MM_PLK_ADC       4
 
 /* RP2350B.  Not 28: that is the RP2040's count, and it put the PC3's

@@ -1457,6 +1457,7 @@ would cause more confusion than the incompatibility does.
 | `INTH` | a digital input that calls a SUB on a **low-to-high** edge |
 | `INTL` | … on a **high-to-low** edge |
 | `INTB` | … on **either** edge |
+| `PWM`  | a PWM output, driven by the `PWM` statement |
 | `OFF`  | not configured |
 
 MMBasic's remaining modes — frequency and counting — are not
@@ -1597,6 +1598,44 @@ the same way.
 A program that arms no interrupt pays nothing at all: the per-statement
 poll is emitted only for programs that use the feature, exactly as the
 `ON ERROR` checks are.
+
+## `PWM`
+
+```basic
+SETPIN 0, PWM                ' GP0 is slice 0, channel A
+PWM 0, 1000, 25              ' slice 0: 1 kHz, 25% on channel A
+PWM 0, 1000, 25, 75          ' ...and 75% on channel B
+PWM 0, 1000, -25             ' negative duty = inverted output
+PWM 0, OFF
+```
+
+`SETPIN pin, PWM` attaches a pin to its PWM output; the `PWM` statement
+then drives the **slice**, not the pin. One slice has two channels and
+drives two pins, which is why the two commands are separate — the same
+split MMBasic uses.
+
+Which slice a pin belongs to is arithmetic: pins below GP32 use slice
+`(pin ÷ 2) MOD 8`, and GP32 upward use `8 + ((pin ÷ 2) MOD 4)`. Even
+pins are channel A, odd pins channel B. **Twelve slices cover
+forty-eight pins, so pins alias**: GP34 and GP42 are the same slice and
+channel, and setting one sets the other. `SETPIN pin, PWM` claims the
+slice as well as the pin, so a second program asking for a pin that
+lands on a slice you hold is told `Pin cannot do that` rather than
+quietly changing your frequency.
+
+Frequency is in Hz and duty in percent, and the range is wide: 100 kHz
+and 50 Hz both work. Below about 5.7 kHz the 16-bit counter cannot hold
+a whole period at 375 MHz, so the clock divider takes up the slack —
+that happens automatically, and the only sign of it is that very low
+frequencies have coarser duty resolution. Asking for something the
+divider cannot reach either gives `Invalid frequency`.
+
+A **negative duty** inverts that channel's output: `-25` is 25% inverted,
+so the pin reads high 75% of the time. It is the channel's polarity bit,
+not a recomputed duty.
+
+`PIN()` will not read a PWM pin — it is an output, and MMBasic refuses it
+too.
 
 ## `SETTICK` — periodic timers
 
@@ -2100,13 +2139,13 @@ translate time, not at run time.
 | `LOOP` | `MAP` | `MATH` | `MKDIR` |
 | `MODE` | `NEXT` | `ON` | `OPEN` |
 | `OPTION` | `PAUSE` | `PIN` | `PIXEL` |
-| `PLAY` | `PRINT` | `RANDOMIZE` | `RBOX` |
-| `READ` | `RENAME` | `RESTORE` | `RETURN` |
-| `RMDIR` | `SAVE` | `SEEK` | `SELECT` |
-| `SETPIN` | `SETTICK` | `SORT` | `STATIC` |
-| `STRUCT` | `SUB` | `SYSTEM` | `TEXT` |
-| `TIME$` | `TIMER` | `TRIANGLE` | `TYPE` |
-| `WEND` | `WHILE` |  |  |
+| `PLAY` | `PRINT` | `PWM` | `RANDOMIZE` |
+| `RBOX` | `READ` | `RENAME` | `RESTORE` |
+| `RETURN` | `RMDIR` | `SAVE` | `SEEK` |
+| `SELECT` | `SETPIN` | `SETTICK` | `SORT` |
+| `STATIC` | `STRUCT` | `SUB` | `SYSTEM` |
+| `TEXT` | `TIME$` | `TIMER` | `TRIANGLE` |
+| `TYPE` | `WEND` | `WHILE` |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -2284,9 +2323,10 @@ MMBasic's nine built-in fonts but only in its normal and vertical
 orientations — the three that rotate the character itself are accepted
 and drawn normally.
 
-Of the pins, `SETPIN n, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|OFF`,
-`PIN(n) =` and `PIN(n)` are done; the frequency and counting modes of
-`SETPIN` are not. Interrupt handlers must be SUBs — MMBasic's label and
+Of the pins, `SETPIN n, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|PWM|OFF`,
+`PIN(n) =` and `PIN(n)` are done, and `PWM slice, freq, duty [, duty2]`
+with `PWM slice, OFF`; the frequency and counting modes of `SETPIN`, and
+`PWM SYNC`, are not. Interrupt handlers must be SUBs — MMBasic's label and
 line-number targets are refused, and with them `IRETURN`, which a SUB
 handler never needs.
 

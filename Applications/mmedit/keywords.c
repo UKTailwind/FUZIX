@@ -111,7 +111,7 @@ const struct mmb_keyword commandtbl[] = {
     { "GUI", 0 },
     { "GUI", 0 },
     { "Device", 0 },
-    { "PWM", 0 },
+    { "PWM", 1 },
     { "CSub", 0 },
     { "End CSub", 0 },
     { "SYNC", 0 },

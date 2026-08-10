@@ -156,6 +156,28 @@ struct pinlock_req {
 #define PC3_TIMERAWH	(PC3_TIMER + 0x24)
 #define PC3_TIMERAWL	(PC3_TIMER + 0x28)
 
+/*	PWM.  Twelve slices of two channels, 0x14 bytes of registers each,
+ *	and one global enable word.
+ *
+ *	Which slice a pin belongs to is arithmetic, not a table - and on
+ *	the RP2350B twelve slices cover forty-eight pins, so PINS ALIAS:
+ *	GP34 and GP42 are both slice 9 channel A, and setting one sets the
+ *	other.  That is why the kernel's lock has a PWM class of its own
+ *	rather than trusting a pin claim to cover it. */
+#define PC3_PWM		0x400a8000UL
+#define PC3_PWM_SLICE(s) (PC3_PWM + 0x14UL * (s))
+#define PC3_PWM_CSR(s)	(PC3_PWM_SLICE(s) + 0x00)
+#define PC3_PWM_DIV(s)	(PC3_PWM_SLICE(s) + 0x04)
+#define PC3_PWM_CTR(s)	(PC3_PWM_SLICE(s) + 0x08)
+#define PC3_PWM_CC(s)	(PC3_PWM_SLICE(s) + 0x0c)
+#define PC3_PWM_TOP(s)	(PC3_PWM_SLICE(s) + 0x10)
+#define PC3_PWM_EN	(PC3_PWM + 0xf0)
+#define PC3_PWM_CSR_EN		0x01UL
+#define PC3_PWM_CSR_PH_CORRECT	0x02UL
+#define PC3_PWM_CSR_A_INV	0x04UL
+#define PC3_PWM_CSR_B_INV	0x08UL
+#define PC3_FUNC_PWM	4
+
 /* ---- claiming ---- */
 
 #ifndef PC3IO_NO_SYSCALLS
@@ -331,6 +353,85 @@ PC3_FN void pc3_pin_in(int pin, int pull)
 	else if (pull < 0)
 		PC3_REG(PC3_PAD(pin) + PC3_SET) = PC3_PAD_PDE;
 	pc3_pin_sio(pin);		/* last: connects the pad */
+}
+
+/* ---- PWM ----
+ *
+ *	Slice and channel from a pin number, the SDK's arithmetic
+ *	(PWM_GPIO_SLICE_NUM): the low bank's 32 pins share eight slices
+ *	and the high bank's sixteen share four more.
+ */
+PC3_FN int pc3_pwm_slice(int pin)
+{
+	if (pin < 32)
+		return (pin >> 1) & 7;
+	return 8 + ((pin >> 1) & 3);
+}
+
+PC3_FN int pc3_pwm_chan(int pin)
+{
+	return pin & 1;			/* 0 = A, 1 = B */
+}
+
+/*	Point a pin at its PWM output.  The pad still has to be connected
+ *	and un-isolated, which is what everything except the function
+ *	select below is for. */
+PC3_FN void pc3_pwm_pin(int pin)
+{
+	PC3_REG(PC3_GPIO_CTRL(pin)) = PC3_FUNC_PWM;
+	/*	Input enable as well, so a C program can read the pin back
+	 *	while PWM drives it - sampling it is one way to measure a
+	 *	duty cycle with no instrument to hand.  BASIC cannot: PIN()
+	 *	refuses a PWM pin, as MMBasic's fun_pin does. */
+	PC3_REG(PC3_PAD(pin) + PC3_SET) = PC3_PAD_IE;
+	PC3_REG(PC3_PAD(pin) + PC3_CLR) = PC3_PAD_OD | PC3_PAD_ISO;
+}
+
+/*	The two channel levels live in ONE register, A in the low half and
+ *	B in the high, so setting one means reading the other back - the
+ *	single read-modify-write in this header, and safe because a slice
+ *	belongs to one process at a time (the kernel's PWM claim). */
+PC3_FN void pc3_pwm_level(int slice, int chan, unsigned long level)
+{
+	unsigned long cc = PC3_REG(PC3_PWM_CC(slice));
+
+	if (chan)
+		cc = (cc & 0x0000FFFFUL) | (level << 16);
+	else
+		cc = (cc & 0xFFFF0000UL) | (level & 0xFFFFUL);
+	PC3_REG(PC3_PWM_CC(slice)) = cc;
+}
+
+/*	div is the integer clock divider; the register is 8.4 fixed point,
+ *	so it goes in shifted up four.  inva/invb invert a channel's
+ *	output, which is what a negative duty asks for.  Left DISABLED:
+ *	the levels are set next and the slice started after, so it never
+ *	runs for an instant with the old duty and the new wrap. */
+PC3_FN void pc3_pwm_config(int slice, unsigned long div, unsigned long top,
+			   int inva, int invb, int phase_correct)
+{
+	unsigned long csr = 0;
+
+	if (inva)
+		csr |= PC3_PWM_CSR_A_INV;
+	if (invb)
+		csr |= PC3_PWM_CSR_B_INV;
+	if (phase_correct)
+		csr |= PC3_PWM_CSR_PH_CORRECT;
+
+	PC3_REG(PC3_PWM_CSR(slice)) = 0;	/* stop while reconfiguring */
+	PC3_REG(PC3_PWM_DIV(slice)) = div << 4;
+	PC3_REG(PC3_PWM_TOP(slice)) = top;
+	PC3_REG(PC3_PWM_CTR(slice)) = 0;
+	PC3_REG(PC3_PWM_CSR(slice)) = csr;
+}
+
+PC3_FN void pc3_pwm_enable(int slice, int on)
+{
+	if (on)
+		PC3_REG(PC3_PWM_CSR(slice) + PC3_SET) = PC3_PWM_CSR_EN;
+	else
+		PC3_REG(PC3_PWM_CSR(slice) + PC3_CLR) = PC3_PWM_CSR_EN;
 }
 
 /* ---- ADC ----
