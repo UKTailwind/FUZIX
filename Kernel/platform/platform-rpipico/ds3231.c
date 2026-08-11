@@ -279,8 +279,38 @@ void ds3231_init(void)
         return;
     }
     rtc_present = 1;
-    if (st & 0x80)
-        kputs("DS3231 RTC: oscillator was stopped, time needs setting (setdate -w)\n");
+
+    /*
+     * OSF is STICKY: it latches when the oscillator stops and stays set
+     * until something clears it, which here is only setdate -w.  So the
+     * bit alone does not mean the time is wrong now - it means it was
+     * wrong at some point since the flag was last cleared.  Telling the
+     * user to set a clock that is already right is worse than saying
+     * nothing, because next time it matters they will not believe it.
+     *
+     * So check the thing being claimed: read the year back, and only
+     * ask for the time if it is not plausible.  A DS3231 that has lost
+     * power reads 2000 (or 2001 on some parts), and this port did not
+     * exist before 2025.  If the flag is set but the clock evidently
+     * kept time, clear it - the machine has just proved the oscillator
+     * is running, and leaving it set would nag for ever.
+     */
+    if (st & 0x80) {
+        uint8_t r[7];
+        int year = 0;
+
+        if (ds3231_read_regs(REG_TIME, r, 7) == 0)
+            year = 2000 + frombcd(r[6]);
+
+        if (year < 2025) {
+            kputs("DS3231 RTC: time not set (setdate -w)\n");
+        } else {
+            uint8_t v = (uint8_t)(st & 0x7F);
+
+            ds3231_write_regs(REG_STATUS, &v, 1);
+            st = v;
+        }
+    }
 
     /*
      * TURN THE 32 kHz OUTPUT ON, EVERY BOOT.
