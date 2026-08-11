@@ -58,6 +58,12 @@ add_compile_definitions(
 		# place - GP34-37 joystick reads and the GP41-44 ADC were
 		# both dead until this.
 		PICO_RP2350A=0
+		# The PC2 and PC3 always carry 16M.  The pico2 board header
+		# defaults to 4M, and devflash.c sizes the dhara disk as
+		# PICO_FLASH_SIZE_BYTES - FLASH_OFFSET, so the default confined
+		# the disk to the first quarter of the chip and left twelve
+		# megabytes doing nothing at all.
+		PICO_FLASH_SIZE_BYTES=\(16*1024*1024\)
 		PICO_HEAP_SIZE=0x0
 		PICO_NO_BINARY_INFO=1
 		PICO_TIME_DEFAULT_ALARM_POOL_DISABLED

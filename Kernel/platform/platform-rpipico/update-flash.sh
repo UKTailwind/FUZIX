@@ -10,13 +10,22 @@ set -e
 # inodes.  256 matches what the old "32 blocks of 8" gave the flash
 # root.
 IMG=${IMG:-filesystem.img}
-# 4000 of the 4055 sectors mkftl can address with the Makefile's
-# -s 3072.  It was 2547 of 2555, and the root outgrew that the moment
-# printf learned %ll and every static binary put on a couple of hundred
-# bytes.  FLASH_OFFSET moved to 1M to make the room; see globals.h,
-# where the three numbers that must agree are listed.
-FSSIZE=${FSSIZE:-4000}
-INODES=${INODES:-256}
+# 8000 sectors (4M) of the 20549 mkftl can address once the disk is
+# given the whole chip above FLASH_OFFSET.
+#
+# It was 2547 of 2555, and the root outgrew that the moment printf
+# learned %ll and every static binary put on a couple of hundred bytes.
+# Two things were wrong behind that: FLASH_OFFSET gave the kernel 512K
+# it did not need, and PICO_FLASH_SIZE_BYTES was the pico2 default of
+# 4M when a PC2 or PC3 always carries 16M - so the disk had a quarter
+# of the chip and the rest was doing nothing.  See globals.h for the
+# numbers that must agree.
+#
+# The root needs about 2600 sectors, so this is room to grow rather
+# than a fit.  Inodes raised with it: 256 would have become the limit
+# long before the blocks did.
+FSSIZE=${FSSIZE:-8000}
+INODES=${INODES:-512}
 
 rm -f ${IMG}
 ../../../Standalone/mkfs ${IMG} ${INODES} $FSSIZE
@@ -528,8 +537,8 @@ if grep -q 'error' /tmp/ucp-flash.log; then
 	echo "  consistent, just short - so this message is the only sign." >&2
 	echo "" >&2
 	echo "  FSSIZE=${FSSIZE} sectors.  The ceiling is the FTL's, not the" >&2
-	echo "  filesystem's: mkftl -s 3072 with 4 kB erase blocks gives" >&2
-	echo "  4055 sectors, and FSSIZE is set just under it." >&2
+	echo "  filesystem's: mkftl -s 15360 with 4 kB erase blocks gives" >&2
+	echo "  20549 sectors, so this is very unlikely to be the wall." >&2
 	echo "" >&2
 	echo "  Fix by dropping something from the list above, or by" >&2
 	echo "  giving the disk more flash - that means FLASH_OFFSET in" >&2

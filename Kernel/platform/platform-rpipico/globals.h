@@ -21,11 +21,16 @@
  *	if fuzix.bin ever reaches this offset, so the overlap that caused
  *	the damage above can never come back silently.
  *
- *	THREE THINGS MOVE TOGETHER.  This constant, the `-o' offset the
- *	Makefile converts filesystem.uf2 to, and `mkftl -s' which must
- *	describe the same device devflash.c does:
+ *	FOUR THINGS MOVE TOGETHER.  This constant, the `-o' offset the
+ *	Makefile converts filesystem.uf2 to, `mkftl -s' which must describe
+ *	the same device devflash.c does, and PICO_FLASH_SIZE_BYTES in
+ *	CMakeLists.txt:
  *
  *		disk size = PICO_FLASH_SIZE_BYTES - FLASH_OFFSET
+ *
+ *	PICO_FLASH_SIZE_BYTES is set to 16M there because a PC2 and a PC3
+ *	always carry 16M; the pico2 board header defaults to 4M, which had
+ *	quietly confined the disk to the first quarter of the chip.
  *
  *	The uf2 offset had been left at the old 0x10018000 - 96K, the
  *	value from before the bricking above - so flashing filesystem.uf2
