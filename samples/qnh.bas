@@ -108,7 +108,7 @@ Do
   ' At 150 m that is about 18 hPa, which is the difference between a
   ' storm and a fine day if you read it off the sensor unreduced.
   qnh = pHPa / (1 - lastalt / 44330.0) ^ 5.255
-  show(5, Str$(qnh, 0, 1) + " hPa", 5, CYAN)
+  show(5, Str$(qnh, 0, 1), 5, CYAN)
 
   ' whatever is left of the second
   Do While Timer - t0 < 1000
@@ -292,12 +292,21 @@ Sub drawchar(x As Integer, y As Integer, c As Integer, f As Integer, fg As Integ
   Pin(CSPIN) = 1
 End Sub
 
+' A glyph that would hang over the right edge is DROPPED, not drawn.
+' The panel clamps a window to its own width but still takes every
+' pixel written into it, so the surplus wraps onto the next row and the
+' character comes out as garbage - which is what a 24-pixel font did
+' with the tenth character of a 240-pixel line.  Silently short is a
+' layout mistake you can see; silently wrapped looks like a bug in the
+' font reader.
 Sub drawstr(x As Integer, y As Integer, s$, f As Integer, fg As Integer, bg As Integer)
-  Local Integer i, w
+  Local Integer i, w, gx
 
   w = fwid(f)
   For i = 1 To Len(s$)
-    drawchar(x + (i - 1) * w, y, Asc(Mid$(s$, i, 1)), f, fg, bg)
+    gx = x + (i - 1) * w
+    If gx + w > SW Then Exit For
+    drawchar(gx, y, Asc(Mid$(s$, i, 1)), f, fg, bg)
   Next i
 End Sub
 
@@ -313,7 +322,9 @@ Sub layout
   drawstr(8, 140, "TEMPERATURE", 1, GREY, BLACK)
   drawstr(8, 184, "STATION PRESSURE", 1, GREY, BLACK)
   drawstr(8, 228, "HEIGHT ASL", 1, GREY, BLACK)
-  drawstr(8, 272, "QNH", 1, GREY, BLACK)
+  ' The unit lives on the label, not on the value: at 24 pixels a
+  ' character, "1013.2 hPa" is ten of them and the panel is 240 wide.
+  drawstr(8, 272, "QNH  hPa", 1, GREY, BLACK)
 End Sub
 
 ' Draw a field only if it changed, and pad to the width it had before

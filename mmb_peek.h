@@ -35,6 +35,25 @@
 
 #include "mmb_runtime.h"
 
+/*	The same bargain the other mmb_*.h headers make: keyed on which
+ *	compiler compiles the OUTPUT, because fccbuild.sh preprocesses
+ *	with gcc and then feeds cc1.  Guarded so a program including
+ *	several of these defines it once.
+ *
+ *	This header is the one that most needs its own copy: a program can
+ *	PEEK without touching a pin, so it is the only mmb_*.h that gets
+ *	included with none of the others.  Leaving it out compiled every
+ *	program that also opened SPI or a pin and failed only on the ones
+ *	that did not - which is to say it passed on the board and failed
+ *	on the one-page example. */
+#ifndef MMG_FN
+#if defined(MM_FCC) || defined(MM_PC3)
+#define MMG_FN static
+#else
+#define MMG_FN static __inline__ __attribute__((unused))
+#endif
+#endif
+
 /*	The address arrives as a signed 64-bit BASIC integer and has to
  *	become a pointer.  Through uintptr_t rather than straight to the
  *	pointer type: the board is 32-bit and the gates run on a 64-bit
