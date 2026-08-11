@@ -26,7 +26,7 @@
 
 #define REG_TIME   0x00 /* sec min hour wday mday month year, BCD */
 #define REG_CONTROL 0x0E /* bit 7 = EOSC (stop), 2 = INTCN, 0 = A1IE */
-#define REG_STATUS 0x0F /* bit 7 = oscillator stop flag, 0 = A1F */
+#define REG_STATUS 0x0F /* bit 7 = OSF, 3 = EN32kHz (BOARD DETECTION), 0 = A1F */
 
 /* What userland's struct cmos_rtc actually looks like on ARM: its time_t
  * is int64_t, so the data union is 8-aligned (offset 8, total 16 bytes).
@@ -320,6 +320,25 @@ int ds3231_user_reg(uint8_t reg, uint8_t *val, int write)
 
         if (reg == REG_CONTROL)
             v &= (uint8_t)~0x80;        /* never stop the oscillator */
+        /*
+         * And never turn off the 32kHz output, for the same reason and
+         * with a worse result.  Bit 3 of the status register is
+         * EN32kHz, and that square wave on GP27 is HOW THIS KERNEL
+         * KNOWS WHICH MACHINE IT IS: board_is_pc2() reads it.  Clear it
+         * and the next boot decides it is a PC2, where GP32 is the SD
+         * card's MISO - so the card is looked for on the wrong pin and
+         * the machine comes up saying "no card found".
+         *
+         * It is battery-backed, so it outlives the power cycle, and the
+         * program that did it cannot undo it because the machine no
+         * longer boots.  A BASIC program clearing the alarm flag with
+         * the obvious "RTC SETREG &H0F, 0" bricked a board exactly that
+         * way; MMBasic on the same board then would not recognise a PC3
+         * either.  The flags in this register are write-0-to-clear, so
+         * forcing this one bit to 1 costs a program nothing it wanted.
+         */
+        if (reg == REG_STATUS)
+            v |= 0x08;                  /* EN32kHz: board detection */
         r = ds3231_write_regs(reg, &v, 1);
     } else {
         r = ds3231_read_regs(reg, val, 1);
