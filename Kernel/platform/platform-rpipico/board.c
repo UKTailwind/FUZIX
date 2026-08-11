@@ -14,6 +14,14 @@
  * A quiet pin means Pico Computer 2 (or a PC3 with a stopped DS3231 -
  * the only ambiguity, accepted as in the other firmwares).
  *
+ * ds3231_init() runs FIRST and turns the 32 kHz output back on if it
+ * was off, which removes most of that ambiguity: the output is in a
+ * battery-backed register that another firmware, an older kernel or a
+ * careless BASIC write can clear, and a PC3 in that state used to be
+ * taken for a PC2 for ever - its SD card probed on the wrong MISO, and
+ * no way in because the machine would not boot.  What is left is a
+ * genuinely stopped oscillator, which no amount of asking will fix.
+ *
  * Runs before the SD card comes up; the CYW43 (PC3 only) is unused by
  * Fuzix, so the SD wiring is the only consequence.
  */

@@ -281,6 +281,43 @@ void ds3231_init(void)
     rtc_present = 1;
     if (st & 0x80)
         kputs("DS3231 RTC: oscillator was stopped, time needs setting (setdate -w)\n");
+
+    /*
+     * TURN THE 32 kHz OUTPUT ON, EVERY BOOT.
+     *
+     * board_detect() runs immediately after this and identifies the
+     * machine by watching that square wave on GP27.  If EN32kHz is
+     * clear the pin is quiet, a PC3 is taken for a PC2, and the SD card
+     * is then probed on the wrong MISO - "SD drive 0: no card found",
+     * on a machine whose card is perfectly good.
+     *
+     * The bit is in a battery-backed register, so whatever cleared it
+     * outlives the power cycle, and the machine cannot be talked out of
+     * it afterwards because it no longer boots.  Anything can have
+     * cleared it: an older kernel, another firmware, or a BASIC program
+     * clearing the alarm flag with a careless write of the whole
+     * register - which is exactly how a board here was lost.
+     *
+     * So this does not ask why; it just puts it back, before the answer
+     * matters.  Benign on a PC2, where GP27 is an ordinary pin and
+     * nothing reads the output.  Doing it HERE is what makes it work at
+     * all: the write goes over I2C0 on GP20/21, which has nothing to do
+     * with the GP27 line detection is about to read.
+     *
+     * Writing the value just read, with bit 3 forced, is safe: the
+     * flags in this register are write-0-to-clear, so putting each one
+     * back as it was leaves it as it was.
+     */
+    if (!(st & 0x08)) {
+        uint8_t v = (uint8_t)(st | 0x08);
+
+        kputs("DS3231 RTC: 32kHz output was off, re-enabling for board detect\n");
+        if (ds3231_write_regs(REG_STATUS, &v, 1) == 0) {
+            /* let the output start before board_detect() counts edges;
+               a 32 kHz cycle is 30us and it wants four of them */
+            busy_wait_us_32(200);
+        }
+    }
     inittod();
 }
 
