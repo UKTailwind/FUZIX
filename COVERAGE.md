@@ -70,10 +70,28 @@ ordinary BASIC program that currently fails outright.
 * **`VAR SAVE` / `VAR RESTORE` / `VAR CLEAR`.** Flash-backed variables map
   naturally onto a small file. Identical from the program's point of view,
   and now cheap given the file layer exists.
-* **`PEEK` / `POKE` / `MEMORY COPY|SET|PACK`.** The `PEEK(VAR x)` and
-  array-address forms translate fine. Raw numeric addresses would become
-  undefined behaviour instead of a clean error, which is a meaningful step
-  down in safety from what you have now.
+* ~~**`PEEK`**~~ **DONE** — `BYTE`, `SHORT`, `WORD`, `INTEGER` and
+  `FLOAT`, with MMBasic's alignment check and MMBasic's message. The
+  worry recorded here was that raw numeric addresses become undefined
+  behaviour rather than a clean error, and that is exactly what they
+  do; what changed is that there is now a reason worth it.
+  `MM.INFO(FONT ADDRESS n)` hands back the address of a built-in font
+  in the kernel's flash, and without `PEEK` that address is useless —
+  a program driving its own SPI panel could ask where MMBasic's glyphs
+  were and not read them. MMBasic on a PicoMite is no safer, and the
+  alternative was every such program shipping its own copy of a font.
+
+  `PEEK(VAR x)`, `PEEK(VARADDR x)` and `PEEK(CFUNADDR …)` are *not*
+  done: those ask about a variable rather than an address, which needs
+  the symbol table rather than a value.
+* **`POKE` / `MEMORY COPY|SET|PACK`.** Still open, and a bigger step
+  than `PEEK` was — a bad read kills one program, a bad write can take
+  the kernel with it, and there is no MMU to disagree.
+* **`MM.INFO(...)`** translates `FONT ADDRESS n` and nothing else. The
+  other options that make sense on this machine already have flat
+  spellings (`MM.HRES`, `MM.VRES`, `MM.DEVICE$`, `MM.VER`,
+  `MM.ERRNO`); the rest describe a filesystem and a display that are
+  not this one. An unsupported option names itself in the error.
 * **`CALL(fname$, args…)`.** Indirect call by name — a generated dispatch
   table keyed on the routine name. Works, but only for routines with
   compatible signatures.
