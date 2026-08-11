@@ -169,14 +169,14 @@ pico_add_extra_outputs(fuzix)
 # own tail on first boot and the board is dead until reflashed - found
 # the hard way when the kernel outgrew the old 96K offset.  Refuse to
 # build an image that can eat itself.
+#
+# The limit is READ from globals.h by flashcheck.sh.  It was a
+# hand-copied $((512*1024)) right here, so when FLASH_OFFSET moved to
+# 1M the build carried on checking against 512K - a guard that
+# disagrees with the thing it guards is worse than none.
 add_custom_command(TARGET fuzix POST_BUILD
-	COMMAND sh -c "sz=$(stat -c %s fuzix.bin); lim=$((512*1024)); \
-		if [ $sz -ge $lim ]; then \
-			echo \"fuzix.bin ($sz bytes) reaches FLASH_OFFSET ($lim): the flash disk would erase the kernel image. Raise FLASH_OFFSET in globals.h.\"; \
-			exit 1; \
-		else \
-			echo \"flash footprint: $sz of $lim bytes ($((100*sz/lim))% of FLASH_OFFSET)\"; \
-		fi"
+	COMMAND sh ${CMAKE_CURRENT_LIST_DIR}/flashcheck.sh
+		${CMAKE_CURRENT_LIST_DIR}/globals.h fuzix.bin
 	VERBATIM
 	WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 

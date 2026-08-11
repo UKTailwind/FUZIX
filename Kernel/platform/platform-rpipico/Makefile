@@ -57,10 +57,20 @@ build/Makefile: CMakeLists.txt $(wildcard ../../*.[chS]) $(wildcard ../../*/*.[c
 	mkdir -p build
 	(cd build && cmake -DPICO_BOARD=${SUBTARGET} -DTOTALMEM=${TOTALMEM} ..)
 
+# The flash disk is everything above FLASH_OFFSET (globals.h, 1M), and
+# these three numbers describe the same region devflash.c does:
+#
+#   -s 3072   PICO_FLASH_SIZE_BYTES (4M for this board) - FLASH_OFFSET
+#   -o 0x10100000   XIP base + FLASH_OFFSET
+#
+# The offset was 0x10018000 - the 96K FLASH_OFFSET used before the
+# bricking described in globals.h - so flashing this uf2 would have
+# written the disk over the kernel and done it again.  Change one of
+# these and you must change all three.
 image:: world
 	./update-flash.sh
-	../../../Standalone/mkftl -s 1952 -e 0x1000 -g 10 filesystem.img -o filesystem.ftl
-	${PICOTOOL} uf2 convert filesystem.ftl -t bin filesystem.uf2 -o 0x10018000 ${PICOTOOLFLAGS}
+	../../../Standalone/mkftl -s 3072 -e 0x1000 -g 10 filesystem.img -o filesystem.ftl
+	${PICOTOOL} uf2 convert filesystem.ftl -t bin filesystem.uf2 -o 0x10100000 ${PICOTOOLFLAGS}
 
 diskimage:
 

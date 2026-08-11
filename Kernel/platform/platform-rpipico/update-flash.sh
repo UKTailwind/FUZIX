@@ -10,7 +10,12 @@ set -e
 # inodes.  256 matches what the old "32 blocks of 8" gave the flash
 # root.
 IMG=${IMG:-filesystem.img}
-FSSIZE=${FSSIZE:-2547}
+# 4000 of the 4055 sectors mkftl can address with the Makefile's
+# -s 3072.  It was 2547 of 2555, and the root outgrew that the moment
+# printf learned %ll and every static binary put on a couple of hundred
+# bytes.  FLASH_OFFSET moved to 1M to make the room; see globals.h,
+# where the three numbers that must agree are listed.
+FSSIZE=${FSSIZE:-4000}
 INODES=${INODES:-256}
 
 rm -f ${IMG}
@@ -523,13 +528,14 @@ if grep -q 'error' /tmp/ucp-flash.log; then
 	echo "  consistent, just short - so this message is the only sign." >&2
 	echo "" >&2
 	echo "  FSSIZE=${FSSIZE} sectors.  The ceiling is the FTL's, not the" >&2
-	echo "  filesystem's: mkftl -s 1952 with 4 kB erase blocks gives" >&2
-	echo "  2555 sectors, and FSSIZE is set just under it." >&2
+	echo "  filesystem's: mkftl -s 3072 with 4 kB erase blocks gives" >&2
+	echo "  4055 sectors, and FSSIZE is set just under it." >&2
 	echo "" >&2
 	echo "  Fix by dropping something from the list above, or by" >&2
-	echo "  raising mkftl's -s in the Makefile and FSSIZE together." >&2
-	echo "  Note the kernel already hands dhara the whole chip above" >&2
-	echo "  FLASH_OFFSET (devflash.c), so -s is the smaller number." >&2
+	echo "  giving the disk more flash - that means FLASH_OFFSET in" >&2
+	echo "  globals.h, mkftl's -s AND the uf2 offset in the Makefile," >&2
+	echo "  all three together.  devflash.c defines the region as" >&2
+	echo "  PICO_FLASH_SIZE_BYTES - FLASH_OFFSET." >&2
 	echo "***********************************************************" >&2
 	echo "" >&2
 	# Deliberately not fatal: the SD card is the real root and this

@@ -14,11 +14,26 @@
  *	both dead (the damage is persistent), only a reflash reviving it,
  *	and that only until the next boot re-ate the tail.
  *
- *	512K leaves the ~100K image five-fold headroom, and CMakeLists
- *	fails the build outright if fuzix.bin ever reaches this offset,
- *	so the overlap can never come back silently.
+ *	1M now, raised from 512K when the flash root stopped fitting: the
+ *	image is ~160K, so this is six-fold headroom, and nothing else
+ *	competes for the space - the kernel and the flash disk are the
+ *	only two things in this chip.  CMakeLists fails the build outright
+ *	if fuzix.bin ever reaches this offset, so the overlap that caused
+ *	the damage above can never come back silently.
+ *
+ *	THREE THINGS MOVE TOGETHER.  This constant, the `-o' offset the
+ *	Makefile converts filesystem.uf2 to, and `mkftl -s' which must
+ *	describe the same device devflash.c does:
+ *
+ *		disk size = PICO_FLASH_SIZE_BYTES - FLASH_OFFSET
+ *
+ *	The uf2 offset had been left at the old 0x10018000 - 96K, the
+ *	value from before the bricking above - so flashing filesystem.uf2
+ *	would have written the disk straight over the kernel image and
+ *	reproduced exactly that failure.  Nobody noticed because that uf2
+ *	is not a release asset and the SD card is the real root.
  */
-#define FLASH_OFFSET (512*1024)
+#define FLASH_OFFSET (1024*1024)
 
 extern void flash_dev_init(void);
 extern void sd_rawinit(void);
