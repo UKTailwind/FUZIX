@@ -2244,20 +2244,20 @@ translate time, not at run time.
 | `DO` | `ELSE` | `ELSEIF` | `END` |
 | `ENDIF` | `ERASE` | `ERROR` | `EXIT` |
 | `FILES` | `FONT` | `FOR` | `FRAMEBUFFER` |
-| `FUNCTION` | `GOSUB` | `GOTO` | `IF` |
-| `INC` | `INPUT` | `KILL` | `LET` |
-| `LINE` | `LOAD` | `LOCAL` | `LONGSTRING` |
-| `LOOP` | `MAP` | `MATH` | `MKDIR` |
-| `MODE` | `NEXT` | `ON` | `OPEN` |
-| `OPTION` | `PAUSE` | `PIN` | `PIXEL` |
-| `PLAY` | `PRINT` | `PWM` | `RANDOMIZE` |
-| `RBOX` | `READ` | `RENAME` | `RESTORE` |
-| `RETURN` | `RMDIR` | `RTC` | `SAVE` |
-| `SEEK` | `SELECT` | `SERVO` | `SETPIN` |
-| `SETTICK` | `SORT` | `STATIC` | `STRUCT` |
-| `SUB` | `SYSTEM` | `TEXT` | `TIME$` |
-| `TIMER` | `TRIANGLE` | `TYPE` | `WEND` |
-| `WHILE` |  |  |  |
+| `FUNCTION` | `GOSUB` | `GOTO` | `I2C2` |
+| `IF` | `INC` | `INPUT` | `KILL` |
+| `LET` | `LINE` | `LOAD` | `LOCAL` |
+| `LONGSTRING` | `LOOP` | `MAP` | `MATH` |
+| `MKDIR` | `MODE` | `NEXT` | `ON` |
+| `OPEN` | `OPTION` | `PAUSE` | `PIN` |
+| `PIXEL` | `PLAY` | `PRINT` | `PWM` |
+| `RANDOMIZE` | `RBOX` | `READ` | `RENAME` |
+| `RESTORE` | `RETURN` | `RMDIR` | `RTC` |
+| `SAVE` | `SEEK` | `SELECT` | `SERVO` |
+| `SETPIN` | `SETTICK` | `SORT` | `STATIC` |
+| `STRUCT` | `SUB` | `SYSTEM` | `TEXT` |
+| `TIME$` | `TIMER` | `TRIANGLE` | `TYPE` |
+| `WEND` | `WHILE` |  |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
