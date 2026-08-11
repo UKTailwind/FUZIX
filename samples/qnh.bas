@@ -34,7 +34,10 @@ Const BMPADDR = &H77
 Const SW = 240, SH = 320             ' the panel, portrait
 
 ' ---- colours, RGB565 -------------------------------------------------
-Const BLACK = &H0000, WHITE = &HFFFF, GREY = &H8410
+' &H8410 is a mid grey and reads as almost nothing on this panel with
+' the backlight at 70 - a label you cannot see is not a label.  This is
+' about three quarters brightness.
+Const BLACK = &H0000, WHITE = &HFFFF, GREY = &HBDF7
 Const YELLOW = &HFFE0, CYAN = &H07FF, GREEN = &H07E0
 Const ORANGE = &HFD20, SKY = &H045F
 
@@ -315,16 +318,27 @@ End Sub
 ' Where each field lives: label row, then the value.  Kept in one place
 ' so the layout is readable rather than scattered through the loop.
 Sub layout
-  drawstr(8, 4, "PC3 QNH STATION", 3, GREY, BLACK)
-  fillrect(0, 32, SW, 2, GREY)
+  ' "PC3 QNH STATION" is fifteen characters, and at sixteen pixels each
+  ' that is 240 - the whole panel - so the last letter has nowhere to
+  ' go.  Three words with half a character between them instead of a
+  ' whole one: 13 glyphs and two 8-pixel gaps is 224, which fits.
+  drawstr(8, 4, "PC3", 3, WHITE, BLACK)
+  drawstr(64, 4, "QNH", 3, WHITE, BLACK)
+  drawstr(120, 4, "STATION", 3, WHITE, BLACK)
+  fillrect(0, 32, SW, 2, SKY)
 
   drawstr(8, 96, "DATE", 1, GREY, BLACK)
   drawstr(8, 140, "TEMPERATURE", 1, GREY, BLACK)
   drawstr(8, 184, "STATION PRESSURE", 1, GREY, BLACK)
   drawstr(8, 228, "HEIGHT ASL", 1, GREY, BLACK)
-  ' The unit lives on the label, not on the value: at 24 pixels a
-  ' character, "1013.2 hPa" is ten of them and the panel is 240 wide.
-  drawstr(8, 272, "QNH  hPa", 1, GREY, BLACK)
+  drawstr(8, 272, "QNH", 1, GREY, BLACK)
+
+  ' The unit sits beside the big number rather than in it: six digits
+  ' of the 24-pixel font reach x=152, so "hPa" in the 16-pixel font at
+  ' 168 clears it with a gap and ends at 216.  Drawn once, here, because
+  ' it never changes - and bottom-aligned with the number, which is
+  ' eight pixels taller.
+  drawstr(168, 294, "hPa", 3, CYAN, BLACK)
 End Sub
 
 ' Draw a field only if it changed, and pad to the width it had before
