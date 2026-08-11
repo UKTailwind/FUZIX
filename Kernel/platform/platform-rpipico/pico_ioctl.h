@@ -3,6 +3,30 @@
 
 #include <stdint.h>
 
+/*
+ * ONE FLAT NUMBER SPACE.  Read that before adding anything below.
+ *
+ * plt_dev_ioctl (misc.c) dispatches every code in this file from a
+ * single if-chain, so GFXIOC_, PICOIOC_, SNDIOC_, PSRAMIOC_ and PLKIOC_
+ * are naming, not namespacing: two names sharing a number means the
+ * test that comes FIRST in that chain wins and the other is dead code
+ * that silently does the wrong thing.
+ *
+ * PICOIOC_BOARD was given 0x0021, which SNDIOC_PCMOPEN already had.
+ * PICOIOC_BOARD is tested first, so every PCM open wrote a 2 or a 3
+ * over the caller's sample rate and returned success - PLAY MP3 played
+ * silence and reported nothing wrong.  The prefixes are exactly why it
+ * looked free.
+ *
+ * The allocation table is not maintained by hand here, because a hand
+ * copy is one more thing to fall out of date.  Ask:
+ *
+ *	sh ioctlcheck.sh
+ *
+ * which prints every code in numeric order and FAILS on a duplicate.
+ * Run it after adding one.
+ */
+
 /* Reboot PI Pico into flash mode */
 #define PICOIOC_FLASH 0x0001
 
@@ -217,7 +241,17 @@ struct gfx_fontinfo {
  * 32 kHz on GP27).  A program that wants to name itself - MMBasic's
  * MM.DEVICE$ does - has no other way to ask: board_name() lived in the
  * kernel and only the banner ever called it. */
-#define PICOIOC_BOARD 0x0021
+/*
+ * 0x002C, NOT 0x0021.  It was 0x0021, which is SNDIOC_PCMOPEN - and
+ * plt_dev_ioctl tests this one first, so every PCM open landed here
+ * instead: it uput a 2 or a 3 over the first four bytes of the caller's
+ * struct snd_pcm (the sample rate) and returned success.  PLAY MP3 then
+ * opened a stream that was never configured and played nothing, with no
+ * error anywhere.  The numbers in this file are one flat space shared by
+ * every prefix; a new one has to be checked against ALL of them, not
+ * just against its own group.
+ */
+#define PICOIOC_BOARD 0x002C
 
 #define PC3_LIBM_MAGIC   0x50433350UL   /* "PC3P" */
 #define PC3_LIBM_VERSION 1
@@ -472,9 +506,57 @@ struct i2c_open {
 	uint8_t scl;
 	uint8_t pad;
 	uint32_t khz;			/* 100, 400 or 1000 */
+	/*
+	 * MMBasic's second OPEN argument, and it belongs HERE rather than
+	 * on each transfer because that is where MMBasic keeps it:
+	 * i2cEnable stores I2C_Timeout once and every transfer passes
+	 * I2C_Timeout*1000 microseconds (I2C.c).  It takes 0, or 100 and
+	 * up - under 100 is "Number out of bounds" there, so it is here.
+	 *
+	 * 0 means "no timeout" on a PicoMite.  It CANNOT mean that here.
+	 * This kernel is non-preemptive, so a transfer that waits forever
+	 * does not hang the program that asked for it - it hangs the
+	 * machine, console and display included, with no way back but the
+	 * reset button.  0 is therefore a long cap (I2C_MAX_TIMEOUT),
+	 * which is the same answer for every device that is merely slow
+	 * and a different one only for a bus that is already broken.
+	 */
+	uint16_t timeout_ms;		/* 0 = the cap, else >= 100 */
+	uint16_t pad2;
 };
 #define PICOIOC_I2COPEN	0x002A
 #define PICOIOC_I2CCLOSE 0x002B		/* uint8_t bus */
+
+/*
+ * One transfer, with MMBasic's option bits - the PC3's own, alongside
+ * upstream's I2C_MSG on /dev/i2c rather than instead of it.
+ *
+ * Upstream's struct i2c_msg (Kernel/include/i2c.h, driven by
+ * Kernel/dev/devi2c.c) is shared with every other Fuzix platform and
+ * has nowhere to put a flag.  Widening it would put a PC3 idea into
+ * code that goes back upstream; a portable program still uses I2C_MSG
+ * and gets exactly what it always did, and only the BASIC path needs
+ * this.
+ *
+ * I2CF_HOLD is MMBasic's option bit 0: end the transfer WITHOUT a
+ * STOP, so the next one is a repeated START on the same device.  It is
+ * the SDK's nostop argument, which is precisely what MMBasic passes -
+ * (I2C_Status == I2C_Status_BusHold ? true : false).
+ *
+ * A held bus is a transaction the caller has promised to finish.  If it
+ * does not - an error, or the process dies - the kernel finishes it:
+ * see the recovery in i2cuser.c, which is what stops one program's
+ * abandoned hold locking the bus for everyone after it.
+ */
+struct i2c_xfer {
+	uint8_t bus;
+	uint8_t addr;			/* 7-bit address << 1 | read */
+	uint8_t len;
+	uint8_t flags;
+	uint8_t *data;
+};
+#define I2CF_HOLD	0x01
+#define PICOIOC_I2CXFER	0x002D
 
 struct rtc_reg {
 	uint8_t reg;			/* 0-255 */

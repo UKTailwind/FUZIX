@@ -70,6 +70,8 @@ static int prtfld(FILE * op, size_t maxlen, size_t ct, unsigned char *buf, int l
 int _vfnprintf(FILE * op, size_t maxlen, const char *fmt, va_list ap)
 {
 	register int i, ljustf, lval, preci, dpoint, width, radix, cnt = 0;
+	int llval;			/* a second 'l': long long */
+	int lcount;			/* how many l's this conversion had */
 	char pad, sign, hash;
 	register char *ptmp, *add;
 	unsigned long val;
@@ -94,6 +96,8 @@ int _vfnprintf(FILE * op, size_t maxlen, const char *fmt, va_list ap)
 			ptmp = tmp;	/* pointer to area to print */
 			hash = 0;
 			lval = (sizeof(int) == sizeof(long));	/* long value flaged */
+			llval = 0;
+			lcount = 0;
 		      fmtnxt:for (i = 0, ++fmt;;
 			     ++fmt) {
 				if (*fmt < '0' || *fmt > '9')
@@ -140,16 +144,43 @@ int _vfnprintf(FILE * op, size_t maxlen, const char *fmt, va_list ap)
 				dpoint = 1;
 				goto fmtnxt;
 
-			case 'l':	/* long data */
+			case 'l':	/* long data, or ll for long long */
+				/* A SECOND l means long long, and it used
+				 * to mean nothing: lval was simply set to 1
+				 * again, so %lld and %llX read a long out of
+				 * a vararg list the caller had aligned for a
+				 * long long.  On ARM that reads the padding
+				 * word and prints 0 - silently, which cost a
+				 * day when the on-board translator emitted
+				 * every &H constant as 0x0.
+				 *
+				 * COUNT the l's; do not test lval.  lval
+				 * starts as (sizeof(int) == sizeof(long)),
+				 * which is 1 on every 32-bit target, so
+				 * "if (lval) llval = 1" fires on the FIRST l
+				 * and turns every %ld into %lld - it ate the
+				 * following argument and %s after it printed
+				 * nothing. */
+				if (lcount++)
+					llval = 1;
 				lval = 1;
 				goto fmtnxt;
 
 			case 'h':	/* short data */
 				lval = 0;
+				llval = 0;
+				lcount = 0;
 				goto fmtnxt;
 
 			case 'd':	/* Signed decimal */
 			case 'i':
+#ifdef CONFIG_PRINTF_LONGLONG
+				if (llval) {
+					ptmp = __lltostr_r(buf,
+						va_arg(ap, long long), 10);
+					goto printit;
+				}
+#endif
 				ptmp = __ltostr_r(buf, (long) ((lval) ?
 						    va_arg(ap, long) :
 						    va_arg(ap, int)), 10);
@@ -180,9 +211,24 @@ int _vfnprintf(FILE * op, size_t maxlen, const char *fmt, va_list ap)
 
 			case 'u':	/* Unsigned decimal */
 			usproc:
+#ifdef CONFIG_PRINTF_LONGLONG
+				if (llval) {
+					unsigned long long lval64 =
+						va_arg(ap, unsigned long long);
+					/* val is read below only by the '#'
+					 * test "is it non-zero", so carry
+					 * that and not the truncation - a
+					 * value whose low 32 bits happen to
+					 * be zero is still non-zero. */
+					val = (unsigned long)(lval64 != 0);
+					ptmp = __ulltostr_r(buf, lval64, radix);
+					goto hashproc;
+				}
+#endif
 				val = lval ? va_arg(ap, unsigned long) :
 				    va_arg(ap, unsigned int);
 				ptmp = __ultostr_r(buf, val, radix);
+			hashproc:
 				add = "";
 				if (hash) {
 					if (radix == 2)

@@ -450,11 +450,15 @@ void conv_write(FILE *f)
         fprintf(f, " * It lives here rather than in the runtime so a guard is\n");
         fprintf(f, " * a load and a branch instead of a library call. */\n");
         fprintf(f, "static int __mm_e[2];\n");
+    }
+    /* OUTSIDE the ON ERROR block - it was written inside it, so an I2C2
+       program that never mentions ON ERROR got no declaration and the
+       generated C would not compile.  Nothing caught it because every
+       I2C2 program in the corpus used ON ERROR SKIP to scan the bus. */
     if (cv.uses_i2c)
         /* SETPIN puts the pins here and OPEN reads them: MMBasic
            allows the two to be far apart in a program. */
         fprintf(f, "static int __mmi2c_sda, __mmi2c_scl;\n");
-    }
     fprintf(f, "\n/* ---- forward declarations ---- */\n");
     if (cv.uses_clear)
         fprintf(f, "static void __mmb_clear(void);\n");

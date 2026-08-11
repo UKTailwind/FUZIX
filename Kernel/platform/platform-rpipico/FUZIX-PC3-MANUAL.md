@@ -2416,10 +2416,57 @@ run time — an I2C transfer that may not be acknowledged, a file that
 may not exist — not arithmetic. If a program traps errors out of
 habit, leaving `ON ERROR` out buys the checks back.
 
+### I2C2 — the second controller
+
+`I2C2` is MMBasic's second bus, and on this machine it is the one a
+program may have. The fixed bus (`I2C`, GP20/GP21) is the QWIIC socket
+*and* the DS3231 the system clock runs on, which the kernel polls from
+interrupt context, so it stays the kernel's.
+
+```basic
+SETPIN 38, 39, I2C2          ' GP38/GP39 or GP42/GP43 - see below
+I2C2 OPEN 400, 1000          ' speed kHz, timeout ms
+I2C2 WRITE &H77, 1, 1, &HD0  ' option 1 = HOLD: no STOP
+I2C2 READ  &H77, 0, 1, r$    ' ...so this is a repeated START
+I2C2 CLOSE
+```
+
+The pins are not free to choose: the RP2350 muxes I2C1's SDA only onto
+pins where `pin AND 3 = 2` and SCL only where `pin AND 3 = 3`, so on
+this board the pairs are **GP38/GP39** and **GP42/GP43**. Anything else
+is refused at `OPEN` rather than producing a bus that never answers.
+
+`WRITE` takes a list of byte expressions, a whole numeric array written
+`a()`, or a string; `READ` takes a numeric array or a string variable.
+The string forms are what MMBasic's own sensor examples use, because
+`STR2BIN()` then lifts the 16- and 32-bit fields straight out of what
+was read.
+
+Option bit 0 **holds** the bus: the transfer ends without a STOP so the
+next one is a repeated START on the same device. Most register-file
+devices do not need it — they keep their address pointer across a STOP —
+but the ones that do would otherwise read plausible nonsense.
+
+Two differences from a PicoMite, both deliberate:
+
+* `timeout` is milliseconds, `0` or `100` and up as MMBasic requires,
+  but **`0` means a five-second cap, not "no timeout"**. This kernel is
+  non-preemptive: a transfer that waited for ever would not hang the
+  program that asked for it, it would hang the machine, console and
+  display included.
+* A held bus that is never finished — the program errors, or is killed
+  between the write and the read — is finished by the kernel, which
+  clocks SCL until the device releases SDA and then issues a STOP.
+  Nothing else on the board would free it.
+
+The pins and the controller are claimed through the pin lock, so they
+come back if the program dies, and a second program asking for the bus
+gets a clear "already in use" rather than a collision.
+
 ## Not covered
 
-I2C, SPI, one-wire, `PORT`, and the interrupt statements — along with
-the editor, `RUN`, `LIST`, `EDIT` and the rest of the immediate-mode
+SPI, one-wire, `PORT`, and the interrupt statements — along with the
+editor, `RUN`, `LIST`, `EDIT` and the rest of the immediate-mode
 environment. The hardware statements are the subject of current work;
 the immediate-mode ones will never apply, since a translated program is
 compiled and run rather than typed at a prompt. (`mmedit` provides the

@@ -112,7 +112,26 @@ static long mm_off(const char *p)
 	return (long)(unsigned long)(uintptr_t)p;
 }
 
-/* Argument fetchers by type; a double or an MMINTEGER takes two slots. */
+/*
+ *	Argument fetchers by type; a double or an MMINTEGER takes two
+ *	slots.  READ THAT AGAIN BEFORE WRITING A WRAPPER: the slots are 32
+ *	bits, so the argument NUMBER is not the parameter number, and I(n)
+ *	on a parameter declared MMINTEGER silently reads half of it.
+ *
+ *	Three wrappers were written I(0), I(1), I(2) for three MMINTEGER
+ *	parameters.  What the callee saw was the low half of the first, the
+ *	high half of the first (0), and the low half of the second:
+ *	mm_i2c_open(38, 39, 400) reached the kernel as sda=38, scl=0,
+ *	khz=39, and mm_rtcreg(reg, val, 1) wrote 0 to every register - which
+ *	on the DS3231 control register turns the alarm pin into a 1 Hz
+ *	square wave, so the alarm test passed for the wrong reason.
+ *
+ *	The runtime's answer was to declare those parameters int, since a
+ *	pin, a register and a length all fit one; the general rule stands
+ *	for anything genuinely 64-bit.  The compiler cannot help here - the
+ *	call is correct C either way - and neither can the host gates,
+ *	where the runtime is called directly and never through a slot.
+ */
 #define Ps(n)	mm_ptr((unsigned long)(uint32_t)arg(n), MM_STRSZ)
 #define Pa(n)	mm_ptr((unsigned long)(uint32_t)arg(n), 0)
 #define PI(n)	((MMINTEGER *)(void *)Pa(n))
@@ -327,10 +346,10 @@ static void w_rtcreg(void)       { A = mm_rtcreg(I(0), I(1), I(2)); }
 /* I2C2 - the second controller.  Pa(2) is the caller's buffer; the
    transfer is one whole transaction, which is why this stays a syscall
    (300us of bus against a 1.5us crossing). */
-static void w_i2c_open(void)     { A = mm_i2c_open(I(0), I(1), I(2)); }
+static void w_i2c_open(void)     { A = mm_i2c_open(I(0), I(1), I(2), I(3)); }
 static void w_i2c_close(void)    { mm_i2c_close(); A = 0; }
 static void w_i2c_xfer(void)
-{ A = mm_i2c_xfer(I(0), I(1), I(2), (unsigned char *)Pa(3)); }
+{ A = mm_i2c_xfer(I(0), I(1), I(2), (unsigned char *)Pa(3), I(4)); }
 static void w_errno(void)    { A = mm_errno(); }
 /* through a scratch temp: MM.ERRMSG$ lives in bcrun's own memory, and a
    program can only be handed a pointer inside the VM's address space */

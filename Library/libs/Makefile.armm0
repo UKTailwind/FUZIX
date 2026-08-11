@@ -2,7 +2,17 @@ CC = arm-none-eabi-gcc
 AR = arm-none-eabi-ar
 PLATFORM = armm0
 export PLATFORM
-CC_OPT = -mcpu=cortex-m33 -ffunction-sections -fdata-sections -fno-strict-aliasing -fomit-frame-pointer -fno-builtin -Wall -g -Os -c -I../include 
+CC_OPT = -mcpu=cortex-m33 -ffunction-sections -fdata-sections -fno-strict-aliasing -fomit-frame-pointer -fno-builtin -Wall -g -Os -c -I../include
+# printf understands %lld and %llX here.  It is not free - a 64-bit
+# divide is a libgcc call - but this is a 32-bit machine whose BASIC
+# integers are 64-bit, and the alternative is what happened before: a
+# second 'l' set the same flag as the first, so "%llX" did a va_arg for
+# a long against a value the caller had aligned as a long long, read the
+# padding word, and printed 0.  Silently.  That put a zero where every
+# &H constant should have been in any program translated ON the board.
+# A target that never prints a 64-bit value leaves this undefined and
+# pays nothing for it - see vfprintf.c and ltostr.c.
+CC_OPT += -DCONFIG_PRINTF_LONGLONG
 ASM_OPT = -g -mcpu=cortex-m33
 # copied in from kernel tree
 KRN_HEADERS = userstructs.h

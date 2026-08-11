@@ -641,19 +641,54 @@ MMINTEGER mm_us(void);
  * there" and the specific form's "the key is eaten" both true. */
 MMINTEGER mm_key_peek(void);
 void mm_key_drop(void);
+/*
+ * The next few take int, not MMINTEGER, and that is not a style
+ * choice.  Under bcrun every entry point here is reached through a
+ * wrapper that pulls arguments off the VM stack by SLOT, and the slots
+ * are 32 bits: an int parameter is one slot, an MMINTEGER is two.  A
+ * wrapper written I(0), I(1), I(2) for three MMINTEGER parameters
+ * therefore reads the low half of the first, the HIGH half of the
+ * first, and the low half of the second.
+ *
+ * That is not theoretical.  mm_i2c_open(38, 39, 400) arrived at the
+ * kernel as sda=38, scl=0, khz=39, and mm_rtcreg(reg, val, 1) wrote 0
+ * to every register it was asked to set - which on the DS3231's control
+ * register clears INTCN and turns the alarm pin into a 1 Hz square
+ * wave, so the arming test PASSED by producing one edge a second from
+ * the wrong mechanism entirely.
+ *
+ * A pin number, a register, a 7-bit address and a transfer length all
+ * fit an int, and every other small-integer entry point here already
+ * takes one (mm_restore, mm_gosub_push, mm_putc).  Matching them makes
+ * the natural wrapper the correct one, which is worth more than the
+ * width.  Nothing on the HOST can catch this class of bug: there the
+ * runtime is called directly with real C prototypes.
+ */
 /* RTC GETREG / RTC SETREG - one DS3231 register.  write 0 reads and
  * returns the value; write 1 writes val and returns it back (a write to
  * the control register comes back with EOSC masked out, because the
  * kernel will not let a program stop the clock).  -1 if there is no RTC.
  * Arming an alarm is writing these registers, which is what MMBasic
  * does too - it has no alarm command either. */
-MMINTEGER mm_rtcreg(MMINTEGER reg, MMINTEGER val, MMINTEGER write);
-/* I2C2 - the second controller on header pins.  open assigns the pins
- * and starts it; xfer is one whole transaction, read or write, with no
- * repeated START (the kernel interface has none).  0 on success. */
-MMINTEGER mm_i2c_open(MMINTEGER sda, MMINTEGER scl, MMINTEGER khz);
-MMINTEGER mm_i2c_xfer(MMINTEGER addr, MMINTEGER read, MMINTEGER n,
-                      unsigned char *buf);
+MMINTEGER mm_rtcreg(int reg, int val, int write);
+/* I2C2 - the second controller on header pins.  open assigns the pins,
+ * starts it, and sets the transfer timeout in milliseconds, which is
+ * where MMBasic keeps it too: I2C2 OPEN speed, timeout, and every
+ * transfer afterwards uses it.  0 there means "no timeout" on a
+ * PicoMite and a long cap here - a non-preemptive kernel cannot wait
+ * for ever on one program's behalf.
+ *
+ * xfer is one whole transaction, read or write.  hold is MMBasic's
+ * option bit 0: end without a STOP so the next transfer is a repeated
+ * START on the same device, for the devices that require a genuine
+ * combined transfer.
+ *
+ * 0 on success, or a NEGATIVE ERRNO so the caller can say which
+ * failure it was - ETIMEDOUT and EIO are different faults and MMBasic
+ * distinguishes them too. */
+MMINTEGER mm_i2c_open(int sda, int scl, int khz, int timeout_ms);
+MMINTEGER mm_i2c_xfer(int addr, int read, int n, unsigned char *buf,
+                      int hold);
 void mm_i2c_close(void);
 void mm_on_error(int mode, MMINTEGER n);   /* 0 abort 1 clear 2 ignore 3 skip */
 /* Write or discard the PRINT line held while armed - the statement

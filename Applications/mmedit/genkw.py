@@ -60,10 +60,15 @@ text = open(MMB2C).read()
 body = text[text.index("def statement_inner"):]
 body = body[:body.index("\n    def ", 10)]
 supported = set()
-for m in re.finditer(r"up == '([A-Z$?]+)'", body):
+# 0-9 in the class, for the same reason the dot matters below: without
+# it a keyword with a digit in it never matched its own dispatch, so
+# I2C2 was painted "the interpreter knows this and mmbc does not" for as
+# long as it had been translating.  The BUILTINS pattern below always
+# allowed digits; these two did not.
+for m in re.finditer(r"up == '([A-Z0-9$?]+)'", body):
     supported.add(m.group(1))
 for m in re.finditer(r"up in \(([^)]*)\)", body):
-    for w in re.findall(r"'([A-Z$?]+)'", m.group(1)):
+    for w in re.findall(r"'([A-Z0-9$?]+)'", m.group(1)):
         supported.add(w)
 tbl = text[text.index("BUILTINS = {"):]
 tbl = tbl[:tbl.index("\n}")]

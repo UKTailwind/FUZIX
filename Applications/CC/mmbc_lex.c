@@ -5,6 +5,31 @@
 
 #include "mmbc.h"
 
+/*
+ * Uppercase hex for a 64-bit value, into a caller's char[17].
+ *
+ * printf cannot be asked: the Fuzix libc's vsnprintf - which is what
+ * sfmt uses, and mmbc runs on the board - has no long-long conversion,
+ * and "%llX" produced "0" for every value.  Nothing said so; the
+ * translated program simply had zeros where its &H constants should
+ * have been.  Rendering the digits here is the same bargain
+ * bc_strtoll makes for parsing them.
+ */
+static const char *hex64(unsigned long long v, char *buf)
+{
+    char *p = buf + 16;
+
+    *p = '\0';
+    if (v == 0)
+        *--p = '0';
+    else
+        while (v != 0) {
+            *--p = "0123456789ABCDEF"[(int)(v & 15)];
+            v >>= 4;
+        }
+    return p;
+}
+
 const char *ctype_of(int ty)
 {
     switch (ty) {
@@ -335,9 +360,26 @@ int tokenize(const char *line, int lineno, struct tok *out)
                         mm_error("line %d: bad &-constant", lineno);
                     val = val * (unsigned)base + (unsigned)d;
                 }
-                /* unsigned 64-bit; hex so >2^63 cannot overflow */
-                addtok(out, &nt, lineno, T_NUM,
-                       sfmt("((MMINTEGER)0x%llXULL)", val), "H");
+                /* unsigned 64-bit; hex so >2^63 cannot overflow.
+                 *
+                 * NOT sfmt("%llX"): sfmt goes through the Fuzix libc's
+                 * vsnprintf, which has no long-long conversion and wrote
+                 * "0" whatever the value was.  On the development
+                 * machine glibc got it right, so this only ever went
+                 * wrong for a program translated ON THE BOARD - where
+                 * every &H, &O and &B constant silently became zero.
+                 * It cost a day: an I2C2 write to &H77 went out
+                 * addressed to 0 and the device did not answer, which
+                 * looks exactly like a wiring fault.  hex64 renders the
+                 * digits itself, the way bc_strtoll parses them itself
+                 * for the same reason. */
+                {
+                    char hb[17];
+
+                    addtok(out, &nt, lineno, T_NUM,
+                           sfmt("((MMINTEGER)0x%sULL)", hex64(val, hb)),
+                           "H");
+                }
                 i = k;
                 continue;
             }

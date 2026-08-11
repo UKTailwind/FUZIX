@@ -48,6 +48,10 @@
 
 #ifdef CONFIG_PC3_PINLOCK
 
+#ifdef CONFIG_DEV_I2C
+extern void plt_i2c_close(uint8_t bus);
+#endif
+
 /*
  *	Twenty-four is the whole header (22 pins) plus room for a couple of
  *	blocks, which is one program using everything at once.  A held
@@ -148,7 +152,17 @@ static void reset_one(uint8_t cls, uint8_t idx)
 		gpio_set_input_enabled(idx, false);
 		break;
 	case PLK_I2C:
+#ifdef CONFIG_DEV_I2C
+		/* NOT i2c_deinit: i2cuser.c has its own "bus 1 is open"
+		   state - which pins, and whether a transfer is allowed at
+		   all - and deinitialising the block behind its back leaves
+		   that saying yes to a controller that is off.  That is
+		   exactly the bug this replaced: the flag survived the
+		   process that set it and no open ever worked again. */
+		plt_i2c_close(idx);
+#else
 		i2c_deinit(idx ? i2c1 : i2c0);
+#endif
 		break;
 	case PLK_SPI:
 		spi_deinit(idx ? spi1 : spi0);

@@ -12,6 +12,9 @@
 #ifdef CONFIG_PC3_PINLOCK
 #include "pinlock.h"
 #endif
+#ifdef CONFIG_DEV_I2C
+#include <i2c.h>		/* struct i2c_msg, for PICOIOC_I2CXFER */
+#endif
 #include <pico/multicore.h>
 #include <pico/bootrom.h>
 #include <hardware/watchdog.h>
@@ -333,13 +336,13 @@ int plt_dev_ioctl(uarg_t request, char *data)
     if (request == PICOIOC_I2COPEN)
     {
         extern int plt_i2c_open(uint8_t bus, uint8_t sda, uint8_t scl,
-                                uint32_t khz);
+                                uint32_t khz, uint16_t timeout_ms);
         struct i2c_open rq;
         int r;
 
         if (uget(data, &rq, sizeof(rq)))
             return -1;
-        r = plt_i2c_open(rq.bus, rq.sda, rq.scl, rq.khz);
+        r = plt_i2c_open(rq.bus, rq.sda, rq.scl, rq.khz, rq.timeout_ms);
         if (r) {
             udata.u_error = -r;
             return -1;
@@ -348,9 +351,54 @@ int plt_dev_ioctl(uarg_t request, char *data)
     }
     if (request == PICOIOC_I2CCLOSE)
     {
-        extern void plt_i2c_close(uint8_t bus);
+        /* The RELEASING form.  plt_i2c_close only shuts the block; it is
+           what the pin lock calls on the way out, and calling it from
+           here would shut the controller while this process still owned
+           it - so nothing else could open it and this one could not use
+           it either. */
+        extern void plt_i2c_release(uint8_t bus);
 
-        plt_i2c_close((uint8_t)(intptr_t)data);
+        plt_i2c_release((uint8_t)(intptr_t)data);
+        return 0;
+    }
+    /*
+     * One transfer WITH MMBasic's options - the PC3's own, beside
+     * upstream's I2C_MSG rather than instead of it (pico_ioctl.h says
+     * why).  The body is devi2c.c's, deliberately: same 64-byte bounce
+     * buffer, same valaddr-returns-the-length test - which is the one
+     * that had been written as "if (valaddr(...))" there and rejected
+     * every transfer it should have passed.
+     */
+    if (request == PICOIOC_I2CXFER)
+    {
+        extern int plt_i2c_msg_flags(struct i2c_msg *msg, uint8_t *kbuf,
+                                     uint8_t flags);
+        struct i2c_xfer rq;
+        struct i2c_msg msg;
+        uint8_t buf[64];
+        int r;
+
+        if (uget(data, &rq, sizeof(rq)))
+            return -1;
+        if (rq.len > sizeof(buf)) {
+            udata.u_error = EMSGSIZE;
+            return -1;
+        }
+        msg.bus = rq.bus;
+        msg.addr = rq.addr;
+        msg.len = rq.len;
+        msg.data = rq.data;
+        if (valaddr((char *)rq.data, rq.len, (rq.addr & 1)) != rq.len)
+            return -1;
+        if ((rq.addr & 1) == 0 && rq.len)
+            uget(rq.data, buf, rq.len);
+        r = plt_i2c_msg_flags(&msg, buf, rq.flags);
+        if (r == 0 && (rq.addr & 1) && rq.len)
+            uput(buf, rq.data, rq.len);
+        if (r) {
+            udata.u_error = -r;
+            return -1;
+        }
         return 0;
     }
 #endif

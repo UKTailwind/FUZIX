@@ -46,23 +46,101 @@
 #define MMI2C_BUS	1		/* MMBasic's I2C2 = the second one */
 #define MMI2C_MAXLEN	64		/* the kernel driver's buffer */
 
-/*	MMBasic's option argument: bit 0 holds the bus rather than
- *	sending a STOP, so a write can be followed by a read of the same
- *	device without releasing it.  The kernel interface is one
- *	transaction per call and has no repeated START, so a hold is
- *	accepted and ignored - and that is written down here because a
- *	device needing a true combined transfer will read wrong rather
- *	than fail, which is the kind of thing that costs an afternoon.
- *	Nearly every register-file device (the BME280 included) is happy
- *	with write-STOP-read, because it keeps its address pointer. */
+/*	MMBasic's option argument: bit 0 holds the bus rather than sending
+ *	a STOP, so a write can be followed by a read of the same device
+ *	without releasing it - a genuine combined transfer.  It is passed
+ *	through to the controller, where it is the SDK's nostop argument,
+ *	which is exactly what MMBasic does with it (I2C.c).
+ *
+ *	It was accepted and IGNORED at first, on the grounds that nearly
+ *	every register-file device is happy with write-STOP-read because
+ *	it keeps its address pointer.  That is true and it is not good
+ *	enough: the ones that are not happy read WRONG rather than fail,
+ *	and a silent difference from MMBasic is worse than a missing
+ *	feature. */
 #define MMI2C_HOLD	1
+
+/*	The runtime returns 0 or a NEGATIVE ERRNO, and this turns it into a
+ *	sentence a program can act on.  "cannot open on those pins" was the
+ *	only message the first version had, and it named the one thing that
+ *	was right: the bus was busy and the pins were fine.  There is no
+ *	errno.h in the on-board include set, so the numbers are written
+ *	out - Library/include/errno.h's, which are Kernel/include/kernel.h's
+ *	too, and those two have to agree anyway. */
+#define MMI2C_EIO	5
+#define MMI2C_EFAULT	14
+#define MMI2C_EBUSY	16
+#define MMI2C_ENODEV	19
+#define MMI2C_EINVAL	22
+#define MMI2C_ETIMEDOUT	48
+
+/*	The same for a transfer.  "no answer" is the one a wiring fault
+ *	gives and it is by far the most common, so it says that rather
+ *	than "failed" - a program checking MM.ERRNO sees the same number
+ *	either way, but the person reading the screen does not. */
+MMG_FN void mmi2c_failed(MMINTEGER r, int read)
+{
+	switch ((int)-r) {
+	case MMI2C_EIO:
+		mm_error(read ? "I2C2 read: no answer from that address"
+			      : "I2C2 write: no answer from that address");
+		break;
+	case MMI2C_ETIMEDOUT:
+		/*	A different fault from "no answer", and worth its own
+		 *	sentence: something IS there and stopped part way, or
+		 *	is holding the bus down.  MMBasic separates these two
+		 *	as well (mmI2Cvalue 1 and 2). */
+		mm_error(read ? "I2C2 read: the device stopped answering"
+			      : "I2C2 write: the device stopped answering");
+		break;
+	case MMI2C_ENODEV:
+		mm_error("I2C2 is not open");
+		break;
+	case MMI2C_EFAULT:
+		mm_error("I2C2 transfer: the kernel refused the buffer");
+		break;
+	case MMI2C_EINVAL:
+		mm_error("I2C2 transfer: bad address or count");
+		break;
+	default:
+		mm_error(read ? "I2C2 read failed" : "I2C2 write failed");
+		break;
+	}
+}
 
 MMG_FN void mmi2c_open(MMINTEGER sda, MMINTEGER scl, MMINTEGER speed,
 		       MMINTEGER timeout)
 {
-	(void)timeout;			/* the kernel's own is fixed */
-	if (mm_i2c_open((int)sda, (int)scl, (int)speed))
-		mm_error("I2C2 cannot open on those pins");
+	MMINTEGER r;
+
+	/*	MMBasic's own test, to the digit (i2cEnable in I2C.c): the
+	 *	timeout is 0, or 100 and up.  Checked here rather than only
+	 *	in the kernel so the message is MMBasic's. */
+	if (timeout < 0 || (timeout > 0 && timeout < 100)) {
+		mm_error("I2C2 timeout must be 0 or 100 ms and up");
+		return;
+	}
+	r = mm_i2c_open((int)sda, (int)scl, (int)speed, (int)timeout);
+	if (r == 0)
+		return;
+	switch ((int)-r) {
+	case MMI2C_EBUSY:
+		mm_error("I2C2 is already in use");
+		break;
+	case MMI2C_EINVAL:
+		/*	Both of the things the kernel checks, because a
+		 *	program that gets this has one of them wrong and no
+		 *	way to tell which from a shorter message. */
+		mm_error("I2C2 needs SDA on GP38 or GP42 with SCL the next "
+			 "pin, and 100, 400 or 1000 kHz");
+		break;
+	case MMI2C_ENODEV:
+		mm_error("I2C2 is not available on this machine");
+		break;
+	default:
+		mm_error("I2C2 cannot open");
+		break;
+	}
 }
 
 MMG_FN void mmi2c_close(void)
@@ -74,21 +152,34 @@ MMG_FN void mmi2c_close(void)
 MMG_FN void mmi2c_write(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 			const unsigned char *buf)
 {
-	(void)opt;
+	MMINTEGER r;
+
+	/*	MMBasic allows 0-3 on a WRITE and only 0-1 on a READ; bit 0
+	 *	is the hold in both.  Same split here. */
+	if (opt < 0 || opt > 3) {
+		mm_error("I2C option must be 0 to 3");
+		return;
+	}
 	if (n < 1 || n > MMI2C_MAXLEN) {
 		mm_error("I2C count out of range");
 		return;
 	}
-	if (mm_i2c_xfer((int)addr, 0, (int)n, (unsigned char *)buf))
-		mm_error("I2C2 write failed");
+	r = mm_i2c_xfer((int)addr, 0, (int)n, (unsigned char *)buf,
+			(int)(opt & MMI2C_HOLD));
+	if (r)
+		mmi2c_failed(r, 0);
 }
 
 MMG_FN void mmi2c_read(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 		       unsigned char *buf)
 {
+	MMINTEGER r;
 	int i;
 
-	(void)opt;
+	if (opt < 0 || opt > 1) {
+		mm_error("I2C option must be 0 or 1");
+		return;
+	}
 	if (n < 1 || n > MMI2C_MAXLEN) {
 		mm_error("I2C count out of range");
 		return;
@@ -101,8 +192,9 @@ MMG_FN void mmi2c_read(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 	 *	exactly like a device answering. */
 	for (i = 0; i < (int)n; i++)
 		buf[i] = 0;
-	if (mm_i2c_xfer((int)addr, 1, (int)n, buf))
-		mm_error("I2C2 read failed");
+	r = mm_i2c_xfer((int)addr, 1, (int)n, buf, (int)(opt & MMI2C_HOLD));
+	if (r)
+		mmi2c_failed(r, 1);
 }
 
 #endif /* MMB_I2C_H */

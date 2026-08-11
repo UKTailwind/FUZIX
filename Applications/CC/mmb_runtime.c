@@ -2594,7 +2594,8 @@ MMINTEGER mm_us(void)
 #define MM_PICOIOC_RTCREG 0x0029        /* pico_ioctl.h is the authority */
 static int mm_gfx_open(void);           /* /dev/sys, opened once */
 
-MMINTEGER mm_rtcreg(MMINTEGER reg, MMINTEGER val, MMINTEGER write)
+/* int, not MMINTEGER, and mmb_runtime.h says at length why. */
+MMINTEGER mm_rtcreg(int reg, int val, int write)
 {
     struct { unsigned char reg, val, write, pad; } rq;
     int fd = mm_gfx_open();
@@ -2616,13 +2617,21 @@ MMINTEGER mm_rtcreg(MMINTEGER reg, MMINTEGER val, MMINTEGER write)
  */
 #define MM_PICOIOC_I2COPEN  0x002A
 #define MM_PICOIOC_I2CCLOSE 0x002B
-#define MM_I2C_MSG          0x0540      /* Kernel/include/i2c.h */
+#define MM_PICOIOC_I2CXFER  0x002D      /* with MMBasic's option bits */
+#define MM_I2CF_HOLD        0x01
 
-static int mm_i2c_fd = -2;
+/*  I2C2 no longer opens /dev/i2c at all: the transfers go through
+    /dev/sys with the rest of the platform calls, because that is where
+    the flags-carrying ioctl lives.  One fewer device a BASIC program
+    has to have present. */
 
-MMINTEGER mm_i2c_open(MMINTEGER sda, MMINTEGER scl, MMINTEGER khz)
+MMINTEGER mm_i2c_open(int sda, int scl, int khz, int timeout_ms)
 {
-    struct { unsigned char bus, sda, scl, pad; unsigned long khz; } rq;
+    struct {
+        unsigned char bus, sda, scl, pad;
+        unsigned long khz;
+        unsigned short timeout_ms, pad2;
+    } rq;
     int fd = mm_gfx_open();
 
     if (fd < 0)
@@ -2632,7 +2641,17 @@ MMINTEGER mm_i2c_open(MMINTEGER sda, MMINTEGER scl, MMINTEGER khz)
     rq.scl = (unsigned char)scl;
     rq.pad = 0;
     rq.khz = (unsigned long)khz;
-    return ioctl(fd, MM_PICOIOC_I2COPEN, &rq) < 0 ? -1 : 0;
+    /*  MMBasic keeps the timeout per bus, set once at OPEN, and every
+        transfer uses it (I2C.c: I2C_Timeout).  So it goes here rather
+        than on each transfer. */
+    rq.timeout_ms = (unsigned short)timeout_ms;
+    rq.pad2 = 0;
+    /* WHY it failed, not just that it did: busy, bad pins and bad speed
+       are three different things for the program to say. */
+    errno = 0;
+    if (ioctl(fd, MM_PICOIOC_I2COPEN, &rq) < 0)
+        return errno ? -errno : -1;
+    return 0;
 }
 
 void mm_i2c_close(void)
@@ -2641,30 +2660,35 @@ void mm_i2c_close(void)
 
     if (fd >= 0)
         (void)ioctl(fd, MM_PICOIOC_I2CCLOSE, (void *)1);
-    if (mm_i2c_fd >= 0) {
-        close(mm_i2c_fd);
-        mm_i2c_fd = -2;
-    }
 }
 
-MMINTEGER mm_i2c_xfer(MMINTEGER addr, MMINTEGER read, MMINTEGER n,
-                      unsigned char *buf)
+/*
+ * hold is MMBasic's option bit 0: finish without a STOP so the next
+ * transfer is a repeated START on the same device.  It goes through the
+ * PC3's own PICOIOC_I2CXFER on /dev/sys rather than upstream's I2C_MSG,
+ * which has no room for a flag - see pico_ioctl.h.
+ */
+MMINTEGER mm_i2c_xfer(int addr, int read, int n, unsigned char *buf,
+                      int hold)
 {
-    struct { unsigned char bus, addr, len; unsigned char *data; } m;
+    struct { unsigned char bus, addr, len, flags; unsigned char *data; } m;
+    int fd = mm_gfx_open();
 
-    if (mm_i2c_fd == -2)
-        mm_i2c_fd = open("/dev/i2c", O_RDWR);
-    if (mm_i2c_fd < 0)
+    if (fd < 0)
         return -1;
     m.bus = 1;
     m.addr = (unsigned char)(((addr & 0x7F) << 1) | (read ? 1 : 0));
     m.len = (unsigned char)n;
+    m.flags = (unsigned char)(hold ? MM_I2CF_HOLD : 0);
     m.data = buf;
-    return ioctl(mm_i2c_fd, MM_I2C_MSG, &m) < 0 ? -1 : 0;
+    errno = 0;
+    if (ioctl(fd, MM_PICOIOC_I2CXFER, &m) < 0)
+        return errno ? -errno : -1;
+    return 0;
 }
 
 #else
-MMINTEGER mm_rtcreg(MMINTEGER reg, MMINTEGER val, MMINTEGER write)
+MMINTEGER mm_rtcreg(int reg, int val, int write)
 {
     (void)reg; (void)val; (void)write;
     return -1;                          /* no clock here */
@@ -2673,17 +2697,17 @@ MMINTEGER mm_rtcreg(MMINTEGER reg, MMINTEGER val, MMINTEGER write)
 /* No second I2C controller off the board.  Silent like the rest of the
  * host build: a program using I2C2 translates, compiles and runs, and
  * every transfer says it failed rather than pretending it worked. */
-MMINTEGER mm_i2c_open(MMINTEGER sda, MMINTEGER scl, MMINTEGER khz)
+MMINTEGER mm_i2c_open(int sda, int scl, int khz, int timeout_ms)
 {
-    (void)sda; (void)scl; (void)khz;
-    return -1;
+    (void)sda; (void)scl; (void)khz; (void)timeout_ms;
+    return -19;                         /* -ENODEV: no such controller */
 }
 void mm_i2c_close(void) {}
-MMINTEGER mm_i2c_xfer(MMINTEGER addr, MMINTEGER read, MMINTEGER n,
-                      unsigned char *buf)
+MMINTEGER mm_i2c_xfer(int addr, int read, int n, unsigned char *buf,
+                      int hold)
 {
-    (void)addr; (void)read; (void)n; (void)buf;
-    return -1;
+    (void)addr; (void)read; (void)n; (void)buf; (void)hold;
+    return -19;
 }
 #endif
 
@@ -4086,7 +4110,7 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
  * that is the full 640x480 the console occupies.
  */
 #define MM_GFXIOC_INFO 0x000E
-#define MM_PICOIOC_BOARD 0x0021         /* pico_ioctl.h is the authority */
+#define MM_PICOIOC_BOARD 0x002C         /* pico_ioctl.h is the authority */
 
 struct mm_gfx_info {
     unsigned short width, height, stride;
