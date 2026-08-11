@@ -2699,9 +2699,14 @@ MMINTEGER mm_spi_open(int sck, int tx, int rx, int hz, int mode, int bits)
     rq.bits = (unsigned char)bits;
     rq.pad = 0;
     errno = 0;
-    if (ioctl(fd, MM_PICOIOC_SPIOPEN, &rq) < 0)
-        return errno ? -errno : -1;
-    return 0;
+    {
+        int r = ioctl(fd, MM_PICOIOC_SPIOPEN, &rq);
+
+        if (r < 0)
+            return errno ? -errno : -1;
+        /* the ACHIEVED clock, which is rarely the one asked for */
+        return r;
+    }
 }
 
 /*

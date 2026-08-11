@@ -62,6 +62,8 @@
 #define MMSPI_TX	3
 #define MMSPI_IS_SPI0(p) ((((p) >> 3) & 1) == 0)
 
+static MMINTEGER mmspi_actual_hz;
+
 MMG_FN void mmspi_failed(MMINTEGER r)
 {
 	switch ((int)-r) {
@@ -132,8 +134,22 @@ MMG_FN void mmspi_open(MMINTEGER p1, MMINTEGER p2, MMINTEGER p3,
 		return;
 	}
 	r = mm_spi_open(sck, tx, rx, (int)speed, (int)mode, (int)bits);
-	if (r)
+	if (r < 0) {
 		mmspi_failed(r);
+		return;
+	}
+	/*	What the controller could actually reach.  The divisor is
+	 *	clk_peri / (CPSDVSR * (1 + SCR)) with CPSDVSR even, so a
+	 *	request usually lands on a neighbouring value, and anything
+	 *	above clk_peri / 2 quietly becomes clk_peri / 2.  Kept so a
+	 *	program can ask rather than guess - MM.SPISPEED below. */
+	mmspi_actual_hz = r;
+}
+
+/*	The clock the last OPEN actually got, for MM.SPISPEED. */
+MMG_FN MMINTEGER mmspi_speed(void)
+{
+	return mmspi_actual_hz;
 }
 
 MMG_FN void mmspi_close(void)

@@ -284,6 +284,12 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval(sfmt("mm_field(%s, %s, %s, %s)", a0, a1, delim, quote),
                      TY_S);
     }
+    if (strcmp(up, "MM.SPISPEED") == 0) {
+        /* the clock SPI OPEN actually got, which is rarely the one
+           asked for - see mmb_spi.h */
+        cv.uses_spi = 1;
+        return mkval("mmspi_speed()", TY_I);
+    }
     if (strcmp(up, "MM.HRES") == 0)
         return mkval("mm_hres()", TY_I);
     if (strcmp(up, "MM.VRES") == 0)
