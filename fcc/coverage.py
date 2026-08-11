@@ -20,10 +20,15 @@ text = open(SRC).read()
 body = text[text.index("def statement_inner"):]
 body = body[:body.index("\n    def ", 10)]
 stmts = []
-for m in re.finditer(r"up == '([A-Z$?]+)'", body):
+# 0-9 in the class, for the same reason the dot matters in the BUILTINS
+# pattern below: without it a keyword with a digit never matched its own
+# dispatch line, so I2C2 was counted as untranslatable and left out of
+# the manual's appendix for as long as it had been translating.  mmedit's
+# genkw.py, which reads this file's tables the same way, had it too.
+for m in re.finditer(r"up == '([A-Z0-9$?]+)'", body):
     stmts.append(m.group(1))
 for m in re.finditer(r"up in \(([^)]*)\)", body):
-    for w in re.findall(r"'([A-Z$?]+)'", m.group(1)):
+    for w in re.findall(r"'([A-Z0-9$?]+)'", m.group(1)):
         stmts.append(w)
 # TYPE blocks are dispatched through skip_type_block rather than an
 # `up ==` test in statement_inner, so the scan above cannot see them
