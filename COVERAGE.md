@@ -95,11 +95,21 @@ ordinary BASIC program that currently fails outright.
 A C translation cannot honestly provide these, and pretending otherwise
 would be worse than the current clear error:
 
-* **Peripherals** — `PORT SPI ONEWIRE PIO IR
+* **Peripherals** — `PORT ONEWIRE PIO IR
   WS2812 STEPPER TMC22XX HUMID TEMPR DISTANCE PULSIN CAMERA KEYBOARD KEYPAD
   MOUSE GAMEPAD WII WATCHDOG CPU FLASH SLEEP BITBANG BITSTREAM`
 
-  `I2C2` and `RTC GETREG`/`RTC SETREG` have left this list.
+  `SPI`, `I2C2` and `RTC GETREG`/`RTC SETREG` have left this list.
+
+  `SETPIN p1, p2, p3, SPI` then `SPI OPEN speed, mode [, bits]` gives
+  the first controller, with `WRITE`, `READ`, `CLOSE` and the `SPI()`
+  function.  The three pins go in any order — the RP2350 fixes each
+  pin's role, `(pin AND 8) = 0` selecting SPI0 and `pin AND 3` the
+  signal, which is how MMBasic resolves them too.  `SPI2` stays out:
+  that is the second controller and here it is the SD card.  Chip
+  select is the program's, as it is on a PicoMite.  `MM.SPISPEED`
+  reports the clock actually achieved, which is rarely the one asked
+  for.
 
   `SETPIN sda, scl, I2C2` then `I2C2 OPEN speed, timeout` gives the
   second controller on header pins — `GP38/GP39` or `GP42/GP43`, the
