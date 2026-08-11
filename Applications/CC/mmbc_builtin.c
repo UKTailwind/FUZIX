@@ -284,6 +284,12 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval(sfmt("mm_field(%s, %s, %s, %s)", a0, a1, delim, quote),
                      TY_S);
     }
+    if (strcmp(up, "MM.SPISPEED") == 0) {
+        /* the clock SPI OPEN actually got, which is rarely the one
+           asked for - see mmb_spi.h */
+        cv.uses_spi = 1;
+        return mkval("mmspi_speed()", TY_I);
+    }
     if (strcmp(up, "MM.HRES") == 0)
         return mkval("mm_hres()", TY_I);
     if (strcmp(up, "MM.VRES") == 0)
@@ -322,6 +328,13 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
            12-bit count exactly; an integer cannot hold 1.6523 volts. */
         cv.uses_gpio = 1;
         return mkval(sfmt("mmg_pin_get(%s)", n(0)), TY_F);
+    }
+    if (strcmp(up, "SPI") == 0) {
+        /* SPI(x) - send one unit and return the one that came back.
+           The command forms (OPEN, WRITE, READ, CLOSE) are statements;
+           this is the function, so it is an integer. */
+        cv.uses_spi = 1;
+        return mkval(sfmt("mmspi_xfer1(%s)", n(0)), TY_I);
     }
     if (strcmp(up, "MAP") == 0) {
         /* MAP(n) - the colour entry n stands for by default, which is

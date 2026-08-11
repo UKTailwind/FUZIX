@@ -51,6 +51,9 @@
 #ifdef CONFIG_DEV_I2C
 extern void plt_i2c_close(uint8_t bus);
 #endif
+#ifdef CONFIG_PC3_SPI0
+extern void plt_spi_close(uint8_t bus);
+#endif
 
 /*
  *	Twenty-four is the whole header (22 pins) plus room for a couple of
@@ -165,7 +168,16 @@ static void reset_one(uint8_t cls, uint8_t idx)
 #endif
 		break;
 	case PLK_SPI:
+#ifdef CONFIG_PC3_SPI0
+		/* NOT spi_deinit, for the reason the I2C case above gives:
+		   spiuser.c keeps its own "bus 0 is open" state - which
+		   pins, how wide the word is, whether a transfer is allowed
+		   at all - and deinitialising the block behind its back
+		   leaves that saying yes to a controller that is off. */
+		plt_spi_close(idx);
+#else
 		spi_deinit(idx ? spi1 : spi0);
+#endif
 		break;
 	case PLK_PWM:
 		pwm_set_enabled(idx, false);

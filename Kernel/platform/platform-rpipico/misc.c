@@ -402,6 +402,71 @@ int plt_dev_ioctl(uarg_t request, char *data)
         return 0;
     }
 #endif
+#ifdef CONFIG_PC3_SPI0
+    if (request == PICOIOC_SPIOPEN)
+    {
+        extern int plt_spi_open(uint8_t bus, uint8_t sck, uint8_t tx,
+                                uint8_t rx, uint32_t hz, uint8_t mode,
+                                uint8_t bits);
+        struct spi_open rq;
+        int r;
+
+        if (uget(data, &rq, sizeof(rq)))
+            return -1;
+        r = plt_spi_open(rq.bus, rq.sck, rq.tx, rq.rx, rq.hz, rq.mode,
+                         rq.bits);
+        if (r < 0) {
+            udata.u_error = -r;
+            return -1;
+        }
+        /* the rate actually achieved, not the one asked for */
+        return r;
+    }
+    if (request == PICOIOC_SPICLOSE)
+    {
+        extern void plt_spi_release(uint8_t bus);
+
+        plt_spi_release((uint8_t)(intptr_t)data);
+        return 0;
+    }
+    /*
+     * The transfer runs out of the CALLER's memory - no bounce buffer,
+     * because one transfer here is a display frame and the kernel has
+     * no room for a copy of it (pico_ioctl.h says why this is sound).
+     * So valaddr is not a formality: it is the only thing standing
+     * between a bad pointer and the DMA-less controller reading
+     * whatever it is aimed at.  Both directions are checked, and the
+     * write side is checked for READ too because the caller's rx
+     * buffer is written into.
+     */
+    if (request == PICOIOC_SPIXFER)
+    {
+        extern int plt_spi_xfer(uint8_t bus, uint8_t *tx, uint8_t *rx,
+                                uint32_t len);
+        struct spi_xfer rq;
+        uint32_t bytes;
+        int r;
+
+        if (uget(data, &rq, sizeof(rq)))
+            return -1;
+        /* units to bytes: a unit is 16 bits above 8 bits per word */
+        bytes = rq.len;
+        if (rq.len && (rq.tx || rq.rx)) {
+            extern uint8_t plt_spi_unit_bytes(void);
+            bytes = rq.len * plt_spi_unit_bytes();
+        }
+        if (rq.tx && valaddr((char *)rq.tx, bytes, 0) != bytes)
+            return -1;
+        if (rq.rx && valaddr((char *)rq.rx, bytes, 1) != bytes)
+            return -1;
+        r = plt_spi_xfer(rq.bus, rq.tx, rq.rx, rq.len);
+        if (r < 0) {
+            udata.u_error = -r;
+            return -1;
+        }
+        return r;
+    }
+#endif
     if (request == PICOIOC_RTCREG)
     {
         extern int ds3231_user_reg(uint8_t reg, uint8_t *val, int write);

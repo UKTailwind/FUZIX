@@ -348,6 +348,15 @@ static void w_rtcreg(void)       { A = mm_rtcreg(I(0), I(1), I(2)); }
    (300us of bus against a 1.5us crossing). */
 static void w_i2c_open(void)     { A = mm_i2c_open(I(0), I(1), I(2), I(3)); }
 static void w_i2c_close(void)    { mm_i2c_close(); A = 0; }
+/* SPI0 - MMBasic's first controller, on header pins.  Pa(0)/Pa(1) are
+   the caller's buffers and either may be 0: tx alone writes, rx alone
+   reads, both together writes and reads.  mm_ptr passes NULL through,
+   which is what makes "0" work as "no buffer" from the program. */
+static void w_spi_open(void)
+{ A = mm_spi_open(I(0), I(1), I(2), I(3), I(4), I(5)); }
+static void w_spi_close(void)    { mm_spi_close(); A = 0; }
+static void w_spi_xfer(void)
+{ A = mm_spi_xfer((unsigned char *)Pa(0), (unsigned char *)Pa(1), I(2)); }
 static void w_i2c_xfer(void)
 { A = mm_i2c_xfer(I(0), I(1), I(2), (unsigned char *)Pa(3), I(4)); }
 static void w_errno(void)    { A = mm_errno(); }
@@ -652,6 +661,9 @@ static const struct mmwrap {
 	{ "mm_rtcreg",	w_rtcreg },
 	{ "mm_i2c_open",	w_i2c_open },
 	{ "mm_i2c_close",	w_i2c_close },
+	{ "mm_spi_open",	w_spi_open },
+	{ "mm_spi_close",	w_spi_close },
+	{ "mm_spi_xfer",	w_spi_xfer },
 	{ "mm_i2c_xfer",	w_i2c_xfer },
 	{ "mm_errno",		w_errno },
 	{ "mm_errmsg",		w_errmsg },

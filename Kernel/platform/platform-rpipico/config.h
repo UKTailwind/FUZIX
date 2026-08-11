@@ -116,6 +116,10 @@
    the kernel keeping only the arbitration and the cleanup.  pinlock.c
    has the argument; PC3-IO-PLAN.md has the plan it belongs to. */
 #define CONFIG_PC3_PINLOCK
+/* SPI0 for userland - MMBasic's SPI, on header pins.  SPI1 is NOT
+   offered: it is the SD card's, and a program that could take it could
+   take the filesystem out from under itself.  spiuser.c. */
+#define CONFIG_PC3_SPI0
 /* Enable to make ^Z dump the inode table for debug */
 #undef CONFIG_IDUMP
 /* Enable to make ^A drop back into the monitor */

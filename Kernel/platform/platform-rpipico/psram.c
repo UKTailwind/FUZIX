@@ -95,6 +95,36 @@ void __no_inline_not_in_flash_func(pc3_clock_init)(uint32_t target_khz,
 
     set_sys_clock_khz(target_khz, true);
 
+    /*
+     * clk_peri FOLLOWS clk_sys, and it has to be said here because the
+     * SDK does the opposite: set_sys_clock_pll parks clk_peri on
+     * PLL_USB at 48 MHz unless PICO_CLOCK_ADJUST_PERI_CLOCK_WITH_SYS_CLOCK
+     * is defined, and that option defaults to off.
+     *
+     * Everything clocked from clk_peri is then capped at 48 MHz however
+     * fast the chip runs - SPI at 24 MHz, because the divisor bottoms
+     * out at clk_peri / 2.  That is what a display benchmark showed:
+     * asking for 31.25, 40, 50 and 62.5 MHz all produced exactly 24,
+     * and asking for 10 and 20 produced 8 and 12, which are 48/6 and
+     * 48/4.  This file has claimed "clk_peri follows clk_sys, as in the
+     * PC3's MicroPython/MMBasic firmwares" since the clock was first
+     * raised, and it simply was not true.
+     *
+     * MMBasic really does run it from clk_sys - it reports the CPU
+     * speed by MEASURING clk_peri (frequency_count_khz of
+     * CLOCKS_FC0_SRC_VALUE_CLK_PERI in External.c), which only makes
+     * sense if the two are the same.
+     *
+     * ORDER MATTERS: this must happen before anything derives a divisor
+     * from clk_peri.  The UART comes up in devtty_early_init() after
+     * this returns, and the SD card's SPI1 later still, so both pick up
+     * the new rate.  Moving it later would leave the console computing
+     * its divisor from 48 MHz and talking gibberish.
+     */
+    clock_configure_undivided(clk_peri, 0,
+                              CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
+                              new_hz);
+
     /* set_sys_clock can rewrite the QSPI pads, so put them back, and
      * now relax the divisor to what the new clock actually needs. */
     pads_qspi_hw->io[0] = 0x67;

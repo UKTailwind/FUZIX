@@ -558,6 +558,64 @@ struct i2c_xfer {
 #define I2CF_HOLD	0x01
 #define PICOIOC_I2CXFER	0x002D
 
+/*
+ * SPI0 - MMBasic's SPI, on header pins.  SPI1 is the SD card and stays
+ * the kernel's, which is why only one controller is offered here.
+ *
+ * The RP2350 fixes which GPIO can carry which SPI signal, and the rule
+ * is modular like I2C's: the INSTANCE is (pin >> 3) & 1 - 0 for SPI0,
+ * 1 for SPI1 - and the ROLE is pin & 3: 0 RX, 1 SS, 2 SCLK, 3 TX.  On
+ * the PC3's header that leaves SPI0 on GP0-GP7 and GP34-GP39, and every
+ * SPI1 pin there (GP26, GP40, GP42-GP46) belongs to the card.  Refusing
+ * the wrong pin here beats a bus that clocks nothing.
+ *
+ * speed, mode and bits are MMBasic's three OPEN arguments.  mode is
+ * (CPOL << 1) | CPHA, which is the ordinary SPI mode number and exactly
+ * what MMBasic decodes - (mode & 2) for polarity, (mode & 1) for phase.
+ * bits is 4 to 16, MMBasic's own bounds, 8 unless asked.
+ *
+ * CHIP SELECT IS NOT HERE, deliberately: MMBasic does not drive it
+ * either.  A display needs CS held across a whole command-and-data
+ * sequence, not per transfer, so only the program knows when to move it
+ * - and now that pins are userland it is a register write, not a call.
+ */
+struct spi_open {
+	uint8_t bus;			/* 0; SPI1 is the SD card */
+	uint8_t sck;
+	uint8_t tx;			/* MOSI */
+	uint8_t rx;			/* MISO */
+	uint32_t hz;
+	uint8_t mode;			/* 0-3 */
+	uint8_t bits;			/* 4-16 */
+	uint16_t pad;
+};
+#define PICOIOC_SPIOPEN		0x002E
+#define PICOIOC_SPICLOSE	0x002F	/* uint8_t bus */
+
+/*
+ * One transfer.  tx or rx may be NULL: tx alone writes, rx alone reads
+ * (clocking zeros out, as MMBasic's SPI READ does), both together is
+ * the write-and-read the SPI() function needs.  len counts UNITS, not
+ * bytes - a unit is 16 bits when bits > 8, which is the width
+ * spi_set_format was given.
+ *
+ * NO BOUNCE BUFFER, unlike the I2C path.  That one copies through 64
+ * bytes because it is upstream's shared driver; here a transfer is a
+ * whole display row or a whole frame - 153,600 bytes for 240x320 at 16
+ * bits - and copying it through the kernel would need memory this
+ * machine does not have.  There is no MMU, so after valaddr says the
+ * range is the caller's, the controller reads it where it lies.  The
+ * kernel is non-preemptive, so nothing can move it meanwhile.
+ */
+struct spi_xfer {
+	uint8_t bus;
+	uint8_t pad[3];
+	uint32_t len;			/* units */
+	uint8_t *tx;			/* NULL to read only */
+	uint8_t *rx;			/* NULL to write only */
+};
+#define PICOIOC_SPIXFER		0x0030
+
 struct rtc_reg {
 	uint8_t reg;			/* 0-255 */
 	uint8_t val;			/* in for a write, out for a read */

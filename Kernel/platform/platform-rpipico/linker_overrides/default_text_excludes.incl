@@ -85,6 +85,13 @@
    it by 248 bytes the moment they were added. */
 *i2cuser.c.o(.text*)
 *devi2c.c.o(.text*)
+/* SPI0 for userland.  Same argument and a wider margin: a transfer here
+   is a display row or a whole frame - 153,600 bytes at 50MHz is 25ms -
+   so where the dispatch runs is far below measurable, and the SDK's
+   spi.c it calls is already in flash below.  Leaving it in RAM
+   overflowed by 1200 bytes the moment the file was added, which is
+   exactly what this file's own note predicts for anything new. */
+*spiuser.c.o(.text*)
 /* The I/O header's ownership table.  Claims happen at SETPIN speed and
    the release sweep runs on the exit path next to freeing memory, so
    nothing here is timed; the table itself is 192 bytes of .bss and stays
@@ -188,6 +195,18 @@
  * the XIP cache.  Moved for the same FS32 RAM squeeze as the batch
  * below. ---- */
 *swapper.c.o(.text*)
+
+/* ---- the PSRAM arena, for the same reason as the swapper above it,
+ * and moved for the same kind of squeeze: adding SPI0 left the link 264
+ * bytes over even with spiuser.c itself in flash.
+ *
+ * Allocation and release run at ioctl speed and on the exit path.  The
+ * one thing here reached often is arena_valaddr, on syscalls that
+ * validate a user pointer, and a syscall already costs 1.5us so a miss
+ * in it is not measurable.  Its work touches PSRAM, which contends with
+ * XIP over the QMI wherever the code lives - swapper.c says exactly
+ * that and made exactly this trade. ---- */
+*arena.c.o(.text*)
 
 /* ---- the SDK peripheral batch, moved when FS32 needed the space.
  *

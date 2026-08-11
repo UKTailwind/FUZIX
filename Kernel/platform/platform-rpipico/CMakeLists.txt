@@ -103,6 +103,7 @@ add_executable(fuzix
 	core1.c
 	devgpio.c
 	i2cuser.c
+	spiuser.c
 	pinlock.c
 	usbdescriptors.c
 	../../dev/devi2c.c
