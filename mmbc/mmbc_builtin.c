@@ -323,6 +323,13 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         cv.uses_gpio = 1;
         return mkval(sfmt("mmg_pin_get(%s)", n(0)), TY_F);
     }
+    if (strcmp(up, "SPI") == 0) {
+        /* SPI(x) - send one unit and return the one that came back.
+           The command forms (OPEN, WRITE, READ, CLOSE) are statements;
+           this is the function, so it is an integer. */
+        cv.uses_spi = 1;
+        return mkval(sfmt("mmspi_xfer1(%s)", n(0)), TY_I);
+    }
     if (strcmp(up, "MAP") == 0) {
         /* MAP(n) - the colour entry n stands for by default, which is
            what a program must ask for to land on that entry.

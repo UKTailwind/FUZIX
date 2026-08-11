@@ -45,6 +45,7 @@ static const struct builtin builtins[] = {
     { "PIXEL", 2, 2 },
     { "MAP", 1, 1 },
     { "PIN", 1, 1 },
+    { "SPI", 1, 1 },
     { "MM.HRES", 0, 0 }, { "MM.VRES", 0, 0 },
     { "MM.ERRNO", 0, 0 }, { "MM.ERRMSG$", 0, 0 },
     { "MM.VER", 0, 0 }, { "MM.DEVICE$", 0, 0 },

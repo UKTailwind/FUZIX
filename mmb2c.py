@@ -94,7 +94,7 @@ BUILTINS = {
     'CHOICE': (3, 3), 'BOUND': (1, 2), 'TRIM$': (1, 3), 'FIELD$': (2, 4),
     'DATETIME$': (1, 1), 'DAY$': (1, 1), 'EPOCH': (1, 1),
     'BIN2STR$': (2, 3), 'STR2BIN': (2, 3), 'RGB': (1, 3), 'MATH': (1, 1),
-    'PIXEL': (2, 2), 'MAP': (1, 1), 'PIN': (1, 1),
+    'PIXEL': (2, 2), 'MAP': (1, 1), 'PIN': (1, 1), 'SPI': (1, 1),
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0),
     'MM.ERRNO': (0, 0), 'MM.ERRMSG$': (0, 0),
     'MM.VER': (0, 0), 'MM.DEVICE$': (0, 0), 'MM.CMDLINE$': (0, 0),
@@ -592,6 +592,7 @@ class Conv(object):
         self.uses_play = False
         self.uses_pwm = False
         self.uses_i2c = False
+        self.uses_spi = False
         # set in the scan pass, so statements BEFORE the ON ERROR line are
         # guarded too - the armed window is a run-time thing
         self.uses_onerror = False
@@ -1654,6 +1655,12 @@ class Conv(object):
             # program: PRINT PIN(2) prints "1" either way.
             self.uses_gpio = True
             return ('mmg_pin_get(%s)' % n(0), TY_F)
+        if up == 'SPI':
+            # SPI(x) - send one unit and return the one that came back.
+            # The command forms (OPEN, WRITE, READ, CLOSE) are
+            # statements; this is the function, so it is an integer.
+            self.uses_spi = True
+            return ('mmspi_xfer1(%s)' % n(0), TY_I)
         self.err("built-in %s() is not supported yet" % up)
 
     # -- built-ins whose arguments are not ordinary expressions ----------
@@ -3303,6 +3310,12 @@ class Conv(object):
         if up == 'I2C2':
             self.do_i2c2()
             return
+        if up == 'SPI' and not self.is_op('(', 1):
+            # SPI( is the function - write a unit and read one back -
+            # and it is handled in the expression parser.  A statement
+            # starting with SPI is the command.
+            self.do_spi()
+            return
         if up == 'SETTICK':
             self.do_settick()
             return
@@ -3394,22 +3407,36 @@ class Conv(object):
                 mode = 'MMG_PIN_PWM'
                 self.uses_pwm = True
             else:
-                # SETPIN sda, scl, I2C2 - the pin-PAIR form, which is
-                # how the second I2C controller gets pins at all.  It
-                # is reached here because what followed the comma was
-                # not a mode word but another pin.
-                scl = self.as_int(self.expr())
+                # SETPIN sda, scl, I2C2      - the pin-PAIR form
+                # SETPIN p1, p2, p3, SPI     - the pin-TRIPLE form
+                # Reached here because what followed the comma was not a
+                # mode word but another pin.
+                p2 = self.as_int(self.expr())
                 self.expect_op(',')
-                if not self.accept_kw('I2C2'):
+                if self.accept_kw('I2C2'):
+                    self.uses_i2c = True
+                    # Remembered rather than acted on: MMBasic assigns
+                    # the pins here and starts the controller at OPEN,
+                    # and a program is entitled to do those in separate
+                    # places.
+                    self.emit('__mmi2c_sda = %s; __mmi2c_scl = %s;'
+                              % (pin, p2))
+                    return
+                # a third pin, then SPI
+                p3 = self.as_int(self.expr())
+                self.expect_op(',')
+                if not self.accept_kw('SPI'):
                     self.err("SETPIN takes DIN, DOUT, AIN, ARAW, "
                              "INTH, INTL, INTB, PWM or OFF, or a pin "
-                             "pair followed by I2C2")
-                self.uses_i2c = True
-                # Remembered rather than acted on: MMBasic assigns the
-                # pins here and starts the controller at OPEN, and a
-                # program is entitled to do those in separate places.
-                self.emit('__mmi2c_sda = %s; __mmi2c_scl = %s;'
-                          % (pin, scl))
+                             "pair followed by I2C2, or a pin triple "
+                             "followed by SPI")
+                self.uses_spi = True
+                # Any order: which signal each pin carries is decided by
+                # the pin number, not by its position here, exactly as
+                # MMBasic works it out from PinDef[pin].mode rather than
+                # from the order written.  mmb_spi.h sorts them.
+                self.emit('__mmspi_a = %s; __mmspi_b = %s; __mmspi_c = %s;'
+                          % (pin, p2, p3))
                 return
             self.uses_gpio = True
             if mode.startswith('MMG_PIN_INT'):
@@ -5031,6 +5058,87 @@ class Conv(object):
                      "string variable, and '%s' is neither" % t[1])
         return s.acc
 
+    def do_spi(self):
+        """SPI OPEN speed, mode [, bits]
+           SPI WRITE n, d1 [, d2 ...] | n, array() | n, string$
+           SPI READ  n, var
+           SPI CLOSE
+
+        The FIRST controller: SPI2 is the second one, which on this
+        board is the SD card's, so it is not offered.  Chip select is
+        the program's, as it is on a PicoMite."""
+        self.i += 1
+        self.uses_spi = True
+        if self.accept_kw('CLOSE'):
+            self.emit('mmspi_close();')
+            return
+        if self.accept_kw('OPEN'):
+            speed = self.as_int(self.expr())
+            self.expect_op(',')
+            mode = self.as_int(self.expr())
+            # bits is optional and 8 unless given, as in MMBasic
+            bits = '8'
+            if self.accept_op(','):
+                bits = self.as_int(self.expr())
+            self.emit('mmspi_open(__mmspi_a, __mmspi_b, __mmspi_c, '
+                      '%s, %s, %s);' % (speed, mode, bits))
+            return
+        wr = self.accept_kw('WRITE')
+        if not wr and not self.accept_kw('READ'):
+            self.err("SPI takes OPEN, WRITE, READ or CLOSE")
+        n = self.as_int(self.expr())
+        self.expect_op(',')
+        self.tmp_used = True
+        # The same three data forms I2C2 takes, and for the same reason:
+        # a display wants a whole run in one call, and MMBasic's own
+        # GetSendDataList accepts a list, an array or a string.
+        if wr:
+            if self.is_array_arg():
+                s = self.arrayref()
+                if s.ty == TY_S:
+                    self.err("SPI WRITE needs a numeric array, and '%s' "
+                             "is a string array" % s.name)
+                base, _cnt = self.array_flat(s)
+                self.emit('{ int __i; unsigned char *__b = '
+                          '(unsigned char *)mm_tmp();')
+                self.emit('  for (__i = 0; __i < (int)(%s) && '
+                          '__i < MM_STRSZ; __i++)' % n)
+                self.emit('    __b[__i] = (unsigned char)(%s)[__i];' % base)
+                self.emit('  mmspi_write(%s, __b); }' % n)
+                return
+            v0 = self.expr()
+            if v0[1] == TY_S and not self.is_op(','):
+                # a string's bytes live at s + 1; element 0 is the length
+                self.emit('mmspi_write(%s, (const unsigned char *)((%s) + 1));'
+                          % (n, v0[0]))
+                return
+            vals = [self.as_int(v0)]
+            while self.accept_op(','):
+                vals.append(self.as_int(self.expr()))
+            self.emit('{ unsigned char __b[%d]; %s'
+                      % (len(vals),
+                         ' '.join('__b[%d] = (unsigned char)(%s);'
+                                  % (i, v) for i, v in enumerate(vals))))
+            self.emit('  mmspi_write(%s, __b); }' % n)
+        elif self.is_array_arg():
+            s = self.arrayref()
+            if s.ty == TY_S:
+                self.err("SPI READ needs a numeric array, and '%s' is a "
+                         "string array" % s.name)
+            base, _cnt = self.array_flat(s)
+            self.emit('{ int __i; unsigned char *__b = '
+                      '(unsigned char *)mm_tmp();')
+            self.emit('  mmspi_read(%s, __b);' % n)
+            self.emit('  for (__i = 0; __i < (int)(%s) && '
+                      '__i < MM_STRSZ; __i++)' % n)
+            self.emit('    (%s)[__i] = __b[__i]; }' % base)
+        else:
+            d = self.i2c_strvar()
+            self.emit('{ unsigned char *__b = (unsigned char *)mm_tmp();')
+            self.emit('  mmspi_read(%s, __b);' % n)
+            self.emit('  mm_ssetn(%s, (const char *)__b, (int)(%s)); }'
+                      % (d, n))
+
     def settick_id(self):
         """SETTICK's optional trailing timer number, 1-4.  Absent is 1,
         which is MMBasic's irq = 0 when the argument is missing."""
@@ -5501,6 +5609,8 @@ class Conv(object):
             wr('#include "mmb_pwm.h"\n')
         if self.uses_i2c:
             wr('#include "mmb_i2c.h"\n')
+        if self.uses_spi:
+            wr('#include "mmb_spi.h"\n')
         wr('#include <math.h>\n')
         wr('#include <string.h>\n')
         wr('#include <stdlib.h>\n\n')
@@ -5594,6 +5704,10 @@ class Conv(object):
             # SETPIN puts the pins here and OPEN reads them: MMBasic
             # allows the two to be far apart in a program.
             wr('static int __mmi2c_sda, __mmi2c_scl;\n')
+        if self.uses_spi:
+            # the same for SPI's three, in whatever order they were
+            # written - mmb_spi.h works out which pin is which signal
+            wr('static int __mmspi_a, __mmspi_b, __mmspi_c;\n')
         wr('\n/* ---- forward declarations ---- */\n')
         if self.uses_clear:
             wr('static void __mmb_clear(void);\n')

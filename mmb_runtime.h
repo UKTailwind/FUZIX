@@ -689,6 +689,19 @@ MMINTEGER mm_rtcreg(int reg, int val, int write);
 MMINTEGER mm_i2c_open(int sda, int scl, int khz, int timeout_ms);
 MMINTEGER mm_i2c_xfer(int addr, int read, int n, unsigned char *buf,
                       int hold);
+/* SPI0 - MMBasic's SPI, on header pins (SPI1 is the SD card).  open
+ * takes the pins ALREADY SORTED into sck/tx/rx: MMBasic works each
+ * pin's role out from the pin itself rather than from the order it was
+ * written, and mmb_spi.h does that before calling here.  hz, mode
+ * (0-3) and bits (4-16) are OPEN's three arguments.
+ *
+ * xfer moves len UNITS - a unit is 16 bits when bits > 8.  tx alone
+ * writes, rx alone reads, both together writes and reads.  It returns
+ * the units moved, or a negative errno.  The buffers are used WHERE
+ * THEY LIE, so a whole display frame is one call. */
+MMINTEGER mm_spi_open(int sck, int tx, int rx, int hz, int mode, int bits);
+MMINTEGER mm_spi_xfer(unsigned char *tx, unsigned char *rx, int len);
+void mm_spi_close(void);
 void mm_i2c_close(void);
 void mm_on_error(int mode, MMINTEGER n);   /* 0 abort 1 clear 2 ignore 3 skip */
 /* Write or discard the PRINT line held while armed - the statement

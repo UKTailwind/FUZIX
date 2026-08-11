@@ -2668,6 +2668,86 @@ void mm_i2c_close(void)
  * PC3's own PICOIOC_I2CXFER on /dev/sys rather than upstream's I2C_MSG,
  * which has no room for a flag - see pico_ioctl.h.
  */
+/*
+ * SPI0 - MMBasic's SPI, on header pins.  SPI1 is the SD card and is not
+ * offered.  The pins go in already sorted into sck/tx/rx; mmb_spi.h
+ * does that from the pin numbers, the way MMBasic works each pin's role
+ * out from the pin itself rather than from the order it was written.
+ */
+#define MM_PICOIOC_SPIOPEN  0x002E
+#define MM_PICOIOC_SPICLOSE 0x002F
+#define MM_PICOIOC_SPIXFER  0x0030
+
+MMINTEGER mm_spi_open(int sck, int tx, int rx, int hz, int mode, int bits)
+{
+    struct {
+        unsigned char bus, sck, tx, rx;
+        unsigned long hz;
+        unsigned char mode, bits;
+        unsigned short pad;
+    } rq;
+    int fd = mm_gfx_open();
+
+    if (fd < 0)
+        return -1;
+    rq.bus = 0;
+    rq.sck = (unsigned char)sck;
+    rq.tx = (unsigned char)tx;
+    rq.rx = (unsigned char)rx;
+    rq.hz = (unsigned long)hz;
+    rq.mode = (unsigned char)mode;
+    rq.bits = (unsigned char)bits;
+    rq.pad = 0;
+    errno = 0;
+    if (ioctl(fd, MM_PICOIOC_SPIOPEN, &rq) < 0)
+        return errno ? -errno : -1;
+    return 0;
+}
+
+/*
+ * One transfer.  tx alone writes, rx alone reads (the controller clocks
+ * zeros out to get data back, which is what MMBasic's SPI READ does),
+ * both together is the write-and-read the SPI() function needs.
+ *
+ * The buffers are NOT copied through the kernel: there is no MMU here,
+ * so it reads them where they lie.  That is what makes a whole display
+ * row - or a whole frame - one syscall rather than hundreds.  MMBasic
+ * itself loops a unit at a time; the bytes on the wire are identical
+ * either way.
+ */
+MMINTEGER mm_spi_xfer(unsigned char *tx, unsigned char *rx, int len)
+{
+    struct {
+        unsigned char bus, pad0, pad1, pad2;
+        unsigned long len;
+        unsigned char *tx;
+        unsigned char *rx;
+    } m;
+    int fd = mm_gfx_open();
+    int r;
+
+    if (fd < 0)
+        return -1;
+    m.bus = 0;
+    m.pad0 = m.pad1 = m.pad2 = 0;
+    m.len = (unsigned long)len;
+    m.tx = tx;
+    m.rx = rx;
+    errno = 0;
+    r = ioctl(fd, MM_PICOIOC_SPIXFER, &m);
+    if (r < 0)
+        return errno ? -errno : -1;
+    return r;
+}
+
+void mm_spi_close(void)
+{
+    int fd = mm_gfx_open();
+
+    if (fd >= 0)
+        (void)ioctl(fd, MM_PICOIOC_SPICLOSE, (void *)0);   /* bus 0 */
+}
+
 MMINTEGER mm_i2c_xfer(int addr, int read, int n, unsigned char *buf,
                       int hold)
 {
@@ -2709,6 +2789,20 @@ MMINTEGER mm_i2c_xfer(int addr, int read, int n, unsigned char *buf,
     (void)addr; (void)read; (void)n; (void)buf; (void)hold;
     return -19;
 }
+
+/* Nor an SPI controller a program may have: SPI1 is the SD card even on
+ * the board, and off it there is nothing at all. */
+MMINTEGER mm_spi_open(int sck, int tx, int rx, int hz, int mode, int bits)
+{
+    (void)sck; (void)tx; (void)rx; (void)hz; (void)mode; (void)bits;
+    return -19;
+}
+MMINTEGER mm_spi_xfer(unsigned char *tx, unsigned char *rx, int len)
+{
+    (void)tx; (void)rx; (void)len;
+    return -19;
+}
+void mm_spi_close(void) {}
 #endif
 
 void mm_int_err_pop(void)

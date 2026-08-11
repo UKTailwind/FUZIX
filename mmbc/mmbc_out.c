@@ -342,6 +342,8 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_pwm.h\"\n");
     if (cv.uses_i2c)
         fprintf(f, "#include \"mmb_i2c.h\"\n");
+    if (cv.uses_spi)
+        fprintf(f, "#include \"mmb_spi.h\"\n");
     fprintf(f, "#include <math.h>\n");
     fprintf(f, "#include <string.h>\n");
     fprintf(f, "#include <stdlib.h>\n\n");
@@ -459,6 +461,10 @@ void conv_write(FILE *f)
         /* SETPIN puts the pins here and OPEN reads them: MMBasic
            allows the two to be far apart in a program. */
         fprintf(f, "static int __mmi2c_sda, __mmi2c_scl;\n");
+    if (cv.uses_spi)
+        /* the same for SPI's three, in whatever order they were
+           written - mmb_spi.h works out which pin is which signal */
+        fprintf(f, "static int __mmspi_a, __mmspi_b, __mmspi_c;\n");
     fprintf(f, "\n/* ---- forward declarations ---- */\n");
     if (cv.uses_clear)
         fprintf(f, "static void __mmb_clear(void);\n");

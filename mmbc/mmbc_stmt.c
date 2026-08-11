@@ -17,6 +17,7 @@ static const char *int_handler(void);
 static const char *setpin_pull(void);
 static void do_settick(void);
 static void do_i2c2(void);
+static void do_spi(void);
 static void do_on_key(void);
 static const char *int_target(void);
 static void do_longstring(void);
@@ -770,6 +771,13 @@ void statement_inner(void)
         }
         return;
     }
+    if (strcmp(up, "SPI") == 0 && !is_op("(", 1)) {
+        /* SPI( is the function - write a unit and read one back - and
+           it is handled in the expression parser.  A statement starting
+           with SPI is the command. */
+        do_spi();
+        return;
+    }
     if (strcmp(up, "I2C2") == 0) {
         do_i2c2();
         return;
@@ -877,21 +885,35 @@ void statement_inner(void)
             cv.uses_pwm = 1;
         }
         else {
-            /* SETPIN sda, scl, I2C2 - the pin-PAIR form, which is how
-               the second I2C controller gets pins at all.  Reached here
-               because what followed the comma was not a mode word but
-               another pin. */
-            const char *scl = as_int(expr());
+            /* SETPIN sda, scl, I2C2   - the pin-PAIR form
+               SETPIN p1, p2, p3, SPI  - the pin-TRIPLE form
+               Reached here because what followed the comma was not a
+               mode word but another pin. */
+            const char *p2 = as_int(expr());
+            const char *p3;
 
             expect_op(",");
-            if (!accept_kw("I2C2")) {
-                cv_err("SETPIN takes DIN, DOUT, AIN, ARAW, "
-                       "INTH, INTL, INTB, PWM or OFF, or a pin pair "
-                       "followed by I2C2");
+            if (accept_kw("I2C2")) {
+                cv.uses_i2c = 1;
+                emit(sfmt("__mmi2c_sda = %s; __mmi2c_scl = %s;", pin, p2));
                 return;
             }
-            cv.uses_i2c = 1;
-            emit(sfmt("__mmi2c_sda = %s; __mmi2c_scl = %s;", pin, scl));
+            p3 = as_int(expr());
+            expect_op(",");
+            if (!accept_kw("SPI")) {
+                cv_err("SETPIN takes DIN, DOUT, AIN, ARAW, "
+                       "INTH, INTL, INTB, PWM or OFF, or a pin pair "
+                       "followed by I2C2, or a pin triple followed by "
+                       "SPI");
+                return;
+            }
+            cv.uses_spi = 1;
+            /* Any order: which signal each pin carries is decided by
+               the pin number, not by its position here, exactly as
+               MMBasic works it out from PinDef[pin].mode rather than
+               from the order written.  mmb_spi.h sorts them. */
+            emit(sfmt("__mmspi_a = %s; __mmspi_b = %s; __mmspi_c = %s;",
+                      pin, p2, p3));
             return;
         }
         cv.uses_gpio = 1;
@@ -1320,6 +1342,119 @@ static void do_on_key(void)
     if (!fn)
         return;
     emit(sfmt("mmi_onkey_sel(%s, %s);", code, fn));
+}
+
+/* mmb2c.py's do_spi.
+
+     SPI OPEN speed, mode [, bits]
+     SPI WRITE n, d1 [, d2 ...] | n, array() | n, string$
+     SPI READ  n, var
+     SPI CLOSE
+
+   The FIRST controller: SPI2 is the second one, which on this board is
+   the SD card's, so it is not offered.  Chip select is the program's,
+   as it is on a PicoMite. */
+static const char *i2c_strvar(void);
+
+static void do_spi(void)
+{
+    const char *n;
+    int wr;
+
+    cv.i++;
+    cv.uses_spi = 1;
+    if (accept_kw("CLOSE")) {
+        emit("mmspi_close();");
+        return;
+    }
+    if (accept_kw("OPEN")) {
+        const char *speed = as_int(expr());
+        const char *mode;
+        const char *bits = "8";
+
+        expect_op(",");
+        mode = as_int(expr());
+        if (accept_op(","))
+            bits = as_int(expr());
+        emit(sfmt("mmspi_open(__mmspi_a, __mmspi_b, __mmspi_c, "
+                  "%s, %s, %s);", speed, mode, bits));
+        return;
+    }
+    wr = accept_kw("WRITE");
+    if (!wr && !accept_kw("READ")) {
+        cv_err("SPI takes OPEN, WRITE, READ or CLOSE");
+        return;
+    }
+    n = as_int(expr());
+    expect_op(",");
+    cv.tmp_used = 1;
+    /* The same three data forms I2C2 takes, and for the same reason: a
+       display wants a whole run in one call, and MMBasic's own
+       GetSendDataList accepts a list, an array or a string. */
+    if (wr) {
+        const char *v[64];
+        int nv = 0, i;
+        char *s;
+        struct val v0;
+
+        if (is_array_arg()) {
+            struct sym *sy = arrayref(1);
+            const char *base;
+
+            if (sy->ty == TY_S) {
+                cv_err(sfmt("SPI WRITE needs a numeric array, and '%s' "
+                            "is a string array", sy->name));
+                return;
+            }
+            base = array_flat(sy).ptr;
+            emit("{ int __i; unsigned char *__b = "
+                 "(unsigned char *)mm_tmp();");
+            emit(sfmt("  for (__i = 0; __i < (int)(%s) && "
+                      "__i < MM_STRSZ; __i++)", n));
+            emit(sfmt("    __b[__i] = (unsigned char)(%s)[__i];", base));
+            emit(sfmt("  mmspi_write(%s, __b); }", n));
+            return;
+        }
+        v0 = expr();
+        if (v0.ty == TY_S && !is_op(",", 0)) {
+            emit(sfmt("mmspi_write(%s, (const unsigned char *)((%s) + 1));",
+                      n, v0.code));
+            return;
+        }
+        v[nv++] = as_int(v0);
+        while (accept_op(",") && nv < 64)
+            v[nv++] = as_int(expr());
+        s = sfmt("{ unsigned char __b[%d];", nv);
+        for (i = 0; i < nv; i++)
+            s = sfmt("%s __b[%d] = (unsigned char)(%s);", s, i, v[i]);
+        emit(s);
+        emit(sfmt("  mmspi_write(%s, __b); }", n));
+    } else if (is_array_arg()) {
+        struct sym *sy = arrayref(1);
+        const char *base;
+
+        if (sy->ty == TY_S) {
+            cv_err(sfmt("SPI READ needs a numeric array, and '%s' is a "
+                        "string array", sy->name));
+            return;
+        }
+        base = array_flat(sy).ptr;
+        emit("{ int __i; unsigned char *__b = "
+             "(unsigned char *)mm_tmp();");
+        emit(sfmt("  mmspi_read(%s, __b);", n));
+        emit(sfmt("  for (__i = 0; __i < (int)(%s) && "
+                  "__i < MM_STRSZ; __i++)", n));
+        emit(sfmt("    (%s)[__i] = __b[__i]; }", base));
+    } else {
+        const char *d = i2c_strvar();
+
+        if (d == NULL)
+            return;
+        emit("{ unsigned char *__b = (unsigned char *)mm_tmp();");
+        emit(sfmt("  mmspi_read(%s, __b);", n));
+        emit(sfmt("  mm_ssetn(%s, (const char *)__b, (int)(%s)); }",
+                  d, n));
+    }
 }
 
 /* mmb2c.py's i2c_strvar.  I2C2 READ's other target: a plain string
