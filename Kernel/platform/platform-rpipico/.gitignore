@@ -1,3 +1,13 @@
 *.uf2
 *.ftl
 *.img
+
+# The port's own scratch.  All of this got committed by accident once:
+# a `git add <this directory>` sweeps up editor settings, __pycache__
+# and the console logs the devtools leave behind.
+.vscode/
+__pycache__/
+*.pyc
+devtools/*.txt
+devtools/*.log
+ccout.txt

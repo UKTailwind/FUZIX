@@ -186,8 +186,12 @@ Regenerate and paste when coverage changes. Everything *below* the
 tables — what is done and not done in graphics, pins and sound — is
 written by hand and the generator knows nothing about it, so replacing
 the whole appendix with the generator's output throws that away. Check
-the tables against `--check` (85 statements, 81 functions, 5 scalar and
-6 array `MATH` at v0.10) rather than pasting blind.
+the tables against `--check` (87 statements, 85 functions, 5 scalar and
+6 array `MATH` at v0.12) rather than pasting blind.
+
+The splice is by *marker* — from `## Statements` down to, but not
+including, `## MATH sub-commands`. An earlier script did it by line
+number and went stale the moment anything above the appendix moved.
 
 ## What is not in this repository
 

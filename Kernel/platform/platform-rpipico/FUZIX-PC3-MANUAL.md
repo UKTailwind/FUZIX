@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.11 — August 2026"
+date: "Release v0.12 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -55,10 +55,11 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## Since v0.11 — not yet released
+## New in v0.12
 
-Written down here rather than folded into the list below, because the
-published v0.11 card does not have it:
+The theme is the outside world again, but reaching further out. v0.11
+gave the machine pins it could drive; this one gives it buses, and a
+way to put its own text on something at the far end of one.
 
 * **I2C2** works from BASIC, with MMBasic's option word and its OPEN
   timeout — see the I2C2 section for the two deliberate differences

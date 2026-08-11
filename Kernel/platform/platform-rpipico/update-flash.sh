@@ -15,7 +15,7 @@ INODES=${INODES:-256}
 
 rm -f ${IMG}
 ../../../Standalone/mkfs ${IMG} ${INODES} $FSSIZE
-../../../Standalone/ucp ${IMG} <<EOF
+../../../Standalone/ucp ${IMG} > /tmp/ucp-flash.log 2>&1 <<EOF
 cd /
 mkdir bin
 mkdir dev
@@ -501,5 +501,40 @@ chmod 0644 advent.db
 #chmod 0755 startrek.logo
 
 EOF
+
+# ucp exits with the status of its LAST command and does not stop on a
+# failure, so a root that does not fit comes out silently short: every
+# file after the one that overflowed is simply missing, fsck is happy
+# because the filesystem is consistent, and the first you know is a
+# missing binary on the board.  Refuse to go on instead.
+#
+# The ceiling is the FTL's, not the filesystem's: mkftl -s 1952 with
+# 4 kB erase blocks gives 2555 sectors, and FSSIZE is set just under
+# it.  Growing the root means growing the flash region.
+if grep -q 'error' /tmp/ucp-flash.log; then
+	echo "" >&2
+	echo "***********************************************************" >&2
+	echo "update-flash.sh: THE FLASH ROOT DOES NOT FIT" >&2
+	echo "" >&2
+	grep 'error' /tmp/ucp-flash.log | sed 's/^/    ucp: /' >&2
+	echo "" >&2
+	echo "  Every file after the one that overflowed is MISSING from" >&2
+	echo "  filesystem.img.  fsck below will still pass - the image is" >&2
+	echo "  consistent, just short - so this message is the only sign." >&2
+	echo "" >&2
+	echo "  FSSIZE=${FSSIZE} sectors.  The ceiling is the FTL's, not the" >&2
+	echo "  filesystem's: mkftl -s 1952 with 4 kB erase blocks gives" >&2
+	echo "  2555 sectors, and FSSIZE is set just under it." >&2
+	echo "" >&2
+	echo "  Fix by dropping something from the list above, or by" >&2
+	echo "  raising mkftl's -s in the Makefile and FSSIZE together." >&2
+	echo "  Note the kernel already hands dhara the whole chip above" >&2
+	echo "  FLASH_OFFSET (devflash.c), so -s is the smaller number." >&2
+	echo "***********************************************************" >&2
+	echo "" >&2
+	# Deliberately not fatal: the SD card is the real root and this
+	# image is not a release asset, so failing here would block a
+	# kernel build over a fallback filesystem.  Loud instead.
+fi
 
 ../../../Standalone/fsck -a ${IMG}
