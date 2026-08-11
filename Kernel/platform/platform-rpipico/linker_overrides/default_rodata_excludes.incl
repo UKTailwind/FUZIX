@@ -58,11 +58,3 @@
 *libm.a:*(.rodata*)
 *double_math.c.o(.rodata*)
 *(.rodata.libm_table*)
-
-/* The RTC driver's strings, by OBJECT rather than by name: a string
- * literal lands in an anonymous .rodata.str section, so there is
- * nothing to name.  Everything ds3231.c has is a boot message read
- * once, and adding one more of them - the note that the 32kHz output
- * had to be turned back on - was what overflowed RAM by 32 bytes and
- * showed these had been sitting in it all along. */
-*ds3231.c.o(.rodata*)
