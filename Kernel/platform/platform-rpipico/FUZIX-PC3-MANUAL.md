@@ -71,6 +71,12 @@ published v0.11 card does not have it:
 * **`printf` understands `%lld` and `%llX`.** It did not, silently,
   which made every `&H` constant zero in a program translated *on the
   board*.
+* **SPI** on the header pins — see the SPI section. An ILI9341 driven
+  from BASIC fills its 240×320 screen in 26 ms.
+* **Every peripheral got faster.** `clk_peri` had been left on the USB
+  PLL at 48 MHz whatever the system clock was doing, so SPI could not
+  exceed 24 MHz, and the UART and SD card were on the same 48 MHz. It
+  now follows `clk_sys`.
 
 ## New in v0.11
 
@@ -2271,10 +2277,10 @@ translate time, not at run time.
 | `RANDOMIZE` | `RBOX` | `READ` | `RENAME` |
 | `RESTORE` | `RETURN` | `RMDIR` | `RTC` |
 | `SAVE` | `SEEK` | `SELECT` | `SERVO` |
-| `SETPIN` | `SETTICK` | `SORT` | `STATIC` |
-| `STRUCT` | `SUB` | `SYSTEM` | `TEXT` |
-| `TIME$` | `TIMER` | `TRIANGLE` | `TYPE` |
-| `WEND` | `WHILE` |  |  |
+| `SETPIN` | `SETTICK` | `SORT` | `SPI` |
+| `STATIC` | `STRUCT` | `SUB` | `SYSTEM` |
+| `TEXT` | `TIME$` | `TIMER` | `TRIANGLE` |
+| `TYPE` | `WEND` | `WHILE` |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -2296,14 +2302,14 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `LLEN` | `LOC` | `LOF` | `LOG` |
 | `LTRIM$` | `MAP` | `MATH` | `MAX` |
 | `MID$` | `MIN` | `MM.CMDLINE$` | `MM.DEVICE$` |
-| `MM.ERRMSG$` | `MM.ERRNO` | `MM.HRES` | `MM.VER` |
-| `MM.VRES` | `OCT$` | `PI` | `PIN` |
-| `PIXEL` | `RAD` | `RGB` | `RIGHT$` |
-| `RND` | `RTRIM$` | `SGN` | `SIN` |
-| `SPACE$` | `SQR` | `STR$` | `STR2BIN` |
-| `STRING$` | `STRUCT` | `TAB` | `TAN` |
-| `TIME$` | `TIMER` | `TRIM$` | `UCASE$` |
-| `VAL` |  |  |  |
+| `MM.ERRMSG$` | `MM.ERRNO` | `MM.HRES` | `MM.SPISPEED` |
+| `MM.VER` | `MM.VRES` | `OCT$` | `PI` |
+| `PIN` | `PIXEL` | `RAD` | `RGB` |
+| `RIGHT$` | `RND` | `RTRIM$` | `SGN` |
+| `SIN` | `SPACE$` | `SPI` | `SQR` |
+| `STR$` | `STR2BIN` | `STRING$` | `STRUCT` |
+| `TAB` | `TAN` | `TIME$` | `TIMER` |
+| `TRIM$` | `UCASE$` | `VAL` |  |
 
 ## MATH() sub-functions
 
@@ -2480,9 +2486,52 @@ The pins and the controller are claimed through the pin lock, so they
 come back if the program dies, and a second program asking for the bus
 gets a clear "already in use" rather than a collision.
 
+### SPI — the first controller
+
+```basic
+SETPIN 2, 3, 4, SPI          ' any order: the pin decides its own role
+SPI OPEN 62500000, 0, 8      ' speed, mode, bits
+SPI WRITE 4, &H2A, 0, 0, 0   ' a list, an array a(), or a string
+SPI READ 3, r$               ' into a string or a numeric array
+v = SPI(&H55)                ' write one unit, read one back
+PRINT MM.SPISPEED            ' the clock it ACTUALLY got
+SPI CLOSE
+```
+
+**The order of the three pins does not matter.** The RP2350 decides
+which signal each one carries: the controller is `(pin AND 8) = 0` for
+SPI0, and the role is `pin AND 3` — 0 MISO, 1 CS, 2 SCLK, 3 MOSI. So
+GP2/GP3/GP4 are SCLK/MOSI/MISO however you write them. On the header
+SPI0 is **GP0–GP7 and GP34–GP39**; the rest (GP26, GP40, GP42–GP46) are
+SPI1, which is **the SD card** and is not offered — a program that could
+take it could take the filesystem out from under itself. This is
+MMBasic's behaviour too: it asks each pin what it can be rather than
+fixing an order.
+
+**Chip select is yours**, exactly as on a PicoMite. A display needs CS
+held across a whole command-and-data sequence rather than per transfer,
+so only the program knows when to move it — and a pin is a register
+write now, not a system call.
+
+`MM.SPISPEED` is worth using. The divisor is `clk_peri / (CPSDVSR ×
+(1 + SCR))` with `CPSDVSR` even, so a request nearly always lands on a
+neighbouring value: asking for 50 MHz gives 46.875, and anything above
+`clk_peri / 2` quietly becomes `clk_peri / 2`. The usable steps here
+are 62.5, 46.875, 37.5, 31.25 MHz and down.
+
+A whole transfer is **one system call whatever its length** — the
+controller reads your buffer where it lies rather than copying it
+through the kernel, which is sound here because there is no MMU and the
+kernel cannot be preempted. A 240×320 screen of 16-bit pixels is
+153,600 bytes and goes out in 26 ms at 62.5 MHz.
+
+One limit to know: a **string holds at most 255 bytes**, so a 240-pixel
+row of RGB565 (480 bytes) takes two writes. The kernel itself has no
+such limit.
+
 ## Not covered
 
-SPI, one-wire, `PORT`, and the interrupt statements — along with the
+One-wire, `PORT`, and the interrupt statements — along with the
 editor, `RUN`, `LIST`, `EDIT` and the rest of the immediate-mode
 environment. The hardware statements are the subject of current work;
 the immediate-mode ones will never apply, since a translated program is
