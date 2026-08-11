@@ -654,6 +654,64 @@ struct val builtin_raw(const char *up)
         return mkval(sfmt("mm_dir(%s, %s, 1)", spec.code, kind), TY_S);
     }
 
+    if (strcmp(up, "PEEK") == 0) {
+        /* PEEK(BYTE addr) and its wider relatives.  The width is a bare
+           keyword, not a string and not a comma-separated argument,
+           which is why this is parsed here - MMBasic's spelling. */
+        struct tok *t;
+        struct val a;
+        const char *fn = NULL;
+        int isfloat = 0;
+
+        expect_op("(");
+        t = nxt();
+        if (t->kind == T_ID) {
+            if (strcmp(t->up, "BYTE") == 0)         fn = "mmpk_byte";
+            else if (strcmp(t->up, "SHORT") == 0)   fn = "mmpk_short";
+            else if (strcmp(t->up, "WORD") == 0)    fn = "mmpk_word";
+            else if (strcmp(t->up, "INTEGER") == 0) fn = "mmpk_integer";
+            else if (strcmp(t->up, "FLOAT") == 0) {
+                fn = "mmpk_float";
+                isfloat = 1;
+            }
+        }
+        if (fn == NULL)
+            /* VAR, VARADDR and CFUNADDR are MMBasic's and are not here:
+               they need the symbol table, not an address. */
+            cv_err("PEEK(%s ...) is not supported; translated are "
+                   "BYTE, SHORT, WORD, INTEGER and FLOAT", t->text);
+        a = expr();
+        expect_op(")");
+        cv.uses_peek = 1;
+        return mkval(sfmt("%s(%s)", fn, as_int(a)), isfloat ? TY_F : TY_I);
+    }
+
+    if (strcmp(up, "MM.INFO") == 0) {
+        /* MM.INFO(FONT ADDRESS n) - where font n's glyphs are, so a
+           program can draw them itself.  Two bare keywords and then an
+           expression, as MMBasic writes it.
+
+           This is the only option translated.  MMBasic's MM.INFO has
+           dozens, most of them about a filesystem and a display this
+           machine reports differently, and the ones that do fit already
+           have flat spellings here (MM.HRES, MM.DEVICE$, MM.VER). */
+        struct tok *t;
+        struct val a;
+
+        expect_op("(");
+        t = nxt();
+        if (t->kind != T_ID || strcmp(t->up, "FONT") != 0)
+            cv_err("MM.INFO(%s ...) is not supported; translated is "
+                   "FONT ADDRESS n", t->text);
+        t = nxt();
+        if (t->kind != T_ID || strcmp(t->up, "ADDRESS") != 0)
+            cv_err("MM.INFO(FONT %s ...) is not supported; translated "
+                   "is FONT ADDRESS n", t->text);
+        a = expr();
+        expect_op(")");
+        return mkval(sfmt("mm_fontaddr(%s)", as_int(a)), TY_I);
+    }
+
     if (strcmp(up, "MATH") == 0) {
         struct tok *t;
 

@@ -344,6 +344,8 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_i2c.h\"\n");
     if (cv.uses_spi)
         fprintf(f, "#include \"mmb_spi.h\"\n");
+    if (cv.uses_peek)
+        fprintf(f, "#include \"mmb_peek.h\"\n");
     fprintf(f, "#include <math.h>\n");
     fprintf(f, "#include <string.h>\n");
     fprintf(f, "#include <stdlib.h>\n\n");

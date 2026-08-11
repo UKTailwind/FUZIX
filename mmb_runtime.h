@@ -525,6 +525,24 @@ char *mm_at(MMINTEGER x, MMINTEGER y, MMINTEGER mode);
  *          and drawing is silently nothing. */
 MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h);
 
+/* Where font n's glyph data IS - MM.INFO(FONT ADDRESS n).
+ *
+ * There is no MMU here, so the kernel's answer is an address this
+ * program can simply read, and the fonts are const so they sit in XIP
+ * flash and never move.  That is what lets a program draw MMBasic's
+ * glyphs onto something the kernel has never heard of - an ILI9341 on
+ * SPI, say - instead of carrying a second copy of the font.
+ *
+ * The first four bytes at the address are the font's own header:
+ * width, height, first character, count.  The glyph for character c
+ * starts at addr + 4 + (c - first) * width * height / 8, packed MSB
+ * first with no padding.  MMBasic's layout, unchanged.
+ *
+ * 0 for a font that does not exist, and 0 where there is no display -
+ * unlike mm_fontinfo there is nothing useful to say about the second
+ * case, and an address of 0 is unreadable either way. */
+MMINTEGER mm_fontaddr(MMINTEGER font);
+
 /* FONT #n [, scale] - the font PRINT draws in, and how big.  Unlike
  * TEXT's own font argument this one sticks, and it decides where PRINT
  * puts the next line: a 24x32 font fills the screen in seven lines

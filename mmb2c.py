@@ -98,6 +98,7 @@ BUILTINS = {
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0), 'MM.SPISPEED': (0, 0),
     'MM.ERRNO': (0, 0), 'MM.ERRMSG$': (0, 0),
     'MM.VER': (0, 0), 'MM.DEVICE$': (0, 0), 'MM.CMDLINE$': (0, 0),
+    'MM.INFO': (1, 1), 'PEEK': (1, 1),
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
     'LINSTR': (2, 3), 'LCOMPARE': (2, 2), 'LINPUT': (3, 3),
@@ -106,6 +107,7 @@ BUILTINS = {
 # built-ins whose arguments cannot be parsed as plain expressions
 RAWARG = ('CHOICE', 'BOUND', 'TRIM$', 'DATETIME$', 'DAY$', 'EPOCH',
           'BIN2STR$', 'STR2BIN', 'RGB', 'MATH',
+          'MM.INFO', 'PEEK',
           'EOF', 'LOC', 'LOF', 'INPUT$', 'DIR$',
           'LLEN', 'LGETSTR$', 'LGETBYTE', 'LINSTR', 'LCOMPARE', 'LINPUT')
 
@@ -593,6 +595,7 @@ class Conv(object):
         self.uses_pwm = False
         self.uses_i2c = False
         self.uses_spi = False
+        self.uses_peek = False      # PEEK(): pulls in mmb_peek.h
         # set in the scan pass, so statements BEFORE the ON ERROR line are
         # guarded too - the armed window is a run-time thing
         self.uses_onerror = False
@@ -1866,6 +1869,51 @@ class Conv(object):
                 kind = 'MM_DIR_' + t[2]
             self.expect_op(')')
             return ('mm_dir(%s, %s, 1)' % (spec[0], kind), TY_S)
+
+        if up == 'PEEK':
+            # PEEK(BYTE addr) and its wider relatives.  The width is a
+            # bare keyword, not a string and not a comma-separated
+            # argument, which is why this is parsed here - MMBasic's
+            # spelling.
+            self.expect_op('(')
+            t = self.nxt()
+            widths = {'BYTE': 'mmpk_byte', 'SHORT': 'mmpk_short',
+                      'WORD': 'mmpk_word', 'INTEGER': 'mmpk_integer',
+                      'FLOAT': 'mmpk_float'}
+            fn = widths.get(t[2]) if t[0] == T_ID else None
+            if fn is None:
+                # VAR, VARADDR and CFUNADDR are MMBasic's and are not
+                # here: they need the symbol table, not an address.
+                self.err("PEEK(%s ...) is not supported; translated are "
+                         "BYTE, SHORT, WORD, INTEGER and FLOAT" % t[1])
+            a = self.expr()
+            self.expect_op(')')
+            self.uses_peek = True
+            return ('%s(%s)' % (fn, self.as_int(a)),
+                    TY_F if t[2] == 'FLOAT' else TY_I)
+
+        if up == 'MM.INFO':
+            # MM.INFO(FONT ADDRESS n) - where font n's glyphs are, so a
+            # program can draw them itself.  Two bare keywords and then
+            # an expression, as MMBasic writes it.
+            #
+            # This is the only option translated.  MMBasic's MM.INFO has
+            # dozens, most of them about a filesystem and a display this
+            # machine reports differently, and the ones that do fit
+            # already have flat spellings here (MM.HRES, MM.DEVICE$,
+            # MM.VER).
+            self.expect_op('(')
+            t = self.nxt()
+            if t[0] != T_ID or t[2] != 'FONT':
+                self.err("MM.INFO(%s ...) is not supported; translated is "
+                         "FONT ADDRESS n" % t[1])
+            t = self.nxt()
+            if t[0] != T_ID or t[2] != 'ADDRESS':
+                self.err("MM.INFO(FONT %s ...) is not supported; translated "
+                         "is FONT ADDRESS n" % t[1])
+            a = self.expr()
+            self.expect_op(')')
+            return ('mm_fontaddr(%s)' % self.as_int(a), TY_I)
 
         if up == 'MATH':
             self.expect_op('(')
@@ -5616,6 +5664,8 @@ class Conv(object):
             wr('#include "mmb_i2c.h"\n')
         if self.uses_spi:
             wr('#include "mmb_spi.h"\n')
+        if self.uses_peek:
+            wr('#include "mmb_peek.h"\n')
         wr('#include <math.h>\n')
         wr('#include <string.h>\n')
         wr('#include <stdlib.h>\n\n')
