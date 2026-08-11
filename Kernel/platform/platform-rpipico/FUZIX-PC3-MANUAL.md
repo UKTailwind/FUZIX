@@ -77,6 +77,12 @@ published v0.11 card does not have it:
   PLL at 48 MHz whatever the system clock was doing, so SPI could not
   exceed 24 MHz, and the UART and SD card were on the same 48 MHz. It
   now follows `clk_sys`.
+* **The built-in fonts can be read.** `MM.INFO(FONT ADDRESS n)` gives
+  the address of a font's glyph data, and **`PEEK`** — which did not
+  exist at all before — reads it. Together they let a program draw
+  MMBasic's own text onto a display the firmware knows nothing about.
+  Both spellings are MMBasic's. See the section on the glyphs, and the
+  worked barometric station that uses them.
 
 ## New in v0.11
 
@@ -1322,6 +1328,104 @@ This changes where the next line goes as well as how the letters look —
 a 24×32 font fills the screen in seven lines where font 1 takes
 nineteen — and scrolling follows it.
 
+## The glyphs themselves: `MM.INFO(FONT ADDRESS)` and `PEEK` {#font-address}
+
+`TEXT` draws on the PC3's own screen. If you have hung a display off
+the I/O header — an ILI9341 on SPI, say — the firmware knows nothing
+about it, and you are drawing every pixel yourself. You would rather
+not also carry your own copy of a font to do it.
+
+You do not have to. Ask where the built-in ones are:
+
+```basic
+a = MM.INFO(FONT ADDRESS 3)
+```
+
+That is a machine address, and on this computer a machine address is
+something a program can simply read. There is no MMU and no memory
+protection: the fonts are `const`, so they live in flash where nothing
+can move them, and `PEEK` reaches them where they lie.
+
+The first four bytes at that address are the font describing itself:
+
+| offset | |
+|---|---|
+| 0 | width in pixels |
+| 1 | height in pixels |
+| 2 | code of the first character it has |
+| 3 | how many characters |
+
+so having the address you need nothing else — no table of sizes, no
+constants of your own to get wrong:
+
+```basic
+w     = PEEK(BYTE a)
+h     = PEEK(BYTE a + 1)
+first = PEEK(BYTE a + 2)
+count = PEEK(BYTE a + 3)
+```
+
+The glyphs follow, each `width × height` bits, packed continuously
+with no padding between rows and no padding between characters, most
+significant bit first. The one for character *c* starts at
+
+    a + 4 + (c - first) * width * height / 8
+
+and bit *y × width + x* of it is the pixel at (*x*, *y*). This is
+MMBasic's own layout, unchanged, because these are MMBasic's own nine
+fonts — the ones the console draws from.
+
+Reading one back is the clearest way to see it. `fontaddr.bas` in
+`/root/cc` does exactly this, and prints:
+
+```
+font  address     cell   first  count
+ 1    1000EF10    8x12     32    224
+ 2    1000F994   12x20     32     95
+ 3    100104BC   16x24     32     95
+ 5    10012814   24x32     32     95
+ 6    10014BB8   32x50     48     11
+```
+
+Font 6 saying `first 48, count 11` is the digits-only font describing
+itself: 48 is `"0"`, and eleven characters is `0` to `9` and one more.
+Nothing in the program was told that.
+
+    MM.INFO(FONT ADDRESS n)     n is 1 to 9; 0 if there is no such font
+    PEEK(BYTE addr)             one unsigned byte
+    PEEK(SHORT addr)            sixteen bits, signed
+    PEEK(WORD addr)             thirty-two bits, unsigned
+    PEEK(INTEGER addr)          sixty-four bits, signed
+    PEEK(FLOAT addr)            a double
+
+Both spellings are MMBasic's, so a program written this way runs on a
+PicoMite unchanged.
+
+**These are sharp.** A `PEEK` of a wrong address is not an error
+message — there is nothing on this machine to catch it. It reads
+whatever is there, or the program dies. Check the address you were
+given before you use it:
+
+```basic
+a = MM.INFO(FONT ADDRESS 3)
+IF a = 0 THEN ERROR "no font 3"
+```
+
+The wider forms insist the address is a multiple of their width, as
+MMBasic does, and say `Address not divisible by 4` if it is not. That
+is a real check and not a formality: an unaligned load faults on this
+processor.
+
+MMBasic's `PEEK(VAR ...)`, `PEEK(VARADDR ...)` and `PEEK(CFUNADDR ...)`
+are not translated — those ask about a *variable* rather than an
+address, which needs the symbol table. Neither is `POKE`, in any form.
+`MM.INFO` translates `FONT ADDRESS` and nothing else; the other things
+MMBasic's `MM.INFO` reports that make sense here already have their own
+spellings (`MM.HRES`, `MM.VRES`, `MM.DEVICE$`, `MM.VER`, `MM.ERRNO`).
+
+There is a worked example of all of this driving a real panel under
+[A worked example: a barometric station](#qnh-example).
+
 ## Animation: `FRAMEBUFFER`
 
 Drawing straight to the screen means the monitor shows the picture
@@ -1896,6 +2000,198 @@ or use the hardware that already exists for it.
   written C, so `bcdump` disassembles them and `BCRUN_BYTECODE=1`
   forces interpretation for comparison.
 
+## A worked example: a barometric station {#qnh-example}
+
+Everything in this chapter, on one screen. The program is `qnh.bas` in
+`/root/cc`; what follows is how it is built rather than a listing of
+it.
+
+It reads a BMP180 barometer, a potentiometer and the clock, and puts
+the results on an ILI9341 panel that the firmware has never heard of —
+including the text, drawn from the built-in fonts:
+
+```
+GP2  SCLK    GP3  MOSI    GP4  MISO     the panel
+GP5  DC      GP6  RESET   GP7  CS       its control lines
+GP0  LED                                backlight, PWM slice 0
+GP38 SDA     GP39 SCL                   I2C2, the BMP180 at &H77
+GP41                                    the potentiometer wiper
+```
+
+Build and run it the usual way:
+
+```
+# mmbc qnh.bas
+# cc qnh.c
+# ./qnh.bc
+```
+
+### What it is for
+
+A barometer reads the pressure where it is standing. Weather reports
+quote pressure **reduced to sea level**, because otherwise a reading
+would say more about your altitude than about the weather — the
+difference is about 12 hPa per hundred metres, which is the gap between
+a settled day and a gale.
+
+The reduction needs to know how high you are, and that is what the
+potentiometer sets. The formula is the one in the BMP180's own
+datasheet, inverted:
+
+```basic
+qnh = pHPa / (1 - alt / 44330.0) ^ 5.255
+```
+
+The result is QNH: what an altimeter should be set to so it reads
+height above sea level.
+
+### Reading the sensor
+
+The BMP180 arithmetic is Bosch's, out of the datasheet, and the program
+uses MMBasic's own BMP180 listing unchanged apart from the bus — the
+part is on the I/O header rather than the QWIIC socket, so `SETPIN`
+names the pins and `I2C2` opens the second controller:
+
+```basic
+SETPIN 38, 39, I2C2
+I2C2 OPEN 400, 1000
+I2C2 WRITE &H77, 1, 1, &HAA        ' the calibration block
+I2C2 READ  &H77, 0, 22, i2cin$
+ac1 = STR2BIN(int16, MID$(i2cin$, 1, 2), big)
+```
+
+Twenty-two bytes of calibration come back as a string and `STR2BIN`
+picks signed and unsigned, big-endian words out of it.
+
+### Reading the potentiometer
+
+One line of setup, because `AIN` is MMBasic's:
+
+```basic
+SETPIN 41, AIN
+alt = INT(PIN(41) / 3.3 * 1000 + 0.5)
+```
+
+`PIN` on an `AIN` pin gives volts: ten readings, sorted, the top two
+and bottom two discarded and the remaining six averaged, scaled 3.3 V
+over 4095 — MMBasic's filter, constant for constant. On the RP2350B
+channel *n* is GP40 + *n*, so GP41 is channel 1.
+
+One ADC count is about a quarter of a metre over a 1000 m range, so the
+program ignores movements below two metres. A display that flickers
+between 141 and 142 is worse than one that is a metre out.
+
+### Drawing text on a panel the firmware does not know
+
+This is the part that needs
+[`MM.INFO(FONT ADDRESS)`](#font-address).
+The fonts are cached once — address, cell and range, every value read
+out of the font's own header:
+
+```basic
+FOR f = 1 TO 9
+  a = MM.INFO(FONT ADDRESS f)
+  fadr(f) = a
+  IF a <> 0 THEN
+    fwid(f) = PEEK(BYTE a)
+    fhgt(f) = PEEK(BYTE a + 1)
+    ffst(f) = PEEK(BYTE a + 2)
+    fcnt(f) = PEEK(BYTE a + 3)
+  ENDIF
+NEXT f
+```
+
+Drawing one character is then: find its glyph, set the panel's window
+to exactly one cell, and write the rows. The window is set once and the
+panel advances by itself, so a glyph costs one address round trip and
+one write per row rather than one per pixel:
+
+```basic
+g = fadr(f) + 4 + (c - ffst(f)) * w * h \ 8
+setwin(x, y, x + w - 1, y + h - 1)
+FOR row = 0 TO h - 1
+  px$ = ""
+  FOR col = 0 TO w - 1
+    bidx = row * w + col
+    bval = PEEK(BYTE g + bidx \ 8)
+    IF (bval >> (7 - (bidx AND 7))) AND 1 THEN
+      px$ = px$ + ink$
+    ELSE
+      px$ = px$ + paper$
+    ENDIF
+  NEXT col
+  SPI WRITE w * 2, px$
+NEXT row
+```
+
+`ink$` and `paper$` are two-byte RGB565 pixels built once per call, so
+the inner loop appends rather than converting.
+
+A row is `width × 2` bytes, which is why this works within the
+255-byte string limit: 32 bytes for the 16×24 font, 48 for the 24×32.
+A whole glyph would not fit — the 16×24 one is 768 bytes — but a row
+always does.
+
+### Two traps this example exists to show
+
+**The panel does not refuse a window wider than itself.** It clamps the
+window and still accepts every pixel you write into it, so the surplus
+wraps onto the next row and the character comes out as noise. Fifteen
+characters of the 16-pixel font is 240 pixels — the whole panel — so a
+title starting at x=8 loses its last letter into the row below. The
+program therefore drops a glyph that would overhang rather than drawing
+it:
+
+```basic
+gx = x + (i - 1) * w
+IF gx + w > SW THEN EXIT FOR
+```
+
+Silently short is a layout mistake you can see. Silently wrapped looks
+like a bug in the font reader, and will cost you an evening.
+
+**Mid grey is not visible.** `RGB565 &H8410` is a perfectly reasonable
+grey and reads as almost nothing on this panel at 70 % backlight.
+`&HBDF7` — about three quarters — is legible. Colours that look fine
+in a table do not always survive a real display, and there is no
+substitute for looking at it.
+
+### What the translation looks like
+
+`MM.INFO(FONT ADDRESS f)` becomes a runtime call and `PEEK` becomes a
+load, which is the whole point of the exercise — the address is not
+marshalled anywhere, it is used:
+
+```c
+v_a = mm_fontaddr(v_f);
+H->v_fadr[(int)(v_f)] = v_a;
+if (((v_a) != (0LL))) {
+    H->v_fwid[(int)(v_f)] = mmpk_byte(v_a);
+    H->v_fhgt[(int)(v_f)] = mmpk_byte(((v_a) + (1LL)));
+    H->v_ffst[(int)(v_f)] = mmpk_byte(((v_a) + (2LL)));
+    H->v_fcnt[(int)(v_f)] = mmpk_byte(((v_a) + (3LL)));
+}
+```
+
+(`H->` is where arrays and strings live — one allocation the program
+owns, rather than globals.)
+
+and `mmpk_byte` is one line in `mmb_peek.h`:
+
+```c
+MMG_FN MMINTEGER mmpk_byte(MMINTEGER addr)
+{
+	return (MMINTEGER)*MMPK_PTR(unsigned char, addr);
+}
+```
+
+Reading font data compiles to a `ldrb`. There is no MMU to go through,
+no copy, and no system call — the flash the kernel keeps its fonts in
+is simply memory that this program can read.
+
+The whole program is 15 KB of BASIC and compiles to about 63 KB of
+bytecode.
+
 
 \newpage
 
@@ -2302,14 +2598,15 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `LLEN` | `LOC` | `LOF` | `LOG` |
 | `LTRIM$` | `MAP` | `MATH` | `MAX` |
 | `MID$` | `MIN` | `MM.CMDLINE$` | `MM.DEVICE$` |
-| `MM.ERRMSG$` | `MM.ERRNO` | `MM.HRES` | `MM.SPISPEED` |
-| `MM.VER` | `MM.VRES` | `OCT$` | `PI` |
-| `PIN` | `PIXEL` | `RAD` | `RGB` |
-| `RIGHT$` | `RND` | `RTRIM$` | `SGN` |
-| `SIN` | `SPACE$` | `SPI` | `SQR` |
-| `STR$` | `STR2BIN` | `STRING$` | `STRUCT` |
-| `TAB` | `TAN` | `TIME$` | `TIMER` |
-| `TRIM$` | `UCASE$` | `VAL` |  |
+| `MM.ERRMSG$` | `MM.ERRNO` | `MM.HRES` | `MM.INFO` |
+| `MM.SPISPEED` | `MM.VER` | `MM.VRES` | `OCT$` |
+| `PEEK` | `PI` | `PIN` | `PIXEL` |
+| `RAD` | `RGB` | `RIGHT$` | `RND` |
+| `RTRIM$` | `SGN` | `SIN` | `SPACE$` |
+| `SPI` | `SQR` | `STR$` | `STR2BIN` |
+| `STRING$` | `STRUCT` | `TAB` | `TAN` |
+| `TIME$` | `TIMER` | `TRIM$` | `UCASE$` |
+| `VAL` |  |  |  |
 
 ## MATH() sub-functions
 

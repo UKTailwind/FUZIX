@@ -280,6 +280,39 @@ ioctl(sys, GFXIOC_FONTINFO, &fi);
 
 `fi.width` comes back 0 for a font that does not exist.
 
+## Reading the glyphs yourself
+
+If you are driving a display of your own — an SPI panel the kernel
+knows nothing about — you want the glyph bits, not a syscall per
+character. Ask where they are:
+
+```c
+struct gfx_fontaddr fa = { .font = 3 };
+ioctl(sys, GFXIOC_FONTADDR, &fa);
+const unsigned char *fp = (const unsigned char *)fa.addr;
+```
+
+The same bargain as `PICOIOC_LIBM`: there is no MMU, and the fonts are
+`const` so they are in XIP flash. `fa.addr` is an address you can read
+directly, it will not move, and nothing needs to be mapped or freed.
+`fa.bytes` is the whole extent, header and glyphs, so you can bound
+your reads; both come back 0 for a font that does not exist.
+
+The layout at `fa.addr` is MMBasic's:
+
+```c
+int w = fp[0], h = fp[1], first = fp[2], count = fp[3];
+const unsigned char *g = fp + 4 + (c - first) * w * h / 8;
+/* bit y * w + x of g is the pixel at (x, y), MSB first,
+   packed continuously - no padding between rows or glyphs */
+int on = (g[(y * w + x) / 8] >> (7 - ((y * w + x) & 7))) & 1;
+```
+
+`w * h` is a multiple of 8 for all nine fonts, which is what makes
+that plain MSB-first byte packing rather than a bit stream.
+
+This is what BASIC's `MM.INFO(FONT ADDRESS n)` is built on.
+
 ## The palette
 
 A 4bpp mode stores a colour *number* per pixel and the palette says
