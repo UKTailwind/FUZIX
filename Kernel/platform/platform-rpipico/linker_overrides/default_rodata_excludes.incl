@@ -58,3 +58,12 @@
 *libm.a:*(.rodata*)
 *double_math.c.o(.rodata*)
 *(.rodata.libm_table*)
+
+/*
+ * ds3231.c's strings - about 208 bytes in four .rodata.str sections -
+ * are an obvious next candidate and were briefly added here to buy 32
+ * bytes of RAM for one more boot message.  Taken out again: the message
+ * was not worth it, and the build that carried it was never actually
+ * boot-tested, so nothing here is known about whether it works.  It is
+ * a candidate, not a hazard.
+ */

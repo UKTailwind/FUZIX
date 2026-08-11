@@ -311,7 +311,11 @@ void ds3231_init(void)
     if (!(st & 0x08)) {
         uint8_t v = (uint8_t)(st | 0x08);
 
-        kputs("DS3231 RTC: 32kHz output was off, re-enabling for board detect\n");
+        /* Silent: the message that belongs here costs 32 bytes of RAM
+           the kernel does not have spare, and a repair that just works
+           is worth more than one that announces itself.  It is visible
+           anyway - the next line of the boot says which machine this
+           is, and that is the thing the repair exists to get right. */
         if (ds3231_write_regs(REG_STATUS, &v, 1) == 0) {
             /* let the output start before board_detect() counts edges;
                a 32 kHz cycle is 30us and it wants four of them */
