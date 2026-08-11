@@ -2531,6 +2531,24 @@ class Conv(object):
                     self.err("OPTION DEFAULT NONE: '%s' needs a type"
                              % canon)
 
+            # MMBasic's DIM s$ LENGTH n, which caps a string to save
+            # memory.  ACCEPTED AND IGNORED: every string here is
+            # MM_STRSZ, so this translation is more generous than
+            # MMBasic rather than different from it - a program that
+            # would hit "string too long" there simply works.  That is
+            # a divergence and the manual says so; refusing outright
+            # would stop real programs translating over a declaration
+            # whose only effect is to make a string smaller.
+            if self.accept_kw('LENGTH'):
+                if ty != TY_S:
+                    self.err("LENGTH is only for strings, and '%s' is not "
+                             "one" % canon)
+                v = self.nxt()
+                if v[0] != T_NUM or v[2] != 'I':
+                    self.err("LENGTH takes a literal integer")
+                if int(v[1]) < 1 or int(v[1]) > 255:
+                    self.err("LENGTH must be 1..255")
+
             if self.mode == 'decl':
                 s = self.declare(canon, ty if stype is None else TY_I,
                                  scope, dims, static)
@@ -4946,11 +4964,36 @@ class Conv(object):
         n = self.as_int(self.expr())
         self.expect_op(',')
         self.tmp_used = True
+        # All three of MMBasic's forms for the data, because its own
+        # BMP180 example uses two of them in the same program: a list of
+        # byte expressions, a whole numeric array written a(), and a
+        # STRING - and the string is the interesting one, since
+        # STR2BIN() then pulls the sensor's 16- and 32-bit fields
+        # straight out of what was read.  A read that only knew about
+        # arrays could not run that program at all.
         if wr:
-            # A list of values, each one byte.  MMBasic also takes an
-            # array or a string here; the list is what a register write
-            # actually looks like and is what this does.
-            vals = [self.as_int(self.expr())]
+            if self.is_array_arg():
+                s = self.arrayref()
+                if s.ty == TY_S:
+                    self.err("I2C2 WRITE needs a numeric array, and '%s' "
+                             "is a string array" % s.name)
+                base, _cnt = self.array_flat(s)
+                self.emit('{ unsigned char __b[MMI2C_MAXLEN]; int __i;')
+                self.emit('  for (__i = 0; __i < (int)(%s) && '
+                          '__i < MMI2C_MAXLEN; __i++)' % n)
+                self.emit('    __b[__i] = (unsigned char)(%s)[__i];' % base)
+                self.emit('  mmi2c_write(%s, %s, %s, __b); }'
+                          % (addr, opt, n))
+                return
+            v0 = self.expr()
+            if v0[1] == TY_S and not self.is_op(','):
+                # The bytes of a string, which live at s + 1 - element 0
+                # is the length.  No copy: the runtime only reads them.
+                self.emit('mmi2c_write(%s, %s, %s, '
+                          '(const unsigned char *)((%s) + 1));'
+                          % (addr, opt, n, v0[0]))
+                return
+            vals = [self.as_int(v0)]
             while self.accept_op(','):
                 vals.append(self.as_int(self.expr()))
             self.emit('{ unsigned char __b[%d]; %s'
@@ -4958,9 +5001,7 @@ class Conv(object):
                          ' '.join('__b[%d] = (unsigned char)(%s);'
                                   % (i, v) for i, v in enumerate(vals))))
             self.emit('  mmi2c_write(%s, %s, %s, __b); }' % (addr, opt, n))
-        else:
-            # Into an integer array, which is what a multi-byte read
-            # wants and what MMBasic's own examples use.
+        elif self.is_array_arg():
             s = self.arrayref()
             if s.ty == TY_S:
                 self.err("I2C2 READ needs a numeric array, and '%s' is a "
@@ -4968,8 +5009,27 @@ class Conv(object):
             base, _cnt = self.array_flat(s)
             self.emit('{ unsigned char __b[%s]; int __i;' % 'MMI2C_MAXLEN')
             self.emit('  mmi2c_read(%s, %s, %s, __b);' % (addr, opt, n))
-            self.emit('  for (__i = 0; __i < (int)(%s); __i++)' % n)
+            self.emit('  for (__i = 0; __i < (int)(%s) && '
+                      '__i < MMI2C_MAXLEN; __i++)' % n)
             self.emit('    (%s)[__i] = __b[__i]; }' % base)
+        else:
+            d = self.i2c_strvar()
+            self.emit('{ unsigned char __b[%s];' % 'MMI2C_MAXLEN')
+            self.emit('  mmi2c_read(%s, %s, %s, __b);' % (addr, opt, n))
+            self.emit('  mm_ssetn(%s, (const char *)__b, (int)(%s)); }'
+                      % (d, n))
+
+    def i2c_strvar(self):
+        """I2C2 READ's other target: a plain string variable."""
+        t = self.nxt()
+        if t[0] != T_ID:
+            self.err("I2C2 READ needs a numeric array, written a(), or a "
+                     "string variable")
+        s = self.reference(t[1], self.is_op('('))
+        if s.ty != TY_S or s.is_array:
+            self.err("I2C2 READ needs a numeric array, written a(), or a "
+                     "string variable, and '%s' is neither" % t[1])
+        return s.acc
 
     def settick_id(self):
         """SETTICK's optional trailing timer number, 1-4.  Absent is 1,

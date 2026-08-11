@@ -95,9 +95,32 @@ ordinary BASIC program that currently fails outright.
 A C translation cannot honestly provide these, and pretending otherwise
 would be worse than the current clear error:
 
-* **Peripherals** — `PORT I2C SPI ONEWIRE PIO IR
+* **Peripherals** — `PORT SPI ONEWIRE PIO IR
   WS2812 STEPPER TMC22XX HUMID TEMPR DISTANCE PULSIN CAMERA KEYBOARD KEYPAD
-  MOUSE GAMEPAD WII RTC WATCHDOG CPU FLASH SLEEP BITBANG BITSTREAM`
+  MOUSE GAMEPAD WII WATCHDOG CPU FLASH SLEEP BITBANG BITSTREAM`
+
+  `I2C2` and `RTC GETREG`/`RTC SETREG` have left this list.
+
+  `SETPIN sda, scl, I2C2` then `I2C2 OPEN speed, timeout` gives the
+  second controller on header pins — `GP38/GP39` or `GP42/GP43`, the
+  only pairs the RP2350 can mux to I2C1.  `WRITE` and `READ` take
+  MMBasic's forms: a list of byte expressions, a whole numeric array
+  written `a()`, or a string; and the option word's bit 0 HOLDS the bus
+  so the next transfer is a repeated START, which is what a device
+  needing a genuine combined transfer requires.  The `timeout` is
+  MMBasic's, in milliseconds, `0` or `100` and up — except that `0`
+  means a five-second cap rather than "no timeout", because a
+  non-preemptive kernel that waits for ever takes the console and the
+  display down with the program.
+
+  `I2C` (the fixed bus, `GP20/GP21`) stays out: that is the QWIIC socket
+  *and* the DS3231 the system clock runs on, and the kernel polls it
+  from interrupt context.  `RTC GETREG`/`SETREG` reach the clock's own
+  registers through the kernel instead, which is how an alarm is armed
+  since MMBasic has no alarm command either — write `&H07`–`&H0A` and
+  set `INTCN|A1IE` in `&H0E`, then `SETPIN 32, INTL, handler`.  A write
+  cannot clear `EOSC`: stopping a battery-backed oscillator outlives the
+  power cycle.
 
   `PWM` and `ADC` have left this list.  `PWM slice, freq, duty [, duty2]`
   and `PWM slice, OFF` translate, with `SETPIN pin, PWM` attaching a pin

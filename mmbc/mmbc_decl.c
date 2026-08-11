@@ -646,6 +646,27 @@ void do_declare(const char *kw)
                        canon);
         }
 
+        /* MMBasic's DIM s$ LENGTH n, which caps a string to save
+           memory.  ACCEPTED AND IGNORED: every string here is MM_STRSZ,
+           so this translation is more generous than MMBasic rather than
+           different from it - a program that would hit "string too
+           long" there simply works.  That is a divergence and the
+           manual says so; refusing outright would stop real programs
+           translating over a declaration whose only effect is to make a
+           string smaller. */
+        if (accept_kw("LENGTH")) {
+            struct tok *v;
+
+            if (ty != TY_S)
+                cv_err("LENGTH is only for strings, and '%s' is not one",
+                       canon);
+            v = nxt();
+            if (v->kind != T_NUM || strcmp(v->up, "I") != 0)
+                cv_err("LENGTH takes a literal integer");
+            else if (atoi(v->text) < 1 || atoi(v->text) > 255)
+                cv_err("LENGTH must be 1..255");
+        }
+
         if (cv.mode == M_DECL) {
             s = declare(canon, stype == NULL ? ty : TY_I,
                         scope, dims, ndims, is_static);

@@ -8,9 +8,14 @@
 M=$(cd "$(dirname "$0")/.." && pwd)
 FCC=${FCC:-/home/peter/src/FUZIX/Applications/CC}
 
+# Every header the on-board cc is given must be here.  mmb_int.h,
+# mmb_pwm.h and mmb_i2c.h were each added to the card image and to
+# hwbuild without being added HERE, so the two trees held different
+# copies and an edit in this repo simply did not reach the board.
 cp "$M/mmb_runtime.c" "$M/mmb_runtime.h" \
    "$M/mmb_gfx.h" "$M/mmb_gfx_pts.h" "$M/mmb_gfx_circle.h" \
    "$M/mmb_gfx_box.h" "$M/mmb_gfx_rbox.h" "$M/mmb_gfx_triangle.h" \
    "$M/mmb_gfx_arc.h" \
-   "$M/mmb_gfx_text.h" "$M/mmb_gfx_map.h" "$M/mmb_gpio.h" "$FCC/"
-echo "synced mmb_runtime.[ch] mmb_gfx*.h mmb_gpio.h -> $FCC"
+   "$M/mmb_gfx_text.h" "$M/mmb_gfx_map.h" "$M/mmb_gpio.h" \
+   "$M/mmb_int.h" "$M/mmb_pwm.h" "$M/mmb_i2c.h" "$FCC/"
+echo "synced mmb_runtime.[ch] mmb_gfx*.h mmb_gpio.h mmb_int.h mmb_pwm.h mmb_i2c.h -> $FCC"

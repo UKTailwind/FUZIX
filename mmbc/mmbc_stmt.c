@@ -1322,6 +1322,28 @@ static void do_on_key(void)
     emit(sfmt("mmi_onkey_sel(%s, %s);", code, fn));
 }
 
+/* mmb2c.py's i2c_strvar.  I2C2 READ's other target: a plain string
+   variable.  NULL after cv_err, which is how the callers here signal a
+   parse that has already reported itself. */
+static const char *i2c_strvar(void)
+{
+    struct tok *t = nxt();
+    struct sym *s;
+
+    if (t->kind != T_ID) {
+        cv_err("I2C2 READ needs a numeric array, written a(), or a "
+               "string variable");
+        return NULL;
+    }
+    s = reference(t->text, is_op("(", 0));
+    if (s->ty != TY_S || s->is_array) {
+        cv_err(sfmt("I2C2 READ needs a numeric array, written a(), or a "
+                    "string variable, and '%s' is neither", t->text));
+        return NULL;
+    }
+    return s->acc;
+}
+
 /* mmb2c.py's do_i2c2.
 
      I2C2 OPEN speed, timeout
@@ -1364,15 +1386,46 @@ static void do_i2c2(void)
     n = as_int(expr());
     expect_op(",");
     cv.tmp_used = 1;
+    /* All three of MMBasic's forms for the data, because its own BMP180
+       example uses two of them in the same program: a list of byte
+       expressions, a whole numeric array written a(), and a STRING -
+       and the string is the interesting one, since STR2BIN() then pulls
+       the sensor's 16- and 32-bit fields straight out of what was read.
+       A read that only knew about arrays could not run that program at
+       all. */
     if (wr) {
-        /* A list of values, each one byte.  MMBasic also takes an array
-           or a string here; the list is what a register write actually
-           looks like and is what this does. */
         const char *v[64];
         int nv = 0, i;
         char *s;
+        struct val v0;
 
-        v[nv++] = as_int(expr());
+        if (is_array_arg()) {
+            struct sym *sy = arrayref(1);
+            const char *base;
+
+            if (sy->ty == TY_S) {
+                cv_err(sfmt("I2C2 WRITE needs a numeric array, and '%s' "
+                            "is a string array", sy->name));
+                return;
+            }
+            base = array_flat(sy).ptr;
+            emit("{ unsigned char __b[MMI2C_MAXLEN]; int __i;");
+            emit(sfmt("  for (__i = 0; __i < (int)(%s) && "
+                      "__i < MMI2C_MAXLEN; __i++)", n));
+            emit(sfmt("    __b[__i] = (unsigned char)(%s)[__i];", base));
+            emit(sfmt("  mmi2c_write(%s, %s, %s, __b); }", addr, opt, n));
+            return;
+        }
+        v0 = expr();
+        if (v0.ty == TY_S && !is_op(",", 0)) {
+            /* The bytes of a string, which live at s + 1 - element 0 is
+               the length.  No copy: the runtime only reads them. */
+            emit(sfmt("mmi2c_write(%s, %s, %s, "
+                      "(const unsigned char *)((%s) + 1));",
+                      addr, opt, n, v0.code));
+            return;
+        }
+        v[nv++] = as_int(v0);
         while (accept_op(",") && nv < 64)
             v[nv++] = as_int(expr());
         s = sfmt("{ unsigned char __b[%d];", nv);
@@ -1380,9 +1433,7 @@ static void do_i2c2(void)
             s = sfmt("%s __b[%d] = (unsigned char)(%s);", s, i, v[i]);
         emit(s);
         emit(sfmt("  mmi2c_write(%s, %s, %s, __b); }", addr, opt, n));
-    } else {
-        /* Into an integer array, which is what a multi-byte read wants
-           and what MMBasic's own examples use. */
+    } else if (is_array_arg()) {
         struct sym *sy = arrayref(1);
         const char *base;
 
@@ -1394,8 +1445,18 @@ static void do_i2c2(void)
         base = array_flat(sy).ptr;
         emit("{ unsigned char __b[MMI2C_MAXLEN]; int __i;");
         emit(sfmt("  mmi2c_read(%s, %s, %s, __b);", addr, opt, n));
-        emit(sfmt("  for (__i = 0; __i < (int)(%s); __i++)", n));
+        emit(sfmt("  for (__i = 0; __i < (int)(%s) && "
+                  "__i < MMI2C_MAXLEN; __i++)", n));
         emit(sfmt("    (%s)[__i] = __b[__i]; }", base));
+    } else {
+        const char *d = i2c_strvar();
+
+        if (d == NULL)
+            return;
+        emit("{ unsigned char __b[MMI2C_MAXLEN];");
+        emit(sfmt("  mmi2c_read(%s, %s, %s, __b);", addr, opt, n));
+        emit(sfmt("  mm_ssetn(%s, (const char *)__b, (int)(%s)); }",
+                  d, n));
     }
 }
 
