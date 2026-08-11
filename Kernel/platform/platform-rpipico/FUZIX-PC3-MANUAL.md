@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.10 — August 2026"
+date: "Release v0.11 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -54,6 +54,23 @@ Headline specification as configured here:
   MMBasic translator in front of it — both run on the machine itself
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
+
+## Since v0.11 — not yet released
+
+Written down here rather than folded into the list below, because the
+published v0.11 card does not have it:
+
+* **I2C2** works from BASIC, with MMBasic's option word and its OPEN
+  timeout — see the I2C2 section for the two deliberate differences
+  from a PicoMite. A BMP180 on GP38/GP39 reads through MMBasic's own
+  reference program unchanged apart from the bus.
+* **The RTC alarm** is armable and was re-tested properly. The v0.11
+  note that it worked was taken from a test that could not tell an
+  alarm from the DS3231's 1 Hz square wave, and had in fact been
+  measuring the square wave.
+* **`printf` understands `%lld` and `%llX`.** It did not, silently,
+  which made every `&H` constant zero in a program translated *on the
+  board*.
 
 ## New in v0.11
 
