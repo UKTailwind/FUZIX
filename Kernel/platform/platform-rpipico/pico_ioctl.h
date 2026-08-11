@@ -226,6 +226,44 @@ struct gfx_fontinfo {
 };
 #define GFXIOC_FONTINFO 0x001D
 
+/* Where a built-in font's glyph data actually IS.
+ *
+ * The same trick as PICOIOC_LIBM below: there is no MMU here, so an
+ * address in kernel flash is an address the caller can read, and the
+ * fonts are const so they are in XIP flash rather than in anyone's RAM.
+ * One syscall at the start and a program can then draw its own glyphs -
+ * onto an SPI panel the kernel knows nothing about, rotated, scaled,
+ * into a shadow buffer - without a second copy of MMBasic's nine fonts
+ * in its own image, and without a syscall per character.
+ *
+ * The layout at `addr' is MMBasic's, unchanged (see fonts.c):
+ *
+ *	byte 0	width in pixels		byte 2	first character
+ *	byte 1	height in pixels	byte 3	how many characters
+ *	byte 4  onwards: the glyphs, width*height bits each, packed
+ *		continuously, MSB first, no padding between them
+ *
+ * so a caller that has the address needs nothing else - the metrics are
+ * in the first four bytes.  GFXIOC_FONTINFO stays because laying text
+ * out is the common case and it should not need PEEKs.
+ *
+ * The glyph for character c starts at
+ *	addr + 4 + (c - first) * (width * height / 8)
+ * and width*height is a multiple of 8 for all nine fonts, which is what
+ * makes that plain MSB-first byte packing rather than a bit stream.
+ *
+ * addr and bytes come back 0 for a font that does not exist.  `bytes' is
+ * header plus glyphs: a program reading flash has no other way to know
+ * where the font ends, and reading past it is silent nonsense rather
+ * than a fault. */
+struct gfx_fontaddr {
+	uint8_t font;		/* in: 1..9 */
+	uint8_t pad[3];
+	uint32_t addr;		/* out: machine address of the font data */
+	uint32_t bytes;		/* out: 4 + count * (width * height / 8) */
+};
+#define GFXIOC_FONTADDR 0x0031
+
 /* The shared maths library.  data -> a void * that receives the
  * address of the table below; from there a program CALLS the entries
  * directly, because there is no MMU here and kernel flash is in the

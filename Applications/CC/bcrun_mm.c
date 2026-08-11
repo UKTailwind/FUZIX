@@ -411,6 +411,11 @@ static void w_pixels(void)   { mm_pixels(PF(0), PI(1), PF(2), PI(3),
    integers, which is why it takes pointers where everything around it
    takes values - the caller is mmg_text in mmb_gfx.h, not BASIC. */
 static void w_fontinfo(void) { A = mm_fontinfo(LL(0), PI(2), PI(3)); }
+/* MM.INFO(FONT ADDRESS n).  A machine address, so it comes back whole:
+   no MMU here and the fonts are in kernel flash, far outside anything
+   the VM's own offsets describe.  PEEK is not in this table at all - it
+   compiles into the program from mmb_peek.h and needs no crossing. */
+static void w_fontaddr(void) { A = mm_fontaddr(LL(0)); }
 static void w_font(void)     { mm_font(LL(0), LL(2)); A = 0; }
 static void w_gtext(void)    { mm_gtext(LL(0), LL(2), LL(4), LL(6),
                                         LL(8), LL(10), Ps(12), LL(13));
@@ -702,6 +707,7 @@ static const struct mmwrap {
 	{ "mm_map_reset",	w_map_reset },
 	{ "mm_map_get",		w_map_get },
 	{ "mm_fontinfo",	w_fontinfo },
+	{ "mm_fontaddr",	w_fontaddr },
 	{ "mm_font",		w_font },
 	{ "mm_gtext",		w_gtext },
 	{ "mm_fb_create",	w_fb_create },

@@ -3858,6 +3858,7 @@ static int mm_gcw = 8, mm_gch = 12;     /* font 1, until FONT says else */
 
 #define MM_GFX_TEXT     0x001A
 #define MM_GFX_FONTINFO 0x001D
+#define MM_GFX_FONTADDR 0x0031
 #define MM_GFX_SCROLL   0x001B
 #define MM_GFX_MAP      0x001E
 #define MM_GFX_MAPCTL   0x001F
@@ -3902,6 +3903,38 @@ MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h)
     if (w) *w = fi.width;
     if (h) *h = fi.height;
     return fi.count;
+}
+
+struct mm_gfx_fontaddr {
+    unsigned char font, pad[3];
+    unsigned int addr, bytes;
+};
+
+/*
+ * MM.INFO(FONT ADDRESS n) - where the glyphs actually are.
+ *
+ * The same trick the shared maths library uses: no MMU, so an address
+ * in kernel flash is an address this program can read.  A program that
+ * has it can draw MMBasic's own glyphs onto a panel the kernel knows
+ * nothing about, with no second copy of the font and no syscall per
+ * character.  See mmb_runtime.h for the layout at that address.
+ *
+ * `bytes' is thrown away here.  MM.INFO gives one number, as MMBasic's
+ * does, and a program that wants the extent computes it from the header
+ * it can now read; a C program wanting it asks the ioctl directly.
+ */
+MMINTEGER mm_fontaddr(MMINTEGER font)
+{
+    struct mm_gfx_fontaddr fa;
+
+    if (mm_gfx_open() < 0)
+        return 0;
+    fa.font = (unsigned char)font;
+    fa.pad[0] = fa.pad[1] = fa.pad[2] = 0;
+    fa.addr = fa.bytes = 0;
+    if (ioctl(mm_gfx_fd, MM_GFX_FONTADDR, &fa) < 0)
+        return 0;               /* a kernel without the call */
+    return (MMINTEGER)fa.addr;
 }
 
 
@@ -4660,6 +4693,17 @@ MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h)
     if (w) *w = 0;
     if (h) *h = 0;
     return -1;
+}
+
+/* No fonts here, so no address to give.  0 rather than -1: an address
+ * is a thing to dereference, and a program that PEEKs what it is given
+ * must fault on a wrong answer rather than read something.  A gate
+ * program that asks has to check before it reads - which is the same
+ * thing it has to do on the board for a font that does not exist. */
+MMINTEGER mm_fontaddr(MMINTEGER font)
+{
+    (void)font;
+    return 0;
 }
 
 void mm_font(MMINTEGER font, MMINTEGER scale)

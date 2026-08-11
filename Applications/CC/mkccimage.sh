@@ -95,6 +95,15 @@ echo "--- installing"
 	echo "get $CC/mmb_pwm.h mmb_pwm.h"
 	# I2C2 - the second controller, on header pins.
 	echo "get $CC/mmb_i2c.h mmb_i2c.h"
+	# SPI0 - likewise.  This one was missing until v0.11: the header
+	# was added to sync-runtime.sh and to both front ends, and NOT
+	# here, so a freshly built card compiled everything except a
+	# program that opened SPI.  That is the failure this list keeps
+	# collecting; add a new mmb_*.h in BOTH places or neither.
+	echo "get $CC/mmb_spi.h mmb_spi.h"
+	# PEEK: reading memory by address, which is what makes
+	# MM.INFO(FONT ADDRESS n) usable from BASIC.
+	echo "get $CC/mmb_peek.h mmb_peek.h"
 	# The pin and ADC REGISTERS, which mmb_gpio.h reaches for directly
 	# now that pin work is not a syscall.  Flat, because that is the
 	# only shape this include directory has; a native program gets the

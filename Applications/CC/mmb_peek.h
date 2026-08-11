@@ -1,0 +1,90 @@
+#ifndef MMB_PEEK_H
+#define MMB_PEEK_H
+/*
+ *	PEEK(BYTE addr) and its wider relatives - reading memory by
+ *	address, which on this machine means reading memory.
+ *
+ *	    PEEK(BYTE addr)		one unsigned byte
+ *	    PEEK(SHORT addr)		sixteen bits, signed, MMBasic's
+ *	    PEEK(WORD addr)		thirty-two bits, unsigned
+ *	    PEEK(INTEGER addr)		sixty-four bits, signed
+ *	    PEEK(FLOAT addr)		a double
+ *
+ *	MMBasic's cmd/fun_peek (MM_Misc.c) with the same option names and
+ *	the same widths.  What it does NOT have is MMBasic's VAR, VARADDR
+ *	and CFUNADDR forms: those need the symbol table on this side of
+ *	the translator, and an honest gap is better than a spelling that
+ *	means something slightly different.
+ *
+ *	There is no MMU and no MPU on an RP2350B, so an address here is a
+ *	machine address and every one of these is a load instruction with
+ *	nothing between it and the bus.  That is the point - it is what
+ *	makes MM.INFO(FONT ADDRESS n) worth having, because the fonts are
+ *	in the kernel's flash and a program can read them where they lie.
+ *	It is also the risk: a wrong address does not raise "Address out
+ *	of range", it faults and the process dies, exactly as it would in
+ *	C.  MMBasic on a PicoMite behaves the same way.
+ *
+ *	ALIGNMENT.  MMBasic insists an address be a multiple of the width
+ *	and errors if it is not; that check is here for the same reason
+ *	it is there, and a stronger one on this part - an unaligned STRD
+ *	is a HardFault on Cortex-M33 rather than a slow load, and the
+ *	failure looks like the VM stack bug in bcrun, not like a bad
+ *	PEEK.  Refusing it early names the mistake.
+ */
+
+#include "mmb_runtime.h"
+
+/*	The address arrives as a signed 64-bit BASIC integer and has to
+ *	become a pointer.  Through uintptr_t rather than straight to the
+ *	pointer type: the board is 32-bit and the gates run on a 64-bit
+ *	host, and this is the one cast that is correct on both.  The
+ *	unsigned step first, so a program that computed its address in a
+ *	way that set the top bit does not sign-extend into nonsense. */
+#define MMPK_PTR(t, a)	((const t *)(uintptr_t)(uint64_t)(a))
+
+/*	mm_error takes one string, so the message is the caller's - which
+ *	is how MMBasic words it too, naming the width that was wanted. */
+MMG_FN int mmpk_aligned(MMINTEGER addr, int width, const char *msg)
+{
+	if (addr & (MMINTEGER)(width - 1)) {
+		mm_error(msg);
+		return 0;
+	}
+	return 1;
+}
+
+MMG_FN MMINTEGER mmpk_byte(MMINTEGER addr)
+{
+	return (MMINTEGER)*MMPK_PTR(unsigned char, addr);
+}
+
+MMG_FN MMINTEGER mmpk_short(MMINTEGER addr)
+{
+	if (!mmpk_aligned(addr, 2, "Address not divisible by 2"))
+		return 0;
+	return (MMINTEGER)*MMPK_PTR(short, addr);
+}
+
+MMG_FN MMINTEGER mmpk_word(MMINTEGER addr)
+{
+	if (!mmpk_aligned(addr, 4, "Address not divisible by 4"))
+		return 0;
+	return (MMINTEGER)*MMPK_PTR(unsigned int, addr);
+}
+
+MMG_FN MMINTEGER mmpk_integer(MMINTEGER addr)
+{
+	if (!mmpk_aligned(addr, 8, "Address not divisible by 8"))
+		return 0;
+	return *MMPK_PTR(MMINTEGER, addr);
+}
+
+MMG_FN MMFLOAT mmpk_float(MMINTEGER addr)
+{
+	if (!mmpk_aligned(addr, 8, "Address not divisible by 8"))
+		return 0;
+	return *MMPK_PTR(MMFLOAT, addr);
+}
+
+#endif /* MMB_PEEK_H */

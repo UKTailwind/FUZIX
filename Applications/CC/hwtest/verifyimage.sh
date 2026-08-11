@@ -80,9 +80,13 @@ done
 
 echo "--- the headers the generated C includes"
 same /usr/lib/cc/include/mmb_runtime.h "$R/Applications/CC/mmb_runtime.h"
+# Every mmb_*.h mkccimage.sh stages, not just the drawing ones: this
+# list had drifted behind that one, so the peripheral headers were
+# shipped and never checked - and mmb_spi.h was not shipped at all.
 for f in mmb_gfx.h mmb_gfx_pts.h mmb_gfx_circle.h mmb_gfx_box.h \
 		mmb_gfx_rbox.h mmb_gfx_triangle.h mmb_gfx_arc.h \
-		mmb_gfx_text.h mmb_gfx_map.h mmb_gpio.h; do
+		mmb_gfx_text.h mmb_gfx_map.h mmb_gpio.h \
+		mmb_int.h mmb_pwm.h mmb_i2c.h mmb_spi.h mmb_peek.h; do
 	same "/usr/lib/cc/include/$f" "$R/Applications/CC/$f"
 done
 

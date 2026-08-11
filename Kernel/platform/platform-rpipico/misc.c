@@ -564,6 +564,27 @@ int plt_dev_ioctl(uarg_t request, char *data)
             return -1;
         return 0;
     }
+    if (request == GFXIOC_FONTADDR)
+    {
+        struct gfx_fontaddr ga;
+        const unsigned char *fp;
+        int w = 0, h = 0, first = 0, count = 0;
+
+        if (uget(data, &ga, sizeof(ga)))
+            return -1;
+        /* No MMU, and the fonts are const so they are in XIP flash: the
+         * address handed out here is one the caller can simply read.
+         * Nothing is pinned or refcounted because nothing can move. */
+        fp = display_font(ga.font, &w, &h, &first, &count);
+        ga.pad[0] = ga.pad[1] = ga.pad[2] = 0;
+        ga.addr = (uint32_t)(uintptr_t)fp;
+        /* Header plus glyphs.  w*h is a multiple of 8 for all nine, so
+         * this is exact rather than rounded - see fonts.c. */
+        ga.bytes = fp ? (uint32_t)(4 + count * ((w * h) / 8)) : 0;
+        if (uput(&ga, data, sizeof(ga)))
+            return -1;
+        return 0;
+    }
     if (request == GFXIOC_INFO)
     {
         struct gfx_info gi;
