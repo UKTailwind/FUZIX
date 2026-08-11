@@ -211,6 +211,12 @@ int _vfnprintf(FILE * op, size_t maxlen, const char *fmt, va_list ap)
 
 			case 'u':	/* Unsigned decimal */
 			usproc:
+				/* if/else rather than a goto past the
+				 * ordinary path: a label only the long-long
+				 * branch jumps to is "defined but not used"
+				 * on every target that leaves the feature
+				 * off, and this file is built for all of
+				 * them. */
 #ifdef CONFIG_PRINTF_LONGLONG
 				if (llval) {
 					unsigned long long lval64 =
@@ -222,13 +228,13 @@ int _vfnprintf(FILE * op, size_t maxlen, const char *fmt, va_list ap)
 					 * be zero is still non-zero. */
 					val = (unsigned long)(lval64 != 0);
 					ptmp = __ulltostr_r(buf, lval64, radix);
-					goto hashproc;
-				}
+				} else
 #endif
-				val = lval ? va_arg(ap, unsigned long) :
-				    va_arg(ap, unsigned int);
-				ptmp = __ultostr_r(buf, val, radix);
-			hashproc:
+				{
+					val = lval ? va_arg(ap, unsigned long) :
+					    va_arg(ap, unsigned int);
+					ptmp = __ultostr_r(buf, val, radix);
+				}
 				add = "";
 				if (hash) {
 					if (radix == 2)
