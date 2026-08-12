@@ -17,6 +17,7 @@ static const char *int_handler(void);
 static const char *setpin_pull(void);
 static void do_settick(void);
 static void do_i2c2(void);
+static void do_onewire(void);
 static void do_spi(void);
 static void do_on_key(void);
 static const char *int_target(void);
@@ -914,6 +915,30 @@ void statement_inner(void)
         }
         return;
     }
+    if (strcmp(up, "ONEWIRE") == 0) {
+        cv.i++;
+        do_onewire();
+        return;
+    }
+    if (strcmp(up, "TEMPR") == 0 && is_kw("START", 1)) {
+        /* TEMPR START pin [, precision [, timeout]] - begin a
+           conversion and come back for it later.  The reading form is a
+           function. */
+        const char *pin, *prec = "1", *tmo = "-1";
+
+        cv.i += 2;
+        pin = as_int(expr());
+        if (accept_op(",")) {
+            if (!is_op(",", 0) && !stmt_end())
+                prec = as_int(expr());
+            if (accept_op(","))
+                tmo = as_int(expr());
+        }
+        cv.uses_gpio = 1;
+        cv.uses_onewire = 1;
+        emit(sfmt("mmow_tempr_start(%s, %s, %s);", pin, prec, tmo));
+        return;
+    }
     if (strcmp(up, "SPI") == 0 && !is_op("(", 1)) {
         /* SPI( is the function - write a unit and read one back - and
            it is handled in the expression parser.  A statement starting
@@ -1692,6 +1717,51 @@ static void do_spi(void)
     else
         comms_rx("SPI READ", n, sfmt("  mmspi_read(%s, %%s);", n),
                  sfmt("  mmspi_read_bytes(%s, %%s);", n));
+}
+
+/* mmb2c.py's do_onewire.
+
+     ONEWIRE RESET pin
+     ONEWIRE WRITE pin, flag, count, <data>
+     ONEWIRE READ  pin, flag, count, <destination>
+
+   The data and destination are the shared forms - MMBasic's owWrite
+   and owRead call GetCommsTxData and GetCommsRxDest at argument 6,
+   exactly as I2C does.  That is why one-wire waited for mmb_comms.h
+   rather than growing a third copy of them. */
+static void do_onewire(void)
+{
+    const char *pin, *flag, *n;
+    int wr;
+
+    cv.uses_gpio = 1;
+    cv.uses_onewire = 1;
+    if (accept_kw("RESET")) {
+        emit(sfmt("(void)mmow_reset(%s);", as_int(expr())));
+        return;
+    }
+    wr = accept_kw("WRITE");
+    if (!wr && !accept_kw("READ")) {
+        cv_err("ONEWIRE takes RESET, WRITE or READ");
+        return;
+    }
+    pin = as_int(expr());
+    expect_op(",");
+    flag = as_int(expr());
+    expect_op(",");
+    n = as_int(expr());
+    expect_op(",");
+    cv.tmp_used = 1;
+    if (wr)
+        comms_tx("ONEWIRE WRITE", n,
+                 sfmt("  mmow_write(%s, %s, %s, %%s);", pin, flag, n),
+                 sfmt("  mmow_write_bytes(%s, %s, %s, %%s);",
+                      pin, flag, n));
+    else
+        comms_rx("ONEWIRE READ", n,
+                 sfmt("  mmow_read(%s, %s, %s, %%s);", pin, flag, n),
+                 sfmt("  mmow_read_bytes(%s, %s, %s, %%s);",
+                      pin, flag, n));
 }
 
 /* mmb2c.py's comms_tx / comms_rx: the data arguments I2C, SPI and

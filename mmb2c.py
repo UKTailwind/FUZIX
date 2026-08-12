@@ -95,8 +95,9 @@ BUILTINS = {
     'DATETIME$': (1, 1), 'DAY$': (1, 1), 'EPOCH': (1, 1),
     'BIN2STR$': (2, 3), 'STR2BIN': (2, 3), 'RGB': (1, 3), 'MATH': (1, 1),
     'PIXEL': (2, 2), 'MAP': (1, 1), 'PIN': (1, 1), 'SPI': (1, 1),
-    'PORT': (2, 16), 'FLAG': (1, 1),
+    'PORT': (2, 16), 'FLAG': (1, 1), 'TEMPR': (1, 2),
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0), 'MM.SPISPEED': (0, 0),
+    'MM.ONEWIRE': (0, 0),
     'POS': (0, 0),
     'MM.ERRNO': (0, 0), 'MM.ERRMSG$': (0, 0),
     'MM.VER': (0, 0), 'MM.DEVICE$': (0, 0), 'MM.CMDLINE$': (0, 0),
@@ -600,6 +601,7 @@ class Conv(object):
         self.uses_pulse = False     # PULSE: pulls in mmb_pulse.h
         self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
         self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
+        self.uses_onewire = False   # ONEWIRE/TEMPR: mmb_onewire.h
         self.uses_play = False
         self.uses_pwm = False
         self.uses_i2c = False
@@ -1550,6 +1552,14 @@ class Conv(object):
             return (cur, ty)
         if up == 'BIT':
             return ('(((%s) >> (%s)) & 1LL)' % (n(0), n(1)), TY_I)
+        if up == 'TEMPR':
+            # TEMPR(pin [, timeout]) - the DS18B20's answer.
+            # It SLEEPS while the conversion runs where MMBasic
+            # spins; see mmb_onewire.h.
+            self.uses_gpio = True
+            self.uses_onewire = True
+            return ('mmow_tempr(%s, %s)'
+                    % (n(0), n(1) if len(args) > 1 else '-1'), TY_F)
         if up == 'FLAG':
             # FLAG(n) - one scratch bit.  The assigning form is a
             # statement, so a FLAG that reaches here is a read.
@@ -1633,6 +1643,12 @@ class Conv(object):
             # asked for - see mmb_spi.h
             self.uses_spi = True
             return ('mmspi_speed()', TY_I)
+        if up == 'MM.ONEWIRE':
+            # What the last ONEWIRE RESET saw - MMBasic's
+            # mmOWvalue, and a flat spelling there too.
+            self.uses_gpio = True
+            self.uses_onewire = True
+            return ('mmow_last()', TY_I)
         if up == 'POS':
             # POS - the column the next character will go in, 1
             # for the start of a line.  MMBasic's fun_pos returns
@@ -3514,6 +3530,27 @@ class Conv(object):
         if up == 'I2C2':
             self.do_i2c2()
             return
+        if up == 'ONEWIRE':
+            self.i += 1
+            self.do_onewire()
+            return
+        if up == 'TEMPR' and self.is_kw('START', 1):
+            # TEMPR START pin [, precision [, timeout]] - begin a
+            # conversion and come back for it later.  The reading form
+            # is a function.
+            self.i += 2
+            pin = self.as_int(self.expr())
+            prec = '1'
+            tmo = '-1'
+            if self.accept_op(','):
+                if not (self.is_op(',') or self.stmt_end()):
+                    prec = self.as_int(self.expr())
+                if self.accept_op(','):
+                    tmo = self.as_int(self.expr())
+            self.uses_gpio = True
+            self.uses_onewire = True
+            self.emit('mmow_tempr_start(%s, %s, %s);' % (pin, prec, tmo))
+            return
         if up == 'SPI' and not self.is_op('(', 1):
             # SPI( is the function - write a unit and read one back -
             # and it is handled in the expression parser.  A statement
@@ -5343,6 +5380,42 @@ class Conv(object):
                              addr, opt, n, dst))
             self.comms_rx('I2C2 READ', n, call)
 
+    def do_onewire(self):
+        """ONEWIRE RESET pin
+           ONEWIRE WRITE pin, flag, count, <data>
+           ONEWIRE READ  pin, flag, count, <destination>
+
+        The data and destination are the shared forms - MMBasic's
+        owWrite and owRead call GetCommsTxData and GetCommsRxDest at
+        argument 6, exactly as I2C does.  That is why one-wire waited
+        for mmb_comms.h rather than growing a third copy of them."""
+        self.uses_gpio = True
+        self.uses_onewire = True
+        if self.accept_kw('RESET'):
+            pin = self.as_int(self.expr())
+            self.emit('(void)mmow_reset(%s);' % pin)
+            return
+        wr = self.accept_kw('WRITE')
+        if not wr and not self.accept_kw('READ'):
+            self.err("ONEWIRE takes RESET, WRITE or READ")
+        pin = self.as_int(self.expr())
+        self.expect_op(',')
+        flag = self.as_int(self.expr())
+        self.expect_op(',')
+        n = self.as_int(self.expr())
+        self.expect_op(',')
+        self.tmp_used = True
+        if wr:
+            def call(src, isbytes):
+                self.emit('  mmow_write%s(%s, %s, %s, %s);'
+                          % ('_bytes' if isbytes else '', pin, flag, n, src))
+            self.comms_tx('ONEWIRE WRITE', n, call)
+        else:
+            def call(dst, isbytes):
+                self.emit('  mmow_read%s(%s, %s, %s, %s);'
+                          % ('_bytes' if isbytes else '', pin, flag, n, dst))
+            self.comms_rx('ONEWIRE READ', n, call)
+
     # -- the data arguments I2C, SPI and one-wire share -----------------
     #
     # MMBasic has ONE implementation of these and three callers:
@@ -6006,8 +6079,20 @@ class Conv(object):
         # LAST of the runtime headers, and it has to be: it services
         # whatever the others left behind, and finds them by their own
         # include guards.
+        # TEMPR sleeps out a conversion of up to 750 ms, so it wants the
+        # serviced wait for the same reason PAUSE does - and it wants it
+        # even in a program that never says PAUSE, which is what the
+        # uses_wait flag alone would miss.  Found on the board: a
+        # SETTICK 100 handler fired ONCE during a 12-bit conversion.
+        if self.uses_onewire and (self.uses_interrupts or self.uses_pulse):
+            self.uses_wait = True
         if self.uses_wait:
             wr('#include "mmb_wait.h"\n')
+        # AFTER mmb_wait.h, and that ordering is load-bearing: TEMPR
+        # uses the serviced wait when the program has one, which it
+        # detects by that header's guard.
+        if self.uses_onewire:
+            wr('#include "mmb_onewire.h"\n')
         wr('#include <math.h>\n')
         wr('#include <string.h>\n')
         wr('#include <stdlib.h>\n\n')

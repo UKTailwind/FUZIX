@@ -364,8 +364,20 @@ void conv_write(FILE *f)
     /* LAST of the runtime headers, and it has to be: it services
        whatever the others left behind, and finds them by their own
        include guards. */
+    /* TEMPR sleeps out a conversion of up to 750 ms, so it wants the
+       serviced wait for the same reason PAUSE does - and it wants it
+       even in a program that never says PAUSE, which is what the
+       uses_wait flag alone would miss.  Found on the board: a
+       SETTICK 100 handler fired ONCE during a 12-bit conversion. */
+    if (cv.uses_onewire && (cv.uses_interrupts || cv.uses_pulse))
+        cv.uses_wait = 1;
     if (cv.uses_wait)
         fprintf(f, "#include \"mmb_wait.h\"\n");
+    /* AFTER mmb_wait.h, and that ordering is load-bearing: TEMPR uses
+       the serviced wait when the program has one, which it detects by
+       that header's guard. */
+    if (cv.uses_onewire)
+        fprintf(f, "#include \"mmb_onewire.h\"\n");
     fprintf(f, "#include <math.h>\n");
     fprintf(f, "#include <string.h>\n");
     fprintf(f, "#include <stdlib.h>\n\n");
