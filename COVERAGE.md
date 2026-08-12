@@ -57,7 +57,7 @@ ordinary BASIC program that currently fails outright.
 | **`MATH` matrix and vector** — `M_MULT M_INVERSE M_TRANSPOSE M_DETERMINANT V_CROSS V_NORMALISE MAGNITUDE DOTPRODUCT CORREL CHI CROSSING`, plus `MATH CRC` and `BASE64` | Pure arithmetic, no platform dependency. Each is small; the set is large. Good candidates to add on demand rather than all at once. |
 | **`ARRAY SLICE` / `ARRAY INSERT`, `MATH C_*`** | Index arithmetic over known dimensions. Mechanical. |
 | ~~**`INKEY$`**~~ **DONE** (`mm_inkey()`, termios-guarded, returns MMBasic's key codes) · **`KEYDOWN`** | `KEYDOWN` needs a key-state table from the kernel, which INKEY$'s one-byte read does not provide — a small kernel ioctl plus a wrapper when wanted. |
-| **`ON ERROR SKIP/IGNORE`, `MM.ERRNO`, `MM.ERRMSG$`** | Cross-cutting: today `mm_error()` prints and exits. Soft failure means either `setjmp`/`longjmp` or a checked error flag after every runtime call. Doable, but it touches everything, so it deserves its own pass. |
+| ~~**`ON ERROR SKIP/IGNORE`, `MM.ERRNO`, `MM.ERRMSG$`**~~ **DONE** | It did get its own pass, and it did touch everything. The checked-flag route rather than `setjmp`: generated code binds a two-int state (`mm_err_bind`), and the translator emits arithmetic checks *only* into programs that actually trap, so a program that never says `ON ERROR` pays nothing — that gating was worth 11.9% on the benchmark. `tests/onerror.bas` covers it. |
 
 ---
 

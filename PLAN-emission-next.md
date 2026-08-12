@@ -133,7 +133,26 @@ temporaries in the routine's own LOCAL frame, which nests with the
 calls and spills to malloc — no wall at all, but an emitter change in
 both translators.
 
-### 3c. The original note: the temporary pool
+### 3c. The temporary pool — DONE
+
+The fix below was made: `mm_release(__mark)` is now emitted before a
+statement that CALLS a routine, not only before ones that use
+temporaries.  Confirmed by reading the emitted C rather than the diff —
+a recursive SUB that builds a string expression per level shows
+
+    mm_release(__mark);
+    if (...) {
+        mm_release(__mark);          /* <- this one */
+        f_descend(...);
+    }
+
+and the same routine now recurses to at least 60 levels where the note
+below measured 9.  `MM_TMPN` is untouched at 16, which was the point:
+the depth stopped mattering rather than the pool getting bigger.
+
+The original note follows.
+
+### 3c (original). The temporary pool
 
 Found 2026-08-09 while testing the LOCAL arena under recursion.  A
 routine that builds a string expression can only recurse **9 levels**
@@ -199,8 +218,11 @@ the host gate structurally cannot see, so a release should run it.
 Constraints of that environment, learned the hard way: the runner must
 be plain Bourne — no `$(( ))`, no `${x%y}`; `cmp` has **no -s** and an
 unknown option makes it fail, which reads as a mismatch on every test;
-`rm -f` still reports a missing file; there is no `sed` and no gzip, so
-the suite goes over as a plain 338K tar and `tar -x -f` is the spelling.
+`rm -f` still reports a missing file; and there is no gzip, so the
+suite goes over as a plain 338K tar and `tar -x -f` is the spelling.
+(**There IS a `sed` as of v0.13**, and an `awk`, a `find`, an `expr`
+and a working `[` — the runner can be less contorted than it is.  It
+was written when none of those existed.)
 A long run needs the console held open for its whole duration
 (`scratchpad/runlong.py`) — closing the port hangs up the tty and takes
 the job with it — and the marker waited for must not appear in the

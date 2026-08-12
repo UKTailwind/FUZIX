@@ -1,7 +1,18 @@
 # PLAN-pixel-batch: batching scalar PIXEL through GFXIOC_PIXELS
 
-Status: DESIGN AGREED, not implemented.  Runtime-only change, no
-kernel work, no ABI change.  2026-08-09.
+Status: **BUILT and board-verified.**  Designed 2026-08-09, shipped in
+v0.9; this header said "not implemented" until 2026-08-12, which was
+simply never updated after the work landed.
+
+What is in the tree: the accumulator (`mm_ptbuf`/`mm_pixn`,
+mmb_runtime.c:4371), `mm_pix_drain()` at 4401, and a `mm_pix_drain()`
+call at the head of every primitive that must not be reordered around
+queued pixels - the list below is the one that was implemented.
+Measured: ripple -21% against v0.9.
+
+The rest of this document is the design as agreed, kept because the
+ordering argument in it is the reason the drain calls are where they
+are, and anyone adding a new primitive needs it.
 
 ## The problem, in numbers (all board-measured)
 
