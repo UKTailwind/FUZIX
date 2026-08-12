@@ -1139,7 +1139,7 @@ wrote solar_eclipse.c
 # ./solar_eclipse.bc < solar_eclipse.in
 ...
 event duration          2.61100904 hours
-Time taken :     2.803  Seconds
+Time taken :     1.954974  Seconds
 ```
 
 The same program takes 12.5 seconds under MMBasic and 8.8 seconds
