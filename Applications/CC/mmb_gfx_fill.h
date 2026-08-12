@@ -15,6 +15,14 @@
  *	crossing as raw bytes (GFXIOC_BLITRD, MMBasic's ReadBufferFast),
  *	160 bytes for a 4bpp mode.
  *
+ *	Board-measured, once it worked: a circle interior 6ms, a whole
+ *	320x240 screen 75ms.  The pixel-at-a-time version would have been
+ *	about 230ms for the screen, so this is three times faster and not
+ *	the hundred the syscall arithmetic suggests - because with the
+ *	reads that cheap the walk is bound by the WRITES and the span
+ *	bookkeeping instead.  Worth writing down: the read was still the
+ *	right thing to fix, and it is no longer the thing to fix next.
+ *
  *	So the comparisons here are on NATIVE INDICES, not RGB888: that is
  *	what is in the bytes.  mm_colour_index turns the caller's colours
  *	into indices once, up front, because the palette and the
