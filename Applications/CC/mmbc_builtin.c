@@ -317,6 +317,36 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
 
         return mkval(sfmt("mm_pixel_get(%s, %s)", a0, a1), TY_I);
     }
+    if (strcmp(up, "PORT") == 0) {
+        /* PORT(pin, nbits [, pin, nbits]...) - several pins read as one
+           integer, all sampled at the same instant.  Pairs, so an odd
+           count is a syntax error rather than a silently dropped
+           argument; MMBasic checks (argc & 0b11) != 0b11. */
+        const char *iv[MAXARGS];
+        char g[512];
+        int k;
+        size_t len = 0;
+
+        if (nargs % 2)
+            cv_err("PORT takes pin, nbits pairs");
+        for (k = 0; k < nargs; k++)
+            iv[k] = as_int(args[k]);
+        /* A comma sequence: the groups are written, then read.  C
+           sequences the comma operator left to right, so the table is
+           full before mmg_port_get looks at it. */
+        g[0] = 0;
+        for (k = 0; k < nargs / 2; k++) {
+            len += (size_t)snprintf(g + len, sizeof(g) - len,
+                                    "%smmg_port_group(%d, %s, %s)",
+                                    k ? ", " : "", k, iv[k * 2],
+                                    iv[k * 2 + 1]);
+            if (len >= sizeof(g))
+                cv_err("PORT argument list too long");
+        }
+        cv.uses_gpio = 1;
+        cv.uses_port = 1;
+        return mkval(sfmt("(%s, mmg_port_get(%d))", g, nargs / 2), TY_I);
+    }
     if (strcmp(up, "PIN") == 0) {
         /* PIN(n) - a digital level, a raw ADC count, or a voltage,
            depending on what SETPIN made the pin.  The assigning form

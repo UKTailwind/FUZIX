@@ -95,6 +95,14 @@ struct pinlock_req {
 #define PC3_SIO		0xd0000000UL
 #define PC3_SIO_IN	(PC3_SIO + 0x004)
 #define PC3_SIO_HI_IN	(PC3_SIO + 0x008)
+/*	The output latch, READ ONLY from here - what the pins are being
+ *	driven to, as opposed to GPIO_IN which is what they actually are.
+ *	Never assign to these two: THE RULE above is about exactly this
+ *	register.  Reading it to work out which bits differ and then
+ *	posting one OUT_XOR is the supported way to change several pins
+ *	on the same cycle, and is what pc3_port_put below does. */
+#define PC3_SIO_OUT	(PC3_SIO + 0x010)
+#define PC3_SIO_HI_OUT	(PC3_SIO + 0x014)
 #define PC3_SIO_OUT_SET	(PC3_SIO + 0x018)
 #define PC3_SIO_HI_OUT_SET (PC3_SIO + 0x01c)
 #define PC3_SIO_OUT_CLR	(PC3_SIO + 0x020)
@@ -296,6 +304,54 @@ PC3_FN void pc3_pin_put(int pin, int v)
 		pc3_pin_high(pin);
 	else
 		pc3_pin_low(pin);
+}
+
+/*	A WHOLE PORT AT ONCE.  mask says which pins take part, val what
+ *	they become; pins outside the mask are untouched.
+ *
+ *	This exists because a loop over pc3_pin_put CANNOT do it.  Eight
+ *	data lines set one at a time are eight different values on the
+ *	bus, and anything watching - a latch, a display, a logic analyser
+ *	- sees all eight.  Here the differing bits are worked out first
+ *	and posted as one OUT_XOR, so every pin in a bank changes on the
+ *	same clock edge.
+ *
+ *	A port spanning both banks takes two stores and the banks move a
+ *	few cycles apart; the hardware offers nothing better, and the
+ *	SDK's gpio_put_masked64 does the same two stores.  Keep a bus
+ *	inside one bank (GP0-31 or GP32-47) if that matters. */
+PC3_FN void pc3_port_put(unsigned long long mask, unsigned long long val)
+{
+	unsigned long m, x;
+
+	m = (unsigned long)mask;
+	if (m) {
+		x = (PC3_REG(PC3_SIO_OUT) ^ (unsigned long)val) & m;
+		if (x)
+			PC3_REG(PC3_SIO_OUT_XOR) = x;
+	}
+	m = (unsigned long)(mask >> 32);
+	if (m) {
+		x = (PC3_REG(PC3_SIO_HI_OUT) ^ (unsigned long)(val >> 32)) & m;
+		if (x)
+			PC3_REG(PC3_SIO_HI_OUT_XOR) = x;
+	}
+}
+
+/*	All 48 pins sampled at one instant - two loads, not 48.  Reading a
+ *	bus a pin at a time can catch it half way through a change; these
+ *	cannot.  _in is the pad, _out the latch (what an output pin is
+ *	being driven to). */
+PC3_FN unsigned long long pc3_pins_in(void)
+{
+	return (unsigned long long)PC3_REG(PC3_SIO_IN) |
+	       ((unsigned long long)PC3_REG(PC3_SIO_HI_IN) << 32);
+}
+
+PC3_FN unsigned long long pc3_pins_out(void)
+{
+	return (unsigned long long)PC3_REG(PC3_SIO_OUT) |
+	       ((unsigned long long)PC3_REG(PC3_SIO_HI_OUT) << 32);
 }
 
 PC3_FN void pc3_pin_toggle(int pin)

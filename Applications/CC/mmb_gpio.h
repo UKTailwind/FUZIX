@@ -76,8 +76,37 @@
  *	gates and a read answers 0. */
 static void pc3_pin_out(int p) { (void)p; }
 static void pc3_pin_in(int p, int u) { (void)p; (void)u; }
-static void pc3_pin_put(int p, int v) { (void)p; (void)v; }
-static int pc3_pin_get(int p) { (void)p; return 0; }
+/*	A shadow output latch, so a write followed by a read gives back
+ *	what was written.  Nothing is connected here and an input still
+ *	reads 0; what this models is the one thing the host CAN check -
+ *	that PORT lays the bits out on the pins the way the board will.
+ *	Getting that wrong is a bus wired backwards, and finding it on
+ *	the host beats finding it with a logic analyser. */
+static unsigned long long pc3_hostlatch;
+static void pc3_pin_put(int p, int v)
+{
+	if (p >= 0 && p < 64) {
+		if (v)
+			pc3_hostlatch |= 1ULL << p;
+		else
+			pc3_hostlatch &= ~(1ULL << p);
+	}
+}
+static int pc3_pin_get(int p)
+{
+	return (p >= 0 && p < 64) ? (int)((pc3_hostlatch >> p) & 1ULL) : 0;
+}
+static void pc3_port_put(unsigned long long m, unsigned long long v)
+{
+	pc3_hostlatch = (pc3_hostlatch & ~m) | (v & m);
+}
+static unsigned long long pc3_pins_in(void) { return pc3_hostlatch; }
+static unsigned long long pc3_pins_out(void) { return pc3_hostlatch; }
+static void pc3_pin_toggle(int p)
+{
+	if (p >= 0 && p < 64)
+		pc3_hostlatch ^= 1ULL << p;
+}
 static void pc3_adc_enable(void) {}
 static void pc3_adc_pin(int c) { (void)c; }
 static void pc3_adc_select(int c) { (void)c; }

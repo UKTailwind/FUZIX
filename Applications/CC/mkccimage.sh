@@ -105,6 +105,15 @@ echo "--- installing"
 	# PEEK: reading memory by address, which is what makes
 	# MM.INFO(FONT ADDRESS n) usable from BASIC.
 	echo "get $CC/mmb_peek.h mmb_peek.h"
+	# PORT and PULSE: several pins as one value, and a timed
+	# inversion.  Both drive the registers directly, so both are
+	# here rather than behind an ioctl.
+	echo "get $CC/mmb_port.h mmb_port.h"
+	echo "get $CC/mmb_pulse.h mmb_pulse.h"
+	# A PAUSE that services what the two above leave running.  It
+	# must be the LAST of these included, and finds them by their
+	# own include guards.
+	echo "get $CC/mmb_wait.h mmb_wait.h"
 	# The pin and ADC REGISTERS, which mmb_gpio.h reaches for directly
 	# now that pin work is not a syscall.  Flat, because that is the
 	# only shape this include directory has; a native program gets the

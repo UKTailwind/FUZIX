@@ -117,6 +117,7 @@ extern int src_nlines;
 struct builtin { const char *name; int minargs, maxargs; };
 
 int kw_in(const char *up);                  /* up in KEYWORDS */
+int routine_name_known(const char *canon);   /* a SUB/FUNCTION of that name */
 const struct builtin *builtin_get(const char *up);   /* BUILTINS[up] */
 int rawarg_in(const char *up);
 int strfunc_in(const char *up);
@@ -332,6 +333,9 @@ struct conv {
     int uses_text;
     int uses_mappal;
     int uses_gpio;
+    int uses_port;              /* PORT: pulls in mmb_port.h */
+    int uses_pulse;             /* PULSE: pulls in mmb_pulse.h */
+    int uses_wait;              /* a serviced PAUSE: pulls in mmb_wait.h */
     int uses_play;              /* PLAY: emit the volume it remembers */
     /* set in the scan pass, so statements BEFORE the ON ERROR line are
        guarded too - the armed window is a run-time thing */

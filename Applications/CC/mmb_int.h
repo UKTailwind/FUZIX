@@ -116,6 +116,39 @@ static long long mm_key_next;		/* earliest us at which to look */
  *	nothing yet pays one global load and a not-taken branch. */
 static int __mm_int_armed;
 
+MMG_FN void mm_int_arm(void)
+{
+	__mm_int_armed++;
+}
+
+/*	How often something armed needs looking at, in microseconds, or 0
+ *	when nothing does.  mmb_wait.h uses it to size the slices of a
+ *	PAUSE: a program with SETTICK 1000 can sleep through most of the
+ *	wait, one with SETTICK 20 cannot, and asking the table is what
+ *	tells them apart.  Without it every PAUSE would have to spin (to
+ *	suit the fastest tick anyone might set) or lumber (and turn a
+ *	20 ms tick into a 100 ms one). */
+MMG_FN long long mm_int_slice_us(void)
+{
+	long long s = 0;
+	int i;
+
+	for (i = 0; i < MM_INT_NTICK; i++)
+		if (mm_tick[i].armed && mm_tick[i].active &&
+		    (s == 0 || mm_tick[i].period < s))
+			s = mm_tick[i].period;
+	if (mm_key_any_fn || mm_key_sel_fn)
+		if (s == 0 || MM_INT_CON_US < s)
+			s = MM_INT_CON_US;
+	/*	A pin interrupt has no period of its own - MMBasic compares
+	 *	levels every statement and a pulse shorter than one is missed
+	 *	either way - so it asks for the ordinary slice rather than
+	 *	forcing a spin. */
+	if (mm_ipin_n > 0 && s == 0)
+		s = 100000;
+	return s;
+}
+
 /*	Inside a handler.  MMBasic's InterruptReturn gate (MM_Misc.c:
  *	10242): interrupts NEVER nest.  A handler's own statements still
  *	carry poll sites - they are ordinary generated statements - and
@@ -177,7 +210,7 @@ MMG_FN void mmi_setpin_int(MMINTEGER pin, MMINTEGER edge, mm_int_fn fn,
 			return;
 		}
 		mm_ipin_n++;
-		__mm_int_armed++;
+		mm_int_arm();
 	}
 	mm_ipins[i].pin = (unsigned char)pin;
 	mm_ipins[i].edge = (unsigned char)edge;
@@ -231,7 +264,7 @@ MMG_FN void mmi_settick(MMINTEGER ms, mm_int_fn fn, MMINTEGER id)
 		return;
 	}
 	if (!mm_tick[i].armed) {
-		__mm_int_armed++;
+		mm_int_arm();
 		mm_ntick_armed++;
 	}
 	mm_tick[i].armed = 1;
@@ -274,7 +307,7 @@ MMG_FN void mmi_settick_pause(MMINTEGER id, MMINTEGER on)
 MMG_FN void mmi_onkey_any(mm_int_fn fn)
 {
 	if (fn && !mm_key_any_fn)
-		__mm_int_armed++;
+		mm_int_arm();
 	else if (!fn && mm_key_any_fn)
 		__mm_int_armed--;
 	mm_key_any_fn = fn;
@@ -293,7 +326,7 @@ MMG_FN void mmi_onkey_sel(MMINTEGER code, mm_int_fn fn)
 	if (code == 0)
 		fn = 0;
 	if (fn && !mm_key_sel_fn)
-		__mm_int_armed++;
+		mm_int_arm();
 	else if (!fn && mm_key_sel_fn)
 		__mm_int_armed--;
 	mm_key_sel_fn = fn;
@@ -315,6 +348,17 @@ MMG_FN void mmi_onkey_sel(MMINTEGER code, mm_int_fn fn)
 MMG_FN void mm_int_poll(void)
 {
 	int i, v, last;
+
+	/*	A pulse ends whether or not a handler is running - it is a
+	 *	timer, not an interrupt, and nothing about it can reenter the
+	 *	BASIC.  So this goes BEFORE the nesting gate, which is what
+	 *	makes a long pulse still end on time inside a handler.  The
+	 *	guard is the include guard: mmb_pulse.h is emitted ahead of
+	 *	this file and only when the program pulses, so the call is
+	 *	here exactly when there is something to call. */
+#ifdef MMB_PULSE_H
+	mmg_pulse_service();
+#endif
 
 	if (__mm_in_int)
 		return;
