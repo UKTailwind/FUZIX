@@ -1,0 +1,7 @@
+long string holds  480 bytes
+480-byte write attempted in one call
+480-byte read attempted, LLEN now  480
+short source:    Insufficient data
+small dest:      Long string is too small for this operation
+i2c long string form accepted
+done

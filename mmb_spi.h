@@ -203,9 +203,16 @@ MMG_FN void mmspi_write(MMINTEGER n, const unsigned int *buf)
  *	which is what a string can hold. */
 MMG_FN void mmspi_write_bytes(MMINTEGER n, const unsigned char *b)
 {
+	/*	NULL means a helper above already raised.  ON ERROR SKIP
+	 *	makes mm_error RETURN rather than stop the statement, so the
+	 *	rest of this generated block runs regardless - and without
+	 *	this guard a refused length still wrote that many bytes
+	 *	through the caller's pointer.  A 400-byte read into a
+	 *	24-byte long string overwrote stdio's buffer and the
+	 *	program's own output came out as NULs. */
 	MMINTEGER r;
 
-	if (n < 1)
+	if (b == 0 || n < 1)
 		return;
 	if (mmspi_bits > 8) {
 		mm_error("SPI is open at more than 8 bits, so a string "
@@ -213,6 +220,34 @@ MMG_FN void mmspi_write_bytes(MMINTEGER n, const unsigned char *b)
 		return;
 	}
 	r = mm_spi_xfer((unsigned char *)b, (unsigned char *)0, (int)n);
+	if (r < 0)
+		mmspi_failed(r);
+}
+
+/*	Straight into a caller's bytes, with no buffer and so no length
+ *	limit - what a long string destination needs.  Eight bits or
+ *	fewer, for the same reason the byte write is. */
+MMG_FN void mmspi_read_bytes(MMINTEGER n, unsigned char *b)
+{
+	MMINTEGER r, i;
+
+	/*	NULL means a helper above already raised.  ON ERROR SKIP
+	 *	makes mm_error RETURN rather than stop the statement, so the
+	 *	rest of this generated block runs regardless - and without
+	 *	this guard a refused length still wrote that many bytes
+	 *	through the caller's pointer.  A 400-byte read into a
+	 *	24-byte long string overwrote stdio's buffer and the
+	 *	program's own output came out as NULs. */
+	if (b == 0 || n < 1)
+		return;
+	if (mmspi_bits > 8) {
+		mm_error("SPI is open at more than 8 bits, so a string "
+			 "cannot be the destination");
+		return;
+	}
+	for (i = 0; i < n; i++)
+		b[i] = 0;
+	r = mm_spi_xfer((unsigned char *)0, b, (int)n);
 	if (r < 0)
 		mmspi_failed(r);
 }

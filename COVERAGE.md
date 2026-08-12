@@ -193,6 +193,28 @@ would be worse than the current clear error:
   ten-sample sort-and-discard filter and `ARAW` the raw count; both need
   an ADC pin, GP40-GP46 on the PC3's header.
 
+  **The data arguments are one implementation, as MMBasic's are.**
+  `GetCommsTxData`, `GetCommsRxDest` and `PutCommsRxData` serve I2C,
+  SPI and one-wire there; the same forms are shared here (`mmb_comms.h`)
+  rather than written out per bus. Both directions take a list of
+  expressions (the count must match, as MMBasic checks), a string, or a
+  whole numeric array; a read also takes a **list of lvalues**, one per
+  value. Destinations are validated *before* the transfer, because a
+  read addresses a device and may advance a register pointer inside it.
+  The buffer holds values rather than bytes — an SPI word can be 16
+  bits, which is why MMBasic's is `unsigned int` too.
+
+  **`LONGSTRING a()` is an extension**, and the reason SPI was
+  re-opened: a BASIC string stops at 255 bytes, a 240-pixel RGB565 row
+  is 480, and a whole frame is 153,600, so a row could not be held in
+  BASIC at all and every drawing program carried a chunking loop. It
+  must be spelled out, because a long string *is* an integer array —
+  written `a()` it is a numeric array and sends one byte per eight-byte
+  cell, which is MMBasic's behaviour and stays. **It is not a speed
+  feature**: measured on the board, one call per row against 100 pixels
+  a call is 30 ms against 32 at 24 MHz and 12 against 13 at 62.5 — the
+  bus dominates, and what changes is what a program can express.
+
   `PORT(pin, nbits [, pin, nbits]...)` translates in both directions -
   as a statement it writes several pins as one number, as a function it
   reads them back (mmb_port.h).  The first pin of a group is the LEAST

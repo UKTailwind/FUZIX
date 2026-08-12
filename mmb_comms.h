@@ -71,7 +71,7 @@ MMG_FN unsigned int *mmc_buf_for(MMINTEGER n)
 {
 	if (n < 1 || n > MMC_MAXN) {
 		mm_error("Number out of bounds");
-		return mmc_buf;		/* mm_error does not return */
+		return 0;
 	}
 	return mmc_buf;
 }
@@ -92,10 +92,58 @@ MMG_FN const unsigned char *mmc_tx_str(const char *s, MMINTEGER n)
 {
 	if ((MMINTEGER)mm_slen(s) < n) {
 		mm_error("Insufficient data");
-		return (const unsigned char *)"";
+		return 0;
 	}
 	/*	Element 0 is the length byte, so the data starts at 1. */
 	return (const unsigned char *)(s + 1);
+}
+
+/*
+ *	A LONG STRING as the data - an extension, and the reason SPI was
+ *	re-opened at all.
+ *
+ *	A BASIC string holds 255 bytes.  A 240-pixel row of RGB565 is 480,
+ *	and a whole 240x320 frame is 153,600, so a display row took two
+ *	writes and a frame could not be assembled in BASIC at all.  The
+ *	kernel has no such limit - struct spi_xfer takes any length - so
+ *	the limit was only ever the shape of the data argument.
+ *
+ *	A long string IS an integer array (a[0] is the byte count, the
+ *	bytes run from &a[1]), which is why this needs saying out loud:
+ *
+ *	    SPI WRITE n, LONGSTRING a()
+ *
+ *	Written as a plain array - `SPI WRITE n, a()` - it is a numeric
+ *	array and MMBasic sends ONE BYTE PER EIGHT-BYTE CELL, quietly and
+ *	wrongly.  That is MMBasic's behaviour too, and it stays; the new
+ *	spelling is how a program says which it meant.
+ *
+ *	No buffer and no copy: the bytes are already bytes and already
+ *	contiguous, exactly as for a string, so the bus reads them where
+ *	they lie.  That is what makes a whole row one call.
+ */
+MMG_FN const unsigned char *mmc_tx_ls(const MMINTEGER *a, MMINTEGER n)
+{
+	if (n > a[0]) {
+		mm_error("Insufficient data");
+		return 0;
+	}
+	return (const unsigned char *)(a + 1);
+}
+
+/*	The same the other way.  The count is checked against the array's
+ *	capacity BEFORE the transfer, as every other destination is, and
+ *	the length is set the way a long string records it. */
+MMG_FN unsigned char *mmc_rx_ls(MMINTEGER *a, MMINTEGER cells, MMINTEGER n)
+{
+	/*	cells counts the whole array, element 0 being the length, so
+	 *	the payload holds (cells - 1) * 8 bytes. */
+	if (n > (cells - 1) * (MMINTEGER)sizeof(MMINTEGER)) {
+		mm_error("Long string is too small for this operation");
+		return 0;
+	}
+	a[0] = n;
+	return (unsigned char *)(a + 1);
 }
 
 MMG_FN void mmc_tx_arr_i(unsigned int *b, MMINTEGER n, const MMINTEGER *a,
@@ -103,6 +151,8 @@ MMG_FN void mmc_tx_arr_i(unsigned int *b, MMINTEGER n, const MMINTEGER *a,
 {
 	MMINTEGER i;
 
+	if (b == 0)
+		return;
 	if (n > cells) {
 		mm_error("Insufficient data");
 		return;
@@ -116,6 +166,8 @@ MMG_FN void mmc_tx_arr_f(unsigned int *b, MMINTEGER n, const MMFLOAT *a,
 {
 	MMINTEGER i;
 
+	if (b == 0)
+		return;
 	if (n > cells) {
 		mm_error("Insufficient data");
 		return;
@@ -155,6 +207,8 @@ MMG_FN void mmc_rx_str(char *s, const unsigned int *b, MMINTEGER n)
 {
 	MMINTEGER i;
 
+	if (b == 0)
+		return;
 	if (n < 1 || n > MM_STRLEN) {
 		mm_error("Number out of bounds");
 		return;
@@ -170,6 +224,8 @@ MMG_FN void mmc_rx_arr_i(MMINTEGER *a, MMINTEGER cells, const unsigned int *b,
 {
 	MMINTEGER i;
 
+	if (b == 0)
+		return;
 	if (n > cells) {
 		mm_error("Insufficient space in array");
 		return;
@@ -183,6 +239,8 @@ MMG_FN void mmc_rx_arr_f(MMFLOAT *a, MMINTEGER cells, const unsigned int *b,
 {
 	MMINTEGER i;
 
+	if (b == 0)
+		return;
 	if (n > cells) {
 		mm_error("Insufficient space in array");
 		return;

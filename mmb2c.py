@@ -5337,9 +5337,10 @@ class Conv(object):
                           % ('_bytes' if isbytes else '', addr, opt, n, src))
             self.comms_tx('I2C2 WRITE', n, call)
         else:
-            def call(buf):
-                self.emit('  mmi2c_read(%s, %s, %s, %s);'
-                          % (addr, opt, n, buf))
+            def call(dst, isbytes):
+                self.emit('  mmi2c_read%s(%s, %s, %s, %s);'
+                          % ('_bytes' if isbytes else '',
+                             addr, opt, n, dst))
             self.comms_rx('I2C2 READ', n, call)
 
     # -- the data arguments I2C, SPI and one-wire share -----------------
@@ -5362,6 +5363,18 @@ class Conv(object):
         buffer or a byte pointer.  `what` names the statement in errors.
         """
         self.uses_comms = True
+        if self.accept_kw('LONGSTRING'):
+            # SPI WRITE n, LONGSTRING a() - the bytes of a long string,
+            # with no 255-byte cap and no copy.  Spelled out because a
+            # long string IS an integer array: written a() it is a
+            # numeric array and sends one byte per eight-byte cell,
+            # which is MMBasic's behaviour and stays.
+            ptr, _cells = self.lsref()
+            self.emit('{ const unsigned char *__b = mmc_tx_ls(%s, %s);'
+                      % (ptr, n))
+            emit_call('__b', True)
+            self.emit('}')
+            return
         if self.is_array_arg():
             s = self.arrayref()
             if s.ty == TY_S:
@@ -5405,6 +5418,15 @@ class Conv(object):
         `emit_call(buf)` writes the statement that fills the buffer.
         """
         self.uses_comms = True
+        if self.accept_kw('LONGSTRING'):
+            # ... and the same as a destination, which is how a program
+            # reads more than 255 bytes back.
+            ptr, cells = self.lsref()
+            self.emit('{ unsigned char *__b = mmc_rx_ls(%s, %s, %s);'
+                      % (ptr, cells, n))
+            emit_call('__b', True)
+            self.emit('}')
+            return
         if self.is_array_arg():
             s = self.arrayref()
             if s.ty == TY_S:
@@ -5416,7 +5438,7 @@ class Conv(object):
             # answer has to be refused before it does.
             self.emit('{ unsigned int *__b = mmc_buf_for(%s);' % n)
             self.emit('  mmc_rx_fits(%s, %s);' % (cnt, n))
-            emit_call('__b')
+            emit_call('__b', False)
             self.emit('  mmc_rx_arr_%s(%s, %s, __b, %s);'
                       % ('i' if s.ty == TY_I else 'f', base, cnt, n))
             self.emit('}')
@@ -5428,7 +5450,7 @@ class Conv(object):
                 self.i += 1
                 self.emit('{ unsigned int *__b = mmc_buf_for(%s);' % n)
                 self.emit('  mmc_rx_strfits(%s);' % n)
-                emit_call('__b')
+                emit_call('__b', False)
                 self.emit('  mmc_rx_str(%s, __b, %s);' % (s.acc, n))
                 self.emit('}')
                 return
@@ -5442,7 +5464,7 @@ class Conv(object):
         self.emit('{ unsigned int *__b;')
         self.emit('  mmc_count(%s, %d);' % (n, len(tgts)))
         self.emit('  __b = mmc_buf_for(%s);' % n)
-        emit_call('__b')
+        emit_call('__b', False)
         for i, t in enumerate(tgts):
             self.emit('  %s = __b[%d];' % (t, i))
         self.emit('}')
@@ -5487,8 +5509,9 @@ class Conv(object):
                           % ('_bytes' if isbytes else '', n, src))
             self.comms_tx('SPI WRITE', n, call)
         else:
-            def call(buf):
-                self.emit('  mmspi_read(%s, %s);' % (n, buf))
+            def call(dst, isbytes):
+                self.emit('  mmspi_read%s(%s, %s);'
+                          % ('_bytes' if isbytes else '', n, dst))
             self.comms_rx('SPI READ', n, call)
 
     def settick_id(self):

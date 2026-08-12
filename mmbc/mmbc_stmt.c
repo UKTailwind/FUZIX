@@ -49,7 +49,8 @@ static void do_mid_assign(void);
 static const char *lvalue_from_here(void);
 static void comms_tx(const char *what, const char *n,
                      const char *callfmt, const char *bytesfmt);
-static void comms_rx(const char *what, const char *n, const char *callfmt);
+static void comms_rx(const char *what, const char *n,
+                     const char *callfmt, const char *bytesfmt);
 static void do_assign(void);
 static void store(const char *target, const char *val, int ty);
 static char *cond(void);
@@ -1689,7 +1690,8 @@ static void do_spi(void)
                  sfmt("  mmspi_write(%s, %%s);", n),
                  sfmt("  mmspi_write_bytes(%s, %%s);", n));
     else
-        comms_rx("SPI READ", n, sfmt("  mmspi_read(%s, %%s);", n));
+        comms_rx("SPI READ", n, sfmt("  mmspi_read(%s, %%s);", n),
+                 sfmt("  mmspi_read_bytes(%s, %%s);", n));
 }
 
 /* mmb2c.py's comms_tx / comms_rx: the data arguments I2C, SPI and
@@ -1710,6 +1712,20 @@ static void comms_tx(const char *what, const char *n,
     struct val v0;
 
     cv.uses_comms = 1;
+    if (accept_kw("LONGSTRING")) {
+        /* SPI WRITE n, LONGSTRING a() - the bytes of a long string, with
+           no 255-byte cap and no copy.  Spelled out because a long
+           string IS an integer array: written a() it is a numeric array
+           and sends one byte per eight-byte cell, which is MMBasic's
+           behaviour and stays. */
+        struct flat f = lsref();
+
+        emit(sfmt("{ const unsigned char *__b = mmc_tx_ls(%s, %s);",
+                  f.ptr, n));
+        emit(sfmt(bytesfmt, "__b"));
+        emit("}");
+        return;
+    }
     if (is_array_arg()) {
         struct sym *sy = arrayref(1);
         struct flat f;
@@ -1754,13 +1770,25 @@ static void comms_tx(const char *what, const char *n,
     emit("}");
 }
 
-static void comms_rx(const char *what, const char *n, const char *callfmt)
+static void comms_rx(const char *what, const char *n, const char *callfmt,
+                     const char *bytesfmt)
 {
     const char *tg[64];
     int nt = 0, i;
     struct tok *t;
 
     cv.uses_comms = 1;
+    if (accept_kw("LONGSTRING")) {
+        /* ... and the same as a destination, which is how a program
+           reads more than 255 bytes back. */
+        struct flat f = lsref();
+
+        emit(sfmt("{ unsigned char *__b = mmc_rx_ls(%s, %s, %s);",
+                  f.ptr, f.cnt, n));
+        emit(sfmt(bytesfmt, "__b"));
+        emit("}");
+        return;
+    }
     if (is_array_arg()) {
         struct sym *sy = arrayref(1);
         struct flat f;
@@ -1868,7 +1896,9 @@ static void do_i2c2(void)
                       addr, opt, n));
     else
         comms_rx("I2C2 READ", n,
-                 sfmt("  mmi2c_read(%s, %s, %s, %%s);", addr, opt, n));
+                 sfmt("  mmi2c_read(%s, %s, %s, %%s);", addr, opt, n),
+                 sfmt("  mmi2c_read_bytes(%s, %s, %s, %%s);",
+                      addr, opt, n));
 }
 
 /* mmb2c.py's settick_id.  SETTICK's optional trailing timer number,

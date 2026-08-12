@@ -183,8 +183,17 @@ MMG_FN void mmi2c_write(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 MMG_FN void mmi2c_write_bytes(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 			      const unsigned char *b)
 {
+	/*	NULL means a helper above already raised.  ON ERROR SKIP
+	 *	makes mm_error RETURN rather than stop the statement, so the
+	 *	rest of this generated block runs regardless - and without
+	 *	this guard a refused length still wrote that many bytes
+	 *	through the caller's pointer.  A 400-byte read into a
+	 *	24-byte long string overwrote stdio's buffer and the
+	 *	program's own output came out as NULs. */
 	MMINTEGER r;
 
+	if (b == 0)
+		return;
 	if (opt < 0 || opt > 3) {
 		mm_error("I2C option must be 0 to 3");
 		return;
@@ -197,6 +206,41 @@ MMG_FN void mmi2c_write_bytes(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 			(int)(opt & MMI2C_HOLD));
 	if (r)
 		mmi2c_failed(r, 0);
+}
+
+/*	Straight into a caller's bytes.  Still capped at MMI2C_MAXLEN -
+ *	that is the kernel driver's own bounce buffer, not a limit of the
+ *	data argument, so a long string buys nothing here.  It is accepted
+ *	anyway because the forms are shared and a program should not have
+ *	to remember which bus allows which. */
+MMG_FN void mmi2c_read_bytes(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
+			     unsigned char *b)
+{
+	/*	NULL means a helper above already raised.  ON ERROR SKIP
+	 *	makes mm_error RETURN rather than stop the statement, so the
+	 *	rest of this generated block runs regardless - and without
+	 *	this guard a refused length still wrote that many bytes
+	 *	through the caller's pointer.  A 400-byte read into a
+	 *	24-byte long string overwrote stdio's buffer and the
+	 *	program's own output came out as NULs. */
+	MMINTEGER r;
+	int i;
+
+	if (b == 0)
+		return;
+	if (opt < 0 || opt > 1) {
+		mm_error("I2C option must be 0 or 1");
+		return;
+	}
+	if (n < 1 || n > MMI2C_MAXLEN) {
+		mm_error("I2C count out of range");
+		return;
+	}
+	for (i = 0; i < (int)n; i++)
+		b[i] = 0;
+	r = mm_i2c_xfer((int)addr, 1, (int)n, b, (int)(opt & MMI2C_HOLD));
+	if (r)
+		mmi2c_failed(r, 1);
 }
 
 MMG_FN void mmi2c_read(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
