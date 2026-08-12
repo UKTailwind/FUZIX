@@ -57,9 +57,28 @@ Headline specification as configured here:
 
 ## New in v0.13
 
-A Unix release rather than a BASIC one: the machine gains the tools you
-would expect to find on it, and the C library gained something it turns
-out never to have had.
+Two releases in one. The machine gains the Unix tools you would expect
+to find on it, the C library gained something it turns out never to
+have had — and BASIC finished a category of MMBasic statements that had
+been half-done for several releases.
+
+**BASIC.** The drawing statements are complete: `POLYGON` (convex or
+concave, with the even-odd rule MMBasic uses), `BEZIER`, and `FILL` for
+flood-filling a region. The pins gained `PORT` in both directions and
+`PULSE`. And the statements that reach *into* a value rather than
+replacing it are all there now: `LMID`, `BIT`, `BYTE`, `FLAG`, `FLAGS`,
+along with `POS` and `FLUSH`.
+
+Two of those are worth a sentence each. **`PORT` changes every pin in a
+bank on the same clock edge** — the bits that differ are worked out
+first and posted as one masked store — which is the whole reason to use
+it for a bus rather than writing the pins one at a time. And **`PAUSE`
+now services interrupts while it waits**, as MMBasic's does. It never
+did before, and a program that arms a `SETTICK` usually has a main loop
+of little but `PAUSE`, so the handler could go its whole life without
+running once.
+
+**Unix.**
 
 * **`awk`** — Lucent's one true awk, the maintained descendant of the
   V7 original. Associative arrays, user-defined functions, regular
@@ -2650,21 +2669,23 @@ translate time, not at run time.
 |   |   |   |   |
 |---|---|---|---|
 | `?` | `ARC` | `ARRAY` | `BEZIER` |
-| `BOX` | `CALL` | `CASE` | `CAT` |
-| `CHDIR` | `CIRCLE` | `CLEAR` | `CLOSE` |
-| `CLS` | `COLOR` | `COLOUR` | `CONST` |
-| `CONTINUE` | `COPY` | `DATA` | `DATE$` |
-| `DIM` | `DO` | `ELSE` | `ELSEIF` |
-| `END` | `ENDIF` | `ERASE` | `ERROR` |
-| `EXIT` | `FILES` | `FILL` | `FONT` |
-| `FOR` | `FRAMEBUFFER` | `FUNCTION` | `GOSUB` |
-| `GOTO` | `I2C2` | `IF` | `INC` |
-| `INPUT` | `KILL` | `LET` | `LINE` |
-| `LOAD` | `LOCAL` | `LONGSTRING` | `LOOP` |
-| `MAP` | `MATH` | `MKDIR` | `MODE` |
-| `NEXT` | `ON` | `OPEN` | `OPTION` |
-| `PAUSE` | `PIN` | `PIXEL` | `PLAY` |
-| `POLYGON` | `PRINT` | `PWM` | `RANDOMIZE` |
+| `BIT` | `BOX` | `BYTE` | `CALL` |
+| `CASE` | `CAT` | `CHDIR` | `CIRCLE` |
+| `CLEAR` | `CLOSE` | `CLS` | `COLOR` |
+| `COLOUR` | `CONST` | `CONTINUE` | `COPY` |
+| `DATA` | `DATE$` | `DIM` | `DO` |
+| `ELSE` | `ELSEIF` | `END` | `ENDIF` |
+| `ERASE` | `ERROR` | `EXIT` | `FILES` |
+| `FILL` | `FLAG` | `FLAGS` | `FLUSH` |
+| `FONT` | `FOR` | `FRAMEBUFFER` | `FUNCTION` |
+| `GOSUB` | `GOTO` | `I2C2` | `IF` |
+| `INC` | `INPUT` | `KILL` | `LET` |
+| `LINE` | `LMID` | `LOAD` | `LOCAL` |
+| `LONGSTRING` | `LOOP` | `MAP` | `MATH` |
+| `MKDIR` | `MODE` | `NEXT` | `ON` |
+| `OPEN` | `OPTION` | `PAUSE` | `PIN` |
+| `PIXEL` | `PLAY` | `POLYGON` | `PORT` |
+| `PRINT` | `PULSE` | `PWM` | `RANDOMIZE` |
 | `RBOX` | `READ` | `RENAME` | `RESTORE` |
 | `RETURN` | `RMDIR` | `RTC` | `SAVE` |
 | `SEEK` | `SELECT` | `SERVO` | `SETPIN` |
@@ -2686,22 +2707,22 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `CHR$` | `CINT` | `COS` | `CWD$` |
 | `DATE$` | `DATETIME$` | `DAY$` | `DEG` |
 | `DIR$` | `EOF` | `EPOCH` | `EXP` |
-| `FIELD$` | `FIX` | `FORMAT$` | `HEX$` |
-| `INKEY$` | `INPUT$` | `INSTR` | `INT` |
-| `LCASE$` | `LCOMPARE` | `LEFT$` | `LEN` |
-| `LGETBYTE` | `LGETSTR$` | `LINPUT` | `LINSTR` |
-| `LLEN` | `LOC` | `LOF` | `LOG` |
-| `LTRIM$` | `MAP` | `MATH` | `MAX` |
-| `MID$` | `MIN` | `MM.CMDLINE$` | `MM.DEVICE$` |
-| `MM.ERRMSG$` | `MM.ERRNO` | `MM.HRES` | `MM.INFO` |
-| `MM.SPISPEED` | `MM.VER` | `MM.VRES` | `OCT$` |
-| `PEEK` | `PI` | `PIN` | `PIXEL` |
-| `RAD` | `RGB` | `RIGHT$` | `RND` |
-| `RTRIM$` | `SGN` | `SIN` | `SPACE$` |
-| `SPI` | `SQR` | `STR$` | `STR2BIN` |
-| `STRING$` | `STRUCT` | `TAB` | `TAN` |
-| `TIME$` | `TIMER` | `TRIM$` | `UCASE$` |
-| `VAL` |  |  |  |
+| `FIELD$` | `FIX` | `FLAG` | `FORMAT$` |
+| `HEX$` | `INKEY$` | `INPUT$` | `INSTR` |
+| `INT` | `LCASE$` | `LCOMPARE` | `LEFT$` |
+| `LEN` | `LGETBYTE` | `LGETSTR$` | `LINPUT` |
+| `LINSTR` | `LLEN` | `LOC` | `LOF` |
+| `LOG` | `LTRIM$` | `MAP` | `MATH` |
+| `MAX` | `MID$` | `MIN` | `MM.CMDLINE$` |
+| `MM.DEVICE$` | `MM.ERRMSG$` | `MM.ERRNO` | `MM.HRES` |
+| `MM.INFO` | `MM.SPISPEED` | `MM.VER` | `MM.VRES` |
+| `OCT$` | `PEEK` | `PI` | `PIN` |
+| `PIXEL` | `PORT` | `POS` | `RAD` |
+| `RGB` | `RIGHT$` | `RND` | `RTRIM$` |
+| `SGN` | `SIN` | `SPACE$` | `SPI` |
+| `SQR` | `STR$` | `STR2BIN` | `STRING$` |
+| `STRUCT` | `TAB` | `TAN` | `TIME$` |
+| `TIMER` | `TRIM$` | `UCASE$` | `VAL` |
 
 ## MATH() sub-functions
 
@@ -2923,9 +2944,9 @@ such limit.
 
 ## Not covered
 
-One-wire, `PORT`, and the interrupt statements — along with the
-editor, `RUN`, `LIST`, `EDIT` and the rest of the immediate-mode
-environment. The hardware statements are the subject of current work;
+One-wire — along with the editor, `RUN`, `LIST`, `EDIT` and the rest
+of the immediate-mode environment. The hardware statements are the
+subject of current work;
 the immediate-mode ones will never apply, since a translated program is
 compiled and run rather than typed at a prompt. (`mmedit` provides the
 editing they existed for.)
@@ -2941,7 +2962,25 @@ orientations — the three that rotate the character itself are accepted
 and drawn normally.
 
 Of the pins, `SETPIN n, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|PWM|OFF`,
-`PIN(n) =` and `PIN(n)` are done, and `PWM slice, freq, duty [, duty2]`
+`PIN(n) =` and `PIN(n)` are done, and so are `PORT` in both directions
+and `PULSE`. `PORT(pin, nbits [, pin, nbits]…)` reads or writes
+several pins as one number, and **the first pin of a group is the
+least significant bit** — `PORT(0,8) = 1` lights GP0, not GP7. Every
+pin in a bank changes on the same clock edge, which is the whole
+reason to use it rather than eight `PIN()` writes: written one at a
+time, eight lines carry seven wrong values first, and anything clocked
+off them sees all seven. A port spanning GP31/GP32 takes one store per
+bank, as it must.
+
+`PULSE pin, width` **inverts** the pin for the width rather than
+driving it high, which is MMBasic's behaviour. Under 3 ms it blocks
+and the width is exact; at 3 ms and above it returns at once and the
+pin flips back later — at the next `PAUSE`, the next `PULSE`, or the
+next statement in a program that also uses interrupts. MMBasic ends
+the long ones from a hardware timer, and this machine has no
+sub-second interval timer to hang one on.
+
+Also `PWM slice, freq, duty [, duty2]`
 with `PWM slice, OFF`, and `SERVO slice, position [, position2]` with
 `SERVO slice, OFF`; the frequency and counting modes of `SETPIN`, and
 `PWM SYNC`, are not. Interrupt handlers must be SUBs — MMBasic's label and
@@ -2951,7 +2990,15 @@ handler never needs.
 Of the interrupts, `SETPIN INTH|INTL|INTB`, `SETTICK` (all four timers,
 `PAUSE`, `RESUME`, off) and `ON KEY` (both forms) are done. They are
 MMBasic's poll, checked between statements, with its priority order and
-its no-nesting rule. Three divergences, all named where they are
+its no-nesting rule. **A `PAUSE` services them while it waits**, as
+MMBasic's does — which matters because a program that arms a `SETTICK`
+usually has a main loop of little else, so a `PAUSE` that ignored it
+would mean the handler never ran at all. The wait is cut into slices
+with the poll between them, and the slice is sized from the shortest
+armed period: a slow tick still sleeps and costs nothing, a fast one
+spins as MMBasic does, and only while the program is pausing.
+
+Three divergences, all named where they are
 described: `SETTICK` fires at the period asked for rather than MMBasic's
 period-plus-a-millisecond; the console is checked at most every 5 ms;
 and keys reach a program only when a line is complete, which is the tty
@@ -2970,6 +3017,27 @@ Of the sound, `PLAY MP3`, `PLAY VOLUME` and `PLAY STOP` are done —
 not, and neither is the four-channel `SOUND` synthesiser the kernel
 provides to BBC BASIC. `PLAY VOLUME` takes one level rather than one
 per channel.
+
+Of the statements that reach *into* something rather than replacing
+it, `MID$(s$,n,m) =`, `LMID(a(),start[,num]) =`, `BIT(v,n) =`,
+`BYTE(s$,n) =`, `FLAG(n) =` and `FLAGS =` are all done, with `BIT()`,
+`BYTE()`, `FLAG()` and `MM.INFO(FLAGS)` reading them back. `FLAGS` is
+sixty-four bits of scratch for the program's own use, cleared at
+start — and one set *per program* here, where MMBasic has a single
+firmware global. `LMID` is a **splice, not an overwrite**: `num` bytes
+come out and the string goes in, so the long string grows or shrinks
+unless the two lengths match, and leaving `num` out means "as long as
+the replacement". Where MMBasic checks the target's type when the
+statement runs, the translator knows an lvalue's type as it generates
+the call, so a `BIT` on a string is refused at translation with the
+line named.
+
+`POS` gives the column the next character will go in, 1 at the start of
+a line. `FLUSH #n` pushes a file out — `fflush` *and* `fsync`, since a
+program that says `FLUSH` means the version that survives the power
+going off. Note that this machine's `fsync` syncs the whole
+filesystem, so it costs more than MMBasic's per-file version; channel
+0 is the console and does nothing, as MMBasic's does.
 
 In a graphics mode a program's `PRINT` now draws the characters into
 whatever is being drawn on, as MMBasic does, so text goes into the
