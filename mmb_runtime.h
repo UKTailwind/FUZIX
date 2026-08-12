@@ -612,12 +612,18 @@ void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
  * A mode change discards the buffer, so CREATE belongs after MODE.  It
  * is also given up automatically when the program ends - nothing leaks
  * if it never calls CLOSE. */
-void mm_fb_create(void);
-void mm_fb_close(void);
+/* which: 1 = the F buffer (FRAMEBUFFER CREATE), 2 = the layer
+ * (FRAMEBUFFER LAYER).  Created and closed separately, as MMBasic
+ * creates and closes them. */
+void mm_fb_create(MMINTEGER which);
+void mm_fb_close(MMINTEGER which);
 void mm_fb_write(MMINTEGER which);
 /* wait: non-zero for MMBasic's ",B" - start at the top of the frame */
 void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait);
 void mm_fb_wait(void);
+/* MERGE: the layer over F onto the screen, skipping the transparent
+ * index (0-15).  Neither source is changed. */
+void mm_fb_merge(MMINTEGER colour);
 
 /* INKEY$ - the key that has been pressed, or "" if none has.  Does not
  * wait, and leaves the terminal as it found it, so INPUT still works

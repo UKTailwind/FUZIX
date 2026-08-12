@@ -133,17 +133,20 @@ int accept_kw(const char *s)
     return 0;
 }
 
-/* Which framebuffer a FRAMEBUFFER argument names.  N is the screen and
-   F the off-screen buffer; MMBasic's L, T and 2 name buffers this
-   machine does not have yet, so they are refused here rather than
-   quietly becoming one of these two. */
+/* Which framebuffer a FRAMEBUFFER argument names.  N is the screen, F
+   the off-screen buffer and L the layer - which is just a second
+   off-screen buffer, and becomes a layer only in MERGE.  MMBasic's T
+   and 2 name buffers this machine does not have, so they are refused
+   here rather than quietly becoming one of these three. */
 int fb_buf(void)
 {
     if (accept_kw("N"))
         return 0;
     if (accept_kw("F"))
         return 1;
-    cv_err("expected N or F");
+    if (accept_kw("L"))
+        return 2;
+    cv_err("expected N, F or L");
     return 0;
 }
 

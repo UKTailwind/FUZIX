@@ -1,0 +1,8 @@
+both buffers created
+merged with transparent 0
+merged again, default colour
+copy works both ways with L
+layer closed
+merge without a layer: Layer not created
+write to a closed layer: Layer not created
+done
