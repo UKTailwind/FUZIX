@@ -340,6 +340,12 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_gfx_map.h\"\n");
     if (cv.uses_gpio)
         fprintf(f, "#include \"mmb_gpio.h\"\n");
+    /* After mmb_gpio.h: PORT validates against the same mmg_mode table
+       SETPIN fills in. */
+    if (cv.uses_port)
+        fprintf(f, "#include \"mmb_port.h\"\n");
+    if (cv.uses_pulse)
+        fprintf(f, "#include \"mmb_pulse.h\"\n");
     /* After mmb_gpio.h, which it uses to read the pins.  Only a program
        that arms an interrupt carries any of it. */
     if (cv.uses_interrupts)
@@ -352,6 +358,11 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_spi.h\"\n");
     if (cv.uses_peek)
         fprintf(f, "#include \"mmb_peek.h\"\n");
+    /* LAST of the runtime headers, and it has to be: it services
+       whatever the others left behind, and finds them by their own
+       include guards. */
+    if (cv.uses_wait)
+        fprintf(f, "#include \"mmb_wait.h\"\n");
     fprintf(f, "#include <math.h>\n");
     fprintf(f, "#include <string.h>\n");
     fprintf(f, "#include <stdlib.h>\n\n");

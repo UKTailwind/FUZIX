@@ -28,7 +28,7 @@ static struct sym *globals_get(const char *canon)
     return NULL;
 }
 
-static int routine_name_known(const char *canon)
+int routine_name_known(const char *canon)
 {
     int k;
     for (k = 0; k < cv.nroutine_names; k++)

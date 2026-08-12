@@ -1,0 +1,4 @@
+after short pulse  pin0 =  0
+short from high    pin0 =  1
+during long pulse  pin0 =  1
+after PULSE 0,0    pin0 =  0

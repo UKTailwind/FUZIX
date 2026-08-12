@@ -2144,6 +2144,15 @@ static MMINTEGER mm_us_now(void)
  *
  * usleep may return early on a signal, so the sleep is a loop against
  * a deadline rather than a single call.
+ *
+ * THIS IS THE PLAIN WAIT AND SERVICES NOTHING.  A program with an
+ * interrupt or a running PULSE needs the wait broken into pieces with
+ * the poll between them, and that CANNOT be done from here: this file
+ * is compiled into bcrun, the poll is a static in a header compiled
+ * into the program, and bcrun's native table holds functions only - a
+ * native cannot see a bytecode symbol, and could not call back into the
+ * VM if it could.  So the slicing lives in generated code instead, in
+ * mmb_wait.h, which calls this one slice at a time.  See mm_wait.
  */
 void mm_pause(MMFLOAT ms)
 {

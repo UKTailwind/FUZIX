@@ -95,6 +95,7 @@ BUILTINS = {
     'DATETIME$': (1, 1), 'DAY$': (1, 1), 'EPOCH': (1, 1),
     'BIN2STR$': (2, 3), 'STR2BIN': (2, 3), 'RGB': (1, 3), 'MATH': (1, 1),
     'PIXEL': (2, 2), 'MAP': (1, 1), 'PIN': (1, 1), 'SPI': (1, 1),
+    'PORT': (2, 16),
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0), 'MM.SPISPEED': (0, 0),
     'MM.ERRNO': (0, 0), 'MM.ERRMSG$': (0, 0),
     'MM.VER': (0, 0), 'MM.DEVICE$': (0, 0), 'MM.CMDLINE$': (0, 0),
@@ -594,6 +595,9 @@ class Conv(object):
         self.uses_text = False
         self.uses_mappal = False
         self.uses_gpio = False
+        self.uses_port = False      # PORT: pulls in mmb_port.h
+        self.uses_pulse = False     # PULSE: pulls in mmb_pulse.h
+        self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
         self.uses_play = False
         self.uses_pwm = False
         self.uses_i2c = False
@@ -1650,6 +1654,24 @@ class Conv(object):
             # is what a program must ask for to land on that entry.
             # Unaffected by remapping, as MMBasic's fun_map is.
             return ('mm_map_get(%s)' % n(0), TY_I)
+        if up == 'PORT':
+            # PORT(pin, nbits [, pin, nbits]...) - several pins read as
+            # one integer.  Pairs, so an odd count is a syntax error
+            # rather than a silently dropped argument; MMBasic makes the
+            # same check with (argc & 0b11) != 0b11.
+            if len(args) % 2:
+                self.err('PORT takes pin, nbits pairs')
+            self.uses_gpio = True
+            self.uses_port = True
+            # A comma sequence: the groups are written, then read.  C
+            # sequences the comma operator left to right, so the table
+            # is full before mmg_port_get looks at it.
+            iv = [self.as_int(a) for a in args]
+            return ('(%s, mmg_port_get(%d))'
+                    % (', '.join('mmg_port_group(%d, %s, %s)'
+                                 % (k, iv[k * 2], iv[k * 2 + 1])
+                                 for k in range(len(iv) // 2)),
+                       len(iv) // 2), TY_I)
         if up == 'PIN':
             # PIN(n) - a digital level, a raw ADC count, or a voltage,
             # depending on what SETPIN made the pin.  The assigning
@@ -2867,6 +2889,20 @@ class Conv(object):
 
         if self.skip_type_block(up):
             return
+        # A SUB the program defines WINS over a statement of the same
+        # name - the rule the expression parser already applies to
+        # functions, and for the same reason: a program written before
+        # a command existed has to keep working.  tests/t2.bas has a
+        # SUB Fill, which was a plain sub call until FILL became a
+        # drawing command, and this is what keeps it one.
+        #
+        # Structural words are excluded: END, PRINT, FOR and the rest
+        # are syntax, not commands, and a SUB called END could not be
+        # called anyway.  Everything else is fair game.
+        if t[0] == T_ID and up not in KEYWORDS \
+                and split_suffix(t[1])[0] in self.routine_names:
+            self.do_assign_or_call()
+            return
         if up == 'STRUCT':
             self.i += 1
             self.do_struct()
@@ -3613,6 +3649,37 @@ class Conv(object):
             self.uses_gpio = True
             self.emit('mmg_pin_put(%s, %s);' % (pin, val))
             return
+        if up == 'PORT' and self.is_op('(', 1):
+            # PORT(pin, nbits [, pin, nbits]...) = value
+            #
+            # Several output pins written as one number, in one masked
+            # store per bank - see mmb_port.h for the bit order, which
+            # is the part worth reading.  The pairs are written into
+            # the runtime's table one call each, because FCC has no
+            # compound literals and a pin number can be an expression,
+            # so the static-table trick used for array bounds does not
+            # apply either.
+            self.i += 1
+            self.expect_op('(')
+            g = []
+            while True:
+                g.append(self.as_int(self.expr()))
+                self.expect_op(',')
+                g.append(self.as_int(self.expr()))
+                if not self.accept_op(','):
+                    break
+            self.expect_op(')')
+            self.expect_op('=')
+            val = self.as_int(self.expr())
+            if len(g) // 2 > 8:
+                self.err('PORT takes at most 8 pin groups')
+            self.uses_gpio = True
+            self.uses_port = True
+            for k in range(len(g) // 2):
+                self.emit('mmg_port_group(%d, %s, %s);'
+                          % (k, g[k * 2], g[k * 2 + 1]))
+            self.emit('mmg_port_put(%d, %s);' % (len(g) // 2, val))
+            return
         if up == 'MAP':
             # MAP(n) = colour     collect one entry
             # MAP SET             apply the collected palette
@@ -3724,9 +3791,32 @@ class Conv(object):
                          self.as_int(x2), self.as_int(y2), col))
             return
         if up == 'PAUSE':
+            # mm_wait, not mm_pause, for a program with an interrupt or
+            # a PULSE to service: it is the same wait cut into slices
+            # with the poll between them, which is what makes a SETTICK
+            # handler fire during a PAUSE the way MMBasic's does.  A
+            # program with nothing armed emits the plain one and pays
+            # nothing.  Decided in the scan pass, so a PAUSE textually
+            # ahead of the SETTICK still gets the serviced form.
             self.i += 1
             v = self.expr()
-            self.emit('mm_pause(%s);' % self.as_flt(v))
+            if self.uses_interrupts or self.uses_pulse:
+                self.uses_wait = True
+                self.emit('mm_wait(%s);' % self.as_flt(v))
+            else:
+                self.emit('mm_pause(%s);' % self.as_flt(v))
+            return
+        if up == 'PULSE':
+            # PULSE pin, width_ms - invert the pin for that long.  Under
+            # 3 ms it blocks and is exact; longer and it returns at once
+            # and the pin flips back later.  See mmb_pulse.h.
+            self.i += 1
+            pin = self.as_int(self.expr())
+            self.expect_op(',')
+            width = self.as_flt(self.expr())
+            self.uses_gpio = True
+            self.uses_pulse = True
+            self.emit('mmg_pulse(%s, %s);' % (pin, width))
             return
         if up == 'ERROR':
             self.i += 1
@@ -5749,6 +5839,12 @@ class Conv(object):
             wr('#include "mmb_gfx_map.h"\n')
         if self.uses_gpio:
             wr('#include "mmb_gpio.h"\n')
+        # After mmb_gpio.h: PORT validates against the same mmg_mode
+        # table SETPIN fills in.
+        if self.uses_port:
+            wr('#include "mmb_port.h"\n')
+        if self.uses_pulse:
+            wr('#include "mmb_pulse.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a
         # program that arms an interrupt carries any of it.
         if self.uses_interrupts:
@@ -5761,6 +5857,11 @@ class Conv(object):
             wr('#include "mmb_spi.h"\n')
         if self.uses_peek:
             wr('#include "mmb_peek.h"\n')
+        # LAST of the runtime headers, and it has to be: it services
+        # whatever the others left behind, and finds them by their own
+        # include guards.
+        if self.uses_wait:
+            wr('#include "mmb_wait.h"\n')
         wr('#include <math.h>\n')
         wr('#include <string.h>\n')
         wr('#include <stdlib.h>\n\n')

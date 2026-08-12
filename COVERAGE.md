@@ -193,6 +193,39 @@ would be worse than the current clear error:
   ten-sample sort-and-discard filter and `ARAW` the raw count; both need
   an ADC pin, GP40-GP46 on the PC3's header.
 
+  `PORT(pin, nbits [, pin, nbits]...)` translates in both directions -
+  as a statement it writes several pins as one number, as a function it
+  reads them back (mmb_port.h).  The first pin of a group is the LEAST
+  significant bit, which is MMBasic's order and not the intuitive one:
+  `PORT(0,8) = 1` lights GP0.  **Every pin in a bank changes on the same
+  clock edge**, which is the whole reason to prefer it over eight
+  `PIN()` writes: the differing bits are worked out first and posted as
+  one masked store, so a bus never carries an intermediate value.  A
+  port spanning GP31/GP32 takes one store per bank, as it must - there
+  is no register covering both, and MMBasic's `gpio_xor_mask64` does the
+  same two.  Reading is one snapshot of all 48 pins for the same reason.
+
+  `PULSE pin, width_ms` translates (mmb_pulse.h).  It INVERTS the pin
+  for the width rather than driving it high, which is MMBasic's
+  behaviour.  Under 3 ms it blocks and the width is exact; at 3 ms and
+  above it returns at once and the pin flips back later.  **Where the
+  later flip happens is a divergence**: MMBasic ends a long pulse from a
+  hardware timer, and Fuzix has no sub-second interval timer to hang one
+  on, so it ends at the next PAUSE, the next PULSE, or the next
+  statement boundary in a program that also uses interrupts.  A program
+  that starts a 500 ms pulse and then computes for a second without
+  pausing holds the pin for the second.
+
+  A related fix came with it: **PAUSE now services interrupts while it
+  waits**, which it did not before.  MMBasic's `cmd_pause` checks
+  interrupts every time round its loop, and a program that arms a
+  `SETTICK` usually has a main loop of little but PAUSE - so a PAUSE
+  that ignored the tick meant the handler never ran at all.  The wait is
+  now sliced with the poll between the slices, and the slice is asked
+  for rather than assumed: the shortest armed tick period, or the time
+  left on a running pulse.  A slow tick still sleeps and costs nothing;
+  a fast one spins, exactly as MMBasic does, and only while pausing.
+
   Two things about this differ from MMBasic and are deliberate.
   **`PIN()` is a float in every mode** where MMBasic returns an integer
   for digital pins and `ARAW`: translated C fixes the type when it is

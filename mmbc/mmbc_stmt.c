@@ -176,6 +176,24 @@ void statement_inner(void)
 
     if (skip_type_block(up))
         return;
+    /* A SUB the program defines WINS over a statement of the same name -
+       the rule the expression parser already applies to functions, and
+       for the same reason: a program written before a command existed
+       has to keep working.  tests/t2.bas has a SUB Fill, which was a
+       plain sub call until FILL became a drawing command, and this is
+       what keeps it one.
+
+       Structural words are excluded: END, PRINT, FOR and the rest are
+       syntax, not commands, and a SUB called END could not be called
+       anyway.  Everything else is fair game. */
+    if (t->kind == T_ID && !kw_in(up)) {
+        int sfx;
+
+        if (routine_name_known(split_suffix(t->text, &sfx))) {
+            do_assign_or_call();
+            return;
+        }
+    }
     if (strcmp(up, "STRUCT") == 0) {
         cv.i++;
         do_struct();
@@ -1071,6 +1089,41 @@ void statement_inner(void)
         emit(sfmt("mmg_pin_put(%s, %s);", pin, val));
         return;
     }
+    if (strcmp(up, "PORT") == 0 && is_op("(", 1)) {
+        /* PORT(pin, nbits [, pin, nbits]...) = value
+
+           Several output pins written as one number, every pin moving
+           on the same edge - see mmb_port.h for the bit order and for
+           why a loop over PIN() is not the same thing.  The pairs are
+           written into the runtime's table one call each, because FCC
+           has no compound literals and a pin number can be an
+           expression, so the static-table trick used for array bounds
+           does not apply either. */
+        const char *pins[8], *bits[8], *val;
+        int n = 0, k;
+
+        cv.i++;
+        expect_op("(");
+        for (;;) {
+            if (n >= 8)
+                cv_err("PORT takes at most 8 pin groups");
+            pins[n] = as_int(expr());
+            expect_op(",");
+            bits[n] = as_int(expr());
+            n++;
+            if (!accept_op(","))
+                break;
+        }
+        expect_op(")");
+        expect_op("=");
+        val = as_int(expr());
+        cv.uses_gpio = 1;
+        cv.uses_port = 1;
+        for (k = 0; k < n; k++)
+            emit(sfmt("mmg_port_group(%d, %s, %s);", k, pins[k], bits[k]));
+        emit(sfmt("mmg_port_put(%d, %s);", n, val));
+        return;
+    }
     if (strcmp(up, "MAP") == 0) {
         /* MAP(n) = colour     collect one entry
            MAP SET             apply the collected palette
@@ -1218,7 +1271,34 @@ void statement_inner(void)
         struct val v;
         cv.i++;
         v = expr();
-        emit(sfmt("mm_pause(%s);", as_flt(v)));
+        /* mm_wait, not mm_pause, for a program with an interrupt or a
+           PULSE to service: it is the same wait cut into slices with the
+           poll between them, which is what makes a SETTICK handler fire
+           during a PAUSE the way MMBasic's does.  A program with nothing
+           armed emits the plain one and pays nothing.  Decided in the
+           scan pass, so a PAUSE textually ahead of the SETTICK still
+           gets the serviced form. */
+        if (cv.uses_interrupts || cv.uses_pulse) {
+            cv.uses_wait = 1;
+            emit(sfmt("mm_wait(%s);", as_flt(v)));
+        } else {
+            emit(sfmt("mm_pause(%s);", as_flt(v)));
+        }
+        return;
+    }
+    if (strcmp(up, "PULSE") == 0) {
+        /* PULSE pin, width_ms - invert the pin for that long.  Under
+           3 ms it blocks and is exact; longer and it returns at once and
+           the pin flips back later.  See mmb_pulse.h. */
+        const char *pin, *width;
+
+        cv.i++;
+        pin = as_int(expr());
+        expect_op(",");
+        width = as_flt(expr());
+        cv.uses_gpio = 1;
+        cv.uses_pulse = 1;
+        emit(sfmt("mmg_pulse(%s, %s);", pin, width));
         return;
     }
     if (strcmp(up, "ERROR") == 0) {
