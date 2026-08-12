@@ -253,7 +253,8 @@ int plt_dev_ioctl(uarg_t request, char *data)
     {
         /* data is the value itself, not a pointer: one int in, like
            GFXIOC_MODE's neighbours. */
-        int r = display_fb_open(udata.u_ptab, (int)(intptr_t)data);
+        int v = (int)(intptr_t)data;
+        int r = display_fb_open(udata.u_ptab, v & 0xFF, (v >> 8) & 0xFF);
         if (r) {
             /* EBUSY and EINVAL say different things, and a program that
                cannot have the layer deserves to know which. */
@@ -270,9 +271,19 @@ int plt_dev_ioctl(uarg_t request, char *data)
         }
         return 0;
     }
-    if (request == GFXIOC_FBCOPY)
+    if (request == GFXIOC_FBCOPY2)
     {
-        if (display_fb_copy(udata.u_ptab, (int)(intptr_t)data)) {
+        int v = (int)(intptr_t)data;
+
+        if (display_fb_copy(udata.u_ptab, (v >> 4) & 0xF, v & 0xF)) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    if (request == GFXIOC_MERGE)
+    {
+        if (display_fb_merge(udata.u_ptab, (int)(intptr_t)data)) {
             udata.u_error = EINVAL;
             return -1;
         }

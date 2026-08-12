@@ -1,7 +1,45 @@
 # FRAMEBUFFER LAYER and FRAMEBUFFER MERGE
 
-A decision and its reasoning, not a plan of work. Nothing here is
-built yet.
+**BUILT, 2026-08-12.** The decision below was taken first and the
+implementation followed it exactly: `disp_fb3` beside `disp_fb2`,
+`display_fb_merge` in display.c, `GFXIOC_MERGE`, a third target for
+`display_fb_select`, and `FRAMEBUFFER LAYER` / `WRITE L` / `COPY` with
+L at either end / `MERGE [c]` / `CLOSE L` through the runtime and both
+translators.
+
+Three things the sketch did not foresee, all found on the board:
+
+**The depth is not always four bits.** MMBasic has two modes here and
+they are different shapes: MODE 1 is the 640×480 **one-bit** console,
+MODE 2 is 320×240 in 16 colours. MMBasic's `merge_scanline` keys per
+nibble, and transcribing it unconditionally meant MODE 1 treated eight
+pixels as two four-bit numbers — which still drew a picture and
+reported plausible timings. The merge branches on depth now, and 1bpp
+is the *cheap* case: a pixel is a bit, so transparent 0 is an `OR` and
+transparent 1 an `AND`, 32 pixels a word.
+
+**It reads two PSRAM buffers, so it must not read them together.** The
+obvious loop takes a byte of F and a byte of L per output byte: two
+streams 38,400 bytes apart competing for one XIP cache, each evicting
+the other. It is two passes instead — `memcpy` F down as one linear
+stream, then stream L once with the destination reads coming from SRAM.
+For the same reason `display_fb_merge` is one of the few things
+deliberately kept OUT of flash: its instruction fetches would contend
+with its own data.
+
+**Adding two flag bytes overflowed the kernel's RAM by eight bytes and
+would not link.** The state is packed into one byte now. That is the
+40K argument below, met from the other side and rather more sharply
+than expected.
+
+Measured, MODE 2: **16.62 ms a frame** for draw-plus-merge — 60 fps
+exactly, the loop quantised by the blanking wait. `COPY F,N`, which is
+pass one of a merge, is 0.75 ms for 38,400 bytes. The composite alone
+cannot be timed while the wait is unconditional, and the wait is
+unconditional because a merge writes into the buffer being scanned out:
+starting part way down the screen tears, once per merge.
+
+The reasoning that led here follows, unchanged.
 
 ## What MMBasic does, twice
 

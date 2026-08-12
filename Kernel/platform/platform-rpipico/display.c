@@ -125,15 +125,34 @@ uint8_t disp_fb[DISP_FB_POOL] __attribute__((aligned(4)));
  */
 uint8_t disp_fb2[DISP_FB_POOL] __uninitialized_psram("fb2");
 
+/*
+ * The LAYER, beside it and in the same window.  Another 40K of PSRAM
+ * and of swap, which against 8 MB is not a consideration - the reason
+ * a layer was not built before is that a SCANOUT-time one would have
+ * had to be in SRAM, and that is 12% of every process's memory
+ * permanently.  See display.h and PC3-LAYER-MERGE.md.
+ */
+uint8_t disp_fb3[DISP_FB_POOL] __uninitialized_psram("fb3");
+
 /* Present only if the window is really there and the link put the layer
  * inside it - a board with no PSRAM links the same but has nowhere for
  * it to live. */
-int display_fb2_ok(void)
+static int fb_in_psram(const uint8_t *p)
 {
-    uint32_t a = (uint32_t)disp_fb2;
+    uint32_t a = (uint32_t)p;
 
     return psram_size &&
            a >= PSRAM_BASE && a + DISP_FB_POOL <= PSRAM_BASE + psram_size;
+}
+
+int display_fb2_ok(void)
+{
+    return fb_in_psram(disp_fb2);
+}
+
+int display_fb3_ok(void)
+{
+    return fb_in_psram(disp_fb3);
 }
 
 /*
@@ -148,13 +167,58 @@ int display_fb2_ok(void)
  * drawing into it.  Anyone else - another program, the console's own
  * repaint - gets the screen, whatever the holder last asked for.
  */
-static struct p_tab *fb_owner;          /* NULL = the layer is free */
-static uint8_t fb_sel;                  /* owner is drawing into it */
+/*
+ * ONE BYTE holds which buffers exist and which is selected, and that is
+ * not premature tidiness: adding two plain flags here overflowed the
+ * kernel's RAM region BY EIGHT BYTES and would not link.  There is that
+ * little SRAM left, which is the same fact - seen from the other side -
+ * that made a scanout-time layer impossible.
+ *
+ *   bit 0  F exists      bits 4-5  the selected target, DISP_FB_N/F/L
+ *   bit 1  layer exists
+ */
+#define FBS_HAVE_F	0x01
+#define FBS_HAVE_L	0x02
+#define FBS_SEL_SHIFT	4
+#define FBS_SEL_MASK	0x30
+
+static struct p_tab *fb_owner;          /* NULL = both buffers are free */
+static uint8_t fb_state;
 static uint8_t *gfx_draw = disp_fb;
+
+static int fb_have(int which)
+{
+    return fb_state & (which == DISP_FB_L ? FBS_HAVE_L : FBS_HAVE_F);
+}
+
+static int fb_selected(void)
+{
+    return (fb_state & FBS_SEL_MASK) >> FBS_SEL_SHIFT;
+}
+
+static void fb_set_sel(int which)
+{
+    fb_state = (uint8_t)((fb_state & ~FBS_SEL_MASK) |
+                         ((which << FBS_SEL_SHIFT) & FBS_SEL_MASK));
+}
+
+/* The buffer a target names, or NULL if the owner has not created it. */
+static uint8_t *fb_buf(int which)
+{
+    if (which == DISP_FB_F)
+        return fb_have(DISP_FB_F) ? disp_fb2 : NULL;
+    if (which == DISP_FB_L)
+        return fb_have(DISP_FB_L) ? disp_fb3 : NULL;
+    return disp_fb;
+}
 
 void display_fb_enter(struct p_tab *who)
 {
-    gfx_draw = (fb_sel && fb_owner == who) ? disp_fb2 : disp_fb;
+    uint8_t *t = NULL;
+
+    if (fb_owner == who && fb_selected() != DISP_FB_N)
+        t = fb_buf(fb_selected());
+    gfx_draw = t ? t : disp_fb;
 }
 
 uint8_t *display_fb_target(void)
@@ -168,17 +232,30 @@ uint8_t *display_fb_target(void)
  * quietly sharing a buffer with another program.  -1 means this board
  * has no PSRAM to put one in.
  */
-int display_fb_open(struct p_tab *who, int claim)
+int display_fb_open(struct p_tab *who, int claim, int which)
 {
+    if (which != DISP_FB_F && which != DISP_FB_L)
+        return -1;
     if (!claim) {
-        display_fb_release(who);
+        /* Closing one buffer leaves the other; the process only stops
+         * being the owner when it has neither.  MMBasic's CLOSE F and
+         * CLOSE L are separate for the same reason. */
+        if (fb_owner != who)
+            return 0;
+        fb_state &= (uint8_t)~(which == DISP_FB_L ? FBS_HAVE_L : FBS_HAVE_F);
+        if (fb_selected() == which)
+            fb_set_sel(DISP_FB_N);
+        if (!(fb_state & (FBS_HAVE_F | FBS_HAVE_L)))
+            fb_owner = NULL;
+        display_fb_enter(who);
         return 0;
     }
-    if (!display_fb2_ok())
+    if (which == DISP_FB_F ? !display_fb2_ok() : !display_fb3_ok())
         return -1;
     if (fb_owner && fb_owner != who)
         return -2;
     fb_owner = who;
+    fb_state |= (uint8_t)(which == DISP_FB_L ? FBS_HAVE_L : FBS_HAVE_F);
     return 0;
 }
 
@@ -186,25 +263,26 @@ void display_fb_release(struct p_tab *who)
 {
     if (fb_owner == who) {
         fb_owner = NULL;
-        fb_sel = 0;
+        fb_state = 0;
         gfx_draw = disp_fb;
     }
 }
 
-/* 0 = the screen, 1 = the layer.  Only its holder may select the layer;
- * anyone else gets -1 rather than silently drawing nowhere. */
+/* DISP_FB_N/F/L.  Only the holder may select an off-screen buffer, and
+ * only one it has created; anyone else gets -1 rather than silently
+ * drawing nowhere. */
 int display_fb_select(struct p_tab *who, int which)
 {
-    if (which == 0) {
+    if (which == DISP_FB_N) {
         if (fb_owner == who)
-            fb_sel = 0;
+            fb_set_sel(DISP_FB_N);
         gfx_draw = disp_fb;
         return 0;
     }
-    if (which != 1 || fb_owner != who)
+    if (fb_owner != who || fb_buf(which) == NULL)
         return -1;
-    fb_sel = 1;
-    gfx_draw = disp_fb2;
+    fb_set_sel(which);
+    gfx_draw = fb_buf(which);
     return 0;
 }
 
@@ -213,18 +291,189 @@ int display_fb_select(struct p_tab *who, int which)
  * otherwise.  One memcpy: the layer holds the mode's own layout, so
  * there is no conversion.  MMBasic's FRAMEBUFFER COPY, whose source and
  * destination we can offer both ways round for the same memcpy. */
-int display_fb_copy(struct p_tab *who, int to_layer)
+int display_fb_copy(struct p_tab *who, int src, int dst)
 {
     int n = display_gfx_fbsize();
+    uint8_t *s, *d;
 
-    if (fb_owner != who || !display_fb2_ok())
+    if (src == dst)
+        return 0;
+    /* The screen needs no claim - anyone may copy to or from what is on
+     * it - but an off-screen buffer must be one this caller created. */
+    if ((src != DISP_FB_N || dst != DISP_FB_N) && fb_owner != who)
+        return -1;
+    s = fb_buf(src);
+    d = fb_buf(dst);
+    if (s == NULL || d == NULL)
         return -1;
     if (n <= 0 || n > DISP_FB_POOL)
         n = DISP_FB_POOL;
-    if (to_layer)
-        memcpy(disp_fb2, disp_fb, (unsigned)n);
-    else
-        memcpy(disp_fb, disp_fb2, (unsigned)n);
+    memcpy(d, s, (unsigned)n);
+    return 0;
+}
+
+/*
+ * MERGE - the layer over F, onto the screen.
+ *
+ * MMBasic's merge_scanline (FrameBuffer.c:823), transcribed.  The
+ * buffers are packed 4bpp, two pixels to a byte, on both machines, so
+ * the keying is PER NIBBLE and the transparent index has to be tested
+ * in each half separately:
+ *
+ *     top    = src & 0xF0     transparent when it equals colour << 4
+ *     bottom = src & 0x0F     transparent when it equals colour
+ *
+ * MMBasic's whole-byte early-out is kept and matters more here than
+ * there: an empty layer is 38,400 bytes of "both nibbles transparent",
+ * and skipping those is the difference between a merge costing what a
+ * copy costs and costing several times more.
+ *
+ * NEITHER SOURCE IS MODIFIED, which is MMBasic's behaviour: it copies
+ * F's line into a batch buffer, merges the layer over that, and pushes
+ * the batch to the panel.  Here the screen IS the panel, so the result
+ * lands in disp_fb directly and the two off-screen buffers are left
+ * alone - a program can merge repeatedly with a moving layer over a
+ * fixed background without redrawing the background.
+ *
+ * IT WAITS FOR VERTICAL BLANKING FIRST, always, because the thing it
+ * writes into is the buffer core1 is DMAing to the display.  Writing it
+ * while the scanout is part way down means the top of the screen shows
+ * the new picture and the bottom the old one - tearing, once per merge.
+ * Starting at the top of blanking gives the whole blanking interval as
+ * a head start, and the merge is a couple of milliseconds against a
+ * 16.7 ms frame, so the scanout never catches it.
+ *
+ * Unconditional rather than an option: a merge is by definition going
+ * to the visible screen, so there is no case where tearing is what the
+ * program wanted.  FRAMEBUFFER COPY keeps its explicit B for the same
+ * job, because a copy might be going anywhere.
+ */
+/*	The live depth, 1 or 4.  A one-line accessor because gfx_bpp and
+ *	gfx_exp are defined further down the file, with the expanders they
+ *	belong to, and the framebuffer machinery is up here. */
+static int gfx_cur_bpp(void);
+
+int display_fb_merge(struct p_tab *who, int colour)
+{
+    int n = display_gfx_fbsize();
+    int bpp = gfx_cur_bpp();
+    uint8_t hi, lo, clear;
+    const uint8_t *l;
+    uint8_t *o = disp_fb;
+    int i, w;
+
+    /*	THE DEPTH DECIDES HOW A PIXEL IS KEYED, and there are two.
+     *	Modes 0 and 3 are 1bpp - eight pixels to a byte, 640 across -
+     *	and the console is 1bpp as well; modes 1, 2, 4, 5 and 7 are 4bpp,
+     *	two pixels to a byte.  Keying nibbles in a 1bpp mode would treat
+     *	eight pixels as two four-bit numbers and produce nonsense, which
+     *	is what the first version of this did. */
+    if (colour < 0 || colour > (bpp == 1 ? 1 : 15))
+        return -1;
+    if (fb_owner != who || !fb_have(DISP_FB_F) || !fb_have(DISP_FB_L))
+        return -1;
+    l = disp_fb3;
+    if (n <= 0 || n > DISP_FB_POOL)
+        n = DISP_FB_POOL;
+    hi = (uint8_t)(colour << 4);
+    lo = (uint8_t)colour;
+    clear = (uint8_t)(hi | lo);
+
+    /*
+     * TWO PASSES, ONE PSRAM STREAM EACH, and that is the whole design.
+     *
+     * The obvious loop reads a byte of F and a byte of L for every byte
+     * of output.  Both are in PSRAM, reached through the QMI and its
+     * XIP cache, so that is TWO interleaved streams 38,400 bytes apart
+     * competing for one small cache - each evicting the other's lines,
+     * every byte.
+     *
+     * So F goes down first as a straight copy, which is one linear read
+     * and what the hardware is good at (0.726 ms measured for this size,
+     * 53 MB/s).  Then the layer is streamed once, also linearly, and
+     * only the bytes that are not transparent write over what is now in
+     * SRAM.  The destination read in the second pass is disp_fb - SRAM,
+     * 3.7x faster than PSRAM and not in the cache's way at all.
+     *
+     * The whole-byte test is a single compare against (colour<<4)|colour
+     * and skips the read-modify-write entirely, so an empty layer costs
+     * one PSRAM stream and no writes.
+     */
+    display_wait_vblank();      /* see below: start at the top of blanking */
+    memcpy(o, disp_fb2, (unsigned)n);
+
+    w = n & ~3;                 /* the word-aligned part; both are 4-aligned */
+
+    if (bpp == 1) {
+        /*
+         * ONE BIT A PIXEL: a bit is transparent or it is not, so the
+         * whole byte is a single boolean operation and there is nothing
+         * to test per pixel.
+         *
+         *   transparent 0 - an opaque pixel is a 1 bit, so OR them in
+         *   transparent 1 - an opaque pixel is a 0 bit, so AND them
+         *
+         * 32 pixels a word, which makes this the cheapest case by far.
+         */
+        const uint32_t *ls = (const uint32_t *)(const void *)l;
+        uint32_t *os = (uint32_t *)(void *)o;
+
+        if (colour) {
+            for (i = 0; i < w / 4; i++)
+                os[i] &= ls[i];
+            for (i = w; i < n; i++)
+                o[i] &= l[i];
+        } else {
+            for (i = 0; i < w / 4; i++)
+                os[i] |= ls[i];
+            for (i = w; i < n; i++)
+                o[i] |= l[i];
+        }
+        return 0;
+    }
+
+    /*
+     * FOUR BITS A PIXEL: MMBasic's per-nibble rule, but tested a WORD
+     * at a time first.  Its own early-out is per byte; four bytes is
+     * eight pixels, and a layer is mostly transparent almost by
+     * definition - that is what a layer is for - so most words are the
+     * transparent pattern repeated and skip in one compare and one
+     * branch rather than four.  A mixed word falls through to the byte
+     * loop, which is MMBasic's code.
+     */
+    {
+        const uint32_t *ls = (const uint32_t *)(const void *)l;
+        uint32_t clearw = (uint32_t)clear * 0x01010101u;
+
+        for (i = 0; i < w; i += 4) {
+            int k;
+
+            if (ls[i >> 2] == clearw)
+                continue;       /* eight transparent pixels: F stands */
+            for (k = i; k < i + 4; k++) {
+                uint8_t s = l[k], top, bot, d;
+
+                if (s == clear)
+                    continue;
+                top = s & 0xF0;
+                bot = s & 0x0F;
+                d = o[k];
+                o[k] = (uint8_t)(((top != hi) ? top : (d & 0xF0)) |
+                                 ((bot != lo) ? bot : (d & 0x0F)));
+            }
+        }
+        for (i = w; i < n; i++) {
+            uint8_t s = l[i], top, bot, d;
+
+            if (s == clear)
+                continue;
+            top = s & 0xF0;
+            bot = s & 0x0F;
+            d = o[i];
+            o[i] = (uint8_t)(((top != hi) ? top : (d & 0xF0)) |
+                             ((bot != lo) ? bot : (d & 0x0F)));
+        }
+    }
     return 0;
 }
 uint8_t disp_tile_fg[DISP_ROWS * DISP_COLS];
@@ -329,6 +578,11 @@ static uint8_t gfx_physmask(enum gexp ex)
 static int gfx_bpp(enum gexp ex)
 {
     return (ex == EXP_CONSOLE || ex == EXP_1BPP_5TO8) ? 1 : 4;
+}
+
+static int gfx_cur_bpp(void)
+{
+    return gfx_bpp(gfx_exp);
 }
 
 /* Built for the mode we are ABOUT to enter, so a live switch can have
@@ -935,7 +1189,7 @@ int display_gfx_mode(int mode)
      * this is that, and it is why a program creates its framebuffer
      * after choosing its mode, never before. */
     fb_owner = NULL;
-    fb_sel = 0;
+    fb_state = 0;               /* both buffers and the selection */
     gfx_draw = disp_fb;
 
     rebuild = (newtim != tim);

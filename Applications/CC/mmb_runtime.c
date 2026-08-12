@@ -5095,26 +5095,39 @@ MMINTEGER mm_colour_index(MMINTEGER rgb)
  */
 #define MM_FB_N 0
 #define MM_FB_F 1
+#define MM_FB_L 2                       /* the layer - MMBasic FRAMEBUFFER LAYER */
 
+/*	Two off-screen buffers now, created and closed separately as
+ *	MMBasic creates and closes them: FRAMEBUFFER CREATE and CLOSE F for
+ *	one, FRAMEBUFFER LAYER and CLOSE L for the other.  MERGE needs
+ *	both, which is what MMBasic's own two NULL tests say. */
 static int mm_fb_made;                  /* CREATE done, CLOSE not yet */
+static int mm_fb_made_l;                /* LAYER done, CLOSE L not yet */
 static int mm_fb_wr = MM_FB_N;          /* where drawing goes now */
 
 #if defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
 
 #define MM_GFXIOC_FBSEL    0x0016
-#define MM_GFXIOC_FBCOPY   0x0017
 #define MM_GFXIOC_FBOPEN   0x0018
+/*	0x0017 was FBCOPY when a copy could only go one of two ways.  The
+ *	layer made that three buffers, so the argument became
+ *	(src << 4) | dst and the NUMBER changed with it: a mismatched
+ *	runtime and kernel now get EINVAL instead of copying the wrong way
+ *	round in silence.  0x0017 is retired, not reused. */
+#define MM_GFXIOC_FBCOPY2  0x0033
+#define MM_GFXIOC_MERGE    0x0034
 #define MM_GFXIOC_VSYNC    0x0019
 
 /* The layer is owned: one process at a time holds it, and the kernel
  * takes it back on exit, exec or a mode change.  So CREATE is a claim
  * that can fail - no PSRAM on this board, or another program has it -
  * which is why this one returns a value and the rest do not. */
-static int mm_fb_open_hw(int claim)
+static int mm_fb_open_hw(int claim, int which)
 {
     if (mm_gfx_open() < 0)
         return -1;
-    return ioctl(mm_gfx_fd, MM_GFXIOC_FBOPEN, (void *)(long)claim);
+    return ioctl(mm_gfx_fd, MM_GFXIOC_FBOPEN,
+                 (void *)(long)((which << 8) | claim));
 }
 
 static void mm_fb_sel_hw(int which)
@@ -5123,10 +5136,18 @@ static void mm_fb_sel_hw(int which)
         ioctl(mm_gfx_fd, MM_GFXIOC_FBSEL, (void *)(long)which);
 }
 
-static void mm_fb_copy_hw(int to_layer)
+static void mm_fb_copy_hw(int src, int dst)
 {
     if (mm_gfx_open() >= 0)
-        ioctl(mm_gfx_fd, MM_GFXIOC_FBCOPY, (void *)(long)to_layer);
+        ioctl(mm_gfx_fd, MM_GFXIOC_FBCOPY2,
+              (void *)(long)((src << 4) | dst));
+}
+
+static int mm_fb_merge_hw(int colour)
+{
+    if (mm_gfx_open() < 0)
+        return -1;
+    return ioctl(mm_gfx_fd, MM_GFXIOC_MERGE, (void *)(long)colour);
 }
 
 static void mm_fb_wait_hw(void)
@@ -5151,20 +5172,21 @@ static void mm_fb_paint_hw(MMINTEGER rgb)
 /* CREATE hands back a blank buffer, as MMBasic's memset does.  The
  * layer is static here and outlives the program that used it, so
  * without this a new program would start with the last one's picture. */
-static void mm_fb_clear_hw(void)
+static void mm_fb_clear_hw(int which)
 {
-    mm_fb_sel_hw(MM_FB_F);
+    mm_fb_sel_hw(which);
     mm_fb_paint_hw(0);
     mm_fb_sel_hw(mm_fb_wr);             /* back where the program was */
 }
 
 #else   /* host: the rules still apply, there is just nothing behind them */
 
-static int mm_fb_open_hw(int claim)     { (void)claim; return 0; }
+static int mm_fb_open_hw(int claim, int w) { (void)claim; (void)w; return 0; }
 static void mm_fb_sel_hw(int which)     { (void)which; }
-static void mm_fb_copy_hw(int to_lay)   { (void)to_lay; }
+static void mm_fb_copy_hw(int s, int d) { (void)s; (void)d; }
+static int mm_fb_merge_hw(int colour)   { (void)colour; return 0; }
 static void mm_fb_wait_hw(void)         {}
-static void mm_fb_clear_hw(void)        {}
+static void mm_fb_clear_hw(int which)   { (void)which; }
 static void mm_fb_paint_hw(MMINTEGER c) { (void)c; }
 
 #endif
@@ -5211,29 +5233,42 @@ static void mm_fb_forget(void)
     mm_fb_wr = MM_FB_N;
 }
 
-void mm_fb_create(void)
+/*	which is MM_FB_F for FRAMEBUFFER CREATE and MM_FB_L for
+ *	FRAMEBUFFER LAYER.  Two buffers, created independently, as
+ *	MMBasic creates them - and each hands back a BLANK one, because
+ *	both are static here and outlive the program that used them. */
+void mm_fb_create(MMINTEGER which)
 {
+    int *made = (which == MM_FB_L) ? &mm_fb_made_l : &mm_fb_made;
+
     mm_pix_drain();             /* a layer claim must not strand queued pixels */
-    if (mm_fb_made) {
-        mm_error("Framebuffer already exists");
+    if (*made) {
+        mm_error(which == MM_FB_L ? "Layer already exists"
+                                  : "Framebuffer already exists");
         return;
     }
-    if (mm_fb_open_hw(1) < 0) {
-        mm_error("Framebuffer not available");
+    if (mm_fb_open_hw(1, (int)which) < 0) {
+        mm_error(which == MM_FB_L ? "Layer not available"
+                                  : "Framebuffer not available");
         return;
     }
-    mm_fb_made = 1;
-    mm_fb_clear_hw();
+    *made = 1;
+    mm_fb_clear_hw((int)which);
 }
 
 /* Closing one that was never created is deliberately quiet - MMBasic's
  * closeframebuffer simply finds nothing to free - because a program
  * that tidies up unconditionally at the end is the normal shape. */
-void mm_fb_close(void)
+void mm_fb_close(MMINTEGER which)
 {
     mm_pix_drain();             /* as mm_fb_create */
-    mm_fb_open_hw(0);           /* drops the claim AND the selection */
-    mm_fb_forget();
+    mm_fb_open_hw(0, (int)which);   /* drops the claim AND the selection */
+    if (which == MM_FB_L)
+        mm_fb_made_l = 0;
+    else
+        mm_fb_forget();
+    if (mm_fb_wr == (int)which)
+        mm_fb_wr = MM_FB_N;
 }
 
 void mm_fb_write(MMINTEGER which)
@@ -5241,6 +5276,10 @@ void mm_fb_write(MMINTEGER which)
     mm_pix_drain();             /* pixels land in the layer that was selected when they were queued */
     if (which == MM_FB_F && !mm_fb_made) {
         mm_error("Frame buffer not created");
+        return;
+    }
+    if (which == MM_FB_L && !mm_fb_made_l) {
+        mm_error("Layer not created");
         return;
     }
     mm_fb_sel_hw((int)which);
@@ -5254,13 +5293,48 @@ void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait)
         mm_error("FRAMEBUFFER COPY source and destination are the same");
         return;
     }
-    if (!mm_fb_made) {
+    /*	Either end may be the layer now, so what has to exist is
+     *	whatever this copy actually names. */
+    if ((src == MM_FB_F || dst == MM_FB_F) && !mm_fb_made) {
         mm_error("Frame buffer not created");
+        return;
+    }
+    if ((src == MM_FB_L || dst == MM_FB_L) && !mm_fb_made_l) {
+        mm_error("Layer not created");
         return;
     }
     if (wait)
         mm_fb_wait_hw();
-    mm_fb_copy_hw(dst == MM_FB_F);
+    mm_fb_copy_hw((int)src, (int)dst);
+}
+
+/*
+ *	FRAMEBUFFER MERGE [colour] - the layer over F, onto the screen,
+ *	skipping the transparent index (0-15, default 0).
+ *
+ *	MMBasic's TFT model exactly: neither source is touched, so a
+ *	program can move something about in the layer and merge again
+ *	without redrawing the background underneath it.  The kernel does
+ *	the compositing per nibble, which is where the 4bpp packing makes
+ *	it two pixels a byte.
+ */
+void mm_fb_merge(MMINTEGER colour)
+{
+    mm_pix_drain();             /* a merge is a snapshot, as a copy is */
+    if (colour < 0 || colour > 15) {
+        mm_error("Number out of bounds");
+        return;
+    }
+    if (!mm_fb_made) {
+        mm_error("Frame buffer not created");
+        return;
+    }
+    if (!mm_fb_made_l) {
+        mm_error("Layer not created");
+        return;
+    }
+    if (mm_fb_merge_hw((int)colour) < 0)
+        mm_error("Framebuffer merge failed");
 }
 
 void mm_fb_wait(void)

@@ -452,26 +452,50 @@ void statement_inner(void)
         return;
     }
     if (strcmp(up, "FRAMEBUFFER") == 0) {
-        /* FRAMEBUFFER CREATE | CLOSE [F] | WRITE N|F |
-                       COPY s, d [, B] | WAIT
+        /* FRAMEBUFFER CREATE | LAYER | CLOSE [F|L] | WRITE N|F|L |
+                       COPY s, d [, B] | MERGE [c] | WAIT
 
-           MMBasic's Draw.c cmd_framebuffer, reduced to the "F" buffer:
-           draw off-screen, then show it in one COPY.  The machine has
-           one off-screen buffer and no transparent blit, so LAYER and
-           MERGE are refused by name below rather than translated into
-           something that is not them.
+           MMBasic's Draw.c cmd_framebuffer.  Two off-screen buffers: F,
+           and the LAYER, which is another framebuffer in every respect
+           except that MERGE puts it OVER F on the way to the screen,
+           skipping a transparent colour.
 
-           A mode change discards the buffer, both here and in the
+           That is MMBasic's TFT model rather than its VGA/HDMI one,
+           where the layer is composited at scanout instead.  The choice
+           is argued in PC3-LAYER-MERGE.md and comes down to SRAM: a
+           scanout-time layer must live where core1 can DMA it, which is
+           40K off every process forever.  A program written for a
+           PicoMite driving an ILI9341 runs unchanged.
+
+           A mode change discards the buffers, both here and in the
            kernel, so CREATE belongs after MODE - which is also where
            MMBasic wants it, setmode() closing every buffer. */
         cv.i++;
         if (accept_kw("CREATE")) {
-            emit("mm_fb_create();");
+            emit("mm_fb_create(1);");
+            return;
+        }
+        if (accept_kw("LAYER")) {
+            emit("mm_fb_create(2);");
             return;
         }
         if (accept_kw("CLOSE")) {
-            accept_kw("F");             /* the only one there is to close */
-            emit("mm_fb_close();");
+            /* CLOSE L closes the layer, CLOSE or CLOSE F the other */
+            int which = accept_kw("L") ? 2 : 1;
+
+            if (which == 1)
+                accept_kw("F");
+            emit(sfmt("mm_fb_close(%d);", which));
+            return;
+        }
+        if (accept_kw("MERGE")) {
+            /* FRAMEBUFFER MERGE [colour] - the transparent index, 0 to
+               15, defaulting to 0 as MMBasic's does. */
+            const char *c = "0";
+
+            if (!stmt_end())
+                c = as_int(expr());
+            emit(sfmt("mm_fb_merge(%s);", c));
             return;
         }
         if (accept_kw("WRITE")) {
@@ -495,8 +519,8 @@ void statement_inner(void)
             emit("mm_fb_wait();");
             return;
         }
-        cv_err("only FRAMEBUFFER CREATE, CLOSE, WRITE, COPY and "
-               "WAIT are translated");
+        cv_err("only FRAMEBUFFER CREATE, LAYER, CLOSE, WRITE, COPY, "
+               "MERGE and WAIT are translated");
     }
     if (strcmp(up, "SYSTEM") == 0
         || ((strcmp(up, "SAVE") == 0 || strcmp(up, "LOAD") == 0)

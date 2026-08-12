@@ -225,3 +225,37 @@
 *hardware_gpio/gpio.c.o(.text*)
 *hardware_adc/adc.c.o(.text*)
 *hardware_spi/spi.c.o(.text*)
+
+
+/* ---- display.c, the cold functions only ----
+ *
+ * display.c as a whole stays in RAM: core1's scanout and the drawing
+ * primitives are on a deadline and a miss there is a visible glitch.
+ *
+ * FRAMEBUFFER MERGE IS NOT HERE, and that was a mistake worth
+ * recording.  It looked like the obvious candidate - it runs once when
+ * a program asks for it - but BOTH ITS SOURCES ARE IN PSRAM, and PSRAM
+ * and flash are reached through the same QMI and share the XIP cache.
+ * Running the loop from flash would put its instruction fetches in
+ * direct contention with the 76,800 bytes of data it is streaming, and
+ * each would evict the other.  It belongs in RAM precisely BECAUSE its
+ * data is external.
+ *
+ * These are the ones that are genuinely cold and touch no PSRAM: the
+ * palette, which changes when a program says MAP SET, and boot-time
+ * initialisation.  They pay for the merge's RAM.
+ *
+ * THE PALETTE IS ON CORE1'S PATH AND THESE ARE STILL SAFE, because
+ * what core1 reads is the TABLE, not these functions.  gfx_lut is a
+ * static array - data, not text - and the expander indexes it every
+ * two pixels (display.c:695).  gfx_lut_rebuild, which fills it, is
+ * deliberately NOT listed either.  What is listed is only the thin
+ * ioctl-side wrappers, and every caller of those is in misc.c or
+ * console.c: core0, in syscall or boot context.  Moving a function
+ * whose name contains "pal" to flash is the sort of thing that wants
+ * checking rather than assuming, so it was checked. */
+*display.c.o(.text.display_init)
+*display.c.o(.text.display_gfx_pal)
+*display.c.o(.text.display_gfx_remap)
+*display.c.o(.text.display_gfx_remap_apply)
+*display.c.o(.text.display_gfx_remap_reset)

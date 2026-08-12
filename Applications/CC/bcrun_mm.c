@@ -446,8 +446,9 @@ static void w_map_set(void)  { mm_map_set(); A = 0; }
 static void w_map_reset(void){ mm_map_reset(); A = 0; }
 static void w_map_get(void)  { A = mm_map_get(LL(0)); }
 /* FRAMEBUFFER - 0 is the screen, 1 the off-screen buffer */
-static void w_fb_create(void){ mm_fb_create(); A = 0; }
-static void w_fb_close(void) { mm_fb_close(); A = 0; }
+static void w_fb_create(void){ mm_fb_create(LL(0)); A = 0; }
+static void w_fb_close(void) { mm_fb_close(LL(0)); A = 0; }
+static void w_fb_merge(void) { mm_fb_merge(LL(0)); A = 0; }
 static void w_fb_write(void) { mm_fb_write(LL(0)); A = 0; }
 static void w_fb_copy(void)  { mm_fb_copy(LL(0), LL(2), LL(4)); A = 0; }
 static void w_fb_wait(void)  { mm_fb_wait(); A = 0; }
@@ -743,6 +744,7 @@ static const struct mmwrap {
 	{ "mm_fb_close",	w_fb_close },
 	{ "mm_fb_write",	w_fb_write },
 	{ "mm_fb_copy",		w_fb_copy },
+	{ "mm_fb_merge",	w_fb_merge },
 	{ "mm_fb_wait",		w_fb_wait },
 	{ "mm_ls_len",		w_ls_len },
 	{ "mm_ls_clear",	w_ls_clear },

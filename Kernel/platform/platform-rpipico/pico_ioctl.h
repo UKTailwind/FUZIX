@@ -205,9 +205,27 @@ struct gfx_batch {
  * program that blocked with the layer selected had its picture written
  * over by whatever ran next, and one that exited without deselecting
  * left the whole machine drawing off-screen. */
-#define GFXIOC_FBOPEN 0x0018		/* int: 1 claim the layer, 0 release */
-#define GFXIOC_FBSEL  0x0016		/* int: 0 screen, 1 layer */
-#define GFXIOC_FBCOPY 0x0017		/* int: 0 layer->screen, 1 screen->layer */
+#define GFXIOC_FBOPEN 0x0018		/* int: (which << 8) | claim */
+#define GFXIOC_FBSEL  0x0016		/* int: 0 screen, 1 F, 2 layer */
+
+/*
+ * FRAMEBUFFER LAYER and MERGE.
+ *
+ * The layer is a THIRD buffer and nothing more; what makes it a layer
+ * is MERGE, which composites it over F onto the screen skipping a
+ * nominated transparent index.  MMBasic's TFT model - see display.h
+ * and PC3-LAYER-MERGE.md for why not its scanout-time one.
+ *
+ * FBCOPY CHANGED SHAPE when the layer arrived and its NUMBER changed
+ * with it, deliberately.  It used to be one int meaning "which
+ * direction", which cannot express three buffers; it is now
+ * (src << 4) | dst over 0 screen, 1 F, 2 layer.  A retired number
+ * means a mismatched runtime and kernel get EINVAL and say so, where
+ * reusing 0x0017 would have had an old binary silently copying the
+ * wrong way round.  0x0017 is not to be used again.
+ */
+#define GFXIOC_FBCOPY2 0x0033		/* int: (src << 4) | dst */
+#define GFXIOC_MERGE   0x0034		/* int: transparent index 0-15 */
 
 /* A run of text at a PIXEL position - MMBasic's PRINT in a graphics
  * mode, which draws glyphs rather than sending characters to a console.

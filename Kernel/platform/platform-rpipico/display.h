@@ -43,20 +43,54 @@ extern uint8_t disp_fb[DISP_FB_POOL];
  * kernel.h is not, so it stays incomplete here. */
 struct p_tab;
 extern uint8_t disp_fb2[DISP_FB_POOL];
+
+/*
+ * And a THIRD buffer, the LAYER - MMBasic's FRAMEBUFFER LAYER.
+ *
+ * It is another off-screen framebuffer and nothing more; what makes it
+ * a layer is MERGE, which composites it OVER the F buffer and puts the
+ * result on the screen, skipping whichever colour index is nominated
+ * transparent.  Neither source is changed.
+ *
+ * MMBasic implements overlays two ways.  Its VGA and HDMI builds test
+ * three buffers per pixel inside the scanline builder, so the composite
+ * is continuous and free; its TFT builds composite on demand in merge()
+ * (FrameBuffer.c:844).  THIS PORT TAKES THE TFT MODEL, deliberately -
+ * a scanout-time layer would have to live in SRAM for core1 to DMA it,
+ * which is 40K off every process's 340K pool forever, for a feature
+ * most programs never use.  PC3-LAYER-MERGE.md has the whole argument
+ * and what would justify revisiting it (a mouse pointer).
+ *
+ * A program written for a PicoMite driving an ILI9341 therefore runs
+ * unchanged; only the moment of compositing differs, and MMBasic itself
+ * defines both moments.
+ */
+extern uint8_t disp_fb3[DISP_FB_POOL];
 int display_fb2_ok(void);
-/* claim (1) or give up (0) the layer.  0 ok, -1 no layer on this board,
- * -2 another process holds it. */
-int display_fb_open(struct p_tab *who, int claim);
-/* 0 = the screen, 1 = the layer.  -1 if the caller has not claimed it. */
+int display_fb3_ok(void);
+
+/* Which off-screen buffer: the argument to open, select and copy. */
+#define DISP_FB_N	0		/* the screen, always present */
+#define DISP_FB_F	1		/* FRAMEBUFFER CREATE */
+#define DISP_FB_L	2		/* FRAMEBUFFER LAYER */
+
+/* claim (1) or give up (0) one of the off-screen buffers.  0 ok, -1 no
+ * PSRAM on this board, -2 another process holds them. */
+int display_fb_open(struct p_tab *who, int claim, int which);
+/* DISP_FB_N/F/L.  -1 if the caller has not created that buffer. */
 int display_fb_select(struct p_tab *who, int which);
 /* Point the primitives at the caller's own target.  Called once per
  * graphics ioctl; a process that owns nothing gets the screen. */
 void display_fb_enter(struct p_tab *who);
 /* Process gone (exit, exec) - drop any claim it held. */
 void display_fb_release(struct p_tab *who);
-/* to_layer 0: layer -> screen, 1: screen -> layer.  -1 unless the caller
- * holds the layer. */
-int display_fb_copy(struct p_tab *who, int to_layer);
+/* Copy one whole buffer to another, any pair of DISP_FB_N/F/L.  -1
+ * unless the caller holds the off-screen buffers it names. */
+int display_fb_copy(struct p_tab *who, int src, int dst);
+/* MERGE: L over F onto the screen, `colour` the transparent index
+ * (0-15).  Neither source is modified.  -1 unless the caller holds
+ * both. */
+int display_fb_merge(struct p_tab *who, int colour);
 /* Where the drawing primitives are currently pointed. */
 uint8_t *display_fb_target(void);
 /* Block until the top of vertical blanking (bounded: if the scanout has
