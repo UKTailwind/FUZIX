@@ -372,13 +372,21 @@ bget ../../../Applications/V7/cmd/rev
 bget ../../../Applications/V7/cmd/split
 bget ../../../Applications/V7/cmd/su
 bget ../../../Applications/V7/cmd/sum
-bget ../../../Applications/V7/cmd/test
-# The SAME program under its other name.  V7/cmd/test.c already checks
-# for argv[0] being a left bracket and for the closing one, so this
-# needed no code at all - and without it every bracket test in every
-# shell script fails with "[: not found", which is most shell scripts
-# ever written.  (No backtick in that sentence: see the note above.)
-bget ../../../Applications/V7/cmd/test [
+# MWC's test, not V7's, and the same binary again under its second
+# name.  Two things going on here:
+#
+# /bin/[ did not exist at all, so every bracket test in every shell
+# script failed with "[: not found" - which is most shell scripts ever
+# written.  Both these programs check argv[0] for the bracket and for
+# the closing one, so it needs no code, only the second name.
+#
+# And V7's test has no -x and no -e, which are the two file tests
+# scripts reach for most.  MWC's has -a -b -c -d -e -f -g -n -o -p -r
+# -s -t -u -w -x -z against V7's -a -d -f -l -n -o -r -s -t -w -z; the
+# only thing lost is -l, a string-length operator nothing uses.  1,128
+# bytes more, checked on the board both ways.
+bget ../../../Applications/MWC/cmd/test
+bget ../../../Applications/MWC/cmd/test [
 # find and expr build in Applications/MWC/cmd, from which NOTHING was
 # installed - the recipe takes 33 programs from V7/cmd and none at all
 # from there.  Both checked on the board.
