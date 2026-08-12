@@ -588,6 +588,7 @@ class Conv(object):
         self.uses_rbox = False
         self.uses_triangle = False
         self.uses_polygon = False
+        self.uses_bezier = False
         self.uses_arc = False
         self.uses_text = False
         self.uses_mappal = False
@@ -3317,6 +3318,33 @@ class Conv(object):
                       % (xf, xi, yf, yi, nverts,
                          self.shortest([xn, yn]), col, fill))
             return
+        if up == 'BEZIER':
+            # BEZIER xarray(), yarray() [, n] [, colour]
+            #
+            # INTEGER arrays, which is MMBasic's own restriction -
+            # cmd_bezier reads them with parseintegerarray.  A float
+            # array is refused rather than converted, because it is a
+            # program that would only work here.
+            self.i += 1
+            xs = self.arrayref()
+            xp, xn = self.array_flat(xs)
+            self.expect_op(',')
+            ys = self.arrayref()
+            yp, yn = self.array_flat(ys)
+            for s in (xs, ys):
+                if s.ty != TY_I:
+                    self.err("BEZIER needs INTEGER control point arrays, "
+                             "and '%s' is not one" % s.name)
+            npts, col = '0LL', 'MM_CUR'
+            if self.accept_op(','):
+                if not self.is_op(','):
+                    npts = self.as_int(self.expr())
+                if self.accept_op(','):
+                    col = self.as_int(self.expr())
+            self.uses_bezier = True
+            self.emit('mmg_bezier(%s, %s, %s, %s, %s);'
+                      % (xp, yp, npts, self.shortest([xn, yn]), col))
+            return
         if up == 'ARC':
             # ARC x, y, r1 [, r2], rad1, rad2 [, colour]
             #
@@ -5690,6 +5718,8 @@ class Conv(object):
             wr('#include "mmb_gfx_triangle.h"\n')
         if self.uses_polygon:
             wr('#include "mmb_gfx_polygon.h"\n')
+        if self.uses_bezier:
+            wr('#include "mmb_gfx_bezier.h"\n')
         if self.uses_arc:
             wr('#include "mmb_gfx_arc.h"\n')
         if self.uses_text:
