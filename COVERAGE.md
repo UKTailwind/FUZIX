@@ -113,11 +113,15 @@ ordinary BASIC program that currently fails outright.
 A C translation cannot honestly provide these, and pretending otherwise
 would be worse than the current clear error:
 
-* **Peripherals** — `PORT ONEWIRE PIO IR
-  WS2812 STEPPER TMC22XX HUMID TEMPR DISTANCE PULSIN CAMERA KEYBOARD KEYPAD
+* **Peripherals** — `PIO IR
+  WS2812 STEPPER TMC22XX HUMID DISTANCE PULSIN CAMERA KEYBOARD KEYPAD
   MOUSE GAMEPAD WII WATCHDOG CPU FLASH SLEEP BITBANG BITSTREAM`
 
-  `SPI`, `I2C2` and `RTC GETREG`/`RTC SETREG` have left this list.
+  `SPI`, `I2C2`, `RTC GETREG`/`RTC SETREG`, `PORT`, `PULSE`, `ONEWIRE`
+  and `TEMPR` have left this list. The last two are the interesting
+  departure: one-wire needs 60 µs slots with a 10 µs sample point, and
+  was impossible while a pin cost an ioctl at 1.488 µs. Once pins
+  became register writes it became ordinary code.
 
   `SETPIN p1, p2, p3, SPI` then `SPI OPEN speed, mode [, bits]` gives
   the first controller, with `WRITE`, `READ`, `CLOSE` and the `SPI()`
@@ -203,6 +207,33 @@ would be worse than the current clear error:
   read addresses a device and may advance a register pointer inside it.
   The buffer holds values rather than bytes — an SPI word can be 16
   bits, which is why MMBasic's is `unsigned int` too.
+
+  **One-wire is the third caller of that layer**, which is what it was
+  built for. `ONEWIRE RESET|WRITE|READ pin, flag, count, …` takes the
+  same data forms as the other two buses and needed no new argument
+  handling at all, because MMBasic's `owWrite`/`owRead` call the same
+  two functions `I2C.c` and `SPI.c` do. `MM.ONEWIRE` holds what the
+  last reset saw, and the flag bits are MMBasic's: 1 reset first, 2
+  reset after, 4 single bits, 8 strong pull-up.
+
+  The slots are bit-banged in the program — a slot is 60 µs and its
+  sample point 10, so this was impossible while a pin cost an ioctl.
+  **What cannot be copied is MMBasic's `disable_interrupts_pico()`**
+  around a byte: a userland program cannot mask interrupts and should
+  not be able to. The kernel is non-preemptive, so nothing takes the
+  processor between two instructions here, but a timer interrupt can
+  still stretch a slot. One-wire tolerates a *long* slot rather than a
+  short one, so a stretched write still reads correctly; a program that
+  cares should check the CRC the device provides.
+
+  **`TEMPR` sleeps where MMBasic spins**, and that is the one
+  deliberate difference. A 12-bit DS18B20 conversion is 750 ms, and
+  `fun_ds18b20` either calls `uSec(200000)` outright or loops on its
+  timer — which costs nothing on firmware with one program to run.
+  This machine has others, so the wait is slept, and through the
+  serviced wait, so a `SETTICK` handler keeps firing while a
+  temperature is being measured. `TEMPR START` returns at once (6 ms
+  measured) and the reading collects the result later.
 
   **`LONGSTRING a()` is an extension**, and the reason SPI was
   re-opened: a BASIC string stops at 255 bytes, a 240-pixel RGB565 row
@@ -512,10 +543,14 @@ ARC PIXEL TEXT CLS` — and these are the gaps in them:
 ## Category 4 — deliberately out
 
 * **Hardware this machine does not have:** `CAMERA GAMEPAD WII
-  WII CLASSIC WII NUNCHUCK KEYPAD KEYBOARD MOUSE HUMID TEMPR
-  TEMPR START DISTANCE PULSIN IR ONEWIRE WS2812 STEPPER TMC22XX LCD
+  WII CLASSIC WII NUNCHUCK KEYPAD KEYBOARD MOUSE HUMID
+  DISTANCE PULSIN IR WS2812 STEPPER TMC22XX LCD
   I2CLCD BACKLIGHT GPS TOUCH CLICK CTRLVAL GUI MSGBOX WEB BITSTREAM
   SLEW WATCHDOG`
+
+  `ONEWIRE`, `TEMPR` and `TEMPR START` were on this list and should not
+  have been: the machine has one-wire on any header pin, and a DS18B20
+  on GP26 is what they were verified against. They are done.
 * **PIO, and its assembler.** `PIO` itself plus the mnemonics that only
   exist inside a PIO program: `JMP MOV NOP PUSH PULL WAIT IN OUT SET
   IRQ` and `IRQ CLEAR/NEXT/NOWAIT/PREV/SET/WAIT`. The pin lock refuses
