@@ -756,6 +756,101 @@ void mm_mid_assign(char *dst, MMINTEGER start, MMINTEGER num, const char *repl)
         dst[start + i] = repl[1 + i];
 }
 
+/*
+ * BIT(intvar, n) = 0|1  and  BYTE(strvar$, n) = 0..255
+ *
+ * MMBasic's cmd_bit and cmd_byte (Commands.c:5641, 5669).  Both are
+ * assignments that reach INTO a variable rather than replacing it, and
+ * both check the type of that variable - "Not an integer", "Not a
+ * string".  Those two checks are not here: the translator knows the
+ * type of an lvalue when it generates the call, so it refuses at
+ * TRANSLATION time and the message names the line.  What is left is
+ * the range checking, which depends on values only known at run time.
+ *
+ * MMBasic uses getint(x, lo, hi) for both, which raises rather than
+ * clamps, so these raise too.  That is the opposite of MID$ above,
+ * which clamps - and it is not an inconsistency to tidy away: MMBasic
+ * clamps in one and raises in the other, and a program can depend on
+ * either.
+ */
+void mm_bit_assign(MMINTEGER *p, MMINTEGER n, MMINTEGER v)
+{
+    if (n < 0 || n > 63) {
+        mm_error("Bit number is out of bounds");
+        return;
+    }
+    if (v < 0 || v > 1) {
+        mm_error("Bit value must be 0 or 1");
+        return;
+    }
+    if (v)
+        *p |= (MMINTEGER)1 << n;
+    else
+        *p &= ~((MMINTEGER)1 << n);
+}
+
+void mm_byte_assign(char *s, MMINTEGER n, MMINTEGER v)
+{
+    /*	One based, and the upper bound is the string's CURRENT length -
+     *	BYTE writes a character that is already there and never extends
+     *	the string.  s[0] is the length byte, so s[n] is the nth
+     *	character with no adjustment, which is why MMBasic indexes it
+     *	exactly this way. */
+    if (n < 1 || n > (MMINTEGER)mm_slen(s)) {
+        mm_error("Byte position is out of bounds");
+        return;
+    }
+    if (v < 0 || v > 255) {
+        mm_error("Byte value must be 0 to 255");
+        return;
+    }
+    s[n] = (char)(unsigned char)v;
+}
+
+/*
+ * FLAG(n) = 0|1, FLAGS = value, FLAG(n), MM.INFO(FLAGS)
+ *
+ * Sixty-four bits of nothing in particular.  MMBasic's g_flag
+ * (Commands.c:221) is written and read by these four and touched by
+ * nothing else in the firmware; it is a scratch register for the
+ * program's own use, and its one real property is that it is CLEARED
+ * WHEN A PROGRAM STARTS (MMBasic.c:6524).
+ *
+ * A static here gets that for free and gets something MMBasic could
+ * not: it is per process, so two BASIC programs running at once have
+ * one each rather than trampling on a single global.
+ */
+static MMINTEGER mm_flags_v;
+
+void mm_flag_assign(MMINTEGER n, MMINTEGER v)
+{
+    if (n < 0 || n > 63) {
+        mm_error("Flag number is out of bounds");
+        return;
+    }
+    if (v < 0 || v > 1) {
+        mm_error("Flag value must be 0 or 1");
+        return;
+    }
+    if (v)
+        mm_flags_v |= (MMINTEGER)1 << n;
+    else
+        mm_flags_v &= ~((MMINTEGER)1 << n);
+}
+
+void mm_flags_set(MMINTEGER v) { mm_flags_v = v; }
+
+MMINTEGER mm_flag_get(MMINTEGER n)
+{
+    if (n < 0 || n > 63) {
+        mm_error("Flag number is out of bounds");
+        return 0;
+    }
+    return (mm_flags_v >> n) & 1;
+}
+
+MMINTEGER mm_flags_get(void) { return mm_flags_v; }
+
 char *mm_ucase(const char *s)
 {
     char *t = mm_tmp();
@@ -2384,6 +2479,57 @@ void mm_ls_replace(MMINTEGER *a, int cells, const char *s, MMINTEGER start)
     mm_ls_fit(cells, start - 1 + k);
     memcpy(MM_LS_DATA(a) + (start - 1), s + 1, (size_t)k);
     if (start - 1 + k > mm_ls_len(a)) a[0] = start - 1 + k;
+}
+
+/*
+ * LMID(a(), start [, num]) = s$
+ *
+ * MMBasic's cmd_lmid (MM_Misc.c:1192), and it is NOT the long-string
+ * twin of LONGSTRING REPLACE above.  REPLACE overwrites in place;
+ * this SPLICES - num bytes at start are taken out and the string put
+ * in, so the long string gets longer or shorter unless the two happen
+ * to be the same length.  Leaving num out means "as many as the
+ * replacement has", which is the overwrite case and the common one.
+ *
+ * The two errors are MMBasic's own words, and the order matters: the
+ * selection is checked against the current length before the result is
+ * checked against the capacity, so a program that asks for an
+ * impossible slice hears about the slice rather than about the size.
+ */
+void mm_ls_lmid(MMINTEGER *a, int cells, MMINTEGER start, MMINTEGER num,
+                const char *s)
+{
+    MMINTEGER cur = mm_ls_len(a);
+    MMINTEGER rl = mm_slen(s);
+    MMINTEGER change;
+
+    if (start < 1 || start > cur) {
+        mm_error("Start position is out of bounds");
+        return;
+    }
+    if (num < 0)
+        num = rl;               /* omitted: as long as the replacement */
+    if (num > cur) {
+        mm_error("Selection exceeds length of string");
+        return;
+    }
+    if (start + num - 1 > cur) {
+        mm_error("Selection exceeds length of string");
+        return;
+    }
+    start--;                    /* position 1 is offset 0 */
+    change = rl - num;
+    if (change == 0) {
+        memcpy(MM_LS_DATA(a) + start, s + 1, (size_t)rl);
+        return;
+    }
+    mm_ls_fit(cells, cur + change);
+    /*	Move the tail before writing, and move it with memmove: the two
+     *	regions overlap whenever the replacement is shorter. */
+    memmove(MM_LS_DATA(a) + start + rl, MM_LS_DATA(a) + start + num,
+            (size_t)(cur - start - num));
+    memcpy(MM_LS_DATA(a) + start, s + 1, (size_t)rl);
+    a[0] = cur + change;
 }
 
 void mm_ls_resize(MMINTEGER *a, int cells, MMINTEGER n)

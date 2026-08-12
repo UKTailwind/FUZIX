@@ -1089,6 +1089,99 @@ void statement_inner(void)
         emit(sfmt("mmg_pin_put(%s, %s);", pin, val));
         return;
     }
+    if ((strcmp(up, "BIT") == 0 || strcmp(up, "BYTE") == 0)
+        && is_op("(", 1)) {
+        /* BIT(intvar, n) = 0|1        set or clear one bit
+           BYTE(strvar$, n) = 0..255   overwrite one character
+
+           Both reach INTO a variable rather than replacing it, so the
+           target is an lvalue and not an expression - MMBasic calls
+           findvar and refuses a constant.  The TYPE check is done here
+           rather than at run time: the translator knows what an lvalue
+           is when it generates the call, so a BIT on a string is a
+           translation error naming the line, which is better than
+           MMBasic managing "Not an integer" at run time. */
+        struct tok *t2;
+        struct sym *s;
+        const char *tgt, *n, *v;
+        int isbit = strcmp(up, "BIT") == 0;
+
+        cv.i++;
+        expect_op("(");
+        /* lvalue_from_here, opened up: it returns the accessor and
+           drops the symbol, and the symbol is what carries the type.
+           Asking reference() a second time would register an implied
+           global twice. */
+        t2 = nxt();
+        if (t2->kind != T_ID)
+            cv_err("%s() assignment needs a variable", up);
+        s = reference(t2->text, is_op("(", 0));
+        tgt = s->is_array ? index_of(s) : s->acc;
+        if (isbit && s->ty != TY_I)
+            cv_err("BIT() assignment needs an integer variable");
+        if (!isbit && s->ty != TY_S)
+            cv_err("BYTE() assignment needs a string variable");
+        expect_op(",");
+        n = as_int(expr());
+        expect_op(")");
+        expect_op("=");
+        v = as_int(expr());
+        if (isbit)
+            emit(sfmt("mm_bit_assign(&(%s), %s, %s);", tgt, n, v));
+        else
+            emit(sfmt("mm_byte_assign(%s, %s, %s);", tgt, n, v));
+        return;
+    }
+    if (strcmp(up, "FLAG") == 0 && is_op("(", 1)) {
+        /* FLAG(n) = 0|1 - one of the sixty-four scratch bits.  The
+           reading form is a function; a statement can only assign. */
+        const char *n, *v;
+
+        cv.i++;
+        expect_op("(");
+        n = as_int(expr());
+        expect_op(")");
+        expect_op("=");
+        v = as_int(expr());
+        emit(sfmt("mm_flag_assign(%s, %s);", n, v));
+        return;
+    }
+    if (strcmp(up, "FLAGS") == 0 && is_op("=", 1)) {
+        /* FLAGS = value - all sixty-four at once.  Reading them is
+           MM.INFO(FLAGS), which is where MMBasic put it. */
+        cv.i += 2;
+        emit(sfmt("mm_flags_set(%s);", as_int(expr())));
+        return;
+    }
+    if (strcmp(up, "LMID") == 0 && is_op("(", 1)) {
+        /* LMID(a(), start [, num]) = s$
+
+           A SPLICE, not an overwrite: num bytes come out and the string
+           goes in, so the long string changes length unless the two
+           match.  Leaving num out means "as many as the replacement
+           has" - see mm_ls_lmid. */
+        struct flat f;
+        struct val start, num, v;
+        int has_num = 0;
+
+        cv.i++;
+        expect_op("(");
+        f = lsref();
+        expect_op(",");
+        start = expr();
+        if (accept_op(",")) {
+            num = expr();
+            has_num = 1;
+        }
+        expect_op(")");
+        expect_op("=");
+        v = expr();
+        if (v.ty != TY_S)
+            cv_err("LMID() assignment needs a string");
+        emit(sfmt("mm_ls_lmid(%s, %s, %s, %s, %s);", f.ptr, f.cnt,
+                  as_int(start), has_num ? as_int(num) : "-1", v.code));
+        return;
+    }
     if (strcmp(up, "PORT") == 0 && is_op("(", 1)) {
         /* PORT(pin, nbits [, pin, nbits]...) = value
 

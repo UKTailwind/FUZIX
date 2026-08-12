@@ -6,6 +6,16 @@
 # a stale /usr/lib/cc/include/mmb_runtime.h is exactly what made cc
 # reject the generated prologue with "type mismatch".
 #
+# The quieter version of that is worse and has also happened: a header
+# too OLD to declare a runtime function does not fail the compile at
+# all.  cc falls back to an implicit declaration, so a bare literal
+# argument goes into ONE 32-bit slot where the native reads two, every
+# argument after it shifts by one, and the program runs and is wrong.
+# LMID(a(), 1) = "AB" - the form that leaves the count out - reported
+# "Selection exceeds length of string" for a selection that was well
+# inside the string.  Size-compare every header, not just the ones a
+# change obviously touched.
+#
 #   sh verifyimage.sh
 #
 # It compares each file on the card against the one that was staged for

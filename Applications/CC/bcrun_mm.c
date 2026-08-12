@@ -221,6 +221,13 @@ static void w_trim(void)     { A = mm_off(mm_trim(Ps(0), Ps(1), I(2))); }
 static void w_field(void)    { A = mm_off(mm_field(Ps(0), LL(1), Ps(3), Ps(4))); }
 static void w_format(void)   { A = mm_off(mm_format(D(0), Ps(2))); }
 static void w_mid_assign(void) { mm_mid_assign(Ps(0), LL(1), LL(3), Ps(5)); A = 0; }
+/* BIT/BYTE/FLAG: the assignment forms and the two flag readers. */
+static void w_bit_assign(void) { mm_bit_assign(PI(0), LL(1), LL(3)); A = 0; }
+static void w_byte_assign(void){ mm_byte_assign(Ps(0), LL(1), LL(3)); A = 0; }
+static void w_flag_assign(void){ mm_flag_assign(LL(0), LL(2)); A = 0; }
+static void w_flags_set(void)  { mm_flags_set(LL(0)); A = 0; }
+static void w_flag_get(void)   { A = mm_flag_get(LL(0)); }
+static void w_flags_get(void)  { A = mm_flags_get(); }
 
 /* date and time */
 static void w_epoch_now(void){ A = mm_epoch_now(); }
@@ -455,6 +462,10 @@ static void w_ls_left(void)  { mm_ls_left(PI(0), I(1), PI(2), LL(3)); A = 0; }
 static void w_ls_right(void) { mm_ls_right(PI(0), I(1), PI(2), LL(3)); A = 0; }
 static void w_ls_mid(void)   { mm_ls_mid(PI(0), I(1), PI(2), LL(3), LL(5)); A = 0; }
 static void w_ls_replace(void){ mm_ls_replace(PI(0), I(1), Ps(2), LL(3)); A = 0; }
+/* (array, cells, start, num, string) - 1 + 1 + 2 + 2 slots, so the
+   string lands at 6.  Count them; a wrong index here reads half of the
+   previous argument and the failure is silent. */
+static void w_ls_lmid(void)  { mm_ls_lmid(PI(0), I(1), LL(2), LL(4), Ps(6)); A = 0; }
 static void w_ls_resize(void){ mm_ls_resize(PI(0), I(1), LL(2)); A = 0; }
 static void w_ls_setbyte(void){ mm_ls_setbyte(PI(0), I(1), LL(2), LL(4)); A = 0; }
 static void w_ls_trim(void)  { mm_ls_trim(PI(0), I(1), LL(2)); A = 0; }
@@ -592,6 +603,12 @@ static const struct mmwrap {
 	{ "mm_field",		w_field },
 	{ "mm_format",		w_format },
 	{ "mm_mid_assign",	w_mid_assign },
+	{ "mm_bit_assign",	w_bit_assign },
+	{ "mm_byte_assign",	w_byte_assign },
+	{ "mm_flag_assign",	w_flag_assign },
+	{ "mm_flags_set",	w_flags_set },
+	{ "mm_flag_get",	w_flag_get },
+	{ "mm_flags_get",	w_flags_get },
 	{ "mm_epoch_now",	w_epoch_now },
 	{ "mm_epoch_str",	w_epoch_str },
 	{ "mm_datetime",	w_datetime },
@@ -735,6 +752,7 @@ static const struct mmwrap {
 	{ "mm_ls_right",	w_ls_right },
 	{ "mm_ls_mid",		w_ls_mid },
 	{ "mm_ls_replace",	w_ls_replace },
+	{ "mm_ls_lmid",	w_ls_lmid },
 	{ "mm_ls_resize",	w_ls_resize },
 	{ "mm_ls_setbyte",	w_ls_setbyte },
 	{ "mm_ls_trim",		w_ls_trim },
