@@ -1,0 +1,110 @@
+The one true awk on Fuzix
+=========================
+
+Lucent's awk (github.com/onetrueawk/awk), the maintained descendant of
+the V7 original by one of its authors.  8,157 lines of C under the
+permissive licence in LICENSE.
+
+WHAT IS DIFFERENT FROM UPSTREAM
+-------------------------------
+
+Deliberately almost nothing, so that taking a newer awk is a copy
+rather than a merge.  Two files differ, by three lines between them:
+
+  awk.h     one #include of "fuzix_compat.h", and an #ifndef around
+            the NCHARS definition so that header can set it.
+
+Everything else this platform needs is in files upstream does not have:
+
+  fuzix_compat.h   MB_CUR_MAX, NCHARS, random/srandom, FOPEN_MAX,
+                   mbtowc/wctomb
+  fuzix_wctype.c   towupper/towlower
+
+The generated files are vendored rather than built: awkgram.tab.c and
+awkgram.tab.h come from yacc, proctab.c from running maketab over the
+latter.  Both are host tools, so neither this build nor the board needs
+yacc.  `make -f Makefile.armm0 tables' regenerates them if awkgram.y is
+ever touched.  byacc was used rather than bison, which upstream's own
+makefile prefers; it reports 44 shift/reduce and 85 reduce/reduce
+conflicts, which look alarming and are inherent to the grammar - the
+resulting parser was checked against user-defined functions, dynamic
+regexes, getline in each form, pipes and printf, and behaves the same.
+
+THE DECISIONS, AND WHY
+----------------------
+
+MB_CUR_MAX is 1.  Fuzix has one locale, C, and no wide-character
+support.  This is not a stub being papered over: awk carries
+awk_mb_cur_max, initialised to 1, and every hot path in b.c and run.c
+reads `if (c < 128 || awk_mb_cur_max == 1)'.  Setting it selects a path
+upstream maintains.  UTF-8 input passes through as bytes, so
+length("e-acute") is 2 rather than 1 and substr can split a character.
+On a machine whose console font is 8x12 ASCII that is the honest answer.
+
+NCHARS is 256+3, not 1256+3.  That is the width of one row of the
+regular expression DFA, and upstream sizes it for Unicode runes.  Each
+state callocs NCHARS entries of eight bytes and resize_state takes ten
+states at a time, so the first growth of any DFA asks for about a
+hundred kilobytes at once - which failed on the board, and awk reported
+"regular expression too big" for gsub(/o/, "0", s).  With
+awk_mb_cur_max at 1 the matcher only ever indexes a row by a byte, so
+the thousand entries above 255 cannot be reached.  A row goes from
+10,072 bytes to 2,072 and nothing is lost.
+
+random() and srandom() become lrand48() and srand48().  An exact
+substitution, not an approximation: both give [0, 2^31-1], and run.c
+divides by 0x80000000 rather than by RAND_MAX.  rand() would have been
+the obvious choice and the wrong one - RAND_MAX is 32767 here, so awk's
+rand() would have had 32768 distinct values.
+
+FOPEN_MAX is 10.  Only the initial size of awk's own table of
+redirections, which run.c reallocs; the real ceiling is the kernel's
+UFTSIZE of ten files per process, three already spent on stdin, stdout
+and stderr.
+
+towupper/towlower are defined rather than macro'd.  They are passed to
+nawk_convert as function pointers.  awk carries its own for DJGPP,
+which lacks them for the same reason, but those are static and collide
+with the declaration the toolchain's wctype.h already provides - so the
+definitions live in fuzix_wctype.c.
+
+WHAT THE C LIBRARY NEEDED
+-------------------------
+
+Three real gaps, all fixed in Library rather than worked around here,
+and all of them things other programs will want:
+
+  stdlib.h        system() had been in the library and undeclared
+                  since it was written.
+
+  Makefile.armm0  drand48.c and lrand48.c existed and were never
+                  compiled, so every one of the seven functions
+                  stdlib.h declares was an undefined reference.
+
+  fnum.c          NEW.  vfprintf.c has called _fnum since it was
+                  written and nothing ever defined it, so the %e/%f/%g
+                  cases sat behind BUILD_LIBM, which no armm0 build
+                  defined - and a %f on this machine printed the
+                  letter f.  awk made it impossible to miss: awk
+                  converts every number with CONVFMT, "%.6g", so
+                  `print 3.5' produced `g'.
+
+  vfprintf.c      %j (intmax_t) and %z (size_t).  awk emits %jd and
+                  %jx for every integer conversion a program writes,
+                  so printf("%x", 255) came out as "jx".
+
+WHAT WAS CHECKED, ON THE BOARD
+------------------------------
+
+Built by the cross compiler, run on a PC3 from /bin/awk:
+
+  associative arrays and for-in       user-defined functions
+  dynamic regexes from -v             getline < file
+  output pipes to a command           split, substr, index
+  field assignment and NF             sqrt, exp, log, int
+  rand/srand spread                   gsub, toupper, length
+  printf widths, precision, %x, %d    NR and pattern counting
+  integers printing as integers
+
+_fnum itself was checked against glibc's printf over 13,596 cases
+before it went near the board - see the note at the top of fnum.c.

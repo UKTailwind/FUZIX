@@ -1,0 +1,44 @@
+ROOT=../..
+FUZIX_ROOT=$(ROOT)
+USERCPU=armm0
+VERBOSE=1
+include $(FUZIX_ROOT)/Target/rules.$(USERCPU)
+
+# The one true awk, Lucent's, unchanged apart from what this platform
+# needs (see PORTING for every difference).
+#
+# awkgram.tab.c, awkgram.tab.h and proctab.c are GENERATED and vendored:
+# the first two by yacc from awkgram.y, the third by running maketab
+# over awkgram.tab.h.  Both are host tools, so keeping their output in
+# the tree means neither a build here nor the board needs yacc.
+# Regenerate with `make tables' if awkgram.y is ever touched.
+# fuzix_wctype.o is this platform's only added object; every other name
+# here is upstream's.  See PORTING.
+OBJS = awkgram.tab.o b.o main.o parse.o proctab.o tran.o lib.o run.o lex.o \
+       fuzix_wctype.o
+
+# awk recurses through its parse tree per record and keeps its own
+# frames for user-defined functions, so the 8K default is not enough -
+# the loader honours PT_GNU_STACK, as with mmedit.
+awk: LINKER_OPT += --defsym __stack_size=32768
+
+all: awk
+
+awk: $(OBJS)
+	$(LINKER) -o awk.debug $(CRT0) $(OBJS) $(LINKER_OPT)
+	$(STRIP) -o awk awk.debug
+
+$(OBJS): awk.h awkgram.tab.h proto.h
+
+# Host-side regeneration, needed only if awkgram.y changes.  Uses the
+# host cc, not the cross compiler: maketab runs here.
+tables:
+	yacc -d -b awkgram awkgram.y
+	$(HOSTCC) -O2 maketab.c -o maketab
+	./maketab awkgram.tab.h > proctab.c
+	rm -f maketab
+
+HOSTCC ?= cc
+
+clean:
+	rm -f *.o awk awk.debug maketab

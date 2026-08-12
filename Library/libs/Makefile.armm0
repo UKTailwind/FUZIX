@@ -13,6 +13,10 @@ CC_OPT = -mcpu=cortex-m33 -ffunction-sections -fdata-sections -fno-strict-aliasi
 # A target that never prints a 64-bit value leaves this undefined and
 # pays nothing for it - see vfprintf.c and ltostr.c.
 CC_OPT += -DCONFIG_PRINTF_LONGLONG
+# The %e/%f/%g conversions, in printf (via fnum.c) and in scanf.  The
+# PC3 has a double-precision BASIC, an MP3 decoder and now awk; a libc
+# on it that cannot print a fraction is not worth the bytes it saves.
+CC_OPT += -DBUILD_LIBM
 ASM_OPT = -g -mcpu=cortex-m33
 # copied in from kernel tree
 KRN_HEADERS = userstructs.h
@@ -50,6 +54,21 @@ SRC_C += malloc.c mkfifo.c mkstemps.c mntent.c nanosleep.c
 SRC_C += opendir.c opendir_r.c pause.c perror.c
 SRC_C += popen.c printf.c putenv.c putchar.c putpwent.c putw.c pwent.c qsort.c
 SRC_C += raise.c rand.c readdir.c readlink.c realloc.c recvfrom.c regerror.c
+# The drand48 family: stdlib.h has declared all seven of these for as
+# long as it has existed and neither file was ever compiled, so any
+# caller got an undefined reference at link time.  lrand48.c carries
+# srand48/lrand48/nrand48/mrand48/jrand48/seed48/lcong48.
+#
+# Worth having rather than pointing callers at rand(): RAND_MAX here is
+# 32767, so rand() gives 32768 distinct values, where lrand48() gives
+# the full [0, 2^31-1].  awk's rand() divides by 2^31 and would have
+# been visibly coarse.
+SRC_C += drand48.c lrand48.c
+# fnum.c is new: vfprintf.c has called _fnum since it was written and
+# nothing ever defined it, so the %e/%f/%g cases sat behind
+# BUILD_LIBM, which no armm0 build defined - and a %f on this machine
+# printed the letter f.  With both, printf and scanf handle floats.
+SRC_C += fnum.c
 SRC_C += regsub.c remount.c remove.c rewind.c rewinddir.c rindex.c rootmntent.c
 SRC_C += seekdir.c sendto.c  setbuffer.c setenv.c
 SRC_C += setlocale.c setvbuf.c settimeofday.c sgetl.c sigdisp.c

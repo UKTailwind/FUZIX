@@ -166,6 +166,27 @@ int _vfnprintf(FILE * op, size_t maxlen, const char *fmt, va_list ap)
 				lval = 1;
 				goto fmtnxt;
 
+			case 'j':	/* intmax_t / uintmax_t */
+				/* 64-bit here, so exactly what ll means.
+				 * awk emits %jd and %jx for every integer
+				 * conversion a program writes, and without
+				 * this the j fell through to the default
+				 * and printed itself: printf("%x", 255)
+				 * in awk came out as "jx". */
+				llval = 1;
+				lval = 1;
+				lcount = 2;
+				goto fmtnxt;
+
+			case 'z':	/* size_t / ssize_t */
+				/* 32-bit here - the same width as long, so
+				 * the long path is the right one.  awk's
+				 * FATAL messages use %zu. */
+				lval = 1;
+				llval = 0;
+				lcount = 1;
+				goto fmtnxt;
+
 			case 'h':	/* short data */
 				lval = 0;
 				llval = 0;

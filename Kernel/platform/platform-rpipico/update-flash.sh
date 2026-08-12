@@ -207,6 +207,9 @@ bget ../../../Applications/util/setboot
 # dies with "EOF in backquote substitution".
 bget ../../../Applications/util/sed
 bget ../../../Applications/util/seq
+# awk - Lucent's one true awk, ported (Applications/awk/PORTING).  Not
+# in Applications/util, hence the different path.
+bget ../../../Applications/awk/awk
 bget ../../../Applications/util/sleep
 bget ../../../Applications/util/ssh
 bget ../../../Applications/util/sort
@@ -302,6 +305,7 @@ chmod 0755 setdate
 chmod 0775 setboot
 chmod 0755 sed
 chmod 0755 seq
+chmod 0755 awk
 chmod 0755 sleep
 chmod 0755 ssh
 chmod 0755 sort

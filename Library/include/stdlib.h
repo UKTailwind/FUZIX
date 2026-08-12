@@ -34,6 +34,13 @@ extern void exit(int __status);
 #endif
 extern void abort(void);
 
+/* libs/system.c has been in the library all along and was never
+   declared here, so every caller got an implicit int and a warning at
+   best - and on a compiler that rejects implicit declarations, an
+   outright error.  Found porting awk, whose system() builtin is a
+   direct call to it. */
+extern int system(const char *__command);
+
 
 #define RAND_MAX	32767
 
