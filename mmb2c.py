@@ -587,6 +587,7 @@ class Conv(object):
         self.uses_box = False
         self.uses_rbox = False
         self.uses_triangle = False
+        self.uses_polygon = False
         self.uses_arc = False
         self.uses_text = False
         self.uses_mappal = False
@@ -3275,6 +3276,47 @@ class Conv(object):
             self.emit('mmg_triangle(%s, %s, %s, %s, %s, %s, %s, %s);'
                       % (x1, y1, x2, y2, x3, y3, col, fill))
             return
+        if up == 'POLYGON':
+            # POLYGON n, xarray(), yarray() [, bordercolour [, fillcolour]]
+            #
+            # Always closed - cmd_polygon passes close=1 to polygon();
+            # the open form belongs to an internal GUI caller.  n == 0
+            # means "as many as the array holds", which is MMBasic's
+            # xcount == 0.
+            #
+            # The multi-polygon form, where the first argument is an
+            # ARRAY of vertex counts and the coordinate arrays hold
+            # several shapes end to end, is refused by name rather than
+            # half-drawn.
+            self.i += 1
+            if self.is_array_arg():
+                self.err("the multi-polygon form of POLYGON (a vertex "
+                         "count array) is not translated; pass a count "
+                         "and one polygon's points")
+            nverts = self.as_int(self.expr())
+            self.expect_op(',')
+            xs = self.arrayref()
+            xp, xn = self.array_flat(xs)
+            self.expect_op(',')
+            ys = self.arrayref()
+            yp, yn = self.array_flat(ys)
+            for s in (xs, ys):
+                if s.ty == TY_S:
+                    self.err("POLYGON needs numeric coordinate arrays, "
+                             "and '%s' is a string array" % s.name)
+            col, fill = 'MM_CUR', 'MM_CUR'
+            if self.accept_op(','):
+                if not self.is_op(','):
+                    col = self.as_int(self.expr())
+                if self.accept_op(','):
+                    fill = self.as_int(self.expr())
+            xf, xi = (xp, 'NULL') if xs.ty == TY_F else ('NULL', xp)
+            yf, yi = (yp, 'NULL') if ys.ty == TY_F else ('NULL', yp)
+            self.uses_polygon = True
+            self.emit('mmg_polygon(%s, %s, %s, %s, %s, %s, %s, %s);'
+                      % (xf, xi, yf, yi, nverts,
+                         self.shortest([xn, yn]), col, fill))
+            return
         if up == 'ARC':
             # ARC x, y, r1 [, r2], rad1, rad2 [, colour]
             #
@@ -5646,6 +5688,8 @@ class Conv(object):
             wr('#include "mmb_gfx_rbox.h"\n')
         if self.uses_triangle:
             wr('#include "mmb_gfx_triangle.h"\n')
+        if self.uses_polygon:
+            wr('#include "mmb_gfx_polygon.h"\n')
         if self.uses_arc:
             wr('#include "mmb_gfx_arc.h"\n')
         if self.uses_text:
