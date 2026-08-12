@@ -157,6 +157,10 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
 
         return mkval(sfmt("(((%s) >> (%s)) & 1LL)", a0, a1), TY_I);
     }
+    if (strcmp(up, "FLAG") == 0)
+        /* FLAG(n) - one scratch bit.  The assigning form is a
+           statement, so a FLAG that reaches here is a read. */
+        return mkval(sfmt("mm_flag_get(%s)", n(0)), TY_I);
     if (strcmp(up, "LEN") == 0)
         return mkval(sfmt("(MMINTEGER)mm_slen(%s)", s(0)), TY_I);
     if (strcmp(up, "ASC") == 0)
@@ -730,9 +734,16 @@ struct val builtin_raw(const char *up)
 
         expect_op("(");
         t = nxt();
+        if (t->kind == T_ID && strcmp(t->up, "FLAGS") == 0) {
+            /* MM.INFO(FLAGS) - all sixty-four scratch bits at once,
+               which is where MMBasic keeps the reading form of the
+               FLAGS command (the MMFLAG case of its big switch). */
+            expect_op(")");
+            return mkval("mm_flags_get()", TY_I);
+        }
         if (t->kind != T_ID || strcmp(t->up, "FONT") != 0)
             cv_err("MM.INFO(%s ...) is not supported; translated is "
-                   "FONT ADDRESS n", t->text);
+                   "FONT ADDRESS n or FLAGS", t->text);
         t = nxt();
         if (t->kind != T_ID || strcmp(t->up, "ADDRESS") != 0)
             cv_err("MM.INFO(FONT %s ...) is not supported; translated "

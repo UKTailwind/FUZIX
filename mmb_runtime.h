@@ -390,6 +390,11 @@ void mm_ls_right  (MMINTEGER *d, int dcells, const MMINTEGER *s, MMINTEGER n);
 void mm_ls_mid    (MMINTEGER *d, int dcells, const MMINTEGER *s,
                    MMINTEGER start, MMINTEGER n);   /* n < 0 = to the end */
 void mm_ls_replace(MMINTEGER *a, int cells, const char *s, MMINTEGER start);
+/* LMID(a(), start [, num]) = s$ - a splice, not an overwrite: num
+ * bytes at start come out and the string goes in, so the long string
+ * changes length.  num < 0 means "as long as the replacement". */
+void mm_ls_lmid   (MMINTEGER *a, int cells, MMINTEGER start, MMINTEGER num,
+                   const char *s);
 void mm_ls_resize (MMINTEGER *a, int cells, MMINTEGER n);
 void mm_ls_setbyte(MMINTEGER *a, int cells, MMINTEGER n, MMINTEGER v);
 void mm_ls_trim   (MMINTEGER *a, int cells, MMINTEGER n);
@@ -414,6 +419,19 @@ int  mm_gosub_pop (void);
 
 /* MID$(s, start, num) = repl$   (the statement form) */
 void mm_mid_assign(char *dst, MMINTEGER start, MMINTEGER num, const char *repl);
+/* BIT(v, n) = 0|1 and BYTE(s$, n) = 0..255 - assignments that reach
+ * into a variable.  The type check is the translator's; these do the
+ * range checks, and raise rather than clamp because MMBasic's getint
+ * does. */
+void mm_bit_assign(MMINTEGER *p, MMINTEGER n, MMINTEGER v);
+void mm_byte_assign(char *s, MMINTEGER n, MMINTEGER v);
+/* FLAG(n) = 0|1, FLAGS = v, and the two readers.  Sixty-four bits of
+ * scratch for the program's own use, cleared at start - and per
+ * process here, which MMBasic's single global could not be. */
+void mm_flag_assign(MMINTEGER n, MMINTEGER v);
+void mm_flags_set(MMINTEGER v);
+MMINTEGER mm_flag_get(MMINTEGER n);
+MMINTEGER mm_flags_get(void);
 
 /* ---- graphics (PC3) --------------------------------------------------
  * Colours are ALWAYS RGB888, as everywhere in MMBasic; the kernel

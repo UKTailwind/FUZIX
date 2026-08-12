@@ -393,11 +393,26 @@ ARC PIXEL TEXT CLS` — and these are the gaps in them:
 
 **Strings and small odds.** All have their function halves already:
 
-* **`MID$(s,n,m) = t`** (`cmd_mid`) — the assignment form of a function
-  that is already translated.
-* **`LMID(...)= `** (`cmd_lmid`) — the `LONGSTRING` equivalent.
-* **`BIT(x,n) = v`**, **`BYTE(x,n) = v`**, **`FLAG(...)= `** — assignment
-  forms; `BIT()` and `BYTE()` already read.
+* ~~**`MID$(s,n,m) = t`**~~ — **done**, and it always was: it is
+  handled in the assignment parser rather than as a statement keyword,
+  which is why the generated outstanding list still names it.
+* ~~**`LMID(a(), start [, num]) = s$`**~~ — **done** (`mm_ls_lmid`).
+  Worth knowing that it is a **splice and not an overwrite**: `num`
+  bytes come out and the string goes in, so the long string grows or
+  shrinks unless the two lengths match, and leaving `num` out means
+  "as long as the replacement". One divergence, deliberate: MMBasic's
+  bound is off by one (`start + (num - 1) - 1 > currentlength`) and
+  lets a selection run a byte past the end, where the tail it then
+  moves is minus one byte long. Refused here.
+* ~~**`BIT(x,n) = v`**, **`BYTE(s$,n) = v`**, **`FLAG(n) = v`**,
+  **`FLAGS = v`**~~ — **done**, with `FLAG(n)` and `MM.INFO(FLAGS)`
+  reading them back. All four reach into a variable rather than
+  replacing it. MMBasic checks the target's type at run time ("Not an
+  integer", "Not a string"); the translator knows an lvalue's type when
+  it generates the call, so those are refused at translation with the
+  line named. `FLAGS` is 64 bits of scratch for the program's own use,
+  cleared at start — and per process here, which MMBasic's single
+  global could not be.
 * **`POS`** (`fun_pos`) — the print column.
 * **`FLUSH`** (`cmd_flush`) — flush a file's buffer.
 * **`SCHANGE$`**, **`TOPBOTTOM`** (`fun_max_min`) — small string and

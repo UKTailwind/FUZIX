@@ -1,0 +1,21 @@
+BIT
+  set 0,3,63     v = 8000000000000009
+  read back       1 0 1 1
+  cleared 3      v = 8000000000000001
+  bits 0-7       v =  255 (255 expected)
+
+BYTE
+  s$ = HellO   len= 5
+  Byte(s$,1) =  72  Byte(s$,5) =  79
+
+FLAG
+  flags 2,5       0 1 1  MM.INFO(FLAGS) =  36
+  cleared 2      MM.INFO(FLAGS) =  32
+  FLAGS = &HFF   Flag(7) =  1  Flag(8) =  0
+
+LMID
+  start          abcdefghij   len= 10
+  LMid(,4,3)=XYZ abcXYZghij   len= 10
+  LMid(,4,3)=12345 abc12345ghij len= 12
+  LMid(,4,5)=-   abc-ghij   len= 8
+  LMid(,1)=AB    ABc-ghij   len= 8

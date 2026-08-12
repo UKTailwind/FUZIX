@@ -95,7 +95,7 @@ BUILTINS = {
     'DATETIME$': (1, 1), 'DAY$': (1, 1), 'EPOCH': (1, 1),
     'BIN2STR$': (2, 3), 'STR2BIN': (2, 3), 'RGB': (1, 3), 'MATH': (1, 1),
     'PIXEL': (2, 2), 'MAP': (1, 1), 'PIN': (1, 1), 'SPI': (1, 1),
-    'PORT': (2, 16),
+    'PORT': (2, 16), 'FLAG': (1, 1),
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0), 'MM.SPISPEED': (0, 0),
     'MM.ERRNO': (0, 0), 'MM.ERRMSG$': (0, 0),
     'MM.VER': (0, 0), 'MM.DEVICE$': (0, 0), 'MM.CMDLINE$': (0, 0),
@@ -1548,6 +1548,10 @@ class Conv(object):
             return (cur, ty)
         if up == 'BIT':
             return ('(((%s) >> (%s)) & 1LL)' % (n(0), n(1)), TY_I)
+        if up == 'FLAG':
+            # FLAG(n) - one scratch bit.  The assigning form is a
+            # statement, so a FLAG that reaches here is a read.
+            return ('mm_flag_get(%s)' % n(0), TY_I)
         if up == 'LEN':
             return ('(MMINTEGER)mm_slen(%s)' % s(0), TY_I)
         if up == 'ASC':
@@ -1929,9 +1933,15 @@ class Conv(object):
             # MM.VER).
             self.expect_op('(')
             t = self.nxt()
+            if t[0] == T_ID and t[2] == 'FLAGS':
+                # MM.INFO(FLAGS) - all sixty-four scratch bits at once,
+                # which is where MMBasic keeps the reading form of the
+                # FLAGS command (the MMFLAG case of its big switch).
+                self.expect_op(')')
+                return ('mm_flags_get()', TY_I)
             if t[0] != T_ID or t[2] != 'FONT':
                 self.err("MM.INFO(%s ...) is not supported; translated is "
-                         "FONT ADDRESS n" % t[1])
+                         "FONT ADDRESS n or FLAGS" % t[1])
             t = self.nxt()
             if t[0] != T_ID or t[2] != 'ADDRESS':
                 self.err("MM.INFO(FONT %s ...) is not supported; translated "
@@ -3649,6 +3659,81 @@ class Conv(object):
             self.uses_gpio = True
             self.emit('mmg_pin_put(%s, %s);' % (pin, val))
             return
+        if up in ('BIT', 'BYTE') and self.is_op('(', 1):
+            # BIT(intvar, n) = 0|1        set or clear one bit
+            # BYTE(strvar$, n) = 0..255   overwrite one character
+            #
+            # Both reach INTO a variable rather than replacing it, so
+            # the target is an lvalue and not an expression - MMBasic
+            # calls findvar and refuses a constant.  The TYPE check is
+            # done here rather than at run time: the translator knows
+            # what an lvalue is when it generates the call, so a BIT on
+            # a string is a translation error naming the line, which is
+            # better than MMBasic managing "Not an integer" at run time.
+            self.i += 1
+            self.expect_op('(')
+            # lvalue_from_here, opened up: it returns the accessor and
+            # drops the symbol, and the symbol is what carries the type.
+            # Asking reference() a second time would register an implied
+            # global twice.
+            t2 = self.nxt()
+            if t2[0] != T_ID:
+                self.err("%s() assignment needs a variable" % up)
+            s = self.reference(t2[1], self.is_op('('))
+            tgt = self.index(s) if s.is_array else s.acc
+            ty = s.ty
+            if up == 'BIT' and ty != TY_I:
+                self.err("BIT() assignment needs an integer variable")
+            if up == 'BYTE' and ty != TY_S:
+                self.err("BYTE() assignment needs a string variable")
+            self.expect_op(',')
+            n = self.as_int(self.expr())
+            self.expect_op(')')
+            self.expect_op('=')
+            v = self.as_int(self.expr())
+            if up == 'BIT':
+                self.emit('mm_bit_assign(&(%s), %s, %s);' % (tgt, n, v))
+            else:
+                self.emit('mm_byte_assign(%s, %s, %s);' % (tgt, n, v))
+            return
+        if up == 'FLAG' and self.is_op('(', 1):
+            # FLAG(n) = 0|1 - one of the sixty-four scratch bits.  The
+            # reading form is a function; a statement can only assign.
+            self.i += 1
+            self.expect_op('(')
+            n = self.as_int(self.expr())
+            self.expect_op(')')
+            self.expect_op('=')
+            v = self.as_int(self.expr())
+            self.emit('mm_flag_assign(%s, %s);' % (n, v))
+            return
+        if up == 'FLAGS' and self.is_op('=', 1):
+            # FLAGS = value - all sixty-four at once.  Reading them is
+            # MM.INFO(FLAGS), which is where MMBasic put it.
+            self.i += 2
+            self.emit('mm_flags_set(%s);' % self.as_int(self.expr()))
+            return
+        if up == 'LMID' and self.is_op('(', 1):
+            # LMID(a(), start [, num]) = s$
+            #
+            # A SPLICE, not an overwrite: num bytes come out and the
+            # string goes in, so the long string changes length unless
+            # the two match.  Leaving num out means "as many as the
+            # replacement has" - see mm_ls_lmid.
+            self.i += 1
+            self.expect_op('(')
+            ptr, cells = self.lsref()
+            self.expect_op(',')
+            start = self.as_int(self.expr())
+            num = self.as_int(self.expr()) if self.accept_op(',') else '-1LL'
+            self.expect_op(')')
+            self.expect_op('=')
+            v = self.expr()
+            if v[1] != TY_S:
+                self.err("LMID() assignment needs a string")
+            self.emit('mm_ls_lmid(%s, %s, %s, %s, %s);'
+                      % (ptr, cells, start, num, v[0]))
+            return
         if up == 'PORT' and self.is_op('(', 1):
             # PORT(pin, nbits [, pin, nbits]...) = value
             #
@@ -4021,7 +4106,7 @@ class Conv(object):
             self.expect_op(',')
             a = self.expr()
             if op == 'MID':
-                b = '-1'
+                b = '-1LL'
                 if self.accept_op(','):
                     b = self.as_int(self.expr())
                 self.emit('mm_ls_mid(%s, %s, %s, %s, %s);'
@@ -4598,7 +4683,7 @@ class Conv(object):
             self.err("MID$() assignment needs a string")
         self.emit('mm_mid_assign(%s, %s, %s, %s);'
                   % (tgt, self.as_int(start),
-                     self.as_int(num) if num else '-1', v[0]))
+                     self.as_int(num) if num else '-1LL', v[0]))
 
     def lvalue_from_here(self):
         t = self.nxt()
