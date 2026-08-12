@@ -108,6 +108,9 @@ echo "--- installing"
 	# PORT and PULSE: several pins as one value, and a timed
 	# inversion.  Both drive the registers directly, so both are
 	# here rather than behind an ioctl.
+	# The data arguments I2C, SPI and one-wire share - one copy, as
+	# MMBasic has one.  Included ahead of both bus headers.
+	echo "get $CC/mmb_comms.h mmb_comms.h"
 	echo "get $CC/mmb_port.h mmb_port.h"
 	echo "get $CC/mmb_pulse.h mmb_pulse.h"
 	# A PAUSE that services what the two above leave running.  It

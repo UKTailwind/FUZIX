@@ -98,7 +98,7 @@ for f in mmb_gfx.h mmb_gfx_pts.h mmb_gfx_circle.h mmb_gfx_box.h \
 		mmb_gfx_text.h mmb_gfx_map.h mmb_gpio.h \
 		mmb_gfx_polygon.h mmb_gfx_bezier.h mmb_gfx_fill.h \
 		mmb_int.h mmb_pwm.h mmb_i2c.h mmb_spi.h mmb_peek.h \
-		mmb_port.h mmb_pulse.h mmb_wait.h; do
+		mmb_comms.h mmb_port.h mmb_pulse.h mmb_wait.h; do
 	same "/usr/lib/cc/include/$f" "$R/Applications/CC/$f"
 done
 

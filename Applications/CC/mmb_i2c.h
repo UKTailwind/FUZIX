@@ -149,10 +149,15 @@ MMG_FN void mmi2c_close(void)
 }
 
 /*	addr is the 7-bit address, as MMBasic takes it. */
+/*	The driver takes bytes; the shared buffer holds values, because
+ *	SPI needs 16 bits (mmb_comms.h).  Narrowed here, into the bounce
+ *	buffer the kernel's shared I2C driver wants anyway. */
+static unsigned char mmi2c_bytes[MMI2C_MAXLEN];
+
 MMG_FN void mmi2c_write(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
-			const unsigned char *buf)
+			const unsigned int *buf)
 {
-	MMINTEGER r;
+	MMINTEGER r, i;
 
 	/*	MMBasic allows 0-3 on a WRITE and only 0-1 on a READ; bit 0
 	 *	is the hold in both.  Same split here. */
@@ -164,14 +169,38 @@ MMG_FN void mmi2c_write(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 		mm_error("I2C count out of range");
 		return;
 	}
-	r = mm_i2c_xfer((int)addr, 0, (int)n, (unsigned char *)buf,
+	for (i = 0; i < n; i++)
+		mmi2c_bytes[i] = (unsigned char)buf[i];
+	r = mm_i2c_xfer((int)addr, 0, (int)n, mmi2c_bytes,
+			(int)(opt & MMI2C_HOLD));
+	if (r)
+		mmi2c_failed(r, 0);
+}
+
+/*	Bytes straight from a string, with no value buffer in the way -
+ *	the same shortcut SPI takes, and for the same reason: the bytes
+ *	are already bytes and already contiguous. */
+MMG_FN void mmi2c_write_bytes(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
+			      const unsigned char *b)
+{
+	MMINTEGER r;
+
+	if (opt < 0 || opt > 3) {
+		mm_error("I2C option must be 0 to 3");
+		return;
+	}
+	if (n < 1 || n > MMI2C_MAXLEN) {
+		mm_error("I2C count out of range");
+		return;
+	}
+	r = mm_i2c_xfer((int)addr, 0, (int)n, (unsigned char *)b,
 			(int)(opt & MMI2C_HOLD));
 	if (r)
 		mmi2c_failed(r, 0);
 }
 
 MMG_FN void mmi2c_read(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
-		       unsigned char *buf)
+		       unsigned int *buf)
 {
 	MMINTEGER r;
 	int i;
@@ -191,10 +220,15 @@ MMG_FN void mmi2c_read(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 	 *	previous WRITE had left at the same address, which looks
 	 *	exactly like a device answering. */
 	for (i = 0; i < (int)n; i++)
-		buf[i] = 0;
-	r = mm_i2c_xfer((int)addr, 1, (int)n, buf, (int)(opt & MMI2C_HOLD));
-	if (r)
+		mmi2c_bytes[i] = 0;
+	r = mm_i2c_xfer((int)addr, 1, (int)n, mmi2c_bytes,
+			(int)(opt & MMI2C_HOLD));
+	if (r) {
 		mmi2c_failed(r, 1);
+		return;
+	}
+	for (i = 0; i < (int)n; i++)
+		buf[i] = mmi2c_bytes[i];
 }
 
 #endif /* MMB_I2C_H */
