@@ -245,6 +245,7 @@ static void w_str2bin_i(void){ A = mm_str2bin_i(I(0), Ps(1), I(2)); }
 /* files */
 static void w_open(void)     { mm_open(Ps(0), I(1), LL(2)); A = 0; }
 static void w_close(void)    { mm_close(LL(0)); A = 0; }
+static void w_flush(void)    { mm_flush(LL(0)); A = 0; }
 static void w_close_all(void){ mm_close_all(); A = 0; }
 static void w_fpr_s(void)    { mm_fpr_s(LL(0), Ps(2)); A = 0; }
 static void w_fpr_i(void)    { mm_fpr_i(LL(0), LL(2)); A = 0; }
@@ -620,6 +621,7 @@ static const struct mmwrap {
 	{ "mm_str2bin_i",	w_str2bin_i },
 	{ "mm_open",		w_open },
 	{ "mm_close",		w_close },
+	{ "mm_flush",		w_flush },
 	{ "mm_close_all",	w_close_all },
 	{ "mm_fpr_s",		w_fpr_s },
 	{ "mm_fpr_i",		w_fpr_i },

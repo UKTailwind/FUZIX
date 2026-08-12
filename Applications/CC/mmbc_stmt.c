@@ -316,6 +316,14 @@ void statement_inner(void)
         do_close();
         return;
     }
+    if (strcmp(up, "FLUSH") == 0) {
+        /* FLUSH #n - get what has been written onto the card.  One
+           channel, as MMBasic takes one; CLOSE above accepts a list and
+           this deliberately does not, because cmd_flush does not. */
+        cv.i++;
+        emit(sfmt("mm_flush(%s);", channel()));
+        return;
+    }
     if (strcmp(up, "INPUT") == 0) {
         cv.i++;
         do_input();
@@ -1179,7 +1187,7 @@ void statement_inner(void)
         if (v.ty != TY_S)
             cv_err("LMID() assignment needs a string");
         emit(sfmt("mm_ls_lmid(%s, %s, %s, %s, %s);", f.ptr, f.cnt,
-                  as_int(start), has_num ? as_int(num) : "-1", v.code));
+                  as_int(start), has_num ? as_int(num) : "-1LL", v.code));
         return;
     }
     if (strcmp(up, "PORT") == 0 && is_op("(", 1)) {
@@ -2060,7 +2068,7 @@ static void do_longstring(void)
         expect_op(",");
         a = expr();
         if (strcmp(op, "MID") == 0) {
-            const char *b = "-1";
+            const char *b = "-1LL";
             if (accept_op(","))
                 b = as_int(expr());
             emit(sfmt("mm_ls_mid(%s, %s, %s, %s, %s);",
@@ -2870,7 +2878,7 @@ static void do_mid_assign(void)
     if (v.ty != TY_S)
         cv_err("MID$() assignment needs a string");
     emit(sfmt("mm_mid_assign(%s, %s, %s, %s);",
-              tgt, as_int(start), has_num ? as_int(num) : "-1",
+              tgt, as_int(start), has_num ? as_int(num) : "-1LL",
               v.code));
 }
 

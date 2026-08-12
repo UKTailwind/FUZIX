@@ -238,6 +238,10 @@ MMINTEGER mm_str2bin_i(int type, const char *s, int big);
 
 void mm_open (const char *fname, int mode, MMINTEGER fnbr);
 void mm_close(MMINTEGER fnbr);
+/* FLUSH #n - fflush and then fsync, so it survives the power going
+ * off.  Channel 0 is the console and does nothing.  Note that Fuzix's
+ * fsync syncs the WHOLE filesystem. */
+void mm_flush(MMINTEGER fnbr);
 void mm_close_all(void);
 
 /* PRINT, with fnbr 0 meaning the console */

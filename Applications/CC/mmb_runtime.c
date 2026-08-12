@@ -1455,6 +1455,36 @@ void mm_close(MMINTEGER fnbr)
     mm_chan[fnbr].mode = 0;
 }
 
+/*
+ * FLUSH #n - get what has been written onto the card.
+ *
+ * MMBasic's cmd_flush (FileIO.c:6473), including its first line: FLUSH
+ * on channel 0 is the console and does nothing at all rather than
+ * complaining.
+ *
+ * Two levels here where MMBasic has one.  fflush empties stdio's own
+ * buffer into the kernel, which is all a program needs to see its data
+ * from another process; fsync is what survives the power going off,
+ * and it is what MMBasic's f_sync means.  Both, because FLUSH is a
+ * program saying "I mean it".
+ *
+ * On Fuzix fsync(fd) IGNORES THE FD and syncs the whole filesystem
+ * (Library/libs/fsync.c is one call to sync()).  So this is more
+ * expensive here than MMBasic's per-file version and does more than
+ * asked - which is the safe direction, and worth knowing before
+ * putting a FLUSH inside a loop.
+ */
+void mm_flush(MMINTEGER fnbr)
+{
+    if (fnbr == 0) return;              /* the console: nothing to do */
+    if (fnbr < 1 || fnbr > MM_MAXFILES) MM_RAISE("Invalid file number");
+    if (mm_chan[fnbr].mode == 0) MM_RAISE("File number is not open");
+    fflush(mm_chan[fnbr].f);
+#if !defined(_WIN32)
+    fsync(fileno(mm_chan[fnbr].f));
+#endif
+}
+
 void mm_close_all(void)
 {
     int i;
@@ -2491,10 +2521,18 @@ void mm_ls_replace(MMINTEGER *a, int cells, const char *s, MMINTEGER start)
  * to be the same length.  Leaving num out means "as many as the
  * replacement has", which is the overwrite case and the common one.
  *
- * The two errors are MMBasic's own words, and the order matters: the
- * selection is checked against the current length before the result is
- * checked against the capacity, so a program that asks for an
- * impossible slice hears about the slice rather than about the size.
+ * The selection is checked against the current length before the
+ * result is checked against the capacity, so a program that asks for
+ * an impossible slice hears about the slice rather than about the
+ * size.
+ *
+ * THE BOUND IS ONE TIGHTER THAN MMBASIC'S, deliberately.  cmd_lmid
+ * tests "start + (num - 1) - 1 > currentlength", which is off by one
+ * and lets a selection run one byte past the end: LMID(a(), 10, 2) on
+ * a ten-byte string passes there, and the tail it then has to move is
+ * minus one byte long.  Here that is refused.  Erring on a slice that
+ * does not exist is a better answer than a memmove of (size_t)-1, and
+ * no program that stays inside its string can tell the difference.
  */
 void mm_ls_lmid(MMINTEGER *a, int cells, MMINTEGER start, MMINTEGER num,
                 const char *s)
