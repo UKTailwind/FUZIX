@@ -13,8 +13,20 @@
  *	-i		ignore case
  *	-l		prints just file names, no lines (quietly overrides -n)
  *	-n		printed lines are preceded by relative line numbers
+ *	-q		prints nothing at all; the exit status is the answer
  *	-s		prints errors only (quietly overrides -l and -n)
  *	-v		prints lines which don't contain the pattern
+ *
+ * -q is what shell scripts use - if grep -q pattern file - and it was
+ * the one flag missing that could not be worked around.  It stops at
+ * the first match rather than reading the rest, so it also terminates
+ * against an endless pipe.
+ *
+ * Note that -q inherits this grep's own -v exit status, which the note
+ * below already warns is not what other greps do; -q -v says "some
+ * line matched", not "some line did not".  That is what -s -v has
+ * always done here and changing it would move ground under existing
+ * scripts.
  *
  * Semantic note:
  * 	If both -l and -v are specified, grep prints the names of those
@@ -81,7 +93,7 @@ int main(int argc, char *argv[])
   pattern = NULL;
 
 /* Process any command line flags. */
-  while ((opt = getopt(argc, argv, "e:cilnsv")) != EOF) {
+  while ((opt = getopt(argc, argv, "e:cilnqsv")) != EOF) {
 	if (opt == '?')
 		exit_status = FAILURE;
 	else
@@ -93,7 +105,7 @@ int main(int argc, char *argv[])
 
 /* Detect a few problems. */
   if ((exit_status == FAILURE) || (optind == argc && pattern == NULL))
-	error_exit("Usage: %s [-cilnsv] [-e] expression [file ...]\n");
+	error_exit("Usage: %s [-cilnqsv] [-e] expression [file ...]\n");
 
 /* Ensure we have a usable pattern. */
   if (pattern == NULL)
@@ -164,7 +176,7 @@ static int match(FILE *input, char *label, char *filename)
   long int matchcount = 0;	/* lines matched */
   int status = NO_MATCH;	/* summary of what was found in this file */
 
-  if (FLAG('s') || FLAG('l')) {
+  if (FLAG('s') || FLAG('l') || FLAG('q')) {
 	while ((line = get_line(input)) != NULL) {
 		testline = FLAG('i') ? map_nocase(line) : line;
 		if (regexec(expression, testline)) {

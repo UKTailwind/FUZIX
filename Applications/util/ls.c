@@ -46,6 +46,7 @@
 #define LSF_OCT		0x080
 #define LSF_DOWN	0x100
 #define LSF_UNSORT	0x200
+#define LSF_TIME	0x400
 
 typedef unsigned char BOOL;
 
@@ -61,6 +62,8 @@ static void printsep(char *name);
 static void printusage(FILE *out);
 static int namesort(const void *p1, const void *p2);
 static int revnamesort(const void *p1, const void *p2);
+static int timesort(const void *p1, const void *p2);
+static int revtimesort(const void *p1, const void *p2);
 
 /*
  * Sort routines for list of filenames.
@@ -72,6 +75,39 @@ static int namesort(const void *p1, const void *p2)
 static int revnamesort(const void *p1, const void *p2)
 {
 	return -strcmp(* (char * const *)p1, * (char * const *) p2);
+}
+
+/*
+ * -t: newest first, which is what every other ls means by it.
+ *
+ * The list holds full path names, so this stats as it compares rather
+ * than carrying a parallel array of times - O(n log n) stats against
+ * one allocation, and this ls is already generous with stat calls.  A
+ * name that cannot be stat'd sorts as time zero rather than failing
+ * the whole listing; ls has already reported the error by then.
+ *
+ * Equal times fall back to the name, so a directory written in one go
+ * still comes out in a stable, predictable order instead of whatever
+ * qsort happens to do with ties.
+ */
+static int timesort(const void *p1, const void *p2)
+{
+	struct stat s1, s2;
+	const char *n1 = * (char * const *) p1;
+	const char *n2 = * (char * const *) p2;
+	time_t t1 = 0, t2 = 0;
+
+	if (LSTAT(n1, &s1) == 0)
+		t1 = s1.st_mtime;
+	if (LSTAT(n2, &s2) == 0)
+		t2 = s2.st_mtime;
+	if (t1 != t2)
+		return (t1 < t2) ? 1 : -1;
+	return strcmp(n1, n2);
+}
+static int revtimesort(const void *p1, const void *p2)
+{
+	return -timesort(p1, p2);
 }
 
 /*
@@ -318,8 +354,15 @@ static void listfiles(char *name)
 	}
 	closedir(dirp);
 	/* Sort the files. */
-	if (!(flags & LSF_UNSORT))
-		qsort((char *) list, listused, sizeof(char *), flags & LSF_DOWN ? revnamesort : namesort);
+	if (!(flags & LSF_UNSORT)) {
+		int (*cmp)(const void *, const void *);
+
+		if (flags & LSF_TIME)
+			cmp = (flags & LSF_DOWN) ? revtimesort : timesort;
+		else
+			cmp = (flags & LSF_DOWN) ? revnamesort : namesort;
+		qsort((char *) list, listused, sizeof(char *), cmp);
+	}
 	/* Now finally list the filenames. */
 	for (i = 0; i < listused; i++) {
 		n = list[i];
@@ -358,7 +401,7 @@ freename:
 
 static void printusage(FILE *out)
 {
-	fprintf(out, "Usage: ls [-Radfiloru] [file...]\n");
+	fprintf(out, "Usage: ls [-1Radfilortu] [file...]\n");
 }
 
 int main(int argc, char *argv[])
@@ -398,6 +441,18 @@ int main(int argc, char *argv[])
 				break;
 			case 'R': /* POSIX recursive directory listing */
 				flags |= LSF_RECUR;
+				break;
+			case 't': /* POSIX sort by modification time, newest first */
+				flags |= LSF_TIME;
+				break;
+			case '1': /* POSIX one entry per line - accepted and
+				     ignored, because that is the only thing
+				     this ls has ever done: there is no column
+				     packing anywhere in it.  Worth taking
+				     rather than rejecting, since scripts and
+				     fingers write it out of habit and an
+				     "Unknown option" is a failure where the
+				     request was already satisfied. */
 				break;
 			default:
 				fprintf(stderr, "Unknown option -%c\n", *cp);
