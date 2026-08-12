@@ -294,6 +294,40 @@ ioctl(sys, GFXIOC_FONTINFO, &fi);
 
 `fi.width` comes back 0 for a font that does not exist.
 
+## Reading the framebuffer
+
+Writing pixels has seven entry points, two of them batched. Reading had
+one — `GFXIOC_GETPIXEL`, a pixel at a time, RGB888, about 2.5 µs each.
+`GFXIOC_BLITRD` is the other half:
+
+```c
+struct gfx_blit gb = { .offset = y * stride, .len = stride, .buf = row };
+ioctl(sys, GFXIOC_BLITRD, &gb);
+```
+
+Same struct as `GFXIOC_BLIT`, same bounds check, and the same target —
+`display_fb_target()`, so a program drawing into the layer reads the
+layer back. **Native bytes**, exactly as `GFXIOC_BLIT` writes them:
+4bpp high nibble is the left pixel, 1bpp MSB is the left pixel. Take
+the stride and depth from `GFXIOC_INFO`.
+
+These are MMBasic's two readers under other names — `ReadBufferFast`
+here, `ReadBuffer` for `GFXIOC_GETPIXEL`, which converts through the
+palette. Use `GETPIXEL` to ask what colour something is; use this to
+*look at* a lot of pixels. A 320-pixel row is one call and 160 bytes
+rather than 320 system calls and 800 µs.
+
+Raw bytes are palette indices, and the palette and its nearest-match
+are the kernel's, so `GFXIOC_COLOUR` returns the index it mapped your
+RGB888 to:
+
+```c
+int idx = ioctl(sys, GFXIOC_COLOUR, (void *)0xFF0000);  /* red -> index */
+```
+
+It sets the drawing colour as a side effect, which costs nothing since
+every drawing call pushes its own colour first.
+
 ## Reading the glyphs yourself
 
 If you are driving a display of your own — an SPI panel the kernel

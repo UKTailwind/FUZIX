@@ -1226,6 +1226,33 @@ is given. `LINE`, `CIRCLE` and the rest take MMBasic's argument order,
 including the blank arguments — `CIRCLE x, y, r, , , fill` is written
 exactly as MMBasic writes it.
 
+### Shapes from arrays, and filling
+
+```basic
+DIM x(5), y(5)
+POLYGON 6, x(), y(), RGB(WHITE), RGB(RED)   ' outline, then fill
+POLYGON 0, x(), y()                          ' 0 = as many as the array holds
+BEZIER cx(), cy(), , RGB(CYAN)               ' n control points
+FILL 100, 80, RGB(GREEN)                     ' flood from a point
+FILL 100, 80, RGB(GREEN), RGB(WHITE)         ' ...up to a boundary colour
+```
+
+`POLYGON` is always closed — the edge from the last vertex back to the
+first is drawn, and the fill assumes it. Coordinates may be integer or
+float arrays. **Concave outlines fill correctly**: the fill collects
+every edge crossing on each row and fills between alternate pairs, so
+an arrowhead's notch stays empty. The multi-polygon form, where the
+first argument is an array of vertex counts, is not translated.
+
+`BEZIER` takes **integer** control-point arrays, which is MMBasic's own
+restriction, and at most sixteen of them.
+
+`FILL` has MMBasic's two modes: given a boundary colour it fills
+everything reachable that is not that colour; without one it replaces
+the colour it finds under the starting point. Note that boundary mode
+fills *over* other colours — it stops only at the boundary. A circle
+interior takes about 6 ms and a whole 320×240 screen about 75 ms.
+
 The drawing primitives live in headers as static functions, one header
 per primitive — `mmb_gfx_circle.h`, `mmb_gfx_box.h`, `mmb_gfx_rbox.h`,
 `mmb_gfx_triangle.h`, `mmb_gfx_arc.h`, `mmb_gfx_text.h`,
@@ -2622,28 +2649,29 @@ translate time, not at run time.
 
 |   |   |   |   |
 |---|---|---|---|
-| `?` | `ARC` | `ARRAY` | `BOX` |
-| `CALL` | `CASE` | `CAT` | `CHDIR` |
-| `CIRCLE` | `CLEAR` | `CLOSE` | `CLS` |
-| `COLOR` | `COLOUR` | `CONST` | `CONTINUE` |
-| `COPY` | `DATA` | `DATE$` | `DIM` |
-| `DO` | `ELSE` | `ELSEIF` | `END` |
-| `ENDIF` | `ERASE` | `ERROR` | `EXIT` |
-| `FILES` | `FONT` | `FOR` | `FRAMEBUFFER` |
-| `FUNCTION` | `GOSUB` | `GOTO` | `I2C2` |
-| `IF` | `INC` | `INPUT` | `KILL` |
-| `LET` | `LINE` | `LOAD` | `LOCAL` |
-| `LONGSTRING` | `LOOP` | `MAP` | `MATH` |
-| `MKDIR` | `MODE` | `NEXT` | `ON` |
-| `OPEN` | `OPTION` | `PAUSE` | `PIN` |
-| `PIXEL` | `PLAY` | `PRINT` | `PWM` |
-| `RANDOMIZE` | `RBOX` | `READ` | `RENAME` |
-| `RESTORE` | `RETURN` | `RMDIR` | `RTC` |
-| `SAVE` | `SEEK` | `SELECT` | `SERVO` |
-| `SETPIN` | `SETTICK` | `SORT` | `SPI` |
-| `STATIC` | `STRUCT` | `SUB` | `SYSTEM` |
-| `TEXT` | `TIME$` | `TIMER` | `TRIANGLE` |
-| `TYPE` | `WEND` | `WHILE` |  |
+| `?` | `ARC` | `ARRAY` | `BEZIER` |
+| `BOX` | `CALL` | `CASE` | `CAT` |
+| `CHDIR` | `CIRCLE` | `CLEAR` | `CLOSE` |
+| `CLS` | `COLOR` | `COLOUR` | `CONST` |
+| `CONTINUE` | `COPY` | `DATA` | `DATE$` |
+| `DIM` | `DO` | `ELSE` | `ELSEIF` |
+| `END` | `ENDIF` | `ERASE` | `ERROR` |
+| `EXIT` | `FILES` | `FILL` | `FONT` |
+| `FOR` | `FRAMEBUFFER` | `FUNCTION` | `GOSUB` |
+| `GOTO` | `I2C2` | `IF` | `INC` |
+| `INPUT` | `KILL` | `LET` | `LINE` |
+| `LOAD` | `LOCAL` | `LONGSTRING` | `LOOP` |
+| `MAP` | `MATH` | `MKDIR` | `MODE` |
+| `NEXT` | `ON` | `OPEN` | `OPTION` |
+| `PAUSE` | `PIN` | `PIXEL` | `PLAY` |
+| `POLYGON` | `PRINT` | `PWM` | `RANDOMIZE` |
+| `RBOX` | `READ` | `RENAME` | `RESTORE` |
+| `RETURN` | `RMDIR` | `RTC` | `SAVE` |
+| `SEEK` | `SELECT` | `SERVO` | `SETPIN` |
+| `SETTICK` | `SORT` | `SPI` | `STATIC` |
+| `STRUCT` | `SUB` | `SYSTEM` | `TEXT` |
+| `TIME$` | `TIMER` | `TRIANGLE` | `TYPE` |
+| `WEND` | `WHILE` |  |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
