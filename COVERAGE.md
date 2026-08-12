@@ -307,8 +307,11 @@ artefacts and the underscore-prefixed PIO assembler directives.
 
 | | in MMBasic | translated | outstanding |
 |---|---|---|---|
-| commands | 208 | 102 | **106** |
+| commands | 208 | 105 | **103** |
 | functions | 93 | 65 | **28** |
+
+`POLYGON`, `BEZIER` and `FILL` came off this list on 2026-08-12 and
+are struck through below.
 
 Names below are MMBasic's. Where a keyword is ambiguous the handler it
 binds to is given, because `Set`, `Wait`, `Mov` and friends are not
@@ -323,18 +326,26 @@ because each item is an inconsistency a user meets by accident.
 **Drawing.** The primitives are there — `LINE BOX CIRCLE RBOX TRIANGLE
 ARC PIXEL TEXT CLS` — and these are the gaps in them:
 
-* **`POLYGON`** (`cmd_polygon`) — `n, xarray(), yarray() [,bordercolour]
-  [,fillcolour]`, plus the multi-polygon form. Scanline fill over a
-  vertex list, or decompose to the filled `TRIANGLE` already here. The
-  kernel's `GFXIOC_PIXELS` batching makes the span writes cheap.
-* **`FILL`** (`cmd_fill`) — flood fill, `x, y, colour [,boundary]`.
-  Needs pixel read-back, which `PIXEL()` already gives, and an explicit
-  stack: MMBasic uses 256-entry blocks in a linked list precisely
-  because recursion will not do. Note the cost model here differs — a
-  read-back is a syscall, so a large fill wants either batching or a
-  kernel-side `GFXIOC_FLOODFILL`. Measure before choosing.
-* **`BEZIER`** (`cmd_bezier`) — pure arithmetic over the existing line
-  drawing.
+* ~~**`POLYGON`**~~ **DONE.** The fill is crossing-based — every edge
+  crossing on a row, sorted, filled between alternate pairs. It was
+  written first by reusing `TRIANGLE`'s per-row min/max extent tables,
+  which is exact for a triangle because a triangle is always convex and
+  cannot express a gap: an arrowhead's notch filled solid. The
+  multi-polygon form (a vertex *count array*) is refused by name.
+* ~~**`FILL`**~~ **DONE**, both modes. The cost model did differ, and
+  the answer was to fix the asymmetry rather than work around it: there
+  were seven ways to write pixels and one to read. **`GFXIOC_BLITRD`**
+  is now the inverse of `GFXIOC_BLIT` — native bytes out of the draw
+  target, MMBasic's `ReadBufferFast` to `GETPIXEL`'s `ReadBuffer` — so
+  a row costs one crossing instead of 320. Circle interior 6 ms, whole
+  screen 75 ms, against ~230 ms a pixel at a time. `GFXIOC_COLOUR` also
+  returns the index it mapped to now, because a program scanning raw
+  bytes cannot otherwise know what a colour looks like in them.
+* ~~**`BEZIER`**~~ **DONE** — `PlotBezier` transcribed, including its
+  step count (three times the bounding-box diagonal, clamped to
+  [10, 2000]) and its run-length coalescing. Sixteen control points
+  maximum with an error past it, where MMBasic walks off three stack
+  arrays.
 
 **Pins.** `SETPIN`/`PIN` are done; the grouped forms are not:
 
