@@ -316,6 +316,14 @@ void statement_inner(void)
         do_close();
         return;
     }
+    if (strcmp(up, "FLUSH") == 0) {
+        /* FLUSH #n - get what has been written onto the card.  One
+           channel, as MMBasic takes one; CLOSE above accepts a list and
+           this deliberately does not, because cmd_flush does not. */
+        cv.i++;
+        emit(sfmt("mm_flush(%s);", channel()));
+        return;
+    }
     if (strcmp(up, "INPUT") == 0) {
         cv.i++;
         do_input();

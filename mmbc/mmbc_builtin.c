@@ -294,6 +294,12 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         cv.uses_spi = 1;
         return mkval("mmspi_speed()", TY_I);
     }
+    if (strcmp(up, "POS") == 0)
+        /* POS - the column the next character will go in, 1 for the
+           start of a line.  MMBasic's fun_pos returns MMCharPos, which
+           the runtime has been tracking all along for TAB; this only
+           gives it a name. */
+        return mkval("(MMINTEGER)mm_col()", TY_I);
     if (strcmp(up, "MM.HRES") == 0)
         return mkval("mm_hres()", TY_I);
     if (strcmp(up, "MM.VRES") == 0)

@@ -97,6 +97,7 @@ BUILTINS = {
     'PIXEL': (2, 2), 'MAP': (1, 1), 'PIN': (1, 1), 'SPI': (1, 1),
     'PORT': (2, 16), 'FLAG': (1, 1),
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0), 'MM.SPISPEED': (0, 0),
+    'POS': (0, 0),
     'MM.ERRNO': (0, 0), 'MM.ERRMSG$': (0, 0),
     'MM.VER': (0, 0), 'MM.DEVICE$': (0, 0), 'MM.CMDLINE$': (0, 0),
     'MM.INFO': (1, 1), 'PEEK': (1, 1),
@@ -1631,6 +1632,12 @@ class Conv(object):
             # asked for - see mmb_spi.h
             self.uses_spi = True
             return ('mmspi_speed()', TY_I)
+        if up == 'POS':
+            # POS - the column the next character will go in, 1
+            # for the start of a line.  MMBasic's fun_pos returns
+            # MMCharPos, which the runtime has been tracking all
+            # along for TAB; this only gives it a name.
+            return ('(MMINTEGER)mm_col()', TY_I)
         if up == 'MM.HRES':
             return ('mm_hres()', TY_I)
         if up == 'MM.VRES':
@@ -3009,6 +3016,14 @@ class Conv(object):
         if up == 'CLOSE':
             self.i += 1
             self.do_close()
+            return
+        if up == 'FLUSH':
+            # FLUSH #n - get what has been written onto the card.  One
+            # channel, as MMBasic takes one; CLOSE above accepts a list
+            # and this deliberately does not, because cmd_flush does
+            # not.
+            self.i += 1
+            self.emit('mm_flush(%s);' % self.channel())
             return
         if up == 'INPUT':
             self.i += 1

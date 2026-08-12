@@ -413,8 +413,17 @@ ARC PIXEL TEXT CLS` — and these are the gaps in them:
   line named. `FLAGS` is 64 bits of scratch for the program's own use,
   cleared at start — and per process here, which MMBasic's single
   global could not be.
-* **`POS`** (`fun_pos`) — the print column.
-* **`FLUSH`** (`cmd_flush`) — flush a file's buffer.
+* ~~**`POS`**~~ — **done**. The column the next character will go in, 1
+  at the start of a line, which is MMBasic's convention. The runtime
+  had been tracking it all along for `TAB`; `POS` only gives it a name.
+* ~~**`FLUSH #n`**~~ — **done**. `fflush` *and* `fsync`, where MMBasic
+  has one `f_sync`: the first is enough for another process to see the
+  data, the second is what survives the power going off, and a program
+  that says `FLUSH` means the second. Channel 0 is the console and does
+  nothing, as `cmd_flush` does. Worth knowing before putting one in a
+  loop: **Fuzix's `fsync` ignores its fd and syncs the whole
+  filesystem** (`Library/libs/fsync.c` is one call to `sync()`), so
+  this costs more here than MMBasic's per-file version.
 * **`SCHANGE$`**, **`TOPBOTTOM`** (`fun_max_min`) — small string and
   min/max helpers.
 * **`LOCATION`** (`cmd_locate`) — cursor positioning; `PRINT @` covers
