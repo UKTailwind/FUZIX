@@ -292,5 +292,154 @@ would be worse than the current clear error:
 ~~1. `DATA`/`READ`/`RESTORE`~~ — done.
 ~~2. The rest of Tier A~~ — done.
 ~~3. `LONGSTRING`~~ — done, along with `GOSUB`/`RETURN`.
-4. `TYPE`/structures — the largest single win left, and the only one that
-   forces a tokenizer change.
+~~4. `TYPE`/structures~~ — done.
+
+See `NEXT.md` for the current ranked queue.
+
+---
+
+# The complete outstanding list
+
+Generated 2026-08-12 by diffing MMBasic's own `AllCommands.h` tables
+against `mmb2c.py`'s dispatch and `BUILTINS`, then classified by hand.
+The counts exclude MMBasic's two empty placeholder rows, its comment
+artefacts and the underscore-prefixed PIO assembler directives.
+
+| | in MMBasic | translated | outstanding |
+|---|---|---|---|
+| commands | 208 | 102 | **106** |
+| functions | 93 | 65 | **28** |
+
+Names below are MMBasic's. Where a keyword is ambiguous the handler it
+binds to is given, because `Set`, `Wait`, `Mov` and friends are not
+what they look like.
+
+## Category 1 — finish what is already there
+
+These complete a family that is otherwise done, and none needs a new
+mechanism. This is the category worth clearing before anything else,
+because each item is an inconsistency a user meets by accident.
+
+**Drawing.** The primitives are there — `LINE BOX CIRCLE RBOX TRIANGLE
+ARC PIXEL TEXT CLS` — and these are the gaps in them:
+
+* **`POLYGON`** (`cmd_polygon`) — `n, xarray(), yarray() [,bordercolour]
+  [,fillcolour]`, plus the multi-polygon form. Scanline fill over a
+  vertex list, or decompose to the filled `TRIANGLE` already here. The
+  kernel's `GFXIOC_PIXELS` batching makes the span writes cheap.
+* **`FILL`** (`cmd_fill`) — flood fill, `x, y, colour [,boundary]`.
+  Needs pixel read-back, which `PIXEL()` already gives, and an explicit
+  stack: MMBasic uses 256-entry blocks in a linked list precisely
+  because recursion will not do. Note the cost model here differs — a
+  read-back is a syscall, so a large fill wants either batching or a
+  kernel-side `GFXIOC_FLOODFILL`. Measure before choosing.
+* **`BEZIER`** (`cmd_bezier`) — pure arithmetic over the existing line
+  drawing.
+
+**Pins.** `SETPIN`/`PIN` are done; the grouped forms are not:
+
+* **`PORT(...)= v`** (`cmd_port`) and **`PORT(...)`** (`fun_port`) —
+  read or write several pins as one value, given as
+  `(startpin, nbits, startpin, nbits, …)`. MMBasic builds a mask and
+  does it in one `gpio_get_all64`/set. On this port pins are already
+  userland register writes through `<sys/pc3io.h>`, so this is mask
+  arithmetic and one store — and it is what a parallel LCD or any
+  bus-like device needs.
+* **`PULSE`** (`cmd_pulse`) — a timed pulse on a pin.
+
+**Strings and small odds.** All have their function halves already:
+
+* **`MID$(s,n,m) = t`** (`cmd_mid`) — the assignment form of a function
+  that is already translated.
+* **`LMID(...)= `** (`cmd_lmid`) — the `LONGSTRING` equivalent.
+* **`BIT(x,n) = v`**, **`BYTE(x,n) = v`**, **`FLAG(...)= `** — assignment
+  forms; `BIT()` and `BYTE()` already read.
+* **`POS`** (`fun_pos`) — the print column.
+* **`FLUSH`** (`cmd_flush`) — flush a file's buffer.
+* **`SCHANGE$`**, **`TOPBOTTOM`** (`fun_max_min`) — small string and
+  min/max helpers.
+* **`LOCATION`** (`cmd_locate`) — cursor positioning; `PRINT @` covers
+  the same ground and this is the other spelling.
+
+## Category 2 — real value, moderate work
+
+* **`FRAMEBUFFER LAYER` and `FRAMEBUFFER MERGE`.** The decision is
+  already made and written up in the FUZIX tree at
+  `platform-rpipico/PC3-LAYER-MERGE.md`: **implement the MERGE model**,
+  which is MMBasic's own TFT build, not a compromise invented here — a
+  program written for a PicoMite driving an ILI9341 runs unchanged, and
+  only the moment of compositing differs. The driver-side `LAYER` model
+  is rejected because it needs every buffer readable at scanout rate,
+  which is 40K of SRAM this machine does not have. That document
+  carries the work sketch (a second PSRAM buffer, a merge routine in
+  `display.c`, `GFXIOC_MERGE`, a third `display_fb_select` target, and
+  the runtime/translator pair) and it is comparable in size to the
+  original FRAMEBUFFER work. **What would change the decision: a mouse
+  pointer**, which is the one case where compositing has to be
+  continuous.
+* **`BLIT`, `BLIT MEMORY`** (`cmd_blit`) — the kernel has `GFXIOC_BLIT`
+  already; this is the BASIC surface over it plus the buffer model.
+* **`SPRITE` family** and **`TILE`/`TILEMAP`** — large, and they lean on
+  BLIT. Worth doing as one piece if games matter.
+* **`REDIM [PRESERVE]`** — needs heap-allocated arrays instead of the
+  current static ones, which puts `malloc` into generated code that has
+  none.
+* **The rest of `MATH`** — `M_MULT M_INVERSE M_TRANSPOSE M_DETERMINANT
+  V_CROSS V_NORMALISE MAGNITUDE DOTPRODUCT CORREL CHI CROSSING`, plus
+  `MATH CRC` and `BASE64`. Pure arithmetic, each small.
+* **`ARRAY SLICE`/`ARRAY INSERT`, `MATH C_*`** — index arithmetic.
+* **`KEYDOWN`** — needs a key-state table from the kernel; `INKEY$`'s
+  one-byte read cannot give it.
+* **`GETSCANLINE`** — the kernel knows; a small ioctl.
+* **`DRAW3D`** and **`TURTLE`** — whole subsystems in MMBasic. Real
+  work, no platform obstacle.
+* **`REFRESH`, `RESOLUTION`, `SYNC`, `FRAME`** — display control whose
+  meaning has to be decided against this display rather than copied.
+
+## Category 3 — possible, wants your steer first
+
+* **`POKE`, `MEMORY COPY|SET|PACK`** — the pair to `PEEK`. A bad read
+  kills one program; a bad write can take the kernel, and there is no
+  MMU to disagree.
+* **`PEEK(VAR x)`, `VARADDR`, `CFUNADDR`** — ask about a *variable*, so
+  they need the symbol table rather than a value.
+* **`VAR SAVE`/`RESTORE`/`CLEAR`** (`cmd_var`) — flash-backed variables
+  onto a file.
+* **`CSUB`** as an `extern` declaration; **`CALL(name$,…)`**;
+  **`JSON$`**; **`EVAL`** (which needs the interpreter a translator has
+  thrown away, so it is the hardest of these by a distance).
+* **`DEVICE`/`DEVICE()`**, **`CONFIGURE`**, **`OPTION`** variants — what
+  should they say on a machine that is not a PicoMite?
+* **`FLASH`, `RAM`, `DRIVE`** — a storage model that is not this one.
+* **`XMODEM`/`YMODEM`** — `uue`/`uud` cover the need already.
+* **`ADC` (the command)** — MMBasic's buffered/DMA sampling, as opposed
+  to `SETPIN AIN`/`PIN()` which are done. Needs a kernel driver.
+* **`SPI2`** is the SD card's controller and **`I2C`** is the QWIIC bus
+  the kernel polls the RTC on; both are deliberately not offered today,
+  and changing that is an arbitration decision, not a translator one.
+* **`TRACE`** — needs a statement-level hook in generated code.
+
+## Category 4 — deliberately out
+
+* **Hardware this machine does not have:** `CAMERA GAMEPAD WII
+  WII CLASSIC WII NUNCHUCK KEYPAD KEYBOARD MOUSE HUMID TEMPR
+  TEMPR START DISTANCE PULSIN IR ONEWIRE WS2812 STEPPER TMC22XX LCD
+  I2CLCD BACKLIGHT GPS TOUCH CLICK CTRLVAL GUI MSGBOX WEB BITSTREAM
+  SLEW WATCHDOG`
+* **PIO, and its assembler.** `PIO` itself plus the mnemonics that only
+  exist inside a PIO program: `JMP MOV NOP PUSH PULL WAIT IN OUT SET
+  IRQ` and `IRQ CLEAR/NEXT/NOWAIT/PREV/SET/WAIT`. The pin lock refuses
+  `PLK_PIO` today pending a survey of which state machines the display
+  and sound engines hold.
+* **The immediate-mode environment:** `EDIT EDIT FILE LIST NEW RUN
+  AUTOSAVE CHAIN LIBRARY EXECUTE HELP CMM2 LOAD CMM2 RUN
+  UPDATE FIRMWARE CONFIGURE CPU`. A translated program is compiled and
+  run, not typed at a prompt; `mmedit` is the editor.
+* **Firmware demos and accelerators:** `MANDELBROT ASTRO STAR RAY CALC
+  DRAW3D`(the demo entry points) — a BASIC program can compute these,
+  and they exist in the firmware because an interpreter cannot.
+* **Interpreter mechanics:** `INTERRUPT IRETURN ONESHOT` — `SETTICK`,
+  `ON KEY` and `SETPIN INTx` cover the same ground the way this port
+  does it (see `PLAN-interrupts.md`); `REM` is the lexer's; `DEFINEFONT`
+  installs into a table that is `const` in flash here.
+* **`FM`, `FLAGS`, `PUSH`/`PULL` outside PIO, `NOP`** — no counterpart.
