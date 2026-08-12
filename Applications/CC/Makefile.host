@@ -51,8 +51,13 @@ TOOLS = $(OBJDIR)/bcrun $(OBJDIR)/bcdump $(OBJDIR)/dumptokens $(OBJDIR)/ccbc
 
 all: $(OBJDIR)/cc0 $(OBJDIR)/cc1 $(OBJDIR)/cc2 $(TOOLS)
 
-$(OBJDIR)/bcrun: bcrun.c bcrun_mm.c mmb_runtime.c mmb_runtime.h bytecode.h | $(OBJDIR)
-	$(HOSTCC) $(HOSTCFLAGS) -o $@ bcrun.c -lm
+# fnum.c comes from the C library, and is compiled in here rather than
+# linked: the board's bcrun gets _fnum from libcarmm0, and this build
+# links the host's libc, which has no such symbol.  Compiling the same
+# source both ways is also what keeps %e and %g identical between this
+# bcrun and the board's - which is the whole point of the gates.
+$(OBJDIR)/bcrun: bcrun.c bcrun_mm.c mmb_runtime.c mmb_runtime.h bytecode.h ../../Library/libs/fnum.c | $(OBJDIR)
+	$(HOSTCC) $(HOSTCFLAGS) -o $@ bcrun.c ../../Library/libs/fnum.c -lm
 
 $(OBJDIR)/bcdump: bcdump.c bytecode.h | $(OBJDIR)
 	$(HOSTCC) $(HOSTCFLAGS) -o $@ bcdump.c

@@ -614,6 +614,11 @@ static long long argll(unsigned n)
  *	not worth carrying here, so it degrades to exponent form and says
  *	so rather than printing confident rubbish.
  */
+/* The C library's float formatter, used by do_format for %e and %g.
+   Declared here because there is no header for it: vfprintf.c declares
+   it privately the same way. */
+extern void _fnum(double val, char fmt, int prec, char *ptmp);
+
 static void fmt_double(char *out, double v, int prec)
 {
 	char digits[64];
@@ -952,6 +957,33 @@ static void do_format(unsigned abase)
 			   end's typeconv_implicit, so there is only ever a
 			   double here. */
 			fmt_double(tmp, argd(a), prec < 0 ? 6 : prec);
+			a += 2;
+			padout(tmp, width, left, zero);
+			break;
+		case 'e':
+		case 'g':
+		case 'E':
+		case 'G':
+			/* These had no case at all, so they fell through to
+			   the default below and printed themselves - and
+			   worse, did not consume their argument, so every
+			   conversion after one of them read the wrong slot:
+			   printf("%e %d", 3.14, 42) printed "%e" and then a
+			   piece of the double.
+
+			   _fnum is the C library's, which until today did
+			   not exist either (Library/libs/fnum.c) - the note
+			   above fmt_double explains that this formatter was
+			   written because the libc had no floating point.
+			   It does now, and _fnum is checked against glibc
+			   over 13,596 cases, so the new conversions use it
+			   rather than growing fmt_double.
+
+			   %f deliberately still goes through fmt_double: it
+			   works, the gates cover it, and swapping the
+			   formatter under every program that already prints
+			   one is not a change to make in passing. */
+			_fnum(argd(a), *f, prec, tmp);
 			a += 2;
 			padout(tmp, width, left, zero);
 			break;

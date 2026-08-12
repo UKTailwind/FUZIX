@@ -19,8 +19,10 @@ OBJDIR = qemu-armm0
 
 all: $(OBJDIR)/bcrun
 
-$(OBJDIR)/bcrun: bcrun.c bcrun_mm.c mmb_runtime.c mmb_runtime.h bytecode.h | $(OBJDIR)
-	$(CROSS) $(CFLAGS) -o $@ bcrun.c -lm
+# fnum.c: see the note in Makefile.host - _fnum is the C library's and
+# this build does not link Fuzix's.
+$(OBJDIR)/bcrun: bcrun.c bcrun_mm.c mmb_runtime.c mmb_runtime.h bytecode.h ../../Library/libs/fnum.c | $(OBJDIR)
+	$(CROSS) $(CFLAGS) -o $@ bcrun.c ../../Library/libs/fnum.c -lm
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
