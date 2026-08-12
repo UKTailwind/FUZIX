@@ -194,6 +194,19 @@ bget ../../../Applications/util/rmdir
 bget ../../../Applications/util/rx
 bget ../../../Applications/util/setdate
 bget ../../../Applications/util/setboot
+# sed and seq were compiled all along and simply never listed here -
+# 23 of the 111 programs in Applications/util are in that position.
+# Most of the rest are period cruft or belong to other platforms; these
+# were picked because they work on THIS machine, checked on it.  size
+# is the example of why that matters: it builds, it runs, and then it
+# says "not a Fuzix binary format" because it predates the ELF layout
+# this port uses.
+#
+# NOTE this is inside an unquoted here-document, so a backtick or a $
+# in a comment is not a comment - the shell expands it and the build
+# dies with "EOF in backquote substitution".
+bget ../../../Applications/util/sed
+bget ../../../Applications/util/seq
 bget ../../../Applications/util/sleep
 bget ../../../Applications/util/ssh
 bget ../../../Applications/util/sort
@@ -212,6 +225,7 @@ bget ../../../Applications/util/touch
 bget ../../../Applications/util/tr
 bget ../../../Applications/util/true
 bget ../../../Applications/util/umount
+bget ../../../Applications/util/uname
 bget ../../../Applications/util/uniq
 bget ../../../Applications/util/uptime
 bget ../../../Applications/util/uud
@@ -286,6 +300,8 @@ chmod 0755 rmdir
 chmod 0755 rx
 chmod 0755 setdate
 chmod 0775 setboot
+chmod 0755 sed
+chmod 0755 seq
 chmod 0755 sleep
 chmod 0755 ssh
 chmod 0755 sort
@@ -304,6 +320,7 @@ chmod 0755 touch
 chmod 0755 tr
 chmod 0755 true
 chmod 0755 umount
+chmod 0755 uname
 chmod 0755 uniq
 chmod 0755 uptime
 chmod 0755 uud
