@@ -1825,7 +1825,10 @@ not an input` — both as MMBasic does.
 Pin work no longer costs a system call. `SETPIN` makes one, once, to
 claim; after that `PIN(n)` and `PIN(n) = v` are single register
 accesses, about ten nanoseconds against the 1.5 µs an ioctl costs.
-That is what makes bit-banging a protocol in BASIC possible at all.
+That is what makes bit-banging a protocol in BASIC possible at all —
+and it is not a theoretical claim: `ONEWIRE` is bit-banged that way,
+in slots of 60 µs with a 10 µs sample point inside them, which an
+ioctl per edge could not have fitted twice over.
 
 ## Pin interrupts
 
@@ -2683,16 +2686,16 @@ translate time, not at run time.
 | `LINE` | `LMID` | `LOAD` | `LOCAL` |
 | `LONGSTRING` | `LOOP` | `MAP` | `MATH` |
 | `MKDIR` | `MODE` | `NEXT` | `ON` |
-| `OPEN` | `OPTION` | `PAUSE` | `PIN` |
-| `PIXEL` | `PLAY` | `POLYGON` | `PORT` |
-| `PRINT` | `PULSE` | `PWM` | `RANDOMIZE` |
-| `RBOX` | `READ` | `RENAME` | `RESTORE` |
-| `RETURN` | `RMDIR` | `RTC` | `SAVE` |
-| `SEEK` | `SELECT` | `SERVO` | `SETPIN` |
-| `SETTICK` | `SORT` | `SPI` | `STATIC` |
-| `STRUCT` | `SUB` | `SYSTEM` | `TEXT` |
-| `TIME$` | `TIMER` | `TRIANGLE` | `TYPE` |
-| `WEND` | `WHILE` |  |  |
+| `ONEWIRE` | `OPEN` | `OPTION` | `PAUSE` |
+| `PIN` | `PIXEL` | `PLAY` | `POLYGON` |
+| `PORT` | `PRINT` | `PULSE` | `PWM` |
+| `RANDOMIZE` | `RBOX` | `READ` | `RENAME` |
+| `RESTORE` | `RETURN` | `RMDIR` | `RTC` |
+| `SAVE` | `SEEK` | `SELECT` | `SERVO` |
+| `SETPIN` | `SETTICK` | `SORT` | `SPI` |
+| `STATIC` | `STRUCT` | `SUB` | `SYSTEM` |
+| `TEMPR` | `TEXT` | `TIME$` | `TIMER` |
+| `TRIANGLE` | `TYPE` | `WEND` | `WHILE` |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -2715,14 +2718,15 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `LOG` | `LTRIM$` | `MAP` | `MATH` |
 | `MAX` | `MID$` | `MIN` | `MM.CMDLINE$` |
 | `MM.DEVICE$` | `MM.ERRMSG$` | `MM.ERRNO` | `MM.HRES` |
-| `MM.INFO` | `MM.SPISPEED` | `MM.VER` | `MM.VRES` |
-| `OCT$` | `PEEK` | `PI` | `PIN` |
-| `PIXEL` | `PORT` | `POS` | `RAD` |
-| `RGB` | `RIGHT$` | `RND` | `RTRIM$` |
-| `SGN` | `SIN` | `SPACE$` | `SPI` |
-| `SQR` | `STR$` | `STR2BIN` | `STRING$` |
-| `STRUCT` | `TAB` | `TAN` | `TIME$` |
-| `TIMER` | `TRIM$` | `UCASE$` | `VAL` |
+| `MM.INFO` | `MM.ONEWIRE` | `MM.SPISPEED` | `MM.VER` |
+| `MM.VRES` | `OCT$` | `PEEK` | `PI` |
+| `PIN` | `PIXEL` | `PORT` | `POS` |
+| `RAD` | `RGB` | `RIGHT$` | `RND` |
+| `RTRIM$` | `SGN` | `SIN` | `SPACE$` |
+| `SPI` | `SQR` | `STR$` | `STR2BIN` |
+| `STRING$` | `STRUCT` | `TAB` | `TAN` |
+| `TEMPR` | `TIME$` | `TIMER` | `TRIM$` |
+| `UCASE$` | `VAL` |  |  |
 
 ## MATH() sub-functions
 
@@ -2872,11 +2876,29 @@ pins where `pin AND 3 = 2` and SCL only where `pin AND 3 = 3`, so on
 this board the pairs are **GP38/GP39** and **GP42/GP43**. Anything else
 is refused at `OPEN` rather than producing a bus that never answers.
 
-`WRITE` takes a list of byte expressions, a whole numeric array written
-`a()`, or a string; `READ` takes a numeric array or a string variable.
-The string forms are what MMBasic's own sensor examples use, because
-`STR2BIN()` then lifts the 16- and 32-bit fields straight out of what
-was read.
+**The data arguments are the same on all three buses**, which is worth
+learning once. `WRITE` takes a list of byte expressions, a whole
+numeric array written `a()`, a string, or a long string written
+`LONGSTRING a()`. `READ` takes any of those, and also **a list of
+variables, one per byte received**:
+
+```basic
+I2C2 READ &H77, 0, 3, hi, mid, lo
+```
+
+MMBasic reaches one implementation of these from `I2C`, `SPI` and
+`ONEWIRE` alike, and so does this — learn them here and they work
+there. The string forms are what MMBasic's own sensor examples use,
+because `STR2BIN()` then lifts the 16- and 32-bit fields straight out
+of what was read.
+
+Two rules the shared code enforces, both MMBasic's. A list must have
+as many values as the count says, or you get `Argument count` — the
+count is not a way to send fewer. And a destination is checked *before*
+the transfer, so asking for forty bytes into an array of sixteen is
+refused without the bus moving: a read addresses a device and can
+advance a register pointer inside it, so it must not happen and then
+fail.
 
 Option bit 0 **holds** the bus: the transfer ends without a STOP so the
 next one is a repeated START on the same device. Most register-file
@@ -2938,18 +2960,78 @@ through the kernel, which is sound here because there is no MMU and the
 kernel cannot be preempted. A 240×320 screen of 16-bit pixels is
 153,600 bytes and goes out in 26 ms at 62.5 MHz.
 
-One limit to know: a **string holds at most 255 bytes**, so a 240-pixel
-row of RGB565 (480 bytes) takes two writes. The kernel itself has no
-such limit.
+A string holds at most 255 bytes, so a 240-pixel row of RGB565 is 480
+and will not fit in one. **A long string will**, and that is what the
+extra word is for:
+
+```basic
+DIM INTEGER row(70)                ' 560 bytes of payload
+' ... fill it with LONGSTRING APPEND ...
+SPI WRITE 480, LONGSTRING row()    ' the whole row, one call
+SPI READ  480, LONGSTRING row()    ' and back
+```
+
+**Say `LONGSTRING` and mean it**, because a long string *is* an integer
+array: written `row()` it is a numeric array and sends one byte per
+eight-byte cell, quietly and wrongly. That is MMBasic's behaviour, and
+the extra word is how you say which of the two you meant.
+
+It is not a speed feature. Filling 240×150 one call per row against
+100 pixels a call measures 30 ms against 32 at 24 MHz, and 12 against
+13 at 62.5 — the bus dominates. What changes is that the row can be
+assembled at all, and with it a whole frame.
+
+### One-wire and `TEMPR`
+
+```basic
+ONEWIRE RESET 26                   ' MM.ONEWIRE = 1 if something answered
+ONEWIRE WRITE 26, 1, 1, &H33       ' reset first, then READ ROM
+ONEWIRE READ  26, 0, 8, id()       ' the eight ROM bytes
+PRINT TEMPR(26)                    ' a DS18B20, degrees C
+```
+
+Any header pin will do; the slots are timed in the program itself.
+The flag is MMBasic's: **1** reset first, **2** reset afterwards, **4**
+send or read single bits rather than bytes, **8** hold a strong pull-up
+when finished, for a parasite-powered device.
+
+The data and destination arguments are **the same ones `I2C2` and `SPI`
+take** — a list, a string, a whole numeric array, a long string, or (on
+a read) a list of variables one per byte. That is not a coincidence:
+MMBasic reaches the same two functions from all three buses, and so
+does this.
+
+`TEMPR(pin)` starts a conversion and waits for it. `TEMPR START pin[,
+precision[, timeout]]` starts one and returns immediately — 6 ms
+measured — so the program can do something useful during the 750 ms a
+12-bit conversion takes, and collect the reading later:
+
+```basic
+TEMPR START 26, 3                  ' 12 bits
+' ... do something else ...
+t = TEMPR(26)
+```
+
+**The wait sleeps rather than spins**, which is the one place this
+differs from MMBasic on purpose. MMBasic has one program to run and
+can afford to spin out three quarters of a second; this machine has
+others. A `SETTICK` handler keeps firing throughout — eight ticks of a
+100 ms timer during one 12-bit conversion, measured.
+
+One honest limitation: a program here **cannot mask interrupts** the
+way MMBasic does around a byte, and should not be able to. Nothing
+takes the processor away mid-slot — the kernel cannot be preempted —
+but a timer interrupt can still stretch one. One-wire tolerates a slot
+being long rather than short, so a stretched write still reads
+correctly; if a transfer matters, check the CRC the device gives you.
 
 ## Not covered
 
-One-wire — along with the editor, `RUN`, `LIST`, `EDIT` and the rest
-of the immediate-mode environment. The hardware statements are the
-subject of current work;
-the immediate-mode ones will never apply, since a translated program is
-compiled and run rather than typed at a prompt. (`mmedit` provides the
-editing they existed for.)
+The editor, `RUN`, `LIST`, `EDIT` and the rest of the immediate-mode
+environment, which will never apply: a translated program is compiled
+and run rather than typed at a prompt. (`mmedit` provides the editing
+they existed for.) The remaining hardware statements are the subject
+of current work.
 
 Of the graphics, `MODE`, `COLOUR`, `PIXEL` (including the array form),
 `LINE`, `CIRCLE`, `BOX`, `RBOX`, `TRIANGLE` (its drawing form —
@@ -2979,6 +3061,11 @@ pin flips back later — at the next `PAUSE`, the next `PULSE`, or the
 next statement in a program that also uses interrupts. MMBasic ends
 the long ones from a hardware timer, and this machine has no
 sub-second interval timer to hang one on.
+
+`ONEWIRE RESET`, `WRITE` and `READ` are done, with `MM.ONEWIRE` and
+MMBasic's four flag bits, and so are `TEMPR` and `TEMPR START` for a
+DS18B20. `ONEWIRE SEARCH` is not — one device to a pin is what the
+statements above assume.
 
 Also `PWM slice, freq, duty [, duty2]`
 with `PWM slice, OFF`, and `SERVO slice, position [, position2]` with
