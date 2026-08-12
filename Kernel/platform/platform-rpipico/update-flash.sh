@@ -373,6 +373,17 @@ bget ../../../Applications/V7/cmd/split
 bget ../../../Applications/V7/cmd/su
 bget ../../../Applications/V7/cmd/sum
 bget ../../../Applications/V7/cmd/test
+# The SAME program under its other name.  V7/cmd/test.c already checks
+# for argv[0] being a left bracket and for the closing one, so this
+# needed no code at all - and without it every bracket test in every
+# shell script fails with "[: not found", which is most shell scripts
+# ever written.  (No backtick in that sentence: see the note above.)
+bget ../../../Applications/V7/cmd/test [
+# find and expr build in Applications/MWC/cmd, from which NOTHING was
+# installed - the recipe takes 33 programs from V7/cmd and none at all
+# from there.  Both checked on the board.
+bget ../../../Applications/MWC/cmd/find
+bget ../../../Applications/MWC/cmd/expr
 bget ../../../Applications/V7/cmd/time
 bget ../../../Applications/V7/cmd/tsort
 bget ../../../Applications/V7/cmd/tty
@@ -405,6 +416,9 @@ chmod 0755 split
 chmod 0755 su
 chmod 0755 sum
 chmod 0755 test
+chmod 0755 [
+chmod 0755 find
+chmod 0755 expr
 chmod 0755 time
 chmod 0755 tsort
 chmod 0755 tty
