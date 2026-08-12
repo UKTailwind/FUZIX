@@ -391,6 +391,13 @@ static void w_cls(void)      { mm_cls(LL(0)); A = 0; }
 static void w_line(void)     { mm_line(LL(0), LL(2), LL(4), LL(6), LL(8));
                                A = 0; }
 static void w_hres(void)     { A = mm_hres(); }
+/* Raw framebuffer reads for FILL.  Pa(2) is the program's buffer - no
+   MMU, so the kernel fills it where it lies, the same as every other
+   buffer that crosses here. */
+static void w_fb_read(void)  { A = mm_fb_read(LL(0), LL(2),
+					      (void *)Pa(4)); }
+static void w_colour_index(void) { A = mm_colour_index(LL(0)); }
+static void w_fb_geom(void)  { A = mm_fb_geom(); }
 static void w_vres(void)     { A = mm_vres(); }
 static void w_mode(void)     { mm_mode(LL(0)); A = 0; }
 static void w_colour(void)   { mm_colour(LL(0), LL(2)); A = 0; }
@@ -693,6 +700,9 @@ static const struct mmwrap {
 	{ "mm_cls",		w_cls },
 	{ "mm_line",		w_line },
 	{ "mm_hres",		w_hres },
+	{ "mm_fb_read",		w_fb_read },
+	{ "mm_colour_index",	w_colour_index },
+	{ "mm_fb_geom",		w_fb_geom },
 	{ "mm_vres",		w_vres },
 	{ "mm_mode",		w_mode },
 	{ "mm_colour",		w_colour },

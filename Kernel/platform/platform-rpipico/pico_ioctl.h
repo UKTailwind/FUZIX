@@ -71,6 +71,33 @@ struct gfx_blit {
 };
 #define GFXIOC_BLIT   0x0005
 
+/* The same thing the other way: copy bytes OUT of the framebuffer into
+ * the caller's buffer.  Same struct, same offset and length, same
+ * target - display_fb_target(), so a program drawing into the layer
+ * reads the layer back.
+ *
+ * NATIVE FORMAT, deliberately, exactly as GFXIOC_BLIT writes it: 4bpp
+ * high nibble = left pixel, 1bpp MSB = left.  This is MMBasic's
+ * ReadBufferFast; GFXIOC_GETPIXEL is its ReadBuffer, which converts
+ * through the palette and hands back RGB888 a pixel at a time.  The
+ * two are for different jobs and both are wanted:
+ *
+ *   GETPIXEL   one pixel, RGB888, ~2.5us - a program asking what
+ *              colour something is
+ *   BLITRD     a run of bytes, raw, one crossing - a program that
+ *              wants to LOOK AT a lot of pixels
+ *
+ * The second is what makes a flood fill possible at a sensible speed.
+ * Reading a 320-pixel row through GETPIXEL is 320 system calls and
+ * 800us; the same row here is one call and 160 bytes.  Without it the
+ * fill has to be written the way nothing else on this machine is, and
+ * MMBasic's own floodfill reads whole scanlines for the same reason.
+ *
+ * Reading is bounds-checked identically to writing, against
+ * display_gfx_fbsize(): a short read is refused rather than served
+ * with whatever follows the framebuffer. */
+#define GFXIOC_BLITRD 0x0032
+
 /* Current mode geometry, so a program can size a shadow buffer and
  * clip without hardcoding what the kernel already knows. */
 struct gfx_info {

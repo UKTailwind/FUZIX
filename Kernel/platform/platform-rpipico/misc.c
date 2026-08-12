@@ -164,7 +164,16 @@ int plt_dev_ioctl(uarg_t request, char *data)
     {
         /* data IS the RGB888 value - 24 bits fit in the argument. */
         display_gfx_colour((uint32_t)data);
-        return 0;
+        /* ...and RETURN the index it mapped to.  It used to return 0
+         * and throw that away, and a caller reading the framebuffer
+         * natively (GFXIOC_BLITRD) has no other way to learn which
+         * index a colour became - the palette and the nearest-match
+         * are the kernel's.  FILL needs exactly this to know what a
+         * boundary colour looks like in the bytes it is scanning.
+         *
+         * Safe to change: success was 0 and is now a small positive
+         * index, and every caller tests for failure with < 0. */
+        return display_gfx_curcol();
     }
     if (request == GFXIOC_GETPIXEL)
     {
@@ -608,6 +617,24 @@ int plt_dev_ioctl(uarg_t request, char *data)
          * operation like the rest, so a shadow-buffer program keeps
          * working when it is pointed at the layer. */
         if (uget(gb.buf, display_fb_target() + gb.offset, gb.len))
+            return -1;
+        return 0;
+    }
+    if (request == GFXIOC_BLITRD)
+    {
+        struct gfx_blit gb;
+        int size = display_gfx_fbsize();
+        if (uget(data, &gb, sizeof(gb)))
+            return -1;
+        if (size == 0 || gb.offset >= size || gb.len > size - gb.offset) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        /* Out of the caller's own target, matching GFXIOC_BLIT and
+         * display_gfx_getpixel - all three read and write gfx_draw, so
+         * a program working in the layer sees the layer whichever it
+         * uses.  Native bytes, not RGB888: this is ReadBufferFast. */
+        if (uput(display_fb_target() + gb.offset, gb.buf, gb.len))
             return -1;
         return 0;
     }
