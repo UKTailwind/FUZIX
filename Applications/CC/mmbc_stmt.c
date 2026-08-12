@@ -728,6 +728,43 @@ void statement_inner(void)
                   col, fill));
         return;
     }
+    if (strcmp(up, "BEZIER") == 0) {
+        /* BEZIER xarray(), yarray() [, n] [, colour]
+
+           INTEGER arrays, which is MMBasic's own restriction -
+           cmd_bezier reads them with parseintegerarray.  A float array
+           is refused rather than converted, because it is a program
+           that would only work here. */
+        struct sym *xsym, *ysym;
+        struct flat xfl, yfl;
+        const char *npts = "0LL", *col = "MM_CUR";
+        const char *counts[2];
+
+        cv.i++;
+        xsym = arrayref(1);
+        xfl = array_flat(xsym);
+        expect_op(",");
+        ysym = arrayref(1);
+        yfl = array_flat(ysym);
+        if (xsym->ty != TY_I)
+            cv_err("BEZIER needs INTEGER control point arrays, and '%s' "
+                   "is not one", xsym->name);
+        if (ysym->ty != TY_I)
+            cv_err("BEZIER needs INTEGER control point arrays, and '%s' "
+                   "is not one", ysym->name);
+        if (accept_op(",")) {
+            if (!is_op(",", 0))
+                npts = as_int(expr());
+            if (accept_op(","))
+                col = as_int(expr());
+        }
+        counts[0] = xfl.cnt;
+        counts[1] = yfl.cnt;
+        cv.uses_bezier = 1;
+        emit(sfmt("mmg_bezier(%s, %s, %s, %s, %s);",
+                  xfl.ptr, yfl.ptr, npts, shortest(counts, 2), col));
+        return;
+    }
     if (strcmp(up, "ARC") == 0) {
         /* ARC x, y, r1 [, r2], rad1, rad2 [, colour]
 

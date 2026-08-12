@@ -328,6 +328,8 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_gfx_triangle.h\"\n");
     if (cv.uses_polygon)
         fprintf(f, "#include \"mmb_gfx_polygon.h\"\n");
+    if (cv.uses_bezier)
+        fprintf(f, "#include \"mmb_gfx_bezier.h\"\n");
     if (cv.uses_arc)
         fprintf(f, "#include \"mmb_gfx_arc.h\"\n");
     if (cv.uses_text)
