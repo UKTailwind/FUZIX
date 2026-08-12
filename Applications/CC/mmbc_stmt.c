@@ -29,6 +29,7 @@ static void do_read(void);
 static void do_restore(void);
 static void do_sort(void);
 static void do_pixels(void);
+static const char *shortest(const char **counts, int n);
 static void do_inc(void);
 static void do_cat(void);
 static void do_erase(void);
@@ -670,6 +671,61 @@ void statement_inner(void)
         cv.uses_triangle = 1;
         emit(sfmt("mmg_triangle(%s, %s, %s, %s, %s, %s, %s, %s);",
                   x1, y1, x2, y2, x3, y3, col, fill));
+        return;
+    }
+    if (strcmp(up, "POLYGON") == 0) {
+        /* POLYGON n, xarray(), yarray() [, bordercolour [, fillcolour]]
+
+           Always closed - cmd_polygon passes close=1 to polygon(); the
+           open form belongs to an internal GUI caller.  n == 0 means
+           "as many as the array holds", which is MMBasic's xcount == 0.
+
+           The multi-polygon form, where the first argument is an ARRAY
+           of vertex counts and the coordinate arrays hold several
+           shapes end to end, is refused by name rather than
+           half-drawn. */
+        struct sym *xsym, *ysym;
+        struct flat xfl, yfl;
+        const char *nverts, *col = "MM_CUR", *fill = "MM_CUR";
+        const char *xfp, *xip, *yfp, *yip;
+        const char *counts[2];
+
+        cv.i++;
+        if (is_array_arg()) {
+            cv_err("the multi-polygon form of POLYGON (a vertex count "
+                   "array) is not translated; pass a count and one "
+                   "polygon's points");
+            return;
+        }
+        nverts = as_int(expr());
+        expect_op(",");
+        xsym = arrayref(1);
+        xfl = array_flat(xsym);
+        expect_op(",");
+        ysym = arrayref(1);
+        yfl = array_flat(ysym);
+        if (xsym->ty == TY_S)
+            cv_err("POLYGON needs numeric coordinate arrays, and '%s' "
+                   "is a string array", xsym->name);
+        if (ysym->ty == TY_S)
+            cv_err("POLYGON needs numeric coordinate arrays, and '%s' "
+                   "is a string array", ysym->name);
+        if (accept_op(",")) {
+            if (!is_op(",", 0))
+                col = as_int(expr());
+            if (accept_op(","))
+                fill = as_int(expr());
+        }
+        if (xsym->ty == TY_F) { xfp = xfl.ptr; xip = "NULL"; }
+        else                  { xfp = "NULL"; xip = xfl.ptr; }
+        if (ysym->ty == TY_F) { yfp = yfl.ptr; yip = "NULL"; }
+        else                  { yfp = "NULL"; yip = yfl.ptr; }
+        counts[0] = xfl.cnt;
+        counts[1] = yfl.cnt;
+        cv.uses_polygon = 1;
+        emit(sfmt("mmg_polygon(%s, %s, %s, %s, %s, %s, %s, %s);",
+                  xfp, xip, yfp, yip, nverts, shortest(counts, 2),
+                  col, fill));
         return;
     }
     if (strcmp(up, "ARC") == 0) {
