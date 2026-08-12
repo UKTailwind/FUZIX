@@ -337,7 +337,7 @@ extern uint8_t progbase[USERMEM];
  *
  * Bump this when tagging a release; BUILDING-PC3.md says so too.
  */
-#define PC3_RELEASE "0.12"
+#define PC3_RELEASE "0.13"
 
 /*
  * The port's own copyright line.  It goes here rather than in start.c's

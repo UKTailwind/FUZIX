@@ -116,6 +116,20 @@ the FPU lock. Do not add `-mfpu` to anything else. For maths that has
 to be fast, use the shared library below: it is double precision, it
 runs on the DCP, and it costs no lock.
 
+**`printf` can print one, as of v0.13.** It could not before: the
+`%e`, `%f` and `%g` conversions sat behind a build option no target
+defined, and the function they called was declared and never written,
+so `printf("%f", x)` put the letter `f` on the screen. `%j` and `%z`
+were missing in the same way. Both directions work now — `scanf` reads
+a float too.
+
+A bytecode program's `printf` is a different implementation (bcrun's
+own, since the library had nothing to offer it) and gained `%e` and
+`%g` at the same time. Before that they printed themselves *and* did
+not consume their argument, so every conversion after one of them read
+the wrong slot — `printf("%g %d", 1.5, 42)` printed `%g` and then a
+piece of the double.
+
 ## Worked examples on disc
 
 Read these before writing anything; they are all short.

@@ -386,7 +386,6 @@ bget ../../../Applications/V7/cmd/sum
 # only thing lost is -l, a string-length operator nothing uses.  1,128
 # bytes more, checked on the board both ways.
 bget ../../../Applications/MWC/cmd/test
-bget ../../../Applications/MWC/cmd/test [
 # find and expr build in Applications/MWC/cmd, from which NOTHING was
 # installed - the recipe takes 33 programs from V7/cmd and none at all
 # from there.  Both checked on the board.
@@ -424,7 +423,16 @@ chmod 0755 split
 chmod 0755 su
 chmod 0755 sum
 chmod 0755 test
-chmod 0755 [
+# test under its other name, the way mv and ln are done further up
+# rather than as a second copy: MWC/cmd/test.c checks argv[0] for the
+# bracket and for the closing one, so the same inode answers to both.
+# Without it every bracket test in every shell script fails with
+# "not found".
+#
+# It has to come AFTER the bget above - ucp links what is already
+# there, and up with mv and ln it failed with ENOENT because test had
+# not been installed yet.
+ln test [
 chmod 0755 find
 chmod 0755 expr
 chmod 0755 time
@@ -568,7 +576,23 @@ EOF
 # The ceiling is the FTL's, not the filesystem's: mkftl -s 1952 with
 # 4 kB erase blocks gives 2555 sectors, and FSSIZE is set just under
 # it.  Growing the root means growing the flash region.
-if grep -q 'error' /tmp/ucp-flash.log; then
+# Anything ucp complained about is worth stopping for, but say WHICH:
+# the first version of this printed "does not fit" for every error, and
+# then blamed a full disk for an ln that had simply run before the file
+# it was linking to existed.
+if grep -q 'error' /tmp/ucp-flash.log && ! grep -q 'error 28' /tmp/ucp-flash.log; then
+	echo "" >&2
+	echo "***********************************************************" >&2
+	echo "update-flash.sh: ucp reported an error building the root" >&2
+	echo "" >&2
+	grep 'error' /tmp/ucp-flash.log | sed 's/^/    ucp: /' >&2
+	echo "" >&2
+	echo "  error 2 is ENOENT - usually an ln naming something that is" >&2
+	echo "  bget'd further down the file.  ucp works top to bottom." >&2
+	echo "***********************************************************" >&2
+	echo "" >&2
+fi
+if grep -q 'error 28' /tmp/ucp-flash.log; then
 	echo "" >&2
 	echo "***********************************************************" >&2
 	echo "update-flash.sh: THE FLASH ROOT DOES NOT FIT" >&2

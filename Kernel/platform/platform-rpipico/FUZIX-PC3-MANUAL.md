@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.12 — August 2026"
+date: "Release v0.13 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -54,6 +54,34 @@ Headline specification as configured here:
   MMBasic translator in front of it — both run on the machine itself
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
+
+## New in v0.13
+
+A Unix release rather than a BASIC one: the machine gains the tools you
+would expect to find on it, and the C library gained something it turns
+out never to have had.
+
+* **`awk`** — Lucent's one true awk, the maintained descendant of the
+  V7 original. Associative arrays, user-defined functions, regular
+  expressions, `getline`, pipes and `printf`, all of it. See
+  [Text processing](#text-processing).
+* **`sed`, `find`, `expr`, `seq`, `uname`, and `[`** — every one of
+  these was **already being compiled** and simply never installed.
+  `[` is the one that matters: `/bin/test` existed and `/bin/[` did
+  not, so every bracket test in every shell script failed with
+  `[: not found`.
+* **`grep -q`**, and **`ls -t`** and **`ls -1`**.
+* **The C library can print a fraction.** `printf("%f", x)` used to
+  print the letter `f` — the conversion was behind a build option no
+  target defined, and the function it called did not exist anywhere in
+  the tree. `%e`, `%f` and `%g` now work, in `printf` and in `scanf`,
+  and so do `%j` and `%z`. A bytecode program's `printf` gained `%e`
+  and `%g` too, where before they printed themselves *and* misaligned
+  every argument after them.
+* **The flash disk is fifteen megabytes**, up from two. The kernel gets
+  1 MB of the chip and the disk takes the rest — and the chip is 16 MB,
+  which the build had never been told. See
+  [Appendix B](#appendix-b-boot-options).
 
 ## New in v0.12
 
@@ -2439,16 +2467,23 @@ the same place. `free` reports both.
 
 **Editors:** `mmedit` (MMBasic's own full-screen editor — see its
 chapter), `vi` (levee), `ue` (a WordStar-diamond micro-Emacs:
-Ctrl-W write, Ctrl-Q quit), `ed`, `fleamacs`.
+Ctrl-W write, Ctrl-Q quit), `ed`.
 
-**Shell & core:** Bourne `sh` (plus `fsh`), and the classic set —
-`ls ll cp mv ln rm mkdir rmdir cat more less head tail grep fgrep
-sed tr cut sort uniq wc find xargs diff diff3 cmp comm join split
+**Shell & core:** Bourne `sh`, and the classic set —
+`ls ll cp mv ln rm mkdir rmdir cat more head tail grep fgrep
+sed awk tr cut sort uniq wc find xargs diff diff3 cmp comm join split
 rev tar dd df du free ps kill killall uptime date cal banner echo
 sleep tee touch which who su passwd stty mount umount sync fsck
-mkfs fdisk chmod chown chgrp od hd factor seq units dc expr m4
-make cron at mail write wall`
+mkfs fdisk chmod chown chgrp od seq dc expr test [ uname
+cron at write wall`
 (and more — see `ls /bin /usr/bin`).
+
+This list is checked against the build recipe rather than remembered:
+it used to promise `less`, `hd`, `factor`, `units`, `m4`, `make` and
+`mail`, none of which were ever installed. A manual that names a
+command the card does not have is worse than one that stays quiet, so
+if you find something here that is missing, that is a bug in one of
+them.
 
 **Machine tools:** `picoctl` (keyboard layout, reboot to the
 flasher), `picogpio`/`gpiotool`, `gfxtest` (display test card),
@@ -2495,6 +2530,37 @@ complete Scott Adams `adv01`–`adv14` and Mysterious Adventures
 `z1`–`z8` and `l9x` (Level 9), `startrek`, `hamurabi`, `backgammon`,
 `invaders`, `2048`, `moo`, `ttt`, `fish`, `arithmetic`, `fortune`,
 `cowsay`, `wump`.
+
+## Text processing {#text-processing}
+
+`awk` is Lucent's — the one true awk, the maintained descendant of the
+V7 original by one of its authors. It is the real thing rather than a
+subset: associative arrays, user-defined functions, `getline` in each
+of its forms, output pipes, dynamic regular expressions, `printf`, and
+the maths library.
+
+```
+# awk '{ s[$1] += $2 } END { for (k in s) printf "%-10s %6.2f\n", k, s[k] }' log
+# ps | awk 'NR > 1 { n++ } END { print n " processes" }'
+```
+
+With `sed`, `grep` and `find` alongside it the usual pipelines work:
+
+```
+# find /bin -name 'a*' | sed 's|/bin/||' | awk '{ print NR, $1 }'
+```
+
+**What these are not.** They are period tools and they show it in
+places, so it is worth knowing where before a script surprises you:
+
+| | |
+|---|---|
+| `grep` | basic regular expressions only. `-c -e -i -l -n -q -s -v`, and no `-E`; use `awk` for an extended regex, or `fgrep` for a fixed string. |
+| `sed`   | MINIX's. Substitution, `-n`, several `-e`, and back-references all work; no `-E`. |
+| `sort`  | the V7 key syntax, `+beg_pos -end_pos`, not `-k`. |
+| `diff`  | V7 — no `-u`, so no unified diffs. |
+| `ls`    | `-t` sorts a *directory* by time, newest first; command-line arguments are listed in the order you gave them, as they always have been. |
+| `test`  | and `[`, which are one program under two names. `-a -b -c -d -e -f -g -n -o -p -r -s -t -u -w -x -z`. |
 
 \newpage
 
