@@ -47,6 +47,9 @@ static void do_assign_or_call(void);
 static void do_callstmt(void);
 static void do_mid_assign(void);
 static const char *lvalue_from_here(void);
+static void comms_tx(const char *what, const char *n,
+                     const char *callfmt, const char *bytesfmt);
+static void comms_rx(const char *what, const char *n, const char *callfmt);
 static void do_assign(void);
 static void store(const char *target, const char *val, int ty);
 static char *cond(void);
@@ -1648,7 +1651,6 @@ static void do_on_key(void)
    The FIRST controller: SPI2 is the second one, which on this board is
    the SD card's, so it is not offered.  Chip select is the program's,
    as it is on a PicoMite. */
-static const char *i2c_strvar(void);
 
 static void do_spi(void)
 {
@@ -1682,95 +1684,132 @@ static void do_spi(void)
     n = as_int(expr());
     expect_op(",");
     cv.tmp_used = 1;
-    /* The same three data forms I2C2 takes, and for the same reason: a
-       display wants a whole run in one call, and MMBasic's own
-       GetSendDataList accepts a list, an array or a string. */
-    if (wr) {
-        const char *v[64];
-        int nv = 0, i;
-        char *s;
-        struct val v0;
-
-        if (is_array_arg()) {
-            struct sym *sy = arrayref(1);
-            const char *base;
-
-            if (sy->ty == TY_S) {
-                cv_err(sfmt("SPI WRITE needs a numeric array, and '%s' "
-                            "is a string array", sy->name));
-                return;
-            }
-            base = array_flat(sy).ptr;
-            emit("{ int __i; unsigned char *__b = "
-                 "(unsigned char *)mm_tmp();");
-            emit(sfmt("  for (__i = 0; __i < (int)(%s) && "
-                      "__i < MM_STRSZ; __i++)", n));
-            emit(sfmt("    __b[__i] = (unsigned char)(%s)[__i];", base));
-            emit(sfmt("  mmspi_write(%s, __b); }", n));
-            return;
-        }
-        v0 = expr();
-        if (v0.ty == TY_S && !is_op(",", 0)) {
-            emit(sfmt("mmspi_write(%s, (const unsigned char *)((%s) + 1));",
-                      n, v0.code));
-            return;
-        }
-        v[nv++] = as_int(v0);
-        while (accept_op(",") && nv < 64)
-            v[nv++] = as_int(expr());
-        s = sfmt("{ unsigned char __b[%d];", nv);
-        for (i = 0; i < nv; i++)
-            s = sfmt("%s __b[%d] = (unsigned char)(%s);", s, i, v[i]);
-        emit(s);
-        emit(sfmt("  mmspi_write(%s, __b); }", n));
-    } else if (is_array_arg()) {
-        struct sym *sy = arrayref(1);
-        const char *base;
-
-        if (sy->ty == TY_S) {
-            cv_err(sfmt("SPI READ needs a numeric array, and '%s' is a "
-                        "string array", sy->name));
-            return;
-        }
-        base = array_flat(sy).ptr;
-        emit("{ int __i; unsigned char *__b = "
-             "(unsigned char *)mm_tmp();");
-        emit(sfmt("  mmspi_read(%s, __b);", n));
-        emit(sfmt("  for (__i = 0; __i < (int)(%s) && "
-                  "__i < MM_STRSZ; __i++)", n));
-        emit(sfmt("    (%s)[__i] = __b[__i]; }", base));
-    } else {
-        const char *d = i2c_strvar();
-
-        if (d == NULL)
-            return;
-        emit("{ unsigned char *__b = (unsigned char *)mm_tmp();");
-        emit(sfmt("  mmspi_read(%s, __b);", n));
-        emit(sfmt("  mm_ssetn(%s, (const char *)__b, (int)(%s)); }",
-                  d, n));
-    }
+    if (wr)
+        comms_tx("SPI WRITE", n,
+                 sfmt("  mmspi_write(%s, %%s);", n),
+                 sfmt("  mmspi_write_bytes(%s, %%s);", n));
+    else
+        comms_rx("SPI READ", n, sfmt("  mmspi_read(%s, %%s);", n));
 }
 
-/* mmb2c.py's i2c_strvar.  I2C2 READ's other target: a plain string
-   variable.  NULL after cv_err, which is how the callers here signal a
-   parse that has already reported itself. */
-static const char *i2c_strvar(void)
-{
-    struct tok *t = nxt();
-    struct sym *s;
+/* mmb2c.py's comms_tx / comms_rx: the data arguments I2C, SPI and
+   one-wire share.  MMBasic has ONE implementation of these and three
+   callers (GetCommsTxData / GetCommsRxDest / PutCommsRxData in
+   MMBasic.c, reached from I2C.c, Onewire.c and SPI.c), so this has one
+   too - the two copies it replaced had drifted five ways.  See
+   mmb_comms.h.
 
-    if (t->kind != T_ID) {
-        cv_err("I2C2 READ needs a numeric array, written a(), or a "
-               "string variable");
-        return NULL;
+   callfmt carries the transfer statement with a single %s where the
+   buffer or byte pointer goes; the Python passes a closure for the same
+   job. */
+static void comms_tx(const char *what, const char *n,
+                     const char *callfmt, const char *bytesfmt)
+{
+    const char *v[64];
+    int nv = 0, i;
+    struct val v0;
+
+    cv.uses_comms = 1;
+    if (is_array_arg()) {
+        struct sym *sy = arrayref(1);
+        struct flat f;
+
+        if (sy->ty == TY_S) {
+            cv_err(sfmt("%s needs a numeric array, and '%s' is a string "
+                        "array", what, sy->name));
+            return;
+        }
+        f = array_flat(sy);
+        emit(sfmt("{ unsigned int *__b = mmc_buf_for(%s);", n));
+        emit(sfmt("  mmc_tx_arr_%s(__b, %s, %s, %s);",
+                  sy->ty == TY_I ? "i" : "f", n, f.ptr, f.cnt));
+        emit(sfmt(callfmt, "__b"));
+        emit("}");
+        return;
     }
-    s = reference(t->text, is_op("(", 0));
-    if (s->ty != TY_S || s->is_array) {
-        cv_err(sfmt("I2C2 READ needs a numeric array, written a(), or a "
-                    "string variable, and '%s' is neither", t->text));
-        return NULL;
+    v0 = expr();
+    if (v0.ty == TY_S && !is_op(",", 0)) {
+        /* A string: no copy, and no buffer.  MMBasic copies because its
+           buffer is the only path it has; mmc_tx_str only checks the
+           length and hands back where the bytes already are. */
+        emit(sfmt("{ const unsigned char *__b = mmc_tx_str(%s, %s);",
+                  v0.code, n));
+        emit(sfmt(bytesfmt, "__b"));
+        emit("}");
+        return;
     }
-    return s->acc;
+    /* A list of expressions.  MMBasic requires as many as the count says
+       and raises "Argument count" otherwise - which the old per-bus code
+       did not check, so a short list left the driver reading past the
+       buffer. */
+    v[nv++] = as_int(v0);
+    while (accept_op(",") && nv < 64)
+        v[nv++] = as_int(expr());
+    emit("{ unsigned int *__b;");
+    emit(sfmt("  mmc_count(%s, %d);", n, nv));
+    emit(sfmt("  __b = mmc_buf_for(%s);", n));
+    for (i = 0; i < nv; i++)
+        emit(sfmt("  __b[%d] = (unsigned int)(%s);", i, v[i]));
+    emit(sfmt(callfmt, "__b"));
+    emit("}");
+}
+
+static void comms_rx(const char *what, const char *n, const char *callfmt)
+{
+    const char *tg[64];
+    int nt = 0, i;
+    struct tok *t;
+
+    cv.uses_comms = 1;
+    if (is_array_arg()) {
+        struct sym *sy = arrayref(1);
+        struct flat f;
+
+        if (sy->ty == TY_S) {
+            cv_err(sfmt("%s needs a numeric array, and '%s' is a string "
+                        "array", what, sy->name));
+            return;
+        }
+        f = array_flat(sy);
+        /* Checked BEFORE the transfer, as GetCommsRxDest is: a read
+           moves the bus, so a destination that cannot hold the answer
+           has to be refused before it does. */
+        emit(sfmt("{ unsigned int *__b = mmc_buf_for(%s);", n));
+        emit(sfmt("  mmc_rx_fits(%s, %s);", f.cnt, n));
+        emit(sfmt(callfmt, "__b"));
+        emit(sfmt("  mmc_rx_arr_%s(%s, %s, __b, %s);",
+                  sy->ty == TY_I ? "i" : "f", f.ptr, f.cnt, n));
+        emit("}");
+        return;
+    }
+    t = peek(0);
+    if (t != NULL && t->kind == T_ID && !is_op(",", 1)) {
+        struct sym *s = reference(t->text, is_op("(", 1));
+
+        if (s->ty == TY_S && !s->is_array) {
+            cv.i++;
+            emit(sfmt("{ unsigned int *__b = mmc_buf_for(%s);", n));
+            emit(sfmt("  mmc_rx_strfits(%s);", n));
+            emit(sfmt(callfmt, "__b"));
+            emit(sfmt("  mmc_rx_str(%s, __b, %s);", s->acc, n));
+            emit("}");
+            return;
+        }
+    }
+    /* A list of lvalues, one per value received - MMBasic's
+       COMMS_RXD_LIST, which was missing here entirely.  A single scalar
+       is the same form with one element, which is also MMBasic's rule
+       that the count must then be 1. */
+    tg[nt++] = lvalue_from_here();
+    while (accept_op(",") && nt < 64)
+        tg[nt++] = lvalue_from_here();
+    emit("{ unsigned int *__b;");
+    emit(sfmt("  mmc_count(%s, %d);", n, nt));
+    emit(sfmt("  __b = mmc_buf_for(%s);", n));
+    emit(sfmt(callfmt, "__b"));
+    for (i = 0; i < nt; i++)
+        emit(sfmt("  %s = __b[%d];", tg[i], i));
+    emit("}");
 }
 
 /* mmb2c.py's do_i2c2.
@@ -1822,71 +1861,14 @@ static void do_i2c2(void)
        the sensor's 16- and 32-bit fields straight out of what was read.
        A read that only knew about arrays could not run that program at
        all. */
-    if (wr) {
-        const char *v[64];
-        int nv = 0, i;
-        char *s;
-        struct val v0;
-
-        if (is_array_arg()) {
-            struct sym *sy = arrayref(1);
-            const char *base;
-
-            if (sy->ty == TY_S) {
-                cv_err(sfmt("I2C2 WRITE needs a numeric array, and '%s' "
-                            "is a string array", sy->name));
-                return;
-            }
-            base = array_flat(sy).ptr;
-            emit("{ unsigned char __b[MMI2C_MAXLEN]; int __i;");
-            emit(sfmt("  for (__i = 0; __i < (int)(%s) && "
-                      "__i < MMI2C_MAXLEN; __i++)", n));
-            emit(sfmt("    __b[__i] = (unsigned char)(%s)[__i];", base));
-            emit(sfmt("  mmi2c_write(%s, %s, %s, __b); }", addr, opt, n));
-            return;
-        }
-        v0 = expr();
-        if (v0.ty == TY_S && !is_op(",", 0)) {
-            /* The bytes of a string, which live at s + 1 - element 0 is
-               the length.  No copy: the runtime only reads them. */
-            emit(sfmt("mmi2c_write(%s, %s, %s, "
-                      "(const unsigned char *)((%s) + 1));",
-                      addr, opt, n, v0.code));
-            return;
-        }
-        v[nv++] = as_int(v0);
-        while (accept_op(",") && nv < 64)
-            v[nv++] = as_int(expr());
-        s = sfmt("{ unsigned char __b[%d];", nv);
-        for (i = 0; i < nv; i++)
-            s = sfmt("%s __b[%d] = (unsigned char)(%s);", s, i, v[i]);
-        emit(s);
-        emit(sfmt("  mmi2c_write(%s, %s, %s, __b); }", addr, opt, n));
-    } else if (is_array_arg()) {
-        struct sym *sy = arrayref(1);
-        const char *base;
-
-        if (sy->ty == TY_S) {
-            cv_err(sfmt("I2C2 READ needs a numeric array, and '%s' is a "
-                        "string array", sy->name));
-            return;
-        }
-        base = array_flat(sy).ptr;
-        emit("{ unsigned char __b[MMI2C_MAXLEN]; int __i;");
-        emit(sfmt("  mmi2c_read(%s, %s, %s, __b);", addr, opt, n));
-        emit(sfmt("  for (__i = 0; __i < (int)(%s) && "
-                  "__i < MMI2C_MAXLEN; __i++)", n));
-        emit(sfmt("    (%s)[__i] = __b[__i]; }", base));
-    } else {
-        const char *d = i2c_strvar();
-
-        if (d == NULL)
-            return;
-        emit("{ unsigned char __b[MMI2C_MAXLEN];");
-        emit(sfmt("  mmi2c_read(%s, %s, %s, __b);", addr, opt, n));
-        emit(sfmt("  mm_ssetn(%s, (const char *)__b, (int)(%s)); }",
-                  d, n));
-    }
+    if (wr)
+        comms_tx("I2C2 WRITE", n,
+                 sfmt("  mmi2c_write(%s, %s, %s, %%s);", addr, opt, n),
+                 sfmt("  mmi2c_write_bytes(%s, %s, %s, %%s);",
+                      addr, opt, n));
+    else
+        comms_rx("I2C2 READ", n,
+                 sfmt("  mmi2c_read(%s, %s, %s, %%s);", addr, opt, n));
 }
 
 /* mmb2c.py's settick_id.  SETTICK's optional trailing timer number,

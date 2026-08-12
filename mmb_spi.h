@@ -64,6 +64,13 @@
 
 static MMINTEGER mmspi_actual_hz;
 
+/*	The word width the last OPEN asked for.  Kept because a transfer
+ *	has to know it: the kernel counts UNITS, not bytes, and a unit is
+ *	16 bits once bits > 8 (pico_ioctl.h, struct spi_xfer).  Handing it
+ *	a byte buffer at that width made it read twice as far as the
+ *	buffer went - and send the low half of each word. */
+static int mmspi_bits = 8;
+
 MMG_FN void mmspi_failed(MMINTEGER r)
 {
 	switch ((int)-r) {
@@ -144,6 +151,7 @@ MMG_FN void mmspi_open(MMINTEGER p1, MMINTEGER p2, MMINTEGER p3,
 	 *	above clk_peri / 2 quietly becomes clk_peri / 2.  Kept so a
 	 *	program can ask rather than guess - MM.SPISPEED below. */
 	mmspi_actual_hz = r;
+	mmspi_bits = (int)bits;
 }
 
 /*	The clock the last OPEN actually got, for MM.SPISPEED. */
@@ -157,33 +165,85 @@ MMG_FN void mmspi_close(void)
 	mm_spi_close();
 }
 
-MMG_FN void mmspi_write(MMINTEGER n, const unsigned char *buf)
+/*
+ *	The transfers.  Both take the shared VALUE buffer (mmb_comms.h)
+ *	rather than bytes, and narrow it here, because that is the only
+ *	place that knows the word width.
+ *
+ *	A unit is one byte up to 8 bits and two from 9 to 16 - the kernel
+ *	counts units, so the buffer handed over has to be in those units
+ *	or it reads off the end of it.
+ */
+static unsigned char mmspi_units[MMC_MAXN * 2];
+
+MMG_FN void mmspi_write(MMINTEGER n, const unsigned int *buf)
 {
-	MMINTEGER r;
+	MMINTEGER r, i;
 
 	if (n < 1)
 		return;
-	r = mm_spi_xfer((unsigned char *)buf, (unsigned char *)0, (int)n);
+	if (n > MMC_MAXN) {
+		mm_error("Number out of bounds");
+		return;
+	}
+	if (mmspi_bits > 8)
+		for (i = 0; i < n; i++)
+			((unsigned short *)(void *)mmspi_units)[i] =
+				(unsigned short)buf[i];
+	else
+		for (i = 0; i < n; i++)
+			mmspi_units[i] = (unsigned char)buf[i];
+	r = mm_spi_xfer(mmspi_units, (unsigned char *)0, (int)n);
 	if (r < 0)
 		mmspi_failed(r);
 }
 
-MMG_FN void mmspi_read(MMINTEGER n, unsigned char *buf)
+/*	Bytes straight from a string, with no buffer in the way - what
+ *	makes a display row one call.  Only valid at 8 bits or fewer,
+ *	which is what a string can hold. */
+MMG_FN void mmspi_write_bytes(MMINTEGER n, const unsigned char *b)
 {
 	MMINTEGER r;
-	int i;
 
 	if (n < 1)
 		return;
+	if (mmspi_bits > 8) {
+		mm_error("SPI is open at more than 8 bits, so a string "
+			 "cannot be the data");
+		return;
+	}
+	r = mm_spi_xfer((unsigned char *)b, (unsigned char *)0, (int)n);
+	if (r < 0)
+		mmspi_failed(r);
+}
+
+MMG_FN void mmspi_read(MMINTEGER n, unsigned int *buf)
+{
+	MMINTEGER r, i;
+
+	if (n < 1)
+		return;
+	if (n > MMC_MAXN) {
+		mm_error("Number out of bounds");
+		return;
+	}
 	/*	Cleared first, so a transfer that fails leaves zeros rather
 	 *	than whatever was on the stack - the same trap I2C2 READ
 	 *	fell into, where the buffer still held a previous write's
 	 *	bytes and looked exactly like a device answering. */
-	for (i = 0; i < (int)n; i++)
-		buf[i] = 0;
-	r = mm_spi_xfer((unsigned char *)0, buf, (int)n);
-	if (r < 0)
+	for (i = 0; i < n * 2; i++)
+		mmspi_units[i] = 0;
+	r = mm_spi_xfer((unsigned char *)0, mmspi_units, (int)n);
+	if (r < 0) {
 		mmspi_failed(r);
+		return;
+	}
+	if (mmspi_bits > 8)
+		for (i = 0; i < n; i++)
+			buf[i] = ((unsigned short *)(void *)mmspi_units)[i];
+	else
+		for (i = 0; i < n; i++)
+			buf[i] = mmspi_units[i];
 }
 
 /*	The SPI() function: send one unit, return what came back. */

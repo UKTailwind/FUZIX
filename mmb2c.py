@@ -599,6 +599,7 @@ class Conv(object):
         self.uses_port = False      # PORT: pulls in mmb_port.h
         self.uses_pulse = False     # PULSE: pulls in mmb_pulse.h
         self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
+        self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
         self.uses_play = False
         self.uses_pwm = False
         self.uses_i2c = False
@@ -5331,64 +5332,120 @@ class Conv(object):
         # straight out of what was read.  A read that only knew about
         # arrays could not run that program at all.
         if wr:
-            if self.is_array_arg():
-                s = self.arrayref()
-                if s.ty == TY_S:
-                    self.err("I2C2 WRITE needs a numeric array, and '%s' "
-                             "is a string array" % s.name)
-                base, _cnt = self.array_flat(s)
-                self.emit('{ unsigned char __b[MMI2C_MAXLEN]; int __i;')
-                self.emit('  for (__i = 0; __i < (int)(%s) && '
-                          '__i < MMI2C_MAXLEN; __i++)' % n)
-                self.emit('    __b[__i] = (unsigned char)(%s)[__i];' % base)
-                self.emit('  mmi2c_write(%s, %s, %s, __b); }'
-                          % (addr, opt, n))
-                return
-            v0 = self.expr()
-            if v0[1] == TY_S and not self.is_op(','):
-                # The bytes of a string, which live at s + 1 - element 0
-                # is the length.  No copy: the runtime only reads them.
-                self.emit('mmi2c_write(%s, %s, %s, '
-                          '(const unsigned char *)((%s) + 1));'
-                          % (addr, opt, n, v0[0]))
-                return
-            vals = [self.as_int(v0)]
-            while self.accept_op(','):
-                vals.append(self.as_int(self.expr()))
-            self.emit('{ unsigned char __b[%d]; %s'
-                      % (len(vals),
-                         ' '.join('__b[%d] = (unsigned char)(%s);'
-                                  % (i, v) for i, v in enumerate(vals))))
-            self.emit('  mmi2c_write(%s, %s, %s, __b); }' % (addr, opt, n))
-        elif self.is_array_arg():
+            def call(src, isbytes):
+                self.emit('  mmi2c_write%s(%s, %s, %s, %s);'
+                          % ('_bytes' if isbytes else '', addr, opt, n, src))
+            self.comms_tx('I2C2 WRITE', n, call)
+        else:
+            def call(buf):
+                self.emit('  mmi2c_read(%s, %s, %s, %s);'
+                          % (addr, opt, n, buf))
+            self.comms_rx('I2C2 READ', n, call)
+
+    # -- the data arguments I2C, SPI and one-wire share -----------------
+    #
+    # MMBasic has ONE implementation of these and three callers:
+    # GetCommsTxData, GetCommsRxDest and PutCommsRxData in MMBasic.c,
+    # reached from I2C.c, Onewire.c and (through GetSendDataList and
+    # GetReceiveDataBuffer) SPI.c.  The buses take the same forms and a
+    # program expects them to, so this is one implementation too.
+    #
+    # Everything lands in the shared value buffer of mmb_comms.h, except
+    # a string source, whose bytes are already bytes and go straight to
+    # the bus.  See that header for why the buffer holds values rather
+    # than bytes - an SPI word can be 16 bits.
+
+    def comms_tx(self, what, n, emit_call):
+        """Parse a TX data argument and emit the transfer.
+
+        `emit_call(src, isbytes)` writes the statement, given either the
+        buffer or a byte pointer.  `what` names the statement in errors.
+        """
+        self.uses_comms = True
+        if self.is_array_arg():
             s = self.arrayref()
             if s.ty == TY_S:
-                self.err("I2C2 READ needs a numeric array, and '%s' is a "
-                         "string array" % s.name)
-            base, _cnt = self.array_flat(s)
-            self.emit('{ unsigned char __b[%s]; int __i;' % 'MMI2C_MAXLEN')
-            self.emit('  mmi2c_read(%s, %s, %s, __b);' % (addr, opt, n))
-            self.emit('  for (__i = 0; __i < (int)(%s) && '
-                      '__i < MMI2C_MAXLEN; __i++)' % n)
-            self.emit('    (%s)[__i] = __b[__i]; }' % base)
-        else:
-            d = self.i2c_strvar()
-            self.emit('{ unsigned char __b[%s];' % 'MMI2C_MAXLEN')
-            self.emit('  mmi2c_read(%s, %s, %s, __b);' % (addr, opt, n))
-            self.emit('  mm_ssetn(%s, (const char *)__b, (int)(%s)); }'
-                      % (d, n))
+                self.err("%s needs a numeric array, and '%s' is a string "
+                         "array" % (what, s.name))
+            base, cnt = self.array_flat(s)
+            self.emit('{ unsigned int *__b = mmc_buf_for(%s);' % n)
+            self.emit('  mmc_tx_arr_%s(__b, %s, %s, %s);'
+                      % ('i' if s.ty == TY_I else 'f', n, base, cnt))
+            emit_call('__b', False)
+            self.emit('}')
+            return
+        v0 = self.expr()
+        if v0[1] == TY_S and not self.is_op(','):
+            # A string: no copy, and no buffer.  MMBasic copies because
+            # its buffer is the only path it has; mmc_tx_str only checks
+            # the length and hands back where the bytes already are.
+            self.emit('{ const unsigned char *__b = mmc_tx_str(%s, %s);'
+                      % (v0[0], n))
+            emit_call('__b', True)
+            self.emit('}')
+            return
+        # A list of expressions.  MMBasic requires as many as the count
+        # says and raises "Argument count" otherwise - which the old
+        # per-bus code did not check, so a short list left the driver
+        # reading past the buffer.
+        vals = [self.as_int(v0)]
+        while self.accept_op(','):
+            vals.append(self.as_int(self.expr()))
+        self.emit('{ unsigned int *__b;')
+        self.emit('  mmc_count(%s, %d);' % (n, len(vals)))
+        self.emit('  __b = mmc_buf_for(%s);' % n)
+        for i, v in enumerate(vals):
+            self.emit('  __b[%d] = (unsigned int)(%s);' % (i, v))
+        emit_call('__b', False)
+        self.emit('}')
 
-    def i2c_strvar(self):
-        """I2C2 READ's other target: a plain string variable."""
-        t = self.nxt()
-        if t[0] != T_ID:
-            self.err("I2C2 READ needs a numeric array, written a(), or a "
-                     "string variable")
-        s = self.reference(t[1], self.is_op('('))
-        if s.ty != TY_S or s.is_array:
-            self.err("I2C2 READ needs a numeric array, written a(), or a "
-                     "string variable, and '%s' is neither" % t[1])
-        return s.acc
+    def comms_rx(self, what, n, emit_call):
+        """Parse an RX destination and emit the transfer.
+
+        `emit_call(buf)` writes the statement that fills the buffer.
+        """
+        self.uses_comms = True
+        if self.is_array_arg():
+            s = self.arrayref()
+            if s.ty == TY_S:
+                self.err("%s needs a numeric array, and '%s' is a string "
+                         "array" % (what, s.name))
+            base, cnt = self.array_flat(s)
+            # Checked BEFORE the transfer, as GetCommsRxDest is: a read
+            # moves the bus, so a destination that cannot hold the
+            # answer has to be refused before it does.
+            self.emit('{ unsigned int *__b = mmc_buf_for(%s);' % n)
+            self.emit('  mmc_rx_fits(%s, %s);' % (cnt, n))
+            emit_call('__b')
+            self.emit('  mmc_rx_arr_%s(%s, %s, __b, %s);'
+                      % ('i' if s.ty == TY_I else 'f', base, cnt, n))
+            self.emit('}')
+            return
+        t = self.peek()
+        if t is not None and t[0] == T_ID and not self.is_op(',', 1):
+            s = self.reference(t[1], self.is_op('(', 1))
+            if s.ty == TY_S and not s.is_array:
+                self.i += 1
+                self.emit('{ unsigned int *__b = mmc_buf_for(%s);' % n)
+                self.emit('  mmc_rx_strfits(%s);' % n)
+                emit_call('__b')
+                self.emit('  mmc_rx_str(%s, __b, %s);' % (s.acc, n))
+                self.emit('}')
+                return
+        # A list of lvalues, one per value received - MMBasic's
+        # COMMS_RXD_LIST, which was missing here entirely.  A single
+        # scalar is the same form with one element, which is also
+        # MMBasic's rule that the count must then be 1.
+        tgts = [self.lvalue_from_here()]
+        while self.accept_op(','):
+            tgts.append(self.lvalue_from_here())
+        self.emit('{ unsigned int *__b;')
+        self.emit('  mmc_count(%s, %d);' % (n, len(tgts)))
+        self.emit('  __b = mmc_buf_for(%s);' % n)
+        emit_call('__b')
+        for i, t in enumerate(tgts):
+            self.emit('  %s = __b[%d];' % (t, i))
+        self.emit('}')
 
     def do_spi(self):
         """SPI OPEN speed, mode [, bits]
@@ -5425,51 +5482,14 @@ class Conv(object):
         # a display wants a whole run in one call, and MMBasic's own
         # GetSendDataList accepts a list, an array or a string.
         if wr:
-            if self.is_array_arg():
-                s = self.arrayref()
-                if s.ty == TY_S:
-                    self.err("SPI WRITE needs a numeric array, and '%s' "
-                             "is a string array" % s.name)
-                base, _cnt = self.array_flat(s)
-                self.emit('{ int __i; unsigned char *__b = '
-                          '(unsigned char *)mm_tmp();')
-                self.emit('  for (__i = 0; __i < (int)(%s) && '
-                          '__i < MM_STRSZ; __i++)' % n)
-                self.emit('    __b[__i] = (unsigned char)(%s)[__i];' % base)
-                self.emit('  mmspi_write(%s, __b); }' % n)
-                return
-            v0 = self.expr()
-            if v0[1] == TY_S and not self.is_op(','):
-                # a string's bytes live at s + 1; element 0 is the length
-                self.emit('mmspi_write(%s, (const unsigned char *)((%s) + 1));'
-                          % (n, v0[0]))
-                return
-            vals = [self.as_int(v0)]
-            while self.accept_op(','):
-                vals.append(self.as_int(self.expr()))
-            self.emit('{ unsigned char __b[%d]; %s'
-                      % (len(vals),
-                         ' '.join('__b[%d] = (unsigned char)(%s);'
-                                  % (i, v) for i, v in enumerate(vals))))
-            self.emit('  mmspi_write(%s, __b); }' % n)
-        elif self.is_array_arg():
-            s = self.arrayref()
-            if s.ty == TY_S:
-                self.err("SPI READ needs a numeric array, and '%s' is a "
-                         "string array" % s.name)
-            base, _cnt = self.array_flat(s)
-            self.emit('{ int __i; unsigned char *__b = '
-                      '(unsigned char *)mm_tmp();')
-            self.emit('  mmspi_read(%s, __b);' % n)
-            self.emit('  for (__i = 0; __i < (int)(%s) && '
-                      '__i < MM_STRSZ; __i++)' % n)
-            self.emit('    (%s)[__i] = __b[__i]; }' % base)
+            def call(src, isbytes):
+                self.emit('  mmspi_write%s(%s, %s);'
+                          % ('_bytes' if isbytes else '', n, src))
+            self.comms_tx('SPI WRITE', n, call)
         else:
-            d = self.i2c_strvar()
-            self.emit('{ unsigned char *__b = (unsigned char *)mm_tmp();')
-            self.emit('  mmspi_read(%s, __b);' % n)
-            self.emit('  mm_ssetn(%s, (const char *)__b, (int)(%s)); }'
-                      % (d, n))
+            def call(buf):
+                self.emit('  mmspi_read(%s, %s);' % (n, buf))
+            self.comms_rx('SPI READ', n, call)
 
     def settick_id(self):
         """SETTICK's optional trailing timer number, 1-4.  Absent is 1,
@@ -5951,6 +5971,9 @@ class Conv(object):
             wr('#include "mmb_int.h"\n')
         if self.uses_pwm:
             wr('#include "mmb_pwm.h"\n')
+        # Before both buses: it is the data forms they share.
+        if self.uses_comms:
+            wr('#include "mmb_comms.h"\n')
         if self.uses_i2c:
             wr('#include "mmb_i2c.h"\n')
         if self.uses_spi:

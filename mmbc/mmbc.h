@@ -335,6 +335,7 @@ struct conv {
     int uses_gpio;
     int uses_port;              /* PORT: pulls in mmb_port.h */
     int uses_pulse;             /* PULSE: pulls in mmb_pulse.h */
+    int uses_comms;             /* I2C/SPI data forms: mmb_comms.h */
     int uses_wait;              /* a serviced PAUSE: pulls in mmb_wait.h */
     int uses_play;              /* PLAY: emit the volume it remembers */
     /* set in the scan pass, so statements BEFORE the ON ERROR line are

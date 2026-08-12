@@ -1,5 +1,11 @@
 pins assigned
 din still parses  0
 second pair parses
-attempted, b(0) =  0 len =  0
+attempted, b(0) =  0 len =  4
 done
+list of lvalues:  0 0 0
+single scalar:    0
+float array:      0
+short list:      Argument count
+small array:     Insufficient space in array
+shared forms done

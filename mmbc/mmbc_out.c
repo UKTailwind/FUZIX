@@ -352,6 +352,9 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_int.h\"\n");
     if (cv.uses_pwm)
         fprintf(f, "#include \"mmb_pwm.h\"\n");
+    /* Before both buses: it is the data forms they share. */
+    if (cv.uses_comms)
+        fprintf(f, "#include \"mmb_comms.h\"\n");
     if (cv.uses_i2c)
         fprintf(f, "#include \"mmb_i2c.h\"\n");
     if (cv.uses_spi)

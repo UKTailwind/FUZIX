@@ -37,3 +37,44 @@ I2C2 READ 118, 1, 4, s$                 ' into a string, holding
 I2C2 CLOSE
 PRINT "attempted, b(0) = ";b(0);" len = ";LEN(s$)
 PRINT "done"
+
+' --- the forms that came with the shared layer -------------------------
+'
+' These were written out twice before, once here and once in SPI, and
+' the two copies had drifted.  MMBasic has ONE implementation
+' (GetCommsTxData / GetCommsRxDest / PutCommsRxData) and three callers;
+' so does this now, which is why the same forms have to work on both
+' buses.  tests/spi.bas is the other half of this test.
+DIM v1, v2, v3
+DIM FLOAT g(8)
+
+' a list of lvalues, one per value received - MMBasic's COMMS_RXD_LIST,
+' which did not exist here at all
+ON ERROR SKIP 1
+I2C2 READ 118, 0, 3, v1, v2, v3
+PRINT "list of lvalues: ";v1;v2;v3
+
+' a single scalar, which is that form with one element
+ON ERROR SKIP 1
+I2C2 READ 118, 0, 1, v1
+PRINT "single scalar:   ";v1
+
+' a float array, both directions
+ON ERROR SKIP 1
+I2C2 WRITE 118, 0, 3, g()
+ON ERROR SKIP 1
+I2C2 READ 118, 0, 3, g()
+PRINT "float array:     ";g(0)
+
+' THE COUNT MUST MATCH THE LIST.  Three asked for and two given:
+' MMBasic raises "Argument count", where the old code built a two-byte
+' buffer, told the driver three, and the third came off the stack.
+ON ERROR SKIP 2
+I2C2 WRITE 118, 0, 3, 1, 2
+PRINT "short list:      ";MM.ERRMSG$
+
+' and a destination too small for what was asked
+ON ERROR SKIP 2
+I2C2 READ 118, 0, 40, b()
+PRINT "small array:     ";MM.ERRMSG$
+PRINT "shared forms done"
