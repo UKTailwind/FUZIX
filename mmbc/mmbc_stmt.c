@@ -728,6 +728,26 @@ void statement_inner(void)
                   col, fill));
         return;
     }
+    if (strcmp(up, "FILL") == 0) {
+        /* FILL x, y, colour [, boundary]
+
+           With a boundary the fill stops at that colour; without one
+           it replaces the colour at the starting point.  MM_CUR
+           carries "no boundary given" to the header, as everywhere. */
+        const char *x, *y, *col, *bound = "MM_CUR";
+
+        cv.i++;
+        x = as_int(expr());
+        expect_op(",");
+        y = as_int(expr());
+        expect_op(",");
+        col = as_int(expr());
+        if (accept_op(","))
+            bound = as_int(expr());
+        cv.uses_fill = 1;
+        emit(sfmt("mmg_fill(%s, %s, %s, %s);", x, y, col, bound));
+        return;
+    }
     if (strcmp(up, "BEZIER") == 0) {
         /* BEZIER xarray(), yarray() [, n] [, colour]
 

@@ -589,6 +589,7 @@ class Conv(object):
         self.uses_triangle = False
         self.uses_polygon = False
         self.uses_bezier = False
+        self.uses_fill = False
         self.uses_arc = False
         self.uses_text = False
         self.uses_mappal = False
@@ -3318,6 +3319,24 @@ class Conv(object):
                       % (xf, xi, yf, yi, nverts,
                          self.shortest([xn, yn]), col, fill))
             return
+        if up == 'FILL':
+            # FILL x, y, colour [, boundary]
+            #
+            # With a boundary the fill stops at that colour; without
+            # one it replaces the colour at the starting point.  MM_CUR
+            # carries "no boundary given" to the header, as everywhere.
+            self.i += 1
+            x = self.as_int(self.expr())
+            self.expect_op(',')
+            y = self.as_int(self.expr())
+            self.expect_op(',')
+            col = self.as_int(self.expr())
+            bound = 'MM_CUR'
+            if self.accept_op(','):
+                bound = self.as_int(self.expr())
+            self.uses_fill = True
+            self.emit('mmg_fill(%s, %s, %s, %s);' % (x, y, col, bound))
+            return
         if up == 'BEZIER':
             # BEZIER xarray(), yarray() [, n] [, colour]
             #
@@ -5720,6 +5739,8 @@ class Conv(object):
             wr('#include "mmb_gfx_polygon.h"\n')
         if self.uses_bezier:
             wr('#include "mmb_gfx_bezier.h"\n')
+        if self.uses_fill:
+            wr('#include "mmb_gfx_fill.h"\n')
         if self.uses_arc:
             wr('#include "mmb_gfx_arc.h"\n')
         if self.uses_text:

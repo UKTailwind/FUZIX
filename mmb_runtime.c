@@ -4233,6 +4233,62 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
     return (r < 0) ? 0 : (MMINTEGER)r;  /* off-screen reads black */
 }
 
+#define MM_GFXIOC_BLITRD 0x0032
+
+struct mm_gfx_blit {
+    unsigned short offset;
+    unsigned short len;
+    void *buf;
+};
+
+/*
+ * Read raw framebuffer bytes - MMBasic's ReadBufferFast, against
+ * mm_pixel_get's ReadBuffer.
+ *
+ * NATIVE FORMAT: 4bpp high nibble = the left pixel, 1bpp MSB = left,
+ * exactly as GFXIOC_BLIT writes.  Out of the caller's own draw target,
+ * so a program working in the layer reads the layer.
+ *
+ * This exists for one reason: a flood fill has to LOOK at a great many
+ * pixels, and one at a time through mm_pixel_get is 2.5us each -
+ * 800us for a 320-pixel row, board-measured.  The same row here is one
+ * crossing and 160 bytes.
+ *
+ * Returns 0, or -1 if there is no display or the range is refused.
+ */
+MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf)
+{
+    struct mm_gfx_blit b;
+
+    if (mm_gfx_open() < 0)
+        return -1;
+    mm_pix_drain();             /* queued pixels must be down first */
+    b.offset = (unsigned short)offset;
+    b.len = (unsigned short)len;
+    b.buf = buf;
+    return ioctl(mm_gfx_fd, MM_GFXIOC_BLITRD, &b) < 0 ? -1 : 0;
+}
+
+/*
+ * Which native index does this RGB888 become?
+ *
+ * The palette and the nearest-match are the kernel's, so a program
+ * scanning raw bytes cannot work it out.  GFXIOC_COLOUR has always
+ * computed it and now returns it; setting the drawing colour as a side
+ * effect is harmless because every drawing call pushes its own colour
+ * before it draws.
+ */
+MMINTEGER mm_colour_index(MMINTEGER rgb)
+{
+    int r;
+
+    if (mm_gfx_open() < 0)
+        return -1;
+    r = ioctl(mm_gfx_fd, MM_GFXIOC_COLOUR, (void *)(long)(rgb & 0xFFFFFF));
+    mm_gfx_col = -1;            /* we moved it: make the cache re-push */
+    return (r < 0) ? -1 : (MMINTEGER)r;
+}
+
 /*
  * MM.HRES / MM.VRES - the drawable size of the screen.
  *
@@ -4263,6 +4319,21 @@ static MMINTEGER mm_gfx_dim(int want_h)
 
 MMINTEGER mm_hres(void) { return mm_gfx_dim(0); }
 MMINTEGER mm_vres(void) { return mm_gfx_dim(1); }
+
+/* Bytes per line and bits per pixel, which a caller reading raw
+   framebuffer bytes needs to make sense of them.  Packed into one
+   integer rather than two calls: (stride << 8) | bpp, and -1 for no
+   display.  Both are small and neither changes without a mode change. */
+MMINTEGER mm_fb_geom(void)
+{
+    struct mm_gfx_info gi;
+
+    if (mm_gfx_open() < 0)
+        return -1;
+    if (ioctl(mm_gfx_fd, MM_GFXIOC_INFO, &gi) < 0)
+        return -1;
+    return ((MMINTEGER)gi.stride << 8) | (MMINTEGER)gi.bpp;
+}
 
 /* Which machine, from the kernel's own detection (PICOIOC_BOARD returns
    the number the boot banner prints).  If it cannot be asked, say 3:
@@ -4753,6 +4824,9 @@ void mm_mode(MMINTEGER n)
 
 MMINTEGER mm_hres(void) { return mm_host_mode == 2 ? 320 : 640; }
 MMINTEGER mm_vres(void) { return mm_host_mode == 2 ? 240 : 480; }
+/* No framebuffer to describe.  -1, so a caller that would read raw
+   bytes takes its no-display path instead of believing a stride. */
+MMINTEGER mm_fb_geom(void) { return -1; }
 
 /* No kernel to ask on the host, and the gates compare output: say PC3,
    which is what the board build says when the ioctl is missing too. */
@@ -4787,6 +4861,21 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
 {
     (void)x; (void)y;
     return 0;
+}
+
+/* No framebuffer to read, and -1 rather than 0: a caller that scans
+   raw bytes must be able to tell "there is nothing here" from "here
+   are some bytes", or it walks an uninitialised buffer. */
+MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf)
+{
+    (void)offset; (void)len; (void)buf;
+    return -1;
+}
+
+MMINTEGER mm_colour_index(MMINTEGER rgb)
+{
+    (void)rgb;
+    return -1;
 }
 
 #endif

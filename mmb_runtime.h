@@ -472,6 +472,25 @@ void mm_map_reset(void);
 MMINTEGER mm_map_get(MMINTEGER index);
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb);
 MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y);
+
+/* Raw framebuffer bytes out of the current draw target - MMBasic's
+ * ReadBufferFast, where mm_pixel_get is its ReadBuffer.  NATIVE format:
+ * 4bpp high nibble = left pixel, 1bpp MSB = left, the same layout
+ * GFXIOC_BLIT writes.  0 on success, -1 if there is no display or the
+ * range is refused.  For code that must LOOK at many pixels: one
+ * crossing for a whole row against 2.5us per pixel one at a time. */
+MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf);
+
+/* Which native index an RGB888 colour becomes, since the palette and
+ * the nearest-match are the kernel's.  -1 if there is no display.
+ * Sets the drawing colour as a side effect, which costs nothing: every
+ * drawing call pushes its own colour first. */
+MMINTEGER mm_colour_index(MMINTEGER rgb);
+
+/* What raw framebuffer bytes mean: (stride << 8) | bpp, -1 for no
+ * display.  One call rather than two because neither changes without a
+ * mode change and both are small. */
+MMINTEGER mm_fb_geom(void);
 /* A line.  Axis-aligned ones become a single span in the kernel, which
  * is an order of magnitude cheaper than plotting them point by point. */
 void mm_line(MMINTEGER x1, MMINTEGER y1, MMINTEGER x2, MMINTEGER y2,

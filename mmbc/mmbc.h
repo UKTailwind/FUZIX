@@ -327,6 +327,7 @@ struct conv {
     int uses_triangle;
     int uses_polygon;
     int uses_bezier;
+    int uses_fill;
     int uses_arc;
     int uses_text;
     int uses_mappal;
