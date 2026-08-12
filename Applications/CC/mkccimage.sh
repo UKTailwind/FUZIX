@@ -111,6 +111,9 @@ echo "--- installing"
 	# The data arguments I2C, SPI and one-wire share - one copy, as
 	# MMBasic has one.  Included ahead of both bus headers.
 	echo "get $CC/mmb_comms.h mmb_comms.h"
+	# One-wire and the DS18B20, bit-banged in userland because a slot
+	# is 60 us and a syscall is 1.5.
+	echo "get $CC/mmb_onewire.h mmb_onewire.h"
 	echo "get $CC/mmb_port.h mmb_port.h"
 	echo "get $CC/mmb_pulse.h mmb_pulse.h"
 	# A PAUSE that services what the two above leave running.  It

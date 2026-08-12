@@ -96,13 +96,13 @@ static int pc3_pin_get(int p)
 {
 	return (p >= 0 && p < 64) ? (int)((pc3_hostlatch >> p) & 1ULL) : 0;
 }
-static void pc3_port_put(unsigned long long m, unsigned long long v)
+MMG_FN void pc3_port_put(unsigned long long m, unsigned long long v)
 {
 	pc3_hostlatch = (pc3_hostlatch & ~m) | (v & m);
 }
-static unsigned long long pc3_pins_in(void) { return pc3_hostlatch; }
-static unsigned long long pc3_pins_out(void) { return pc3_hostlatch; }
-static void pc3_pin_toggle(int p)
+MMG_FN unsigned long long pc3_pins_in(void) { return pc3_hostlatch; }
+MMG_FN unsigned long long pc3_pins_out(void) { return pc3_hostlatch; }
+MMG_FN void pc3_pin_toggle(int p)
 {
 	if (p >= 0 && p < 64)
 		pc3_hostlatch ^= 1ULL << p;

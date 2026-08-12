@@ -49,6 +49,8 @@ static const struct builtin builtins[] = {
     { "FLAG", 1, 1 },
     { "SPI", 1, 1 },
     { "POS", 0, 0 },
+    { "TEMPR", 1, 2 },
+    { "MM.ONEWIRE", 0, 0 },
     { "MM.HRES", 0, 0 }, { "MM.VRES", 0, 0 },
     { "MM.SPISPEED", 0, 0 },
     { "MM.ERRNO", 0, 0 }, { "MM.ERRMSG$", 0, 0 },

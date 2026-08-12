@@ -294,6 +294,24 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         cv.uses_spi = 1;
         return mkval("mmspi_speed()", TY_I);
     }
+    if (strcmp(up, "TEMPR") == 0) {
+        /* TEMPR(pin [, timeout]) - the DS18B20's answer.  It SLEEPS
+           while the conversion runs where MMBasic spins; see
+           mmb_onewire.h. */
+        const char *a0 = n(0);
+        const char *a1 = nargs > 1 ? n(1) : "-1";
+
+        cv.uses_gpio = 1;
+        cv.uses_onewire = 1;
+        return mkval(sfmt("mmow_tempr(%s, %s)", a0, a1), TY_F);
+    }
+    if (strcmp(up, "MM.ONEWIRE") == 0) {
+        /* What the last ONEWIRE RESET saw - MMBasic's mmOWvalue, and a
+           flat spelling there too. */
+        cv.uses_gpio = 1;
+        cv.uses_onewire = 1;
+        return mkval("mmow_last()", TY_I);
+    }
     if (strcmp(up, "POS") == 0)
         /* POS - the column the next character will go in, 1 for the
            start of a line.  MMBasic's fun_pos returns MMCharPos, which
