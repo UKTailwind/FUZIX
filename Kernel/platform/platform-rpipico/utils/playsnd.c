@@ -39,7 +39,13 @@
 
 #define RATE 44100
 #define CHUNK 512		/* frames rendered per pass */
-#define TARGET 2048		/* keep this many frames queued */
+/* Keep ~186 ms queued.  MMBasic keeps 93, but this machine stalls its
+ * processes for ~150 ms at a stretch on a slow heartbeat (pcmpace's
+ * cushion scan: 168 underruns in 5 s at 16K, 17 at 24K, ZERO at 32K),
+ * so 93 ms starves through no fault of the feeder.  32K rides every
+ * stall out; the cost is SOUND changes landing ~186 ms late.  When the
+ * stall itself is found and fixed, this can come back down. */
+#define TARGET 8192		/* frames queued: ~186 ms at 44100 */
 #define IDLE_EXIT_US 5000000L
 
 /* voice state - audio.c's snd_voice_t with the phase in 20.12 */
@@ -95,6 +101,26 @@ static void make_noise(void)
 		noisetable[i] = (unsigned short)(rand() % 3800 + 100);
 }
 
+/* polyBLEP, as the kernel synth and the reference now render: a
+ * square edge or saw wrap that can only land on a sample tick carries
+ * alias images that beat against the true harmonics - the shimmer on
+ * sustained notes.  Within one sample of the edge the band-limited
+ * step differs from the naive one by (1-t)^2 of the step toward its
+ * midpoint.  d and inc are 20.12 phase units; the result is q*q in
+ * 0..65536, 65536 at the edge. */
+static long blep_q(long d, long inc)
+{
+	long t;
+
+	if (inc < 256)
+		return 0;
+	t = d / (inc >> 8);
+	if (t >= 256)
+		return 0;
+	t = 256 - t;
+	return t * t;
+}
+
 /* audio.c's snd_sample, fixed point */
 static int snd_sample(struct voice *v)
 {
@@ -107,12 +133,35 @@ static int snd_sample(struct voice *v)
 	case MM_SND_TRI:
 		j = triangletable[ph];
 		break;
-	case MM_SND_SQUARE:
+	case MM_SND_SQUARE: {
+		long q = 0, half = 2048L << 12, full = 4096L << 12;
+
 		j = ph > 2047 ? 3900 : 100;
+		if (v->phase < v->phinc)
+			q = blep_q(v->phase, v->phinc);
+		else if (full - v->phase < v->phinc)
+			q = blep_q(full - v->phase, v->phinc);
+		else if (v->phase >= half && v->phase - half < v->phinc)
+			q = blep_q(v->phase - half, v->phinc);
+		else if (v->phase < half && half - v->phase < v->phinc)
+			q = blep_q(half - v->phase, v->phinc);
+		if (q)
+			j = 2000 + (int)((long)(j - 2000) * (65536 - q) /
+					 65536);
 		break;
-	case MM_SND_SAW:
+	}
+	case MM_SND_SAW: {
+		long full = 4096L << 12;
+
 		j = ph * 3800 / 4096 + 100;
+		if (v->phase < v->phinc)
+			j += (int)(1900L * blep_q(v->phase, v->phinc) /
+				   65536);
+		else if (full - v->phase < v->phinc)
+			j -= (int)(1900L * blep_q(full - v->phase,
+						  v->phinc) / 65536);
 		break;
+	}
 	case MM_SND_PNOISE:
 		j = noisetable[ph];
 		break;
@@ -265,24 +314,48 @@ int main(int argc, char *argv[])
 	struct snd_buf sb;
 	struct snd_stat st;
 	struct mm_playmsg m;
-	int sfd, ffd, n;
+	int sfd, ffd, n, dbg = 0, nofifo = 0;
 	long idle = 0;
+	unsigned long last_under = 0;
+	int statctr = 0;
 
 	if (argc >= 2)
 		set_gain(atoi(argv[1]), atoi(argv[1]));
+	if (argc >= 3 && argv[2][0] == 'd')
+		dbg = 1;
+	/* 't': the FIFO-free discriminator.  A 440 sine baked in at
+	 * start, no mkfifo, no control fd, no per-pass reads - everything
+	 * else identical.  If this holds clean where the normal mode
+	 * pulses, the per-pass FIFO read path is the destroyer. */
+	if (argc >= 3 && argv[2][0] == 't') {
+		int s;
+
+		for (s = 0; s < 2; s++) {
+			vc[0][s].type = MM_SND_SINE;
+			vc[0][s].phinc = (long)(((long long)440000 << 24) /
+						((long long)RATE * 1000));
+			vc[0][s].vol = 41;
+			vc[0][s].vol_target = 41;
+		}
+		nofifo = 1;
+	}
 
 	/* FIFO first, then the stream: the client polls PCMOWNER and
 	 * writes the moment it goes live, so the FIFO must already be
 	 * there - and a fresh inode discards any stale records. */
-	unlink(MM_PLAYCTL_FIFO);
-	if (mkfifo(MM_PLAYCTL_FIFO, 0666) < 0) {
-		perror("playsnd: mkfifo");
-		return 1;
-	}
-	ffd = open(MM_PLAYCTL_FIFO, O_RDWR | O_NDELAY);
-	if (ffd < 0) {
-		perror("playsnd: fifo");
-		return 1;
+	if (nofifo)
+		ffd = -1;
+	else {
+		unlink(MM_PLAYCTL_FIFO);
+		if (mkfifo(MM_PLAYCTL_FIFO, 0666) < 0) {
+			perror("playsnd: mkfifo");
+			return 1;
+		}
+		ffd = open(MM_PLAYCTL_FIFO, O_RDWR | O_NDELAY);
+		if (ffd < 0) {
+			perror("playsnd: fifo");
+			return 1;
+		}
 	}
 
 	sfd = open("/dev/sys", O_RDWR);
@@ -300,34 +373,92 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	/* Who owns the stream, for the NEXT program: a client born after
+	 * this daemon has mm_play_kind = NONE and needs to adopt rather
+	 * than raise "Sound output in use" at a synth it could use. */
+	{
+		FILE *kf = fopen(MM_PLAY_KINDFILE, "w");
+
+		if (kf != NULL) {
+			fputc('S', kf);
+			fclose(kf);
+		}
+	}
+
 	signal(SIGINT, on_intr);
 
 	while (!stopping) {
-		while ((n = read(ffd, &m, sizeof(m))) == (int)sizeof(m)) {
+		for (; ffd >= 0;) {
+			n = read(ffd, &m, sizeof(m));
+			if (n != (int)sizeof(m)) {
+				if (dbg && n > 0)
+					fprintf(stderr,
+						"snd: partial %d\n", n);
+				break;
+			}
+			if (dbg)
+				fprintf(stderr,
+					"snd: op%d a%d b%d %ld %ld %ld\n",
+					m.op, m.a, m.b, (long)m.p1,
+					(long)m.p2, (long)m.p3);
 			do_msg(&m);
 			idle = 0;
 		}
 		if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0)
 			break;
+		if (dbg) {
+			if (st.underruns != last_under) {
+				fprintf(stderr, "snd: UNDERRUN %lu (q %lu)\n",
+					(unsigned long)st.underruns,
+					(unsigned long)st.queued);
+				last_under = st.underruns;
+			}
+			if (++statctr >= 50) {	/* ~1 s of passes */
+				statctr = 0;
+				fprintf(stderr, "snd: q %lu u %lu\n",
+					(unsigned long)st.queued,
+					(unsigned long)st.underruns);
+			}
+		}
 		while (st.queued < TARGET * 4 && !stopping) {
+			int off = 0, w;
+
 			render(CHUNK);
-			sb.base = pcm;
-			sb.len = sizeof(pcm);
-			if (ioctl(sfd, SNDIOC_PCMWRITE, &sb) < 0)
+			/* A short write is the NORMAL case (playmp3's
+			 * comment says so): hand the chunk over piece by
+			 * piece until the ring has taken all of it.
+			 * Dropping the tail was the morse-code bug. */
+			while (off < (int)sizeof(pcm) && !stopping) {
+				sb.base = (char *)pcm + off;
+				sb.len = (unsigned long)(sizeof(pcm) - off);
+				w = ioctl(sfd, SNDIOC_PCMWRITE, &sb);
+				if (w < 0) {
+					stopping = 1;
+					break;
+				}
+				if (w == 0)
+					usleep(20000);
+				off += w;
+			}
+			if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0) {
+				stopping = 1;
 				break;
-			if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0)
-				break;
+			}
+			if (dbg)
+				fprintf(stderr, "snd: w%d q%lu\n", off,
+					(unsigned long)st.queued);
 		}
 		if (quiet()) {
-			idle += 20000;
+			idle += 10000;
 			if (idle >= IDLE_EXIT_US)
 				break;
 		} else
 			idle = 0;
-		usleep(20000);
+		usleep(10000);
 	}
 
 	ioctl(sfd, SNDIOC_PCMCLOSE, 0);
 	unlink(MM_PLAYCTL_FIFO);
+	unlink(MM_PLAY_KINDFILE);
 	return 0;
 }

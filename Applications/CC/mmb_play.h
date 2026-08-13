@@ -53,6 +53,29 @@ static long long mm_tone_end;
  * live once, next to the spawn machinery they belong with. */
 #define mmp_send(op, a, b, p1, p2, p3) 	mm_play_send((op), (a), (b), (long)(p1), (long)(p2), (long)(p3))
 
+/* A stream owner this program did not start is not necessarily "in
+ * use": a synth daemon from the previous RUN is still commandable
+ * over the FIFO.  The daemon says what it is in the kind file; adopt
+ * that, and only a genuine mismatch (an MP3 player writes no kind
+ * file) raises. */
+MMG_FN void mmp_adopt(void)
+{
+	FILE *kf;
+	int c;
+
+	if (mm_play_kind != MMP_KIND_NONE || mm_play_owner() == 0)
+		return;
+	kf = fopen(MM_PLAY_KINDFILE, "r");
+	if (kf == NULL)
+		return;
+	c = fgetc(kf);
+	fclose(kf);
+	if (c == 'S')
+		mm_play_kind = MMP_KIND_SND;
+	else if (c == 'M')
+		mm_play_kind = MMP_KIND_MOD;
+}
+
 /* The daemon is up, or becomes up, or this raises.  kind is what the
  * caller needs running; a live stream of another kind is the
  * reference's error. */
@@ -61,6 +84,7 @@ MMG_FN int mmp_ensure(int kind, const char *prog)
 	int i;
 
 	if (mm_play_owner() != 0) {
+		mmp_adopt();
 		if (mm_play_kind == kind)
 			return 0;
 		MM_RAISEV("Sound output in use", -1);
@@ -185,6 +209,7 @@ MMG_FN void mmp_modsample(MMINTEGER s, MMINTEGER ch, MMINTEGER vol)
 		MM_RAISE("Invalid channel");
 	if (vol < 1 || vol > 64)
 		MM_RAISE("Invalid volume");
+	mmp_adopt();
 	if (mm_play_owner() == 0 || mm_play_kind != MMP_KIND_MOD)
 		MM_RAISE("Samples play over MOD file");
 	if (mmp_send(MM_PLAY_MODSAMP, (int)s, (int)ch, (long)vol, 0, 0) < 0)

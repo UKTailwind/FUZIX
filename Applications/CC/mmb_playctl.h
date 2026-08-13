@@ -22,6 +22,12 @@
 #define MM_PLAYCTL_FIFO "/tmp/.playctl"
 #define MM_PLAYCTL_VER  1
 
+/* One byte, 'S' or 'M', written by the daemon once it owns the PCM
+ * stream and unlinked when it exits: how a program born AFTER the
+ * daemon learns what is playing (its own mm_play_kind starts NONE).
+ * MMBasic's CurrentlyPlaying, made to survive a program boundary. */
+#define MM_PLAY_KINDFILE "/tmp/.playkind"
+
 struct mm_playmsg {
 	unsigned char ver;	/* MM_PLAYCTL_VER */
 	unsigned char op;

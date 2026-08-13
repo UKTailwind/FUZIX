@@ -145,6 +145,16 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	/* kind for a later program's adoption, as playsnd */
+	{
+		FILE *kf = fopen(MM_PLAY_KINDFILE, "w");
+
+		if (kf != NULL) {
+			fputc('M', kf);
+			fclose(kf);
+		}
+	}
+
 	signal(SIGINT, on_intr);
 
 	while (!stopping) {
@@ -172,18 +182,33 @@ int main(int argc, char *argv[])
 		if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0)
 			break;
 		while (st.queued < TARGET_BYTES && !stopping && !ended) {
+			int off = 0, w;
+
 			memset(pcm, 0, sizeof(pcm));
 			if (hxcmod_fillbuffer(&modctx, (msample *)pcm,
 					      CHUNK, NULL, noloop) && noloop)
 				ended = 1;
 			for (i = 0; i < CHUNK * 2; i++)
 				pcm[i] = (short)((pcm[i] * gain) >> 8);
-			sb.base = pcm;
-			sb.len = sizeof(pcm);
-			if (ioctl(sfd, SNDIOC_PCMWRITE, &sb) < 0)
+			/* short writes are the normal case: hand the whole
+			 * chunk over, as playmp3 does - dropping the tail
+			 * was the starvation-gap bug */
+			while (off < (int)sizeof(pcm) && !stopping) {
+				sb.base = (char *)pcm + off;
+				sb.len = (unsigned long)(sizeof(pcm) - off);
+				w = ioctl(sfd, SNDIOC_PCMWRITE, &sb);
+				if (w < 0) {
+					stopping = 1;
+					break;
+				}
+				if (w == 0)
+					usleep(20000);
+				off += w;
+			}
+			if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0) {
+				stopping = 1;
 				break;
-			if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0)
-				break;
+			}
 		}
 		if (ended && st.queued == 0)
 			break;
@@ -192,5 +217,6 @@ int main(int argc, char *argv[])
 
 	ioctl(sfd, SNDIOC_PCMCLOSE, 0);
 	unlink(MM_PLAYCTL_FIFO);
+	unlink(MM_PLAY_KINDFILE);
 	return 0;
 }

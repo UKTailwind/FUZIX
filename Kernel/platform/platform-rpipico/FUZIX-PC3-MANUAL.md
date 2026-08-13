@@ -1750,7 +1750,7 @@ The decoder is MMBasic's, so it reads 1, 4, 8, 16, 24 and 32-bit BMPs,
 `BI_BITFIELDS`, and RLE4/RLE8 compression. Dithering is *optional*, as
 in MMBasic — omit the mode and the image is mapped without it.
 
-## Music: `PLAY MP3`, `PLAY VOLUME`, `PLAY STOP`
+## Music: `PLAY MP3`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE`
 
 ```basic
 PLAY VOLUME 70
@@ -1802,6 +1802,54 @@ them over with `fat get`, as with any other file.
 `PLAY` and BBC BASIC's `SOUND` share one piece of hardware and are
 mutually exclusive, exactly as they are in MMBasic. Starting a track
 silences the synthesiser; stopping it hands the hardware back.
+
+### The synthesiser: `PLAY SOUND` and `PLAY TONE`
+
+```basic
+PLAY SOUND 1, B, S, 440, 15     ' voice 1, both sides, sine, 440 Hz
+PLAY SOUND 2, B, Q, 220, 10     ' a square underneath it
+PAUSE 1000
+PLAY SOUND 1, B, O              ' voice 1 off
+PLAY TONE 440, 554, 600         ' left/right pair for 600 ms
+```
+
+MMBasic's four-voice synthesiser, rendered by a separate program the
+first `PLAY SOUND` or `PLAY TONE` starts, feeding the same kernel
+buffer MP3 playback uses. Four voices, each with an independent left
+and right side; channels are `L`, `R`, `B` or `M`, and the types are
+`S`ine, `Q` (square), `T`riangle, `W` (sawtooth), `P`eriodic noise,
+`N` (white noise) and `O`ff. Frequency is 1 Hz to 20 kHz, volume 0 to
+25. `PLAY TONE` takes left and right frequencies and an optional
+duration in milliseconds, rounded down to whole cycles as MMBasic
+rounds it; no duration means until further notice. The square and
+sawtooth are band-limited (polyBLEP), so they hold a pure pitch at
+the top of the range instead of shimmering.
+
+Two things are honestly different from MMBasic. Channel and type are
+**bare letters, not strings** — `PLAY SOUND 1, B, S, 440` rather than
+`PLAY SOUND 1, "B", "S", 440` — until string arguments land. And a
+change of note takes effect about **0.2 seconds late**: the renderer
+keeps that much audio queued so that the machine's own pauses (flash
+housekeeping, console scrolls) never leave the sound stuttering. The
+synthesiser exits by itself after five seconds with every voice off,
+or with `PLAY STOP`.
+
+### Modules: `PLAY MODFILE` and `PLAY MODSAMPLE`
+
+```basic
+PLAY MODFILE "/root/ptetris.mod"
+PAUSE 5000
+PLAY MODSAMPLE 3, 4             ' fire sample 3 on channel 4, over the music
+PLAY STOP
+```
+
+`PLAY MODFILE` plays ProTracker modules at 22 kHz through the hxcmod
+tracker, the whole file staged in PSRAM. Like MP3 it runs as its own
+program and does not wait. `PLAY MODSAMPLE n, ch [, vol]` asks the
+*running* player to mix one of the module's own samples over the
+music - MMBasic's game sound-effect trick - with nothing loaded and
+nothing interrupted. With a completion interrupt the module plays
+once; otherwise it loops until `PLAY STOP`.
 
 ## Pins: `SETPIN` and `PIN`
 
@@ -3230,11 +3278,12 @@ I/O header may be claimed, and the pin is released and reset when the
 program ends however it ends. `OPTION VCC` is not supported, so `AIN`
 always scales by 3.3 V.
 
-Of the sound, `PLAY MP3`, `PLAY VOLUME` and `PLAY STOP` are done —
-`PLAY TONE`, `WAV`, `FLAC`, `MOD`, `MIDI`, `SAMPLE` and `EFFECT` are
-not, and neither is the four-channel `SOUND` synthesiser the kernel
-provides to BBC BASIC. `PLAY VOLUME` takes one level rather than one
-per channel.
+Of the sound, `PLAY MP3`, `PLAY VOLUME`, `PLAY STOP`, `PLAY SOUND`,
+`PLAY TONE`, `PLAY MODFILE` and `PLAY MODSAMPLE` are done — `WAV`,
+`FLAC`, `MIDI`, `LOAD SOUND` and the user-defined `U` waveform are
+not. `PLAY SOUND`'s channel and type are bare letters rather than
+MMBasic's strings for now, and `PLAY VOLUME` takes one level rather
+than one per channel.
 
 Of the statements that reach *into* something rather than replacing
 it, `MID$(s$,n,m) =`, `LMID(a(),start[,num]) =`, `BIT(v,n) =`,
