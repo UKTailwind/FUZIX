@@ -1797,6 +1797,134 @@ int display_gfx_text(int x, int y, int font, int scale, int fc, int bc,
  * was drawing off-screen moved the wrong picture.  Nothing had noticed
  * because nothing had yet printed with a framebuffer selected.
  */
+/*
+ * The two-axis scroll with wrap - GFXIOC_SCROLL2, SPRITE SCROLL's
+ * engine.  dx > 0 picture right, dy > 0 picture up, matching the
+ * reference's ScrollBufferH/V senses.  fillc is a NATIVE index (the
+ * dispatcher reduces RGB888), or -1 leave, -2 wrap.
+ *
+ * One packed row is the only working storage.  Horizontal movement is
+ * per pixel through it - at 4bpp an odd dx crosses nibbles and at 1bpp
+ * any dx crosses bits, and one honest path beats four clever ones.
+ * Vertical wrap is the three-reversal rotation, swapping rows through
+ * the same buffer, so no band-sized allocation exists anywhere.
+ * A frame-sized scroll in mode 7 costs a few milliseconds of RAM work,
+ * once per game frame.
+ */
+static uint8_t sc2_row[DISP_STRIDE > 160 ? DISP_STRIDE : 164];
+
+static int sc2_get(const uint8_t *r, int x, int bpp)
+{
+    if (bpp == 4)
+        return (x & 1) ? (r[x >> 1] & 15) : (r[x >> 1] >> 4);
+    return (r[x >> 3] >> (7 - (x & 7))) & 1;
+}
+
+static void sc2_set(uint8_t *r, int x, int bpp, int v)
+{
+    if (bpp == 4) {
+        if (x & 1)
+            r[x >> 1] = (uint8_t)((r[x >> 1] & 0xF0) | (v & 15));
+        else
+            r[x >> 1] = (uint8_t)((r[x >> 1] & 0x0F) | ((v & 15) << 4));
+    } else {
+        uint8_t m = (uint8_t)(0x80 >> (x & 7));
+
+        if (v)
+            r[x >> 3] |= m;
+        else
+            r[x >> 3] &= (uint8_t)~m;
+    }
+}
+
+static void sc2_revrows(uint8_t *base, int stride, int a, int b)
+{
+    while (a < b - 1) {
+        b--;
+        memcpy(sc2_row, base + a * stride, (unsigned)stride);
+        memcpy(base + a * stride, base + b * stride, (unsigned)stride);
+        memcpy(base + b * stride, sc2_row, (unsigned)stride);
+        a++;
+    }
+}
+
+int display_gfx_scroll2(int dx, int dy, int fillc)
+{
+    enum gexp ex = gfx_exp;
+    int h = (ex == EXP_CONSOLE) ? DISP_HEIGHT : gfx_rows;
+    int stride = (ex == EXP_CONSOLE) ? DISP_STRIDE : gfx_stride;
+    int w = gfx_width(ex);
+    int bpp = gfx_bpp(ex);
+    int x, y;
+    uint8_t fill8;
+
+    if (!stride || !w || (bpp != 1 && bpp != 4))
+        return -1;
+    fill8 = (bpp == 4) ? (uint8_t)((fillc & 15) | ((fillc & 15) << 4))
+                       : (uint8_t)(fillc ? 0xFF : 0);
+
+    if (dx) {
+        for (y = 0; y < h; y++) {
+            uint8_t *row = gfx_draw + y * stride;
+
+            memcpy(sc2_row, row, (unsigned)stride);
+            /* new[x] takes old[x - dx] when that lies on the row;
+             * otherwise wrap takes it modulo, leave keeps old[x], and
+             * a colour fills. */
+            for (x = 0; x < w; x++) {
+                int sx = x - dx;
+                int v;
+
+                if (sx >= 0 && sx < w)
+                    v = sc2_get(sc2_row, sx, bpp);
+                else if (fillc == -2) {
+                    sx %= w;
+                    if (sx < 0)
+                        sx += w;
+                    v = sc2_get(sc2_row, sx, bpp);
+                } else if (fillc == -1)
+                    v = sc2_get(sc2_row, x, bpp);
+                else
+                    v = (bpp == 4) ? (fillc & 15) : (fillc ? 1 : 0);
+                sc2_set(row, x, bpp, v);
+            }
+        }
+    }
+
+    if (dy) {
+        int n = dy < 0 ? -dy : dy;
+
+        if (fillc == -2) {
+            n %= h;
+            if (n) {
+                int k = dy > 0 ? n : h - n;
+
+                /* rotate rows left by k: picture up by dy>0 */
+                sc2_revrows(gfx_draw, stride, 0, k);
+                sc2_revrows(gfx_draw, stride, k, h);
+                sc2_revrows(gfx_draw, stride, 0, h);
+            }
+        } else if (n >= h) {
+            if (fillc != -1)
+                memset(gfx_draw, fill8, (unsigned)(stride * h));
+        } else {
+            int keep = (h - n) * stride;
+
+            if (dy > 0) {
+                memmove(gfx_draw, gfx_draw + n * stride, (unsigned)keep);
+                if (fillc != -1)
+                    memset(gfx_draw + keep, fill8,
+                           (unsigned)(n * stride));
+            } else {
+                memmove(gfx_draw + n * stride, gfx_draw, (unsigned)keep);
+                if (fillc != -1)
+                    memset(gfx_draw, fill8, (unsigned)(n * stride));
+            }
+        }
+    }
+    return 0;
+}
+
 int display_gfx_scroll(int rows, int fillc)
 {
     enum gexp ex = gfx_exp;

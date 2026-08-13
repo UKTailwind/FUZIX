@@ -308,6 +308,25 @@ int plt_dev_ioctl(uarg_t request, char *data)
         }
         return 0;
     }
+    if (request == GFXIOC_SCROLL2)
+    {
+        /* dx/dy in pixels with the reference's senses; fill is RGB888
+         * reduced here (like every colour crossing), with -1 (leave)
+         * and -2 (wrap) passed through as themselves. */
+        struct gfx_scroll2 s2;
+        int fillarg;
+
+        if (uget(data, &s2, sizeof(s2)))
+            return -1;
+        fillarg = (s2.fill < 0) ? (int)s2.fill
+                                : (int)display_gfx_map((uint32_t)s2.fill &
+                                                       0xFFFFFF);
+        if (s2.fill < -2 || display_gfx_scroll2(s2.dx, s2.dy, fillarg)) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
     if (request == GFXIOC_TEXT)
     {
         /* The string is read where it lies, blessed once by valaddr_r -

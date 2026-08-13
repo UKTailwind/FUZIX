@@ -4463,6 +4463,32 @@ MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf)
 }
 
 #define MM_GFXIOC_BLIT 0x0005
+#define MM_GFXIOC_SCROLL2 0x0035
+
+struct mm_gfx_scroll2 {
+    short dx;
+    short dy;
+    int fill;                   /* RGB888, or -1 leave, -2 wrap */
+};
+
+/*
+ * Both-axis scroll with wrap - SPRITE SCROLL's engine, kernel-side
+ * because a horizontal scroll of a packed framebuffer through the byte
+ * window would mean shifting every byte of it across the boundary.
+ * dx > 0 picture right, dy > 0 picture up, the reference's senses.
+ */
+MMINTEGER mm_fb_scroll2(MMINTEGER dx, MMINTEGER dy, MMINTEGER fill)
+{
+    struct mm_gfx_scroll2 s;
+
+    if (mm_gfx_open() < 0)
+        return -1;
+    mm_pix_drain();             /* queued pixels scroll WITH the frame */
+    s.dx = (short)dx;
+    s.dy = (short)dy;
+    s.fill = (int)fill;
+    return ioctl(mm_gfx_fd, MM_GFXIOC_SCROLL2, &s) < 0 ? -1 : 0;
+}
 
 /*
  * The write half of the same window: raw native bytes INTO the current
@@ -5091,6 +5117,12 @@ MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf)
 MMINTEGER mm_fb_put(MMINTEGER offset, MMINTEGER len, const void *buf)
 {
     (void)offset; (void)len; (void)buf;
+    return -1;
+}
+
+MMINTEGER mm_fb_scroll2(MMINTEGER dx, MMINTEGER dy, MMINTEGER fill)
+{
+    (void)dx; (void)dy; (void)fill;
     return -1;
 }
 

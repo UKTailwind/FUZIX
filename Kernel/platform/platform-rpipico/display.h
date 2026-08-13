@@ -177,6 +177,9 @@ int display_gfx_text(int x, int y, int font, int scale, int fc, int bc,
  * scroll calls it and GFXIOC_SCROLL hands it to userland, so a PRINT
  * running off the bottom behaves the same whoever issued it. */
 int display_gfx_scroll(int rows, int fillc);
+/* both axes, wrap-capable - GFXIOC_SCROLL2; fillc is a native index,
+ * or -1 leave, -2 wrap */
+int display_gfx_scroll2(int dx, int dy, int fillc);
 
 /* Current geometry, for GFXIOC_INFO. */
 void display_gfx_geom(uint16_t *w, uint16_t *h, uint16_t *stride,

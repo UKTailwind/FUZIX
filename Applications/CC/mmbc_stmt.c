@@ -579,7 +579,7 @@ void statement_inner(void)
            PLAN-games.md - it wants the kernel's SCROLL2), LOADPNG
            and LOADBMP (want the image decoders). */
         static const char *const nospr[] = {
-            "SCROLL", "LOADPNG", "LOADBMP", NULL
+            "LOADPNG", "LOADBMP", NULL
         };
         int si;
 
@@ -795,6 +795,21 @@ void statement_inner(void)
                       n, x, y, w, h));
             return;
         }
+        if (is_kw("SCROLL", 1)) {
+            /* SCROLL x, y [,colour] - the default is the reference's
+               -2: wrap the departing band round. */
+            const char *x, *y;
+            const char *blank = "-2LL";
+
+            cv.i += 2;
+            x = as_int(expr());
+            expect_op(",");
+            y = as_int(expr());
+            if (accept_op(","))
+                blank = as_int(expr());
+            emit(sfmt("mms_scroll(%s, %s, %s);", x, y, blank));
+            return;
+        }
         if (is_kw("SET", 1) && is_kw("TRANSPARENT", 2)) {
             const char *c;
 
@@ -829,8 +844,7 @@ void statement_inner(void)
         }
         for (si = 0; nospr[si]; si++)
             if (is_kw(nospr[si], 1))
-                cv_err(sfmt("SPRITE %s is not translated%s", nospr[si],
-                            si == 0 ? " yet (PLAN-games.md Phase 4)" : ""));
+                cv_err(sfmt("SPRITE %s is not translated", nospr[si]));
         cv_err("unknown SPRITE form");
     }
     if (strcmp(up, "BLIT") == 0) {

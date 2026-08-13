@@ -507,6 +507,10 @@ MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf);
  * bytes are native - no colour reduction - so the packing rules are the
  * caller's, and mmb_blit.h is the caller. */
 MMINTEGER mm_fb_put(MMINTEGER offset, MMINTEGER len, const void *buf);
+/* Both-axis scroll with wrap (GFXIOC_SCROLL2): dx > 0 picture right,
+ * dy > 0 picture up; fill is RGB888, or -1 leave, -2 wrap.  -1 on no
+ * display. */
+MMINTEGER mm_fb_scroll2(MMINTEGER dx, MMINTEGER dy, MMINTEGER fill);
 
 /* Which native index an RGB888 colour becomes, since the palette and
  * the nearest-match are the kernel's.  -1 if there is no display.

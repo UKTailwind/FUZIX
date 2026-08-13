@@ -388,6 +388,23 @@ struct pc3_libm {
  * scrolls its own buffer rather than the screen. */
 #define GFXIOC_SCROLL 0x001B
 
+/* Scroll the write target in BOTH axes, with wrap-around - what
+ * MMBasic's SPRITE SCROLL needs and GFXIOC_SCROLL cannot do (no
+ * horizontal, no wrap).  dx > 0 moves the picture right, dy > 0 moves
+ * it up - the reference's own senses.  fill says what the vacated band
+ * becomes: an RGB888 colour, or -1 to leave the vacated pixels holding
+ * what they held (the reference's memmove residue), or -2 to wrap the
+ * departing band round to the other edge.  Horizontal work is done at
+ * pixel granularity whatever the packing, one row staged at a time, so
+ * the cost is flash code and one row buffer, not SRAM.
+ * GFXIOC_SCROLL stays: the console's own scrolling uses it. */
+struct gfx_scroll2 {
+	int16_t dx;
+	int16_t dy;
+	int32_t fill;		/* RGB888, or -1 leave, or -2 wrap */
+};
+#define GFXIOC_SCROLL2 0x0035
+
 /* Block until the top of vertical blanking - MMBasic's FRAMEBUFFER WAIT,
  * and what FRAMEBUFFER COPY ...,B does first.  No argument.  Bounded: if
  * the scanout has stopped this returns rather than hanging the caller. */
