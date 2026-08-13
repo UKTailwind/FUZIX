@@ -155,6 +155,21 @@ MMG_FN long long mm_int_slice_us(void)
  *	this is what makes them no-ops. */
 static int __mm_in_int;
 
+/*	PLAY TONE's completion interrupt.  No IPC anywhere: mmb_play.h
+ *	computed the duration, so the deadline sits in mm_tone_end and
+ *	the poll compares the clock against it.  Guarded like the sprite
+ *	block below: only a program that plays carries it. */
+#ifdef MMB_PLAY_H
+static mm_int_fn mm_tone_fn;
+
+MMG_FN void mmi_tone_int(mm_int_fn fn)
+{
+	if (mm_tone_fn == 0)
+		__mm_int_armed++;
+	mm_tone_fn = fn;
+}
+#endif
+
 /*	SPRITE INTERRUPT / STINTERRUPT handlers.  Registered here rather
  *	than in mmb_sprite.h because arming is this file's business
  *	(__mm_int_armed), and the poll below already owns the scan order.
@@ -453,6 +468,16 @@ MMG_FN void mm_int_poll(void)
 	if (mm_sprst_fn && mms_st_found) {
 		mms_st_found = 0;
 		mm_int_fire(mm_sprst_fn);
+		return;
+	}
+#endif
+
+	/*	The tone deadline - MMBasic's WAVcomplete, one comparison.
+	 *	Cleared before firing, as every one-shot here is. */
+#ifdef MMB_PLAY_H
+	if (mm_tone_fn && mm_tone_end && MMI_US() >= mm_tone_end) {
+		mm_tone_end = 0;
+		mm_int_fire(mm_tone_fn);
 		return;
 	}
 #endif

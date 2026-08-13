@@ -349,6 +349,10 @@ void conv_write(FILE *f)
        whose collision checks exist only under this header's guard. */
     if (cv.uses_sprite)
         fprintf(f, "#include \"mmb_sprite.h\"\n");
+    /* Before mmb_int.h, whose tone-deadline check exists only under
+       this header's guard.  It defines mm_play_volume itself. */
+    if (cv.uses_playd)
+        fprintf(f, "#include \"mmb_play.h\"\n");
     if (cv.uses_gpio)
         fprintf(f, "#include \"mmb_gpio.h\"\n");
     /* After mmb_gpio.h: PORT validates against the same mmg_mode table
@@ -396,7 +400,7 @@ void conv_write(FILE *f)
        what makes the volume stick across statements the way MMBasic's
        does.  Emitted only when the program plays something, so nothing
        else carries it - the same bargain as the two headers above. */
-    if (cv.uses_play)
+    if (cv.uses_play && !cv.uses_playd)
         fprintf(f, "static int mm_play_volume = 80;\n\n");
     if (cv.ntypes > 0) {
         int j;

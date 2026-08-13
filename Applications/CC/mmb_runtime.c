@@ -3785,7 +3785,39 @@ MMINTEGER mm_run_bg(void)
 
 static int mm_snd_fd = -2;              /* -2 = not tried yet */
 
-static int mm_play_owner(void)
+#include "mmb_playctl.h"
+
+/*
+ * One control record to the player daemon's FIFO - mmb_play.h's
+ * transport.  Never blocks (the FIFO semantics fifotest pinned:
+ * O_NDELAY opens always succeed for a writer) and -1 is "it is not
+ * there", which the caller turns into its own message.
+ */
+MMINTEGER mm_play_send(MMINTEGER op, MMINTEGER a, MMINTEGER b,
+                       MMINTEGER p1, MMINTEGER p2, MMINTEGER p3)
+{
+    struct mm_playmsg m;
+    int fd;
+
+    m.ver = MM_PLAYCTL_VER;
+    m.op = (unsigned char)op;
+    m.a = (unsigned char)a;
+    m.b = (unsigned char)b;
+    m.p1 = (int)p1;
+    m.p2 = (int)p2;
+    m.p3 = (int)p3;
+    fd = open(MM_PLAYCTL_FIFO, O_WRONLY | O_NDELAY);
+    if (fd < 0)
+        return -1;
+    if (write(fd, &m, sizeof(m)) != (int)sizeof(m)) {
+        close(fd);
+        return -1;
+    }
+    close(fd);
+    return 0;
+}
+
+MMINTEGER mm_play_owner(void)
 {
     int who;
 
@@ -3799,7 +3831,14 @@ static int mm_play_owner(void)
 
 #else
 
-static int mm_play_owner(void) { return 0; }
+MMINTEGER mm_play_owner(void) { return 0; }
+
+MMINTEGER mm_play_send(MMINTEGER op, MMINTEGER a, MMINTEGER b,
+                       MMINTEGER p1, MMINTEGER p2, MMINTEGER p3)
+{
+    (void)op; (void)a; (void)b; (void)p1; (void)p2; (void)p3;
+    return -1;
+}
 
 #endif
 
