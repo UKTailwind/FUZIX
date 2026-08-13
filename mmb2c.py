@@ -3516,6 +3516,18 @@ class Conv(object):
                 self.emit('mms_static(%s, %s, %s, %s, %s, 0);'
                           % (n, x, y, w, h))
                 return
+            if self.is_kw('SCROLL', 1):
+                # SCROLL x, y [,colour] - the default is the
+                # reference's -2: wrap the departing band round.
+                self.i += 2
+                x = self.as_int(self.expr())
+                self.expect_op(',')
+                y = self.as_int(self.expr())
+                blank = '-2LL'
+                if self.accept_op(','):
+                    blank = self.as_int(self.expr())
+                self.emit('mms_scroll(%s, %s, %s);' % (x, y, blank))
+                return
             if self.is_kw('SET', 1) and self.is_kw('TRANSPARENT', 2):
                 self.i += 3
                 c = self.as_int(self.expr())
@@ -3541,11 +3553,9 @@ class Conv(object):
                 self.uses_interrupts = True
                 self.emit('mmi_st_noint();')
                 return
-            for kw in ('SCROLL', 'LOADPNG', 'LOADBMP'):
+            for kw in ('LOADPNG', 'LOADBMP'):
                 if self.is_kw(kw, 1):
-                    self.err('SPRITE %s is not translated%s' %
-                             (kw, ' yet (PLAN-games.md Phase 4)'
-                              if kw == 'SCROLL' else ''))
+                    self.err('SPRITE %s is not translated' % kw)
             self.err('unknown SPRITE form')
         if up == 'BLIT':
             # BLIT READ [#]n, x, y, w, h        screen -> buffer 1-64

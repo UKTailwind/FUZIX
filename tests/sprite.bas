@@ -54,6 +54,21 @@ SPRITE CLOSE #3
 SPRITE CLOSE #1
 PRINT "n2: "; SPRITE(N)
 
+' SCROLL: layer-0 sprites and statics wrap with the background
+' (the pixels are the board's business; the positions are checkable
+' here).  Centre of #5 is (12,12): x +8 -> 20, y -4 -> 8, so the
+' corner lands at (18,6).  The static's centre (305,205) moves the
+' same way.
+SPRITE LOADARRAY #5, 4, 4, a%()
+SPRITE SHOW #5, 10, 10, 0
+SPRITE STATIC 2, 300, 200, 10, 10
+SPRITE SCROLL 8, 4
+PRINT "sc5: "; SPRITE(X, #5); " "; SPRITE(Y, #5)
+PRINT "st2: "; SPRITE(ST, 2, X); " "; SPRITE(ST, 2, Y)
+SPRITE STATIC 2, OFF
+SPRITE HIDE #5
+SPRITE CLOSE #5
+
 ' hide all / restore round trip
 SPRITE LOADARRAY #4, 4, 4, a%()
 SPRITE SHOW #4, 20, 20, 2

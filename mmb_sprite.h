@@ -1043,6 +1043,79 @@ MMG_FN void mms_close_all(void)
 	mms_which = -1;
 }
 
+/* centre-point wrap for SCROLL: the reference's own arithmetic, with
+ * Y INVERTED relative to X (Sprite.c:2110-2121) - a quirk, and kept. */
+MMG_FN int mms_wrapc(int centre, int delta, int limit)
+{
+	centre += delta;
+	if (centre >= limit)
+		centre -= limit;
+	if (centre < 0)
+		centre += limit;
+	return centre;
+}
+
+/* SPRITE SCROLL x, y [, colour] - the whole scene moves: layer-0
+ * sprites and statics wrap with the background, layers 1-4 are hidden,
+ * the frame scrolls in the kernel (GFXIOC_SCROLL2: wrap by default,
+ * -1 leaves the band, a colour fills it), pending NEXT positions are
+ * applied, everything reshows, and the background collision sweep
+ * runs - Sprite.c:2081-2208 in order. */
+MMG_FN void mms_scroll(MMINTEGER xi, MMINTEGER yi, MMINTEGER blank)
+{
+	int hres = (int)mm_hres(), vres = (int)mm_vres(), i;
+	int x = (int)xi, y = (int)yi;
+
+	if (mms_hideall)
+		MM_RAISE("Sprites are hidden");
+	if (x < -hres / 2 - 1 || x > hres || y < -vres / 2 - 1 || y > vres)
+		MM_RAISE("Invalid sprite coordinates");
+	if (blank < -2 || blank > 0xFFFFFF)
+		MM_RAISE("Invalid colour");
+	if (x == 0 && y == 0)
+		return;
+	for (i = mms_lp - 1; i >= 0; i--)
+		mms_unshow(mms_lifo[i]);
+	for (i = mms_zp - 1; i >= 0; i--) {
+		struct mmb_sprite *sb = &mms[mms_zlifo[i]];
+		int xs = sb->x + (sb->w >> 1);
+		int ys = sb->y + (sb->h >> 1);
+
+		mms_unshow(mms_zlifo[i]);
+		sb->x = (short)(mms_wrapc(xs, x, hres) - (sb->w >> 1));
+		sb->y = (short)(mms_wrapc(ys, -y, vres) - (sb->h >> 1));
+	}
+	for (i = 1; i <= MMS_MAXST; i++) {
+		struct mmb_stobj *st = &mms_st[i];
+		int bx, by;
+
+		if (!st->active)
+			continue;
+		bx = st->x + (st->w >> 1);
+		by = st->y + (st->h >> 1);
+		st->x = (short)(mms_wrapc(bx, x, hres) - (st->w >> 1));
+		st->y = (short)(mms_wrapc(by, -y, vres) - (st->h >> 1));
+	}
+	mm_fb_scroll2(x, y, blank);
+	for (i = 0; i < mms_zp; i++)
+		mms_show_px(mms_zlifo[i], mms[mms_zlifo[i]].x,
+			    mms[mms_zlifo[i]].y, 0);
+	for (i = 0; i < mms_lp; i++) {
+		struct mmb_sprite *sb = &mms[mms_lifo[i]];
+
+		if (sb->nx != MMS_INACTIVE) {
+			sb->x = sb->nx;
+			sb->nx = MMS_INACTIVE;
+		}
+		if (sb->ny != MMS_INACTIVE) {
+			sb->y = sb->ny;
+			sb->ny = MMS_INACTIVE;
+		}
+		mms_show_px(mms_lifo[i], sb->x, sb->y, 0);
+	}
+	mms_collisions(0);
+}
+
 MMG_FN void mms_static(MMINTEGER n, MMINTEGER x, MMINTEGER y,
 		       MMINTEGER w, MMINTEGER h, MMINTEGER off)
 {
