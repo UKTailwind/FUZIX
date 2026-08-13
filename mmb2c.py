@@ -606,6 +606,7 @@ class Conv(object):
         self.uses_blit = False      # BLIT family: mmb_blit.h
         self.uses_flash = False     # pseudo flash slots: mmb_flash.h
         self.uses_sprite = False    # SPRITE family: mmb_sprite.h
+        self.uses_playd = False     # SOUND/TONE/MOD daemons: mmb_play.h
         self.uses_pwm = False
         self.uses_i2c = False
         self.uses_spi = False
@@ -3738,9 +3739,74 @@ class Conv(object):
                 v = self.expr()
                 if v[1] == TY_S:
                     self.err('PLAY VOLUME wants a number')
-                self.emit('mm_play_volume = (int)(%s);' % v[0])
-                self.emit('if (mm_play_volume < 0) mm_play_volume = 0;')
-                self.emit('if (mm_play_volume > 100) mm_play_volume = 100;')
+                if self.uses_playd:
+                    # a running daemon hears the change at once
+                    self.emit('mmp_volume(%s);' % self.as_int(v))
+                else:
+                    self.emit('mm_play_volume = (int)(%s);' % v[0])
+                    self.emit('if (mm_play_volume < 0) mm_play_volume = 0;')
+                    self.emit('if (mm_play_volume > 100) '
+                              'mm_play_volume = 100;')
+                return
+            if self.is_kw('SOUND', 1):
+                # PLAY SOUND voice, channel, type [, freq [, vol]]
+                # channel: L R B M (M means both, as the reference
+                # takes it); type: O S Q T W P N - U (a user table) is
+                # not translated.  cmd_play at Audio.c:1946.
+                self.uses_playd = True
+                self.i += 2
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                sides = None
+                for nm, bits in (('L', 1), ('R', 2), ('B', 3), ('M', 3)):
+                    if self.is_kw(nm):
+                        self.i += 1
+                        sides = bits
+                        break
+                if sides is None:
+                    self.err('PLAY SOUND wants a channel: L, R, B or M')
+                self.expect_op(',')
+                ty = None
+                for nm, code in (('O', 0), ('S', 1), ('Q', 2), ('T', 3),
+                                 ('W', 4), ('P', 5), ('N', 6)):
+                    if self.is_kw(nm):
+                        self.i += 1
+                        ty = code
+                        break
+                if ty is None:
+                    if self.is_kw('U'):
+                        self.err('PLAY SOUND type U is not translated')
+                    self.err('PLAY SOUND wants a type: O S Q T W P or N')
+                freq, vol = '10.0', '25LL'
+                if self.accept_op(','):
+                    if not self.is_op(','):
+                        freq = self.as_flt(self.expr())
+                    if self.accept_op(','):
+                        vol = self.as_int(self.expr())
+                self.emit('mmp_sound(%s, %d, %d, %s, %s);'
+                          % (n, sides, ty, freq, vol))
+                return
+            if self.is_kw('TONE', 1):
+                # PLAY TONE left, right [, dur_ms [, interrupt]] - no
+                # duration means until PLAY STOP; the completion
+                # interrupt is a deadline here, not an IPC.
+                self.uses_playd = True
+                self.i += 2
+                fl = self.as_flt(self.expr())
+                self.expect_op(',')
+                fr = self.as_flt(self.expr())
+                dur, fn = '0.0', None
+                if self.accept_op(','):
+                    if not self.is_op(','):
+                        dur = self.as_flt(self.expr())
+                    if self.accept_op(','):
+                        self.uses_interrupts = True
+                        fn = self.int_handler()
+                if fn is not None:
+                    self.emit('mmi_tone_int(%s);' % fn)
+                    self.emit('mmp_tone(%s, %s, %s, 1);' % (fl, fr, dur))
+                else:
+                    self.emit('mmp_tone(%s, %s, %s, 0);' % (fl, fr, dur))
                 return
             if self.is_kw('MP3', 1):
                 self.i += 2
@@ -3753,7 +3819,7 @@ class Conv(object):
                 self.emit('mm_run_arg_i(mm_play_volume);')
                 self.emit('mm_play_start();')
                 return
-            self.err('only PLAY MP3, PLAY VOLUME and PLAY STOP are translated')
+            self.err('only PLAY MP3, SOUND, TONE, VOLUME and STOP are translated')
         if up == 'CIRCLE':
             # CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
             # The geometry is mmb_gfx_circle.h's, not the runtime's.  MMBasic
@@ -6557,6 +6623,10 @@ class Conv(object):
         # whose collision checks exist only under this header's guard.
         if self.uses_sprite:
             wr('#include "mmb_sprite.h"\n')
+        # Before mmb_int.h, whose tone-deadline check exists only under
+        # this header's guard.  It defines mm_play_volume itself.
+        if self.uses_playd:
+            wr('#include "mmb_play.h"\n')
         if self.uses_gpio:
             wr('#include "mmb_gpio.h"\n')
         # After mmb_gpio.h: PORT validates against the same mmg_mode
@@ -6604,8 +6674,9 @@ class Conv(object):
         # which is what makes the volume stick across statements the
         # way MMBasic's does.  Emitted only when the program plays
         # something, so nothing else carries it - the same bargain as
-        # the two headers above.
-        if self.uses_play:
+        # the two headers above.  mmb_play.h brings its own copy, so a
+        # program with SOUND or TONE must not get a second.
+        if self.uses_play and not self.uses_playd:
             wr('static int mm_play_volume = 80;\n\n')
         if self.type_order:
             wr('/* ---- TYPE definitions: the firmware layout, byte for'

@@ -370,6 +370,14 @@ MMINTEGER mm_run_bg(void);
  * says is playing - which need not be a player this program started -
  * and returns when the sound output is free again. */
 MMINTEGER mm_play_start(void);
+/* Who owns the PCM stream (pid, 0 none): the kernel's answer, asked
+ * fresh each time - PLAY STOP's discovery, and now the player
+ * daemons' too (mmb_play.h). */
+MMINTEGER mm_play_owner(void);
+/* one control record to the player daemon (mmb_playctl.h); -1 when no
+ * daemon is listening */
+MMINTEGER mm_play_send(MMINTEGER op, MMINTEGER a, MMINTEGER b,
+                       MMINTEGER p1, MMINTEGER p2, MMINTEGER p3);
 MMINTEGER mm_play_stop(void);
 void mm_timer_set(MMFLOAT ms);           /* TIMER = n, milliseconds    */
 void mm_set_date(const char *d);         /* DATE$ =                    */

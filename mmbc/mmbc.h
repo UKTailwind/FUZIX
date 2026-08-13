@@ -342,6 +342,7 @@ struct conv {
     int uses_blit;              /* BLIT family: mmb_blit.h */
     int uses_flash;             /* pseudo flash slots: mmb_flash.h */
     int uses_sprite;            /* SPRITE family: mmb_sprite.h */
+    int uses_playd;             /* SOUND/TONE/MOD daemons: mmb_play.h */
     /* set in the scan pass, so statements BEFORE the ON ERROR line are
        guarded too - the armed window is a run-time thing */
     int uses_onerror;

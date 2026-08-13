@@ -1061,9 +1061,94 @@ void statement_inner(void)
             v = expr();
             if (v.ty == TY_S)
                 cv_err("PLAY VOLUME wants a number");
-            emit(sfmt("mm_play_volume = (int)(%s);", v.code));
-            emit("if (mm_play_volume < 0) mm_play_volume = 0;");
-            emit("if (mm_play_volume > 100) mm_play_volume = 100;");
+            if (cv.uses_playd) {
+                /* a running daemon hears the change at once */
+                emit(sfmt("mmp_volume(%s);", as_int(v)));
+            } else {
+                emit(sfmt("mm_play_volume = (int)(%s);", v.code));
+                emit("if (mm_play_volume < 0) mm_play_volume = 0;");
+                emit("if (mm_play_volume > 100) "
+                     "mm_play_volume = 100;");
+            }
+            return;
+        }
+        if (is_kw("SOUND", 1)) {
+            /* PLAY SOUND voice, channel, type [, freq [, vol]]
+               channel: L R B M (M means both, as the reference
+               takes it); type: O S Q T W P N - U (a user table) is
+               not translated.  cmd_play at Audio.c:1946. */
+            static const struct { const char *nm; int bits; } chans[] = {
+                { "L", 1 }, { "R", 2 }, { "B", 3 }, { "M", 3 },
+                { NULL, 0 }
+            };
+            static const struct { const char *nm; int code; } types[] = {
+                { "O", 0 }, { "S", 1 }, { "Q", 2 }, { "T", 3 },
+                { "W", 4 }, { "P", 5 }, { "N", 6 }, { NULL, 0 }
+            };
+            const char *n;
+            const char *freq = "10.0", *vol = "25LL";
+            int sides = -1, ty = -1, ci;
+
+            cv.uses_playd = 1;
+            cv.i += 2;
+            n = as_int(expr());
+            expect_op(",");
+            for (ci = 0; chans[ci].nm; ci++)
+                if (is_kw(chans[ci].nm, 0)) {
+                    cv.i += 1;
+                    sides = chans[ci].bits;
+                    break;
+                }
+            if (sides < 0)
+                cv_err("PLAY SOUND wants a channel: L, R, B or M");
+            expect_op(",");
+            for (ci = 0; types[ci].nm; ci++)
+                if (is_kw(types[ci].nm, 0)) {
+                    cv.i += 1;
+                    ty = types[ci].code;
+                    break;
+                }
+            if (ty < 0) {
+                if (is_kw("U", 0))
+                    cv_err("PLAY SOUND type U is not translated");
+                cv_err("PLAY SOUND wants a type: O S Q T W P or N");
+            }
+            if (accept_op(",")) {
+                if (!is_op(",", 0))
+                    freq = as_flt(expr());
+                if (accept_op(","))
+                    vol = as_int(expr());
+            }
+            emit(sfmt("mmp_sound(%s, %d, %d, %s, %s);",
+                      n, sides, ty, freq, vol));
+            return;
+        }
+        if (is_kw("TONE", 1)) {
+            /* PLAY TONE left, right [, dur_ms [, interrupt]] - no
+               duration means until PLAY STOP; the completion
+               interrupt is a deadline here, not an IPC. */
+            const char *fl, *fr;
+            const char *dur = "0.0", *fn = NULL;
+
+            cv.uses_playd = 1;
+            cv.i += 2;
+            fl = as_flt(expr());
+            expect_op(",");
+            fr = as_flt(expr());
+            if (accept_op(",")) {
+                if (!is_op(",", 0))
+                    dur = as_flt(expr());
+                if (accept_op(",")) {
+                    cv.uses_interrupts = 1;
+                    fn = int_handler();
+                }
+            }
+            if (fn != NULL) {
+                emit(sfmt("mmi_tone_int(%s);", fn));
+                emit(sfmt("mmp_tone(%s, %s, %s, 1);", fl, fr, dur));
+            } else {
+                emit(sfmt("mmp_tone(%s, %s, %s, 0);", fl, fr, dur));
+            }
             return;
         }
         if (is_kw("MP3", 1)) {
@@ -1079,7 +1164,7 @@ void statement_inner(void)
             emit("mm_play_start();");
             return;
         }
-        cv_err("only PLAY MP3, PLAY VOLUME and PLAY STOP are translated");
+        cv_err("only PLAY MP3, SOUND, TONE, VOLUME and STOP are translated");
     }
     if (strcmp(up, "CIRCLE") == 0) {
         /* CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
