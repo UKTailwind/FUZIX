@@ -108,6 +108,8 @@ void readi(regptr inoptr ino, uint_fast8_t flag)
 #endif
 	case MODE_R(F_PIPE):
 		ispipe = true;
+		/* the stream position is the pipe's own, not this fd's */
+		udata.u_offset = ino->c_pipe_roff;
 		/* This bit really needs to be inside the loop for pipe cases */
 		if (!wait_pipe_read(ino, flag))
 		        break;
@@ -161,6 +163,7 @@ void readi(regptr inoptr ino, uint_fast8_t flag)
 			if (ispipe && LOWORD(udata.u_offset) >= 18 * BLKSIZE)
 				udata.u_offset = 0;
 			if (ispipe) {
+				ino->c_pipe_roff = LOWORD(udata.u_offset);
 				ino->c_node.i_size -= amount;
 				wakeup(ino);
 			}
@@ -203,6 +206,8 @@ void writei(regptr inoptr ino, uint_fast8_t flag)
 #endif
 	case MODE_R(F_PIPE):
 		ispipe = true;
+		/* the stream position is the pipe's own, not this fd's */
+		udata.u_offset = ino->c_pipe_woff;
 
 	case MODE_R(F_DIR):
 	case MODE_R(F_REG):
@@ -243,6 +248,7 @@ void writei(regptr inoptr ino, uint_fast8_t flag)
 			if (ispipe) {
 				if (LOWORD(udata.u_offset) >= 18 * BLKSIZE)
 					udata.u_offset = 0;
+				ino->c_pipe_woff = LOWORD(udata.u_offset);
 				ino->c_node.i_size += amount;
 				/* Wake up any readers */
 				wakeup(ino);

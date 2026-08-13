@@ -45,7 +45,7 @@ struct rec {
 int main(void)
 {
     struct rec r;
-    int fdr, fdw, pid, status, n, got = 0, tries = 0, ok = 1;
+    int fdr, fdw, pid, status, n, i, got = 0, tries = 0, ok = 1;
 
     signal(SIGPIPE, SIG_IGN);
     unlink(PATH);
@@ -151,6 +151,56 @@ int main(void)
     wait(&status);
     if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0))
         ok = 0;
+
+    /* 5: a FRESH writer per record - the mm_play_send pattern.  Every
+     * open() starts its fd offset at 0, so before the pipe carried its
+     * own stream positions (cinode c_pipe_roff/woff) record 2 onward
+     * overwrote record 1's bytes while the reader walked ahead into
+     * never-written blocks and was handed zeros - playdemo's "morse
+     * code on a single note".  Leg 3 never caught it because one fd
+     * wrote all five records.  This is the regression test. */
+    unlink(PATH);
+    if (mkfifo(PATH, 0666) < 0) {
+        perror("mkfifo 2");
+        return 1;
+    }
+    fdr = open(PATH, O_RDWR | O_NDELAY);
+    if (fdr < 0) {
+        perror("daemon reopen rdwr");
+        unlink(PATH);
+        return 1;
+    }
+    for (i = 0; i < NREC; i++) {
+        fdw = open(PATH, O_WRONLY | O_NDELAY);
+        if (fdw < 0) {
+            perror("reopen wr");
+            ok = 0;
+            break;
+        }
+        memset(&r, 0, sizeof(r));
+        r.ver = 1;
+        r.op = (unsigned char)(i + 1);
+        r.p1 = 2000 + i;
+        if (write(fdw, &r, sizeof(r)) != (int)sizeof(r)) {
+            perror("reopen write");
+            close(fdw);
+            ok = 0;
+            break;
+        }
+        close(fdw);
+        n = read(fdr, &r, sizeof(r));
+        if (n != (int)sizeof(r) || r.ver != 1 ||
+            r.op != (unsigned char)(i + 1) || r.p1 != 2000 + i) {
+            printf("reopen record %d %s (n=%d ver=%d op=%d p1=%ld)\n",
+                   i, n == (int)sizeof(r) ? "CORRUPT" : "unreadable",
+                   n, r.ver, r.op, (long)r.p1);
+            ok = 0;
+            break;
+        }
+    }
+    if (i == NREC)
+        printf("reopen-writer records: %d/%d intact\n", i, NREC);
+    close(fdr);
 
     unlink(PATH);
     printf(ok ? "fifotest PASS\n" : "fifotest FAIL\n");

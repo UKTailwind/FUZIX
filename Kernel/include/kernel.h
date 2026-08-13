@@ -328,13 +328,21 @@ typedef struct cinode {
     uint8_t    c_refs;          /* In-core reference count */
     uint8_t    c_readers;	/* Count of readers by oft entry */
     uint8_t    c_writers;	/* Count of writers by oft entry */
-    uint8_t    c_flags;           
+    uint8_t    c_flags;
 #define CDIRTY		0x80	/* Modified flag. */
 #define CRDONLY		0x40	/* On a read only file system */
 #define CFLOCK		0x0F	/* flock bits */
 #define CFLEX		0x0F	/* locked exclusive */
 #define CFMAX		0x0E	/* highest shared lock count permitted */
    uint8_t     c_super;		/* Superblock index */
+   /* A pipe's stream positions belong to the PIPE, not to any one
+    * fd: each open() starts its fd at offset 0, so a FIFO whose
+    * writers come and go per message wrote every record over the
+    * first one while the reader walked ahead into never-written
+    * blocks and was handed zeros.  In-core only - pipes are never
+    * valid on disk between uses. */
+   uint16_t    c_pipe_roff;
+   uint16_t    c_pipe_woff;
 #ifdef CONFIG_BLOCK_SLEEP
    uint16_t    c_lock;		/* inode lock state */
 #endif

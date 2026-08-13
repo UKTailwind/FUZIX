@@ -274,3 +274,8 @@
  * loop stays in RAM.  Moved to flash to make room for sc2_row (the
  * SCROLL2 row buffer), which is data and has no choice. */
 *display.c.o(.text.display_gfx_mode)
+
+/* Process exit is once per process, syscall context, and 312 bytes -
+ * moved to pay for the pipe stream positions in cinode (4 bytes per
+ * itab slot), which are data and cost RAM wherever they live. */
+*process.c.o(.text.doexit)

@@ -354,6 +354,15 @@ found:
         if(!(nindex->c_node.i_nlink && nindex->c_node.i_mode & F_MASK))
             goto badino;
     }
+    /* Coming back into use from unreferenced: a pipe's stream
+       positions start fresh.  A recycled slot otherwise hands a new
+       FIFO the positions of a dead one - and while any opener holds
+       the inode (c_refs >= 1) the stream survives the per-message
+       writers a FIFO client typically is. */
+    if (nindex->c_refs == 0) {
+        nindex->c_pipe_roff = 0;
+        nindex->c_pipe_woff = 0;
+    }
     nindex->c_refs++;
     return nindex;
 
