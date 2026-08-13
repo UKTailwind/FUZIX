@@ -804,18 +804,29 @@ The full BBC sound system plays through the PCM5102 DAC and the
 SOUND 1,-15,89,20                          A4 (440 Hz) for one second
 ENVELOPE 1,1,4,-4,4,10,10,10,126,-2,0,-10,120,100
 SOUND 1,1,100,30                           envelope-shaped note
-SOUND &101,-15,53,20:SOUND &102,-15,69,20:SOUND &103,-15,81,20
+SOUND &201,-15,53,20:SOUND &202,-15,69,20:SOUND &203,-15,81,20
                                            a synchronised C-E-G chord
 ```
 
 Channels 1–3 are square-wave tones, channel 0 is noise. Each channel
-queues up to 8 notes; `&1x` in the channel number flushes the queue,
-`&1xx`–`&3xx` synchronise channels. `ENVELOPE` implements the
+queues up to 8 notes; `&1x` in the channel number flushes the queue.
+`&Sxx` holds the note until S *other* channels carry the same sync
+mark, so a three-note chord wants `&2xx` on each channel — `&1xx`
+releases in pairs, playing two notes and leaving the third waiting
+for a partner that never comes. `ENVELOPE` implements the
 three-section pitch envelope and ADSR amplitude, stepped at the
 authentic 100 Hz. Pitch follows the BBC scale: 4 units per semitone,
 89 = A4 = 440 Hz. Durations are in 20ths of a second; 255 means
 "until further notice". `SOUND` blocks BBC-style when a queue is
 full (Esc still works).
+
+Two notes on character. The output is hot: one full-amplitude
+(`-15`) square is a quarter of DAC full scale and three sum to
+nearly three-quarters, which can clip a sensitive line input that
+handles MP3 playback happily — drop to `-7` if the input distorts.
+And the tones are raw digital squares, so sustained high notes carry
+a faint aliasing shimmer that the original's hardware dividers did
+not have.
 
 There is one audio output, so the synthesiser and MP3 playback are
 mutually exclusive — as they are in MMBasic. While a track is playing,
