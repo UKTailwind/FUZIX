@@ -20,7 +20,7 @@ const struct mmb_keyword commandtbl[] = {
     { "Data", 1 },
     { "Dim", 1 },
     { "Do", 1 },
-    { "Else If", 0 },
+    { "Else If", 1 },
     { "End If", 1 },
     { "Exit Do", 1 },
     { "ElseIf", 1 },

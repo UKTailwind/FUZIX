@@ -104,7 +104,11 @@ supported.update(["AND", "OR", "NOT", "XOR", "MOD", "INV", "THEN", "TO",
 # checked by translating a program that uses it; a two-word name is NOT
 # added here on the strength of its first word being supported, because
 # most of them are not (ARRAY SLICE and ARRAY INSERT are the examples).
-supported.update(["TEMPR START", "LINE INPUT", "ARRAY SET", "ARRAY ADD"])
+supported.update(["TEMPR START", "LINE INPUT", "ARRAY SET", "ARRAY ADD",
+                  # "Else If" and "ElseIf" are separate rows in
+                  # AllCommands.h binding to the same cmd_else, and the
+                  # translator takes ELSE followed by IF as ELSEIF
+                  "ELSE IF"])
 
 
 def is_supported(nm):
