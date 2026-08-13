@@ -168,6 +168,21 @@ MMG_FN void mmi_tone_int(mm_int_fn fn)
 		__mm_int_armed++;
 	mm_tone_fn = fn;
 }
+
+/*	MODFILE's completion: the daemon exits when the song ends, so
+ *	"the owner went away" IS the signal - NEXT.md's "PLAY-done via
+ *	SNDIOC_PCMOWNER", with its consumer.  One ioctl per poll while
+ *	armed, nothing at all otherwise. */
+static mm_int_fn mm_mod_fn;
+static unsigned char mm_mod_watch;
+
+MMG_FN void mmi_mod_int(mm_int_fn fn)
+{
+	if (mm_mod_fn == 0)
+		__mm_int_armed++;
+	mm_mod_fn = fn;
+	mm_mod_watch = 1;
+}
 #endif
 
 /*	SPRITE INTERRUPT / STINTERRUPT handlers.  Registered here rather
@@ -478,6 +493,12 @@ MMG_FN void mm_int_poll(void)
 	if (mm_tone_fn && mm_tone_end && MMI_US() >= mm_tone_end) {
 		mm_tone_end = 0;
 		mm_int_fire(mm_tone_fn);
+		return;
+	}
+	if (mm_mod_fn && mm_mod_watch && mm_play_owner() == 0) {
+		mm_mod_watch = 0;
+		mm_play_kind = MMP_KIND_NONE;
+		mm_int_fire(mm_mod_fn);
 		return;
 	}
 #endif

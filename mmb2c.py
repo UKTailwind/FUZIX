@@ -3808,6 +3808,39 @@ class Conv(object):
                 else:
                     self.emit('mmp_tone(%s, %s, %s, 0);' % (fl, fr, dur))
                 return
+            if self.is_kw('MODFILE', 1):
+                # PLAY MODFILE f$ [, interrupt] - with an interrupt
+                # the song plays once and the player's exit fires it;
+                # without one it loops until PLAY STOP.
+                self.uses_playd = True
+                self.i += 2
+                v = self.expr()
+                if v[1] != TY_S:
+                    self.err('PLAY MODFILE wants a file name')
+                fn = None
+                if self.accept_op(','):
+                    self.uses_interrupts = True
+                    fn = self.int_handler()
+                if fn is not None:
+                    self.emit('mmi_mod_int(%s);' % fn)
+                    self.emit('mmp_modfile(%s, 1);' % v[0])
+                else:
+                    self.emit('mmp_modfile(%s, 0);' % v[0])
+                return
+            if self.is_kw('MODSAMPLE', 1):
+                # PLAY MODSAMPLE sample, channel [, volume] - a
+                # request to the RUNNING player to mix a sample the
+                # file already holds over the music.
+                self.uses_playd = True
+                self.i += 2
+                sm = self.as_int(self.expr())
+                self.expect_op(',')
+                ch = self.as_int(self.expr())
+                vol = '64LL'
+                if self.accept_op(','):
+                    vol = self.as_int(self.expr())
+                self.emit('mmp_modsample(%s, %s, %s);' % (sm, ch, vol))
+                return
             if self.is_kw('MP3', 1):
                 self.i += 2
                 v = self.expr()
@@ -3819,7 +3852,7 @@ class Conv(object):
                 self.emit('mm_run_arg_i(mm_play_volume);')
                 self.emit('mm_play_start();')
                 return
-            self.err('only PLAY MP3, SOUND, TONE, VOLUME and STOP are translated')
+            self.err('only PLAY MP3, MODFILE, MODSAMPLE, SOUND, TONE, VOLUME and STOP are translated')
         if up == 'CIRCLE':
             # CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
             # The geometry is mmb_gfx_circle.h's, not the runtime's.  MMBasic

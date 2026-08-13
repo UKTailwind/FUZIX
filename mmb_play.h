@@ -142,6 +142,55 @@ MMG_FN void mmp_tone(MMFLOAT fl, MMFLOAT fr, MMFLOAT ms, MMINTEGER has_int)
 		mm_tone_end = 0;
 }
 
+/* PLAY MODFILE file$ [, interrupt] - playmod loads the whole file
+ * (into the PSRAM arena, its comment says why) and plays at 22050;
+ * with an interrupt the song runs once and the daemon's exit IS the
+ * completion signal - mmb_int.h polls the owner away.  A live stream
+ * of any kind refuses, the reference's way: PLAY STOP first. */
+MMG_FN void mmp_modfile(const char *file, MMINTEGER has_int)
+{
+	int i;
+
+	if (mm_play_owner() != 0)
+		MM_RAISE("Sound output in use");
+	mm_play_kind = MMP_KIND_NONE;
+	mm_run_begin();
+	mm_run_arg("\007playmod");
+	mm_run_arg(file);
+	mm_run_arg_i(mm_play_volume);
+	mm_run_arg_i(has_int ? 1 : 0);
+	if (mm_play_start() < 0)
+		return;
+	for (i = 0; i < 100; i++) {
+		if (mm_play_owner() != 0) {
+			mm_play_kind = MMP_KIND_MOD;
+			return;
+		}
+		mm_pause(20);
+	}
+	MM_RAISE("Could not play the MOD file");
+}
+
+/* PLAY MODSAMPLE sample, channel [, volume] - one record to the
+ * RUNNING player: hxcmod points an effect slot at a sample already in
+ * the file and mixes it over the music.  Nothing is loaded, nothing
+ * pauses.  The reference requires a MOD to be playing, and so does
+ * this - the owner check plus the kind is its CurrentlyPlaying ==
+ * P_MOD. */
+MMG_FN void mmp_modsample(MMINTEGER s, MMINTEGER ch, MMINTEGER vol)
+{
+	if (s < 1 || s > 32)
+		MM_RAISE("Invalid sample number");
+	if (ch < 1 || ch > 4)
+		MM_RAISE("Invalid channel");
+	if (vol < 1 || vol > 64)
+		MM_RAISE("Invalid volume");
+	if (mm_play_owner() == 0 || mm_play_kind != MMP_KIND_MOD)
+		MM_RAISE("Samples play over MOD file");
+	if (mmp_send(MM_PLAY_MODSAMP, (int)s, (int)ch, (long)vol, 0, 0) < 0)
+		MM_RAISE("Samples play over MOD file");
+}
+
 /* PLAY VOLUME for a program that also plays SOUND/TONE/MOD: remember
  * it for the next spawn AND tell the daemon that is running now. */
 MMG_FN void mmp_volume(MMINTEGER v)
