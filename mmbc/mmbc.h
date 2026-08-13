@@ -341,6 +341,7 @@ struct conv {
     int uses_play;              /* PLAY: emit the volume it remembers */
     int uses_blit;              /* BLIT family: mmb_blit.h */
     int uses_flash;             /* pseudo flash slots: mmb_flash.h */
+    int uses_sprite;            /* SPRITE family: mmb_sprite.h */
     /* set in the scan pass, so statements BEFORE the ON ERROR line are
        guarded too - the armed window is a run-time thing */
     int uses_onerror;

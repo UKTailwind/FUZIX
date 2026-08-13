@@ -101,7 +101,7 @@ BUILTINS = {
     'POS': (0, 0),
     'MM.ERRNO': (0, 0), 'MM.ERRMSG$': (0, 0),
     'MM.VER': (0, 0), 'MM.DEVICE$': (0, 0), 'MM.CMDLINE$': (0, 0),
-    'MM.INFO': (1, 1), 'PEEK': (1, 1),
+    'MM.INFO': (1, 1), 'PEEK': (1, 1), 'SPRITE': (1, 3),
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
     'LINSTR': (2, 3), 'LCOMPARE': (2, 2), 'LINPUT': (3, 3),
@@ -110,7 +110,7 @@ BUILTINS = {
 # built-ins whose arguments cannot be parsed as plain expressions
 RAWARG = ('CHOICE', 'BOUND', 'TRIM$', 'DATETIME$', 'DAY$', 'EPOCH',
           'BIN2STR$', 'STR2BIN', 'RGB', 'MATH',
-          'MM.INFO', 'PEEK',
+          'MM.INFO', 'PEEK', 'SPRITE',
           'EOF', 'LOC', 'LOF', 'INPUT$', 'DIR$',
           'LLEN', 'LGETSTR$', 'LGETBYTE', 'LINSTR', 'LCOMPARE', 'LINPUT')
 
@@ -605,6 +605,7 @@ class Conv(object):
         self.uses_play = False
         self.uses_blit = False      # BLIT family: mmb_blit.h
         self.uses_flash = False     # pseudo flash slots: mmb_flash.h
+        self.uses_sprite = False    # SPRITE family: mmb_sprite.h
         self.uses_pwm = False
         self.uses_i2c = False
         self.uses_spi = False
@@ -1951,6 +1952,78 @@ class Conv(object):
             return ('%s(%s)' % (fn, self.as_int(a)),
                     TY_F if t[2] == 'FLOAT' else TY_I)
 
+        if up == 'SPRITE':
+            # SPRITE(selector, ...) - Sprite.c fun_sprite, engine in
+            # mmb_sprite.h.  The letters become the reference's own t
+            # codes; V and D return floats (a bearing in radians and a
+            # centre distance), everything else integers.  SPRITE(B...)
+            # is the bounds-analysis machinery and is not translated.
+            self.uses_sprite = True
+            self.uses_blit = True
+            self.expect_op('(')
+            if self.is_kw('ST'):
+                self.i += 1
+                self.expect_op(',')
+                if self.is_kw('COLLISION'):
+                    self.i += 1
+                    self.expect_op(')')
+                    return ('mms_fun_st(1, 0, 0)', TY_I)
+                if self.is_kw('OBJECT'):
+                    self.i += 1
+                    self.expect_op(')')
+                    return ('mms_fun_st(2, 0, 0)', TY_I)
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                prop = None
+                for nm, code in (('X', 1), ('Y', 2), ('W', 3), ('H', 4),
+                                 ('A', 5)):
+                    if self.is_kw(nm):
+                        self.i += 1
+                        prop = code
+                        break
+                if prop is None:
+                    self.err('SPRITE(ST, n, ...) wants X, Y, W, H or A')
+                self.expect_op(')')
+                return ('mms_fun_st(0, %s, %d)' % (n, prop), TY_I)
+            sel = None
+            for nm, code in (('W', 1), ('H', 2), ('X', 3), ('Y', 4),
+                             ('L', 5), ('C', 6), ('V', 7), ('T', 8),
+                             ('E', 9), ('D', 10), ('A', 11), ('N', 12),
+                             ('S', 13)):
+                if self.is_kw(nm):
+                    self.i += 1
+                    sel = code
+                    break
+            if sel is None:
+                if self.is_kw('B'):
+                    self.err('SPRITE(B ...) is not translated')
+                self.err('SPRITE() wants a selector letter')
+            if sel == 13:
+                self.expect_op(')')
+                return ('mms_fun(13, 0, 0, 1)', TY_I)
+            if sel == 12:
+                if self.accept_op(','):
+                    l = self.as_int(self.expr())
+                    self.expect_op(')')
+                    return ('mms_fun(12, %s, 0, 2)' % l, TY_I)
+                self.expect_op(')')
+                return ('mms_fun(12, 0, 0, 1)', TY_I)
+            self.expect_op(',')
+            self.accept_op('#')
+            n = self.as_int(self.expr())
+            if sel in (7, 10):
+                self.expect_op(',')
+                self.accept_op('#')
+                m = self.as_int(self.expr())
+                self.expect_op(')')
+                return ('mms_fun_f(%d, %s, %s)' % (sel, n, m), TY_F)
+            if self.accept_op(','):
+                i3 = self.as_int(self.expr())
+                self.expect_op(')')
+                return ('mms_fun(%d, %s, %s, 2)' % (sel, n, i3), TY_I)
+            self.expect_op(')')
+            return ('mms_fun(%d, %s, 0, 1)' % (sel, n), TY_I)
         if up == 'MM.INFO':
             # MM.INFO(FONT ADDRESS n) - where font n's glyphs are, so a
             # program can draw them itself.  Two bare keywords and then
@@ -3261,6 +3334,219 @@ class Conv(object):
                 first = False
             self.emit('mm_run_exec();')
             return
+        if up == 'SPRITE':
+            # The SPRITE family (graphics/Sprite.c), engine in
+            # mmb_sprite.h on the BLIT row workhorses.  Deferred there
+            # and refused here by name: SCROLL (Phase 4 of
+            # PLAN-games.md - it wants the kernel's SCROLL2), LOADPNG
+            # and LOADBMP (want the image decoders).
+            self.uses_sprite = True
+            self.uses_blit = True
+            if self.is_kw('SHOW', 1):
+                # SHOW [#]n,x,y,layer[,flags]
+                # SHOW SAFE [#]n,x,y,layer[,flags[,ontop]] - flags may
+                # be a bare comma in the SAFE form, as the reference
+                # allows (argc >= 9 && *argv[8]).
+                safe = '1LL' if self.is_kw('SAFE', 2) else '0LL'
+                self.i += 3 if safe == '1LL' else 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                x = self.as_int(self.expr())
+                self.expect_op(',')
+                y = self.as_int(self.expr())
+                self.expect_op(',')
+                layer = self.as_int(self.expr())
+                flags, ontop = '0LL', '0LL'
+                if self.accept_op(','):
+                    if not self.is_op(','):
+                        flags = self.as_int(self.expr())
+                    if safe == '1LL' and self.accept_op(','):
+                        ontop = self.as_int(self.expr())
+                self.emit('mms_show(%s, %s, %s, %s, %s, %s, %s);'
+                          % (n, x, y, layer, flags, safe, ontop))
+                return
+            if self.is_kw('HIDE', 1):
+                if self.is_kw('ALL', 2):
+                    self.i += 3
+                    self.emit('mms_hide_all();')
+                    return
+                safe = '1LL' if self.is_kw('SAFE', 2) else '0LL'
+                self.i += 3 if safe == '1LL' else 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.emit('mms_hide(%s, %s);' % (n, safe))
+                return
+            if self.is_kw('RESTORE', 1):
+                self.i += 2
+                self.emit('mms_restore();')
+                return
+            if self.is_kw('MOVE', 1):
+                self.i += 2
+                self.emit('mms_move();')
+                return
+            if self.is_kw('WRITE', 1):
+                # WRITE [#]n,x,y[,flags] - the default is the
+                # reference's rotation=4: transparency HONOURED, the
+                # inverse of SHOW's default.
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                x = self.as_int(self.expr())
+                self.expect_op(',')
+                y = self.as_int(self.expr())
+                flags = '4LL'
+                if self.accept_op(','):
+                    flags = self.as_int(self.expr())
+                self.emit('mms_write(%s, %s, %s, %s);' % (n, x, y, flags))
+                return
+            if self.is_kw('READ', 1):
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                x = self.as_int(self.expr())
+                self.expect_op(',')
+                y = self.as_int(self.expr())
+                self.expect_op(',')
+                w = self.as_int(self.expr())
+                self.expect_op(',')
+                h = self.as_int(self.expr())
+                self.emit('mms_read(%s, %s, %s, %s, %s);' % (n, x, y, w, h))
+                return
+            if self.is_kw('NEXT', 1):
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                x = self.as_int(self.expr())
+                self.expect_op(',')
+                y = self.as_int(self.expr())
+                self.emit('mms_next(%s, %s, %s);' % (n, x, y))
+                return
+            if self.is_kw('COPY', 1):
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                self.accept_op('#')
+                first = self.as_int(self.expr())
+                self.expect_op(',')
+                cnt = self.as_int(self.expr())
+                self.emit('mms_copy(%s, %s, %s);' % (n, first, cnt))
+                return
+            if self.is_kw('SWAP', 1):
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                self.accept_op('#')
+                rn = self.as_int(self.expr())
+                flags = '0LL'
+                if self.accept_op(','):
+                    flags = self.as_int(self.expr())
+                self.emit('mms_swap(%s, %s, %s);' % (n, rn, flags))
+                return
+            if self.is_kw('CLOSE', 1):
+                if self.is_kw('ALL', 2):
+                    self.i += 3
+                    self.emit('mms_close_all();')
+                    return
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.emit('mms_close(%s);' % n)
+                return
+            if self.is_kw('LOADARRAY', 1):
+                # LOADARRAY [#]n, w, h, array() - RGB888 colours,
+                # reduced by RGB121 bit extraction as the reference
+                # does.  An integer array; the reference also takes
+                # float, which nothing has needed yet.
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                w = self.as_int(self.expr())
+                self.expect_op(',')
+                h = self.as_int(self.expr())
+                self.expect_op(',')
+                sym = self.arrayref()
+                if sym.ty != TY_I:
+                    self.err('SPRITE LOADARRAY wants an integer array')
+                ptr, cnt = self.array_flat(sym)
+                self.emit('mms_loadarray(%s, %s, %s, %s, %s);'
+                          % (n, w, h, ptr, cnt))
+                return
+            if self.is_kw('LOAD', 1):
+                # LOAD file$ [,startsprite [,mode]] - bare commas
+                # allowed, as the reference's *argv[2] test allows.
+                self.i += 2
+                v = self.expr()
+                if v[1] != TY_S:
+                    self.err('SPRITE LOAD wants a file name')
+                start, mode = '1LL', '0LL'
+                if self.accept_op(','):
+                    if not self.is_op(','):
+                        start = self.as_int(self.expr())
+                    if self.accept_op(','):
+                        mode = self.as_int(self.expr())
+                self.emit('mms_load(%s, %s, %s);' % (v[0], start, mode))
+                return
+            if self.is_kw('STATIC', 1):
+                if self.is_kw('CLEAR', 2):
+                    self.i += 3
+                    self.emit('mms_static_clear();')
+                    return
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                if self.is_kw('OFF'):
+                    self.i += 1
+                    self.emit('mms_static(%s, 0, 0, 0, 0, 1);' % n)
+                    return
+                x = self.as_int(self.expr())
+                self.expect_op(',')
+                y = self.as_int(self.expr())
+                self.expect_op(',')
+                w = self.as_int(self.expr())
+                self.expect_op(',')
+                h = self.as_int(self.expr())
+                self.emit('mms_static(%s, %s, %s, %s, %s, 0);'
+                          % (n, x, y, w, h))
+                return
+            if self.is_kw('SET', 1) and self.is_kw('TRANSPARENT', 2):
+                self.i += 3
+                c = self.as_int(self.expr())
+                self.emit('mms_set_transparent(%s);' % c)
+                return
+            if self.is_kw('INTERRUPT', 1):
+                self.i += 2
+                self.uses_interrupts = True
+                self.emit('mmi_sprite_int(%s);' % self.int_handler())
+                return
+            if self.is_kw('NOINTERRUPT', 1):
+                self.i += 2
+                self.uses_interrupts = True
+                self.emit('mmi_sprite_noint();')
+                return
+            if self.is_kw('STINTERRUPT', 1):
+                self.i += 2
+                self.uses_interrupts = True
+                self.emit('mmi_st_int(%s);' % self.int_handler())
+                return
+            if self.is_kw('NOSTINTERRUPT', 1):
+                self.i += 2
+                self.uses_interrupts = True
+                self.emit('mmi_st_noint();')
+                return
+            for kw in ('SCROLL', 'LOADPNG', 'LOADBMP'):
+                if self.is_kw(kw, 1):
+                    self.err('SPRITE %s is not translated%s' %
+                             (kw, ' yet (PLAN-games.md Phase 4)'
+                              if kw == 'SCROLL' else ''))
+            self.err('unknown SPRITE form')
         if up == 'BLIT':
             # BLIT READ [#]n, x, y, w, h        screen -> buffer 1-64
             # BLIT WRITE [#]n, x, y [, mode]    buffer -> screen, mode 0-7
@@ -6257,6 +6543,10 @@ class Conv(object):
             wr('#include "mmb_flash.h"\n')
         if self.uses_blit:
             wr('#include "mmb_blit.h"\n')
+        # After mmb_blit.h (the row workhorses) and before mmb_int.h,
+        # whose collision checks exist only under this header's guard.
+        if self.uses_sprite:
+            wr('#include "mmb_sprite.h"\n')
         if self.uses_gpio:
             wr('#include "mmb_gpio.h"\n')
         # After mmb_gpio.h: PORT validates against the same mmg_mode

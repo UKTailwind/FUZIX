@@ -572,6 +572,267 @@ void statement_inner(void)
         emit("mm_run_exec();");
         return;
     }
+    if (strcmp(up, "SPRITE") == 0) {
+        /* The SPRITE family (graphics/Sprite.c), engine in
+           mmb_sprite.h on the BLIT row workhorses.  Deferred there
+           and refused here by name: SCROLL (Phase 4 of
+           PLAN-games.md - it wants the kernel's SCROLL2), LOADPNG
+           and LOADBMP (want the image decoders). */
+        static const char *const nospr[] = {
+            "SCROLL", "LOADPNG", "LOADBMP", NULL
+        };
+        int si;
+
+        cv.uses_sprite = 1;
+        cv.uses_blit = 1;
+        if (is_kw("SHOW", 1)) {
+            const char *n, *x, *y, *layer;
+            const char *flags = "0LL", *ontop = "0LL";
+            const char *safe = is_kw("SAFE", 2) ? "1LL" : "0LL";
+
+            cv.i += (safe[0] == '1') ? 3 : 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            x = as_int(expr());
+            expect_op(",");
+            y = as_int(expr());
+            expect_op(",");
+            layer = as_int(expr());
+            if (accept_op(",")) {
+                if (!is_op(",", 0))
+                    flags = as_int(expr());
+                if (safe[0] == '1' && accept_op(","))
+                    ontop = as_int(expr());
+            }
+            emit(sfmt("mms_show(%s, %s, %s, %s, %s, %s, %s);",
+                      n, x, y, layer, flags, safe, ontop));
+            return;
+        }
+        if (is_kw("HIDE", 1)) {
+            const char *n, *safe;
+
+            if (is_kw("ALL", 2)) {
+                cv.i += 3;
+                emit("mms_hide_all();");
+                return;
+            }
+            safe = is_kw("SAFE", 2) ? "1LL" : "0LL";
+            cv.i += (safe[0] == '1') ? 3 : 2;
+            accept_op("#");
+            n = as_int(expr());
+            emit(sfmt("mms_hide(%s, %s);", n, safe));
+            return;
+        }
+        if (is_kw("RESTORE", 1)) {
+            cv.i += 2;
+            emit("mms_restore();");
+            return;
+        }
+        if (is_kw("MOVE", 1)) {
+            cv.i += 2;
+            emit("mms_move();");
+            return;
+        }
+        if (is_kw("WRITE", 1)) {
+            const char *n, *x, *y;
+            const char *flags = "4LL";
+
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            x = as_int(expr());
+            expect_op(",");
+            y = as_int(expr());
+            if (accept_op(","))
+                flags = as_int(expr());
+            emit(sfmt("mms_write(%s, %s, %s, %s);", n, x, y, flags));
+            return;
+        }
+        if (is_kw("READ", 1)) {
+            const char *n, *x, *y, *w, *h;
+
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            x = as_int(expr());
+            expect_op(",");
+            y = as_int(expr());
+            expect_op(",");
+            w = as_int(expr());
+            expect_op(",");
+            h = as_int(expr());
+            emit(sfmt("mms_read(%s, %s, %s, %s, %s);", n, x, y, w, h));
+            return;
+        }
+        if (is_kw("NEXT", 1)) {
+            const char *n, *x, *y;
+
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            x = as_int(expr());
+            expect_op(",");
+            y = as_int(expr());
+            emit(sfmt("mms_next(%s, %s, %s);", n, x, y));
+            return;
+        }
+        if (is_kw("COPY", 1)) {
+            const char *n, *first, *cnt;
+
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            accept_op("#");
+            first = as_int(expr());
+            expect_op(",");
+            cnt = as_int(expr());
+            emit(sfmt("mms_copy(%s, %s, %s);", n, first, cnt));
+            return;
+        }
+        if (is_kw("SWAP", 1)) {
+            const char *n, *rn;
+            const char *flags = "0LL";
+
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            accept_op("#");
+            rn = as_int(expr());
+            if (accept_op(","))
+                flags = as_int(expr());
+            emit(sfmt("mms_swap(%s, %s, %s);", n, rn, flags));
+            return;
+        }
+        if (is_kw("CLOSE", 1)) {
+            const char *n;
+
+            if (is_kw("ALL", 2)) {
+                cv.i += 3;
+                emit("mms_close_all();");
+                return;
+            }
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            emit(sfmt("mms_close(%s);", n));
+            return;
+        }
+        if (is_kw("LOADARRAY", 1)) {
+            /* LOADARRAY [#]n, w, h, array() - RGB888 colours,
+               reduced by RGB121 bit extraction as the reference
+               does.  An integer array; the reference also takes
+               float, which nothing has needed yet. */
+            const char *n, *w, *h;
+            struct sym *sym;
+            struct flat fl;
+
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            w = as_int(expr());
+            expect_op(",");
+            h = as_int(expr());
+            expect_op(",");
+            sym = arrayref(1);
+            if (sym->ty != TY_I)
+                cv_err("SPRITE LOADARRAY wants an integer array");
+            fl = array_flat(sym);
+            emit(sfmt("mms_loadarray(%s, %s, %s, %s, %s);",
+                      n, w, h, fl.ptr, fl.cnt));
+            return;
+        }
+        if (is_kw("LOAD", 1)) {
+            /* LOAD file$ [,startsprite [,mode]] - bare commas
+               allowed, as the reference's *argv[2] test allows. */
+            const char *start = "1LL", *mode = "0LL";
+            struct val v;
+
+            cv.i += 2;
+            v = expr();
+            if (v.ty != TY_S)
+                cv_err("SPRITE LOAD wants a file name");
+            if (accept_op(",")) {
+                if (!is_op(",", 0))
+                    start = as_int(expr());
+                if (accept_op(","))
+                    mode = as_int(expr());
+            }
+            emit(sfmt("mms_load(%s, %s, %s);", v.code, start, mode));
+            return;
+        }
+        if (is_kw("STATIC", 1)) {
+            const char *n, *x, *y, *w, *h;
+
+            if (is_kw("CLEAR", 2)) {
+                cv.i += 3;
+                emit("mms_static_clear();");
+                return;
+            }
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            if (is_kw("OFF", 0)) {
+                cv.i += 1;
+                emit(sfmt("mms_static(%s, 0, 0, 0, 0, 1);", n));
+                return;
+            }
+            x = as_int(expr());
+            expect_op(",");
+            y = as_int(expr());
+            expect_op(",");
+            w = as_int(expr());
+            expect_op(",");
+            h = as_int(expr());
+            emit(sfmt("mms_static(%s, %s, %s, %s, %s, 0);",
+                      n, x, y, w, h));
+            return;
+        }
+        if (is_kw("SET", 1) && is_kw("TRANSPARENT", 2)) {
+            const char *c;
+
+            cv.i += 3;
+            c = as_int(expr());
+            emit(sfmt("mms_set_transparent(%s);", c));
+            return;
+        }
+        if (is_kw("INTERRUPT", 1)) {
+            cv.i += 2;
+            cv.uses_interrupts = 1;
+            emit(sfmt("mmi_sprite_int(%s);", int_handler()));
+            return;
+        }
+        if (is_kw("NOINTERRUPT", 1)) {
+            cv.i += 2;
+            cv.uses_interrupts = 1;
+            emit("mmi_sprite_noint();");
+            return;
+        }
+        if (is_kw("STINTERRUPT", 1)) {
+            cv.i += 2;
+            cv.uses_interrupts = 1;
+            emit(sfmt("mmi_st_int(%s);", int_handler()));
+            return;
+        }
+        if (is_kw("NOSTINTERRUPT", 1)) {
+            cv.i += 2;
+            cv.uses_interrupts = 1;
+            emit("mmi_st_noint();");
+            return;
+        }
+        for (si = 0; nospr[si]; si++)
+            if (is_kw(nospr[si], 1))
+                cv_err(sfmt("SPRITE %s is not translated%s", nospr[si],
+                            si == 0 ? " yet (PLAN-games.md Phase 4)" : ""));
+        cv_err("unknown SPRITE form");
+    }
     if (strcmp(up, "BLIT") == 0) {
         /* BLIT READ [#]n, x, y, w, h        screen -> buffer 1-64
            BLIT WRITE [#]n, x, y [, mode]    buffer -> screen, mode 0-7

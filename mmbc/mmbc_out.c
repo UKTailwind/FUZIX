@@ -345,6 +345,10 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_flash.h\"\n");
     if (cv.uses_blit)
         fprintf(f, "#include \"mmb_blit.h\"\n");
+    /* After mmb_blit.h (the row workhorses) and before mmb_int.h,
+       whose collision checks exist only under this header's guard. */
+    if (cv.uses_sprite)
+        fprintf(f, "#include \"mmb_sprite.h\"\n");
     if (cv.uses_gpio)
         fprintf(f, "#include \"mmb_gpio.h\"\n");
     /* After mmb_gpio.h: PORT validates against the same mmg_mode table

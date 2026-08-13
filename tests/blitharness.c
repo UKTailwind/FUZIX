@@ -74,6 +74,7 @@ void mm_fb_write(MMINTEGER which) { cur_target = which; }
 
 #include "mmb_flash.h"
 #include "mmb_blit.h"
+#include "mmb_sprite.h"
 
 /* ---- the independent pixel model ------------------------------------ */
 
@@ -421,6 +422,55 @@ static void t_fbform(void)
         }
 }
 
+/* The sprite pixel path: show composites with transparency and saves
+ * the background, a second show restores the first spot, hide restores
+ * everything, opaque flags copy the zeros too. */
+static void t_sprite(void)
+{
+    MMINTEGER img[64];
+    int x, y, i;
+
+    if (cur_bpp != 4)
+        return;
+    /* colour 9 checkerboard, transparent (0) elsewhere */
+    for (i = 0; i < 64; i++)
+        img[i] = ((i ^ (i >> 3)) & 1) ? 0xFF00FF : 0;  /* magenta = 9 */
+    card();
+    memcpy(model, fb, sizeof(model));
+    mms_loadarray(1, 8, 8, img, 64);
+    mms_show(1, 20, 20, 1, 0, 0, 0);
+    for (y = 0; y < 8; y++)
+        for (x = 0; x < 8; x++) {
+            int on = ((y * 8 + x) ^ ((y * 8 + x) >> 3)) & 1;
+
+            expect("spr-show", 20 + x, 20 + y,
+                   on ? 9 : mget(20 + x, 20 + y), fbget(20 + x, 20 + y));
+        }
+    /* moving restores the old spot exactly */
+    mms_show(1, 40, 30, 1, 0, 0, 0);
+    for (y = 0; y < 8; y++)
+        for (x = 0; x < 8; x++)
+            expect("spr-move", 20 + x, 20 + y, mget(20 + x, 20 + y),
+                   fbget(20 + x, 20 + y));
+    /* hide restores everything */
+    mms_hide(1, 0);
+    for (y = 0; y < 8; y++)
+        for (x = 0; x < 8; x++)
+            expect("spr-hide", 40 + x, 30 + y, mget(40 + x, 30 + y),
+                   fbget(40 + x, 30 + y));
+    /* opaque show copies the zeros too */
+    mms_show(1, 60, 60, 1, 4, 0, 0);
+    for (y = 0; y < 8; y++)
+        for (x = 0; x < 8; x++) {
+            int on = ((y * 8 + x) ^ ((y * 8 + x) >> 3)) & 1;
+
+            expect("spr-opaque", 60 + x, 60 + y, on ? 9 : 0,
+                   fbget(60 + x, 60 + y));
+        }
+    mms_hide(1, 0);
+    mms_close(1);
+}
+
 int main(void)
 {
     int m;
@@ -435,6 +485,7 @@ int main(void)
         t_readclip();
         t_flash();
         t_fbform();
+        t_sprite();
     }
     if (failures) {
         fprintf(stderr, "blitharness: %d failures\n", failures);
