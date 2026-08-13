@@ -103,7 +103,12 @@ static void init_name_cache(void)
 #define NUM_NODES 512
 struct node *node_table;
 #else
-#define NUM_NODES 100
+/* The SAME 512 as the arena build: the host cc2 is the development
+   gate for the board cc2, and a gate stricter than its target rejects
+   code the board compiles (mmb_sprite.h's collision sweep was the one
+   that showed it, at the old 100).  Static here because the host has
+   no arena and no reason to care. */
+#define NUM_NODES 512
 
 static struct node node_table[NUM_NODES];
 #endif

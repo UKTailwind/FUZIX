@@ -56,7 +56,7 @@ static const struct builtin builtins[] = {
     { "MM.ERRNO", 0, 0 }, { "MM.ERRMSG$", 0, 0 },
     { "MM.VER", 0, 0 }, { "MM.DEVICE$", 0, 0 },
     { "MM.CMDLINE$", 0, 0 },
-    { "MM.INFO", 1, 1 }, { "PEEK", 1, 1 },
+    { "MM.INFO", 1, 1 }, { "PEEK", 1, 1 }, { "SPRITE", 1, 3 },
     { "DIR$", 0, 2 },
     { "LLEN", 1, 1 }, { "LGETSTR$", 3, 3 }, { "LGETBYTE", 2, 2 },
     { "LINSTR", 2, 3 }, { "LCOMPARE", 2, 2 }, { "LINPUT", 3, 3 },
@@ -67,7 +67,7 @@ static const struct builtin builtins[] = {
 static const char *rawarg[] = {
     "CHOICE", "BOUND", "TRIM$", "DATETIME$", "DAY$", "EPOCH",
     "BIN2STR$", "STR2BIN", "RGB", "MATH",
-    "MM.INFO", "PEEK",
+    "MM.INFO", "PEEK", "SPRITE",
     "EOF", "LOC", "LOF", "INPUT$", "DIR$",
     "LLEN", "LGETSTR$", "LGETBYTE", "LINSTR", "LCOMPARE", "LINPUT",
     NULL

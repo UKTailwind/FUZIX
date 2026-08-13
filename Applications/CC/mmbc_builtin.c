@@ -744,6 +744,103 @@ struct val builtin_raw(const char *up)
         return mkval(sfmt("%s(%s)", fn, as_int(a)), isfloat ? TY_F : TY_I);
     }
 
+    if (strcmp(up, "SPRITE") == 0) {
+        /* SPRITE(selector, ...) - Sprite.c fun_sprite, engine in
+           mmb_sprite.h.  The letters become the reference's own t
+           codes; V and D return floats (a bearing in radians and a
+           centre distance), everything else integers.  SPRITE(B...)
+           is the bounds-analysis machinery and is not translated. */
+        static const struct { const char *nm; int code; } sels[] = {
+            { "W", 1 }, { "H", 2 }, { "X", 3 }, { "Y", 4 },
+            { "L", 5 }, { "C", 6 }, { "V", 7 }, { "T", 8 },
+            { "E", 9 }, { "D", 10 }, { "A", 11 }, { "N", 12 },
+            { "S", 13 }, { NULL, 0 }
+        };
+        const char *n;
+        int sel = 0, si;
+
+        cv.uses_sprite = 1;
+        cv.uses_blit = 1;
+        expect_op("(");
+        if (is_kw("ST", 0)) {
+            static const struct { const char *nm; int code; } props[] = {
+                { "X", 1 }, { "Y", 2 }, { "W", 3 }, { "H", 4 },
+                { "A", 5 }, { NULL, 0 }
+            };
+            int prop = 0;
+
+            cv.i += 1;
+            expect_op(",");
+            if (is_kw("COLLISION", 0)) {
+                cv.i += 1;
+                expect_op(")");
+                return mkval("mms_fun_st(1, 0, 0)", TY_I);
+            }
+            if (is_kw("OBJECT", 0)) {
+                cv.i += 1;
+                expect_op(")");
+                return mkval("mms_fun_st(2, 0, 0)", TY_I);
+            }
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            for (si = 0; props[si].nm; si++)
+                if (is_kw(props[si].nm, 0)) {
+                    cv.i += 1;
+                    prop = props[si].code;
+                    break;
+                }
+            if (prop == 0)
+                cv_err("SPRITE(ST, n, ...) wants X, Y, W, H or A");
+            expect_op(")");
+            return mkval(sfmt("mms_fun_st(0, %s, %d)", n, prop), TY_I);
+        }
+        for (si = 0; sels[si].nm; si++)
+            if (is_kw(sels[si].nm, 0)) {
+                cv.i += 1;
+                sel = sels[si].code;
+                break;
+            }
+        if (sel == 0) {
+            if (is_kw("B", 0))
+                cv_err("SPRITE(B ...) is not translated");
+            cv_err("SPRITE() wants a selector letter");
+        }
+        if (sel == 13) {
+            expect_op(")");
+            return mkval("mms_fun(13, 0, 0, 1)", TY_I);
+        }
+        if (sel == 12) {
+            if (accept_op(",")) {
+                const char *l = as_int(expr());
+
+                expect_op(")");
+                return mkval(sfmt("mms_fun(12, %s, 0, 2)", l), TY_I);
+            }
+            expect_op(")");
+            return mkval("mms_fun(12, 0, 0, 1)", TY_I);
+        }
+        expect_op(",");
+        accept_op("#");
+        n = as_int(expr());
+        if (sel == 7 || sel == 10) {
+            const char *m;
+
+            expect_op(",");
+            accept_op("#");
+            m = as_int(expr());
+            expect_op(")");
+            return mkval(sfmt("mms_fun_f(%d, %s, %s)", sel, n, m), TY_F);
+        }
+        if (accept_op(",")) {
+            const char *i3 = as_int(expr());
+
+            expect_op(")");
+            return mkval(sfmt("mms_fun(%d, %s, %s, 2)", sel, n, i3), TY_I);
+        }
+        expect_op(")");
+        return mkval(sfmt("mms_fun(%d, %s, 0, 1)", sel, n), TY_I);
+    }
     if (strcmp(up, "MM.INFO") == 0) {
         /* MM.INFO(FONT ADDRESS n) - where font n's glyphs are, so a
            program can draw them itself.  Two bare keywords and then an

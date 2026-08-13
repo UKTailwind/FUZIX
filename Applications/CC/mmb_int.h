@@ -155,6 +155,45 @@ MMG_FN long long mm_int_slice_us(void)
  *	this is what makes them no-ops. */
 static int __mm_in_int;
 
+/*	SPRITE INTERRUPT / STINTERRUPT handlers.  Registered here rather
+ *	than in mmb_sprite.h because arming is this file's business
+ *	(__mm_int_armed), and the poll below already owns the scan order.
+ *	Compiled only when the program sprites - see the guard at the
+ *	use site in mm_int_poll. */
+#ifdef MMB_SPRITE_H
+static mm_int_fn mm_sprcoll_fn, mm_sprst_fn;
+
+MMG_FN void mmi_sprite_int(mm_int_fn fn)
+{
+	if (mm_sprcoll_fn == 0)
+		__mm_int_armed++;
+	mm_sprcoll_fn = fn;
+}
+
+MMG_FN void mmi_sprite_noint(void)
+{
+	if (mm_sprcoll_fn) {
+		mm_sprcoll_fn = 0;
+		__mm_int_armed--;
+	}
+}
+
+MMG_FN void mmi_st_int(mm_int_fn fn)
+{
+	if (mm_sprst_fn == 0)
+		__mm_int_armed++;
+	mm_sprst_fn = fn;
+}
+
+MMG_FN void mmi_st_noint(void)
+{
+	if (mm_sprst_fn) {
+		mm_sprst_fn = 0;
+		__mm_int_armed--;
+	}
+}
+#endif
+
 /*
  *	GotAnInterrupt, minus the trampoline.
  *
@@ -396,6 +435,27 @@ MMG_FN void mm_int_poll(void)
 			}
 		}
 	}
+
+	/*	Sprite collisions between keys and pins - MMBasic's own scan
+	 *	order (keys 9892, collision 9991, pins 10153).  The guard is
+	 *	the include guard, the mmb_pulse.h pattern: mmb_sprite.h is
+	 *	emitted ahead of this file and only when the program sprites,
+	 *	so these tests exist exactly when there is something to test.
+	 *	The flag is cleared BEFORE the handler runs, as MMBasic
+	 *	clears CollisionFound - a collision during the handler is a
+	 *	new event. */
+#ifdef MMB_SPRITE_H
+	if (mm_sprcoll_fn && mms_coll_found) {
+		mms_coll_found = 0;
+		mm_int_fire(mm_sprcoll_fn);
+		return;
+	}
+	if (mm_sprst_fn && mms_st_found) {
+		mms_st_found = 0;
+		mm_int_fire(mm_sprst_fn);
+		return;
+	}
+#endif
 
 	for (i = 0; i < mm_ipin_n; i++) {
 		v = pc3_pin_get((int)mm_ipins[i].pin);
