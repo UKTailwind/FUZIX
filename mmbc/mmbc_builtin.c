@@ -765,9 +765,24 @@ struct val builtin_raw(const char *up)
             expect_op(")");
             return mkval("mm_flags_get()", TY_I);
         }
+        if (t->kind == T_ID && strcmp(t->up, "FLASH") == 0) {
+            /* MM.INFO(FLASH ADDRESS n) - the slot's base address,
+               which is how a program hands slot data to BLIT MEMORY.
+               The pseudo slot allocates on this very reference
+               (mmb_flash.h), so asking for the address is enough. */
+            t = nxt();
+            if (t->kind != T_ID || strcmp(t->up, "ADDRESS") != 0)
+                cv_err("MM.INFO(FLASH %s ...) is not supported; "
+                       "translated is FLASH ADDRESS n", t->text);
+            a = expr();
+            expect_op(")");
+            cv.uses_flash = 1;
+            return mkval(sfmt("(MMINTEGER)(long)mmf_addr(%s)", as_int(a)),
+                         TY_I);
+        }
         if (t->kind != T_ID || strcmp(t->up, "FONT") != 0)
             cv_err("MM.INFO(%s ...) is not supported; translated is "
-                   "FONT ADDRESS n or FLAGS", t->text);
+                   "FONT ADDRESS n, FLASH ADDRESS n or FLAGS", t->text);
         t = nxt();
         if (t->kind != T_ID || strcmp(t->up, "ADDRESS") != 0)
             cv_err("MM.INFO(FONT %s ...) is not supported; translated "

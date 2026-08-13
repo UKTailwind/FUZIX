@@ -338,6 +338,11 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_gfx_text.h\"\n");
     if (cv.uses_mappal)
         fprintf(f, "#include \"mmb_gfx_map.h\"\n");
+    /* Before mmb_blit.h, and the order is load-bearing: BLIT FLASH is
+       compiled only when the slot machinery's include guard is already
+       present - the mmb_wait.h detection pattern. */
+    if (cv.uses_flash)
+        fprintf(f, "#include \"mmb_flash.h\"\n");
     if (cv.uses_blit)
         fprintf(f, "#include \"mmb_blit.h\"\n");
     if (cv.uses_gpio)

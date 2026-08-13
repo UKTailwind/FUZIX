@@ -581,6 +581,11 @@ void statement_inner(void)
            BLIT MEMORY addr, x, y [, t]      packed 4bpp, RLE if the
                                              size words carry the top bit
 
+           BLIT FRAMEBUFFER s, d, x1, y1, x2, y2, w, h [, t]
+                                             rectangle between N/F/L
+           BLIT FLASH n, d, x1, y1, x2, y2, w, h [, t]
+                                             image out of a slot
+
            cmd_blit (graphics/Blit.c), engine in mmb_blit.h.  WRITE's
            mode argument is optional WITHOUT the bare-comma licence the
            drawing commands have: the reference takes 5 or 7 arguments
@@ -588,13 +593,11 @@ void statement_inner(void)
            transparent colour is -1 (none) to 15, checked at run time
            as the reference's getint does.
 
-           Not translated: LOAD (wants the BMP decoder), FRAMEBUFFER
-           and FLASH (Phase 2 of PLAN-games.md), RESIZE, and the
-           LCD-only MERGE / RGB332-only MEMORY332, which do not apply
-           to these screen modes at all. */
+           Not translated: LOAD (wants the BMP decoder), RESIZE, and
+           the LCD-only MERGE / RGB332-only MEMORY332, which do not
+           apply to these screen modes at all. */
         static const char *const noblit[] = {
-            "LOAD", "FRAMEBUFFER", "FLASH", "RESIZE", "MERGE",
-            "MEMORY332", NULL
+            "LOAD", "RESIZE", "MERGE", "MEMORY332", NULL
         };
         int bi;
 
@@ -655,6 +658,38 @@ void statement_inner(void)
                       is_mem ? "mem" : "comp", a, x, y, blank));
             return;
         }
+        if (is_kw("FRAMEBUFFER", 1) || is_kw("FLASH", 1)) {
+            const char *src, *dst_unused;
+            const char *args[6];
+            const char *blank = "-1LL";
+            char srcbuf[16];
+            int is_flash = is_kw("FLASH", 1);
+            int dst, ai;
+
+            (void)dst_unused;
+            cv.i += 2;
+            if (is_flash) {
+                cv.uses_flash = 1;
+                src = as_int(expr());
+                expect_op(",");
+            } else {
+                sprintf(srcbuf, "%d", fb_buf());
+                src = srcbuf;
+                expect_op(",");
+            }
+            dst = fb_buf();
+            for (ai = 0; ai < 6; ai++) {
+                expect_op(",");
+                args[ai] = as_int(expr());
+            }
+            if (accept_op(","))
+                blank = as_int(expr());
+            emit(sfmt("mmb_blit_%s(%s, %d, %s, %s, %s, %s, %s, %s, %s);",
+                      is_flash ? "flash" : "fb", src, dst,
+                      args[0], args[1], args[2], args[3], args[4],
+                      args[5], blank));
+            return;
+        }
         for (bi = 0; noblit[bi]; bi++)
             if (is_kw(noblit[bi], 1))
                 cv_err(sfmt("BLIT %s is not translated", noblit[bi]));
@@ -676,6 +711,47 @@ void statement_inner(void)
                       x1, y1, x2, y2, w, h));
             return;
         }
+    }
+    if (strcmp(up, "FLASH") == 0) {
+        /* FLASH DISK LOAD n, file$ [, O[VERWRITE]]
+           FLASH ERASE n
+
+           The image-slot half of MMBasic's FLASH command
+           (FileIO.c:1232, :1039), against the pseudo slots of
+           mmb_flash.h.  The program-management half - SAVE, LOAD,
+           RUN, CHAIN, LIST - manages BASIC programs in flash, a
+           thing this machine does with a filesystem, so it is
+           refused by name rather than absorbed. */
+        cv.uses_flash = 1;
+        if (is_kw("DISK", 1) && is_kw("LOAD", 2)) {
+            const char *n;
+            const char *ovr = "0LL";
+            struct val v;
+
+            cv.i += 3;
+            n = as_int(expr());
+            expect_op(",");
+            v = expr();
+            if (v.ty != TY_S)
+                cv_err("FLASH DISK LOAD wants a file name");
+            if (accept_op(",")) {
+                if (accept_kw("O") || accept_kw("OVERWRITE"))
+                    ovr = "1LL";
+                else
+                    cv_err("FLASH DISK LOAD takes only O here");
+            }
+            emit(sfmt("mmf_disk_load(%s, %s, %s);", v.code, n, ovr));
+            return;
+        }
+        if (is_kw("ERASE", 1)) {
+            const char *n;
+
+            cv.i += 2;
+            n = as_int(expr());
+            emit(sfmt("mmf_erase(%s);", n));
+            return;
+        }
+        cv_err("only FLASH DISK LOAD and FLASH ERASE are translated");
     }
     if (strcmp(up, "PLAY") == 0) {
         /* PLAY MP3 f$          play a file, in the BACKGROUND

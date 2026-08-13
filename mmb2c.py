@@ -604,6 +604,7 @@ class Conv(object):
         self.uses_onewire = False   # ONEWIRE/TEMPR: mmb_onewire.h
         self.uses_play = False
         self.uses_blit = False      # BLIT family: mmb_blit.h
+        self.uses_flash = False     # pseudo flash slots: mmb_flash.h
         self.uses_pwm = False
         self.uses_i2c = False
         self.uses_spi = False
@@ -1968,9 +1969,23 @@ class Conv(object):
                 # FLAGS command (the MMFLAG case of its big switch).
                 self.expect_op(')')
                 return ('mm_flags_get()', TY_I)
+            if t[0] == T_ID and t[2] == 'FLASH':
+                # MM.INFO(FLASH ADDRESS n) - the slot's base address,
+                # which is how a program hands slot data to BLIT MEMORY.
+                # The pseudo slot allocates on this very reference
+                # (mmb_flash.h), so asking for the address is enough.
+                t = self.nxt()
+                if t[0] != T_ID or t[2] != 'ADDRESS':
+                    self.err("MM.INFO(FLASH %s ...) is not supported; "
+                             "translated is FLASH ADDRESS n" % t[1])
+                a = self.expr()
+                self.expect_op(')')
+                self.uses_flash = True
+                return ('(MMINTEGER)(long)mmf_addr(%s)' % self.as_int(a),
+                        TY_I)
             if t[0] != T_ID or t[2] != 'FONT':
                 self.err("MM.INFO(%s ...) is not supported; translated is "
-                         "FONT ADDRESS n or FLAGS" % t[1])
+                         "FONT ADDRESS n, FLASH ADDRESS n or FLAGS" % t[1])
             t = self.nxt()
             if t[0] != T_ID or t[2] != 'ADDRESS':
                 self.err("MM.INFO(FONT %s ...) is not supported; translated "
@@ -3262,10 +3277,14 @@ class Conv(object):
             # The transparent colour is -1 (none) to 15, checked at run
             # time as the reference's getint does.
             #
-            # Not translated: LOAD (wants the BMP decoder), FRAMEBUFFER
-            # and FLASH (Phase 2 of PLAN-games.md), RESIZE, and the
-            # LCD-only MERGE / RGB332-only MEMORY332, which do not apply
-            # to these screen modes at all.
+            # BLIT FRAMEBUFFER s, d, x1, y1, x2, y2, w, h [, t]
+            #                                   rectangle between N/F/L
+            # BLIT FLASH n, d, x1, y1, x2, y2, w, h [, t]
+            #                                   image out of a slot
+            #
+            # Not translated: LOAD (wants the BMP decoder), RESIZE, and
+            # the LCD-only MERGE / RGB332-only MEMORY332, which do not
+            # apply to these screen modes at all.
             self.uses_blit = True
             if self.is_kw('READ', 1):
                 self.i += 2
@@ -3316,8 +3335,31 @@ class Conv(object):
                 self.emit('mmb_blit_%s(%s, %s, %s, %s);'
                           % ('mem' if is_mem else 'comp', a, x, y, blank))
                 return
-            for kw in ('LOAD', 'FRAMEBUFFER', 'FLASH', 'RESIZE', 'MERGE',
-                       'MEMORY332'):
+            if self.is_kw('FRAMEBUFFER', 1) or self.is_kw('FLASH', 1):
+                is_flash = self.is_kw('FLASH', 1)
+                self.i += 2
+                if is_flash:
+                    self.uses_flash = True
+                    n = self.as_int(self.expr())
+                    self.expect_op(',')
+                    src = n
+                else:
+                    src = '%d' % self.fb_buf()
+                    self.expect_op(',')
+                dst = self.fb_buf()
+                args = []
+                for _ in range(6):
+                    self.expect_op(',')
+                    args.append(self.as_int(self.expr()))
+                blank = '-1LL'
+                if self.accept_op(','):
+                    blank = self.as_int(self.expr())
+                self.emit('mmb_blit_%s(%s, %d, %s, %s, %s, %s, %s, %s, %s);'
+                          % ('flash' if is_flash else 'fb', src, dst,
+                             args[0], args[1], args[2], args[3], args[4],
+                             args[5], blank))
+                return
+            for kw in ('LOAD', 'RESIZE', 'MERGE', 'MEMORY332'):
                 if self.is_kw(kw, 1):
                     self.err('BLIT %s is not translated' % kw)
             self.i += 1
@@ -3335,6 +3377,38 @@ class Conv(object):
             self.emit('mmb_blit_copy(%s, %s, %s, %s, %s, %s);'
                       % (x1, y1, x2, y2, w, h))
             return
+        if up == 'FLASH':
+            # FLASH DISK LOAD n, file$ [, O[VERWRITE]]
+            # FLASH ERASE n
+            #
+            # The image-slot half of MMBasic's FLASH command
+            # (FileIO.c:1232, :1039), against the pseudo slots of
+            # mmb_flash.h.  The program-management half - SAVE, LOAD,
+            # RUN, CHAIN, LIST - manages BASIC programs in flash, a
+            # thing this machine does with a filesystem, so it is
+            # refused by name rather than absorbed.
+            self.uses_flash = True
+            if self.is_kw('DISK', 1) and self.is_kw('LOAD', 2):
+                self.i += 3
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                v = self.expr()
+                if v[1] != TY_S:
+                    self.err('FLASH DISK LOAD wants a file name')
+                ovr = '0LL'
+                if self.accept_op(','):
+                    if self.accept_kw('O') or self.accept_kw('OVERWRITE'):
+                        ovr = '1LL'
+                    else:
+                        self.err('FLASH DISK LOAD takes only O here')
+                self.emit('mmf_disk_load(%s, %s, %s);' % (v[0], n, ovr))
+                return
+            if self.is_kw('ERASE', 1):
+                self.i += 2
+                n = self.as_int(self.expr())
+                self.emit('mmf_erase(%s);' % n)
+                return
+            self.err('only FLASH DISK LOAD and FLASH ERASE are translated')
         if up == 'PLAY':
             # PLAY MP3 f$          play a file, in the BACKGROUND
             # PLAY VOLUME n        0-100, remembered for later PLAYs
@@ -6176,6 +6250,11 @@ class Conv(object):
             wr('#include "mmb_gfx_text.h"\n')
         if self.uses_mappal:
             wr('#include "mmb_gfx_map.h"\n')
+        # Before mmb_blit.h, and the order is load-bearing: BLIT FLASH
+        # is compiled only when the slot machinery's include guard is
+        # already present - the mmb_wait.h detection pattern.
+        if self.uses_flash:
+            wr('#include "mmb_flash.h"\n')
         if self.uses_blit:
             wr('#include "mmb_blit.h"\n')
         if self.uses_gpio:

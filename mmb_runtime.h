@@ -623,6 +623,9 @@ void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
 void mm_fb_create(MMINTEGER which);
 void mm_fb_close(MMINTEGER which);
 void mm_fb_write(MMINTEGER which);
+/* Where drawing goes right now (0 N, 1 F, 2 L) - so a primitive that
+ * must switch targets can put the program's choice back. */
+MMINTEGER mm_fb_cur(void);
 /* wait: non-zero for MMBasic's ",B" - start at the top of the frame */
 void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait);
 void mm_fb_wait(void);

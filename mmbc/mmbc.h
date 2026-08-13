@@ -340,6 +340,7 @@ struct conv {
     int uses_wait;              /* a serviced PAUSE: pulls in mmb_wait.h */
     int uses_play;              /* PLAY: emit the volume it remembers */
     int uses_blit;              /* BLIT family: mmb_blit.h */
+    int uses_flash;             /* pseudo flash slots: mmb_flash.h */
     /* set in the scan pass, so statements BEFORE the ON ERROR line are
        guarded too - the armed window is a run-time thing */
     int uses_onerror;

@@ -338,7 +338,17 @@ transcribed from `Blit.c:1568-1722` including the mode-0 fast path.
 `BLIT MEMORY`'s compressed-vs-raw top-bit sniff (`Blit.c:290`) comes
 along for free with COMPRESSED's RLE decoder.
 
-### Phase 2 — flash slots (`mmb_flash.h`) + `BLIT FRAMEBUFFER`
+### Phase 2 — flash slots (`mmb_flash.h`) + `BLIT FRAMEBUFFER`  ✅ DONE 2026-08-13
+
+Board-verified (flashpix: slot file written from BASIC, loaded, blitted,
+pixel-exact, and N→F→N round trip exact). Slot capacity is 48K, not the
+reference's 120K — the host gates' whole VM is 128K, and a full 320×240
+sheet is 38.4K; larger files raise "File too big for a flash slot"
+(divergence ledger). `MM.INFO(FLASH ADDRESS n)` allocates lazily, so
+only slot-using programs pay, as specified. mm_fb_cur() joined the
+runtime so the target-switching forms can restore the program's choice.
+
+*(original scope, for the record)*
 
 D3 as specified: slot table, `FLASH DISK LOAD/ERASE`,
 `MM.INFO(FLASH ADDRESS n)`, `BLIT FLASH` (arena row → SRAM staging →

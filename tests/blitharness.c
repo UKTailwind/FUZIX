@@ -65,6 +65,14 @@ void mm_fatal(const char *msg)
     exit(1);
 }
 
+/* One buffer stands in for N, F and L: target switching is identity
+ * here, so the FRAMEBUFFER form is exercised as an in-buffer copy and
+ * what is being checked is its row logic, clipping and transparency. */
+static MMINTEGER cur_target;
+MMINTEGER mm_fb_cur(void) { return cur_target; }
+void mm_fb_write(MMINTEGER which) { cur_target = which; }
+
+#include "mmb_flash.h"
 #include "mmb_blit.h"
 
 /* ---- the independent pixel model ------------------------------------ */
@@ -342,6 +350,77 @@ static void t_readclip(void)
     mmb_blit_close(4);
 }
 
+/* BLIT FLASH out of a pseudo slot: the slot image is packed the
+ * PicoMite way - LOW nibble is the left pixel, the mirror of this
+ * machine - and this check is what pins that interpretation. */
+static void t_flash(void)
+{
+    unsigned char *s;
+    int x, y;
+
+    if (cur_bpp != 4)
+        return;
+    s = mmf_addr(1);
+    /* a 6x3 image: pixel (x,y) = x + y + 1, low nibble first */
+    s[0] = 6; s[1] = 0; s[2] = 0; s[3] = 0;
+    s[4] = 3; s[5] = 0; s[6] = 0; s[7] = 0;
+    for (y = 0; y < 3; y++)
+        for (x = 0; x < 6; x += 2)
+            s[8 + y * 3 + (x >> 1)] =
+                (unsigned char)(((x + y + 1) & 15) |
+                                (((x + 1 + y + 1) & 15) << 4));
+    card();
+    memcpy(model, fb, sizeof(model));
+    mmb_blit_flash(1, 0, 0, 0, 40, 40, 6, 3, -1);
+    for (y = 0; y < 3; y++)
+        for (x = 0; x < 6; x++)
+            expect("flash", 40 + x, 40 + y, (x + y + 1) & 15,
+                   fbget(40 + x, 40 + y));
+
+    /* transparent: colour 2 keeps the card underneath */
+    card();
+    memcpy(model, fb, sizeof(model));
+    mmb_blit_flash(1, 0, 0, 0, 60, 40, 6, 3, 2);
+    for (y = 0; y < 3; y++)
+        for (x = 0; x < 6; x++) {
+            int c = (x + y + 1) & 15;
+
+            expect("flash-t", 60 + x, 40 + y,
+                   c == 2 ? mget(60 + x, 40 + y) : c,
+                   fbget(60 + x, 40 + y));
+        }
+    mmf_erase(1);
+}
+
+/* the FRAMEBUFFER form as an in-buffer rectangle copy with clipping
+ * and transparency (the mock has one buffer, see mm_fb_write above) */
+static void t_fbform(void)
+{
+    int x, y;
+
+    if (cur_bpp != 4)
+        return;
+    card();
+    memcpy(model, fb, sizeof(model));
+    mmb_blit_fb(0, 1, 30, 30, 200, 100, 20, 10, -1);
+    for (y = 0; y < 10; y++)
+        for (x = 0; x < 20; x++)
+            expect("fbform", 200 + x, 100 + y,
+                   mget(30 + x, 30 + y), fbget(200 + x, 100 + y));
+
+    card();
+    memcpy(model, fb, sizeof(model));
+    mmb_blit_fb(0, 1, 30, 30, 200, 100, 20, 10, 3);
+    for (y = 0; y < 10; y++)
+        for (x = 0; x < 20; x++) {
+            int c = mget(30 + x, 30 + y);
+
+            expect("fbform-t", 200 + x, 100 + y,
+                   c == 3 ? mget(200 + x, 100 + y) : c,
+                   fbget(200 + x, 100 + y));
+        }
+}
+
 int main(void)
 {
     int m;
@@ -354,6 +433,8 @@ int main(void)
         t_copy();
         t_decode();
         t_readclip();
+        t_flash();
+        t_fbform();
     }
     if (failures) {
         fprintf(stderr, "blitharness: %d failures\n", failures);
