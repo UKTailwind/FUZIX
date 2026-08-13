@@ -1522,9 +1522,11 @@ LOOP WHILE INKEY$ = ""
 | | |
 |---|---|
 | `FRAMEBUFFER CREATE` | make the off-screen buffer, blank |
-| `FRAMEBUFFER WRITE N` \| `F` | send drawing to the screen, or to the buffer |
-| `FRAMEBUFFER COPY s, d [, B]` | `s` and `d` each `N` or `F`; `B` starts at the top of the frame |
-| `FRAMEBUFFER CLOSE [F]` | give the buffer back |
+| `FRAMEBUFFER LAYER` | make the layer, blank |
+| `FRAMEBUFFER WRITE N` \| `F` \| `L` | send drawing to the screen, the buffer, or the layer |
+| `FRAMEBUFFER COPY s, d [, B]` | `s` and `d` each `N`, `F` or `L`; `B` starts at the top of the frame |
+| `FRAMEBUFFER MERGE [colour]` | the layer over the buffer, onto the screen |
+| `FRAMEBUFFER CLOSE [F` \| `L]` | give one back |
 | `FRAMEBUFFER WAIT` | wait for the top of the frame |
 
 Everything that draws follows `WRITE`, `CLS` included — so `CLS` while
@@ -1558,9 +1560,76 @@ somewhere near 4.4 ms against the 17 ms the display gives you, and
 with room for roughly three times as much drawing before one is
 dropped.
 
-Not yet: `FRAMEBUFFER LAYER` and `FRAMEBUFFER MERGE`. There is one
-off-screen buffer and no transparent blit; both are refused by name
-rather than translated into something they are not.
+### The layer
+
+`FRAMEBUFFER LAYER` makes a second off-screen buffer. It is the same
+size and shape as `F` and you draw into it the same way, with
+`FRAMEBUFFER WRITE L`; what makes it a *layer* is `MERGE`, which puts it
+**on top**:
+
+```basic
+FRAMEBUFFER MERGE [colour]
+```
+
+lays the layer over `F` and shows the result, treating `colour` as
+transparent — wherever the layer holds it, `F` shows through. Left out,
+it is 0.
+
+**Neither source is changed by a merge.** That is the whole point of
+having one: the background goes into `F` once, the thing that moves
+goes into the layer, and a frame is one `CLS` of the layer, one shape,
+and one `MERGE` — no repainting of everything underneath:
+
+```basic
+MODE 2
+FRAMEBUFFER CREATE
+FRAMEBUFFER LAYER
+
+FRAMEBUFFER WRITE F                   ' the background, drawn once
+CLS RGB(BLUE)
+BOX 20, 20, 120, 80, 2, RGB(WHITE), RGB(RED)
+
+FRAMEBUFFER WRITE N
+DO
+  FRAMEBUFFER WRITE L
+  CLS 0                               ' 0 is the transparent index
+  CIRCLE x, 120, 30, 2, 1, RGB(YELLOW), RGB(YELLOW)
+  FRAMEBUFFER WRITE N
+  FRAMEBUFFER MERGE 0
+  x = x + 4
+LOOP WHILE INKEY$ = ""
+```
+
+`COPY` takes `L` at either end, so `COPY F, L` puts the background into
+the layer to draw over, and `COPY L, N` shows the layer on its own.
+`CLOSE L` gives it back; so does the end of the program.
+
+**The transparent colour means what it means in the mode you are in.**
+In `MODE 2` a pixel is four bits, so it is a colour index from 0 to 15
+and the merge keys on it per pixel. In `MODE 1` a pixel is one bit:
+transparent 0 means the layer's set pixels paint and its clear ones let
+`F` through, and transparent 1 is the other way round. Same command,
+same program, and `MODE 1` is the faster of the two.
+
+**What it costs.** A merge waits for the top of the frame first, always
+— it writes into the buffer being scanned out, and starting part way
+down tears the picture once per merge. In `MODE 2` the loop above runs
+at **16.62 ms a frame, 60 frames a second**, of which the drawing is
+2.57 ms; the rest is the composite and the wait it is hidden behind. It
+is quantised by that wait, so a little more drawing costs nothing at
+all and too much costs a whole frame.
+
+`MERGE` needs both buffers and says so — "Layer not created" if there
+is no layer, "Frame buffer not created" if there is no `F` — rather
+than doing half of it.
+
+This is MMBasic's TFT model, the one its ILI9341 builds use, so a
+program written for a PicoMite with a panel on it runs here unchanged.
+Its VGA and HDMI builds do the same compositing inside the scanline
+builder instead, continuously and without a command; that needs every
+buffer in the RAM the display DMAs from, which on this machine is 40K
+taken off every program forever, whether it uses a layer or not. The
+reasoning is written out in `PC3-LAYER-MERGE.md` in the source tree.
 
 `INKEY$` returns the key that has been pressed, or `""` if none has,
 without waiting — which is how the loop above ends. It leaves the
@@ -3036,9 +3105,9 @@ of current work.
 Of the graphics, `MODE`, `COLOUR`, `PIXEL` (including the array form),
 `LINE`, `CIRCLE`, `BOX`, `RBOX`, `TRIANGLE` (its drawing form —
 `SAVE`/`RESTORE` need the interpreter's blit buffers), `ARC`, `RGB()`,
-`FRAMEBUFFER`, `PRINT @`, `TEXT`, `FONT`, `CLS [colour]` and `MAP`
-(statement and function) are done; `BLIT` is not yet, nor are
-`FRAMEBUFFER LAYER` and `FRAMEBUFFER MERGE`. `TEXT` draws in any of
+`FRAMEBUFFER` (including `LAYER` and `MERGE`), `PRINT @`, `TEXT`,
+`FONT`, `CLS [colour]` and `MAP` (statement and function) are done;
+`BLIT` is not yet. `TEXT` draws in any of
 MMBasic's nine built-in fonts but only in its normal and vertical
 orientations — the three that rotate the character itself are accepted
 and drawn normally.

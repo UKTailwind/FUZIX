@@ -95,6 +95,17 @@ supported.update(["AND", "OR", "NOT", "XOR", "MOD", "INV", "THEN", "TO",
                   "INTEGER", "FLOAT", "STRING",
                   "OUTPUT", "APPEND", "RANDOM"])
 
+# MMBasic gives some commands a TWO-WORD name in AllCommands.h, while
+# the translator dispatches on the first word and reads the second
+# itself (`up == 'TEMPR' and self.is_kw('START', 1)`).  The scan above
+# only ever sees the first word, so without this every one of them is
+# painted "the interpreter knows this and mmbc does not" - the same
+# failure I2C2 had, from the other direction.  Each of these was
+# checked by translating a program that uses it; a two-word name is NOT
+# added here on the strength of its first word being supported, because
+# most of them are not (ARRAY SLICE and ARRAY INSERT are the examples).
+supported.update(["TEMPR START", "LINE INPUT", "ARRAY SET", "ARRAY ADD"])
+
 
 def is_supported(nm):
     # MMBasic spells a function with its opening bracket ("Sqr(", "Left

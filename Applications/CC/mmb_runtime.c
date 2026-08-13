@@ -5076,17 +5076,18 @@ MMINTEGER mm_colour_index(MMINTEGER rgb)
 /*
  * FRAMEBUFFER - draw off-screen, show it in one go.
  *
- * MMBasic's Draw.c cmd_framebuffer, reduced to the "F" buffer:
+ * MMBasic's Draw.c cmd_framebuffer:
  *
- *   FRAMEBUFFER CREATE            make it, blank
- *   FRAMEBUFFER WRITE N | F       send drawing to the screen or to it
- *   FRAMEBUFFER COPY s, d [, B]   s and d each N or F; B waits for the
- *                                 top of the frame first
- *   FRAMEBUFFER CLOSE [F]         give it back
+ *   FRAMEBUFFER CREATE            make the F buffer, blank
+ *   FRAMEBUFFER LAYER             make the layer, blank
+ *   FRAMEBUFFER WRITE N | F | L   send drawing to the screen, the
+ *                                 buffer, or the layer
+ *   FRAMEBUFFER COPY s, d [, B]   s and d each N, F or L; B waits for
+ *                                 the top of the frame first
+ *   FRAMEBUFFER MERGE [colour]    the layer over F, onto the screen,
+ *                                 skipping the transparent index
+ *   FRAMEBUFFER CLOSE [F | L]     give one back
  *   FRAMEBUFFER WAIT              wait for the top of the frame
- *
- * LAYER, MERGE and the second buffers are not here yet; the translator
- * says so by name rather than mistranslating them.
  *
  * The rules - what is an error, and when - are common to every target,
  * so a program behaves the same under the host gates as on the board.
@@ -5314,9 +5315,14 @@ void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait)
  *
  *	MMBasic's TFT model exactly: neither source is touched, so a
  *	program can move something about in the layer and merge again
- *	without redrawing the background underneath it.  The kernel does
- *	the compositing per nibble, which is where the 4bpp packing makes
- *	it two pixels a byte.
+ *	without redrawing the background underneath it.
+ *
+ *	The kernel does the compositing, and HOW depends on the depth of
+ *	the mode: per nibble in MODE 2, where 4bpp packs two pixels to a
+ *	byte, but per BIT in MODE 1, which is the one-bit console.  Keying
+ *	nibbles there would read eight pixels as two 4-bit numbers and
+ *	still draw a picture.  The range check below is MMBasic's 0-15
+ *	whatever the mode, as MMBasic's is.
  */
 void mm_fb_merge(MMINTEGER colour)
 {

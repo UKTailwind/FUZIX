@@ -16,9 +16,11 @@ buffer:
     FRAMEBUFFER CLOSE [F]         give it back
     FRAMEBUFFER WAIT              wait for the top of the frame
 
-`LAYER`, `MERGE` and the second buffers are **not** built. There is one
-off-screen buffer and no transparent blit; the translator refuses them
-by name rather than turning them into something they are not.
+`LAYER`, `MERGE` and the second buffer were not built when this was
+written. They are now — 2026-08-12, on the MERGE model — and
+`PC3-LAYER-MERGE.md` is the record of that, including the two things
+building it found. Read this document as the state of the `F` buffer
+alone.
 
 ## 2. The kernel: the write target is per PROCESS
 
@@ -114,14 +116,17 @@ fit before one was.
 alternative the plan floated — spend 40 KB of SRAM on it instead — would
 buy 2.1 ms a frame out of a 12.6 ms surplus.
 
-## 5. What is left
+## 5. What was left, and what became of it
 
-* `LAYER` and `MERGE`, which need a second buffer and a
-  transparent-colour blit. Only then is there a reason to make the
-  buffers arena allocations owned by the process rather than the one
-  static `disp_fb2` — with a single F buffer, `CREATE`/`CLOSE` really
-  are just a claim on it, and `__uninitialized_psram("fb2")` earns its
-  40 KB.
-* `MODE 2` `PRINT` still goes to the console, and so to the screen, even
-  while drawing goes to the buffer. `OPTION CONSOLE` is the fix and is
-  already on the list.
+* ~~`LAYER` and `MERGE`~~ — **built 2026-08-12**, and the guess here
+  about allocation was wrong in the cheap direction: the second buffer
+  is another static `__uninitialized_psram` beside `disp_fb2`, not an
+  arena allocation owned by the process. `CREATE`/`CLOSE` and
+  `LAYER`/`CLOSE L` are each still just a claim on a fixed 40 KB, which
+  is the same thing said twice rather than a new mechanism. What it did
+  cost was eight bytes of kernel RAM: two flag bytes would not link, so
+  the state is packed into one. See `PC3-LAYER-MERGE.md`.
+* ~~`MODE 2` `PRINT` going to the console~~ — **done**. In a graphics
+  mode `PRINT` draws the characters, into whichever buffer is selected,
+  as MMBasic does. `OPTION CONSOLE` is still on the list, but for
+  choosing where the console itself lives rather than for this.
