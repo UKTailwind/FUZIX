@@ -39,11 +39,15 @@ playmp3.o: CCOPTS += $(FPFLAGS)
 
 .PHONY: all clean
 
-all: $(UTILSBIN)
+all: $(UTILSBIN) playmod
 
 clean:
 	rm -f *.o
 	rm -f $(UTILSBIN)
+
+# playmod links the vendored hxcmod tracker alongside its own object
+playmod: playmod.o hxcmod.o
+	$(LINKER) $(CRT0) $^ -o $@ $(LINKER_OPT) $(LINKER_TAIL)
 
 $(UTILSBIN): %: %.o
 	$(LINKER) $(CRT0) $^ -o $@ $(LINKER_OPT) $(LINKER_TAIL)

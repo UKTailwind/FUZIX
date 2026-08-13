@@ -33,7 +33,8 @@ stage loadimage "$R/Kernel/platform/platform-rpipico/utils/loadimage"
 stage playmp3   "$R/Kernel/platform/platform-rpipico/utils/playmp3"
 # playsnd is PLAY SOUND / PLAY TONE's synthesiser, the same shape.
 stage playsnd   "$R/Kernel/platform/platform-rpipico/utils/playsnd"
+stage playmod   "$R/Kernel/platform/platform-rpipico/utils/playmod"
 
 ls -l "$S"/cc0.s "$S"/cc1.s "$S"/cc2.s "$S"/ccbc.s "$S"/bcrun.s \
       "$S"/bcdump.s "$S"/mmbc.s "$S"/cpp.s "$S"/mmedit.s \
-      "$S"/saveimage.s "$S"/loadimage.s "$S"/playmp3.s "$S"/playsnd.s
+      "$S"/saveimage.s "$S"/loadimage.s "$S"/playmp3.s "$S"/playsnd.s "$S"/playmod.s

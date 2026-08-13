@@ -1151,6 +1151,47 @@ void statement_inner(void)
             }
             return;
         }
+        if (is_kw("MODFILE", 1)) {
+            /* PLAY MODFILE f$ [, interrupt] - with an interrupt the
+               song plays once and the player's exit fires it; without
+               one it loops until PLAY STOP. */
+            const char *fn = NULL;
+            struct val v;
+
+            cv.uses_playd = 1;
+            cv.i += 2;
+            v = expr();
+            if (v.ty != TY_S)
+                cv_err("PLAY MODFILE wants a file name");
+            if (accept_op(",")) {
+                cv.uses_interrupts = 1;
+                fn = int_handler();
+            }
+            if (fn != NULL) {
+                emit(sfmt("mmi_mod_int(%s);", fn));
+                emit(sfmt("mmp_modfile(%s, 1);", v.code));
+            } else {
+                emit(sfmt("mmp_modfile(%s, 0);", v.code));
+            }
+            return;
+        }
+        if (is_kw("MODSAMPLE", 1)) {
+            /* PLAY MODSAMPLE sample, channel [, volume] - a request
+               to the RUNNING player to mix a sample the file already
+               holds over the music. */
+            const char *sm, *ch;
+            const char *vol = "64LL";
+
+            cv.uses_playd = 1;
+            cv.i += 2;
+            sm = as_int(expr());
+            expect_op(",");
+            ch = as_int(expr());
+            if (accept_op(","))
+                vol = as_int(expr());
+            emit(sfmt("mmp_modsample(%s, %s, %s);", sm, ch, vol));
+            return;
+        }
         if (is_kw("MP3", 1)) {
             struct val v;
             cv.i += 2;
@@ -1164,7 +1205,7 @@ void statement_inner(void)
             emit("mm_play_start();");
             return;
         }
-        cv_err("only PLAY MP3, SOUND, TONE, VOLUME and STOP are translated");
+        cv_err("only PLAY MP3, MODFILE, MODSAMPLE, SOUND, TONE, VOLUME and STOP are translated");
     }
     if (strcmp(up, "CIRCLE") == 0) {
         /* CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
