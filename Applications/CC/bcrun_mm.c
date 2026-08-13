@@ -404,6 +404,9 @@ static void w_hres(void)     { A = mm_hres(); }
    buffer that crosses here. */
 static void w_fb_read(void)  { A = mm_fb_read(LL(0), LL(2),
 					      (void *)Pa(4)); }
+/* ... and writes, for BLIT: native bytes back into the draw target. */
+static void w_fb_put(void)   { A = mm_fb_put(LL(0), LL(2),
+					     (const void *)Pa(4)); }
 static void w_colour_index(void) { A = mm_colour_index(LL(0)); }
 static void w_fb_geom(void)  { A = mm_fb_geom(); }
 static void w_vres(void)     { A = mm_vres(); }
@@ -721,6 +724,7 @@ static const struct mmwrap {
 	{ "mm_line",		w_line },
 	{ "mm_hres",		w_hres },
 	{ "mm_fb_read",		w_fb_read },
+	{ "mm_fb_put",		w_fb_put },
 	{ "mm_colour_index",	w_colour_index },
 	{ "mm_fb_geom",		w_fb_geom },
 	{ "mm_vres",		w_vres },

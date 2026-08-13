@@ -502,6 +502,11 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y);
  * range is refused.  For code that must LOOK at many pixels: one
  * crossing for a whole row against 2.5us per pixel one at a time. */
 MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf);
+/* The write half of the same window: native bytes into the current draw
+ * target (GFXIOC_BLIT).  Same contract, same -1 on no display.  The
+ * bytes are native - no colour reduction - so the packing rules are the
+ * caller's, and mmb_blit.h is the caller. */
+MMINTEGER mm_fb_put(MMINTEGER offset, MMINTEGER len, const void *buf);
 
 /* Which native index an RGB888 colour becomes, since the palette and
  * the nearest-match are the kernel's.  -1 if there is no display.

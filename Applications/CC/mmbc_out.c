@@ -338,6 +338,8 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_gfx_text.h\"\n");
     if (cv.uses_mappal)
         fprintf(f, "#include \"mmb_gfx_map.h\"\n");
+    if (cv.uses_blit)
+        fprintf(f, "#include \"mmb_blit.h\"\n");
     if (cv.uses_gpio)
         fprintf(f, "#include \"mmb_gpio.h\"\n");
     /* After mmb_gpio.h: PORT validates against the same mmg_mode table
