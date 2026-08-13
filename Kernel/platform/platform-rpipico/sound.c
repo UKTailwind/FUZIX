@@ -274,8 +274,43 @@ static void __not_in_flash_func(snd_fill)(int16_t *buf)
         for (i = 1; i < 4; i++) {
             struct schan *c = &ch[i];
             if (c->active && c->level) {
+                uint32_t ph, nc, u, t;
+                int32_t v;
+
                 c->phase += c->inc;
-                mix += (c->phase & 0x80000000u) ? c->level : -c->level;
+                ph = c->phase;
+                nc = c->inc;
+                v = (ph & 0x80000000u) ? c->level : -c->level;
+
+                /* polyBLEP.  A square that can only flip on sample
+                 * boundaries carries alias images that beat against
+                 * the true harmonics - a pitch-dependent shimmer on
+                 * sustained notes, worst at the top of the range.
+                 * The band-limited step differs from the naive one
+                 * only within a sample of each edge, and there the
+                 * residual is (1-tau)^2 of the step toward the
+                 * transition midpoint - which for a square centred
+                 * on zero is just a scale-down of the sample's own
+                 * value.  tau in Q8; the divide is a single UDIV on
+                 * this core, and only edge-adjacent samples (a few
+                 * hundred per second per voice) reach it.  This
+                 * runs in the DMA IRQ: everything stays inline and
+                 * integer.  Edges: wrap = fall, half = rise. */
+                if (ph < nc)
+                    u = ph;                     /* just after fall */
+                else if (ph > (uint32_t)-nc)
+                    u = (uint32_t)-ph;          /* just before fall */
+                else if ((ph - 0x80000000u) < nc)
+                    u = ph - 0x80000000u;       /* just after rise */
+                else if ((0x80000000u - ph) < nc)
+                    u = 0x80000000u - ph;       /* just before rise */
+                else
+                    u = ~0u;
+                if (u != ~0u && (t = u / (nc >> 8)) < 256) {
+                    t = 256 - t;
+                    v -= (int32_t)(v * (int32_t)(t * t)) >> 16;
+                }
+                mix += v;
             }
         }
         /* channel 0: noise, LFSR clocked from its pitch */
