@@ -2970,6 +2970,15 @@ class Conv(object):
             self.i += 1
             self.do_elseif()
             return
+        # MMBasic spells it two ways and AllCommands.h binds BOTH to
+        # cmd_else: "Else If" is one command name there, not an ELSE
+        # with an IF after it.  Taken as two words this opened a nested
+        # block that wanted its own ENDIF, so a program written the
+        # spelling the manual uses died with "unterminated if block".
+        if up == 'ELSE' and self.is_kw('IF', 1):
+            self.i += 2
+            self.do_elseif()
+            return
         if up == 'ELSE':
             self.i += 1
             self.do_else()

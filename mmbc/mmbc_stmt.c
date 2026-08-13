@@ -236,6 +236,16 @@ void statement_inner(void)
         do_elseif();
         return;
     }
+    /* MMBasic spells it two ways and AllCommands.h binds BOTH to
+     * cmd_else: "Else If" is one command name there, not an ELSE with
+     * an IF after it.  Taken as two words this opened a nested block
+     * that wanted its own ENDIF, so a program written the spelling the
+     * manual uses died with "unterminated if block". */
+    if (strcmp(up, "ELSE") == 0 && is_kw("IF", 1)) {
+        cv.i += 2;
+        do_elseif();
+        return;
+    }
     if (strcmp(up, "ELSE") == 0) {
         cv.i++;
         do_else();

@@ -1,0 +1,10 @@
+one   (IF)
+two   (ElseIf)
+three (Else If)
+four  (ELSE)
+chain = 1111
+line one
+line two
+line three
+same line body
+done
