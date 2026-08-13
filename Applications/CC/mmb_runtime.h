@@ -777,8 +777,15 @@ char *mm_errmsg(void);              /* MM.ERRMSG$                      */
 
 /* The PC3 release, as major.mmpp so the fields compare as one number
  * (0.10 reads higher than 0.09).  BUMP THIS WITH PC3_RELEASE in the
- * kernel's config.h - the release recipe in BUILDING-PC3.md says so. */
-#define MM_RELEASE 0.10
+ * kernel's config.h.
+ *
+ * That instruction was here from the start and was followed exactly
+ * once: this said 0.10 for v0.11, v0.12 and v0.13, so every program
+ * that asked the machine what it was running got an answer three
+ * releases old.  `relcheck.sh` in the platform directory compares this
+ * with PC3_RELEASE and the manual's date line, and is in the recipe
+ * now - a comment asking to be kept in step is not a mechanism. */
+#define MM_RELEASE 0.14
 MMFLOAT mm_ver(void);               /* MM.VER                          */
 char *mm_device(void);              /* MM.DEVICE$                      */
 char *mm_cmdline(void);             /* MM.CMDLINE$                     */

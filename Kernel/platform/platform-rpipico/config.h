@@ -336,8 +336,12 @@ extern uint8_t progbase[USERMEM];
  * published.  Both numbers are right; only one of them was on screen.
  *
  * Bump this when tagging a release; BUILDING-PC3.md says so too.
+ * It is not the only place the release number is written down -
+ * MM_RELEASE in mmb_runtime.h is what a BASIC program's MM.VER
+ * answers, and it sat three releases behind this one without anything
+ * noticing.  `sh relcheck.sh` now compares the two and the manual.
  */
-#define PC3_RELEASE "0.13"
+#define PC3_RELEASE "0.14"
 
 /*
  * The port's own copyright line.  It goes here rather than in start.c's

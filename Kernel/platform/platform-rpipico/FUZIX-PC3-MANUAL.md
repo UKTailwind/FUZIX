@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.13 — August 2026"
+date: "Release v0.14 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -54,6 +54,57 @@ Headline specification as configured here:
   MMBasic translator in front of it — both run on the machine itself
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
+
+## New in v0.14
+
+The buses stopped being three different programs, and the display
+gained a layer.
+
+**One implementation of the data arguments.** `I2C`, `SPI` and
+`ONEWIRE` all take their data the same way in MMBasic — a list of
+values, a string, a whole array, or a long string — because MMBasic
+writes that handling once and calls it from three places. Here it had
+been written twice, and the two copies had drifted apart: a write list
+never checked that its count matched, so `I2C2 WRITE a, 0, 3, 1, 2`
+sent a third byte off the stack; reading into a list of variables did
+not exist at all; neither array form was bounds checked; `SPI` reported
+`I2C2`'s error messages because it called `I2C2`'s helper; and the
+buffers held bytes, so `SPI OPEN speed, mode, 16` sent the low half of
+each word — and read twice as far as the buffer went, because the
+transfer counts units and not bytes. There is one implementation now
+and one set of rules, and `ONEWIRE` needed no argument handling of its
+own when it arrived, which is the point of doing it this way.
+
+**`LONGSTRING` as bus data.** `SPI WRITE n, LONGSTRING a()` and the
+matching `READ`, on every bus. A BASIC string stops at 255 bytes and a
+240-pixel RGB565 row is 480, so a panel row used to take two writes.
+It has to be spelled out, because a long string *is* an integer array:
+written `a()` it is a numeric array and sends one byte per eight-byte
+cell. That is MMBasic's behaviour and it stays.
+
+**`ONEWIRE` and `TEMPR`.** `ONEWIRE RESET`, `WRITE` and `READ`, with
+`MM.ONEWIRE`, and `TEMPR(pin)` and `TEMPR START` for a DS18B20. Bit
+banged in your own program's time, which this machine can do because a
+pin is a register access rather than a system call. **`TEMPR` sleeps
+through the conversion** where MMBasic spins: three quarters of a
+second is a long time on a machine with other processes in it.
+
+**`FRAMEBUFFER LAYER` and `FRAMEBUFFER MERGE`.** A second off-screen
+buffer that goes *over* the first, with one colour transparent, so the
+background is drawn once and only the thing on top is redrawn. This is
+MMBasic's TFT model, so a program written for a PicoMite with a panel
+on it runs here unchanged. In `MODE 2` the whole loop — clear the
+layer, draw, merge, wait for the frame — runs at 60 frames a second.
+
+**`MM.VER` answers the release you are running.** It had said 0.10
+since v0.10, through three releases that were not v0.10, because the
+number lived in a second place and only a comment asked for it to be
+kept in step. `relcheck.sh` compares the three places it is written
+down and the release cannot go out with them disagreeing.
+
+The editor colours six more keywords correctly, `TEMPR START` and
+`LINE INPUT` among them: it could not see a command MMBasic spells as
+two words.
 
 ## New in v0.13
 

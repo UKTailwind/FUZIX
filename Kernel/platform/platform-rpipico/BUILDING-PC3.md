@@ -167,6 +167,29 @@ downloaded `pc3-v0.6` and booted it saw only `0.5` and concluded the
 wrong file had been published. **Bump `PC3_RELEASE` in `config.h` when
 tagging a release**; nothing checks that the tag and the constant agree.
 
+`PC3_RELEASE` is not the only place the number is written down, and
+that cost three releases:
+
+    config.h                PC3_RELEASE "0.14"        the boot banner
+    Applications/CC/        MM_RELEASE 0.14           what MM.VER
+      mmb_runtime.h                                   answers in BASIC
+    FUZIX-PC3-MANUAL.md     date: "Release v0.14 ..." the PDF's cover
+
+`MM_RELEASE` was set when `MM.VER` was added at v0.10 and was still
+0.10 at v0.13, so every BASIC program that asked the machine what it
+was running was told something three releases old. The comment on it
+asked to be kept in step with `PC3_RELEASE`; a comment is not a
+mechanism. **Run**
+
+    sh relcheck.sh
+
+which reads all three and exits 1 if they disagree. Two things it
+knows that the eye does not: `MM.VER` is MMBasic's `major.mmpp`, so the
+minor part is padded to two digits and `0.9` there is `0.09`; and the
+master copy of `mmb_runtime.h` is in the mmb2c repository, so fix it
+there and re-run `fcc/sync-runtime.sh` or the next sync puts the stale
+number back.
+
 ## 8. The manuals
 
 There are two, and both are plain pandoc:
@@ -186,8 +209,8 @@ Regenerate and paste when coverage changes. Everything *below* the
 tables — what is done and not done in graphics, pins and sound — is
 written by hand and the generator knows nothing about it, so replacing
 the whole appendix with the generator's output throws that away. Check
-the tables against `--check` (87 statements, 85 functions, 5 scalar and
-6 array `MATH` at v0.12) rather than pasting blind.
+the tables against `--check` (100 statements, 90 functions, 5 scalar and
+6 array `MATH` at v0.14; 87 and 85 at v0.12) rather than pasting blind.
 
 The splice is by *marker* — from `## Statements` down to, but not
 including, `## MATH sub-commands`. An earlier script did it by line
