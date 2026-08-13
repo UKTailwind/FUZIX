@@ -603,6 +603,7 @@ class Conv(object):
         self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
         self.uses_onewire = False   # ONEWIRE/TEMPR: mmb_onewire.h
         self.uses_play = False
+        self.uses_blit = False      # BLIT family: mmb_blit.h
         self.uses_pwm = False
         self.uses_i2c = False
         self.uses_spi = False
@@ -3244,6 +3245,95 @@ class Conv(object):
                     self.emit('mm_run_arg_f(%s);' % v[0])
                 first = False
             self.emit('mm_run_exec();')
+            return
+        if up == 'BLIT':
+            # BLIT READ [#]n, x, y, w, h        screen -> buffer 1-64
+            # BLIT WRITE [#]n, x, y [, mode]    buffer -> screen, mode 0-7
+            # BLIT CLOSE [#]n                   free the buffer
+            # BLIT x1, y1, x2, y2, w, h         screen -> screen copy
+            # BLIT COMPRESSED addr, x, y [, t]  RLE 4bpp image from memory
+            # BLIT MEMORY addr, x, y [, t]      packed 4bpp, RLE if the
+            #                                   size words carry the top bit
+            #
+            # cmd_blit (graphics/Blit.c), engine in mmb_blit.h.  WRITE's
+            # mode argument is optional WITHOUT the bare-comma licence
+            # the drawing commands have: the reference takes 5 or 7
+            # arguments and nothing between (argc==6 is a syntax error).
+            # The transparent colour is -1 (none) to 15, checked at run
+            # time as the reference's getint does.
+            #
+            # Not translated: LOAD (wants the BMP decoder), FRAMEBUFFER
+            # and FLASH (Phase 2 of PLAN-games.md), RESIZE, and the
+            # LCD-only MERGE / RGB332-only MEMORY332, which do not apply
+            # to these screen modes at all.
+            self.uses_blit = True
+            if self.is_kw('READ', 1):
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                x = self.as_int(self.expr())
+                self.expect_op(',')
+                y = self.as_int(self.expr())
+                self.expect_op(',')
+                w = self.as_int(self.expr())
+                self.expect_op(',')
+                h = self.as_int(self.expr())
+                self.emit('mmb_blit_read(%s, %s, %s, %s, %s);'
+                          % (n, x, y, w, h))
+                return
+            if self.is_kw('WRITE', 1):
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                x = self.as_int(self.expr())
+                self.expect_op(',')
+                y = self.as_int(self.expr())
+                mode = '0LL'
+                if self.accept_op(','):
+                    mode = self.as_int(self.expr())
+                self.emit('mmb_blit_write(%s, %s, %s, %s);'
+                          % (n, x, y, mode))
+                return
+            if self.is_kw('CLOSE', 1):
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.emit('mmb_blit_close(%s);' % n)
+                return
+            if self.is_kw('COMPRESSED', 1) or self.is_kw('MEMORY', 1):
+                is_mem = self.is_kw('MEMORY', 1)
+                self.i += 2
+                a = self.as_int(self.expr())
+                self.expect_op(',')
+                x = self.as_int(self.expr())
+                self.expect_op(',')
+                y = self.as_int(self.expr())
+                blank = '-1LL'
+                if self.accept_op(','):
+                    blank = self.as_int(self.expr())
+                self.emit('mmb_blit_%s(%s, %s, %s, %s);'
+                          % ('mem' if is_mem else 'comp', a, x, y, blank))
+                return
+            for kw in ('LOAD', 'FRAMEBUFFER', 'FLASH', 'RESIZE', 'MERGE',
+                       'MEMORY332'):
+                if self.is_kw(kw, 1):
+                    self.err('BLIT %s is not translated' % kw)
+            self.i += 1
+            x1 = self.as_int(self.expr())
+            self.expect_op(',')
+            y1 = self.as_int(self.expr())
+            self.expect_op(',')
+            x2 = self.as_int(self.expr())
+            self.expect_op(',')
+            y2 = self.as_int(self.expr())
+            self.expect_op(',')
+            w = self.as_int(self.expr())
+            self.expect_op(',')
+            h = self.as_int(self.expr())
+            self.emit('mmb_blit_copy(%s, %s, %s, %s, %s, %s);'
+                      % (x1, y1, x2, y2, w, h))
             return
         if up == 'PLAY':
             # PLAY MP3 f$          play a file, in the BACKGROUND
@@ -6086,6 +6176,8 @@ class Conv(object):
             wr('#include "mmb_gfx_text.h"\n')
         if self.uses_mappal:
             wr('#include "mmb_gfx_map.h"\n')
+        if self.uses_blit:
+            wr('#include "mmb_blit.h"\n')
         if self.uses_gpio:
             wr('#include "mmb_gpio.h"\n')
         # After mmb_gpio.h: PORT validates against the same mmg_mode

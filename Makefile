@@ -57,7 +57,14 @@ run: all
 	    else ../$$t; fi ); \
 	done
 
-check: all
+# the pixel-exact engine checks: a fake framebuffer behind mm_fb_*,
+# every blit operation compared against an independent model.  The .bas
+# gates cannot see pixels (the host has no display); this can.
+$(BUILD)/blitharness: tests/blitharness.c mmb_blit.h mmb_runtime.h | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/blitharness.c $(LDLIBS)
+
+check: all $(BUILD)/blitharness
+	@$(BUILD)/blitharness || { echo "  FAIL blitharness"; exit 1; }
 	@mkdir -p $(BUILD)/work
 	@fail=0; \
 	for t in $(TESTS); do \

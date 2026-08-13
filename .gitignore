@@ -21,3 +21,6 @@ tests/xcheck/xcheck
 /tests/work/
 *.mpy
 __pycache__/
+
+# hand-written harness sources, not translator output
+!/tests/blitharness.c

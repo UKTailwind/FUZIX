@@ -300,10 +300,15 @@ would be worse than the current clear error:
   true: the PC3 kernel draws, so `MODE PIXEL LINE CIRCLE BOX RBOX
   TRIANGLE ARC CLS COLOUR TEXT FONT MAP FRAMEBUFFER` and `PRINT @` are
   translated and run on hardware (`TRIANGLE` in its drawing form;
-  `SAVE`/`RESTORE` need the interpreter's blit buffers).  `BLIT` still
-  needs a block pixel-read ioctl.  What remains here is the part that
-  needs state a translator has no place to keep - sprites, tile maps, a
-  GUI toolkit - or hardware the PC3 does not have.
+  `SAVE`/`RESTORE` need the interpreter's blit buffers).  **`BLIT` is
+  translated too** - READ/WRITE/CLOSE, the plain screen copy,
+  COMPRESSED and MEMORY, engine in `mmb_blit.h`, board-verified by
+  pixel readback (PLAN-games.md Phase 1); LOAD, FRAMEBUFFER, FLASH and
+  RESIZE are that plan's later phases.  What remains here is the part
+  that needs state a translator has no place to keep - sprites, tile
+  maps, a GUI toolkit - or hardware the PC3 does not have; for sprites
+  that is no longer a reason, and PLAN-games.md Phase 3 does them the
+  way BLIT was done.
 * **Sound** — `PLAY TONE WAV FLAC MOD MIDI SAMPLE EFFECT PAUSE NEXT PREVIOUS`
 
   Not all of `PLAY`, though: `PLAY MP3`, `PLAY VOLUME` and `PLAY STOP` are
@@ -513,10 +518,12 @@ ARC PIXEL TEXT CLS` — and these are the gaps in them:
   evict each other. Measured in MODE 2: draw plus merge, 16.62 ms a
   frame, which is 60 fps, the loop quantised by the blanking wait a
   merge has to take.
-* **`BLIT`, `BLIT MEMORY`** (`cmd_blit`) — the kernel has `GFXIOC_BLIT`
-  already; this is the BASIC surface over it plus the buffer model.
+* **`BLIT`, `BLIT MEMORY`** — DONE (PLAN-games.md Phase 1): the core
+  six forms ship in `mmb_blit.h` over per-row `GFXIOC_BLIT`/`BLITRD`,
+  board-verified; the file/flash-slot forms are Phase 2 of that plan.
 * **`SPRITE` family** and **`TILE`/`TILEMAP`** — large, and they lean on
-  BLIT. Worth doing as one piece if games matter.
+  BLIT, which now exists. PLAN-games.md Phase 3; `TILE`/`TILEMAP` stay
+  deferred there.
 * **`REDIM [PRESERVE]`** — needs heap-allocated arrays instead of the
   current static ones, which puts `malloc` into generated code that has
   none.

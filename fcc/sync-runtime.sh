@@ -21,5 +21,5 @@ cp "$M/mmb_runtime.c" "$M/mmb_runtime.h" \
    "$M/mmb_int.h" "$M/mmb_pwm.h" "$M/mmb_comms.h" "$M/mmb_i2c.h" \
    "$M/mmb_spi.h" \
    "$M/mmb_peek.h" "$M/mmb_port.h" "$M/mmb_pulse.h" "$M/mmb_wait.h" \
-   "$M/mmb_onewire.h" "$FCC/"
-echo "synced mmb_runtime.[ch] mmb_gfx*.h mmb_gpio.h mmb_int.h mmb_pwm.h mmb_comms.h mmb_onewire.h mmb_i2c.h mmb_spi.h mmb_peek.h mmb_port.h mmb_pulse.h mmb_wait.h -> $FCC"
+   "$M/mmb_onewire.h" "$M/mmb_blit.h" "$FCC/"
+echo "synced mmb_runtime.[ch] mmb_gfx*.h mmb_gpio.h mmb_int.h mmb_pwm.h mmb_comms.h mmb_onewire.h mmb_i2c.h mmb_spi.h mmb_peek.h mmb_port.h mmb_pulse.h mmb_wait.h mmb_blit.h -> $FCC"

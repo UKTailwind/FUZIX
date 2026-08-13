@@ -20,6 +20,11 @@ the order and the reason.
 
 ## Next
 
+**Games first (2026-08-13): BLIT, SPRITE, PLAY SOUND/TONE and PLAY
+MODFILE/MODSAMPLE now have a full plan in PLAN-games.md and take
+priority over the ranking below where they conflict. Phase 0 of that
+plan (board spikes) is the next concrete action.**
+
 ### 1. `SPI WRITE` of a LONGSTRING
 
 The 255-byte string limit is the one wall the display work keeps

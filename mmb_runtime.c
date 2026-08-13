@@ -4462,6 +4462,29 @@ MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf)
     return ioctl(mm_gfx_fd, MM_GFXIOC_BLITRD, &b) < 0 ? -1 : 0;
 }
 
+#define MM_GFXIOC_BLIT 0x0005
+
+/*
+ * The write half of the same window: raw native bytes INTO the current
+ * draw target - MMBasic's DrawBufferFast.  mm_fb_read's mirror in every
+ * particular, and it exists for the same customer: mmb_blit.h moves
+ * rectangles as one crossing per row, where per-pixel plots would be
+ * 2.5us each.  Colour reduction is not involved - the bytes ARE native -
+ * so the caller owns the packing rules.
+ */
+MMINTEGER mm_fb_put(MMINTEGER offset, MMINTEGER len, const void *buf)
+{
+    struct mm_gfx_blit b;
+
+    if (mm_gfx_open() < 0)
+        return -1;
+    mm_pix_drain();             /* queued pixels must be down first */
+    b.offset = (unsigned short)offset;
+    b.len = (unsigned short)len;
+    b.buf = (void *)buf;
+    return ioctl(mm_gfx_fd, MM_GFXIOC_BLIT, &b) < 0 ? -1 : 0;
+}
+
 /*
  * Which native index does this RGB888 become?
  *
@@ -5060,6 +5083,12 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
    raw bytes must be able to tell "there is nothing here" from "here
    are some bytes", or it walks an uninitialised buffer. */
 MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf)
+{
+    (void)offset; (void)len; (void)buf;
+    return -1;
+}
+
+MMINTEGER mm_fb_put(MMINTEGER offset, MMINTEGER len, const void *buf)
 {
     (void)offset; (void)len; (void)buf;
     return -1;

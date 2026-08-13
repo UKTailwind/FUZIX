@@ -572,6 +572,111 @@ void statement_inner(void)
         emit("mm_run_exec();");
         return;
     }
+    if (strcmp(up, "BLIT") == 0) {
+        /* BLIT READ [#]n, x, y, w, h        screen -> buffer 1-64
+           BLIT WRITE [#]n, x, y [, mode]    buffer -> screen, mode 0-7
+           BLIT CLOSE [#]n                   free the buffer
+           BLIT x1, y1, x2, y2, w, h         screen -> screen copy
+           BLIT COMPRESSED addr, x, y [, t]  RLE 4bpp image from memory
+           BLIT MEMORY addr, x, y [, t]      packed 4bpp, RLE if the
+                                             size words carry the top bit
+
+           cmd_blit (graphics/Blit.c), engine in mmb_blit.h.  WRITE's
+           mode argument is optional WITHOUT the bare-comma licence the
+           drawing commands have: the reference takes 5 or 7 arguments
+           and nothing between (argc==6 is a syntax error).  The
+           transparent colour is -1 (none) to 15, checked at run time
+           as the reference's getint does.
+
+           Not translated: LOAD (wants the BMP decoder), FRAMEBUFFER
+           and FLASH (Phase 2 of PLAN-games.md), RESIZE, and the
+           LCD-only MERGE / RGB332-only MEMORY332, which do not apply
+           to these screen modes at all. */
+        static const char *const noblit[] = {
+            "LOAD", "FRAMEBUFFER", "FLASH", "RESIZE", "MERGE",
+            "MEMORY332", NULL
+        };
+        int bi;
+
+        cv.uses_blit = 1;
+        if (is_kw("READ", 1)) {
+            const char *n, *x, *y, *w, *h;
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            x = as_int(expr());
+            expect_op(",");
+            y = as_int(expr());
+            expect_op(",");
+            w = as_int(expr());
+            expect_op(",");
+            h = as_int(expr());
+            emit(sfmt("mmb_blit_read(%s, %s, %s, %s, %s);",
+                      n, x, y, w, h));
+            return;
+        }
+        if (is_kw("WRITE", 1)) {
+            const char *n, *x, *y;
+            const char *mode = "0LL";
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            x = as_int(expr());
+            expect_op(",");
+            y = as_int(expr());
+            if (accept_op(","))
+                mode = as_int(expr());
+            emit(sfmt("mmb_blit_write(%s, %s, %s, %s);", n, x, y, mode));
+            return;
+        }
+        if (is_kw("CLOSE", 1)) {
+            const char *n;
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            emit(sfmt("mmb_blit_close(%s);", n));
+            return;
+        }
+        if (is_kw("COMPRESSED", 1) || is_kw("MEMORY", 1)) {
+            const char *a, *x, *y;
+            const char *blank = "-1LL";
+            int is_mem = is_kw("MEMORY", 1);
+            cv.i += 2;
+            a = as_int(expr());
+            expect_op(",");
+            x = as_int(expr());
+            expect_op(",");
+            y = as_int(expr());
+            if (accept_op(","))
+                blank = as_int(expr());
+            emit(sfmt("mmb_blit_%s(%s, %s, %s, %s);",
+                      is_mem ? "mem" : "comp", a, x, y, blank));
+            return;
+        }
+        for (bi = 0; noblit[bi]; bi++)
+            if (is_kw(noblit[bi], 1))
+                cv_err(sfmt("BLIT %s is not translated", noblit[bi]));
+        {
+            const char *x1, *y1, *x2, *y2, *w, *h;
+            cv.i++;
+            x1 = as_int(expr());
+            expect_op(",");
+            y1 = as_int(expr());
+            expect_op(",");
+            x2 = as_int(expr());
+            expect_op(",");
+            y2 = as_int(expr());
+            expect_op(",");
+            w = as_int(expr());
+            expect_op(",");
+            h = as_int(expr());
+            emit(sfmt("mmb_blit_copy(%s, %s, %s, %s, %s, %s);",
+                      x1, y1, x2, y2, w, h));
+            return;
+        }
+    }
     if (strcmp(up, "PLAY") == 0) {
         /* PLAY MP3 f$          play a file, in the BACKGROUND
            PLAY VOLUME n        0-100, remembered for later PLAYs
