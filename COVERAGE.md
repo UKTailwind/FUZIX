@@ -484,20 +484,35 @@ ARC PIXEL TEXT CLS` — and these are the gaps in them:
 
 ## Category 2 — real value, moderate work
 
-* **`FRAMEBUFFER LAYER` and `FRAMEBUFFER MERGE`.** The decision is
-  already made and written up in the FUZIX tree at
-  `platform-rpipico/PC3-LAYER-MERGE.md`: **implement the MERGE model**,
-  which is MMBasic's own TFT build, not a compromise invented here — a
-  program written for a PicoMite driving an ILI9341 runs unchanged, and
-  only the moment of compositing differs. The driver-side `LAYER` model
-  is rejected because it needs every buffer readable at scanout rate,
-  which is 40K of SRAM this machine does not have. That document
-  carries the work sketch (a second PSRAM buffer, a merge routine in
-  `display.c`, `GFXIOC_MERGE`, a third `display_fb_select` target, and
-  the runtime/translator pair) and it is comparable in size to the
-  original FRAMEBUFFER work. **What would change the decision: a mouse
-  pointer**, which is the one case where compositing has to be
-  continuous.
+* ~~**`FRAMEBUFFER LAYER` and `FRAMEBUFFER MERGE`**~~ — **DONE**
+  (2026-08-12), on the model chosen in the FUZIX tree at
+  `platform-rpipico/PC3-LAYER-MERGE.md`: **the MERGE model**, which is
+  MMBasic's own TFT build, not a compromise invented here — a program
+  written for a PicoMite driving an ILI9341 runs unchanged, and only the
+  moment of compositing differs. The driver-side `LAYER` model was
+  rejected because it needs every buffer readable at scanout rate, which
+  is 40K of SRAM this machine does not have; **a mouse pointer** is
+  still the one thing that would change that, compositing being
+  genuinely continuous there.
+
+  `LAYER` opens a second off-screen buffer, `WRITE L` draws into it,
+  `COPY` takes it at either end, and `MERGE [colour]` lays it over `F`
+  with `colour` transparent (0 by default) and shows the result. A
+  second PSRAM buffer beside `disp_fb2`, `display_fb_merge` in
+  `display.c`, `GFXIOC_MERGE`, a third `display_fb_select` target.
+
+  Two things building it taught, both in that document. **The keying
+  depends on the depth**: MODE 1 is the 640×480 one-bit console and
+  MODE 2 is 320×240 in 16 colours, so MMBasic's per-nibble rule
+  transcribed unconditionally treats eight MODE 1 pixels as two 4-bit
+  numbers — and still draws a picture. At 1bpp a pixel is a bit, so
+  transparent 0 is an `OR` and transparent 1 an `AND`, 32 pixels at a
+  time, and it is the cheap case. And **both sources are in PSRAM
+  behind one XIP cache**, so it is two passes — `memcpy` `F` down, then
+  stream `L` over it — rather than one loop reading two streams that
+  evict each other. Measured in MODE 2: draw plus merge, 16.62 ms a
+  frame, which is 60 fps, the loop quantised by the blanking wait a
+  merge has to take.
 * **`BLIT`, `BLIT MEMORY`** (`cmd_blit`) — the kernel has `GFXIOC_BLIT`
   already; this is the BASIC surface over it plus the buffer model.
 * **`SPRITE` family** and **`TILE`/`TILEMAP`** — large, and they lean on
