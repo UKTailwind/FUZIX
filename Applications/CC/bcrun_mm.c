@@ -453,6 +453,7 @@ static void w_fb_create(void){ mm_fb_create(LL(0)); A = 0; }
 static void w_fb_close(void) { mm_fb_close(LL(0)); A = 0; }
 static void w_fb_merge(void) { mm_fb_merge(LL(0)); A = 0; }
 static void w_fb_write(void) { mm_fb_write(LL(0)); A = 0; }
+static void w_fb_cur(void)   { A = mm_fb_cur(); }
 static void w_fb_copy(void)  { mm_fb_copy(LL(0), LL(2), LL(4)); A = 0; }
 static void w_fb_wait(void)  { mm_fb_wait(); A = 0; }
 
@@ -747,6 +748,7 @@ static const struct mmwrap {
 	{ "mm_fb_create",	w_fb_create },
 	{ "mm_fb_close",	w_fb_close },
 	{ "mm_fb_write",	w_fb_write },
+	{ "mm_fb_cur",		w_fb_cur },
 	{ "mm_fb_copy",		w_fb_copy },
 	{ "mm_fb_merge",	w_fb_merge },
 	{ "mm_fb_wait",		w_fb_wait },

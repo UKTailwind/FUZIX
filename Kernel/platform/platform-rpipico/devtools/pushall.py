@@ -62,6 +62,8 @@ HEADERS = [
      "/usr/lib/cc/include/mmb_gpio.h"),
     (os.path.join(CC, "mmb_blit.h"), "mmb_blit.h",
      "/usr/lib/cc/include/mmb_blit.h"),
+    (os.path.join(CC, "mmb_flash.h"), "mmb_flash.h",
+     "/usr/lib/cc/include/mmb_flash.h"),
 ]
 # The STRIPPED binaries, which stageall.sh has already produced in
 # hwtest/ - the same files the card image installs.  Stripping here

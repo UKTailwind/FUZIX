@@ -5316,6 +5316,14 @@ void mm_fb_write(MMINTEGER which)
     mm_fb_wr = (int)which;
 }
 
+/* Where drawing goes right now (0 N, 1 F, 2 L).  mmb_blit.h's
+ * FRAMEBUFFER and FLASH forms switch the target to work and must put
+ * it back where the program had it; this is "where it had it". */
+MMINTEGER mm_fb_cur(void)
+{
+    return mm_fb_wr;
+}
+
 void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait)
 {
     mm_pix_drain();             /* a copy is a snapshot: what was drawn must be in it */

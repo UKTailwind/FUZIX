@@ -424,4 +424,151 @@ MMG_FN void mmb_blit_mem(MMINTEGER addr, MMINTEGER xi, MMINTEGER yi,
 		mmb_blit_decode(mmb_unc, (int)xi, (int)yi, w, h, (int)blank);
 }
 
+/* ---- BLIT FRAMEBUFFER src, dst, x1, y1, x2, y2, w, h [, t] ----------
+ * A rectangle from one of N/F/L to another, through the per-process
+ * draw target: select the source, read the rows, select the
+ * destination, write them, put the program's own target back.
+ * mm_fb_write does the "is it created" checks - the same errors the
+ * FRAMEBUFFER statements raise.  The reference refuses mode 1
+ * (Blit.c:799) and so does this.  Source rectangle must lie inside the
+ * screen; the destination clips, as blit121 clips. */
+
+MMG_FN void mmb_blit_fb(MMINTEGER src, MMINTEGER dst,
+			MMINTEGER x1i, MMINTEGER y1i,
+			MMINTEGER x2i, MMINTEGER y2i,
+			MMINTEGER wi, MMINTEGER hi, MMINTEGER blank)
+{
+	int stride = 0, bpp = 0, hres, vres, headless;
+	int x1 = (int)x1i, y1 = (int)y1i, x2 = (int)x2i, y2 = (int)y2i;
+	int w = (int)wi, h = (int)hi;
+	int keep, sx0, dx0, dy0, dw, dh, i, j;
+
+	if (blank < -1 || blank > 15)
+		MM_RAISE("Invalid transparent colour");
+	headless = mmb_geom(&stride, &bpp, &hres, &vres);
+	if (!headless && bpp != 4)
+		MM_RAISE("Not available in mode 1");
+	if (x1 < 0 || y1 < 0 || w < 1 || h < 1 ||
+	    x1 + w > hres || y1 + h > vres)
+		MM_RAISE("Invalid coordinates");
+	if (headless)
+		return;
+
+	sx0 = x2 < 0 ? -x2 : 0;
+	dx0 = x2 < 0 ? 0 : x2;
+	dy0 = y2 < 0 ? 0 : y2;
+	dw = w - sx0;
+	dh = h - (y2 < 0 ? -y2 : 0);
+	if (dx0 + dw > hres) dw = hres - dx0;
+	if (dy0 + dh > vres) dh = vres - dy0;
+	if (dw < 1 || dh < 1)
+		return;
+
+	keep = (int)mm_fb_cur();
+	for (i = 0; i < dh; i++) {
+		int sy = y1 + (y2 < 0 ? -y2 : 0) + i;
+
+		mm_fb_write(src);
+		if (mmb_row_get(sy, x1 + sx0, dw, stride, bpp,
+				mmb_srcpx) < 0)
+			break;
+		mm_fb_write(dst);
+		if (blank >= 0) {
+			if (mmb_row_get(dy0 + i, dx0, dw, stride, bpp,
+					mmb_rowpx) < 0)
+				break;
+			for (j = 0; j < dw; j++)
+				if (mmb_srcpx[j] != (unsigned char)blank)
+					mmb_rowpx[j] = mmb_srcpx[j];
+			if (mmb_row_put(dy0 + i, dx0, dw, stride, bpp,
+					mmb_rowpx) < 0)
+				break;
+		} else if (mmb_row_put(dy0 + i, dx0, dw, stride, bpp,
+				       mmb_srcpx) < 0)
+			break;
+	}
+	mm_fb_write(keep);
+}
+
+/* ---- BLIT FLASH n, dst, x1, y1, x2, y2, w, h [, t] ------------------
+ * An image out of a pseudo flash slot (mmb_flash.h) onto N/F/L.  The
+ * slot layout is the REFERENCE's: uint32 width, uint32 height, then
+ * packed 4bpp with the LOW nibble the left pixel - the PicoMite's
+ * packing, not this machine's - so asset files made for a PicoMite
+ * work unmodified.  In mode 1 a non-zero index becomes ink, the same
+ * rule every other decoder here follows.  Only compiled when the
+ * program also uses a FLASH command, which is what the guard means. */
+
+#ifdef MMB_FLASH_H
+MMG_FN void mmb_blit_flash(MMINTEGER n, MMINTEGER dst,
+			   MMINTEGER x1i, MMINTEGER y1i,
+			   MMINTEGER x2i, MMINTEGER y2i,
+			   MMINTEGER wi, MMINTEGER hi, MMINTEGER blank)
+{
+	int stride = 0, bpp = 0, hres, vres, headless;
+	int x1 = (int)x1i, y1 = (int)y1i, x2 = (int)x2i, y2 = (int)y2i;
+	int w = (int)wi, h = (int)hi;
+	int keep, sx0, dx0, dy0, dw, dh, i, j, sstride;
+	unsigned long hs, vs;
+	unsigned char *s = mmf_addr(n);
+
+	if (s == NULL)
+		return;
+	if (blank < -1 || blank > 15)
+		MM_RAISE("Invalid transparent colour");
+	hs = (unsigned long)s[0] | ((unsigned long)s[1] << 8) |
+	     ((unsigned long)s[2] << 16) | ((unsigned long)s[3] << 24);
+	vs = (unsigned long)s[4] | ((unsigned long)s[5] << 8) |
+	     ((unsigned long)s[6] << 16) | ((unsigned long)s[7] << 24);
+	if (hs > 3840 || vs > 2160)
+		MM_RAISE("Invalid Image");
+	if (x1 < 0 || y1 < 0 || w < 1 || h < 1 ||
+	    (unsigned long)(x1 + w) > hs || (unsigned long)(y1 + h) > vs)
+		MM_RAISE("Invalid coordinates");
+	headless = mmb_geom(&stride, &bpp, &hres, &vres);
+	if (headless)
+		return;
+
+	sx0 = x2 < 0 ? -x2 : 0;
+	dx0 = x2 < 0 ? 0 : x2;
+	dy0 = y2 < 0 ? 0 : y2;
+	dw = w - sx0;
+	dh = h - (y2 < 0 ? -y2 : 0);
+	if (dx0 + dw > hres) dw = hres - dx0;
+	if (dy0 + dh > vres) dh = vres - dy0;
+	if (dw < 1 || dh < 1)
+		return;
+
+	sstride = ((int)hs + 1) >> 1;
+	keep = (int)mm_fb_cur();
+	mm_fb_write(dst);
+	for (i = 0; i < dh; i++) {
+		const unsigned char *row = s + 8 +
+		    (long)(y1 + (y2 < 0 ? -y2 : 0) + i) * sstride;
+
+		for (j = 0; j < dw; j++) {
+			int sx = x1 + sx0 + j;
+
+			/* PicoMite packing: LOW nibble = even pixel */
+			mmb_srcpx[j] = (sx & 1) ? (row[sx >> 1] >> 4)
+						: (row[sx >> 1] & 15);
+		}
+		if (blank >= 0) {
+			if (mmb_row_get(dy0 + i, dx0, dw, stride, bpp,
+					mmb_rowpx) < 0)
+				break;
+			for (j = 0; j < dw; j++)
+				if (mmb_srcpx[j] != (unsigned char)blank)
+					mmb_rowpx[j] = mmb_srcpx[j];
+			if (mmb_row_put(dy0 + i, dx0, dw, stride, bpp,
+					mmb_rowpx) < 0)
+				break;
+		} else if (mmb_row_put(dy0 + i, dx0, dw, stride, bpp,
+				       mmb_srcpx) < 0)
+			break;
+	}
+	mm_fb_write(keep);
+}
+#endif /* MMB_FLASH_H */
+
 #endif /* MMB_BLIT_H */
