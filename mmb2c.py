@@ -2977,6 +2977,34 @@ class Conv(object):
             w = self.nxt()
             self.opt_base = int(w[1])
             return
+        if t[2] == 'CONSOLE':
+            # OPTION CONSOLE SERIAL | SCREEN | BOTH | NONE
+            #
+            # A bitmask, exactly the reference's (MM_Misc.c:5178):
+            # BOTH 3, SERIAL 1, SCREEN 2, NONE 0, and putConsole is
+            # "if (OptionConsole & 2) DisplayPutC; if (OptionConsole & 1)
+            # SerialConsolePutC" (PicoMite.c:1174).
+            #
+            # It is a run-time statement, not a compile-time setting: a
+            # program turns the screen off round a section and back on
+            # after, so it emits a call where it stands.
+            #
+            # This is the debugging tool that was missing.  A program in
+            # a graphics mode drew its PRINTs on the screen and nothing
+            # reached the console, so a trace either scrolled away under
+            # the picture or was overwritten by it - and if the machine
+            # then stopped, there was nothing to read anywhere.  Hours
+            # went into that on picofrog before /dev/tty was used by
+            # hand instead.
+            self.i += 1
+            w = self.nxt()
+            mode = {'SERIAL': 1, 'SCREEN': 2, 'BOTH': 3, 'NONE': 0}.get(
+                w[2] if w[0] == T_ID else '')
+            if mode is None:
+                self.err('OPTION CONSOLE wants SERIAL, SCREEN, BOTH '
+                         'or NONE')
+            self.emit('mm_console(%d);' % mode)
+            return
         self.skip_statement()
 
     # -- DIM / LOCAL / STATIC / CONST ------------------------------------

@@ -356,6 +356,11 @@ static void mm_gflush(void);
  * target rather than the console, and has to drop whatever PRINT had
  * half-collected.  Only the drawing itself is platform-specific. */
 static int mm_gon;                      /* PRINT draws rather than tells */
+/* OPTION CONSOLE: bit 0 serial, bit 1 screen.  BOTH at the start, as
+   the firmware resets it (Commands.c:3924) - so a program in a graphics
+   mode reaches the serial console without having to ask, which is what
+   makes a PRINT usable as a trace. */
+static int mm_console_opt = 3;
 static int mm_gx, mm_gy;                /* the pixel cursor - CurrentX/Y */
 static int mm_gn;                       /* characters collected so far */
 
@@ -416,12 +421,40 @@ void mm_putc(int c)
         mm_prover = 1;
         mm_pr_commit();
     }
-    if (mm_gputc(c))
-        return;
-    putchar(c);
+    /*
+     * OPTION CONSOLE.  putConsole is "if (OptionConsole & 2)
+     * DisplayPutC; if (OptionConsole & 1) SerialConsolePutC"
+     * (PicoMite.c:1174) - two independent sinks, so BOTH really does
+     * write the character twice, to two different places.
+     *
+     * In a TEXT mode there is no second sink: the console is the tty,
+     * mm_gputc has nothing to draw on, and both bits mean the same
+     * thing.  Only NONE is different there.
+     */
+    if (mm_gon) {
+        if (mm_console_opt & 2)
+            mm_gputc(c);
+        if (mm_console_opt & 1)
+            putchar(c);
+    } else if (mm_console_opt) {
+        putchar(c);
+    }
     if (c == '\r' || c == '\n') mm_charpos = 1;
     else if (c == '\t')         mm_charpos = (((mm_charpos - 1) / 14) + 1) * 14 + 1;
     else                        mm_charpos++;
+}
+
+/*
+ *	OPTION CONSOLE SERIAL | SCREEN | BOTH | NONE - MM_Misc.c:5178.
+ *
+ *	The reference's own numbering, because it is a bitmask and the two
+ *	bits are tested separately: 1 serial, 2 screen, 3 both, 0 neither.
+ *	BOTH at the start, as the firmware resets it (Commands.c:3924).
+ */
+void mm_console(MMINTEGER mode)
+{
+    mm_gflush();                /* the old routing owns what is pending */
+    mm_console_opt = (int)(mode & 3);
 }
 
 static void mm_puts_raw(const char *cstr)
