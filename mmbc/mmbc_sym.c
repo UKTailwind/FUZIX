@@ -133,21 +133,118 @@ int accept_kw(const char *s)
     return 0;
 }
 
-/* Which framebuffer a FRAMEBUFFER argument names.  N is the screen, F
-   the off-screen buffer and L the layer - which is just a second
-   off-screen buffer, and becomes a layer only in MERGE.  MMBasic's T
-   and 2 name buffers this machine does not have, so they are refused
-   here rather than quietly becoming one of these three. */
-int fb_buf(void)
+/* Does this text parse as a justification?  mmg_just's grammar and
+   MMBasic's GetJustification: [L|C|R] then [T|M|B] then [N|V|I|U|D],
+   each of them optional. */
+static int looks_like_just(const char *s)
 {
-    if (accept_kw("N"))
-        return 0;
-    if (accept_kw("F"))
-        return 1;
-    if (accept_kw("L"))
-        return 2;
-    cv_err("expected N, F or L");
-    return 0;
+    static const char *sets[] = { "LCR", "TMB", "NVIUD" };
+    int i = 0, k;
+    char *u = upper(s);
+    int n = (int)strlen(u);
+
+    for (k = 0; k < 3; k++)
+        if (i < n && strchr(sets[k], u[i]) != NULL)
+            i++;
+    return n > 0 && i == n;
+}
+
+/* TEXT's justification: a bare word or a string.
+
+   MMBasic tries the argument's RAW TEXT as a justification before it
+   evaluates anything (Draw.c:2148-2149), which is what makes
+   `TEXT x, y, s$, CM' work unquoted - picofrog writes it that way and
+   so does most PicoMite code.  The ambiguity that comes with it is the
+   reference's too: a variable called C loses to the justification C,
+   there and here.
+
+   Only when the word IS the whole argument: `C + "M"' has to be
+   evaluated, and MMBasic tries its whole text first for the same
+   reason. */
+const char *just_arg(void)
+{
+    struct tok *t = peek(0);
+
+    if (t != NULL && t->kind == T_ID && looks_like_just(t->text)) {
+        struct tok *n = peek(1);
+
+        if (n == NULL ||
+            (n->kind == T_OP && (strcmp(n->up, ",") == 0 ||
+                                 strcmp(n->up, ":") == 0)) ||
+            (n->kind == T_ID && strcmp(n->up, "ELSE") == 0)) {
+            cv.i += 1;
+            return c_string_literal(t->text);
+        }
+    }
+    return as_str(expr());
+}
+
+/* A bare letter, a quoted letter, or a string at run time.
+
+   MMBasic's own two-stage form, and both stages are in its source for
+   each of these: cmd_framebuffer and cmd_play try checkstring()
+   against the bare token first and fall through to getCstring() +
+   strcasecmp() - which is why "b" and "B" and a bare B all work, and
+   why a variable is allowed where the manual only ever shows a letter.
+
+   A quoted letter is decided HERE rather than at run time: it is
+   knowable now, and an unknown one is then a translation error instead
+   of something the program discovers when it plays. */
+const char *kw_or_str(const struct kwval *table, const char *rt,
+                      const char *what)
+{
+    const struct kwval *k;
+    struct tok *t;
+
+    for (k = table; k->nm; k++)
+        if (is_kw(k->nm, 0)) {
+            cv.i += 1;
+            return sfmt("%d", k->val);
+        }
+    t = peek(0);
+    if (t != NULL && t->kind == T_STR) {
+        /* .strip().upper(), as the Python does */
+        const char *b = t->text;
+        const char *e;
+        char *cut;
+        size_t n;
+        char *up;
+
+        while (*b == ' ' || *b == '\t')
+            b++;
+        e = b + strlen(b);
+        while (e > b && (e[-1] == ' ' || e[-1] == '\t'))
+            e--;
+        n = (size_t)(e - b);
+        cut = salloc(n + 1);
+        memcpy(cut, b, n);
+        cut[n] = 0;
+        up = upper(cut);
+        for (k = table; k->nm; k++)
+            if (strcmp(up, k->nm) == 0) {
+                cv.i += 1;
+                return sfmt("%d", k->val);
+            }
+        cv_err("%s", what);
+    }
+    return sfmt("%s(%s)", rt, as_str(expr()));
+}
+
+/* Which framebuffer a FRAMEBUFFER argument names, as a C expression.
+   N is the screen, F the off-screen buffer and L the layer - which is
+   just a second off-screen buffer, and becomes a layer only in MERGE.
+   MMBasic's T and 2 name buffers this machine does not have, so they
+   are refused here rather than quietly becoming one of these three. */
+const char *fb_buf(void)
+{
+    static const struct kwval bufs[] = {
+        { "N", 0 }, { "F", 1 }, { "L", 2 }, { NULL, 0 }
+    };
+    const char *e = kw_or_str(bufs, "__mmb_fbsel", "expected N, F or L");
+
+    if (!(e[0] >= '0' && e[0] <= '9'))
+        cv.uses_fbsel = 1;
+    return e;
 }
 
 /* ELSE terminates a statement too (single-line IF). */

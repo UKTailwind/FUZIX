@@ -535,6 +535,24 @@ void conv_write(FILE *f)
         }
         fprintf(f, "};\n");
     }
+    if (cv.uses_fbsel)
+        /* FRAMEBUFFER's buffer as a string the program computes -
+           MMBasic's getCstring/strcasecmp arm.  Emitted here rather
+           than put in a header because it needs nothing but the
+           runtime every program already has, and a header would be one
+           more file to keep in step on the board. */
+        fprintf(f, "\n/* FRAMEBUFFER buffer named at run time */\n"
+                   "static int __mmb_fbsel(const char *s)\n"
+                   "{\n"
+                   "    int c = mm_slen(s) == 1 ? mm_cstr(s)[0] : 0;\n"
+                   "    if (c >= 'a' && c <= 'z')\n"
+                   "        c -= 32;\n"
+                   "    if (c == 'N') return 0;\n"
+                   "    if (c == 'F') return 1;\n"
+                   "    if (c == 'L') return 2;\n"
+                   "    mm_error(\"expected N, F or L\");\n"
+                   "    return 0;\n"
+                   "}\n");
     fprintf(f, "\n/* ---- forward declarations ---- */\n");
     if (cv.uses_clear)
         fprintf(f, "static void __mmb_clear(void);\n");

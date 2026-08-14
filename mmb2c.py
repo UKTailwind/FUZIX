@@ -595,6 +595,8 @@ class Conv(object):
         self.uses_fill = False
         self.uses_arc = False
         self.uses_text = False
+        # a FRAMEBUFFER buffer named by a string the program computes
+        self.uses_fbsel = False
         # DefineFont blocks, number -> the font's bytes in the kernel's
         # layout.  Collected by pass_fonts before anything else runs.
         self.fonts = {}
@@ -684,20 +686,94 @@ class Conv(object):
             return True
         return False
 
+    @staticmethod
+    def looks_like_just(s):
+        """Does this text parse as a justification?
+
+        mmg_just's grammar and MMBasic's GetJustification: [L|C|R] then
+        [T|M|B] then [N|V|I|U|D], each of them optional."""
+        u = s.upper()
+        i = 0
+        if i < len(u) and u[i] in 'LCR':
+            i += 1
+        if i < len(u) and u[i] in 'TMB':
+            i += 1
+        if i < len(u) and u[i] in 'NVIUD':
+            i += 1
+        return len(u) > 0 and i == len(u)
+
+    def just_arg(self):
+        """TEXT's justification: a bare word or a string.
+
+        MMBasic tries the argument's RAW TEXT as a justification before
+        it evaluates anything (Draw.c:2148-2149), which is what makes
+        `TEXT x, y, s$, CM' work unquoted - picofrog writes it that way
+        and so does most PicoMite code.  The ambiguity that comes with
+        it is the reference's too: a variable called C loses to the
+        justification C, there and here.
+
+        Only when the word IS the whole argument: `C + "M"' has to be
+        evaluated, and MMBasic tries its whole text first for the same
+        reason."""
+        t = self.peek()
+        if t is not None and t[0] == T_ID and self.looks_like_just(t[1]):
+            nxt = self.peek(1)
+            if nxt is None or (nxt[0] == T_OP and nxt[1] in (',', ':')) \
+                    or (nxt[0] == T_ID and nxt[2] == 'ELSE'):
+                self.i += 1
+                return c_string_literal(t[1])
+        return self.as_str(self.expr())
+
+    def kw_or_str(self, table, rt, what):
+        """A bare letter, a quoted letter, or a string at run time.
+
+        MMBasic's own two-stage form, and both stages are in its source
+        for each of these: cmd_framebuffer and cmd_play try
+        checkstring() against the bare token first and fall through to
+        getCstring() + strcasecmp() - which is why "b" and "B" and a
+        bare B all work, and why a variable is allowed where the
+        manual only ever shows a letter.  picofrog needs both:
+        `FRAMEBUFFER WRITE L' and `framebuffer write lc$', `PLAY SOUND
+        1,"L","q",...' and `PLAY SOUND 4,B,Q,...'.
+
+        A quoted letter is decided HERE rather than at run time: it is
+        knowable now, and an unknown one is then a translation error
+        instead of something the program discovers when it plays.
+
+        `table' is [(letter, value)], `rt' the runtime decoder for the
+        case that is only knowable when it runs.  Returns a C
+        expression either way.
+        """
+        for nm, val in table:
+            if self.is_kw(nm):
+                self.i += 1
+                return str(val)
+        t = self.peek()
+        if t is not None and t[0] == T_STR:
+            up = t[1].strip().upper()
+            for nm, val in table:
+                if up == nm:
+                    self.i += 1
+                    return str(val)
+            self.err(what)
+        return '%s(%s)' % (rt, self.as_str(self.expr()))
+
+    # N is the screen, F the off-screen buffer and L the layer - which
+    # is just a second off-screen buffer, and becomes a layer only in
+    # MERGE.  MMBasic's T and 2 name buffers this machine does not
+    # have, so they are refused rather than quietly becoming one of
+    # these three.
+    FB_BUFS = (('N', 0), ('F', 1), ('L', 2))
+
     def fb_buf(self):
-        # Which framebuffer a FRAMEBUFFER argument names.  N is the
-        # screen, F the off-screen buffer and L the layer - which is
-        # just a second off-screen buffer, and becomes a layer only in
-        # MERGE.  MMBasic's T and 2 name buffers this machine does not
-        # have, so they are refused here rather than quietly becoming
-        # one of these three.
-        if self.accept_kw('N'):
-            return 0
-        if self.accept_kw('F'):
-            return 1
-        if self.accept_kw('L'):
-            return 2
-        self.err("expected N, F or L")
+        """Which framebuffer a FRAMEBUFFER argument names, as a C
+        expression - a constant when it is written as a letter, and
+        __mmb_fbsel() when the program works it out as it runs."""
+        e = self.kw_or_str(self.FB_BUFS, '__mmb_fbsel',
+                           "expected N, F or L")
+        if not e.isdigit():
+            self.uses_fbsel = True
+        return e
 
     def stmt_end(self):
         # ELSE terminates a statement too, so that the PRINT in
@@ -3413,15 +3489,31 @@ class Conv(object):
                 self.emit('mm_fb_close(%d);' % which)
                 return
             if self.accept_kw('MERGE'):
-                # FRAMEBUFFER MERGE [colour] - the transparent index,
-                # 0 to 15, defaulting to 0 as MMBasic's does.
+                # FRAMEBUFFER MERGE [colour] [, B] - the transparent
+                # index, 0 to 15, defaulting to 0 as MMBasic's does.
+                #
+                # MMBasic's second argument asks for the merge to run on
+                # the OTHER CORE so BASIC carries on (FrameBuffer.c:1071
+                # pushes it down the multicore FIFO).  Accepted and not
+                # acted on, and that is not a divergence: on a VGA
+                # display the reference ignores it too - FrameBuffer.c
+                # :1084 sets background = 0 for every DISPLAY_TYPE from
+                # VGA222 up, which is this machine's class.  So the
+                # merge happens in the syscall, exactly as it does
+                # there.  R and A name modes this display has no
+                # equivalent for and are refused rather than quietly
+                # taken as B.
                 c = '0'
                 if not self.stmt_end():
-                    c = self.as_int(self.expr())
+                    if not self.is_op(','):
+                        c = self.as_int(self.expr())
+                    if self.accept_op(','):
+                        if not self.accept_kw('B'):
+                            self.err('FRAMEBUFFER MERGE takes only B here')
                 self.emit('mm_fb_merge(%s);' % c)
                 return
             if self.accept_kw('WRITE'):
-                self.emit('mm_fb_write(%d);' % self.fb_buf())
+                self.emit('mm_fb_write(%s);' % self.fb_buf())
                 return
             if self.accept_kw('COPY'):
                 s = self.fb_buf()
@@ -3432,7 +3524,7 @@ class Conv(object):
                     if not self.accept_kw('B'):
                         self.err("FRAMEBUFFER COPY takes only B here")
                     b = 1
-                self.emit('mm_fb_copy(%d, %d, %d);' % (s, d, b))
+                self.emit('mm_fb_copy(%s, %s, %d);' % (s, d, b))
                 return
             if self.accept_kw('WAIT'):
                 self.emit('mm_fb_wait();')
@@ -3779,7 +3871,7 @@ class Conv(object):
                     self.expect_op(',')
                     src = n
                 else:
-                    src = '%d' % self.fb_buf()
+                    src = self.fb_buf()
                     self.expect_op(',')
                 dst = self.fb_buf()
                 args = []
@@ -3789,7 +3881,7 @@ class Conv(object):
                 blank = '-1LL'
                 if self.accept_op(','):
                     blank = self.as_int(self.expr())
-                self.emit('mmb_blit_%s(%s, %d, %s, %s, %s, %s, %s, %s, %s);'
+                self.emit('mmb_blit_%s(%s, %s, %s, %s, %s, %s, %s, %s, %s);'
                           % ('flash' if is_flash else 'fb', src, dst,
                              args[0], args[1], args[2], args[3], args[4],
                              args[5], blank))
@@ -3895,33 +3987,27 @@ class Conv(object):
                 self.i += 2
                 n = self.as_int(self.expr())
                 self.expect_op(',')
-                sides = None
-                for nm, bits in (('L', 1), ('R', 2), ('B', 3), ('M', 3)):
-                    if self.is_kw(nm):
-                        self.i += 1
-                        sides = bits
-                        break
-                if sides is None:
-                    self.err('PLAY SOUND wants a channel: L, R, B or M')
+                # Both of these are a bare letter, a quoted one or a
+                # string the program works out - MMBasic's cmd_play
+                # takes all three, and picofrog writes them quoted and
+                # in lower case.
+                sides = self.kw_or_str(
+                    (('L', 1), ('R', 2), ('B', 3), ('M', 3)), 'mmp_side',
+                    'PLAY SOUND wants a channel: L, R, B or M')
                 self.expect_op(',')
-                ty = None
-                for nm, code in (('O', 0), ('S', 1), ('Q', 2), ('T', 3),
-                                 ('W', 4), ('P', 5), ('N', 6)):
-                    if self.is_kw(nm):
-                        self.i += 1
-                        ty = code
-                        break
-                if ty is None:
-                    if self.is_kw('U'):
-                        self.err('PLAY SOUND type U is not translated')
-                    self.err('PLAY SOUND wants a type: O S Q T W P or N')
+                if self.is_kw('U'):
+                    self.err('PLAY SOUND type U is not translated')
+                ty = self.kw_or_str(
+                    (('O', 0), ('S', 1), ('Q', 2), ('T', 3), ('W', 4),
+                     ('P', 5), ('N', 6)), 'mmp_type',
+                    'PLAY SOUND wants a type: O S Q T W P or N')
                 freq, vol = '10.0', '25LL'
                 if self.accept_op(','):
                     if not self.is_op(','):
                         freq = self.as_flt(self.expr())
                     if self.accept_op(','):
                         vol = self.as_int(self.expr())
-                self.emit('mmp_sound(%s, %d, %d, %s, %s);'
+                self.emit('mmp_sound(%s, %s, %s, %s, %s);'
                           % (n, sides, ty, freq, vol))
                 return
             if self.is_kw('TONE', 1):
@@ -4220,7 +4306,7 @@ class Conv(object):
             fc, bc = 'mm_fg()', 'mm_bg()'
             if self.accept_op(','):
                 if not self.is_op(','):
-                    just = self.as_str(self.expr())
+                    just = self.just_arg()
                 if self.accept_op(','):
                     if not self.is_op(','):
                         font = self.as_int(self.expr())
@@ -6951,6 +7037,24 @@ class Conv(object):
                 row = data[off:off + 12]
                 wr('    ' + ','.join('0x%02x' % b for b in row) + ',\n')
             wr('};\n')
+        if self.uses_fbsel:
+            # FRAMEBUFFER's buffer as a string the program computes -
+            # MMBasic's getCstring/strcasecmp arm.  Emitted here rather
+            # than put in a header because it needs nothing but the
+            # runtime every program already has, and a header would be
+            # one more file to keep in step on the board.
+            wr('\n/* FRAMEBUFFER buffer named at run time */\n'
+               'static int __mmb_fbsel(const char *s)\n'
+               '{\n'
+               '    int c = mm_slen(s) == 1 ? mm_cstr(s)[0] : 0;\n'
+               '    if (c >= \'a\' && c <= \'z\')\n'
+               '        c -= 32;\n'
+               '    if (c == \'N\') return 0;\n'
+               '    if (c == \'F\') return 1;\n'
+               '    if (c == \'L\') return 2;\n'
+               '    mm_error("expected N, F or L");\n'
+               '    return 0;\n'
+               '}\n')
         wr('\n/* ---- forward declarations ---- */\n')
         if self.uses_clear:
             wr('static void __mmb_clear(void);\n')
