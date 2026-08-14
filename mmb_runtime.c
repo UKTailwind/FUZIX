@@ -350,6 +350,9 @@ static int mm_charpos = 1;
  * the character. */
 static int mm_gputc(int c);
 static void mm_gflush(void);
+/* The console's screen half - see mm_console.  Platform-specific: an
+ * ioctl on the board, nothing at all where there is no display. */
+static void mm_con_mirror(int on);
 
 /* The graphics text cursor and its pending run.  Common to both builds
  * because CLS consults it - in a graphics mode CLS clears the write
@@ -455,6 +458,19 @@ void mm_console(MMINTEGER mode)
 {
     mm_gflush();                /* the old routing owns what is pending */
     mm_console_opt = (int)(mode & 3);
+    /*
+     * The console this runs on is MIRRORED: the same byte reaches the
+     * display and the uart, which is what makes the machine usable from
+     * either and is exactly wrong once a program owns the screen - in a
+     * graphics mode the console renders as pixels, so a PRINT meant for
+     * a terminal is drawn over the picture.
+     *
+     * So "serial" has to turn the display half off at the kernel, or it
+     * is not serial at all.  The kernel puts it back when the process
+     * ends, so a program that dies here cannot leave the machine with a
+     * console nobody can see.
+     */
+    mm_con_mirror(mm_console_opt & 2);
 }
 
 static void mm_puts_raw(const char *cstr)
@@ -4125,6 +4141,16 @@ static int mm_gcw = 8, mm_gch = 12;     /* font 1, until FONT says else */
 #define MM_GFX_FONTINFO 0x001D
 #define MM_GFX_FONTADDR 0x0031
 #define MM_GFX_FONTDEF  0x0036
+/* PICOIOC_CONMIRROR: does console output reach the display as well as
+ * the uart.  Same flat number space as the GFXIOC_ codes and the same
+ * device, so mm_gfx_fd serves. */
+#define MM_PICO_CONMIRROR 0x0038
+
+static void mm_con_mirror(int on)
+{
+    if (mm_gfx_open() >= 0)
+        ioctl(mm_gfx_fd, MM_PICO_CONMIRROR, (void *)(long)(on ? 1 : 0));
+}
 #define MM_GFX_SCROLL   0x001B
 #define MM_GFX_MAP      0x001E
 #define MM_GFX_MAPCTL   0x001F
@@ -5146,6 +5172,13 @@ MMINTEGER mm_fontdef(MMINTEGER font, MMINTEGER addr, MMINTEGER bytes)
 void mm_font(MMINTEGER font, MMINTEGER scale)
 {
     (void)font; (void)scale;
+}
+
+/* No display to keep off, so nothing to ask the kernel for: stdout is
+ * the only console there is here and it is already the serial one. */
+static void mm_con_mirror(int on)
+{
+    (void)on;
 }
 
 /* No display, so FONT selected nothing and the caller's defaults stand. */
