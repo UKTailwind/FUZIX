@@ -501,19 +501,39 @@ void statement_inner(void)
         if (accept_kw("MERGE")) {
             /* FRAMEBUFFER MERGE [colour] - the transparent index, 0 to
                15, defaulting to 0 as MMBasic's does. */
+            /* FRAMEBUFFER MERGE [colour] [, B] - the transparent
+               index, 0 to 15, defaulting to 0 as MMBasic's does.
+
+               MMBasic's second argument asks for the merge to run on
+               the OTHER CORE so BASIC carries on (FrameBuffer.c:1071
+               pushes it down the multicore FIFO).  Accepted and not
+               acted on, and that is not a divergence: on a VGA display
+               the reference ignores it too - FrameBuffer.c:1084 sets
+               background = 0 for every DISPLAY_TYPE from VGA222 up,
+               which is this machine's class.  So the merge happens in
+               the syscall, exactly as it does there.  R and A name
+               modes this display has no equivalent for and are refused
+               rather than quietly taken as B. */
             const char *c = "0";
 
-            if (!stmt_end())
-                c = as_int(expr());
+            if (!stmt_end()) {
+                if (!is_op(",", 0))
+                    c = as_int(expr());
+                if (accept_op(",")) {
+                    if (!accept_kw("B"))
+                        cv_err("FRAMEBUFFER MERGE takes only B here");
+                }
+            }
             emit(sfmt("mm_fb_merge(%s);", c));
             return;
         }
         if (accept_kw("WRITE")) {
-            emit(sfmt("mm_fb_write(%d);", fb_buf()));
+            emit(sfmt("mm_fb_write(%s);", fb_buf()));
             return;
         }
         if (accept_kw("COPY")) {
-            int s, d, b = 0;
+            const char *s, *d;
+            int b = 0;
             s = fb_buf();
             expect_op(",");
             d = fb_buf();
@@ -522,7 +542,7 @@ void statement_inner(void)
                     cv_err("FRAMEBUFFER COPY takes only B here");
                 b = 1;
             }
-            emit(sfmt("mm_fb_copy(%d, %d, %d);", s, d, b));
+            emit(sfmt("mm_fb_copy(%s, %s, %d);", s, d, b));
             return;
         }
         if (accept_kw("WAIT")) {
@@ -934,22 +954,19 @@ void statement_inner(void)
             return;
         }
         if (is_kw("FRAMEBUFFER", 1) || is_kw("FLASH", 1)) {
-            const char *src, *dst_unused;
+            const char *src, *dst;
             const char *args[6];
             const char *blank = "-1LL";
-            char srcbuf[16];
             int is_flash = is_kw("FLASH", 1);
-            int dst, ai;
+            int ai;
 
-            (void)dst_unused;
             cv.i += 2;
             if (is_flash) {
                 cv.uses_flash = 1;
                 src = as_int(expr());
                 expect_op(",");
             } else {
-                sprintf(srcbuf, "%d", fb_buf());
-                src = srcbuf;
+                src = fb_buf();
                 expect_op(",");
             }
             dst = fb_buf();
@@ -959,7 +976,7 @@ void statement_inner(void)
             }
             if (accept_op(","))
                 blank = as_int(expr());
-            emit(sfmt("mmb_blit_%s(%s, %d, %s, %s, %s, %s, %s, %s, %s);",
+            emit(sfmt("mmb_blit_%s(%s, %s, %s, %s, %s, %s, %s, %s, %s);",
                       is_flash ? "flash" : "fb", src, dst,
                       args[0], args[1], args[2], args[3], args[4],
                       args[5], blank));
@@ -1077,49 +1094,39 @@ void statement_inner(void)
                channel: L R B M (M means both, as the reference
                takes it); type: O S Q T W P N - U (a user table) is
                not translated.  cmd_play at Audio.c:1946. */
-            static const struct { const char *nm; int bits; } chans[] = {
+            static const struct kwval chans[] = {
                 { "L", 1 }, { "R", 2 }, { "B", 3 }, { "M", 3 },
                 { NULL, 0 }
             };
-            static const struct { const char *nm; int code; } types[] = {
+            static const struct kwval types[] = {
                 { "O", 0 }, { "S", 1 }, { "Q", 2 }, { "T", 3 },
                 { "W", 4 }, { "P", 5 }, { "N", 6 }, { NULL, 0 }
             };
-            const char *n;
+            const char *n, *sides, *ty;
             const char *freq = "10.0", *vol = "25LL";
-            int sides = -1, ty = -1, ci;
 
             cv.uses_playd = 1;
             cv.i += 2;
             n = as_int(expr());
             expect_op(",");
-            for (ci = 0; chans[ci].nm; ci++)
-                if (is_kw(chans[ci].nm, 0)) {
-                    cv.i += 1;
-                    sides = chans[ci].bits;
-                    break;
-                }
-            if (sides < 0)
-                cv_err("PLAY SOUND wants a channel: L, R, B or M");
+            /* Both of these are a bare letter, a quoted one or a
+               string the program works out - MMBasic's cmd_play takes
+               all three, and picofrog writes them quoted and in lower
+               case. */
+            sides = kw_or_str(chans, "mmp_side",
+                              "PLAY SOUND wants a channel: L, R, B or M");
             expect_op(",");
-            for (ci = 0; types[ci].nm; ci++)
-                if (is_kw(types[ci].nm, 0)) {
-                    cv.i += 1;
-                    ty = types[ci].code;
-                    break;
-                }
-            if (ty < 0) {
-                if (is_kw("U", 0))
-                    cv_err("PLAY SOUND type U is not translated");
-                cv_err("PLAY SOUND wants a type: O S Q T W P or N");
-            }
+            if (is_kw("U", 0))
+                cv_err("PLAY SOUND type U is not translated");
+            ty = kw_or_str(types, "mmp_type",
+                           "PLAY SOUND wants a type: O S Q T W P or N");
             if (accept_op(",")) {
                 if (!is_op(",", 0))
                     freq = as_flt(expr());
                 if (accept_op(","))
                     vol = as_int(expr());
             }
-            emit(sfmt("mmp_sound(%s, %d, %d, %s, %s);",
+            emit(sfmt("mmp_sound(%s, %s, %s, %s, %s);",
                       n, sides, ty, freq, vol));
             return;
         }
@@ -1484,7 +1491,7 @@ void statement_inner(void)
         s = as_str(expr());
         if (accept_op(",")) {
             if (!is_op(",", 0))
-                just = as_str(expr());
+                just = just_arg();
             if (accept_op(",")) {
                 if (!is_op(",", 0))
                     font = as_int(expr());

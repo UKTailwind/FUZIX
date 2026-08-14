@@ -336,6 +336,7 @@ struct conv {
     int uses_fill;
     int uses_arc;
     int uses_text;
+    int uses_fbsel;             /* FRAMEBUFFER buffer named at run time */
     int uses_mappal;
     int uses_gpio;
     int uses_port;              /* PORT: pulls in mmb_port.h */
@@ -390,7 +391,17 @@ int is_kw(const char *s, int k);
 int accept_op(const char *s);
 void expect_op(const char *s);
 int accept_kw(const char *s);
-int fb_buf(void);                           /* self.fb_buf - N=0, F=1 */
+/* A letter, a quoted letter or a string worked out as the program
+   runs - MMBasic takes all three for a FRAMEBUFFER buffer and for PLAY
+   SOUND's channel and type.  Returns a C expression: a constant when
+   the letter is written down, a call to `rt' when it is not. */
+struct kwval { const char *nm; int val; };
+const char *kw_or_str(const struct kwval *table, const char *rt,
+                      const char *what);
+/* TEXT's justification: the bare word MMBasic tries before it
+   evaluates anything, or an ordinary string expression. */
+const char *just_arg(void);
+const char *fb_buf(void);                   /* self.fb_buf - N=0, F=1 */
 int stmt_end(void);
 void emit(const char *text);
 int last_line(void);                        /* index of the line emit() wrote */
