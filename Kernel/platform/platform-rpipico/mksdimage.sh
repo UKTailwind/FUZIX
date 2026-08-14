@@ -69,6 +69,35 @@ if grep -q "error number" "$FS.ucp.log"; then
 fi
 rm -f "$FS.ucp.log"
 
+# The MMBasic examples, in /root/MMBasic where a user will find them.
+# mkexamples.sh holds the manifest and what each program is for; this
+# just installs whatever it produced, so the two cannot drift.  ~190K of
+# text, which the flash root could not spare and the card does not
+# notice.
+echo "--- MMBasic examples"
+EX=$(mktemp -d)
+sh "$P/devtools/mkexamples.sh" "$EX/mmbasic" > "$FS.ex.log" 2>&1 || {
+	echo "mkexamples.sh failed:" >&2
+	cat "$FS.ex.log" >&2
+	exit 1
+}
+{
+	echo "cd /root"
+	echo "mkdir MMBasic"
+	echo "cd MMBasic"
+	for b in "$EX"/mmbasic/README "$EX"/mmbasic/*.bas; do
+		echo "bget $b $(basename "$b")"
+	done
+	echo "exit"
+} | "$R/Standalone/ucp" "$FS" > "$FS.ucp.log" 2>&1
+if grep -q "error number" "$FS.ucp.log"; then
+	echo "ucp failed installing the examples:" >&2
+	cat "$FS.ucp.log" >&2
+	exit 1
+fi
+echo "    $(ls "$EX"/mmbasic/*.bas | wc -l) programs in /root/MMBasic"
+rm -rf "$EX" "$FS.ucp.log" "$FS.ex.log"
+
 echo "--- padding to the partition size"
 dd if=/dev/zero of="$FS" bs=512 seek=$FSSIZE count=$((COUNT - FSSIZE)) \
    conv=notrunc status=none
