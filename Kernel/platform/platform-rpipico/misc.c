@@ -115,6 +115,43 @@ int plt_dev_ioctl(uarg_t request, char *data)
         }
         return 0;
     }
+    if (request == PICOIOC_CONMIRROR)
+    {
+        /* data is the value itself, like GFXIOC_FBOPEN's neighbours. */
+        extern void console_mirror(int on);
+
+        console_mirror((int)(intptr_t)data ? 1 : 0);
+        return 0;
+    }
+    if (request == PICOIOC_NUMLOCK)
+    {
+        extern int usb_kbd_numlock_get(void);
+        extern void usb_kbd_numlock_set(int on);
+        extern void usb_kbd_numlock_pref_apply(uint16_t vid, uint16_t pid, int on);
+        extern int usb_kbd_numlock_led(void);
+        extern uint32_t usb_kbd_id(void);
+        struct kbd_numlock k;
+        uint32_t id;
+        if (uget(data, &k, sizeof(k)))
+            return -1;
+        if (k.set) {
+            /* A named keyboard records a preference without touching the
+               one in use; unnamed means "the keyboard I am typing on". */
+            if (k.vid || k.pid)
+                usb_kbd_numlock_pref_apply(k.vid, k.pid, k.on ? 1 : 0);
+            else
+                usb_kbd_numlock_set(k.on ? 1 : 0);
+        }
+        id = usb_kbd_id();
+        k.on = usb_kbd_numlock_get();
+        k.led = usb_kbd_numlock_led();
+        k.vid = (uint16_t)(id >> 16);
+        k.pid = (uint16_t)id;
+        k.pad = 0;
+        if (uput(&k, data, sizeof(k)))
+            return -1;
+        return 0;
+    }
 #endif
 #if defined(CONFIG_PC3_USB_KBD) && !defined(PC3_NO_USB_BUS_RESET)
     if (request == PICOIOC_USBRESET)
@@ -935,6 +972,10 @@ void plt_exec_cleanup(void)
     display_fb_release(udata.u_ptab);
     /* and its fonts, which point into the image being replaced */
     display_font_release(udata.u_ptab);
+    /* and the console back onto the display: a program that turned the
+       screen half off (OPTION CONSOLE SERIAL) must not leave the next
+       one - or the shell - typing into a display that shows nothing. */
+    console_mirror_reset();
 #endif
 #ifdef CONFIG_PC3_PINLOCK
     /* The new image did not claim these pins and does not know what they

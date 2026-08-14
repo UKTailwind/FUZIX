@@ -174,6 +174,13 @@ int display_font_set(int font, const unsigned char *addr,
  * into whatever runs next. */
 void display_font_release(struct p_tab *who);
 
+/* The console's SCREEN half (console.c).  This console is mirrored -
+ * display and uart - so a program that owns the screen has to ask for
+ * the display half to stop, and the kernel puts it back when the
+ * process ends. */
+void console_mirror(int on);
+void console_mirror_reset(void);
+
 /* A run of text at a PIXEL position.  Draws through the caller's write
  * target like every other primitive, which is what lets PRINT reach the
  * off-screen buffer.  Returns the x the text ended at.

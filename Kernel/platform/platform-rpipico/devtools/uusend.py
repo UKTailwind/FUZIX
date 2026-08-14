@@ -16,7 +16,7 @@ import sys, time, serial, binascii, os
 import fzport
 
 PORT, BAUD = os.environ.get("FZPORT", "COM11"), 115200
-PROMPT = os.environ.get("FZPROMPT", "# ").encode()
+PROMPT = os.environ.get("FZPROMPT", "# ")   # text: drain() decodes
 
 
 def uuencode(data, name):
@@ -168,7 +168,7 @@ def main():
         sys.stderr.write(
             "uusend: no '%s' prompt - something is running on the board.\n"
             "        Stop it (Ctrl-C) first, or set FZFORCE=1 to send "
-            "anyway.\n" % PROMPT.decode().strip())
+            "anyway.\n" % PROMPT.strip())
         return 1
 
     send(ser, local, remote, gap)

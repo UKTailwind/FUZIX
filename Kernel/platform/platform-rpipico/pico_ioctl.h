@@ -48,6 +48,54 @@
  * would have silently shadowed realloc. */
 #define PICOIOC_USBRESET 0x001C
 
+/*
+ * Num lock, which is a property of the KEYBOARD rather than of the
+ * machine - see the long note in usbkbd.c.  A keyboard with no numeric
+ * keypad overlays one onto 7890/uiop/jkl;/m while num lock is on, its
+ * own firmware doing that in response to the LED report the kernel
+ * sends, and nothing in the USB descriptors identifies such a keyboard:
+ * a Raspberry Pi keyboard and a full-size Lenovo send byte-identical
+ * report descriptors.  So the kernel guesses from the one readable
+ * signal (a keyboard that declares no num lock LED is taken to have no
+ * keypad) and remembers what it is told, by VID:PID.
+ *
+ * One call does both directions.  `set' 0 fills the struct in and
+ * changes nothing; 1 applies `on'.  On a set, vid/pid 0 means the
+ * keyboard that is plugged in - naming one explicitly records the choice
+ * for a keyboard that is NOT attached, which is how /etc/rc can carry a
+ * setting across a reboot for each keyboard the machine owns.
+ *
+ * On return, vid/pid are always the MOUNTED keyboard (0 if none) and
+ * `led' says whether it declared a num lock LED, so `picoctl numlock'
+ * can report what the guess was based on.
+ */
+struct kbd_numlock {
+	uint8_t on;		/* in on a set; out always: current state */
+	uint8_t set;		/* in: 0 query, 1 apply */
+	uint8_t led;		/* out: keyboard declares a num lock LED */
+	uint8_t pad;
+	uint16_t vid;		/* in on a set (0 = the mounted one); out: mounted */
+	uint16_t pid;
+};
+/* Does console output reach the DISPLAY as well as the uart?
+ *
+ * data is the value itself: 1 mirrors (the default and what this
+ * machine is built around - the same byte to the screen and the serial
+ * line, so it can be driven from either), 0 sends it to the uart alone.
+ *
+ * MMBasic has two independent devices, and OPTION CONSOLE SERIAL means
+ * the uart by itself.  Here there is ONE device that is both, so the
+ * screen half has to be turned off explicitly - and in a graphics mode
+ * it must be, because the console renders as pixels there and a PRINT
+ * meant for a terminal is drawn over the program's own picture.
+ *
+ * Given up automatically when the process ends, like the layer and the
+ * user fonts: a program that dies holding this would otherwise leave
+ * the machine with a display that shows nothing anyone types. */
+#define PICOIOC_CONMIRROR 0x0038
+
+#define PICOIOC_NUMLOCK 0x0037
+
 /* Graphics (PC3: see PC3-GFX-DESIGN.md).  All on /dev/sys. */
 
 /* data -> int: BBC mode 0-5, mode 7 (320x240 16 colours, NOT teletext),

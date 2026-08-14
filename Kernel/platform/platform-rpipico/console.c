@@ -57,6 +57,26 @@ static int16_t con_rows = DISP_ROWS;
  * MMBasic does, and what PRINT in MODE 2 needs. */
 static volatile uint8_t con_gfx_active;
 
+/* Does console output reach the DISPLAY as well as the uart?
+ *
+ * One by default, which is the mirrored console this machine is built
+ * around.  A program that owns the screen turns it off for the duration
+ * (PICOIOC_CONMIRROR, from OPTION CONSOLE SERIAL), and the kernel turns
+ * it back on when that process ends - see console_mirror_reset. */
+static volatile uint8_t con_to_display = 1;
+
+void console_mirror(int on)
+{
+    con_to_display = on ? 1 : 0;
+}
+
+/* On the way out of any process: a program that died holding the screen
+ * must not leave the machine with a console nobody can see. */
+void console_mirror_reset(void)
+{
+    con_to_display = 1;
+}
+
 #define CON_COLS con_cols
 #define CON_ROWS con_rows
 
@@ -838,7 +858,22 @@ void console_putc(uint8_t devn, uint8_t c)
         return;
     }
 
-    con_output(c);      /* the screen sees every byte, in order */
+    /*
+     * The screen half is skippable.  This console is mirrored - the
+     * same byte goes to the display and to the uart - which is what
+     * makes the machine usable from either, and it is exactly wrong
+     * once a program owns the screen: in a graphics mode the console
+     * renders as pixels, so a PRINT meant for a terminal lands on top
+     * of the picture.
+     *
+     * MMBasic has two independent devices and OPTION CONSOLE SERIAL
+     * means the uart alone; here that has to be asked for, because
+     * there is one device that is both.  PICOIOC_CONMIRROR is the ask,
+     * and the kernel puts it back when the process ends - a program
+     * that dies holding it must not leave the machine with no console.
+     */
+    if (con_to_display)
+        con_output(c);  /* the screen sees every byte, in order */
 
     irq = di();
     if (nheld == 0) {

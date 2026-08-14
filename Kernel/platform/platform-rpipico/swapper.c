@@ -192,6 +192,10 @@ void pagemap_free(ptptr p)
        reused: every process loads at the same address, so a slot left
        behind is a plausible pointer into the NEXT program's data */
     display_font_release(p);
+    /* and the console back onto the display: a program that turned the
+       screen half off (OPTION CONSOLE SERIAL) and then died would leave
+       the machine with a display that shows nothing anyone types */
+    console_mirror_reset();
 #endif
 #ifdef CONFIG_PC3_PINLOCK
     /* and the I/O header, with the PINS THEMSELVES put back to inputs:
