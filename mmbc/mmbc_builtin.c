@@ -807,6 +807,18 @@ struct val builtin_raw(const char *up)
             cv_err("SPRITE() wants a selector letter");
         }
         if (sel == 13) {
+            /* SPRITE(S) - the sprite that triggered the last collision
+               interrupt.  An argument is accepted and ignored, because
+               the reference accepts and ignores one: fun_sprite parses
+               up to five arguments for every selector, and the t==13
+               arm is "iret = sprite_which_collided" without ever
+               looking at argv[2] (Sprite.c:2462).  Programs are written
+               both ways - brownian.bas says SPRITE(S, i) - and refusing
+               the second argument rejected a line MMBasic runs. */
+            if (accept_op(",")) {
+                accept_op("#");
+                expr();
+            }
             expect_op(")");
             return mkval("mms_fun(13, 0, 0, 1)", TY_I);
         }

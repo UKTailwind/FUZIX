@@ -17,6 +17,10 @@ PRINT "x1: "; SPRITE(X, #1)
 SPRITE SHOW #2, 12, 12, 1
 PRINT "c2: "; SPRITE(C, #2); " "; SPRITE(C, #2, 1)
 PRINT "s: "; SPRITE(S)
+' the argument form: fun_sprite parses up to five arguments
+' for every selector and the S arm never looks at them, so
+' this is the same answer (Sprite.c:2462)
+PRINT "s2: "; SPRITE(S, 1)
 PRINT "t1: "; SPRITE(T, #1)
 
 ' a copy off the left edge reports the edge, once

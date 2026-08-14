@@ -30,23 +30,23 @@ Box 0,0,MM.HRES,MM.VRES
 ' Draw red obstacle boxes and define them as background objects
 ' Box 1 - top left area
 Box 60,40,50,50,3,RGB(red),RGB(red)
-Sprite background 1, 60, 40, 50, 50
+sprite static 1, 60, 40, 50, 50
 
 ' Box 2 - top right area
 Box 210,40,50,50,3,RGB(red),RGB(red)
-Sprite background 2, 210, 40, 50, 50
+sprite static 2, 210, 40, 50, 50
 
 ' Box 3 - center
 Box 135,95,50,50,3,RGB(red),RGB(red)
-Sprite background 3, 135, 95, 50, 50
+sprite static 3, 135, 95, 50, 50
 
 ' Box 4 - bottom left area
 Box 60,150,50,50,3,RGB(red),RGB(red)
-Sprite background 4, 60, 150, 50, 50
+sprite static 4, 60, 150, 50, 50
 
 ' Box 5 - bottom right area
 Box 210,150,50,50,3,RGB(red),RGB(red)
-Sprite background 5, 210, 150, 50, 50
+sprite static 5, 210, 150, 50, 50
 
 ' Place the atoms on screen
 k=1
@@ -91,9 +91,9 @@ Loop
 Function inside_box(px As integer, py As integer, size As integer) As integer
   Local integer b
   For b = 1 To 5
-    If sprite(BG, b, A) Then  ' If background object is active
-      If px + size > sprite(BG, b, X) And px < sprite(BG, b, X) + sprite(BG, b, W) Then
-        If py + size > sprite(BG, b, Y) And py < sprite(BG, b, Y) + sprite(BG, b, H) Then
+    If sprite(st, b, A) Then  ' If background object is active
+      If px + size > sprite(st, b, X) And px < sprite(st, b, X) + sprite(st, b, W) Then
+        If py + size > sprite(st, b, Y) And py < sprite(st, b, Y) + sprite(st, b, H) Then
           inside_box = 1
           Exit Function
         EndIf
@@ -158,10 +158,10 @@ Sub break_collision(atom As integer)
 
     If bg_hit > 0 Then
       ' Bounce off background object - determine which side was hit
-      bx = sprite(BG, bg_hit, X)
-      by = sprite(BG, bg_hit, Y)
-      bw = sprite(BG, bg_hit, W)
-      bh = sprite(BG, bg_hit, H)
+      bx = sprite(st, bg_hit, X)
+      by = sprite(st, bg_hit, Y)
+      bw = sprite(st, bg_hit, W)
+      bh = sprite(st, bg_hit, H)
       ax = x(atom) + sprite(W, atom)\2
       ay = y(atom) + sprite(H, atom)\2
 
