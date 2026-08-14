@@ -2143,6 +2143,7 @@ static const struct {
 
 static unsigned char *mathbind;		/* symbol -> mfns index + 1 */
 static unsigned short *eqbind;		/* symbol -> eqop descriptor */
+static unsigned nbind;			/* entries in each of the three */
 
 /*
  *	Bind one library symbol into libbind/mathbind/eqbind by name.
@@ -2221,7 +2222,7 @@ static int lib_resolve(unsigned idx)
 
 static void libcall(unsigned idx)
 {
-	if (idx >= h.h_nsym)
+	if (idx >= nbind)
 		fault("bad library index");
 	for (;;) {
 		if (libbind[idx]) {
@@ -2481,9 +2482,22 @@ static void load(const char *path)
 			fault("short string table");
 	}
 
-	libbind = calloc(h.h_nsym ? h.h_nsym : 1, sizeof(*libbind));
-	mathbind = calloc(h.h_nsym ? h.h_nsym : 1, sizeof(*mathbind));
-	eqbind = calloc(h.h_nsym ? h.h_nsym : 1, sizeof(*eqbind));
+	/*
+	 * The bind tables are indexed by symbol number, but only library
+	 * symbols are ever looked up in them - so size them by the last
+	 * library symbol rather than by the last symbol.  cc2 numbers the
+	 * library symbols first, which makes that the count of them: 574
+	 * bytes on picofrog where sizing by h_nsym was 14K, held for the
+	 * whole run.  An object from before that change has them scattered
+	 * and simply gets the tables it always had.
+	 */
+	nbind = 0;
+	for (i = 0; i < h.h_nsym; i++)
+		if (sym[i].s_type == BC_SYM_LIB)
+			nbind = i + 1;
+	libbind = calloc(nbind ? nbind : 1, sizeof(*libbind));
+	mathbind = calloc(nbind ? nbind : 1, sizeof(*mathbind));
+	eqbind = calloc(nbind ? nbind : 1, sizeof(*eqbind));
 	if (libbind == NULL || mathbind == NULL || eqbind == NULL) {
 		fprintf(stderr, "%s: out of memory (bind table)\n", path);
 		exit(1);

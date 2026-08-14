@@ -821,7 +821,8 @@ static void compact_syms(void)
 {
 	static unsigned short remap[MAXSYM];
 	static unsigned char keep[MAXSYM];
-	unsigned i, o2;
+	unsigned short *perm;
+	unsigned i, o2, onsym;
 
 	memset(keep, 0, nsym);
 	for (i = 0; i < nfix; i++)
@@ -847,13 +848,76 @@ static void compact_syms(void)
 		strtablen += strlen(bc_symname[i]) + 1;
 		o2++;
 	}
+	onsym = nsym;
 	nsym = o2;
+
+	/*
+	 *	Library symbols to the front.
+	 *
+	 *	The loader keeps three tables indexed by symbol number to
+	 *	dispatch a library call, and only library symbols are ever
+	 *	looked up in them - so what sizes those tables is the HIGHEST
+	 *	library index, not how many there are.  Scattered through the
+	 *	table, that is every symbol in the program: on picofrog, 14K
+	 *	of loader memory to serve 82 entries, and 14K is the kind of
+	 *	number that decides whether a program loads at all.
+	 *
+	 *	Numbered from zero they cost 574 bytes.  Nothing about the
+	 *	format changes - these are still ordinary symbol indices, and
+	 *	the loader sizes the tables from the file in front of it - so
+	 *	an object built before this still loads, with the tables it
+	 *	would always have had.
+	 *
+	 *	perm[] is the final position of each surviving symbol; the
+	 *	swap loop applies it in place, one cycle at a time.  Copying
+	 *	straight into a second pass would not do: a destination can
+	 *	be past its source here, which overwrites entries the second
+	 *	pass has not read yet.  If the allocation fails the old
+	 *	numbering stands - it costs loader memory, nothing else.
+	 */
+	perm = malloc(nsym ? nsym * sizeof(unsigned short) : 1);
+	if (perm) {
+		unsigned nlib = 0, klib, kother;
+
+		for (i = 0; i < nsym; i++)
+			if (symtab[i].s_type == BC_SYM_LIB)
+				nlib++;
+		for (i = 0, klib = 0, kother = nlib; i < nsym; i++)
+			perm[i] = (symtab[i].s_type == BC_SYM_LIB)
+				  ? klib++ : kother++;
+		/* Compose, before the swaps below consume perm. */
+		for (i = 0; i < onsym; i++)
+			if (keep[i])
+				remap[i] = perm[remap[i]];
+		for (i = 0; i < nsym; i++) {
+			while (perm[i] != i) {
+				unsigned d = perm[i];
+				struct bc_sym ts = symtab[i];
+				unsigned char tl = sym_in_lit[i];
+				char *tn = bc_symname[i];
+
+				symtab[i] = symtab[d];
+				symtab[d] = ts;
+				sym_in_lit[i] = sym_in_lit[d];
+				sym_in_lit[d] = tl;
+				bc_symname[i] = bc_symname[d];
+				bc_symname[d] = tn;
+				perm[i] = perm[d];
+				perm[d] = d;
+			}
+		}
+		free(perm);
+	}
+
 	for (i = 0; i < nfix; i++)
 		fixtab[i].f_sym = remap[fixtab[i].f_sym];
 
 	/* Rewrite the baked indices - the bytecode LIBCALL operands and
-	   the native movs/movw immediates.  Indices only ever shrink, so
-	   the instruction form always still fits. */
+	   the native movs/movw immediates.  Every recorded site is a
+	   library symbol, and those are exactly the ones the partition
+	   above moves to the front, so an index can only shrink and the
+	   instruction form always still fits.  Checked, not assumed: a
+	   silent truncation here would call the wrong function. */
 	for (i = 0; i < nlibref; i++) {
 		unsigned long at = libreftab[i].at;
 		unsigned s = remap[libreftab[i].sym];
@@ -863,6 +927,8 @@ static void compact_syms(void)
 			codebuf[at + 1] = (s >> 8) & 0xFF;
 			break;
 		case 1:			/* movs r0, #imm8 */
+			if (s > 255)
+				error("libcall index too large");
 			codebuf[at] = s & 0xFF;
 			break;
 		default: {		/* movw r0, #imm16 */
