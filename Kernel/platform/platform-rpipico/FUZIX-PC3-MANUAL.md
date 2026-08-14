@@ -1465,6 +1465,53 @@ This changes where the next line goes as well as how the letters look —
 a 24×32 font fills the screen in seven lines where font 1 takes
 nineteen — and scrolling follows it.
 
+## Your own font: `DefineFont`
+
+A program can carry a font of its own and use it exactly like the nine
+built-in ones:
+
+```basic
+FONT 10
+TEXT 8, 8, "SCORE 1000", "LT", 10
+
+DefineFont 10
+  03300808
+  FFFFFFFF FFFFFFFF
+  55AA55AA 55AA55AA
+End DefineFont
+```
+
+The block may sit anywhere in the file — the bottom is the usual place,
+as it is in MMBasic, and the font is in force from the first line of
+the program whatever line it is written on.
+
+**Numbers 10 to 16.** Fonts 1 to 9 are the built-in ones, shared with
+the shell and every other program, so they cannot be replaced;
+`DefineFont 9` is an error naming the range rather than a definition
+that quietly does not happen. Ports of PicoMite programs that define a
+low-numbered font need that one number changed.
+
+The first word is the font describing itself and the rest are the
+glyphs, in MMBasic's format, so a `DefineFont` block from a PicoMite
+program can be pasted in unaltered:
+
+| the first word, byte by byte | |
+|---|---|
+| width in pixels | height in pixels |
+| code of the first character | how many characters |
+
+Each group of eight hex digits is one 32-bit word, **least significant
+byte first** — so `03300808` is width 8, height 8, first character
+0x30 (`0`), three characters. Each glyph follows as width × height
+bits, most significant bit leftmost, with no padding; width × height
+must be a multiple of 8. A font is checked when the program is
+translated, so a header that disagrees with the data it carries is a
+translation error rather than a screen full of rubbish.
+
+The glyphs live in the program and cost nothing else — the firmware is
+handed their address, not a copy — and they go away with it. Another
+program asking for font 10 gets its own, or nothing.
+
 ## The glyphs themselves: `MM.INFO(FONT ADDRESS)` and `PEEK` {#font-address}
 
 `TEXT` draws on the PC3's own screen. If you have hung a display off

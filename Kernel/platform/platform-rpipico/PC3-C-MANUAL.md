@@ -294,6 +294,42 @@ ioctl(sys, GFXIOC_FONTINFO, &fi);
 
 `fi.width` comes back 0 for a font that does not exist.
 
+### A font of your own
+
+`GFXIOC_FONTDEF` is the mirror of `GFXIOC_FONTADDR`: that one tells you
+where a kernel font is, this one tells the kernel where yours is.
+
+```c
+static const unsigned char myfont[] = {
+    8, 8, '0', 3,               /* width, height, first char, count */
+    /* then count glyphs, width*height bits each, MSB first */
+};
+struct gfx_fontdef fd = { .font = 10, .addr = (uint32_t)(uintptr_t)myfont,
+                          .bytes = sizeof myfont };
+ioctl(sys, GFXIOC_FONTDEF, &fd);
+```
+
+It is then font 10 to `GFXIOC_TEXT`, `FONTINFO` and `FONTADDR`, and the
+renderer treats it exactly like a built-in one — any cell size, because
+every metric comes out of those four header bytes.
+
+Nothing is copied: the glyphs stay in your image and the kernel reads
+them where they lie, which works here for the same reason `FONTADDR`
+does — no MMU, so an address is an address. Numbers **10 to 16**; 1 to
+9 are the built-in nine and are refused, because the console and every
+other program draw with them.
+
+The registration belongs to your process and goes when it exits or
+execs, and it is invisible to everyone else — ask for font 10 in
+another program and you get its own or nothing. That is not tidiness:
+every process here loads at the same address, so one program's font
+pointer is a plausible address inside the next one, and a slot left
+behind would draw glyphs out of whatever is running now.
+
+The call refuses a `bytes` that disagrees with the header, an address
+that is not yours, and a width × height that is not a multiple of 8 —
+the condition that makes the glyph bits plain MSB-first bytes.
+
 ## Reading the framebuffer
 
 Writing pixels has seven entry points, two of them batched. Reading had
