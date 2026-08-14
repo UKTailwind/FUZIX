@@ -601,6 +601,25 @@ MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h);
  * case, and an address of 0 is unreadable either way. */
 MMINTEGER mm_fontaddr(MMINTEGER font);
 
+/* DefineFont n - register a font of THIS PROGRAM'S own, numbers 10-16
+ * (1-9 are the built-in nine, shared with the console and every other
+ * program, and the translator refuses them).
+ *
+ * The mirror of mm_fontaddr: nothing is copied, the glyphs stay in the
+ * program's image and the kernel reads them where they lie.  `addr'
+ * points at the four-byte header documented above and `bytes' spans
+ * header and glyphs together; the data must already be in that layout,
+ * which is what the translator's byte-swap of a DefineFont block
+ * produces.
+ *
+ * Called from the program's prologue rather than where the block sits,
+ * because MMBasic binds fonts when the program is loaded - a block at
+ * the bottom of a file is in force at the top of it.  The registration
+ * dies with the process; no other program can see it.
+ *
+ * 0, or -1 where there is no display or the kernel refuses it. */
+MMINTEGER mm_fontdef(MMINTEGER font, MMINTEGER addr, MMINTEGER bytes);
+
 /* FONT #n [, scale] - the font PRINT draws in, and how big.  Unlike
  * TEXT's own font argument this one sticks, and it decides where PRINT
  * puts the next line: a 24x32 font fills the screen in seven lines

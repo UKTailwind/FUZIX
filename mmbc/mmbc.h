@@ -294,6 +294,11 @@ struct conv {
     const char **warnings; int nwarnings, cwarnings;
     struct implied_rec *implied; int nimplied, cimplied;
     struct data_item *data; int ndata, cdata;
+    /* DefineFont blocks, collected by pass_fonts before anything else
+     * runs.  Kept in font-number order (there are at most seven), so
+     * the emitter walks the array as the Python walks sorted(). */
+    struct fontdef { int num; unsigned char *data; int len; }
+        *fonts; int nfonts, cfonts;
     int lenient, fcc;
     struct bnd *bnds; int nbnds, cbnds;                /* bnd_tables */
     struct skip_rec *skipped; int nskipped, cskipped;
@@ -416,6 +421,11 @@ struct val expr(void);
 
 void pass_routine_names(void);
 void pass_declarations(void);
+/* DefineFont ... End DefineFont, taken at the LINE level before any
+ * other pass (the body is hex, not BASIC) and blanked out afterwards.
+ * Fonts bind at program LOAD in MMBasic, so a block at the bottom of a
+ * file is in force at the top of it. */
+void pass_fonts(void);
 void place_label(const char *canon);
 void strip_line_number(void);
 void skip_statement(void);

@@ -595,6 +595,9 @@ class Conv(object):
         self.uses_fill = False
         self.uses_arc = False
         self.uses_text = False
+        # DefineFont blocks, number -> the font's bytes in the kernel's
+        # layout.  Collected by pass_fonts before anything else runs.
+        self.fonts = {}
         self.uses_mappal = False
         self.uses_gpio = False
         self.uses_port = False      # PORT: pulls in mmb_port.h
@@ -2221,6 +2224,141 @@ class Conv(object):
                     and toks[k][2] in ('SUB', 'FUNCTION') \
                     and toks[k + 1][0] == T_ID:
                 self.routine_names[split_suffix(toks[k + 1][1])[0]] = 1
+
+    def pass_fonts(self):
+        """Collect every DefineFont ... End DefineFont before anything
+        else runs, for the same reason pass_types exists: MMBasic binds
+        fonts when the program is LOADED (MMBasic.c walks the CFunction
+        area filling FontTable[]), so a block at the bottom of a file is
+        in force at the top of it - picofrog selects font 9 at line 95
+        and defines it at line 1324.
+
+        The body is hex, not BASIC, so it is taken here at the LINE
+        level and the lines are then blanked: nothing downstream should
+        try to tokenise a bare `5F200808' as an expression.
+
+        Each 8-digit group is a 32-bit LITTLE-ENDIAN word, so the bytes
+        come out reversed - and then they are exactly the layout the
+        kernel's own fonts use (width, height, first char, count, then
+        the glyphs MSB first).  That is the whole trick: no bit
+        reordering anywhere, one swap here at translation time.
+        """
+        i = 0
+        while i < len(self.lines):
+            self.lineno = i + 1
+            txt = self.lines[i].strip()
+            up = txt.upper()
+            if not (up.startswith('DEFINEFONT') or
+                    up.startswith('DEFINE FONT')):
+                i += 1
+                continue
+            head = txt.split(None, 2 if up.startswith('DEFINE FONT') else 1)
+            num = head[-1].strip() if len(head) > 1 else ''
+            num = num.lstrip('#').strip()
+            # a trailing comment is legal on the DefineFont line
+            for c in ("'", ';'):
+                if c in num:
+                    num = num.split(c)[0].strip()
+            try:
+                # base 10, matching mmbc's strtol(num, NULL, 10): a
+                # leading zero must not quietly become octal in one
+                # translator and not the other
+                fno = int(num, 10)
+            except ValueError:
+                self.errors.append("line %d: DefineFont wants a font "
+                                   "number" % self.lineno)
+                self.lines[i] = ''
+                i += 1
+                continue
+            start = i
+            self.lines[i] = ''
+            i += 1
+            words = []
+            ended = False
+            bad = False
+            while i < len(self.lines):
+                t = self.lines[i].strip()
+                u = t.upper().replace(' ', '')
+                self.lines[i] = ''
+                i += 1
+                if u.startswith('ENDDEFINEFONT'):
+                    ended = True
+                    break
+                # comments and blank lines inside the block are ignored,
+                # as they are anywhere else
+                if t.startswith("'") or not t:
+                    continue
+                if "'" in t:
+                    t = t.split("'")[0]
+                for w in t.split():
+                    if len(w) != 8 or \
+                            any(c not in '0123456789abcdefABCDEF'
+                                for c in w):
+                        # say it ONCE and keep reading to the terminator:
+                        # stopping here would add a bogus "no matching
+                        # End DefineFont" on top of the real complaint
+                        if not bad:
+                            self.errors.append(
+                                "line %d: DefineFont wants 8-digit hex "
+                                "words, not '%s'" % (i, w))
+                        bad = True
+                    else:
+                        words.append(int(w, 16))
+            if not ended:
+                self.errors.append("line %d: DefineFont %d has no matching "
+                                   "End DefineFont" % (start + 1, fno))
+                continue
+            if bad:
+                continue
+            self.define_font(fno, words, start + 1)
+
+    def define_font(self, fno, words, where):
+        """One collected block: check it and keep the bytes."""
+        # 1-9 are the built-in nine, shared with the console and every
+        # other program, so they cannot be replaced - and saying so is
+        # the point.  A silently ignored DefineFont would draw in the
+        # wrong glyphs and look like a rendering bug.
+        if fno < 10 or fno > 16:
+            self.errors.append("line %d: DefineFont %d - user fonts are "
+                               "10 to 16 (1-9 are built in)" % (where, fno))
+            return
+        if fno in self.fonts:
+            self.errors.append("line %d: font %d is defined twice"
+                               % (where, fno))
+            return
+        if not words:
+            self.errors.append("line %d: DefineFont %d is empty"
+                               % (where, fno))
+            return
+        data = []
+        for w in words:
+            data.append(w & 0xFF)
+            data.append((w >> 8) & 0xFF)
+            data.append((w >> 16) & 0xFF)
+            data.append((w >> 24) & 0xFF)
+        wid, hgt, first, count = data[0], data[1], data[2], data[3]
+        if wid == 0 or hgt == 0 or count == 0:
+            self.errors.append("line %d: font %d has a zero in its header "
+                               "(width %d, height %d, count %d)"
+                               % (where, fno, wid, hgt, count))
+            return
+        if (wid * hgt) % 8:
+            # what makes the glyphs plain MSB-first bytes rather than a
+            # bit stream - the renderer assumes it, as MMBasic's does
+            self.errors.append("line %d: font %d is %dx%d - width times "
+                               "height must be a multiple of 8"
+                               % (where, fno, wid, hgt))
+            return
+        need = 4 + count * (wid * hgt // 8)
+        if len(data) < need:
+            self.errors.append("line %d: font %d says %d characters of "
+                               "%dx%d (%d bytes) but carries %d"
+                               % (where, fno, count, wid, hgt, need,
+                                  len(data)))
+            return
+        # trailing padding a tracker may have left is dropped: the
+        # header is the authority on where the font ends
+        self.fonts[fno] = data[:need]
 
     def pass_types(self):
         """Register every TYPE ... END TYPE before anything else needs
@@ -6437,6 +6575,7 @@ class Conv(object):
     # ==================================================================
 
     def run(self):
+        self.pass_fonts()
         self.pass_routine_names()
         self.pass_declarations()
         self.walk('scan')
@@ -6798,6 +6937,20 @@ class Conv(object):
             # the same for SPI's three, in whatever order they were
             # written - mmb_spi.h works out which pin is which signal
             wr('static int __mmspi_a, __mmspi_b, __mmspi_c;\n')
+        # DefineFont: the glyphs live in this program's image and the
+        # kernel is given their address, so they are `static const' -
+        # nothing copies them and nothing may move them.
+        for fno in sorted(self.fonts):
+            data = self.fonts[fno]
+            wr('\n/* DefineFont %d: %dx%d, %d characters from %d, '
+               '%d bytes */\n'
+               % (fno, data[0], data[1], data[3], data[2], len(data)))
+            wr('static const unsigned char __mmfont_%d[%d] = {\n'
+               % (fno, len(data)))
+            for off in range(0, len(data), 12):
+                row = data[off:off + 12]
+                wr('    ' + ','.join('0x%02x' % b for b in row) + ',\n')
+            wr('};\n')
         wr('\n/* ---- forward declarations ---- */\n')
         if self.uses_clear:
             wr('static void __mmb_clear(void);\n')
@@ -6824,6 +6977,12 @@ class Conv(object):
         else:
             wr('int main(void)\n{\n')
         wr('    unsigned __mark = mm_mark(); (void)__mark;\n')
+        # Fonts first, and here rather than where the block sits: the
+        # interpreter binds them at LOAD, so a program may select font
+        # 10 a thousand lines above its DefineFont.
+        for fno in sorted(self.fonts):
+            wr('    mm_fontdef(%d, (MMINTEGER)(long)__mmfont_%d, '
+               '(MMINTEGER)sizeof __mmfont_%d);\n' % (fno, fno, fno))
         if self.uses_cmdline:
             wr('    mm_argv_bind(argc, argv);\n')
         if self.uses_onerror:
@@ -6908,6 +7067,9 @@ def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
     conv = Conv(lines, inpath)
     conv.lenient = lenient
     conv.fcc = fcc
+    # before every other pass: a DefineFont block is hex, not BASIC, and
+    # is in force from the top of the program however far down it sits
+    conv.pass_fonts()
     conv.pass_routine_names()
     conv.pass_types()
     conv.pass_declarations()
