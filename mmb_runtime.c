@@ -4298,6 +4298,14 @@ void mm_font(MMINTEGER font, MMINTEGER scale)
     }
 }
 
+void mm_font_cur(MMINTEGER *font, MMINTEGER *scale)
+{
+    if (font)
+        *font = mm_gfont;
+    if (scale)
+        *scale = mm_gscale;
+}
+
 /*
  * TEXT's glyph run - see mmb_runtime.h.  Everything about WHERE it goes
  * was settled by mmg_text before this was called; all that is left is
@@ -4317,10 +4325,12 @@ void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
         return;
     if (len > MM_GFX_TEXT_MAX)
         len = MM_GFX_TEXT_MAX;
+    /* Omitted means the current one, as it does in mmg_text above this
+     * and in Draw.c cmd_text before that. */
     if (scale < 1)
-        scale = 1;
+        scale = mm_gscale;
     if (font < 1)
-        font = 1;
+        font = mm_gfont;
     gt.x = (short)x;
     gt.y = (short)y;
     gt.scale = (unsigned char)scale;
@@ -5103,6 +5113,15 @@ MMINTEGER mm_fontdef(MMINTEGER font, MMINTEGER addr, MMINTEGER bytes)
 void mm_font(MMINTEGER font, MMINTEGER scale)
 {
     (void)font; (void)scale;
+}
+
+/* No display, so FONT selected nothing and the caller's defaults stand. */
+void mm_font_cur(MMINTEGER *font, MMINTEGER *scale)
+{
+    if (font)
+        *font = 1;
+    if (scale)
+        *scale = 1;
 }
 
 /* No screen, so no palette to remap - and silence rather than an error,

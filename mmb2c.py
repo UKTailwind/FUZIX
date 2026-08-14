@@ -4314,7 +4314,15 @@ class Conv(object):
             y = self.as_int(self.expr())
             self.expect_op(',')
             s = self.as_str(self.expr())
-            just, font, scale = '0', '1LL', '1LL'
+            # 0 for an omitted font or scale, NOT 1: the default is the
+            # CURRENT font and scale, which is what FONT set, and only
+            # the runtime knows them.  Draw.c:2133 cmd_text takes both
+            # from gui_font.  Emitting 1 here meant a program that said
+            # FONT 10 and then drew with the plain four-argument TEXT -
+            # which is what MMBasic programs do - got font 1 every time,
+            # so an 8x8 panel came out in 8x12 and overlapped, and
+            # DefineFont looked broken when it was not.
+            just, font, scale = '0', '0LL', '0LL'
             fc, bc = 'mm_fg()', 'mm_bg()'
             if self.accept_op(','):
                 if not self.is_op(','):
