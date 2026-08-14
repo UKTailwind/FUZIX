@@ -120,8 +120,13 @@ int accept_op(const char *s)
 
 void expect_op(const char *s)
 {
+    /* "syntax error" first, because that is what it is and what MMBasic
+       calls it.  A bare "expected ')'" reads as a missing bracket and
+       sends the reader looking for one; the real cause is usually an
+       argument form this translator does not take yet, with the ')'
+       simply being where it gave up. */
     if (!accept_op(s))
-        cv_err("expected '%s'", s);
+        cv_err("syntax error (expected '%s')", s);
 }
 
 int accept_kw(const char *s)

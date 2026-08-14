@@ -678,7 +678,12 @@ class Conv(object):
 
     def expect_op(self, s):
         if not self.accept_op(s):
-            self.err("expected '%s'" % s)
+            # "syntax error" first, because that is what it is and what
+            # MMBasic calls it.  A bare "expected ')'" reads as a missing
+            # bracket and sends the reader looking for one; the real
+            # cause is usually an argument form this translator does not
+            # take yet, with the ')' simply being where it gave up.
+            self.err("syntax error (expected '%s')" % s)
 
     def accept_kw(self, s):
         if self.is_kw(s):
@@ -1421,6 +1426,47 @@ class Conv(object):
                     if not s.is_const and not s.is_array:
                         self.i += 1
                         return ('var', s, None)
+                # one ELEMENT of an array: a(i), a(i,j)
+                #
+                # An element is a variable like any other and MMBasic
+                # passes it by reference - findvar() on "x(k)" hands the
+                # sub a pointer to that element (MMBasic.c:2230, "set
+                # argvalue to point to the variable's data").  Treated as
+                # an expression here it was copied into a temporary, so a
+                # sub that writes to its parameter wrote into the
+                # temporary and the caller's array never changed.
+                #
+                # brownian.bas is what found it: its whole animation is
+                # "vector i, direction(i), 1, x(i), y(i)" updating x()
+                # and y() through the parameters.  Every atom was drawn
+                # at its starting position for ever, and nothing else
+                # about the program looked wrong.
+                if nxt1 is not None and nxt1[0] == T_OP and nxt1[1] == '(':
+                    s = self.lookup(canon)
+                    if s is not None and s.is_array and not s.is_const:
+                        # Only when the ')' ENDS the argument: a(i)+1 is
+                        # an expression and must stay one.  Scanned, not
+                        # parsed-and-backtracked, so nothing is consumed
+                        # unless this really is a bare element.
+                        k, depth, tk = 1, 0, None
+                        while True:
+                            tk = self.peek(k)
+                            if tk is None:
+                                break
+                            if tk[0] == T_OP and tk[1] == '(':
+                                depth += 1
+                            elif tk[0] == T_OP and tk[1] == ')':
+                                depth -= 1
+                                if depth == 0:
+                                    break
+                            k += 1
+                        after = self.peek(k + 1) if tk is not None else None
+                        if tk is not None and (
+                                after is None
+                                or (after[0] == T_OP
+                                    and after[1] in (',', ')', ':'))):
+                            self.i += 1
+                            return ('elem', s, (self.index(s), s.ty))
         v = self.expr()
         return ('val', None, v)
 
@@ -1451,6 +1497,15 @@ class Conv(object):
                     self.err("structure type mismatch in call to '%s'"
                              % r.name)
                 return '&' + a[1].acc
+            if a[0] == 'elem':
+                # An element of an array OF structures - structtest's
+                # TEST 5.  It reaches here as its own kind now, and the
+                # address of the element is what the callee wants, the
+                # same as every other structure argument.
+                if a[1].stype != p.stype:
+                    self.err("structure type mismatch in call to '%s'"
+                             % r.name)
+                return '&' + a[2][0]
             if a[0] == 'val':
                 code, ty = a[2]
                 if not isinstance(ty, tuple) or ty[1] != p.stype:
@@ -1505,6 +1560,15 @@ class Conv(object):
                 return 'mm_scopy(%s)' % a[1].acc
             if a[0] == 'array':
                 self.err("unexpected array argument")
+            if a[0] == 'elem':
+                # A string array element is already a char[]; by
+                # reference it IS the element, by value a scratch copy.
+                if a[1].ty != TY_S:
+                    self.err("type mismatch in call to '%s'" % r.name)
+                if p.byref:
+                    return a[2][0]
+                self.tmp_used = True
+                return 'mm_scopy(%s)' % a[2][0]
             v = a[2]
             if v[1] != TY_S:
                 self.err("type mismatch in call to '%s'" % r.name)
@@ -1523,6 +1587,15 @@ class Conv(object):
                 else self.as_flt(('%s' % a[1].acc, a[1].ty))
         elif a[0] == 'array':
             self.err("unexpected array argument")
+        elif a[0] == 'elem':
+            # The address of the element itself, so the sub writes into
+            # the caller's array - the whole point of a by-reference
+            # parameter.  A type that does not match falls through to a
+            # converted copy, exactly as a scalar of the wrong type does.
+            if a[1].ty == p.ty and p.byref:
+                return '&' + a[2][0]
+            v = a[2]
+            val = self.as_int(v) if p.ty == TY_I else self.as_flt(v)
         else:
             v = a[2]
             val = self.as_int(v) if p.ty == TY_I else self.as_flt(v)
@@ -5918,6 +5991,15 @@ class Conv(object):
 
     def close_block(self, kind):
         if not self.blocks or self.blocks[-1][0] != kind:
+            # A block whose OPENER could not be translated leaves its
+            # close with nothing to match, and "mismatched end of if
+            # block" then reads as a second, separate fault in a line
+            # that is perfectly good.  Say which line actually caused it
+            # - one real error and one consequence, not two mysteries.
+            if self.skipped:
+                self.err("end of %s block with no start - line %d above "
+                         "could not be translated" % (kind,
+                                                      self.skipped[-1][0]))
             self.err("mismatched end of %s block" % kind)
         blk = self.blocks.pop()
         self.indent -= 1
@@ -7207,6 +7289,22 @@ def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
             ln = f.readline()
             if not ln:
                 break
+            # XMODEM pads the last block, so a program that arrived that
+            # way carries NULs after its last line - brownian.bas came
+            # over with 23 of them after "End Sub".  That is how files
+            # reach these machines, and MMBasic reads such a file
+            # without noticing, its program store being NUL-terminated.
+            # Refusing it meant a program that runs on the reference
+            # would not translate here, and said so at a line number
+            # past the end of the program.
+            #
+            # NUL is where the program stops, which is what it means in
+            # a BASIC source - not something to strip out of the middle.
+            if '\0' in ln:
+                ln = ln.split('\0', 1)[0]
+                if ln:
+                    lines.append(ln)
+                break
             lines.append(ln)
     finally:
         f.close()
@@ -7258,7 +7356,15 @@ def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
         print("%d line(s) could not be translated and were commented out:"
               % len(conv.skipped))
         for ln, text, why in conv.skipped:
+            # The offending source, not just the complaint.  It was
+            # already being kept for the report at the end of the C and
+            # simply never shown here, so a message like "expected ')'"
+            # arrived with nothing to attach it to - on a board, where
+            # the source is a file away, that is most of the diagnosis
+            # missing.
             print("  line %d: %s" % (ln, why))
+            if text:
+                print("      %s" % text[:72])
     if report:
         for ln in conv.report():
             print(ln)

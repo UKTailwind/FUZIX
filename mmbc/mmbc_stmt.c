@@ -3837,8 +3837,18 @@ static void do_else(void)
 static void close_block(const char *kind)
 {
     if (cv.nblocks == 0
-        || strcmp(cv.blocks[cv.nblocks - 1].kind, kind) != 0)
+        || strcmp(cv.blocks[cv.nblocks - 1].kind, kind) != 0) {
+        /* A block whose OPENER could not be translated leaves its close
+           with nothing to match, and "mismatched end of if block" then
+           reads as a second, separate fault in a line that is perfectly
+           good.  Say which line actually caused it - one real error and
+           one consequence, not two mysteries. */
+        if (cv.nskipped > 0)
+            cv_err("end of %s block with no start - line %d above could "
+                   "not be translated", kind,
+                   cv.skipped[cv.nskipped - 1].line);
         cv_err("mismatched end of %s block", kind);
+    }
     cv.nblocks--;
     cv.indent--;
     emit("}");

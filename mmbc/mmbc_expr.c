@@ -491,6 +491,61 @@ void arg_item(struct arg *out)
                     return;
                 }
             }
+            /* one ELEMENT of an array: a(i), a(i,j)
+             *
+             * An element is a variable like any other and MMBasic passes
+             * it by reference - findvar() on "x(k)" hands the sub a
+             * pointer to that element (MMBasic.c:2230, "set argvalue to
+             * point to the variable's data").  Treated as an expression
+             * it was copied into a temporary, so a sub that writes to
+             * its parameter wrote into the temporary and the caller's
+             * array never changed.
+             *
+             * brownian.bas is what found it: its whole animation is
+             * "vector i, direction(i), 1, x(i), y(i)" updating x() and
+             * y() through the parameters.  Every atom was drawn at its
+             * starting position for ever. */
+            if (nxt1 != NULL && nxt1->kind == T_OP
+                && strcmp(nxt1->text, "(") == 0) {
+                struct sym *s = sym_lookup(canon);
+
+                if (s != NULL && s->is_array && !s->is_const) {
+                    /* Only when the ')' ENDS the argument: a(i)+1 is an
+                       expression and must stay one.  Scanned, not
+                       parsed-and-backtracked, so nothing is consumed
+                       unless this really is a bare element. */
+                    int k = 1, depth = 0;
+                    struct tok *tk = NULL, *after;
+
+                    for (;;) {
+                        tk = peek(k);
+                        if (tk == NULL)
+                            break;
+                        if (tk->kind == T_OP && strcmp(tk->text, "(") == 0)
+                            depth++;
+                        else if (tk->kind == T_OP
+                                 && strcmp(tk->text, ")") == 0) {
+                            depth--;
+                            if (depth == 0)
+                                break;
+                        }
+                        k++;
+                    }
+                    after = (tk != NULL) ? peek(k + 1) : NULL;
+                    if (tk != NULL
+                        && (after == NULL
+                            || (after->kind == T_OP
+                                && (strcmp(after->text, ",") == 0
+                                    || strcmp(after->text, ")") == 0
+                                    || strcmp(after->text, ":") == 0)))) {
+                        cv.i += 1;
+                        out->kind = ARG_ELEM;
+                        out->s = s;
+                        out->v = mkval(index_of(s), s->ty);
+                        return;
+                    }
+                }
+            }
         }
     }
     out->kind = ARG_VAL;
@@ -535,6 +590,17 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r)
                 cv_err("structure type mismatch in call to '%s'",
                        r->name);
             return sfmt("&%s", a->s->acc);
+        }
+        if (a->kind == ARG_ELEM) {
+            /* An element of an array OF structures - structtest's TEST
+               5.  It reaches here as its own kind now, and the address
+               of the element is what the callee wants, the same as
+               every other structure argument. */
+            if (a->s->stype == NULL
+                || strcmp(a->s->stype, p->stype) != 0)
+                cv_err("structure type mismatch in call to '%s'",
+                       r->name);
+            return sfmt("&%s", a->v.code);
         }
         if (a->kind == ARG_VAL) {
             struct val v = a->v;
@@ -618,6 +684,16 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r)
         }
         if (a->kind == ARG_ARRAY)
             cv_err("unexpected array argument");
+        if (a->kind == ARG_ELEM) {
+            /* A string array element is already a char[]; by reference
+               it IS the element, by value a scratch copy. */
+            if (a->s->ty != TY_S)
+                cv_err("type mismatch in call to '%s'", r->name);
+            if (p->byref)
+                return a->v.code;
+            cv.tmp_used = 1;
+            return sfmt("mm_scopy(%s)", a->v.code);
+        }
         v = a->v;
         if (v.ty != TY_S)
             cv_err("type mismatch in call to '%s'", r->name);
@@ -643,6 +719,15 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r)
             val = (p->ty == TY_I) ? as_int(av) : as_flt(av);
         } else if (a->kind == ARG_ARRAY) {
             cv_err("unexpected array argument");
+        } else if (a->kind == ARG_ELEM) {
+            /* The address of the element itself, so the sub writes into
+               the caller's array - the whole point of a by-reference
+               parameter.  A type that does not match falls through to a
+               converted copy, exactly as a scalar of the wrong type
+               does. */
+            if (a->s->ty == p->ty && p->byref)
+                return sfmt("&%s", a->v.code);
+            val = (p->ty == TY_I) ? as_int(a->v) : as_flt(a->v);
         } else {
             val = (p->ty == TY_I) ? as_int(a->v) : as_flt(a->v);
         }
