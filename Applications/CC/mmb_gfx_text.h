@@ -107,10 +107,26 @@ static void mmg_text(int x, int y, const char *s, const char *just,
 	int len = mm_slen(s);
 	int w, h, i;
 
-	if (font < 1)
-		font = 1;
-	if (scale < 1)
-		scale = 1;
+	/*
+	 * An omitted font or scale is the CURRENT one, which is what FONT
+	 * set - Draw.c:2133 cmd_text, "font = (gui_font >> 4) + 1; scale =
+	 * (gui_font & 0b1111); ... // the defaults".  Defaulting to 1 here
+	 * instead made FONT look broken when it was not: a program that
+	 * says FONT 10 once and then draws with the plain four-argument
+	 * TEXT - which is what MMBasic programs do - got font 1 every
+	 * time, so an 8x8 panel came out in 8x12 and overlapped.  It hid
+	 * DefineFont completely: the feature worked, and no program using
+	 * it in the ordinary way could show that it did.
+	 */
+	if (font < 1 || scale < 1) {
+		MMINTEGER cf = 1, cs = 1;
+
+		mm_font_cur(&cf, &cs);
+		if (font < 1)
+			font = (int)cf;
+		if (scale < 1)
+			scale = (int)cs;
+	}
 	if (scale > 15)
 		scale = 15;
 	if (just && mm_slen(just) &&

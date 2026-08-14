@@ -582,6 +582,11 @@ char *mm_at(MMINTEGER x, MMINTEGER y, MMINTEGER mode);
  *          The host build, where a translated program must still run
  *          and drawing is silently nothing. */
 MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h);
+/* What FONT last selected.  TEXT's omitted font and scale are these,
+ * not 1 and 1 - Draw.c cmd_text takes both from gui_font - and the
+ * primitive that lays TEXT out lives in a header, on the far side of
+ * this file's statics, so it has to ask. */
+void mm_font_cur(MMINTEGER *font, MMINTEGER *scale);
 
 /* Where font n's glyph data IS - MM.INFO(FONT ADDRESS n).
  *

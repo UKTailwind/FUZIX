@@ -443,6 +443,10 @@ static void w_fontaddr(void) { A = mm_fontaddr(LL(0)); }
    where it lies.  A machine address again, so it crosses whole. */
 static void w_fontdef(void)  { A = mm_fontdef(LL(0), LL(2), LL(4)); }
 static void w_font(void)     { mm_font(LL(0), LL(2)); A = 0; }
+/* What FONT last selected - two by-ref integers back, like mm_fontinfo
+   above, and for the same caller: mmg_text needs TEXT's defaults and
+   they live on this side. */
+static void w_font_cur(void) { mm_font_cur(PI(0), PI(1)); A = 0; }
 static void w_gtext(void)    { mm_gtext(LL(0), LL(2), LL(4), LL(6),
                                         LL(8), LL(10), Ps(12), LL(13));
                                A = 0; }
@@ -756,6 +760,7 @@ static const struct mmwrap {
 	{ "mm_fontaddr",	w_fontaddr },
 	{ "mm_fontdef",		w_fontdef },
 	{ "mm_font",		w_font },
+	{ "mm_font_cur",	w_font_cur },
 	{ "mm_gtext",		w_gtext },
 	{ "mm_fb_create",	w_fb_create },
 	{ "mm_fb_close",	w_fb_close },
