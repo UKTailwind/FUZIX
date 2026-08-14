@@ -9,9 +9,17 @@
   '     MM.INFO(platform) and MM.INFO(system I2C) calls that hunt for
   '     them have no answer on this machine.  The arrow keys already
   '     matched: our INKEY$ returns MMBasic's own 128-131.
-  '   - lcd% forced to 0.  The original works it out from MM.DEVICE$
-  '     containing "VGA" or "HDMI"; ours answers with the board name,
-  '     which says neither, and the LCD path is not the one we want.
+  '   - lcd% forced to 1, which is the LAYER question and not a claim
+  '     about the display.  The original picks its buffer model from
+  '     MM.DEVICE$: on VGA it draws the frog into the LAYER and never
+  '     merges, because there the layer is composited at scanout; on an
+  '     LCD it draws the world into F, the frog into L, and MERGEs.
+  '     This machine implements the second model - a scanout-time layer
+  '     would cost 40K of SRAM permanently (PC3-LAYER-MERGE.md) - so
+  '     the LCD arm is the one that matches, and MODE 2 is now set on
+  '     both arms.  With lcd%=0 everything drawn into the layer, the
+  '     frog included, was simply never composited: the game ran with
+  '     an invisible frog.
   '   - DefineFont 9 became 10.  Fonts 1-9 here are the built-in nine,
   '     shared with the shell; 10-16 are a program's own.
   '   - RUN became END (see GameOver).  MMBasic restarts the program
@@ -65,7 +73,7 @@
   Option EXPLICIT ON
   
   'platform
-  const lcd%=0 'PORT: PC3 is VGA/HDMI class, not an LCD panel
+  const lcd%=1 'PORT: not a panel - this picks the MERGE model, see the header
   const lc$=choice(lcd%=1,"F","N") '@harm what framebuffer to use
   dim f_merge%=0, l_time%, h_beat%=50'30 '@harm to get suitible game play with LCD
   if instr(mm.device$,"2350") then
@@ -114,11 +122,9 @@
   High%=2500
   Restore colors:For f%=1 To 15:Read Col%(f%):Next f%
   JP%=600:FRB%=1:SND%=1:Font 10
-  if lcd% then
-    FRAMEBUFFER CREATE 'only with LCD, else use N
-  else
-    mode 2 'VGA
-  end if
+  mode 2 'PORT: 320x240 in 16 colours either way - the original only
+         ' reached MODE 2 down the VGA arm, and we take the other one
+  FRAMEBUFFER CREATE 'PORT: was "only with LCD"; here it always applies
   FRAMEBUFFER LAYER
   framebuffer write lc$
   
@@ -183,7 +189,11 @@ restart1: 'this is the next frog
   Do
     move_lanes
     add_fly is_fly% '@fly
-    f_merge%=1 'trigger for framebuffer merge 0,b
+    framebuffer merge 0,b 'PORT: @harm set f_merge% here and let the music
+                          ' tick do the merge.  The merge IS the compositor
+                          ' on this machine, so it cannot depend on sound
+                          ' being on; done here it is also once per frame
+                          ' rather than once per beat.
     FRAMEBUFFER WRITE L
     
     do : loop until timer>l_time% '@harm, to get consisten speed
@@ -879,7 +889,7 @@ Sub music
   EndIf
   If Freq2%>1  Then Play sound 2,"B","w",Freq2%,adsr2%(mt%)
   Inc mt%:If mt%>n_adsr% Then mt%=1 '@harm different adsr
-  if f_merge% then if lcd% then framebuffer merge 0,b : f_merge%=0 '@harm combine merge and sound
+  'PORT: the merge moved to the main loop (see there); f_merge% is dead
 End Sub
   
 Function expand$(pxl$)
