@@ -16,6 +16,7 @@ import sys, time, serial, binascii, os
 import fzport
 
 PORT, BAUD = os.environ.get("FZPORT", "COM11"), 115200
+PROMPT = os.environ.get("FZPROMPT", "# ").encode()
 
 
 def uuencode(data, name):
@@ -153,7 +154,22 @@ def main():
 
     ser = fzport.open_port(BAUD, timeout=1, port=port)
     time.sleep(0.3); ser.reset_input_buffer()
-    ser.write(b"\r"); ser.flush(); drain(ser, 0.4, 3)
+    ser.write(b"\r"); ser.flush()
+    hello = drain(ser, 0.4, 3)
+
+    # Is there a SHELL there?  Everything below types a command and then
+    # tens of thousands of lines of uuencode; if a program is running
+    # instead, all of that goes into the program.  Doing exactly that to
+    # brownian while it was still animating locked the machine up and
+    # cost a power cycle - the tool had no idea anything was amiss.
+    #
+    # FZFORCE=1 sends anyway, for a board whose prompt is not "#".
+    if PROMPT not in hello and not os.environ.get("FZFORCE"):
+        sys.stderr.write(
+            "uusend: no '%s' prompt - something is running on the board.\n"
+            "        Stop it (Ctrl-C) first, or set FZFORCE=1 to send "
+            "anyway.\n" % PROMPT.decode().strip())
+        return 1
 
     send(ser, local, remote, gap)
     decode(ser, remote)
