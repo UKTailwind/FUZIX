@@ -4,7 +4,14 @@
 /* This controls the number of symbols (including complex types, arrays and
    unique function prototypes. Cost is 10 bytes per node on a small box. We
    can probably make symbols the self expanding one eventually */
-#define MAXSYM			768
+/* 768 was not enough for a real program: picofrog, a 1200-line BASIC game
+   translated to C, ran out at "<stdin>:9600 - too many symbols".  A
+   symbol here is 16 bytes on this target, so 2048 costs 20K more bss in
+   a compiler that had 113K in a 256K process, and nothing else changes -
+   the table is scanned by pointer, and the 11-bit S_INDEX field indexes
+   the IDX data rather than this table, so there is no packing limit to
+   run into. */
+#define MAXSYM			2048
 /* Expression nodes. Currently 16 bytes on a small box will be about 24 once
    we have everything in */
 #define NUM_NODES		512

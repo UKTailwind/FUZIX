@@ -44,6 +44,20 @@ cat > "$W/recurse.c" <<EOF
 static int rec(int a){return a?rec(a-1):0;}
 int main(){return 0;}
 EOF
+cat > "$W/reccalled.c" <<EOF
+static int rec(int a){return a?rec(a-1):0;}
+int main(){return rec(3);}
+EOF
+cat > "$W/chain.c" <<EOF
+static int leaf(int a)$BODY
+static int deadcaller(int a){return leaf(a);}
+int main(){return 0;}
+EOF
+cat > "$W/chainlive.c" <<EOF
+static int leaf(int a)$BODY
+static int livecaller(int a){return leaf(a);}
+int main(){return livecaller(3);}
+EOF
 cat > "$W/addr.c" <<EOF
 static int taken(int a){return a;}
 int main(){int(*p)(int)=taken;return p(1);}
@@ -59,6 +73,9 @@ base=$(build "$W/base.c")
 dead=$(build "$W/dead.c")
 live=$(build "$W/live.c")
 rec=$(build "$W/recurse.c")
+reccalled=$(build "$W/reccalled.c")
+chain=$(build "$W/chain.c")
+chainlive=$(build "$W/chainlive.c")
 addr=$(build "$W/addr.c")
 ten=$(build "$W/ten.c")
 
@@ -75,7 +92,13 @@ check() {			# name, actual, test, expected, why
 echo "empty main is $base bytes"
 check "unused static dropped"   "$dead" -eq "$base" "it should cost nothing"
 check "used static kept"        "$live" -gt "$base" "it is called"
-check "recursive static kept"   "$rec"  -gt "$base" "it names itself, so the count is 2"
+check "uncalled recursive dropped" "$rec" -eq "$base" \
+	"the count says 2 because it names itself; reachability says nobody calls it"
+check "called recursive kept"   "$reccalled" -gt "$base" "CORRECTNESS: main calls it"
+check "dead chain dropped"      "$chain" -eq "$base" \
+	"nothing calls deadcaller, so leaf goes with it"
+check "live chain kept"         "$chainlive" -gt "$base" \
+	"CORRECTNESS: main -> livecaller -> leaf"
 check "address-taken kept"      "$addr" -gt "$base" "CORRECTNESS: p() calls it"
 check "ten statics, one used"   "$ten"  -lt "$((base + (live - base) * 3))" \
 	"nine of the ten should be gone"

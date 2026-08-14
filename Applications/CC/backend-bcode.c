@@ -59,8 +59,15 @@
    scarce. Here cc2 runs in a 256K process, so the cost of 2048 is a few
    tens of K against a program that would otherwise simply not compile
    ("too many symbols" on c-testsuite 00200). */
+/* 4096 was not enough either: picofrog, a 1200-line BASIC game, has
+   3546 string literals in its DATA statements and each one is a symbol
+   here, so it stopped at "too many symbols" with cc1 already raised.
+   A symbol costs 17 bytes across the three tables (bc_sym, the name
+   pointer and sym_in_lit), so 8192 is ~70K more - carved from the
+   PSRAM arena on the board, where bc_arena_carve_all measures before
+   it places, and nothing on the host. */
 #if defined(BIG_TABLES) || defined(ARENA_TABLES)
-#define MAXSYM		4096
+#define MAXSYM		8192
 #define MAXFIX		8192
 #define MAXLAB		3072
 #else

@@ -21,6 +21,11 @@ extern unsigned copy_string(unsigned label, unsigned maxlen, unsigned pad,
 extern unsigned out_off;
 extern void prescan_names(void);
 extern unsigned name_used_once(unsigned id);
+/* A file scope static that no root reaches - see lex.c.  Strictly
+   stronger than name_used_once, which only sees names nothing mentions
+   twice; this also drops a function whose only callers are themselves
+   dead. */
+extern unsigned name_unreachable(unsigned id);
 
 extern void out_write(void);
 extern void out_flush(void);

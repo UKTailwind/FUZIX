@@ -496,8 +496,16 @@ void function_body(unsigned st, unsigned name, unsigned type)
 	 * and generate nothing. That is what lets a header carry a
 	 * library of helpers and a program pay only for the ones it uses;
 	 * with no linker there is nothing to strip it later.
+	 *
+	 * name_unreachable is the same idea carried further: counting
+	 * names keeps whatever a DEAD function mentions, which was fine
+	 * for a header holding one primitive and useless against the
+	 * sprite and blit engines, where one entry point named the other
+	 * fourteen. It walks the static call graph from the roots
+	 * instead. Both are asked; either is enough to drop the code.
 	 */
-	dead = (st == S_STATIC && name_used_once(name));
+	dead = (st == S_STATIC &&
+		(name_used_once(name) || name_unreachable(name)));
 	if (dead)
 		out_off++;
 

@@ -87,6 +87,111 @@ unsigned name_used_once(unsigned id)
 }
 
 /*
+ *	REACHABILITY, on top of the count above.
+ *
+ *	Counting names keeps anything a DEAD function mentions: the
+ *	callees of something nothing calls stay, and so does everything
+ *	they in turn name. That was affordable while a header held one
+ *	primitive and the rule's own comment said so - "inside a header
+ *	everything is reachable from its entry point". It stopped being
+ *	true when the sprite and blit engines arrived: 53 functions
+ *	behind fifteen entry points, so a program doing one SPRITE READ
+ *	was handed the collision detector, the show/hide stacks and the
+ *	compressed-blit decoders. Measured on that program, 94% of the
+ *	generated code was unreachable; across a whole game, 29%.
+ *
+ *	So the file scope statics become a graph and it is walked from
+ *	the roots. A static is kept if something outside every static
+ *	body names it - main, an extern function, an initialiser - or if
+ *	a kept static names it.
+ *
+ *	The bounds are deliberate and every one of them fails SAFE, by
+ *	keeping code: more statics than FN_MAX, or names past
+ *	NAMES_TRACKED, and the answer falls back to the count.
+ */
+#define FN_MAX		192		/* static functions tracked */
+#define FN_WORDS	((FN_MAX + 31) / 32)
+
+static unsigned short fn_name[FN_MAX];	/* index -> token id */
+static unsigned fn_n;
+static unsigned fn_over;		/* too many: fall back */
+static unsigned fn_edge[FN_MAX][FN_WORDS];
+static unsigned fn_root[FN_WORDS];
+static unsigned fn_keep[FN_WORDS];
+static unsigned fn_graph_done;
+
+static void bit_set(unsigned *w, unsigned i)
+{
+	w[i >> 5] |= 1UL << (i & 31);
+}
+
+static unsigned bit_get(const unsigned *w, unsigned i)
+{
+	return (w[i >> 5] >> (i & 31)) & 1;
+}
+
+/* Index of a name in the static-function table, or -1. */
+static int fn_find(unsigned id)
+{
+	unsigned i;
+
+	for (i = 0; i < fn_n; i++)
+		if (fn_name[i] == id)
+			return (int)i;
+	return -1;
+}
+
+static void fn_add(unsigned id)
+{
+	if (fn_find(id) >= 0)
+		return;
+	if (fn_n == FN_MAX) {
+		fn_over = 1;
+		return;
+	}
+	fn_name[fn_n++] = (unsigned short)id;
+}
+
+/* Mark from the roots until nothing new appears. */
+static void fn_close(void)
+{
+	unsigned again = 1, i, j;
+
+	for (i = 0; i < FN_WORDS; i++)
+		fn_keep[i] = fn_root[i];
+	while (again) {
+		again = 0;
+		for (i = 0; i < fn_n; i++) {
+			if (!bit_get(fn_keep, i))
+				continue;
+			for (j = 0; j < fn_n; j++) {
+				if (bit_get(fn_edge[i], j) &&
+				    !bit_get(fn_keep, j)) {
+					bit_set(fn_keep, j);
+					again = 1;
+				}
+			}
+		}
+	}
+}
+
+/*
+ *	Is this file scope static unreachable?  Asked once per function
+ *	definition, by body.c.
+ */
+unsigned name_unreachable(unsigned id)
+{
+	int i;
+
+	if (!fn_graph_done || fn_over)
+		return 0;
+	i = fn_find(id);
+	if (i < 0)
+		return 0;
+	return !bit_get(fn_keep, (unsigned)i);
+}
+
+/*
  *	Walk the token stream once counting names, then rewind. The shape
  *	of this loop has to match next_token() and copy_string() exactly
  *	or it falls out of step: tokens are two bytes, five of them carry
@@ -98,13 +203,29 @@ unsigned name_used_once(unsigned id)
  *	giving it the file the driver does - the pass is simply skipped
  *	and every static is generated as before.
  */
-void prescan_names(void)
+/*
+ *	One walk of the token stream.  pass 0 counts names and finds the
+ *	file scope static function DEFINITIONS; pass 1 fills in the graph
+ *	now that the set of them is known.
+ *
+ *	A definition is `static ... name ( ... ) {' - the '(' before the
+ *	'{' is what separates it from `static int tab[] = {...}', whose
+ *	braces are an initialiser and whose contents belong to nobody.
+ *	Getting that wrong would be the one dangerous mistake here: the
+ *	names in a function-pointer table would be attributed to a
+ *	variable rather than to the roots, and dropped.
+ */
+static void prescan_pass(int pass)
 {
 	int c;
 	unsigned t, i;
-
-	if (lseek(0, 0, SEEK_CUR) < 0)
-		return;
+	unsigned depth = 0;	/* brace depth */
+	unsigned armed = 0;	/* `static' seen at file scope */
+	unsigned saweq = 0;	/* ...and an '=' after it: an initialiser */
+	unsigned pend = 0;	/* the name that might be being defined */
+	unsigned frozen = 0;	/* pend is settled: the '(' has been seen */
+	unsigned prev = 0;	/* previous token, for the '(' before '{' */
+	int cur = -1;		/* static function being walked, or root */
 
 	for (;;) {
 		c = in_byte();
@@ -117,9 +238,92 @@ void prescan_names(void)
 		t |= c << 8;
 
 		if (t >= T_SYMBOL) {
-			name_bump(t);
+			if (pass == 0)
+				name_bump(t);
+			if (depth == 0) {
+				/* A name at file scope is a USE only if it
+				   comes after an '=' - otherwise it is the
+				   thing being declared, or a parameter, and
+				   its own definition must not root it. */
+				if (pass == 1 && (!armed || saweq)) {
+					int k = fn_find(t);
+					if (k >= 0)
+						bit_set(fn_root, (unsigned)k);
+				}
+				/* The name being defined is the one just
+				   before the argument list - NOT whatever
+				   comes after it, or a parameter would be
+				   taken for the function. */
+				if (armed && !frozen)
+					pend = t;
+			} else if (pass == 1) {
+				int k = fn_find(t);
+				if (k >= 0) {
+					if (cur >= 0)
+						bit_set(fn_edge[cur],
+							(unsigned)k);
+					else
+						bit_set(fn_root, (unsigned)k);
+				}
+			}
+			prev = t;
 			continue;
 		}
+		switch (t) {
+		case T_STATIC:
+			if (depth == 0) {
+				armed = 1;
+				saweq = 0;
+				pend = 0;
+				frozen = 0;
+			}
+			break;
+		case T_LPAREN:
+			/* the argument list: pend is the name */
+			if (depth == 0 && armed)
+				frozen = 1;
+			break;
+		case T_EQ:
+			if (depth == 0)
+				saweq = 1;
+			break;
+		case T_SEMICOLON:
+			if (depth == 0) {
+				armed = 0;
+				saweq = 0;
+				pend = 0;
+				frozen = 0;
+			}
+			break;
+		case T_LCURLY:
+			/* a body, not an initialiser, iff `) {' */
+			if (depth == 0 && armed && !saweq && pend &&
+			    prev == T_RPAREN) {
+				if (pass == 0)
+					fn_add(pend);
+				else
+					cur = fn_find(pend);
+			}
+			depth++;
+			break;
+		case T_RCURLY:
+			if (depth)
+				depth--;
+			if (depth == 0) {
+				armed = 0;
+				saweq = 0;
+				pend = 0;
+				frozen = 0;
+				cur = -1;
+			}
+			break;
+		}
+		/* NOT T_LINE: a line marker sits between the ')' and the
+		   '{' of every definition whose brace is on its own line,
+		   which is most of them, and it must not be mistaken for
+		   the token before the body. */
+		if (t != T_LINE)
+			prev = t;
 		switch (t) {
 		case T_LINE:
 			in_byte();
@@ -151,10 +355,41 @@ void prescan_names(void)
 			break;
 		}
 	}
+}
 
+static void prescan_rewind(void)
+{
 	if (lseek(0, 0, SEEK_SET) < 0)
 		fatal("seek error");
 	inlen = 0;
+}
+
+void prescan_names(void)
+{
+	if (lseek(0, 0, SEEK_CUR) < 0)
+		return;
+
+	prescan_pass(0);		/* names, and which statics exist */
+	prescan_rewind();
+	/* A way back to the name count alone, for bisecting a program
+	   that the graph and the old rule disagree about. */
+	if (getenv("CC1_NO_DCE"))
+		fn_over = 1;
+	if (fn_n && !fn_over) {
+		prescan_pass(1);	/* who names whom */
+		prescan_rewind();
+		fn_close();
+		fn_graph_done = 1;
+	}
+	if (getenv("CC1_DCE_DEBUG")) {
+		unsigned i, k = 0;
+		for (i = 0; i < fn_n; i++)
+			if (bit_get(fn_keep, i))
+				k++;
+		fprintf(stderr, "\ndce: %u statics, %u kept, %u dropped, "
+			"over=%u done=%u\n", fn_n, k, fn_n - k, fn_over,
+			fn_graph_done);
+	}
 	prescan_done = 1;
 }
 
