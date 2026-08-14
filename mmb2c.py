@@ -2724,6 +2724,18 @@ class Conv(object):
             if not self.accept_op(','):
                 break
 
+    # Does any DATA item actually need the float column?  The int one?
+    # A column no item uses is eight bytes an item of nothing, and it
+    # is emitted as a NULL the runtime never dereferences: READ reaches
+    # a column only for an item whose kind names it.
+    @property
+    def data_has_f(self):
+        return any(k == 2 for k, f, i, s in self.data)
+
+    @property
+    def data_has_i(self):
+        return any(k == 0 for k, f, i, s in self.data)
+
     def source_text(self, a, b):
         """Rebuild the source of tokens [a, b) - the text form of a
         numeric DATA item, for when it is READ into a string."""
@@ -6990,19 +7002,27 @@ class Conv(object):
                 wr('static const MMINTEGER %s[] = { %s };\n' % (name, body))
         if self.data:
             wr('\n/* ---- DATA items: parallel primitive arrays, so no\n')
-            wr(' * struct layout crosses the bcrun VM boundary ---- */\n')
+            wr(' * struct layout crosses the bcrun VM boundary.\n')
+            wr(' *\n')
+            wr(' * A column whose kind no item has is not emitted at all -\n')
+            wr(' * READ never looks at it, and eight bytes an item is worth\n')
+            wr(' * having back: picofrog carries 1692 items and not one\n')
+            wr(' * float, which was 13,536 bytes of zeroes in the data\n')
+            wr(' * segment of a program that had none to spare. ---- */\n')
             wr('static const int __mmb_data_kind[] = {\n')
             for kind, f, i, sv in self.data:
                 wr('    %d,\n' % kind)
             wr('};\n')
-            wr('static const MMFLOAT __mmb_data_f[] = {\n')
-            for kind, f, i, sv in self.data:
-                wr('    %s,\n' % f)
-            wr('};\n')
-            wr('static const MMINTEGER __mmb_data_i[] = {\n')
-            for kind, f, i, sv in self.data:
-                wr('    %s,\n' % i)
-            wr('};\n')
+            if self.data_has_f:
+                wr('static const MMFLOAT __mmb_data_f[] = {\n')
+                for kind, f, i, sv in self.data:
+                    wr('    %s,\n' % f)
+                wr('};\n')
+            if self.data_has_i:
+                wr('static const MMINTEGER __mmb_data_i[] = {\n')
+                for kind, f, i, sv in self.data:
+                    wr('    %s,\n' % i)
+                wr('};\n')
             wr('static const char *__mmb_data_s[] = {\n')
             for kind, f, i, sv in self.data:
                 wr('    %s,\n' % sv)
@@ -7094,8 +7114,11 @@ class Conv(object):
         if getattr(self, 'heap_used', False):
             wr('    H = mm_heap(sizeof *H);   /* arrays and strings */\n')
         if self.data:
-            wr('    mm_data_init4(__mmb_data_kind, __mmb_data_f, '
-               '__mmb_data_i, __mmb_data_s, %d);\n' % len(self.data))
+            wr('    mm_data_init4(__mmb_data_kind, %s, %s, '
+               '__mmb_data_s, %d);\n'
+               % ('__mmb_data_f' if self.data_has_f else '0',
+                  '__mmb_data_i' if self.data_has_i else '0',
+                  len(self.data)))
         for ln in self.out_main:
             wr(ln + '\n')
         wr('    return 0;\n}\n')
