@@ -63,11 +63,21 @@
 #ifdef BIG_TABLES
 #define MEMSIZE		131072		/* program address space */
 #else
-/* 48K: the largest translated program so far uses ~8K of data+bss and
-   the stack; what remains is heap.  Every byte given here is taken
-   from the loader's mallocs (code, symbols, string table) in the same
-   256K process. */
-#define MEMSIZE		49152
+/*
+ * 96K.  This was 48K, and the reason given was that every byte here is
+ * taken from the loader's mallocs in the same 256K process - but the
+ * process ceiling is no longer 256K.  config.h gives a process all of
+ * user memory (PROGSIZE = 346,624 with TOTALMEM=340), for exactly this
+ * reason: the 262144 was a swap slot size and it "stopped bcrun
+ * loading a 140K translated BASIC program".
+ *
+ * A CAP, not an allocation: load() asks for what the program's own
+ * header says it needs and only clamps to this, so a small program
+ * still gets a small mem[] and nothing changes for it.  picofrog wants
+ * 73,833 - 52,589 of DATA statements, 6,740 of bss, the runtime pools,
+ * the stack - and 48K refused it at the "program too large" check.
+ */
+#define MEMSIZE		98304
 #endif
 /* Dead space at the bottom so that no object can live at address 0 and
    a null pointer stays distinguishable from a real one. */
@@ -2141,9 +2151,44 @@ static unsigned short *eqbind;		/* symbol -> eqop descriptor */
  *	symbol and string tables are freed - or lazily on first call
  *	under BCRUN_LAZYBIND=1.
  */
+/*
+ *	The name of one symbol.
+ *
+ *	The loader used to read the WHOLE string table - every label, every
+ *	static, every name cc2 kept - to use the handful that are library
+ *	symbols, and then free it again.  On a big program that is 13K held
+ *	across the largest allocations the loader makes, which is 13K a
+ *	program cannot have; picofrog died on exactly that malloc.
+ *
+ *	So by default nothing is loaded: the names are read from the object
+ *	file, one at a time, only for the symbols that need resolving - a
+ *	seek and a short read each, a hundred or so times, once per run.
+ *	Under BCRUN_LAZYBIND the table is still loaded whole, because
+ *	first-call binding needs names after the file has gone.
+ */
+static FILE *symf;			/* open only while loading */
+static long strtab_off;			/* where the names start in it */
+
+static const char *sym_name(unsigned idx)
+{
+	static char buf[80];
+	unsigned n = 0;
+	int c;
+
+	if (strtab)
+		return strtab + sym[idx].s_name;
+	if (symf == NULL ||
+	    fseek(symf, strtab_off + (long)sym[idx].s_name, SEEK_SET))
+		return "?";
+	while (n < sizeof(buf) - 1 && (c = fgetc(symf)) > 0)
+		buf[n++] = (char)c;
+	buf[n] = 0;
+	return buf;
+}
+
 static int lib_resolve(unsigned idx)
 {
-	const char *name = strtab + sym[idx].s_name;
+	const char *name = sym_name(idx);
 	unsigned i;
 	int mi;
 	unsigned d;
@@ -2196,7 +2241,7 @@ static void libcall(unsigned idx)
 		if (strtab == NULL || !lib_resolve(idx)) {
 			fprintf(stderr,
 				"bcrun: no runtime function \"%s\"\n",
-				strtab ? strtab + sym[idx].s_name : "?");
+				strtab ? sym_name(idx) : "?");
 			exit(1);
 		}
 	}
@@ -2294,14 +2339,18 @@ static void load(const char *path)
 		exit(1);
 	}
 	code = malloc(h.h_code ? h.h_code : 1);
-	sym = malloc((h.h_nsym ? h.h_nsym : 1) * sizeof(struct bc_sym));
-	if (code == NULL || sym == NULL) {
+	if (code == NULL) {
 		/* Unchecked, this surfaced as "short code at pc 0", which
 		   reads like a truncated file rather than what it is. */
 		fprintf(stderr, "%s: out of memory (%lu bytes of code)\n",
 			path, (unsigned long)h.h_code);
 		exit(1);
 	}
+	/* The symbol table is NOT claimed here.  It is not read until
+	   after mem[] has been obtained, and holding 12 bytes a symbol
+	   across that - the largest single request the loader makes -
+	   only makes it likelier to fail.  It is claimed where it is
+	   filled, below. */
 
 	if (fread(code, 1, h.h_code, f) != h.h_code)
 		fault("short code");
@@ -2406,16 +2455,31 @@ static void load(const char *path)
 	   of a 256K process once whole programs went native. */
 	if (fseek(f, (long)(h.h_nfixup * sizeof(struct bc_fixup)), SEEK_CUR))
 		fault("seek");
+	sym = malloc((h.h_nsym ? h.h_nsym : 1) * sizeof(struct bc_sym));
+	if (sym == NULL) {
+		fprintf(stderr, "%s: out of memory (%lu symbols)\n",
+			path, (unsigned long)h.h_nsym);
+		exit(1);
+	}
 	for (i = 0; i < h.h_nsym; i++)
 		if (fread(&sym[i], sizeof(struct bc_sym), 1, f) != 1)
 			fault("short symbols");
-	strtab = malloc(h.h_strsize ? h.h_strsize : 1);
-	if (strtab == NULL) {
-		fprintf(stderr, "%s: out of memory (string table)\n", path);
-		exit(1);
+	/* Where the names are, so sym_name() can fetch the few that are
+	   wanted.  Only the lazy-bind path takes the whole table: it
+	   needs names after the file is closed. */
+	symf = f;
+	strtab_off = ftell(f);
+	if (getenv("BCRUN_LAZYBIND")) {
+		strtab = malloc(h.h_strsize ? h.h_strsize : 1);
+		if (strtab == NULL) {
+			fprintf(stderr, "%s: out of memory (string table)\n",
+				path);
+			exit(1);
+		}
+		if (h.h_strsize &&
+		    fread(strtab, 1, h.h_strsize, f) != h.h_strsize)
+			fault("short string table");
 	}
-	if (h.h_strsize && fread(strtab, 1, h.h_strsize, f) != h.h_strsize)
-		fault("short string table");
 
 	libbind = calloc(h.h_nsym ? h.h_nsym : 1, sizeof(*libbind));
 	mathbind = calloc(h.h_nsym ? h.h_nsym : 1, sizeof(*mathbind));
@@ -2548,7 +2612,7 @@ static void load(const char *path)
 			fprintf(stderr,
 				"bcrun: cannot take the address of library "
 				"function \"%s\"\n",
-				strtab + sym[fx.f_sym].s_name);
+				sym_name(fx.f_sym));
 			exit(1);
 		}
 
@@ -2566,7 +2630,9 @@ static void load(const char *path)
 			wr32(database + o, rd32(database + o) + v);
 		}
 	}
-	fclose(f);
+	/* The file stays open until the names have been used: sym_name()
+	   reads them straight out of it rather than the loader holding a
+	   copy of every name to use a hundred. */
 
 	/*
 	 *	Bind every library symbol now, then free the names: after
@@ -2585,7 +2651,7 @@ static void load(const char *path)
 			if (!lib_resolve((unsigned)i)) {
 				fprintf(stderr,
 					"%s: no runtime function \"%s\"\n",
-					path, strtab + sym[i].s_name);
+					path, sym_name((unsigned)i));
 				exit(1);
 			}
 		}
@@ -2594,6 +2660,8 @@ static void load(const char *path)
 		free(sym);
 		sym = NULL;
 	}
+	fclose(f);
+	symf = NULL;
 }
 
 /* ---- native code ---------------------------------------------------- */

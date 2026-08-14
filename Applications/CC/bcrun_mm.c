@@ -834,9 +834,11 @@ static unsigned long mmrt_reserve(unsigned long base)
 {
 	unsigned long i;
 
+	/* sym_name, not strtab: the loader no longer holds every name -
+	   it fetches the few it wants out of the object file. */
 	for (i = 0; i < h.h_nsym; i++)
 		if (sym[i].s_type == BC_SYM_LIB &&
-		    strncmp(strtab + sym[i].s_name, "mm_", 3) == 0)
+		    strncmp(sym_name((unsigned)i), "mm_", 3) == 0)
 			break;
 	if (i == h.h_nsym)
 		return base;
