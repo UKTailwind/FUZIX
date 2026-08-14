@@ -11,12 +11,18 @@ works - an animation loop prints nothing for seconds at a time, and at
 0.6 the reply is declared over and its results are lost.
 """
 import os, sys, time, serial
+import fzport
 
 PORT, BAUD = os.environ.get("FZPORT", "COM11"), 115200
 QUIET = float(os.environ.get("FZQUIET", "0.6"))
+# The longest a single command may take before the reply is declared
+# over regardless of quiet.  180s was fine until a whole program was
+# compiled ON the board: cc on a 127K C file runs for minutes, and the
+# transcript was being cut off mid-compile.
+LIMIT = float(os.environ.get("FZLIMIT", "180"))
 
 
-def drain(ser, quiet=QUIET, limit=180.0):
+def drain(ser, quiet=QUIET, limit=LIMIT):
     buf = b""
     last = time.time()
     t0 = time.time()
@@ -43,7 +49,7 @@ def slow(ser, line, delay):
 
 def main():
     delay = float(sys.argv[1]) / 1000.0
-    with serial.Serial(PORT, BAUD, timeout=0.2) as ser:
+    with fzport.open_port(BAUD, timeout=0.2) as ser:
         time.sleep(0.2)
         ser.reset_input_buffer()
         slow(ser, "", delay)

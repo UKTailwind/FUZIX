@@ -75,6 +75,16 @@ BINARIES = [
     (os.path.join(CC, "hwtest", "mmbc.s"), "mmbc", "/usr/bin/mmbc"),
     (os.path.join(CC, "hwtest", "mmedit.s"), "mmedit", "/usr/bin/mmedit"),
 ]
+# The compiler passes.  Not part of the BASIC set above - a board can
+# run a program built on the host without them being current - but a
+# change to the code generator only reaches an ON-BOARD compile if they
+# go too, and a board whose cc2 is older than its bcrun quietly builds
+# the objects the old one built.  --cc sends just these.
+COMPILER = [
+    (os.path.join(CC, "hwtest", "cc0.s"), "cc0", "/usr/lib/cc/cc0"),
+    (os.path.join(CC, "hwtest", "cc1.s"), "cc1", "/usr/lib/cc/cc1"),
+    (os.path.join(CC, "hwtest", "cc2.s"), "cc2", "/usr/lib/cc/cc2"),
+]
 
 
 def run(args):
@@ -94,16 +104,8 @@ def shell(*cmds):
     run(["fzsh.py", "5"] + list(cmds))
 
 
-def main():
-    only_headers = "--headers" in sys.argv
-
-    for src, name, dest in HEADERS:
-        send(src, name)
-        shell("mv %s %s" % (name, dest))
-    if only_headers:
-        return
-
-    for src, name, dest in BINARIES:
+def install(table):
+    for src, name, dest in table:
         if not os.path.exists(src):
             print("skipping %s - run stageall.sh first" % name)
             continue
@@ -111,6 +113,26 @@ def main():
         # chmod before the mv: a half-sent binary should never be the
         # one sitting in /usr/bin.
         shell("chmod +x " + name, "mv %s %s" % (name, dest))
+
+
+def main():
+    only_headers = "--headers" in sys.argv
+    only_cc = "--cc" in sys.argv
+
+    if only_cc:
+        install(COMPILER)
+        return
+
+    for src, name, dest in HEADERS:
+        send(src, name)
+        shell("mv %s %s" % (name, dest))
+    if only_headers:
+        return
+
+    install(BINARIES)
+    # The compiler last: it is the biggest send and the least likely to
+    # be what is being iterated on.  --cc does it alone.
+    install(COMPILER)
 
 
 main()

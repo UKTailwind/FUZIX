@@ -13,6 +13,7 @@ Lines are 62 characters, well inside the 132-byte tty queue, with a
 gap after each so cat can drain it.
 """
 import sys, time, serial, binascii, os
+import fzport
 
 PORT, BAUD = os.environ.get("FZPORT", "COM11"), 115200
 
@@ -150,7 +151,7 @@ def main():
     local, remote = argv[0], argv[1]
     gap = (int(argv[2]) if len(argv) > 2 else 25) / 1000.0
 
-    ser = serial.Serial(port, BAUD, timeout=1)
+    ser = fzport.open_port(BAUD, timeout=1, port=port)
     time.sleep(0.3); ser.reset_input_buffer()
     ser.write(b"\r"); ser.flush(); drain(ser, 0.4, 3)
 
