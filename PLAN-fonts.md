@@ -1,6 +1,30 @@
 # PLAN: user-defined fonts (`DefineFont`)
 
-Written 2026-08-13, from the picofrog survey.  Not started.
+Written 2026-08-13 from the picofrog survey.  **EXECUTED 2026-08-14 and
+board-verified** - mmb2c 8502c02, FUZIX 1f4e8e475.  Every phase below
+is done; the notes in each say what actually happened.
+
+Board evidence, in order:
+
+* the spike, on the real machine: `defined font 10`, `metrics: width 8`,
+  **`pixels: 0 bad`**, `define font 9: refused`, `short extent:
+  refused`, `foreign address: refused`, and `child correctly saw no
+  font 10` - the ownership hazard closed by a real forked process
+  rather than by argument;
+* `tests/fontdef.bas` through the whole chain (translate, on-board
+  `cc`, `bcrun`, kernel) printing `start` / `done`;
+* **picofrog's own 764-byte Konami font** as font 10: the `!` glyph
+  read back with exactly the twelve lit pixels its bytes predict, and
+  a line of it drawn beside the built-in font for the eye.
+
+The one thing that went wrong is worth more than the plan: the first
+board run said `Error: Invalid font`, and the cause was the BOARD's
+`/usr/lib/cc/include/mmb_runtime.h` being stale.  Without the
+prototype the call compiled anyway and every argument after the first
+shifted - the kernel was handed `addr 0 bytes 0`.  Deploying a new
+runtime function means deploying THREE things (bcrun, the header, and
+whatever calls it), and the header is the one with no symptom of its
+own.  See [[board-missing-prototype-slots]].
 
 `picofrog6_b9.bas` is the driver: it carries its own 8x8 "Konami style"
 font as a `DefineFont` block and selects it with `Font 9`.  Nothing
