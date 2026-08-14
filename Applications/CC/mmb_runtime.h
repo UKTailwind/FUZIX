@@ -587,6 +587,12 @@ MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h);
  * primitive that lays TEXT out lives in a header, on the far side of
  * this file's statics, so it has to ask. */
 void mm_font_cur(MMINTEGER *font, MMINTEGER *scale);
+/* OPTION CONSOLE SERIAL | SCREEN | BOTH | NONE - the reference's own
+ * bitmask (MM_Misc.c:5178): 1 serial, 2 screen, 3 both, 0 neither.  In
+ * a graphics mode this is what decides whether a PRINT reaches the
+ * serial line as well as the picture, which is the difference between
+ * a trace you can read and one the screen scrolls away. */
+void mm_console(MMINTEGER mode);
 
 /* Where font n's glyph data IS - MM.INFO(FONT ADDRESS n).
  *
