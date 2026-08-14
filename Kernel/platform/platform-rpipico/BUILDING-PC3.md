@@ -19,6 +19,21 @@ The Pico SDK is fetched automatically: `PICO_SDK_FETCH_FROM_GIT = yes`
 in this directory's Makefile, so the first configure needs network. If
 you have a local SDK, point `PICO_SDK_PATH` at it instead.
 
+**TinyUSB must be 0.20**, as the PC3's MMBasic and MicroPython builds
+use. SDK 2.3.0 bundles 0.18; after the SDK is fetched (or in a local
+SDK), upgrade its copy in place — the bundled tree is a git checkout,
+so it is one command:
+
+    git -C build/_deps/pico_sdk-src/lib/tinyusb fetch origin tag 0.20.0
+    git -C build/_deps/pico_sdk-src/lib/tinyusb checkout -f 0.20.0
+
+(Any clone of tinyusb that has the tag works as the fetch source.)
+The SDK fetch is pinned to tag 2.3.0 with FetchContent updates
+disconnected (pico_sdk_import.cmake), so reconfigures and clean
+rebuilds that keep `_deps` leave this checkout alone.  Only deleting
+`_deps` itself loses it - then re-fetch and do it again.
+`git -C ... describe --tags` answers "which one am I on".
+
 Note if you are rebuilding: cmake keeps `-DTOTALMEM` in
 `build/CMakeCache.txt`. Deleting that cache without network makes cmake
 try to re-fetch the SDK, and deleting it *with* a stale environment

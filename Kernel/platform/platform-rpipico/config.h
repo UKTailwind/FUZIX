@@ -91,11 +91,20 @@
  * out of the build). */
 #define CONFIG_PC3_DISPLAY
 
-/* USB host keyboard. Temporarily disabled to bisect the preemption
- * crashes: with this off there is no TinyUSB activity at all (no init,
- * no pump), input is serial-only, and the PendSV preemption machinery
- * still runs - so spinner/kill tests over serial isolate the core. */
-#define PC3_NO_USB_BUS_RESET
+/* USB host keyboard.  (To bisect TinyUSB out entirely - no init, no
+ * pump, serial-only input with the PendSV machinery still running -
+ * undefine CONFIG_PC3_USB_KBD.)
+ *
+ * The SE0 bus reset at usbkbd_init is ENABLED.  The PC3's CH334 hub is
+ * externally powered: it keeps its USB address and configured state
+ * across a warm reboot and then ignores re-enumeration from address 0,
+ * so without the reset the keyboard only ever works after a full power
+ * cycle - the exact field report that got it turned back on.  It had
+ * been disabled by PC3_NO_USB_BUS_RESET from v0.5 to v0.14, by a
+ * commit whose stated reason was lost to a truncated message; if a
+ * problem reappears, suspect booting with the DPDT switch in the PROG
+ * position (the SE0 is then driven at the attached PC, not the hub)
+ * and record the finding HERE before defining it again. */
 #define CONFIG_PC3_USB_KBD
 
 /* BBC 4-channel sound on the PCM5102 I2S DAC (GP10/11/22) */

@@ -35,6 +35,8 @@
 #undef time_t
 #include "pico/time.h"
 #include <hardware/structs/usb.h>
+#include <hardware/structs/nvic.h>
+#include <hardware/irq.h>
 #include "kbd_decode.h"
 #include "keyboard_maps.h"
 #include "rawuart.h"
@@ -184,6 +186,28 @@ void kbd_backend_set_leds(int slot, uint8_t leds)
     kbd_leds_mark(slot);
 }
 
+/* --- the rest of the decoder core's backend seam (kbd_decode.h) ---------- */
+
+/* Millisecond tick for the repeat engine. */
+uint32_t kbd_ticks_ms(void)
+{
+    return (uint32_t)(time_us_64() / 1000);
+}
+
+/* MicroPython schedules its keyboard.on_key callback here; the kernel
+ * has no equivalent (held-key state is read via usb_kbd_keydown, kept
+ * for a future ioctl). */
+void kbd_backend_on_key(int code)
+{
+    (void)code;
+}
+
+/* The core's diagnostic line (the orphaned-repeat guard). */
+void kbd_backend_msg(const char *s)
+{
+    kputs(s);
+}
+
 static int hid_slot_find(uint8_t addr, uint8_t inst)
 {
     for (int i = 0; i < HID_NSLOTS; i++) {
@@ -231,6 +255,66 @@ static void hid_poll(void)
     }
 }
 
+/* --- polled rescue ------------------------------------------------------- */
+
+/* rawuart.c's lesson, applied to USB: interrupt delivery on this
+ * platform can strand - enabled, pending, never taken (mechanism still
+ * unexplained; NOTES-console-wedge.md).  The uart survives it by being
+ * drained from the tick; USB survives it here, from the pump.  A
+ * stranded USB interrupt otherwise kills input silently - and if a key
+ * was down at the time, the synthesised auto-repeat types that
+ * character forever, which was exactly the field report. */
+
+/* hcd.h, which tusb.h does not export to the application. */
+extern void hcd_int_handler(uint8_t rhport, bool in_isr);
+
+/* SIE error latches nothing else clears: CRC, bit-stuff and RX-overflow
+ * have no interrupt enabled and the hcd's ISR never touches them (the
+ * documented dead-keyboard state had all three latched - the 0x47800205
+ * in PC3-IRQ-REVIEW.md); DATA_SEQ and RESUME are ours to clear now that
+ * their interrupts are masked at init (see usbkbd_init). */
+#define USB_SIE_ERROR_LATCHES ( \
+    USB_SIE_STATUS_CRC_ERROR_BITS | USB_SIE_STATUS_BIT_STUFF_ERROR_BITS | \
+    USB_SIE_STATUS_RX_OVERFLOW_BITS | USB_SIE_STATUS_DATA_SEQ_ERROR_BITS | \
+    USB_SIE_STATUS_RESUME_BITS)
+
+static void usb_rescue(void)
+{
+    static bool pending_seen;
+    static bool said;
+    uint32_t errs = usb_hw->sie_status & USB_SIE_ERROR_LATCHES;
+    uint32_t primask;
+
+    if (errs) {
+        hw_clear_bits(&usb_hw->sie_status, errs);
+    }
+
+    /* This runs in thread context.  With PRIMASK clear, an enabled
+     * interrupt cannot sit pending - the CPU would have taken it before
+     * the load below completed.  Seeing it pending anyway means
+     * delivery is stranded; requiring it on two consecutive passes
+     * rules out sampling the one cycle of a delivery in flight. */
+    __asm volatile ("mrs %0, primask" : "=r" (primask));
+    if (!primask && irq_is_enabled(USBCTRL_IRQ) &&
+        (nvic_hw->ispr[USBCTRL_IRQ / 32] & (1u << (USBCTRL_IRQ % 32)))) {
+        if (pending_seen) {
+            irq_set_enabled(USBCTRL_IRQ, false);
+            hcd_int_handler(0, false); /* run the stranded ISR by hand */
+            irq_set_enabled(USBCTRL_IRQ, true);
+            kbd_stop_repeat(); /* input gapped; the held key is not trustworthy */
+            pending_seen = false;
+            if (!said) { /* said once, like rawuart's stall report */
+                said = true;
+                kputs("USB: stranded interrupt, rescued by polling\n");
+            }
+        } else {
+            pending_seen = true;
+        }
+    } else {
+        pending_seen = false;
+    }
+}
+
 /* --- task pump ----------------------------------------------------------- */
 
 /* The pump body: only ever entered via usb_pump_stacked (tricks.S),
@@ -242,6 +326,7 @@ void usb_pump_c(void)
     static volatile bool in_task;
     if (usbh_inited && !in_task) {
         in_task = true;
+        usb_rescue();
         tuh_task();
         hid_poll();
         kbd_repeat_check();
@@ -335,6 +420,22 @@ void usbkbd_init(void)
         memset((void *)&hid_slots[i], 0, sizeof(hid_slots[i]));
 
     tuh_init(0); /* native controller, root-hub port 0 */
+
+    /* A kernel must not HardFault on bus noise.  TinyUSB's rp2040 hcd
+     * panic()s - a BKPT, i.e. a hard lockup - on a data-toggle mismatch
+     * (ERROR_DATA_SEQ), and on any enabled-but-unhandled interrupt, of
+     * which HOST_RESUME is one it enables and never handles.  Both
+     * arrive from ordinary electrical noise on this board (378 MHz,
+     * PSRAM and HSTX beside the connector, every device behind a hub):
+     * the field signature was constant lockups with the CRC/bit-stuff
+     * latches set (PC3-IRQ-REVIEW.md).  MMBasic ships the same hcd
+     * unpatched, but a BASIC interpreter rebooting is an annoyance
+     * where a kernel rebooting is a disk check.  Mask both at the
+     * controller: the hardware poll of the endpoint simply continues,
+     * and usb_rescue() clears the latches they leave behind. */
+    hw_clear_bits(&usb_hw->inte,
+        USB_INTE_ERROR_DATA_SEQ_BITS | USB_INTE_HOST_RESUME_BITS);
+
 #ifndef PC3_NO_USB_BUS_RESET
     usb_bus_reset();    /* force any attached hub back to Default state */
     busy_wait_us(50000); /* let the hub re-detect its downstream ports */

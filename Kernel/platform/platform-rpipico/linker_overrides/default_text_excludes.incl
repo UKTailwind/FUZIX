@@ -196,6 +196,21 @@
  * below. ---- */
 *swapper.c.o(.text*)
 
+/* ---- TinyUSB's hub and HID class drivers, moved when the 0.20
+ * upgrade outgrew 0.18's RAM fit by 1048 bytes.
+ *
+ * Both run only from tuh_task - thread context, on the dedicated usb
+ * stack - never from the interrupt (the ISR's whole call graph is
+ * hcd_rp2040.c / rp2040_usb.c plus usbh.c's hcd_event_handler, none of
+ * which is listed here), and never while flash is busy (the flash
+ * driver's di() window masks the tick that would pend the pump).
+ * Attach-time enumeration and 50/s report dispatch are human-speed; a
+ * cache miss cannot hurt.  Do NOT add the rest of tinyusb wholesale:
+ * with PICO_RP2040_USB_FAST_IRQ at its default 0 the ISR itself is
+ * plain .text and a blanket pattern would drag it to flash. ---- */
+*hub.c.o(.text*)
+*hid_host.c.o(.text*)
+
 /* ---- the PSRAM arena, for the same reason as the swapper above it,
  * and moved for the same kind of squeeze: adding SPI0 left the link 264
  * bytes over even with spiuser.c itself in flash.

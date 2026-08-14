@@ -29,10 +29,17 @@ if (NOT PICO_SDK_PATH)
         if (PICO_SDK_FETCH_FROM_GIT_PATH)
             get_filename_component(FETCHCONTENT_BASE_DIR "${PICO_SDK_FETCH_FROM_GIT_PATH}" REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
         endif ()
+        # Pinned (was master): the PC3 build wants SDK 2.3.0 exactly, and a
+        # moving tag makes reconfigures run a git stash/pull/unstash cycle
+        # in _deps/pico_sdk-src - which fails once the bundled tinyusb has
+        # been moved to 0.20.0 (see BUILDING-PC3.md).  UPDATES_DISCONNECTED
+        # stops the update step from touching git at all once the SDK is
+        # populated, so offline rebuilds and the tinyusb checkout survive.
+        set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
         FetchContent_Declare(
                 pico_sdk
                 GIT_REPOSITORY https://github.com/raspberrypi/pico-sdk
-                GIT_TAG master
+                GIT_TAG 2.3.0
         )
         if (NOT pico_sdk)
             message("Downloading Raspberry Pi Pico SDK")
