@@ -624,6 +624,46 @@ int plt_dev_ioctl(uarg_t request, char *data)
             return -1;
         return 0;
     }
+    if (request == GFXIOC_FONTDEF)
+    {
+        struct gfx_fontdef fd;
+        unsigned char hdr[4];
+        uint32_t need;
+
+        if (uget(data, &fd, sizeof(fd)))
+            return -1;
+        /* The WHOLE extent must be this process's, checked once here:
+         * the renderer reads it later without asking again, which is
+         * safe only because the slot is invisible to anyone else and
+         * is dropped when this process goes. */
+        if (fd.bytes < 4 ||
+            valaddr((const uint8_t *)(uintptr_t)fd.addr, fd.bytes, 0)
+                != fd.bytes)
+            return -1;              /* valaddr sets EFAULT */
+        if (uget((const void *)(uintptr_t)fd.addr, hdr, sizeof(hdr)))
+            return -1;
+        /* width*height a multiple of 8 is what makes the glyphs plain
+         * MSB-first bytes rather than a bit stream (fonts.c), and the
+         * renderer assumes it.  A font with no characters would index
+         * off the front of its own data. */
+        if (!hdr[0] || !hdr[1] || !hdr[3] || ((hdr[0] * hdr[1]) & 7)) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        need = 4u + (uint32_t)hdr[3] *
+                    ((uint32_t)hdr[0] * (uint32_t)hdr[1] / 8u);
+        if (fd.bytes < need) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        if (display_font_set(fd.font,
+                             (const unsigned char *)(uintptr_t)fd.addr,
+                             udata.u_ptab)) {
+            udata.u_error = EINVAL;     /* not 10-16 */
+            return -1;
+        }
+        return 0;
+    }
     if (request == GFXIOC_INFO)
     {
         struct gfx_info gi;
@@ -893,6 +933,8 @@ void plt_exec_cleanup(void)
      * leaving the claim would have it drawing into a layer it cannot
      * show. */
     display_fb_release(udata.u_ptab);
+    /* and its fonts, which point into the image being replaced */
+    display_font_release(udata.u_ptab);
 #endif
 #ifdef CONFIG_PC3_PINLOCK
     /* The new image did not claim these pins and does not know what they

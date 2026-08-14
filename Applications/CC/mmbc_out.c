@@ -514,6 +514,27 @@ void conv_write(FILE *f)
         /* the same for SPI's three, in whatever order they were
            written - mmb_spi.h works out which pin is which signal */
         fprintf(f, "static int __mmspi_a, __mmspi_b, __mmspi_c;\n");
+    /* DefineFont: the glyphs live in this program's image and the
+       kernel is given their address, so they are `static const' -
+       nothing copies them and nothing may move them. */
+    for (k = 0; k < cv.nfonts; k++) {
+        const unsigned char *d = cv.fonts[k].data;
+        int len = cv.fonts[k].len, off;
+
+        fprintf(f, "\n/* DefineFont %d: %dx%d, %d characters from %d, "
+                   "%d bytes */\n",
+                cv.fonts[k].num, d[0], d[1], d[3], d[2], len);
+        fprintf(f, "static const unsigned char __mmfont_%d[%d] = {\n",
+                cv.fonts[k].num, len);
+        for (off = 0; off < len; off += 12) {
+            int m, last = off + 12 < len ? off + 12 : len;
+            fprintf(f, "    ");
+            for (m = off; m < last; m++)
+                fprintf(f, "0x%02x,", d[m]);
+            fprintf(f, "\n");
+        }
+        fprintf(f, "};\n");
+    }
     fprintf(f, "\n/* ---- forward declarations ---- */\n");
     if (cv.uses_clear)
         fprintf(f, "static void __mmb_clear(void);\n");
@@ -540,6 +561,13 @@ void conv_write(FILE *f)
     else
         fprintf(f, "int main(void)\n{\n");
     fprintf(f, "    unsigned __mark = mm_mark(); (void)__mark;\n");
+    /* Fonts first, and here rather than where the block sits: the
+       interpreter binds them at LOAD, so a program may select font 10
+       a thousand lines above its DefineFont. */
+    for (k = 0; k < cv.nfonts; k++)
+        fprintf(f, "    mm_fontdef(%d, (MMINTEGER)(long)__mmfont_%d, "
+                   "(MMINTEGER)sizeof __mmfont_%d);\n",
+                cv.fonts[k].num, cv.fonts[k].num, cv.fonts[k].num);
     if (cv.uses_cmdline)
         fprintf(f, "    mm_argv_bind(argc, argv);\n");
     if (cv.uses_onerror)

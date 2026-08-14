@@ -302,12 +302,46 @@ struct gfx_fontinfo {
  * where the font ends, and reading past it is silent nonsense rather
  * than a fault. */
 struct gfx_fontaddr {
-	uint8_t font;		/* in: 1..9 */
+	uint8_t font;		/* in: 1..16 */
 	uint8_t pad[3];
 	uint32_t addr;		/* out: machine address of the font data */
 	uint32_t bytes;		/* out: 4 + count * (width * height / 8) */
 };
 #define GFXIOC_FONTADDR 0x0031
+
+/* A font of the CALLER'S OWN - MMBasic's DefineFont, and the exact
+ * mirror of GFXIOC_FONTADDR above: that hands a program the address of
+ * a kernel font, this takes the address of a program's.
+ *
+ * Nothing is copied.  The glyphs stay in the caller's image - where
+ * they cost the program rather than the kernel's last few hundred
+ * bytes of RAM - and are read where they lie, which works for the
+ * reason FONTADDR works in the other direction: no MMU, so an address
+ * is an address.  MMBasic does the same, its FontTable holding
+ * pointers to font data sitting in flash beside the program.
+ *
+ * `addr' points at the four-byte header documented above, `bytes' at
+ * the whole extent including it; both are checked against the calling
+ * process, and the header must agree with `bytes' (and width*height
+ * must be a multiple of 8, which the glyph packing assumes).
+ *
+ * Numbers 10-16 ONLY: the built-in nine are shared with the console
+ * and every other program, so they cannot be replaced.  Nine plus
+ * seven is MMBasic's sixteen.
+ *
+ * The registration belongs to the PROCESS and disappears when it exits
+ * or execs.  It has to: every process here loads at the same address,
+ * so a slot left behind would be a plausible pointer into whatever
+ * runs next, drawing silent garbage.  Another process asking for the
+ * same number gets nothing, not this one's glyphs.
+ */
+struct gfx_fontdef {
+	uint8_t font;		/* in: 10..16 */
+	uint8_t pad[3];
+	uint32_t addr;		/* in: the glyph data, header first */
+	uint32_t bytes;		/* in: 4 + count * (width * height / 8) */
+};
+#define GFXIOC_FONTDEF 0x0036
 
 /* The shared maths library.  data -> a void * that receives the
  * address of the table below; from there a program CALLS the entries

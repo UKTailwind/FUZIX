@@ -4091,6 +4091,7 @@ static int mm_gcw = 8, mm_gch = 12;     /* font 1, until FONT says else */
 #define MM_GFX_TEXT     0x001A
 #define MM_GFX_FONTINFO 0x001D
 #define MM_GFX_FONTADDR 0x0031
+#define MM_GFX_FONTDEF  0x0036
 #define MM_GFX_SCROLL   0x001B
 #define MM_GFX_MAP      0x001E
 #define MM_GFX_MAPCTL   0x001F
@@ -4155,6 +4156,38 @@ struct mm_gfx_fontaddr {
  * does, and a program that wants the extent computes it from the header
  * it can now read; a C program wanting it asks the ioctl directly.
  */
+/*
+ * DefineFont n - a font of the PROGRAM'S OWN, numbers 10-16.
+ *
+ * The exact mirror of mm_fontaddr above: that asks where a kernel font
+ * is, this says where one of ours is.  Nothing is copied - the glyphs
+ * stay in this program's image and the kernel reads them where they
+ * lie, which works for the same reason (no MMU, an address is an
+ * address) and costs the kernel a pointer.
+ *
+ * The translator emits the data already byte-swapped into the layout
+ * mm_fontaddr documents, and calls this from the program's prologue -
+ * MMBasic binds fonts when the program is LOADED, so a DefineFont
+ * block at the bottom of a file is in force at the top of it.
+ *
+ * The registration dies with the process, which is what makes handing
+ * out an address safe: nothing else can reach it.
+ */
+MMINTEGER mm_fontdef(MMINTEGER font, MMINTEGER addr, MMINTEGER bytes)
+{
+    struct mm_gfx_fontaddr fd;          /* same shape: font, addr, bytes */
+
+    if (mm_gfx_open() < 0)
+        return -1;
+    fd.font = (unsigned char)font;
+    fd.pad[0] = fd.pad[1] = fd.pad[2] = 0;
+    fd.addr = (unsigned int)addr;
+    fd.bytes = (unsigned int)bytes;
+    if (ioctl(mm_gfx_fd, MM_GFX_FONTDEF, &fd) < 0)
+        return -1;
+    return 0;
+}
+
 MMINTEGER mm_fontaddr(MMINTEGER font)
 {
     struct mm_gfx_fontaddr fa;
@@ -5056,6 +5089,15 @@ MMINTEGER mm_fontaddr(MMINTEGER font)
 {
     (void)font;
     return 0;
+}
+
+/* DefineFont with nothing to draw on.  -1, and the caller ignores it:
+ * a program carrying its own font must still RUN under the gates, and
+ * every drawing call here is already silently nothing. */
+MMINTEGER mm_fontdef(MMINTEGER font, MMINTEGER addr, MMINTEGER bytes)
+{
+    (void)font; (void)addr; (void)bytes;
+    return -1;
 }
 
 void mm_font(MMINTEGER font, MMINTEGER scale)

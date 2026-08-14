@@ -26,6 +26,7 @@
  */
 
 #include <kernel.h>
+#include <kdata.h>			/* udata: whose font a slot is */
 #include <stdint.h>
 #include "display.h"
 
@@ -66,20 +67,87 @@ static const unsigned char *const font_table[] = {
 #define NFONTS ((int)(sizeof(font_table) / sizeof(font_table[0])))
 
 /*
+ * A PROGRAM'S OWN FONT (GFXIOC_FONTDEF), which is MMBasic's DefineFont.
+ *
+ * The mirror of GFXIOC_FONTADDR: that hands a program the address of a
+ * kernel font, this takes the address of a program's.  Nothing is
+ * copied - the glyphs stay in the caller's image, where they cost the
+ * program and not the kernel's last few hundred bytes of RAM, and are
+ * read where they lie.  There is no MMU, so a user address is a machine
+ * address; MMBasic does the same thing with the font in flash beside
+ * the program (MMBasic.c:1167, FontTable[] holding pointers).
+ *
+ * Numbers 10-16 only.  MMBasic's nine built-ins keep 1-9 and a
+ * DefineFont onto one of them is refused rather than honoured, so a
+ * program cannot change what the console and every other program draws
+ * with; the translator turns that into an error the programmer sees.
+ * Nine built-in plus seven of these is MMBasic's sixteen.
+ *
+ * OWNERSHIP IS NOT OPTIONAL.  Every process on this machine loads at
+ * the same PROGLOAD, so one program's font address is a perfectly
+ * plausible address inside the next one, and a slot left behind would
+ * have it drawing glyphs out of whatever is running now - silently,
+ * with no fault to trace.  So each slot carries the p_tab that
+ * registered it (a pointer, not a pid: pids are reused), a slot is
+ * invisible to any other process, and display_font_release() empties
+ * it on exit and on exec.
+ */
+#define UFONT_FIRST  10
+#define UFONT_SLOTS  7                  /* fonts 10-16 */
+
+static struct {
+    const unsigned char *addr;
+    struct p_tab *owner;
+} ufont[UFONT_SLOTS];
+
+/* Remember one.  The caller (misc.c) has already checked that the whole
+ * extent belongs to this process and that the header agrees with it. */
+int display_font_set(int font, const unsigned char *addr, struct p_tab *owner)
+{
+    if (font < UFONT_FIRST || font >= UFONT_FIRST + UFONT_SLOTS)
+        return -1;
+    ufont[font - UFONT_FIRST].addr = addr;
+    ufont[font - UFONT_FIRST].owner = owner;
+    return 0;
+}
+
+/* Process gone (exit, exec) - its fonts go with it. */
+void display_font_release(struct p_tab *who)
+{
+    unsigned i;
+
+    for (i = 0; i < UFONT_SLOTS; i++)
+        if (ufont[i].owner == who) {
+            ufont[i].addr = NULL;
+            ufont[i].owner = NULL;
+        }
+}
+
+/*
  * The glyph data for a font, with its metrics, or NULL if there is no
  * such font.  Fonts are numbered from 1, as MMBasic numbers them.
  *
  * Every metric comes out of the font's own header rather than a table
- * here, so adding a font is one line above and nothing else.
+ * here, so adding a font is one line above and nothing else - and it is
+ * what lets a user font of any cell size drop in with no other change.
  */
 const unsigned char *display_font(int font, int *w, int *h,
                                   int *first, int *count)
 {
     const unsigned char *fp;
 
-    if (font < 1 || font > NFONTS)
+    if (font >= UFONT_FIRST && font < UFONT_FIRST + UFONT_SLOTS) {
+        unsigned i = (unsigned)(font - UFONT_FIRST);
+
+        /* Another process's slot is not ours to draw from */
+        if (ufont[i].addr == NULL || ufont[i].owner != udata.u_ptab)
+            return NULL;
+        fp = ufont[i].addr;
+    }
+    else if (font < 1 || font > NFONTS)
         return NULL;
-    fp = font_table[font - 1];
+    else
+        fp = font_table[font - 1];
     if (w)
         *w = fp[0];
     if (h)

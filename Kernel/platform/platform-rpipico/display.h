@@ -154,13 +154,25 @@ int display_gfx_remap(int index, uint32_t rgb888);
 int display_gfx_remap_apply(void);
 int display_gfx_remap_reset(void);
 
-/* The built-in fonts - MMBasic's nine, in flash (fonts.c).  Numbered
- * from 1 as MMBasic numbers them; NULL for one that does not exist.
- * Every metric is read out of the font's own four-byte header, so
- * nothing anywhere carries a second idea of how big a font is. */
+/* The fonts (fonts.c).  1-9 are MMBasic's built-in nine, in flash;
+ * 10-16 are the CALLING PROCESS's own, registered with GFXIOC_FONTDEF
+ * (MMBasic's DefineFont) and invisible to any other process.  NULL for
+ * one that does not exist.  Every metric is read out of the font's own
+ * four-byte header, so nothing anywhere carries a second idea of how
+ * big a font is - which is what lets a user font of any cell size drop
+ * in with no change to the renderer. */
 const unsigned char *display_font(int font, int *w, int *h,
                                   int *first, int *count);
+/* How many BUILT-IN fonts; the user slots are per process. */
 int display_font_count(void);
+/* Register one of the caller's own.  The caller must already have
+ * checked the extent against the process (misc.c). */
+int display_font_set(int font, const unsigned char *addr,
+                     struct p_tab *owner);
+/* Process gone (exit, exec) - drop its fonts.  Every process loads at
+ * the same address, so a slot left behind would be a plausible pointer
+ * into whatever runs next. */
+void display_font_release(struct p_tab *who);
 
 /* A run of text at a PIXEL position.  Draws through the caller's write
  * target like every other primitive, which is what lets PRINT reach the

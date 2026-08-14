@@ -438,6 +438,10 @@ static void w_fontinfo(void) { A = mm_fontinfo(LL(0), PI(2), PI(3)); }
    the VM's own offsets describe.  PEEK is not in this table at all - it
    compiles into the program from mmb_peek.h and needs no crossing. */
 static void w_fontaddr(void) { A = mm_fontaddr(LL(0)); }
+/* DefineFont: the address goes the OTHER way - the program's own font
+   data, which lives in the program's image and is read by the kernel
+   where it lies.  A machine address again, so it crosses whole. */
+static void w_fontdef(void)  { A = mm_fontdef(LL(0), LL(2), LL(4)); }
 static void w_font(void)     { mm_font(LL(0), LL(2)); A = 0; }
 static void w_gtext(void)    { mm_gtext(LL(0), LL(2), LL(4), LL(6),
                                         LL(8), LL(10), Ps(12), LL(13));
@@ -750,6 +754,7 @@ static const struct mmwrap {
 	{ "mm_map_get",		w_map_get },
 	{ "mm_fontinfo",	w_fontinfo },
 	{ "mm_fontaddr",	w_fontaddr },
+	{ "mm_fontdef",		w_fontdef },
 	{ "mm_font",		w_font },
 	{ "mm_gtext",		w_gtext },
 	{ "mm_fb_create",	w_fb_create },

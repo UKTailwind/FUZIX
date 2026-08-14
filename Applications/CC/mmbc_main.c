@@ -115,6 +115,10 @@ static const char *convert(const char *inpath, const char *outpath,
     cv.mode = M_SCAN;
     cv.indent = 1;
 
+    /* before every other pass: a DefineFont block is hex, not BASIC,
+     * and is in force from the top of the program however far down it
+     * sits */
+    pass_fonts();
     pass_routine_names();
     pass_types();
     pass_declarations();

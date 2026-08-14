@@ -55,7 +55,7 @@ bcrun.o: CCOPTS += -DMM_PC3
 # arena client after cc2.
 MMBC_OBJ = mmbc_main.o mmbc_lex.o mmbc_util.o mmbc_tab.o mmbc_sym.o \
 	   mmbc_expr.o mmbc_builtin.o mmbc_decl.o mmbc_walk.o \
-	   mmbc_stmt.o mmbc_out.o mmbc_type.o
+	   mmbc_stmt.o mmbc_out.o mmbc_type.o mmbc_font.o
 
 $(MMBC_OBJ): CCOPTS += -DMMBC_ARENA
 $(MMBC_OBJ): mmbc.h mmbc_expr.h

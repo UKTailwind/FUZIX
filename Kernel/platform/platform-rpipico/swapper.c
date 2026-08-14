@@ -188,6 +188,10 @@ void pagemap_free(ptptr p)
     /* and so does the framebuffer layer, or the next program to ask for
        one is told it is busy by a process that no longer exists */
     display_fb_release(p);
+    /* and any font it defined, which points into the image about to be
+       reused: every process loads at the same address, so a slot left
+       behind is a plausible pointer into the NEXT program's data */
+    display_font_release(p);
 #endif
 #ifdef CONFIG_PC3_PINLOCK
     /* and the I/O header, with the PINS THEMSELVES put back to inputs:
