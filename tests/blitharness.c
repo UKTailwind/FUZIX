@@ -51,6 +51,46 @@ MMINTEGER mm_fb_put(MMINTEGER offset, MMINTEGER len, const void *buf)
     return 0;
 }
 
+/*
+ * The rectangle forms - `rows` rows of `len` bytes, the framebuffer
+ * advancing by `stride` between them while the caller's buffer is
+ * PACKED at len bytes a row (mmb_blit.h indexes it as base + y*len).
+ *
+ * These were added to mmb_blit.h with GFXIOC_BLITR and not to this
+ * harness, so from that commit the pixel-exact gate did not LINK - and
+ * a gate that does not build reports nothing at all rather than
+ * reporting a failure.  It had been silent ever since.
+ */
+MMINTEGER mm_fb_readr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                      MMINTEGER stride, void *buf)
+{
+    unsigned char *d = buf;
+    MMINTEGER i;
+
+    for (i = 0; i < rows; i++) {
+        MMINTEGER o = offset + i * stride;
+        if (o < 0 || o + len > (MMINTEGER)cur_stride * cur_vres)
+            return -1;
+        memcpy(d + i * len, fb + o, (size_t)len);
+    }
+    return 0;
+}
+
+MMINTEGER mm_fb_putr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                     MMINTEGER stride, const void *buf)
+{
+    const unsigned char *s = buf;
+    MMINTEGER i;
+
+    for (i = 0; i < rows; i++) {
+        MMINTEGER o = offset + i * stride;
+        if (o < 0 || o + len > (MMINTEGER)cur_stride * cur_vres)
+            return -1;
+        memcpy(fb + o, s + i * len, (size_t)len);
+    }
+    return 0;
+}
+
 /* Any raise in this harness is a test failure: the deliberate error
  * paths are the .bas gate's job. */
 void mm_error(const char *msg)
