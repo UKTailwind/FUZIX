@@ -31,6 +31,7 @@
 #else
 #include <termios.h>
 #include <unistd.h>
+#include <signal.h>     /* the console must be given back on a signal too */
 #endif
 
 /* ================= error state ===================================== *
@@ -3374,6 +3375,28 @@ static int mm_tty_held;                 /* we have it raw now */
 static int mm_tty_have;                 /* mm_tty_cooked is valid */
 static int mm_tty_want;                 /* a key reader asked for it */
 
+/* The signals that end a program while it is holding the console.  Only
+ * the "stop now" ones: a crash leaves the terminal raw too, but a fault
+ * handler that touches the tty is a poor place to be and the crash is
+ * the louder problem. */
+static const int mm_raw_sigs[] = { SIGINT, SIGQUIT, SIGTERM, SIGHUP };
+
+/*
+ * Give the console back, then die exactly as we would have died.
+ *
+ * Putting the default disposition back and re-raising - rather than
+ * calling exit() - is what keeps the exit status honest: the shell still
+ * reports the program as killed by that signal, `$?` still says so, and
+ * a script testing for an interrupted run still sees one.  Calling
+ * exit(0) here would have quietly turned every Ctrl-C into a success.
+ */
+static void mm_raw_onsig(int sig)
+{
+    mm_raw_release();
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
 static int mm_raw_hold(void)
 {
     if (mm_tty_held)
@@ -3415,6 +3438,22 @@ static int mm_raw_hold(void)
          * paths alike.
          */
         atexit(mm_raw_release);
+        /*
+         * ...and a signal death runs NO atexit handler, which is the one
+         * door left open: Ctrl-C on a program holding the console left
+         * the terminal raw and logged the user out exactly as above.  It
+         * is the commonest way to stop a game, so it was the commonest
+         * way to lose the session.  See mm_raw_onsig for why re-raising
+         * keeps the exit status honest.
+         */
+        {
+            unsigned i;
+            for (i = 0; i < sizeof(mm_raw_sigs) / sizeof(mm_raw_sigs[0]); i++)
+                /* a signal our parent had ignored stays ignored - the
+                   standard idiom, so `prog &` keeps behaving */
+                if (signal(mm_raw_sigs[i], mm_raw_onsig) == SIG_IGN)
+                    signal(mm_raw_sigs[i], SIG_IGN);
+        }
     }
     mm_tty_held = 1;
     mm_tty_want = 1;

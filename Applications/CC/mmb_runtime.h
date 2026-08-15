@@ -850,7 +850,7 @@ char *mm_errmsg(void);              /* MM.ERRMSG$                      */
  * releases old.  `relcheck.sh` in the platform directory compares this
  * with PC3_RELEASE and the manual's date line, and is in the recipe
  * now - a comment asking to be kept in step is not a mechanism. */
-#define MM_RELEASE 0.14
+#define MM_RELEASE 0.15
 MMFLOAT mm_ver(void);               /* MM.VER                          */
 char *mm_device(void);              /* MM.DEVICE$                      */
 char *mm_cmdline(void);             /* MM.CMDLINE$                     */
