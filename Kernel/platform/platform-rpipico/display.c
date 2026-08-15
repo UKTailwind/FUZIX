@@ -713,6 +713,87 @@ static void __not_in_flash_func(disp_dma_irq)(void)
 }
 
 /* --- core1 fill loop: expand one scanline into RGB332 -------------------- */
+/*
+ * The one watchdog that survives core0 dying with interrupts off.
+ *
+ * The tick holds di() across its whole body, so if it hangs in there
+ * interrupts never come back and every diagnostic on core0 dies with
+ * it: no fault so no dump, no tick so no kernel watchdog, no console
+ * because the shell is core0's too.  The machine looks dead and says
+ * nothing - which is the picofrog freeze exactly.
+ *
+ * core1 is untouched by any of that.  It paints out of the framebuffer
+ * and takes none of core0's interrupts or locks, so it can watch the
+ * tick counter and report when it stops - and, from the phase
+ * breadcrumb, WHICH CALL in the tick it stopped in.  The report goes
+ * straight at the uart's data register: the transmit ring, the tty
+ * layer and the console are all core0's and all suspect.  Hardware
+ * uart1 is the console here (config.h sets DEV_UART_0_INSTANCE to 1).
+ *
+ * Phases: 1 usbkbd_tick, 2 tty_interrupt, 3 rawuart_tx_poll,
+ *         4 timer_interrupt, 5 pre-empt/re-arm (tick body finished).
+ */
+extern volatile uint32_t pc3_tickbeat, pc3_syscount;
+extern volatile uint8_t pc3_tickphase;
+
+static uint32_t c1_beat, c1_frames;
+
+static void __not_in_flash_func(c1_putc)(char c)
+{
+    uart_hw_t *hw = uart_get_hw(uart1);
+
+    while (hw->fr & UART_UARTFR_TXFF_BITS)
+	;
+    hw->dr = (uint8_t)c;
+}
+
+static void __not_in_flash_func(c1_str)(const char *s)
+{
+    while (*s)
+	c1_putc(*s++);
+}
+
+static void __not_in_flash_func(c1_hex)(uint32_t v, int n)
+{
+    static const char d[] = "0123456789ABCDEF";
+
+    while (--n >= 0)
+	c1_putc(d[(v >> (n * 4)) & 15]);
+}
+
+/*
+ * One compare a frame, and it KEEPS saying it - every two seconds for
+ * as long as the tick is stopped.  Reporting once was a race that lost
+ * a run: the line goes out the instant the machine dies, and whoever is
+ * watching the port has usually not attached yet, or resets the board
+ * before reading it.  A frozen machine has nothing else to say, so
+ * repeating costs nothing and means the evidence is there whenever
+ * someone looks.
+ */
+static void __not_in_flash_func(disp_core1_watch)(void)
+{
+    if (pc3_tickbeat != c1_beat) {
+	c1_beat = pc3_tickbeat;
+	c1_frames = 0;
+	return;
+    }
+    if (++c1_frames < 120)			/* ~2s at 60Hz */
+	return;
+    c1_frames = 0;
+
+    /*	nsys is the one that matters now.  Watch it ACROSS the repeats:
+     *	climbing means core0 is alive in userland and only the timer
+     *	interrupt has stopped; frozen means core0 is not executing at
+     *	all, and then the dead tick is a symptom rather than the fault. */
+    c1_str("\r\n[CORE0 STALLED phase=");
+    c1_hex(pc3_tickphase, 1);
+    c1_str(" beat=");
+    c1_hex(pc3_tickbeat, 8);
+    c1_str(" nsys=");
+    c1_hex(pc3_syscount, 8);
+    c1_str("]\r\n");
+}
+
 static void __not_in_flash_func(disp_fill_loop)(void)
 {
     /*
@@ -741,8 +822,12 @@ static void __not_in_flash_func(disp_fill_loop)(void)
         if (v_scanline != last_line) {
             last_line = v_scanline;
             int active = last_line - vblank;
-            if (active < 0 || active >= vact)
+            if (active < 0 || active >= vact) {
+                /* Once a frame, in vblank, where there is time. */
+                if (last_line == 0)
+                    disp_core1_watch();
                 continue;
+            }
 
             /*
              * NO __dmb() here, though MMBasic has one at the top of

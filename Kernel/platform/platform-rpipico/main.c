@@ -137,8 +137,20 @@ void fatal_exception_handler(struct extended_exception_frame* eh)
     panic("fatal exception");
 }
 
+/* Read by the core1 stall watchdog (display.c), and it is the whole
+   question once the tick is known to have exited cleanly: if this keeps
+   climbing while the tick is dead, core0 is alive and running userland
+   and only the timer interrupt has stopped being delivered.  If it is
+   frozen too, core0 has stopped running code with interrupts off - a
+   bus stall, or a fault handler halted after printing its dump to a
+   console nobody can see (in a graphics mode the panic text goes to a
+   framebuffer that is not on the screen; picofrog died that way for a
+   week) - and the timer is a symptom, not the fault. */
+volatile uint32_t pc3_syscount;
+
 void syscall_handler(struct svc_frame* eh)
 {
+    pc3_syscount++;
     udata.u_callno = *(uint8_t*)(eh->pc - 2);
     udata.u_argn = eh->r0;
     udata.u_argn1 = eh->r1;
