@@ -31,7 +31,7 @@ struct devsw dev_tab[] =  /* The device driver switch table */
   /* Pack to 7 with nxio if adding private devices and start at 8 */
 };
 
-static absolute_time_t now;
+static repeating_timer_t tick_timer;
 
 bool validdev(uint16_t dev)
 {
@@ -43,26 +43,67 @@ bool validdev(uint16_t dev)
         return true;
 }
 
-static void timer_tick_cb(unsigned alarm)
+/*
+ *	The system tick, driven by the SDK's repeating timer.
+ *
+ *	It used to re-arm its own hardware alarm, and that is what froze the
+ *	machine: hardware_alarm_set_target returns true when the target has
+ *	already passed, and in that case the alarm is NOT armed.  Nothing
+ *	else re-armed it, so ONE missed deadline stopped the timer for good -
+ *	no scheduling, no tty_interrupt, no signal delivery, no pre-emption.
+ *	The board stayed powered and completely unresponsive, core1 kept
+ *	painting a perfect picture, and nothing faulted so there was no crash
+ *	dump to say why.
+ *
+ *	The pool cannot do that.  The entry stays in its ordered list and the
+ *	pool re-programs the hardware from the head of that list, so there is
+ *	no state in which the tick is simply gone; a target already in the
+ *	past makes the callback fire again immediately instead.
+ *
+ *	The delay is NEGATIVE deliberately, as MMBasic's is
+ *	(PicoMite.c:903, add_repeating_timer_us(-1000)): the sign selects the
+ *	phase reference.  Negative measures the next fire from the SCHEDULED
+ *	target, so the rate stays exactly one period however long this
+ *	handler takes; positive would measure from now and let the tick drift
+ *	by the handler's own duration.
+ */
+/*
+ *	Read by the core1 stall watchdog (display.c).  The tick holds di()
+ *	across its whole body, so if it hangs anywhere in here interrupts
+ *	stay off for ever and nothing on core0 is left to say where.  One
+ *	store per step costs nothing and turns "the tick stopped" into the
+ *	name of the call that stopped it.
+ */
+volatile uint32_t pc3_tickbeat;
+volatile uint8_t pc3_tickphase;
+
+#define TICK_PHASE(n)	(pc3_tickphase = (n))
+
+static bool timer_tick_cb(repeating_timer_t *rt)
 {
     irqflags_t irq = di();
     udata.u_ininterrupt = 1;
+    pc3_tickbeat++;
 
-    absolute_time_t next;
-    update_us_since_boot(&next, to_us_since_boot(now) + (1000000 / TICKSPERSEC));
+    (void)rt;
 
 #ifdef CONFIG_PC3_USB_KBD
     {
         extern void usbkbd_tick(void);
+        TICK_PHASE(1);
         usbkbd_tick();
     }
 #endif
+    TICK_PHASE(2);
     tty_interrupt();
     /* After the echo, not before: tty_interrupt() is what queues it, and
      * this is the kick that makes sure a tick's worth of queued output
      * actually leaves.  See rawuart_tx_poll. */
+    TICK_PHASE(3);
     rawuart_tx_poll();
+    TICK_PHASE(4);
     timer_interrupt();
+    TICK_PHASE(5);
 
     /* Pre-empt / signal a running user process: pend PendSV, whose
        handler redirects user-mode PCs through the preempt trampoline
@@ -77,6 +118,7 @@ static void timer_tick_cb(unsigned alarm)
 #else
         int starved = 0;
 #endif
+        TICK_PHASE(6);
         if (!udata.u_insys && udata.u_ptab &&
             (starved || need_resched ||
              (udata.u_ptab->p_sig[0].s_pending & ~udata.u_ptab->p_sig[0].s_held) ||
@@ -85,14 +127,15 @@ static void timer_tick_cb(unsigned alarm)
         }
     }
 
-    if (hardware_alarm_set_target(0, next))
-    {
-        update_us_since_boot(&next, time_us_64() + (1000000 / TICKSPERSEC));
-        hardware_alarm_set_target(0, next);
-    }
-
+    TICK_PHASE(7);
     udata.u_ininterrupt = 0;
     irqrestore(irq);
+    /*	0 = left the tick cleanly.  If the watchdog reports a stall at
+     *	phase 0 then the body is not the problem at all: the tick
+     *	finished and was simply never called again, which puts the fault
+     *	in the alarm pool or in what PendSV went off and did. */
+    TICK_PHASE(0);
+    return true;			/* keep repeating */
 }
 
 #ifdef CONFIG_NET
@@ -120,12 +163,27 @@ void device_init(void)
      * with a stack pointer outside KSTACK entirely. */
     rawuart_rx_irq_start();
 
-    /* Timer interrup must be initialized before blcok devices.
-       set_boot_line uses pause syscall which will not be operational otherwise. */
-    hardware_alarm_claim(0);
-    update_us_since_boot(&now, time_us_64());
-    hardware_alarm_set_callback(0, timer_tick_cb);
-    hardware_alarm_force_irq(0);
+    /* Timer interrupt must be initialized before block devices.
+       set_boot_line uses the pause syscall which will not be operational
+       otherwise.
+
+       The pool claims the hardware alarm itself (alarm 0, pinned in
+       CMakeLists.txt, which is the one this tick has always used), so
+       there is no hardware_alarm_claim here and no callback to install.
+
+       alarm_pool_init_default() is called explicitly rather than left to
+       the SDK's runtime-init hook: the hook is conditional on macros this
+       kernel does not control, and an uninitialised default pool would
+       leave the machine with no tick at all - the exact failure being
+       fixed here.  It checks whether the pool is already up, so calling
+       it when the hook did run is a no-op.
+       The first tick lands one period out rather than immediately, which
+       the old hardware_alarm_force_irq forced; 5ms before the first tick
+       is not a constraint anything here has. */
+    alarm_pool_init_default();
+    if (!add_repeating_timer_us(-(1000000 / TICKSPERSEC), timer_tick_cb,
+			        NULL, &tick_timer))
+	panic("tick");
 
     /* The flash device is too small to be useful, and a corrupt flash will
      * cause a crash on startup... oddly. */

@@ -66,7 +66,24 @@ add_compile_definitions(
 		PICO_FLASH_SIZE_BYTES=\(16*1024*1024\)
 		PICO_HEAP_SIZE=0x0
 		PICO_NO_BINARY_INFO=1
-		PICO_TIME_DEFAULT_ALARM_POOL_DISABLED
+		# The default alarm pool drives the system tick (devices.c).
+		# It was disabled here, which is why the tick was hand-rolled on
+		# a bare hardware alarm - and a hand-rolled re-arm is what froze
+		# the machine: hardware_alarm_set_target leaves the alarm UNarmed
+		# when the target has already passed, nothing else re-armed it,
+		# and one missed deadline stopped the timer for good.  The pool
+		# keeps its entries in an ordered list and re-fires immediately
+		# on a miss, so it cannot end up unarmed.  MMBasic runs its own
+		# tick this way (PicoMite.c:903, add_repeating_timer_us(-1000)).
+		#
+		# It costs static RAM only - the default pool and its entries are
+		# static objects, not malloc'd, which matters because PICO_HEAP_SIZE
+		# is 0 here.  Two entries (24 bytes each) is one for the tick and
+		# one spare; the SDK default of 16 would be 384 bytes this port
+		# has not got.  Alarm 0 keeps the tick on the same hardware alarm
+		# and the same IRQ it has always used.
+		PICO_TIME_DEFAULT_ALARM_POOL_MAX_TIMERS=2
+		PICO_TIME_DEFAULT_ALARM_POOL_HARDWARE_ALARM_NUM=0
     TOTALMEM=${TOTALMEM}
 		)
 
