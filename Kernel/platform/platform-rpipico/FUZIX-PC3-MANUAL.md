@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.14 — August 2026"
+date: "Release v0.15 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -54,6 +54,61 @@ Headline specification as configured here:
   MMBasic translator in front of it — both run on the machine itself
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
+
+## New in v0.15
+
+The machine can play a game, and everything in this release is
+something that had to be true before it could.
+
+**`BLIT`, `SPRITE` and the flash slots.** `BLIT` copies a rectangle
+of screen anywhere, reads and writes the flash slots MMBasic keeps
+images in, and works against the off-screen framebuffer as well as the
+display. On top of it sits the `SPRITE` family — load, show, move,
+hide, collision detection, transparency, and a two-axis `SPRITE
+SCROLL`. A rectangle now crosses into the kernel once rather than once
+per row, which is what makes a screenful of sprites affordable.
+
+**The synthesiser moved into the kernel.** `PLAY SOUND` and `PLAY
+TONE` used to be rendered by a separate program keeping a fifth of a
+second of audio queued ahead. That is fine for music and impossible
+for a game: a program changing pitch every 20 ms was heard a tenth of
+a second late, and the renderer and the game could not both fit in
+memory at once, so the machine spent its time swapping them past each
+other. The four voices are now rendered in the interrupt that feeds
+the DAC, exactly where MMBasic renders them, and a `PLAY SOUND` is
+heard in the next buffer the hardware asks for. `PLAY MODFILE` and
+`PLAY MODSAMPLE` play tracker modules.
+
+**A program's own font.** `DefineFont` takes MMBasic's hex block and
+gives the program fonts 10 to 16, usable everywhere a built-in font
+is. The data is byte-compatible with MMBasic's, so a font written for
+a PicoMite is pasted in and works.
+
+**The compiler bug that made all of it fail.** picofrog froze the
+machine with no crash message, in native code and in bytecode alike.
+The compiler was emitting a stack frame of whatever size the locals
+added up to — 261 bytes in the function that moved the frog — and an
+odd frame leaves the interpreter's stack pointer odd, so the next
+64-bit store through a by-reference local wrote across an alignment
+boundary and took a fault the display mode hid. Frames are rounded
+now. It would have reached any program with enough locals and a
+`FLOAT` passed by reference, so it is worth knowing it was there.
+
+**The keyboard.** AltGr types the third character on a key at last,
+the console and the BASIC `INKEY$` path share one decoder rather than
+two that had drifted, and the USB stack survives a keyboard being
+unplugged, replugged or reset mid-session instead of taking the
+machine down with it.
+
+**Smaller things.** `cc prog.bas` translates and compiles in one
+command. `ELSE IF` written as two words translates, which is how
+MMBasic spells it. Stopping a program with `Ctrl-C` no longer leaves
+the terminal in the state the program set it to — which had been
+logging people out, because a shell reading a raw terminal sees an
+instant end of input and takes it for a hangup. `mmedit` colours
+`DefineFont`, `SPRITE`, `BLIT` and `FLASH` as the translatable
+keywords they became. Forty-six MMBasic example programs live in
+`/root/MMBasic` with a README saying what each one shows.
 
 ## New in v0.14
 
@@ -1220,7 +1275,7 @@ running natively.
 
 ## A worked example: something numerical
 
-A longer one. `solar_eclipse.bas`, in `/root/cc`, is a 3,200-line
+A longer one. `eclipse.bas`, in `/root/MMBasic`, is a 3,200-line
 astronomical calculation (Bessel elements, lunar and solar series)
 that reads a date and prints the circumstances of an eclipse. It is a
 good test because every digit of its output can be checked against
@@ -1591,7 +1646,7 @@ MMBasic's own layout, unchanged, because these are MMBasic's own nine
 fonts — the ones the console draws from.
 
 Reading one back is the clearest way to see it. `fontaddr.bas` in
-`/root/cc` does exactly this, and prints:
+`/root/MMBasic` does exactly this, and prints:
 
 ```
 font  address     cell   first  count
@@ -1891,9 +1946,9 @@ PLAY SOUND 1, B, O              ' voice 1 off
 PLAY TONE 440, 554, 600         ' left/right pair for 600 ms
 ```
 
-MMBasic's four-voice synthesiser, rendered by a separate program the
-first `PLAY SOUND` or `PLAY TONE` starts, feeding the same kernel
-buffer MP3 playback uses. Four voices, each with an independent left
+MMBasic's four-voice synthesiser, rendered by the kernel itself in the
+audio interrupt that drives the DAC — the same place MMBasic renders
+it. Four voices, each with an independent left
 and right side; channels are `L`, `R`, `B` or `M`, and the types are
 `S`ine, `Q` (square), `T`riangle, `W` (sawtooth), `P`eriodic noise,
 `N` (white noise) and `O`ff. Frequency is 1 Hz to 20 kHz, volume 0 to
@@ -1903,14 +1958,21 @@ rounds it; no duration means until further notice. The square and
 sawtooth are band-limited (polyBLEP), so they hold a pure pitch at
 the top of the range instead of shimmering.
 
-Two things are honestly different from MMBasic. Channel and type are
-**bare letters, not strings** — `PLAY SOUND 1, B, S, 440` rather than
-`PLAY SOUND 1, "B", "S", 440` — until string arguments land. And a
-change of note takes effect about **0.2 seconds late**: the renderer
-keeps that much audio queued so that the machine's own pauses (flash
-housekeeping, console scrolls) never leave the sound stuttering. The
-synthesiser exits by itself after five seconds with every voice off,
-or with `PLAY STOP`.
+Channel and type may be written as a bare letter, a quoted letter or a
+string worked out at run time, as MMBasic writes them: `PLAY SOUND 1,
+B, S, 440`, `PLAY SOUND 1, "B", "S", 440` and `PLAY SOUND 1, c$, t$,
+440` are the same statement.
+
+**A change of note is heard at once.** Until v0.15 the synthesiser was
+a separate program rendering ahead into a queue, which put a fifth of
+a second between the statement and the sound — audible as lag in a
+game, and the reason a program changing pitch every 20 ms could not
+work at all. It now runs where MMBasic runs it, in the interrupt that
+feeds the DAC, so a `PLAY SOUND` is in the next buffer the hardware
+asks for: under two milliseconds. The voices go quiet by themselves
+after five seconds with every voice off, or on `PLAY STOP`, and a
+program that ends — including one stopped with `Ctrl-C` — takes its
+sound with it.
 
 ### Modules: `PLAY MODFILE` and `PLAY MODSAMPLE`
 
@@ -2338,7 +2400,7 @@ or use the hardware that already exists for it.
 ## A worked example: a barometric station {#qnh-example}
 
 Everything in this chapter, on one screen. The program is `qnh.bas` in
-`/root/cc`; what follows is how it is built rather than a listing of
+`/root/MMBasic`; what follows is how it is built rather than a listing of
 it.
 
 It reads a BMP180 barometer, a potentiometer and the clock, and puts
@@ -2562,7 +2624,7 @@ to fit the terminal width.
 **The colour coding answers "will this compile?"** A keyword `mmbc` can
 translate is cyan; one only the interpreter knows is blue. That second
 colour is the useful one here, because a program is compiled rather than
-run as you type it, and it is worth seeing `MM.WATCHDOG` or `BLIT` in
+run as you type it, and it is worth seeing `MM.WATCHDOG` or `REDIM` in
 blue before you build rather than after. The lists come from the
 translator's own tables, so they cannot drift from what it does.
 
@@ -2929,27 +2991,28 @@ translate time, not at run time.
 |   |   |   |   |
 |---|---|---|---|
 | `?` | `ARC` | `ARRAY` | `BEZIER` |
-| `BIT` | `BOX` | `BYTE` | `CALL` |
-| `CASE` | `CAT` | `CHDIR` | `CIRCLE` |
-| `CLEAR` | `CLOSE` | `CLS` | `COLOR` |
-| `COLOUR` | `CONST` | `CONTINUE` | `COPY` |
-| `DATA` | `DATE$` | `DIM` | `DO` |
-| `ELSE` | `ELSEIF` | `END` | `ENDIF` |
-| `ERASE` | `ERROR` | `EXIT` | `FILES` |
-| `FILL` | `FLAG` | `FLAGS` | `FLUSH` |
-| `FONT` | `FOR` | `FRAMEBUFFER` | `FUNCTION` |
-| `GOSUB` | `GOTO` | `I2C2` | `IF` |
-| `INC` | `INPUT` | `KILL` | `LET` |
-| `LINE` | `LMID` | `LOAD` | `LOCAL` |
-| `LONGSTRING` | `LOOP` | `MAP` | `MATH` |
-| `MKDIR` | `MODE` | `NEXT` | `ON` |
-| `ONEWIRE` | `OPEN` | `OPTION` | `PAUSE` |
-| `PIN` | `PIXEL` | `PLAY` | `POLYGON` |
-| `PORT` | `PRINT` | `PULSE` | `PWM` |
-| `RANDOMIZE` | `RBOX` | `READ` | `RENAME` |
-| `RESTORE` | `RETURN` | `RMDIR` | `RTC` |
-| `SAVE` | `SEEK` | `SELECT` | `SERVO` |
-| `SETPIN` | `SETTICK` | `SORT` | `SPI` |
+| `BIT` | `BLIT` | `BOX` | `BYTE` |
+| `CALL` | `CASE` | `CAT` | `CHDIR` |
+| `CIRCLE` | `CLEAR` | `CLOSE` | `CLS` |
+| `COLOR` | `COLOUR` | `CONST` | `CONTINUE` |
+| `COPY` | `DATA` | `DATE$` | `DEFINEFONT` |
+| `DIM` | `DO` | `ELSE` | `ELSEIF` |
+| `END` | `ENDIF` | `ERASE` | `ERROR` |
+| `EXIT` | `FILES` | `FILL` | `FLAG` |
+| `FLAGS` | `FLASH` | `FLUSH` | `FONT` |
+| `FOR` | `FRAMEBUFFER` | `FUNCTION` | `GOSUB` |
+| `GOTO` | `I2C2` | `IF` | `INC` |
+| `INPUT` | `KILL` | `LET` | `LINE` |
+| `LMID` | `LOAD` | `LOCAL` | `LONGSTRING` |
+| `LOOP` | `MAP` | `MATH` | `MKDIR` |
+| `MODE` | `NEXT` | `ON` | `ONEWIRE` |
+| `OPEN` | `OPTION` | `PAUSE` | `PIN` |
+| `PIXEL` | `PLAY` | `POLYGON` | `PORT` |
+| `PRINT` | `PULSE` | `PWM` | `RANDOMIZE` |
+| `RBOX` | `READ` | `RENAME` | `RESTORE` |
+| `RETURN` | `RMDIR` | `RTC` | `SAVE` |
+| `SEEK` | `SELECT` | `SERVO` | `SETPIN` |
+| `SETTICK` | `SORT` | `SPI` | `SPRITE` |
 | `STATIC` | `STRUCT` | `SUB` | `SYSTEM` |
 | `TEMPR` | `TEXT` | `TIME$` | `TIMER` |
 | `TRIANGLE` | `TYPE` | `WEND` | `WHILE` |
@@ -2980,10 +3043,10 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `PIN` | `PIXEL` | `PORT` | `POS` |
 | `RAD` | `RGB` | `RIGHT$` | `RND` |
 | `RTRIM$` | `SGN` | `SIN` | `SPACE$` |
-| `SPI` | `SQR` | `STR$` | `STR2BIN` |
-| `STRING$` | `STRUCT` | `TAB` | `TAN` |
-| `TEMPR` | `TIME$` | `TIMER` | `TRIM$` |
-| `UCASE$` | `VAL` |  |  |
+| `SPI` | `SPRITE` | `SQR` | `STR$` |
+| `STR2BIN` | `STRING$` | `STRUCT` | `TAB` |
+| `TAN` | `TEMPR` | `TIME$` | `TIMER` |
+| `TRIM$` | `UCASE$` | `VAL` |  |
 
 ## MATH() sub-functions
 
@@ -3294,11 +3357,13 @@ Of the graphics, `MODE`, `COLOUR`, `PIXEL` (including the array form),
 `LINE`, `CIRCLE`, `BOX`, `RBOX`, `TRIANGLE` (its drawing form —
 `SAVE`/`RESTORE` need the interpreter's blit buffers), `ARC`, `RGB()`,
 `FRAMEBUFFER` (including `LAYER` and `MERGE`), `PRINT @`, `TEXT`,
-`FONT`, `CLS [colour]` and `MAP` (statement and function) are done;
-`BLIT` is not yet. `TEXT` draws in any of
-MMBasic's nine built-in fonts but only in its normal and vertical
-orientations — the three that rotate the character itself are accepted
-and drawn normally.
+`FONT`, `CLS [colour]` and `MAP` (statement and function) are done, and
+since v0.15 so are `BLIT` — including the flash slots it reads and
+writes — and the `SPRITE` family with its two-axis `SCROLL`. `TEXT`
+draws in any of MMBasic's nine built-in fonts, and in a font the
+program defines for itself with `DefineFont` (numbers 10 to 16), but
+only in its normal and vertical orientations — the three that rotate
+the character itself are accepted and drawn normally.
 
 Of the pins, `SETPIN n, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|PWM|OFF`,
 `PIN(n) =` and `PIN(n)` are done, and so are `PORT` in both directions
@@ -3359,9 +3424,7 @@ always scales by 3.3 V.
 Of the sound, `PLAY MP3`, `PLAY VOLUME`, `PLAY STOP`, `PLAY SOUND`,
 `PLAY TONE`, `PLAY MODFILE` and `PLAY MODSAMPLE` are done — `WAV`,
 `FLAC`, `MIDI`, `LOAD SOUND` and the user-defined `U` waveform are
-not. `PLAY SOUND`'s channel and type are bare letters rather than
-MMBasic's strings for now, and `PLAY VOLUME` takes one level rather
-than one per channel.
+not. `PLAY VOLUME` takes one level rather than one per channel.
 
 Of the statements that reach *into* something rather than replacing
 it, `MID$(s$,n,m) =`, `LMID(a(),start[,num]) =`, `BIT(v,n) =`,

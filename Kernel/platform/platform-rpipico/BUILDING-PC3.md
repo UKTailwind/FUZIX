@@ -53,22 +53,28 @@ From this directory:
     make TARGET=rpipico SUBTARGET=pico2
 
 `SUBTARGET=pico2` is what selects the RP2350 and, with it,
-`TOTALMEM=340` — the amount of SRAM given to user processes. The
+`TOTALMEM=336` — the amount of SRAM given to user processes. The
 result is `build/fuzix.uf2`.
 
-340 of the 512 KB, because the kernel keeps the other 172. It used to
+336 of the 512 KB, because the kernel keeps the other 176. It used to
 keep more: it was built `PICO_COPY_TO_RAM`, which copied all 90,676
 bytes of `.text` into RAM at boot. Most of it now executes from flash
 (`linker_overrides/default_text_excludes.incl` names what may, and why
 some things may not), which freed 45 KB and let the pool grow from 312
-to 340.
+to 340. It came back down to 336 at v0.15: the kernel synthesiser
+needed the last 1,752 bytes of kernel RAM and one 4K pool block was
+what paid for it.
 
-`linker_overrides/memory_ram.incl` carves the same split and **nothing
-checks that the two agree**, so change both or neither.
+**That number is written in THREE places and nothing checks them**:
+`TOTALMEM` in the platform `Makefile`, the `RAM`/`PROGPOOL` split in
+`linker_overrides/memory_ram.incl`, and the derivation in `config.h`.
+Change all three or none.
 
-**The kernel's RAM is effectively full.** As of 2026-08-07 it uses
-175,792 of its 176,128 bytes — **336 bytes spare**, where a year's
-worth of these notes used to say 9,320. Assume any new kernel array,
+**The kernel's RAM is effectively full.** As of 2026-08-15 it ends at
+`0x2002b070` with the pool starting at `0x2002c000` — **3,984 bytes
+spare**, which looks comfortable and is not: reclaiming the block the
+synthesiser cost needs 4,096, so it is 112 bytes short of paying
+itself back. Assume any new kernel array,
 buffer or statically allocated struct will not fit, and that the next
 one to be added is the one that fails. The failure is at least loud: a
 `region RAM overflowed` at link time, which is exactly what the split
@@ -224,8 +230,17 @@ Regenerate and paste when coverage changes. Everything *below* the
 tables — what is done and not done in graphics, pins and sound — is
 written by hand and the generator knows nothing about it, so replacing
 the whole appendix with the generator's output throws that away. Check
-the tables against `--check` (100 statements, 90 functions, 5 scalar and
-6 array `MATH` at v0.14; 87 and 85 at v0.12) rather than pasting blind.
+the tables against `--check` (104 statements, 91 functions, 5 scalar and
+6 array `MATH` at v0.15; 100 and 90 at v0.14; 87 and 85 at v0.12)
+rather than pasting blind.
+
+`coverage.py` reads the dispatch chain in `statement_inner`, so a
+statement handled in a *pre-pass* is invisible to it and must be named
+by hand — `TYPE` always was, and `DEFINEFONT` was missing from this
+appendix for the whole of the release that introduced it. The same
+blind spot is in `mmedit`'s `genkw.py`, which reads the same tables:
+both were fixed at v0.15, and both will need it again for the next
+statement that is lifted out before the dispatch runs.
 
 The splice is by *marker* — from `## Statements` down to, but not
 including, `## MATH sub-commands`. An earlier script did it by line
