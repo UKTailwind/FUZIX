@@ -47,6 +47,57 @@ static int mm_poisoned(void)
     return mm_est != NULL && mm_est[0] != 0;
 }
 
+/*
+ * MM_TB=1 - breadcrumbs straight at UART1's data register by polled
+ * MMIO, for the picofrog death hunt.  The machine dies with interrupts
+ * off: the tty ring, stdio and the console all die with it, and a
+ * marker that QUEUES is a marker nobody ever sees - which is very
+ * likely what happened to every MM_IOTRACE line.  A polled write is in
+ * the FIFO before the call returns, and the FIFO drains by hardware.
+ *
+ * Two characters per marker, so the fatal run reads as a ladder:
+ * the last rung printed names the code that never came back.
+ */
+#if defined(MM_PC3) || defined(__FUZIX__)
+#define MM_TB_FR ((volatile unsigned int *)0x40078018)  /* UARTFR  */
+#define MM_TB_DR ((volatile unsigned int *)0x40078000)  /* UARTDR  */
+static int mm_tb_on(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("MM_TB");
+        v = (e && *e && *e != '0') ? 1 : 0;
+    }
+    return v;
+}
+static void mm_tb(const char *s)
+{
+    if (!mm_tb_on())
+        return;
+    while (*s) {
+        while (*MM_TB_FR & 0x20)        /* TXFF */
+            ;
+        *MM_TB_DR = (unsigned int)(unsigned char)*s++;
+    }
+}
+static void mm_tb_hex(unsigned long v)
+{
+    static const char d[] = "0123456789abcdef";
+    char b[9];
+    int i;
+
+    for (i = 7; i >= 0; i--) {
+        b[i] = d[v & 15];
+        v >>= 4;
+    }
+    b[8] = 0;
+    mm_tb(b);
+}
+#else
+#define mm_tb(s)        ((void)0)
+#define mm_tb_hex(v)    ((void)0)
+#endif
+
 /* ================= scratch buffers ================================= */
 
 #ifdef MM_HOSTED
@@ -2798,6 +2849,7 @@ static int  mm_int_sskip[2];
 
 void mm_int_err_push(void)
 {
+    mm_tb("[E");                /* a handler dispatch is starting */
     mm_int_serrno = mm_errno_v;
     memcpy(mm_int_serrmsg, mm_errmsg_v, sizeof(mm_int_serrmsg));
     if (mm_est) {
@@ -3060,6 +3112,7 @@ void mm_int_err_pop(void)
         mm_est[0] = mm_int_sskip[0];
         mm_est[1] = mm_int_sskip[1];
     }
+    mm_tb("[e");                /* the handler dispatch completed */
 }
 
 static int mm_armed(void)
@@ -4176,8 +4229,56 @@ struct mm_gfx_fontinfo {
  * draws from the same table.  A program that hardwired 8x12 would put
  * its text in the wrong place the moment it asked for font 3.
  */
+/*
+ *	MM_IOTRACE=1 - say what is about to cross, before it crosses.
+ *
+ *	For a syscall that never returns: there is no fault to report, the
+ *	console is dead because the kernel never gets back to it, and a
+ *	trace at the statement boundary shows only that the statement
+ *	never finished.  This sits at the boundary that matters.
+ */
+static int mm_iotrace(void)
+{
+    static int cached = -1;
+
+    if (cached < 0)
+        cached = getenv("MM_IOTRACE") ? 1 : 0;
+    return cached;
+}
+
+/* MM_TXTCOPY=1 - see the use site in mm_gtext. */
+static int mm_txtcopy(void)
+{
+    static int cached = -1;
+
+    if (cached < 0)
+        cached = getenv("MM_TXTCOPY") ? 1 : 0;
+    return cached;
+}
+
+/*
+ *	...and then WAIT for it to get out.
+ *
+ *	fflush hands the line to the tty; the tty transmits it in the
+ *	background.  If the next syscall never returns, whatever is still
+ *	in that queue is never sent, and the last line - the one naming
+ *	the call that hung - arrives half finished or not at all.  That
+ *	is exactly how the first hunt lost its most important message.
+ *
+ *	Busy, not a sleep: this must not depend on the scheduler running
+ *	again, which is the thing in question.
+ */
+static void mm_iodrain(void)
+{
+    MMINTEGER t0 = mm_us();
+
+    while (mm_us() - t0 < 30000)
+        ;
+}
+
 MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h)
 {
+    mm_tb("[i");
     mm_pix_drain();             /* geometry only, but the rule has no exemptions */
     struct mm_gfx_fontinfo fi;
 
@@ -4188,8 +4289,15 @@ MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h)
     fi.font = (unsigned char)font;
     fi.width = fi.height = fi.first = 0;
     fi.count = fi.nfonts = 0;
+    if (mm_iotrace()) {
+        fprintf(stderr, "FONTINFO f=%u\r\n", (unsigned)fi.font);
+        fflush(stderr);
+        mm_iodrain();
+    }
+    mm_tb("[o");
     if (ioctl(mm_gfx_fd, MM_GFX_FONTINFO, &fi) < 0)
         return -1;                      /* a kernel without the call */
+    mm_tb("[p");
     if (fi.width == 0)
         return 0;                       /* no font of that number */
     if (w) *w = fi.width;
@@ -4359,10 +4467,19 @@ void mm_font(MMINTEGER font, MMINTEGER scale)
 
 void mm_font_cur(MMINTEGER *font, MMINTEGER *scale)
 {
+    /* The 2026-08-15 ladder run stopped the machine BETWEEN this
+     * function's entry and mm_fontinfo's - which is these two 64-bit
+     * stores through by-ref pointers, the exact class the loader's
+     * round-to-8 comment documents.  So: say where the stores are
+     * about to land BEFORE making them, and say they survived after. */
+    mm_tb("[c");
+    mm_tb_hex((unsigned long)font);
+    mm_tb_hex((unsigned long)scale);
     if (font)
         *font = mm_gfont;
     if (scale)
         *scale = mm_gscale;
+    mm_tb("[C");
 }
 
 /*
@@ -4377,6 +4494,7 @@ void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
     struct mm_gfx_text gt;
     int r;
 
+    mm_tb("[t");
     mm_gflush();                        /* the old position owns what is pending */
     mm_gx = (int)x;
     mm_gy = (int)y;
@@ -4398,13 +4516,68 @@ void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
     gt.bg = (bg < 0) ? -1L : (long)(bg & 0xFFFFFF);
     gt.len = (unsigned short)len;
     gt.str = (void *)s;
+    /*
+     * MM_TXTCOPY=1: hand the kernel a FIXED address of our own instead
+     * of wherever the BASIC string happens to live.
+     *
+     * GFXIOC_TEXT is a crossing that carries a user POINTER - the kernel
+     * blesses it with valaddr_r and then reads the bytes WHERE THEY LIE,
+     * rather than copying them in.  The picofrog freeze stops core0
+     * dead: no fault, no tick, and the syscall counter frozen too, which
+     * is what a bus access that never completes looks like and not what
+     * a software bug looks like.  So the address the kernel is told to
+     * read is worth ruling in or out, and this rules it out in one run:
+     * if copying the bytes into our own buffer first cures the freeze,
+     * the fault is WHERE the string lives, not TEXT at all.
+     *
+     * Static rather than automatic on purpose - bcrun's stack is not the
+     * place to put a couple of hundred bytes, and a static in the
+     * program's own data is exactly the "somewhere else" being tested.
+     */
+    if (mm_txtcopy()) {
+        static char mm_txtbuf[MM_GFX_TEXT_MAX];
+        int i;
+
+        for (i = 0; i < (int)len; i++)
+            mm_txtbuf[i] = s[i];
+        gt.str = (void *)mm_txtbuf;
+    }
+    /*
+     * MM_IOTRACE=1: say what is about to cross, BEFORE it crosses.
+     *
+     * A syscall that does not return leaves nothing to read: no fault,
+     * no dump, the console dead because the kernel never gets back to
+     * it, and the display still showing the last frame because scanout
+     * is autonomous.  Tracing at the BASIC statement boundary cannot
+     * see inside that - the statement simply never finishes - so the
+     * trace has to sit at the syscall boundary, and the last line
+     * printed then names the call and the parameters it was given.
+     *
+     * Unbuffered on purpose: a line still sitting in stdio when the
+     * kernel stops is a line nobody ever sees.
+     */
+    if (mm_iotrace()) {
+        /* p is the one that matters: it is the address the kernel is
+           about to read, and the freeze looks like a read that never
+           completes. */
+        fprintf(stderr,
+                "TEXT p=%08lx len=%u x=%d y=%d f=%u sc=%u fg=%ld bg=%ld\r\n",
+                (unsigned long)gt.str, (unsigned)gt.len,
+                (int)gt.x, (int)gt.y, (unsigned)gt.font,
+                (unsigned)gt.scale, (long)gt.fg, (long)gt.bg);
+        fflush(stderr);
+        mm_iodrain();
+    }
     /* GFXIOC_TEXT returns the x it ended at, which is the cursor
      * position a following PRINT wants - and it is the kernel's own
      * arithmetic in the kernel's own font, so nothing here needs to
      * know how wide font 5 is.  A negative answer is the error return,
      * or text drawn entirely off the left edge; leave the cursor alone
      * for either. */
+    mm_tb("[x");
+    mm_tb_hex((unsigned long)gt.str);
     r = ioctl(mm_gfx_fd, MM_GFX_TEXT, &gt);
+    mm_tb("[k");
     if (r >= 0)
         mm_gx = r;
 }
