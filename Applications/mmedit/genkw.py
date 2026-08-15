@@ -88,6 +88,12 @@ supported.update(["AND", "OR", "NOT", "XOR", "MOD", "INV", "THEN", "TO",
                   "EXIT DO", "EXIT FOR", "EXIT SUB", "EXIT FUNCTION",
                   "LOOP", "UNTIL", "WHILE", "WEND", "NEXT",
                   "TYPE", "END TYPE",
+                  # DefineFont is the same shape: pass_fonts() lifts the
+                  # whole block out before statement_inner ever runs, so
+                  # the dispatch scan cannot see it and the editor painted
+                  # a font the translator DOES build as interpreter-only.
+                  # AllCommands.h spells the close "End DefineFont".
+                  "DEFINEFONT", "END DEFINEFONT",
                   # OPTION's second words that do_option reads, the type
                   # names DIM takes, and the modes OPEN takes - none of
                   # them commands, all of them translated
