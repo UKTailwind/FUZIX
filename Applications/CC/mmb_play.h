@@ -159,6 +159,23 @@ MMG_FN void mmp_sound(MMINTEGER voice, MMINTEGER sides, MMINTEGER type,
 		MM_RAISE("Invalid frequency");
 	if (vol < 0 || vol > 25)
 		MM_RAISE("Invalid volume");
+	/* The kernel synthesiser first: one ioctl, audible within a
+	 * 64-frame buffer, no daemon and no second process.  -2 is an
+	 * MP3/MOD player holding the output; -1 is a kernel without the
+	 * ioctl (or the host), and the daemon path below keeps every
+	 * already-shipped arrangement working there. */
+	{
+		MMINTEGER r = mm_snd_cmd(MM_PLAY_SOUND, voice, sides, type,
+					 (MMINTEGER)(freq * 1000.0 + 0.5),
+					 vol);
+
+		if (r == 0) {
+			mm_play_kind = MMP_KIND_SND;
+			return;
+		}
+		if (r == -2)
+			MM_RAISE("Sound output in use");
+	}
 	if (mmp_ensure(MMP_KIND_SND, "\007playsnd") < 0)
 		return;
 	if (mmp_send(MM_PLAY_SOUND, (int)voice, (int)sides, (long)type,
@@ -196,12 +213,29 @@ MMG_FN void mmp_tone(MMFLOAT fl, MMFLOAT fr, MMFLOAT ms, MMINTEGER has_int)
 		if (samples < 1)
 			samples = 1;
 	}
+	/* Kernel first, as mmp_sound - the tone-done interrupt needs no
+	 * transport either way, so it is shared below. */
+	{
+		MMINTEGER r = mm_snd_cmd(MM_PLAY_TONE, 0, 0,
+					 (MMINTEGER)(fl * 1000.0 + 0.5),
+					 (MMINTEGER)(fr * 1000.0 + 0.5),
+					 (MMINTEGER)(samples < 0 ? -1
+							       : samples));
+
+		if (r == 0) {
+			mm_play_kind = MMP_KIND_SND;
+			goto tone_int;
+		}
+		if (r == -2)
+			MM_RAISE("Sound output in use");
+	}
 	if (mmp_ensure(MMP_KIND_SND, "\007playsnd") < 0)
 		return;
 	if (mmp_send(MM_PLAY_TONE, 0, 0, (long)(fl * 1000.0 + 0.5),
 		     (long)(fr * 1000.0 + 0.5),
 		     (long)(samples < 0 ? -1 : samples)) < 0)
 		MM_RAISE("Sound output did not start");
+tone_int:
 	if (has_int && samples > 0)
 		mm_tone_end = (long long)mm_us() +
 		    (long long)((MMFLOAT)samples * (1000000.0 / 44100.0));
@@ -268,6 +302,11 @@ MMG_FN void mmp_volume(MMINTEGER v)
 		mm_play_volume = 0;
 	if (mm_play_volume > 100)
 		mm_play_volume = 100;
+	if (mm_play_kind == MMP_KIND_SND) {
+		mm_snd_cmd(MM_PLAY_VOLUME, 0, 0, mm_play_volume,
+			   mm_play_volume, 0);
+		return;
+	}
 	if (mm_play_owner() != 0)
 		mmp_send(MM_PLAY_VOLUME, 0, 0, mm_play_volume,
 			 mm_play_volume, 0);

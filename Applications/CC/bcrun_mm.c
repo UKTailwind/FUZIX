@@ -392,6 +392,9 @@ static void w_play_stop(void) { A = mm_play_stop(); }
 static void w_play_owner(void){ A = mm_play_owner(); }
 static void w_play_send(void) { A = mm_play_send(LL(0), LL(2), LL(4),
 					        LL(6), LL(8), LL(10)); }
+static void w_snd_cmd(void)   { A = mm_snd_cmd(LL(0), LL(2), LL(4),
+					       LL(6), LL(8), LL(10)); }
+static void w_snd_stop(void)  { A = mm_snd_stop(); }
 static void w_set_date(void) { mm_set_date(Ps(0)); A = 0; }
 static void w_set_time(void) { mm_set_time(Ps(0)); A = 0; }
 
@@ -742,6 +745,8 @@ static const struct mmwrap {
 	{ "mm_play_stop",	w_play_stop },
 	{ "mm_play_owner",	w_play_owner },
 	{ "mm_play_send",	w_play_send },
+	{ "mm_snd_cmd",		w_snd_cmd },
+	{ "mm_snd_stop",	w_snd_stop },
 	{ "mm_set_date",	w_set_date },
 	{ "mm_set_time",	w_set_time },
 	{ "mm_pixel",		w_pixel },
