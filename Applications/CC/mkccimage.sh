@@ -73,53 +73,28 @@ echo "--- installing"
 	done
 	# what mmbc-generated C includes: the runtime's interface and the
 	# FCC-view headers (math.h etc. map to bcrun natives)
-	echo "get $CC/mmb_runtime.h mmb_runtime.h"
-	# the geometry primitives, included only by a program that draws:
-	# static functions, one header per primitive so a program carries
-	# exactly the primitives it names (cc1's dead-static rule counts
-	# names, not reachability, so the include is the granularity).
-	# mmb_gfx.h is the umbrella kept for hand-written C.
-	for f in mmb_gfx.h mmb_gfx_pts.h mmb_gfx_circle.h mmb_gfx_box.h \
-			mmb_gfx_rbox.h mmb_gfx_triangle.h mmb_gfx_arc.h \
-			mmb_gfx_text.h mmb_gfx_map.h mmb_gfx_polygon.h \
-			mmb_gfx_bezier.h mmb_gfx_fill.h; do
-		echo "get $CC/$f $f"
+	# EVERY mmb_*.h, by glob, for the reason sync-runtime.sh uses one:
+	# a glob cannot forget.  This was a hand-written list and the list
+	# was wrong twice.  mmb_spi.h was missing at v0.11, so a fresh card
+	# compiled everything except a program that opened SPI; then at
+	# v0.15 mmb_play.h, mmb_blit.h, mmb_sprite.h and mmb_flash.h were
+	# all missing at once - which is to say the release whose theme was
+	# games shipped a card that could not compile a program using PLAY,
+	# BLIT or SPRITE.  Found by building a four-line program ON THE
+	# BOARD; every host gate passed, because the host has the headers.
+	#
+	# What the list used to record, and is worth keeping: these are the
+	# geometry and peripheral primitives, static functions with one
+	# header per primitive so a program carries exactly what it names
+	# (cc1's dead-static rule counts names, not reachability, so the
+	# include is the granularity).  mmb_gfx.h is the umbrella kept for
+	# hand-written C.  mmb_wait.h must be included LAST by generated
+	# code and finds the others by their own include guards - that is
+	# the emitter's business, not this script's; staging order does not
+	# matter.
+	for f in "$CC"/mmb_*.h; do
+		echo "get $f $(basename "$f")"
 	done
-	# SETPIN and PIN, on the same terms - and easy to forget: a card
-	# without this compiles every program that draws and fails only on
-	# the ones that touch a pin, long after the change that added it.
-	echo "get $CC/mmb_gpio.h mmb_gpio.h"
-	# SETPIN's interrupt modes: the poll, the table and the dispatch.
-	# Same terms - only a program that arms one names any of it.
-	echo "get $CC/mmb_int.h mmb_int.h"
-	# PWM: MMBasic's wrap-and-duty arithmetic and the slice mapping.
-	echo "get $CC/mmb_pwm.h mmb_pwm.h"
-	# I2C2 - the second controller, on header pins.
-	echo "get $CC/mmb_i2c.h mmb_i2c.h"
-	# SPI0 - likewise.  This one was missing until v0.11: the header
-	# was added to sync-runtime.sh and to both front ends, and NOT
-	# here, so a freshly built card compiled everything except a
-	# program that opened SPI.  That is the failure this list keeps
-	# collecting; add a new mmb_*.h in BOTH places or neither.
-	echo "get $CC/mmb_spi.h mmb_spi.h"
-	# PEEK: reading memory by address, which is what makes
-	# MM.INFO(FONT ADDRESS n) usable from BASIC.
-	echo "get $CC/mmb_peek.h mmb_peek.h"
-	# PORT and PULSE: several pins as one value, and a timed
-	# inversion.  Both drive the registers directly, so both are
-	# here rather than behind an ioctl.
-	# The data arguments I2C, SPI and one-wire share - one copy, as
-	# MMBasic has one.  Included ahead of both bus headers.
-	echo "get $CC/mmb_comms.h mmb_comms.h"
-	# One-wire and the DS18B20, bit-banged in userland because a slot
-	# is 60 us and a syscall is 1.5.
-	echo "get $CC/mmb_onewire.h mmb_onewire.h"
-	echo "get $CC/mmb_port.h mmb_port.h"
-	echo "get $CC/mmb_pulse.h mmb_pulse.h"
-	# A PAUSE that services what the two above leave running.  It
-	# must be the LAST of these included, and finds them by their
-	# own include guards.
-	echo "get $CC/mmb_wait.h mmb_wait.h"
 	# The pin and ADC REGISTERS, which mmb_gpio.h reaches for directly
 	# now that pin work is not a syscall.  Flat, because that is the
 	# only shape this include directory has; a native program gets the

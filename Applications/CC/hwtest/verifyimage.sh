@@ -90,17 +90,14 @@ done
 
 echo "--- the headers the generated C includes"
 same /usr/lib/cc/include/mmb_runtime.h "$R/Applications/CC/mmb_runtime.h"
-# Every mmb_*.h mkccimage.sh stages, not just the drawing ones: this
-# list had drifted behind that one, so the peripheral headers were
-# shipped and never checked - and mmb_spi.h was not shipped at all.
-for f in mmb_gfx.h mmb_gfx_pts.h mmb_gfx_circle.h mmb_gfx_box.h \
-		mmb_gfx_rbox.h mmb_gfx_triangle.h mmb_gfx_arc.h \
-		mmb_gfx_text.h mmb_gfx_map.h mmb_gpio.h \
-		mmb_gfx_polygon.h mmb_gfx_bezier.h mmb_gfx_fill.h \
-		mmb_int.h mmb_pwm.h mmb_i2c.h mmb_spi.h mmb_peek.h \
-		mmb_comms.h mmb_onewire.h mmb_port.h mmb_pulse.h \
-		mmb_wait.h; do
-	same "/usr/lib/cc/include/$f" "$R/Applications/CC/$f"
+# EVERY mmb_*.h in the tree, by the same glob mkccimage.sh stages them
+# with - not a list beside a list.  Two hand-written lists drifted from
+# each other twice: mmb_spi.h was in neither at v0.11, and at v0.15
+# mmb_play/blit/sprite/flash.h were shipped by neither, so a card that
+# verified clean could not compile a program that made a sound.  A
+# header present in the tree and absent from the card now FAILS here.
+for f in "$R"/Applications/CC/mmb_*.h; do
+	same "/usr/lib/cc/include/$(basename "$f")" "$f"
 done
 
 echo "--- /root/cc"
