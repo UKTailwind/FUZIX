@@ -91,10 +91,148 @@ MMG_FN int mmb_geom(int *stride, int *bpp, int *hres, int *vres)
 
 static unsigned char mmb_rowb[164];	/* widest byte span + slack */
 
+/* ---- the window: many rows per crossing ------------------------------
+ *
+ * Every rectangle in this file and in mmb_sprite.h is a loop of the two
+ * row calls below, and each of those is a SYSTEM CALL - two for a
+ * write, which read-modify-writes for the boundary bytes.  A 9x9 sprite
+ * cost about fifty crossings to show; the board measured 0.54ms per
+ * SPRITE SHOW, and 91% of brownian.bas's 38ms frame was in SPRITE SHOW
+ * alone.  MMBasic runs the same algorithm as plain memory access in one
+ * address space, which is the whole of the difference.
+ *
+ * So: a caller opens a window over the rectangle it is about to walk,
+ * and the row calls serve from a batch of rows fetched in ONE crossing
+ * instead of going to the kernel each time.  Nothing else changes -
+ * same arguments, same pixels, same order - which is why every caller
+ * gets it for two lines and none of the pixel logic moves.
+ *
+ * A row outside the open window, or no window at all, takes the direct
+ * path exactly as before: the window is an optimisation, never a
+ * precondition, and a caller that forgets to close one loses nothing
+ * but the batching.
+ */
+#ifndef MMB_WINB
+#define MMB_WINB 1024			/* packed bytes held at once */
+#endif
+
+static unsigned char mmb_winbuf[MMB_WINB];
+static struct {
+	int open;			/* a window is being walked      */
+	int y0, y1;			/* row range it covers           */
+	int b0, len;			/* byte span within a row        */
+	int stride;
+	int rows;			/* rows per batch                */
+	int have;			/* rows resident, 0 = none       */
+	int base;			/* first resident row            */
+	int dirty;			/* resident rows need writing    */
+	int fault;			/* a transfer failed - stop      */
+} mmb_win;
+
+/* Push the resident batch back if anything changed. */
+MMG_FN int mmb_win_flush(void)
+{
+	int r = 0;
+
+	if (mmb_win.dirty && mmb_win.have > 0) {
+		if (mm_fb_putr((MMINTEGER)mmb_win.base * mmb_win.stride
+			       + mmb_win.b0, mmb_win.len, mmb_win.have,
+			       mmb_win.stride, mmb_winbuf) < 0) {
+			mmb_win.fault = 1;
+			r = -1;
+		}
+	}
+	mmb_win.dirty = 0;
+	return r;
+}
+
+/*	Open a window over rows [y0, y0+h) of the byte span the caller is
+ *	about to walk.  x0/w are PIXELS and are turned into the same byte
+ *	span the row calls compute, so a row inside the window is served
+ *	from the batch and one outside is not. */
+MMG_FN void mmb_win_open(int y0, int h, int x0, int w, int stride, int bpp)
+{
+	int b0, b1, per;
+
+	mmb_win.open = 0;
+	mmb_win.have = 0;
+	mmb_win.dirty = 0;
+	mmb_win.fault = 0;
+	if (h < 1 || w < 1 || stride < 1)
+		return;
+	if (bpp == 4) {
+		b0 = x0 >> 1;
+		b1 = (x0 + w - 1) >> 1;
+	} else if (bpp == 1) {
+		b0 = x0 >> 3;
+		b1 = (x0 + w - 1) >> 3;
+	} else
+		return;
+	mmb_win.len = b1 - b0 + 1;
+	if (mmb_win.len > MMB_WINB)
+		return;			/* a row wider than the batch */
+	per = MMB_WINB / mmb_win.len;
+	if (per < 2)
+		return;			/* one row a batch buys nothing */
+	if (per > h)
+		per = h;
+	mmb_win.y0 = y0;
+	mmb_win.y1 = y0 + h;
+	mmb_win.b0 = b0;
+	mmb_win.stride = stride;
+	mmb_win.rows = per;
+	mmb_win.base = 0;
+	mmb_win.open = 1;
+}
+
+MMG_FN int mmb_win_close(void)
+{
+	int r = mmb_win.open ? mmb_win_flush() : 0;
+
+	mmb_win.open = 0;
+	mmb_win.have = 0;
+	return r;
+}
+
+/*	The batch holding row y, fetched if it is not the resident one.
+ *	NULL means "not served here" - the caller does it the direct way. */
+MMG_FN unsigned char *mmb_win_bytes(int y, int b0, int len)
+{
+	int base;
+
+	if (!mmb_win.open || mmb_win.fault)
+		return 0;
+	if (y < mmb_win.y0 || y >= mmb_win.y1)
+		return 0;
+	if (b0 != mmb_win.b0 || len != mmb_win.len)
+		return 0;		/* a different span: not ours */
+	base = mmb_win.y0
+	     + ((y - mmb_win.y0) / mmb_win.rows) * mmb_win.rows;
+	if (mmb_win.have == 0 || base != mmb_win.base) {
+		int n = mmb_win.y1 - base;
+
+		if (mmb_win_flush() < 0)
+			return 0;
+		if (n > mmb_win.rows)
+			n = mmb_win.rows;
+		if (mm_fb_readr((MMINTEGER)base * mmb_win.stride + mmb_win.b0,
+				mmb_win.len, n, mmb_win.stride,
+				mmb_winbuf) < 0) {
+			mmb_win.fault = 1;
+			mmb_win.have = 0;
+			return 0;
+		}
+		mmb_win.base = base;
+		mmb_win.have = n;
+	}
+	return mmb_winbuf + (size_t)(y - mmb_win.base) * mmb_win.len;
+}
+
 MMG_FN int mmb_row_get(int y, int x0, int w, int stride, int bpp,
 		       unsigned char *px)
 {
 	int b0, b1, i;
+	unsigned char *row;
 
 	if (bpp == 4) {
 		b0 = x0 >> 1;
@@ -103,16 +241,23 @@ MMG_FN int mmb_row_get(int y, int x0, int w, int stride, int bpp,
 		b0 = x0 >> 3;
 		b1 = (x0 + w - 1) >> 3;
 	}
-	if (mm_fb_read((MMINTEGER)y * stride + b0, b1 - b0 + 1, mmb_rowb) < 0)
-		return -1;
+	/* From the open window if this row is in it - see mmb_win_open.
+	   Otherwise the direct crossing, exactly as before. */
+	row = mmb_win_bytes(y, b0, b1 - b0 + 1);
+	if (row == 0) {
+		if (mm_fb_read((MMINTEGER)y * stride + b0, b1 - b0 + 1,
+			       mmb_rowb) < 0)
+			return -1;
+		row = mmb_rowb;
+	}
 	for (i = 0; i < w; i++) {
 		int x = x0 + i;
 
 		if (bpp == 4)
-			px[i] = (x & 1) ? (mmb_rowb[(x >> 1) - b0] & 15)
-					: (mmb_rowb[(x >> 1) - b0] >> 4);
+			px[i] = (x & 1) ? (row[(x >> 1) - b0] & 15)
+					: (row[(x >> 1) - b0] >> 4);
 		else
-			px[i] = (mmb_rowb[(x >> 3) - b0] >> (7 - (x & 7))) & 1;
+			px[i] = (row[(x >> 3) - b0] >> (7 - (x & 7))) & 1;
 	}
 	return 0;
 }
@@ -120,7 +265,8 @@ MMG_FN int mmb_row_get(int y, int x0, int w, int stride, int bpp,
 MMG_FN int mmb_row_put(int y, int x0, int w, int stride, int bpp,
 		       const unsigned char *px)
 {
-	int b0, b1, i;
+	int b0, b1, i, win = 0;
+	unsigned char *row;
 
 	if (bpp == 4) {
 		b0 = x0 >> 1;
@@ -131,21 +277,31 @@ MMG_FN int mmb_row_put(int y, int x0, int w, int stride, int bpp,
 	}
 	/* Read-modify-write, always: the boundary bytes carry pixels that
 	 * are not ours, and one uniform path beats reasoning per case
-	 * about which edges align (the pixel-batch lesson applied). */
-	if (mm_fb_read((MMINTEGER)y * stride + b0, b1 - b0 + 1, mmb_rowb) < 0)
-		return -1;
+	 * about which edges align (the pixel-batch lesson applied).
+	 *
+	 * Inside an open window the read is already done - the batch holds
+	 * these bytes - so the modify happens in place and the write back
+	 * is one crossing for the whole batch, not two per row. */
+	row = mmb_win_bytes(y, b0, b1 - b0 + 1);
+	if (row == 0) {
+		if (mm_fb_read((MMINTEGER)y * stride + b0, b1 - b0 + 1,
+			       mmb_rowb) < 0)
+			return -1;
+		row = mmb_rowb;
+	} else
+		win = 1;
 	for (i = 0; i < w; i++) {
 		int x = x0 + i;
 
 		if (bpp == 4) {
-			unsigned char *p = &mmb_rowb[(x >> 1) - b0];
+			unsigned char *p = &row[(x >> 1) - b0];
 
 			if (x & 1)
 				*p = (*p & 0xF0) | (px[i] & 15);
 			else
 				*p = (*p & 0x0F) | ((px[i] & 15) << 4);
 		} else {
-			unsigned char *p = &mmb_rowb[(x >> 3) - b0];
+			unsigned char *p = &row[(x >> 3) - b0];
 			unsigned char m = 0x80 >> (x & 7);
 
 			if (px[i])
@@ -153,6 +309,10 @@ MMG_FN int mmb_row_put(int y, int x0, int w, int stride, int bpp,
 			else
 				*p &= (unsigned char)~m;
 		}
+	}
+	if (win) {
+		mmb_win.dirty = 1;
+		return 0;
 	}
 	return mm_fb_put((MMINTEGER)y * stride + b0, b1 - b0 + 1, mmb_rowb);
 }

@@ -515,6 +515,15 @@ MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf);
  * bytes are native - no colour reduction - so the packing rules are the
  * caller's, and mmb_blit.h is the caller. */
 MMINTEGER mm_fb_put(MMINTEGER offset, MMINTEGER len, const void *buf);
+/* The same two, a RECTANGLE at a time: `rows` spans of `len` bytes,
+ * `stride` apart in the target and contiguous in buf.  One crossing
+ * instead of one per row - which is what every rectangle in mmb_blit.h
+ * and mmb_sprite.h was paying, twice over for a write (it
+ * read-modify-writes).  Same native layout, same -1 on no display. */
+MMINTEGER mm_fb_readr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                      MMINTEGER stride, void *buf);
+MMINTEGER mm_fb_putr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                     MMINTEGER stride, const void *buf);
 /* Both-axis scroll with wrap (GFXIOC_SCROLL2): dx > 0 picture right,
  * dy > 0 picture up; fill is RGB888, or -1 leave, -2 wrap.  -1 on no
  * display. */

@@ -4568,10 +4568,23 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
 }
 
 #define MM_GFXIOC_BLITRD 0x0032
+#define MM_GFXIOC_BLITR   0x0039        /* rows in  */
+#define MM_GFXIOC_BLITRDR 0x003A        /* rows out */
 
 struct mm_gfx_blit {
     unsigned short offset;
     unsigned short len;
+    void *buf;
+};
+
+/* The rectangle form: rows of len bytes, stride apart in the target and
+ * contiguous here.  Must match struct gfx_blitr in pico_ioctl.h. */
+struct mm_gfx_blitr {
+    unsigned long offset;
+    unsigned short len;
+    unsigned short rows;
+    unsigned short stride;
+    unsigned short pad;
     void *buf;
 };
 
@@ -4601,6 +4614,46 @@ MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf)
     b.len = (unsigned short)len;
     b.buf = buf;
     return ioctl(mm_gfx_fd, MM_GFXIOC_BLITRD, &b) < 0 ? -1 : 0;
+}
+
+/*
+ * The same window, `rows` of it at once - see GFXIOC_BLITR in
+ * pico_ioctl.h.  Every rectangle in mmb_blit.h and mmb_sprite.h used to
+ * be a loop of the single-row calls above, which is a system call per
+ * row and two per written row; here it is one.
+ */
+MMINTEGER mm_fb_readr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                      MMINTEGER stride, void *buf)
+{
+    struct mm_gfx_blitr b;
+
+    if (mm_gfx_open() < 0)
+        return -1;
+    mm_pix_drain();
+    b.offset = (unsigned long)offset;
+    b.len = (unsigned short)len;
+    b.rows = (unsigned short)rows;
+    b.stride = (unsigned short)stride;
+    b.pad = 0;
+    b.buf = buf;
+    return ioctl(mm_gfx_fd, MM_GFXIOC_BLITRDR, &b) < 0 ? -1 : 0;
+}
+
+MMINTEGER mm_fb_putr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                     MMINTEGER stride, const void *buf)
+{
+    struct mm_gfx_blitr b;
+
+    if (mm_gfx_open() < 0)
+        return -1;
+    mm_pix_drain();
+    b.offset = (unsigned long)offset;
+    b.len = (unsigned short)len;
+    b.rows = (unsigned short)rows;
+    b.stride = (unsigned short)stride;
+    b.pad = 0;
+    b.buf = (void *)buf;
+    return ioctl(mm_gfx_fd, MM_GFXIOC_BLITR, &b) < 0 ? -1 : 0;
 }
 
 #define MM_GFXIOC_BLIT 0x0005
@@ -5286,6 +5339,23 @@ MMINTEGER mm_fb_put(MMINTEGER offset, MMINTEGER len, const void *buf)
     return -1;
 }
 
+/* No framebuffer to move rows of, and the row form above says so the
+   same way: the callers fall back to drawing nothing, as they already
+   do headless. */
+MMINTEGER mm_fb_readr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                      MMINTEGER stride, void *buf)
+{
+    (void)offset; (void)len; (void)rows; (void)stride; (void)buf;
+    return -1;
+}
+
+MMINTEGER mm_fb_putr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                     MMINTEGER stride, const void *buf)
+{
+    (void)offset; (void)len; (void)rows; (void)stride; (void)buf;
+    return -1;
+}
+
 MMINTEGER mm_fb_scroll2(MMINTEGER dx, MMINTEGER dy, MMINTEGER fill)
 {
     (void)dx; (void)dy; (void)fill;
@@ -5539,7 +5609,21 @@ void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait)
         mm_error("Layer not created");
         return;
     }
-    if (wait)
+    /*
+     * ,B waits for vertical blanking, and ONLY when the destination is
+     * the physical display.
+     *
+     * The wait exists because the destination is the buffer core1 is
+     * DMAing out: writing it part way down a frame shows the top of the
+     * new picture and the bottom of the old one.  A copy into F or the
+     * layer touches nothing being scanned out, so there is nothing to
+     * tear and nothing to wait for - waiting there would cost a frame
+     * for no reason, which on a program copying every frame is half its
+     * budget.  The reference reaches the wait only down its "copying to
+     * the real display" arm too (FrameBuffer.c:1197 cmd_framebuffer;
+     * the plain buffer-to-buffer case is one memcpy).
+     */
+    if (wait && dst == MM_FB_N)
         mm_fb_wait_hw();
     mm_fb_copy_hw((int)src, (int)dst);
 }
