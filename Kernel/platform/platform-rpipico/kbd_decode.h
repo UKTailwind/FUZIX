@@ -56,6 +56,24 @@ void kbd_repeat_check(void);
 int usb_kbd_keydown(int n);
 // Lock-state bitmap in LED order: 0x01 num, 0x02 caps, 0x04 scroll.
 uint8_t kbd_led_bitmap(void);
+// Seed the num-lock state (MMBasic's Option.numlock), 0 = off.  The right
+// value is a property of the KEYBOARD, not of us: a board with no numeric
+// keypad often overlays one onto the letter keys while num-lock is on, and
+// its firmware drives that from the LED report we send.  Nothing in the USB
+// descriptors distinguishes such a keyboard - a Raspberry Pi keyboard and a
+// full-size Lenovo emit byte-identical HID report descriptors, both
+// declaring the whole key usage page (Usage Max 0x00FF) and a Num Lock LED
+// - so the platform remembers the choice per keyboard instead.  Does NOT
+// push the LEDs; the caller does that at its own safe moment.
+void kbd_set_numlock(int on);
+// Does this keyboard's HID report descriptor declare a Num Lock LED?  A
+// keyboard with no Num Lock LIGHT is very likely one with no numeric
+// keypad, which is the ONE thing about the keypad the descriptors do
+// say - and only in that direction; see the note in kbd_decode.c.  The
+// platform uses it as the default when it has no saved setting for the
+// keyboard.  Returns 1 for "declares one" AND for "cannot tell", so an
+// absent descriptor never reads as an absent keypad.
+int kbd_has_numlock_led(const uint8_t *desc, uint16_t len);
 // A keyboard went away: stop auto-repeat / clear the held-key state.
 void kbd_stop_repeat(void);
 void kbd_clear_state(void);

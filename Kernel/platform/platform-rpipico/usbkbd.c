@@ -106,6 +106,7 @@ typedef struct {
     volatile bool active;
     uint8_t addr;
     uint8_t inst;
+    uint16_t vid, pid;              /* identifies the device across unplugs */
     uint8_t type;
     volatile bool report_requested; /* a tuh_hid_receive_report in flight */
     volatile int report_timer;      /* ms since last report (advanced by tick) */
@@ -177,13 +178,151 @@ static bool kbd_leds_send(int slot)
         HID_REPORT_TYPE_OUTPUT, &hid_slots[slot].sendlights, 1);
 }
 
+/* --- num lock is a property of the KEYBOARD, not of us ------------------- */
+/*
+ * The embedded keypad described above (a Pi keyboard typing 6 for O) is
+ * the KEYBOARD'S OWN doing, and the only thing that triggers it is the
+ * num lock bit in the LED report we send.  So the right value is a
+ * property of the keyboard - and it cannot be discovered by asking one.
+ *
+ * A Raspberry Pi keyboard (04d9:0006, no keypad) and a full-size Lenovo
+ * (04b3:3025) return BYTE-IDENTICAL 65-byte report descriptors: both
+ * declare the whole key usage page (19 00 2a ff 00 - an Array item
+ * declares the range of values an element may carry, not which keys
+ * exist), and both declare a num lock LED.  A VID:PID quirk table is no
+ * better: 04d9 is Holtek, a generic controller vendor shared across
+ * unrelated OEM designs, so quirking it would break a full-size Holtek
+ * keyboard.
+ *
+ * Two rules, in this order:
+ *
+ *   1. A keyboard that declares NO num lock LED is taken to have no
+ *      keypad - kbd_has_numlock_led in the shared decoder, and see the
+ *      note there for why only that direction holds.
+ *   2. Whatever was last chosen for THIS keyboard beats rule 1,
+ *      remembered by VID:PID so swapping between a compact keyboard and
+ *      a full-size one does the right thing each time.
+ *
+ * The MicroPython PC3 port has the same two rules and writes (2) to
+ * /settings.json, so it survives a reboot.  A kernel does not write
+ * files: here (2) lives in RAM for the session, and `picoctl numlock`
+ * in /etc/rc is what makes a choice permanent.  Small and static - this
+ * is read from the mount callback, which cannot allocate or wait.
+ */
+#define KBD_NUMLOCK_PREFS 4
+static struct {
+    uint16_t vid, pid;
+    uint8_t on;
+} kbd_numlock_pref[KBD_NUMLOCK_PREFS];
+static uint8_t kbd_numlock_pref_n;
+
+/* Remember `on' for this keyboard, replacing any existing entry.  A full
+   table drops its oldest; the cost is one more Num Lock press on the
+   keyboard that got evicted. */
+void usb_kbd_numlock_pref(uint16_t vid, uint16_t pid, int on)
+{
+    for (int i = 0; i < kbd_numlock_pref_n; i++) {
+        if (kbd_numlock_pref[i].vid == vid && kbd_numlock_pref[i].pid == pid) {
+            kbd_numlock_pref[i].on = on ? 1 : 0;
+            return;
+        }
+    }
+    if (kbd_numlock_pref_n == KBD_NUMLOCK_PREFS) {
+        memmove(&kbd_numlock_pref[0], &kbd_numlock_pref[1],
+            sizeof(kbd_numlock_pref) - sizeof(kbd_numlock_pref[0]));
+        kbd_numlock_pref_n--;
+    }
+    kbd_numlock_pref[kbd_numlock_pref_n].vid = vid;
+    kbd_numlock_pref[kbd_numlock_pref_n].pid = pid;
+    kbd_numlock_pref[kbd_numlock_pref_n].on = on ? 1 : 0;
+    kbd_numlock_pref_n++;
+}
+
+/* The remembered setting for this keyboard, or `dflt' - what the
+   descriptor's LED block suggests - for one never seen. */
+static int kbd_numlock_for(uint16_t vid, uint16_t pid, int dflt)
+{
+    for (int i = 0; i < kbd_numlock_pref_n; i++) {
+        if (kbd_numlock_pref[i].vid == vid && kbd_numlock_pref[i].pid == pid) {
+            return kbd_numlock_pref[i].on;
+        }
+    }
+    return dflt;
+}
+
+/* Whether the mounted keyboard declared a num lock LED, for the ioctl to
+   report - the machine's own answer beats guessing from the model name. */
+static bool kbd_numlock_led_seen = true;
+
+/* Reached only from a Caps/Num/Scroll keypress, so a change in the num
+   bit here IS the user saying what this keyboard wants: remember it, so
+   a keyboard unplugged and plugged back in this session comes back the
+   way they left it. */
 void kbd_backend_set_leds(int slot, uint8_t leds)
 {
     if (slot < 0) {
         return;
     }
+    if ((leds ^ hid_slots[slot].sendlights) & 0x01) {
+        usb_kbd_numlock_pref(hid_slots[slot].vid, hid_slots[slot].pid,
+            leds & 0x01);
+    }
     hid_slots[slot].sendlights = leds;
     kbd_leds_mark(slot);
+}
+
+/* --- what the PICOIOC_NUMLOCK ioctl calls (misc.c) ----------------------- */
+
+int usb_kbd_numlock_get(void)
+{
+    return kbd_led_bitmap() & 0x01;
+}
+
+/* Whether the mounted keyboard declares a num lock LED. */
+int usb_kbd_numlock_led(void)
+{
+    return kbd_numlock_led_seen ? 1 : 0;
+}
+
+/* The mounted keyboard as (vid << 16) | pid, or 0 if there is none. */
+uint32_t usb_kbd_id(void)
+{
+    for (int i = 0; i < HID_NSLOTS; i++) {
+        if (hid_slots[i].active && hid_slots[i].type == HID_KBD) {
+            return ((uint32_t)hid_slots[i].vid << 16) | hid_slots[i].pid;
+        }
+    }
+    return 0;
+}
+
+/* Apply num lock now, remember it for the mounted keyboard, and mark the
+   LEDs so hid_poll pushes them - which is what makes an overlay keyboard
+   drop its embedded keypad immediately rather than at the next mount. */
+void usb_kbd_numlock_set(int on)
+{
+    kbd_set_numlock(on);
+    for (int i = 0; i < HID_NSLOTS; i++) {
+        if (hid_slots[i].active && hid_slots[i].type == HID_KBD) {
+            usb_kbd_numlock_pref(hid_slots[i].vid, hid_slots[i].pid, on);
+            hid_slots[i].sendlights = kbd_led_bitmap();
+            kbd_leds_mark(i);
+        }
+    }
+}
+
+/* Record a preference for a NAMED keyboard, and if that happens to be
+   the keyboard in use, apply it now instead of at its next mount.
+   Without the second half, `picoctl numlock --load' from /etc/rc would
+   file the setting correctly and leave the keyboard being typed on
+   exactly as it was - which is the whole case it exists for, since the
+   keyboard has already mounted and had its first LED report by the time
+   rc runs. */
+void usb_kbd_numlock_pref_apply(uint16_t vid, uint16_t pid, int on)
+{
+    usb_kbd_numlock_pref(vid, pid, on);
+    if (usb_kbd_id() == (((uint32_t)vid << 16) | pid)) {
+        usb_kbd_numlock_set(on);
+    }
 }
 
 /* --- the rest of the decoder core's backend seam (kbd_decode.h) ---------- */
@@ -464,9 +603,11 @@ void tuh_umount_cb(uint8_t dev_addr)
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance,
     uint8_t const *desc_report, uint16_t desc_len)
 {
-    (void)desc_report;
-    (void)desc_len;
     uint8_t proto = tuh_hid_interface_protocol(dev_addr, instance);
+    uint16_t vid = 0, pid = 0;
+    /* Cached by TinyUSB - no bus traffic, so it is safe here (the rule
+       above about control transfers from this callback). */
+    tuh_vid_pid_get(dev_addr, &vid, &pid);
 
     /* Keyboard-only for now: mice/gamepads/touch are left unclaimed
      * (unclaimed interfaces are harmless, as MMBasic's filter shows).
@@ -480,6 +621,8 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance,
     hid_slots[0].active = true;
     hid_slots[0].addr = dev_addr;
     hid_slots[0].inst = instance;
+    hid_slots[0].vid = vid;
+    hid_slots[0].pid = pid;
     hid_slots[0].type = HID_KBD;
     hid_slots[0].report_requested = false;
     hid_slots[0].report_rate = 20; /* ms, as MMBasic */
@@ -487,8 +630,16 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance,
      * ms after mount. */
     hid_slots[0].report_timer = -(10 + 2 * 500);
     hid_slots[0].notfirsttime = false;
+    /* Settle num lock BEFORE the LED bitmap is seeded, so the very first
+       LED report carries it and a keyboard that overlays a keypad onto
+       its letter keys never gets the chance to turn the overlay on. */
+    kbd_numlock_led_seen = kbd_has_numlock_led(desc_report, desc_len) ? true : false;
+    kbd_set_numlock(kbd_numlock_for(vid, pid, kbd_numlock_led_seen ? 1 : 0));
     hid_slots[0].sendlights = kbd_led_bitmap();
     kputs("USB keyboard attached\n");
+    if (!kbd_numlock_led_seen) {
+        kputs("USB keyboard: no num lock LED, assuming no numeric keypad\n");
+    }
     /* NOTE: no tuh_hid_receive_report here - hid_poll() issues it. */
 }
 

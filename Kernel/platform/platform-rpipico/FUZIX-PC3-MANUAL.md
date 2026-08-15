@@ -642,6 +642,37 @@ console is an 80×40 colour terminal (termcap type `pc3`) and the USB
 keyboard and serial input feed the same session interchangeably. Set
 the keyboard layout in `/etc/rc` (`picoctl keymap uk` by default).
 
+### Num lock, and keyboards with no keypad
+
+A keyboard with no numeric keypad — a Raspberry Pi keyboard, and most
+laptop-style boards — usually overlays one onto `7890`/`uiop`/`jkl;`/`m`
+whenever num lock is on, so those letters type digits. The keyboard's
+own firmware does that, in response to the num lock light the machine
+asks it to show.
+
+Two things handle it. A keyboard that reports **no num lock light** is
+taken to have no keypad and starts with num lock off (it says so at
+boot). That does not catch every such keyboard — one that reports a num
+lock light while having no keypad is indistinguishable from a full-size
+keyboard — so **pressing Num Lock is also remembered**, per keyboard, for
+as long as the machine stays on.
+
+To ask what is going on:
+
+```
+# picoctl numlock
+num lock on
+keyboard 04d9:0006, num lock LED declared
+```
+
+and to change it: `picoctl numlock off`. The kernel does not write
+files, so a setting is only permanent if it is named in `/etc/rc`, where
+each keyboard can have its own line:
+
+```
+picoctl numlock off 04d9:0006
+```
+
 To power off, type `shutdown` (or at minimum `sync`, then wait a
 moment). After an unclean power-off the next boot repairs the
 filesystem automatically (`fsck -a -y`).
@@ -2760,8 +2791,8 @@ command the card does not have is worse than one that stays quiet, so
 if you find something here that is missing, that is a bug in one of
 them.
 
-**Machine tools:** `picoctl` (keyboard layout, reboot to the
-flasher), `picogpio`/`gpiotool`, `gfxtest` (display test card),
+**Machine tools:** `picoctl` (keyboard layout, num lock, display mode,
+reboot to the flasher), `picogpio`/`gpiotool`, `gfxtest` (display test card),
 `setdate` (DS3231), `flashrom`, `setboot`, `dosread`/`doswrite`
 (FAT12/16 floppy-era transfers), `fat`, `uue`/`uud` (serial file
 transfer — see that chapter).

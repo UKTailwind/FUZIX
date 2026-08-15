@@ -5,6 +5,104 @@ original phased plan lives in the MicroPython repo at
 `boards/PICO_COMPUTER_3/fuzix/PLAN.md`; these notes supersede it as the
 live document.
 
+## Num lock per keyboard (2026-08-14) — ported from the MicroPython PC3
+
+The embedded-keypad problem `kbd_leds_mark`'s comment already named (a Pi
+keyboard typing 6 for O) now has an answer. It is the KEYBOARD'S firmware
+overlaying a keypad onto `7890/uiop/jkl;/m`, triggered only by the num
+lock bit in the LED report we send — and which kind of keyboard it is
+cannot be discovered by asking one.
+
+Proven on hardware from the MicroPython side: a Raspberry Pi keyboard
+(`04d9:0006`, no keypad) and a full-size Lenovo (`04b3:3025`) return
+**byte-identical 65-byte report descriptors**, both declaring the whole
+key usage page (`19 00 2a ff 00` — an Array item declares the range of
+values an element may carry, not which keys exist) and both declaring a
+num lock LED. A VID:PID quirk table is no better: `04d9` is Holtek, a
+generic controller vendor, so quirking it would break a full-size Holtek
+keyboard.
+
+So: guess from the one readable signal, remember what you are told.
+
+- `kbd_has_numlock_led()` lives in **kbd_decode.c** — the file vendored
+  byte-identical with the MicroPython port — so both trees share one copy
+  and `kbdsync.sh` guards it. A keyboard declaring no num lock LED is
+  taken to have no keypad. Only that direction holds: a declared LED means
+  nothing (the Pi keyboard declares one), an absent one is evidence. It is
+  credible here because both dumped keyboards declare `19 01 29 03`,
+  exactly the lights they have, not the spec's boilerplate `29 05`.
+  Host-tested under ASan/UBSan against the function extracted from the
+  shared file by `sed`, 12 cases including truncated and garbage input.
+- `kbd_numlock_pref[4]` in usbkbd.c remembers by VID:PID, consulted at
+  mount **before** `sendlights` is seeded so the first LED report already
+  carries it. Static and allocation-free — the mount callback cannot
+  allocate or wait. `tuh_vid_pid_get` is cached by TinyUSB, so calling it
+  there breaks none of the enumeration rules at the top of the file.
+- `kbd_backend_set_leds` updates the table when the num bit changes, so a
+  Num Lock press is remembered for the session.
+- `PICOIOC_NUMLOCK` (0x0037; `ioctlcheck.sh` clean) is query-and-set in one
+  struct. On a set, vid/pid 0 means the mounted keyboard; naming one
+  records a preference for a keyboard that is not attached.
+- `picoctl numlock [on|off [vvvv:pppp]]`; bare `picoctl numlock` reports
+  the state, the keyboard's VID:PID and whether it declared the LED.
+
+### Persistence — the half that first shipped missing
+
+The first cut left the table RAM-only and put a *commented* rc line in as
+the answer. Tested on hardware: the Pi keyboard came up with num lock on
+every boot, exactly as that design says it must. Two reasons, and only the
+second is fixable here — the Pi keyboard **declares** a num lock LED, so
+rule 1 never fires for it, and nothing replayed rule 2 across a reboot.
+MicroPython works because it *persists*, not because it detects.
+
+So the persistence is now ported properly, through userland, where a Unix
+keeps this:
+
+- `/etc/numlock` — a line per keyboard, `04d9:0006 off`.
+- `picoctl numlock off` applies it AND records it there; `--once` doesn't.
+  A bare `picoctl numlock` reports state, VID:PID and whether the LED was
+  declared.
+- `picoctl numlock --load` in `/etc/rc` replays the lot at boot.
+- `usb_kbd_numlock_pref_apply()` in usbkbd.c — recording a preference for
+  the keyboard that IS mounted also applies it, otherwise `--load` would
+  file the setting and leave the keyboard being typed on unchanged, which
+  is the whole case it exists for.
+- Host-tested under ASan/UBSan against `nl_read`/`nl_save`/`nl_load`
+  extracted from picoctl.c by `awk`: create, append, update-in-place with
+  no duplicate, comments/blanks/rubbish skipped, missing file quiet,
+  round trip. It found a real bug first — a hand-edited file with no
+  trailing newline had the new entry jammed onto its last line.
+
+rc still runs after the keyboard's first LED report, so an affected
+keyboard has the overlay on for the first second or so of boot, before
+login. Nothing to do about that short of the kernel writing files.
+
+### Two traps found on the way
+
+**`Kernel/platform/platform-rpipico/rc` is NOT the rc that ships.**
+`fuzix-basefs.pkg` installs `/etc/rc` from
+`Standalone/filesystem-src/etc-files/rc`, and the two have drifted
+independently. The first commented line went into the platform copy and
+would never have reached a card. The platform copy now says so at the top.
+
+**`make diskimage` was already broken.** ucp died with `error 28` partway
+through and then `panic: inode freed` — which reads like corruption, not a
+full disk. It is inodes: the root is 4.1M of content in a 32M image, and
+the 32M and 8M images fail at exactly the same file. FS32 is the cause,
+having taken `DINODE_SIZE` from 64 bytes to 256, so upstream's `isize=256`
+buys a quarter as many as it used to. Nothing to do with the num lock work
+— that adds no files. Fixed by measurement rather than arithmetic, because
+the arithmetic does not line up: 256 dies at `stty`, 512 at `utsname.h`,
+1024 is clean, though 512 blocks at 2 inodes each ought to have covered the
+591 the root needs. Something else is eating them, and
+`NOTES-inode-freelist.md` describes a two-byte overrun onto `s_ninode`
+fixed in the kernel that may still be live in these host tools — **not
+proven, worth chasing**. `isize` is now 2048 in the top-level Makefile.
+
+Kernel, picoctl and a full card image all build clean; `pc3-sd.img`
+refreshed and verified to contain the new rc line and picoctl. **Not yet
+run on hardware.**
+
 ## Workflow
 
 - Build (WSL): `PICO_SDK_PATH=$HOME/src/micropython/lib/pico-sdk make
