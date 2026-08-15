@@ -37,6 +37,7 @@
 
 #define LIBPATH		"/usr/lib/cc/"
 #define CMD_CPP		"/usr/bin/cpp"
+#define CMD_MMBC	"/usr/bin/mmbc"
 /*
  * Headers describing what bcrun actually provides, which is not what
  * /usr/include describes - those are the Fuzix libc's, for native
@@ -49,6 +50,7 @@
 
 static const char *libpath = LIBPATH;
 static const char *cppcmd = CMD_CPP;
+static const char *mmbccmd = CMD_MMBC;
 static char incpath[80];
 static int verbose;
 static int keep;
@@ -60,6 +62,10 @@ static char ppfile[64];
 static char tokfile[64];
 static char irfile[64];
 static char symfile[64];
+/* The C that mmbc generated from a .bas source.  A distinct name -
+   prog.mb.c, not prog.c - so compiling prog.bas can never overwrite a
+   real prog.c sitting beside it. */
+static char basfile[64];
 
 /*
  *	Only one cc at a time.
@@ -138,6 +144,8 @@ static void cleanup(void)
 			unlink(tokfile);
 		if (*irfile)
 			unlink(irfile);
+		if (*basfile)
+			unlink(basfile);
 	}
 	if (*symfile)
 		unlink(symfile);
@@ -183,7 +191,9 @@ static void run(char **argv, const char *in, const char *out)
 			fprintf(stderr, " %s", *q++);
 		if (in)
 			fprintf(stderr, " <%s", in);
-		fprintf(stderr, " >%s\n", out);
+		if (out)
+			fprintf(stderr, " >%s", out);
+		fprintf(stderr, "\n");
 	}
 
 	if (in) {
@@ -193,12 +203,16 @@ static void run(char **argv, const char *in, const char *out)
 			fatal();
 		}
 	}
-	fdout = open(out, O_RDWR | O_CREAT | O_TRUNC, 0666);
-	if (fdout == -1) {
-		perror(out);
-		fatal();
+	/* out may be NULL for a pass that writes its own file - mmbc
+	   takes -o and its stdout is only chatter */
+	if (out) {
+		fdout = open(out, O_RDWR | O_CREAT | O_TRUNC, 0666);
+		if (fdout == -1) {
+			perror(out);
+			fatal();
+		}
 	}
-	if (put_shebang) {
+	if (put_shebang && fdout != -1) {
 		/* the child inherits the shared offset, so its output
 		   lands after the line; bcrun's loader skips it */
 		write(fdout, shebang, sizeof(shebang) - 1);
@@ -215,15 +229,18 @@ static void run(char **argv, const char *in, const char *out)
 			dup2(fdin, 0);
 			close(fdin);
 		}
-		dup2(fdout, 1);
-		close(fdout);
+		if (fdout != -1) {
+			dup2(fdout, 1);
+			close(fdout);
+		}
 		execv(argv[0], argv);
 		perror(argv[0]);
 		_exit(255);
 	}
 	if (fdin != -1)
 		close(fdin);
-	close(fdout);
+	if (fdout != -1)
+		close(fdout);
 
 	while ((p = waitpid(pid, &status, 0)) != pid) {
 		if (p == -1) {
@@ -307,7 +324,7 @@ int main(int argc, char *argv[])
 
 	if (src == NULL) {
 		fprintf(stderr,
-			"usage: cc [-o out] [-v] [-k] [-Ldir] file.c\n");
+			"usage: cc [-o out] [-v] [-k] [-Ldir] file.c|file.bas\n");
 		return 1;
 	}
 
@@ -325,6 +342,35 @@ int main(int argc, char *argv[])
 	signal(SIGINT, onsig);
 	signal(SIGHUP, onsig);
 	signal(SIGTERM, onsig);
+
+	/*
+	 * BASIC first, through mmbc: cc prog.bas is the whole build, the
+	 * way the manual has always written the two commands.  The
+	 * generated C gets a name of its own (prog.mb.c) and is removed
+	 * with the other intermediates, so a real prog.c next to the
+	 * BASIC is never touched.  After this the pipeline neither knows
+	 * nor cares where the C came from.
+	 */
+	{
+		const char *dot = strrchr(src, '.');
+
+		if (dot && (strcmp(dot, ".bas") == 0 ||
+			    strcmp(dot, ".BAS") == 0)) {
+			if (access(mmbccmd, X_OK) != 0) {
+				fprintf(stderr, "cc: no %s - BASIC needs "
+					"the translator\n", mmbccmd);
+				fatal();
+			}
+			basename_to(basfile, src, ".mb.c");
+			av[0] = (char *) mmbccmd;
+			av[1] = src;
+			av[2] = "-o";
+			av[3] = basfile;
+			av[4] = NULL;
+			run(av, NULL, NULL);
+			src = basfile;
+		}
+	}
 
 	/*
 	 * cpp takes its input as an argument and writes to stdout. If it
