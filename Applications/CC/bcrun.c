@@ -2867,6 +2867,19 @@ static int64_t native_enter(unsigned long off)
  *	offsets cc2 bakes into BC_LOCAL agree in both worlds.
  */
 static int force_bytecode;	/* BCRUN_BYTECODE=1: ignore native code */
+/*
+ * BCRUN_SPCHECK=1: verify the VM stack pointer stays 4-aligned at
+ * every bytecode boundary.  The picofrog kill shot (2026-08-15) was a
+ * 64-bit by-ref store through an ODD frame address - the VM sp had
+ * been displaced by one byte somewhere in a burst of tick-interrupt
+ * dispatches, and the store was an unaligned HardFault whose panic is
+ * invisible in a graphics mode.  Slots are 4 bytes; sp has no business
+ * being anything but 4-aligned here, and the first op that leaves it
+ * misaligned is the bug.  Costs one test per op, only when asked.
+ */
+static int spcheck;		/* BCRUN_SPCHECK=1 */
+static unsigned long spchk_pc;	/* where the last op was fetched     */
+static unsigned char spchk_op;	/* and what it was                   */
 
 /*
  *	BCRUN_PROF=1: count every crossing from native code back into
@@ -3139,6 +3152,18 @@ static int64_t bc_exec(unsigned long entry)
 		unsigned char op;
 		int64_t b;
 
+		if (spcheck && (sp & 3)) {
+			/* prev_* were captured before the op that ran last -
+			   THAT op (or the call it made) left sp misaligned. */
+			fprintf(stderr, "bcrun: SP MISALIGNED sp=%08lx "
+				"after pc=%04lx op=%02x (next pc=%04lx)\n",
+				sp, spchk_pc, spchk_op, pc);
+			fault("sp misaligned");
+		}
+		if (spcheck) {
+			spchk_pc = pc;
+			spchk_op = code[pc];
+		}
 		if (trace)
 			fprintf(stderr, "%04lx: op %02x A=%ld sp=%lx\n",
 				pc, code[pc], (long)A, sp);
@@ -3584,6 +3609,7 @@ int main(int argc, char *argv[])
 	mem_init();
 	mfns_share();
 	force_bytecode = getenv("BCRUN_BYTECODE") != NULL;
+	spcheck = getenv("BCRUN_SPCHECK") != NULL;
 	prof_on = getenv("BCRUN_PROF") != NULL;
 	if (prof_on) {
 		prof_op = calloc(256, sizeof(uint32_t));
