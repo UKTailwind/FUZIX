@@ -10,6 +10,19 @@ static int cmpstr(const void *a, const void *b)
     return strcmp(*(const char *const *)a, *(const char *const *)b);
 }
 
+/* Does any DATA item have this kind?  self.data_has_f / data_has_i in
+   the Python: a column no item uses is not emitted, and the runtime is
+   handed a NULL it never dereferences. */
+static int data_has_kind(int kind)
+{
+    int k;
+
+    for (k = 0; k < cv.ndata; k++)
+        if (cv.data[k].kind == kind)
+            return 1;
+    return 0;
+}
+
 /* Sorted copy of the global names (scratch). */
 static const char **global_names_sorted(int *np)
 {
@@ -474,20 +487,34 @@ void conv_write(FILE *f)
     if (cv.ndata > 0) {
         fprintf(f, "\n/* ---- DATA items: parallel primitive arrays, "
                    "so no\n");
-        fprintf(f, " * struct layout crosses the bcrun VM boundary "
+        fprintf(f, " * struct layout crosses the bcrun VM boundary.\n");
+        fprintf(f, " *\n");
+        fprintf(f, " * A column whose kind no item has is not emitted at "
+                   "all -\n");
+        fprintf(f, " * READ never looks at it, and eight bytes an item is "
+                   "worth\n");
+        fprintf(f, " * having back: picofrog carries 1692 items and not "
+                   "one\n");
+        fprintf(f, " * float, which was 13,536 bytes of zeroes in the "
+                   "data\n");
+        fprintf(f, " * segment of a program that had none to spare. "
                    "---- */\n");
         fprintf(f, "static const int __mmb_data_kind[] = {\n");
         for (k = 0; k < cv.ndata; k++)
             fprintf(f, "    %d,\n", cv.data[k].kind);
         fprintf(f, "};\n");
-        fprintf(f, "static const MMFLOAT __mmb_data_f[] = {\n");
-        for (k = 0; k < cv.ndata; k++)
-            fprintf(f, "    %s,\n", cv.data[k].f);
-        fprintf(f, "};\n");
-        fprintf(f, "static const MMINTEGER __mmb_data_i[] = {\n");
-        for (k = 0; k < cv.ndata; k++)
-            fprintf(f, "    %s,\n", cv.data[k].i);
-        fprintf(f, "};\n");
+        if (data_has_kind(2)) {
+            fprintf(f, "static const MMFLOAT __mmb_data_f[] = {\n");
+            for (k = 0; k < cv.ndata; k++)
+                fprintf(f, "    %s,\n", cv.data[k].f);
+            fprintf(f, "};\n");
+        }
+        if (data_has_kind(0)) {
+            fprintf(f, "static const MMINTEGER __mmb_data_i[] = {\n");
+            for (k = 0; k < cv.ndata; k++)
+                fprintf(f, "    %s,\n", cv.data[k].i);
+            fprintf(f, "};\n");
+        }
         fprintf(f, "static const char *__mmb_data_s[] = {\n");
         for (k = 0; k < cv.ndata; k++)
             fprintf(f, "    %s,\n", cv.data[k].sv);
@@ -594,8 +621,10 @@ void conv_write(FILE *f)
         fprintf(f, "    H = mm_heap(sizeof *H);   "
                    "/* arrays and strings */\n");
     if (cv.ndata > 0)
-        fprintf(f, "    mm_data_init4(__mmb_data_kind, __mmb_data_f, "
-                   "__mmb_data_i, __mmb_data_s, %d);\n", cv.ndata);
+        fprintf(f, "    mm_data_init4(__mmb_data_kind, %s, %s, "
+                   "__mmb_data_s, %d);\n",
+                data_has_kind(2) ? "__mmb_data_f" : "0",
+                data_has_kind(0) ? "__mmb_data_i" : "0", cv.ndata);
     for (k = 0; k < cv.out_main.n; k++)
         fprintf(f, "%s\n", cv.out_main.lines[k]);
     fprintf(f, "    return 0;\n}\n");

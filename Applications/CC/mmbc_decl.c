@@ -544,6 +544,42 @@ void do_option(void)
         cv.opt_base = atoi(w->text);
         return;
     }
+    if (strcmp(t->up, "CONSOLE") == 0) {
+        /* OPTION CONSOLE SERIAL | SCREEN | BOTH | NONE
+         *
+         * A bitmask, exactly the reference's (MM_Misc.c:5178): BOTH 3,
+         * SERIAL 1, SCREEN 2, NONE 0, and putConsole is "if
+         * (OptionConsole & 2) DisplayPutC; if (OptionConsole & 1)
+         * SerialConsolePutC" (PicoMite.c:1174).
+         *
+         * A run-time statement, not a compile-time setting: a program
+         * turns the screen off round a section and back on after, so it
+         * emits a call where it stands.
+         *
+         * This is the debugging tool that was missing.  A program in a
+         * graphics mode drew its PRINTs on the screen and nothing
+         * reached the console, so a trace either scrolled away under
+         * the picture or was overwritten by it - and if the machine
+         * then stopped, there was nothing to read anywhere. */
+        int mode = -1;
+
+        cv.i++;
+        w = nxt();
+        if (w->kind == T_ID) {
+            if (strcmp(w->up, "SERIAL") == 0)
+                mode = 1;
+            else if (strcmp(w->up, "SCREEN") == 0)
+                mode = 2;
+            else if (strcmp(w->up, "BOTH") == 0)
+                mode = 3;
+            else if (strcmp(w->up, "NONE") == 0)
+                mode = 0;
+        }
+        if (mode < 0)
+            cv_err("OPTION CONSOLE wants SERIAL, SCREEN, BOTH or NONE");
+        emit(sfmt("mm_console(%d);", mode));
+        return;
+    }
     skip_statement();
 }
 

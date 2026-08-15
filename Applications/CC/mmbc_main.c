@@ -33,6 +33,23 @@ static int read_lines(const char *path)
     fclose(f);
     buf[sz] = 0;
 
+    /* XMODEM pads the last block, so a program that arrived that way
+       carries NULs after its last line - brownian.bas came over with 23
+       of them after "End Sub".  That is how files reach these machines,
+       and MMBasic reads such a file without noticing, its program store
+       being NUL-terminated.  Refusing it meant a program that runs on
+       the reference would not translate here, and said so at a line
+       number past the end of the program.
+
+       NUL is where the program stops, which is what it means in a BASIC
+       source - not something to strip out of the middle. */
+    {
+        char *z = memchr(buf, 0, (size_t)sz);
+
+        if (z != NULL)
+            sz = (long)(z - buf);
+    }
+
     src_lines = xrealloc(NULL, sizeof(char *) * (size_t)cap);
     src_nlines = 0;
     p = buf;
@@ -213,9 +230,17 @@ static const char *convert(const char *inpath, const char *outpath,
     if (cv.nskipped > 0) {
         printf("%d line(s) could not be translated and were "
                "commented out:\n", cv.nskipped);
-        for (k = 0; k < cv.nskipped; k++)
+        /* The offending source, not just the complaint.  It was already
+           being kept for the report at the end of the C and simply
+           never shown here, so a message like "expected ')'" arrived
+           with nothing to attach it to - on a board, where the source
+           is a file away, that is most of the diagnosis missing. */
+        for (k = 0; k < cv.nskipped; k++) {
             printf("  line %d: %s\n", cv.skipped[k].line,
                    cv.skipped[k].why);
+            if (cv.skipped[k].text && cv.skipped[k].text[0])
+                printf("      %.72s\n", cv.skipped[k].text);
+        }
     }
     if (report) {
         memset(&rep, 0, sizeof(rep));

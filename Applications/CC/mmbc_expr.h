@@ -18,6 +18,7 @@
  *     None                        - omitted argument
  *     ('array', sym, None)        - whole array:  a()
  *     ('var',   sym, None)        - bare scalar variable
+ *     ('elem',  sym, (code, ty))  - one element:  a(i)
  *     ('val',   None, (code, ty)) - any other expression
  * An omitted item becomes kind ARG_NONE; emit_call also passes NULL
  * for a position beyond the end of the list (Python None either way,
@@ -27,11 +28,12 @@
 #define ARG_ARRAY 1
 #define ARG_VAR   2
 #define ARG_VAL   3
+#define ARG_ELEM  4
 
 struct arg {
     int kind;
-    struct sym *s;              /* ARG_ARRAY / ARG_VAR */
-    struct val v;               /* ARG_VAL */
+    struct sym *s;              /* ARG_ARRAY / ARG_VAR / ARG_ELEM */
+    struct val v;               /* ARG_VAL / ARG_ELEM */
 };
 
 /* Python lists are unbounded; a fixed cap with a hard error is the

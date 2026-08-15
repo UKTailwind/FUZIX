@@ -1480,7 +1480,15 @@ void statement_inner(void)
            (transparent paper) and so cannot double as the "none given"
            sentinel the other statements use. */
         const char *x, *y, *s;
-        const char *just = "0", *font = "1LL", *scale = "1LL";
+        /* 0 for an omitted font or scale, NOT 1: the default is the
+           CURRENT font and scale, which is what FONT set, and only the
+           runtime knows them.  Draw.c:2133 cmd_text takes both from
+           gui_font.  Emitting 1 here meant a program that said FONT 10
+           and then drew with the plain four-argument TEXT - which is
+           what MMBasic programs do - got font 1 every time, so an 8x8
+           panel came out in 8x12 and overlapped, and DefineFont looked
+           broken when it was not. */
+        const char *just = "0", *font = "0LL", *scale = "0LL";
         const char *fc = "mm_fg()", *bc = "mm_bg()";
 
         cv.i++;
@@ -3829,8 +3837,18 @@ static void do_else(void)
 static void close_block(const char *kind)
 {
     if (cv.nblocks == 0
-        || strcmp(cv.blocks[cv.nblocks - 1].kind, kind) != 0)
+        || strcmp(cv.blocks[cv.nblocks - 1].kind, kind) != 0) {
+        /* A block whose OPENER could not be translated leaves its close
+           with nothing to match, and "mismatched end of if block" then
+           reads as a second, separate fault in a line that is perfectly
+           good.  Say which line actually caused it - one real error and
+           one consequence, not two mysteries. */
+        if (cv.nskipped > 0)
+            cv_err("end of %s block with no start - line %d above could "
+                   "not be translated", kind,
+                   cv.skipped[cv.nskipped - 1].line);
         cv_err("mismatched end of %s block", kind);
+    }
     cv.nblocks--;
     cv.indent--;
     emit("}");
