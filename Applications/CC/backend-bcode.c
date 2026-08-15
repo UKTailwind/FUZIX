@@ -608,6 +608,23 @@ void gen_prologue(const char *name)
  */
 void gen_frame(unsigned size, unsigned aframe)
 {
+	/*
+	 *	The stack is 4-byte slots and every address handed down
+	 *	from here - by-ref arguments included - is computed off
+	 *	sp.  A frame size that is not a multiple of 4 therefore
+	 *	skews sp for the entire call subtree below this function,
+	 *	and the first 64-bit store through such an address is an
+	 *	unaligned fault on the board (picofrog 2026-08-15:
+	 *	f_move_player's 261-byte frame, and the machine died
+	 *	inside mm_font_cur with no dump to show for it).  The
+	 *	front end hands us the raw sum of the locals; round it up
+	 *	here.  The pad sits between the top local and the return
+	 *	address, and the thumb backend translates the operand we
+	 *	emit, so native frames get the same rounding for free.
+	 *	gen_epilogue must round identically or LEAVE unbalances
+	 *	the stack.
+	 */
+	size = (size + 3) & ~3u;
 	frame_len = size + 4;		/* locals plus the return address */
 	cbyte(BC_ENTER);
 	cword(size);
@@ -615,6 +632,7 @@ void gen_frame(unsigned size, unsigned aframe)
 
 void gen_epilogue(unsigned size, unsigned argsize)
 {
+	size = (size + 3) & ~3u;	/* exactly as gen_frame rounded */
 	if (sp)
 		error("sp");
 	cbyte(BC_LEAVE);
