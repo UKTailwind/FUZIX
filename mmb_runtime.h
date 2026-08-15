@@ -376,6 +376,12 @@ MMINTEGER mm_play_start(void);
 MMINTEGER mm_play_owner(void);
 /* one control record to the player daemon (mmb_playctl.h); -1 when no
  * daemon is listening */
+/* PLAY SOUND/TONE/VOLUME into the kernel synthesiser: 0 done, -2 the
+ * output is held by an MP3/MOD player, -1 no such ioctl (fall back to
+ * the daemon).  mm_snd_stop silences and releases it. */
+MMINTEGER mm_snd_cmd(MMINTEGER op, MMINTEGER a, MMINTEGER b,
+                     MMINTEGER p1, MMINTEGER p2, MMINTEGER p3);
+MMINTEGER mm_snd_stop(void);
 MMINTEGER mm_play_send(MMINTEGER op, MMINTEGER a, MMINTEGER b,
                        MMINTEGER p1, MMINTEGER p2, MMINTEGER p3);
 MMINTEGER mm_play_stop(void);

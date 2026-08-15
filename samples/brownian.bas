@@ -2,7 +2,7 @@
 
 Option explicit
 Option default none
-'Option console serial
+Option console serial
 MODE 2
 FRAMEBUFFER create
 FRAMEBUFFER write f
@@ -101,14 +101,14 @@ Do
     vector i, direction(i), 1, x(i), y(i)
     Sprite show i,x(i),y(i),1
     ' Check for sprite collisions OR background object collisions
-    If sprite(S,i)<>-1 Then
+    If sprite(S)<>-1 Then
       break_collision i
     EndIf
   Next i
 
   FRAMEBUFFER copy f,n
-'  Print @(0,0)Timer;
-'  Timer = 0
+  Print Timer
+  Timer = 0
 Loop
 
 ' Check if a position is inside any of the static boxes
@@ -171,9 +171,9 @@ End Sub
 ' Handle collisions - break them by bouncing
 Sub break_collision(atom As integer)
   Local integer j=1, col, bg_hit, hit
-  Local integer bx, by, bw, bh, ax, ay
+  Local integer bx, by, bw, bh, aw, ah
+  Local integer pl, pr, pt, pb, pushx, pushy
   Local float current_angle=direction(atom)
-  Local float dx, dy
 
   ' Check what type of collision occurred
   If sprite(e,atom)=1 Then
@@ -201,25 +201,54 @@ Sub break_collision(atom As integer)
     Next col
 
     If bg_hit > 0 Then
-      ' Bounce off static object - determine which side was hit
+      ' Bounce off a static object.
+      '
+      ' The old code chose the bounce axis by comparing the atom centre with
+      ' the box centre, and only ever reflected the direction - it never
+      ' separated the atom from the box.  Reflection on its own cannot
+      ' recover from an overlap: the atom is still touching next frame, so it
+      ' collides again and reflects again, and two reflections about the same
+      ' axis cancel out.  That is the atom stuck creeping along a box edge.
+      ' Near a corner the centre test picks the wrong axis, which walks the
+      ' atom further in until it is completely inside the box - and once
+      ' fully inside, nothing in the routine can ever get it out.
+      '
+      ' Fix: work out the minimum translation vector (how far the atom must
+      ' move on each axis to clear the box), then actually push it out along
+      ' the shallower axis and reflect about that same axis.
       bx = sprite(ST, bg_hit, X)
       by = sprite(ST, bg_hit, Y)
       bw = sprite(ST, bg_hit, W)
       bh = sprite(ST, bg_hit, H)
-      ax = x(atom) + sprite(W, atom)\2
-      ay = y(atom) + sprite(H, atom)\2
+      aw = sprite(W, atom)
+      ah = sprite(H, atom)
 
-      ' Determine if collision is more horizontal or vertical
-      dx = Abs(ax - (bx + bw\2))
-      dy = Abs(ay - (by + bh\2))
+      pl = (x(atom) + aw) - bx      ' travel needed to clear out to the left
+      pr = (bx + bw) - x(atom)      ' travel needed to clear out to the right
+      pt = (y(atom) + ah) - by      ' travel needed to clear upwards
+      pb = (by + bh) - y(atom)      ' travel needed to clear downwards
 
-      If dx / bw > dy / bh Then
-        ' Horizontal bounce (hit left or right side)
+      If pl < pr Then pushx = -pl Else pushx = pr
+      If pt < pb Then pushy = -pt Else pushy = pb
+
+      If Abs(pushx) <= Abs(pushy) Then
+        x(atom) = x(atom) + pushx
         current_angle = 360 - current_angle
       Else
-        ' Vertical bounce (hit top or bottom)
+        y(atom) = y(atom) + pushy
         current_angle = ((540 - current_angle) Mod 360)
       EndIf
+
+      ' Don't let the push shove the atom off screen
+      If x(atom) < 0 Then x(atom) = 0
+      If y(atom) < 0 Then y(atom) = 0
+      If x(atom) > MM.HRES - aw Then x(atom) = MM.HRES - aw
+      If y(atom) > MM.VRES - ah Then y(atom) = MM.VRES - ah
+
+      ' Re-seed the vector sub with the corrected position.  Without this its
+      ' internal float position still holds the pre-push spot and the very
+      ' next move puts the atom straight back inside the box.
+      vector atom, current_angle, 0, x(atom), y(atom)
     Else
       ' Collision with another sprite or corner
       current_angle = current_angle + 180
@@ -239,7 +268,7 @@ Sub break_collision(atom As integer)
       direction(atom) = Rnd*360
       vector atom, direction(atom), j, x(atom), y(atom)
       j = j + 1
-    Loop Until x(atom)>=0 And x(atom)<=MM.HRES-sprite(w,atom) And y(atom)>=0 And y(atom)<=MM.VRES-sprite(h,atom)
+    Loop Until x(atom)>=0 And x(atom)<=MM.HRES-sprite(w,atom) And y(atom)>=0 And y(atom)<=MM.VRES-sprite(h,atom) And inside_box(x(atom),y(atom),sprite(w,atom))=0
     Sprite show atom, x(atom), y(atom), 1
   Loop
 
@@ -253,4 +282,4 @@ Sub break_collision(atom As integer)
     vector atom, direction(atom), 0, x(atom), y(atom)
     Sprite show atom, x(atom), y(atom), 1
   Loop
-End Sub                       
+End Sub                                                                                                      

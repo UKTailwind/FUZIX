@@ -3931,6 +3931,58 @@ MMINTEGER mm_play_owner(void)
     return who > 0 ? who : 0;
 }
 
+/*
+ * PLAY SOUND / TONE / VOLUME straight into the KERNEL's synthesiser -
+ * SNDIOC_MMCMD, the same record the daemon's FIFO carried, minus the
+ * daemon.  The audio IRQ reads the parameters within one 64-frame
+ * buffer, which is what lets a program slide a pitch every 20 ms; the
+ * FIFO-and-daemon path put a 186 ms cushion and a whole process (and,
+ * on a full machine, a 300K swap thrash) in front of every change.
+ *
+ * 0 = done.  -2 = an MP3/MOD player holds the output ("Sound output
+ * in use").  -1 = no such ioctl - an older kernel, or the host - and
+ * the caller falls back to the daemon so nothing already shipped gets
+ * worse.
+ */
+#define MM_SNDIOC_MMCMD  0x003B
+#define MM_SNDIOC_MMSTOP 0x003C
+
+struct mm_sndmmcmd {
+    unsigned char op, a, b, pad;
+    int p1, p2, p3;
+};
+
+MMINTEGER mm_snd_cmd(MMINTEGER op, MMINTEGER a, MMINTEGER b,
+                     MMINTEGER p1, MMINTEGER p2, MMINTEGER p3)
+{
+    struct mm_sndmmcmd m;
+
+    if (mm_snd_fd == -2)
+        mm_snd_fd = open("/dev/sys", O_RDWR);
+    if (mm_snd_fd < 0)
+        return -1;
+    m.op = (unsigned char)op;
+    m.a = (unsigned char)a;
+    m.b = (unsigned char)b;
+    m.pad = 0;
+    m.p1 = (int)p1;
+    m.p2 = (int)p2;
+    m.p3 = (int)p3;
+    if (ioctl(mm_snd_fd, MM_SNDIOC_MMCMD, &m) < 0)
+        return (errno == EBUSY) ? -2 : -1;
+    return 0;
+}
+
+MMINTEGER mm_snd_stop(void)
+{
+    if (mm_snd_fd == -2)
+        mm_snd_fd = open("/dev/sys", O_RDWR);
+    if (mm_snd_fd < 0)
+        return -1;
+    ioctl(mm_snd_fd, MM_SNDIOC_MMSTOP, 0);
+    return 0;
+}
+
 #else
 
 MMINTEGER mm_play_owner(void) { return 0; }
@@ -3941,6 +3993,15 @@ MMINTEGER mm_play_send(MMINTEGER op, MMINTEGER a, MMINTEGER b,
     (void)op; (void)a; (void)b; (void)p1; (void)p2; (void)p3;
     return -1;
 }
+
+MMINTEGER mm_snd_cmd(MMINTEGER op, MMINTEGER a, MMINTEGER b,
+                     MMINTEGER p1, MMINTEGER p2, MMINTEGER p3)
+{
+    (void)op; (void)a; (void)b; (void)p1; (void)p2; (void)p3;
+    return -1;
+}
+
+MMINTEGER mm_snd_stop(void) { return 0; }
 
 #endif
 
@@ -3970,8 +4031,16 @@ MMINTEGER mm_play_start(void)
 
 MMINTEGER mm_play_stop(void)
 {
-    int who = mm_play_owner();
+    int who;
     int i;
+
+    /* The kernel synthesiser first: if PLAY SOUND holds the output the
+     * "owner" is the BASIC program itself, and the old signal-the-owner
+     * path would deliver SIGINT to the very program running this
+     * statement.  MMSTOP silences and releases; any owner left after it
+     * is a real daemon and the signalling below is for them. */
+    mm_snd_stop();
+    who = mm_play_owner();
 
     if (who) {
         kill((pid_t)who, SIGINT);       /* playmp3 closes tidily on it */
