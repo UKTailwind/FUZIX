@@ -1,4 +1,22 @@
+/*
+ *	Distinct identifiers cc0 can hold.  A large generated program -
+ *	picofrog's translation was the first - carries more names than
+ *	any hand-written source here ever did, and the failure is a hard
+ *	stop ("too many sybmols").  The table costs MAXNAME * sizeof
+ *	(struct name), about 40 bytes an entry on ARM: 2048 is +40K
+ *	against a 256K process, which is the NAMELEN argument below over
+ *	again.  The host takes headroom on top under BIG_TABLES, and a
+ *	Z80-class target keeps the old size.
+ */
+#ifndef MAXNAME
+#ifdef BIG_TABLES
+#define MAXNAME		4096
+#elif defined(CPU_armm0)
+#define MAXNAME		2048
+#else
 #define MAXNAME		1024
+#endif
+#endif
 
 /*
  *	Significant characters in an identifier, including the NUL.
