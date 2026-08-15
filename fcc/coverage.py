@@ -33,6 +33,11 @@ for m in re.finditer(r"up in \(([^)]*)\)", body):
 # TYPE blocks are dispatched through skip_type_block rather than an
 # `up ==` test in statement_inner, so the scan above cannot see them
 stmts.append('TYPE')
+# DefineFont has the same blind spot from the other end: pass_fonts()
+# lifts the whole block out BEFORE statement_inner ever runs.  It has
+# been translated and board-verified since v0.15 and was missing from
+# this appendix - which is the list a reader trusts to say what works.
+stmts.append('DEFINEFONT')
 stmts = sorted(set(stmts))
 
 # ---- functions: the BUILTINS table -----------------------------------
