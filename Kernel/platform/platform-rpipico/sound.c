@@ -478,6 +478,368 @@ static void pcm_release(void)
     pcm_set_rate(SND_RATE);
 }
 
+/*
+ * --- MMBasic PLAY SOUND synthesiser (IRQ context) ---------------------
+ *
+ * playsnd's 4-voice x 2-side core (utils/playsnd.c, itself MMBasic's
+ * audio.c), moved INTO the DMA IRQ.  The daemon could not do the job:
+ * its 186 ms PCM cushion swallowed every 20 ms pitch slide, and a
+ * pool-sized program plus the daemon could not be co-resident at all -
+ * every exchange swapped ~300K through the QMI, which is the noise,
+ * the starved scanout and the "lockup" of 2026-08-15.  Here a
+ * parameter poke is audible within one 64-frame buffer, which is
+ * MMBasic's own arrangement.
+ *
+ * Integer only, 20.12 phase in 4096-entry-table units at 44100 Hz -
+ * verbatim from playsnd, whose arithmetic was already built for a
+ * machine that must not touch the FPU.  rand() is the one substitution
+ * (the kernel has none): an xorshift32, seeded fixed - noise is noise.
+ */
+
+#include "utils/sound_tables.h"
+
+static void pcm_reap(void);             /* defined below with the ring */
+
+#define MMS_RATE 44100
+
+/* mmb_playctl.h's values, pinned in pico_ioctl.h's comment */
+#define MMS_OP_SOUND  1
+#define MMS_OP_TONE   2
+#define MMS_OP_VOLUME 4
+#define MMS_SND_OFF    0
+#define MMS_SND_SINE   1
+#define MMS_SND_SQUARE 2
+#define MMS_SND_TRI    3
+#define MMS_SND_SAW    4
+#define MMS_SND_PNOISE 5
+#define MMS_SND_WNOISE 6
+
+struct mmvoice {
+    uint8_t type;
+    long phase;                 /* table units << 12 */
+    long phinc;
+    int vol;                    /* index into mapping[], 0..41 */
+    int vol_target;
+    long dwell;                 /* white noise: samples on this level */
+    int noiseval;
+};
+
+static struct mmvoice mmv[4][2];
+/* 8K the kernel's SRAM has not got: allocated from the heap - which IS
+ * the PSRAM window - on the first PNOISE, exactly as the PCM ring is.
+ * The IRQ reads it there the same way it reads the ring. */
+static uint16_t *mms_noisetable;
+static long mms_tone_ph[2], mms_tone_inc[2];
+static long long mms_tone_left = -2;    /* -2 off, -1 forever */
+static int mms_gain = 205;              /* 8.8: 80% of full */
+static volatile uint8_t mms_active;
+static uint16_t mms_owner;
+static uint32_t mms_quiet_frames;
+#define MMS_IDLE_FRAMES (5u * MMS_RATE) /* playsnd's 5 s idle exit */
+
+static uint32_t mms_rand_state = 0x2545F491;
+static int mms_rand(void)
+{
+    uint32_t x = mms_rand_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    mms_rand_state = x;
+    return (int)(x & 0x7FFFFFFF);
+}
+
+static void mms_make_noise(void)
+{
+    int i;
+
+    if (mms_noisetable)
+        return;
+    mms_noisetable = malloc(4096 * sizeof(uint16_t));
+    if (!mms_noisetable)
+        return;                 /* PNOISE stays silent; nothing dies */
+    for (i = 0; i < 4096; i++)
+        mms_noisetable[i] = (uint16_t)(mms_rand() % 3800 + 100);
+}
+
+/* polyBLEP residual, q*q in 0..65536 - playsnd's blep_q verbatim */
+static long __not_in_flash_func(mms_blep_q)(long d, long inc)
+{
+    long t;
+
+    if (inc < 256)
+        return 0;
+    t = d / (inc >> 8);
+    if (t >= 256)
+        return 0;
+    t = 256 - t;
+    return t * t;
+}
+
+static int __not_in_flash_func(mms_sample)(struct mmvoice *v)
+{
+    int j, ph = (int)(v->phase >> 12);
+
+    switch (v->type) {
+    case MMS_SND_SINE:
+        j = SineTable[ph];
+        break;
+    case MMS_SND_TRI:
+        j = triangletable[ph];
+        break;
+    case MMS_SND_SQUARE: {
+        long q = 0, half = 2048L << 12, full = 4096L << 12;
+
+        j = ph > 2047 ? 3900 : 100;
+        if (v->phase < v->phinc)
+            q = mms_blep_q(v->phase, v->phinc);
+        else if (full - v->phase < v->phinc)
+            q = mms_blep_q(full - v->phase, v->phinc);
+        else if (v->phase >= half && v->phase - half < v->phinc)
+            q = mms_blep_q(v->phase - half, v->phinc);
+        else if (v->phase < half && half - v->phase < v->phinc)
+            q = mms_blep_q(half - v->phase, v->phinc);
+        if (q)
+            j = 2000 + (int)((long)(j - 2000) * (65536 - q) / 65536);
+        break;
+    }
+    case MMS_SND_SAW: {
+        long full = 4096L << 12;
+
+        j = ph * 3800 / 4096 + 100;
+        if (v->phase < v->phinc)
+            j += (int)(1900L * mms_blep_q(v->phase, v->phinc) / 65536);
+        else if (full - v->phase < v->phinc)
+            j -= (int)(1900L * mms_blep_q(full - v->phase, v->phinc)
+                       / 65536);
+        break;
+    }
+    case MMS_SND_PNOISE:
+        if (!mms_noisetable)
+            return 0;           /* the malloc failed at claim time */
+        j = mms_noisetable[ph];
+        break;
+    case MMS_SND_WNOISE:
+        if (v->dwell <= 0) {
+            v->dwell = v->phinc >> 12;
+            if (v->dwell <= 0)
+                v->dwell = 1;
+            v->noiseval = mms_rand() % 3800 + 100;
+        }
+        v->dwell--;
+        return (v->noiseval - 2000) * mapping[v->vol] / 2000;
+    default:
+        return 0;
+    }
+    v->phase += v->phinc;
+    if (v->phase >= (4096L << 12))
+        v->phase -= (4096L << 12);
+    return (j - 2000) * mapping[v->vol] / 2000;
+}
+
+static int mms_quiet(void)
+{
+    int i, s;
+
+    if (mms_tone_left != -2)
+        return 0;
+    for (i = 0; i < 4; i++)
+        for (s = 0; s < 2; s++)
+            if (mmv[i][s].type != MMS_SND_OFF || mmv[i][s].vol != 0)
+                return 0;
+    return 1;
+}
+
+/* IRQ-safe: the idle path runs this from the DMA interrupt, so it must
+ * not call into the SDK's PIO code (flash-resident, and the flash may
+ * be mid-write).  The SM is left at 44100: the BBC synth that takes
+ * over renders silence while idle, and the next claimant - PCM open,
+ * an MM command, or PLAY STOP below - sets the rate it wants.  The one
+ * visible edge is a BBC SOUND note played after an MM session idles
+ * out, which sounds an octave high until then. */
+static void mms_release(void)
+{
+    int i, s;
+
+    for (i = 0; i < 4; i++)
+        for (s = 0; s < 2; s++) {
+            mmv[i][s].type = MMS_SND_OFF;
+            mmv[i][s].vol = 0;
+            mmv[i][s].vol_target = 0;
+        }
+    mms_tone_left = -2;
+    mms_active = 0;
+    mms_owner = 0;
+}
+
+/* playsnd's render(), one 64-frame buffer, straight into the DMA half */
+static void __not_in_flash_func(mmsnd_fill)(int16_t *buf)
+{
+    static int ramp;
+    int n, i, s;
+
+    for (n = 0; n < SND_NBUF; n++) {
+        int lv = 0, rv = 0;
+
+        if (++ramp >= 44) {             /* SOUND_RAMP_INTERVAL */
+            ramp = 0;
+            for (i = 0; i < 4; i++)
+                for (s = 0; s < 2; s++) {
+                    struct mmvoice *v = &mmv[i][s];
+
+                    if (v->vol < v->vol_target)
+                        v->vol++;
+                    else if (v->vol > v->vol_target)
+                        v->vol--;
+                }
+        }
+        if (mms_tone_left != -2) {
+            lv = (SineTable[mms_tone_ph[0] >> 12] - 2000) * 16;
+            rv = (SineTable[mms_tone_ph[1] >> 12] - 2000) * 16;
+            mms_tone_ph[0] += mms_tone_inc[0];
+            if (mms_tone_ph[0] >= (4096L << 12))
+                mms_tone_ph[0] -= (4096L << 12);
+            mms_tone_ph[1] += mms_tone_inc[1];
+            if (mms_tone_ph[1] >= (4096L << 12))
+                mms_tone_ph[1] -= (4096L << 12);
+            if (mms_tone_left > 0 && --mms_tone_left == 0)
+                mms_tone_left = -2;
+        } else {
+            for (i = 0; i < 4; i++) {
+                if (mmv[i][0].type != MMS_SND_OFF)
+                    lv += mms_sample(&mmv[i][0]);
+                if (mmv[i][1].type != MMS_SND_OFF)
+                    rv += mms_sample(&mmv[i][1]);
+            }
+            lv *= 16;
+            rv *= 16;
+        }
+        buf[n * 2] = (int16_t)((lv * mms_gain) >> 8);
+        buf[n * 2 + 1] = (int16_t)((rv * mms_gain) >> 8);
+    }
+
+    /* The daemon exited after five silent seconds to free the output
+     * for MP3 and MOD; the claim releases itself on the same terms. */
+    if (mms_quiet()) {
+        mms_quiet_frames += SND_NBUF;
+        if (mms_quiet_frames >= MMS_IDLE_FRAMES)
+            mms_release();
+    } else
+        mms_quiet_frames = 0;
+}
+
+/* The owner is gone: hand the output back. */
+static void mms_reap(void)
+{
+    ptptr p;
+
+    if (!mms_active)
+        return;
+    for (p = ptab; p < ptab_end; ++p)
+        if (p->p_pid == mms_owner && p->p_status != P_EMPTY &&
+            p->p_status != P_ZOMBIE)
+            return;
+    mms_release();
+}
+
+/* The ioctl entry.  Returns 0, or -2 when an MP3/MOD player holds the
+ * output (the reference's "Sound output in use"). */
+int sound_mm_cmd(uint8_t op, uint8_t a, uint8_t b,
+                 int32_t p1, int32_t p2, int32_t p3, uint16_t pid)
+{
+    int i;
+
+    pcm_reap();
+    mms_reap();
+    if (pcm_active)
+        return -2;
+    if (!mms_active) {
+        sound_quiet();                  /* the BBC channels stop */
+        pcm_set_rate(MMS_RATE);
+        mms_owner = pid;
+        mms_quiet_frames = 0;
+        mms_active = 1;                 /* last: the IRQ reads this */
+    } else
+        mms_owner = pid;                /* one BASIC at a time anyway */
+
+    switch (op) {
+    case MMS_OP_SOUND: {
+        int voice = a - 1;
+        long inc;
+
+        if (voice < 0 || voice > 3)
+            return 0;
+        if (p1 == MMS_SND_PNOISE)
+            mms_make_noise();
+        /* phinc = freq/RATE * 4096 in 20.12; freq arrives in mHz */
+        {
+            long long t = (long long)p2 << 24;
+
+            inc = (long)(t / ((long long)MMS_RATE * 1000));
+        }
+        for (i = 0; i < 2; i++) {
+            struct mmvoice *v = &mmv[voice][i];
+
+            if (!(b & (1 << i)))
+                continue;
+            v->phinc = inc;
+            if (p1 == MMS_SND_WNOISE)
+                v->dwell = 0;
+            v->type = (uint8_t)p1;
+            v->vol_target = (int)(p3 * 41 / 25);
+            if (v->type == MMS_SND_OFF)
+                v->vol_target = 0;
+            if (v->phase >= (4096L << 12))
+                v->phase = 0;
+        }
+        break;
+    }
+    case MMS_OP_TONE:
+        mms_tone_ph[0] = mms_tone_ph[1] = 0;
+        mms_tone_inc[0] = (long)(((long long)p1 << 24) /
+                                 ((long long)MMS_RATE * 1000));
+        mms_tone_inc[1] = (long)(((long long)p2 << 24) /
+                                 ((long long)MMS_RATE * 1000));
+        mms_tone_left = (p3 < 0) ? -1 : (long long)p3;
+        if (mms_tone_left == 0)
+            mms_tone_left = -2;
+        break;
+    case MMS_OP_VOLUME: {
+        int v = p1 > p2 ? p1 : p2;
+
+        if (v < 0)
+            v = 0;
+        if (v > 100)
+            v = 100;
+        mms_gain = (mapping[v] << 8) / mapping[100];
+        break;
+    }
+    default:
+        break;
+    }
+    return 0;
+}
+
+void sound_mm_stop(void)
+{
+    if (mms_active) {
+        mms_release();
+        pcm_set_rate(SND_RATE);         /* process context: safe */
+    }
+}
+
+/* Called from pagemap_free as a process dies.  Without this a program
+ * killed mid-note - Ctrl-C included - leaves its last parameters
+ * sounding forever: a sustained voice never goes quiet, so the idle
+ * release never fires, and nothing else ever asks the driver anything.
+ * The daemon died WITH its sound; the kernel synth has to be told. */
+void sound_mm_owner_gone(uint16_t pid)
+{
+    if (mms_active && mms_owner == pid) {
+        mms_release();
+        pcm_set_rate(SND_RATE);
+    }
+}
+
 /* Release a stream whose owner is gone.  A ZOMBIE counts as gone: it
  * has exited, it is only waiting to be reaped, and it will not be
  * writing any more samples.  Without this a player killed with SIGKILL
@@ -508,6 +870,11 @@ int sound_pcm_open(uint32_t rate, int channels, uint16_t owner)
     if (rate < 8000 || rate > 48000 || (channels != 1 && channels != 2))
         return -1;
     pcm_reap();
+    mms_reap();
+    /* The kernel synth holds the output exactly as a daemon used to:
+     * PLAY MP3 while SOUND is playing is the reference's error. */
+    if (mms_active)
+        return -2;
     if (pcm_active && pcm_owner != owner)
         return -2;
     if (pcm_ring == NULL) {
@@ -532,6 +899,9 @@ int sound_pcm_open(uint32_t rate, int channels, uint16_t owner)
 uint16_t sound_pcm_owner(void)
 {
     pcm_reap();
+    mms_reap();
+    if (mms_active)
+        return mms_owner;
     return pcm_active ? pcm_owner : 0;
 }
 
@@ -601,6 +971,8 @@ static void __not_in_flash_func(snd_dma_irq)(void)
         dma_channel_set_trans_count(dmach_a, SND_NBUF, false);
         if (pcm_active)
             pcm_fill(sndbuf[0]);
+        else if (mms_active)
+            mmsnd_fill(sndbuf[0]);
         else
             snd_fill(sndbuf[0]);
     }
@@ -610,6 +982,8 @@ static void __not_in_flash_func(snd_dma_irq)(void)
         dma_channel_set_trans_count(dmach_b, SND_NBUF, false);
         if (pcm_active)
             pcm_fill(sndbuf[1]);
+        else if (mms_active)
+            mmsnd_fill(sndbuf[1]);
         else
             snd_fill(sndbuf[1]);
     }

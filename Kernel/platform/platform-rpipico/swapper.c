@@ -178,6 +178,11 @@ static struct mapentry* find_free_block(ptptr p)
 
 void pagemap_free(ptptr p)
 {
+    /* A dying process takes its sound with it - see sound.c. */
+    {
+        extern void sound_mm_owner_gone(uint16_t pid);
+        sound_mm_owner_gone(p->p_pid);
+    }
     #ifdef DEBUG
         kprintf("free %d\n", get_slot(p));
     #endif
@@ -734,8 +739,15 @@ int swapout(ptptr p)
        200K memset through the QMI at 12MB/s would add 16ms to every
        swapout for nothing. */
     region = arena_alloc_raw(p, bytes);
-    if (!region)
+    if (!region) {
+        /* Say so: this refusal surfaces far away as "swapin: no
+         * memory", which blames the SRAM pool for what was really
+         * the PSRAM arena - no contiguous region of `bytes`, or the
+         * ownership table full. */
+        kprintf("swapout: pid %d needs %u bytes, arena refused\n",
+                p->p_pid, bytes);
         return ENOMEM;
+    }
 
     for (int i=0; i<blocks; i++)
     {
@@ -795,9 +807,23 @@ void swapin(ptptr p, uint16_t map)
          * caller reports ENOMEM) but not here: dereferencing it turns
          * into a copy through a wild constant pointer - 4K into the
          * same innocent memory every time, which is exactly the class
-         * of corruption that must be a panic. */
-        if (!b)
+         * of corruption that must be a panic.  But a panic that names
+         * only itself cost a day once - say who needed what, and who
+         * was holding the blocks, before dying. */
+        if (!b) {
+            ptptr q;
+            /* NOT p->p_pid: the block loop's `void *p` shadows the
+             * ptptr parameter right here. */
+            kprintf("swapin: slot %d needs %d blocks at block %d\n",
+                    slot, blocks, i);
+            for (q = ptab; q < ptab + PTABSIZE; q++)
+                if (q->p_status != P_EMPTY)
+                    kprintf("  pid %d status %d blocks %d %s\n",
+                            q->p_pid, q->p_status,
+                            other_proc_blocks(q),
+                            q->p_page ? "resident" : "swapped");
             panic("swapin: no memory");
+        }
         blockindex = b - allocation_map;
         p = (void*)PROGBASE + blockindex*BLOCKSIZE;
 

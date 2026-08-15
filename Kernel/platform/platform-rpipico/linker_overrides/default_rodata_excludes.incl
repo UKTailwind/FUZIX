@@ -67,3 +67,12 @@
  * boot-tested, so nothing here is known about whether it works.  It is
  * a candidate, not a hazard.
  */
+
+/* The MMBasic synth's wave tables, 8K each and read per SAMPLE in the
+ * audio IRQ - but through the XIP cache, where a steady tone walks
+ * them near-sequentially.  16K of RAM back; if sustained notes ever
+ * crackle under cache pressure, these are the first suspects.
+ * mapping[] (404 bytes, per-sample per-voice) deliberately stays in
+ * RAM. */
+*sound.c.o(.rodata.SineTable*)
+*sound.c.o(.rodata.triangletable*)

@@ -40,6 +40,6 @@
  */
 MEMORY
 {
-    RAM(rwx)     : ORIGIN = RAM_ORIGIN,           LENGTH = 0x2B000
-    PROGPOOL(rw) : ORIGIN = RAM_ORIGIN + 0x2B000, LENGTH = 340k
+    RAM(rwx)     : ORIGIN = RAM_ORIGIN,           LENGTH = 0x2C000
+    PROGPOOL(rw) : ORIGIN = RAM_ORIGIN + 0x2C000, LENGTH = 336k
 }

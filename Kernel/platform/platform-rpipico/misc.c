@@ -983,6 +983,28 @@ int plt_dev_ioctl(uarg_t request, char *data)
         extern uint16_t sound_pcm_owner(void);
         return (int)sound_pcm_owner();
     }
+    if (request == SNDIOC_MMCMD)
+    {
+        extern int sound_mm_cmd(uint8_t, uint8_t, uint8_t,
+                                int32_t, int32_t, int32_t, uint16_t);
+        struct snd_mmcmd m;
+        int r;
+        if (uget(data, &m, sizeof(m)))
+            return -1;
+        r = sound_mm_cmd(m.op, m.a, m.b, m.p1, m.p2, m.p3,
+                         udata.u_ptab->p_pid);
+        if (r) {
+            udata.u_error = EBUSY;      /* an MP3/MOD player holds it */
+            return -1;
+        }
+        return 0;
+    }
+    if (request == SNDIOC_MMSTOP)
+    {
+        extern void sound_mm_stop(void);
+        sound_mm_stop();
+        return 0;
+    }
 #endif
     return -1;
 }

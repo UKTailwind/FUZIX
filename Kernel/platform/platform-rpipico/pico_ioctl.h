@@ -104,6 +104,37 @@ struct gfx_blitr {
 #define GFXIOC_BLITR   0x0039	/* rows INTO the target   */
 #define GFXIOC_BLITRDR 0x003A	/* rows OUT of the target */
 
+/*
+ * MMBasic PLAY SOUND / PLAY TONE / PLAY VOLUME, synthesised IN THE
+ * KERNEL - the audio IRQ reads voice parameters this ioctl pokes, so
+ * a parameter change is audible within one 64-frame buffer (~1.5 ms)
+ * rather than behind a daemon's 186 ms PCM cushion.  MMBasic's own
+ * arrangement, and the reason picofrog can slide a pitch every 20 ms.
+ *
+ * The op and the values are PINNED to mmb_playctl.h's MM_PLAY_* and
+ * MM_SND_* (SOUND=1 TONE=2 VOLUME=4; OFF=0 SINE=1 SQUARE=2 TRI=3
+ * SAW=4 PNOISE=5 WNOISE=6): the client built these records for the
+ * daemon's FIFO for a whole release and every shipped .bc still
+ * carries them.
+ *
+ * SOUND: a=voice 1-4, b=side bits (L=1,R=2), p1=type, p2=freq mHz,
+ *        p3=vol 0-25.  TONE: p1=left mHz, p2=right mHz, p3=duration
+ *        in samples at 44100 (-1 forever).  VOLUME: p1=left 0-100,
+ *        p2=right 0-100.
+ *
+ * The first command claims the output for the calling pid (EBUSY if
+ * an MP3/MOD player holds it); five seconds of silence, process
+ * death, or SNDIOC_MMSTOP release it.  SNDIOC_PCMOWNER reports the
+ * claim, which is what makes PLAY MP3's refusal and PLAY STOP's
+ * discovery work unchanged.
+ */
+struct snd_mmcmd {
+	uint8_t op, a, b, pad;
+	int32_t p1, p2, p3;
+};
+#define SNDIOC_MMCMD	0x003B	/* struct snd_mmcmd */
+#define SNDIOC_MMSTOP	0x003C	/* silence and release, data unused */
+
 /* Does console output reach the DISPLAY as well as the uart?
  *
  * data is the value itself: 1 mirrors (the default and what this

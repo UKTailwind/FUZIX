@@ -294,3 +294,39 @@
  * moved to pay for the pipe stream positions in cinode (4 bytes per
  * itab slot), which are data and cost RAM wherever they live. */
 *process.c.o(.text.doexit)
+
+/* The MMBasic synth's PROCESS-context half: the ioctl entry and its
+ * helpers run at PLAY-statement speed, not sample speed.  The IRQ
+ * half (mmsnd_fill, mms_sample, mms_blep_q, mms_quiet, mms_release,
+ * mms_rand) is NOT here and stays in RAM. */
+*sound.c.o(.text.sound_mm_cmd)
+*sound.c.o(.text.sound_mm_stop)
+*sound.c.o(.text.mms_make_noise)
+*sound.c.o(.text.mms_reap)
+
+/* Once per boot and once per open respectively. */
+*sound.c.o(.text.sound_init)
+*sound.c.o(.text.sound_pcm_open)
+
+/* The whole pico ioctl dispatcher: 3.9K of if-chain, syscall context
+ * only, and every hot path it dispatches TO makes its own residency
+ * decision.  A flash-write ioctl returns through here only after the
+ * primitive has restored XIP, so the return address being in flash is
+ * fine - the doexit argument over again. */
+*misc.c.o(.text.plt_dev_ioctl)
+
+/* The swap machinery: syscall context, and its cost is the 4K-block
+ * memcpys (libc, RAM-resident), not the loops around them.  Swap
+ * moves images to PSRAM, never to the flash disk, so none of this
+ * runs during a flash write. */
+*swapper.c.o(.text.swapin)
+*swapper.c.o(.text.swapout)
+*swapper.c.o(.text.pagemap_alloc)
+*swapper.c.o(.text.pagemap_realloc)
+*swapper.c.o(.text.pagemap_free)
+*swapper.c.o(.text.largest_neighbour)
+
+/* More once-per-something sound entries. */
+*sound.c.o(.text.sound_envelope)
+*sound.c.o(.text.sound_pcm_close)
+*sound.c.o(.text.sound_pcm_stat)
