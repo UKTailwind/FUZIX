@@ -727,6 +727,47 @@ int plt_dev_ioctl(uarg_t request, char *data)
             return -1;
         return 0;
     }
+    if (request == GFXIOC_BLITR || request == GFXIOC_BLITRDR)
+    {
+        /* A rectangle as `rows` spans: one crossing, the row loop this
+         * side.  Bounds are the single-row rule applied to the LAST
+         * row, which covers every row before it because they are
+         * ascending and evenly spaced. */
+        struct gfx_blitr gr;
+        int size = display_gfx_fbsize();
+        uint32_t last;
+        uint8_t *t;
+        unsigned r;
+
+        if (uget(data, &gr, sizeof(gr)))
+            return -1;
+        if (size == 0 || gr.rows == 0 || gr.len == 0
+            || gr.stride == 0 || gr.len > gr.stride) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        /* In 32 bits throughout: rows * stride on a big mode overflows
+         * a uint16_t long before it reaches the framebuffer's end. */
+        last = gr.offset + (uint32_t)(gr.rows - 1) * gr.stride + gr.len;
+        if (gr.offset >= (uint32_t)size || last > (uint32_t)size) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        t = display_fb_target() + gr.offset;
+        for (r = 0; r < gr.rows; r++) {
+            uint8_t *u = (uint8_t *)gr.buf + (unsigned)r * gr.len;
+
+            if (request == GFXIOC_BLITR) {
+                if (uget(u, t, gr.len))
+                    return -1;
+            } else {
+                if (uput(t, u, gr.len))
+                    return -1;
+            }
+            t += gr.stride;
+        }
+        return 0;
+    }
     if (request == GFXIOC_BLITRD)
     {
         struct gfx_blit gb;

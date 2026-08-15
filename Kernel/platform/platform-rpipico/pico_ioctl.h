@@ -77,6 +77,33 @@ struct kbd_numlock {
 	uint16_t vid;		/* in on a set (0 = the mounted one); out: mounted */
 	uint16_t pid;
 };
+/* The same bytes as GFXIOC_BLIT and GFXIOC_BLITRD, but a RECTANGLE:
+ * `rows` spans of `len` bytes, `stride` apart in the framebuffer and
+ * contiguous in the caller's buffer.  Same target, same layout, same
+ * bounds rule - only the row loop moves.
+ *
+ * Why: every rectangle mover in the runtime was a loop of one-row
+ * calls, and each of those is a system call - two for a write, which
+ * read-modify-writes for the boundary bytes.  A 9x9 sprite cost about
+ * fifty crossings to show, which the board measured as 0.54ms per
+ * SPRITE SHOW and 91% of a 38ms frame.  The pixels moved are identical;
+ * what changes is how many times the kernel is entered to move them.
+ *
+ * The caller still owns the packing rules and the pixel logic, exactly
+ * as it does for the single-row pair - this is a transfer, not a
+ * drawing operation.
+ */
+struct gfx_blitr {
+	uint32_t offset;	/* first row: byte offset into the target */
+	uint16_t len;		/* bytes per row                          */
+	uint16_t rows;
+	uint16_t stride;	/* the target's bytes per row             */
+	uint16_t pad;
+	void *buf;		/* rows * len bytes, contiguous           */
+};
+#define GFXIOC_BLITR   0x0039	/* rows INTO the target   */
+#define GFXIOC_BLITRDR 0x003A	/* rows OUT of the target */
+
 /* Does console output reach the DISPLAY as well as the uart?
  *
  * data is the value itself: 1 mirrors (the default and what this

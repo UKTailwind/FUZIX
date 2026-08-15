@@ -350,6 +350,9 @@ static int mm_charpos = 1;
  * the character. */
 static int mm_gputc(int c);
 static void mm_gflush(void);
+/* The console's screen half - see mm_console.  Platform-specific: an
+ * ioctl on the board, nothing at all where there is no display. */
+static void mm_con_mirror(int on);
 
 /* The graphics text cursor and its pending run.  Common to both builds
  * because CLS consults it - in a graphics mode CLS clears the write
@@ -455,6 +458,19 @@ void mm_console(MMINTEGER mode)
 {
     mm_gflush();                /* the old routing owns what is pending */
     mm_console_opt = (int)(mode & 3);
+    /*
+     * The console this runs on is MIRRORED: the same byte reaches the
+     * display and the uart, which is what makes the machine usable from
+     * either and is exactly wrong once a program owns the screen - in a
+     * graphics mode the console renders as pixels, so a PRINT meant for
+     * a terminal is drawn over the picture.
+     *
+     * So "serial" has to turn the display half off at the kernel, or it
+     * is not serial at all.  The kernel puts it back when the process
+     * ends, so a program that dies here cannot leave the machine with a
+     * console nobody can see.
+     */
+    mm_con_mirror(mm_console_opt & 2);
 }
 
 static void mm_puts_raw(const char *cstr)
@@ -4125,6 +4141,16 @@ static int mm_gcw = 8, mm_gch = 12;     /* font 1, until FONT says else */
 #define MM_GFX_FONTINFO 0x001D
 #define MM_GFX_FONTADDR 0x0031
 #define MM_GFX_FONTDEF  0x0036
+/* PICOIOC_CONMIRROR: does console output reach the display as well as
+ * the uart.  Same flat number space as the GFXIOC_ codes and the same
+ * device, so mm_gfx_fd serves. */
+#define MM_PICO_CONMIRROR 0x0038
+
+static void mm_con_mirror(int on)
+{
+    if (mm_gfx_open() >= 0)
+        ioctl(mm_gfx_fd, MM_PICO_CONMIRROR, (void *)(long)(on ? 1 : 0));
+}
 #define MM_GFX_SCROLL   0x001B
 #define MM_GFX_MAP      0x001E
 #define MM_GFX_MAPCTL   0x001F
@@ -4542,10 +4568,23 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
 }
 
 #define MM_GFXIOC_BLITRD 0x0032
+#define MM_GFXIOC_BLITR   0x0039        /* rows in  */
+#define MM_GFXIOC_BLITRDR 0x003A        /* rows out */
 
 struct mm_gfx_blit {
     unsigned short offset;
     unsigned short len;
+    void *buf;
+};
+
+/* The rectangle form: rows of len bytes, stride apart in the target and
+ * contiguous here.  Must match struct gfx_blitr in pico_ioctl.h. */
+struct mm_gfx_blitr {
+    unsigned long offset;
+    unsigned short len;
+    unsigned short rows;
+    unsigned short stride;
+    unsigned short pad;
     void *buf;
 };
 
@@ -4575,6 +4614,46 @@ MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf)
     b.len = (unsigned short)len;
     b.buf = buf;
     return ioctl(mm_gfx_fd, MM_GFXIOC_BLITRD, &b) < 0 ? -1 : 0;
+}
+
+/*
+ * The same window, `rows` of it at once - see GFXIOC_BLITR in
+ * pico_ioctl.h.  Every rectangle in mmb_blit.h and mmb_sprite.h used to
+ * be a loop of the single-row calls above, which is a system call per
+ * row and two per written row; here it is one.
+ */
+MMINTEGER mm_fb_readr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                      MMINTEGER stride, void *buf)
+{
+    struct mm_gfx_blitr b;
+
+    if (mm_gfx_open() < 0)
+        return -1;
+    mm_pix_drain();
+    b.offset = (unsigned long)offset;
+    b.len = (unsigned short)len;
+    b.rows = (unsigned short)rows;
+    b.stride = (unsigned short)stride;
+    b.pad = 0;
+    b.buf = buf;
+    return ioctl(mm_gfx_fd, MM_GFXIOC_BLITRDR, &b) < 0 ? -1 : 0;
+}
+
+MMINTEGER mm_fb_putr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                     MMINTEGER stride, const void *buf)
+{
+    struct mm_gfx_blitr b;
+
+    if (mm_gfx_open() < 0)
+        return -1;
+    mm_pix_drain();
+    b.offset = (unsigned long)offset;
+    b.len = (unsigned short)len;
+    b.rows = (unsigned short)rows;
+    b.stride = (unsigned short)stride;
+    b.pad = 0;
+    b.buf = (void *)buf;
+    return ioctl(mm_gfx_fd, MM_GFXIOC_BLITR, &b) < 0 ? -1 : 0;
 }
 
 #define MM_GFXIOC_BLIT 0x0005
@@ -5148,6 +5227,13 @@ void mm_font(MMINTEGER font, MMINTEGER scale)
     (void)font; (void)scale;
 }
 
+/* No display to keep off, so nothing to ask the kernel for: stdout is
+ * the only console there is here and it is already the serial one. */
+static void mm_con_mirror(int on)
+{
+    (void)on;
+}
+
 /* No display, so FONT selected nothing and the caller's defaults stand. */
 void mm_font_cur(MMINTEGER *font, MMINTEGER *scale)
 {
@@ -5250,6 +5336,23 @@ MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf)
 MMINTEGER mm_fb_put(MMINTEGER offset, MMINTEGER len, const void *buf)
 {
     (void)offset; (void)len; (void)buf;
+    return -1;
+}
+
+/* No framebuffer to move rows of, and the row form above says so the
+   same way: the callers fall back to drawing nothing, as they already
+   do headless. */
+MMINTEGER mm_fb_readr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                      MMINTEGER stride, void *buf)
+{
+    (void)offset; (void)len; (void)rows; (void)stride; (void)buf;
+    return -1;
+}
+
+MMINTEGER mm_fb_putr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
+                     MMINTEGER stride, const void *buf)
+{
+    (void)offset; (void)len; (void)rows; (void)stride; (void)buf;
     return -1;
 }
 
@@ -5506,7 +5609,21 @@ void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait)
         mm_error("Layer not created");
         return;
     }
-    if (wait)
+    /*
+     * ,B waits for vertical blanking, and ONLY when the destination is
+     * the physical display.
+     *
+     * The wait exists because the destination is the buffer core1 is
+     * DMAing out: writing it part way down a frame shows the top of the
+     * new picture and the bottom of the old one.  A copy into F or the
+     * layer touches nothing being scanned out, so there is nothing to
+     * tear and nothing to wait for - waiting there would cost a frame
+     * for no reason, which on a program copying every frame is half its
+     * budget.  The reference reaches the wait only down its "copying to
+     * the real display" arm too (FrameBuffer.c:1197 cmd_framebuffer;
+     * the plain buffer-to-buffer case is one memcpy).
+     */
+    if (wait && dst == MM_FB_N)
         mm_fb_wait_hw();
     mm_fb_copy_hw((int)src, (int)dst);
 }

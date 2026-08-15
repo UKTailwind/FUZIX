@@ -105,6 +105,49 @@ MMG_FN int mmp_ensure(int kind, const char *prog)
 	MM_RAISEV("Sound output did not start", -1);
 }
 
+/* The channel and the type when the program works them out as it runs
+ * - MMBasic's getCstring/strcasecmp arm (Audio.c:1977 and 2085), which
+ * is why "b" and "B" both do, and why a variable is allowed where the
+ * manual only shows a letter.  A letter written literally never
+ * reaches these: the translator decodes it.
+ *
+ * The messages are the reference's own. */
+MMG_FN int mmp_side(const char *s)
+{
+	int c = mm_slen(s) == 1 ? mm_cstr(s)[0] : 0;
+
+	if (c >= 'a' && c <= 'z')
+		c -= 32;
+	if (c == 'L')
+		return 1;
+	if (c == 'R')
+		return 2;
+	if (c == 'B' || c == 'M')
+		return 3;
+	MM_RAISEV("Position must be L, R, or B", 3);
+}
+
+MMG_FN int mmp_type(const char *s)
+{
+	int c = mm_slen(s) == 1 ? mm_cstr(s)[0] : 0;
+
+	if (c >= 'a' && c <= 'z')
+		c -= 32;
+	switch (c) {
+	case 'O': return MM_SND_OFF;
+	case 'S': return MM_SND_SINE;
+	case 'Q': return MM_SND_SQUARE;
+	case 'T': return MM_SND_TRI;
+	case 'W': return MM_SND_SAW;
+	case 'P': return MM_SND_PNOISE;
+	case 'N': return MM_SND_WNOISE;
+	case 'U':
+		/* a user-defined wave table, which nothing here can load */
+		MM_RAISEV("PLAY SOUND type U is not translated", MM_SND_OFF);
+	}
+	MM_RAISEV("Invalid type", MM_SND_OFF);
+}
+
 /* PLAY SOUND voice, channel, type [, frequency [, volume]] -
  * cmd_play's own ranges (Audio.c:1946). */
 MMG_FN void mmp_sound(MMINTEGER voice, MMINTEGER sides, MMINTEGER type,

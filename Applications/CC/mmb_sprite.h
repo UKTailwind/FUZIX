@@ -107,13 +107,38 @@ MMG_FN void mms_lifo_swap(unsigned char *st, int pp, int n, int m)
 /* ---- pixel work on the blit row workhorses -------------------------- */
 
 /* restore the saved background - the reference's blithide */
+/*	The rectangle a sprite at (x,y) actually occupies on screen, as the
+ *	row loops below clip it: the x span is the same for every row, so
+ *	it is worth computing once - and a window over it turns the loop's
+ *	crossing-per-row into one for the batch (mmb_win_open). */
+MMG_FN int mms_clip(int x, int y, int w, int h, int hres, int vres,
+		    int *cx, int *cw, int *cy, int *ch)
+{
+	int y0 = y, y1 = y + h;
+
+	if (x < 0) { *cw = w + x; *cx = 0; } else { *cw = w; *cx = x; }
+	if (*cx + *cw > hres)
+		*cw = hres - *cx;
+	if (y0 < 0)
+		y0 = 0;
+	if (y1 > vres)
+		y1 = vres;
+	*cy = y0;
+	*ch = y1 - y0;
+	return (*cw >= 1 && *ch >= 1);
+}
+
 MMG_FN void mms_hide_px(struct mmb_sprite *sb)
 {
 	int stride = 0, bpp = 0, hres, vres, i, j;
+	int cx, cw, cy, ch;
 
 	sb->active = 0;
 	if (mmb_geom(&stride, &bpp, &hres, &vres))
 		return;
+	if (mms_clip(sb->x, sb->y, sb->w, sb->h, hres, vres,
+		     &cx, &cw, &cy, &ch))
+		mmb_win_open(cy, ch, cx, cw, stride, bpp);
 	for (i = 0; i < sb->h; i++) {
 		int y = sb->y + i, x0 = sb->x, w = sb->w, s0 = 0;
 
@@ -123,10 +148,21 @@ MMG_FN void mms_hide_px(struct mmb_sprite *sb)
 		if (x0 + w > hres) w = hres - x0;
 		if (w < 1)
 			continue;
-		for (j = 0; j < w; j++)
-			mmb_rowpx[j] = sb->store[(size_t)i * sb->w + s0 + j];
+		/*	The row base once, not once per pixel.  "store[i * sb->w
+		 *	+ s0 + j]" inside the j loop is a multiply per PIXEL:
+		 *	the board profiler counted 48 of them for one 8x8
+		 *	SPRITE SHOW, each a crossing out of native code into
+		 *	the interpreter's helper, and 336us for the show. */
+		{
+			const unsigned char *srow = sb->store
+					+ (size_t)i * sb->w + s0;
+
+			for (j = 0; j < w; j++)
+				mmb_rowpx[j] = srow[j];
+		}
 		mmb_row_put(y, x0, w, stride, bpp, mmb_rowpx);
 	}
+	mmb_win_close();
 }
 
 /* the reference's BlitShowBuffer: restore old spot unless told not to,
@@ -151,6 +187,19 @@ MMG_FN void mms_show_px(int bnbr, int x1, int y1, int mode)
 			sb->active = 1;
 		return;
 	}
+	/*	ONE window across both loops below.  The save reads the
+	 *	rectangle and the draw modifies the same bytes, so with the
+	 *	batch resident the whole SPRITE SHOW is one crossing in and
+	 *	one out - where it was a read per row for the save and a
+	 *	read and a write per row for the draw.  Nothing between them
+	 *	touches the framebuffer, which is what makes it safe to hold
+	 *	the rows across the pair. */
+	{
+		int cx, cw, cy, ch;
+
+		if (mms_clip(x1, y1, w, h, hres, vres, &cx, &cw, &cy, &ch))
+			mmb_win_open(cy, ch, cx, cw, stride, bpp);
+	}
 	if (mode != 2) {
 		for (i = 0; i < h; i++) {
 			int y = y1 + i, x0 = x1, ww = w, s0 = 0;
@@ -161,10 +210,13 @@ MMG_FN void mms_show_px(int bnbr, int x1, int y1, int mode)
 			if (x0 + ww > hres) ww = hres - x0;
 			if (ww < 1)
 				continue;
-			if (mmb_row_get(y, x0, ww, stride, bpp, mmb_rowpx) == 0)
+			if (mmb_row_get(y, x0, ww, stride, bpp, mmb_rowpx) == 0) {
+				unsigned char *srow = sb->store
+						+ (size_t)i * w + s0;
+
 				for (j = 0; j < ww; j++)
-					sb->store[(size_t)i * w + s0 + j] =
-					    mmb_rowpx[j];
+					srow[j] = mmb_rowpx[j];
+			}
 		}
 	}
 	for (i = 0; i < h; i++) {
@@ -177,30 +229,39 @@ MMG_FN void mms_show_px(int bnbr, int x1, int y1, int mode)
 		if (ww < 1)
 			continue;
 		sr = (sb->rot & 2) ? h - 1 - i : i;
-		if (fullmode & 8) {
-			for (j = 0; j < ww; j++) {
-				int sc = s0 + j;
+		/*	As in the save above: the source row base is the same
+		 *	for every pixel of the row, and computing it inside
+		 *	the j loop made "sr * w" a multiply per pixel. */
+		{
+			const unsigned char *irow = sb->img + (size_t)sr * w;
 
-				if (sb->rot & 1)
-					sc = w - 1 - sc;
-				mmb_rowpx[j] = sb->img[(size_t)sr * w + sc];
-			}
-		} else {
-			if (mmb_row_get(y, x0, ww, stride, bpp, mmb_rowpx) < 0)
-				continue;
-			for (j = 0; j < ww; j++) {
-				int sc = s0 + j;
-				unsigned char c;
+			if (fullmode & 8) {
+				for (j = 0; j < ww; j++) {
+					int sc = s0 + j;
 
-				if (sb->rot & 1)
-					sc = w - 1 - sc;
-				c = sb->img[(size_t)sr * w + sc];
-				if (c != mms_transparent)
-					mmb_rowpx[j] = c;
+					if (sb->rot & 1)
+						sc = w - 1 - sc;
+					mmb_rowpx[j] = irow[sc];
+				}
+			} else {
+				if (mmb_row_get(y, x0, ww, stride, bpp,
+						mmb_rowpx) < 0)
+					continue;
+				for (j = 0; j < ww; j++) {
+					int sc = s0 + j;
+					unsigned char c;
+
+					if (sb->rot & 1)
+						sc = w - 1 - sc;
+					c = irow[sc];
+					if (c != mms_transparent)
+						mmb_rowpx[j] = c;
+				}
 			}
 		}
 		mmb_row_put(y, x0, ww, stride, bpp, mmb_rowpx);
 	}
+	mmb_win_close();
 	if (!(mode & 4))
 		sb->active = 1;
 }
