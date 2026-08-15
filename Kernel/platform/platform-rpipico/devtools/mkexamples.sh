@@ -55,6 +55,7 @@ circrnd:$H/circrnd.bas:ten thousand random filled circles, timed
 spritepix:$M/samples/spritepix.bas:the SPRITE family, verified by PIXEL()
 blitpix:$M/samples/blitpix.bas:BLIT against the framebuffer
 scrollpix:$M/samples/scrollpix.bas:SPRITE SCROLL
+brownian:$M/samples/brownian.bas:sprites colliding - Brownian motion, double buffered
 flashpix:$M/samples/flashpix.bas:the flash slots BLIT can read and write
 playdemo:$M/samples/playdemo.bas:PLAY SOUND and PLAY TONE
 moddemo:$M/samples/moddemo.bas:PLAY MODFILE and MODSAMPLE (wants a .mod file)
@@ -67,6 +68,7 @@ tempr:$M/samples/tempr.bas:ONEWIRE and TEMPR - a DS18B20 on GP26
 bmp180:$H/bmp180.bas:a BMP180 pressure sensor on the QWIIC bus
 alarm:$H/alarm.bas:the DS3231 real time clock and its alarm
 qnh:$M/samples/qnh.bas:a whole application - sensors, graphics and files
+bench:$M/tests/bench.bas:KnivD's MMBasic benchmark - the number to compare
 eclipse:$H/solar_eclipse.bas:a solar eclipse computed from first principles
 picofrog:$M/samples/picofrog.bas:a complete arcade game (keyboard: arrows, space)
 "

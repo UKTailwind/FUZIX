@@ -106,6 +106,15 @@ done
 echo "--- /root/cc"
 list /root/cc | sed -n '3,$p' | awk '{ printf "  %-20s %s\n", $NF, $(NF-5) }'
 
+# The curated examples, which come from the BASE image (mksdimage.sh)
+# rather than from this script.  Listed for the same reason /root/cc is:
+# a ucp "cd" into a directory that does not exist carries on and drops
+# every following file somewhere else, and an empty listing here is what
+# that looks like - so an examples directory that silently failed to
+# reach the card would otherwise be found by the user, not by us.
+echo "--- /root/MMBasic"
+list /root/MMBasic | sed -n '3,$p' | awk '{ printf "  %-20s %s\n", $NF, $(NF-5) }'
+
 echo
 if [ $fail = 0 ]; then
 	echo "image matches what was staged"

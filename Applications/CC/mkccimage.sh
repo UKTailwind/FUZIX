@@ -156,7 +156,11 @@ echo "--- installing"
 	for f in "$CC"/hosttest/samples/*.c; do
 		echo "get $f $(basename "$f")"
 	done
-	# BASIC samples for mmbc (synced from the mmb2c repo)
+	# BASIC samples for mmbc (synced from the mmb2c repo).  These are
+	# the WHOLE corpus, probes and regressions included, and they are
+	# here for the board-side testing that needs them.  The curated
+	# subset a user should read lives in /root/MMBasic with a README -
+	# mksdimage.sh installs that from devtools/mkexamples.sh.
 	for f in "$CC"/hwtest/*.bas "$CC"/hwtest/*.in; do
 		[ -r "$f" ] && echo "get $f $(basename "$f")"
 	done
