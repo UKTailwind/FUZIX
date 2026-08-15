@@ -150,10 +150,26 @@ kernel: ltools
 	mkdir -p Images/$(TARGET)
 	+(cd Kernel; $(MAKE))
 
+# isize was upstream's 256 and the image no longer fits in it: ucp fails
+# with "error 28" partway through and then "panic: inode freed", which
+# reads like a corrupt image rather than a full one.  It is inodes, not
+# blocks - the root is 4.1M of content (429 files, 54 directories, 94
+# device nodes, 14 links = 591 inodes) and the 32M and 8M images fail at
+# exactly the same file.  FS32 is why: DINODE_SIZE went from 64 bytes to
+# 256 (kernel.h), so the same isize buys a quarter as many.
+#
+# Measured rather than derived, because the arithmetic does not line up -
+# 256 dies at `stty', 512 at `utsname.h', 1024 builds clean, and 512
+# blocks of 2 inodes each ought already to have covered 591.  Something
+# else is eating them; NOTES-inode-freelist.md in platform-rpipico
+# describes a two-byte overrun onto s_ninode that was fixed in the kernel
+# and may not be fixed in these host tools.  2048 is the next step up
+# from the first value that works, so the root can grow without this
+# coming back; it costs 1M of a 32M image.
 diskimage: stand ltools libs apps kernel
 	mkdir -p Images/$(TARGET)
-	+(cd Standalone/filesystem-src; ./build-filesystem $(ENDIANFLAG) $(FUZIX_ROOT)/Images/$(TARGET)/filesys.img 256 65535)
-	+(cd Standalone/filesystem-src; ./build-filesystem $(ENDIANFLAG) $(FUZIX_ROOT)/Images/$(TARGET)/filesys8.img 256 16384)
+	+(cd Standalone/filesystem-src; ./build-filesystem $(ENDIANFLAG) $(FUZIX_ROOT)/Images/$(TARGET)/filesys.img 2048 65535)
+	+(cd Standalone/filesystem-src; ./build-filesystem $(ENDIANFLAG) $(FUZIX_ROOT)/Images/$(TARGET)/filesys8.img 2048 16384)
 	+(cd Kernel; $(MAKE) diskimage)
 
 kclean:
