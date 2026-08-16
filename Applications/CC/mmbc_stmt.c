@@ -1199,20 +1199,40 @@ void statement_inner(void)
             emit(sfmt("mmp_modsample(%s, %s, %s);", sm, ch, vol));
             return;
         }
-        if (is_kw("MP3", 1)) {
-            struct val v;
-            cv.i += 2;
-            v = expr();
-            if (v.ty != TY_S)
-                cv_err("PLAY MP3 wants a file name");
-            emit("mm_run_begin();");
-            emit(sfmt("mm_run_arg(%s);", c_string_literal("playmp3")));
-            emit(sfmt("mm_run_arg(%s);", v.code));
-            emit("mm_run_arg_i(mm_play_volume);");
-            emit("mm_play_start();");
-            return;
+        /* MP3, WAV and FLAC are the same statement with a different
+           program behind it: each spawns a one-shot player that holds
+           the PCM stream for its own lifetime, so unlike SOUND and
+           MODFILE there is no daemon to command and NO KIND to record -
+           mmp_adopt says as much ("an MP3 player writes no kind file"),
+           and PLAY STOP reaches all three the same way, by signalling
+           whoever owns the stream. */
+        {
+            static const char *const files[3][2] = {
+                { "MP3", "playmp3" },
+                { "WAV", "playwav" },
+                { "FLAC", "playflac" }
+            };
+            int k;
+
+            for (k = 0; k < 3; k++) {
+                if (is_kw(files[k][0], 1)) {
+                    struct val v;
+                    cv.i += 2;
+                    v = expr();
+                    if (v.ty != TY_S)
+                        cv_err(sfmt("PLAY %s wants a file name",
+                                    files[k][0]));
+                    emit("mm_run_begin();");
+                    emit(sfmt("mm_run_arg(%s);",
+                              c_string_literal(files[k][1])));
+                    emit(sfmt("mm_run_arg(%s);", v.code));
+                    emit("mm_run_arg_i(mm_play_volume);");
+                    emit("mm_play_start();");
+                    return;
+                }
+            }
         }
-        cv_err("only PLAY MP3, MODFILE, MODSAMPLE, SOUND, TONE, VOLUME and STOP are translated");
+        cv_err("only PLAY MP3, WAV, FLAC, MODFILE, MODSAMPLE, SOUND, TONE, VOLUME and STOP are translated");
     }
     if (strcmp(up, "CIRCLE") == 0) {
         /* CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]

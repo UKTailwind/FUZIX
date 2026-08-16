@@ -1895,7 +1895,7 @@ The decoder is MMBasic's, so it reads 1, 4, 8, 16, 24 and 32-bit BMPs,
 `BI_BITFIELDS`, and RLE4/RLE8 compression. Dithering is *optional*, as
 in MMBasic — omit the mode and the image is mapped without it.
 
-## Music: `PLAY MP3`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE`
+## Music: `PLAY MP3`, `PLAY WAV`, `PLAY FLAC`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE`
 
 ```basic
 PLAY VOLUME 70
@@ -1916,10 +1916,26 @@ loop; here there is no idle loop to do it in, and no cost when there is
 nothing to play. A translated benchmark measured **89% of its full
 speed** with a track playing.
 
+`PLAY WAV` and `PLAY FLAC` are the same statement with a different
+decoder behind it, and behave the same way in every respect — they do
+not wait, `PLAY STOP` stops them, and `PLAY VOLUME` sets their level.
+WAV covers 8, 16, 24 and 32-bit PCM, IEEE float, A-law and mu-law, all
+converted to the 16 bits the hardware takes. FLAC is read at its own
+rate and bit depth; a 44.1 kHz 16-bit stereo file plays with no
+underruns while the machine is otherwise idle.
+
+One thing to know about FLAC in particular: its decoder is sized from
+the file, at roughly `maxBlockSize x 4 x channels`, so a file written
+with 4096-sample blocks wants about 32K and one written with 16384
+wants about 132K — out of a pool of 336K shared with everything else
+running. A file that will not open says so, and says how much it
+wanted, rather than failing silently.
+
 `PLAY VOLUME n` takes 0 to 100 and is remembered, so every later
-`PLAY MP3` uses it until it is changed again. Out-of-range values are
-clamped rather than refused. The default is 80. The scale is
-logarithmic, so 50 is a comfortable half rather than a whisper.
+`PLAY MP3`, `PLAY WAV` or `PLAY FLAC` uses it until it is changed
+again. Out-of-range values are clamped rather than refused. The default
+is 80. The scale is logarithmic, so 50 is a comfortable half rather
+than a whisper.
 
 `PLAY STOP` stops whatever is playing. It asks the kernel which
 process holds the sound output rather than remembering what it started,
@@ -3433,10 +3449,12 @@ I/O header may be claimed, and the pin is released and reset when the
 program ends however it ends. `OPTION VCC` is not supported, so `AIN`
 always scales by 3.3 V.
 
-Of the sound, `PLAY MP3`, `PLAY VOLUME`, `PLAY STOP`, `PLAY SOUND`,
-`PLAY TONE`, `PLAY MODFILE` and `PLAY MODSAMPLE` are done — `WAV`,
-`FLAC`, `MIDI`, `LOAD SOUND` and the user-defined `U` waveform are
-not. `PLAY VOLUME` takes one level rather than one per channel.
+Of the sound, `PLAY MP3`, `PLAY WAV`, `PLAY FLAC`, `PLAY VOLUME`,
+`PLAY STOP`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE` and
+`PLAY MODSAMPLE` are done — `MIDI`, `LOAD SOUND` and the user-defined
+`U` waveform are not. `PLAY VOLUME` takes one level rather than one
+per channel. None of the file players takes the completion interrupt
+MMBasic allows on them.
 
 Of the statements that reach *into* something rather than replacing
 it, `MID$(s$,n,m) =`, `LMID(a(),start[,num]) =`, `BIT(v,n) =`,
