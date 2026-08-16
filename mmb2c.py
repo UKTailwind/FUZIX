@@ -4190,18 +4190,29 @@ class Conv(object):
                     vol = self.as_int(self.expr())
                 self.emit('mmp_modsample(%s, %s, %s);' % (sm, ch, vol))
                 return
-            if self.is_kw('MP3', 1):
-                self.i += 2
-                v = self.expr()
-                if v[1] != TY_S:
-                    self.err('PLAY MP3 wants a file name')
-                self.emit('mm_run_begin();')
-                self.emit('mm_run_arg(%s);' % c_string_literal('playmp3'))
-                self.emit('mm_run_arg(%s);' % v[0])
-                self.emit('mm_run_arg_i(mm_play_volume);')
-                self.emit('mm_play_start();')
-                return
-            self.err('only PLAY MP3, MODFILE, MODSAMPLE, SOUND, TONE, VOLUME and STOP are translated')
+            # MP3, WAV and FLAC are the same statement with a different
+            # program behind it: each spawns a one-shot player that holds
+            # the PCM stream for its own lifetime, so unlike SOUND and
+            # MODFILE there is no daemon to command and NO KIND to
+            # record - mmp_adopt says as much ("an MP3 player writes no
+            # kind file"), and PLAY STOP reaches all three the same way,
+            # by signalling whoever owns the stream.
+            for kw, prog in (('MP3', 'playmp3'),
+                             ('WAV', 'playwav'),
+                             ('FLAC', 'playflac')):
+                if self.is_kw(kw, 1):
+                    self.i += 2
+                    v = self.expr()
+                    if v[1] != TY_S:
+                        self.err('PLAY %s wants a file name' % kw)
+                    self.emit('mm_run_begin();')
+                    self.emit('mm_run_arg(%s);' % c_string_literal(prog))
+                    self.emit('mm_run_arg(%s);' % v[0])
+                    self.emit('mm_run_arg_i(mm_play_volume);')
+                    self.emit('mm_play_start();')
+                    return
+            self.err('only PLAY MP3, WAV, FLAC, MODFILE, MODSAMPLE, SOUND, '
+                     'TONE, VOLUME and STOP are translated')
         if up == 'CIRCLE':
             # CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
             # The geometry is mmb_gfx_circle.h's, not the runtime's.  MMBasic
