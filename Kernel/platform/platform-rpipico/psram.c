@@ -19,6 +19,7 @@
 #include "hardware/structs/pads_qspi.h"
 #include "hardware/clocks.h"
 #include "hardware/sync.h"
+#include "hardware/vreg.h"
 #include "psram.h"
 
 /*
@@ -79,6 +80,38 @@ void __no_inline_not_in_flash_func(pc3_clock_init)(uint32_t target_khz,
     uint32_t old_hz = clock_get_hz(clk_sys);
     uint32_t new_hz = target_khz * 1000u;
     uint32_t worst = (old_hz > new_hz) ? old_hz : new_hz;
+
+    /*
+     * CORE VOLTAGE FIRST, and it must settle before the clock moves.
+     *
+     * The chip leaves reset at 1.10 V and this kernel runs at 375 MHz.
+     * The PC3 does not depend on the internal regulator - DVDD there is
+     * fed externally at 1.3 V - but a clone on a stock module such as a
+     * Pimoroni PGA2350 has nothing else, and at 375 MHz on 1.10 V it
+     * does not run at all.  That is the reported failure, and it is why
+     * this is here rather than left to the board.
+     *
+     * MMBasic's ladder (PicoMite.c), except that it uses 1.60 V above
+     * 320 MHz and this uses 1.40 - enough over the 1.3 the PC3 supplies
+     * externally at this speed, without asking a clone for MMBasic's
+     * full headroom until someone reports needing it.
+     *
+     * vreg_disable_voltage_limit() first: anything above 1.30 V sits
+     * behind POWMAN's limit and vreg_set_voltage() would clamp.
+     *
+     * Safe to call the SDK's flash-resident vreg code from this
+     * RAM-resident function: XIP is still live and stays live until
+     * set_sys_clock_khz below, which is the whole reason for the
+     * ordering in this function.
+     */
+    vreg_disable_voltage_limit();
+    if (target_khz <= 200000)
+        vreg_set_voltage(VREG_VOLTAGE_1_15);
+    else if (target_khz <= 320000)
+        vreg_set_voltage(VREG_VOLTAGE_1_30);
+    else
+        vreg_set_voltage(VREG_VOLTAGE_1_40);
+    busy_wait_us(10000);        /* MMBasic waits 10 ms; so do we */
 
     /* Drive strength and slew for a fast QSPI clock - MMBasic's values */
     pads_qspi_hw->io[0] = 0x67;
