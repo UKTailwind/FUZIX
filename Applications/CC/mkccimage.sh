@@ -37,7 +37,8 @@ set -e
 p2geom "$SRC"
 START=$P2_START
 COUNT=$P2_COUNT
-for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc saveimage loadimage mmedit playmp3; do
+for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc saveimage loadimage mmedit \
+		playmp3 playmod; do
 	[ -r "$CC/hwtest/$f.s" ] || {
 		echo "missing $CC/hwtest/$f.s - cross build and strip first" >&2
 		exit 1; }
@@ -121,10 +122,31 @@ echo "--- installing"
 	# it, and nothing installed it.  PLAY MP3 on a fresh card reported
 	# "no such program".  Any name added here must be added to
 	# hwtest/verifyimage.sh too, which agreed with the omission.
-	for f in cpp bcrun bcdump mmbc saveimage loadimage mmedit playmp3; do
-		echo "bget $CC/hwtest/$f.s $f"
-		echo "chmod 755 $f"
-	done
+	# EVERY staged program, by glob - cc0/cc1/cc2 went to /usr/lib/cc
+	# above and ccbc is installed as "cc" just now, so those four are
+	# the only exceptions.  This was a hand-written list and it missed
+	# playmp3 for a whole release; then it missed PLAYMOD for the
+	# release that added PLAY MODFILE and PLAY MODSAMPLE, so the
+	# statement raised "Could not play the MOD file" on a card whose
+	# every gate was green.  The binary was cross-built and staged both
+	# times; only the installing was forgotten.
+	# Exactly what stageall.sh staged, from the list it writes - not a
+	# hand-kept list here, which is how playmp3 missed a whole release
+	# and playmod missed the release that ADDED PLAY MODFILE and PLAY
+	# MODSAMPLE: cross-built, staged, installed nowhere, and the
+	# statement answered "Could not play the MOD file" on a card whose
+	# every gate was green.
+	#
+	# cc0/cc1/cc2 went to /usr/lib/cc above and ccbc is installed as
+	# "cc" just now.  playsnd is DEPRECATED: its synthesiser moved into
+	# the kernel's DAC interrupt at v0.15 and the client only reaches
+	# for the daemon on a kernel too old to have the ioctl, which is
+	# not the kernel shipped beside this card.
+	while read -r b; do
+		case $b in cc0 | cc1 | cc2 | ccbc | playsnd) continue ;; esac
+		echo "bget $CC/hwtest/$b.s $b"
+		echo "chmod 755 $b"
+	done < "$CC/hwtest/staged.list"
 	echo "cd /root"
 	echo "mkdir cc"
 	echo "cd cc"

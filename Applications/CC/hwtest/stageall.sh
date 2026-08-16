@@ -13,9 +13,21 @@ CC=$(cd "$(dirname "$0")/.." && pwd)
 R=$(cd "$CC/../.." && pwd)
 S=$CC/hwtest
 
+# Every program staged is recorded in staged.list, and mkccimage.sh
+# and verifyimage.sh install and check exactly that.  They used to keep
+# hand-written lists of their own, which is how playmp3 missed a whole
+# release and playmod missed the release that added PLAY MODFILE: the
+# binary was built here, staged here, and installed by nobody.  The
+# list is written by the thing that does the staging, so it cannot fall
+# behind it.  It is a list rather than a glob over *.s because this
+# directory also holds leftovers - a stale cc.s from an older native
+# driver is still here, and a glob installed it OVER /usr/bin/cc.
+: > "$S/staged.list"
+
 stage() {
 	[ -r "$2" ] || { echo "missing $2" >&2; exit 1; }
 	arm-none-eabi-strip -o "$S/$1.s" "$2"
+	echo "$1" >> "$S/staged.list"
 }
 
 for f in cc0 cc1 cc2 ccbc bcrun bcdump mmbc; do

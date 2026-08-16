@@ -84,9 +84,15 @@ done
 
 echo "--- the programs"
 same /usr/bin/cc "$S/ccbc.s"
-for f in cpp bcrun bcdump mmbc mmedit saveimage loadimage playmp3; do
-	same "/usr/bin/$f" "$S/$f.s"
-done
+# Exactly what stageall.sh staged, read from the list it writes - the
+# same source mkccimage.sh installs from, so this cannot verify a card
+# clean while a staged program is missing from it.  That is what it did
+# for playmp3 and again for playmod.  The two exception lists must
+# match; playsnd is deprecated, see the note in mkccimage.sh.
+while read -r b; do
+	case $b in cc0 | cc1 | cc2 | ccbc | playsnd) continue ;; esac
+	same "/usr/bin/$b" "$S/$b.s"
+done < "$S/staged.list"
 
 echo "--- the headers the generated C includes"
 same /usr/lib/cc/include/mmb_runtime.h "$R/Applications/CC/mmb_runtime.h"
