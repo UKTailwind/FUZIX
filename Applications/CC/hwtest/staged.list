@@ -12,3 +12,5 @@ loadimage
 playmp3
 playsnd
 playmod
+playwav
+playflac

@@ -46,6 +46,11 @@ stage playmp3   "$R/Kernel/platform/platform-rpipico/utils/playmp3"
 # playsnd is PLAY SOUND / PLAY TONE's synthesiser, the same shape.
 stage playsnd   "$R/Kernel/platform/platform-rpipico/utils/playsnd"
 stage playmod   "$R/Kernel/platform/platform-rpipico/utils/playmod"
+# playwav and playflac are playmp3 with a different decoder (pcmplay.h
+# holds everything they share).  Soft float, unlike playmp3 - see the
+# utils Makefile for why that matters.
+stage playwav   "$R/Kernel/platform/platform-rpipico/utils/playwav"
+stage playflac  "$R/Kernel/platform/platform-rpipico/utils/playflac"
 
 ls -l "$S"/cc0.s "$S"/cc1.s "$S"/cc2.s "$S"/ccbc.s "$S"/bcrun.s \
       "$S"/bcdump.s "$S"/mmbc.s "$S"/cpp.s "$S"/mmedit.s \
