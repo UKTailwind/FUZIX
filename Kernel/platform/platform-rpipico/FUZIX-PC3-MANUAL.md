@@ -1255,16 +1255,15 @@ Do
 Loop Until count%=4
 End
 
-# mmbc bench.bas
-wrote bench.c
-# cc bench.c
+# cc bench.bas
+wrote bench.mb.c
 .......................................................................
 # ./bench.bc
 MMBASIC benchmark (C) KnivD 2016
-Calculating... Performance:    28944 grains
-Performance:    28944 grains
-Performance:    28944 grains
-Performance:    28940 grains
+Performance:    54232 grains
+Performance:    54236 grains
+Performance:    54236 grains
+Performance:    54236 grains
 ```
 
 MMBasic itself scores about 12,000 grains on the same board at the same
@@ -1273,28 +1272,41 @@ string building, `Str$`, `Instr`, `Sin`, `Log`, `Tan`, `Rnd`, a
 thousand-element array and a timer — all of it translated, compiled and
 running natively.
 
+Read the timings in this chapter as figures to compare against rather
+than constants. They are wall-clock measurements on a machine with
+other processes in it, they move a percent or two between runs, and
+they drift as the language grows — this one has roughly doubled since
+it was first printed here, and the eclipse below has slowed a little
+as more of MMBasic went in.
+
 ## A worked example: something numerical
 
-A longer one. `eclipse.bas`, in `/root/MMBasic`, is a 3,200-line
-astronomical calculation (Bessel elements, lunar and solar series)
-that reads a date and prints the circumstances of an eclipse. It is a
-good test because every digit of its output can be checked against
-other machines.
+A longer one. It is a 3,200-line astronomical calculation (Bessel
+elements, lunar and solar series) that reads a date and prints the
+circumstances of an eclipse, and it is a good test because every digit
+of its output can be checked against other machines. It is among the
+examples as `eclipse.bas`, and in `/root/cc` as `solar_eclipse.bas`
+with a `solar_eclipse.in` holding a date to feed it:
 
 ```
-# mmbc solar_eclipse.bas
-wrote solar_eclipse.c
+# cd /root/cc
+# cc solar_eclipse.bas
+wrote solar_eclipse.mb.c
+...........................................................
 # ./solar_eclipse.bc < solar_eclipse.in
 ...
 event duration          2.61100904 hours
-Time taken :     1.954974  Seconds
+Time taken :     2.122675  Seconds
 ```
 
 The same program takes 12.5 seconds under MMBasic and 8.8 seconds
 under MicroPython on this hardware; every digit printed is identical in
-all three. Translating it takes a few seconds. Compiling it is a much
-longer job than the benchmark above — it is a hundred and forty
-kilobytes of C — so start it when you have the machine to yourself.
+all three. Translating and compiling it together takes about twenty
+seconds — it is a hundred and forty kilobytes of C, so it is much the
+longest build in this manual.
+
+This one was 1.95 seconds at v0.13, with rather less of MMBasic
+implemented; the digits of the answer have not moved.
 
 ## What the translation looks like
 
