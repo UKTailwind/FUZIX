@@ -61,6 +61,17 @@ the whole program (the checks-gating rule working exactly as designed):
     without:         38.4K bytecode, main 14.4K -> 26.1K NATIVE,
                      fully native image 132K, process ~258K - FITS
 
+BOARD-VERIFIED (2026-08-17, COM17): new mmbc + cc2 installed with
+.prev rollbacks; mmbc's PSRAM arena raised 768K->2M (PicoMan is the
+first Game*Mite-sized on-board translation).  On the machine: all 56
+functions native including main (14,388 bc -> 26,178), the game loads,
+runs and takes ^C; /root/MMBasic/picoman.bc is now the native build.
+Interleaved A/B of old vs new cc2 on identical C: eclipse +0.07%,
+bench equal at 52.5K grains (above the 51.4K record) - the density
+pass costs nothing measurable.  Session drift (eclipse 2.087 -> 2.152
+in 15 min, same binary) dwarfs every real delta: fresh-boot + screen
+console remains the only protocol for absolute numbers.
+
 RESOLVED IN THE COMPILER (user's insight, later the same evening):
 IGNORE is the only form that needs program-wide checks - SKIP nn only
 covers the next nn statements.  Both translators now emit the checked
