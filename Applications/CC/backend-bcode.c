@@ -66,10 +66,24 @@
    pointer and sym_in_lit), so 8192 is ~70K more - carved from the
    PSRAM arena on the board, where bc_arena_carve_all measures before
    it places, and nothing on the host. */
+/* And 8192 fixups was not enough for PicoMan, a 1200-line BASIC game
+   whose DATA is a 5103-entry maze: every reference from code or data to
+   a symbol is a fixup, and a program that size simply has more of them
+   than picofrog did.  MAXFIX sizes FOUR tables - fixtab 8 bytes,
+   fix_in_lit 1, patchtab 8, libreftab 8 - so it is 25 bytes a unit,
+   and doubling it is ~200K more out of the PSRAM arena.  That is
+   affordable where the 256K process it used to live in was not: the
+   arena is the whole point (PC3-PSRAM-ARENA.md).
+
+   MAXLAB went 3072 -> 8192 in the same pass and for the same program:
+   a label is 24 bytes, so that is ~120K.  Raise these together with the
+   DATA-column work in mmb2c - a table that emits only the columns it
+   can prove live took PicoMan's DATA from 81,648 bytes to 40,824, and
+   without that the data segment overflows before any of these do. */
 #if defined(BIG_TABLES) || defined(ARENA_TABLES)
 #define MAXSYM		8192
-#define MAXFIX		8192
-#define MAXLAB		3072
+#define MAXFIX		16384
+#define MAXLAB		8192
 #else
 #define MAXSYM		2048
 #define MAXFIX		4096
@@ -178,10 +192,23 @@ static void thumb_commit(void);
 
 /* ------------------------------------------------------------------ */
 
+/*
+ *	A table overflow names the limit that was hit and the value it
+ *	has, so the fix is not a guessing game across three build
+ *	configurations.  One static buffer: the caller is on its way to
+ *	exit and nothing re-enters.
+ */
+static void table_full(const char *what, unsigned long lim)
+{
+	static char buf[64];
+	sprintf(buf, "%s full (limit %lu)", what, lim);
+	error(buf);
+}
+
 static void cbyte(unsigned v)
 {
 	if (codelen >= CODEMAX) {
-		error("code overflow");
+		table_full("code segment", CODEMAX);
 		return;
 	}
 	codebuf[codelen++] = v;
@@ -203,18 +230,19 @@ static void clong(unsigned long v)
 
 static unsigned in_literal(void);
 
+
 static void dbyte(unsigned v)
 {
 	if (in_literal()) {
 		if (litlen >= DATAMAX) {
-			error("literal overflow");
+			table_full("literal segment", DATAMAX);
 			return;
 		}
 		litbuf[litlen++] = v;
 		return;
 	}
 	if (datalen >= DATAMAX) {
-		error("data overflow");
+		table_full("data segment", DATAMAX);
 		return;
 	}
 	databuf[datalen++] = v;
@@ -255,7 +283,7 @@ static unsigned symref(const char *name)
 			return i;
 	}
 	if (nsym >= MAXSYM) {
-		error("too many symbols");
+		table_full("symbol table", MAXSYM);
 		return 0;
 	}
 	bc_symname[nsym] = strdup(name);
@@ -290,7 +318,7 @@ static unsigned labsym(const char *tail, unsigned n)
 static void fixup(unsigned seg, unsigned long off, unsigned sym)
 {
 	if (nfix >= MAXFIX) {
-		error("too many fixups");
+		table_full("fixup table", MAXFIX);
 		return;
 	}
 	fixtab[nfix].f_offset = off;
@@ -317,7 +345,7 @@ static unsigned labref(const char *tail, unsigned n)
 			return i;
 	}
 	if (nlab >= MAXLAB) {
-		error("too many labels");
+		table_full("label table", MAXLAB);
 		return 0;
 	}
 	if (strlen(tail) >= LABTAIL)
@@ -336,7 +364,7 @@ static void jumpto(unsigned op, const char *tail, unsigned n)
 	unsigned l = labref(tail, n);
 	cbyte(op);
 	if (npatch >= MAXFIX) {
-		error("too many jumps");
+		table_full("jump table", MAXFIX);
 		return;
 	}
 	patchtab[npatch].at = codelen;
@@ -505,7 +533,7 @@ static unsigned nlibref;
 static void librec(unsigned long at, unsigned sym, unsigned form)
 {
 	if (nlibref >= MAXFIX) {
-		error("too many libcalls");
+		table_full("libcall table", MAXFIX);
 		return;
 	}
 	libreftab[nlibref].at = at;
@@ -823,7 +851,7 @@ void gen_start(void)
 {
 }
 
-static void thumb_link_calls(void);
+static void thumb_resolve_calls(void);
 
 /*
  *	Drop generated label symbols ("L<n>...", "Sw<n>_<n>") that no
@@ -969,7 +997,7 @@ void gen_end(void)
 	unsigned i;
 
 	resolve_jumps();
-	thumb_link_calls();
+	thumb_resolve_calls();
 	compact_syms();
 
 	/* Literals sit after data in the emitted image, so everything

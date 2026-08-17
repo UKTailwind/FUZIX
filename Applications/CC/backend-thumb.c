@@ -99,6 +99,39 @@ ATAB(static struct tref treftab[TPOOLMAX],
 static unsigned ntref;
 
 /*
+ *	Uniform call sites.  Every BC_CALL emits the same 8-byte site -
+ *	subs r4,#4 / bl / adds r4,#4 - with the BL left blank, and
+ *	thumb_resolve_calls() points it at the callee's native entry or,
+ *	for a callee with none (the mm runtime, libc, a function that
+ *	stayed bytecode), at a 14-byte per-callee thunk shared by every
+ *	site.  This replaces the old two-form scheme where only a callee
+ *	that had ALREADY committed got the 8-byte form and everything
+ *	else carried a 14-byte movw/movt trampoline - rewritten to a BL
+ *	plus three dead nops when the callee turned out native, and kept
+ *	forever when it did not, which for a BASIC program meant every
+ *	runtime call (432 sites in PicoMan against 261 direct).
+ *
+ *	tcalltab stages a function's sites (tbuf-relative) through the
+ *	walks; thumb_commit flushes them to callsitetab against the
+ *	placed code.
+ */
+struct tcall {
+	unsigned sym;
+	unsigned site;			/* toff of the BL's first halfword */
+};
+ATAB(static struct tcall tcalltab[TPOOLMAX],
+     static struct tcall *tcalltab);
+static unsigned ntcall;
+
+struct callsite {
+	unsigned sym;
+	unsigned long at;		/* codebuf offset of the BL */
+};
+ATAB(static struct callsite callsitetab[MAXFIX],
+     static struct callsite *callsitetab);
+static unsigned ncallsite;
+
+/*
  *	Stage 10 peephole state.  t_targets: one bit per span byte, set
  *	during the dry pass for every in-span branch/case target - all
  *	tracking dies at a marked op, because control can arrive there
@@ -1367,21 +1400,6 @@ static void t_bw(long off)
 	unsigned j2 = (!(i2 ^ s)) & 1;
 	t32(0xF000 | (s << 10) | imm10,
 	    0x9000 | (j1 << 13) | (j2 << 11) | imm11);
-}
-
-/* bl, same encoding with the link bit */
-static void t_blw(long off)
-{
-	unsigned long u = ((unsigned long)off >> 1) & 0xFFFFFF;
-	unsigned imm11 = u & 0x7FF;
-	unsigned imm10 = (u >> 11) & 0x3FF;
-	unsigned i2 = (u >> 21) & 1;
-	unsigned i1 = (u >> 22) & 1;
-	unsigned s = (off < 0);
-	unsigned j1 = (!(i1 ^ s)) & 1;
-	unsigned j2 = (!(i2 ^ s)) & 1;
-	t32(0xF000 | (s << 10) | imm10,
-	    0xD000 | (j1 << 13) | (j2 << 11) | imm11);
 }
 
 /* b<cond>.w, offset as above (T3, +-1MB) */
@@ -3025,44 +3043,8 @@ static int t_span(unsigned long start, unsigned long end)
 		case BC_CALL: {
 			unsigned s;
 			unsigned long ad = t_rd32c(o + 1);
-			unsigned long tent = ~0UL;
 			if (!t_addrsym(o + 1, &s))
 				return 0;
-			/*
-			 *	Stage-8 peephole: a callee already known to
-			 *	be native - itself, or any function this
-			 *	module committed earlier - is a direct BL.
-			 *	The parity slot is dead for a native callee
-			 *	(only a bytecode BC_RET reads it), so the
-			 *	site is subs/bl/adds: no trampoline, no
-			 *	register-file reload, no global-sp traffic.
-			 *	The callee returns r4 balanced (ENTER/LEAVE
-			 *	and pushes are symmetric) and preserves
-			 *	r4-r6 by construction.  Forced-bytecode and
-			 *	x86 hosts never execute this span, so the
-			 *	alias path is untouched.
-			 */
-			if (ad == 0) {
-				if (s == fn_sym)
-					tent = t_base;	/* self-recursion:
-							   own preamble */
-				else if (symtab[s].s_type == BC_SYM_CODE &&
-					 symtab[s].s_value < codelen &&
-					 codebuf[symtab[s].s_value] == BC_NATIVE)
-					tent = BC_NATIVE_ENTRY(symtab[s].s_value);
-			}
-			if (tent != ~0UL) {
-				t16(0x3C04);	/* subs r4, #4 - slot */
-				if (t_dry)
-					t32(0, 0);
-				else
-					t_blw((long)tent -
-					      (long)(t_base + t_psize +
-						     tlen + 4));
-				t16(0x3404);	/* adds r4, #4        */
-				o += 5;
-				break;
-			}
 			/* A library callee arrives as a CALL on a
 			   BC_SYM_LIB symbol (helper_call's tagged-index
 			   path); the string family skips all of that
@@ -3073,6 +3055,39 @@ static int t_span(unsigned long start, unsigned long end)
 				o += 5;
 				break;
 			}
+			/*
+			 *	The uniform site (see tcalltab above).  The
+			 *	parity slot is dead for a native callee (only
+			 *	a bytecode BC_RET reads it) but its 4 bytes
+			 *	are part of the frame math either way, so the
+			 *	caller makes it and takes it back; a thunked
+			 *	callee reaches helper_call with the vsp above
+			 *	it.  The callee returns r4 balanced and
+			 *	preserves r4-r6: native by construction, C
+			 *	helpers per the AAPCS.  Whether the BL can go
+			 *	straight to the callee is gen_end's decision,
+			 *	when every function has committed - deciding
+			 *	here is what left most calls on the old
+			 *	14-byte trampoline.
+			 */
+			if (ad == 0) {
+				if (ntcall >= TPOOLMAX)
+					return 0;
+				t16(0x3C04);	/* subs r4, #4 - slot */
+				if (!t_dry) {
+					tcalltab[ntcall].sym = s;
+					tcalltab[ntcall].site = tlen;
+				}
+				ntcall++;
+				t32(0, 0);	/* bl, resolved at gen_end */
+				t16(0x3404);	/* adds r4, #4        */
+				o += 5;
+				break;
+			}
+			/* A call carrying an addend does not exist in cc2's
+			   output today; if one ever arrives it keeps the old
+			   self-contained trampoline rather than growing the
+			   thunk scheme an (addend, symbol) axis. */
 			if (ntpool >= TPOOLMAX)
 				return 0;
 			if (!t_dry) {
@@ -3732,6 +3747,7 @@ static void thumb_commit(void)
 	tlen = 0;
 	ntpool = 0;
 	ntref = 0;
+	ntcall = 0;
 	t_lcn = 0;
 	t_lcspann = 0;
 	t_lcpendn = 0;
@@ -3837,6 +3853,7 @@ static void thumb_commit(void)
 	tlen = 0;
 	ntpool = 0;
 	ntref = 0;
+	ntcall = 0;
 	t_dry = 1;
 	if (!t_span(fn_start, end))
 		goto bailed;
@@ -3854,6 +3871,7 @@ static void thumb_commit(void)
 	tlen = 0;
 	ntpool = 0;
 	ntref = 0;
+	ntcall = 0;
 	t_dry = 0;
 	t_span(fn_start, end);		/* same input: cannot fail now */
 		if (tlen != dry_tlen)
@@ -3959,6 +3977,16 @@ static void thumb_commit(void)
 	for (i = 0; i < ntref; i++)
 		librec(base + treftab[i].site, treftab[i].sym,
 		       treftab[i].form);
+	/* ... and its call sites, for thumb_resolve_calls at gen_end */
+	for (i = 0; i < ntcall; i++) {
+		if (ncallsite >= MAXFIX) {
+			table_full("call sites", MAXFIX);
+			return;
+		}
+		callsitetab[ncallsite].sym = tcalltab[i].sym;
+		callsitetab[ncallsite].at = base + tcalltab[i].site;
+		ncallsite++;
+	}
 
 	symtab[fn_sym].s_value = marker;
 	have_native = 1;
@@ -3979,100 +4007,90 @@ bailed:
 	}
 }
 
-/*
- *	Link-time half of the direct-BL peephole.  Translation can only
- *	turn a call into a direct BL when the callee committed EARLIER;
- *	most real calls are forward references, so at gen_end - every
- *	function placed - each remaining trampoline call site whose
- *	callee did go native is rewritten in place.  A call site is a
- *	pair-fixup at a movw/movt r0 followed by the exact trampoline
- *	tail (mov r1,r4 / ldr r3,[r5] / blx r3), 14 bytes; it becomes
- *	subs r4,#4 / bl callee / adds r4,#4 / 3x nop - same length, so
- *	no relayout - and the fixup is dropped so the loader cannot
- *	patch what is no longer an address pair.  (&func constants are
- *	movw/movt too, but never carry the call tail; forced-bytecode
- *	and x86 hosts never execute native spans, so the alias path is
- *	untouched either way.)
- */
-static void thumb_link_calls(void)
+/* Patch the blank BL at codebuf offset `at` to reach `tgt` */
+static void t_patch_bl(unsigned long at, unsigned long tgt)
 {
-	unsigned i, o2;
-	unsigned linked = 0;
+	long disp = (long)tgt - (long)(at + 4);
+	unsigned long u = ((unsigned long)disp >> 1) & 0xFFFFFF;
+	unsigned imm11 = u & 0x7FF;
+	unsigned imm10 = (u >> 11) & 0x3FF;
+	unsigned i2 = (u >> 21) & 1;
+	unsigned i1 = (u >> 22) & 1;
+	unsigned sn = (disp < 0);
+	unsigned j1 = (!(i1 ^ sn)) & 1;
+	unsigned j2 = (!(i2 ^ sn)) & 1;
+
+	codebuf[at] = (0xF000 | (sn << 10) | imm10) & 0xFF;
+	codebuf[at + 1] = (0xF000 | (sn << 10) | imm10) >> 8;
+	codebuf[at + 2] = (0xD000 | (j1 << 13) | (j2 << 11) | imm11) & 0xFF;
+	codebuf[at + 3] = (0xD000 | (j1 << 13) | (j2 << 11) | imm11) >> 8;
+}
+
+/*
+ *	Resolve the uniform call sites, every function now placed.  A
+ *	callee that committed gets a direct BL to its native entry -
+ *	self-recursion included, its own marker is in place by now.
+ *	Anything else - the mm runtime and libc (BC_SYM_LIB, whose
+ *	pair-fixed value is helper_call's tagged index), or a function
+ *	that stayed bytecode - gets one shared 14-byte thunk per callee:
+ *
+ *	    movw/movt r0, #0     pair fixup: the loader writes the value
+ *	    adds r1, r4, #4      vsp above the parity slot the site made
+ *	    ldr  r3, [r5, #0]    helper_call
+ *	    bx   r3              tail: it returns straight to the site
+ *
+ *	The site's subs r4,#4 stays in force across the thunk (r4 is
+ *	callee-saved through helper_call) and the site's adds takes it
+ *	back, so the slot the frame math counts on exists exactly as it
+ *	does for a native callee.
+ */
+static void thumb_resolve_calls(void)
+{
+	unsigned i, j;
+	unsigned nthunk = 0;	/* tcalltab reused: sym -> thunk offset */
 
 	if (!have_native)
 		return;
-	for (i = 0; i < nfix; i++) {
-		unsigned long o = fixtab[i].f_offset;
-		unsigned s = fixtab[i].f_sym;
-		unsigned long tent, site_pc;
-		long disp;
-		unsigned long u;
-		unsigned imm11, imm10, i1, i2, sn, j1, j2;
+	for (i = 0; i < ncallsite; i++) {
+		unsigned s = callsitetab[i].sym;
+		unsigned long at = callsitetab[i].at;
+		unsigned long tgt;
 
-		if (fixtab[i].f_pad != 2 || fixtab[i].f_seg != BC_SEG_CODE)
-			continue;
-		if (symtab[s].s_type != BC_SYM_CODE)
-			continue;
-		if (symtab[s].s_value >= codelen ||
-		    codebuf[symtab[s].s_value] != BC_NATIVE)
-			continue;
-		if (o + 14 > codelen)
-			continue;
-		/* movw r0 / movt r0 with any imm, then the call tail */
-		if ((codebuf[o] & 0xF0) != 0x40 ||
-		    (codebuf[o + 1] & 0xFB) != 0xF2 ||
-		    (codebuf[o + 3] & 0x8F) != 0 ||
-		    (codebuf[o + 4] & 0xF0) != 0xC0 ||
-		    (codebuf[o + 5] & 0xFB) != 0xF2 ||
-		    (codebuf[o + 7] & 0x8F) != 0)
-			continue;
-		if (codebuf[o + 8] != 0x21 || codebuf[o + 9] != 0x46 ||
-		    codebuf[o + 10] != 0x2B || codebuf[o + 11] != 0x68 ||
-		    codebuf[o + 12] != 0x98 || codebuf[o + 13] != 0x47)
-			continue;
-
-		tent = BC_NATIVE_ENTRY(symtab[s].s_value);
-		site_pc = o + 2 + 4;	/* BL follows the subs */
-		disp = (long)tent - (long)site_pc;
-
-		codebuf[o] = 0x04;	/* subs r4, #4 */
-		codebuf[o + 1] = 0x3C;
-		u = ((unsigned long)disp >> 1) & 0xFFFFFF;
-		imm11 = u & 0x7FF;
-		imm10 = (u >> 11) & 0x3FF;
-		i2 = (u >> 21) & 1;
-		i1 = (u >> 22) & 1;
-		sn = (disp < 0);
-		j1 = (!(i1 ^ sn)) & 1;
-		j2 = (!(i2 ^ sn)) & 1;
-		codebuf[o + 2] = (0xF000 | (sn << 10) | imm10) & 0xFF;
-		codebuf[o + 3] = (0xF000 | (sn << 10) | imm10) >> 8;
-		codebuf[o + 4] = (0xD000 | (j1 << 13) | (j2 << 11) | imm11) & 0xFF;
-		codebuf[o + 5] = (0xD000 | (j1 << 13) | (j2 << 11) | imm11) >> 8;
-		codebuf[o + 6] = 0x04;	/* adds r4, #4 */
-		codebuf[o + 7] = 0x34;
-		codebuf[o + 8] = 0x00;	/* nop x3 */
-		codebuf[o + 9] = 0xBF;
-		codebuf[o + 10] = 0x00;
-		codebuf[o + 11] = 0xBF;
-		codebuf[o + 12] = 0x00;
-		codebuf[o + 13] = 0xBF;
-
-		fixtab[i].f_sym = 0xFFFF;	/* drop below */
-		linked++;
-	}
-	if (linked) {
-		for (i = o2 = 0; i < nfix; i++)
-			if (!(fixtab[i].f_pad == 2 && fixtab[i].f_sym == 0xFFFF)) {
-				fixtab[o2] = fixtab[i];
-				fix_in_lit[o2] = fix_in_lit[i];
-				o2++;
+		if (symtab[s].s_type == BC_SYM_CODE &&
+		    symtab[s].s_value < codelen &&
+		    codebuf[symtab[s].s_value] == BC_NATIVE)
+			tgt = BC_NATIVE_ENTRY(symtab[s].s_value);
+		else {
+			for (j = 0; j < nthunk; j++)
+				if (tcalltab[j].sym == s)
+					break;
+			if (j == nthunk) {
+				if (nthunk >= TPOOLMAX) {
+					table_full("call thunks", TPOOLMAX);
+					return;
+				}
+				tcalltab[nthunk].sym = s;
+				tcalltab[nthunk].site = (unsigned)codelen;
+				nthunk++;
+				fixup(BC_SEG_CODE, codelen, s);
+				fixtab[nfix - 1].f_pad = 2;
+				cbyte(0x40); cbyte(0xF2);	/* movw r0, #0 */
+				cbyte(0x00); cbyte(0x00);
+				cbyte(0xC0); cbyte(0xF2);	/* movt r0, #0 */
+				cbyte(0x00); cbyte(0x00);
+				cbyte(0x21); cbyte(0x1D);	/* adds r1, r4, #4 */
+				cbyte(0x2B); cbyte(0x68);	/* ldr r3, [r5, #0] */
+				cbyte(0x18); cbyte(0x47);	/* bx  r3 */
+				if (codelen >= CODEMAX)
+					return;
 			}
-		nfix = o2;
-		if (getenv("THUMB_VERBOSE"))
-			fprintf(stderr, "linked: %u call sites -> direct BL\n",
-				linked);
+			tgt = tcalltab[j].site;
+		}
+		t_patch_bl(at, tgt);
 	}
+	if (getenv("THUMB_VERBOSE"))
+		fprintf(stderr, "calls: %u sites, %u thunks\n",
+			ncallsite, nthunk);
 }
 
 /*
@@ -4154,6 +4172,8 @@ static void bc_arena_carve_all(void)
 	t_targets = bc_arena_carve(TMAX / 8);
 	tpooltab = bc_arena_carve(TPOOLMAX * sizeof(struct tpool));
 	treftab = bc_arena_carve(TPOOLMAX * sizeof(struct tref));
+	tcalltab = bc_arena_carve(TPOOLMAX * sizeof(struct tcall));
+	callsitetab = bc_arena_carve(MAXFIX * sizeof(struct callsite));
 	/* The node pool (backend.c) carves AFTER init, out of this
 	   reserve.  Counted while measuring, NOT carved while placing -
 	   consuming it here left the later carve past the end of the
