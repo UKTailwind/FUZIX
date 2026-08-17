@@ -113,7 +113,7 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         for (k = 0; m[k].name; k++)
             if (strcmp(up, m[k].name) == 0)
                 return mkval(sfmt("%s(%s)",
-                                  cv.uses_onerror ? m[k].chk : m[k].raw,
+                                  checks_on() ? m[k].chk : m[k].raw,
                                   f(0)), TY_F);
     }
     if (strcmp(up, "ATAN2") == 0) {
@@ -305,6 +305,8 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         cv.uses_onewire = 1;
         return mkval(sfmt("mmow_tempr(%s, %s)", a0, a1), TY_F);
     }
+    if (strcmp(up, "MM.I2C") == 0)
+        return mkval("mm_i2c_stat()", TY_I);
     if (strcmp(up, "MM.ONEWIRE") == 0) {
         /* What the last ONEWIRE RESET saw - MMBasic's mmOWvalue, and a
            flat spelling there too. */
@@ -330,11 +332,31 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval("mm_ver()", TY_F);
     if (strcmp(up, "MM.DEVICE$") == 0)
         return mkval("mm_device()", TY_S);
+    /* The flat spellings of four MM.INFO() answers.  MMBasic has both
+       forms and programs use both - Pico-Vaders writes
+       Mm.Info(FontHeight) where another writes MM.FONTHEIGHT - so they
+       reach the same runtime call rather than one of them working. */
+    if (strcmp(up, "MM.FONTHEIGHT") == 0)
+        return mkval("mm_fontheight()", TY_I);
+    if (strcmp(up, "MM.FONTWIDTH") == 0)
+        return mkval("mm_fontwidth()", TY_I);
+    if (strcmp(up, "MM.HPOS") == 0)
+        return mkval("mm_hpos()", TY_I);
+    if (strcmp(up, "MM.VPOS") == 0)
+        return mkval("mm_vpos()", TY_I);
     if (strcmp(up, "MM.CMDLINE$") == 0) {
         /* the only thing that needs main's arguments, so main only takes
            them when a program asks */
         cv.uses_cmdline = 1;
         return mkval("mm_cmdline()", TY_S);
+    }
+    if (strcmp(up, "KEYDOWN") == 0) {
+        /* KEYDOWN(n): which keys are HELD, which INKEY$ cannot say - a
+           character stream has no way to express "up and fire
+           together".  0 the count, 1..6 the codes with 1 the most
+           recent, 7 the modifiers, 8 the locks, exactly MMBasic's
+           fun_keydown. */
+        return mkval(sfmt("mm_keydown(%s)", n(0)), TY_I);
     }
     if (strcmp(up, "PIXEL") == 0) {
         /* PIXEL(x, y) reads a pixel back AS RGB888 - the kernel
@@ -723,6 +745,17 @@ struct val builtin_raw(const char *up)
 
         expect_op("(");
         t = nxt();
+        if (t->kind == T_ID && strcmp(t->up, "VARADDR") == 0) {
+            /* PEEK(VARADDR v) - where a variable lives.  This one needs
+               the SYMBOL, not an address, which is why it is here and
+               not in the header: the translator is the only thing that
+               knows where a variable is.  A STRING gives the address of
+               its LENGTH BYTE, because that is where an MMBasic string
+               starts and ours have the same layout. */
+            const char *r = varaddr();
+            expect_op(")");
+            return mkval(r, TY_I);
+        }
         if (t->kind == T_ID) {
             if (strcmp(t->up, "BYTE") == 0)         fn = "mmpk_byte";
             else if (strcmp(t->up, "SHORT") == 0)   fn = "mmpk_short";
@@ -734,10 +767,13 @@ struct val builtin_raw(const char *up)
             }
         }
         if (fn == NULL)
-            /* VAR, VARADDR and CFUNADDR are MMBasic's and are not here:
-               they need the symbol table, not an address. */
+            /* VAR and CFUNADDR are MMBasic's and are not here: VAR
+               is a byte inside a variable rather than an address, and
+               CFUNADDR names an embedded blob a compiler has no
+               equivalent for. */
             cv_err("PEEK(%s ...) is not supported; translated are "
-                   "BYTE, SHORT, WORD, INTEGER and FLOAT", t->text);
+                   "BYTE, SHORT, WORD, INTEGER, FLOAT and VARADDR",
+                   t->text);
         a = expr();
         expect_op(")");
         cv.uses_peek = 1;
@@ -853,26 +889,107 @@ struct val builtin_raw(const char *up)
         expect_op(")");
         return mkval(sfmt("mms_fun(%d, %s, 0, 1)", sel, n), TY_I);
     }
-    if (strcmp(up, "MM.INFO") == 0) {
-        /* MM.INFO(FONT ADDRESS n) - where font n's glyphs are, so a
-           program can draw them itself.  Two bare keywords and then an
-           expression, as MMBasic writes it.
-
-           This is the only option translated.  MMBasic's MM.INFO has
-           dozens, most of them about a filesystem and a display this
-           machine reports differently, and the ones that do fit already
-           have flat spellings here (MM.HRES, MM.DEVICE$, MM.VER). */
-        struct tok *t;
+    /* MMBasic overlays MM.INFO and MM.INFO$ onto ONE function
+       (fun_info), which decides the type from the sub-keyword rather
+       than from the '$'.  So both spellings land here and the tables
+       below say what each answer is. */
+    if (strcmp(up, "MM.INFO") == 0 || strcmp(up, "MM.INFO$") == 0) {
+        /* The sub-keywords this machine can answer.  MMBasic's own list
+           is dozens long and nearly all of it is about hardware, a
+           flash program store or a network that is not here; what is
+           below is what a program running on a PC3 can use an answer
+           to.  Two-word names are matched first, so EXISTS DIR is never
+           read as EXISTS. */
+        static const struct { const char *kw, *call; int ty; } plain[] = {
+            { "FLAGS",      "mm_flags_get()", TY_I },
+            { "FONTHEIGHT", "mm_fontheight()", TY_I },
+            { "FONTWIDTH",  "mm_fontwidth()", TY_I },
+            { "HPOS",       "mm_hpos()", TY_I },
+            { "VPOS",       "mm_vpos()", TY_I },
+            { "DEVICE",     "mm_device()", TY_S },
+            { "PLATFORM",   "mm_platform()", TY_S },
+            { "PATH",       "mm_path()", TY_S },
+            { "CURRENT",    "mm_current()", TY_S },
+            { "DRIVE",      "mm_drive()", TY_S },
+            { "VERSION",    "mm_ver()", TY_F },
+            { "ERRNO",      "mm_errno()", TY_I },
+            { "ERRMSG",     "mm_errmsg()", TY_S },
+            { NULL, NULL, 0 }
+        };
+        static const struct { const char *kw, *call; } witharg[] = {
+            { "PINNO",       "mm_pinno(%s)" },
+            { "FILESIZE",    "mm_filesize(%s)" },
+            { "EXISTS FILE", "mm_exists_file(%s)" },
+            { "EXISTS DIR",  "mm_exists_dir(%s)" },
+            { NULL, NULL }
+        };
+        struct tok *t, *nx;
         struct val a;
+        char two[64];
+        int i, words;
 
         expect_op("(");
         t = nxt();
-        if (t->kind == T_ID && strcmp(t->up, "FLAGS") == 0) {
-            /* MM.INFO(FLAGS) - all sixty-four scratch bits at once,
-               which is where MMBasic keeps the reading form of the
-               FLAGS command (the MMFLAG case of its big switch). */
+        if (t->kind != T_ID)
+            cv_err("MM.INFO wants a keyword, not %s", t->text);
+        two[0] = 0;
+        nx = peek(0);
+        if (nx != NULL && nx->kind == T_ID
+            && strlen(t->up) + strlen(nx->up) + 2 <= sizeof(two)) {
+            strcpy(two, t->up);
+            strcat(two, " ");
+            strcat(two, nx->up);
+        }
+
+        /* OPTION BASE is answered HERE, at translation time: it is a
+           compile-time setting for this translator, so the value is
+           already known and a run-time call could only look it up
+           again.  It also unblocks the shape the Game*Mite ctrl library
+           opens with, Dim ctrl.key_map%(31 + Mm.Info(Option Base)). */
+        if (strcmp(two, "OPTION BASE") == 0) {
+            (void)nxt();
             expect_op(")");
-            return mkval("mm_flags_get()", TY_I);
+            return mkval(sfmt("%dLL", cv.opt_base), TY_I);
+        }
+        for (words = 2; words >= 1; words--) {
+            const char *key = (words == 2) ? two : t->up;
+            if (key[0] == 0)
+                continue;
+            for (i = 0; witharg[i].kw != NULL; i++) {
+                if (strcmp(key, witharg[i].kw) != 0)
+                    continue;
+                if (words == 2)
+                    (void)nxt();
+                a = expr();
+                if (strcmp(key, "PINNO") == 0 && a.ty == TY_I) {
+                    /* MM.INFO(PINNO GP1), unquoted.  MMBasic takes both:
+                       fun_info's PINNO checks the raw text for "GPnn"
+                       before evaluating it, so a bare pin name is legal
+                       there as well as a string.  Here a bare GP1 has
+                       already become the integer 1 - the name IS the
+                       number on this machine - so the answer is the
+                       value, and only the string form needs parsing. */
+                    expect_op(")");
+                    return mkval(a.code, TY_I);
+                }
+                if (a.ty != TY_S)
+                    cv_err("MM.INFO(%s ...) wants a string", key);
+                expect_op(")");
+                return mkval(sfmt(witharg[i].call, a.code), TY_I);
+            }
+            for (i = 0; plain[i].kw != NULL; i++) {
+                if (strcmp(key, plain[i].kw) != 0)
+                    continue;
+                if (words == 2)
+                    (void)nxt();
+                /* Both PATH and CURRENT are argv[0], which main only
+                   receives when a program asks for something needing
+                   it - the same flag MM.CMDLINE$ raises. */
+                if (strcmp(key, "PATH") == 0 || strcmp(key, "CURRENT") == 0)
+                    cv.uses_cmdline = 1;
+                expect_op(")");
+                return mkval(plain[i].call, plain[i].ty);
+            }
         }
         if (t->kind == T_ID && strcmp(t->up, "FLASH") == 0) {
             /* MM.INFO(FLASH ADDRESS n) - the slot's base address,
@@ -890,8 +1007,12 @@ struct val builtin_raw(const char *up)
                          TY_I);
         }
         if (t->kind != T_ID || strcmp(t->up, "FONT") != 0)
-            cv_err("MM.INFO(%s ...) is not supported; translated is "
-                   "FONT ADDRESS n, FLASH ADDRESS n or FLAGS", t->text);
+            cv_err("MM.INFO(%s ...) is not supported; translated are "
+                   "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
+                   "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
+                   "VPOS, OPTION BASE, PINNO, FILESIZE, EXISTS FILE, "
+                   "EXISTS DIR, FONT ADDRESS n and FLASH ADDRESS n",
+                   t->text);
         t = nxt();
         if (t->kind != T_ID || strcmp(t->up, "ADDRESS") != 0)
             cv_err("MM.INFO(FONT %s ...) is not supported; translated "

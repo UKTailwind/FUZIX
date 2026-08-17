@@ -354,7 +354,7 @@ struct sym *sym_lookup(const char *canon)
     return table_get(cv.globals, cv.nglobals, canon);
 }
 
-static struct sym *sym_new(const char *canon, int ty, const char *acc)
+struct sym *sym_new(const char *canon, int ty, const char *acc)
 {
     struct sym *s = palloc(sizeof(*s));
 

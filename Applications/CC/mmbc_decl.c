@@ -94,6 +94,46 @@ void pass_routine_names(void)
                 cv.routine_names[cv.nroutine_names++] = pstr(canon);
             }
         }
+        /* Every array a REDIM names, wherever it stands.  In MMBasic all
+           arrays are allocated at run time so any of them can be
+           re-dimensioned; here an array with constant bounds is a C
+           array with nothing to change, so being REDIMmed anywhere is
+           what makes it dynamic - and the DIM has to know before it is
+           translated, which is why this is a pre-scan. */
+        for (k = 0; k < nt - 1; k++) {
+            int n;
+            if (toks[k].kind != T_ID || strcmp(toks[k].up, "REDIM") != 0)
+                continue;
+            n = k + 1;
+            if (n < nt && toks[n].kind == T_ID
+                && strcmp(toks[n].up, "PRESERVE") == 0)
+                n++;
+            while (n + 1 < nt && toks[n].kind == T_ID) {
+                int depth = 0;
+                char *canon = split_suffix(toks[n].text, &sfx);
+                if (!redimmed_in(canon)) {
+                    GROW(cv.redimmed, cv.nredimmed, cv.credimmed);
+                    cv.redimmed[cv.nredimmed++] = pstr(canon);
+                }
+                n++;
+                while (n < nt) {
+                    if (toks[n].kind == T_OP
+                        && strcmp(toks[n].text, "(") == 0) {
+                        depth++;
+                    } else if (toks[n].kind == T_OP
+                               && strcmp(toks[n].text, ")") == 0) {
+                        if (--depth == 0) { n++; break; }
+                    }
+                    n++;
+                }
+                if (n < nt && toks[n].kind == T_OP
+                    && strcmp(toks[n].text, ",") == 0)
+                    n++;
+                else
+                    break;
+            }
+            break;
+        }
     }
 }
 
@@ -589,6 +629,133 @@ static char *linear_index(struct sym *s, int k);
 /* Runs in every pass.  In the 'decl' pass it records the symbols; in
  * the 'emit' pass it produces the initialisation code (the
  * declarations themselves are hoisted to the top of the C scope). */
+/* Was this array named by some REDIM?  In MMBasic every array is
+   allocated at run time so any of them can be re-dimensioned; here an
+   array with constant bounds is a C array with nothing to change, so
+   being REDIMmed anywhere is what makes it dynamic - and the DIM has to
+   know before it is translated, which is why pass_routine_names
+   collects the names in a pre-scan. */
+int redimmed_in(const char *canon)
+{
+    int k;
+
+    for (k = 0; k < cv.nredimmed; k++)
+        if (strcmp(cv.redimmed[k], canon) == 0)
+            return 1;
+    return 0;
+}
+
+/* The C declaration of a run-time array's storage pointer. */
+const char *dyn_decl(struct sym *s, const char *cn)
+{
+    if (s->ty == TY_S)
+        return sfmt("char (*%s)[MM_STRSZ]", cn);
+    return sfmt("%s *%s", ctype_of(s->ty), cn);
+}
+
+/* The C size of one element of an array. */
+static const char *elsize_of(struct sym *s)
+{
+    if (s->ty == TY_S)
+        return "MM_STRSZ";
+    return sfmt("sizeof(%s)", ctype_of(s->ty));
+}
+
+/*
+ * DIM / REDIM of an array with run-time bounds.
+ *
+ * The new bounds go into a scratch table first and the runtime swaps
+ * them in, so a REDIM PRESERVE can compare the two before anything is
+ * allocated - and so a failed one leaves the array as it was rather
+ * than half changed.
+ *
+ * `dims` holds counts (the declaration adds the +1); the table holds
+ * MMBasic's UPPER BOUNDS, which is count - 1.
+ */
+void emit_dim_alloc(struct sym *s, const char **dims, int ndims,
+                    int preserve)
+{
+    const char *nb = newtmp("nb");
+    int k;
+
+    const char *old = newtmp("ao");
+    const char *np = newtmp("an");
+
+    cv.tmp_used = 1;
+    emit(sfmt("{ MMINTEGER %s[%d]; void *%s, *%s;",
+              nb, ndims + 1, old, np));
+    emit(sfmt("  %s[0] = %d;", nb, ndims));
+    for (k = 0; k < ndims; k++)
+        emit(sfmt("  %s[%d] = (%s) - 1;", nb, k + 1, dims[k]));
+    /* mm_heap and mm_lfree here rather than inside the runtime: under
+       bcrun only a call made BY the program reaches the VM's
+       allocator, so a block the native runtime malloc'd would be a
+       machine address in a cell the VM owns. */
+    emit(sfmt("  %s = mm_heap((unsigned long)"
+              "mm_arr_bytes(%s, %s));", np, nb, elsize_of(s)));
+    emit(sfmt("  %s = mm_arr_swap(%s, %s, %s, %s, %s, %d);",
+              old, s->acc, s->bacc, nb, np, elsize_of(s), preserve));
+    /* The PROGRAM stores the new pointer into its own variable: a
+       pointer-to-pointer would be written at the host's width into a
+       cell the VM sizes, which is a 32-bit slot under bcrun. */
+    emit(sfmt("  %s = %s;", s->acc, np));
+    emit(sfmt("  if (%s) mm_lfree(%s); }", old, old));
+}
+
+/*
+ * REDIM [PRESERVE] a(n) [, b(n) ...]
+ *
+ * MMBasic's cmd_redim.  The array must already exist and must already
+ * be dynamic - which, thanks to the pre-scan, it is whenever a REDIM
+ * names it.
+ */
+void do_redim(void)
+{
+    int preserve = 0;
+
+    if (is_kw("PRESERVE", 0)) {
+        cv.i++;
+        preserve = 1;
+    }
+    for (;;) {
+        struct tok *t = nxt();
+        const char **dims = NULL;
+        int ndims = 0, cdims = 0;
+        char *canon;
+        int sfx;
+        struct sym *s;
+
+        if (t->kind != T_ID)
+            cv_err("REDIM needs an array name");
+        canon = split_suffix(t->text, &sfx);
+        s = sym_lookup(canon);
+        if (s == NULL || !s->is_array)
+            cv_err("'%s' is not an array", canon);
+        if (sfx != TY_NONE && sfx != s->ty)
+            cv_err("'%s' is %s but used as %s", canon,
+                   tyname_of(s->ty), tyname_of(sfx));
+        if (s->is_param)
+            cv_err("'%s' is a parameter, so its bounds belong to the "
+                   "caller", canon);
+        if (!s->dynamic)
+            cv_err("'%s' was DIMmed with constant bounds, so it has no "
+                   "run-time size to change; give its DIM a bound that "
+                   "is not a literal or a CONST", canon);
+        expect_op("(");
+        for (;;) {
+            GROW(dims, ndims, cdims);
+            dims[ndims++] = pstr(sfmt("(%s) + 1", as_int(expr())));
+            if (!accept_op(","))
+                break;
+        }
+        expect_op(")");
+        if (cv.mode == M_EMIT)
+            emit_dim_alloc(s, dims, ndims, preserve);
+        if (!accept_op(","))
+            break;
+    }
+}
+
 void do_declare(const char *kw)
 {
     const char *scope;
@@ -619,6 +786,7 @@ void do_declare(const char *kw)
         int ndims = 0, cdims = 0;
         const char *stype = NULL;
         struct sym *s;
+        int dyn = 0;
 
         t = nxt();
         if (t->kind != T_ID)
@@ -632,17 +800,13 @@ void do_declare(const char *kw)
                  * captures the bounds, and the one where a CONST still
                  * carries its literal text (by the emit pass it has
                  * become the #define's name). */
-                if (cv.mode == M_DECL && !const_c_expr(b)) {
-                    /* Report it once and carry on with a bound that at
-                     * least compiles, so the whole program is not
-                     * buried under "'px' is not an array" for every
-                     * later line. */
-                    cv_note("the size of '%s' is worked out while the "
-                            "program runs, and mmb2c fixes array sizes "
-                            "when it translates.  Give the bound as a "
-                            "literal or a CONST", canon);
-                    b = "0";
-                }
+                /* A bound that is not a compile-time constant makes
+                 * the whole array DYNAMIC: it cannot be a C array,
+                 * because the bounds would have to be in its type, so
+                 * it becomes a flat pointer plus a bounds table -
+                 * which is what an array parameter already is here. */
+                if (!const_c_expr(b))
+                    dyn = 1;
                 GROW(dims, ndims, cdims);
                 dims[ndims++] = sfmt("(%s) + 1", b);
                 if (!accept_op(","))
@@ -708,9 +872,23 @@ void do_declare(const char *kw)
                         scope, dims, ndims, is_static);
             if (stype != NULL)
                 s->stype = pstr(stype);
+            if (dyn || redimmed_in(canon)) {
+                dyn = 1;
+                if (stype != NULL)
+                    cv_err("an array of a TYPE needs constant bounds");
+                if (ndims > 5)
+                    cv_err("an array has at most 5 dimensions");
+                s->dynamic = 1;
+            }
         } else {
             s = sym_lookup(canon);
         }
+
+        /* A run-time bound is allocated where the DIM stands, not
+           hoisted: the expression may name variables that are only set
+           by the time the statement runs. */
+        if (s != NULL && s->dynamic && cv.mode == M_EMIT)
+            emit_dim_alloc(s, dims, ndims, 0);
 
         if (accept_op("=")) {
             if (s != NULL && s->stype != NULL) {
@@ -775,13 +953,47 @@ static void emit_initialiser(struct sym *s, int is_static)
     }
 }
 
-/* Element k of an array in an initialiser list. */
+/* Element k of an array in an initialiser list, in MMBasic's storage
+ * order.
+ *
+ * cmd_dim (Commands.c:8658) fills the values into linear array memory,
+ * and MMBasic arrays store the FIRST subscript varying fastest - so
+ * DIM a(3,1) = (p,q,...) sets a(0,0), a(1,0), a(2,0), a(3,0), a(0,1),
+ * ...  Our C arrays are declared the other way round (the last
+ * subscript is adjacent), so the flat position maps to a subscript
+ * LIST rather than to a flat offset.  The divisions below are built
+ * from k (a literal) and the dimension sizes (constant expressions by
+ * the time an array is static), so cc1 folds every one of them to a
+ * plain index. */
 static char *linear_index(struct sym *s, int k)
 {
+    char *out;
+    const char *div;
+    int j;
+
     if (s->ndims == 1)
         return sfmt("%s[%d]", s->acc, k);
-    cv_err("initialiser lists are only supported for 1-D arrays");
-    return NULL;
+    if (s->dynamic) {
+        cv_err("an initialiser list on a run-time DIM is only "
+               "supported for 1-D arrays");
+        return NULL;
+    }
+    out = sfmt("%s", s->acc);
+    div = NULL;
+    for (j = 0; j < s->ndims; j++) {
+        const char *sz = s->dims[j];
+        char *e;
+
+        if (div == NULL)
+            e = sfmt("%d", k);
+        else
+            e = sfmt("(%d) / (%s)", k, div);
+        if (j < s->ndims - 1)
+            e = sfmt("(%s) %% (%s)", e, sz);
+        out = sfmt("%s[(%s)]", out, e);
+        div = (div == NULL) ? sz : sfmt("(%s) * (%s)", div, sz);
+    }
+    return out;
 }
 
 void do_const(void)
@@ -811,10 +1023,54 @@ void do_const(void)
                 cv_err("CONST '%s' type conflict", canon);
             }
         }
-        if (cv.mode == M_DECL) {
+        if (cv.cur != NULL) {
+            /* CONST INSIDE A SUB OR FUNCTION IS LOCAL TO IT.
+             *
+             * MMBasic says so in one line - cmd_const does
+             * `if (g_LocalIndex != 0) type |= V_LOCAL;`
+             * (Commands.c:6478) - and this used to put every CONST in
+             * the globals whatever scope it was written in.  Two
+             * routines each declaring their own `Const f$` then
+             * collided, and an unrelated `f%` elsewhere in the program
+             * failed with "'f' is STRING but used as INTEGER".
+             *
+             * A local one is a LOCAL assigned where the statement
+             * stands and refused as an assignment target afterwards -
+             * not a #define.  MMBasic evaluates the expression ONCE,
+             * when the statement runs, and it may call a function.
+             */
             struct sym *s;
-            if (globals_get(canon) != NULL)
-                cv_err("'%s' already declared", canon);
+            if (cv.mode == M_DECL) {
+                s = declare(canon, ty, "local", NULL, 0, 0);
+                s->is_const = 1;
+            } else {
+                s = sym_lookup(canon);
+            }
+            if (cv.mode == M_EMIT && s != NULL) {
+                if (ty == TY_S)
+                    emit(sfmt("mm_sset(%s, %s);", s->acc, v.code));
+                else
+                    emit(sfmt("%s = %s;", s->acc, v.code));
+            }
+        } else if (cv.mode == M_DECL) {
+            struct sym *s;
+            struct sym *dup = globals_get(canon);
+            if (dup != NULL) {
+                /* A WARNING, and it has to be: MMBasic runs only one
+                   arm of an If, so the same global CONST declared in
+                   both arms is legal there and the arm that ran is the
+                   one that exists.  A compiler sees both and has to
+                   pick, and picking silently is how PicoMan came to
+                   draw its maze at (200,200) on a 320x240 screen.
+                   cv_err would be worse than useless - the declaration
+                   pass swallows it, so nothing was printed at all. */
+                cv_warn("'%s' is declared CONST more than once; the "
+                        "first (line %d) is the one used", canon,
+                        dup->where);
+                if (!accept_op(","))
+                    break;
+                continue;
+            }
             s = palloc(sizeof(*s));
             memset(s, 0, sizeof(*s));
             s->name = pstr(canon);
@@ -822,10 +1078,29 @@ void do_const(void)
             s->ty = ty;
             s->acc = pstr(sfmt("(%s)", v.code));
             s->is_const = 1;
+            /* An expression that is not compile-time constant must be
+               evaluated ONCE, where the statement stands, as
+               cmd_const's DoExpression does - never re-evaluated from
+               a #define at every use (see const_or_literal_expr) */
+            s->const_runtime = !const_or_literal_expr(v.code);
             s->where = cv.lineno;
             s->declared_in = "";
             GROW(cv.globals, cv.nglobals, cv.cglobals);
             cv.globals[cv.nglobals++] = s;
+        } else if (cv.mode == M_EMIT) {
+            struct sym *s = globals_get(canon);
+
+            if (s != NULL && s->is_const && s->const_runtime) {
+                /* evaluate once, in flow: the hidden global takes the
+                   value here and every use just reads it */
+                if (s->ty == TY_S)
+                    emit(sfmt("mm_sset(%s, %s);", cconst(canon),
+                              v.code));
+                else if (s->ty == TY_I)
+                    emit(sfmt("%s = %s;", cconst(canon), as_int(v)));
+                else
+                    emit(sfmt("%s = %s;", cconst(canon), as_flt(v)));
+            }
         }
         if (!accept_op(","))
             break;

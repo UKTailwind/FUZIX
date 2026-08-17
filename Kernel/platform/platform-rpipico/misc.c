@@ -152,6 +152,26 @@ int plt_dev_ioctl(uarg_t request, char *data)
             return -1;
         return 0;
     }
+    if (request == PICOIOC_KEYDOWN)
+    {
+        /* usb_kbd_keydown() is MMBasic's fun_keydown by index; here the
+           whole snapshot goes out at once so a caller reading the count
+           and then the codes cannot see two different instants. */
+        extern int usb_kbd_keydown(int n);
+        struct kbd_down d;
+        int i;
+
+        d.count = (uint8_t)usb_kbd_keydown(0);
+        d.mods = (uint8_t)usb_kbd_keydown(7);
+        d.locks = (uint8_t)usb_kbd_keydown(8);
+        d.pad = 0;
+        for (i = 0; i < 6; i++)
+            d.key[i] = (uint8_t)usb_kbd_keydown(i + 1);
+        d.pad2[0] = d.pad2[1] = 0;
+        if (uput(&d, data, sizeof(d)))
+            return -1;
+        return 0;
+    }
 #endif
 #if defined(CONFIG_PC3_USB_KBD) && !defined(PC3_NO_USB_BUS_RESET)
     if (request == PICOIOC_USBRESET)

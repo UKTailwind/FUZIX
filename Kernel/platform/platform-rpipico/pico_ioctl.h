@@ -154,6 +154,31 @@ struct snd_mmcmd {
 
 #define PICOIOC_NUMLOCK 0x0037
 
+/* MMBasic's KEYDOWN(): which keys are HELD, rather than which key was
+ * typed.  data -> a struct kbd_down that receives the lot.
+ *
+ * A game needs this and INKEY$ structurally cannot give it: a keyboard
+ * sends one character at a time, so "up and fire together" is not a
+ * question the character stream can answer.  The HID boot report is six
+ * concurrent key codes, which is exactly MMBasic's six, so this is the
+ * report itself rather than anything reconstructed - usb_kbd_keydown()
+ * already kept it, and until now nothing outside the kernel could ask.
+ *
+ * ONE call returns everything: MMBasic's function takes an index and a
+ * game reads several in a row, and six separate crossings could each
+ * see a different instant.  A single snapshot cannot disagree with
+ * itself, and costs one syscall instead of six.
+ */
+struct kbd_down {
+	uint8_t count;		/* how many of key[] are non-zero */
+	uint8_t mods;		/* the modifier bitmap - KEYDOWN(7) */
+	uint8_t locks;		/* 1 caps, 2 num, 4 scroll - KEYDOWN(8) */
+	uint8_t pad;
+	uint8_t key[6];		/* the held codes, most recent first */
+	uint8_t pad2[2];
+};
+#define PICOIOC_KEYDOWN 0x003D
+
 /* Graphics (PC3: see PC3-GFX-DESIGN.md).  All on /dev/sys. */
 
 /* data -> int: BBC mode 0-5, mode 7 (320x240 16 colours, NOT teletext),

@@ -212,11 +212,28 @@ static uint8_t *fb_buf(int which)
     return disp_fb;
 }
 
+/*
+ * A CHILD of the owner draws where the owner draws.
+ *
+ * On a PicoMite LOAD IMAGE is interpreter code and lands in whatever
+ * FRAMEBUFFER WRITE selected.  Here it is a separate binary, and so are
+ * SAVE IMAGE and the LOAD JPG/LOAD PNG to come, because the decoders are
+ * far too big to carry in every compiled program.  Without this the
+ * target does not cross the fork: a program drawing into F loads its
+ * picture onto the SCREEN instead, where the next MERGE promptly wipes
+ * it - which is exactly what PETSCII Robots' title screen did.
+ *
+ * The owner is blocked in wait() for that child, so there are never two
+ * writers; and the exclusion the target exists for still holds, because
+ * an UNRELATED program - or the console repainting - is not a child of
+ * the owner and still gets the screen.
+ */
 void display_fb_enter(struct p_tab *who)
 {
     uint8_t *t = NULL;
 
-    if (fb_owner == who && fb_selected() != DISP_FB_N)
+    if (fb_owner && fb_selected() != DISP_FB_N &&
+        (fb_owner == who || (who && who->p_pptr == fb_owner)))
         t = fb_buf(fb_selected());
     gfx_draw = t ? t : disp_fb;
 }

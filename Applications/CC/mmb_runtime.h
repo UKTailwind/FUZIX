@@ -41,9 +41,14 @@ typedef int64_t MMINTEGER;
  * Each costs MM_STRSZ bytes of static RAM.  They are handed out as a
  * stack: every generated function takes a mark on entry and every
  * statement releases back to it, so the high-water mark is set by the
- * most string-heavy single expression, not by the length of the run. */
+ * most string-heavy single expression - INCLUDING the functions it
+ * calls, whose own peaks stack on the caller's.  16 lasted until
+ * PETSCII Robots' config reader: LCase$(Field$(Field$(s$,...,
+ * Chr$(34)),..., Chr$(34))) inside a function called from a
+ * string-using statement.  The interpreter has no such cap; 32 is
+ * 8K of bss, which the board's bcrun can afford. */
 #ifndef MM_TMPN
-#define MM_TMPN 16
+#define MM_TMPN 32
 #endif
 
 /* Format used when PRINTing a float. */
@@ -294,10 +299,19 @@ void       mm_data_init(const MMDataItem *tbl, int n);
 /* The form mmb2c emits: four parallel primitive arrays, so no struct
  * layout crosses the bcrun VM boundary.  In the hosted (bcrun) build
  * the string table stays a VM offset - see mmb_runtime.c. */
+/* mm_data_init5 is the one the translator emits: any column it can
+   prove dead is NULL, and a NULL kind column means every item is
+   `ukind`.  A DATA item costs 24 bytes with every column present and
+   the data segment is bounded at 64K, so this is the difference
+   between a large table fitting and not - see mmb_runtime.c. */
 #ifdef MM_HOSTED
+void       mm_data_init5(const int *kind, int ukind, const MMFLOAT *f,
+                         const MMINTEGER *i, unsigned long s, int n);
 void       mm_data_init4(const int *kind, const MMFLOAT *f,
                          const MMINTEGER *i, unsigned long s, int n);
 #else
+void       mm_data_init5(const int *kind, int ukind, const MMFLOAT *f,
+                         const MMINTEGER *i, const char **s, int n);
 void       mm_data_init4(const int *kind, const MMFLOAT *f,
                          const MMINTEGER *i, const char **s, int n);
 #endif
@@ -320,6 +334,23 @@ void mm_sort_s(char (*a)[MM_STRSZ], MMINTEGER *idx, int total, int start,
 /* An array handed to a SUB comes with its bounds: { rank, ub1, ub2, ... }
  * so the callee can index any rank and ask BOUND() about it.          */
 int mm_arr_count(const MMINTEGER *bounds);
+
+/* An array whose bounds are worked out while the program runs is a flat
+ * pointer plus a bounds table - the same shape an array PARAMETER
+ * already has, so indexing, BOUND() and whole-array operations need no
+ * new code.  MM_MAXDIM is MMBasic's own (configuration.h). */
+#define MM_MAXDIM 5
+/* The translator emits the allocation and the free around these - see
+   mmb_runtime.c: under bcrun only a call made BY the program reaches
+   the VM's allocator, so the runtime may not allocate memory the
+   program will hold a pointer to. */
+unsigned long mm_arr_bytes(const MMINTEGER *nb, unsigned long elsize);
+/* Takes the OLD pointer by value and returns it; the program stores the
+   new one into its own variable itself.  No pointer-to-pointer crosses
+   the boundary, which is what makes this correct under bcrun on a
+   64-bit host, where a program pointer is a 32-bit VM cell. */
+void *mm_arr_swap(void *old, MMINTEGER *b, const MMINTEGER *nb,
+                  void *newblock, unsigned long elsize, int preserve);
 
 /* ---- whole array operations (ARRAY SET/ADD, MATH SET/SCALE/ADD) ---- */
 void mm_arr_set_i  (MMINTEGER *a, int n, MMINTEGER v);
@@ -817,6 +848,13 @@ MMINTEGER mm_rtcreg(int reg, int val, int write);
  * failure it was - ETIMEDOUT and EIO are different faults and MMBasic
  * distinguishes them too. */
 MMINTEGER mm_i2c_open(int sda, int scl, int khz, int timeout_ms);
+/* The general form: bus 0 is the fixed one (GP20/21, the QWIIC socket
+   and the DS3231), bus 1 is I2C2 on header pins.  Every transfer sets
+   MM.I2C and none of them raises - MMBasic's own contract. */
+MMINTEGER mm_i2c_msg(int bus, int addr, int read, int n,
+                     unsigned char *buf, int hold);
+MMINTEGER mm_i2c_stat(void);            /* MM.I2C: 0 ok, 1 none, 2 stop */
+MMINTEGER mm_i2c_setstat(MMINTEGER r);
 MMINTEGER mm_i2c_xfer(int addr, int read, int n, unsigned char *buf,
                       int hold);
 /* SPI0 - MMBasic's SPI, on header pins (SPI1 is the SD card).  open
@@ -852,9 +890,36 @@ char *mm_errmsg(void);              /* MM.ERRMSG$                      */
  * now - a comment asking to be kept in step is not a mechanism. */
 #define MM_RELEASE 0.15
 MMFLOAT mm_ver(void);               /* MM.VER                          */
-char *mm_device(void);              /* MM.DEVICE$                      */
+char *mm_device(void);              /* MM.DEVICE$ - "Fuzix"            */
 char *mm_cmdline(void);             /* MM.CMDLINE$                     */
 void mm_argv_bind(int argc, char **argv);
+
+/* MM.INFO(...) - the sub-keywords this machine can answer.  MMBasic has
+ * dozens more, nearly all about hardware or a program store that is not
+ * here; these are the ones a program running on a PC3 can use, and the
+ * ones the Game*Mite corpus actually asks for.
+ *
+ * MM.DEVICE$ is the FIRMWARE ("Fuzix") and MM.INFO(PLATFORM) is the
+ * BOARD ("PC3"), which is MMBasic's own division of the two.
+ */
+int   mm_board_no(void);            /* 2 or 3, for PLATFORM            */
+char *mm_platform(void);            /* MM.INFO(PLATFORM)               */
+char *mm_path(void);                /* MM.INFO(PATH)    dir + '/'      */
+char *mm_current(void);             /* MM.INFO(CURRENT) the program    */
+char *mm_drive(void);               /* MM.INFO(DRIVE)   always "A:"    */
+MMINTEGER mm_exists_file(const char *path); /* 1 file, -1 dir, 0 none  */
+MMINTEGER mm_exists_dir(const char *path);
+MMINTEGER mm_filesize(const char *path);    /* -1 none, -2 a directory */
+MMINTEGER mm_pinno(const char *name);       /* "GP8" -> 8              */
+MMINTEGER mm_fontwidth(void);       /* MM.FONTWIDTH,  cell x scale     */
+MMINTEGER mm_fontheight(void);      /* MM.FONTHEIGHT, cell x scale     */
+MMINTEGER mm_hpos(void);            /* MM.HPOS - the pixel cursor      */
+MMINTEGER mm_vpos(void);            /* MM.VPOS                         */
+
+/* KEYDOWN(n): 0 the count of held keys, 1..6 the codes (1 = most
+ * recent), 7 the modifier bitmap, 8 the locks.  Drains the console
+ * first, as MMBasic does - see the definition. */
+MMINTEGER mm_keydown(MMINTEGER n);
 
 #define MM_RAISE(msg)      do { mm_error(msg); return; } while (0)
 #define MM_RAISEV(msg, v)  do { mm_error(msg); return (v); } while (0)

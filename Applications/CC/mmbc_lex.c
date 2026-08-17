@@ -509,6 +509,54 @@ char *cvar(const char *name)
     return dots_to_dunder("v_", name);
 }
 
+/* A global CONST's C name.  Its OWN prefix, not cvar's: a global CONST
+ * is emitted as a #define and a macro has no scope, so with both on
+ * `v_` a LOCAL named the same as a global CONST had its declaration
+ * rewritten by the macro and the C did not compile.  MMBasic simply
+ * shadows - findvar looks in the local table first - and the two
+ * prefixes are how that shadowing survives into C. */
+char *cconst(const char *name)
+{
+    return dots_to_dunder("k_", name);
+}
+
+/* GP8 read as a value -> 8, the pin it names.  -1 if it is not one.
+ *
+ * MMBasic resolves these in getpinarg() rather than in the expression
+ * parser, and says why: "GPn is not a valid expression".  It has to be
+ * a special case there because MMBasic's pin numbers are CONNECTOR pins
+ * and GP8 is a GPIO, so the name needs PINMAP.  Here the two are the
+ * same number - mmb_gpio.h chose the GPIO numbering and gave its
+ * reasons - so the name resolves to the number itself, once, for every
+ * place a pin is written: SETPIN gp8, PIN(gp8), PORT(GP12,2,...).
+ *
+ * A DECLARED variable of that name still wins, which is what `known` is
+ * for.  Without this the name was not an error either: with OPTION
+ * EXPLICIT off it became an implied global, so `Pin(GP8)` silently read
+ * GP0 - a wrong pin rather than a refusal.
+ */
+int gp_pin(const char *word, const struct sym *known)
+{
+    int n = 0;
+    const char *p;
+
+    if (known != NULL)
+        return -1;
+    if (word[0] == 0 || word[1] == 0 || word[2] == 0)
+        return -1;
+    if ((word[0] != 'G' && word[0] != 'g')
+        || (word[1] != 'P' && word[1] != 'p'))
+        return -1;
+    for (p = word + 2; *p; p++) {
+        if (*p < '0' || *p > '9')
+            return -1;
+        n = n * 10 + (*p - '0');
+        if (n > 47)
+            return -1;      /* GP99 is far more likely to be a variable */
+    }
+    return n;
+}
+
 char *clabel(const char *name)
 {
     return dots_to_dunder("L_", name);
@@ -521,6 +569,36 @@ char *clabel(const char *name)
  * textually and literals are literals, so the test is simply whether
  * any letter in the text belongs to something other than a number: a
  * variable arrives as v_<name>, a call as mm_<name>. */
+/* const_c_expr with string literals allowed: is this expression a
+ * compile-time constant once quoted spans are ignored?  The test that
+ * decides whether a global CONST can be a #define - one that cannot
+ * (it calls into the runtime, like Mm.Device$) is materialised into a
+ * hidden global instead, assigned ONCE where the CONST statement
+ * stands, exactly as cmd_const's DoExpression evaluates once.  The
+ * #define form re-evaluated the expression at EVERY use: robots'
+ * LCD_DISPLAY called mm_device() twice per test, each call parking a
+ * scratch string nothing ever released, and the pool died in
+ * fade_in. */
+int const_or_literal_expr(const char *text)
+{
+    char *out = salloc(strlen(text) + 1);
+    int i = 0, j = 0;
+
+    while (text[i]) {
+        if (text[i] == '"') {
+            i++;
+            while (text[i] && text[i] != '"')
+                i += (text[i] == '\\' && text[i + 1]) ? 2 : 1;
+            if (text[i])
+                i++;
+            continue;
+        }
+        out[j++] = text[i++];
+    }
+    out[j] = 0;
+    return const_c_expr(out);
+}
+
 int const_c_expr(const char *text)
 {
     int i = 0;

@@ -277,7 +277,41 @@ static void w_at(void)       { A = mm_off(mm_at(LL(0), LL(2), LL(4))); }
 static void w_dir(void)      { A = mm_off(mm_dir(Ps(0), I(1), I(2))); }
 static void w_files(void)    { mm_files(Ps(0)); A = 0; }
 
-/* DATA / READ / RESTORE */
+/* DIM a(n) and REDIM: an array whose bounds are worked out while the
+ * program runs.  The allocation and the free are the PROGRAM's (they
+ * go through w_heap/w_lfree to the VM heap), so what crosses here is
+ * only the arithmetic and the copy. */
+static void w_arr_bytes(void)
+{
+	A = (long)(mm_arr_bytes((const MMINTEGER *)(void *)Pa(0),
+			     (unsigned long)(uint32_t)arg(1)));
+}
+
+static void w_arr_swap(void)
+{
+	A = mm_off((char *)mm_arr_swap((void *)Pa(0), PI(1),
+				       (const MMINTEGER *)(void *)Pa(2),
+				       (void *)Pa(3),
+				       (unsigned long)(uint32_t)arg(4),
+				       I(5)));
+}
+
+
+/* DATA / READ / RESTORE
+ *
+ * init5 is the one the translator emits: any column it can prove dead
+ * is a null VM pointer, and a null kind column means every item is
+ * `ukind`.  Pa() maps a VM pointer to a host one and gives NULL for a
+ * null VM pointer, so the optional columns need no special case here. */
+static void w_data_init5(void)
+{
+	mm_data_init5((const int *)(void *)Pa(0), I(1),
+		      (const MMFLOAT *)(void *)Pa(2),
+		      (const MMINTEGER *)(void *)Pa(3),
+		      (unsigned long)(uint32_t)arg(4), I(5));
+	A = 0;
+}
+
 static void w_data_init4(void)
 {
 	/* the string table stays a VM offset: its elements are 32-bit
@@ -367,6 +401,11 @@ static void w_spi_xfer(void)
 { A = mm_spi_xfer((unsigned char *)Pa(0), (unsigned char *)Pa(1), I(2)); }
 static void w_i2c_xfer(void)
 { A = mm_i2c_xfer(I(0), I(1), I(2), (unsigned char *)Pa(3), I(4)); }
+/* The general form: bus 0 is the fixed one (GP20/21, the QWIIC socket
+   and the DS3231), bus 1 is I2C2 on header pins. */
+static void w_i2c_msg(void)
+{ A = mm_i2c_msg(I(0), I(1), I(2), I(3), (unsigned char *)Pa(4), I(5)); }
+static void w_i2c_stat(void) { A = mm_i2c_stat(); }
 static void w_errno(void)    { A = mm_errno(); }
 /* through a scratch temp: MM.ERRMSG$ lives in bcrun's own memory, and a
    program can only be handed a pointer inside the VM's address space */
@@ -374,6 +413,22 @@ static void w_errmsg(void)   { A = mm_off(mm_scopy(mm_errmsg())); }
 static void w_pr_commit(void){ mm_pr_commit(); A = 0; }
 static void w_ver(void)      { A = dput(mm_ver()); }
 static void w_device(void)   { A = mm_off(mm_scopy(mm_device())); }
+/* MM.INFO()'s answers.  The string ones go through mm_scopy for the
+   same reason MM.ERRMSG$ does: they live in bcrun's own memory and a
+   program can only be handed a pointer inside the VM's address space. */
+static void w_platform(void) { A = mm_off(mm_scopy(mm_platform())); }
+static void w_path(void)     { A = mm_off(mm_scopy(mm_path())); }
+static void w_current(void)  { A = mm_off(mm_scopy(mm_current())); }
+static void w_drive(void)    { A = mm_off(mm_scopy(mm_drive())); }
+static void w_exists_file(void) { A = mm_exists_file(Ps(0)); }
+static void w_exists_dir(void)  { A = mm_exists_dir(Ps(0)); }
+static void w_filesize(void) { A = mm_filesize(Ps(0)); }
+static void w_pinno(void)    { A = mm_pinno(Ps(0)); }
+static void w_fontwidth(void)  { A = mm_fontwidth(); }
+static void w_fontheight(void) { A = mm_fontheight(); }
+static void w_hpos(void)     { A = mm_hpos(); }
+static void w_vpos(void)     { A = mm_vpos(); }
+static void w_keydown(void)  { A = mm_keydown(I(0)); }
 static void w_cmdline(void)  { A = mm_off(mm_scopy(mm_cmdline())); }
 /* The generated main passes its own argc/argv, which are meaningless
    here - the entry is dispatched without them.  bcrun's are the real
@@ -680,6 +735,9 @@ static const struct mmwrap {
 	{ "mm_at",		w_at },
 	{ "mm_dir",		w_dir },
 	{ "mm_files",		w_files },
+	{ "mm_arr_bytes",	w_arr_bytes },
+	{ "mm_arr_swap",	w_arr_swap },
+	{ "mm_data_init5",	w_data_init5 },
 	{ "mm_data_init4",	w_data_init4 },
 	{ "mm_restore",		w_restore },
 	{ "mm_read_f",		w_read_f },
@@ -727,11 +785,26 @@ static const struct mmwrap {
 	{ "mm_spi_close",	w_spi_close },
 	{ "mm_spi_xfer",	w_spi_xfer },
 	{ "mm_i2c_xfer",	w_i2c_xfer },
+	{ "mm_i2c_msg",	w_i2c_msg },
+	{ "mm_i2c_stat",	w_i2c_stat },
 	{ "mm_errno",		w_errno },
 	{ "mm_errmsg",		w_errmsg },
 	{ "mm_pr_commit",	w_pr_commit },
 	{ "mm_ver",		w_ver },
 	{ "mm_device",		w_device },
+	{ "mm_platform",	w_platform },
+	{ "mm_path",		w_path },
+	{ "mm_current",		w_current },
+	{ "mm_drive",		w_drive },
+	{ "mm_exists_file",	w_exists_file },
+	{ "mm_exists_dir",	w_exists_dir },
+	{ "mm_filesize",	w_filesize },
+	{ "mm_pinno",		w_pinno },
+	{ "mm_fontwidth",	w_fontwidth },
+	{ "mm_fontheight",	w_fontheight },
+	{ "mm_hpos",		w_hpos },
+	{ "mm_vpos",		w_vpos },
+	{ "mm_keydown",		w_keydown },
 	{ "mm_cmdline",		w_cmdline },
 	{ "mm_argv_bind",	w_argv_bind },
 	{ "mm_timer_set",	w_timer_set },
