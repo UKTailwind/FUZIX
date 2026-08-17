@@ -1078,10 +1078,29 @@ void do_const(void)
             s->ty = ty;
             s->acc = pstr(sfmt("(%s)", v.code));
             s->is_const = 1;
+            /* An expression that is not compile-time constant must be
+               evaluated ONCE, where the statement stands, as
+               cmd_const's DoExpression does - never re-evaluated from
+               a #define at every use (see const_or_literal_expr) */
+            s->const_runtime = !const_or_literal_expr(v.code);
             s->where = cv.lineno;
             s->declared_in = "";
             GROW(cv.globals, cv.nglobals, cv.cglobals);
             cv.globals[cv.nglobals++] = s;
+        } else if (cv.mode == M_EMIT) {
+            struct sym *s = globals_get(canon);
+
+            if (s != NULL && s->is_const && s->const_runtime) {
+                /* evaluate once, in flow: the hidden global takes the
+                   value here and every use just reads it */
+                if (s->ty == TY_S)
+                    emit(sfmt("mm_sset(%s, %s);", cconst(canon),
+                              v.code));
+                else if (s->ty == TY_I)
+                    emit(sfmt("%s = %s;", cconst(canon), as_int(v)));
+                else
+                    emit(sfmt("%s = %s;", cconst(canon), as_flt(v)));
+            }
         }
         if (!accept_op(","))
             break;

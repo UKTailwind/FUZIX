@@ -86,6 +86,7 @@ const char *varaddr(void);      /* PEEK(VARADDR v) */
 int gp_pin(const char *word, const struct sym *known);  /* "GP8" -> 8 */
 char *clabel(const char *name);
 int const_c_expr(const char *text);
+int const_or_literal_expr(const char *text);
 char *upper(const char *s);
 char *lower(const char *s);
 
@@ -154,6 +155,10 @@ struct sym {
     const char **dims;          /* C size expressions */
     int ndims;
     int is_const, is_array, is_param, byref, is_static;
+    /* A global CONST whose expression is not a compile-time constant:
+       a hidden global assigned once where the CONST statement stands,
+       never a #define (see do_const) */
+    int const_runtime;
     /* An array whose bounds are only known at run time.  Held exactly
        as an array PARAMETER is - a flat pointer plus a bounds table -
        so index_of(), array_flat() and BOUND() take the same branch for

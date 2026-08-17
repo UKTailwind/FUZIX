@@ -524,8 +524,31 @@ void conv_write(FILE *f)
     names = global_names_sorted(&n);
     for (k = 0; k < n; k++) {
         struct sym *s = globals_get(names[k]);
-        if (s->is_const)
+        if (s->is_const && !s->const_runtime)
             fprintf(f, "#define %s %s\n", cconst(names[k]), s->acc);
+    }
+    {
+        int any = 0;
+
+        for (k = 0; k < n; k++) {
+            struct sym *s = globals_get(names[k]);
+
+            if (!s->is_const || !s->const_runtime)
+                continue;
+            if (!any) {
+                fprintf(f, "/* CONSTs whose expressions need the runtime: hidden\n");
+                fprintf(f, " * globals, assigned ONCE where each CONST stands -\n");
+                fprintf(f, " * cmd_const evaluates at the statement, never at the\n");
+                fprintf(f, " * use */\n");
+                any = 1;
+            }
+            if (s->ty == TY_S)
+                fprintf(f, "static char %s[MM_STRSZ];\n",
+                        cconst(names[k]));
+            else
+                fprintf(f, "static %s %s;\n", ctype_of(s->ty),
+                        cconst(names[k]));
+        }
     }
     fprintf(f, "\n/* ---- global variables ---- */\n");
     global_decls(&gd);

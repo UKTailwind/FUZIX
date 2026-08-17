@@ -391,7 +391,7 @@ class Sym(object):
     __slots__ = ('name', 'ty', 'acc', 'dims', 'is_const', 'is_array',
                  'is_param', 'byref', 'is_static', 'where', 'implied',
                  'declared_in', 'disp', 'has_init', 'stype', 'dynamic',
-                 'bacc')
+                 'bacc', 'const_runtime')
 
     def __init__(self, name, ty, acc):
         self.name = name          # canonical: lower case, no suffix
@@ -415,6 +415,10 @@ class Sym(object):
         # same branch for both.  bacc is the C text of that table.
         self.dynamic = False
         self.bacc = ''
+        # A global CONST whose expression is not a compile-time
+        # constant: a hidden global assigned once where the CONST
+        # statement stands, never a #define (see do_const)
+        self.const_runtime = False
 
 
 class TypeMember(object):
@@ -568,6 +572,32 @@ def cconst(name):
 
 def clabel(name):
     return 'L_' + name.replace('.', '__')
+
+
+def const_or_literal_expr(text):
+    """const_c_expr with string literals allowed: is this expression a
+    compile-time constant once quoted spans are ignored?  The test that
+    decides whether a global CONST can be a #define - one that cannot
+    (it calls into the runtime, like Mm.Device$) is materialised into a
+    hidden global instead, assigned ONCE where the CONST statement
+    stands, exactly as cmd_const's DoExpression evaluates once.  The
+    #define form re-evaluated the expression at EVERY use: robots'
+    LCD_DISPLAY called mm_device() twice per test, each call parking a
+    scratch string nothing ever released, and the pool died in
+    fade_in."""
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == '\\' else 1
+            i += 1
+            continue
+        out.append(text[i])
+        i += 1
+    return const_c_expr(''.join(out))
 
 
 def const_c_expr(text):
@@ -3854,6 +3884,11 @@ class Conv(object):
             elif self.mode == 'decl':
                 s = Sym(canon, ty, '(' + v[0] + ')')
                 s.is_const = True
+                # An expression that is not compile-time constant must
+                # be evaluated ONCE, where the statement stands, as
+                # cmd_const's DoExpression does - never re-evaluated
+                # from a #define at every use (see const_or_literal_expr)
+                s.const_runtime = not const_or_literal_expr(v[0])
                 s.where = self.lineno
                 if canon in self.globals:
                     # A WARNING, and it has to be: MMBasic runs only one
@@ -3873,6 +3908,21 @@ class Conv(object):
                               % (canon, self.globals[canon].where))
                 else:
                     self.globals[canon] = s
+            elif self.mode == 'emit':
+                s = self.globals.get(canon)
+                if s is not None and s.is_const \
+                        and getattr(s, 'const_runtime', False):
+                    # evaluate once, in flow: the hidden global takes
+                    # the value here and every use just reads it
+                    if s.ty == TY_S:
+                        self.emit('mm_sset(%s, %s);'
+                                  % (cconst(canon), v[0]))
+                    elif s.ty == TY_I:
+                        self.emit('%s = %s;'
+                                  % (cconst(canon), self.as_int(v)))
+                    else:
+                        self.emit('%s = %s;'
+                                  % (cconst(canon), self.as_flt(v)))
             if not self.accept_op(','):
                 break
 
@@ -8093,8 +8143,22 @@ class Conv(object):
         names.sort()
         for nm in names:
             s = self.globals[nm]
-            if s.is_const:
+            if s.is_const and not s.const_runtime:
                 wr('#define %s %s\n' % (cconst(nm), s.acc))
+        rt = [nm for nm in names
+              if self.globals[nm].is_const
+              and self.globals[nm].const_runtime]
+        if rt:
+            wr('/* CONSTs whose expressions need the runtime: hidden\n')
+            wr(' * globals, assigned ONCE where each CONST stands -\n')
+            wr(' * cmd_const evaluates at the statement, never at the\n')
+            wr(' * use */\n')
+            for nm in rt:
+                s = self.globals[nm]
+                if s.ty == TY_S:
+                    wr('static char %s[MM_STRSZ];\n' % cconst(nm))
+                else:
+                    wr('static %s %s;\n' % (CTYPE[s.ty], cconst(nm)))
         wr('\n/* ---- global variables ---- */\n')
         for ln in self.global_decls():
             wr(ln + '\n')

@@ -22,6 +22,9 @@
   If Call(CTRL_DRIVER$, 1) <> "" Then Error
   
   'screen setup
+  ' A PicoMite LCD panel is always 320x240; the PC3 boots in the text
+  ' console and must enter the graphics mode first.
+  If Mm.Device$ = "Fuzix" Then Mode 2
   If LCD_DISPLAY Then FRAMEBUFFER Create Else Mode 2
   FRAMEBUFFER layer 9 'color 9 is transparant
   Font 10   ' renumbered from 9: user fonts are 10-16 here

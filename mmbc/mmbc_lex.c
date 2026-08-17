@@ -569,6 +569,36 @@ char *clabel(const char *name)
  * textually and literals are literals, so the test is simply whether
  * any letter in the text belongs to something other than a number: a
  * variable arrives as v_<name>, a call as mm_<name>. */
+/* const_c_expr with string literals allowed: is this expression a
+ * compile-time constant once quoted spans are ignored?  The test that
+ * decides whether a global CONST can be a #define - one that cannot
+ * (it calls into the runtime, like Mm.Device$) is materialised into a
+ * hidden global instead, assigned ONCE where the CONST statement
+ * stands, exactly as cmd_const's DoExpression evaluates once.  The
+ * #define form re-evaluated the expression at EVERY use: robots'
+ * LCD_DISPLAY called mm_device() twice per test, each call parking a
+ * scratch string nothing ever released, and the pool died in
+ * fade_in. */
+int const_or_literal_expr(const char *text)
+{
+    char *out = salloc(strlen(text) + 1);
+    int i = 0, j = 0;
+
+    while (text[i]) {
+        if (text[i] == '"') {
+            i++;
+            while (text[i] && text[i] != '"')
+                i += (text[i] == '\\' && text[i + 1]) ? 2 : 1;
+            if (text[i])
+                i++;
+            continue;
+        }
+        out[j++] = text[i++];
+    }
+    out[j] = 0;
+    return const_c_expr(out);
+}
+
 int const_c_expr(const char *text)
 {
     int i = 0;
