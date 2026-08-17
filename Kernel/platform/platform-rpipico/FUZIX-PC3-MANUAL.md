@@ -2807,38 +2807,36 @@ its slowest.
 The rules below come from porting PicoMan (Geoff Graham's PacMan,
 1,250 lines, graphics-heavy). As it arrived it compiled to 101 KB of
 bytecode with a 63 KB main line — too big to translate, too big to
-load fully native. After the changes described here it is 38 KB, every
-function translates, and the whole game images at 132 KB. Numbers
-below are from that exercise. Compute-heavy programs rarely hit any of
-this — the solar eclipse benchmark has never been near a limit —
-because number crunching lives naturally in functions over a few
-variables. Games are different: they draw, and they grow main lines.
+load fully native. With the compiler taught the rule below it is
+38 KB, every function translates, and the whole game images at 134 KB
+— unmodified. Numbers below are from that exercise. Compute-heavy
+programs rarely hit any of this — the solar eclipse benchmark has
+never been near a limit — because number crunching lives naturally in
+functions over a few variables. Games are different: they draw, and
+they grow main lines.
 
-**1. `ON ERROR` is the most expensive word in the language.** One `ON
-ERROR` anywhere makes the compiler emit checked arithmetic for the
-*whole program* — every array index, every integer operation, so the
-error can be reported rather than corrupt memory. That one line was 62
-of PicoMan's 101 KB. The original used it to swallow a first-time
-error:
-
-```basic
-On Error Skip
-Blit Close n        ' errors if the buffer does not exist yet
-Blit Read n, x, y, w, h
-```
-
-Track the state instead, and the whole apparatus disappears:
-
-```basic
-If BlitOpen(n) Then Blit Close n
-BlitOpen(n) = 1
-Blit Read n, x, y, w, h
-```
-
-Test-and-branch beats trap-and-skip. If a program genuinely needs `ON
-ERROR` — probing for optional hardware, say — do the probing in a
-separate little program run once, or accept the cost knowingly: it is
-about 2.6× on code size.
+**1. `ON ERROR IGNORE` is the most expensive statement in the
+language.** For an error to be *survivable*, the compiler must emit
+checked arithmetic — every array index, every division — so the error
+is reported rather than corrupting memory. `ON ERROR IGNORE` arms that
+for an unbounded stretch of the program, so its presence anywhere
+makes the **whole program** pay: about 2.6× on code size (it was 62 of
+PicoMan's 101 KB while the compiler still treated every `ON ERROR`
+this way). `ON ERROR SKIP [nn]`, by contrast, covers only the next
+`nn` statements, and the compiler emits the checked forms for exactly
+that window — PicoMan's one `On Error Skip` over a first-time `Blit
+Close` costs a few dozen bytes, not sixty thousand. So: prefer `SKIP`
+with a literal count, tightly around the fallible statement, and keep
+`IGNORE` for short probe programs. Two prints of `MM.ERRNO` cost less
+than one `IGNORE`. One care with `SKIP` in a compiled program: the
+interpreter's count follows execution into a called SUB, statement by
+statement, while the compiled window covers the statements *written*
+after the `ON ERROR SKIP` (plus one for each routine entered) — a
+skip that relies on being consumed deep inside a callee's arithmetic
+behaves like the interpreter only under `IGNORE`. Runtime command
+errors — a `Blit Close` on nothing, a missing file, an I2C device
+that does not answer — are trapped anywhere the count is armed, in
+either world.
 
 **2. Keep the main line thin.** The main line is one function, and a
 function only runs at full speed if it translates. Put the work in

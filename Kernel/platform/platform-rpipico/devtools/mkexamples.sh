@@ -75,7 +75,7 @@ bench:$M/tests/bench.bas:KnivD's MMBasic benchmark - the number to compare
 eclipse:$H/solar_eclipse.bas:a solar eclipse computed from first principles
 picofrog:$M/samples/picofrog.bas:a complete arcade game (keyboard: arrows, space)
 vaders:$M/samples/vaders.bas:Pico-Vaders, ported from the Game*Mite (keyboard)
-picoman:$M/samples/picoman.bas:PicoMan from the Game*Mite - fully native since its ON ERROR was reworked (see the manual's making-it-fit chapter)
+picoman:$M/samples/picoman.bas:PicoMan from the Game*Mite - fully native (see the manual's making-it-fit chapter)
 "
 
 # One entry per LINE - the descriptions have spaces in them, so the
