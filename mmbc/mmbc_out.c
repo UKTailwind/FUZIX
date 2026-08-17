@@ -175,8 +175,8 @@ static void global_decls(struct outbuf *o)
             for (d = 0; d < s->ndims; d++)
                 dims = sfmt("%s[%s]", dims, s->dims[d]);
             if (s->ty == TY_S)
-                ob_add(&heap, sfmt("char %s%s[MM_STRSZ];%s", cn, dims,
-                                   note));
+                ob_add(&heap, sfmt("char %s%s[%s];%s", cn, dims,
+                                   strsz_of(s), note));
             else
                 ob_add(&heap, sfmt("%s %s%s;%s", ctype_of(s->ty), cn,
                                    dims, note));
@@ -251,7 +251,8 @@ static void local_structs(struct outbuf *o)
                 for (d = 0; d < s->ndims; d++)
                     dims = sfmt("%s[%s]", dims, s->dims[d]);
                 if (s->ty == TY_S)
-                    ob_add(o, sfmt("    char %s%s[MM_STRSZ];", cn, dims));
+                    ob_add(o, sfmt("    char %s%s[%s];", cn, dims,
+                                   strsz_of(s)));
                 else
                     ob_add(o, sfmt("    %s %s%s;", ctype_of(s->ty), cn,
                                    dims));

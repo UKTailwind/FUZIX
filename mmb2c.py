@@ -40,6 +40,10 @@ TY_S = 's'      # string, MMBasic layout: [len][data...][NUL]
 CTYPE = {TY_F: 'MMFLOAT', TY_I: 'MMINTEGER', TY_S: 'char'}
 TYNAME = {TY_F: 'FLOAT', TY_I: 'INTEGER', TY_S: 'STRING'}
 
+# MM_STRLEN in mmb_runtime.h: the characters a string can hold, and the
+# LENGTH an array element gets when the program does not say.
+MM_STRLEN = 255
+
 # ----------------------------------------------------------------- tokens
 
 T_ID = 1
@@ -391,7 +395,7 @@ class Sym(object):
     __slots__ = ('name', 'ty', 'acc', 'dims', 'is_const', 'is_array',
                  'is_param', 'byref', 'is_static', 'where', 'implied',
                  'declared_in', 'disp', 'has_init', 'stype', 'dynamic',
-                 'bacc', 'const_runtime')
+                 'bacc', 'const_runtime', 'slen')
 
     def __init__(self, name, ty, acc):
         self.name = name          # canonical: lower case, no suffix
@@ -419,6 +423,13 @@ class Sym(object):
         # constant: a hidden global assigned once where the CONST
         # statement stands, never a #define (see do_const)
         self.const_runtime = False
+        # DIM s$(n) LENGTH m on an ARRAY: the element stride, which is
+        # m + 1 and is part of the PROGRAM'S VIEW OF MEMORY, not just a
+        # saving - findvar returns val.s + nbr * (size + 1)
+        # (MMBasic.c:4924), so a program walking the array with
+        # PEEK(VARADDR a$()) is entitled to that spacing.  None = the
+        # default MM_STRSZ element, which carries a trailing NUL.
+        self.slen = None
 
 
 class TypeMember(object):
@@ -1457,7 +1468,7 @@ class Conv(object):
         if as_array:
             if not s.is_array:
                 self.err("'%s' is not an array" % canon)
-            return (self.index(s), s.ty)
+            return (self.sread(s, self.index(s)), s.ty)
         if s.is_const:
             return (s.acc, s.ty)
         if s.is_array:
@@ -1568,6 +1579,13 @@ class Conv(object):
             self.i += 2
             if not s.is_array:
                 self.err("'%s' is not an array" % canon)
+            # A LENGTH array is exactly what this is usually asked
+            # about - a program that walks the elements itself, at the
+            # spacing it declared - so take the address directly rather
+            # than through array_flat, which refuses to hand the
+            # elements to a runtime that would step over them wrongly.
+            if s.ty == TY_S and s.slen is not None:
+                return '(MMINTEGER)(uintptr_t)(%s)' % s.acc
             ptr, cnt = self.array_flat(s)
             return '(MMINTEGER)(uintptr_t)(%s)' % ptr
         if self.is_op('('):
@@ -1907,6 +1925,7 @@ class Conv(object):
                     bnd = '(const MMINTEGER[]){ %s }' % body
                 # flatten, so the callee can index any rank it likes
                 if s.ty == TY_S:
+                    self.no_length_array(s)
                     base = '(char (*)[MM_STRSZ])%s' % s.acc
                 else:
                     base = '(%s *)%s' % (CTYPE[s.ty], s.acc)
@@ -2683,8 +2702,22 @@ class Conv(object):
             return (s.acc, 'mm_arr_count(%s)' % b)
         cnt = '(int)(%s)' % ' * '.join('(%s)' % d for d in s.dims)
         if s.ty == TY_S:
+            self.no_length_array(s)
             return ('(char (*)[MM_STRSZ])%s' % s.acc, cnt)
         return ('(%s *)%s' % (CTYPE[s.ty], s.acc), cnt)
+
+    def no_length_array(self, s):
+        """Refuse to hand a LENGTH array to anything that walks its
+        elements.  The runtime steps at MM_STRSZ and this one does not,
+        so the alternative is silently reading from between the
+        elements - an honest gap where a wrong answer would do real
+        damage.  VARADDR is not affected: it wants the address, which
+        is the same number either way."""
+        if s.ty == TY_S and s.slen is not None:
+            self.err("'%s' was DIMmed with LENGTH %d, so its elements "
+                     "are %d bytes apart; passing the whole array is "
+                     "not translated (index it, or drop the LENGTH)"
+                     % (s.disp, s.slen, s.slen + 1))
 
     def lsref(self):
         """A long string: an INTEGER array holding the byte count in
@@ -3619,13 +3652,27 @@ class Conv(object):
                              % canon)
 
             # MMBasic's DIM s$ LENGTH n, which caps a string to save
-            # memory.  ACCEPTED AND IGNORED: every string here is
-            # MM_STRSZ, so this translation is more generous than
-            # MMBasic rather than different from it - a program that
-            # would hit "string too long" there simply works.  That is
-            # a divergence and the manual says so; refusing outright
-            # would stop real programs translating over a declaration
-            # whose only effect is to make a string smaller.
+            # memory.
+            #
+            # On a SCALAR it is accepted and ignored: the string still
+            # starts at its length byte with its characters after it, so
+            # every address a program can compute is the same one, and a
+            # generous cap only means a program that would hit "string
+            # too long" on the firmware works here.
+            #
+            # On an ARRAY it is NOT free, because it sets the SPACING of
+            # the elements: findvar returns val.s + nbr * (size + 1)
+            # (MMBasic.c:4924).  PETSCII Robots holds its 128x64 world
+            # map as DIM LV$(63) LENGTH 128 and reads tiles straight out
+            # of it with PEEK(BYTE (y)*129 + x + lva) - the 129 IS the
+            # LENGTH, and at MM_STRSZ spacing every tile read comes from
+            # the wrong place.  So an array honours it, and the element
+            # is the firmware's own: length byte plus LENGTH characters,
+            # with no room for the trailing NUL the rest of the runtime
+            # assumes.  That is the layout a STRING member of a TYPE
+            # already has, so it takes the same care - mm_ssetm to
+            # write, mm_scopy to read.
+            slen = None
             if self.accept_kw('LENGTH'):
                 if ty != TY_S:
                     self.err("LENGTH is only for strings, and '%s' is not "
@@ -3635,12 +3682,16 @@ class Conv(object):
                     self.err("LENGTH takes a literal integer")
                 if int(v[1]) < 1 or int(v[1]) > 255:
                     self.err("LENGTH must be 1..255")
+                if dims and int(v[1]) < MM_STRLEN:
+                    slen = int(v[1])
 
             if self.mode == 'decl':
                 s = self.declare(canon, ty if stype is None else TY_I,
                                  scope, dims, static)
                 if stype is not None:
                     s.stype = stype
+                if slen is not None:
+                    s.slen = slen
                 if dyn or canon in self.redimmed:
                     dyn = True
                     if stype is not None:
@@ -3649,6 +3700,10 @@ class Conv(object):
                     if len(dims) > 5:
                         self.err("an array has at most 5 dimensions")
                     s.dynamic = True
+                    # A run-time array is a flat pointer plus a bounds
+                    # table, and mm_arr_* walk it at MM_STRSZ: the
+                    # spacing is the runtime's, not the declaration's.
+                    s.slen = None
             else:
                 s = self.lookup(canon)
 
@@ -3678,8 +3733,48 @@ class Conv(object):
     def elsize(self, s):
         """The C size of one element of an array."""
         if s.ty == TY_S:
-            return 'MM_STRSZ'
+            return self.strsz(s)
         return 'sizeof(%s)' % CTYPE[s.ty]
+
+    def strsz(self, s):
+        """The declared size of one string element.
+
+        MM_STRSZ unless the array was DIMmed with a LENGTH, in which
+        case it is the firmware's own LENGTH + 1 - see do_declare.  A
+        program cannot see the difference except through VARADDR, and
+        one that looks is entitled to the firmware's answer.
+        """
+        if s.slen is None:
+            return 'MM_STRSZ'
+        return '%d' % (s.slen + 1)
+
+    def sread(self, s, code):
+        """Read a string ARRAY ELEMENT as an expression value.
+
+        An element of a LENGTH array is the firmware's layout - no room
+        for the trailing NUL when the string is full - so it is copied
+        into a scratch buffer, which restores the invariant the rest of
+        the runtime relies on (mm_cstr is s + 1).  This is exactly what
+        a STRING member of a TYPE does, for exactly the same reason.
+        """
+        if s.ty != TY_S or s.slen is None:
+            return code
+        self.tmp_used = True
+        return 'mm_scopy(%s)' % code
+
+    def swrite(self, s, target, val):
+        """Assign to a string variable or array element, bounded when
+        the element is a LENGTH one (mm_ssetm writes the NUL only when
+        the string leaves room for it)."""
+        return self.swrite_cap(s.slen if s.ty == TY_S else None,
+                               target, val)
+
+    def swrite_cap(self, cap, target, val):
+        """swrite where the caller carries the capacity rather than the
+        symbol - what input_target hands back."""
+        if cap is None:
+            return 'mm_sset(%s, %s);' % (target, val)
+        return 'mm_ssetm(%s, %d, %s);' % (target, cap, val)
 
     def emit_dim_alloc(self, s, dims, preserve):
         """DIM / REDIM of an array with run-time bounds.
@@ -3771,7 +3866,7 @@ class Conv(object):
                 if self.mode == 'emit':
                     sub = self.linear_index(s, k)
                     if s.ty == TY_S:
-                        self.emit('mm_sset(%s, %s);' % (sub, v[0]))
+                        self.emit(self.swrite(s, sub, v[0]))
                     elif s.ty == TY_I:
                         self.emit('%s = %s;' % (sub, self.as_int(v)))
                     else:
@@ -6072,10 +6167,10 @@ class Conv(object):
                               % (ptr, k, 'i' if sym.ty == TY_I else 'f'))
                 self.tmp_used = True
             else:
-                tgt, ty = self.input_target()
+                tgt, ty, cap = self.input_target()
                 if ty == TY_S:
                     self.reads_string = True
-                    self.emit('mm_sset(%s, mm_read_s());' % tgt)
+                    self.emit(self.swrite_cap(cap, tgt, 'mm_read_s()'))
                     self.tmp_used = True
                 else:
                     self.emit('%s = mm_read_%s();'
@@ -6186,7 +6281,7 @@ class Conv(object):
 
     # -- INC / CAT / ERASE ---------------------------------------------------
     def do_inc(self):
-        tgt, ty = self.input_target()
+        tgt, ty, cap = self.input_target()
         if self.accept_op(','):
             v = self.expr()
         else:
@@ -6194,7 +6289,8 @@ class Conv(object):
         if ty == TY_S:
             if v[1] != TY_S:
                 self.err("INC on a string needs a string increment")
-            self.emit('mm_sset(%s, mm_scat(%s, %s));' % (tgt, tgt, v[0]))
+            self.emit(self.swrite_cap(cap, tgt,
+                                      'mm_scat(%s, %s)' % (tgt, v[0])))
             self.tmp_used = True
         elif ty == TY_I:
             self.emit('%s += %s;' % (tgt, self.as_int(v)))
@@ -6202,14 +6298,15 @@ class Conv(object):
             self.emit('%s += %s;' % (tgt, self.as_flt(v)))
 
     def do_cat(self):
-        tgt, ty = self.input_target()
+        tgt, ty, cap = self.input_target()
         if ty != TY_S:
             self.err("CAT needs a string variable")
         self.expect_op(',')
         v = self.expr()
         if v[1] != TY_S:
             self.err("CAT needs a string to append")
-        self.emit('mm_sset(%s, mm_scat(%s, %s));' % (tgt, tgt, v[0]))
+        self.emit(self.swrite_cap(cap, tgt,
+                                  'mm_scat(%s, %s)' % (tgt, v[0])))
         self.tmp_used = True
 
     def do_erase(self):
@@ -6436,7 +6533,11 @@ class Conv(object):
         self.skip_statement()            # KILL's optional 'all'
 
     def input_target(self):
-        """A variable, possibly an array element, that INPUT can write."""
+        """A variable, possibly an array element, that INPUT can write.
+
+        Returns (accessor, type, capacity), where the capacity is the
+        LENGTH of a string array element and None for everything else -
+        a plain string has room for its NUL and takes mm_sset."""
         t = self.nxt()
         if t[0] != T_ID:
             self.err("INPUT needs a variable")
@@ -6453,7 +6554,7 @@ class Conv(object):
             if sfx is not None and sfx != self.cur.ty:
                 self.err("'%s' is %s but used as %s"
                          % (canon, TYNAME[self.cur.ty], TYNAME[sfx]))
-            return (self.retacc(), self.cur.ty)
+            return (self.retacc(), self.cur.ty, None)
         is_arr = self.is_op('(')
         sym = self.reference(t[1], False)
         if sym.is_const:
@@ -6461,10 +6562,10 @@ class Conv(object):
         if is_arr:
             if not sym.is_array:
                 self.err("'%s' is not an array" % sym.name)
-            return (self.index(sym), sym.ty)
+            return (self.index(sym), sym.ty, sym.slen)
         if sym.is_array:
             self.err("cannot INPUT into a whole array")
-        return (sym.acc, sym.ty)
+        return (sym.acc, sym.ty, None)
 
     def do_input(self):
         chan = '0'
@@ -6484,9 +6585,9 @@ class Conv(object):
                 self.emit('mm_pr_s("\\002" "? ");')
         self.emit('mm_input_line(%s);' % chan)
         while not self.stmt_end():
-            tgt, ty = self.input_target()
+            tgt, ty, cap = self.input_target()
             if ty == TY_S:
-                self.emit('mm_sset(%s, mm_input_next());' % tgt)
+                self.emit(self.swrite_cap(cap, tgt, 'mm_input_next()'))
             elif ty == TY_I:
                 self.emit('%s = mm_atoi(mm_input_next());' % tgt)
             else:
@@ -6507,10 +6608,10 @@ class Conv(object):
                 self.i += 1
                 self.emit('mm_pr_s(%s);' % c_string_literal(t[1]))
                 self.i += 1
-        tgt, ty = self.input_target()
+        tgt, ty, cap = self.input_target()
         if ty != TY_S:
             self.err("LINE INPUT needs a string variable")
-        self.emit('mm_sset(%s, mm_getline(%s));' % (tgt, chan))
+        self.emit(self.swrite_cap(cap, tgt, 'mm_getline(%s)' % chan))
         self.tmp_used = True
 
     # -- assignment / sub call -------------------------------------------
@@ -6698,7 +6799,7 @@ class Conv(object):
         if s.ty == TY_S:
             if v[1] != TY_S:
                 self.err("cannot assign a number to string '%s'" % canon)
-            self.emit('mm_sset(%s, %s);' % (target, v[0]))
+            self.emit(self.swrite(s, target, v[0]))
         elif s.ty == TY_I:
             self.store(target, self.as_int(v), TY_I)
         else:
@@ -7724,7 +7825,8 @@ class Conv(object):
         if s.is_array:
             dims = ''.join('[%s]' % d for d in s.dims)
             if s.ty == TY_S:
-                self.emit('%schar %s%s[MM_STRSZ];' % (pfx, s.acc, dims))
+                self.emit('%schar %s%s[%s];'
+                          % (pfx, s.acc, dims, self.strsz(s)))
             else:
                 self.emit('%s%s %s%s;' % (pfx, CTYPE[s.ty], s.acc, dims))
             if not s.is_static:
@@ -7875,7 +7977,8 @@ class Conv(object):
             elif s.is_array:
                 dims = ''.join('[%s]' % d for d in s.dims)
                 if s.ty == TY_S:
-                    heap.append('char %s%s[MM_STRSZ];%s' % (cn, dims, note))
+                    heap.append('char %s%s[%s];%s'
+                                % (cn, dims, self.strsz(s), note))
                 else:
                     heap.append('%s %s%s;%s'
                                 % (CTYPE[s.ty], cn, dims, note))
@@ -7935,7 +8038,8 @@ class Conv(object):
                 elif s.is_array:
                     dims = ''.join('[%s]' % d for d in s.dims)
                     if s.ty == TY_S:
-                        out.append('    char %s%s[MM_STRSZ];' % (cn, dims))
+                        out.append('    char %s%s[%s];'
+                                   % (cn, dims, self.strsz(s)))
                     else:
                         out.append('    %s %s%s;'
                                    % (CTYPE[s.ty], cn, dims))

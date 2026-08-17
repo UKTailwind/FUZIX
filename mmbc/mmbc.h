@@ -32,6 +32,9 @@
 #define TY_I 'i'                /* MMINTEGER (int64_t) */
 #define TY_S 's'                /* string, MMBasic layout [len][data][NUL] */
 #define TY_NONE 0               /* Python None */
+/* MM_STRLEN in mmb_runtime.h: the characters a string can hold, and the
+ * LENGTH an array element gets when the program does not say. */
+#define MM_STRLEN 255
 /* The Python types a struct value as a TUPLE ('T'|'TM', tyname); every
  * isinstance(ty, tuple) test becomes ty == TY_T here, with the tuple's
  * members carried in struct val's stype ('T'/'TM' second half) and tm
@@ -79,6 +82,11 @@ struct sym;
 /* run-time arrays (mmbc_decl.c) */
 int redimmed_in(const char *canon);
 const char *dyn_decl(struct sym *s, const char *cn);
+const char *strsz_of(struct sym *s);
+const char *sread_of(struct sym *s, const char *code);
+const char *swrite_of(struct sym *s, const char *target, const char *val);
+const char *swrite_cap(int cap, const char *target, const char *val);
+void no_length_array(struct sym *s);
 void emit_dim_alloc(struct sym *s, const char **dims, int ndims,
                     int preserve);
 void do_redim(void);
@@ -165,6 +173,13 @@ struct sym {
        both.  bacc is the C text of that table. */
     int dynamic;
     const char *bacc;
+    /* DIM s$(n) LENGTH m on an ARRAY: the element stride, which is
+       m + 1 and is part of the PROGRAM'S VIEW OF MEMORY, not just a
+       saving - findvar returns val.s + nbr * (size + 1)
+       (MMBasic.c:4924), so a program walking the array with
+       PEEK(VARADDR a$()) is entitled to that spacing.  0 = the default
+       MM_STRSZ element, which carries a trailing NUL. */
+    int alen;
     int where;                  /* source line first seen */
     int implied;
     int has_init;

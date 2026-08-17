@@ -63,8 +63,27 @@ run: all
 $(BUILD)/blitharness: tests/blitharness.c mmb_blit.h mmb_runtime.h | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ tests/blitharness.c $(LDLIBS)
 
-check: all $(BUILD)/blitharness
+# The same idea for GUI BITMAP, and it has more to prove: mmb_gui.h
+# draws a background rectangle plus runs of foreground columns where
+# the firmware plots every scaled pixel on its own.  An optimisation
+# over the reference has to be shown equal to it, so this compares
+# every drawing against MMBasic's literal four-deep loop - transcribed
+# in the harness and sharing no code with the engine.
+$(BUILD)/guiharness: tests/guiharness.c mmb_gui.h mmb_gfx_pts.h \
+		mmb_runtime.h | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/guiharness.c $(LDLIBS)
+
+# LINE's width is four algorithms picked by shape, and the sign of the
+# width decides whether it hangs off one side or is centred.  Same
+# treatment as guiharness: compared against the firmware's own DrawLine.
+$(BUILD)/lineharness: tests/lineharness.c mmb_gfx_line.h mmb_gfx_pts.h \
+		mmb_runtime.h | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/lineharness.c $(LDLIBS)
+
+check: all $(BUILD)/blitharness $(BUILD)/guiharness $(BUILD)/lineharness
 	@$(BUILD)/blitharness || { echo "  FAIL blitharness"; exit 1; }
+	@$(BUILD)/guiharness || { echo "  FAIL guiharness"; exit 1; }
+	@$(BUILD)/lineharness || { echo "  FAIL lineharness"; exit 1; }
 	@mkdir -p $(BUILD)/work
 	@fail=0; \
 	for t in $(TESTS); do \

@@ -419,6 +419,70 @@ static int mm_console_opt = 3;
 static int mm_gx, mm_gy;                /* the pixel cursor - CurrentX/Y */
 static int mm_gn;                       /* characters collected so far */
 
+/*
+ * MM.I2C - how the last I2C transfer went.
+ *
+ * MMBasic's mmI2Cvalue (I2C.c:74): 0 it worked, 1 nothing answered,
+ * 2 it started and stopped.  Every transfer sets it and NONE of them
+ * raises - the program is expected to look.  That is what makes
+ * I2C CHECK worth having and what Pico-Frog's `if mm.i2c = 0` reads.
+ *
+ * Shared between the builds so a program testing it runs under the
+ * gates: off the board every transfer fails, so it reads 1 there.
+ */
+static int mm_i2c_stat_v;
+
+MMINTEGER mm_i2c_stat(void) { return mm_i2c_stat_v; }
+
+/* Map an errno from the transfer onto MMBasic's three values, and pass
+   the errno back so a caller that does want to raise still can.  EIO is
+   the RP2350 driver's PICO_ERROR_GENERIC - nothing acknowledged - and
+   ETIMEDOUT is its PICO_ERROR_TIMEOUT. */
+MMINTEGER mm_i2c_setstat(MMINTEGER r)
+{
+    if (r == 0)
+        mm_i2c_stat_v = 0;
+    else if (r == -110 || r == -48)     /* ETIMEDOUT: Linux 110, Fuzix 48 */
+        mm_i2c_stat_v = 2;
+    else
+        mm_i2c_stat_v = 1;
+    return r;
+}
+
+/* MM.HPOS and MM.VPOS, which MMBasic answers straight out of CurrentX
+   and CurrentY (MM_Misc.c fun_info).  Shared for the same reason the
+   cursor itself is: both builds move it. */
+MMINTEGER mm_hpos(void) { return mm_gx; }
+MMINTEGER mm_vpos(void) { return mm_gy; }
+
+/* MM.INFO(PINNO "GPnn") - the pin a name stands for.
+ *
+ * MMBasic keeps a PINMAP because its pin numbers are CONNECTOR pins and
+ * GP8 is a GPIO; here the two are the same number, which is the choice
+ * mmb_gpio.h made and gave its reasons for, so this is codemap()'s
+ * identity plus MMBasic's own parse and range check (External.c
+ * codecheck/codemap).  Anything that is not GPnn, or is out of range,
+ * is an error rather than a wrong pin - a silently wrong pin is the
+ * divergence class that outranks a missing feature.
+ */
+MMINTEGER mm_pinno(const char *s)
+{
+    const char *p = mm_cstr(s);
+    int n = 0, digits = 0;
+
+    if ((p[0] != 'G' && p[0] != 'g') || (p[1] != 'P' && p[1] != 'p'))
+        MM_RAISEV("Invalid pin string", 0);
+    for (p += 2; *p >= '0' && *p <= '9'; p++) {
+        n = n * 10 + (*p - '0');
+        digits++;
+        if (n > 47)
+            break;
+    }
+    if (*p != 0 || digits == 0 || n > 47)
+        MM_RAISEV("Invalid GPIO", 0);
+    return n;
+}
+
 /* PRINT is all or nothing while ON ERROR is armed ------------------- *
  *
  * cmd_print builds the whole line into one buffer and writes it at the
@@ -2007,7 +2071,71 @@ void mm_files(const char *spec)
     mm_pr_nl();
 }
 
+/* MM.INFO(EXISTS FILE f$), MM.INFO(EXISTS DIR d$), MM.INFO(FILESIZE f$)
+ *
+ * MMBasic's three answers, kept exactly (MM_Misc.c fun_info):
+ *
+ *   EXISTS FILE  1 if it is a file, -1 if the name exists but is a
+ *                DIRECTORY, 0 if there is nothing there.  The -1 is not
+ *                decoration - it is how a program tells "wrong kind"
+ *                from "missing", and Pico-Vaders tests for it.
+ *   EXISTS DIR   non-zero if it is a directory.
+ *   FILESIZE     the size in bytes.
+ *
+ * One stat() serves all three, and it is the same call the file manager
+ * settled on for sizes.
+ */
+MMINTEGER mm_exists_file(const char *path)
+{
+#ifdef _WIN32
+    struct _stat st;
+    if (_stat(mm_cstr(path), &st) != 0)
+        return 0;
+    return (st.st_mode & _S_IFDIR) ? -1 : 1;
+#else
+    struct stat st;
+    if (stat(mm_cstr(path), &st) != 0)
+        return 0;
+    return S_ISDIR(st.st_mode) ? -1 : 1;
+#endif
+}
+
+MMINTEGER mm_exists_dir(const char *path)
+{
+#ifdef _WIN32
+    struct _stat st;
+    if (_stat(mm_cstr(path), &st) != 0)
+        return 0;
+    return (st.st_mode & _S_IFDIR) ? 1 : 0;
+#else
+    struct stat st;
+    if (stat(mm_cstr(path), &st) != 0)
+        return 0;
+    return S_ISDIR(st.st_mode) ? 1 : 0;
+#endif
+}
+
+MMINTEGER mm_filesize(const char *path)
+{
+#ifdef _WIN32
+    struct _stat st;
+    if (_stat(mm_cstr(path), &st) != 0)
+        return -1;
+    return (st.st_mode & _S_IFDIR) ? -2 : (MMINTEGER)st.st_size;
+#else
+    struct stat st;
+    if (stat(mm_cstr(path), &st) != 0)
+        return -1;
+    /* MMBasic's FileSize answers -2 for a directory and -1 for nothing
+       there, so a caller can tell the two apart without a second call. */
+    return S_ISDIR(st.st_mode) ? -2 : (MMINTEGER)st.st_size;
+#endif
+}
+
 #else  /* MM_NO_DIRS */
+MMINTEGER mm_exists_file(const char *p) { (void)p; return 0; }
+MMINTEGER mm_exists_dir(const char *p) { (void)p; return 0; }
+MMINTEGER mm_filesize(const char *p) { (void)p; return -1; }
 void mm_mkdir(const char *p) { (void)p; mm_error("MKDIR is not available in this build"); }
 void mm_rmdir(const char *p) { (void)p; mm_error("RMDIR is not available in this build"); }
 void mm_chdir(const char *p) { (void)p; mm_error("CHDIR is not available in this build"); }
@@ -2027,12 +2155,31 @@ static int  mm_dn = 0, mm_dptr = 0;
 static int  mm_dstack[8];
 static int  mm_dsp = 0;
 
-/* mmb2c emits the table as four parallel primitive arrays
- * (mm_data_init4) so that no struct layout ever crosses the bcrun VM
- * boundary - int, double and int64 read identically on both sides,
- * where a struct's padding is each compiler's own business.  The
- * struct form stays for hand-written driver code. */
+/* mmb2c emits the table as parallel primitive arrays (mm_data_init5)
+ * so that no struct layout ever crosses the bcrun VM boundary - int,
+ * double and int64 read identically on both sides, where a struct's
+ * padding is each compiler's own business.  The struct form stays for
+ * hand-written driver code.
+ *
+ * A COLUMN THAT SAYS NOTHING IS NOT EMITTED.  Each item costs 4 bytes
+ * of kind, 8 of float, 8 of integer and a 4-byte text pointer - 24 an
+ * item, in a data segment bounded at 64K.  Almost no real table needs
+ * all of it: PicoMan's is 5103 items, every one an integer, and it
+ * wanted 81,648 bytes of which 40,824 were a constant repeated 5103
+ * times and a text column no READ in the program could reach.  That is
+ * what put it over the limit.
+ *
+ * So the translator drops any column it can prove dead, and passes:
+ *
+ *   kind == NULL     every item is `ukind`
+ *   f, i, s == NULL  no item of that kind exists and no READ can ask
+ *
+ * mm_d4_on is the mode flag now.  It used to be `mm_d4_kind != NULL`,
+ * which is exactly the thing that had to become optional.
+ */
+static int              mm_d4_on;
 static const int       *mm_d4_kind = NULL;
+static int              mm_d4_ukind;
 static const MMFLOAT   *mm_d4_f;
 static const MMINTEGER *mm_d4_i;
 #ifdef MM_HOSTED
@@ -2048,19 +2195,49 @@ static const char     **mm_d4_s;
 static const char *mm_d4_str(int j)
 {
 #ifdef MM_HOSTED
+    if (!mm_d4_s)
+        return "\000";
     return (const char *)mm_vm_base()
         + mm_vm_rd32(mm_d4_s + 4ul * (unsigned long)j);
 #else
+    if (mm_d4_s == NULL)
+        return "\000";
     return mm_d4_s[j];
 #endif
 }
 
+/* The kind of item j: from the column, or the one value they all share
+   when the translator proved there was only one. */
+static int mm_d4_k(int j)
+{
+    return mm_d4_kind ? mm_d4_kind[j] : mm_d4_ukind;
+}
+
 void mm_data_init(const MMDataItem *tbl, int n)
 {
-    mm_dtbl = tbl; mm_d4_kind = NULL;
+    mm_dtbl = tbl; mm_d4_on = 0; mm_d4_kind = NULL;
     mm_dn = n; mm_dptr = 0; mm_dsp = 0;
 }
 
+/* The general form.  `k` may be NULL, and then every item is `ukind`;
+   f, i and s may each be NULL when no item of that kind exists. */
+#ifdef MM_HOSTED
+void mm_data_init5(const int *k, int ukind, const MMFLOAT *f,
+                   const MMINTEGER *i, unsigned long s, int n)
+#else
+void mm_data_init5(const int *k, int ukind, const MMFLOAT *f,
+                   const MMINTEGER *i, const char **s, int n)
+#endif
+{
+    mm_d4_on = 1;
+    mm_d4_kind = k; mm_d4_ukind = ukind;
+    mm_d4_f = f; mm_d4_i = i; mm_d4_s = s;
+    mm_dtbl = NULL;
+    mm_dn = n; mm_dptr = 0; mm_dsp = 0;
+}
+
+/* The four-column form every program built before the columns became
+   optional still calls.  A kind array is always present there. */
 #ifdef MM_HOSTED
 void mm_data_init4(const int *k, const MMFLOAT *f, const MMINTEGER *i,
                    unsigned long s, int n)
@@ -2069,9 +2246,7 @@ void mm_data_init4(const int *k, const MMFLOAT *f, const MMINTEGER *i,
                    const char **s, int n)
 #endif
 {
-    mm_d4_kind = k; mm_d4_f = f; mm_d4_i = i; mm_d4_s = s;
-    mm_dtbl = NULL;
-    mm_dn = n; mm_dptr = 0; mm_dsp = 0;
+    mm_data_init5(k, MM_D_FLT, f, i, s, n);
 }
 
 void mm_restore(int index)
@@ -2089,30 +2264,30 @@ static int mm_next_idx(void)
 MMFLOAT mm_read_f(void)
 {
     int j = mm_next_idx();
-    int kind = mm_d4_kind ? mm_d4_kind[j] : mm_dtbl[j].kind;
+    int kind = mm_d4_on ? mm_d4_k(j) : mm_dtbl[j].kind;
     if (kind == MM_D_STR)
-        return mm_val(mm_d4_kind ? mm_d4_str(j) : mm_dtbl[j].s);
+        return mm_val(mm_d4_on ? mm_d4_str(j) : mm_dtbl[j].s);
     if (kind == MM_D_INT)
-        return (MMFLOAT)(mm_d4_kind ? mm_d4_i[j] : mm_dtbl[j].i);
-    return mm_d4_kind ? mm_d4_f[j] : mm_dtbl[j].f;
+        return (MMFLOAT)(mm_d4_on ? mm_d4_i[j] : mm_dtbl[j].i);
+    return mm_d4_on ? mm_d4_f[j] : mm_dtbl[j].f;
 }
 
 MMINTEGER mm_read_i(void)
 {
     int j = mm_next_idx();
-    int kind = mm_d4_kind ? mm_d4_kind[j] : mm_dtbl[j].kind;
+    int kind = mm_d4_on ? mm_d4_k(j) : mm_dtbl[j].kind;
     if (kind == MM_D_STR)
-        return (MMINTEGER)mm_val(mm_d4_kind ? mm_d4_str(j) : mm_dtbl[j].s);
+        return (MMINTEGER)mm_val(mm_d4_on ? mm_d4_str(j) : mm_dtbl[j].s);
     if (kind == MM_D_FLT)
-        return mm_toint(mm_d4_kind ? mm_d4_f[j] : mm_dtbl[j].f);
-    return mm_d4_kind ? mm_d4_i[j] : mm_dtbl[j].i;
+        return mm_toint(mm_d4_on ? mm_d4_f[j] : mm_dtbl[j].f);
+    return mm_d4_on ? mm_d4_i[j] : mm_dtbl[j].i;
 }
 
 char *mm_read_s(void)
 {
     int j = mm_next_idx();
     char *t = mm_tmp();
-    mm_sset(t, mm_d4_kind ? mm_d4_str(j) : mm_dtbl[j].s);
+    mm_sset(t, mm_d4_on ? mm_d4_str(j) : mm_dtbl[j].s);
     return t;
 }
 
@@ -2235,6 +2410,80 @@ int mm_arr_count(const MMINTEGER *b)
     for (k = 1; k <= rank; k++) n *= (int)(b[k] + 1);
     return n;
 }
+
+/*
+ * DIM a(n) and REDIM [PRESERVE] a(n), where n is worked out while the
+ * program runs.
+ *
+ * An array whose bounds are not known when the program is translated
+ * cannot be a C array - its type would have to carry them - so it
+ * becomes exactly what an array PARAMETER already is here: a flat
+ * pointer plus a bounds table, b[0] the rank and b[1..rank] the upper
+ * bounds.  Everything that indexes, counts or BOUNDs an array
+ * parameter then works on it unchanged; this function is the only new
+ * machinery, and it is the allocation.
+ *
+ * The elements go on the heap, which on this machine is PSRAM - the
+ * same place every other array already lives, so nothing about the
+ * memory picture changes.
+ *
+ * PRESERVE is MMBasic's (cmd_redim, Commands.c:5458): only the LAST
+ * subscript may change, and min(old, new) elements are carried over.
+ * The restriction is not arbitrary - the elements are in row-major
+ * order, so growing any earlier subscript moves every element that
+ * follows it and a straight copy would scramble the array.
+ *
+ * THE TRANSLATOR ALLOCATES, NOT THIS.  Under bcrun the runtime is
+ * native code and the program's memory is the VM's, so a pointer this
+ * function malloc'd would be a machine address stored in a cell the VM
+ * sizes and owns.  mm_heap and mm_lfree are wrapped to the VM's own
+ * allocator for exactly that reason (bcrun_mm.c w_heap), and only a
+ * call made BY the program reaches a wrapper - so the allocation and
+ * the free are emitted around this, and what is left here is the
+ * arithmetic and the copy, which are safe anywhere.
+ */
+unsigned long mm_arr_bytes(const MMINTEGER *nb, unsigned long elsize)
+{
+    int rank = (int)nb[0], k;
+
+    if (rank < 1 || rank > MM_MAXDIM)
+        MM_RAISEV("too many dimensions", 0);
+    for (k = 1; k <= rank; k++)
+        if (nb[k] < 0)
+            MM_RAISEV("array bound cannot be negative", 0);
+    return (unsigned long)mm_arr_count(nb) * elsize;
+}
+
+/*
+ * Put the new block in place and hand the old one back to be freed.
+ * Returns the old pointer, or NULL if there was none.
+ */
+void *mm_arr_swap(void *old, MMINTEGER *b, const MMINTEGER *nb,
+                  void *newblock, unsigned long elsize, int preserve)
+{
+    int rank = (int)nb[0];
+    int oldn, newn, k;
+
+    if (newblock == NULL)
+        return old;                     /* the allocation already raised */
+    if (preserve && old != NULL) {
+        if ((int)b[0] != rank)
+            MM_RAISEV("Only the last array index can be changed", old);
+        for (k = 1; k < rank; k++)
+            if (b[k] != nb[k])
+                MM_RAISEV("Only the last array index can be changed",
+                          old);
+        newn = mm_arr_count(nb);
+        oldn = mm_arr_count(b);
+        if (oldn > newn)
+            oldn = newn;
+        memcpy(newblock, old, (size_t)oldn * elsize);
+    }
+    for (k = 0; k <= rank; k++)
+        b[k] = nb[k];
+    return old;
+}
+
 
 void mm_arr_set_i(MMINTEGER *a, int n, MMINTEGER v)
 { int i; for (i = 0; i < n; i++) a[i] = v; }
@@ -3048,23 +3297,29 @@ void mm_spi_close(void)
         (void)ioctl(fd, MM_PICOIOC_SPICLOSE, (void *)0);   /* bus 0 */
 }
 
-MMINTEGER mm_i2c_xfer(int addr, int read, int n, unsigned char *buf,
-                      int hold)
+MMINTEGER mm_i2c_msg(int bus, int addr, int read, int n,
+                     unsigned char *buf, int hold)
 {
     struct { unsigned char bus, addr, len, flags; unsigned char *data; } m;
     int fd = mm_gfx_open();
 
     if (fd < 0)
-        return -1;
-    m.bus = 1;
+        return mm_i2c_setstat(-1);
+    m.bus = (unsigned char)bus;
     m.addr = (unsigned char)(((addr & 0x7F) << 1) | (read ? 1 : 0));
     m.len = (unsigned char)n;
     m.flags = (unsigned char)(hold ? MM_I2CF_HOLD : 0);
     m.data = buf;
     errno = 0;
     if (ioctl(fd, MM_PICOIOC_I2CXFER, &m) < 0)
-        return errno ? -errno : -1;
-    return 0;
+        return mm_i2c_setstat(errno ? -errno : -1);
+    return mm_i2c_setstat(0);
+}
+
+MMINTEGER mm_i2c_xfer(int addr, int read, int n, unsigned char *buf,
+                      int hold)
+{
+    return mm_i2c_msg(1, addr, read, n, buf, hold);
 }
 
 #else
@@ -3083,11 +3338,17 @@ MMINTEGER mm_i2c_open(int sda, int scl, int khz, int timeout_ms)
     return -19;                         /* -ENODEV: no such controller */
 }
 void mm_i2c_close(void) {}
+MMINTEGER mm_i2c_msg(int bus, int addr, int read, int n,
+                     unsigned char *buf, int hold)
+{
+    (void)bus; (void)addr; (void)read; (void)n; (void)buf; (void)hold;
+    return mm_i2c_setstat(-19);         /* -ENODEV: nothing answered */
+}
+
 MMINTEGER mm_i2c_xfer(int addr, int read, int n, unsigned char *buf,
                       int hold)
 {
-    (void)addr; (void)read; (void)n; (void)buf; (void)hold;
-    return -19;
+    return mm_i2c_msg(1, addr, read, n, buf, hold);
 }
 
 /* Nor an SPI controller a program may have: SPI1 is the SD card even on
@@ -3151,19 +3412,98 @@ MMFLOAT mm_ver(void) { return MM_RELEASE; }
 
 static char mm_devbuf[MM_STRSZ];
 
-/* "Fuzix on PC2" / "Fuzix on PC3" - what this machine is, not what it is
-   compatible with.  A program testing for "PicoMite" is asking whether
-   it is talking to the interpreter, and it is not. */
+/* MM.DEVICE$ is "Fuzix" - the firmware, and nothing else.
+ *
+ * MMBasic answers with the build ("PicoMiteVGA", "PicoMiteHDMIUSB"), and
+ * a program's whole use of it is to pick a path: Lazer-Cycle asks
+ * InStr(Mm.Device$, "PicoMite"), Pico-Frog asks for "VGA" or "HDMI".
+ * Every one of those questions has the answer "no" here, and one word
+ * says so cleanly enough to test with a plain comparison.
+ *
+ * WHICH machine it is has moved to MM.INFO(PLATFORM), which is where
+ * MMBasic keeps it too - DEVICE is the firmware, PLATFORM is the board.
+ * So nothing is lost by the shortening; it is only told apart properly.
+ */
 static char *mm_dev_name(int n)
 {
-    char t[16];
+    char t[8];
 
-    t[0] = 'F'; t[1] = 'u'; t[2] = 'z'; t[3] = 'i'; t[4] = 'x';
-    t[5] = ' '; t[6] = 'o'; t[7] = 'n'; t[8] = ' ';
-    t[9] = 'P'; t[10] = 'C'; t[11] = (char)('0' + (n < 2 || n > 9 ? 3 : n));
-    t[12] = 0;
+    (void)n;
+    t[0] = 'F'; t[1] = 'u'; t[2] = 'z'; t[3] = 'i'; t[4] = 'x'; t[5] = 0;
     mm_ssetc(mm_devbuf, t);
     return mm_devbuf;
+}
+
+/* MM.INFO(PLATFORM) - "PC2" or "PC3", the number the boot banner prints
+   and the one PICOIOC_BOARD answers with. */
+char *mm_platform(void)
+{
+    char t[8];
+    int n = mm_board_no();
+
+    t[0] = 'P'; t[1] = 'C'; t[2] = (char)('0' + (n < 2 || n > 9 ? 3 : n));
+    t[3] = 0;
+    mm_ssetc(mm_devbuf, t);
+    return mm_devbuf;
+}
+
+/* MM.INFO(PATH) and MM.INFO(CURRENT).
+ *
+ * MMBasic reads these out of the program it loaded: CURRENT is the file
+ * name, PATH is that with everything after the last '/' cut off, and
+ * both are "NONE" when it does not know.  A translated program is an
+ * executable the shell ran, so argv[0] is the same fact - which is why
+ * mm_argv_bind now keeps it, and why the generated main takes arguments
+ * whenever a program asks for either of these as well as for
+ * MM.CMDLINE$.
+ *
+ * The trailing '/' on PATH is MMBasic's and is what makes the usual
+ * shape work: LOAD IMAGE MM.INFO(PATH) + "sprites.bmp".
+ */
+static char mm_argv0[MM_STRLEN + 1];
+static char mm_pathbuf[MM_STRSZ];
+
+char *mm_current(void)
+{
+    mm_ssetc(mm_pathbuf, mm_argv0[0] ? mm_argv0 : "NONE");
+    return mm_pathbuf;
+}
+
+char *mm_path(void)
+{
+    char t[MM_STRLEN + 1];
+    int i, cut = -1;
+
+    if (!mm_argv0[0]) {
+        mm_ssetc(mm_pathbuf, "NONE");
+        return mm_pathbuf;
+    }
+    for (i = 0; mm_argv0[i]; i++) {
+        t[i] = mm_argv0[i];
+        if (mm_argv0[i] == '/')
+            cut = i;
+    }
+    /* No directory in the name at all - the shell found it on PATH or in
+       the current directory, and "./" is the honest answer as well as
+       the one that concatenates correctly. */
+    if (cut < 0) {
+        mm_ssetc(mm_pathbuf, "./");
+        return mm_pathbuf;
+    }
+    t[cut + 1] = 0;
+    mm_ssetc(mm_pathbuf, t);
+    return mm_pathbuf;
+}
+
+/* MM.INFO(DRIVE) - MMBasic's "A:" (internal flash) or "B:" (the SD
+   card).  This machine has one filesystem and no drive letters, so the
+   answer is always "A:".  It is not a pretence: the programs that ask
+   save the drive, do a file operation and put it back, and a constant
+   answer makes that round trip correct rather than merely harmless. */
+char *mm_drive(void)
+{
+    mm_ssetc(mm_pathbuf, "A:");
+    return mm_pathbuf;
 }
 
 /* MM.CMDLINE$: the arguments the program was started with, space
@@ -3177,6 +3517,14 @@ void mm_argv_bind(int argc, char **argv)
     char t[MM_STRLEN + 1];
     int i, n = 0;
 
+    /* argv[0] separately, for MM.INFO(PATH) and MM.INFO(CURRENT) - it is
+       not part of the command line MMBasic reports. */
+    mm_argv0[0] = 0;
+    if (argc > 0 && argv[0] != NULL) {
+        for (i = 0; argv[0][i] && i < MM_STRLEN; i++)
+            mm_argv0[i] = argv[0][i];
+        mm_argv0[i] = 0;
+    }
     for (i = 1; i < argc && argv[i] != NULL; i++) {
         int k = 0;
         if (n && n < MM_STRLEN)
@@ -4573,6 +4921,17 @@ void mm_font(MMINTEGER font, MMINTEGER scale)
     }
 }
 
+/* MM.FONTWIDTH / MM.FONTHEIGHT, and the MM.INFO() spellings of both.
+ *
+ * MMBasic multiplies the cell by the scale - FontTable[gui_font>>4][1] *
+ * (gui_font & 0x0F) - so these are the size of a character as DRAWN,
+ * not the size of the glyph.  That is what makes the usual layout line
+ * work: Inc y%, Mm.Info(FontHeight) + 1.  mm_gcw/mm_gch already hold
+ * the cell, cached for the cursor code.
+ */
+MMINTEGER mm_fontwidth(void)  { return (MMINTEGER)mm_gcw * mm_gscale; }
+MMINTEGER mm_fontheight(void) { return (MMINTEGER)mm_gch * mm_gscale; }
+
 void mm_font_cur(MMINTEGER *font, MMINTEGER *scale)
 {
     /* The 2026-08-15 ladder run stopped the machine BETWEEN this
@@ -5054,15 +5413,71 @@ MMINTEGER mm_fb_geom(void)
 
 /* Which machine, from the kernel's own detection (PICOIOC_BOARD returns
    the number the boot banner prints).  If it cannot be asked, say 3:
-   that is what the port is for, and a wrong name beats no answer. */
-char *mm_device(void)
+   that is what the port is for, and a wrong name beats no answer.
+
+   MM.DEVICE$ no longer varies with this - it is "Fuzix" on both - but
+   MM.INFO(PLATFORM) does, and that is the one a program should ask. */
+int mm_board_no(void)
 {
     mm_pix_drain();             /* as above: a compare is cheaper than a rule with holes */
     int n = 3;
 
     if (mm_gfx_open() >= 0)
         (void)ioctl(mm_gfx_fd, MM_PICOIOC_BOARD, &n);
-    return mm_dev_name(n);
+    return n;
+}
+
+char *mm_device(void) { return mm_dev_name(0); }
+
+/*
+ * KEYDOWN(n) - which keys are HELD.
+ *
+ * MMBasic's fun_keydown, argument for argument: 0 the count, 1..6 the
+ * codes with 1 the most recent, 7 the modifier bitmap, 8 the locks.
+ * The kernel keeps the six-slot array from the HID boot report, which
+ * IS MMBasic's six, so nothing here reconstructs anything.
+ *
+ * AND IT DRAINS THE CONSOLE FIRST, as MMBasic does ("clear anything in
+ * the input buffer").  That is not tidiness.  A held key still sends
+ * characters, and a game that reads only KEYDOWN would pile up minutes
+ * of them behind the tty - to be delivered to the shell the moment it
+ * exits.  Draining needs the terminal in raw mode for the reason INKEY$
+ * documents at length, so the hold is taken here too, and released at
+ * exit by the same path.
+ *
+ * A program that mixes KEYDOWN and INKEY$ therefore loses the keystroke
+ * to whichever asks first.  That is MMBasic's behaviour and the manual
+ * says so; the two are alternatives, not layers.
+ */
+#define MM_PICOIOC_KEYDOWN 0x003D       /* pico_ioctl.h is the authority */
+
+struct mm_kbd_down {
+    unsigned char count, mods, locks, pad;
+    unsigned char key[6];
+    unsigned char pad2[2];
+};
+
+MMINTEGER mm_keydown(MMINTEGER n)
+{
+    struct mm_kbd_down d;
+
+    if (n < 0 || n > 8)
+        MM_RAISEV("KEYDOWN takes 0 to 8", 0);
+    if (mm_raw_hold())
+        while (mm_rd1() >= 0)
+            ;
+    d.count = d.mods = d.locks = 0;
+    d.key[0] = d.key[1] = d.key[2] = 0;
+    d.key[3] = d.key[4] = d.key[5] = 0;
+    if (mm_gfx_open() < 0 || ioctl(mm_gfx_fd, MM_PICOIOC_KEYDOWN, &d) < 0)
+        return 0;               /* no keyboard is "nothing held", not an error */
+    if (n == 0)
+        return d.count;
+    if (n == 7)
+        return d.mods;
+    if (n == 8)
+        return d.locks;
+    return d.key[n - 1];
 }
 
 /*
@@ -5503,10 +5918,43 @@ MMINTEGER mm_fontdef(MMINTEGER font, MMINTEGER addr, MMINTEGER bytes)
     return -1;
 }
 
+/* Nothing is drawn here, but WHAT WOULD BE DRAWN still has a size, and a
+ * program laying text out asks for it.  So FONT is tracked after all -
+ * for the same reason MODE is (mm_hres just below): the point of the
+ * host build is that a program lays itself out identically under the
+ * gates, and it cannot if MM.FONTHEIGHT is 12 on the board and 0 here.
+ *
+ * The nine cells are the built-in fonts, in MMBasic's order, from the
+ * kernel's own table (platform-rpipico/fonts.c) - so these are the same
+ * numbers mm_fontinfo would return over the ioctl.  Font 6 really is
+ * digits only at 32x50.  A font outside 1..9 is a program-defined one,
+ * whose cell this build has no way to know; it keeps the current one,
+ * which is what the board does when mm_fontinfo fails.
+ */
+static const unsigned char mm_hfont_cell[9][2] = {
+    { 8, 12 }, { 12, 20 }, { 16, 24 }, { 10, 16 }, { 24, 32 },
+    { 32, 50 }, { 6, 8 }, { 4, 6 }, { 8, 10 }
+};
+static int mm_hfont = 1, mm_hscale = 1;
+static int mm_hcw = 8, mm_hch = 12;
+
 void mm_font(MMINTEGER font, MMINTEGER scale)
 {
-    (void)font; (void)scale;
+    if (scale < 1)
+        scale = 1;
+    if (scale > 15)
+        scale = 15;
+    if (font >= 1 && font <= 9) {
+        mm_hfont = (int)font;
+        mm_hcw = mm_hfont_cell[font - 1][0];
+        mm_hch = mm_hfont_cell[font - 1][1];
+    }
+    if (font >= 1)
+        mm_hscale = (int)scale;
 }
+
+MMINTEGER mm_fontwidth(void)  { return (MMINTEGER)mm_hcw * mm_hscale; }
+MMINTEGER mm_fontheight(void) { return (MMINTEGER)mm_hch * mm_hscale; }
 
 /* No display to keep off, so nothing to ask the kernel for: stdout is
  * the only console there is here and it is already the serial one. */
@@ -5515,13 +5963,14 @@ static void mm_con_mirror(int on)
     (void)on;
 }
 
-/* No display, so FONT selected nothing and the caller's defaults stand. */
+/* No display, so nothing was DRAWN - but FONT was still selected, and
+ * a caller asking which one must be told the same thing on both. */
 void mm_font_cur(MMINTEGER *font, MMINTEGER *scale)
 {
     if (font)
-        *font = 1;
+        *font = mm_hfont;
     if (scale)
-        *scale = 1;
+        *scale = mm_hscale;
 }
 
 /* No screen, so no palette to remap - and silence rather than an error,
@@ -5572,7 +6021,21 @@ MMINTEGER mm_fb_geom(void) { return -1; }
 
 /* No kernel to ask on the host, and the gates compare output: say PC3,
    which is what the board build says when the ioctl is missing too. */
-char *mm_device(void) { return mm_dev_name(3); }
+int mm_board_no(void) { return 3; }
+
+char *mm_device(void) { return mm_dev_name(0); }
+
+/* No USB keyboard here, so nothing is held.  Zero rather than an error,
+   for the reason every other absent device gives one: a translated
+   program that polls KEYDOWN in its loop has to RUN under the gates,
+   and "no key is down" is a true answer on a machine with no keyboard.
+   It is also a deterministic one, which is what a gate needs. */
+MMINTEGER mm_keydown(MMINTEGER n)
+{
+    if (n < 0 || n > 8)
+        MM_RAISEV("KEYDOWN takes 0 to 8", 0);
+    return 0;
+}
 
 void mm_plot(const short *xy, MMINTEGER n, MMINTEGER rgb)
 {

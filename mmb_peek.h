@@ -106,4 +106,54 @@ MMG_FN MMFLOAT mmpk_float(MMINTEGER addr)
 	return *MMPK_PTR(MMFLOAT, addr);
 }
 
+/*
+ *	POKE BYTE addr, value and its wider relatives - writing memory by
+ *	address, which on this machine means writing memory.
+ *
+ *	MMBasic's cmd_poke (MM_Misc.c:8236), same option names, same
+ *	widths, and the same absence of a range check: its POKERANGE test
+ *	is commented out in the firmware, so a wrong address faults here
+ *	exactly as it does there.  Everything the PEEK comment above says
+ *	about there being no MMU applies with more force - a stray read
+ *	is a wrong answer, a stray write is a corrupted machine.
+ *
+ *	The alignment rule is the same and for the same reason: a byte
+ *	needs none, the rest do, and an unaligned 64-bit store on a
+ *	Cortex-M33 is a HardFault rather than a slow store.
+ */
+#define MMPK_WPTR(t, a)	((t *)(uintptr_t)(uint64_t)(a))
+
+MMG_FN void mmpk_poke_byte(MMINTEGER addr, MMINTEGER v)
+{
+	*MMPK_WPTR(unsigned char, addr) = (unsigned char)v;
+}
+
+MMG_FN void mmpk_poke_short(MMINTEGER addr, MMINTEGER v)
+{
+	if (!mmpk_aligned(addr, 2, "Address not divisible by 2"))
+		return;
+	*MMPK_WPTR(short, addr) = (short)v;
+}
+
+MMG_FN void mmpk_poke_word(MMINTEGER addr, MMINTEGER v)
+{
+	if (!mmpk_aligned(addr, 4, "Address not divisible by 4"))
+		return;
+	*MMPK_WPTR(unsigned int, addr) = (unsigned int)v;
+}
+
+MMG_FN void mmpk_poke_integer(MMINTEGER addr, MMINTEGER v)
+{
+	if (!mmpk_aligned(addr, 8, "Address not divisible by 8"))
+		return;
+	*MMPK_WPTR(MMINTEGER, addr) = v;
+}
+
+MMG_FN void mmpk_poke_float(MMINTEGER addr, MMFLOAT v)
+{
+	if (!mmpk_aligned(addr, 8, "Address not divisible by 8"))
+		return;
+	*MMPK_WPTR(MMFLOAT, addr) = v;
+}
+
 #endif /* MMB_PEEK_H */

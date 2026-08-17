@@ -27,6 +27,22 @@
  *
  *	The transfers go through /dev/i2c's ordinary I2C_MSG with bus 1;
  *	only the OPEN is platform-specific.
+ *
+ *	NO TRANSFER RAISES, on either bus.  MMBasic's i2c_masterCommand
+ *	and i2c2_masterCommand set mmI2Cvalue and return - there is no
+ *	error() on any path through them - and the program reads MM.I2C:
+ *	0 it worked, 1 nothing answered, 2 it started and stopped.
+ *
+ *	This USED to raise, which was louder than MMBasic rather than
+ *	quieter, and still wrong: a program written against the
+ *	interpreter carries on past a device that did not answer, and
+ *	here it stopped.  A bus scan cannot be written at all against a
+ *	version that raises.
+ *
+ *	OPEN still raises, and that is the line: bad pins or a bad speed
+ *	is a mistake in the program, where a device that did not answer
+ *	is a fact about the world.  MMBasic draws it in the same place
+ *	(i2c2Enable really does error("Pin not set for I2C2")).
  */
 
 #include "mmb_runtime.h"
@@ -67,6 +83,10 @@
  *	errno.h in the on-board include set, so the numbers are written
  *	out - Library/include/errno.h's, which are Kernel/include/kernel.h's
  *	too, and those two have to agree anyway. */
+/*	EIO, EFAULT and ETIMEDOUT are what a TRANSFER returns, and nothing
+ *	looks at them here any more - the runtime turns them into MM.I2C.
+ *	Kept because they name the numbers the kernel sends back and the
+ *	next reader of this file will want them. */
 #define MMI2C_EIO	5
 #define MMI2C_EFAULT	14
 #define MMI2C_EBUSY	16
@@ -74,39 +94,6 @@
 #define MMI2C_EINVAL	22
 #define MMI2C_ETIMEDOUT	48
 
-/*	The same for a transfer.  "no answer" is the one a wiring fault
- *	gives and it is by far the most common, so it says that rather
- *	than "failed" - a program checking MM.ERRNO sees the same number
- *	either way, but the person reading the screen does not. */
-MMG_FN void mmi2c_failed(MMINTEGER r, int read)
-{
-	switch ((int)-r) {
-	case MMI2C_EIO:
-		mm_error(read ? "I2C2 read: no answer from that address"
-			      : "I2C2 write: no answer from that address");
-		break;
-	case MMI2C_ETIMEDOUT:
-		/*	A different fault from "no answer", and worth its own
-		 *	sentence: something IS there and stopped part way, or
-		 *	is holding the bus down.  MMBasic separates these two
-		 *	as well (mmI2Cvalue 1 and 2). */
-		mm_error(read ? "I2C2 read: the device stopped answering"
-			      : "I2C2 write: the device stopped answering");
-		break;
-	case MMI2C_ENODEV:
-		mm_error("I2C2 is not open");
-		break;
-	case MMI2C_EFAULT:
-		mm_error("I2C2 transfer: the kernel refused the buffer");
-		break;
-	case MMI2C_EINVAL:
-		mm_error("I2C2 transfer: bad address or count");
-		break;
-	default:
-		mm_error(read ? "I2C2 read failed" : "I2C2 write failed");
-		break;
-	}
-}
 
 MMG_FN void mmi2c_open(MMINTEGER sda, MMINTEGER scl, MMINTEGER speed,
 		       MMINTEGER timeout)
@@ -157,7 +144,7 @@ static unsigned char mmi2c_bytes[MMI2C_MAXLEN];
 MMG_FN void mmi2c_write(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 			const unsigned int *buf)
 {
-	MMINTEGER r, i;
+	MMINTEGER i;
 
 	/*	MMBasic allows 0-3 on a WRITE and only 0-1 on a READ; bit 0
 	 *	is the hold in both.  Same split here. */
@@ -171,10 +158,8 @@ MMG_FN void mmi2c_write(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 	}
 	for (i = 0; i < n; i++)
 		mmi2c_bytes[i] = (unsigned char)buf[i];
-	r = mm_i2c_xfer((int)addr, 0, (int)n, mmi2c_bytes,
-			(int)(opt & MMI2C_HOLD));
-	if (r)
-		mmi2c_failed(r, 0);
+	(void)mm_i2c_msg(MMI2C_BUS, (int)addr, 0, (int)n, mmi2c_bytes,
+			 (int)(opt & MMI2C_HOLD));
 }
 
 /*	Bytes straight from a string, with no value buffer in the way -
@@ -190,7 +175,6 @@ MMG_FN void mmi2c_write_bytes(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 	 *	through the caller's pointer.  A 400-byte read into a
 	 *	24-byte long string overwrote stdio's buffer and the
 	 *	program's own output came out as NULs. */
-	MMINTEGER r;
 
 	if (b == 0)
 		return;
@@ -202,10 +186,8 @@ MMG_FN void mmi2c_write_bytes(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 		mm_error("I2C count out of range");
 		return;
 	}
-	r = mm_i2c_xfer((int)addr, 0, (int)n, (unsigned char *)b,
-			(int)(opt & MMI2C_HOLD));
-	if (r)
-		mmi2c_failed(r, 0);
+	(void)mm_i2c_msg(MMI2C_BUS, (int)addr, 0, (int)n,
+			 (unsigned char *)b, (int)(opt & MMI2C_HOLD));
 }
 
 /*	Straight into a caller's bytes.  Still capped at MMI2C_MAXLEN -
@@ -223,7 +205,6 @@ MMG_FN void mmi2c_read_bytes(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 	 *	through the caller's pointer.  A 400-byte read into a
 	 *	24-byte long string overwrote stdio's buffer and the
 	 *	program's own output came out as NULs. */
-	MMINTEGER r;
 	int i;
 
 	if (b == 0)
@@ -238,15 +219,13 @@ MMG_FN void mmi2c_read_bytes(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 	}
 	for (i = 0; i < (int)n; i++)
 		b[i] = 0;
-	r = mm_i2c_xfer((int)addr, 1, (int)n, b, (int)(opt & MMI2C_HOLD));
-	if (r)
-		mmi2c_failed(r, 1);
+	(void)mm_i2c_msg(MMI2C_BUS, (int)addr, 1, (int)n, b,
+			 (int)(opt & MMI2C_HOLD));
 }
 
 MMG_FN void mmi2c_read(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 		       unsigned int *buf)
 {
-	MMINTEGER r;
 	int i;
 
 	if (opt < 0 || opt > 1) {
@@ -265,14 +244,143 @@ MMG_FN void mmi2c_read(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
 	 *	exactly like a device answering. */
 	for (i = 0; i < (int)n; i++)
 		mmi2c_bytes[i] = 0;
-	r = mm_i2c_xfer((int)addr, 1, (int)n, mmi2c_bytes,
-			(int)(opt & MMI2C_HOLD));
-	if (r) {
-		mmi2c_failed(r, 1);
+	(void)mm_i2c_msg(MMI2C_BUS, (int)addr, 1, (int)n, mmi2c_bytes,
+			 (int)(opt & MMI2C_HOLD));
+	/*	Copied out even when it failed: the buffer was zeroed
+	 *	first, so the destination is DEFINED either way.  Nothing
+	 *	raises here now, so a program that did not look at MM.I2C
+	 *	would otherwise carry whatever was in its array before. */
+	for (i = 0; i < (int)n; i++)
+		buf[i] = mmi2c_bytes[i];
+}
+
+/*
+ *	I2C0 - the FIXED bus: GP20/GP21, the QWIIC socket and the DS3231
+ *	together.
+ *
+ *	    I2C WRITE addr, option, count, d1 [, d2 ...]
+ *	    I2C READ  addr, option, count, var
+ *	    I2C CHECK addr
+ *
+ *	NO SETPIN, NO OPEN, NO CLOSE, and that is not a simplification -
+ *	the pins are the board's and the controller is already running
+ *	for the clock.  MMBasic draws the same line for the same reason
+ *	(I2C.c cmd_i2c has no pin test where cmd_i2c2 errors "Pin not set
+ *	for I2C2"), and the kernel keeps it behind /dev/i2c so a program
+ *	and the RTC poll in interrupt context cannot collide.
+ *
+ *	AND NOTHING HERE RAISES.  MMBasic's I2C transfers set mmI2Cvalue
+ *	- 0 it worked, 1 nothing answered, 2 it started and stopped - and
+ *	return; the program reads MM.I2C.  That is the whole point of
+ *	I2C CHECK, and it is what a scan loop over 128 addresses needs.
+ *
+ *	This is a DIVERGENCE from our own I2C2, which raises.  Both
+ *	cannot be right and MMBasic is the reference, so the fixed bus
+ *	follows it; I2C2's behaviour is left alone here rather than
+ *	changed underneath programs that already rely on it.
+ */
+#define MMI2C0_BUS	0
+
+MMG_FN void mmi2c0_write(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
+			 const unsigned int *buf)
+{
+	MMINTEGER i;
+
+	if (opt < 0 || opt > 3) {
+		mm_error("I2C option must be 0 to 3");
+		return;
+	}
+	if (n < 1 || n > MMI2C_MAXLEN) {
+		mm_error("I2C count out of range");
+		return;
+	}
+	for (i = 0; i < n; i++)
+		mmi2c_bytes[i] = (unsigned char)buf[i];
+	(void)mm_i2c_msg(MMI2C0_BUS, (int)addr, 0, (int)n, mmi2c_bytes,
+			 (int)(opt & MMI2C_HOLD));
+}
+
+MMG_FN void mmi2c0_write_bytes(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
+			       const unsigned char *b)
+{
+	if (b == 0)
+		return;
+	if (opt < 0 || opt > 3) {
+		mm_error("I2C option must be 0 to 3");
+		return;
+	}
+	if (n < 1 || n > MMI2C_MAXLEN) {
+		mm_error("I2C count out of range");
+		return;
+	}
+	(void)mm_i2c_msg(MMI2C0_BUS, (int)addr, 0, (int)n,
+			 (unsigned char *)b, (int)(opt & MMI2C_HOLD));
+}
+
+MMG_FN void mmi2c0_read_bytes(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
+			      unsigned char *b)
+{
+	int i;
+
+	if (b == 0)
+		return;
+	if (opt < 0 || opt > 1) {
+		mm_error("I2C option must be 0 or 1");
+		return;
+	}
+	if (n < 1 || n > MMI2C_MAXLEN) {
+		mm_error("I2C count out of range");
+		return;
+	}
+	/*	Zeroed first, for the reason the I2C2 read gives at
+	 *	length: nothing raises here, so a failed read that left
+	 *	the previous transfer's bytes in place would look exactly
+	 *	like a device answering. */
+	for (i = 0; i < (int)n; i++)
+		b[i] = 0;
+	(void)mm_i2c_msg(MMI2C0_BUS, (int)addr, 1, (int)n, b,
+			 (int)(opt & MMI2C_HOLD));
+}
+
+MMG_FN void mmi2c0_read(MMINTEGER addr, MMINTEGER opt, MMINTEGER n,
+			unsigned int *buf)
+{
+	int i;
+
+	if (opt < 0 || opt > 1) {
+		mm_error("I2C option must be 0 or 1");
+		return;
+	}
+	if (n < 1 || n > MMI2C_MAXLEN) {
+		mm_error("I2C count out of range");
 		return;
 	}
 	for (i = 0; i < (int)n; i++)
+		mmi2c_bytes[i] = 0;
+	(void)mm_i2c_msg(MMI2C0_BUS, (int)addr, 1, (int)n, mmi2c_bytes,
+			 (int)(opt & MMI2C_HOLD));
+	for (i = 0; i < (int)n; i++)
 		buf[i] = mmi2c_bytes[i];
+}
+
+/*
+ *	I2C CHECK addr - is anything at that address?
+ *
+ *	MMBasic's i2cCheck (I2C.c:1534) reads ONE byte and records the
+ *	result in mmI2Cvalue; it neither returns anything nor raises, so
+ *	the answer is read with MM.I2C afterwards.  A one-byte read is
+ *	also the only probe that works on a device with no safe register
+ *	to write.
+ */
+MMG_FN void mmi2c0_check(MMINTEGER addr)
+{
+	unsigned char d = 0;
+
+	if (addr < 0 || addr > 0x7F) {
+		mm_error("Invalid I2C address");
+		return;
+	}
+	(void)mm_i2c_msg(MMI2C0_BUS, (int)addr, 1, 1, &d, 0);
 }
 
 #endif /* MMB_I2C_H */
