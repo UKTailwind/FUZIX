@@ -5,6 +5,19 @@
 
 #include "mmbc.h"
 
+/* Are the ON ERROR checked forms live for the statement being emitted?
+ * IGNORE (or an unknowable SKIP count) arms the whole program; a
+ * literal SKIP n arms the ON ERROR statement and the next n.  MMBasic's
+ * own counter is dynamic - it follows execution into a called SUB - so
+ * a compiled ARITHMETIC error deeper in a callee than the routine-entry
+ * decrements reach is not trapped where the interpreter would have
+ * counted its way to it; a runtime command error is trapped anywhere,
+ * because the runtime consults the armed count wherever it is raised. */
+int checks_on(void)
+{
+    return cv.onerror_global || cv.err_window > 0;
+}
+
 /* Python str.strip() - scratch copy with surrounding whitespace gone. */
 static char *stripped(const char *s)
 {
@@ -34,6 +47,8 @@ void walk(int mode)
     cv.gosub_n = 0;
     cv.cur = NULL;
     cv.indent = 1;
+    cv.err_window = 0;
+    cv.err_window_pending = -1;
     cv.nblocks = 0;
     cv.out = &cv.out_main;
     cv.opt_default = TY_F;
@@ -164,6 +179,14 @@ void statement(void)
         && !failed)
         out_insert(out_at_entry, where,
                    pstr(sfmt("%*smm_release(__mark);", ind * 4, "")));
+    /* A literal ON ERROR SKIP n arms its window here: the ON ERROR
+     * statement itself is covered (n+1 with the runtime's own +1), so
+     * ITS guard performs the decrement the interpreter does at the end
+     * of the ON ERROR line, and the counter reaches the next statement
+     * intact. */
+    if (cv.err_window_pending >= 0 && !failed)
+        cv.err_window = cv.err_window_pending + 1;
+    cv.err_window_pending = -1;
     /* Clear the poison and count the statement, where the interpreter
      * does it: AFTER the statement (MMBasic.c:1867).  Before would count
      * a statement that calls a SUB ahead of the SUB's own statements, and
@@ -171,7 +194,7 @@ void statement(void)
      * closed a block has emitted a brace by now, so its guard goes in
      * front instead - for an opener that is the same thing, and for a
      * closer it lands where the closing keyword executes anyway. */
-    if (cv.mode == M_EMIT && cv.uses_onerror && cv.out == out_at_entry
+    if (cv.mode == M_EMIT && checks_on() && cv.out == out_at_entry
         && !failed) {
         const char *guard =
             pstr(sfmt("%*sif (__mm_e[1]) { mm_pr_commit();"
@@ -182,6 +205,8 @@ void statement(void)
         else
             out_insert(out_at_entry, where, guard);
     }
+    if (cv.err_window > 0 && !failed)
+        cv.err_window--;
     /* The interrupt poll goes AFTER the error bookkeeping, which is the
      * interpreter's own order: statement, error bookkeeping, then
      * check_interrupt (MMBasic.c:1852-1879).  Same opener/closer

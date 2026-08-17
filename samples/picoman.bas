@@ -68,7 +68,6 @@ If MM.Device$ = "MMBasic for Windows" Then TestMode = 1
 
 Dim x, y, j, k, l, mx, my, tt
 Dim a(ax, ay), d(16, 16, 16)
-Dim BlitOpen(24)   ' which BLIT buffers exist - see CreateGhost
 Dim GhostX(3), GhostY(3), GhostDirection(3), GAction(3), GInGate(3)
 Dim GhostColour(3) = (RGB(red), RGB(magenta), RGB(green), RGB(cyan))
 Dim ManX, ManY, ManDirection, NextManDirection = 4
@@ -484,12 +483,8 @@ Sub CreateGhost i, bbuf, eyes, clr
   RBox 9*13 + xMargin - 9, 9*13 + yMargin - ManR, 17, ManR * 2 + 2, 6, 0, clr
   Circle 9*13 + xMargin - 1, 9*13 + yMargin - ManR/2 + 1, 3, 1, 0.7, 0, 0
   Circle 9*13 + xMargin - 1 * eyes - 1, 9*13 + yMargin - ManR/2 + 1, 3, 1, 0.7, 0, 0
-  ' The original closed the buffer under ON ERROR SKIP to swallow the
-  ' first-time "no such buffer" error.  One ON ERROR anywhere makes the
-  ' compiler emit checked arithmetic for the WHOLE program - here that
-  ' was 62K of the game's 101K bytecode - so track what is open instead.
-  If BlitOpen((i*6)+bbuf) Then Blit Close (i*6)+bbuf
-  BlitOpen((i*6)+bbuf) = 1
+  On Error Skip
+  Blit Close (i*6)+bbuf
   Blit Read (i*6)+bbuf, 9*13 + xMargin - 9, 9*13 + yMargin - ManR, 17, ManR * 2 + 2
 End Sub
 

@@ -47,6 +47,66 @@ static char *bname(const char *name)
     return out;
 }
 
+/* mmb2c.py's varaddr.  PEEK(VARADDR v) - the address of a variable's
+   storage.
+
+   MMBasic's findvar with V_EMPTY_OK | V_NOFIND_ERR: the variable must
+   already exist, and a whole array written a() is legal and answers
+   with element 0.
+
+   The forms and what each is the address OF:
+
+       v           a scalar's own storage
+       s$          the LENGTH BYTE, where an MMBasic string starts
+       a(i)        that element
+       a()         element 0, whatever the rank
+
+   A string and an array are already addresses in C - a char[] and an
+   array both decay - so only the scalars take an '&'.  Cast through
+   uintptr_t for the same reason mmb_peek.h does: the board is 32-bit
+   and the gates are 64-bit, and this is the cast right on both. */
+const char *varaddr(void)
+{
+    struct tok *t = nxt();
+    char *canon;
+    int sfx;
+    struct sym *s;
+
+    if (t->kind != T_ID)
+        cv_err("PEEK(VARADDR ...) needs a variable");
+    canon = split_suffix(t->text, &sfx);
+    s = sym_lookup(canon);
+    if (s == NULL)
+        cv_err("'%s' has not been declared", canon);
+    if (sfx != TY_NONE && sfx != s->ty)
+        cv_err("'%s' is %s but used as %s", canon, tyname_of(s->ty),
+               tyname_of(sfx));
+    if (s->is_const)
+        cv_err("'%s' is a CONST, so it has no address", canon);
+    if (is_op("(", 0) && is_op(")", 1)) {
+        struct flat f;
+        cv.i += 2;
+        if (!s->is_array)
+            cv_err("'%s' is not an array", canon);
+        f = array_flat(s);
+        return sfmt("(MMINTEGER)(uintptr_t)(%s)", f.ptr);
+    }
+    if (is_op("(", 0)) {
+        const char *el;
+        if (!s->is_array)
+            cv_err("'%s' is not an array", canon);
+        el = index_of(s);
+        if (s->ty == TY_S)
+            return sfmt("(MMINTEGER)(uintptr_t)(%s)", el);
+        return sfmt("(MMINTEGER)(uintptr_t)&(%s)", el);
+    }
+    if (s->is_array)
+        cv_err("array '%s' needs () or an index", canon);
+    if (s->ty == TY_S)
+        return sfmt("(MMINTEGER)(uintptr_t)(%s)", s->acc);
+    return sfmt("(MMINTEGER)(uintptr_t)&(%s)", s->acc);
+}
+
 struct val expr(void)
 {
     return e_logical();
@@ -194,7 +254,7 @@ struct val e_mul(void)
                    a real program does. */
                 const char *rd = as_flt(r);
 
-                if (nonzero_literal(rd) || !cv.uses_onerror)
+                if (nonzero_literal(rd) || !checks_on())
                     v = mkval(sfmt("((%s) / (%s))", as_flt(v), rd), TY_F);
                 else
                     v = mkval(sfmt("mm_fdiv(%s, %s)", as_flt(v), rd),
@@ -339,6 +399,11 @@ struct val e_name(void)
     }
 
     as_array = is_op("(", 0);
+    if (!as_array) {
+        int gp = gp_pin(word, sym_lookup(canon));
+        if (gp >= 0)
+            return mkval(sfmt("%dLL", gp), TY_I);
+    }
     s = reference(word, as_array);
     if (s->stype != NULL) {
         const char *base;
@@ -381,11 +446,13 @@ const char *index_of(struct sym *s)
             break;
     }
     expect_op(")");
-    if (s->is_param) {
+    if (s->is_param || s->dynamic) {
         /* MMBasic gives an array parameter no rank of its own - it
          * inherits whatever was passed - so the subscripts are folded
-         * into one offset using the bounds handed in alongside it. */
-        const char *b = bname(s->name);
+         * into one offset using the bounds handed in alongside it.
+         * An array DIMmed with a run-time bound is the same shape and
+         * folds the same way, out of its own bounds table. */
+        const char *b = s->dynamic ? s->bacc : bname(s->name);
         const char *off = parts[0];
 
         for (k = 1; k < nparts; k++)
@@ -460,6 +527,37 @@ void arg_item(struct arg *out)
         int sfx;
         char *canon = split_suffix(t->text, &sfx);
 
+        /* INSIDE A FUNCTION, ITS OWN NAME IS A VARIABLE - the return
+           value - and MMBasic passes it by reference like any other.
+           The test below skips every name that is a routine, so this
+           one fell through to the expression path and went BY VALUE
+           through a temporary: the callee wrote into the temporary and
+           the function returned whatever it had before.
+
+           It compiles and runs, which is what makes it bad.  Found in
+           Pico-Vaders, whose whole controller layer is
+               Function twait%(...)
+                 Call ctrl$, twait%
+           so every button read came back zero. */
+        if (cv.cur != NULL && cv.cur->is_func
+            && strcmp(canon, cv.cur->name) == 0) {
+            struct tok *nx = peek(1);
+            if (nx == NULL
+                || (nx->kind == T_OP
+                    && (strcmp(nx->text, ",") == 0
+                        || strcmp(nx->text, ")") == 0
+                        || strcmp(nx->text, ":") == 0))) {
+                struct sym *s;
+                if (sfx != TY_NONE && sfx != cv.cur->ty)
+                    cv_err("'%s' is %s but used as %s", canon,
+                           tyname_of(cv.cur->ty), tyname_of(sfx));
+                s = sym_new(canon, cv.cur->ty, retacc());
+                cv.i++;
+                out->kind = ARG_VAR;
+                out->s = s;
+                return;
+            }
+        }
         (void)sfx;
         if (routine_get(canon) == NULL) {
             struct tok *nxt1 = peek(1);
@@ -626,8 +724,8 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r)
         s = a->s;
         if (s->ty != p->ty)
             cv_err("array type mismatch in call to '%s'", r->name);
-        if (s->is_param) {
-            bnd = bname(s->name);
+        if (s->is_param || s->dynamic) {
+            bnd = s->dynamic ? s->bacc : bname(s->name);
             base = s->acc;
         } else {
             const char *dj = NULL;
@@ -798,9 +896,10 @@ struct flat array_flat(struct sym *s)
 
     if (!s->is_array)
         cv_err("'%s' is not an array", s->name);
-    if (s->is_param) {
+    if (s->is_param || s->dynamic) {
         r.ptr = s->acc;
-        r.cnt = sfmt("mm_arr_count(%s)", bname(s->name));
+        r.cnt = sfmt("mm_arr_count(%s)",
+                     s->dynamic ? s->bacc : bname(s->name));
         return r;
     }
     {
@@ -886,8 +985,8 @@ const char *bound_of(struct sym *sym, struct val dim, int has_dim)
         has_k = 0;
         kexpr = as_int(dim);
     }
-    if (sym->is_param) {
-        const char *nm = bname(sym->name);
+    if (sym->is_param || sym->dynamic) {
+        const char *nm = sym->dynamic ? sym->bacc : bname(sym->name);
 
         if (has_k && k == 0)
             return sfmt("%d", cv.opt_base);

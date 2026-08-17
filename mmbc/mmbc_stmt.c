@@ -17,6 +17,7 @@ static const char *int_handler(void);
 static const char *setpin_pull(void);
 static void do_settick(void);
 static void do_i2c2(void);
+static void do_i2c0(void);
 static void do_onewire(void);
 static void do_spi(void);
 static void do_on_key(void);
@@ -428,6 +429,46 @@ void statement_inner(void)
     if (strcmp(up, "ERASE") == 0) {
         cv.i++;
         do_erase();
+        return;
+    }
+    if (strcmp(up, "REDIM") == 0) {
+        cv.i++;
+        do_redim();
+        return;
+    }
+    if (strcmp(up, "POKE") == 0) {
+        /* POKE BYTE addr, value   and its wider relatives.
+
+           The width is a bare keyword, exactly as PEEK's is, so it is
+           read here rather than as an argument.  MMBasic's other POKE
+           forms - VAR, DISPLAY, PROGMEM - address the interpreter's own
+           structures and have no equivalent. */
+        struct tok *t;
+        const char *fn = NULL, *addr;
+        struct val v;
+        int isfloat = 0;
+
+        cv.i++;
+        t = nxt();
+        if (t->kind == T_ID) {
+            if (strcmp(t->up, "BYTE") == 0)         fn = "mmpk_poke_byte";
+            else if (strcmp(t->up, "SHORT") == 0)   fn = "mmpk_poke_short";
+            else if (strcmp(t->up, "WORD") == 0)    fn = "mmpk_poke_word";
+            else if (strcmp(t->up, "INTEGER") == 0) fn = "mmpk_poke_integer";
+            else if (strcmp(t->up, "FLOAT") == 0) {
+                fn = "mmpk_poke_float";
+                isfloat = 1;
+            }
+        }
+        if (fn == NULL)
+            cv_err("POKE %s is not supported; translated are BYTE, "
+                   "SHORT, WORD, INTEGER and FLOAT", t->text);
+        addr = as_int(expr());
+        expect_op(",");
+        v = expr();
+        cv.uses_peek = 1;
+        emit(sfmt("%s(%s, %s);", fn, addr,
+                  isfloat ? as_flt(v) : as_int(v)));
         return;
     }
     if (strcmp(up, "CLEAR") == 0) {
@@ -1311,6 +1352,56 @@ void statement_inner(void)
         }
         return;
     }
+    if (strcmp(up, "GUI") == 0 && is_kw("BITMAP", 1)) {
+        /* GUI BITMAP x, y, bits [,w] [,h] [,scale] [,c] [,bc]
+         *
+         * The one form of GUI that means anything here: the rest of
+         * cmd_gui is touch-screen widgets, and this machine has no
+         * touch hardware.  MMBasic's own defaults (Draw.c:449) are 8x8
+         * at scale 1 in the current colours - note the SCALE default is
+         * 1 and not the FONT scale, whatever the manual says; the code
+         * never reads the font.
+         *
+         * `bits` may be a string or an integer, and the two are
+         * different byte sources rather than the same one converted -
+         * see mmb_gui.h. */
+        const char *x, *y;
+        const char *w = "8LL", *h = "8LL", *scale = "1LL";
+        const char *fc = "mm_fg()", *bc = "mm_bg()";
+        struct val v;
+        int k;
+
+        cv.i += 2;
+        cv.uses_gui = 1;
+        x = as_int(expr());
+        expect_op(",");
+        y = as_int(expr());
+        expect_op(",");
+        v = expr();
+        for (k = 0; k < 5; k++) {
+            const char *e;
+            if (!accept_op(","))
+                break;
+            if (is_op(",", 0))
+                continue;               /* a bare comma keeps the default */
+            e = as_int(expr());
+            if (k == 0) w = e;
+            else if (k == 1) h = e;
+            else if (k == 2) scale = e;
+            else if (k == 3) fc = e;
+            else bc = e;
+        }
+        if (v.ty == TY_S)
+            emit(sfmt("mmg_gui_bitmap(%s, %s, (const unsigned char *)"
+                      "mm_cstr(%s), mm_slen(%s), %s, %s, %s, %s, %s);",
+                      x, y, v.code, v.code, w, h, scale, fc, bc));
+        else if (v.ty == TY_I)
+            emit(sfmt("mmg_gui_bitmap_i(%s, %s, %s, %s, %s, %s, %s, %s);",
+                      x, y, v.code, w, h, scale, fc, bc));
+        else
+            cv_err("GUI BITMAP wants a string or an integer");
+        return;
+    }
     if (strcmp(up, "TRIANGLE") == 0) {
         /* TRIANGLE x1, y1, x2, y2, x3, y3 [, colour [, fill]]
 
@@ -1599,6 +1690,10 @@ void statement_inner(void)
     }
     if (strcmp(up, "I2C2") == 0) {
         do_i2c2();
+        return;
+    }
+    if (strcmp(up, "I2C") == 0) {
+        do_i2c0();
         return;
     }
     if (strcmp(up, "SETTICK") == 0) {
@@ -2018,7 +2113,7 @@ void statement_inner(void)
          * Measured 433us point-by-point against 71us batched for a 312
          * point diagonal. */
         struct val x1, y1, x2, y2;
-        const char *col = "MM_CUR";
+        const char *col = "MM_CUR", *wid = NULL;
         const char *a, *b, *c2, *d;
 
         cv.i++;
@@ -2036,7 +2131,7 @@ void statement_inner(void)
             if (!is_op(",", 0)) {
                 struct val w = expr();
                 if (strcmp(w.code, "1LL") != 0 && strcmp(w.code, "1") != 0)
-                    cv_warn("LINE width is not supported yet; drawn 1 pixel wide");
+                    wid = as_int(w);
             }
             if (accept_op(","))
                 col = as_int(expr());
@@ -2045,7 +2140,16 @@ void statement_inner(void)
         b = as_int(y1);
         c2 = as_int(x2);
         d = as_int(y2);
-        emit(sfmt("mm_line(%s, %s, %s, %s, %s);", a, b, c2, d, col));
+        if (wid == NULL) {
+            emit(sfmt("mm_line(%s, %s, %s, %s, %s);", a, b, c2, d, col));
+        } else {
+            /* A width is four different algorithms in the firmware,
+               picked by shape - see mmb_gfx_line.h.  Only a program
+               that asks for one carries them. */
+            cv.uses_linew = 1;
+            emit(sfmt("mmg_linew(%s, %s, %s, %s, %s, %s);",
+                      a, b, c2, d, wid, col));
+        }
         return;
     }
     if (strcmp(up, "PAUSE") == 0) {
@@ -2561,6 +2665,60 @@ static void comms_rx(const char *what, const char *n, const char *callfmt,
     emit("}");
 }
 
+/* mmb2c.py's do_i2c0.
+
+     I2C WRITE addr, option, count, d1 [, d2 ...]
+     I2C READ  addr, option, count, <destination>
+     I2C CHECK addr
+
+   The FIXED bus: GP20/GP21, the QWIIC socket and the DS3231 together.
+   No SETPIN, no OPEN, no CLOSE - the pins are the board's and the
+   controller is already running for the clock, which is why MMBasic's
+   cmd_i2c has no pin test where cmd_i2c2 errors "Pin not set for I2C2".
+
+   NOTHING HERE RAISES: MMBasic records the outcome in MM.I2C and
+   returns.  See mmb_i2c.h. */
+static void do_i2c0(void)
+{
+    const char *addr, *opt, *n;
+    int wr;
+
+    cv.i++;
+    cv.uses_i2c0 = 1;
+    if (accept_kw("CHECK")) {
+        emit(sfmt("mmi2c0_check(%s);", as_int(expr())));
+        return;
+    }
+    if (is_kw("OPEN", 0) || is_kw("CLOSE", 0)) {
+        cv_err("the fixed I2C bus is always open - GP20/GP21 are the "
+               "board's and the controller runs for the clock; OPEN and "
+               "CLOSE are I2C2's");
+        return;
+    }
+    wr = accept_kw("WRITE");
+    if (!wr && !accept_kw("READ")) {
+        cv_err("I2C takes WRITE, READ or CHECK");
+        return;
+    }
+    addr = as_int(expr());
+    expect_op(",");
+    opt = as_int(expr());
+    expect_op(",");
+    n = as_int(expr());
+    expect_op(",");
+    cv.tmp_used = 1;
+    if (wr)
+        comms_tx("I2C WRITE", n,
+                 sfmt("  mmi2c0_write(%s, %s, %s, %%s);", addr, opt, n),
+                 sfmt("  mmi2c0_write_bytes(%s, %s, %s, %%s);",
+                      addr, opt, n));
+    else
+        comms_rx("I2C READ", n,
+                 sfmt("  mmi2c0_read(%s, %s, %s, %%s);", addr, opt, n),
+                 sfmt("  mmi2c0_read_bytes(%s, %s, %s, %%s);",
+                      addr, opt, n));
+}
+
 /* mmb2c.py's do_i2c2.
 
      I2C2 OPEN speed, timeout
@@ -2938,9 +3096,11 @@ static void do_read(void)
             char *k = newtmp("k");
             emit(sfmt("{ int %s; for (%s = 0; %s < %s; %s++)",
                       k, k, k, f.cnt, k));
-            if (sym->ty == TY_S)
+            if (sym->ty == TY_S) {
+                cv.reads_string = 1;
                 emit(sfmt("    mm_sset((%s)[%s], mm_read_s()); }",
                           f.ptr, k));
+            }
             else
                 emit(sfmt("    (%s)[%s] = mm_read_%s(); }",
                           f.ptr, k, sym->ty == TY_I ? "i" : "f"));
@@ -2948,6 +3108,7 @@ static void do_read(void)
         } else {
             struct val tgt = input_target();
             if (tgt.ty == TY_S) {
+                cv.reads_string = 1;
                 emit(sfmt("mm_sset(%s, mm_read_s());", tgt.code));
                 cv.tmp_used = 1;
             } else {
@@ -3151,8 +3312,8 @@ static void do_cat(void)
 
 static void do_erase(void)
 {
-    cv_warn("ERASE zeroes the variable; static storage cannot be "
-            "handed back the way the interpreter does");
+    int warned = 0;
+
     while (!stmt_end()) {
         struct tok *t = peek(0);
         struct sym *sym;
@@ -3162,7 +3323,24 @@ static void do_erase(void)
         cv.i++;
         if (accept_op("("))
             expect_op(")");
-        emit(zero_of(sym));
+        if (sym->is_array && sym->dynamic && !sym->is_param) {
+            /* This one really is given back: its elements are on the
+               heap, so ERASE frees them and leaves it undimensioned,
+               exactly as the interpreter's erase() does. */
+            const char *old = newtmp("ae");
+            cv.tmp_used = 1;
+            emit(sfmt("{ void *%s = %s;", old, sym->acc));
+            emit(sfmt("  %s = 0; %s[0] = 0;", sym->acc, sym->bacc));
+            emit(sfmt("  if (%s) mm_lfree(%s); }", old, old));
+        } else {
+            if (!warned) {
+                cv_warn("ERASE zeroes the variable; static storage "
+                        "cannot be handed back the way the "
+                        "interpreter does");
+                warned = 1;
+            }
+            emit(zero_of(sym));
+        }
         if (!accept_op(","))
             break;
     }
@@ -3201,6 +3379,7 @@ static void do_on_error(void)
     const char *kw = (w != NULL && w->kind == T_ID) ? w->up : "";
     const char *n = "1";
     int mode;
+    int nlit;
 
     if (strcmp(kw, "RESTART") == 0)
         cv_err("ON ERROR RESTART reboots the machine; a compiled "
@@ -3219,8 +3398,35 @@ static void do_on_error(void)
     }
     cv.i += 1;
     cv.uses_onerror = 1;
-    if (mode == 3 && peek(0) != NULL && !is_op(":", 0))
-        n = as_int(expr());
+    if (mode == 2)
+        cv.onerror_global = 1;
+    nlit = -1;
+    if (mode == 3 && peek(0) != NULL && !is_op(":", 0)) {
+        struct tok *w2 = peek(0);
+        struct tok *w3 = peek(1);
+        int alldig = (w2->kind == T_NUM && strcmp(w2->up, "I") == 0
+                      && *w2->text);
+        const char *p;
+
+        if (alldig)
+            for (p = w2->text; *p; p++)
+                if (*p < '0' || *p > '9')
+                    alldig = 0;
+        if (alldig && (w3 == NULL ||
+                       (w3->kind == T_OP && strcmp(w3->text, ":") == 0))) {
+            nlit = atoi(w2->text);
+            n = pstr(w2->text);
+            cv.i += 1;
+        } else {
+            /* the count is a run-time value: the window cannot be laid
+               out at compile time, so arm the whole program */
+            n = as_int(expr());
+            cv.onerror_global = 1;
+        }
+    } else if (mode == 3)
+        nlit = 1;
+    if (nlit >= 0)
+        cv.err_window_pending = nlit;
     emit(sfmt("mm_on_error(%d, %s);", mode, n));
 }
 
@@ -3730,7 +3936,7 @@ static void store(const char *target, const char *val, int ty)
     const char *ctype = (ty == TY_I) ? "MMINTEGER" : "MMFLOAT";
     char *tmp;
 
-    if (!cv.uses_onerror) {
+    if (!checks_on()) {
         emit(sfmt("%s = %s;", target, val));
         return;
     }
@@ -3749,7 +3955,7 @@ static void store(const char *target, const char *val, int ty)
  * statement is skipped. */
 static char *poisoned_cond(const char *c, int enter)
 {
-    if (!cv.uses_onerror)
+    if (!checks_on())
         return (char *)c;
     if (enter)
         return sfmt("__mm_e[0] ? 1 : (%s)", c);
@@ -4334,7 +4540,10 @@ static void open_routine(int is_func)
         else
             emit(sfmt("%s __ret = 0;", ctype_of(r->ty)));
     }
-    if (cv.uses_onerror)
+    if (cv.uses_onerror) {
+        /* a lexical SKIP window never crosses into a routine body */
+        cv.err_window = 0;
+        cv.err_window_pending = -1;
         /* Entered with an error already recorded - which means an
            argument expression raised - so do nothing and go back.  The
            interpreter never gets here at all: it jumps away before the
@@ -4342,6 +4551,7 @@ static void open_routine(int is_func)
            spends none of the skip count on statements in here. */
         emit(sfmt("if (__mm_e[0]) { %s%s }", routine_exit(),
                   r->is_func ? " return __ret;" : " return;"));
+    }
     if (cv.uses_onerror)
         /* The SUB/FUNCTION line is itself a statement the interpreter
            executes and counts on every call, so entering costs one of

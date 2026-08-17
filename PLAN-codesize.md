@@ -61,10 +61,22 @@ the whole program (the checks-gating rule working exactly as designed):
     without:         38.4K bytecode, main 14.4K -> 26.1K NATIVE,
                      fully native image 132K, process ~258K - FITS
 
-samples/picoman.bas now tracks its buffers in BlitOpen() instead
-(test-and-branch for trap-and-skip, behaviour identical), builds fully
-native under the DEFAULT board caps - all 55 functions, no bails - and
-the BCODE_ONLY note is gone from mkexamples.sh.  Board re-test owed.
+RESOLVED IN THE COMPILER (user's insight, later the same evening):
+IGNORE is the only form that needs program-wide checks - SKIP nn only
+covers the next nn statements.  Both translators now emit the checked
+forms for a literal SKIP's window alone (checks_on() = onerror_global
+|| err_window; the ON ERROR statement itself is in the window so its
+guard performs the interpreter's own end-of-line decrement; a
+non-literal count escalates to program-wide).  Documented divergence:
+the interpreter's count follows execution into a callee; the compiled
+window is lexical plus one decrement per routine entered - a skip
+consumed deep inside a callee's ARITHMETIC diverges; runtime command
+errors are dynamic in both worlds.  tests/onerrwin.bas gates the
+window machinery; onerror.bas (IGNORE, PicoMite-proven) still passes
+byte-for-byte.  samples/picoman.bas keeps Geoff's original On Error
+Skip UNMODIFIED and builds fully native under the default board caps -
+all 55 functions, image 134,104.  The BCODE_ONLY note is gone from
+mkexamples.sh.  Board re-test owed (new mmbc + cc2 + the game).
 
 The manual gained the chapter: FUZIX-PC3-MANUAL.md "Making a big
 program fit - and run fast" (#making-it-fit), five rules with these

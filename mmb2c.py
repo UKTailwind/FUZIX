@@ -97,11 +97,15 @@ BUILTINS = {
     'PIXEL': (2, 2), 'MAP': (1, 1), 'PIN': (1, 1), 'SPI': (1, 1),
     'PORT': (2, 16), 'FLAG': (1, 1), 'TEMPR': (1, 2),
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0), 'MM.SPISPEED': (0, 0),
-    'MM.ONEWIRE': (0, 0),
+    'MM.ONEWIRE': (0, 0), 'MM.I2C': (0, 0),
     'POS': (0, 0),
     'MM.ERRNO': (0, 0), 'MM.ERRMSG$': (0, 0),
     'MM.VER': (0, 0), 'MM.DEVICE$': (0, 0), 'MM.CMDLINE$': (0, 0),
-    'MM.INFO': (1, 1), 'PEEK': (1, 1), 'SPRITE': (1, 3),
+    'MM.FONTHEIGHT': (0, 0), 'MM.FONTWIDTH': (0, 0),
+    'MM.HPOS': (0, 0), 'MM.VPOS': (0, 0),
+    'MM.INFO': (1, 1), 'MM.INFO$': (1, 1),
+    'KEYDOWN': (1, 1),
+    'PEEK': (1, 1), 'SPRITE': (1, 3),
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
     'LINSTR': (2, 3), 'LCOMPARE': (2, 2), 'LINPUT': (3, 3),
@@ -110,7 +114,7 @@ BUILTINS = {
 # built-ins whose arguments cannot be parsed as plain expressions
 RAWARG = ('CHOICE', 'BOUND', 'TRIM$', 'DATETIME$', 'DAY$', 'EPOCH',
           'BIN2STR$', 'STR2BIN', 'RGB', 'MATH',
-          'MM.INFO', 'PEEK', 'SPRITE',
+          'MM.INFO', 'MM.INFO$', 'PEEK', 'SPRITE',
           'EOF', 'LOC', 'LOF', 'INPUT$', 'DIR$',
           'LLEN', 'LGETSTR$', 'LGETBYTE', 'LINSTR', 'LCOMPARE', 'LINPUT')
 
@@ -386,7 +390,8 @@ def c_string_literal(s):
 class Sym(object):
     __slots__ = ('name', 'ty', 'acc', 'dims', 'is_const', 'is_array',
                  'is_param', 'byref', 'is_static', 'where', 'implied',
-                 'declared_in', 'disp', 'has_init', 'stype')
+                 'declared_in', 'disp', 'has_init', 'stype', 'dynamic',
+                 'bacc')
 
     def __init__(self, name, ty, acc):
         self.name = name          # canonical: lower case, no suffix
@@ -404,6 +409,12 @@ class Sym(object):
         self.implied = False
         self.has_init = False
         self.declared_in = ''     # '' = main line, else routine name
+        # An array whose bounds are only known at run time.  It is held
+        # exactly as an array PARAMETER is - a flat pointer plus a
+        # bounds table - so index(), array_flat() and BOUND() take the
+        # same branch for both.  bacc is the C text of that table.
+        self.dynamic = False
+        self.bacc = ''
 
 
 class TypeMember(object):
@@ -506,8 +517,53 @@ def split_suffix(word):
     return word.lower(), None
 
 
+def gp_pin(word, known):
+    """GP8 read as a value -> 8, the pin it names.  None if it is not one.
+
+    MMBasic resolves these in getpinarg() rather than in the expression
+    parser, and says why: "GPn is not a valid expression".  It has to be
+    a special case there because MMBasic's pin numbers are CONNECTOR
+    pins and GP8 is a GPIO, so the name needs PINMAP.  Here the two are
+    the same number - mmb_gpio.h chose the GPIO numbering and gave its
+    reasons - so the name resolves to the number itself and can be done
+    once, here, for every place a pin is written: SETPIN gp8, PIN(gp8),
+    PORT(GP12,2,GP11,2,...).
+
+    A DECLARED variable of that name still wins, which is what `known`
+    is for.  Without this the name was not an error either: with OPTION
+    EXPLICIT off it became an implied global, so `Pin(GP8)` silently
+    read GP0 - a wrong pin rather than a refusal, the divergence class
+    that outranks a missing feature.
+    """
+    if known is not None:
+        return None
+    n = 0
+    if len(word) < 3 or word[0] not in 'Gg' or word[1] not in 'Pp':
+        return None
+    for c in word[2:]:
+        if c < '0' or c > '9':
+            return None
+        n = n * 10 + (ord(c) - 48)
+    # 48 GPIOs on the RP2350B.  Out of range is left alone rather than
+    # resolved: GP99 is far more likely to be someone's variable.
+    return n if n < 48 else None
+
+
 def cvar(name):
     return 'v_' + name.replace('.', '__')
+
+
+def cconst(name):
+    """A global CONST's C name.
+
+    Its OWN prefix, not cvar's.  A global CONST is emitted as a #define,
+    and a macro has no scope: with both on `v_`, a LOCAL named the same
+    as a global CONST had its declaration rewritten by the macro and the
+    C did not compile.  MMBasic simply shadows - findvar looks in the
+    local table first - and the two prefixes are how that shadowing
+    survives into C.
+    """
+    return 'k_' + name.replace('.', '__')
 
 
 def clabel(name):
@@ -588,6 +644,11 @@ class Conv(object):
         self.in_type = False      # inside TYPE...END TYPE in this pass
         self.uses_circle = False
         self.uses_box = False
+        self.uses_gui = False
+        self.uses_i2c0 = False
+        self.uses_linew = False
+        self.reads_string = False
+        self.redimmed = {}
         self.uses_rbox = False
         self.uses_triangle = False
         self.uses_polygon = False
@@ -616,9 +677,22 @@ class Conv(object):
         self.uses_i2c = False
         self.uses_spi = False
         self.uses_peek = False      # PEEK(): pulls in mmb_peek.h
-        # set in the scan pass, so statements BEFORE the ON ERROR line are
-        # guarded too - the armed window is a run-time thing
+        # set in the scan pass: any ON ERROR at all pulls in the __mm_e
+        # state, the routine prologues and mm_err_bind
         self.uses_onerror = False
+        # ON ERROR IGNORE arms trapping for an unbounded stretch of the
+        # program, so every statement pays the checked forms - set in
+        # the scan pass, statements BEFORE the line included, because
+        # the armed window is a run-time thing.  A literal ON ERROR
+        # SKIP n arms exactly the ON ERROR statement plus the next n:
+        # the checked forms and the per-statement bookkeeping are
+        # emitted for that window alone (err_window, counted down in
+        # statement()), which is why one first-use guard in a big
+        # program no longer costs the whole program checked arithmetic.
+        # A SKIP whose count is not a bare literal is treated as IGNORE.
+        self.onerror_global = False
+        self.err_window = 0
+        self.err_window_pending = None
         # likewise: an interrupt armed at line 100 has to be polled by
         # the statements before it, so the poll sites are emitted for
         # the whole program or none of it
@@ -665,6 +739,18 @@ class Conv(object):
     def is_op(self, s, k=0):
         t = self.peek(k)
         return t is not None and t[0] == T_OP and t[1] == s
+
+    def checks_on(self):
+        """Are the ON ERROR checked forms live for the statement being
+        emitted?  IGNORE (or an unknowable SKIP count) arms the whole
+        program; a literal SKIP n arms the ON ERROR statement and the
+        next n.  MMBasic's own counter is dynamic - it follows execution
+        into a called SUB - so a compiled ARITHMETIC error deeper in a
+        callee than the routine-entry decrements reach is not trapped
+        where the interpreter would have counted its way to it; a
+        runtime command error is trapped anywhere, because the runtime
+        consults the armed count wherever it is raised."""
+        return self.onerror_global or self.err_window > 0
 
     def is_kw(self, s, k=0):
         t = self.peek(k)
@@ -822,7 +908,7 @@ class Conv(object):
         String assignment needs none of this: it goes through mm_sset,
         which checks for itself."""
         ctype = 'MMINTEGER' if ty == TY_I else 'MMFLOAT'
-        if not self.uses_onerror:
+        if not self.checks_on():
             self.emit('%s = %s;' % (target, val))
             return
         tmp = self.newtmp('cv')
@@ -1184,7 +1270,7 @@ class Conv(object):
                     # world: dividing by 180, 86400 or pi is most of the
                     # division a real program does.
                     rd = self.as_flt(r)
-                    if nonzero_literal(rd) or not self.uses_onerror:
+                    if nonzero_literal(rd) or not self.checks_on():
                         v = ('((%s) / (%s))' % (self.as_flt(v), rd), TY_F)
                     else:
                         v = ('mm_fdiv(%s, %s)' % (self.as_flt(v), rd), TY_F)
@@ -1285,6 +1371,10 @@ class Conv(object):
                 self.member_path(base, s2.stype, parts, sfx2))
 
         as_array = self.is_op('(')
+        if not as_array:
+            gp = gp_pin(word, self.lookup(canon))
+            if gp is not None:
+                return ('%dLL' % gp, TY_I)
         s = self.reference(word, as_array)
         if s.stype is not None:
             if as_array and not s.is_array:
@@ -1354,11 +1444,13 @@ class Conv(object):
             if not self.accept_op(','):
                 break
         self.expect_op(')')
-        if s.is_param:
+        if s.is_param or s.dynamic:
             # MMBasic gives an array parameter no rank of its own - it
             # inherits whatever was passed - so the subscripts are folded
             # into one offset using the bounds handed in alongside it.
-            b = '__b_' + s.name.replace('.', '__')
+            # An array DIMmed with a run-time bound is the same shape and
+            # folds the same way, out of its own bounds table.
+            b = s.bacc if s.dynamic else '__b_' + s.name.replace('.', '__')
             off = parts[0]
             for k in range(1, len(parts)):
                 off = '((%s) * ((%s)[%d] + 1) + (%s))' % (off, b, k + 1,
@@ -1368,6 +1460,59 @@ class Conv(object):
             self.err("'%s' has %d dimension(s), %d given"
                      % (s.name, len(s.dims), len(parts)))
         return s.acc + ''.join('[' + p + ']' for p in parts)
+
+    def varaddr(self):
+        """PEEK(VARADDR v) - the address of a variable's storage.
+
+        MMBasic's findvar with V_EMPTY_OK | V_NOFIND_ERR: the variable
+        must already exist, and a whole array written a() is legal and
+        answers with element 0.
+
+        The forms and what each is the address OF:
+
+            v           a scalar's own storage
+            s$          the LENGTH BYTE, where an MMBasic string starts
+            a(i)        that element
+            a()         element 0, whatever the rank
+
+        A string and an array are already addresses in C - a char[] and
+        an array both decay - so only the scalars take an '&'.  Cast
+        through uintptr_t for the same reason mmb_peek.h does: the board
+        is 32-bit and the gates are 64-bit, and this is the cast that is
+        right on both.
+        """
+        t = self.nxt()
+        if t[0] != T_ID:
+            self.err("PEEK(VARADDR ...) needs a variable")
+        canon, sfx = split_suffix(t[1])
+        s = self.lookup(canon)
+        if s is None:
+            # V_NOFIND_ERR: MMBasic will not create one here
+            self.err("'%s' has not been declared" % canon)
+        if sfx is not None and sfx != s.ty:
+            self.err("'%s' is %s but used as %s"
+                     % (canon, TYNAME[s.ty], TYNAME[sfx]))
+        if s.is_const:
+            self.err("'%s' is a CONST, so it has no address" % canon)
+        if self.is_op('(') and self.is_op(')', 1):
+            # a() - the whole array
+            self.i += 2
+            if not s.is_array:
+                self.err("'%s' is not an array" % canon)
+            ptr, cnt = self.array_flat(s)
+            return '(MMINTEGER)(uintptr_t)(%s)' % ptr
+        if self.is_op('('):
+            if not s.is_array:
+                self.err("'%s' is not an array" % canon)
+            el = self.index(s)
+            if s.ty == TY_S:
+                return '(MMINTEGER)(uintptr_t)(%s)' % el
+            return '(MMINTEGER)(uintptr_t)&(%s)' % el
+        if s.is_array:
+            self.err("array '%s' needs () or an index" % canon)
+        if s.ty == TY_S:
+            return '(MMINTEGER)(uintptr_t)(%s)' % s.acc
+        return '(MMINTEGER)(uintptr_t)&(%s)' % s.acc
 
     def retacc(self):
         return '__ret'
@@ -1408,6 +1553,30 @@ class Conv(object):
         t = self.peek()
         if t is not None and t[0] == T_ID and t[2] not in BUILTINS:
             canon, sfx = split_suffix(t[1])
+            # INSIDE A FUNCTION, ITS OWN NAME IS A VARIABLE - the return
+            # value - and MMBasic passes it by reference like any other.
+            # The test below skips every name that is a routine, so this
+            # one fell through to the expression path and was passed BY
+            # VALUE through a temporary: the callee wrote into the
+            # temporary and the function returned whatever it had before.
+            #
+            # It compiles and runs, which is what makes it bad.  Found in
+            # Pico-Vaders, whose whole controller layer is
+            #     Function twait%(...)
+            #       Call ctrl$, twait%
+            # so every button read came back zero and the game could not
+            # be started.
+            if (self.cur is not None and self.cur.is_func
+                    and canon == self.cur.name):
+                nxt1 = self.peek(1)
+                if nxt1 is None or (nxt1[0] == T_OP
+                                    and nxt1[1] in (',', ')', ':')):
+                    if sfx is not None and sfx != self.cur.ty:
+                        self.err("'%s' is %s but used as %s"
+                                 % (canon, TYNAME[self.cur.ty], TYNAME[sfx]))
+                    s = Sym(canon, self.cur.ty, self.retacc())
+                    self.i += 1
+                    return ('var', s, None)
             if canon not in self.routines:
                 nxt1 = self.peek(1)
                 # whole array:  a()
@@ -1524,8 +1693,13 @@ class Conv(object):
             s = a[1]
             if s.ty != p.ty:
                 self.err("array type mismatch in call to '%s'" % r.name)
-            if s.is_param:
-                bnd = '__b_' + s.name.replace('.', '__')
+            if s.is_param or s.dynamic:
+                # The LIVE bounds table, not one rebuilt from the DIM:
+                # a REDIM since then would make the rebuilt one wrong,
+                # and a dynamic array is already the pointer-plus-table
+                # shape the callee wants.
+                bnd = (s.bacc if s.dynamic
+                       else '__b_' + s.name.replace('.', '__'))
                 base = s.acc
             else:
                 body = ('%d, %s'
@@ -1678,7 +1852,7 @@ class Conv(object):
             # program the checks have no customer and the calls go
             # straight to libm.  The rest have no checks and are always
             # direct.
-            if self.uses_onerror:
+            if self.checks_on():
                 cf = {'SQR': 'mm_sqr', 'SIN': 'sin', 'COS': 'cos',
                       'TAN': 'tan', 'ATN': 'atan', 'LOG': 'mm_log',
                       'EXP': 'exp', 'ASIN': 'mm_asin',
@@ -1803,6 +1977,8 @@ class Conv(object):
             # asked for - see mmb_spi.h
             self.uses_spi = True
             return ('mmspi_speed()', TY_I)
+        if up == 'MM.I2C':
+            return ('mm_i2c_stat()', TY_I)
         if up == 'MM.ONEWIRE':
             # What the last ONEWIRE RESET saw - MMBasic's
             # mmOWvalue, and a flat spelling there too.
@@ -1827,11 +2003,31 @@ class Conv(object):
             return ('mm_ver()', TY_F)
         if up == 'MM.DEVICE$':
             return ('mm_device()', TY_S)
+        # The flat spellings of four MM.INFO() answers.  MMBasic has
+        # both forms and programs use both - Pico-Vaders writes
+        # Mm.Info(FontHeight) where another writes MM.FONTHEIGHT - so
+        # they go to the same runtime call rather than being aliases
+        # only one of which works.
+        if up == 'MM.FONTHEIGHT':
+            return ('mm_fontheight()', TY_I)
+        if up == 'MM.FONTWIDTH':
+            return ('mm_fontwidth()', TY_I)
+        if up == 'MM.HPOS':
+            return ('mm_hpos()', TY_I)
+        if up == 'MM.VPOS':
+            return ('mm_vpos()', TY_I)
         if up == 'MM.CMDLINE$':
             # the only thing that needs main's arguments, so main only
             # takes them when a program asks
             self.uses_cmdline = True
             return ('mm_cmdline()', TY_S)
+        if up == 'KEYDOWN':
+            # KEYDOWN(n): which keys are HELD, which INKEY$ cannot say -
+            # a character stream has no way to express "up and fire
+            # together".  0 the count, 1..6 the codes with 1 the most
+            # recent, 7 the modifiers, 8 the locks, exactly MMBasic's
+            # fun_keydown.
+            return ('mm_keydown(%s)' % n(0), TY_I)
         if up == 'PIXEL':
             # PIXEL(x, y) reads a pixel back AS RGB888 - the kernel
             # primitive maps the mode's own colour numbering back out,
@@ -2093,12 +2289,32 @@ class Conv(object):
             widths = {'BYTE': 'mmpk_byte', 'SHORT': 'mmpk_short',
                       'WORD': 'mmpk_word', 'INTEGER': 'mmpk_integer',
                       'FLOAT': 'mmpk_float'}
+            if t[0] == T_ID and t[2] == 'VARADDR':
+                # PEEK(VARADDR v) - where a variable lives.
+                #
+                # This one needs the SYMBOL, not an address, which is
+                # why it is here and not in the header: the translator
+                # is the only thing that knows where a variable is.
+                # MMBasic's findvar takes V_EMPTY_OK, so a whole array
+                # written a() is legal and gives element 0.
+                #
+                # A STRING gives the address of its LENGTH BYTE, because
+                # that is where an MMBasic string starts and ours have
+                # the same layout - so PEEK(BYTE addr) is the length and
+                # addr+1 is the first character, exactly as on a
+                # PicoMite.
+                a = self.varaddr()
+                self.expect_op(')')
+                return (a, TY_I)
             fn = widths.get(t[2]) if t[0] == T_ID else None
             if fn is None:
-                # VAR, VARADDR and CFUNADDR are MMBasic's and are not
-                # here: they need the symbol table, not an address.
+                # VAR and CFUNADDR are MMBasic's and are not here: VAR
+                # is a byte inside a variable rather than an address,
+                # and CFUNADDR names an embedded blob a compiler has no
+                # equivalent for.
                 self.err("PEEK(%s ...) is not supported; translated are "
-                         "BYTE, SHORT, WORD, INTEGER and FLOAT" % t[1])
+                         "BYTE, SHORT, WORD, INTEGER, FLOAT and VARADDR"
+                         % t[1])
             a = self.expr()
             self.expect_op(')')
             self.uses_peek = True
@@ -2189,48 +2405,13 @@ class Conv(object):
                 return ('mms_fun(%d, %s, %s, 2)' % (sel, n, i3), TY_I)
             self.expect_op(')')
             return ('mms_fun(%d, %s, 0, 1)' % (sel, n), TY_I)
-        if up == 'MM.INFO':
-            # MM.INFO(FONT ADDRESS n) - where font n's glyphs are, so a
-            # program can draw them itself.  Two bare keywords and then
-            # an expression, as MMBasic writes it.
-            #
-            # This is the only option translated.  MMBasic's MM.INFO has
-            # dozens, most of them about a filesystem and a display this
-            # machine reports differently, and the ones that do fit
-            # already have flat spellings here (MM.HRES, MM.DEVICE$,
-            # MM.VER).
-            self.expect_op('(')
-            t = self.nxt()
-            if t[0] == T_ID and t[2] == 'FLAGS':
-                # MM.INFO(FLAGS) - all sixty-four scratch bits at once,
-                # which is where MMBasic keeps the reading form of the
-                # FLAGS command (the MMFLAG case of its big switch).
-                self.expect_op(')')
-                return ('mm_flags_get()', TY_I)
-            if t[0] == T_ID and t[2] == 'FLASH':
-                # MM.INFO(FLASH ADDRESS n) - the slot's base address,
-                # which is how a program hands slot data to BLIT MEMORY.
-                # The pseudo slot allocates on this very reference
-                # (mmb_flash.h), so asking for the address is enough.
-                t = self.nxt()
-                if t[0] != T_ID or t[2] != 'ADDRESS':
-                    self.err("MM.INFO(FLASH %s ...) is not supported; "
-                             "translated is FLASH ADDRESS n" % t[1])
-                a = self.expr()
-                self.expect_op(')')
-                self.uses_flash = True
-                return ('(MMINTEGER)(long)mmf_addr(%s)' % self.as_int(a),
-                        TY_I)
-            if t[0] != T_ID or t[2] != 'FONT':
-                self.err("MM.INFO(%s ...) is not supported; translated is "
-                         "FONT ADDRESS n, FLASH ADDRESS n or FLAGS" % t[1])
-            t = self.nxt()
-            if t[0] != T_ID or t[2] != 'ADDRESS':
-                self.err("MM.INFO(FONT %s ...) is not supported; translated "
-                         "is FONT ADDRESS n" % t[1])
-            a = self.expr()
-            self.expect_op(')')
-            return ('mm_fontaddr(%s)' % self.as_int(a), TY_I)
+        if up in ('MM.INFO', 'MM.INFO$'):
+            # MMBasic overlays the two spellings onto ONE function
+            # (fun_info), which decides the type from the sub-keyword
+            # rather than from the '$'.  So do both here, and let the
+            # table below say what each returns - a program writes
+            # Mm.Info$(Drive) and Mm.Info(Drive) for the same thing.
+            return self.do_mm_info()
 
         if up == 'MATH':
             self.expect_op('(')
@@ -2308,9 +2489,9 @@ class Conv(object):
         """(pointer to element 0, element count) for a whole array."""
         if not s.is_array:
             self.err("'%s' is not an array" % s.name)
-        if s.is_param:
-            cnt = 'mm_arr_count(__b_%s)' % s.name.replace('.', '__')
-            return (s.acc, cnt)
+        if s.is_param or s.dynamic:
+            b = s.bacc if s.dynamic else '__b_%s' % s.name.replace('.', '__')
+            return (s.acc, 'mm_arr_count(%s)' % b)
         cnt = '(int)(%s)' % ' * '.join('(%s)' % d for d in s.dims)
         if s.ty == TY_S:
             return ('(char (*)[MM_STRSZ])%s' % s.acc, cnt)
@@ -2348,8 +2529,9 @@ class Conv(object):
         else:
             k = None
             kexpr = self.as_int(dim)
-        if sym.is_param:
-            nm = '__b_' + sym.name.replace('.', '__')
+        if sym.is_param or sym.dynamic:
+            nm = (sym.bacc if sym.dynamic
+                  else '__b_' + sym.name.replace('.', '__'))
             if k == 0:
                 return str(self.opt_base)
             return '(%s)[%s]' % (nm, kexpr)
@@ -2385,6 +2567,38 @@ class Conv(object):
                     and toks[k][2] in ('SUB', 'FUNCTION') \
                     and toks[k + 1][0] == T_ID:
                 self.routine_names[split_suffix(toks[k + 1][1])[0]] = 1
+            # Every array a REDIM names, wherever it stands.  In MMBasic
+            # all arrays are allocated at run time so any of them can be
+            # re-dimensioned; here an array with constant bounds is a C
+            # array with nothing to change, so being REDIMmed anywhere
+            # is what makes it dynamic - and the DIM has to know that
+            # before it is translated, which is why this is a pre-scan.
+            for j in range(len(toks) - 1):
+                if toks[j][0] == T_ID and toks[j][2] == 'REDIM':
+                    n = j + 1
+                    if n < len(toks) and toks[n][0] == T_ID \
+                            and toks[n][2] == 'PRESERVE':
+                        n += 1
+                    while n + 1 < len(toks) and toks[n][0] == T_ID:
+                        self.redimmed[split_suffix(toks[n][1])[0]] = 1
+                        # skip to just past this array's subscripts
+                        depth = 0
+                        n += 1
+                        while n < len(toks):
+                            if toks[n][0] == T_OP and toks[n][1] == '(':
+                                depth += 1
+                            elif toks[n][0] == T_OP and toks[n][1] == ')':
+                                depth -= 1
+                                if depth == 0:
+                                    n += 1
+                                    break
+                            n += 1
+                        if n < len(toks) and toks[n][0] == T_OP \
+                                and toks[n][1] == ',':
+                            n += 1
+                        else:
+                            break
+                    break
 
     def pass_fonts(self):
         """Collect every DefineFont ... End DefineFont before anything
@@ -2821,6 +3035,26 @@ class Conv(object):
     def data_has_i(self):
         return any(k == 0 for k, f, i, s in self.data)
 
+    # The KIND column, when every item has the same kind, is one value
+    # repeated once per item - four bytes each of nothing.  Returns the
+    # shared kind, or None when they differ and the column is needed.
+    @property
+    def data_uniform_kind(self):
+        if not self.data:
+            return None
+        k0 = self.data[0][0]
+        return k0 if all(k == k0 for k, f, i, s in self.data) else None
+
+    # The TEXT column is MMBasic's raw source text for each item, kept
+    # because READ into a string gives the text of a numeric item.  It
+    # is only reachable if some item IS a string, or some READ in the
+    # program targets one - and a program with neither pays four bytes
+    # an item plus the literals for a column nothing can look at.
+    @property
+    def data_has_s(self):
+        return (self.reads_string
+                or any(k == 1 for k, f, i, s in self.data))
+
     def source_text(self, a, b):
         """Rebuild the source of tokens [a, b) - the text form of a
         numeric DATA item, for when it is READ into a string."""
@@ -2949,6 +3183,119 @@ class Conv(object):
             return TY_S
         self.err("unknown type '%s'" % t[1])
 
+    # MM.INFO() sub-keywords that take no argument: the word, the C call
+    # and the type.  Two-word names are matched first, longest first, so
+    # EXISTS DIR is never read as EXISTS.  MMBasic's own list is dozens
+    # long and nearly all of it is about hardware, a flash program store
+    # or a network this machine does not have; what is here is what a
+    # program running on a PC3 can actually use an answer to.
+    MMINFO_PLAIN = {
+        'FLAGS':      ('mm_flags_get()', TY_I),
+        'FONTHEIGHT': ('mm_fontheight()', TY_I),
+        'FONTWIDTH':  ('mm_fontwidth()', TY_I),
+        'HPOS':       ('mm_hpos()', TY_I),
+        'VPOS':       ('mm_vpos()', TY_I),
+        'DEVICE':     ('mm_device()', TY_S),
+        'PLATFORM':   ('mm_platform()', TY_S),
+        'PATH':       ('mm_path()', TY_S),
+        'CURRENT':    ('mm_current()', TY_S),
+        'DRIVE':      ('mm_drive()', TY_S),
+        'VERSION':    ('mm_ver()', TY_F),
+        'ERRNO':      ('mm_errno()', TY_I),
+        'ERRMSG':     ('mm_errmsg()', TY_S),
+    }
+    # ... and the ones that take an expression after the keyword.
+    MMINFO_ARG = {
+        'PINNO':       ('mm_pinno(%s)', TY_S, TY_I),
+        'FILESIZE':    ('mm_filesize(%s)', TY_S, TY_I),
+        'EXISTS FILE': ('mm_exists_file(%s)', TY_S, TY_I),
+        'EXISTS DIR':  ('mm_exists_dir(%s)', TY_S, TY_I),
+    }
+
+    def do_mm_info(self):
+        """MM.INFO(...) and MM.INFO$(...), which are one function."""
+        self.expect_op('(')
+        t = self.nxt()
+        if t[0] != T_ID:
+            self.err("MM.INFO wants a keyword, not %s" % t[1])
+        one = t[2]
+        two = None
+        nx = self.peek()
+        if nx is not None and nx[0] == T_ID:
+            two = one + ' ' + nx[2]
+
+        # OPTION BASE is answered HERE, at translation time: OPTION BASE
+        # is a compile-time setting for this translator, so the value is
+        # already known and a run-time call could only look it up again.
+        # It is also what unblocks the shape the ctrl library opens with,
+        # Dim ctrl.key_map%(31 + Mm.Info(Option Base)).
+        if two == 'OPTION BASE':
+            self.i += 1
+            self.expect_op(')')
+            return ('%dLL' % self.opt_base, TY_I)
+
+        # Two words first, so EXISTS DIR is never read as EXISTS.
+        for words, key in ((2, two), (1, one)):
+            if key is None:
+                continue
+            if key not in self.MMINFO_ARG and key not in self.MMINFO_PLAIN:
+                continue
+            if words == 2:
+                self.i += 1             # the second keyword
+            if key in self.MMINFO_ARG:
+                fmt, want, rty = self.MMINFO_ARG[key]
+                v = self.expr()
+                if key == 'PINNO' and v[1] == TY_I:
+                    # MM.INFO(PINNO GP1), unquoted.  MMBasic takes both:
+                    # fun_info's PINNO checks the raw text for "GPnn"
+                    # before evaluating it, so a bare pin name is legal
+                    # there as well as a string.  Here a bare GP1 has
+                    # already become the integer 1 - the name IS the
+                    # number on this machine - so the answer is the
+                    # value, and only the string form needs parsing.
+                    self.expect_op(')')
+                    return (v[0], TY_I)
+                if v[1] != want:
+                    self.err("MM.INFO(%s ...) wants a string" % key)
+                self.expect_op(')')
+                return (fmt % v[0], rty)
+            if key in ('PATH', 'CURRENT'):
+                # Both are argv[0], which main only receives when a
+                # program asks for something that needs it - the same
+                # flag MM.CMDLINE$ raises.
+                self.uses_cmdline = True
+            self.expect_op(')')
+            return self.MMINFO_PLAIN[key]
+
+        if one == 'FLASH':
+            # MM.INFO(FLASH ADDRESS n) - the slot's base address, which
+            # is how a program hands slot data to BLIT MEMORY.  The
+            # pseudo slot allocates on this very reference
+            # (mmb_flash.h), so asking for the address is enough.
+            t = self.nxt()
+            if t[0] != T_ID or t[2] != 'ADDRESS':
+                self.err("MM.INFO(FLASH %s ...) is not supported; "
+                         "translated is FLASH ADDRESS n" % t[1])
+            a = self.expr()
+            self.expect_op(')')
+            self.uses_flash = True
+            return ('(MMINTEGER)(long)mmf_addr(%s)' % self.as_int(a), TY_I)
+        if one == 'FONT':
+            # MM.INFO(FONT ADDRESS n) - where font n's glyphs are, so a
+            # program can draw them itself.
+            t = self.nxt()
+            if t[0] != T_ID or t[2] != 'ADDRESS':
+                self.err("MM.INFO(FONT %s ...) is not supported; "
+                         "translated is FONT ADDRESS n" % t[1])
+            a = self.expr()
+            self.expect_op(')')
+            return ('mm_fontaddr(%s)' % self.as_int(a), TY_I)
+        self.err("MM.INFO(%s ...) is not supported; translated are "
+                 "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
+                 "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
+                 "VPOS, OPTION BASE, PINNO, FILESIZE, EXISTS FILE, "
+                 "EXISTS DIR, FONT ADDRESS n and FLASH ADDRESS n" % t[1])
+
     def do_option(self):
         t = self.peek()
         if t is None:
@@ -3033,6 +3380,7 @@ class Conv(object):
                 self.err("variable name expected in %s" % kw)
             canon, sfx = split_suffix(t[1])
             dims = None
+            dyn = False
             if self.accept_op('('):
                 dims = []
                 while True:
@@ -3042,16 +3390,14 @@ class Conv(object):
                     # that captures the bounds, and the one where a
                     # CONST still carries its literal text (by the emit
                     # pass it has become the #define's name).
-                    if self.mode == 'decl' and not const_c_expr(b):
-                        # Report it once and carry on with a bound that
-                        # at least compiles, so the whole program is not
-                        # buried under "'px' is not an array" for every
-                        # later line.
-                        self.note("the size of '%s' is worked out while the "
-                                  "program runs, and mmb2c fixes array sizes "
-                                  "when it translates.  Give the bound as a "
-                                  "literal or a CONST" % canon)
-                        b = '0'
+                    #
+                    # A bound that is not a compile-time constant makes
+                    # the whole array DYNAMIC: it cannot be a C array,
+                    # because the bounds would have to be in its type,
+                    # so it becomes a flat pointer plus a bounds table -
+                    # which is what an array parameter already is here.
+                    if not const_c_expr(b):
+                        dyn = True
                     dims.append('(%s) + 1' % b)
                     if not self.accept_op(','):
                         break
@@ -3106,8 +3452,22 @@ class Conv(object):
                                  scope, dims, static)
                 if stype is not None:
                     s.stype = stype
+                if dyn or canon in self.redimmed:
+                    dyn = True
+                    if stype is not None:
+                        self.err("an array of a TYPE needs constant "
+                                 "bounds")
+                    if len(dims) > 5:
+                        self.err("an array has at most 5 dimensions")
+                    s.dynamic = True
             else:
                 s = self.lookup(canon)
+
+            # A run-time bound is allocated where the DIM stands, not
+            # hoisted: the expression may name variables that are only
+            # set by the time the statement runs.
+            if s is not None and s.dynamic and self.mode == 'emit':
+                self.emit_dim_alloc(s, dims, False)
 
             if self.accept_op('='):
                 if s is not None and s.stype is not None:
@@ -3117,6 +3477,94 @@ class Conv(object):
                         s.has_init = True
                     self.emit_initialiser(s, static)
 
+            if not self.accept_op(','):
+                break
+
+    def dyn_decl(self, s, cn):
+        """The C declaration of a run-time array's storage pointer."""
+        if s.ty == TY_S:
+            return 'char (*%s)[MM_STRSZ]' % cn
+        return '%s *%s' % (CTYPE[s.ty], cn)
+
+    def elsize(self, s):
+        """The C size of one element of an array."""
+        if s.ty == TY_S:
+            return 'MM_STRSZ'
+        return 'sizeof(%s)' % CTYPE[s.ty]
+
+    def emit_dim_alloc(self, s, dims, preserve):
+        """DIM / REDIM of an array with run-time bounds.
+
+        The new bounds go into a scratch table first and the runtime
+        swaps them in, so a REDIM PRESERVE can compare the two before
+        anything is allocated - and so a failed one leaves the array as
+        it was rather than half changed.
+
+        `dims` holds counts (the declaration adds the +1); the table
+        holds MMBasic's UPPER BOUNDS, which is count - 1.
+        """
+        nb = self.newtmp('nb')
+        old = self.newtmp('ao')
+        self.tmp_used = True
+        np = self.newtmp('an')
+        self.emit('{ MMINTEGER %s[%d]; void *%s, *%s;'
+                  % (nb, len(dims) + 1, old, np))
+        self.emit('  %s[0] = %d;' % (nb, len(dims)))
+        for k, d in enumerate(dims):
+            self.emit('  %s[%d] = (%s) - 1;' % (nb, k + 1, d))
+        # mm_heap and mm_lfree here rather than inside the runtime: under
+        # bcrun only a call made BY the program reaches the VM's
+        # allocator, so a block the native runtime malloc'd would be a
+        # machine address in a cell the VM owns.
+        self.emit('  %s = mm_heap((unsigned long)'
+                  'mm_arr_bytes(%s, %s));' % (np, nb, self.elsize(s)))
+        self.emit('  %s = mm_arr_swap(%s, %s, %s, %s, %s, %d);'
+                  % (old, s.acc, s.bacc, nb, np, self.elsize(s),
+                     1 if preserve else 0))
+        # The PROGRAM stores the new pointer into its own variable: a
+        # pointer-to-pointer would be written at the host's width into a
+        # cell the VM sizes, which is a 32-bit slot under bcrun.
+        self.emit('  %s = %s;' % (s.acc, np))
+        self.emit('  if (%s) mm_lfree(%s); }' % (old, old))
+
+    def do_redim(self):
+        """REDIM [PRESERVE] a(n) [, b(n) ...]
+
+        MMBasic's cmd_redim.  The array must already exist and must
+        already be dynamic: an array declared with constant bounds is a
+        C array, and there is nothing to re-dimension.
+        """
+        preserve = False
+        if self.is_kw('PRESERVE'):
+            self.i += 1
+            preserve = True
+        while True:
+            t = self.nxt()
+            if t[0] != T_ID:
+                self.err("REDIM needs an array name")
+            canon, sfx = split_suffix(t[1])
+            s = self.lookup(canon)
+            if s is None or not s.is_array:
+                self.err("'%s' is not an array" % canon)
+            if sfx is not None and sfx != s.ty:
+                self.err("'%s' is %s but used as %s"
+                         % (canon, TYNAME[s.ty], TYNAME[sfx]))
+            if s.is_param:
+                self.err("'%s' is a parameter, so its bounds belong to "
+                         "the caller" % canon)
+            if not s.dynamic:
+                self.err("'%s' was DIMmed with constant bounds, so it has "
+                         "no run-time size to change; give its DIM a "
+                         "bound that is not a literal or a CONST" % canon)
+            self.expect_op('(')
+            dims = []
+            while True:
+                dims.append('(%s) + 1' % self.as_int(self.expr()))
+                if not self.accept_op(','):
+                    break
+            self.expect_op(')')
+            if self.mode == 'emit':
+                self.emit_dim_alloc(s, dims, preserve)
             if not self.accept_op(','):
                 break
 
@@ -3182,13 +3630,65 @@ class Conv(object):
                     ty = TY_I
                 else:
                     self.err("CONST '%s' type conflict" % canon)
-            if self.mode == 'decl':
+            if self.cur is not None:
+                # CONST INSIDE A SUB OR FUNCTION IS LOCAL TO IT.
+                #
+                # MMBasic says so in one line - cmd_const does
+                # `if (g_LocalIndex != 0) type |= V_LOCAL;`
+                # (Commands.c:6478) - and this used to put every CONST
+                # in the globals whatever scope it was written in.  Two
+                # routines each declaring their own `Const f$` then
+                # collided, and the second use of an unrelated `f%`
+                # somewhere else in the program failed with "'f' is
+                # STRING but used as INTEGER".  Six of the Game*Mite
+                # programs do exactly that, because the library they
+                # share declares CONSTs inside SELECT CASE arms.
+                #
+                # A local one is a LOCAL that is assigned where the
+                # statement stands and refused as an assignment target
+                # afterwards - not a #define.  That is what MMBasic
+                # does: the expression is evaluated by DoExpression
+                # when the statement runs, ONCE, and it may call a
+                # function (3D-maze writes Const f$ =
+                # gamemite.file$("menu.bas")).  Inlining it would call
+                # that function again at every use.
+                #
+                # MMBasic also allows the same name twice in one
+                # routine, because only one branch of an If runs;
+                # declare() returns the existing symbol when the types
+                # agree, so that keeps working.
+                if self.mode == 'decl':
+                    s = self.declare(canon, ty, 'local')
+                    s.is_const = True
+                else:
+                    s = self.lookup(canon)
+                if self.mode == 'emit' and s is not None:
+                    if ty == TY_S:
+                        self.emit('mm_sset(%s, %s);' % (s.acc, v[0]))
+                    else:
+                        self.emit('%s = %s;' % (s.acc, v[0]))
+            elif self.mode == 'decl':
                 s = Sym(canon, ty, '(' + v[0] + ')')
                 s.is_const = True
                 s.where = self.lineno
                 if canon in self.globals:
-                    self.err("'%s' already declared" % canon)
-                self.globals[canon] = s
+                    # A WARNING, and it has to be: MMBasic runs only one
+                    # arm of an If, so the same global CONST declared in
+                    # both arms is legal there and the arm that ran is
+                    # the one that exists.  A compiler sees both and has
+                    # to pick, and picking silently is how PicoMan came
+                    # to draw its maze at (200,200) on a 320x240 screen:
+                    # its Windows arm sets xMargin = 200 and its
+                    # Game*Mite arm 10, and the first won.
+                    #
+                    # err() would be worse than useless here - the
+                    # declaration pass swallows MMError, so it printed
+                    # NOTHING and the wrong value shipped.
+                    self.warn("'%s' is declared CONST more than once; "
+                              "the first (line %d) is the one used"
+                              % (canon, self.globals[canon].where))
+                else:
+                    self.globals[canon] = s
             if not self.accept_op(','):
                 break
 
@@ -3202,6 +3702,8 @@ class Conv(object):
         self.gosub_n = 0
         self.cur = None
         self.indent = 1
+        self.err_window = 0
+        self.err_window_pending = None
         self.blocks = []
         self.out = self.out_main
         self.opt_default = TY_F
@@ -3270,7 +3772,15 @@ class Conv(object):
             # is the same thing (it runs once, either side), and for a
             # closer it lands at the end of the block, which is where the
             # closing keyword executes anyway.
-            if self.mode == 'emit' and self.uses_onerror \
+            # A literal ON ERROR SKIP n arms its window here: the ON
+            # ERROR statement itself is covered (n+1 with the runtime's
+            # own +1), so ITS guard performs the decrement the
+            # interpreter does at the end of the ON ERROR line, and the
+            # counter reaches the next statement intact.
+            if self.err_window_pending is not None and failed is None:
+                self.err_window = self.err_window_pending + 1
+            self.err_window_pending = None
+            if self.mode == 'emit' and self.checks_on() \
                     and self.out is out_at_entry and failed is None:
                 guard = ('    ' * ind
                          + 'if (__mm_e[1]) { mm_pr_commit(); __mm_e[0] = 0;'
@@ -3279,6 +3789,8 @@ class Conv(object):
                     out_at_entry.append(guard)
                 else:
                     out_at_entry.insert(where, guard)
+            if self.err_window > 0 and failed is None:
+                self.err_window -= 1
             # The interrupt poll goes AFTER the error bookkeeping, which
             # is the interpreter's own order: statement, error
             # bookkeeping, then check_interrupt (MMBasic.c:1852-1879).
@@ -3553,6 +4065,36 @@ class Conv(object):
         if up == 'ERASE':
             self.i += 1
             self.do_erase()
+            return
+        if up == 'REDIM':
+            self.i += 1
+            self.do_redim()
+            return
+        if up == 'POKE':
+            # POKE BYTE addr, value   and its wider relatives.
+            #
+            # The width is a bare keyword, exactly as PEEK's is, so it
+            # is read here rather than as an argument.  MMBasic's other
+            # POKE forms - VAR, DISPLAY, PROGMEM - address the
+            # interpreter's own structures and have no equivalent.
+            self.i += 1
+            t = self.nxt()
+            widths = {'BYTE': ('mmpk_poke_byte', False),
+                      'SHORT': ('mmpk_poke_short', False),
+                      'WORD': ('mmpk_poke_word', False),
+                      'INTEGER': ('mmpk_poke_integer', False),
+                      'FLOAT': ('mmpk_poke_float', True)}
+            w = widths.get(t[2]) if t[0] == T_ID else None
+            if w is None:
+                self.err("POKE %s is not supported; translated are BYTE, "
+                         "SHORT, WORD, INTEGER and FLOAT" % t[1])
+            addr = self.as_int(self.expr())
+            self.expect_op(',')
+            v = self.expr()
+            self.uses_peek = True
+            self.emit('%s(%s, %s);'
+                      % (w[0], addr,
+                         self.as_flt(v) if w[1] else self.as_int(v)))
             return
         if up == 'CLEAR':
             self.i += 1
@@ -4277,6 +4819,54 @@ class Conv(object):
                 self.emit('mmg_box(%s, %s, %s, %s, %s, %s, %s);'
                           % (x, y, w, h, lw, col, fill))
             return
+        if up == 'GUI' and self.is_kw('BITMAP', 1):
+            # GUI BITMAP x, y, bits [,w] [,h] [,scale] [,c] [,bc]
+            #
+            # The one form of GUI that means anything here: the rest of
+            # cmd_gui is touch-screen widgets, and this machine has no
+            # touch hardware.  MMBasic's own defaults (Draw.c:449) are
+            # 8x8 at scale 1 in the current colours - note the SCALE
+            # default is 1 and not the FONT scale, whatever the manual
+            # says; the code never reads the font.
+            #
+            # `bits` may be a string or an integer, and the two are
+            # different byte sources rather than the same one converted
+            # - see mmb_gui.h.
+            self.i += 2
+            self.uses_gui = True
+            x = self.as_int(self.expr())
+            self.expect_op(',')
+            y = self.as_int(self.expr())
+            self.expect_op(',')
+            v = self.expr()
+            w, h, scale = '8LL', '8LL', '1LL'
+            fc, bc = 'mm_fg()', 'mm_bg()'
+            for k in range(5):
+                if not self.accept_op(','):
+                    break
+                if self.is_op(','):
+                    continue            # a bare comma keeps the default
+                e = self.as_int(self.expr())
+                if k == 0:
+                    w = e
+                elif k == 1:
+                    h = e
+                elif k == 2:
+                    scale = e
+                elif k == 3:
+                    fc = e
+                else:
+                    bc = e
+            if v[1] == TY_S:
+                self.emit('mmg_gui_bitmap(%s, %s, (const unsigned char *)'
+                          'mm_cstr(%s), mm_slen(%s), %s, %s, %s, %s, %s);'
+                          % (x, y, v[0], v[0], w, h, scale, fc, bc))
+            elif v[1] == TY_I:
+                self.emit('mmg_gui_bitmap_i(%s, %s, %s, %s, %s, %s, %s, %s);'
+                          % (x, y, v[0], w, h, scale, fc, bc))
+            else:
+                self.err('GUI BITMAP wants a string or an integer')
+            return
         if up == 'TRIANGLE':
             # TRIANGLE x1, y1, x2, y2, x3, y3 [, colour [, fill]]
             #
@@ -4489,6 +5079,9 @@ class Conv(object):
             return
         if up == 'I2C2':
             self.do_i2c2()
+            return
+        if up == 'I2C':
+            self.do_i2c0()
             return
         if up == 'ONEWIRE':
             self.i += 1
@@ -4874,19 +5467,29 @@ class Conv(object):
             self.expect_op(',')
             y2 = self.expr()
             col = 'MM_CUR'
+            wid = None
             if self.accept_op(','):
                 # x1..y2 are required; the optional ones after them may
                 # each be left blank, so LINE x1,y1,x2,y2,,c is how a
                 # colour is given without a width.
                 if not self.is_op(','):
                     w = self.expr()
-                    if not (w[0].strip() in ('1LL', '1')):
-                        self.warn("LINE width is not supported yet; drawn 1 pixel wide")
+                    if w[0].strip() not in ('1LL', '1'):
+                        wid = self.as_int(w)
                 if self.accept_op(','):
                     col = self.as_int(self.expr())
-            self.emit('mm_line(%s, %s, %s, %s, %s);'
-                      % (self.as_int(x1), self.as_int(y1),
-                         self.as_int(x2), self.as_int(y2), col))
+            if wid is None:
+                self.emit('mm_line(%s, %s, %s, %s, %s);'
+                          % (self.as_int(x1), self.as_int(y1),
+                             self.as_int(x2), self.as_int(y2), col))
+            else:
+                # A width is four different algorithms in the firmware,
+                # picked by shape - see mmb_gfx_line.h.  Only a program
+                # that asks for one carries them.
+                self.uses_linew = True
+                self.emit('mmg_linew(%s, %s, %s, %s, %s, %s);'
+                          % (self.as_int(x1), self.as_int(y1),
+                             self.as_int(x2), self.as_int(y2), wid, col))
             return
         if up == 'PAUSE':
             # mm_wait, not mm_pause, for a program with an interrupt or
@@ -5222,6 +5825,7 @@ class Conv(object):
                 self.emit('{ int %s; for (%s = 0; %s < %s; %s++)'
                           % (k, k, k, cnt, k))
                 if sym.ty == TY_S:
+                    self.reads_string = True
                     self.emit('    mm_sset((%s)[%s], mm_read_s()); }'
                               % (ptr, k))
                 else:
@@ -5231,6 +5835,7 @@ class Conv(object):
             else:
                 tgt, ty = self.input_target()
                 if ty == TY_S:
+                    self.reads_string = True
                     self.emit('mm_sset(%s, mm_read_s());' % tgt)
                     self.tmp_used = True
                 else:
@@ -5369,8 +5974,7 @@ class Conv(object):
         self.tmp_used = True
 
     def do_erase(self):
-        self.warn("ERASE zeroes the variable; static storage cannot be "
-                  "handed back the way the interpreter does")
+        warned = False
         while not self.stmt_end():
             t = self.peek()
             if t is None or t[0] != T_ID:
@@ -5379,7 +5983,22 @@ class Conv(object):
             self.i += 1
             if self.accept_op('('):
                 self.expect_op(')')
-            self.emit(self.zero_of(sym))
+            if sym.is_array and sym.dynamic and not sym.is_param:
+                # This one really is given back: its elements are on the
+                # heap, so ERASE frees them and leaves it undimensioned,
+                # exactly as the interpreter's erase() does.
+                old = self.newtmp('ae')
+                self.tmp_used = True
+                self.emit('{ void *%s = %s;' % (old, sym.acc))
+                self.emit('  %s = 0; %s[0] = 0;' % (sym.acc, sym.bacc))
+                self.emit('  if (%s) mm_lfree(%s); }' % (old, old))
+            else:
+                if not warned:
+                    self.warn("ERASE zeroes the variable; static storage "
+                              "cannot be handed back the way the "
+                              "interpreter does")
+                    warned = True
+                self.emit(self.zero_of(sym))
             if not self.accept_op(','):
                 break
 
@@ -5415,10 +6034,28 @@ class Conv(object):
         self.i += 1
         mode = {'ABORT': 0, 'CLEAR': 1, 'IGNORE': 2, 'SKIP': 3}[kw]
         self.uses_onerror = True
+        if kw == 'IGNORE':
+            self.onerror_global = True
+        nlit = None
         if kw == 'SKIP' and self.peek() is not None and not self.is_op(':'):
-            n = self.as_int(self.expr())
+            w2 = self.peek()
+            w3 = self.peek(1)
+            if (w2[0] == T_NUM and w2[2] == 'I' and w2[1].isdigit()
+                    and (w3 is None or (w3[0] == T_OP and w3[1] == ':'))):
+                nlit = int(w2[1])
+                n = w2[1]
+                self.i += 1
+            else:
+                # the count is a run-time value: the window cannot be
+                # laid out at compile time, so arm the whole program
+                n = self.as_int(self.expr())
+                self.onerror_global = True
         else:
             n = '1'
+            if kw == 'SKIP':
+                nlit = 1
+        if nlit is not None:
+            self.err_window_pending = nlit
         self.emit('mm_on_error(%d, %s);' % (mode, n))
 
     # -- ON nbr GOTO ---------------------------------------------------------
@@ -5958,7 +6595,7 @@ class Conv(object):
         multi-line IF or a loop the next statement is inside the body, so
         it is entered; for a single-line IF the next statement is the next
         line, so the whole statement is skipped."""
-        if not self.uses_onerror:
+        if not self.checks_on():
             return c
         if enter:
             return '__mm_e[0] ? 1 : (%s)' % c
@@ -6298,6 +6935,52 @@ class Conv(object):
             self.emit('mmi_onkey_any(0);')
             return
         self.emit('mmi_onkey_sel(%s, %s);' % (code, self.int_target()))
+
+    def do_i2c0(self):
+        """I2C WRITE addr, option, count, d1 [, d2 ...]
+           I2C READ  addr, option, count, <destination>
+           I2C CHECK addr
+
+        The FIXED bus: GP20/GP21, the QWIIC socket and the DS3231
+        together.  No SETPIN, no OPEN, no CLOSE - the pins are the
+        board's and the controller is already running for the clock,
+        which is why MMBasic's cmd_i2c has no pin test where cmd_i2c2
+        errors "Pin not set for I2C2".
+
+        NOTHING HERE RAISES: MMBasic records the outcome in MM.I2C and
+        returns.  See mmb_i2c.h.
+        """
+        self.i += 1
+        self.uses_i2c0 = True
+        if self.accept_kw('CHECK'):
+            addr = self.as_int(self.expr())
+            self.emit('mmi2c0_check(%s);' % addr)
+            return
+        if self.is_kw('OPEN') or self.is_kw('CLOSE'):
+            self.err("the fixed I2C bus is always open - GP20/GP21 are "
+                     "the board's and the controller runs for the clock; "
+                     "OPEN and CLOSE are I2C2's")
+        wr = self.accept_kw('WRITE')
+        if not wr and not self.accept_kw('READ'):
+            self.err("I2C takes WRITE, READ or CHECK")
+        addr = self.as_int(self.expr())
+        self.expect_op(',')
+        opt = self.as_int(self.expr())
+        self.expect_op(',')
+        n = self.as_int(self.expr())
+        self.expect_op(',')
+        self.tmp_used = True
+        if wr:
+            def call(src, isbytes):
+                self.emit('  mmi2c0_write%s(%s, %s, %s, %s);'
+                          % ('_bytes' if isbytes else '', addr, opt, n, src))
+            self.comms_tx('I2C WRITE', n, call)
+        else:
+            def call(dst, isbytes):
+                self.emit('  mmi2c0_read%s(%s, %s, %s, %s);'
+                          % ('_bytes' if isbytes else '',
+                             addr, opt, n, dst))
+            self.comms_rx('I2C READ', n, call)
 
     def do_i2c2(self):
         """I2C2 OPEN speed, timeout
@@ -6722,6 +7405,9 @@ class Conv(object):
             # call.  Returning at once is the same thing observably, and
             # it spends none of the skip count on statements in here.
             ret = ' return __ret;' if r.is_func else ' return;'
+            # a lexical SKIP window never crosses into a routine body
+            self.err_window = 0
+            self.err_window_pending = None
             self.emit('if (__mm_e[0]) { %s%s }'
                       % (self.routine_exit(), ret))
             # The SUB/FUNCTION line is itself a statement the interpreter
@@ -6864,6 +7550,13 @@ class Conv(object):
                     if s.is_array else ''
                 heap.append('struct t_%s %s%s;%s'
                             % (s.stype, cn, dims, note))
+            elif s.is_array and s.dynamic:
+                # Bounds known only at run time, so the elements cannot
+                # be part of the type: a pointer and the bounds table
+                # beside it, which is the shape an array parameter has.
+                heap.append('%s;   /* DIM at run time */'
+                            % self.dyn_decl(s, cn))
+                heap.append('MMINTEGER __b_%s[MM_MAXDIM + 1];' % cn)
             elif s.is_array:
                 dims = ''.join('[%s]' % d for d in s.dims)
                 if s.ty == TY_S:
@@ -6920,6 +7613,10 @@ class Conv(object):
                         if s.is_array else ''
                     out.append('    struct t_%s %s%s;'
                                % (s.stype, cn, dims))
+                elif s.is_array and s.dynamic:
+                    out.append('    %s;   /* DIM at run time */'
+                               % self.dyn_decl(s, cn))
+                    out.append('    MMINTEGER __b_%s[MM_MAXDIM + 1];' % cn)
                 elif s.is_array:
                     dims = ''.join('[%s]' % d for d in s.dims)
                     if s.ty == TY_S:
@@ -7007,6 +7704,10 @@ class Conv(object):
             wr('#include "mmb_gfx_circle.h"\n')
         if self.uses_box:
             wr('#include "mmb_gfx_box.h"\n')
+        if self.uses_gui:
+            wr('#include "mmb_gui.h"\n')
+        if self.uses_linew:
+            wr('#include "mmb_gfx_line.h"\n')
         if self.uses_rbox:
             wr('#include "mmb_gfx_rbox.h"\n')
         if self.uses_triangle:
@@ -7055,7 +7756,7 @@ class Conv(object):
         # Before both buses: it is the data forms they share.
         if self.uses_comms:
             wr('#include "mmb_comms.h"\n')
-        if self.uses_i2c:
+        if self.uses_i2c or self.uses_i2c0:
             wr('#include "mmb_i2c.h"\n')
         if self.uses_spi:
             wr('#include "mmb_spi.h"\n')
@@ -7128,7 +7829,7 @@ class Conv(object):
         for nm in names:
             s = self.globals[nm]
             if s.is_const:
-                wr('#define %s %s\n' % (cvar(nm), s.acc))
+                wr('#define %s %s\n' % (cconst(nm), s.acc))
         wr('\n/* ---- global variables ---- */\n')
         for ln in self.global_decls():
             wr(ln + '\n')
@@ -7150,10 +7851,11 @@ class Conv(object):
             wr(' * having back: picofrog carries 1692 items and not one\n')
             wr(' * float, which was 13,536 bytes of zeroes in the data\n')
             wr(' * segment of a program that had none to spare. ---- */\n')
-            wr('static const int __mmb_data_kind[] = {\n')
-            for kind, f, i, sv in self.data:
-                wr('    %d,\n' % kind)
-            wr('};\n')
+            if self.data_uniform_kind is None:
+                wr('static const int __mmb_data_kind[] = {\n')
+                for kind, f, i, sv in self.data:
+                    wr('    %d,\n' % kind)
+                wr('};\n')
             if self.data_has_f:
                 wr('static const MMFLOAT __mmb_data_f[] = {\n')
                 for kind, f, i, sv in self.data:
@@ -7164,10 +7866,11 @@ class Conv(object):
                 for kind, f, i, sv in self.data:
                     wr('    %s,\n' % i)
                 wr('};\n')
-            wr('static const char *__mmb_data_s[] = {\n')
-            for kind, f, i, sv in self.data:
-                wr('    %s,\n' % sv)
-            wr('};\n')
+            if self.data_has_s:
+                wr('static const char *__mmb_data_s[] = {\n')
+                for kind, f, i, sv in self.data:
+                    wr('    %s,\n' % sv)
+                wr('};\n')
         if self.uses_onerror:
             wr('\n/* ---- ON ERROR state, read by the guards below ---- *\n')
             wr(' * [0] is the poison: an error has been recorded and the\n')
@@ -7237,7 +7940,21 @@ class Conv(object):
         for ln in self.out_body:
             wr(ln + '\n')
         wr('\n/* ---- main program ---- */\n')
-        if self.uses_cmdline:
+        # MAIN TAKES NO ARGUMENTS IN THE FCC BUILD.
+        #
+        # bcrun dispatches the entry with nothing pushed - run() calls
+        # bc_exec(h_entry) - so a main declared with two parameters
+        # reads a frame two slots short and the program segfaults before
+        # its first statement.  Nothing had ever caught it because no
+        # test used MM.CMDLINE$, the only thing that asked for the
+        # arguments, until MM.INFO(PATH) and MM.INFO(CURRENT) did.
+        #
+        # bcrun already holds the real command line and hands it over
+        # inside its mm_argv_bind wrapper (bcrun_mm.c: it ignores what
+        # the caller passed and uses prog_argv), so the arguments are
+        # not lost - only the signature has to go.  The hosted gcc build
+        # has no such wrapper and keeps the real one.
+        if self.uses_cmdline and not self.fcc:
             wr('int main(int argc, char **argv)\n{\n')
         else:
             wr('int main(void)\n{\n')
@@ -7249,16 +7966,20 @@ class Conv(object):
             wr('    mm_fontdef(%d, (MMINTEGER)(long)__mmfont_%d, '
                '(MMINTEGER)sizeof __mmfont_%d);\n' % (fno, fno, fno))
         if self.uses_cmdline:
-            wr('    mm_argv_bind(argc, argv);\n')
+            wr('    mm_argv_bind(argc, argv);\n' if not self.fcc
+               else '    mm_argv_bind(0, (char **)0);\n')
         if self.uses_onerror:
             wr('    mm_err_bind(__mm_e);\n')
         if getattr(self, 'heap_used', False):
             wr('    H = mm_heap(sizeof *H);   /* arrays and strings */\n')
         if self.data:
-            wr('    mm_data_init4(__mmb_data_kind, %s, %s, '
-               '__mmb_data_s, %d);\n'
-               % ('__mmb_data_f' if self.data_has_f else '0',
+            uk = self.data_uniform_kind
+            wr('    mm_data_init5(%s, %d, %s, %s, %s, %d);\n'
+               % ('__mmb_data_kind' if uk is None else '0',
+                  0 if uk is None else uk,
+                  '__mmb_data_f' if self.data_has_f else '0',
                   '__mmb_data_i' if self.data_has_i else '0',
+                  '__mmb_data_s' if self.data_has_s else '0',
                   len(self.data)))
         for ln in self.out_main:
             wr(ln + '\n')
@@ -7273,7 +7994,7 @@ def _const_fixup(conv):
     for nm in conv.globals:
         s = conv.globals[nm]
         if s.is_const:
-            s.acc = cvar(nm)
+            s.acc = cconst(nm)
 
 
 def _heap_fixup(conv):
@@ -7290,6 +8011,8 @@ def _heap_fixup(conv):
             continue
         if s.is_array or s.ty == TY_S or s.stype is not None:
             s.acc = 'H->' + cvar(nm)
+            if s.dynamic:
+                s.bacc = 'H->__b_' + cvar(nm)
 
 
 def _local_heap_fixup(conv):
@@ -7318,6 +8041,8 @@ def _local_heap_fixup(conv):
         r.heap_locals = True
         for nm in heap:
             r.locals[nm].acc = '__L->' + cvar(nm)
+            if r.locals[nm].dynamic:
+                r.locals[nm].bacc = '__L->__b_' + cvar(nm)
 
 
 def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
@@ -7364,7 +8089,7 @@ def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
         if conv.globals[nm].is_const:
             consts[nm] = conv.globals[nm].acc
     for nm in consts:
-        conv.globals[nm].acc = cvar(nm)
+        conv.globals[nm].acc = cconst(nm)
     _heap_fixup(conv)
     _local_heap_fixup(conv)
     conv.tmpn = 0

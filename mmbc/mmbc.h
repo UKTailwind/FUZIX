@@ -74,6 +74,16 @@ int boolean_expr(const char *code);
 char *c_string_literal(const char *s);
 char *split_suffix(const char *word, int *ty);  /* ty out: TY_* or TY_NONE */
 char *cvar(const char *name);
+char *cconst(const char *name);   /* a global CONST: #define, own prefix */
+struct sym;
+/* run-time arrays (mmbc_decl.c) */
+int redimmed_in(const char *canon);
+const char *dyn_decl(struct sym *s, const char *cn);
+void emit_dim_alloc(struct sym *s, const char **dims, int ndims,
+                    int preserve);
+void do_redim(void);
+const char *varaddr(void);      /* PEEK(VARADDR v) */
+int gp_pin(const char *word, const struct sym *known);  /* "GP8" -> 8 */
 char *clabel(const char *name);
 int const_c_expr(const char *text);
 char *upper(const char *s);
@@ -144,6 +154,12 @@ struct sym {
     const char **dims;          /* C size expressions */
     int ndims;
     int is_const, is_array, is_param, byref, is_static;
+    /* An array whose bounds are only known at run time.  Held exactly
+       as an array PARAMETER is - a flat pointer plus a bounds table -
+       so index_of(), array_flat() and BOUND() take the same branch for
+       both.  bacc is the C text of that table. */
+    int dynamic;
+    const char *bacc;
     int where;                  /* source line first seen */
     int implied;
     int has_init;
@@ -329,6 +345,11 @@ struct conv {
     int uses_clear;
     int uses_circle;
     int uses_box;
+    int uses_gui;
+    int uses_linew;
+    int reads_string;
+    const char **redimmed;      /* every array some REDIM names */
+    int nredimmed, credimmed;
     int uses_rbox;
     int uses_triangle;
     int uses_polygon;
@@ -349,15 +370,27 @@ struct conv {
     int uses_flash;             /* pseudo flash slots: mmb_flash.h */
     int uses_sprite;            /* SPRITE family: mmb_sprite.h */
     int uses_playd;             /* SOUND/TONE/MOD daemons: mmb_play.h */
-    /* set in the scan pass, so statements BEFORE the ON ERROR line are
-       guarded too - the armed window is a run-time thing */
+    /* set in the scan pass: any ON ERROR at all pulls in the __mm_e
+       state, the routine prologues and mm_err_bind */
     int uses_onerror;
+    /* ON ERROR IGNORE (or a SKIP whose count is not a bare literal)
+       arms trapping for an unbounded stretch of the program, so every
+       statement pays the checked forms - set in the scan pass,
+       statements BEFORE the line included, because the armed window is
+       a run-time thing.  A literal ON ERROR SKIP n arms exactly the ON
+       ERROR statement plus the next n: the checked forms and the
+       per-statement bookkeeping are emitted for that window alone
+       (err_window, counted down in statement()). */
+    int onerror_global;
+    int err_window;
+    int err_window_pending;     /* -1 = none */
     /* likewise: an interrupt armed at line 100 has to be polled by the
        statements before it, so the poll sites are emitted for the whole
        program or none of it */
     int uses_interrupts;
     int uses_pwm;
     int uses_i2c;
+    int uses_i2c0;
     int uses_spi;
     int uses_peek;             /* PEEK(): pulls in mmb_peek.h */
     int uses_cmdline;          /* MM.CMDLINE$: main takes argv */
@@ -387,6 +420,7 @@ struct tok *peek(int k);
 int at_end(void);
 struct tok *nxt(void);
 int is_op(const char *s, int k);
+int checks_on(void);
 int is_kw(const char *s, int k);
 int accept_op(const char *s);
 void expect_op(const char *s);
@@ -411,6 +445,7 @@ void out_append(struct outbuf *o, const char *persistent_line);
 void out_insert(struct outbuf *o, int where, const char *persistent_line);
 struct label *label_rec(const char *canon);  /* find-or-create */
 struct sym *sym_lookup(const char *canon);   /* self.lookup */
+struct sym *sym_new(const char *canon, int ty, const char *acc);
 struct sym *declare(const char *canon, int ty, const char *scope,
                     const char **arr_dims, int ndims, int is_static);
 struct sym *reference(const char *word, int as_array);
