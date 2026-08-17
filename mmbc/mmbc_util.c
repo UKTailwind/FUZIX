@@ -20,7 +20,12 @@ struct psram_req {
     unsigned long base;
 };
 
-#define MMBC_ARENA_LEN (768UL * 1024)
+/* 768K translated everything up to the eclipse; PicoMan (77K of
+ * BASIC, the first Game*Mite-sized program translated ON the board)
+ * exhausted it.  The allocator is copy-and-abandon by design, so the
+ * bound is generous rather than tight - the PSRAM heap is ~7.8M and
+ * the one-compile-at-a-time rule means no concurrent claimant. */
+#define MMBC_ARENA_LEN (2048UL * 1024)
 
 static unsigned char *ar_cur, *ar_end;
 
