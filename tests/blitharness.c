@@ -151,6 +151,28 @@ static void fbset(int x, int y, int c)
 
 /* a snapshot to model against */
 static unsigned char model[160 * 480];
+
+/* the same store, into the model - so a test can compute what the
+ * engine ought to have drawn, longhand, and diff the two */
+static void mset(int x, int y, int c)
+{
+    unsigned char *p;
+
+    if (cur_bpp == 4) {
+        p = &model[y * cur_stride + (x >> 1)];
+        if (x & 1)
+            *p = (unsigned char)((*p & 0xF0) | (c & 15));
+        else
+            *p = (unsigned char)((*p & 0x0F) | ((c & 15) << 4));
+    } else {
+        p = &model[y * cur_stride + (x >> 3)];
+        if (c)
+            *p |= (unsigned char)(0x80 >> (x & 7));
+        else
+            *p &= (unsigned char)~(0x80 >> (x & 7));
+    }
+}
+
 static int mget(int x, int y)
 {
     unsigned char b;
@@ -301,6 +323,100 @@ static void t_copy(void)
                 expect("copy", dx + x, dy + y,
                        mget(sx + x, sy + y), fbget(dx + x, dy + y));
     }
+}
+
+/*	A SWEEP over the shapes the fast paths actually split on.
+ *
+ *	The single 8x4 case below exercises one width, one position and
+ *	short runs.  The blitter now has a packed staging path, a
+ *	run-at-a-time RLE reader and an aligned nibble-swap fast case,
+ *	and which one runs depends on the width's parity, the x parity,
+ *	whether anything is clipped and whether a transparent colour was
+ *	given.  That is a grid, and a grid wants sweeping - the crash
+ *	that sent a board into fsck was a shape nothing here had drawn.
+ *
+ *	The oracle is a plain reference blit written out longhand: no
+ *	staging, no fast case, one pixel at a time.
+ */
+static void t_sweep(void)
+{
+    static const int widths[] = { 1, 2, 3, 7, 8, 15, 16, 24, 33, 64 };
+    static const int xs[] = { -5, -1, 0, 1, 2, 30, 31, 300, 318 };
+    unsigned char img[64 * 9], stream[64 * 9 * 2 + 8];
+    int wi, xi, t, enc, i;
+
+    if (cur_bpp != 4)
+        return;
+
+    for (wi = 0; wi < (int)(sizeof widths / sizeof widths[0]); wi++)
+        for (xi = 0; xi < (int)(sizeof xs / sizeof xs[0]); xi++)
+            for (t = 0; t < 2; t++)          /* opaque, then keyed on 5 */
+                for (enc = 0; enc < 2; enc++) {   /* raw, then RLE */
+                    int w = widths[wi], h = 9, x0 = xs[xi], y0 = 20;
+                    int blank = t ? 5 : -1;
+                    int n = 0, px, py;
+
+                    for (i = 0; i < w * h; i++)
+                        img[i] = (unsigned char)((i * 5 + wi + xi) & 15);
+                    /* a long flat run, to cross a row boundary and to
+                       exercise a stored count of 0 = 256 pixels */
+                    for (i = 0; i < w * h && i < 300; i++)
+                        if (i > w / 2 && i < w * h - 2)
+                            img[i] = 5;
+
+                    stream[n++] = (unsigned char)(w & 0xFF);
+                    stream[n++] = (unsigned char)(w >> 8);
+                    stream[n++] = (unsigned char)(h & 0xFF);
+                    stream[n++] = (unsigned char)((h >> 8) | (enc ? 0x80 : 0));
+                    if (enc) {
+                        i = 0;
+                        while (i < w * h) {
+                            int run = 1;
+
+                            while (i + run < w * h && img[i + run] == img[i]
+                                   && run < 15)
+                                run++;
+                            stream[n++] =
+                                (unsigned char)((img[i] << 4) | run);
+                            i += run;
+                        }
+                    } else {
+                        for (i = 0; i < w * h; i += 2) {
+                            unsigned char b = img[i];
+
+                            if (i + 1 < w * h)
+                                b |= (unsigned char)(img[i + 1] << 4);
+                            stream[n++] = b;
+                        }
+                    }
+
+                    card();
+                    memcpy(model, fb, sizeof(model));
+                    /* the oracle, longhand, into the model */
+                    for (py = 0; py < h; py++)
+                        for (px = 0; px < w; px++) {
+                            int c = img[py * w + px];
+                            int dx = x0 + px, dy = y0 + py;
+
+                            if (blank >= 0 && c == blank)
+                                continue;
+                            if (dx < 0 || dx >= cur_hres
+                                || dy < 0 || dy >= cur_vres)
+                                continue;
+                            mset(dx, dy, c);
+                        }
+                    mmb_blit_mem((MMINTEGER)(long)stream, x0, y0, blank);
+                    for (py = 0; py < h; py++)
+                        for (px = 0; px < w; px++) {
+                            int dx = x0 + px, dy = y0 + py;
+
+                            if (dx < 0 || dx >= cur_hres
+                                || dy < 0 || dy >= cur_vres)
+                                continue;
+                            expect("sweep", dx, dy, mget(dx, dy),
+                                   fbget(dx, dy));
+                        }
+                }
 }
 
 /* the decoders: a known image RLE- and raw-encoded by this harness,
@@ -521,6 +637,7 @@ int main(void)
         t_modes();
         t_clip();
         t_copy();
+        t_sweep();
         t_decode();
         t_readclip();
         t_flash();

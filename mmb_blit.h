@@ -530,7 +530,15 @@ MMG_FN unsigned char mmb_rle(int reset)
  *	not: an RLE run carries across rows, so consuming the stream is
  *	not optional, and a clipped row must still advance it.
  */
-static unsigned char mmb_packrow[336];	/* (max width + 1) / 2, + slack */
+/*	Staged rows are the SOURCE's full width, not the clipped width -
+ *	an RLE run has to be consumed whether it lands on screen or not -
+ *	so the capacity is a hard limit on w and not a soft one.  A source
+ *	wider than this takes the original per-pixel path, which stages
+ *	nothing and is bounded by the screen instead.  Getting this wrong
+ *	is a bss overrun from a number read out of a sprite header, which
+ *	is exactly the kind of thing a bad address turns into a crash. */
+#define MMB_PACKPX 640			/* pixels a staged row may hold */
+static unsigned char mmb_packrow[MMB_PACKPX / 2];
 
 MMG_FN void mmb_pack_row(unsigned char (*next)(int), int w)
 {
@@ -716,7 +724,7 @@ MMG_FN void mmb_blit_decode(unsigned char (*next)(int), int x1, int y1,
 		 *	pixels, none of this applies, and the modes that use
 		 *	it are not what sprites are drawn in.
 		 */
-		if (bpp == 4) {
+		if (bpp == 4 && w <= MMB_PACKPX) {
 			const unsigned char *src;
 
 			/*	An UNCOMPRESSED source of even width is
