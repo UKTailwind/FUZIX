@@ -77,6 +77,38 @@ static long long time_us64(void)
 #define pow(x, y)    ((mfns[16].f2)((x), (y)))
 #define atan2(y, x)  ((mfns[17].f2)((y), (x)))
 
+/*
+ *	And the rest of them, for the same reason.  Four were redirected
+ *	when this was written and the runtime calls ten: mm_acos, mm_asin
+ *	and mm_log still named theirs directly, which kept acos (1,192),
+ *	asin (1,008) and log (868) - and the range reducers behind them -
+ *	in EVERY process for functions the kernel already runs from flash.
+ *
+ *	The whole point of MFN(f) being NULL under MM_PC3 is that nothing
+ *	references the local copies so the linker drops them, and one
+ *	direct call is enough to defeat it silently.  So the list is
+ *	complete now rather than "the ones that showed up": floor, ceil
+ *	and fabs are here as well, because a future edit adding one more
+ *	caller should not quietly put 3K back.
+ *
+ *	Indices are the table ABI (libm_table.c), by position.
+ */
+#define sin(x)       ((mfns[0].f1)(x))
+#define cos(x)       ((mfns[1].f1)(x))
+#define tan(x)       ((mfns[2].f1)(x))
+#define asin(x)      ((mfns[3].f1)(x))
+#define acos(x)      ((mfns[4].f1)(x))
+#define atan(x)      ((mfns[5].f1)(x))
+#define sinh(x)      ((mfns[6].f1)(x))
+#define cosh(x)      ((mfns[7].f1)(x))
+#define tanh(x)      ((mfns[8].f1)(x))
+#define exp(x)       ((mfns[10].f1)(x))
+#define log(x)       ((mfns[11].f1)(x))
+#define floor(x)     ((mfns[13].f1)(x))
+#define ceil(x)      ((mfns[14].f1)(x))
+#define fabs(x)      ((mfns[15].f1)(x))
+#define fmod(x, y)   ((mfns[18].f2)((x), (y)))
+
 /* The runtime's hosted islands read the DATA string table through
    these (it holds 32-bit VM pointers whatever the host width). */
 /* NULL, not mem: the DATA string table holds machine addresses like
