@@ -55,6 +55,51 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
+## New in v0.16
+
+Porting other people's MMBasic programs, and the things that stopped it.
+
+**`PLAY WAV` and `PLAY FLAC`**, beside `PLAY MP3`. One statement each
+with a different decoder behind it, and `PLAY STOP` reaches all three
+the same way. See [Music](#music).
+
+**`KEYDOWN()`** — which keys are *held*, up to six at once, rather than
+which key was typed. A game needs this and `INKEY$` structurally cannot
+give it: a character stream has no way to say "up and fire together".
+The USB boot report already carried exactly the six codes MMBasic
+exposes; nothing outside the kernel could ask for them. See
+[`KEYDOWN`](#keydown).
+
+**Pin names.** `SETPIN GP4, DIN` and `PIN(GP4)` now mean what they say.
+This closes a trap as much as it adds a convenience: without it, `GP4`
+in a program that had not declared it became an implied variable worth
+zero, so `PIN(GP4)` quietly read **GP0**. See [Pin names](#gp-names).
+
+**`MM.INFO()` answers seventeen things** rather than three — the
+program's own path, whether a file or directory exists and how big it
+is, the current font's cell, the text cursor, `OPTION BASE`, and what
+machine this is. `MM.INFO$()` is the same function, as in MMBasic.
+See [Asking the machine about itself](#mm-info).
+
+**`MM.DEVICE$` is now `"Fuzix"`** and not `"Fuzix on PC3"`. It names the
+firmware; the board moved to `MM.INFO(PLATFORM)`, which is MMBasic's own
+division of the two. A program testing `INSTR(MM.DEVICE$, "PicoMite")`
+gets a clean no either way.
+
+**`CONST` inside a `SUB` is local to it**, as MMBasic has always had it
+(`cmd_const` sets `V_LOCAL` when it is not at the top level). Every
+`CONST` used to go into the globals whatever scope it was written in, so
+two routines that each declared their own collided — and the error
+surfaced somewhere else entirely, as an unrelated variable of the same
+name "already declared as STRING". Shared library code declares
+constants inside routines constantly, so this blocked whole programs
+rather than single lines.
+
+Two smaller things found while fixing that one, both of which had never
+been exercised by any test: a global `CONST` and a `LOCAL` of the same
+name generated the same C name, and a program using `MM.CMDLINE$`
+crashed on the board before its first statement.
+
 ## New in v0.15
 
 The machine can play a game, and everything in this release is
@@ -335,12 +380,14 @@ machine faster.
   appears, every one of those becomes the checked, trappable statement
   the interpreter has. "What `ON ERROR` costs", below, has the numbers.
 * **The machine can say what it is.** `MM.VER` gives the release as a
-  number (0.10 reads higher than 0.09), `MM.DEVICE$` gives
-  `Fuzix on PC2` or `Fuzix on PC3` — detected, not assumed — and
-  `MM.CMDLINE$` gives the arguments the program was started with, so a
-  translated program can be used as a proper command. `MM.DEVICE$`
-  needed a new kernel call: which board this is was something the kernel
-  knew and only the boot banner ever said.
+  number (0.10 reads higher than 0.09), `MM.DEVICE$` names the firmware
+  and `MM.CMDLINE$` gives the arguments the program was started with, so
+  a translated program can be used as a proper command. Naming the
+  machine needed a new kernel call: which board this is was something
+  the kernel knew and only the boot banner ever said. *(In this release
+  `MM.DEVICE$` answered `Fuzix on PC2` / `Fuzix on PC3`. Since v0.16 it
+  is `Fuzix` alone and the board is `MM.INFO(PLATFORM)` — see
+  [Asking the machine about itself](#mm-info).)*
 * **`mmedit`'s Find works from the machine's own keyboard.** `F3` opened
   the prompt and then ignored Enter, because a serial terminal sends CR
   where the USB keyboard sends LF and the prompt only accepted the
@@ -1701,9 +1748,8 @@ processor.
 MMBasic's `PEEK(VAR ...)`, `PEEK(VARADDR ...)` and `PEEK(CFUNADDR ...)`
 are not translated — those ask about a *variable* rather than an
 address, which needs the symbol table. Neither is `POKE`, in any form.
-`MM.INFO` translates `FONT ADDRESS` and nothing else; the other things
-MMBasic's `MM.INFO` reports that make sense here already have their own
-spellings (`MM.HRES`, `MM.VRES`, `MM.DEVICE$`, `MM.VER`, `MM.ERRNO`).
+What else `MM.INFO` answers is listed under
+[Asking the machine about itself](#mm-info).
 
 There is a worked example of all of this driving a real panel under
 [A worked example: a barometric station](#qnh-example).
@@ -1895,7 +1941,7 @@ The decoder is MMBasic's, so it reads 1, 4, 8, 16, 24 and 32-bit BMPs,
 `BI_BITFIELDS`, and RLE4/RLE8 compression. Dithering is *optional*, as
 in MMBasic — omit the mode and the image is mapped without it.
 
-## Music: `PLAY MP3`, `PLAY WAV`, `PLAY FLAC`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE`
+## Music: `PLAY MP3`, `PLAY WAV`, `PLAY FLAC`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE` {#music}
 
 ```basic
 PLAY VOLUME 70
@@ -2396,6 +2442,133 @@ While it is held:
 
 This is what BBC BASIC and the editors on this machine already do.
 
+## `KEYDOWN` — which keys are *held* {#keydown}
+
+`INKEY$` tells you what was **typed**. `KEYDOWN` tells you what is
+**down right now**, and for a game that is a different question: a
+character stream has no way to say "up and fire together".
+
+```basic
+DO
+  IF KEYDOWN(0) THEN                     ' anything at all held?
+    FOR i = 1 TO KEYDOWN(0)
+      k = KEYDOWN(i)                     ' 1 is the most recent
+      IF k = 128 THEN y = y - 1          ' up
+      IF k = 129 THEN y = y + 1          ' down
+      IF k = 130 THEN x = x - 1          ' left
+      IF k = 131 THEN x = x + 1          ' right
+      IF k = 32  THEN Fire                ' ... at the same time
+    NEXT i
+  ENDIF
+LOOP
+```
+
+| argument | answer |
+|---|---|
+| `KEYDOWN(0)` | how many keys are held, 0 to 6 |
+| `KEYDOWN(1)` … `KEYDOWN(6)` | the code of the *n*th, 1 being the most recent |
+| `KEYDOWN(7)` | modifier bitmap: 1 left Alt, 2 left Ctrl, 4 left GUI, 8 left Shift, and 16/32/64/128 for the right-hand four |
+| `KEYDOWN(8)` | locks: 1 caps, 2 num, 4 scroll |
+
+**Six is the hardware's limit, not ours.** A USB keyboard's boot report
+carries six concurrent key codes, which is exactly the six MMBasic
+exposes, so this is the report itself rather than anything
+reconstructed. Most keyboards also refuse certain three-key
+combinations for reasons of their own wiring; that is the keyboard, and
+no software can see past it.
+
+**`KEYDOWN` empties the type-ahead buffer**, exactly as MMBasic does.
+That is not tidiness: a held key still sends characters, and a game that
+read only `KEYDOWN` would otherwise pile up minutes of them behind the
+terminal, to be delivered to the shell the moment it exited. The
+consequence is that `KEYDOWN` and `INKEY$` are **alternatives, not
+layers** — whichever asks first gets the keystroke. Pick one per
+program.
+
+Like `INKEY$`, the first `KEYDOWN` puts the terminal in raw mode and
+holds it, with everything the section above says about that.
+
+## Asking the machine about itself: `MM.INFO` {#mm-info}
+
+```basic
+PRINT MM.DEVICE$                  ' Fuzix
+PRINT MM.INFO(PLATFORM)           ' PC3   (or PC2)
+PRINT MM.INFO(VERSION)            ' same number as MM.VER
+```
+
+**`MM.DEVICE$` is `"Fuzix"` — the firmware, and nothing else.** MMBasic
+answers with its build (`PicoMiteVGA`, `PicoMiteHDMIUSB`), and a
+program's whole use of it is to pick a path: `IF INSTR(MM.DEVICE$,
+"PicoMite")`, `IF INSTR(MM.DEVICE$, "VGA")`. Every one of those
+questions has the answer "no" here, and one word says so cleanly enough
+to test with a plain comparison. **Which machine** it is has moved to
+`MM.INFO(PLATFORM)`, which is where MMBasic keeps it too — `DEVICE` is
+the firmware, `PLATFORM` is the board.
+
+`MM.INFO(...)` and `MM.INFO$(...)` are the same function, as in MMBasic:
+the sub-keyword decides the type, not the `$`.
+
+| sub-keyword | answer |
+|---|---|
+| `DEVICE` | `"Fuzix"` |
+| `PLATFORM` | `"PC3"` or `"PC2"` |
+| `VERSION` | the release, as `MM.VER` |
+| `PATH` | the directory the running program was started from, ending in `/` |
+| `CURRENT` | the program's own file name |
+| `DRIVE` | always `"A:"` — see below |
+| `EXISTS FILE f$` | 1 a file, **−1 a directory**, 0 nothing there |
+| `EXISTS DIR d$` | 1 if it is a directory |
+| `FILESIZE f$` | bytes; −1 nothing there, −2 a directory |
+| `OPTION BASE` | 0 or 1 |
+| `PINNO "GP8"` | the pin a name stands for |
+| `FONTHEIGHT`, `FONTWIDTH` | the current font's cell **times the current scale** |
+| `HPOS`, `VPOS` | the graphics text cursor |
+| `ERRNO`, `ERRMSG` | as `MM.ERRNO` and `MM.ERRMSG$` |
+| `FLAGS` | all sixty-four scratch bits |
+| `FONT ADDRESS n`, `FLASH ADDRESS n` | as before |
+
+`MM.FONTHEIGHT`, `MM.FONTWIDTH`, `MM.HPOS` and `MM.VPOS` are the flat
+spellings of four of those, and MMBasic has both — a program may write
+either.
+
+**`DRIVE` is always `"A:"`, and that is not a pretence.** This machine
+has one filesystem and no drive letters. Programs that ask save the
+drive, do a file operation and put it back; a constant answer makes that
+round trip *correct* rather than merely harmless.
+
+**The `−1` from `EXISTS FILE` is MMBasic's own**, and it earns its keep:
+it is how a program tells "that name is a directory" from "there is
+nothing there" without a second call.
+
+`FONTHEIGHT` and `FONTWIDTH` follow `FONT`, and include the scale — so
+`INC y, MM.INFO(FONTHEIGHT) + 1` moves down one line whatever font is
+selected, which is what the shape is for.
+
+Everything else MMBasic's `MM.INFO` reports is about hardware, a flash
+program store or a network that is not here.
+
+## Pin names: `GP8` {#gp-names}
+
+Wherever a pin is expected you may write its **name** instead of its
+number:
+
+```basic
+SETPIN GP4, DIN, PULLUP
+IF PIN(GP4) = 0 THEN PRINT "pressed"
+x = PORT(GP0, 8)                  ' GP0..GP7 as one number
+n = MM.INFO(PINNO "GP" + STR$(i)) ' ... or build the name at run time
+```
+
+On this machine a pin **is** its GPIO number, so `GP8` is simply 8 —
+MMBasic needs a lookup table here because its pin numbers are connector
+pins. A variable you have declared with that name still wins.
+
+This closes a trap rather than only adding convenience. Before it, `GP8`
+in a program without `OPTION EXPLICIT` became an implied variable worth
+zero, so `PIN(GP8)` quietly read **GP0** — a wrong pin, with nothing
+said. A silent divergence outranks a missing feature, and this one is
+now neither.
+
 ## Timers and the deliberate divergence
 
 The 100 ms figure above is the one **deliberate divergence** from MMBasic, and
@@ -2616,6 +2789,92 @@ is simply memory that this program can read.
 
 The whole program is 15 KB of BASIC and compiles to about 63 KB of
 bytecode.
+
+## Making a big program fit — and run fast {#making-it-fit}
+
+A compiled program pays for its size twice. First there is the obvious
+budget: a process gets about 330 KB, `bcrun` and its working space take
+about 170 KB of that, and what remains holds your code (which expands
+about 1.8× when it is translated to native ARM), your variables and
+your stack. Second, and less obvious: any single `Sub`, `Function` or
+main line whose bytecode exceeds the translator's buffers stays
+**interpreted**, which runs about 2.7× slower — and the main line, the
+part between the top of the file and the first `Sub`, is compiled as
+one function. A game whose whole loop lives in the main line can grow
+that one function past the cap and end up with its hottest code being
+its slowest.
+
+The rules below come from porting PicoMan (Geoff Graham's PacMan,
+1,250 lines, graphics-heavy). As it arrived it compiled to 101 KB of
+bytecode with a 63 KB main line — too big to translate, too big to
+load fully native. After the changes described here it is 38 KB, every
+function translates, and the whole game images at 132 KB. Numbers
+below are from that exercise. Compute-heavy programs rarely hit any of
+this — the solar eclipse benchmark has never been near a limit —
+because number crunching lives naturally in functions over a few
+variables. Games are different: they draw, and they grow main lines.
+
+**1. `ON ERROR` is the most expensive word in the language.** One `ON
+ERROR` anywhere makes the compiler emit checked arithmetic for the
+*whole program* — every array index, every integer operation, so the
+error can be reported rather than corrupt memory. That one line was 62
+of PicoMan's 101 KB. The original used it to swallow a first-time
+error:
+
+```basic
+On Error Skip
+Blit Close n        ' errors if the buffer does not exist yet
+Blit Read n, x, y, w, h
+```
+
+Track the state instead, and the whole apparatus disappears:
+
+```basic
+If BlitOpen(n) Then Blit Close n
+BlitOpen(n) = 1
+Blit Read n, x, y, w, h
+```
+
+Test-and-branch beats trap-and-skip. If a program genuinely needs `ON
+ERROR` — probing for optional hardware, say — do the probing in a
+separate little program run once, or accept the cost knowingly: it is
+about 2.6× on code size.
+
+**2. Keep the main line thin.** The main line is one function, and a
+function only runs at full speed if it translates. Put the work in
+`Sub`s and `Function`s and keep the main line to setup and a loop that
+calls them. A web of `GOTO`s pins code into the main line; `GOTO` is
+fine within a routine, but reaching a block only by `GOTO` keeps it —
+and everything it drags in — in the one function that must stay small.
+
+**3. Locals are cheaper than globals.** Every reference to a global
+variable costs a 5-byte address in bytecode and 8-10 bytes translated;
+a `Local` or a parameter costs 2-3 and often 2-4. Before its rework,
+36% of PicoMan's main line was global addressing. In a `Sub`, declare
+scratch variables `Local`; pass coordinates as parameters rather than
+parking them in globals.
+
+**4. Fold repetition into a `Sub`.** Drawing statements are the widest
+statements in the language — every argument is a 64-bit expression
+that must be built and pushed, so one seven-argument `Circle` costs
+120-140 bytes *each time it appears*. Four near-identical `Triangle`
+statements for four directions are one `Sub` with parameters. This is
+ordinary factoring, but on this machine it is also how the code stays
+under the translation caps.
+
+**5. `DATA` is nearly free; code is dear.** `DATA` values go to the
+data segment byte-for-byte (unused columns are pruned), and reading
+them is cheap. A table beats a computed unroll: PicoMan's 42 KB
+shortest-path database costs almost nothing in code, while the same
+information as `If` chains would be enormous.
+
+**Seeing where you stand.** `ls -l prog.bc` gives the object size.
+`THUMB_VERBOSE=1 cc prog.c` prints one line per function — `native:
+name (bytecode -> native bytes)` — and, for any function that stayed
+bytecode, the reason: `size policy` means it was too big to translate,
+and that function will run interpreted. A program that is still too
+big to load can be built `BCODE_ONLY=1 cc prog.c`: about 2.7× slower,
+but roughly a third the code.
 
 
 \newpage

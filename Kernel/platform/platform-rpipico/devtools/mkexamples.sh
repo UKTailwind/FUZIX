@@ -62,15 +62,20 @@ moddemo:$M/samples/moddemo.bas:PLAY MODFILE and MODSAMPLE (wants a .mod file)
 saveimg:$H/saveimg.bas:SAVE IMAGE, and running another program with SYSTEM
 imgtrip:$H/imgtrip.bas:SAVE IMAGE and LOAD IMAGE, there and back
 port:$M/samples/port.bas:PORT - eight pins as one number (I/O header)
+switches:$M/samples/switches.bas:check a button array on GP34-GP41 (I/O header)
 pulse:$M/samples/pulse.bas:PULSE - a timed inversion on one pin (I/O header)
 spi:$H/spi.bas:SPI on the I/O header
 tempr:$M/samples/tempr.bas:ONEWIRE and TEMPR - a DS18B20 on GP26
-bmp180:$H/bmp180.bas:a BMP180 pressure sensor on the QWIIC bus
+bmp180:$H/bmp180.bas:a BMP180 pressure sensor on I2C2, over the I/O header (SETPIN + I2C2 OPEN)
+bmp180q:$M/samples/bmp180q.bas:the same sensor on the QWIIC socket - the fixed bus needs no SETPIN or OPEN
+i2cscan:$M/samples/i2cscan.bas:I2C CHECK over the QWIIC bus; finds the DS3231 at &h68 whatever else is fitted
 alarm:$H/alarm.bas:the DS3231 real time clock and its alarm
 qnh:$M/samples/qnh.bas:a whole application - sensors, graphics and files
 bench:$M/tests/bench.bas:KnivD's MMBasic benchmark - the number to compare
 eclipse:$H/solar_eclipse.bas:a solar eclipse computed from first principles
 picofrog:$M/samples/picofrog.bas:a complete arcade game (keyboard: arrows, space)
+vaders:$M/samples/vaders.bas:Pico-Vaders, ported from the Game*Mite (keyboard)
+picoman:$M/samples/picoman.bas:PicoMan from the Game*Mite - fully native since its ON ERROR was reworked (see the manual's making-it-fit chapter)
 "
 
 # One entry per LINE - the descriptions have spaces in them, so the
