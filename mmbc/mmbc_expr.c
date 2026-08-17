@@ -385,6 +385,46 @@ struct val e_name(void)
         return emit_call(r, &args);
     }
 
+    /* Call(name$ [, args...]) - the function form of CALL.  A user
+     * routine named CALL wins above, exactly as it would for a
+     * built-in.  A literal name resolves here and now to a direct
+     * call; only a run-time name needs the dispatcher. */
+    if (strcmp(up, "CALL") == 0 && is_op("(", 0)) {
+        struct tok *w2;
+        struct arglist args;
+        struct val v;
+        struct calldisp *d;
+
+        cv.i++;
+        w2 = peek(0);
+        if (w2 != NULL && w2->kind == T_STR) {
+            int sfx2;
+            char *canon2 = split_suffix(lower(w2->text), &sfx2);
+
+            r = routine_get(canon2);
+            if (r == NULL || !r->is_func)
+                cv_err("CALL: no FUNCTION named '%s'", w2->text);
+            if (sfx2 != TY_NONE && r->ty != sfx2)
+                cv_err("'%s' is %s but named as %s", canon2,
+                       tyname_of(r->ty), tyname_of(sfx2));
+            cv.i++;
+            args.n = 0;
+            while (accept_op(","))
+                arg_item(&args.a[args.n++]);
+            expect_op(")");
+            return emit_call(r, &args);
+        }
+        v = expr();
+        if (v.ty != TY_S)
+            cv_err("CALL needs the routine name in a string");
+        args.n = 0;
+        while (accept_op(","))
+            arg_item(&args.a[args.n++]);
+        expect_op(")");
+        d = call_dispatch(1, &args);
+        return emit_call_byname(d, v.code, &args);
+    }
+
     if (strcmp(up, "STRUCT") == 0 && is_op("(", 0))
         return struct_fn();
 
@@ -648,6 +688,245 @@ void arg_item(struct arg *out)
     }
     out->kind = ARG_VAL;
     out->v = expr();
+}
+
+/* -- CALL by name: execute a SUB or FUNCTION named in a string --------
+ *
+ * MMBasic resolves the name at run time (cmd_call / the Call()
+ * function).  Compiled, the possible targets are known: every routine
+ * whose parameter list matches the shape of the arguments at this CALL
+ * site.  One dispatcher is emitted per distinct shape (__mm_calld_N,
+ * after the routine bodies): it compares the name - case-insensitively,
+ * with and without the type suffix - against each candidate and
+ * forwards the arguments.  A name that matches nothing is a run-time
+ * error, as in the interpreter.  Documented divergence: MMBasic would
+ * also find a routine whose parameters do NOT fit these arguments and
+ * fail inside it; here such a routine is simply never a candidate. */
+/* Canonical names that appear as string literals anywhere in the
+ * program - the set a run-time CALL name can plausibly draw from when
+ * the site's own shape is ambiguous.  Static token buffer: MAXTOKS
+ * tokens do not fit the board build's stack. */
+static struct tok lit_toks[MAXTOKS];
+
+static void lit_names_build(void)
+{
+    int idx, k;
+
+    if (cv.lit_names_built)
+        return;
+    cv.lit_names_built = 1;
+    for (idx = 0; idx < src_nlines; idx++) {
+        jmp_buf jb, *saved = err_jmp;
+        int n;
+
+        err_jmp = &jb;
+        if (setjmp(jb) != 0) {
+            err_jmp = saved;
+            continue;
+        }
+        n = tokenize(src_lines[idx], idx + 1, lit_toks);
+        err_jmp = saved;
+        for (k = 0; k < n; k++) {
+            int sfx, j, have = 0;
+            const char *nm;
+
+            if (lit_toks[k].kind != T_STR)
+                continue;
+            nm = split_suffix(lower(lit_toks[k].text), &sfx);
+            for (j = 0; j < cv.nlit_names; j++)
+                if (strcmp(cv.lit_names[j], nm) == 0)
+                    have = 1;
+            if (!have) {
+                GROW(cv.lit_names, cv.nlit_names, cv.clit_names);
+                cv.lit_names[cv.nlit_names++] = pstr(nm);
+            }
+        }
+    }
+}
+
+static int lit_name_has(const char *nm)
+{
+    int j;
+
+    for (j = 0; j < cv.nlit_names; j++)
+        if (strcmp(cv.lit_names[j], nm) == 0)
+            return 1;
+    return 0;
+}
+
+static int call_arg_ty(struct arg *a)
+{
+    if (a == NULL || a->kind == ARG_NONE)
+        cv_err("CALL cannot omit an argument");
+    if (a->kind == ARG_VAR || a->kind == ARG_ELEM)
+        return a->s->ty;
+    if (a->kind == ARG_VAL)
+        return a->v.ty;
+    cv_err("a whole array cannot be passed through CALL yet");
+    return 0;
+}
+
+struct calldisp *call_dispatch(int is_func, struct arglist *args)
+{
+    int tys[MAXARGS];
+    struct routine *exact[MAXCALLC], *coerced[MAXCALLC];
+    int nexact = 0, ncoerced = 0;
+    struct routine **cands;
+    int ncands, k, j, rty;
+    struct calldisp *d;
+
+    for (k = 0; k < args->n; k++)
+        tys[k] = call_arg_ty(&args->a[k]);
+    for (j = 0; j < cv.nroutines; j++) {
+        struct routine *r = cv.routines[j];
+        int ok_exact = 1, ok_coerce = 1, skip = 0;
+
+        if ((r->is_func != 0) != (is_func != 0))
+            continue;
+        /* trailing arguments may be omitted, exactly as they may in a
+           direct call: the candidate's spare parameters take their
+           defaults in the dispatcher body */
+        if (r->nparams < args->n)
+            continue;
+        for (k = 0; k < r->nparams; k++)
+            if (r->params[k]->stype != NULL || r->params[k]->is_array)
+                skip = 1;
+        if (skip)
+            continue;
+        for (k = 0; k < args->n; k++) {
+            struct sym *p = r->params[k];
+
+            if (p->ty == tys[k])
+                continue;
+            ok_exact = 0;
+            if (args->a[k].kind == ARG_VAL && tys[k] == TY_I
+                && p->ty == TY_F)
+                continue;
+            ok_coerce = 0;
+            break;
+        }
+        if (ok_exact) {
+            if (nexact < MAXCALLC)
+                exact[nexact++] = r;
+        } else if (ok_coerce) {
+            if (ncoerced < MAXCALLC)
+                coerced[ncoerced++] = r;
+        }
+    }
+    cands = nexact ? exact : coerced;
+    ncands = nexact ? nexact : ncoerced;
+    if (ncands == 0)
+        cv_err("CALL: no SUB or FUNCTION takes arguments of "
+               "this shape");
+    rty = cands[0]->ty;
+    if (is_func) {
+        int mixed = 0;
+
+        for (j = 0; j < ncands; j++)
+            if (cands[j]->ty != rty)
+                mixed = 1;
+        if (mixed) {
+            /* An ambiguous shape (a zero-argument Call() matches every
+             * zero-argument function).  Narrow to the routines the
+             * program actually NAMES in a string literal somewhere -
+             * the set a run-time name can plausibly draw from. */
+            struct routine *nar[MAXCALLC];
+            int nnar = 0;
+
+            lit_names_build();
+            for (j = 0; j < ncands; j++)
+                if (lit_name_has(cands[j]->name))
+                    nar[nnar++] = cands[j];
+            if (nnar) {
+                for (j = 0; j < nnar; j++)
+                    cands[j] = nar[j];
+                ncands = nnar;
+                rty = cands[0]->ty;
+            }
+        }
+    }
+    for (j = 0; j < ncands; j++)
+        if (is_func && cands[j]->ty != rty)
+            cv_err("CALL: functions matching these arguments "
+                   "return different types ('%s' and '%s'); "
+                   "name the target with a literal string, or "
+                   "make their types uniform",
+                   cands[0]->name, cands[j]->name);
+    {
+        /* candidates whose by-reference pattern differs from the
+           representative's cannot share its formals */
+        struct routine *base = cands[0];
+        int nkeep = 0;
+
+        for (j = 0; j < ncands; j++) {
+            for (k = 0; k < args->n; k++)
+                if ((cands[j]->params[k]->byref != 0)
+                    != (base->params[k]->byref != 0))
+                    break;
+            if (k == args->n)
+                cands[nkeep++] = cands[j];
+        }
+        ncands = nkeep;
+    }
+    for (j = 0; j < cv.ncalld; j++) {
+        int m;
+
+        d = &cv.calld[j];
+        if (d->is_func != is_func)
+            continue;
+        if (is_func && d->rty != rty)
+            continue;
+        if (d->nparams != args->n || d->ncands != ncands)
+            continue;
+        for (k = 0; k < d->nparams; k++)
+            if (d->pty[k] != cands[0]->params[k]->ty
+                || d->pbyref[k] != (cands[0]->params[k]->byref != 0))
+                break;
+        if (k < d->nparams)
+            continue;
+        for (m = 0; m < ncands; m++)
+            if (d->cands[m] != cands[m])
+                break;
+        if (m == ncands)
+            return d;
+    }
+    GROW(cv.calld, cv.ncalld, cv.ccalld);
+    d = &cv.calld[cv.ncalld];
+    d->is_func = is_func;
+    d->rty = is_func ? rty : TY_NONE;
+    d->nparams = args->n;
+    for (k = 0; k < args->n; k++) {
+        d->pty[k] = cands[0]->params[k]->ty;
+        d->pbyref[k] = (cands[0]->params[k]->byref != 0);
+    }
+    d->name = pstr(sfmt("__mm_calld_%d", cv.ncalld));
+    d->rep = cands[0];
+    d->ncands = ncands;
+    for (j = 0; j < ncands; j++)
+        d->cands[j] = cands[j];
+    cv.ncalld++;
+    return d;
+}
+
+struct val emit_call_byname(struct calldisp *d, const char *nmexpr,
+                            struct arglist *args)
+{
+    struct routine *rep = d->rep;
+    const char *joined = NULL;
+    int k;
+
+    if (d->is_func && rep->ty == TY_S) {
+        cv.tmp_used = 1;
+        joined = "mm_tmp()";
+    }
+    joined = joined ? sfmt("%s, %s", joined, nmexpr) : nmexpr;
+    for (k = 0; k < d->nparams; k++) {
+        const char *piece = pass_arg(rep->params[k], &args->a[k], rep);
+
+        joined = sfmt("%s, %s", joined, piece);
+    }
+    return mkval(sfmt("%s(%s)", d->name, joined),
+                 d->is_func ? rep->ty : TY_NONE);
 }
 
 /* Build the C call text for a user SUB or FUNCTION. */

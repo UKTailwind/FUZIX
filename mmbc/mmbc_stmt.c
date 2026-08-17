@@ -96,6 +96,26 @@ static void close_routine(int is_func);
 
 /* ---- local helpers ---- */
 
+/* MEMORY|COMPRESSED addr, x, y [, t] - shared by BLIT and SPRITE: on
+ * an LCD PicoMite the two are one command. */
+static void do_blit_memform(void)
+{
+    const char *a, *x, *y;
+    const char *blank = "-1LL";
+    int is_mem = is_kw("MEMORY", 1);
+
+    cv.i += 2;
+    a = as_int(expr());
+    expect_op(",");
+    x = as_int(expr());
+    expect_op(",");
+    y = as_int(expr());
+    if (accept_op(","))
+        blank = as_int(expr());
+    emit(sfmt("mmb_blit_%s(%s, %s, %s, %s);",
+              is_mem ? "mem" : "comp", a, x, y, blank));
+}
+
 /* pfx + name.replace('.', '__') */
 static char *dunder(const char *pfx, const char *name)
 {
@@ -527,6 +547,16 @@ void statement_inner(void)
             return;
         }
         if (accept_kw("LAYER")) {
+            /* FRAMEBUFFER LAYER [transparent] - the optional colour
+               (0-15, default 0) is the transparent index a MERGE uses
+               when it names none.  The firmware keeps it in
+               transparentlow/high (V5.08.00 Draw.c:7375-7381), so it
+               is run-time state and lives in an emitted global, not
+               in the translator. */
+            if (!stmt_end()) {
+                cv.uses_fbt = 1;
+                emit(sfmt("__mm_fbt = (int)(%s);", as_int(expr())));
+            }
             emit("mm_fb_create(2);");
             return;
         }
@@ -555,7 +585,7 @@ void statement_inner(void)
                the syscall, exactly as it does there.  R and A name
                modes this display has no equivalent for and are refused
                rather than quietly taken as B. */
-            const char *c = "0";
+            const char *c = cv.uses_fbt ? "__mm_fbt" : "0";
 
             if (!stmt_end()) {
                 if (!is_op(",", 0))
@@ -646,6 +676,13 @@ void statement_inner(void)
 
         cv.uses_sprite = 1;
         cv.uses_blit = 1;
+        if (is_kw("MEMORY", 1) || is_kw("COMPRESSED", 1)) {
+            /* On an LCD PicoMite SPRITE and BLIT are one command
+               (V5.08.00's blitother serves both spellings), so the
+               memory forms are BLIT MEMORY under another name. */
+            do_blit_memform();
+            return;
+        }
         if (is_kw("SHOW", 1)) {
             const char *n, *x, *y, *layer;
             const char *flags = "0LL", *ontop = "0LL";
@@ -979,19 +1016,7 @@ void statement_inner(void)
             return;
         }
         if (is_kw("COMPRESSED", 1) || is_kw("MEMORY", 1)) {
-            const char *a, *x, *y;
-            const char *blank = "-1LL";
-            int is_mem = is_kw("MEMORY", 1);
-            cv.i += 2;
-            a = as_int(expr());
-            expect_op(",");
-            x = as_int(expr());
-            expect_op(",");
-            y = as_int(expr());
-            if (accept_op(","))
-                blank = as_int(expr());
-            emit(sfmt("mmb_blit_%s(%s, %s, %s, %s);",
-                      is_mem ? "mem" : "comp", a, x, y, blank));
+            do_blit_memform();
             return;
         }
         if (is_kw("FRAMEBUFFER", 1) || is_kw("FLASH", 1)) {
@@ -3778,21 +3803,47 @@ static void do_callstmt(void)
     struct routine *r;
     struct arglist args;
     struct val v;
+    struct calldisp *d;
     int sfx;
 
     if (t != NULL && t->kind == T_STR) {
+        /* a literal name resolves here and now: a direct call */
         cv.i++;
-        canon = lower(t->text);
-    } else {
-        t = nxt();
-        canon = split_suffix(t->text, &sfx);
+        canon = split_suffix(lower(t->text), &sfx);
+        r = routine_get(canon);
+        if (r == NULL)
+            cv_err("CALL to unknown subroutine '%s'", canon);
+        accept_op(",");
+        call_args(0, &args);
+        v = emit_call(r, &args);
+        emit(sfmt("%s;", v.code));
+        return;
     }
-    r = routine_get(canon);
-    if (r == NULL)
-        cv_err("CALL to unknown subroutine '%s'", canon);
-    accept_op(",");
-    call_args(0, &args);
-    v = emit_call(r, &args);
+    if (t != NULL && t->kind == T_ID
+        && routine_get(split_suffix(t->text, &sfx)) != NULL) {
+        /* the classic form: CALL subname [, args] */
+        cv.i++;
+        r = routine_get(split_suffix(t->text, &sfx));
+        accept_op(",");
+        call_args(0, &args);
+        v = emit_call(r, &args);
+        emit(sfmt("%s;", v.code));
+        return;
+    }
+    /* the name is a run-time string: dispatch by name */
+    v = expr();
+    if (v.ty != TY_S)
+        cv_err("CALL needs a SUB name or a string");
+    args.n = 0;
+    if (accept_op(",")) {
+        while (1) {
+            arg_item(&args.a[args.n++]);
+            if (!accept_op(","))
+                break;
+        }
+    }
+    d = call_dispatch(0, &args);
+    v = emit_call_byname(d, v.code, &args);
     emit(sfmt("%s;", v.code));
 }
 
@@ -4643,6 +4694,44 @@ char *signature(struct routine *r)
     else
         ret = sfmt("%s ", ctype_of(r->ty));
     return sfmt("%s%s(%s)", ret, r->cname, joined);
+}
+
+/* The C prototype of a CALL-by-name dispatcher: the shape of its
+ * representative routine with the name argument added. */
+char *calld_head(struct calldisp *d)
+{
+    struct routine *rep = d->rep;
+    const char *joined = NULL;
+    const char *ret;
+    int k;
+
+    if (d->is_func && rep->ty == TY_S)
+        joined = "char *__ret";
+    {
+        const char *part = "const char *__nm";
+
+        joined = joined ? sfmt("%s, %s", joined, part) : part;
+    }
+    for (k = 0; k < d->nparams; k++) {
+        struct sym *p = rep->params[k];
+        char *nm = dunder("p_", p->name);
+        const char *part;
+
+        if (p->ty == TY_S)
+            part = sfmt("char *%s", nm);
+        else if (p->byref)
+            part = sfmt("%s *%s", ctype_of(p->ty), nm);
+        else
+            part = sfmt("%s %s", ctype_of(p->ty), nm);
+        joined = sfmt("%s, %s", joined, part);
+    }
+    if (!d->is_func)
+        ret = "static void ";
+    else if (rep->ty == TY_S)
+        ret = "static char *";
+    else
+        ret = sfmt("static %s ", ctype_of(rep->ty));
+    return sfmt("%s%s(%s)", ret, d->name, joined);
 }
 
 static void close_routine(int is_func)

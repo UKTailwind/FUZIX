@@ -147,7 +147,7 @@ static const char *convert(const char *inpath, const char *outpath,
     for (k = 0; k < cv.nglobals; k++) {
         const_accs[k] = cv.globals[k]->acc;
         if (cv.globals[k]->is_const)
-            cv.globals[k]->acc = pstr(cvar(cv.globals[k]->name));
+            cv.globals[k]->acc = pstr(cconst(cv.globals[k]->name));
     }
     /* Arrays and strings live in the struct global_decls builds, so
      * every reference to one goes through H.  The emitter reads acc for
@@ -159,8 +159,11 @@ static const char *convert(const char *inpath, const char *outpath,
         struct sym *s = cv.globals[k];
         if (s->is_const)
             continue;
-        if (s->is_array || s->ty == TY_S || s->stype != NULL)
+        if (s->is_array || s->ty == TY_S || s->stype != NULL) {
             s->acc = pstr(sfmt("H->%s", cvar(s->name)));
+            if (s->dynamic)
+                s->bacc = pstr(sfmt("H->__b_%s", cvar(s->name)));
+        }
     }
     /* The same rewrite per routine for LOCAL arrays and strings, which
      * live in a block taken per invocation - that is what makes
@@ -184,6 +187,8 @@ static const char *convert(const char *inpath, const char *outpath,
                 continue;
             r->heap_locals = 1;
             s->acc = pstr(sfmt("__L->%s", cvar(s->name)));
+            if (s->dynamic)
+                s->bacc = pstr(sfmt("__L->__b_%s", cvar(s->name)));
         }
     }
     cv.tmpn = 0;

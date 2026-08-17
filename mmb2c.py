@@ -673,6 +673,14 @@ class Conv(object):
         self.uses_flash = False     # pseudo flash slots: mmb_flash.h
         self.uses_sprite = False    # SPRITE family: mmb_sprite.h
         self.uses_playd = False     # SOUND/TONE/MOD daemons: mmb_play.h
+        # FRAMEBUFFER LAYER with a transparent colour: the colour is
+        # run-time state (the firmware's transparentlow/high), kept in
+        # an emitted global that MERGE reads when it names no colour
+        self.uses_fbt = False
+        # CALL by name: one dispatcher per distinct argument shape,
+        # emitted after the routine bodies (see call_dispatch)
+        self.call_disp = []
+        self.lit_names = None       # see lit_routine_names()
         self.uses_pwm = False
         self.uses_i2c = False
         self.uses_spi = False
@@ -1357,6 +1365,37 @@ class Conv(object):
             args = self.call_args(True)
             return self.emit_call(r, args)
 
+        # Call(name$ [, args...]) - the function form of CALL.  A user
+        # routine named CALL wins above, exactly as it would for a
+        # built-in.  A literal name resolves here and now to a direct
+        # call; only a run-time name needs the dispatcher.
+        if up == 'CALL' and self.is_op('('):
+            self.i += 1
+            w2 = self.peek()
+            if w2 is not None and w2[0] == T_STR:
+                canon2, sfx2 = split_suffix(w2[1].lower())
+                r = self.routines.get(canon2)
+                if r is None or not r.is_func:
+                    self.err("CALL: no FUNCTION named '%s'" % w2[1])
+                if sfx2 is not None and r.ty != sfx2:
+                    self.err("'%s' is %s but named as %s"
+                             % (canon2, TYNAME[r.ty], TYNAME[sfx2]))
+                self.i += 1
+                args = []
+                while self.accept_op(','):
+                    args.append(self.arg_item())
+                self.expect_op(')')
+                return self.emit_call(r, args)
+            v = self.expr()
+            if v[1] != TY_S:
+                self.err("CALL needs the routine name in a string")
+            args = []
+            while self.accept_op(','):
+                args.append(self.arg_item())
+            self.expect_op(')')
+            d = self.call_dispatch(True, args)
+            return self.emit_call_byname(d, v[0], args)
+
         if up == 'STRUCT' and self.is_op('('):
             return self.struct_fn()
 
@@ -1638,6 +1677,126 @@ class Conv(object):
                             return ('elem', s, (self.index(s), s.ty))
         v = self.expr()
         return ('val', None, v)
+
+    # -- CALL by name: execute a SUB or FUNCTION named in a string ------
+    #
+    # MMBasic resolves the name at run time (cmd_call / the Call()
+    # function).  Compiled, the possible targets are known: every
+    # routine whose parameter list matches the shape of the arguments
+    # at this CALL site.  One dispatcher is emitted per distinct shape
+    # (__mm_calld_N, after the routine bodies): it compares the name -
+    # case-insensitively, with and without the type suffix - against
+    # each candidate and forwards the arguments.  A name that matches
+    # nothing is a run-time error, as in the interpreter.  Documented
+    # divergence: MMBasic would also find a routine whose parameters do
+    # NOT fit these arguments and fail inside it; here such a routine
+    # is simply never a candidate.
+    def lit_routine_names(self):
+        """Canonical names that appear as string literals anywhere in
+        the program - the set a run-time CALL name can plausibly draw
+        from when the site's own shape is ambiguous."""
+        if self.lit_names is None:
+            names = set()
+            for idx in range(len(self.lines)):
+                try:
+                    toks = tokenize(self.lines[idx], idx + 1)
+                except MMError:
+                    continue
+                for t in toks:
+                    if t[0] == T_STR:
+                        names.add(split_suffix(t[1].lower())[0])
+            self.lit_names = names
+        return self.lit_names
+
+    def call_arg_ty(self, a):
+        if a is None:
+            self.err("CALL cannot omit an argument")
+        if a[0] in ('var', 'elem'):
+            return a[1].ty
+        if a[0] == 'val':
+            return a[2][1]
+        self.err("a whole array cannot be passed through CALL yet")
+
+    def call_dispatch(self, is_func, args):
+        tys = [self.call_arg_ty(a) for a in args]
+        nargs = len(args)
+        exact = []
+        coerced = []
+        for nm in self.routines:
+            r = self.routines[nm]
+            if bool(r.is_func) != is_func or r.params is None:
+                continue
+            # trailing arguments may be omitted, exactly as they may in
+            # a direct call: the candidate's spare parameters take their
+            # defaults in the dispatcher body
+            if len(r.params) < nargs:
+                continue
+            if any(p.stype is not None or p.is_array for p in r.params):
+                continue
+            ok_exact = True
+            ok_coerce = True
+            for p, a, ty in zip(r.params[:nargs], args, tys):
+                if p.ty == ty:
+                    continue
+                ok_exact = False
+                if a[0] == 'val' and ty == TY_I and p.ty == TY_F:
+                    continue
+                ok_coerce = False
+                break
+            if ok_exact:
+                exact.append(r)
+            elif ok_coerce:
+                coerced.append(r)
+        cands = exact if exact else coerced
+        if not cands:
+            self.err("CALL: no SUB or FUNCTION takes arguments of "
+                     "this shape")
+        rty = cands[0].ty
+        if is_func and any(r.ty != rty for r in cands):
+            # An ambiguous shape (a zero-argument Call() matches every
+            # function).  Narrow to the routines the program actually
+            # NAMES in a string literal somewhere - the set a run-time
+            # name can plausibly draw from.
+            lits = self.lit_routine_names()
+            narrowed = [r for r in cands if r.name in lits]
+            if narrowed:
+                cands = narrowed
+                rty = cands[0].ty
+        for r in cands:
+            if is_func and r.ty != rty:
+                self.err("CALL: functions matching these arguments "
+                         "return different types ('%s' and '%s'); "
+                         "name the target with a literal string, or "
+                         "make their types uniform"
+                         % (cands[0].name, r.name))
+        base = cands[0]
+        cands = [r for r in cands
+                 if all(bool(p.byref) == bool(q.byref)
+                        for p, q in zip(r.params[:nargs],
+                                        base.params[:nargs]))]
+        key = (is_func, rty if is_func else None,
+               tuple((p.ty, bool(p.byref)) for p in base.params[:nargs]),
+               tuple(sorted(r.name for r in cands)))
+        for d in self.call_disp:
+            if d['key'] == key:
+                return d
+        d = {'key': key, 'name': '__mm_calld_%d' % len(self.call_disp),
+             'is_func': is_func, 'nargs': nargs,
+             'rep': base, 'cands': cands}
+        self.call_disp.append(d)
+        return d
+
+    def emit_call_byname(self, d, nmexpr, args):
+        rep = d['rep']
+        out = []
+        if d['is_func'] and rep.ty == TY_S:
+            self.tmp_used = True
+            out.append('mm_tmp()')
+        out.append(nmexpr)
+        for k in range(d['nargs']):
+            out.append(self.pass_arg(rep.params[k], args[k], rep))
+        return ('%s(%s)' % (d['name'], ', '.join(out)),
+                rep.ty if d['is_func'] else None)
 
     def emit_call(self, r, args):
         """Build the C call text for a user SUB or FUNCTION."""
@@ -3607,10 +3766,35 @@ class Conv(object):
             self.emit('}')
 
     def linear_index(self, s, k):
-        """Element k of an array in an initialiser list."""
+        """Element k of an array in an initialiser list, in MMBasic's
+        storage order.
+
+        cmd_dim (Commands.c:8658) fills the values into linear array
+        memory, and MMBasic arrays store the FIRST subscript varying
+        fastest - so DIM a(3,1) = (p,q,...) sets a(0,0), a(1,0),
+        a(2,0), a(3,0), a(0,1), ...  Our C arrays are declared the
+        other way round (the last subscript is adjacent), so the flat
+        position maps to a subscript LIST rather than to a flat
+        offset.  The divisions below are built from k (a literal) and
+        the dimension sizes (constant expressions by the time an array
+        is static), so cc1 folds every one of them to a plain index."""
         if len(s.dims) == 1:
             return '%s[%d]' % (s.acc, k)
-        self.err("initialiser lists are only supported for 1-D arrays")
+        if s.dynamic:
+            self.err("an initialiser list on a run-time DIM is only "
+                     "supported for 1-D arrays")
+        subs = []
+        div = None
+        for j, sz in enumerate(s.dims):
+            if div is None:
+                e = '%d' % k
+            else:
+                e = '(%d) / (%s)' % (k, div)
+            if j < len(s.dims) - 1:
+                e = '(%s) %% (%s)' % (e, sz)
+            subs.append('(%s)' % e)
+            div = sz if div is None else '(%s) * (%s)' % (div, sz)
+        return s.acc + ''.join('[' + p + ']' for p in subs)
 
     def do_const(self):
         while True:
@@ -4146,6 +4330,16 @@ class Conv(object):
                 self.emit('mm_fb_create(1);')
                 return
             if self.accept_kw('LAYER'):
+                # FRAMEBUFFER LAYER [transparent] - the optional colour
+                # (0-15, default 0) is the transparent index a MERGE
+                # uses when it names none.  The firmware keeps it in
+                # transparentlow/high (V5.08.00 Draw.c:7375-7381), so
+                # it is run-time state and lives in an emitted global,
+                # not in the translator.
+                if not self.stmt_end():
+                    self.uses_fbt = True
+                    self.emit('__mm_fbt = (int)(%s);'
+                              % self.as_int(self.expr()))
                 self.emit('mm_fb_create(2);')
                 return
             if self.accept_kw('CLOSE'):
@@ -4170,7 +4364,7 @@ class Conv(object):
                 # there.  R and A name modes this display has no
                 # equivalent for and are refused rather than quietly
                 # taken as B.
-                c = '0'
+                c = '__mm_fbt' if self.uses_fbt else '0'
                 if not self.stmt_end():
                     if not self.is_op(','):
                         c = self.as_int(self.expr())
@@ -4240,6 +4434,12 @@ class Conv(object):
             # and LOADBMP (want the image decoders).
             self.uses_sprite = True
             self.uses_blit = True
+            if self.is_kw('MEMORY', 1) or self.is_kw('COMPRESSED', 1):
+                # On an LCD PicoMite SPRITE and BLIT are one command
+                # (V5.08.00's blitother serves both spellings), so the
+                # memory forms are BLIT MEMORY under another name.
+                self.do_blit_memform()
+                return
             if self.is_kw('SHOW', 1):
                 # SHOW [#]n,x,y,layer[,flags]
                 # SHOW SAFE [#]n,x,y,layer[,flags[,ontop]] - flags may
@@ -4516,18 +4716,7 @@ class Conv(object):
                 self.emit('mmb_blit_close(%s);' % n)
                 return
             if self.is_kw('COMPRESSED', 1) or self.is_kw('MEMORY', 1):
-                is_mem = self.is_kw('MEMORY', 1)
-                self.i += 2
-                a = self.as_int(self.expr())
-                self.expect_op(',')
-                x = self.as_int(self.expr())
-                self.expect_op(',')
-                y = self.as_int(self.expr())
-                blank = '-1LL'
-                if self.accept_op(','):
-                    blank = self.as_int(self.expr())
-                self.emit('mmb_blit_%s(%s, %s, %s, %s);'
-                          % ('mem' if is_mem else 'comp', a, x, y, blank))
+                self.do_blit_memform()
                 return
             if self.is_kw('FRAMEBUFFER', 1) or self.is_kw('FLASH', 1):
                 is_flash = self.is_kw('FLASH', 1)
@@ -6301,21 +6490,59 @@ class Conv(object):
             return
         self.do_assign()
 
+    def do_blit_memform(self):
+        """MEMORY|COMPRESSED addr, x, y [, t] - shared by BLIT and
+        SPRITE: on an LCD PicoMite the two are one command."""
+        is_mem = self.is_kw('MEMORY', 1)
+        self.i += 2
+        a = self.as_int(self.expr())
+        self.expect_op(',')
+        x = self.as_int(self.expr())
+        self.expect_op(',')
+        y = self.as_int(self.expr())
+        blank = '-1LL'
+        if self.accept_op(','):
+            blank = self.as_int(self.expr())
+        self.emit('mmb_blit_%s(%s, %s, %s, %s);'
+                  % ('mem' if is_mem else 'comp', a, x, y, blank))
+
     def do_callstmt(self):
         t = self.peek()
         if t is not None and t[0] == T_STR:
+            # a literal name resolves here and now: a direct call
             self.i += 1
-            canon = t[1].lower()
-        else:
-            t = self.nxt()
-            canon = split_suffix(t[1])[0]
-        r = self.routines.get(canon)
-        if r is None:
-            self.err("CALL to unknown subroutine '%s'" % canon)
-        self.accept_op(',')
-        args = self.call_args(False)
-        code, ty = self.emit_call(r, args)
-        self.emit('%s;' % code)
+            canon = split_suffix(t[1].lower())[0]
+            r = self.routines.get(canon)
+            if r is None:
+                self.err("CALL to unknown subroutine '%s'" % canon)
+            self.accept_op(',')
+            args = self.call_args(False)
+            code, ty = self.emit_call(r, args)
+            self.emit('%s;' % code)
+            return
+        if t is not None and t[0] == T_ID \
+                and split_suffix(t[1])[0] in self.routines:
+            # the classic form: CALL subname [, args]
+            self.i += 1
+            r = self.routines[split_suffix(t[1])[0]]
+            self.accept_op(',')
+            args = self.call_args(False)
+            code, ty = self.emit_call(r, args)
+            self.emit('%s;' % code)
+            return
+        # the name is a run-time string: dispatch by name
+        v = self.expr()
+        if v[1] != TY_S:
+            self.err("CALL needs a SUB name or a string")
+        args = []
+        if self.accept_op(','):
+            while True:
+                args.append(self.arg_item())
+                if not self.accept_op(','):
+                    break
+        d = self.call_dispatch(False, args)
+        code, _ = self.emit_call_byname(d, v[0], args)
+        self.emit(code + ';')
 
     def do_mid_assign(self):
         self.i += 1
@@ -7448,6 +7675,30 @@ class Conv(object):
             else:
                 self.emit('%s %s = 0;' % (CTYPE[s.ty], s.acc))
 
+    def calld_head(self, d):
+        """The C prototype of a CALL-by-name dispatcher: the shape of
+        its representative routine with the name argument added."""
+        rep = d['rep']
+        parts = []
+        if d['is_func'] and rep.ty == TY_S:
+            parts.append('char *__ret')
+        parts.append('const char *__nm')
+        for p in rep.params[:d['nargs']]:
+            nm = 'p_' + p.name.replace('.', '__')
+            if p.ty == TY_S:
+                parts.append('char *%s' % nm)
+            elif p.byref:
+                parts.append('%s *%s' % (CTYPE[p.ty], nm))
+            else:
+                parts.append('%s %s' % (CTYPE[p.ty], nm))
+        if not d['is_func']:
+            ret = 'static void '
+        elif rep.ty == TY_S:
+            ret = 'static char *'
+        else:
+            ret = 'static ' + CTYPE[rep.ty] + ' '
+        return '%s%s(%s)' % (ret, d['name'], ', '.join(parts))
+
     def signature(self, r):
         parts = []
         if r.is_func and r.ty == TY_S:
@@ -7871,6 +8122,11 @@ class Conv(object):
                 for kind, f, i, sv in self.data:
                     wr('    %s,\n' % sv)
                 wr('};\n')
+        if self.uses_fbt:
+            wr('\n/* FRAMEBUFFER LAYER\'s transparent colour: the merge\n')
+            wr(' * default when MERGE names none (transparentlow/high\n')
+            wr(' * in the firmware) */\n')
+            wr('static int __mm_fbt = 0;\n')
         if self.uses_onerror:
             wr('\n/* ---- ON ERROR state, read by the guards below ---- *\n')
             wr(' * [0] is the poison: an error has been recorded and the\n')
@@ -7926,6 +8182,8 @@ class Conv(object):
         rn.sort()
         for nm in rn:
             wr(self.signature(self.routines[nm]) + ';\n')
+        for d in self.call_disp:
+            wr(self.calld_head(d) + ';\n')
         if self.uses_clear:
             wr('\nstatic void __mmb_clear(void)\n{\n')
             names = list(self.globals.keys())
@@ -7939,6 +8197,54 @@ class Conv(object):
         wr('\n/* ---- subroutines and functions ---- */\n')
         for ln in self.out_body:
             wr(ln + '\n')
+        if self.call_disp:
+            wr('\n/* ---- CALL by name ---- */\n')
+            wr('/* One dispatcher per argument shape: the name is\n')
+            wr(' * compared case-insensitively, with and without its\n')
+            wr(' * type suffix, against every routine that could take\n')
+            wr(' * these arguments. */\n')
+            wr('static int __mm_nameeq(const char *m, const char *lit)\n')
+            wr('{\n')
+            wr('    int n = (unsigned char)m[0];\n')
+            wr('    int i;\n')
+            wr('    for (i = 0; i < n; i++) {\n')
+            wr('        char ca = m[1 + i], cb = lit[i];\n')
+            wr('        if (cb == 0) return 0;\n')
+            wr("        if (ca >= 'a' && ca <= 'z') ca -= 32;\n")
+            wr("        if (cb >= 'a' && cb <= 'z') cb -= 32;\n")
+            wr('        if (ca != cb) return 0;\n')
+            wr('    }\n')
+            wr('    return lit[n] == 0;\n')
+            wr('}\n')
+            sfx = {TY_S: '$', TY_I: '%', TY_F: '!'}
+            for d in self.call_disp:
+                rep = d['rep']
+                fwd = []
+                if d['is_func'] and rep.ty == TY_S:
+                    fwd.append('__ret')
+                for p in rep.params[:d['nargs']]:
+                    fwd.append('p_' + p.name.replace('.', '__'))
+                wr('\n%s\n{\n' % self.calld_head(d))
+                for r in d['cands']:
+                    names = [r.name]
+                    if r.is_func:
+                        names.append(r.name + sfx[r.ty])
+                    cond = ' || '.join('__mm_nameeq(__nm, "%s")' % n2
+                                       for n2 in names)
+                    # a candidate's spare parameters take their defaults
+                    tail = [self.pass_arg(p, None, r)
+                            for p in r.params[d['nargs']:]]
+                    callx = '%s(%s)' % (r.cname, ', '.join(fwd + tail))
+                    if d['is_func']:
+                        wr('    if (%s) return %s;\n' % (cond, callx))
+                    else:
+                        wr('    if (%s) { %s; return; }\n' % (cond, callx))
+                wr('    mm_error("CALL: no such SUB or FUNCTION");\n')
+                if d['is_func'] and rep.ty == TY_S:
+                    wr('    return __ret;\n')
+                elif d['is_func']:
+                    wr('    return 0;\n')
+                wr('}\n')
         wr('\n/* ---- main program ---- */\n')
         # MAIN TAKES NO ARGUMENTS IN THE FCC BUILD.
         #

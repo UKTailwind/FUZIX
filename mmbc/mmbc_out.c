@@ -4,10 +4,32 @@
  * (implied, skipped, data) are lists = append order. */
 
 #include "mmbc.h"
+#include "mmbc_expr.h"          /* pass_arg, for dispatcher defaults */
 
 static int cmpstr(const void *a, const void *b)
 {
     return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+/* pfx + name.replace('.', '__'), the same rule as everywhere else */
+static char *out_dunder(const char *pfx, const char *name)
+{
+    size_t n = strlen(name);
+    char *out = salloc(strlen(pfx) + n * 2 + 1);
+    size_t j = strlen(pfx);
+    size_t i;
+
+    memcpy(out, pfx, j);
+    for (i = 0; i < n; i++) {
+        if (name[i] == '.') {
+            out[j++] = '_';
+            out[j++] = '_';
+        } else {
+            out[j++] = name[i];
+        }
+    }
+    out[j] = 0;
+    return out;
 }
 
 /* Does any DATA item have this kind?  self.data_has_f / data_has_i in
@@ -21,6 +43,32 @@ static int data_has_kind(int kind)
         if (cv.data[k].kind == kind)
             return 1;
     return 0;
+}
+
+/* The KIND column, when every item has the same kind, is one value
+   repeated once per item - four bytes each of nothing.  Returns the
+   shared kind, or -1 when they differ and the column is needed.
+   self.data_uniform_kind in the Python. */
+static int data_uniform_kind(void)
+{
+    int k, k0;
+
+    if (cv.ndata == 0)
+        return -1;
+    k0 = cv.data[0].kind;
+    for (k = 1; k < cv.ndata; k++)
+        if (cv.data[k].kind != k0)
+            return -1;
+    return k0;
+}
+
+/* The TEXT column is MMBasic's raw source text for each item, kept
+   because READ into a string gives the text of a numeric item.  It is
+   only reachable if some item IS a string, or some READ in the program
+   targets one.  self.data_has_s in the Python. */
+static int data_has_s(void)
+{
+    return cv.reads_string || data_has_kind(1);
 }
 
 /* Sorted copy of the global names (scratch). */
@@ -115,6 +163,13 @@ static void global_decls(struct outbuf *o)
                     dims = sfmt("%s[%s]", dims, s->dims[d]);
             ob_add(&heap, sfmt("struct t_%s %s%s;%s", s->stype, cn,
                                dims, note));
+        } else if (s->is_array && s->dynamic) {
+            /* Bounds known only at run time, so the elements cannot be
+               part of the type: a pointer and the bounds table beside
+               it, which is the shape an array parameter has. */
+            ob_add(&heap, sfmt("%s;   /* DIM at run time */",
+                               dyn_decl(s, cn)));
+            ob_add(&heap, sfmt("MMINTEGER __b_%s[MM_MAXDIM + 1];", cn));
         } else if (s->is_array) {
             dims = sstr("");
             for (d = 0; d < s->ndims; d++)
@@ -186,6 +241,11 @@ static void local_structs(struct outbuf *o)
                         dims = sfmt("%s[%s]", dims, s->dims[d]);
                 ob_add(o, sfmt("    struct t_%s %s%s;", s->stype, cn,
                                dims));
+            } else if (s->is_array && s->dynamic) {
+                ob_add(o, sfmt("    %s;   /* DIM at run time */",
+                               dyn_decl(s, cn)));
+                ob_add(o, sfmt("    MMINTEGER __b_%s[MM_MAXDIM + 1];",
+                               cn));
             } else if (s->is_array) {
                 dims = sstr("");
                 for (d = 0; d < s->ndims; d++)
@@ -335,6 +395,10 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_gfx_circle.h\"\n");
     if (cv.uses_box)
         fprintf(f, "#include \"mmb_gfx_box.h\"\n");
+    if (cv.uses_gui)
+        fprintf(f, "#include \"mmb_gui.h\"\n");
+    if (cv.uses_linew)
+        fprintf(f, "#include \"mmb_gfx_line.h\"\n");
     if (cv.uses_rbox)
         fprintf(f, "#include \"mmb_gfx_rbox.h\"\n");
     if (cv.uses_triangle)
@@ -383,7 +447,7 @@ void conv_write(FILE *f)
     /* Before both buses: it is the data forms they share. */
     if (cv.uses_comms)
         fprintf(f, "#include \"mmb_comms.h\"\n");
-    if (cv.uses_i2c)
+    if (cv.uses_i2c || cv.uses_i2c0)
         fprintf(f, "#include \"mmb_i2c.h\"\n");
     if (cv.uses_spi)
         fprintf(f, "#include \"mmb_spi.h\"\n");
@@ -461,7 +525,7 @@ void conv_write(FILE *f)
     for (k = 0; k < n; k++) {
         struct sym *s = globals_get(names[k]);
         if (s->is_const)
-            fprintf(f, "#define %s %s\n", cvar(names[k]), s->acc);
+            fprintf(f, "#define %s %s\n", cconst(names[k]), s->acc);
     }
     fprintf(f, "\n/* ---- global variables ---- */\n");
     global_decls(&gd);
@@ -499,10 +563,12 @@ void conv_write(FILE *f)
                    "data\n");
         fprintf(f, " * segment of a program that had none to spare. "
                    "---- */\n");
-        fprintf(f, "static const int __mmb_data_kind[] = {\n");
-        for (k = 0; k < cv.ndata; k++)
-            fprintf(f, "    %d,\n", cv.data[k].kind);
-        fprintf(f, "};\n");
+        if (data_uniform_kind() < 0) {
+            fprintf(f, "static const int __mmb_data_kind[] = {\n");
+            for (k = 0; k < cv.ndata; k++)
+                fprintf(f, "    %d,\n", cv.data[k].kind);
+            fprintf(f, "};\n");
+        }
         if (data_has_kind(2)) {
             fprintf(f, "static const MMFLOAT __mmb_data_f[] = {\n");
             for (k = 0; k < cv.ndata; k++)
@@ -515,10 +581,18 @@ void conv_write(FILE *f)
                 fprintf(f, "    %s,\n", cv.data[k].i);
             fprintf(f, "};\n");
         }
-        fprintf(f, "static const char *__mmb_data_s[] = {\n");
-        for (k = 0; k < cv.ndata; k++)
-            fprintf(f, "    %s,\n", cv.data[k].sv);
-        fprintf(f, "};\n");
+        if (data_has_s()) {
+            fprintf(f, "static const char *__mmb_data_s[] = {\n");
+            for (k = 0; k < cv.ndata; k++)
+                fprintf(f, "    %s,\n", cv.data[k].sv);
+            fprintf(f, "};\n");
+        }
+    }
+    if (cv.uses_fbt) {
+        fprintf(f, "\n/* FRAMEBUFFER LAYER's transparent colour: the merge\n");
+        fprintf(f, " * default when MERGE names none (transparentlow/high\n");
+        fprintf(f, " * in the firmware) */\n");
+        fprintf(f, "static int __mm_fbt = 0;\n");
     }
     if (cv.uses_onerror) {
         fprintf(f, "\n/* ---- ON ERROR state, read by the guards below ---- *\n");
@@ -586,6 +660,8 @@ void conv_write(FILE *f)
     names = routine_names_sorted(&n);
     for (k = 0; k < n; k++)
         fprintf(f, "%s;\n", signature(routine_get(names[k])));
+    for (k = 0; k < cv.ncalld; k++)
+        fprintf(f, "%s;\n", calld_head(&cv.calld[k]));
     if (cv.uses_clear) {
         fprintf(f, "\nstatic void __mmb_clear(void)\n{\n");
         names = global_names_sorted(&n);
@@ -600,8 +676,89 @@ void conv_write(FILE *f)
     fprintf(f, "\n/* ---- subroutines and functions ---- */\n");
     for (k = 0; k < cv.out_body.n; k++)
         fprintf(f, "%s\n", cv.out_body.lines[k]);
+    if (cv.ncalld) {
+        int j;
+
+        fprintf(f, "\n/* ---- CALL by name ---- */\n");
+        fprintf(f, "/* One dispatcher per argument shape: the name is\n");
+        fprintf(f, " * compared case-insensitively, with and without its\n");
+        fprintf(f, " * type suffix, against every routine that could take\n");
+        fprintf(f, " * these arguments. */\n");
+        fprintf(f, "static int __mm_nameeq(const char *m, const char *lit)\n");
+        fprintf(f, "{\n");
+        fprintf(f, "    int n = (unsigned char)m[0];\n");
+        fprintf(f, "    int i;\n");
+        fprintf(f, "    for (i = 0; i < n; i++) {\n");
+        fprintf(f, "        char ca = m[1 + i], cb = lit[i];\n");
+        fprintf(f, "        if (cb == 0) return 0;\n");
+        fprintf(f, "        if (ca >= 'a' && ca <= 'z') ca -= 32;\n");
+        fprintf(f, "        if (cb >= 'a' && cb <= 'z') cb -= 32;\n");
+        fprintf(f, "        if (ca != cb) return 0;\n");
+        fprintf(f, "    }\n");
+        fprintf(f, "    return lit[n] == 0;\n");
+        fprintf(f, "}\n");
+        for (k = 0; k < cv.ncalld; k++) {
+            struct calldisp *d = &cv.calld[k];
+            struct routine *rep = d->rep;
+            const char *fwd = NULL;
+
+            if (d->is_func && rep->ty == TY_S)
+                fwd = "__ret";
+            for (j = 0; j < d->nparams; j++) {
+                const char *pn = out_dunder("p_",
+                                            rep->params[j]->name);
+                fwd = fwd ? sfmt("%s, %s", fwd, pn) : pn;
+            }
+            fprintf(f, "\n%s\n{\n", calld_head(d));
+            for (j = 0; j < d->ncands; j++) {
+                struct routine *r = d->cands[j];
+                const char *cond;
+                const char *callx;
+                const char *ca = fwd;
+                int m;
+
+                /* a candidate's spare parameters take their defaults */
+                for (m = d->nparams; m < r->nparams; m++) {
+                    const char *piece = pass_arg(r->params[m], NULL, r);
+
+                    ca = ca ? sfmt("%s, %s", ca, piece) : piece;
+                }
+                callx = sfmt("%s(%s)", r->cname, ca ? ca : "");
+
+                cond = sfmt("__mm_nameeq(__nm, \"%s\")", r->name);
+                if (r->is_func)
+                    cond = sfmt("%s || __mm_nameeq(__nm, \"%s%c\")",
+                                cond, r->name,
+                                r->ty == TY_S ? '$'
+                                : r->ty == TY_I ? '%' : '!');
+                if (d->is_func)
+                    fprintf(f, "    if (%s) return %s;\n", cond, callx);
+                else
+                    fprintf(f, "    if (%s) { %s; return; }\n",
+                            cond, callx);
+            }
+            fprintf(f, "    mm_error(\"CALL: no such SUB or FUNCTION\");\n");
+            if (d->is_func && rep->ty == TY_S)
+                fprintf(f, "    return __ret;\n");
+            else if (d->is_func)
+                fprintf(f, "    return 0;\n");
+            fprintf(f, "}\n");
+        }
+    }
     fprintf(f, "\n/* ---- main program ---- */\n");
-    if (cv.uses_cmdline)
+    /* MAIN TAKES NO ARGUMENTS IN THE FCC BUILD.
+     *
+     * bcrun dispatches the entry with nothing pushed - run() calls
+     * bc_exec(h_entry) - so a main declared with two parameters reads a
+     * frame two slots short and the program segfaults before its first
+     * statement.  Nothing had caught it because no test used
+     * MM.CMDLINE$, the only thing that asked for the arguments, until
+     * MM.INFO(PATH) and MM.INFO(CURRENT) did.
+     *
+     * bcrun already holds the real command line and hands it over
+     * inside its mm_argv_bind wrapper, so nothing is lost - only the
+     * signature has to go.  The hosted gcc build keeps the real one. */
+    if (cv.uses_cmdline && !cv.fcc)
         fprintf(f, "int main(int argc, char **argv)\n{\n");
     else
         fprintf(f, "int main(void)\n{\n");
@@ -614,17 +771,23 @@ void conv_write(FILE *f)
                    "(MMINTEGER)sizeof __mmfont_%d);\n",
                 cv.fonts[k].num, cv.fonts[k].num, cv.fonts[k].num);
     if (cv.uses_cmdline)
-        fprintf(f, "    mm_argv_bind(argc, argv);\n");
+        fprintf(f, cv.fcc ? "    mm_argv_bind(0, (char **)0);\n"
+                          : "    mm_argv_bind(argc, argv);\n");
     if (cv.uses_onerror)
         fprintf(f, "    mm_err_bind(__mm_e);\n");
     if (cv.heap_used)
         fprintf(f, "    H = mm_heap(sizeof *H);   "
                    "/* arrays and strings */\n");
-    if (cv.ndata > 0)
-        fprintf(f, "    mm_data_init4(__mmb_data_kind, %s, %s, "
-                   "__mmb_data_s, %d);\n",
-                data_has_kind(2) ? "__mmb_data_f" : "0",
-                data_has_kind(0) ? "__mmb_data_i" : "0", cv.ndata);
+    {
+        int uk = data_uniform_kind();
+        if (cv.ndata > 0)
+            fprintf(f, "    mm_data_init5(%s, %d, %s, %s, %s, %d);\n",
+                    uk < 0 ? "__mmb_data_kind" : "0",
+                    uk < 0 ? 0 : uk,
+                    data_has_kind(2) ? "__mmb_data_f" : "0",
+                    data_has_kind(0) ? "__mmb_data_i" : "0",
+                    data_has_s() ? "__mmb_data_s" : "0", cv.ndata);
+    }
     for (k = 0; k < cv.out_main.n; k++)
         fprintf(f, "%s\n", cv.out_main.lines[k]);
     fprintf(f, "    return 0;\n}\n");

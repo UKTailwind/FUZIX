@@ -304,6 +304,11 @@ struct conv {
     const char *srcname;
     struct sym **globals; int nglobals, cglobals;      /* insertion order */
     struct routine **routines; int nroutines, croutines;
+    /* CALL by name: one dispatcher per distinct argument shape,
+       emitted after the routine bodies (see call_dispatch) */
+    struct calldisp *calld; int ncalld, ccalld;
+    const char **lit_names; int nlit_names, clit_names;
+    int lit_names_built;        /* see lit_routine_names() */
     const char **routine_names; int nroutine_names, croutine_names;
     struct label *labels; int nlabels, clabels;
     const char **errors; int nerrors, cerrors;
@@ -370,6 +375,10 @@ struct conv {
     int uses_flash;             /* pseudo flash slots: mmb_flash.h */
     int uses_sprite;            /* SPRITE family: mmb_sprite.h */
     int uses_playd;             /* SOUND/TONE/MOD daemons: mmb_play.h */
+    /* FRAMEBUFFER LAYER with a transparent colour: the colour is
+       run-time state (the firmware's transparentlow/high), kept in an
+       emitted global that MERGE reads when it names no colour */
+    int uses_fbt;
     /* set in the scan pass: any ON ERROR at all pulls in the __mm_e
        state, the routine prologues and mm_err_bind */
     int uses_onerror;
@@ -508,6 +517,25 @@ void statement_inner(void);
 char *loop_cond(const char *c);
 int is_literal_number(struct val v);
 struct routine *routine_get(const char *canon);
+
+/* CALL by name (mmbc_expr.c): a dispatcher per argument shape */
+struct arglist;
+#define MAXCALLC 64
+struct calldisp {
+    int is_func;
+    int rty;                    /* result TY_*, TY_NONE for subs */
+    int nparams;
+    int pty[64];
+    int pbyref[64];
+    const char *name;           /* __mm_calld_N */
+    struct routine *rep;
+    struct routine *cands[MAXCALLC];
+    int ncands;
+};
+struct calldisp *call_dispatch(int is_func, struct arglist *args);
+struct val emit_call_byname(struct calldisp *d, const char *nmexpr,
+                            struct arglist *args);
+char *calld_head(struct calldisp *d);
 int type_word(void);
 char *zero_of(struct sym *s);
 char *signature(struct routine *r);
