@@ -45,31 +45,43 @@
 #endif
 
 #define MMF_SLOTS 3
-/* The reference slot is MAX_PROG_SIZE (120K on the rp2040 build); here
- * a slot holds what the display can use - a full 320x240 sheet is
- * 38408 bytes - because the host gates' VM is 128K in total and a
- * faithful slot could never run there.  A larger file raises "File too
- * big for a flash slot" rather than truncating: the honest divergence,
- * recorded in PLAN-games.md.  Override with -DMMF_SLOTSZ if a real
- * asset ever needs it. */
+/* The reference slot size: MAX_PROG_SIZE, 120K on the rp2040 build.
+ * It was 48K here on the theory that a slot only ever held a screen's
+ * worth - and then PETSCII Robots loaded its 87,724-byte sprite
+ * library into slot 3, exactly as it does on a Game*Mite.  Slots are
+ * taken lazily from the VM heap (512K, PSRAM on the board), so a
+ * program that never names one still pays nothing and the gates'
+ * host runs carry the same default. */
 #ifndef MMF_SLOTSZ
-#define MMF_SLOTSZ (48L * 1024L)
+#define MMF_SLOTSZ (120L * 1024L)
 #endif
 
 static unsigned char *mmf_slot[MMF_SLOTS];
+static long mmf_size[MMF_SLOTS];
 
 /* The slot's base address, allocating on first reference - which is
  * what makes a program that mentions no slot cost nothing.  NULL only
- * after a raise. */
+ * after a raise.  The reference size is asked for first; an
+ * environment whose heap cannot give it (the host gates' heap lives
+ * inside mem[]) gets the largest halving it can, and a load still
+ * raises "File too big" honestly against what was taken.  The board's
+ * PSRAM heap grants the full reference size, which PETSCII Robots'
+ * 87,724-byte sprite library needs. */
 MMG_FN unsigned char *mmf_addr(MMINTEGER n)
 {
 	if (n < 1 || n > MMF_SLOTS)
 		MM_RAISEV("Invalid flash slot", (unsigned char *)0);
 	if (mmf_slot[n - 1] == NULL) {
-		mmf_slot[n - 1] = (unsigned char *)malloc(MMF_SLOTSZ);
+		long sz = MMF_SLOTSZ;
+
+		while (sz >= 4096
+		       && (mmf_slot[n - 1] =
+			   (unsigned char *)malloc((size_t)sz)) == NULL)
+			sz /= 2;
 		if (mmf_slot[n - 1] == NULL)
 			MM_RAISEV("Not enough memory", (unsigned char *)0);
-		memset(mmf_slot[n - 1], 0xFF, MMF_SLOTSZ);
+		mmf_size[n - 1] = sz;
+		memset(mmf_slot[n - 1], 0xFF, (size_t)sz);
 	}
 	return mmf_slot[n - 1];
 }
@@ -79,7 +91,7 @@ MMG_FN void mmf_erase(MMINTEGER n)
 	unsigned char *s = mmf_addr(n);
 
 	if (s != NULL)
-		memset(s, 0xFF, MMF_SLOTSZ);
+		memset(s, 0xFF, (size_t)mmf_size[n - 1]);
 }
 
 /* file$ arrives as an MMBasic string; the runtime keeps the trailing
@@ -101,15 +113,16 @@ MMG_FN void mmf_disk_load(const char *file, MMINTEGER n, MMINTEGER ovr)
 		MM_RAISE("Cannot open file");
 	fseek(f, 0L, SEEK_END);
 	size = ftell(f);
-	if (size > MMF_SLOTSZ) {
+	if (size > mmf_size[n - 1]) {
 		fclose(f);
 		MM_RAISE("File too big for a flash slot");
 	}
 	fseek(f, 0L, SEEK_SET);
-	memset(s, 0xFF, MMF_SLOTSZ);	/* the erase the reference does */
+	/* the erase the reference does */
+	memset(s, 0xFF, (size_t)mmf_size[n - 1]);
 	if (fread(s, 1, (size_t)size, f) != (size_t)size) {
 		fclose(f);
-		memset(s, 0xFF, MMF_SLOTSZ);
+		memset(s, 0xFF, (size_t)mmf_size[n - 1]);
 		MM_RAISE("Cannot read file");
 	}
 	fclose(f);

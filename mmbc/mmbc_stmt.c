@@ -3656,9 +3656,28 @@ static struct val input_target(void)
     struct sym *sym;
     struct val r;
     int is_arr;
+    int sfx;
+    const char *canon;
 
     if (t->kind != T_ID)
         cv_err("INPUT needs a variable");
+    canon = split_suffix(t->text, &sfx);
+    /* INSIDE A FUNCTION, ITS OWN NAME IS A VARIABLE - the return
+       value - and CAT, INC and INPUT write it like any other.
+       Without this the write went to an invisible implied GLOBAL of
+       the same name: PETSCII Robots' path$() builds its result with
+       `Cat path$, "/" + f$`, so every file path came back as the
+       bare directory and loadimage read a DIRECTORY as its BMP -
+       "not a BMP file" with a file that was perfectly good. */
+    if (cv.cur != NULL && cv.cur->is_func
+        && strcmp(canon, cv.cur->name) == 0 && !is_op("(", 0)) {
+        if (sfx != TY_NONE && sfx != cv.cur->ty)
+            cv_err("'%s' is %s but used as %s", canon,
+                   tyname_of(cv.cur->ty), tyname_of(sfx));
+        r.code = retacc();
+        r.ty = cv.cur->ty;
+        return r;
+    }
     is_arr = is_op("(", 0);
     sym = reference(t->text, 0);
     if (sym->is_const)

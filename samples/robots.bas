@@ -9,10 +9,12 @@
   Const NES_A_CLOCK = Mm.Info(PinNo GP3)
   Const NES_PULSE! = 0.012 ' 12uS
   
-  Const LCD_DISPLAY = Mm.Device$ = "PicoMite"
+  ' The Pico Computer 3 (MM.Device$ = "Fuzix") is the LCD model: an
+  ' explicit FrameBuffer Merge, no automatic layer overlay.
+  Const LCD_DISPLAY = Mm.Device$ = "PicoMite" Or Mm.Device$ = "Fuzix"
   Const SC$ = Choice(LCD_DISPLAY, "f", "n")
-  
-  Dim CTRL_DRIVER$ = Choice(LCD_DISPLAY, "ctrl_gamemite$", "ctrl_none$")
+
+  Dim CTRL_DRIVER$ = Choice(Mm.Device$ = "Fuzix", "ctrl_fuzix$", Choice(LCD_DISPLAY, "ctrl_gamemite$", "ctrl_none$"))
   ' Uncomment one of these to override controller:
   ' CTRL_DRIVER$ = "ctrl_atari_a$"      ' Atari Joystick on PicoGAME port A
   ' CTRL_DRIVER$ = "ctrl_nes_a$"        ' NES gamepad on PicoGAME port A
@@ -2134,6 +2136,47 @@ Function ctrl_gamemite$(init)
 End Function
   
   
+  ' Controller driver for the Pico Computer 3 (MM.Device$ = "Fuzix"):
+  ' the Game*Mite switch array moved to GP34-GP41 - GP8-GP15 are not
+  ' claimable on this machine - same bit order, same active-low wiring,
+  ' internal pull-ups.  A board with no switches reads all-high, which
+  ' is "nothing pressed", and the keyboard still arrives through
+  ' read_inkey$() as on every platform.
+Function ctrl_fuzix$(init)
+  If Not init Then
+    Local bits = (Port(GP34, 8) Xor &hFF) And &hFF, s$
+
+    Select Case bits
+        Case 0    : Exit Function
+        Case &h01 : s$ = "down"
+        Case &h02 : s$ = "left"
+        Case &h04 : s$ = "up"
+        Case &h08 : s$ = "right"
+        Case &h10 : s$ = "escape"        ' Select
+        Case &h20 : s$ = "use-item"      ' Start
+        Case &h40 : s$ = "search"        ' Fire B
+        Case &h41 : s$ = "toggle-item"   ' Down + Fire B
+        Case &h44 : s$ = "toggle-weapon" ' Up + Fire B
+        Case &h80 : s$ = "move"          ' Fire A
+        Case &h81 : s$ = "fire-down"     ' Down + Fire A
+        Case &h82 : s$ = "fire-left"     ' Left + Fire A
+        Case &h84 : s$ = "fire-up"       ' Up + Fire A
+        Case &h88 : s$ = "fire-right"    ' Right + Fire A
+        Case &hC0 : s$ = "map"           ' Fire A + Fire B
+    End Select
+
+    ctrl_fuzix$ = s$
+    Exit Function
+  Else
+    ' Initialise GP34-GP41 as digital inputs with PullUp resistors
+    Local i
+    For i = 34 To 41
+      SetPin i, Din, PullUp
+    Next
+  EndIf
+End Function
+
+
   ' Controller driver for NES gamepad connected to PicoGAME VGA port A.
 Function ctrl_nes_a$(init)
   If Not init Then

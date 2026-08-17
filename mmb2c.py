@@ -6390,6 +6390,20 @@ class Conv(object):
         t = self.nxt()
         if t[0] != T_ID:
             self.err("INPUT needs a variable")
+        canon, sfx = split_suffix(t[1])
+        # INSIDE A FUNCTION, ITS OWN NAME IS A VARIABLE - the return
+        # value - and CAT, INC and INPUT write it like any other.
+        # Without this the write went to an invisible implied GLOBAL of
+        # the same name: PETSCII Robots' path$() builds its result with
+        # `Cat path$, "/" + f$`, so every file path came back as the
+        # bare directory and loadimage read a DIRECTORY as its BMP -
+        # "not a BMP file" with a file that was perfectly good.
+        if (self.cur is not None and self.cur.is_func
+                and canon == self.cur.name and not self.is_op('(')):
+            if sfx is not None and sfx != self.cur.ty:
+                self.err("'%s' is %s but used as %s"
+                         % (canon, TYNAME[self.cur.ty], TYNAME[sfx]))
+            return (self.retacc(), self.cur.ty)
         is_arr = self.is_op('(')
         sym = self.reference(t[1], False)
         if sym.is_const:
