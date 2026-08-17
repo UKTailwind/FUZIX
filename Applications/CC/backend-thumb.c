@@ -869,12 +869,32 @@ static int t_fused(unsigned long o, unsigned width)
 static unsigned long t_boolbranch(unsigned long o, unsigned cond,
 				  unsigned long start, unsigned long end)
 {
-	unsigned nxt = (o + 1 < end) ? codebuf[o + 1] : BC_NOP;
+	unsigned long jo = o + 1;
+	unsigned nxt;
 
-	if ((nxt == BC_JFALSE || nxt == BC_JTRUE) && !t_landing(o + 1)) {
+	/*
+	 *	The flags are set and cond is the condition for "true".
+	 *	cc1 normalises truthiness with a BOOL after nearly every
+	 *	comparison, so the jump this site wants sits behind one -
+	 *	`x > y ; BOOL ; JFALSE` is the commonest condition shape in
+	 *	compiled BASIC.  A BOOL of the 0/1 this site would
+	 *	materialise is an identity, and an LNOT is a condition
+	 *	flip, so chains of either are swallowed (nothing may land
+	 *	inside) and the fusion looks at what follows them.  Without
+	 *	this the compare paid a full 8-byte t_flagval and the BOOL
+	 *	re-tested the value it had just built.
+	 */
+	while (jo < end && !t_landing(jo) &&
+	       (codebuf[jo] == BC_BOOL || codebuf[jo] == BC_LNOT)) {
+		if (codebuf[jo] == BC_LNOT)
+			cond ^= 1;
+		jo++;
+	}
+	nxt = (jo < end) ? codebuf[jo] : BC_NOP;
+	if ((nxt == BC_JFALSE || nxt == BC_JTRUE) && !t_landing(jo)) {
 		unsigned i;
 		for (i = fn_patch_lo; i < npatch; i++) {
-			if (patchtab[i].at != o + 2)
+			if (patchtab[i].at != jo + 1)
 				continue;
 			{
 				struct label *l = &labtab[patchtab[i].lab];
@@ -889,14 +909,14 @@ static unsigned long t_boolbranch(unsigned long o, unsigned cond,
 						t_bcw(c,
 						  (long)tmap[l->addr - start] -
 						  (long)(tlen + 4));
-					return o + 4;
+					return jo + 3;
 				}
 			}
 			break;
 		}
 	}
 	t_flagval(cond);
-	return o + 1;
+	return jo;
 }
 
 /*
