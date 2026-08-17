@@ -344,7 +344,32 @@ int pagemap_realloc(struct exec *hdr, usize_t size)
      * largest_neighbour().  Only growing is checked: shrinking, and a
      * process that is already over the line because its neighbours
      * appeared after it, must both still be able to proceed. */
-    if (blocks > oldblocks) {
+    /*
+     * EVERY size a process settles on has to leave room for the biggest
+     * OTHER process to be resident, not just a bigger one than before.
+     *
+     * This used to be `if (blocks > oldblocks)`, and the hole that left
+     * is the whole of the bug: exec is where a process's final size is
+     * fixed, and exec'ing a SMALL program into a forked child is a
+     * SHRINK from the copy it inherited.  playmod is 10 blocks and the
+     * child it replaced was 75, so nothing was checked - and PETSCII
+     * Robots at 75 blocks of an 84-block pool then could not be swapped
+     * back in beside it.  swapin() may evict anything except the process
+     * it is switching away from, so the pair that has to fit is the
+     * biggest two; 85 does not fit in 84 and the machine panicked with
+     * nothing to recover to.
+     *
+     * A shrink is not automatically safe, because what matters is not
+     * whether THIS process got smaller but whether it has ARRIVED
+     * alongside a big one.  Checking the settled size covers both.
+     *
+     * The cost of refusing is an ENOMEM from exec, which every caller
+     * already handles.  For the case that found this, PLAY MODFILE
+     * cannot start its player: the program loses its music and keeps
+     * running, and the shell keeps its prompt.  That is the trade -
+     * a feature fails instead of the machine dying.
+     */
+    {
         int room = NUM_ALLOCATION_BLOCKS - largest_neighbour();
         if (room < 1)
             room = 1;

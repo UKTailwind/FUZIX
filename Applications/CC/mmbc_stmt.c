@@ -41,7 +41,7 @@ static void do_array_cmd(void);
 static void do_open(void);
 static void do_close(void);
 static void do_fileword(const char *up);
-static struct val input_target(void);
+static struct val input_target(int *cap);
 static void do_input(void);
 static void do_line_input(void);
 static int looks_like_assignment(void);
@@ -3131,10 +3131,11 @@ static void do_read(void)
                           f.ptr, k, sym->ty == TY_I ? "i" : "f"));
             cv.tmp_used = 1;
         } else {
-            struct val tgt = input_target();
+            int cap;
+            struct val tgt = input_target(&cap);
             if (tgt.ty == TY_S) {
                 cv.reads_string = 1;
-                emit(sfmt("mm_sset(%s, mm_read_s());", tgt.code));
+                emit(swrite_cap(cap, tgt.code, "mm_read_s()"));
                 cv.tmp_used = 1;
             } else {
                 emit(sfmt("%s = mm_read_%s();", tgt.code,
@@ -3297,7 +3298,8 @@ static void do_pixels(void)
 
 static void do_inc(void)
 {
-    struct val tgt = input_target();
+    int cap;
+    struct val tgt = input_target(&cap);
     struct val v;
 
     if (accept_op(",")) {
@@ -3309,8 +3311,8 @@ static void do_inc(void)
     if (tgt.ty == TY_S) {
         if (v.ty != TY_S)
             cv_err("INC on a string needs a string increment");
-        emit(sfmt("mm_sset(%s, mm_scat(%s, %s));", tgt.code, tgt.code,
-                  v.code));
+        emit(swrite_cap(cap, tgt.code,
+                        sfmt("mm_scat(%s, %s)", tgt.code, v.code)));
         cv.tmp_used = 1;
     } else if (tgt.ty == TY_I) {
         emit(sfmt("%s += %s;", tgt.code, as_int(v)));
@@ -3321,7 +3323,8 @@ static void do_inc(void)
 
 static void do_cat(void)
 {
-    struct val tgt = input_target();
+    int cap;
+    struct val tgt = input_target(&cap);
     struct val v;
 
     if (tgt.ty != TY_S)
@@ -3330,8 +3333,8 @@ static void do_cat(void)
     v = expr();
     if (v.ty != TY_S)
         cv_err("CAT needs a string to append");
-    emit(sfmt("mm_sset(%s, mm_scat(%s, %s));", tgt.code, tgt.code,
-              v.code));
+    emit(swrite_cap(cap, tgt.code,
+                    sfmt("mm_scat(%s, %s)", tgt.code, v.code)));
     cv.tmp_used = 1;
 }
 
@@ -3650,7 +3653,14 @@ static void do_fileword(const char *up)
 }
 
 /* A variable, possibly an array element, that INPUT can write. */
-static struct val input_target(void)
+/*
+ * A variable, possibly an array element, that INPUT can write.
+ *
+ * *cap comes back as the LENGTH of a string array element and 0 for
+ * everything else - a plain string has room for its NUL and takes
+ * mm_sset.
+ */
+static struct val input_target(int *cap)
 {
     struct tok *t = nxt();
     struct sym *sym;
@@ -3659,6 +3669,7 @@ static struct val input_target(void)
     int sfx;
     const char *canon;
 
+    *cap = 0;
     if (t->kind != T_ID)
         cv_err("INPUT needs a variable");
     canon = split_suffix(t->text, &sfx);
@@ -3687,6 +3698,7 @@ static struct val input_target(void)
             cv_err("'%s' is not an array", sym->name);
         r.code = index_of(sym);
         r.ty = sym->ty;
+        *cap = sym->alen;
         return r;
     }
     if (sym->is_array)
@@ -3718,9 +3730,10 @@ static void do_input(void)
     }
     emit(sfmt("mm_input_line(%s);", chan));
     while (!stmt_end()) {
-        struct val tgt = input_target();
+        int cap;
+        struct val tgt = input_target(&cap);
         if (tgt.ty == TY_S)
-            emit(sfmt("mm_sset(%s, mm_input_next());", tgt.code));
+            emit(swrite_cap(cap, tgt.code, "mm_input_next()"));
         else if (tgt.ty == TY_I)
             emit(sfmt("%s = mm_atoi(mm_input_next());", tgt.code));
         else
@@ -3735,6 +3748,7 @@ static void do_line_input(void)
 {
     const char *chan = "0";
     struct val tgt;
+    int cap;
 
     if (is_op("#", 0)) {
         chan = channel();
@@ -3748,10 +3762,10 @@ static void do_line_input(void)
             cv.i++;
         }
     }
-    tgt = input_target();
+    tgt = input_target(&cap);
     if (tgt.ty != TY_S)
         cv_err("LINE INPUT needs a string variable");
-    emit(sfmt("mm_sset(%s, mm_getline(%s));", tgt.code, chan));
+    emit(swrite_cap(cap, tgt.code, sfmt("mm_getline(%s)", chan)));
     cv.tmp_used = 1;
 }
 
@@ -3983,7 +3997,7 @@ static void do_assign(void)
     if (s->ty == TY_S) {
         if (v.ty != TY_S)
             cv_err("cannot assign a number to string '%s'", canon);
-        emit(sfmt("mm_sset(%s, %s);", target, v.code));
+        emit(swrite_of(s, target, v.code));
     } else if (s->ty == TY_I) {
         store(target, as_int(v), TY_I);
     } else {
@@ -4651,7 +4665,8 @@ static void emit_local_decl(struct sym *s)
         for (k = 0; k < s->ndims; k++)
             dims = sfmt("%s[%s]", dims, s->dims[k]);
         if (s->ty == TY_S)
-            emit(sfmt("%schar %s%s[MM_STRSZ];", pfx, s->acc, dims));
+            emit(sfmt("%schar %s%s[%s];", pfx, s->acc, dims,
+                      strsz_of(s)));
         else
             emit(sfmt("%s%s %s%s;", pfx, ctype_of(s->ty), s->acc,
                       dims));

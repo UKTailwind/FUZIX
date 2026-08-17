@@ -4189,13 +4189,23 @@ MMINTEGER mm_run_exec(void)
     }
     if (pid == 0) {
         execvp(mm_run_argv[0], mm_run_argv);
-        _exit(127);             /* only reached if exec failed */
+        /* Only reached if exec failed, and WHY is worth carrying
+           back: 127 is the shell's "not found", and reporting that
+           for an out-of-memory refusal is a lie that costs hours.
+           A big BASIC program can leave the machine no room to load
+           a helper at all, and the kernel now says so rather than
+           panicking a context switch later. */
+        _exit(errno == ENOMEM ? 126 : 127);
     }
     while (waitpid(pid, &status, 0) < 0)
         ;
 #if defined(MM_PC3) || defined(__FUZIX__)
     sync();                     /* and whatever the child wrote */
 #endif
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 126) {
+        mm_error("not enough memory to start it");
+        return -1;
+    }
     if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
         mm_error("no such program");
         return -1;
@@ -4241,7 +4251,7 @@ MMINTEGER mm_run_bg(void)
     }
     if (pid == 0) {
         execvp(mm_run_argv[0], mm_run_argv);
-        _exit(127);
+        _exit(errno == ENOMEM ? 126 : 127);
     }
     return (MMINTEGER)pid;
 }

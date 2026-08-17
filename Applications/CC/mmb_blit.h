@@ -523,6 +523,153 @@ MMG_FN unsigned char mmb_rle(int reset)
 	return mmb_rle_out;
 }
 
+/*	One source row, staged PACKED - low nibble the left pixel, which
+ *	is the source's own order.
+ *
+ *	The decoder is pulled exactly w times whether the row is drawn or
+ *	not: an RLE run carries across rows, so consuming the stream is
+ *	not optional, and a clipped row must still advance it.
+ */
+/*	Staged rows are the SOURCE's full width, not the clipped width -
+ *	an RLE run has to be consumed whether it lands on screen or not -
+ *	so the capacity is a hard limit on w and not a soft one.  A source
+ *	wider than this takes the original per-pixel path, which stages
+ *	nothing and is bounded by the screen instead.  Getting this wrong
+ *	is a bss overrun from a number read out of a sprite header, which
+ *	is exactly the kind of thing a bad address turns into a crash. */
+#define MMB_PACKPX 640			/* pixels a staged row may hold */
+static unsigned char mmb_packrow[MMB_PACKPX / 2];
+
+MMG_FN void mmb_pack_row(unsigned char (*next)(int), int w)
+{
+	int i, n = w >> 1;
+
+	for (i = 0; i < n; i++) {
+		unsigned char lo = next(0);
+
+		mmb_packrow[i] = (unsigned char)(lo | (next(0) << 4));
+	}
+	if (w & 1)
+		mmb_packrow[n] = next(0);
+}
+
+/*	The same row, taken a RUN at a time instead of a pixel at a time.
+ *
+ *	mmb_rle hands back one pixel per call and the caller cannot see
+ *	that forty of them are the same; this reads the run structure
+ *	directly and fills.  Sprite sheets are mostly flat colour, so the
+ *	runs are long and this is where the coding pays.
+ *
+ *	The count quirk is preserved exactly: a stored count of 0 means
+ *	256, because the reference's `available--` wraps a uint8_t and
+ *	mmb_rle reproduces that one pixel at a time.
+ */
+MMG_FN void mmb_pack_row_rle(int w)
+{
+	int i = 0;
+
+	while (i < w) {
+		int run, take, j;
+		unsigned char c;
+
+		if (mmb_rle_avail == 0) {
+			mmb_rle_avail = *mmb_ncp & 0x0F;
+			mmb_rle_out = (unsigned char)(*mmb_ncp >> 4);
+			mmb_ncp++;
+			if (mmb_rle_avail == 0)
+				run = 256;	/* the wrap, spelled out */
+			else
+				run = mmb_rle_avail;
+		} else
+			run = mmb_rle_avail;
+		take = (run > w - i) ? w - i : run;
+		c = mmb_rle_out;
+		for (j = 0; j < take; j++, i++) {
+			if (i & 1)
+				mmb_packrow[i >> 1] =
+					(unsigned char)(mmb_packrow[i >> 1]
+							| (c << 4));
+			else
+				mmb_packrow[i >> 1] = c;
+		}
+		mmb_rle_avail = (unsigned char)(run - take);
+	}
+}
+
+/*	Merge a staged row into the destination's packed bytes.
+ *
+ *	Everything here is byte work on the row the window already holds
+ *	in SRAM: no expansion, no second pass, and no crossing - the
+ *	window flushes the whole rectangle in one when it closes.
+ */
+MMG_FN void mmb_merge_row(const unsigned char *sp, int y, int x1, int w,
+			  int vx0, int vw, int stride, int blank)
+{
+	int b0 = vx0 >> 1, b1 = (vx0 + vw - 1) >> 1;
+	int nb = b1 - b0 + 1, i, win = 1;
+	unsigned char *row = mmb_win_bytes(y, b0, nb);
+
+	if (row == 0) {
+		if (mm_fb_read((MMINTEGER)y * stride + b0, nb, mmb_rowb) < 0)
+			return;
+		row = mmb_rowb;
+		win = 0;
+	}
+	/*	The aligned, opaque case - a tile drawn on an even column,
+	 *	nothing clipped - is the one games actually use, and it
+	 *	reduces to swapping the nibbles of each source byte: the
+	 *	source has the left pixel low, the framebuffer has it high.
+	 */
+	if (blank < 0 && !(x1 & 1) && vx0 == x1 && vw == w) {
+		int n = w >> 1;
+
+		for (i = 0; i < n; i++) {
+			unsigned char s = sp[i];
+
+			row[i] = (unsigned char)((s << 4) | (s >> 4));
+		}
+		if (w & 1)
+			row[n] = (unsigned char)((row[n] & 0x0F)
+						 | (sp[n] << 4));
+		if (win)
+			mmb_win.dirty = 1;
+		else
+			mm_fb_put((MMINTEGER)y * stride + b0, nb, mmb_rowb);
+		return;
+	}
+	/*	The general case: two pixels an iteration, and a byte whose
+	 *	pixels are both transparent costs one compare and no store.
+	 */
+	for (i = 0; i < w; i += 2) {
+		unsigned char s = sp[i >> 1];
+		int lo = s & 15, hi = (s >> 4) & 15;
+		int k;
+
+		if (blank >= 0 && lo == blank && hi == blank
+		    && i + 1 < w)
+			continue;
+		for (k = 0; k < 2 && i + k < w; k++) {
+			int c = k ? hi : lo;
+			int x = x1 + i + k;
+			unsigned char *p;
+
+			if (blank >= 0 && c == blank)
+				continue;
+			if (x < vx0 || x >= vx0 + vw)
+				continue;
+			p = &row[(x >> 1) - b0];
+			if (x & 1)
+				*p = (unsigned char)((*p & 0xF0) | c);
+			else
+				*p = (unsigned char)((*p & 0x0F) | (c << 4));
+		}
+	}
+	if (win)
+		mmb_win.dirty = 1;
+	else
+		mm_fb_put((MMINTEGER)y * stride + b0, nb, mmb_rowb);
+}
+
 /* The shared body of COMPRESSED and MEMORY: w x h pixels from whichever
  * decoder, drawn at x1,y1 honouring the transparent index, rows outside
  * the screen consumed but not drawn - docompressed's general path, with
@@ -531,15 +678,77 @@ MMG_FN void mmb_blit_decode(unsigned char (*next)(int), int x1, int y1,
 			    int w, int h, int blank)
 {
 	int stride = 0, bpp = 0, hres, vres, headless;
-	int y, x, vx0, vw;
+	int y, x, vx0, vw, vy0, vy1;
 
 	headless = mmb_geom(&stride, &bpp, &hres, &vres);
 	next(1);
 	vx0 = x1 < 0 ? 0 : x1;
 	vw = (x1 + w > hres ? hres : x1 + w) - vx0;
+	/*
+	 *	One crossing for the whole sprite, not two per row.
+	 *
+	 *	This is the batching mmb_win_open was written for and the
+	 *	blitter was simply never given: a 24x24 tile is 12 packed
+	 *	bytes a row, so the entire tile fits one batch and its 48
+	 *	crossings become 2.  PETSCII Robots redraws 77 tiles for a
+	 *	step - 3,696 crossings, which is seconds - and MMBasic does
+	 *	the identical algorithm as plain memory writes in one
+	 *	address space.  That difference, not the decoding, is what
+	 *	made a game an RP2040 interprets comfortably crawl here.
+	 */
+	vy0 = y1 < 0 ? 0 : y1;
+	vy1 = y1 + h > vres ? vres : y1 + h;
+	if (!headless)
+		mmb_win_open(vy0, vy1 - vy0, vx0, vw, stride, bpp);
 	for (y = y1; y < y1 + h; y++) {
 		int visible = !headless && y >= 0 && y < vres && vw > 0;
 
+		/*	NIBBLE TO NIBBLE, at 4bpp.
+		 *
+		 *	Source and destination are BOTH packed two pixels to
+		 *	a byte, so expanding a row to one byte per pixel,
+		 *	editing it and squeezing it back touches every pixel
+		 *	three times to move it once - and the pull was a call
+		 *	through a function pointer per pixel on top.  The
+		 *	board measured that at 1.35us a pixel, ~500 cycles,
+		 *	while the kernel does the same work on the same PSRAM
+		 *	at a sixth of it.
+		 *
+		 *	So the row is staged packed and merged a BYTE at a
+		 *	time: two pixels an iteration, a whole byte skipped
+		 *	when both its pixels are transparent, and for the
+		 *	aligned case - even x, even width, opaque - the merge
+		 *	is a nibble swap with no per-pixel work at all.
+		 *
+		 *	1bpp keeps the original path: there a byte is eight
+		 *	pixels, none of this applies, and the modes that use
+		 *	it are not what sprites are drawn in.
+		 */
+		if (bpp == 4 && w <= MMB_PACKPX) {
+			const unsigned char *src;
+
+			/*	An UNCOMPRESSED source of even width is
+			 *	already exactly the staged row - same
+			 *	packing, same order, row-aligned - so it is
+			 *	used where it lies and not a single pixel is
+			 *	pulled.  (Odd widths straddle a byte from one
+			 *	row to the next, so those still stage.)
+			 */
+			if (next == mmb_unc && !(w & 1)) {
+				src = mmb_ncp;
+				mmb_ncp += w >> 1;
+			} else {
+				if (next == mmb_rle)
+					mmb_pack_row_rle(w);
+				else
+					mmb_pack_row(next, w);
+				src = mmb_packrow;
+			}
+			if (visible)
+				mmb_merge_row(src, y, x1, w, vx0, vw,
+					      stride, blank);
+			continue;
+		}
 		if (visible &&
 		    mmb_row_get(y, vx0, vw, stride, bpp, mmb_rowpx) < 0)
 			visible = 0;
@@ -555,6 +764,7 @@ MMG_FN void mmb_blit_decode(unsigned char (*next)(int), int x1, int y1,
 		if (visible)
 			mmb_row_put(y, vx0, vw, stride, bpp, mmb_rowpx);
 	}
+	mmb_win_close();
 }
 
 MMG_FN void mmb_blit_comp(MMINTEGER addr, MMINTEGER xi, MMINTEGER yi,

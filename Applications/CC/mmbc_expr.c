@@ -88,6 +88,13 @@ const char *varaddr(void)
         cv.i += 2;
         if (!s->is_array)
             cv_err("'%s' is not an array", canon);
+        /* A LENGTH array is exactly what this is usually asked about -
+           a program that walks the elements itself, at the spacing it
+           declared - so take the address directly rather than through
+           array_flat, which refuses to hand the elements to a runtime
+           that would step over them wrongly. */
+        if (s->ty == TY_S && s->alen != 0)
+            return sfmt("(MMINTEGER)(uintptr_t)(%s)", s->acc);
         f = array_flat(s);
         return sfmt("(MMINTEGER)(uintptr_t)(%s)", f.ptr);
     }
@@ -457,7 +464,7 @@ struct val e_name(void)
     if (as_array) {
         if (!s->is_array)
             cv_err("'%s' is not an array", canon);
-        return mkval(index_of(s), s->ty);
+        return mkval(sread_of(s, index_of(s)), s->ty);
     }
     if (s->is_const)
         return mkval(s->acc, s->ty);
@@ -1039,9 +1046,10 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r)
                 bnd = sfmt("(const MMINTEGER[]){ %s }", body);
             }
             /* flatten, so the callee can index any rank it likes */
-            if (s->ty == TY_S)
+            if (s->ty == TY_S) {
+                no_length_array(s);
                 base = sfmt("(char (*)[MM_STRSZ])%s", s->acc);
-            else
+            } else
                 base = sfmt("(%s *)%s", ctype_of(s->ty), s->acc);
         }
         return sfmt("%s, %s", base, bnd);
@@ -1190,9 +1198,10 @@ struct flat array_flat(struct sym *s)
                   : sfmt("(%s)", s->dims[k]);
         r.cnt = sfmt("(int)(%s)", j ? j : "");
     }
-    if (s->ty == TY_S)
+    if (s->ty == TY_S) {
+        no_length_array(s);
         r.ptr = sfmt("(char (*)[MM_STRSZ])%s", s->acc);
-    else
+    } else
         r.ptr = sfmt("(%s *)%s", ctype_of(s->ty), s->acc);
     return r;
 }

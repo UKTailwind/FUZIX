@@ -657,8 +657,73 @@ const char *dyn_decl(struct sym *s, const char *cn)
 static const char *elsize_of(struct sym *s)
 {
     if (s->ty == TY_S)
-        return "MM_STRSZ";
+        return strsz_of(s);
     return sfmt("sizeof(%s)", ctype_of(s->ty));
+}
+
+/*
+ * The declared size of one string element.
+ *
+ * MM_STRSZ unless the array was DIMmed with a LENGTH, in which case it
+ * is the firmware's own LENGTH + 1 - see do_declare.  A program cannot
+ * see the difference except through VARADDR, and one that looks is
+ * entitled to the firmware's answer.
+ */
+const char *strsz_of(struct sym *s)
+{
+    if (s->alen == 0)
+        return "MM_STRSZ";
+    return sfmt("%d", s->alen + 1);
+}
+
+/*
+ * Read a string ARRAY ELEMENT as an expression value.
+ *
+ * An element of a LENGTH array is the firmware's layout - no room for
+ * the trailing NUL when the string is full - so it is copied into a
+ * scratch buffer, which restores the invariant the rest of the runtime
+ * relies on (mm_cstr is s + 1).  This is exactly what a STRING member
+ * of a TYPE does, for exactly the same reason.
+ */
+const char *sread_of(struct sym *s, const char *code)
+{
+    if (s->ty != TY_S || s->alen == 0)
+        return code;
+    cv.tmp_used = 1;
+    return sfmt("mm_scopy(%s)", code);
+}
+
+/*
+ * Assign to a string variable or array element, bounded when the
+ * element is a LENGTH one (mm_ssetm writes the NUL only when the string
+ * leaves room for it).
+ */
+const char *swrite_cap(int cap, const char *target, const char *val)
+{
+    if (cap == 0)
+        return sfmt("mm_sset(%s, %s);", target, val);
+    return sfmt("mm_ssetm(%s, %d, %s);", target, cap, val);
+}
+
+const char *swrite_of(struct sym *s, const char *target, const char *val)
+{
+    return swrite_cap(s->ty == TY_S ? s->alen : 0, target, val);
+}
+
+/*
+ * Refuse to hand a LENGTH array to anything that walks its elements.
+ * The runtime steps at MM_STRSZ and this one does not, so the
+ * alternative is silently reading from between the elements - an honest
+ * gap where a wrong answer would do real damage.  VARADDR is not
+ * affected: it wants the address, which is the same number either way.
+ */
+void no_length_array(struct sym *s)
+{
+    if (s->ty == TY_S && s->alen != 0)
+        cv_err("'%s' was DIMmed with LENGTH %d, so its elements are %d "
+               "bytes apart; passing the whole array is not translated "
+               "(index it, or drop the LENGTH)",
+               s->disp, s->alen, s->alen + 1);
 }
 
 /*
@@ -787,6 +852,7 @@ void do_declare(const char *kw)
         const char *stype = NULL;
         struct sym *s;
         int dyn = 0;
+        int alen;
 
         t = nxt();
         if (t->kind != T_ID)
@@ -847,13 +913,27 @@ void do_declare(const char *kw)
         }
 
         /* MMBasic's DIM s$ LENGTH n, which caps a string to save
-           memory.  ACCEPTED AND IGNORED: every string here is MM_STRSZ,
-           so this translation is more generous than MMBasic rather than
-           different from it - a program that would hit "string too
-           long" there simply works.  That is a divergence and the
-           manual says so; refusing outright would stop real programs
-           translating over a declaration whose only effect is to make a
-           string smaller. */
+           memory.
+
+           On a SCALAR it is accepted and ignored: the string still
+           starts at its length byte with its characters after it, so
+           every address a program can compute is the same one, and a
+           generous cap only means a program that would hit "string too
+           long" on the firmware works here.
+
+           On an ARRAY it is NOT free, because it sets the SPACING of
+           the elements: findvar returns val.s + nbr * (size + 1)
+           (MMBasic.c:4924).  PETSCII Robots holds its 128x64 world map
+           as DIM LV$(63) LENGTH 128 and reads tiles straight out of it
+           with PEEK(BYTE (y)*129 + x + lva) - the 129 IS the LENGTH,
+           and at MM_STRSZ spacing every tile read comes from the wrong
+           place.  So an array honours it, and the element is the
+           firmware's own: length byte plus LENGTH characters, with no
+           room for the trailing NUL the rest of the runtime assumes.
+           That is the layout a STRING member of a TYPE already has, so
+           it takes the same care - mm_ssetm to write, mm_scopy to
+           read. */
+        alen = 0;
         if (accept_kw("LENGTH")) {
             struct tok *v;
 
@@ -865,6 +945,8 @@ void do_declare(const char *kw)
                 cv_err("LENGTH takes a literal integer");
             else if (atoi(v->text) < 1 || atoi(v->text) > 255)
                 cv_err("LENGTH must be 1..255");
+            else if (ndims > 0 && atoi(v->text) < MM_STRLEN)
+                alen = atoi(v->text);
         }
 
         if (cv.mode == M_DECL) {
@@ -872,6 +954,8 @@ void do_declare(const char *kw)
                         scope, dims, ndims, is_static);
             if (stype != NULL)
                 s->stype = pstr(stype);
+            if (alen != 0)
+                s->alen = alen;
             if (dyn || redimmed_in(canon)) {
                 dyn = 1;
                 if (stype != NULL)
@@ -879,6 +963,10 @@ void do_declare(const char *kw)
                 if (ndims > 5)
                     cv_err("an array has at most 5 dimensions");
                 s->dynamic = 1;
+                /* A run-time array is a flat pointer plus a bounds
+                   table, and mm_arr_* walk it at MM_STRSZ: the spacing
+                   is the runtime's, not the declaration's. */
+                s->alen = 0;
             }
         } else {
             s = sym_lookup(canon);
@@ -922,7 +1010,7 @@ static void emit_initialiser(struct sym *s, int is_static)
             if (cv.mode == M_EMIT) {
                 char *sub = linear_index(s, k);
                 if (s->ty == TY_S)
-                    emit(sfmt("mm_sset(%s, %s);", sub, v.code));
+                    emit(swrite_of(s, sub, v.code));
                 else if (s->ty == TY_I)
                     emit(sfmt("%s = %s;", sub, as_int(v)));
                 else
