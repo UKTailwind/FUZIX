@@ -37,7 +37,31 @@
 
 #define RATE 22050
 #define CHUNK 1024		/* frames per render */
-#define TARGET_BYTES (2048 * 4)	/* ~93 ms queued */
+/*
+ *	How much audio to keep queued, and it MUST outlast the sleep
+ *	below - which is where this was wrong.
+ *
+ *	usleep() rounds UP to deciseconds, because the kernel timer wheel
+ *	runs once per 100ms (Library/libs/usleep.c): usleep(20000) does
+ *	not sleep 20ms, it sleeps 100ms.  With 2048*4 bytes queued -
+ *	92.9ms at 22050Hz stereo - this player refilled, slept PAST THE
+ *	END of its own buffer, and woke to silence.  That was the ~10Hz
+ *	pulsing on PETSCII Robots' title screen: about a tenth of a
+ *	second of music, then about a tenth of nothing, forever.  It was
+ *	never scheduling or swapping.
+ *
+ *	16384 bytes is 185.8ms, so a 100ms sleep leaves ~86ms in hand -
+ *	margin enough for the jitter a busy machine adds (a merge holds
+ *	the kernel for up to a frame).  It is also the LATENCY of a
+ *	PLAY MODSAMPLE effect, since already-queued audio plays first,
+ *	so it is bought at a real cost and should not grow without one.
+ *
+ *	The fix that would need neither number is a blocking PCM write -
+ *	psleep in sound_pcm_write, woken from the audio IRQ when the ring
+ *	drains - which would wake this exactly when there is room, with
+ *	no polling and no floor.  Worth doing; bigger than this.
+ */
+#define TARGET_BYTES 16384	/* ~186 ms queued; see above */
 
 static modcontext modctx;
 static short pcm[CHUNK * 2];
@@ -202,7 +226,7 @@ int main(int argc, char *argv[])
 					break;
 				}
 				if (w == 0)
-					usleep(20000);
+					usleep(1);	/* the wheel: 100ms */
 				off += w;
 			}
 			if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0) {
@@ -212,7 +236,7 @@ int main(int argc, char *argv[])
 		}
 		if (ended && st.queued == 0)
 			break;
-		usleep(20000);
+		usleep(1);		/* the wheel: 100ms */
 	}
 
 	ioctl(sfd, SNDIOC_PCMCLOSE, 0);
