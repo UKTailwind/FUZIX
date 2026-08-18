@@ -1,6 +1,11 @@
 /* pngharness - run loadpng's own code on the host and write a PPM.
  *
- *   cc -o pngharness pngharness.c upng.c upng_pc3.c -DUPNG_NO_FILE
+ *   cc -o pngharness pngharness.c upng.c -DUPNG_NO_FILE
+ *
+ * NOT upng_pc3.c: this file supplies its own GetMemory,
+ * FreeMemorySafe, routinechecks and error, so linking that as
+ * well is a duplicate definition and the build fails.  The line
+ * above used to name it and no gate runs this, so it went stale.
  *   ./pngharness test.png out.ppm [x y transparent cutoff]
  *
  * Same idea as jpgharness: loadpng is an ARM binary that talks to

@@ -361,7 +361,13 @@ static void flush(void)
 	b.flags = 0;
 	b.items = pts;
 	b.colours = cols;
-	ioctl(sysfd, GFXIOC_PIXELS, &b);
+	/* A refused batch loses up to BATCH pixels, and nothing about the
+	   picture says so: it draws, and it is quietly incomplete.  The
+	   caller is a BASIC program, which takes a non-zero exit as an
+	   error, so stopping here is what MMBasic does when a command
+	   cannot do what it was asked. */
+	if (ioctl(sysfd, GFXIOC_PIXELS, &b) < 0)
+		die("cannot draw to the screen");
 	npts = 0;
 }
 
