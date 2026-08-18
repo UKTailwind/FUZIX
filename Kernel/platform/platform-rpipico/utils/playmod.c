@@ -50,18 +50,44 @@
  *	second of music, then about a tenth of nothing, forever.  It was
  *	never scheduling or swapping.
  *
- *	16384 bytes is 185.8ms, so a 100ms sleep leaves ~86ms in hand -
- *	margin enough for the jitter a busy machine adds (a merge holds
- *	the kernel for up to a frame).  It is also the LATENCY of a
- *	PLAY MODSAMPLE effect, since already-queued audio plays first,
- *	so it is bought at a real cost and should not grow without one.
+ *	16384 bytes - 186ms - fixed the pulse with nothing else running
+ *	and did NOT fix it with something else running, which is the
+ *	measurement that matters: a pure-compute BASIC loop was enough to
+ *	empty it.  After the 100ms sleep expires this still has to be
+ *	SCHEDULED, and then render, while another process wants the
+ *	processor; 86ms of margin does not cover that.
  *
- *	The fix that would need neither number is a blocking PCM write -
- *	psleep in sound_pcm_write, woken from the audio IRQ when the ring
- *	drains - which would wake this exactly when there is room, with
- *	no polling and no floor.  Worth doing; bigger than this.
+ *	The players that do not pulse show what the margin should be.
+ *	playmp3, playwav and playflac share pcm_write() in pcmplay.h and
+ *	have NO target at all: they write until the ring refuses, which
+ *	is up to the 256K the kernel holds - seconds of audio - and sleep
+ *	only when it is genuinely full.  That is what "the kernel's deep
+ *	ring" in playmp3's header is buying, and why an MP3 survives a
+ *	busy machine that a MOD does not.
+ *
+ *	This does not go the whole way, because unlike a music file a MOD
+ *	takes EFFECTS: queued audio plays before anything new, so the
+ *	queue depth is the delay on a PLAY MODSAMPLE, and a game whose
+ *	door thuds arrive a second late is worse than one that stutters.
+ *	48K is 557ms - 457ms of margin after the sleep, which is five
+ *	times what proved insufficient - and half a second of effect
+ *	latency, which is poor but usable.
+ *
+ *	SO THE GUESS IS GONE.  SNDIOC_PCMWAIT sleeps in the kernel until
+ *	the ring has drained to a mark, and the kernel wakes it on the
+ *	TICK - 5ms, not the 100ms usleep can manage.  The queue now only
+ *	has to cover 5ms of granularity instead of a decisecond of sleep
+ *	plus a scheduling delay, so it can be short again, and short is
+ *	exactly what a game's sound effects need.
+ *
+ *	8192 bytes is 92.9ms of music in hand and 92.9ms before a door
+ *	thud is heard - back to where this started, but now for a reason
+ *	rather than by accident, and without the dropouts, because the
+ *	waiting is done by the thing that knows when the ring drains.
+ *	The low mark is half of it: refill when half is gone.
  */
-#define TARGET_BYTES 16384	/* ~186 ms queued; see above */
+#define TARGET_BYTES 8192	/* ~93 ms queued */
+#define LOW_BYTES    4096	/* ~46 ms: wake and top up */
 
 static modcontext modctx;
 static short pcm[CHUNK * 2];
@@ -225,8 +251,10 @@ int main(int argc, char *argv[])
 					stopping = 1;
 					break;
 				}
-				if (w == 0)
-					usleep(1);	/* the wheel: 100ms */
+				if (w == 0 &&
+				    ioctl(sfd, SNDIOC_PCMWAIT,
+					  (void *)LOW_BYTES) < 0)
+					usleep(1);
 				off += w;
 			}
 			if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0) {
@@ -236,7 +264,20 @@ int main(int argc, char *argv[])
 		}
 		if (ended && st.queued == 0)
 			break;
-		usleep(1);		/* the wheel: 100ms */
+		/* Sleep until the ring has drained to the low mark, woken on
+		   the kernel tick.  This is the whole reason the queue above
+		   can be 93ms instead of 557ms: no guess at how long to wait,
+		   so no need to keep half a second of latency in hand. */
+		if (ioctl(sfd, SNDIOC_PCMWAIT, (void *)LOW_BYTES) < 0) {
+			static int moaned;
+			if (!moaned) {
+				moaned = 1;
+				fprintf(stderr, "playmod: PCMWAIT failed, errno %d"
+					" - falling back to a 100ms sleep\n",
+					errno);
+			}
+			usleep(1);
+		}
 	}
 
 	ioctl(sfd, SNDIOC_PCMCLOSE, 0);

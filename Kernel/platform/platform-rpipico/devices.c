@@ -103,6 +103,15 @@ static bool timer_tick_cb(repeating_timer_t *rt)
     rawuart_tx_poll();
     TICK_PHASE(4);
     timer_interrupt();
+    /* A player waiting for room in the PCM ring is woken HERE and
+       not from the DMA IRQ: this is the kernel-s own interrupt
+       path, where touching the process table is safe.  5ms of
+       granularity, against the 100ms floor usleep gives userland -
+       which is what lets an audio queue be short. */
+    {
+        extern void sound_pcm_tick(void);
+        sound_pcm_tick();
+    }
     TICK_PHASE(5);
 
     /* Pre-empt / signal a running user process: pend PendSV, whose

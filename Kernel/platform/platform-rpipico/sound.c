@@ -938,6 +938,63 @@ int sound_pcm_write(const uint8_t *ubuf, uint32_t len, uint16_t owner)
     return (int)len;
 }
 
+/*
+ * Waiting for room, without a player having to guess how long.
+ *
+ * The DMA IRQ is where the ring actually drains, but it is a raw SDK
+ * handler and not inside the kernel's interrupt discipline - waking
+ * the scheduler from there could catch the process table mid-update.
+ * The TICK is the proper context and is 5ms (TICKSPERSEC 200), which
+ * is twenty times finer than the decisecond floor usleep() imposes on
+ * userland, and that is the whole point: the queue no longer has to be
+ * deep enough to cover a 100ms sleep, so it stops being latency.
+ *
+ * One waiter, because there is one PCM stream and one owner.
+ */
+static volatile uint32_t pcm_waitmark;
+static volatile uint8_t pcm_waiting;
+
+void sound_pcm_tick(void)
+{
+    if (!pcm_waiting)
+        return;
+    if (!pcm_active || (pcm_head - pcm_tail) <= pcm_waitmark) {
+        pcm_waiting = 0;
+        wakeup((char *)&pcm_waiting);
+        /*
+         * AND LET IT RUN.  Waking it is not enough: MAXTICKS is
+         * TICKSPERSEC/2, so a timeslice here is 100 ticks - HALF A
+         * SECOND - and a compute-bound program holds the processor for
+         * all of it.  The player would be ready and not running while
+         * its queue emptied, which is why 557ms of audio papered over
+         * this and 186ms did not: 557 outlasts a 500ms timeslice.
+         *
+         * Winding runticks up to the current process's own limit makes
+         * the next preempt check reschedule, so the player runs within
+         * a tick or two of the ring needing it.  Only an audio wakeup
+         * does this - it is the one thing here with a deadline - and
+         * it costs the interrupted program one early context switch.
+         */
+        if (udata.u_ptab != NULL && runticks < udata.u_ptab->p_priority)
+            runticks = udata.u_ptab->p_priority;
+    }
+}
+
+int sound_pcm_wait(uint32_t mark, uint16_t owner)
+{
+    if (!pcm_active || pcm_owner != owner)
+        return -1;
+    if ((pcm_head - pcm_tail) <= mark)
+        return 0;               /* already room: do not sleep at all */
+    pcm_waitmark = mark;
+    pcm_waiting = 1;
+    /* psleep, not psleep_nosig: PLAY STOP is a SIGINT and must not be
+       held off until the ring happens to drain. */
+    psleep((char *)&pcm_waiting);
+    pcm_waiting = 0;
+    return 0;
+}
+
 void sound_pcm_stat(uint32_t *space, uint32_t *queued, uint32_t *under)
 {
     uint32_t used = pcm_head - pcm_tail;

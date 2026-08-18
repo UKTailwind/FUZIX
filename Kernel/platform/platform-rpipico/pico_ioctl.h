@@ -574,6 +574,29 @@ struct gfx_scroll2 {
  * and what FRAMEBUFFER COPY ...,B does first.  No argument.  Bounded: if
  * the scanout has stopped this returns rather than hanging the caller. */
 #define GFXIOC_VSYNC  0x0019
+
+/*
+ * The same wait, BOUNDED, so the caller can do the waiting.
+ *
+ * GFXIOC_VSYNC and the wait MERGE used to do are a spin inside the
+ * kernel, and this kernel does not preempt inside a syscall
+ * (preempt_handler only fires for user-mode PCs).  A frame is 16.7ms;
+ * holding the CPU for that long stops EVERYTHING, and what it stopped
+ * was the MOD player, whose audio then ran dry between merges.
+ *
+ * data is the microseconds to spin for.  The return is 1 if the top of
+ * blanking was reached and 0 if the budget ran out, so a caller loops:
+ *
+ *	while (!ioctl(fd, GFXIOC_VSYNCTRY, (void *)2000)) ;
+ *
+ * and between those calls it is in USER mode, where the tick can take
+ * the CPU away and give it to somebody who needs it.  The kernel still
+ * does the fine-grained watching - it is the only thing that can see
+ * v_scanline - but it does it in slices.
+ *
+ * Capped at 20000us a call so this cannot become the thing it fixes.
+ */
+#define GFXIOC_VSYNCTRY 0x003E
 /* Bounds the kernel's work per call.  A caller with more chunks; the
  * runtime does that invisibly, and it keeps one ioctl from holding the
  * cpu for an unbounded time. */
@@ -670,6 +693,40 @@ struct snd_stat {
  * player that died without closing is not counted - the kernel hands
  * the stream back when its owner is gone. */
 #define SNDIOC_PCMOWNER 0x0025
+
+/*
+ * Sleep until the queue has drained to `data' bytes, so a player does
+ * not have to GUESS how long to wait.
+ *
+ * usleep() cannot help: it rounds up to deciseconds because the timer
+ * wheel does (Library/libs/usleep.c), so the shortest sleep available
+ * to userland is 100ms.  A player that sleeps 100ms must therefore
+ * keep more than 100ms queued - plus whatever a busy machine adds
+ * before it is scheduled and has rendered - and everything queued is
+ * LATENCY on the next sound effect.  playmod needed 557ms of queue to
+ * stop stuttering under load, which is 557ms before a door thud is
+ * heard.  The number was always a guess at a scheduling delay.
+ *
+ * This removes the guess.  The kernel knows exactly when the ring
+ * drains, so it does the waiting and wakes the player on the TICK -
+ * 5ms here (TICKSPERSEC 200), twenty times finer than a decisecond.
+ * The queue can then be short, because it only has to cover 5ms of
+ * granularity rather than 100ms of sleep plus scheduling.
+ *
+ * Woken by a signal as well, which is what PLAY STOP needs.
+ * Returns 0 when there is room, -1 if the caller does not hold the
+ * stream.
+ *
+ * 0x003F, NOT 0x0026 - which is PLKIOC_CLAIM, and the pin lock is
+ * tested first, so every wait went there instead and came back as a
+ * failure.  playmod then fell back to usleep and pulsed exactly as
+ * before, with the queue now SHORTENED on the strength of a wait that
+ * was never happening.  That is the second time a number in this file
+ * has been quietly taken (see PICOIOC_BOARD above); the numbers are a
+ * single flat space shared by every subsystem here, and grep before
+ * choosing is the whole of the discipline.
+ */
+#define SNDIOC_PCMWAIT 0x003F
 
 /* BBC ADVAL (PC3): data -> int selector, returns the reading.
  *

@@ -338,6 +338,13 @@ int plt_dev_ioctl(uarg_t request, char *data)
         }
         return 0;
     }
+    if (request == GFXIOC_VSYNCTRY)
+    {
+        /* data is the microsecond budget, not a pointer.  See the
+           header: the caller loops on this so that it is in user mode -
+           where the tick can preempt it - between the slices. */
+        return display_wait_vblank_try((unsigned int)(intptr_t)data);
+    }
     if (request == GFXIOC_MERGE)
     {
         if (display_fb_merge(udata.u_ptab, (int)(intptr_t)data)) {
@@ -990,6 +997,20 @@ int plt_dev_ioctl(uarg_t request, char *data)
         sound_pcm_stat(&st.space, &st.queued, &st.underruns);
         if (uput(&st, data, sizeof(st)))
             return -1;
+        return 0;
+    }
+    if (request == SNDIOC_PCMWAIT)
+    {
+        /* data is the low-water mark in bytes, not a pointer: sleep
+           until the ring has drained to it.  See the header - this is
+           what lets a player keep a SHORT queue, because it no longer
+           has to cover usleep's 100ms floor with audio. */
+        extern int sound_pcm_wait(uint32_t, uint16_t);
+        if (sound_pcm_wait((uint32_t)(intptr_t)data,
+                           udata.u_ptab->p_pid) < 0) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
         return 0;
     }
     if (request == SNDIOC_PCMCLOSE)

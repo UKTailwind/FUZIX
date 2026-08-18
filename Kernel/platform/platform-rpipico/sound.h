@@ -36,6 +36,8 @@ void sound_quiet(void);
 int sound_pcm_open(uint32_t rate, int channels, uint16_t owner);
 int sound_pcm_write(const uint8_t *ubuf, uint32_t len, uint16_t owner);
 void sound_pcm_stat(uint32_t *space, uint32_t *queued, uint32_t *under);
+int sound_pcm_wait(uint32_t mark, uint16_t owner);
+void sound_pcm_tick(void);
 void sound_pcm_close(uint16_t owner);
 uint16_t sound_pcm_owner(void);
 
