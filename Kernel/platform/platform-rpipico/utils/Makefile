@@ -47,14 +47,28 @@ playmp3.o: CCOPTS += $(FPFLAGS)
 
 .PHONY: all clean
 
-all: $(UTILSBIN) playmod
+all: $(UTILSBIN) playmod loadjpg loadpng
 
 clean:
 	rm -f *.o
-	rm -f $(UTILSBIN)
+	rm -f $(UTILSBIN) playmod loadjpg loadpng
 
 # playmod links the vendored hxcmod tracker alongside its own object
 playmod: playmod.o hxcmod.o
+	$(LINKER) $(CRT0) $^ -o $@ $(LINKER_OPT) $(LINKER_TAIL)
+
+# loadjpg links MMBasic's own picojpeg, unmodified, the same way.
+# It is NOT in UTILS because that list drives the one-object pattern
+# rule below.  loadpng links MMBasic's upng on the same terms.
+loadpng: loadpng.o upng.o upng_pc3.o
+	$(LINKER) $(CRT0) $^ -o $@ $(LINKER_OPT) $(LINKER_TAIL)
+
+# upng reads its own file through MMBasic file numbers; loadpng reads
+# the file itself and calls upng_new_from_bytes, so that entry point is
+# compiled out.
+upng.o: CCOPTS += -DUPNG_NO_FILE
+
+loadjpg: loadjpg.o picojpeg.o
 	$(LINKER) $(CRT0) $^ -o $@ $(LINKER_OPT) $(LINKER_TAIL)
 
 $(UTILSBIN): %: %.o

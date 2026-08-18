@@ -4121,6 +4121,24 @@ MMINTEGER mm_run_bg(void)
     return -1;
 }
 
+int mm_run_pipe(void)
+{
+    mm_error("running a program needs the native runtime");
+    return -1;
+}
+
+MMINTEGER mm_run_pipe_close(int fd)
+{
+    (void)fd;
+    return -1;
+}
+
+MMINTEGER mm_run_pipe_read(int fd, void *buf, int n)
+{
+    (void)fd; (void)buf; (void)n;
+    return -1;
+}
+
 MMINTEGER mm_play_start(void)
 {
     mm_error("running a program needs the native runtime");
@@ -4139,6 +4157,95 @@ MMINTEGER mm_play_stop(void)
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+/*
+ * Run what was collected and read its OUTPUT, rather than waiting for
+ * it in silence.  Returns a descriptor to read from, or -1.
+ *
+ * SPRITE LOADPNG is why this exists.  The PNG decoder has to be a
+ * separate program - upng needs the whole image inflated in PSRAM and
+ * is far too big to compile into every BASIC program - but the sprite
+ * it produces belongs to the caller, so it comes back down a pipe
+ * instead of going to the screen.  See loadpng.c's sprite mode.
+ *
+ * The caller MUST finish with mm_run_pipe_close, which reaps the child
+ * and reports a non-zero exit as a BASIC error, exactly as mm_run_exec
+ * does: a decoder that failed half way must not leave a half-filled
+ * sprite looking like a good one.
+ */
+static pid_t mm_pipe_pid = -1;
+
+int mm_run_pipe(void)
+{
+    int fds[2];
+    pid_t pid;
+
+    if (mm_run_nargs == 0) {
+        mm_error("no program named");
+        return -1;
+    }
+    mm_run_argv[mm_run_nargs] = NULL;
+    fflush(stdout);
+    mm_gflush();                /* the child shares the screen */
+#if defined(MM_PC3) || defined(__FUZIX__)
+    sync();                     /* mm_run_exec says why */
+#endif
+    if (pipe(fds) < 0) {
+        mm_error("cannot make a pipe");
+        return -1;
+    }
+    pid = fork();
+    if (pid < 0) {
+        close(fds[0]);
+        close(fds[1]);
+        mm_error("cannot start a program");
+        return -1;
+    }
+    if (pid == 0) {
+        /* stdout to the pipe; stderr is left alone so the decoder's
+           complaints still reach the console. */
+        close(fds[0]);
+        if (fds[1] != 1) {
+            dup2(fds[1], 1);
+            close(fds[1]);
+        }
+        execvp(mm_run_argv[0], mm_run_argv);
+        _exit(errno == ENOMEM ? 126 : 127);
+    }
+    close(fds[1]);
+    mm_pipe_pid = pid;
+    return fds[0];
+}
+
+/* One read from the pipe.  Here rather than in mmb_sprite.h because
+   that header is compiled by fcc against the board's include path,
+   which has no <unistd.h> - and because every other system call in this
+   runtime is already behind the same guard. */
+MMINTEGER mm_run_pipe_read(int fd, void *buf, int n)
+{
+    return (MMINTEGER)read(fd, buf, (size_t)n);
+}
+
+MMINTEGER mm_run_pipe_close(int fd)
+{
+    int status = 0;
+
+    if (fd >= 0)
+        close(fd);
+    if (mm_pipe_pid < 0)
+        return -1;
+    while (waitpid(mm_pipe_pid, &status, 0) < 0)
+        ;
+    mm_pipe_pid = -1;
+    if (status != 0) {
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 126)
+            mm_error("not enough memory to run the program");
+        else
+            mm_error("the program reported a failure");
+        return -1;
+    }
+    return 0;
+}
 
 MMINTEGER mm_run_exec(void)
 {

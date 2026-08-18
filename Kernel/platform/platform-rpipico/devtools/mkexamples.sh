@@ -39,6 +39,7 @@ ellipse:$H/ellipse.bas:an ellipse with a stretched aspect
 polygon:$M/samples/polygon.bas:POLYGON, checked by reading the pixels back
 bezier:$M/samples/bezier.bas:BEZIER curves
 fill:$M/samples/fill.bas:FILL in both modes, timed
+blitbench:$M/samples/blitbench.bas:the 4bpp pixel engine, path by path, in ns per pixel
 xorplot:$M/samples/xorplot.bas:the XOR pattern, and what readback says about it
 maptest:$H/maptest.bas:MAP - changing what the sixteen colours mean
 fbtext:$H/fbtext.bas:PRINT @(x,y) - text on a graphics screen
@@ -84,16 +85,30 @@ robots:$M/samples/robots.bas:PETSCII Robots - the big one; needs the resource tr
 printf '%s\n' "$LIST" | grep ':' > "$OUT/.manifest"
 
 n=0
+gone=""
 while IFS= read -r e; do
     name=$(echo "$e" | cut -d: -f1)
     src=$(echo "$e" | cut -d: -f2)
     if [ ! -f "$src" ]; then
-        echo "missing: $src" >&2
+        gone="$gone
+    $name: $src"
         continue
     fi
     cp "$src" "$OUT/$name.bas"
     n=$((n + 1))
 done < "$OUT/.manifest"
+
+# FATAL, and all of them at once.  A warning here scrolled past in a
+# long build once already and the card shipped without the program:
+# the image then verified clean, because it matched what was staged and
+# the staging was what was short.  If an entry is deliberately optional
+# it belongs outside the manifest, like the robots assets below.
+if [ -n "$gone" ]; then
+    echo "mkexamples: manifest entries with no file:$gone" >&2
+    echo "mkexamples: fix the path or drop the entry - not building a"\
+         "card that is quietly missing a program" >&2
+    exit 1
+fi
 
 # PETSCII Robots needs its data beside it: levels, tile attributes,
 # music, pictures and the sprite library.  A megabyte of game art does

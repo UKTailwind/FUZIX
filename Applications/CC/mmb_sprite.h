@@ -1321,6 +1321,95 @@ MMG_FN void mms_load(const char *file, MMINTEGER start, MMINTEGER mode)
 
 /* SPRITE LOADARRAY [#]n, w, h, array() - the array holds RGB888
  * colours; RGB121 is pure bit extraction, as the reference does. */
+/* ---- SPRITE LOADPNG #n, f$ [, transparent [, cutoff]] ---------------
+ *
+ *	The decoding happens in ANOTHER PROCESS - /usr/bin/loadpng with
+ *	its -s flag - and the sprite comes back down a pipe.  upng has to
+ *	inflate a whole image before a pixel of it exists (see loadpng.c),
+ *	which needs the PSRAM arena and far more code than belongs in
+ *	every BASIC program; as a program it costs a resident one nothing.
+ *
+ *	What arrives is exactly this buffer's shape: two 16-bit sizes,
+ *	then one COLOUR INDEX PER BYTE, row major.  One byte per pixel and
+ *	not the reference's packed 4bpp because that is what mms_alloc
+ *	gives us - the same divergence the blit buffers make.  So the read
+ *	goes straight into sb->img with no unpacking at all.
+ *
+ *	`transparent` carries MMBasic's sign trick, and it is passed
+ *	through untouched: 0-15 is the index given to pixels below the
+ *	cutoff, and -n means "substitute index n for opaque black".  The
+ *	loader applies it; nothing here needs to know.
+ */
+MMG_FN void mms_loadpng(MMINTEGER bn, const char *file, MMINTEGER targ,
+			MMINTEGER cutoff)
+{
+	struct mmb_sprite *sb = mms_get(bn);
+	unsigned char hdr[4];
+	int fd, w, h, got, n;
+
+	if (sb == NULL)
+		return;
+	if (sb->img != NULL)
+		MM_RAISE("Buffer already in use");
+	if (targ < -15 || targ > 15)
+		MM_RAISE("Invalid transparent colour");
+	if (cutoff < 1 || cutoff > 254)
+		MM_RAISE("Invalid cutoff");
+
+	mm_run_begin();
+	mm_run_arg("\007loadpng");
+	mm_run_arg("\002-s");
+	mm_run_arg(file);
+	mm_run_arg_i(targ);
+	mm_run_arg_i(cutoff);
+	fd = mm_run_pipe();
+	if (fd < 0)
+		return;			/* mm_run_pipe raised it */
+
+	/*	The header first, because the size decides the buffer -
+	 *	and a short read here means the decoder died before it
+	 *	wrote anything, which its own message on stderr will have
+	 *	explained.  Reap it either way. */
+	got = 0;
+	while (got < 4) {
+		n = (int)mm_run_pipe_read(fd, hdr + got, 4 - got);
+		if (n <= 0)
+			break;
+		got += n;
+	}
+	if (got < 4) {
+		/*	Close FIRST: if the decoder exited non-zero it has
+		 *	already said why, on stderr and as a BASIC error,
+		 *	and that message is the useful one. */
+		if (mm_run_pipe_close(fd) < 0)
+			return;
+		MM_RAISE("The PNG could not be decoded");
+	}
+	w = hdr[0] | (hdr[1] << 8);
+	h = hdr[2] | (hdr[3] << 8);
+	if (w < 1 || h < 1 || w > (int)mm_hres() || h > (int)mm_vres()) {
+		mm_run_pipe_close(fd);
+		MM_RAISE("Invalid sprite size");
+	}
+	mms_alloc((int)bn, w, h);
+	if (sb->img == NULL) {
+		mm_run_pipe_close(fd);
+		return;
+	}
+	got = 0;
+	while (got < w * h) {
+		n = (int)mm_run_pipe_read(fd, sb->img + got,
+					  w * h - got);
+		if (n <= 0)
+			break;
+		got += n;
+	}
+	if (mm_run_pipe_close(fd) < 0)
+		return;			/* a failed decoder is an error */
+	if (got < w * h)
+		MM_RAISE("The PNG could not be decoded");
+}
+
 MMG_FN void mms_loadarray(MMINTEGER bn, MMINTEGER wi, MMINTEGER hi,
 			  const MMINTEGER *a, MMINTEGER count)
 {

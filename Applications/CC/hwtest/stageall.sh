@@ -37,6 +37,14 @@ stage cpp       "$R/Applications/cpp/cpp"
 stage mmedit    "$R/Applications/mmedit/mmedit"
 stage saveimage "$R/Kernel/platform/platform-rpipico/utils/saveimage"
 stage loadimage "$R/Kernel/platform/platform-rpipico/utils/loadimage"
+# loadjpg is what LOAD JPG runs - MMBasic's own picojpeg, as a
+# program, on the same bargain as the image pair: a whole operation,
+# so it costs a resident BASIC program nothing.
+stage loadjpg   "$R/Kernel/platform/platform-rpipico/utils/loadjpg"
+# loadpng is what LOAD PNG runs.  Unlike the others it needs the
+# PSRAM arena: upng inflates the whole image before a pixel can be
+# drawn, which is why the reference offers LOAD PNG only on rp2350.
+stage loadpng   "$R/Kernel/platform/platform-rpipico/utils/loadpng"
 # playmp3 is what PLAY MP3 runs, on the same terms as the image pair.
 # It is the ONE program on the card built with the hardware FPU
 # (utils/Makefile says why), so a rebuild that quietly dropped those
@@ -54,4 +62,4 @@ stage playflac  "$R/Kernel/platform/platform-rpipico/utils/playflac"
 
 ls -l "$S"/cc0.s "$S"/cc1.s "$S"/cc2.s "$S"/ccbc.s "$S"/bcrun.s \
       "$S"/bcdump.s "$S"/mmbc.s "$S"/cpp.s "$S"/mmedit.s \
-      "$S"/saveimage.s "$S"/loadimage.s "$S"/playmp3.s "$S"/playsnd.s "$S"/playmod.s
+      "$S"/saveimage.s "$S"/loadimage.s "$S"/loadjpg.s "$S"/loadpng.s "$S"/playmp3.s "$S"/playsnd.s "$S"/playmod.s

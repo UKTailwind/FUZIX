@@ -219,20 +219,42 @@ program never sees that: `MODE 2` means what it means on a PicoMite, and
 So the measurements above were taken at **320×240, stride 160, 38,400
 bytes** — nothing in the test was clipped.
 
-### MERGE is ~12× slower than its own documented copy rate
+### MERGE measured 16.9 ms — and 16.7 ms of that was the blanking wait
 
-`display_fb_merge` is carefully built — two passes, one linear PSRAM
-stream each, whole-byte transparency test — and its comment records
-0.726 ms to copy 153,600 bytes, i.e. 53 MB/s. At 320×240 the
-framebuffer is 38,400 bytes, so a merge moves ~76,800 bytes across both
-passes. At the documented rate that is about 1.4 ms. **It measures 16.9
-ms**, roughly 4.5 MB/s.
+**CORRECTED 2026-08-18. There is no mystery here; do not go hunting
+one.** What follows is what this section used to claim, and why it was
+wrong, because the wrong version is the more believable one.
 
-Either the second pass is far more expensive than the first — it is a
-byte-at-a-time test-and-store against SRAM, not a block copy — or
-something in the path is not behaving as the comment describes. Worth
-its own investigation: at 17 ms a frame it is the single largest item in
-a Robots step once the blitter is fixed.
+The claim was: `display_fb_merge`'s own comment records 0.726 ms to copy
+153,600 bytes, i.e. 53 MB/s; a merge at 320×240 moves ~76,800 bytes
+across its two passes, so it should cost ~1.4 ms — yet it measured
+**16.9 ms**, about 4.5 MB/s, so something in the path must not behave as
+the comment describes.
+
+**The 16.9 ms was one frame at 60 Hz (16.67 ms), not a slow copy.** When
+that measurement was taken, `display_fb_merge` began by spinning for the
+top of vertical blanking, *inside the syscall*. The number timed the
+wait; the copy was hidden underneath it. The wait moved out to the
+caller the following day — `GFXIOC_VSYNCTRY`, bounded slices, driven
+from `mm_fb_merge_hw` — for an unrelated reason: a non-preempting
+kernel holding the CPU for a whole frame drained the MOD player's queue
+and was audible. `display.c` now carries the "NO WAIT HERE ANY MORE"
+note recording it.
+
+Two consequences:
+
+* **The copy cost is now measurable clean, and has not been measured.**
+  One board run says whether it is the ~1.4 ms the comment predicts.
+  Until someone runs it, neither number should be quoted.
+* **A frame still costs up to 16.7 ms of waiting** — that is a 60 Hz
+  display and it is supposed to be there. What changed is that the CPU
+  is yielded during it rather than held, so the wait no longer costs
+  *everything else on the machine* what it used to.
+
+The general lesson is one this project keeps re-learning: a measurement
+that brackets a hardware wait times the wait. Check a suspicious number
+against the frame period, the tick and the timeslice before believing it
+means what you would like it to mean.
 
 ---
 
@@ -242,9 +264,11 @@ a Robots step once the blitter is fixed.
    specialised per source encoding, no function pointer, no
    unpack/repack. Expected ~6× on all tile and sprite drawing. No
    kernel change; the transfer primitives are already right.
-2. **Investigate `MERGE`** against the 53 MB/s its own note claims. At
-   17 ms it is the largest single item in a frame once (1) is done, and
-   it runs every pass of the main loop whether anything moved or not.
+2. ~~**Investigate `MERGE`** against the 53 MB/s its own note claims.~~
+   **WITHDRAWN** — the 16.9 ms was the in-kernel blanking wait, which
+   has since moved to the caller. See §5. What is left is a
+   confirmation, not an investigation: time a merge now the wait is out
+   and check it against the predicted ~1.4 ms.
 3. Re-time a movement step and compare against the RP2040.
 
 The audio pulse is being tracked separately: it was identical in a

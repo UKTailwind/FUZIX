@@ -9,6 +9,8 @@ cpp
 mmedit
 saveimage
 loadimage
+loadjpg
+loadpng
 playmp3
 playsnd
 playmod

@@ -104,13 +104,64 @@ since that decision:
 
 Worth measuring both ways with `bench.bas` before committing.
 
-### 4.2 libc — 7,918 bytes (1.9 blocks). Safe.
+### 4.2 libc — MEASURED 2026-08-18: 2,416 bytes, not 7,918. Marginal.
 
-`do_format` + `_vfnprintf` alone are 2.7 K, and they format into
-caller-supplied buffers that live in `mem[]`. `strcmp`, `memcpy` and
-friends take whatever the caller passes — mostly `mem[]`, but a BASIC
-string can be in the PSRAM heap, so the byte-loop routines are the ones
-to think twice about. The formatting machinery is unambiguous.
+**This section used to claim 7,918 bytes (1.9 blocks) and "safe".  Both
+halves were wrong, and the experiment that showed it took half an hour:
+build bcrun with every printf-family call stubbed out and read the size
+off `arm-none-eabi-size`.**
+
+    bcrun as shipped                            97,673 text
+    ... with bcrun's own diagnostics stubbed     97,497   (-176)
+    ... and the runtime's two sprintf sites too  95,257   (-2,416)
+
+**2,416 bytes - 0.59 of a block - and that is the CEILING**, before the
+replacement code that would have to go back in.
+
+Two reasons the estimate was too high:
+
+* **`do_format` is bcrun's OWN formatter, not the libc's** (bcrun.c
+  ~842).  It reads printf's arguments off the VM stack, which a varargs
+  function structurally cannot do, so the kernel's `_vsnprintf` cannot
+  replace it however good it is.  `do_format` (1,508) stays, and so do
+  `_fnum` (764) and `fnum_digits` (528), because `do_format` calls them
+  directly for a program's `%e`/`%g`.  That is 2,800 bytes counted as
+  movable which are not.
+* **The libc is an ARCHIVE, and archive members come in whole.**
+  `-ffunction-sections` applies to bcrun's own compile, not to the
+  prebuilt `libcarmm0.a`.  `_vfnprintf` (1,168) stayed linked with NO
+  caller in bcrun until the two `sprintf` sites in mmb_runtime.c went as
+  well - it arrives with whichever member `sprintf` needs.  **The unit
+  of saving is an object file, not a function**, which is worth
+  remembering before estimating any other libc item.
+
+**The cost of collecting it**: 23 `fprintf(stderr, ...)` sites in bcrun
+plus 2 `sprintf` in mmb_runtime.c must all route through a
+kernel-provided formatter, and each must produce identical bytes or a
+diagnostic changes.  The libm lesson applies in full - one direct
+reference left behind and the member returns and the saving is zero,
+which is exactly what happened with `acos`/`asin`/`log` until
+`192c731a6`.
+
+**Verdict: not worth doing on its own.**  0.59 of a block for a new
+kernel ABI and 25 call sites is a poor trade beside the other items
+here.  Revisit only if a formatter is being exported for another reason
+anyway.
+
+**The kernel DOES already have a full formatter in flash**, and that
+half of the idea was sound: `_vsnprintf` (1,752), `_ftoa` (910),
+`_etoa` (1,046), `_ntoa_long_long` (194), `_ntoa_format`, `_ntoa_long`,
+`_out_*` - mpaland's printf with float and long-long support, at
+0x10008xxx.  Sharing it would cost the kernel nothing.  There is simply
+much less on the userland side willing to give it up than this section
+assumed.
+
+**A risk note that survives regardless**: BASIC number output does NOT
+go through printf.  `mm_float_to_str` and `mm_format` are hand-written,
+and the whole runtime uses `sprintf` twice - an error message and an
+ANSI cursor escape, both integer-only.  So swapping formatters could
+not change a BASIC `PRINT` of a number; the exposure is C programs and
+bcrun's own diagnostics, both of which the gates compare.
 
 ### 4.3 `mm_*` runtime — 26,478 bytes (6.5 blocks). The biggest prize, case by case.
 

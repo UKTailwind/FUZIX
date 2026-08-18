@@ -141,6 +141,8 @@ Read these before writing anything; they are all short.
 | `utils/ripple.c` | per-pixel drawing versus a shadow buffer |
 | `utils/bmtest.c` | `GFXIOC_BITMAP` and `GFXIOC_RECT`, verified by readback |
 | `utils/saveimage.c`, `loadimage.c` | reading and writing the screen |
+| `utils/loadjpg.c` | picojpeg, a block at a time - memory that does not grow with the picture |
+| `utils/loadpng.c`, `upng_pc3.c` | upng, which must inflate the whole image, so it uses a PSRAM arena; and its `-s` mode, which writes a sprite to stdout for another process to read |
 | `utils/memprobe.c` | how much memory a process can actually have |
 | `utils/allocbench.c` | the cost of a PSRAM arena allocation |
 | `utils/pcmtest.c` | the PCM sound sink, from a generated tone |

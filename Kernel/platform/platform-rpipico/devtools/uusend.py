@@ -2,6 +2,15 @@
 
   python uusend.py <localfile> <remotename> [gap_ms]
 
+gap_ms is ACCEPTED AND IGNORED if it is below the 25 ms default, and it
+is the only argument here that ever mattered: three separate board
+crashes - gap 0 twice, then gap 5 - each wedged the console mid-transfer
+and cost a full fsck. The tty queue is 132 bytes and the per-line gap is
+what keeps at most one line outstanding; below the default that stops
+being true, intermittently, which is worse than failing outright. A
+LARGER value is honoured, because more time between lines is only ever
+safer.
+
 Avoids XMODEM entirely. rx/sx assume a serial port separate from the
 console -- they poll the console for a keypress to cancel, so on a
 machine where the console *is* the link the first byte of the transfer
@@ -150,7 +159,18 @@ def main():
             port = a[7:]
 
     local, remote = argv[0], argv[1]
-    gap = (int(argv[2]) if len(argv) > 2 else 25) / 1000.0
+
+    # The gap floor is not negotiable - see the note at the top.  A
+    # bigger gap is fine; a smaller one is ignored, loudly, because
+    # silently doing something other than what was asked is its own
+    # kind of trap.
+    GAP_MIN_MS = 25
+    want = int(argv[2]) if len(argv) > 2 else GAP_MIN_MS
+    if want < GAP_MIN_MS:
+        print("uusend: gap %d ms ignored, using %d - a smaller gap has "
+              "crashed the board three times" % (want, GAP_MIN_MS))
+        want = GAP_MIN_MS
+    gap = want / 1000.0
 
     ser = fzport.open_port(BAUD, timeout=1, port=port)
     time.sleep(0.3); ser.reset_input_buffer()

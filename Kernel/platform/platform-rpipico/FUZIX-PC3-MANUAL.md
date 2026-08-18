@@ -113,6 +113,22 @@ hide, collision detection, transparency, and a two-axis `SPRITE
 SCROLL`. A rectangle now crosses into the kernel once rather than once
 per row, which is what makes a screenful of sprites affordable.
 
+`SPRITE LOADPNG` builds a sprite straight from a PNG:
+
+```
+SPRITE LOADPNG [#]n, fname$ [,transparent] [,cutoff]
+```
+
+The decoding happens in another process and the sprite arrives down a
+pipe, so a program that loads twenty sprites still carries no decoder.
+`transparent` defaults to **0** and `cutoff` to **30**, both as in the
+reference, and the default is the point: `SPRITE SHOW` skips colour 0
+because that is the sprite transparent colour's own default, so a PNG's
+see-through pixels become see-through sprite pixels with no arguments at
+all. Pass a different index to paint them instead, or a *negative* value
+to substitute that index for opaque black — which is how artwork whose
+black would vanish against a black background is kept visible.
+
 **The synthesiser moved into the kernel.** `PLAY SOUND` and `PLAY
 TONE` used to be rendered by a separate program keeping a fifth of a
 second of audio queued ahead. That is fine for music and impossible
@@ -1917,7 +1933,7 @@ down, `&H7F` delete, and `&H91`–`&H9C` for F1 to F12. A sequence it
 does not recognise comes back byte by byte behind its escape, so
 nothing is lost — and a bare `ESC` is still `CHR$(27)`.
 
-## Running another program: `SYSTEM`, `SAVE IMAGE`, `LOAD IMAGE`
+## Running another program: `SYSTEM`, `SAVE IMAGE`, `LOAD IMAGE`, `LOAD JPG`, `LOAD PNG`
 
 `SYSTEM` runs a program and waits for it:
 
@@ -1950,6 +1966,66 @@ LOAD IMAGE fname$ [,x] [,y] [,mode] [,ximage] [,yimage] [,wimage] [,himage]
 The decoder is MMBasic's, so it reads 1, 4, 8, 16, 24 and 32-bit BMPs,
 `BI_BITFIELDS`, and RLE4/RLE8 compression. Dithering is *optional*, as
 in MMBasic — omit the mode and the image is mapped without it.
+
+`LOAD BMP` is accepted as a synonym for `LOAD IMAGE`, as in the
+reference.
+
+### `LOAD JPG`
+
+```
+LOAD JPG fname$ [,x] [,y] [,mode] [,ximage] [,yimage] [,scale]
+```
+
+MMBasic's own picojpeg, as the `loadjpg` program. `scale` is 1, 2, 4 or
+8 and bins that many source pixels into one on screen, so a photograph
+larger than the display can be fitted to it. `ximage`/`yimage` take a
+region out of the middle of a larger picture.
+
+Binning costs nothing extra: every MCU still has to be decoded, because
+a JPEG stream cannot be seeked into — only the drawing is reduced. A
+320×240 photograph draws in about 0.45 s either way.
+
+`mode` is the dither argument. It is *parsed and ignored*, for the
+reason given under `LOAD IMAGE`: error diffusion wants rows of signed
+error per channel, and this program runs while your BASIC program is
+still resident in memory.
+
+### `LOAD PNG`
+
+```
+LOAD PNG fname$ [,x] [,y] [,transparent] [,cutoff]
+```
+
+MMBasic's own upng, as the `loadpng` program.
+
+**`transparent` decides what happens to see-through pixels, and its
+default will surprise you the first time.** As in the reference it
+defaults to **0**, which is the palette's black — so a PNG with a
+transparent surround lands on screen inside a black box. That is what a
+PicoMite does, and it is deliberate: the same default is what makes
+`SPRITE LOADPNG` work (see below). To let the screen show through
+instead, pass **-1**:
+
+```basic
+CLS RGB(255,255,255)
+LOAD PNG "apple.png", 0, 0, -1     ' the white shows through
+LOAD PNG "apple.png"               ' a black box around it
+```
+
+`cutoff` is the alpha value above which a pixel counts as opaque, 1 to
+254, default 20.
+
+Note that an *opaque* black pixel is drawn black whichever you choose —
+nothing can tell "background" from "black" once the alpha channel says
+opaque. If a picture has an unwanted dark surround even with `-1`, the
+file has an opaque background rather than an alpha one.
+
+`LOAD PNG` needs the PSRAM arena and says so if a kernel cannot provide
+one. PNG cannot be decoded a piece at a time — its filters refer to the
+row above and its compressed stream is one window over the whole image —
+so the entire picture is inflated before any of it can be drawn: about
+300 KB for a full screen, twice the whole process pool. The reference
+has the same constraint and offers `LOAD PNG` only on RP2350 for it.
 
 ## Music: `PLAY MP3`, `PLAY WAV`, `PLAY FLAC`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE` {#music}
 
@@ -3168,6 +3244,28 @@ transfer — see that chapter).
 files, `BI_BITFIELDS`, and RLE4/RLE8, and dithers only when asked.
 These are the programs `SAVE IMAGE` and `LOAD IMAGE` run, and they are
 just as useful from the shell.
+
+`loadjpg` and `loadpng` are the same idea for the other two formats,
+and are what `LOAD JPG` and `LOAD PNG` run:
+
+```
+# loadjpg photo.jpg                      at 0,0
+# loadjpg photo.jpg 0 0 0 0 0 2          binned 2:1, so 640x480 fits
+# loadpng logo.png 40 20                 at x,y
+# loadpng logo.png 0 0 -1                let the screen show through
+# loadpng -s logo.png > logo.spr         decode to a SPRITE, on stdout
+```
+
+`loadjpg` is MMBasic's picojpeg and decodes a block at a time, so its
+memory does not grow with the picture. `loadpng` is MMBasic's upng,
+which cannot work that way — it inflates the whole image first — so it
+uses the PSRAM arena and costs the process pool nothing.
+
+The `-s` form is how `SPRITE LOADPNG` works: it writes the decoded
+sprite to standard output as two 16-bit sizes followed by one colour
+index per byte, and the runtime reads that straight into a sprite
+buffer. It needs no graphics mode, so it is also the way to convert
+artwork from the shell.
 
 **Sound:** `playmp3` plays an MP3 file through the audio DAC:
 

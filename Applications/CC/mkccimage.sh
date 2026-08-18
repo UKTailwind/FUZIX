@@ -37,7 +37,7 @@ set -e
 p2geom "$SRC"
 START=$P2_START
 COUNT=$P2_COUNT
-for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc saveimage loadimage mmedit \
+for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc saveimage loadimage loadjpg loadpng mmedit \
 		playmp3 playmod; do
 	[ -r "$CC/hwtest/$f.s" ] || {
 		echo "missing $CC/hwtest/$f.s - cross build and strip first" >&2

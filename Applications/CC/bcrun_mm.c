@@ -474,6 +474,18 @@ static void w_run_arg_i(void) { mm_run_arg_i(LL(0)); A = 0; }
 static void w_run_arg_f(void) { mm_run_arg_f(D(0)); A = 0; }
 static void w_run_exec(void)  { A = mm_run_exec(); }
 static void w_run_bg(void)    { A = mm_run_bg(); }
+/* SPRITE LOADPNG: run the decoder and read the sprite back.  The
+   buffer is the program's, so it arrives as a VM offset and Pa turns
+   it into the real address, exactly as the framebuffer reads do. */
+static void w_run_pipe(void)  { A = mm_run_pipe(); }
+static void w_run_pipe_read(void)
+{
+	/* int, void *, int - three 32-bit slots, so I(0), Pa(1), I(2).
+	   Not LL(0)/Pa(2)/LL(4): see the note in mmb_runtime.h about
+	   slots, which this got wrong once already. */
+	A = mm_run_pipe_read(I(0), (void *)Pa(1), I(2));
+}
+static void w_run_pipe_close(void) { A = mm_run_pipe_close(I(0)); }
 static void w_play_start(void){ A = mm_play_start(); }
 static void w_play_stop(void) { A = mm_play_stop(); }
 static void w_play_owner(void){ A = mm_play_owner(); }
@@ -846,6 +858,9 @@ static const struct mmwrap {
 	{ "mm_run_arg_f",	w_run_arg_f },
 	{ "mm_run_exec",	w_run_exec },
 	{ "mm_run_bg",		w_run_bg },
+	{ "mm_run_pipe",	w_run_pipe },
+	{ "mm_run_pipe_read",	w_run_pipe_read },
+	{ "mm_run_pipe_close",	w_run_pipe_close },
 	{ "mm_play_start",	w_play_start },
 	{ "mm_play_stop",	w_play_stop },
 	{ "mm_play_owner",	w_play_owner },

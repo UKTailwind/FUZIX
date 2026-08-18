@@ -11,6 +11,12 @@
 
 /* ---- forward declarations, Python order ---- */
 
+/* Which program serves this LOAD, or NULL if it is not one of them.
+   A function rather than a local because cc1 compiles this file on the
+   board and C89 has no mid-block declarations - and is_kw() is pure
+   lookahead, so asking twice costs nothing and consumes nothing. */
+static const char *load_prog(const char *up);
+
 static void do_print(void);
 static char *prcall(const char *chan, const char *what, const char *arg);
 static const char *int_handler(void);
@@ -623,26 +629,37 @@ void statement_inner(void)
         cv_err("only FRAMEBUFFER CREATE, LAYER, CLOSE, WRITE, COPY, "
                "MERGE and WAIT are translated");
     }
-    if (strcmp(up, "SYSTEM") == 0
-        || ((strcmp(up, "SAVE") == 0 || strcmp(up, "LOAD") == 0)
-            && is_kw("IMAGE", 1))) {
+    if (strcmp(up, "SYSTEM") == 0 || load_prog(up) != NULL
+        || (strcmp(up, "SAVE") == 0 && is_kw("IMAGE", 1))) {
         /* SYSTEM prog$ [, arg ...]        run a program and wait
            SAVE IMAGE f$ [, x, y, w, h]    both are programs
            LOAD IMAGE f$ [, x, y]
+           LOAD BMP   f$ [, x, y]          the reference's own synonym
+           LOAD JPG   f$ [, x, y [, mode [, xi, yi [, scale]]]]
+           LOAD PNG   f$ [, x, y [, transparent [, cutoff]]]
 
            An argv, not a command line: nothing to quote and no shell
            in the middle.  MMBasic has no SYSTEM - it is firmware with
            nothing to run - so that spelling is ours, but SAVE IMAGE
-           and LOAD IMAGE are the interpreter's own and are simply
-           handed to /usr/bin/saveimage and /usr/bin/loadimage. */
+           and the LOAD family are the interpreter's own and are simply
+           handed to /usr/bin/saveimage, /usr/bin/loadimage and
+           /usr/bin/loadjpg and /usr/bin/loadpng.
+
+           LOAD JPG's arguments are passed straight through in the
+           reference's order - x, y, dither mode, image offsets, scale -
+           so a program written for a PicoMite needs no edit.  The mode
+           is parsed and ignored there, as it is in loadimage: see the
+           note in loadjpg.c about dithering. */
         const char *prog = NULL;
         int first = 1;
 
         if (strcmp(up, "SYSTEM") == 0) {
             cv.i++;
         } else {
+            /* BEFORE the tokens are consumed: load_prog looks ahead
+               one token, and cv.i += 2 eats the very keyword it reads. */
+            prog = (strcmp(up, "SAVE") == 0) ? "saveimage" : load_prog(up);
             cv.i += 2;
-            prog = (strcmp(up, "SAVE") == 0) ? "saveimage" : "loadimage";
         }
         emit("mm_run_begin();");
         if (prog != NULL)
@@ -667,10 +684,10 @@ void statement_inner(void)
         /* The SPRITE family (graphics/Sprite.c), engine in
            mmb_sprite.h on the BLIT row workhorses.  Deferred there
            and refused here by name: SCROLL (Phase 4 of
-           PLAN-games.md - it wants the kernel's SCROLL2), LOADPNG
-           and LOADBMP (want the image decoders). */
+           PLAN-games.md - it wants the kernel's SCROLL2) and
+           LOADBMP (wants the BMP decoder).  LOADPNG translates. */
         static const char *const nospr[] = {
-            "LOADPNG", "LOADBMP", NULL
+            "LOADBMP", NULL
         };
         int si;
 
@@ -681,6 +698,30 @@ void statement_inner(void)
                (V5.08.00's blitother serves both spellings), so the
                memory forms are BLIT MEMORY under another name. */
             do_blit_memform();
+            return;
+        }
+        if (is_kw("LOADPNG", 1)) {
+            /* SPRITE LOADPNG [#]n, f$ [, transparent [, cutoff]]
+
+               The decoding is /usr/bin/loadpng's, in another process,
+               and the sprite comes back down a pipe - see mms_loadpng.
+               transparent carries MMBasic's sign trick (-n = substitute
+               n for opaque black) and is passed through untouched;
+               cutoff defaults to 30 here, not LOAD PNG's 20, as in the
+               reference. */
+            const char *n, *f, *t = "0LL", *c = "30LL";
+
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            f = as_str(expr());
+            if (accept_op(",")) {
+                t = as_int(expr());
+                if (accept_op(","))
+                    c = as_int(expr());
+            }
+            emit(sfmt("mms_loadpng(%s, %s, %s, %s);", n, f, t, c));
             return;
         }
         if (is_kw("SHOW", 1)) {
@@ -2294,6 +2335,19 @@ void statement_inner(void)
 }
 
 /* -- PRINT ----------------------------------------------------------- */
+
+static const char *load_prog(const char *up)
+{
+    if (strcmp(up, "LOAD") != 0)
+        return NULL;
+    if (is_kw("IMAGE", 1) || is_kw("BMP", 1))
+        return "loadimage";
+    if (is_kw("JPG", 1))
+        return "loadjpg";
+    if (is_kw("PNG", 1))
+        return "loadpng";
+    return NULL;
+}
 
 static void do_print(void)
 {
