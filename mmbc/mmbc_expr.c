@@ -479,8 +479,6 @@ const char *index_of(struct sym *s)
 {
     const char *parts[MAXARGS];
     int nparts = 0;
-    const char *res;
-    int k;
 
     expect_op("(");
     for (;;) {
@@ -493,13 +491,26 @@ const char *index_of(struct sym *s)
             break;
     }
     expect_op(")");
+    return subscript_of(s, parts, nparts);
+}
+
+/* The C for one element, given one index text per dimension.
+ *
+ * Split out of index_of() so that ARRAY SLICE, which has to build the
+ * same accessor from indices it parsed itself, cannot drift from the
+ * folding rule below. */
+const char *subscript_of(struct sym *s, const char **parts, int nparts)
+{
+    const char *res;
+    int k;
+
     if (s->is_param || s->dynamic) {
         /* MMBasic gives an array parameter no rank of its own - it
          * inherits whatever was passed - so the subscripts are folded
          * into one offset using the bounds handed in alongside it.
          * An array DIMmed with a run-time bound is the same shape and
          * folds the same way, out of its own bounds table. */
-        const char *b = s->dynamic ? s->bacc : bname(s->name);
+        const char *b = bnd_acc(s);
         const char *off = parts[0];
 
         for (k = 1; k < nparts; k++)
@@ -514,6 +525,105 @@ const char *index_of(struct sym *s)
     for (k = 0; k < nparts; k++)
         res = sfmt("%s[%s]", res, parts[k]);
     return res;
+}
+
+/* The bounds table { rank, ub1, ... } that goes with a flat array -
+ * an array parameter's, or a run-time DIM's own. */
+const char *bnd_acc(struct sym *s)
+{
+    return s->dynamic ? s->bacc : bname(s->name);
+}
+
+/* How many elements of a dimension the program can reach.
+ *
+ * Our arrays are declared with bound + 1 elements whatever OPTION BASE
+ * says, so under BASE 1 element 0 exists and is out of reach.  MMBasic
+ * allocates only what it can index, so a count it compares against has
+ * to have that element taken back off. */
+const char *usable(const char *txt)
+{
+    if (cv.opt_base)
+        return sfmt("(%s) - %d", txt, cv.opt_base);
+    return txt;
+}
+
+/* The C size of each dimension, as text.  For a static array these are
+ * the declaration's own bounds; for a flat one they come out of the
+ * bounds table, where entry k + 1 is dimension k's upper bound. */
+void dim_sizes(struct sym *s, int rank, const char **out)
+{
+    int k;
+
+    if (s->is_param || s->dynamic) {
+        const char *b = bnd_acc(s);
+
+        for (k = 0; k < rank; k++)
+            out[k] = sfmt("((%s)[%d] + 1)", b, k + 1);
+        return;
+    }
+    for (k = 0; k < rank; k++)
+        out[k] = sfmt("(%s)", s->dims[k]);
+}
+
+/* (first element, length) of the one-dimensional array that ARRAY SLICE
+ * fills, or that ARRAY INSERT reads. */
+struct flat array_line(struct sym *s)
+{
+    struct flat r;
+    const char *base = sfmt("(int)(%d)", cv.opt_base);
+
+    if (!s->is_array)
+        cv_err("'%s' is not an array", s->name);
+    if (!(s->is_param || s->dynamic) && s->ndims != 1)
+        cv_err("'%s' has %d dimensions, and a one-dimensional array "
+               "is wanted here", s->name, s->ndims);
+    if (s->ty == TY_S)
+        no_length_array(s);
+    r.ptr = sfmt("&%s", subscript_of(s, &base, 1));
+    if (s->is_param || s->dynamic)
+        r.cnt = usable(sfmt("mm_arr_count(%s)", bnd_acc(s)));
+    else
+        r.cnt = usable(sfmt("(%s)", s->dims[0]));
+    return r;
+}
+
+/* (first element, stride, length) of one line through an array.
+ *
+ * `parts` is one index per dimension with NULL where the statement left
+ * a blank, and the line runs along that dimension.
+ *
+ * Our C arrays carry the BASIC subscripts in source order, so the LAST
+ * one is adjacent - the opposite of MMBasic's storage, where the FIRST
+ * is.  The stride is therefore the product of the sizes to the RIGHT of
+ * the blank index, and 1 when the blank index is last.  MMBasic reaches
+ * the same elements from the other end (array_slice builds off[] as a
+ * running product from the left): the addresses differ, the set of
+ * elements does not. */
+struct vec array_vector(struct sym *s, const char **parts, int nparts,
+                        int blank)
+{
+    const char *sz[MAXARGS];
+    const char *idx[MAXARGS];
+    struct vec r;
+    int k;
+
+    if (s->ty == TY_S)
+        no_length_array(s);
+    if (!(s->is_param || s->dynamic) && s->ndims < 2)
+        cv_err("'%s' has one dimension, and a slice is taken from an "
+               "array of two or more", s->name);
+    dim_sizes(s, nparts, sz);
+    for (k = 0; k < nparts; k++)
+        idx[k] = parts[k];
+    idx[blank] = sfmt("(int)(%d)", cv.opt_base);
+    r.ptr = sfmt("&%s", subscript_of(s, idx, nparts));
+    r.step = NULL;
+    for (k = blank + 1; k < nparts; k++)
+        r.step = r.step ? sfmt("%s * %s", r.step, sz[k]) : sz[k];
+    if (r.step == NULL)
+        r.step = "1";
+    r.cnt = usable(sz[blank]);
+    return r;
 }
 
 const char *retacc(void)

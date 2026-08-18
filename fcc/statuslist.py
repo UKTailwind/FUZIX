@@ -62,6 +62,17 @@ for name, lo, hi in re.findall(r"'([A-Z0-9.$]+)': \((\d+), (\d+)\)", tbl):
     supported.add(name)
 for m in re.finditer(r"MATHFUNCS = \{([^}]*)\}", text):
     supported.update(re.findall(r"'([A-Z0-9]+)'", m.group(1)))
+# ARRAY SET, ARRAY SLICE and the rest: one dispatch serves both the ARRAY
+# and the MATH spellings, and it is a method of its own, so the scan of
+# statement_inner above cannot see into it.  Read it here rather than
+# listing the names by hand, so that the next one added counts itself.
+blk = text[text.index("def do_array_cmd"):]
+blk = blk[:blk.index("\n    def ", 10)]
+for w in re.findall(r"op == '([A-Z_0-9]+)'", blk):
+    supported.add("ARRAY " + w)
+for m in re.finditer(r"op in \(([^)]*)\)", blk):
+    for w in re.findall(r"'([A-Z_0-9]+)'", m.group(1)):
+        supported.add("ARRAY " + w)
 supported.update(["AND", "OR", "NOT", "XOR", "MOD", "INV", "THEN", "TO",
                   "STEP", "AS", "ELSE", "ELSEIF", "END IF", "END SUB",
                   "END FUNCTION", "END SELECT", "CASE ELSE", "SELECT CASE",
@@ -71,8 +82,10 @@ supported.update(["AND", "OR", "NOT", "XOR", "MOD", "INV", "THEN", "TO",
                   "BASE", "EXPLICIT", "DEFAULT", "SELECT",
                   "INTEGER", "FLOAT", "STRING",
                   "OUTPUT", "APPEND", "RANDOM",
-                  "TEMPR START", "LINE INPUT", "ARRAY SET", "ARRAY ADD",
-                  "ELSE IF"])
+                  "TEMPR START", "LINE INPUT", "ELSE IF",
+                  # dispatched inside the COLOUR branch of the graphics
+                  # words, which the scan above does not open
+                  "COLOUR MAP"])
 
 
 def is_supported(nm):

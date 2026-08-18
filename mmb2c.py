@@ -1524,13 +1524,21 @@ class Conv(object):
             if not self.accept_op(','):
                 break
         self.expect_op(')')
+        return self.subscript(s, parts)
+
+    def subscript(self, s, parts):
+        """The C for one element, given one index text per dimension.
+
+        Split out of index() so that ARRAY SLICE, which has to build the
+        same accessor from indices it parsed itself, cannot drift from
+        the folding rule below."""
         if s.is_param or s.dynamic:
             # MMBasic gives an array parameter no rank of its own - it
             # inherits whatever was passed - so the subscripts are folded
             # into one offset using the bounds handed in alongside it.
             # An array DIMmed with a run-time bound is the same shape and
             # folds the same way, out of its own bounds table.
-            b = s.bacc if s.dynamic else '__b_' + s.name.replace('.', '__')
+            b = self.bnd_acc(s)
             off = parts[0]
             for k in range(1, len(parts)):
                 off = '((%s) * ((%s)[%d] + 1) + (%s))' % (off, b, k + 1,
@@ -1540,6 +1548,24 @@ class Conv(object):
             self.err("'%s' has %d dimension(s), %d given"
                      % (s.name, len(s.dims), len(parts)))
         return s.acc + ''.join('[' + p + ']' for p in parts)
+
+    def bnd_acc(self, s):
+        """The bounds table { rank, ub1, ... } that goes with a flat
+        array - an array parameter's, or a run-time DIM's own."""
+        if s.dynamic:
+            return s.bacc
+        return '__b_' + s.name.replace('.', '__')
+
+    def dim_sizes(self, s, rank):
+        """The C size of each dimension, as text.
+
+        For a static array these are the declaration's own bounds; for a
+        flat one they come out of the bounds table, where entry k + 1 is
+        dimension k's upper bound."""
+        if s.is_param or s.dynamic:
+            b = self.bnd_acc(s)
+            return ['((%s)[%d] + 1)' % (b, k + 1) for k in range(rank)]
+        return ['(%s)' % d for d in s.dims]
 
     def varaddr(self):
         """PEEK(VARADDR v) - the address of a variable's storage.
@@ -2705,6 +2731,58 @@ class Conv(object):
             self.no_length_array(s)
             return ('(char (*)[MM_STRSZ])%s' % s.acc, cnt)
         return ('(%s *)%s' % (CTYPE[s.ty], s.acc), cnt)
+
+    def usable(self, txt):
+        """How many elements of a dimension the program can reach.
+
+        Our arrays are declared with bound + 1 elements whatever OPTION
+        BASE says, so under BASE 1 element 0 exists and is out of reach.
+        MMBasic allocates only what it can index, so a count it compares
+        against has to have that element taken back off."""
+        if self.opt_base:
+            return '(%s) - %d' % (txt, self.opt_base)
+        return txt
+
+    def array_line(self, s):
+        """(first element, length) of the one-dimensional array that
+        ARRAY SLICE fills, or that ARRAY INSERT reads."""
+        if not s.is_array:
+            self.err("'%s' is not an array" % s.name)
+        if not (s.is_param or s.dynamic) and len(s.dims) != 1:
+            self.err("'%s' has %d dimensions, and a one-dimensional "
+                     "array is wanted here" % (s.name, len(s.dims)))
+        if s.ty == TY_S:
+            self.no_length_array(s)
+        ptr = '&' + self.subscript(s, ['(int)(%d)' % self.opt_base])
+        if s.is_param or s.dynamic:
+            return (ptr, self.usable('mm_arr_count(%s)' % self.bnd_acc(s)))
+        return (ptr, self.usable('(%s)' % s.dims[0]))
+
+    def array_vector(self, s, parts, blank):
+        """(first element, stride, length) of one line through an array.
+
+        `parts` is one index per dimension with None where the statement
+        left a blank, and the line runs along that dimension.
+
+        Our C arrays carry the BASIC subscripts in source order, so the
+        LAST one is adjacent - the opposite of MMBasic's storage, where
+        the FIRST is.  The stride is therefore the product of the sizes to
+        the RIGHT of the blank index, and 1 when the blank index is last.
+        MMBasic reaches the same elements from the other end (array_slice
+        builds off[] as a running product from the left): the addresses
+        differ, the set of elements does not."""
+        if s.ty == TY_S:
+            self.no_length_array(s)
+        if not (s.is_param or s.dynamic) and len(s.dims) < 2:
+            self.err("'%s' has one dimension, and a slice is taken from "
+                     "an array of two or more" % s.name)
+        sz = self.dim_sizes(s, len(parts))
+        idx = list(parts)
+        idx[blank] = '(int)(%d)' % self.opt_base
+        ptr = '&' + self.subscript(s, idx)
+        rest = sz[blank + 1:]
+        return (ptr, ' * '.join(rest) if rest else '1',
+                self.usable(sz[blank]))
 
     def no_length_array(self, s):
         """Refuse to hand a LENGTH array to anything that walks its
@@ -3902,23 +3980,32 @@ class Conv(object):
         position maps to a subscript LIST rather than to a flat
         offset.  The divisions below are built from k (a literal) and
         the dimension sizes (constant expressions by the time an array
-        is static), so cc1 folds every one of them to a plain index."""
+        is static), so cc1 folds every one of them to a plain index.
+
+        OPTION BASE 1 counts here too, and used not to: MMBasic's linear
+        memory begins at index 1 in every dimension, while ours keeps an
+        unreachable element 0, so the values landed one place early and
+        the last one was never written at all.  DIM s(4) = (1,2,3,4) left
+        s(1) holding 2 and s(4) holding nothing."""
         if len(s.dims) == 1:
-            return '%s[%d]' % (s.acc, k)
+            return '%s[%d]' % (s.acc, k + self.opt_base)
         if s.dynamic:
             self.err("an initialiser list on a run-time DIM is only "
                      "supported for 1-D arrays")
         subs = []
         div = None
         for j, sz in enumerate(s.dims):
+            u = self.usable(sz)
             if div is None:
                 e = '%d' % k
             else:
                 e = '(%d) / (%s)' % (k, div)
             if j < len(s.dims) - 1:
-                e = '(%s) %% (%s)' % (e, sz)
+                e = '(%s) %% (%s)' % (e, u)
+            if self.opt_base:
+                e = '(%s) + %d' % (e, self.opt_base)
             subs.append('(%s)' % e)
-            div = sz if div is None else '(%s) * (%s)' % (div, sz)
+            div = u if div is None else '(%s) * (%s)' % (div, u)
         return s.acc + ''.join('[' + p + ']' for p in subs)
 
     def do_const(self):
@@ -5787,10 +5874,38 @@ class Conv(object):
             self.emit('mm_font(%s, %s);' % (n, scale))
             return
         if up in ('COLOUR', 'COLOR'):
+            self.i += 1
+            if self.is_kw('MAP'):
+                # COLOUR MAP in%(), out%() [, map%()] - a whole array of
+                # colour codes 0-15 turned into RGB888.  The array form
+                # of MAP(), and it shares mm_map_get with it, so the
+                # default palette can only be described in one place.
+                #
+                # Integer arrays only.  MMBasic's parsenumberarray takes
+                # float ones too, but every spelling in its manual is %
+                # and a float palette would double the runtime for no
+                # program that exists.
+                self.i += 1
+                src = self.arrayref()
+                self.expect_op(',')
+                dst = self.arrayref()
+                cmap, cmapn = 'NULL', '0'
+                if self.accept_op(','):
+                    m = self.arrayref()
+                    if m.ty != TY_I:
+                        self.err("COLOUR MAP's palette must be an integer "
+                                 "array")
+                    cmap, cmapn = self.array_line(m)
+                if src.ty != TY_I or dst.ty != TY_I:
+                    self.err("COLOUR MAP works on integer arrays")
+                sp, sc = self.array_flat(src)
+                dp, dc = self.array_flat(dst)
+                self.emit('mm_colour_map(%s, %s, %s, %s, %s, %s);'
+                          % (sp, sc, dp, dc, cmap, cmapn))
+                return
             # COLOUR fg [, bg].  Everything that draws without being
             # given a colour uses fg.  bg is remembered but nothing
             # reads it yet - TEXT and the filled shapes will.
-            self.i += 1
             fg = self.expr()
             if self.accept_op(','):
                 bg = self.as_int(self.expr())
@@ -6522,6 +6637,55 @@ class Conv(object):
             conv = self.as_int if src.ty == TY_I else self.as_flt
             self.emit('%s(%s, %s, %s, %s);'
                       % (fn, sptr, scnt, conv(val), dptr))
+            return
+        if op in ('SLICE', 'INSERT'):
+            # ARRAY SLICE  from(), i1, , i3, to()     - read one line out
+            # ARRAY INSERT into(), i1, , i3, from()   - write one line in
+            #
+            # MATH SLICE and MATH INSERT are the same two commands:
+            # MMBasic's cmd_math calls array_slice and array_insert, the
+            # very functions cmd_slice and cmd_insert call.
+            #
+            # Exactly one index is left blank, and that is the dimension
+            # the line runs along.  The blank is a comma with nothing
+            # before it, so it is recognised by finding a comma where an
+            # expression should have started - and the array at the end
+            # is recognised the way PIXEL recognises its array form, by
+            # the a() spelling.
+            arr = self.arrayref()
+            self.expect_op(',')
+            parts = []
+            blank = None
+            while not self.is_array_arg():
+                if self.is_op(','):
+                    if blank is not None:
+                        self.err("ARRAY %s: only one index can be omitted"
+                                 % op)
+                    blank = len(parts)
+                    parts.append(None)
+                else:
+                    parts.append('(int)(%s)' % self.as_int(self.expr()))
+                if not self.accept_op(','):
+                    self.err("ARRAY %s wants the one-dimensional array "
+                             "last, written b()" % op)
+            line = self.arrayref()
+            if blank is None:
+                self.err("ARRAY %s: leave one index blank to say which "
+                         "dimension the line runs along" % op)
+            if arr.ty != line.ty:
+                self.err("ARRAY %s needs both arrays to be the same type "
+                         "(MMBasic converts between integer and float "
+                         "here; this does not, as ARRAY ADD does not)"
+                         % op)
+            ptr, step, n = self.array_vector(arr, parts, blank)
+            lptr, lcnt = self.array_line(line)
+            sfx = {TY_I: 'i', TY_F: 'f', TY_S: 's'}[arr.ty]
+            if op == 'SLICE':
+                self.emit('mm_arr_copy_%s(%s, 1, %s, %s, %s, %s);'
+                          % (sfx, lptr, ptr, step, n, lcnt))
+            else:
+                self.emit('mm_arr_copy_%s(%s, %s, %s, 1, %s, %s);'
+                          % (sfx, ptr, step, lptr, n, lcnt))
             return
         if op == 'RANDOMIZE':
             if self.stmt_end():

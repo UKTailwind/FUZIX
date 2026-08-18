@@ -2514,6 +2514,34 @@ void mm_arr_scale_i(const MMINTEGER *in, int n, MMINTEGER v, MMINTEGER *out)
 void mm_arr_scale_f(const MMFLOAT *in, int n, MMFLOAT v, MMFLOAT *out)
 { int i; for (i = 0; i < n; i++) out[i] = in[i] * v; }
 
+/* ---- ARRAY SLICE / ARRAY INSERT ---------------------------------- */
+
+#define MM_SIZEMM "Size mismatch between slice and target array"
+
+void mm_arr_copy_i(MMINTEGER *dst, int dstep, const MMINTEGER *src,
+                   int sstep, int n, int flat)
+{
+    int i;
+    if (flat != n) MM_RAISE(MM_SIZEMM);
+    for (i = 0; i < n; i++) dst[i * dstep] = src[i * sstep];
+}
+
+void mm_arr_copy_f(MMFLOAT *dst, int dstep, const MMFLOAT *src,
+                   int sstep, int n, int flat)
+{
+    int i;
+    if (flat != n) MM_RAISE(MM_SIZEMM);
+    for (i = 0; i < n; i++) dst[i * dstep] = src[i * sstep];
+}
+
+void mm_arr_copy_s(char (*dst)[MM_STRSZ], int dstep, char (*src)[MM_STRSZ],
+                   int sstep, int n, int flat)
+{
+    int i;
+    if (flat != n) MM_RAISE(MM_SIZEMM);
+    for (i = 0; i < n; i++) mm_sset(dst[i * dstep], src[i * sstep]);
+}
+
 /* ================= MATH() array reductions =========================
  * SD is the sample form, sqrt(var / (n - 1)), matching the firmware.
  * MEDIAN uses selection rather than a sorted copy so that nothing has
@@ -4081,6 +4109,40 @@ MMINTEGER mm_map_get(MMINTEGER index)
     MMINTEGER n = index & 15;
 
     return ((n & 8) << 20) | ((n & 6) << 13) | ((n & 1) << 7);
+}
+
+/*
+ * COLOUR MAP - the array form of MAP().
+ *
+ * MMBasic (cmd_colourmap in Draw.c) starts from a copy of RGB121map and
+ * overwrites all sixteen entries when the third array is given, so a
+ * supplied map is used INSTEAD of the palette, never merged with it.
+ * That is what the NULL here selects between.
+ *
+ * The index check is MMBasic's, plus the negative case it does not
+ * make: MMBasic tests only `in >= 16` and would read map[-n] for a
+ * negative code.  No valid program can tell the difference.
+ */
+void mm_colour_map(const MMINTEGER *in, int n, MMINTEGER *out, int outn,
+                   const MMINTEGER *map, int mapn)
+{
+    int i;
+
+    if (outn != n)
+        MM_RAISE("Array size mismatch");
+    if (map) {
+        if (mapn != 16)
+            MM_RAISE("Array size not 16 elements");
+        for (i = 0; i < 16; i++)
+            if (map[i] < 0 || map[i] > 0xFFFFFF)
+                MM_RAISE("Invalid colour");
+    }
+    for (i = 0; i < n; i++) {
+        MMINTEGER c = in[i];
+        if (c < 0 || c > 15)
+            MM_RAISE("Input range error on element");
+        out[i] = map ? map[c] : mm_map_get(c);
+    }
 }
 
 /* ---- graphics (PC3) --------------------------------------------------

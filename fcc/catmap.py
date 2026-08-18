@@ -35,14 +35,15 @@ CAT = {
     "@(": "FN",
 
     # ---- 1: finish what is already there ----------------------------
-    # Each of these has its family present and is the missing member,
-    # which is the shape that reads as a bug rather than a gap.
-    # Not a synonym for MAP, as this table used to say.  COLOUR MAP
-    # src(), dst() [, map()] translates a whole ARRAY of RGB121 indices
-    # into 24-bit RGB, from RGB121map or a supplied 16-element map.  The
-    # scalar form MAP(n) is already in, so this is its array form.
-    "Colour Map": 1,
-    "Array Slice": 1, "Array Insert": 1,   # ARRAY SET/ADD are in
+    # EMPTY, and that is not an accident: the category held the members
+    # missing from families that were otherwise present, and all of them
+    # have been done - ARRAY SLICE, ARRAY INSERT and COLOUR MAP (with
+    # MATH SLICE and MATH INSERT, which MMBasic implements with the very
+    # same two functions).  Anything that lands here again should be
+    # small and should be finished rather than queued.
+    #
+    # If a name reappears below as UNCLASSIFIED, the scan has stopped
+    # seeing something that works.  That is the alarm, not a bug.
     "ADC": 2,
 
     # ---- 2: real value, moderate work ------------------------------
@@ -58,11 +59,7 @@ CAT = {
     # Graphics primitives and toys, each self-contained
     "TILE": 2, "Tilemap": 2, "Tilemap(": 2, "Turtle": 2,
     "Frame": 2, "Frame(": 2, "Ray": 2, "Ray(": 2,
-    "Star": 2, "Astro": 2, "Mandelbrot": 2,
-    # Not MM.INFO's neighbour, as this table used to say: cmd_locate
-    # lives in io/GPS.c and sets the observer's latitude, longitude and
-    # date for the astronomical calculations.  It goes with Astro.
-    "Location": 2,
+    "Mandelbrot": 2,
     "Draw3D": 2, "DRAW3D(": 2,
 
     # ---- 3: possible, wants your steer first -----------------------
@@ -118,7 +115,15 @@ CAT = {
     # Hardware the PC3 does not have, or a device the kernel owns.
     "LCD": 5, "I2CLCD": 5,
     "Wii": 5, "Wii Classic": 5, "Wii Nunchuck": 5,
-    "Camera": 5, "Touch(": 5, "GPS(": 5,
+    "Camera": 5, "Touch(": 5,
+    # The whole GPS and astronomy family, all four in io/GPS.c and
+    # sharing its state: GPS( reads the receiver, cmd_star serves both
+    # STAR (which errors unless GPSvalid) and ASTRO, and LOCATION sets
+    # the observer's latitude, longitude and date.  This is arithmetic
+    # over an NMEA stream with no reason to live in the translator - it
+    # is a standalone program, the shape loadjpg and loadpng already
+    # take.  Not a gap in the language.
+    "GPS(": 5, "Star": 5, "Astro": 5, "Location": 5,
     "MsgBox(": 5, "CtrlVal(": 5, "Click(": 5, "Backlight": 5,
     "WEB": 5, "Gamepad": 5, "TMC22xx": 5,
     "Device": 5, "DEVICE(": 5,

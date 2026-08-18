@@ -9,14 +9,14 @@ and it lives in `fcc/catmap.py`.
 
 | | in MMBasic | translated | not translated |
 |---|---|---|---|
-| commands | 226 | **126** | 100 |
+| commands | 226 | **129** | 97 |
 | functions | 127 | **91** | 36 |
-| total | 353 | **217** | 136 |
+| total | 353 | **220** | 133 |
 
-The 136 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
-Draw3D each appear twice, CtrlVal as both a command and a function - so there are **133 distinct
+The 133 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
+Draw3D each appear twice, CtrlVal as both a command and a function - so there are **130 distinct
 names**. Of those, **19 are false negatives** (the thing works and the scanner cannot see it),
-leaving **114 real gaps**, of which 49 are in categories 4 and 5 and are not intended to close.
+leaving **111 real gaps**, of which 52 are in categories 4 and 5 and are not intended to close.
 
 ## What this count cannot tell you
 
@@ -43,11 +43,11 @@ four inside its "excluded from the documentation" block.
 
 ## The five categories
 
-1. **Finish what is already there** - 3
-2. **Real value, moderate work** - 33
+1. **Finish what is already there** - 0
+2. **Real value, moderate work** - 30
 3. **Possible, wants your steer first** - 29
 4. **Deliberately out** - 27
-5. **Not applicable to this machine** - 22
+5. **Not applicable to this machine** - 25
 
 ## False negatives: implemented, invisible to the scan
 
@@ -57,13 +57,9 @@ misled us before (`DefineFont` and `BLIT MEMORY` both read as missing while they
 
 `Rem`, `/*`, `*/`, `Blit Memory`, `+`, `-`, `^`, `*`, `/`, `\\`, `<<`, `>>`, `<>`, `>=`, `<=`, `<`, `>`, `=`, `@(`
 
-## Category 1 - Finish what is already there (3)
+## Category 2 - Real value, moderate work (30)
 
-**Commands:** `Array Insert`, `Array Slice`, `Colour Map`
-
-## Category 2 - Real value, moderate work (33)
-
-**Commands:** `ADC`, `Astro`, `Bitstream`, `CPU`, `Calc`, `Draw3D`, `FM`, `Frame`, `Humid`, `IR`, `IReturn`, `Interrupt`, `Keypad`, `Location`, `Mandelbrot`, `OneShot`, `Ray`, `SYNC`, `Slew`, `Star`, `Stepper`, `TILE`, `Tilemap`, `Turtle`, `WS2812`, `WatchDog`
+**Commands:** `ADC`, `Bitstream`, `CPU`, `Calc`, `Draw3D`, `FM`, `Frame`, `Humid`, `IR`, `IReturn`, `Interrupt`, `Keypad`, `Mandelbrot`, `OneShot`, `Ray`, `SYNC`, `Slew`, `Stepper`, `TILE`, `Tilemap`, `Turtle`, `WS2812`, `WatchDog`
 
 **Functions:** `DRAW3D(`, `Distance(`, `Frame(`, `Json$(`, `Pulsin(`, `Ray(`, `Tilemap(`
 
@@ -79,15 +75,15 @@ misled us before (`DefineFont` and `BLIT MEMORY` both read as missing while they
 
 **Functions:** `Eval(`, `SChange$(`, `TopBottom(`, `base$(`, `~(`
 
-## Category 5 - Not applicable to this machine (22)
+## Category 5 - Not applicable to this machine (25)
 
-**Commands:** `Backlight`, `Camera`, `CtrlVal(`, `Device`, `Gamepad`, `I2CLCD`, `Keyboard`, `LCD`, `Mouse`, `SPI2`, `TMC22xx`, `WEB`, `Wii`, `Wii Classic`, `Wii Nunchuck`
+**Commands:** `Astro`, `Backlight`, `Camera`, `CtrlVal(`, `Device`, `Gamepad`, `I2CLCD`, `Keyboard`, `LCD`, `Location`, `Mouse`, `SPI2`, `Star`, `TMC22xx`, `WEB`, `Wii`, `Wii Classic`, `Wii Nunchuck`
 
 **Functions:** `Click(`, `CtrlVal(`, `DEVICE(`, `GPS(`, `MsgBox(`, `SPI2(`, `Touch(`
 
-## Translated: the 126 commands
+## Translated: the 129 commands
 
-`Arc`, `Array Add`, `Array Set`, `Bezier`, `Bit(`, `Blit`, `Box`, `Byte(`, `CLS`, `Call`, `Case`, `Case Else`, `Cat`, `Chdir`, `Circle`, `Clear`, `Close`, `Color`, `Colour`, `Const`, `Continue`, `Copy`, `Data`, `Date$`, `DefineFont`, `Dim`, `Do`, `Else`, `Else If`, `ElseIf`, `End`, `End DefineFont`, `End Function`, `End If`, `End Select`, `End Sub`, `End Type`, `EndIf`, `Erase`, `Error`, `Exit`, `Exit Do`, `Exit For`, `Exit Function`, `Exit Sub`, `FRAMEBUFFER`, `Files`, `Fill`, `Flag(`, `Flags`, `Flash`, `Flush`, `Font`, `For`, `Function`, `GUI`, `GUI`, `GoSub`, `GoTo`, `I2C`, `I2C2`, `If`, `Inc`, `Input`, `Kill`, `LMid(`, `Let`, `Line`, `Line Input`, `Load`, `Local`, `LongString`, `Loop`, `MID$(`, `MODE`, `Map`, `Map`, `Map(`, `Map(`, `Math`, `Mkdir`, `Mode`, `Next`, `On`, `OneWire`, `Open`, `Option`, `PWM`, `Pause`, `Pin(`, `Pixel`, `Play`, `Poke`, `Polygon`, `Port(`, `Print`, `Pulse`, `RBox`, `RTC`, `Randomize`, `Randomize`, `ReDim`, `Read`, `Rename`, `Restore`, `Return`, `Rmdir`, `SPI`, `Save`, `Seek`, `Select Case`, `Servo`, `SetPin`, `SetTick`, `Sort`, `Sprite`, `Static`, `Struct`, `Sub`, `TEMPR START`, `Text`, `Time$`, `Timer`, `Triangle`, `Type`, `While`
+`Arc`, `Array Add`, `Array Insert`, `Array Set`, `Array Slice`, `Bezier`, `Bit(`, `Blit`, `Box`, `Byte(`, `CLS`, `Call`, `Case`, `Case Else`, `Cat`, `Chdir`, `Circle`, `Clear`, `Close`, `Color`, `Colour`, `Colour Map`, `Const`, `Continue`, `Copy`, `Data`, `Date$`, `DefineFont`, `Dim`, `Do`, `Else`, `Else If`, `ElseIf`, `End`, `End DefineFont`, `End Function`, `End If`, `End Select`, `End Sub`, `End Type`, `EndIf`, `Erase`, `Error`, `Exit`, `Exit Do`, `Exit For`, `Exit Function`, `Exit Sub`, `FRAMEBUFFER`, `Files`, `Fill`, `Flag(`, `Flags`, `Flash`, `Flush`, `Font`, `For`, `Function`, `GUI`, `GUI`, `GoSub`, `GoTo`, `I2C`, `I2C2`, `If`, `Inc`, `Input`, `Kill`, `LMid(`, `Let`, `Line`, `Line Input`, `Load`, `Local`, `LongString`, `Loop`, `MID$(`, `MODE`, `Map`, `Map`, `Map(`, `Map(`, `Math`, `Mkdir`, `Mode`, `Next`, `On`, `OneWire`, `Open`, `Option`, `PWM`, `Pause`, `Pin(`, `Pixel`, `Play`, `Poke`, `Polygon`, `Port(`, `Print`, `Pulse`, `RBox`, `RTC`, `Randomize`, `Randomize`, `ReDim`, `Read`, `Rename`, `Restore`, `Return`, `Rmdir`, `SPI`, `Save`, `Seek`, `Select Case`, `Servo`, `SetPin`, `SetTick`, `Sort`, `Sprite`, `Static`, `Struct`, `Sub`, `TEMPR START`, `Text`, `Time$`, `Timer`, `Triangle`, `Type`, `While`
 
 ## Translated: the 91 functions
 
@@ -100,13 +96,13 @@ misled us before (`DefineFont` and `BLIT MEMORY` both read as missing while they
 translated and says nothing about the 67 members. Read from MMBasic's `core/MATHS.c` and mmb2c's
 `MATHFUNCS`, `MATHARRAY` and `do_array_cmd`.
 
-**15 of 67 members translated.**
+**17 of 67 members translated.**
 
-### `MATH <subcommand>` - in-place, on arrays - 4 of 38
+### `MATH <subcommand>` - in-place, on arrays - 6 of 38
 
-**Translated:** `ADD`, `RANDOMIZE`, `SCALE`, `SET`
+**Translated:** `ADD`, `INSERT`, `RANDOMIZE`, `SCALE`, `SET`, `SLICE`
 
-**Not translated:** `AES128`, `C_ADD`, `C_AND`, `C_DIV`, `C_MUL`, `C_MULT`, `C_OR`, `C_SUB`, `C_XOR`, `FFT`, `INSERT`, `INTERPOLATE`, `M_INVERSE`, `M_MULT`, `M_PRINT`, `M_TRANSPOSE`, `PID`, `POWER`, `Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`, `SENSORFUSION`, `SHIFT`, `SINC`, `SLICE`, `V_CROSS`, `V_MULT`, `V_NORMALISE`, `V_PRINT`, `V_ROTATE`, `WINDOW`
+**Not translated:** `AES128`, `C_ADD`, `C_AND`, `C_DIV`, `C_MUL`, `C_MULT`, `C_OR`, `C_SUB`, `C_XOR`, `FFT`, `INTERPOLATE`, `M_INVERSE`, `M_MULT`, `M_PRINT`, `M_TRANSPOSE`, `PID`, `POWER`, `Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`, `SENSORFUSION`, `SHIFT`, `SINC`, `V_CROSS`, `V_MULT`, `V_NORMALISE`, `V_PRINT`, `V_ROTATE`, `WINDOW`
 
 ### `MATH(<subfunction> ...)` - returns a value - 11 of 29
 

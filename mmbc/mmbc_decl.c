@@ -7,6 +7,7 @@
  * parsing must advance the token stream even when nothing is emitted. */
 
 #include "mmbc.h"
+#include "mmbc_expr.h"          /* usable(), for OPTION BASE in an initialiser */
 
 int type_word(void);
 
@@ -1060,7 +1061,7 @@ static char *linear_index(struct sym *s, int k)
     int j;
 
     if (s->ndims == 1)
-        return sfmt("%s[%d]", s->acc, k);
+        return sfmt("%s[%d]", s->acc, k + cv.opt_base);
     if (s->dynamic) {
         cv_err("an initialiser list on a run-time DIM is only "
                "supported for 1-D arrays");
@@ -1069,7 +1070,7 @@ static char *linear_index(struct sym *s, int k)
     out = sfmt("%s", s->acc);
     div = NULL;
     for (j = 0; j < s->ndims; j++) {
-        const char *sz = s->dims[j];
+        const char *u = usable(s->dims[j]);
         char *e;
 
         if (div == NULL)
@@ -1077,9 +1078,11 @@ static char *linear_index(struct sym *s, int k)
         else
             e = sfmt("(%d) / (%s)", k, div);
         if (j < s->ndims - 1)
-            e = sfmt("(%s) %% (%s)", e, sz);
+            e = sfmt("(%s) %% (%s)", e, u);
+        if (cv.opt_base)
+            e = sfmt("(%s) + %d", e, cv.opt_base);
         out = sfmt("%s[(%s)]", out, e);
-        div = (div == NULL) ? sz : sfmt("(%s) * (%s)", div, sz);
+        div = (div == NULL) ? u : sfmt("(%s) * (%s)", div, u);
     }
     return out;
 }
