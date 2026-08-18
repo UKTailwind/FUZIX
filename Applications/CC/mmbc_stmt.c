@@ -2127,6 +2127,43 @@ void statement_inner(void)
         const char *f;
 
         cv.i++;
+        if (is_kw("MAP", 0)) {
+            /* COLOUR MAP in%(), out%() [, map%()] - a whole array of
+               colour codes 0-15 turned into RGB888.  The array form of
+               MAP(), and it shares mm_map_get with it, so the default
+               palette can only be described in one place.
+
+               Integer arrays only.  MMBasic's parsenumberarray takes
+               float ones too, but every spelling in its manual is % and
+               a float palette would double the runtime for no program
+               that exists. */
+            struct sym *src, *dst;
+            struct flat sf, df;
+            const char *cmap = "NULL", *cmapn = "0";
+
+            cv.i++;
+            src = arrayref(1);
+            expect_op(",");
+            dst = arrayref(1);
+            if (accept_op(",")) {
+                struct sym *m = arrayref(1);
+                struct flat mf;
+
+                if (m->ty != TY_I)
+                    cv_err("COLOUR MAP's palette must be an integer "
+                           "array");
+                mf = array_line(m);
+                cmap = mf.ptr;
+                cmapn = mf.cnt;
+            }
+            if (src->ty != TY_I || dst->ty != TY_I)
+                cv_err("COLOUR MAP works on integer arrays");
+            sf = array_flat(src);
+            df = array_flat(dst);
+            emit(sfmt("mm_colour_map(%s, %s, %s, %s, %s, %s);",
+                      sf.ptr, sf.cnt, df.ptr, df.cnt, cmap, cmapn));
+            return;
+        }
         fg = expr();
         if (accept_op(","))
             bg = as_int(expr());
@@ -3635,6 +3672,63 @@ static void do_array_cmd(void)
             emit(sfmt("%s(%s, %s, %s, %s);",
                       fn, sf.ptr, sf.cnt, cval, df.ptr));
         }
+        return;
+    }
+    if (strcmp(op, "SLICE") == 0 || strcmp(op, "INSERT") == 0) {
+        /* ARRAY SLICE  from(), i1, , i3, to()     - read one line out
+         * ARRAY INSERT into(), i1, , i3, from()   - write one line in
+         *
+         * MATH SLICE and MATH INSERT are the same two commands:
+         * MMBasic's cmd_math calls array_slice and array_insert, the
+         * very functions cmd_slice and cmd_insert call.
+         *
+         * Exactly one index is left blank, and that is the dimension
+         * the line runs along.  The blank is a comma with nothing
+         * before it, so it is recognised by finding a comma where an
+         * expression should have started - and the array at the end is
+         * recognised the way PIXEL recognises its array form, by the
+         * a() spelling. */
+        struct sym *arr, *line;
+        const char *parts[MAXARGS];
+        int nparts = 0, blank = -1;
+        struct vec v;
+        struct flat lf;
+        const char *sfx;
+
+        arr = arrayref(1);
+        expect_op(",");
+        while (!is_array_arg()) {
+            if (nparts >= MAXARGS)
+                cv_err("ARRAY %s: too many indices", op);
+            if (is_op(",", 0)) {
+                if (blank >= 0)
+                    cv_err("ARRAY %s: only one index can be omitted", op);
+                blank = nparts;
+                parts[nparts++] = NULL;
+            } else {
+                parts[nparts++] = sfmt("(int)(%s)", as_int(expr()));
+            }
+            if (!accept_op(","))
+                cv_err("ARRAY %s wants the one-dimensional array last, "
+                       "written b()", op);
+        }
+        line = arrayref(1);
+        if (blank < 0)
+            cv_err("ARRAY %s: leave one index blank to say which "
+                   "dimension the line runs along", op);
+        if (arr->ty != line->ty)
+            cv_err("ARRAY %s needs both arrays to be the same type "
+                   "(MMBasic converts between integer and float here; "
+                   "this does not, as ARRAY ADD does not)", op);
+        v = array_vector(arr, parts, nparts, blank);
+        lf = array_line(line);
+        sfx = arr->ty == TY_I ? "i" : (arr->ty == TY_F ? "f" : "s");
+        if (strcmp(op, "SLICE") == 0)
+            emit(sfmt("mm_arr_copy_%s(%s, 1, %s, %s, %s, %s);",
+                      sfx, lf.ptr, v.ptr, v.step, v.cnt, lf.cnt));
+        else
+            emit(sfmt("mm_arr_copy_%s(%s, %s, %s, 1, %s, %s);",
+                      sfx, v.ptr, v.step, lf.ptr, v.cnt, lf.cnt));
         return;
     }
     if (strcmp(op, "RANDOMIZE") == 0) {

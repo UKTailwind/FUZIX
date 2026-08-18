@@ -377,6 +377,11 @@ static void w_arr_add_f(void){ mm_arr_add_f(PF(0), I(1), D(2), PF(4)); A = 0; }
 static void w_arr_add_s(void){ mm_arr_add_s(PSA(0), I(1), Ps(2), PSA(3)); A = 0; }
 static void w_arr_scale_i(void){ mm_arr_scale_i(PI(0), I(1), LL(2), PI(4)); A = 0; }
 static void w_arr_scale_f(void){ mm_arr_scale_f(PF(0), I(1), D(2), PF(4)); A = 0; }
+/* ARRAY SLICE / ARRAY INSERT: six arguments, and every one of them is a
+   pointer or an int, so here the slot number IS the parameter number. */
+static void w_arr_copy_i(void){ mm_arr_copy_i(PI(0), I(1), PI(2), I(3), I(4), I(5)); A = 0; }
+static void w_arr_copy_f(void){ mm_arr_copy_f(PF(0), I(1), PF(2), I(3), I(4), I(5)); A = 0; }
+static void w_arr_copy_s(void){ mm_arr_copy_s(PSA(0), I(1), PSA(2), I(3), I(4), I(5)); A = 0; }
 
 /* MATH() array reductions */
 static void w_st_sum_i(void) { A = dput(mm_st_sum_i(PI(0), I(1))); }
@@ -573,6 +578,9 @@ static void w_map(void)      { mm_map(LL(0), LL(2)); A = 0; }
 static void w_map_set(void)  { mm_map_set(); A = 0; }
 static void w_map_reset(void){ mm_map_reset(); A = 0; }
 static void w_map_get(void)  { A = mm_map_get(LL(0)); }
+/* COLOUR MAP: the palette is NULL when the program gave none, and
+   mm_ptr passes 0 through unchanged, so PI(4) is NULL there. */
+static void w_colour_map(void){ mm_colour_map(PI(0), I(1), PI(2), I(3), PI(4), I(5)); A = 0; }
 /* FRAMEBUFFER - 0 is the screen, 1 the off-screen buffer */
 static void w_fb_create(void){ mm_fb_create(LL(0)); A = 0; }
 static void w_fb_close(void) { mm_fb_close(LL(0)); A = 0; }
@@ -801,6 +809,9 @@ static const struct mmwrap {
 	{ "mm_arr_add_s",	w_arr_add_s },
 	{ "mm_arr_scale_i",	w_arr_scale_i },
 	{ "mm_arr_scale_f",	w_arr_scale_f },
+	{ "mm_arr_copy_i",	w_arr_copy_i },
+	{ "mm_arr_copy_f",	w_arr_copy_f },
+	{ "mm_arr_copy_s",	w_arr_copy_s },
 	{ "mm_st_sum_i",	w_st_sum_i },
 	{ "mm_st_sum_f",	w_st_sum_f },
 	{ "mm_st_mean_i",	w_st_mean_i },
@@ -894,6 +905,7 @@ static const struct mmwrap {
 	{ "mm_map_set",		w_map_set },
 	{ "mm_map_reset",	w_map_reset },
 	{ "mm_map_get",		w_map_get },
+	{ "mm_colour_map",	w_colour_map },
 	{ "mm_fontinfo",	w_fontinfo },
 	{ "mm_fontaddr",	w_fontaddr },
 	{ "mm_fontdef",		w_fontdef },

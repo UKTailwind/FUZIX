@@ -363,6 +363,34 @@ void mm_arr_add_s  (char (*in)[MM_STRSZ], int n, const char *v,
 void mm_arr_scale_i(const MMINTEGER *in, int n, MMINTEGER v, MMINTEGER *out);
 void mm_arr_scale_f(const MMFLOAT   *in, int n, MMFLOAT   v, MMFLOAT   *out);
 
+/* ---- ARRAY SLICE / ARRAY INSERT (and MATH SLICE / MATH INSERT) -----
+ * One vector out of, or into, an array of two or more dimensions: the
+ * caller names every index but one, and the vector runs along the
+ * dimension left blank.
+ *
+ * MMBasic works the offsets out at run time from its own storage order
+ * (array_slice in Commands.c, where off[i] is a running product of the
+ * bounds).  Here the translator knows the rank and the bounds, so it
+ * hands over just four numbers - where the vector starts, how far
+ * apart its elements are, how many there are, and how long the
+ * one-dimensional side is - and ONE strided copy serves both directions
+ * and all three types.  SLICE steps the source, INSERT steps the
+ * destination; nothing here knows which.
+ *
+ * `flat` is the length of the one-dimensional array and must equal `n`:
+ * that comparison is MMBasic's "Size mismatch between slice and target
+ * array", and it is made here rather than by the translator because a
+ * bound may not exist until the program runs.  It rides on this call
+ * instead of a guard of its own so that a SLICE is one statement, which
+ * is what keeps a function holding one inside the native compiler
+ * (see PLAN-codesize.md). */
+void mm_arr_copy_i(MMINTEGER *dst, int dstep, const MMINTEGER *src,
+                   int sstep, int n, int flat);
+void mm_arr_copy_f(MMFLOAT *dst, int dstep, const MMFLOAT *src,
+                   int sstep, int n, int flat);
+void mm_arr_copy_s(char (*dst)[MM_STRSZ], int dstep, char (*src)[MM_STRSZ],
+                   int sstep, int n, int flat);
+
 /* ---- MATH() array reductions ---------------------------------------- */
 MMFLOAT mm_st_sum_i (const MMINTEGER *a, int n);
 MMFLOAT mm_st_sum_f (const MMFLOAT   *a, int n);
@@ -537,6 +565,19 @@ void mm_map_reset(void);
  * is MMBasic's fun_map - the inverse of the bit extraction above, and
  * deliberately NOT affected by any remapping. */
 MMINTEGER mm_map_get(MMINTEGER index);
+
+/* COLOUR MAP in%(), out%() [, map%()] - a whole array of colour codes
+ * 0-15 turned into RGB888, either through the default palette (map
+ * NULL, so mm_map_get answers) or through a 16-entry table the program
+ * supplies.  in and out may be the same array: each element is read
+ * before it is written.
+ *
+ * The three size checks are MMBasic's own and are made here, where the
+ * counts exist even for an array whose bounds the program worked out:
+ * in and out must match, and a supplied palette must be exactly 16
+ * entries long.  mapn is ignored when map is NULL. */
+void mm_colour_map(const MMINTEGER *in, int n, MMINTEGER *out, int outn,
+                   const MMINTEGER *map, int mapn);
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb);
 MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y);
 

@@ -70,6 +70,16 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r);
 struct sym *arrayref(int need_parens);      /* Python default: True */
 int is_array_arg(void);                     /* does "a()" start here? */
 struct flat array_flat(struct sym *s);
+/* one line through an array: where it starts, how far apart its
+   elements are, and how many there are (ARRAY SLICE / ARRAY INSERT) */
+struct vec { const char *ptr; const char *step; const char *cnt; };
+const char *subscript_of(struct sym *s, const char **parts, int nparts);
+const char *bnd_acc(struct sym *s);
+const char *usable(const char *txt);
+void dim_sizes(struct sym *s, int rank, const char **out);
+struct flat array_line(struct sym *s);
+struct vec array_vector(struct sym *s, const char **parts, int nparts,
+                        int blank);
 struct flat lsref(void);
 const char *channel(void);
 /* dim: Python None -> has_dim = 0 (dim ignored) */

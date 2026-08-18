@@ -1571,6 +1571,31 @@ remapping never moves where new drawing lands.
 
 `MAP` needs a 16-colour mode; in `MODE 1` it is an error.
 
+### `COLOUR MAP` — a whole array at once
+
+`COLOUR MAP in%(), out%()` is the array form of the `MAP()` function: it
+turns a whole array of colour codes 0-15 into RGB888 colours in one
+statement, which is what an image or a tile table wants.
+
+```basic
+DIM INTEGER code(255), col(255)
+COLOUR MAP code(), col()               ' the default palette
+```
+
+A third array replaces the palette for that call — it must be exactly
+sixteen entries, and each must be a valid 24-bit colour:
+
+```basic
+DIM INTEGER pal(15)
+FOR i = 0 TO 15 : pal(i) = RGB(i * 17, i * 17, i * 17) : NEXT i
+COLOUR MAP code(), col(), pal()        ' sixteen greys instead
+```
+
+The two arrays must be the same size, and `in` and `out` may be the same
+array — each element is read before it is written. The arrays are
+integer; MMBasic accepts float ones as well, and here that is an error
+rather than a silent conversion.
+
 ## Text on the picture: `TEXT` and `FONT`
 
 `TEXT` puts a string at a pixel position, justified how you ask, in any
@@ -3453,7 +3478,7 @@ Whole-array (one number out of an array): `MAX`, `MEAN`, `MEDIAN`, `MIN`, `SD`, 
 ## MATH sub-commands
 
 `MATH` is also a statement, and that is a different and much longer list
-in the interpreter. Four of it are translated — the ones that walk an
+in the interpreter. Six of it are translated — the ones that walk an
 array element by element, which is what most programs use it for:
 
 | | |
@@ -3462,10 +3487,38 @@ array element by element, which is what most programs use it for:
 | `MATH ADD a(), v, b()` | `b() = a() + v`, element by element |
 | `MATH SCALE a(), v, b()` | `b() = a() * v`, element by element |
 | `MATH RANDOMIZE [seed]` | seed the generator; no seed uses the clock |
+| `MATH SLICE a(), i, , k, b()` | copy one line of `a()` into `b()` |
+| `MATH INSERT a(), i, , k, b()` | copy `b()` back into that line |
 
-All four take integer, float or string arrays, except `SCALE`, which is
-numeric only — as it is there. `ARRAY` is accepted as a spelling of
-`MATH` for these.
+`SET`, `ADD`, `SLICE` and `INSERT` take integer, float or string arrays;
+`SCALE` is numeric only, as it is there. `ARRAY` is accepted as a
+spelling of `MATH` for all of them, and `ARRAY SLICE` and `ARRAY INSERT`
+are the spellings the manual uses — the interpreter runs both through
+the same two functions.
+
+### Slicing an array
+
+A **slice** is one line through an array of two or more dimensions. Give
+every index but one; the line runs along the one left blank, and the
+array it is copied to or from is one-dimensional and the same length.
+
+```basic
+DIM a(3, 4, 5), b(4)
+ARRAY SLICE  a(), 2, , 3, b()    ' b() = a(2,0,3), a(2,1,3), ... a(2,4,3)
+b(0) = 99
+ARRAY INSERT a(), 2, , 3, b()    ' and back again
+```
+
+It is far quicker than the equivalent `FOR` loop, and that is the reason
+it exists: the elements of the line are a fixed distance apart, so the
+copy is a single stride and the index arithmetic is done once at
+translate time rather than once per element. `OPTION BASE` is respected
+on both sides. A length that does not match is
+`Size mismatch between slice and target array`, as in the interpreter.
+
+One difference to know about: MMBasic converts between integer and float
+arrays here, and this does not — both arrays must be the same type, the
+same rule `ARRAY ADD` already follows.
 
 The rest are not translated, and each says so by name rather than being
 mistaken for something else: the matrix operations (`M_MULT`,
@@ -3474,7 +3527,7 @@ mistaken for something else: the matrix operations (`M_MULT`,
 (`Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`),
 the complex arithmetic (`C_ADD`, `C_SUB`, `C_MUL`, `C_DIV`, `C_AND`,
 `C_OR`, `C_XOR`), `FFT`, `WINDOW`, `SINC`, `INTERPOLATE`, `POWER`,
-`SHIFT`, `SLICE`, `INSERT`, `PID`, `SENSORFUSION` and `AES128`.
+`SHIFT`, `PID`, `SENSORFUSION` and `AES128`.
 
 They are a coherent block of work rather than a scattering of gaps —
 most are pure arithmetic over arrays with no hardware in them, so they
