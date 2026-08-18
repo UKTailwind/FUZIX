@@ -3,26 +3,38 @@
  *   loadimage file.bmp [x [y [mode [ximage [yimage]]]]]
  *
  * MMBasic's LOAD IMAGE, as a program.  The screen has sixteen colours
- * in MODE 2 and two in MODE 1, so anything photographic has to be
- * dithered; the quantiser and the error weights here are MMBasic's
- * own, from BmpDecoder.c and FileIO.c, so a picture lands looking the
- * way it does on the interpreter.
+ * in MODE 2 and two in MODE 1, so a photograph is quantised to the
+ * nearest one - the quantiser is MMBasic's own rgb888_to_rgb121_dither
+ * from BmpDecoder.c, so a colour lands on the same palette entry the
+ * interpreter would pick.
+ *
+ * NO DITHERING.  Error diffusion needed nine arrays a raster wide -
+ * three planes for the current row and two more rows for Atkinson's
+ * reach - which was 18,504 bytes of bss, in a process this machine
+ * loads WHILE a BASIC program is resident.  At 12 blocks of an
+ * 84-block pool loadimage was a bigger neighbour than the MOD player
+ * and the kernel had to refuse it (see PC3-SHARED-CODE.md); a picture
+ * that will not load at all is worse than one that bands.  What is
+ * left is the quantiser, which is the part that decides the colour.
+ *
+ * The mode argument is still accepted and parsed, because it sits
+ * between y and the image offsets and dropping it would shift them,
+ * but nothing acts on it.
  *
  * Formats: 1, 4, 8, 16, 24 and 32 bits, uncompressed or BI_BITFIELDS,
  * and RLE4 and RLE8.  Bottom-up and top-down.  BITMAPCOREHEADER as
  * well as BITMAPINFOHEADER, and the V4/V5 headers are read as an
  * INFOHEADER with the tail skipped, which is what they are.
  *
- * Rows are fetched by seeking rather than buffered, because a BMP is
- * stored bottom-up and dithering has to run top-down: the error from
- * one row feeds the next.  RLE cannot be seeked into, so it gets the
- * same treatment as the firmware gives it - one sequential pass that
- * records where each row starts, and then the rows are read in the
- * order wanted.
+ * Rows are fetched by seeking rather than buffered: a BMP is stored
+ * bottom-up and this draws top-down.  RLE cannot be seeked into, so it
+ * gets the same treatment as the firmware gives it - one sequential
+ * pass that records where each row starts, and then the rows are read
+ * in the order wanted.
  *
  * Pixels reach the screen through GFXIOC_PIXELS a batch at a time,
- * with a colour for each, so a dithered row is a handful of ioctls
- * rather than one per pixel.
+ * with a colour for each, so a row is a handful of ioctls rather than
+ * one per pixel.
  */
 
 #include <stdio.h>
@@ -58,16 +70,9 @@ static struct gfx_info gi;
 
 static unsigned long  rgbrow[MAXW];	/* one decoded row, RGB888 */
 static unsigned char  raw[MAXW * 4];	/* the same row as it lies in the file */
-static short  err_r[MAXW + 4], err_g[MAXW + 4], err_b[MAXW + 4];
-static short  nxt_r[MAXW + 4], nxt_g[MAXW + 4], nxt_b[MAXW + 4];
-static short  nx2_r[MAXW + 4], nx2_g[MAXW + 4], nx2_b[MAXW + 4];
-/* The mode argument.  -1, the default, means no dithering at all;
-   bits 0-1 name the output format and bit 2 the method, which is
-   the interpreter's encoding.  The format bits are accepted and
-   ignored: the screen already fixes the format. */
-static int    dmode = -1;
-#define DITHERING	(dmode >= 0)
-#define ATKINSON	(dmode & 4)
+/* The mode argument is still READ, because it is positional and the
+   image offsets come after it, but nothing acts on it: see the note at
+   the top about dithering. */
 static unsigned long  linestart[MAXH];	/* RLE only */
 static struct gfx_pt  pts[BATCH];
 static unsigned long  cols[BATCH];
@@ -400,65 +405,23 @@ static int luma(unsigned long p)
 
 /*
  * One row, one bit deep: ink or paper, chosen on luminance.
- *
- * So the error is diffused on luminance too - ONE plane, not three.
- * Feeding three channel errors into a decision taken on a single
- * number is not merely wasteful, it is wrong: a pixel that reads back
- * as a saturated colour quantises to white and injects an error of
- * -255 on the channels it lacks, which turns off perfectly good
- * neighbours.  In console mode that is not a rare case, because a set
- * bit takes its colour from its cell's ink attribute and need not be
- * white.  The symptom was dithering disturbing a picture that was
- * already black and white.
  */
 static void ditherrow1(int screeny, int x0, int w)
 {
 	int x;
 
 	for (x = 0; x < w; x++) {
-		int y = luma(rgbrow[x]) + (DITHERING ? err_r[x + 1] : 0);
-		int on, e;
-
-		if (y < 0) y = 0; else if (y > 255) y = 255;
-		on = (y >= 128);
-
-		if (DITHERING) {
-			e = y - (on ? 255 : 0);
-			if (ATKINSON) {
-				/*     X   1/8 1/8
-				   1/8 1/8 1/8
-				       1/8            */
-				err_r[x + 2] += (short)(e / 8);
-				err_r[x + 3] += (short)(e / 8);
-				nxt_r[x]     += (short)(e / 8);
-				nxt_r[x + 1] += (short)(e / 8);
-				nxt_r[x + 2] += (short)(e / 8);
-				nx2_r[x + 1] += (short)(e / 8);
-			} else {
-				/*      X   7/16
-				   3/16 5/16 1/16     */
-				err_r[x + 2] += (short)((e * 7) / 16);
-				nxt_r[x]     += (short)((e * 3) / 16);
-				nxt_r[x + 1] += (short)((e * 5) / 16);
-				nxt_r[x + 2] += (short)(e / 16);
-			}
-		}
+		int y = luma(rgbrow[x]);
 
 		if (x0 + x >= 0 && x0 + x < gi.width)
-			plot(x0 + x, screeny, on ? 0xFFFFFFUL : 0UL);
+			plot(x0 + x, screeny, (y >= 128) ? 0xFFFFFFUL : 0UL);
 	}
 	flush();
-	/* Roll the planes on.  Atkinson reaches two rows down, so this is
-	   a rotation rather than a clear - zeroing "next" at the top of a
-	   row would throw away what the row before last put there. */
-	memcpy(err_r, nxt_r, sizeof(err_r));
-	memcpy(nxt_r, nx2_r, sizeof(nxt_r));
-	memset(nx2_r, 0, sizeof(nx2_r));
 }
 
 /*
  * One row, four bits deep: the sixteen colours of RGB121, quantised
- * per channel, so the error is per channel too.
+ * per channel.
  */
 static void ditherrow(int screeny, int x0, int w)
 {
@@ -471,73 +434,16 @@ static void ditherrow(int screeny, int x0, int w)
 
 	for (x = 0; x < w; x++) {
 		unsigned long p = rgbrow[x];
-		int r = (int)((p >> 16) & 0xFF);
-		int g = (int)((p >> 8) & 0xFF);
-		int b = (int)(p & 0xFF);
 		int qr, qg, qb;
-		unsigned long out;
-
-		if (DITHERING) {
-			r += err_r[x + 1];
-			g += err_g[x + 1];
-			b += err_b[x + 1];
-		}
-		if (r < 0) r = 0; else if (r > 255) r = 255;
-		if (g < 0) g = 0; else if (g > 255) g = 255;
-		if (b < 0) b = 0; else if (b > 255) b = 255;
-
-		out = quantise(r, g, b, &qr, &qg, &qb);
-
-		if (DITHERING) {
-			int er = r - qr, eg = g - qg, eb = b - qb;
-			if (ATKINSON) {
-				err_r[x + 2] += (short)(er / 8);
-				err_g[x + 2] += (short)(eg / 8);
-				err_b[x + 2] += (short)(eb / 8);
-				err_r[x + 3] += (short)(er / 8);
-				err_g[x + 3] += (short)(eg / 8);
-				err_b[x + 3] += (short)(eb / 8);
-				nxt_r[x]     += (short)(er / 8);
-				nxt_g[x]     += (short)(eg / 8);
-				nxt_b[x]     += (short)(eb / 8);
-				nxt_r[x + 1] += (short)(er / 8);
-				nxt_g[x + 1] += (short)(eg / 8);
-				nxt_b[x + 1] += (short)(eb / 8);
-				nxt_r[x + 2] += (short)(er / 8);
-				nxt_g[x + 2] += (short)(eg / 8);
-				nxt_b[x + 2] += (short)(eb / 8);
-				nx2_r[x + 1] += (short)(er / 8);
-				nx2_g[x + 1] += (short)(eg / 8);
-				nx2_b[x + 1] += (short)(eb / 8);
-			} else {
-				err_r[x + 2] += (short)((er * 7) / 16);
-				err_g[x + 2] += (short)((eg * 7) / 16);
-				err_b[x + 2] += (short)((eb * 7) / 16);
-				nxt_r[x]     += (short)((er * 3) / 16);
-				nxt_g[x]     += (short)((eg * 3) / 16);
-				nxt_b[x]     += (short)((eb * 3) / 16);
-				nxt_r[x + 1] += (short)((er * 5) / 16);
-				nxt_g[x + 1] += (short)((eg * 5) / 16);
-				nxt_b[x + 1] += (short)((eb * 5) / 16);
-				nxt_r[x + 2] += (short)(er / 16);
-				nxt_g[x + 2] += (short)(eg / 16);
-				nxt_b[x + 2] += (short)(eb / 16);
-			}
-		}
+		unsigned long out = quantise((int)((p >> 16) & 0xFF),
+					     (int)((p >> 8) & 0xFF),
+					     (int)(p & 0xFF),
+					     &qr, &qg, &qb);
 
 		if (x0 + x >= 0 && x0 + x < gi.width)
 			plot(x0 + x, screeny, out);
 	}
 	flush();
-	memcpy(err_r, nxt_r, sizeof(err_r));
-	memcpy(err_g, nxt_g, sizeof(err_g));
-	memcpy(err_b, nxt_b, sizeof(err_b));
-	memcpy(nxt_r, nx2_r, sizeof(nxt_r));
-	memcpy(nxt_g, nx2_g, sizeof(nxt_g));
-	memcpy(nxt_b, nx2_b, sizeof(nxt_b));
-	memset(nx2_r, 0, sizeof(nx2_r));
-	memset(nx2_g, 0, sizeof(nx2_g));
-	memset(nx2_b, 0, sizeof(nx2_b));
 }
 
 /* An argument that was left out is passed as an empty string, because
@@ -562,13 +468,9 @@ int main(int argc, char *argv[])
 	}
 	x0    = arg(argc, argv, 2, 0);
 	y0    = arg(argc, argv, 3, 0);
-	dmode = arg(argc, argv, 4, -1);
+	(void)arg(argc, argv, 4, -1);	/* the mode: read, not used */
 	ximg  = arg(argc, argv, 5, 0);
 	yimg  = arg(argc, argv, 6, 0);
-	if (dmode == 3 || dmode == 7)
-		die("RGB565 dithering not yet supported");
-	if (dmode < -1 || dmode > 7)
-		die("mode must be -1 to 7");
 	/* Where in the IMAGE to start, which moves the picture the other
 	   way on the screen. */
 	x0 -= ximg;
@@ -592,24 +494,17 @@ int main(int argc, char *argv[])
 		rlerows = buildlinetable();
 	}
 
-	memset(err_r, 0, sizeof(err_r));
-	memset(nxt_r, 0, sizeof(nxt_r));
-	memset(nxt_g, 0, sizeof(nxt_g));
-	memset(nxt_b, 0, sizeof(nxt_b));
-	memset(nx2_r, 0, sizeof(nx2_r));
-	memset(nx2_g, 0, sizeof(nx2_g));
-	memset(nx2_b, 0, sizeof(nx2_b));
-	memset(err_g, 0, sizeof(err_g));
-	memset(err_b, 0, sizeof(err_b));
-
-	/* Top down on the screen whichever way the file is stored, because
-	   the error diffusion only makes sense in that order. */
+	/* Top down on the screen whichever way the file is stored.  Nothing
+	   now carries between rows, so this is no longer forced - but the
+	   RLE path records where each row starts precisely so it can be read
+	   in this order, and a picture that is clipped at the top must still
+	   consume the rows above it. */
 	for (y = 0; y < height; y++) {
 		int screeny = y0 + y;
 		fetchrow(topdown ? y : (height - 1 - y), rlerows);
 		if (screeny < 0 || screeny >= gi.height)
-			continue;	/* still dithered, so the rows below
-					   inherit the right error */
+			continue;	/* fetched, so the file position keeps up,
+					   but off the screen and not drawn */
 		ditherrow(screeny, x0, width);
 	}
 
