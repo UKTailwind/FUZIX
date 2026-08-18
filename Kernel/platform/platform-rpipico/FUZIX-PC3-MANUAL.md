@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.15 — August 2026"
+date: "Release v0.16 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -743,6 +743,16 @@ There is no password. The system arrives at a Bourne shell; the
 console is an 80×40 colour terminal (termcap type `pc3`) and the USB
 keyboard and serial input feed the same session interchangeably. Set
 the keyboard layout in `/etc/rc` (`picoctl keymap uk` by default).
+
+**Auto-repeat** waits 250 ms and then repeats every 50 ms — twenty a
+second. HID keyboards only report a change of state, so the repeat is
+synthesised from the held key. These were MMBasic's 600/150, which is
+a typewriter's rate and fine for typing, but anything *held* suffers:
+a game played from the keyboard crawled beside the same game played
+from a switch array, which is read fresh every pass of its loop with
+no typematic delay at all. The standard `KBRATE` tty ioctl adjusts
+them at run time, but note that its units are TENTHS of a second and
+so cannot express the 50 ms default.
 
 ### Num lock, and keyboards with no keypad
 
@@ -2516,9 +2526,9 @@ the sub-keyword decides the type, not the `$`.
 | `PATH` | the directory the running program was started from, ending in `/` |
 | `CURRENT` | the program's own file name |
 | `DRIVE` | always `"A:"` — see below |
-| `EXISTS FILE f$` | 1 a file, **−1 a directory**, 0 nothing there |
+| `EXISTS FILE f$` | 1 a file, **-1 a directory**, 0 nothing there |
 | `EXISTS DIR d$` | 1 if it is a directory |
-| `FILESIZE f$` | bytes; −1 nothing there, −2 a directory |
+| `FILESIZE f$` | bytes; -1 nothing there, -2 a directory |
 | `OPTION BASE` | 0 or 1 |
 | `PINNO "GP8"` | the pin a name stands for |
 | `FONTHEIGHT`, `FONTWIDTH` | the current font's cell **times the current scale** |
@@ -2536,7 +2546,7 @@ has one filesystem and no drive letters. Programs that ask save the
 drive, do a file operation and put it back; a constant answer makes that
 round trip *correct* rather than merely harmless.
 
-**The `−1` from `EXISTS FILE` is MMBasic's own**, and it earns its keep:
+**The `-1` from `EXISTS FILE` is MMBasic's own**, and it earns its keep:
 it is how a program tells "that name is a directory" from "there is
 nothing there" without a second call.
 
@@ -3286,15 +3296,16 @@ translate time, not at run time.
 | `EXIT` | `FILES` | `FILL` | `FLAG` |
 | `FLAGS` | `FLASH` | `FLUSH` | `FONT` |
 | `FOR` | `FRAMEBUFFER` | `FUNCTION` | `GOSUB` |
-| `GOTO` | `I2C2` | `IF` | `INC` |
-| `INPUT` | `KILL` | `LET` | `LINE` |
-| `LMID` | `LOAD` | `LOCAL` | `LONGSTRING` |
-| `LOOP` | `MAP` | `MATH` | `MKDIR` |
-| `MODE` | `NEXT` | `ON` | `ONEWIRE` |
-| `OPEN` | `OPTION` | `PAUSE` | `PIN` |
-| `PIXEL` | `PLAY` | `POLYGON` | `PORT` |
-| `PRINT` | `PULSE` | `PWM` | `RANDOMIZE` |
-| `RBOX` | `READ` | `RENAME` | `RESTORE` |
+| `GOTO` | `GUI` | `I2C` | `I2C2` |
+| `IF` | `INC` | `INPUT` | `KILL` |
+| `LET` | `LINE` | `LMID` | `LOAD` |
+| `LOCAL` | `LONGSTRING` | `LOOP` | `MAP` |
+| `MATH` | `MKDIR` | `MODE` | `NEXT` |
+| `ON` | `ONEWIRE` | `OPEN` | `OPTION` |
+| `PAUSE` | `PIN` | `PIXEL` | `PLAY` |
+| `POKE` | `POLYGON` | `PORT` | `PRINT` |
+| `PULSE` | `PWM` | `RANDOMIZE` | `RBOX` |
+| `READ` | `REDIM` | `RENAME` | `RESTORE` |
 | `RETURN` | `RMDIR` | `RTC` | `SAVE` |
 | `SEEK` | `SELECT` | `SERVO` | `SETPIN` |
 | `SETTICK` | `SORT` | `SPI` | `SPRITE` |
@@ -3317,21 +3328,23 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `DIR$` | `EOF` | `EPOCH` | `EXP` |
 | `FIELD$` | `FIX` | `FLAG` | `FORMAT$` |
 | `HEX$` | `INKEY$` | `INPUT$` | `INSTR` |
-| `INT` | `LCASE$` | `LCOMPARE` | `LEFT$` |
-| `LEN` | `LGETBYTE` | `LGETSTR$` | `LINPUT` |
-| `LINSTR` | `LLEN` | `LOC` | `LOF` |
-| `LOG` | `LTRIM$` | `MAP` | `MATH` |
-| `MAX` | `MID$` | `MIN` | `MM.CMDLINE$` |
-| `MM.DEVICE$` | `MM.ERRMSG$` | `MM.ERRNO` | `MM.HRES` |
-| `MM.INFO` | `MM.ONEWIRE` | `MM.SPISPEED` | `MM.VER` |
-| `MM.VRES` | `OCT$` | `PEEK` | `PI` |
-| `PIN` | `PIXEL` | `PORT` | `POS` |
-| `RAD` | `RGB` | `RIGHT$` | `RND` |
-| `RTRIM$` | `SGN` | `SIN` | `SPACE$` |
-| `SPI` | `SPRITE` | `SQR` | `STR$` |
-| `STR2BIN` | `STRING$` | `STRUCT` | `TAB` |
-| `TAN` | `TEMPR` | `TIME$` | `TIMER` |
-| `TRIM$` | `UCASE$` | `VAL` |  |
+| `INT` | `KEYDOWN` | `LCASE$` | `LCOMPARE` |
+| `LEFT$` | `LEN` | `LGETBYTE` | `LGETSTR$` |
+| `LINPUT` | `LINSTR` | `LLEN` | `LOC` |
+| `LOF` | `LOG` | `LTRIM$` | `MAP` |
+| `MATH` | `MAX` | `MID$` | `MIN` |
+| `MM.CMDLINE$` | `MM.DEVICE$` | `MM.ERRMSG$` | `MM.ERRNO` |
+| `MM.FONTHEIGHT` | `MM.FONTWIDTH` | `MM.HPOS` | `MM.HRES` |
+| `MM.I2C` | `MM.INFO` | `MM.INFO$` | `MM.ONEWIRE` |
+| `MM.SPISPEED` | `MM.VER` | `MM.VPOS` | `MM.VRES` |
+| `OCT$` | `PEEK` | `PI` | `PIN` |
+| `PIXEL` | `PORT` | `POS` | `RAD` |
+| `RGB` | `RIGHT$` | `RND` | `RTRIM$` |
+| `SGN` | `SIN` | `SPACE$` | `SPI` |
+| `SPRITE` | `SQR` | `STR$` | `STR2BIN` |
+| `STRING$` | `STRUCT` | `TAB` | `TAN` |
+| `TEMPR` | `TIME$` | `TIMER` | `TRIM$` |
+| `UCASE$` | `VAL` |  |  |
 
 ## MATH() sub-functions
 
@@ -3376,6 +3389,20 @@ program that does not use them.
 to the dimensions MMBasic allows. `DIM`, `LOCAL`, `STATIC`, `CONST`,
 `OPTION BASE`, `SUB` and `FUNCTION` with by-reference arguments, and
 the usual control flow.
+
+**`DIM s$(n) LENGTH m` sets the SPACING of the elements**, not just a
+cap on each. The firmware places element `k` at `base + k * (m + 1)`,
+and a program is entitled to that: PETSCII Robots keeps its 128x64
+world map as `DIM LV$(63) LENGTH 128` and reads tiles straight out of
+it with `PEEK(BYTE (y) * 129 + x + lva)`, where the 129 *is* the
+`LENGTH`. So an array honours it, and an element is then the
+firmware's own layout — a length byte and `LENGTH` characters, with no
+room for the trailing NUL the runtime normally keeps. That is handled
+for you; the one visible consequence is that such an array cannot be
+passed whole to a `SUB` or to `SORT`, because the runtime's array
+helpers step at the full string size. Index it instead, or leave the
+`LENGTH` off. On a *scalar* `LENGTH` is still only a cap, since a
+scalar's layout cannot differ.
 
 **Structures** (MMBasic's `TYPE ... END TYPE`, documented in full in
 the PicoMite structures manual) are translated with the firmware's

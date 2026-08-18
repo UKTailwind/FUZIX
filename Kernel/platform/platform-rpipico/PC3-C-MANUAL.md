@@ -471,6 +471,23 @@ display gives you. `GFXIOC_VSYNC` before the copy holds a loop to the
 refresh rate — 59 fps with room for roughly three times as much
 drawing.
 
+**`GFXIOC_VSYNC` holds the CPU while it waits, and nothing else on the
+machine runs.** The kernel does not preempt inside a system call, so a
+wait of up to a frame stops every other process — audible at once if
+anything is playing. Where that matters, wait in slices instead:
+
+```c
+while (!ioctl(sys, GFXIOC_VSYNCTRY, (void *)2000))  /* microseconds */
+        ;
+```
+
+`GFXIOC_VSYNCTRY` spins for at most the budget you give it (capped at
+20 ms) and returns 1 if the top of blanking arrived, 0 if it did not —
+so the loop is back in user mode between tries, where the tick can take
+the CPU away and give it to somebody who needs it. `FRAMEBUFFER MERGE`
+in the BASIC runtime does exactly this, which is why compositing no
+longer starves the audio.
+
 # Sound
 
 Four channels, BBC `SOUND` semantics.
@@ -510,6 +527,26 @@ ioctl(sys, SNDIOC_PCMCLOSE, 0);
   and you should come back. The ring holds 256 KB, about 1.5 seconds at
   44100 stereo — deep on purpose, because a Fuzix process can be
   swapped out for tens of milliseconds and the audio must not notice.
+* **Do not poll with `usleep` — use `SNDIOC_PCMWAIT`.**
+
+  ```c
+  ioctl(sys, SNDIOC_PCMWAIT, (void *)low_water);  /* bytes, not a ptr */
+  ```
+
+  It sleeps until the ring has drained to `low_water` and returns 0, or
+  -1 if you do not hold the stream; a signal wakes it too, which is what
+  a stop request needs. This exists because `usleep` **cannot sleep for
+  less than 100 ms** — it rounds up to the timer wheel's decisecond — so
+  a player that polls has to keep more than 100 ms of audio queued to
+  cover its own sleep, and everything queued is latency before the next
+  sound is heard. The kernel knows when the ring drains, so it does the
+  waiting, on the 5 ms tick.
+
+  It also **lets the woken player run**: a timeslice here is `MAXTICKS`,
+  which is half a second, so a compute-bound program would otherwise
+  hold the processor while the ready player's queue emptied. That, not
+  buffering, is what made the MOD player stutter under load — and it is
+  why a queue of 93 ms is now enough where 186 ms was not.
 * **Mono is expanded by the driver**, so a mono source costs you
   nothing and halves the traffic into the ring.
 * `underruns` counts half-buffers the interrupt had to fill with

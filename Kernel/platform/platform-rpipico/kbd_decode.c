@@ -39,13 +39,26 @@
 #define KBD_CTRL  (0x11) // left|right ctrl
 
 // Auto-repeat (typematic): HID keyboards only report on state change, so
-// we synthesise repeats from the held key.  Defaults are MMBasic's
-// (OPTION KEYBOARD REPEAT 600,150): a long wait before the first repeat
-// so a deliberate keypress never doubles, then a comfortable rate.
+// we synthesise repeats from the held key.
+//
+// These were MMBasic's (OPTION KEYBOARD REPEAT 600,150), and 150ms - under
+// seven characters a second - is a typewriter's rate, not a machine's.  It
+// is fine for typing and wrong for anything HELD: PETSCII Robots played
+// from the keyboard crawled beside the same game played from the Game*Mite
+// switches, which are read fresh every pass of the game loop with no
+// typematic delay at all.  The player waited 600ms for the first step and
+// then got one every 150ms.
+//
+// So: the Linux console's delay, and the fast repeat rate a PC keyboard
+// controller offers (20 a second).  250ms is still far longer than a
+// deliberate tap, so a keypress does not double.
+//
 // Runtime-adjustable through kbd_set_repeat (Fuzix: the KBRATE ioctl,
-// /bin/kbdrate, in tenths of a second; kept in ms here).
-#define KBD_REPEAT_FIRST_DEFAULT (600)
-#define KBD_REPEAT_NEXT_DEFAULT  (150)
+// /bin/kbdrate, in tenths of a second; kept in ms here) - note that the
+// standard interface's TENTHS cannot express 50ms, which is why this is a
+// default and not a program's job.
+#define KBD_REPEAT_FIRST_DEFAULT (250)
+#define KBD_REPEAT_NEXT_DEFAULT  (50)
 uint16_t kbd_repeat_first = KBD_REPEAT_FIRST_DEFAULT;
 uint16_t kbd_repeat_next = KBD_REPEAT_NEXT_DEFAULT;
 // A poll gap longer than this means a release could have been missed,

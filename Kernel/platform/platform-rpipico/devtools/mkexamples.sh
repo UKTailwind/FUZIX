@@ -76,6 +76,7 @@ eclipse:$H/solar_eclipse.bas:a solar eclipse computed from first principles
 picofrog:$M/samples/picofrog.bas:a complete arcade game (keyboard: arrows, space)
 vaders:$M/samples/vaders.bas:Pico-Vaders, ported from the Game*Mite (keyboard)
 picoman:$M/samples/picoman.bas:PicoMan from the Game*Mite - fully native (see the manual's making-it-fit chapter)
+robots:$M/samples/robots.bas:PETSCII Robots - the big one; needs the resource tree in robots/ (keyboard or switches)
 "
 
 # One entry per LINE - the descriptions have spaces in them, so the
@@ -93,6 +94,31 @@ while IFS= read -r e; do
     cp "$src" "$OUT/$name.bas"
     n=$((n + 1))
 done < "$OUT/.manifest"
+
+# PETSCII Robots needs its data beside it: levels, tile attributes,
+# music, pictures and the sprite library.  A megabyte of game art does
+# not belong in the kernel's git tree, so it lives with the other media
+# (~/.pc3emu/sd) and is copied in here if present.
+#
+# LOUD if absent, never silent: a robots.bas with no robots/ directory
+# is a game that starts, draws nothing and stops, which looks like a
+# broken port rather than a missing asset.
+ROBO=${ROBO:-$HOME/.pc3emu/sd/petrobot}
+if [ -d "$ROBO" ]; then
+    mkdir -p "$OUT/robots"
+    for d in data images lib music; do
+        if [ -d "$ROBO/$d" ]; then
+            cp -r "$ROBO/$d" "$OUT/robots/$d"
+        else
+            echo "mkexamples: $ROBO/$d missing - robots will not run" >&2
+        fi
+    done
+    echo "robots resources: $(find "$OUT/robots" -type f | wc -l) files"
+else
+    echo "mkexamples: NO $ROBO - robots.bas is shipped WITHOUT its" >&2
+    echo "  resources and will not run.  Put the tree there or drop" >&2
+    echo "  robots from the manifest." >&2
+fi
 
 # The README, built from the same manifest so the two cannot drift.
 {
@@ -132,6 +158,19 @@ Where to start
 
 picofrog is a port of Martin Herhaus's PicoMite game; the header of
 the file lists every change the port made and why.
+
+robots.bas is PETSCII Robots - the largest MMBasic program here, and
+the only one with data of its own.  Its levels, music, pictures and
+sprite library are in robots/, and it must be run from THIS directory
+so it can find them:
+
+    cd /root/MMBasic
+    mmbc robots.bas
+    cc robots.c
+    ./robots.bc
+
+It takes a few minutes to compile.  Play it with the arrow keys and
+space, or with a switch array on GP34-GP41 (the Game*Mite layout).
 TAIL
 } > "$OUT/README"
 

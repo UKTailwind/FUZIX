@@ -88,6 +88,27 @@ sh "$P/devtools/mkexamples.sh" "$EX/mmbasic" > "$FS.ex.log" 2>&1 || {
 	for b in "$EX"/mmbasic/README "$EX"/mmbasic/*.bas; do
 		echo "bget $b $(basename "$b")"
 	done
+	# A program with DATA of its own - so far only PETSCII Robots -
+	# brings a directory with it.  ucp has no recursive get, so the
+	# tree is walked here: one mkdir per subdirectory, bget per file,
+	# and back to /root/MMBasic afterwards.  bget, not get: these are
+	# levels, .mod tunes, .bmp pictures and an 87K sprite library, and
+	# a text-mode get would corrupt every one of them.
+	if [ -d "$EX/mmbasic/robots" ]; then
+		echo "mkdir robots"
+		echo "cd robots"
+		for d in "$EX"/mmbasic/robots/*/; do
+			[ -d "$d" ] || continue
+			echo "mkdir $(basename "$d")"
+			echo "cd $(basename "$d")"
+			for f in "$d"*; do
+				[ -f "$f" ] || continue
+				echo "bget $f $(basename "$f")"
+			done
+			echo "cd .."
+		done
+		echo "cd .."
+	fi
 	echo "exit"
 } | "$R/Standalone/ucp" "$FS" > "$FS.ucp.log" 2>&1
 if grep -q "error number" "$FS.ucp.log"; then
@@ -96,6 +117,9 @@ if grep -q "error number" "$FS.ucp.log"; then
 	exit 1
 fi
 echo "    $(ls "$EX"/mmbasic/*.bas | wc -l) programs in /root/MMBasic"
+if [ -d "$EX/mmbasic/robots" ]; then
+	echo "    $(find "$EX"/mmbasic/robots -type f | wc -l) robots resource files"
+fi
 rm -rf "$EX" "$FS.ucp.log" "$FS.ex.log"
 
 echo "--- padding to the partition size"
