@@ -54,8 +54,8 @@ CAT = {
     "Stepper": 2, "FM": 2, "Calc": 2,
     # Language and data
     "Json$(": 2,
-    # System and interrupts: reads of state the kernel already keeps
-    "WatchDog": 2, "CPU": 2, "Interrupt": 2, "IReturn": 2,
+    # System: reads of state the kernel already keeps
+    "WatchDog": 2, "CPU": 2,
     # Graphics primitives and toys, each self-contained
     "TILE": 2, "Tilemap": 2, "Tilemap(": 2, "Turtle": 2,
     "Frame": 2, "Frame(": 2, "Ray": 2, "Ray(": 2,
@@ -87,6 +87,15 @@ CAT = {
     "Update Firmware": 4,
     "Eval(": 4,                     # wants an interpreter at run time
     "CSub": 4, "End CSub": 4,       # a compiler links objects
+    # Not "reads of state the kernel keeps", as this table used to say.
+    # AllCommands.h points Interrupt at cmd_csubinterrupt: it arms a
+    # CSUB as a handler, so it goes wherever CSub goes.  IReturn returns
+    # from a handler written as a LABEL or a LINE NUMBER, and
+    # int_handler() refuses both by design - compiled code cannot be
+    # jumped into from a poll site - so a translated handler is a SUB
+    # and END SUB is its return.  SETTICK, ON KEY and SETPIN INTx are
+    # all in already (PLAN-interrupts phase 1).
+    "Interrupt": 4, "IReturn": 4,
     "Drive": 4,                     # one filesystem, mounted
     #
     # INTERPRETER-INTERNAL SPELLINGS.  MMBasic ran out of slots in its

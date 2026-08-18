@@ -16,7 +16,7 @@ and it lives in `fcc/catmap.py`.
 The 133 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
 Draw3D each appear twice, CtrlVal as both a command and a function - so there are **130 distinct
 names**. Of those, **19 are false negatives** (the thing works and the scanner cannot see it),
-leaving **111 real gaps**, of which 52 are in categories 4 and 5 and are not intended to close.
+leaving **111 real gaps**, of which 54 are in categories 4 and 5 and are not intended to close.
 
 ## What this count cannot tell you
 
@@ -44,9 +44,9 @@ four inside its "excluded from the documentation" block.
 ## The five categories
 
 1. **Finish what is already there** - 0
-2. **Real value, moderate work** - 30
+2. **Real value, moderate work** - 28
 3. **Possible, wants your steer first** - 29
-4. **Deliberately out** - 27
+4. **Deliberately out** - 29
 5. **Not applicable to this machine** - 25
 
 ## False negatives: implemented, invisible to the scan
@@ -57,9 +57,9 @@ misled us before (`DefineFont` and `BLIT MEMORY` both read as missing while they
 
 `Rem`, `/*`, `*/`, `Blit Memory`, `+`, `-`, `^`, `*`, `/`, `\\`, `<<`, `>>`, `<>`, `>=`, `<=`, `<`, `>`, `=`, `@(`
 
-## Category 2 - Real value, moderate work (30)
+## Category 2 - Real value, moderate work (28)
 
-**Commands:** `ADC`, `Bitstream`, `CPU`, `Calc`, `Draw3D`, `FM`, `Frame`, `Humid`, `IR`, `IReturn`, `Interrupt`, `Keypad`, `Mandelbrot`, `OneShot`, `Ray`, `SYNC`, `Slew`, `Stepper`, `TILE`, `Tilemap`, `Turtle`, `WS2812`, `WatchDog`
+**Commands:** `ADC`, `Bitstream`, `CPU`, `Calc`, `Draw3D`, `FM`, `Frame`, `Humid`, `IR`, `Keypad`, `Mandelbrot`, `OneShot`, `Ray`, `SYNC`, `Slew`, `Stepper`, `TILE`, `Tilemap`, `Turtle`, `WS2812`, `WatchDog`
 
 **Functions:** `DRAW3D(`, `Distance(`, `Frame(`, `Json$(`, `Pulsin(`, `Ray(`, `Tilemap(`
 
@@ -69,9 +69,9 @@ misled us before (`DefineFont` and `BLIT MEMORY` both read as missing while they
 
 **Functions:** `GetScanLine`, `Pio(`
 
-## Category 4 - Deliberately out (27)
+## Category 4 - Deliberately out (29)
 
-**Commands:** `Autosave`, `CMM2 Load`, `CMM2 Run`, `CSub`, `Chain`, `Configure`, `Drive`, `Edit`, `Edit File`, `End CSub`, `Execute`, `Help`, `Library`, `List`, `New`, `Ram`, `Run`, `Trace`, `Update Firmware`, `VAR`, `XModem`, `YModem`
+**Commands:** `Autosave`, `CMM2 Load`, `CMM2 Run`, `CSub`, `Chain`, `Configure`, `Drive`, `Edit`, `Edit File`, `End CSub`, `Execute`, `Help`, `IReturn`, `Interrupt`, `Library`, `List`, `New`, `Ram`, `Run`, `Trace`, `Update Firmware`, `VAR`, `XModem`, `YModem`
 
 **Functions:** `Eval(`, `SChange$(`, `TopBottom(`, `base$(`, `~(`
 

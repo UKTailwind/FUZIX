@@ -1,111 +1,159 @@
 # The queue
 
-One ranked list, because the work was spread across five documents and
-three of them had gone stale. Reviewed 2026-08-12, against the tree
-rather than against the notes — everything below was checked by reading
-the code or running it, and four items that were still listed as
-outstanding turned out to be finished.
+One ranked list. **Reviewed 2026-08-18 against the tree** — every entry
+below was checked by reading the code or running it, not by reading the
+notes. The previous review (2026-08-12) had drifted the same way its own
+predecessor had: of its six ranked items **two were finished and a third
+half-finished**, and of its eight "wants your steer" items **four were
+finished**.
 
-Detail lives in the documents named in each entry; this file is only
-the order and the reason.
+Detail lives in the documents named in each entry; this file is only the
+order and the reason.
+
+**Language coverage is NOT ranked here.** `COVERAGE-STATUS.md` is
+generated from MMBasic's `AllCommands.h` and mmb2c's own dispatch, so it
+cannot go stale the way this file does. Take gaps from there; this file
+carries only the work that a name-by-name list cannot express.
 
 ## Corrected on this pass — do not re-do these
 
+Checked in the tree on 2026-08-18. Each names where to look, so the next
+review can re-check rather than re-trust.
+
 | said | actually |
 |---|---|
-| COVERAGE Tier B: `ON ERROR SKIP/IGNORE`, `MM.ERRNO`, `MM.ERRMSG$` "deserves its own pass" | **Done.** It got the pass. Checked-flag route, `mm_err_bind`, and the checks are gated so a program that never traps pays nothing (+11.9% on the benchmark). `tests/onerror.bas`. |
-| PLAN-pixel-batch: "DESIGN AGREED, not implemented" | **Done and board-verified**, ripple −21%. `mm_ptbuf`/`mm_pixn`/`mm_pix_drain` are all in mmb_runtime.c. |
-| PLAN-emission-next 3c: string expressions cap recursion at 9 levels | **Done.** `mm_release` is emitted before call statements now; the same shape reaches 60+. `MM_TMPN` never changed, which was the point. |
-| PLAN-emission-next 6: "there is no `sed`" on the board | There is, as of v0.13 — and `awk`, `find`, `expr` and a working `[`. The board test runner can stop contorting around their absence. |
+| 1. `SPI WRITE` of a LONGSTRING | **Done.** `mmb2c.py:7687`, `mmc_tx_ls` — no cap, no copy. `I2C2 WRITE` shares it. |
+| 2. Split SUBs over the translated-size ceiling | **Gone.** No `size policy` anywhere in `mmb2c.py` or `mmbc/`, and `structtest` builds and passes in `make check`. |
+| 5a. `POKE` | **Done.** `mmb2c.py:4489`. The decision it "wanted" was taken. |
+| `REDIM [PRESERVE]` | **Done.** `mmb2c.py:4485`. A dynamic array is a flat pointer plus a bounds table — the shape an array parameter already had, so no new array model was needed. |
+| `KEYDOWN` | **Done.** `mmb2c.py:2258`, `BUILTINS` line 111. |
+| `PEEK(VAR x)` / `VARADDR` | **Done.** `mmb2c.py:1571`, `tests/varaddr.bas`. |
+| `CALL(fname$)` | **Done.** `mmb2c.py:1413` (the function form; the statement is 4395). |
+| Interrupts phase 1 | **Done.** `SETTICK`, `ON KEY`, `SETPIN INTH/INTL/INTB`, and the SPRITE interrupt family. PLAN-interrupts' phase-1 table is fully struck through. |
+| Scalar `PIXEL` batching | **Done and board-verified 2026-08-11**, ripple −21%. Listed here again because it was re-proposed on 2026-08-18 from a stale memory note. `mm_ptbuf`/`mm_pixn`/`mm_pix_drain`, 49 references in `mmb_runtime.c`. |
+
+Also finished since the last review and not in any queue: `LOAD JPG`,
+`LOAD PNG`, `SPRITE LOADPNG`, `ARRAY SLICE`, `ARRAY INSERT`,
+`MATH SLICE`, `MATH INSERT`, `COLOUR MAP`, `DefineFont`, the
+`OPTION BASE 1` initialiser fix, and the games plan in full
+(`BLIT`, `SPRITE`, `PLAY SOUND/TONE`, `PLAY MODFILE`).
+
+**Category 1 of COVERAGE-STATUS.md — "finish what is already there" —
+is now empty.**
 
 ## Next
 
-**Games first (2026-08-13): BLIT, SPRITE, PLAY SOUND/TONE and PLAY
-MODFILE/MODSAMPLE now have a full plan in PLAN-games.md and take
-priority over the ranking below where they conflict. Phase 0 of that
-plan (board spikes) is the next concrete action.**
+### 1. Pixel batching phase 2: the deferred tail
 
-### 1. `SPI WRITE` of a LONGSTRING
+The only outstanding part of the batching work, and it is correctness,
+not speed. `MM_PIX_LATENCY_US` is 10 ms, but the bound is only tested
+inside `mm_pixel` — so a program that plots and then computes silently
+leaves its last partial batch unpainted until it plots again. There is
+no `alarm()` anywhere in `mmb_runtime.c`; the backstop was designed and
+never built.
 
-The 255-byte string limit is the one wall the display work keeps
-hitting: a 240-pixel RGB565 row is 480 bytes, so every row goes out as
-two writes, and a whole frame cannot be assembled in BASIC at all. The
-kernel has no such limit — one syscall takes a frame — and LONGSTRING
-already exists and is already a byte buffer inside an INTEGER array.
+`SIGALRM`, and **100 ms, not 1 s**: `alarm()` is the POSIX seconds
+wrapper, but `_alarm()` takes DECISECONDS and `process.c` decrements
+once per decisecond tick, which is the only way a process can see it.
+Needs a busy flag so the handler cannot land between the append and the
+count update, and a test that plots and then sleeps.
 
-So this is a statement form, not a mechanism: teach `SPI WRITE` (and
-`I2C2 WRITE`) to take a LONGSTRING and pass its bytes. Note the trap
-recorded in COVERAGE — a LONGSTRING handed over as a numeric array
-today sends one byte per 8-byte cell, silently.
+Small, bounded, and it closes a visible-to-the-user gap.
 
-Small, and it unblocks the framebuffer work that stalled on it.
+### 2. `MATH CRC` and `BASE64`
 
-### 2. Split SUBs over the translated-size ceiling
+The two most asked for of the 52 MATH members still out. Pure
+arithmetic, no platform dependency, and testable against the
+interpreter one function at a time. The matrix, vector, quaternion and
+complex families are the same shape and are best added on demand — the
+3D and graphics demos say which are wanted first, and adding the block
+speculatively is how a translator grows code nobody calls.
 
-`structtest`'s main line is 32,556 bytecodes and bails with `size
-policy` — the only program in the suite that does. That is a capability
-limit rather than a performance one: a large program simply cannot be
-translated, and the failure names an internal policy rather than
-anything the author can act on.
+See the MATH section of `COVERAGE-STATUS.md` for the full split.
 
-At minimum the message should say what to do. Better is to split at
-statement boundaries into `__main_1()`, `__main_2()`.
+### 3. Emission: the two remaining candidates
 
-### 3. The rest of the `MATH` family
+From PLAN-emission-next §4, both still unexamined, both verified
+outstanding today:
 
-`M_MULT M_INVERSE M_TRANSPOSE M_DETERMINANT V_CROSS V_NORMALISE
-MAGNITUDE DOTPRODUCT CORREL CHI CROSSING`, plus `MATH CRC` and
-`BASE64`. Pure arithmetic, no platform dependency, each one small and
-independently testable against the interpreter. Best added on demand
-rather than as a block — the 3D and graphics demos say which are
-wanted first.
+* **`mm_mark`/`mm_release` elision.** Every generated routine opens with
+  `unsigned __mark = mm_mark();` unconditionally (`mmb2c.py:7979` and
+  `8652`), including routines that take no string temporary at all. The
+  `tmp_used` flag already exists for per-statement release and is the
+  obvious lever.
+* **int narrowing of loop counters.**
 
-### 4. Emission: the two remaining candidates
+Measure the way `pc3-benchmark-method` says: fresh boot, output to the
+screen, both builds interleaved in one session. Expect small numbers and
+be willing to drop either on the measurement.
 
-From PLAN-emission-next §4, both unexamined:
+### 4. `MEMORY COPY | SET | PACK`
 
-* `mm_mark`/`mm_release` elision in routines that take no temporaries
-  at all — currently every routine pays the pair.
-* int narrowing of loop counters.
+`POKE` landed, which was the contentious half; this is the block form
+and the argument is now only about speed, not safety. A program driving
+its own display wants to move bytes without a loop.
 
-Measure the way pc3-benchmark-method says: fresh boot, output to the
-screen, both builds interleaved in one session.
+### 5. Interrupts phase 2
 
-### 5. `POKE` and `MEMORY COPY|SET|PACK`
+Two reads of state the kernel already keeps, from PLAN-interrupts' own
+table: **COM rx level** via `TIOCINQ` on the port, and **PLAY-done** via
+polling `SNDIOC_PCMOWNER` back to 0. Neither exists yet — the
+`SNDIOC_PCMOWNER` call already in `mmb_runtime.c` is `PLAY STOP` asking
+who owns the stream, not an interrupt source.
 
-The natural pair to `PEEK`, which shipped in v0.12, and the honest
-argument for it is the same: a program driving its own display wants
-to move bytes without a loop. The argument against is stronger than it
-was for `PEEK`, and it is recorded in COVERAGE — a bad read kills one
-program, a bad write can take the kernel with it, and there is no MMU
-to disagree. **Wants a decision, not an implementation.**
+Nothing for the RTC: the pin path covers it.
 
-### 6. Fold the board test suite into the release checks
+### 6. Fold the board test suites into the release checks
 
-PLAN-emission-next §6. The c-testsuite on the card at `/root/ct` is the
-only thing that has ever exercised `cpp`, and it found four bugs the
-host gate structurally cannot see. It should run before a release. Now
-easier than when that was written, since the board has `sed` and `awk`.
+`relcheck.sh` checks the release number in three places and nothing
+checks that the gates were run. Two of them are board-only by
+construction and have each found bugs no host gate can see:
+`Applications/cpp/cpptest.sh` (the C preprocessor — host gates use
+`gcc -E`, so `cpp` is untested off the board) and the c-testsuite at
+`/root/ct`.
+
+A release checklist that names every gate, host and board, and refuses
+without them. Now easier than when this was first written: the board has
+`sed`, `awk`, `find`, `expr` and a working `[`.
 
 ## Wants your steer before any work
 
-* **`REDIM [PRESERVE]`** — needs heap-allocated arrays instead of the
-  current static ones, which puts `malloc` into generated code that has
-  none today. A real change to the array model; only worth it if you
-  use it.
-* **`KEYDOWN`** — needs a key-state table from the kernel, which
-  INKEY$'s one-byte read cannot give. Small ioctl plus a wrapper.
-* **Interrupts phase 2** (PLAN-interrupts) — `COM` rx level via TIOCINQ,
-  PLAY-done via SNDIOC_PCMOWNER. Both are reads of state the kernel
-  already keeps.
-* **`PEEK(VAR x)` / `VARADDR`** — asks about a *variable* rather than an
-  address, so it needs the symbol table on the translator side.
-* **`CALL(fname$)`**, **`JSON$`**, **`CSUB` as an extern declaration**,
-  **`VAR SAVE`/`RESTORE`** — all in COVERAGE Tier C with their catches.
+* **The PIO block** — 25 of the 29 names in COVERAGE-STATUS category 3,
+  all or nothing, and a language inside the language. The single
+  largest remaining piece of MMBasic.
+* **`JSON$`** — a parser, and the only category-2 language item with
+  real size to it.
+* **`VAR SAVE` / `VAR RESTORE`** — wants somewhere to put the values and
+  a decision about what survives a reboot.
+* **`WATCHDOG` and `CPU`** — both are really kernel questions here: the
+  kernel already runs a watchdog on core1, and `CPU RESTART`/`SLEEP` ask
+  it to do something it may not want to do.
+* **`RESOLUTION`, `REFRESH`, `GETSCANLINE`, `MEMORY`** — the rest of
+  category 3, each a decision about the machine rather than work.
+
+## Open in the FUZIX tree, not here
+
+Kept in one place because both have been re-discovered more than once
+and neither belongs to mmb2c:
+
+* **The ~150 ms machine stall.** `pcmpace` is the scanner. Open since
+  the PLAY SOUND work; the 186 ms cushion that shipped is a cushion, not
+  a fix.
+* **The console wedge.** Intermittent console death during transfers;
+  not the filesystem, not a panic. `dnull.py` is the discriminator and
+  the recovery recipe is written down. No kernel fix yet.
 
 ## Deliberately closed
 
 `sort -k`, `diff -u` and `grep -E` are userland, not mmb2c, and are
-recorded in the FUZIX tree. `__mmb_main` wrapper and inlining `MOD`/`\`
-by a literal are killed on measured evidence — see the "do not
-re-propose" table in PLAN-emission-next.
+recorded in the FUZIX tree. The `__mmb_main` wrapper and inlining
+`MOD`/`\` by a literal are killed on measured evidence — see the "do not
+re-propose" table in PLAN-emission-next. The kernel blit engine is
+killed on a structural argument: the kernel cannot call program code,
+because a bcrun function pointer is an offset into `code[]`.
+
+`CSUB` and `INTERRUPT` are out together: `AllCommands.h` points
+`Interrupt` at `cmd_csubinterrupt`, so it arms a CSUB as a handler and
+has nothing to arm. `IRETURN` goes with them — it returns from a handler
+written as a label or a line number, and `int_handler()` refuses both by
+design, so a translated handler is a SUB and `END SUB` is its return.
