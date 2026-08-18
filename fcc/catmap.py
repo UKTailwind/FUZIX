@@ -28,18 +28,22 @@ CAT = {
     "Rem": "FN", "/*": "FN", "*/": "FN",
     # Dispatched by do_blit_memform - BLIT and SPRITE share it.
     "Blit Memory": "FN",
+    # PRINT @(x, y [, mode]) - MMBasic's fun_at, and there is no other
+    # form of it: fun_at errors unless the enclosing command is PRINT.
+    # do_print handles it, mode argument and all, so the scan of
+    # statement_inner and BUILTINS cannot see it.
+    "@(": "FN",
 
     # ---- 1: finish what is already there ----------------------------
     # Each of these has its family present and is the missing member,
     # which is the shape that reads as a bug rather than a gap.
-    "SPI2": 1, "SPI2(": 1,          # SPI0 and I2C2 are in; this is the pair
-    "Colour Map": 1,                # MAP is in, its COLOUR spelling is not
+    # Not a synonym for MAP, as this table used to say.  COLOUR MAP
+    # src(), dst() [, map()] translates a whole ARRAY of RGB121 indices
+    # into 24-bit RGB, from RGB121map or a supplied 16-element map.  The
+    # scalar form MAP(n) is already in, so this is its array form.
+    "Colour Map": 1,
     "Array Slice": 1, "Array Insert": 1,   # ARRAY SET/ADD are in
-    "base$(": 1, "SChange$(": 1, "TopBottom(": 1,
-    "@(": 1,                        # PRINT @ is in; the function form is not
-    "~(": 1,                        # INV is in; this is its operator spelling
     "ADC": 2,
-    "Location": 1,                  # MM.INFO neighbours are in
 
     # ---- 2: real value, moderate work ------------------------------
     # Peripherals: a pin here is a register access, not a syscall, so
@@ -55,6 +59,10 @@ CAT = {
     "TILE": 2, "Tilemap": 2, "Tilemap(": 2, "Turtle": 2,
     "Frame": 2, "Frame(": 2, "Ray": 2, "Ray(": 2,
     "Star": 2, "Astro": 2, "Mandelbrot": 2,
+    # Not MM.INFO's neighbour, as this table used to say: cmd_locate
+    # lives in io/GPS.c and sets the observer's latitude, longitude and
+    # date for the astronomical calculations.  It goes with Astro.
+    "Location": 2,
     "Draw3D": 2, "DRAW3D(": 2,
 
     # ---- 3: possible, wants your steer first -----------------------
@@ -83,6 +91,28 @@ CAT = {
     "Eval(": 4,                     # wants an interpreter at run time
     "CSub": 4, "End CSub": 4,       # a compiler links objects
     "Drive": 4,                     # one filesystem, mounted
+    #
+    # INTERPRETER-INTERNAL SPELLINGS.  MMBasic ran out of slots in its
+    # function table, so it COMMENTED SOME OUT and made the tokeniser
+    # rewrite them into one shared entry that takes a selector letter.
+    # All four sit inside Functions.c's "@cond ... excluded from the
+    # documentation" block; a BASIC program never writes them.
+    #
+    #   base$(b, n [, w])  <- Hex$( Oct$( Bin$(     "utility function
+    #                                               used by HEX$(),
+    #                                               OCT$() and BIN$()"
+    #   SChange$(sel, ...) <- Left$( Right$( UCase$( LCase$(
+    #   TopBottom(sel,...) <- Max( Min(
+    #   ~(sel)             <- the flat MM.* reads (MM.HRES, MM.VRES,
+    #                         MM.VER, MM.I2C, MM.FONTHEIGHT/WIDTH,
+    #                         MM.HPOS/VPOS, MM.ONEWIRE, MM.ERRNO,
+    #                         MM.ERRMSG$, MM.DEVICE$, MM.CMDLINE$, ...)
+    #
+    # We translate SOURCE TEXT, not MMBasic's tokenised form, so the
+    # wrapper spelling never reaches us.  What matters is the real
+    # functions, and all of them are in: Hex$ Oct$ Bin$ Left$ Right$
+    # UCase$ LCase$ Max Min, and 14 of the flat MM.* reads.
+    "base$(": 4, "SChange$(": 4, "TopBottom(": 4, "~(": 4,
 
     # ---- 5: not applicable to this machine -------------------------
     # Hardware the PC3 does not have, or a device the kernel owns.
@@ -93,6 +123,11 @@ CAT = {
     "WEB": 5, "Gamepad": 5, "TMC22xx": 5,
     "Device": 5, "DEVICE(": 5,
     "Keyboard": 5, "Mouse": 5,      # the kernel owns the USB HID devices
+    # MMBasic's second SPI bus lands on the pins the SD card uses, and
+    # the PC3 does not break those out to any header, so there is
+    # nothing a program could talk to.  SPI0 is the one that is wired
+    # (PC3-SPI0 notes) and it is in.
+    "SPI2": 5, "SPI2(": 5,
 }
 
 NAMES = {

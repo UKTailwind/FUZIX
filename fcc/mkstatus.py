@@ -94,6 +94,19 @@ W.append("So read the numbers as \"names the translator dispatches\", "
          "The honest per-feature figure is lower, and the only way to get "
          "it is the\nway the MATH section does it: read the reference's "
          "own sub-tables.\n")
+W.append("**And it can understate, in one specific place.** MMBasic ran "
+         "out of room in its function table, so\nit COMMENTED NAMES OUT "
+         "of it and made the tokeniser rewrite them into a shared entry "
+         "that takes a\nselector letter: `Hex$(`, `Oct$(` and `Bin$(` all "
+         "become `base$(`; `Left$(`, `Right$(`, `UCase$(` and\n"
+         "`LCase$(` become `SChange$(`; `Max(` and `Min(` become "
+         "`TopBottom(`; and the flat `MM.*` reads become\n`~(`. Those nine "
+         "functions are therefore ABSENT from AllCommands.h and so absent "
+         "from every list\nbelow - and all nine are translated, as are 14 "
+         "of the `MM.*` reads. The four wrapper spellings are\nin category "
+         "4: we translate source text, not MMBasic's tokenised form, and "
+         "`Functions.c` keeps all\nfour inside its "
+         "\"excluded from the documentation\" block.\n")
 
 W.append("## The five categories\n")
 for k in (1, 2, 3, 4, 5):

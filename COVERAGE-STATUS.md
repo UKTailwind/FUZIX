@@ -15,8 +15,8 @@ and it lives in `fcc/catmap.py`.
 
 The 136 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
 Draw3D each appear twice, CtrlVal as both a command and a function - so there are **133 distinct
-names**. Of those, **18 are false negatives** (the thing works and the scanner cannot see it),
-leaving **115 real gaps**, of which 43 are in categories 4 and 5 and are not intended to close.
+names**. Of those, **19 are false negatives** (the thing works and the scanner cannot see it),
+leaving **114 real gaps**, of which 49 are in categories 4 and 5 and are not intended to close.
 
 ## What this count cannot tell you
 
@@ -32,13 +32,22 @@ So read the numbers as "names the translator dispatches", which is what they are
 percentage of MMBasic. The honest per-feature figure is lower, and the only way to get it is the
 way the MATH section does it: read the reference's own sub-tables.
 
+**And it can understate, in one specific place.** MMBasic ran out of room in its function table, so
+it COMMENTED NAMES OUT of it and made the tokeniser rewrite them into a shared entry that takes a
+selector letter: `Hex$(`, `Oct$(` and `Bin$(` all become `base$(`; `Left$(`, `Right$(`, `UCase$(` and
+`LCase$(` become `SChange$(`; `Max(` and `Min(` become `TopBottom(`; and the flat `MM.*` reads become
+`~(`. Those nine functions are therefore ABSENT from AllCommands.h and so absent from every list
+below - and all nine are translated, as are 14 of the `MM.*` reads. The four wrapper spellings are
+in category 4: we translate source text, not MMBasic's tokenised form, and `Functions.c` keeps all
+four inside its "excluded from the documentation" block.
+
 ## The five categories
 
-1. **Finish what is already there** - 11
-2. **Real value, moderate work** - 32
+1. **Finish what is already there** - 3
+2. **Real value, moderate work** - 33
 3. **Possible, wants your steer first** - 29
-4. **Deliberately out** - 23
-5. **Not applicable to this machine** - 20
+4. **Deliberately out** - 27
+5. **Not applicable to this machine** - 22
 
 ## False negatives: implemented, invisible to the scan
 
@@ -46,17 +55,15 @@ These are dispatched somewhere the scan does not look - the lexer, the expressio
 two-word branch. They are listed so the count above is honest, and because this class has
 misled us before (`DefineFont` and `BLIT MEMORY` both read as missing while they worked).
 
-`Rem`, `/*`, `*/`, `Blit Memory`, `+`, `-`, `^`, `*`, `/`, `\\`, `<<`, `>>`, `<>`, `>=`, `<=`, `<`, `>`, `=`
+`Rem`, `/*`, `*/`, `Blit Memory`, `+`, `-`, `^`, `*`, `/`, `\\`, `<<`, `>>`, `<>`, `>=`, `<=`, `<`, `>`, `=`, `@(`
 
-## Category 1 - Finish what is already there (11)
+## Category 1 - Finish what is already there (3)
 
-**Commands:** `Array Insert`, `Array Slice`, `Colour Map`, `Location`, `SPI2`
+**Commands:** `Array Insert`, `Array Slice`, `Colour Map`
 
-**Functions:** `@(`, `SChange$(`, `SPI2(`, `TopBottom(`, `base$(`, `~(`
+## Category 2 - Real value, moderate work (33)
 
-## Category 2 - Real value, moderate work (32)
-
-**Commands:** `ADC`, `Astro`, `Bitstream`, `CPU`, `Calc`, `Draw3D`, `FM`, `Frame`, `Humid`, `IR`, `IReturn`, `Interrupt`, `Keypad`, `Mandelbrot`, `OneShot`, `Ray`, `SYNC`, `Slew`, `Star`, `Stepper`, `TILE`, `Tilemap`, `Turtle`, `WS2812`, `WatchDog`
+**Commands:** `ADC`, `Astro`, `Bitstream`, `CPU`, `Calc`, `Draw3D`, `FM`, `Frame`, `Humid`, `IR`, `IReturn`, `Interrupt`, `Keypad`, `Location`, `Mandelbrot`, `OneShot`, `Ray`, `SYNC`, `Slew`, `Star`, `Stepper`, `TILE`, `Tilemap`, `Turtle`, `WS2812`, `WatchDog`
 
 **Functions:** `DRAW3D(`, `Distance(`, `Frame(`, `Json$(`, `Pulsin(`, `Ray(`, `Tilemap(`
 
@@ -66,17 +73,17 @@ misled us before (`DefineFont` and `BLIT MEMORY` both read as missing while they
 
 **Functions:** `GetScanLine`, `Pio(`
 
-## Category 4 - Deliberately out (23)
+## Category 4 - Deliberately out (27)
 
 **Commands:** `Autosave`, `CMM2 Load`, `CMM2 Run`, `CSub`, `Chain`, `Configure`, `Drive`, `Edit`, `Edit File`, `End CSub`, `Execute`, `Help`, `Library`, `List`, `New`, `Ram`, `Run`, `Trace`, `Update Firmware`, `VAR`, `XModem`, `YModem`
 
-**Functions:** `Eval(`
+**Functions:** `Eval(`, `SChange$(`, `TopBottom(`, `base$(`, `~(`
 
-## Category 5 - Not applicable to this machine (20)
+## Category 5 - Not applicable to this machine (22)
 
-**Commands:** `Backlight`, `Camera`, `CtrlVal(`, `Device`, `Gamepad`, `I2CLCD`, `Keyboard`, `LCD`, `Mouse`, `TMC22xx`, `WEB`, `Wii`, `Wii Classic`, `Wii Nunchuck`
+**Commands:** `Backlight`, `Camera`, `CtrlVal(`, `Device`, `Gamepad`, `I2CLCD`, `Keyboard`, `LCD`, `Mouse`, `SPI2`, `TMC22xx`, `WEB`, `Wii`, `Wii Classic`, `Wii Nunchuck`
 
-**Functions:** `Click(`, `CtrlVal(`, `DEVICE(`, `GPS(`, `MsgBox(`, `Touch(`
+**Functions:** `Click(`, `CtrlVal(`, `DEVICE(`, `GPS(`, `MsgBox(`, `SPI2(`, `Touch(`
 
 ## Translated: the 126 commands
 
