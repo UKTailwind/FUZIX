@@ -97,6 +97,14 @@ sh "$P/devtools/mkexamples.sh" "$EX/mmbasic" > "$FS.ex.log" 2>&1 || {
 	if [ -d "$EX/mmbasic/robots" ]; then
 		echo "mkdir robots"
 		echo "cd robots"
+		# The .bas sits WITH its data: the program resolves the
+		# levels and pictures against the current directory, so a
+		# copy left in /root/MMBasic builds and then cannot find
+		# its own title screen.  The written card said so.
+		for f in "$EX"/mmbasic/robots/*.bas; do
+			[ -f "$f" ] || continue
+			echo "bget $f $(basename "$f")"
+		done
 		for d in "$EX"/mmbasic/robots/*/; do
 			[ -d "$d" ] || continue
 			echo "mkdir $(basename "$d")"

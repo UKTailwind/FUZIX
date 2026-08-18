@@ -160,11 +160,12 @@ picofrog is a port of Martin Herhaus's PicoMite game; the header of
 the file lists every change the port made and why.
 
 robots.bas is PETSCII Robots - the largest MMBasic program here, and
-the only one with data of its own.  Its levels, music, pictures and
-sprite library are in robots/, and it must be run from THIS directory
-so it can find them:
+the only one with data of its own.  It lives in robots/ together with
+its levels, music, pictures and sprite library, and must be run FROM
+THAT DIRECTORY, because it looks for them relative to wherever it is
+started:
 
-    cd /root/MMBasic
+    cd /root/MMBasic/robots
     mmbc robots.bas
     cc robots.c
     ./robots.bc
@@ -173,6 +174,14 @@ It takes a few minutes to compile.  Play it with the arrow keys and
 space, or with a switch array on GP34-GP41 (the Game*Mite layout).
 TAIL
 } > "$OUT/README"
+
+# robots.bas belongs INSIDE robots/, because path$() resolves its
+# levels, music and pictures against the CURRENT directory - so the
+# program and its data have to sit together.  Moved after the README is
+# written so the manifest still describes it in the program list.
+if [ -d "$OUT/robots" ] && [ -f "$OUT/robots.bas" ]; then
+    mv "$OUT/robots.bas" "$OUT/robots/robots.bas"
+fi
 
 rm -f "$OUT/.manifest"
 cd "$(dirname "$OUT")"
