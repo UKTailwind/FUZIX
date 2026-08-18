@@ -373,8 +373,17 @@ int pagemap_realloc(struct exec *hdr, usize_t size)
         int room = NUM_ALLOCATION_BLOCKS - largest_neighbour();
         if (room < 1)
             room = 1;
-        if (blocks > room)
+        if (blocks > room) {
+            /* Say WHO could not fit beside WHAT.  A bare ENOMEM sends
+               the caller looking at its own size, and the number that
+               actually refused it is the neighbour's - which is not
+               visible from userland at all. */
+            kprintf("exec: pid %d needs %d blocks, %d free beside a "
+                    "%d-block neighbour (pool %d)\n",
+                    p->p_pid, blocks, room, largest_neighbour(),
+                    NUM_ALLOCATION_BLOCKS);
             return ENOMEM;
+        }
     }
 
     #ifdef DEBUG
