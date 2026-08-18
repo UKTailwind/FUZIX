@@ -96,6 +96,7 @@ uint8_t *display_fb_target(void);
 /* Block until the top of vertical blanking (bounded: if the scanout has
  * stopped this returns rather than hanging the caller). */
 void display_wait_vblank(void);
+int display_wait_vblank_try(unsigned int us);
 extern uint8_t disp_tile_fg[DISP_ROWS * DISP_COLS];
 extern uint8_t disp_tile_bg[DISP_ROWS * DISP_COLS];
 

@@ -416,7 +416,20 @@ int display_fb_merge(struct p_tab *who, int colour)
      * and skips the read-modify-write entirely, so an empty layer costs
      * one PSRAM stream and no writes.
      */
-    display_wait_vblank();      /* see below: start at the top of blanking */
+    /*
+     * NO WAIT HERE ANY MORE.  This used to spin for the top of blanking
+     * before compositing, which is up to a whole 16.7ms frame inside a
+     * syscall - and this kernel does not preempt inside one, so it
+     * stopped every other process for that long.  With a MOD player
+     * running, that was audible: its queue drained between merges.
+     *
+     * The waiting now belongs to the caller, in slices, through
+     * GFXIOC_VSYNCTRY - which does the identical spin but bounded, so
+     * userland comes back to preemptible ground between tries.  The
+     * runtime does it before calling this (mm_fb_merge_hw), so the
+     * picture still lands at the top of blanking; what changed is who
+     * is holding the CPU while it waits.
+     */
     memcpy(o, disp_fb2, (unsigned)n);
 
     w = n & ~3;                 /* the word-aligned part; both are 4-aligned */
@@ -1223,6 +1236,29 @@ static void gfx_wait_vblank(void)
 void display_wait_vblank(void)
 {
     gfx_wait_vblank();
+}
+
+/*
+ * The same wait in SLICES, for a caller that would rather not hold the
+ * processor for a whole frame - see GFXIOC_VSYNCTRY.  Spins at most
+ * `us`, returns 1 if the top of blanking arrived and 0 if it did not,
+ * so the caller can come back round having been preemptible in
+ * between.  A frame is 16.7ms and this kernel cannot preempt inside a
+ * syscall, so the difference is whether the MOD player gets to run.
+ */
+int display_wait_vblank_try(unsigned int us)
+{
+    uint64_t dl;
+
+    if (us > 20000u)
+        us = 20000u;
+    dl = time_us_64() + us;
+    while (v_scanline != 0) {
+        if (time_us_64() >= dl)
+            return 0;
+        tight_loop_contents();
+    }
+    return 1;
 }
 
 /* Enter a graphics mode - BBC 0-5, or MODE 7 (320x240, 16 colours) -

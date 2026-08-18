@@ -6189,6 +6189,7 @@ static int mm_fb_wr = MM_FB_N;          /* where drawing goes now */
 #define MM_GFXIOC_FBCOPY2  0x0033
 #define MM_GFXIOC_MERGE    0x0034
 #define MM_GFXIOC_VSYNC    0x0019
+#define MM_GFXIOC_VSYNCTRY 0x003E
 
 /* The layer is owned: one process at a time holds it, and the kernel
  * takes it back on exit, exec or a mode change.  So CREATE is a claim
@@ -6215,17 +6216,48 @@ static void mm_fb_copy_hw(int src, int dst)
               (void *)(long)((src << 4) | dst));
 }
 
+/*
+ * Wait for the top of blanking WITHOUT holding the processor.
+ *
+ * The kernel is the only thing that can see the scanline, but it does
+ * not preempt inside a syscall - so the old "spin in the kernel until
+ * v_scanline is 0" stopped every other process for up to a frame,
+ * 16.7ms, every time a program merged.  With a MOD player running that
+ * is audible: its queue drains between merges and the music pulses.
+ *
+ * GFXIOC_VSYNCTRY does the same spin BOUNDED, so this loops on it and
+ * is back in user mode - preemptible, tick and all - between the
+ * slices.  2ms a slice is nine tries to cover a frame: nine crossings
+ * at 2us against 16.7ms of somebody else's CPU handed back.
+ *
+ * Bounded overall for the same reason the kernel's version was: if the
+ * scanout ever stops, a program must not hang waiting for a raster
+ * that is not coming.
+ */
+static void mm_fb_vsync_wait(void)
+{
+    int i;
+
+    if (mm_gfx_open() < 0)
+        return;
+    for (i = 0; i < 32; i++)
+        if (ioctl(mm_gfx_fd, MM_GFXIOC_VSYNCTRY, (void *)2000L) != 0)
+            return;
+}
+
 static int mm_fb_merge_hw(int colour)
 {
     if (mm_gfx_open() < 0)
         return -1;
+    /* The kernel merge no longer waits: the wait is here, where the
+       program can be taken off the processor while it happens. */
+    mm_fb_vsync_wait();
     return ioctl(mm_gfx_fd, MM_GFXIOC_MERGE, (void *)(long)colour);
 }
 
 static void mm_fb_wait_hw(void)
 {
-    if (mm_gfx_open() >= 0)
-        ioctl(mm_gfx_fd, MM_GFXIOC_VSYNC, (void *)0L);
+    mm_fb_vsync_wait();
 }
 
 /* Flood whatever is currently being drawn on.  One rectangle: the
