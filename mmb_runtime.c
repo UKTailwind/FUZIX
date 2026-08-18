@@ -5509,7 +5509,27 @@ MMINTEGER mm_keydown(MMINTEGER n)
 #define MM_GFXIOC_PIXELS   0x0014
 #define MM_GFXIOC_RECTS    0x0015
 #define MM_GFXIOC_RECT     0x0012
-#define MM_BATCH           512          /* items per crossing */
+/*
+ * Items per crossing.
+ *
+ * This sizes THREE static buffers - mm_ptbuf, mm_colq and mm_pixels'
+ * colbuf - and they are bss in every BASIC process on the machine, so
+ * the number is a memory decision as much as a speed one.  At 512 it
+ * was 6,144 bytes of every program's footprint.
+ *
+ * The economics say it need not be: a crossing costs 2us and a pixel
+ * store 15ns, so the per-point cost is 15ns + 2000ns/N.  That is 19ns
+ * at 128 against 19.9ns at 512 - and in absolute terms, ten thousand
+ * scattered points cost 78 crossings instead of 20, which is 116us
+ * against 39us.  Both are nothing beside the 150ms a screen of them
+ * takes to draw.  Past about 128 the syscall is already amortised into
+ * noise and every further item is bytes for nothing.
+ *
+ * 128 keeps 1,536 bytes of the three and gives 4,608 back - more than
+ * a block of the 84 this machine has, for every program, measured
+ * against t_pixel.bas which draws 40,000 of them.
+ */
+#define MM_BATCH           128          /* items per crossing */
 
 struct mm_gfx_pt { short x, y; };
 struct mm_gfx_rc { short x1, y1, x2, y2; };
