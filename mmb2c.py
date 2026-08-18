@@ -4537,23 +4537,40 @@ class Conv(object):
                 return
             self.err("only FRAMEBUFFER CREATE, LAYER, CLOSE, WRITE, COPY, "
                      "MERGE and WAIT are translated")
-        if up == 'SYSTEM' or (up in ('SAVE', 'LOAD') and self.is_kw('IMAGE', 1)):
+        _loadprog = None
+        if up == 'LOAD':
+            for _kw, _p in (('IMAGE', 'loadimage'), ('BMP', 'loadimage'),
+                            ('JPG', 'loadjpg'), ('PNG', 'loadpng')):
+                if self.is_kw(_kw, 1):
+                    _loadprog = _p
+                    break
+        if (up == 'SYSTEM' or _loadprog is not None
+                or (up == 'SAVE' and self.is_kw('IMAGE', 1))):
             # SYSTEM prog$ [, arg ...]        run a program and wait
             # SAVE IMAGE f$ [, x, y, w, h]    both are programs
             # LOAD IMAGE f$ [, x, y]
+            # LOAD BMP   f$ [, x, y]          the reference's own synonym
+            # LOAD JPG   f$ [, x, y [, mode [, xi, yi [, scale]]]]
+            # LOAD PNG   f$ [, x, y [, transparent [, cutoff]]]
             #
             # An argv, not a command line: nothing to quote and no
             # shell in the middle.  MMBasic has no SYSTEM - it is
             # firmware with nothing to run - so that spelling is ours,
-            # but SAVE IMAGE and LOAD IMAGE are the interpreter's own
-            # and are simply handed to /usr/bin/saveimage and
-            # /usr/bin/loadimage.
+            # but SAVE IMAGE and the LOAD family are the interpreter's
+            # own and are simply handed to /usr/bin/saveimage,
+            # /usr/bin/loadimage, /usr/bin/loadjpg and /usr/bin/loadpng.
+            #
+            # LOAD JPG's arguments are passed straight through in the
+            # reference's order - x, y, dither mode, image offsets,
+            # scale - so a program written for a PicoMite needs no
+            # edit.  The mode is parsed and ignored there, as it is in
+            # loadimage: see the note in loadjpg.c about dithering.
             if up == 'SYSTEM':
                 self.i += 1
                 prog = None
             else:
                 self.i += 2
-                prog = 'saveimage' if up == 'SAVE' else 'loadimage'
+                prog = 'saveimage' if up == 'SAVE' else _loadprog
             self.emit('mm_run_begin();')
             if prog is not None:
                 self.emit('mm_run_arg(%s);' % c_string_literal(prog))
@@ -4575,8 +4592,8 @@ class Conv(object):
             # The SPRITE family (graphics/Sprite.c), engine in
             # mmb_sprite.h on the BLIT row workhorses.  Deferred there
             # and refused here by name: SCROLL (Phase 4 of
-            # PLAN-games.md - it wants the kernel's SCROLL2), LOADPNG
-            # and LOADBMP (want the image decoders).
+            # PLAN-games.md - it wants the kernel's SCROLL2) and
+            # LOADBMP (wants the BMP decoder).  LOADPNG translates.
             self.uses_sprite = True
             self.uses_blit = True
             if self.is_kw('MEMORY', 1) or self.is_kw('COMPRESSED', 1):
@@ -4796,9 +4813,31 @@ class Conv(object):
                 self.uses_interrupts = True
                 self.emit('mmi_st_noint();')
                 return
-            for kw in ('LOADPNG', 'LOADBMP'):
-                if self.is_kw(kw, 1):
-                    self.err('SPRITE %s is not translated' % kw)
+            if self.is_kw('LOADPNG', 1):
+                # SPRITE LOADPNG [#]n, f$ [, transparent [, cutoff]]
+                #
+                # The decoding is /usr/bin/loadpng's, in another
+                # process, and the sprite comes back down a pipe - see
+                # mms_loadpng.  transparent carries MMBasic's sign
+                # trick (-n = substitute n for opaque black) and is
+                # passed through untouched; cutoff defaults to 30 here,
+                # not LOAD PNG's 20, as in the reference.
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                f = self.as_str(self.expr())
+                t = '0LL'
+                c = '30LL'
+                if self.accept_op(','):
+                    t = self.as_int(self.expr())
+                    if self.accept_op(','):
+                        c = self.as_int(self.expr())
+                self.emit('mms_loadpng(%s, %s, %s, %s);'
+                          % (n, f, t, c))
+                return
+            if self.is_kw('LOADBMP', 1):
+                self.err('SPRITE LOADBMP is not translated')
             self.err('unknown SPRITE form')
         if up == 'BLIT':
             # BLIT READ [#]n, x, y, w, h        screen -> buffer 1-64

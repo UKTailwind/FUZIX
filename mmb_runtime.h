@@ -921,6 +921,12 @@ MMINTEGER mm_vpos(void);            /* MM.VPOS                         */
  * first, as MMBasic does - see the definition. */
 MMINTEGER mm_keydown(MMINTEGER n);
 
+/* Run the collected argv and read its output - see mm_run_pipe in
+   mmb_runtime.c.  Finish with mm_run_pipe_close, always. */
+int mm_run_pipe(void);
+MMINTEGER mm_run_pipe_close(int fd);
+MMINTEGER mm_run_pipe_read(int fd, void *buf, int n);
+
 #define MM_RAISE(msg)      do { mm_error(msg); return; } while (0)
 #define MM_RAISEV(msg, v)  do { mm_error(msg); return (v); } while (0)
 

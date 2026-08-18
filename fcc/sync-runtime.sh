@@ -1,9 +1,19 @@
 #!/bin/sh
 #
-# The master copies of the mm runtime live in this repo.  bcrun's
-# hosted build (FUZIX Applications/CC, bcrun_mm.c) compiles verbatim
-# copies of them; re-run this after editing mmb_runtime.c or any
-# mmb_*.h so the two trees stay identical.
+# The master copies of the mm runtime AND of the C translator live in
+# this repo.  bcrun's hosted build (FUZIX Applications/CC, bcrun_mm.c)
+# compiles verbatim copies of the runtime, and the board's mmbc is built
+# there from verbatim copies of mmbc*.c; re-run this after editing
+# mmb_runtime.c, any mmb_*.h, or any mmbc source, so the two trees stay
+# identical.
+#
+# THE TRANSLATOR WAS NOT IN HERE UNTIL 2026-08-18, and it is the worst
+# omission of the set: mmbc is what turns BASIC into C ON THE BOARD, so
+# a stale copy there builds a translator that does not know a keyword
+# this repo's gates have just proved.  It is silent - the build
+# succeeds, cgate passes here, and the board rejects the program.
+# Found when LOAD JPG translated on the host and Applications/CC still
+# held the previous day's mmbc_stmt.c.
 #
 # EVERY mmb_*.h, by glob, deliberately.  This used to be a
 # hand-maintained list and the list was wrong three separate times:
@@ -24,10 +34,11 @@ FCC=${FCC:-/home/peter/src/FUZIX/Applications/CC}
 [ -d "$FCC" ] || { echo "sync-runtime: no $FCC" >&2; exit 1; }
 
 cp "$M/mmb_runtime.c" "$M"/mmb_*.h "$FCC/" || exit 1
+cp "$M"/mmbc/mmbc*.c "$M"/mmbc/mmbc*.h "$FCC/" || exit 1
 
 bad=0
 n=0
-for f in "$M/mmb_runtime.c" "$M"/mmb_*.h; do
+for f in "$M/mmb_runtime.c" "$M"/mmb_*.h "$M"/mmbc/mmbc*.c "$M"/mmbc/mmbc*.h; do
 	b=$(basename "$f")
 	n=$((n + 1))
 	if ! cmp -s "$f" "$FCC/$b"; then
@@ -39,4 +50,4 @@ if [ "$bad" != 0 ]; then
 	echo "sync-runtime: $bad file(s) differ after copying" >&2
 	exit 1
 fi
-echo "synced $n files (mmb_runtime.c + every mmb_*.h) -> $FCC"
+echo "synced $n files (mmb_runtime.c, every mmb_*.h, every mmbc source) -> $FCC"
