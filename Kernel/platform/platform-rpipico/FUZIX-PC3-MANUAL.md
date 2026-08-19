@@ -210,8 +210,7 @@ Two things handle it. A keyboard that reports **no num lock light** is
 taken to have no keypad and starts with num lock off (it says so at
 boot). That does not catch every such keyboard — one that reports a num
 lock light while having no keypad is indistinguishable from a full-size
-keyboard — so **pressing Num Lock is also remembered**, per keyboard, for
-as long as the machine stays on.
+keyboard — so **pressing Num Lock is also remembered**, per keyboard.
 
 To ask what is going on:
 
@@ -221,13 +220,18 @@ num lock on
 keyboard 04d9:0006, num lock LED declared
 ```
 
-and to change it: `picoctl numlock off`. The kernel does not write
-files, so a setting is only permanent if it is named in `/etc/rc`, where
-each keyboard can have its own line:
+and to change it: `picoctl numlock off`. **That is remembered across
+reboots**: the kernel itself writes no files, so `picoctl` keeps a line
+per keyboard in `/etc/numlock` whenever a setting changes, and `/etc/rc`
+replays them with `picoctl numlock --load` at every boot. Add `--once`
+to change the setting without saving it. The full syntax, including
+setting a keyboard that is not plugged in yet, is in
+[Commands at the `#` prompt](#shell-commands).
 
-```
-picoctl numlock off 04d9:0006
-```
+One thing that can mislead: the keyboard remembers its own num-lock
+state, and the hub is externally powered, so it keeps that state across
+a warm reboot. A reading taken right after a reboot tells you what the
+keyboard is doing, not what the machine decided.
 
 To power off, type `shutdown` (or at minimum `sync`, then wait a
 moment). After an unclean power-off the next boot repairs the
@@ -2682,7 +2686,8 @@ Everything the kernel will do on request that has no better home.
 # picoctl numlock                report
 # picoctl numlock off            for the keyboard plugged in now
 # picoctl numlock on 04b3:3025   for one that is not
-# picoctl numlock off --once     do not save it
+# picoctl numlock off --once     change it without saving
+# picoctl numlock --load         replay the saved settings (/etc/rc does this)
 ```
 
 `picoctl flash` is the polite way to reach the bootloader: `sync`,
