@@ -102,14 +102,26 @@ back from the pool."*
    73 of the 84, so five blocks is affordable but not free, and it is
    the option to reach for last.
 
-### Where the tree is left
+### Where the 1,624 bytes of new RAM-resident code came from
 
-`PC3_NET=0` is the shipped kernel, unchanged. `PC3_NET=1` compiles and
-links everything and then **fails the link by 15,544 bytes**, on
-purpose: that failure is the current, honest state of the question. To
-build a measurement image, widen the split by 20K - `memory_ram.incl`
-to `RAM 0x31000` / `PROGPOOL 316k`, and `-DTOTALMEM=316` - which is how
-the numbers above were taken.
+Worth knowing, because it is not what it looks like. The largest single
+item is 606 bytes of **merged string pool** - GCC emits string literals
+into `.rodata.<func>.str1.4` sections which ld merges into one output
+chunk, and the map attributes the whole chunk to its first contributor
+(`devices.c.o`). So lwIP's and the cyw43 driver's assertion and warning
+strings land in the kernel's RAM-resident string pool.
+
+That pool is 8,330 bytes and it is *all* in RAM, which looks like two
+free blocks waiting to be claimed. It is not: `rawflash.c` and dhara
+are deliberately RAM-resident because they run while the flash is
+erasing, and a `kprintf` on that path reading its format string from
+XIP would hang the machine. Moving the pool wholesale is therefore not
+a free win, and that is presumably why it was never done. If those 606
+bytes ever matter on their own, `LWIP_NOASSERT` drops most of them.
+
+The rest is ordinary: sem 246, unique_id 132, gpio 108, dma 108,
+claim 79, irq 32, pio 19 - SDK helpers that were never referenced
+before and are not named for flash.
 
 ## Step 1 - the radio, no stack
 
@@ -142,12 +154,42 @@ with the radio associated - both idle-polling and mid-transfer - while
 looking at the screen. Scanout contention is this port's known sore
 point and the packet path now shares the QMI with it.
 
-## Step 3 - the PSRAM A/B
+## Step 3 - lwIP's memory into PSRAM. DONE, and taken out of order.
 
-`LWIP_RAM_HEAP_POINTER` at an `arena.c` block plus `MEMP_MEM_MALLOC=1`,
-then re-run step 2's measurements unchanged. Worth ~11K of SRAM.
+Done before step 1 deliberately: it decides whether this feature costs
+the process pool one block or five, it is pure build-side work with no
+hardware risk, and step 1 needs a board in front of you.
 
-Two things are already known about this:
+`MEMP_MEM_MALLOC=1` makes every lwIP pool - pbufs, PCBs, TCP segments -
+come from lwIP's heap instead of being its own static array, and
+`LWIP_RAM_HEAP_POINTER` points that heap at `pc3_lwip_heap`, a 64K
+array `net_cyw43.c` places in the PSRAM window with the SDK's
+`__uninitialized_psram`. That is the same mechanism `display.c` uses
+for the spare framebuffers, and `psram.c`'s `psram_static_len()` then
+moves the PSRAM block device and the arena allocator up above it
+without being told anything.
+
+| | SRAM-only | lwIP in PSRAM |
+|---|---|---|
+| RAM `.bss` delta | +15,360 | **+2,984** |
+| RAM `.data` delta | +1,624 | +1,624 |
+| total extra SRAM | 16,984 | **4,608** |
+| process pool | 336K -> 316K (**5 blocks**) | 336K -> 332K (**1 block**) |
+| PSRAM used | 0 | 65,600 (0.8%, off the top of the swap disc) |
+
+What is left in SRAM is `cyw43_state` (2,448 - driver state and the
+buffers the PIO and DMA reach, which cannot move), the 1,624 of code
+above, and about 500 bytes of small statics. The RAM region ends with
+1,440 bytes free, which is the budget steps 1-4 have to fit in.
+
+`PC3_NET=1` now builds with one flag and no manual edits:
+`linker_overrides_net/memory_ram.incl` carves the 332K split and is
+added ahead of the base override directory so it shadows that one file,
+and the CMakeLists sets `TOTALMEM 332` to match. A `PC3_NET=0` build
+never sees either and is byte-identical to the shipped kernel apart
+from the `__TIME__` stamp - verified from a clean build directory.
+
+Two things were known before starting, and both held:
 
 * **No DMA ever touches a pbuf.** `cyw43_lwip.c` fills receive pbufs
   with `pbuf_take` (a memcpy) and transmits by copying out through the
@@ -162,6 +204,14 @@ Two things are already known about this:
   `mem.c`. What MMBasic *does* prove is that network-path data works
   from PSRAM at speed - its TLS record buffers and cert parsing live
   there.
+
+**Still to verify on the board.** This is a link-time result. Nothing
+has moved a packet, so the cost of putting the packet path on the QMI
+next to the scanout is still unmeasured, and that is step 2's job: the
+graphics stress with the radio associated, idle-polling and
+mid-transfer, watching the screen. If PSRAM pbufs fleck the display,
+the fallback is not "back to SRAM" - it is the five-block version, and
+that is a decision with a number attached rather than a guess.
 
 ## Step 4 - the first socket
 

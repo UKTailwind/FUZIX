@@ -33,6 +33,23 @@
 #include "lwip/raw.h"
 #include "lwip/timeouts.h"
 
+#include <pico/platform/sections.h>     /* __uninitialized_psram */
+
+/*
+ * lwIP's heap, and with MEMP_MEM_MALLOC set it is lwIP's ONLY pool:
+ * pbufs, PCBs and TCP segments all come out of here.  It is placed in
+ * the PSRAM window by the linker, the same mechanism display.c uses
+ * for the spare framebuffers, and psram.c's psram_static_len() moves
+ * the PSRAM block device and the arena allocator up above it without
+ * being told.
+ *
+ * The two extra records are lwIP's own heap boundary markers, plus
+ * slack for the alignment mem_init() applies to the pointer it is
+ * given.  Undersizing this would not fail the build - lwIP would just
+ * run its heap off the end of the array and into the swap disc.
+ */
+unsigned char pc3_lwip_heap[MEM_SIZE + 64] __uninitialized_psram("lwip");
+
 /* Never set.  See the header comment. */
 volatile uint8_t pc3_net_enable;
 

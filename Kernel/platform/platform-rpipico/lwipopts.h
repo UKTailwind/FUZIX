@@ -1,24 +1,39 @@
 /*
  * lwIP configuration for the Pico Computer 3 Fuzix port.
  *
- * This is deliberately the FLOOR, not a comfortable configuration: the
- * first question this port has to answer about networking is what it
- * costs in SRAM, and the honest way to ask it is to measure the
- * smallest stack that could still do the job and then decide what to
- * buy back.  See PC3-NET-PLAN.md.
+ * WHERE lwIP's MEMORY LIVES IS THE WHOLE DESIGN HERE.
  *
- * The numbers that matter:
+ * Step 0 measured the stack with everything static, in SRAM, at the
+ * smallest configuration that could still work: 15,360 bytes of .bss,
+ * on a kernel whose RAM region has 1,952 bytes spare.  Two thirds of
+ * that was the pbuf pool and lwIP's own heap.
  *
- *   PBUF_POOL_SIZE * PBUF_POOL_BUFSIZE   the receive pool, static .bss
- *   MEM_SIZE                             lwIP's own heap, static .bss
- *   the MEMP_NUM_* pools                 one static array each
+ * So both now come out of PSRAM instead:
  *
- * All three are static arrays here (MEM_LIBC_MALLOC is 0 and
- * MEMP_MEM_MALLOC is 0), which is what makes them measurable in the
- * map before a single packet moves.  Moving them into PSRAM is a
- * later, separate experiment - LWIP_RAM_HEAP_POINTER plus
- * MEMP_MEM_MALLOC - and it is deliberately NOT done here, so that the
- * baseline number is a baseline.
+ *   MEMP_MEM_MALLOC     every memp pool - pbufs, PCBs, TCP segments -
+ *                       is allocated from lwIP's heap rather than
+ *                       being its own static array.
+ *   LWIP_RAM_HEAP_POINTER
+ *                       that heap is pc3_lwip_heap, which net_cyw43.c
+ *                       places in the PSRAM window with the SDK's
+ *                       __uninitialized_psram, exactly as display.c
+ *                       places the spare framebuffers.  psram.c's
+ *                       psram_static_len() then keeps the PSRAM block
+ *                       device and the arena allocator above it, so
+ *                       nothing has to be told about it twice.
+ *
+ * This is safe because NO DMA EVER TOUCHES A PBUF: cyw43_lwip.c fills
+ * a receive pbuf with pbuf_take (a memcpy) and transmits by copying
+ * out through the driver's own SRAM buffer.  The only thing that must
+ * stay in SRAM is cyw43_state, which holds those bus buffers, and it
+ * is the driver's own static.
+ *
+ * MMBasic did NOT do this, and the reason does not transfer: its lwIP
+ * heap has to stay on the C heap because the MMBasic heap is wiped by
+ * InitHeap(true) on every program RUN, while lwIP holds state (the
+ * netif's DHCP struct) that outlives a RUN.  A kernel arena has no
+ * such event.  What MMBasic does prove is that network-path data works
+ * from PSRAM at speed.
  *
  * NO_SYS: there is no RTOS under this.  lwIP runs from the kernel's
  * existing pump (plt_idle, and PendSV when a spinning process starves
@@ -35,7 +50,22 @@
 
 #define MEM_ALIGNMENT               4
 #define MEM_LIBC_MALLOC             0
-#define MEMP_MEM_MALLOC             0
+
+/* The two lines that move the stack into PSRAM.  pc3_lwip_heap is
+   defined in net_cyw43.c; the array is MEM_SIZE plus lwIP's own two
+   boundary records and alignment slack. */
+#define MEMP_MEM_MALLOC             1
+extern unsigned char pc3_lwip_heap[];
+#define LWIP_RAM_HEAP_POINTER       pc3_lwip_heap
+
+/* 64K, where the SRAM version could afford 4K.  With MEMP_MEM_MALLOC
+   this one heap now serves pbufs, PCBs and TCP segments, so it has to
+   be big enough for all of them at once - and out here it is 0.8% of
+   the PSRAM, against 19% of the process pool if it were in SRAM.
+   The MEMP_NUM_* limits below stop applying once the pools come from
+   the heap; they are kept as documentation of the intended shape and
+   as the numbers to restore if this ever has to go back to SRAM. */
+#define MEM_SIZE                    (64 * 1024)
 
 /* Protocols.  DNS is off: Fuzix's libc has its own resolver
    (Library/libs/resolv.c) and the netd applications use it, so a
@@ -57,17 +87,12 @@
 #define LWIP_NETIF_LINK_CALLBACK    1
 #define LWIP_DHCP_DOES_ACD_CHECK    0
 
-/* The floor.  A working configuration will want more of both - each
-   pbuf is about 1.5K and MEM_SIZE bounds how much TCP can have queued
-   - but every byte added here is a byte off the process pool until
-   the PSRAM experiment says otherwise. */
-#define MEM_SIZE                    4000
-#define PBUF_POOL_SIZE              4
+#define PBUF_POOL_SIZE              16
 #define TCP_MSS                     1460
-#define TCP_WND                     (2 * TCP_MSS)
-#define TCP_SND_BUF                 (2 * TCP_MSS)
+#define TCP_WND                     (4 * TCP_MSS)
+#define TCP_SND_BUF                 (4 * TCP_MSS)
 #define TCP_SND_QUEUELEN            ((4 * TCP_SND_BUF + TCP_MSS - 1) / TCP_MSS)
-#define MEMP_NUM_TCP_SEG            16
+#define MEMP_NUM_TCP_SEG            32
 
 /* NSOCKET in Fuzix is 8, so there is no point having room for more
    than that plus the listeners they came from. */

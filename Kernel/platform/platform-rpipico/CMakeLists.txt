@@ -48,45 +48,6 @@ endif()
 if(DEFINED ENV{PC3_NO_KBD_LEDS})
 	add_compile_definitions(PC3_NO_KBD_LEDS=1)
 endif()
-option(TOTALMEM "specify how much TOTALMEM is present" 0)
-
-add_compile_definitions(
-		# The PC3 is an RP2350B: 48 GPIOs, ADC on GP40-47.  The pico2
-		# board header defaults to the A variant, which makes every
-		# SDK GPIO mask operation on pins >= 32 silently wrap (shift
-		# by pin & 31) and leaves the high-bank pad pull-downs in
-		# place - GP34-37 joystick reads and the GP41-44 ADC were
-		# both dead until this.
-		PICO_RP2350A=0
-		# The PC2 and PC3 always carry 16M.  The pico2 board header
-		# defaults to 4M, and devflash.c sizes the dhara disk as
-		# PICO_FLASH_SIZE_BYTES - FLASH_OFFSET, so the default confined
-		# the disk to the first quarter of the chip and left twelve
-		# megabytes doing nothing at all.
-		PICO_FLASH_SIZE_BYTES=\(16*1024*1024\)
-		PICO_HEAP_SIZE=0x0
-		PICO_NO_BINARY_INFO=1
-		# The default alarm pool drives the system tick (devices.c).
-		# It was disabled here, which is why the tick was hand-rolled on
-		# a bare hardware alarm - and a hand-rolled re-arm is what froze
-		# the machine: hardware_alarm_set_target leaves the alarm UNarmed
-		# when the target has already passed, nothing else re-armed it,
-		# and one missed deadline stopped the timer for good.  The pool
-		# keeps its entries in an ordered list and re-fires immediately
-		# on a miss, so it cannot end up unarmed.  MMBasic runs its own
-		# tick this way (PicoMite.c:903, add_repeating_timer_us(-1000)).
-		#
-		# It costs static RAM only - the default pool and its entries are
-		# static objects, not malloc'd, which matters because PICO_HEAP_SIZE
-		# is 0 here.  Two entries (24 bytes each) is one for the tick and
-		# one spare; the SDK default of 16 would be 384 bytes this port
-		# has not got.  Alarm 0 keeps the tick on the same hardware alarm
-		# and the same IRQ it has always used.
-		PICO_TIME_DEFAULT_ALARM_POOL_MAX_TIMERS=2
-		PICO_TIME_DEFAULT_ALARM_POOL_HARDWARE_ALARM_NUM=0
-    TOTALMEM=${TOTALMEM}
-		)
-
 # ---- CYW43 Wi-Fi / lwIP --------------------------------------------
 #
 # OFF by default and it must stay that way until the cost is known:
@@ -125,6 +86,58 @@ if(PC3_NET)
 		CYW43_PIO_CLOCK_DIV_DYNAMIC=1
 	)
 endif()
+
+option(TOTALMEM "specify how much TOTALMEM is present" 0)
+# Networking costs the process pool exactly one 4K block: 336K -> 332K.
+# Measured, see PC3-NET-PLAN.md - and it is one block rather than five
+# only because lwIP's heap and every one of its pools now live in PSRAM
+# (lwipopts.h).  What is left in SRAM is cyw43_state, which holds the
+# buffers the PIO/DMA bus transfers use and therefore cannot move, plus
+# about 1.4K of newly RAM-resident SDK code.
+#
+# linker_overrides_net/memory_ram.incl carves the matching split.  The
+# two must agree and nothing checks that they do - the same warning the
+# base memory_ram.incl carries about TOTALMEM.
+if(PC3_NET)
+	set(TOTALMEM 332)
+endif()
+
+add_compile_definitions(
+		# The PC3 is an RP2350B: 48 GPIOs, ADC on GP40-47.  The pico2
+		# board header defaults to the A variant, which makes every
+		# SDK GPIO mask operation on pins >= 32 silently wrap (shift
+		# by pin & 31) and leaves the high-bank pad pull-downs in
+		# place - GP34-37 joystick reads and the GP41-44 ADC were
+		# both dead until this.
+		PICO_RP2350A=0
+		# The PC2 and PC3 always carry 16M.  The pico2 board header
+		# defaults to 4M, and devflash.c sizes the dhara disk as
+		# PICO_FLASH_SIZE_BYTES - FLASH_OFFSET, so the default confined
+		# the disk to the first quarter of the chip and left twelve
+		# megabytes doing nothing at all.
+		PICO_FLASH_SIZE_BYTES=\(16*1024*1024\)
+		PICO_HEAP_SIZE=0x0
+		PICO_NO_BINARY_INFO=1
+		# The default alarm pool drives the system tick (devices.c).
+		# It was disabled here, which is why the tick was hand-rolled on
+		# a bare hardware alarm - and a hand-rolled re-arm is what froze
+		# the machine: hardware_alarm_set_target leaves the alarm UNarmed
+		# when the target has already passed, nothing else re-armed it,
+		# and one missed deadline stopped the timer for good.  The pool
+		# keeps its entries in an ordered list and re-fires immediately
+		# on a miss, so it cannot end up unarmed.  MMBasic runs its own
+		# tick this way (PicoMite.c:903, add_repeating_timer_us(-1000)).
+		#
+		# It costs static RAM only - the default pool and its entries are
+		# static objects, not malloc'd, which matters because PICO_HEAP_SIZE
+		# is 0 here.  Two entries (24 bytes each) is one for the tick and
+		# one spare; the SDK default of 16 would be 384 bytes this port
+		# has not got.  Alarm 0 keeps the tick on the same hardware alarm
+		# and the same IRQ it has always used.
+		PICO_TIME_DEFAULT_ALARM_POOL_MAX_TIMERS=2
+		PICO_TIME_DEFAULT_ALARM_POOL_HARDWARE_ALARM_NUM=0
+    TOTALMEM=${TOTALMEM}
+		)
 
 pico_sdk_init()
 
@@ -246,6 +259,13 @@ endif()
 
 pico_set_float_implementation(fuzix none)
 pico_set_double_implementation(fuzix pico)
+# Added BEFORE the base directory on purpose: the SDK searches these
+# paths in the order they are added, so linker_overrides_net shadows
+# the one file it contains (memory_ram.incl - the SRAM split) and
+# everything else still comes from linker_overrides.
+if(PC3_NET)
+	pico_add_linker_script_override_path(fuzix ${CMAKE_CURRENT_LIST_DIR}/linker_overrides_net)
+endif()
 pico_add_linker_script_override_path(fuzix ${CMAKE_CURRENT_LIST_DIR}/linker_overrides)
 pico_add_extra_outputs(fuzix)
 
