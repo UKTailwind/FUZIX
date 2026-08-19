@@ -688,6 +688,15 @@ host it writes the slightly different C that gcc prefers; `--fcc` and
 `--gcc` force either form, which only matters if you are moving the
 generated C between the two.
 
+There is a shortcut. **`cc prog.bas` does both steps in one command**:
+it runs `mmbc` for you, into `prog.mb.c` — a deliberately different
+name, so that C you wrote yourself in `prog.c` is never overwritten —
+compiles that, and deletes it again with the other intermediates. It is
+the quickest way to get from BASIC to a running program, and the
+examples in this chapter are written the long way only so that each
+step is visible. Use `mmbc` on its own — or `cc -k` — whenever you want
+to keep the generated C and read it.
+
 ## A first program
 
 ```
@@ -760,8 +769,9 @@ Do
 Loop Until count%=4
 End
 
-# cc bench.bas
-wrote bench.mb.c
+# mmbc bench.bas
+wrote bench.c
+# cc bench.c
 .......................................................................
 # ./bench.bc
 MMBASIC benchmark (C) KnivD 2016
@@ -795,8 +805,9 @@ with a `solar_eclipse.in` holding a date to feed it:
 
 ```
 # cd /root/cc
-# cc solar_eclipse.bas
-wrote solar_eclipse.mb.c
+# mmbc solar_eclipse.bas
+wrote solar_eclipse.c
+# cc solar_eclipse.c
 ...........................................................
 # ./solar_eclipse.bc < solar_eclipse.in
 ...
@@ -2806,6 +2817,9 @@ Each of these has a chapter of its own; this is the summary.
 `cc prog.bas` is the whole build in one command: it runs `mmbc` first
 and writes `prog.mb.c`, a deliberately different name from `prog.c` so
 that compiling `prog.bas` can never overwrite C you wrote yourself.
+That file is deleted again with the other intermediates, so the
+shortcut leaves no C behind: pass `-k` to keep it, or run `mmbc` on its
+own when the generated C is what you are after.
 `mmbc --report` lists implied globals and any line it could not
 translate; `--strict` stops on the first of them instead of commenting
 it out and carrying on.
