@@ -34,6 +34,7 @@
 #undef ssize_t
 #undef time_t
 #include "pico/time.h"
+#include "hardware/timer.h"
 #include <hardware/structs/usb.h>
 #include <hardware/structs/nvic.h>
 #include <hardware/irq.h>
@@ -120,7 +121,19 @@ static hid_slot_t hid_slots[HID_NSLOTS];
 static bool usbh_inited;
 
 static volatile uint32_t last_pump_ms;
+static volatile uint32_t last_pump_us;
 static void usb_pump(void);
+
+/* The 32-bit raw microsecond counter, read straight out of the timer.
+ * time_us_64() is a syscall-free SDK call but still a 64-bit assembly
+ * of two registers plus a divide at the call site; this is one load,
+ * which is what makes it affordable per character.  Wraps every ~71
+ * minutes, and every use below is an unsigned DIFFERENCE, which is
+ * correct across the wrap. */
+static inline uint32_t timer_raw_us(void)
+{
+    return timer_hw->timerawl;
+}
 
 /* Advance the report timers: called from the 200 Hz kernel tick (IRQ
  * context - plain counters only, as MMBasic's 1 ms timer does). The
@@ -459,10 +472,14 @@ static void usb_rescue(void)
 /* The pump body: only ever entered via usb_pump_stacked (tricks.S),
  * which switches to the dedicated USB stack first - tuh_task's depth
  * must never land on the kernel stack (it overflows into udata). */
+/* tuh_task is not reentrant; guard against nested pumping.  File scope
+ * rather than function-static because usbkbd_pump_if_starved has to see
+ * it: that one is called from the tty output path, which a HID callback
+ * can re-enter through kprintf. */
+static volatile bool in_task;
+
 void usb_pump_c(void)
 {
-    /* tuh_task is not reentrant; guard against nested pumping */
-    static volatile bool in_task;
     if (usbh_inited && !in_task) {
         in_task = true;
         usb_rescue();
@@ -470,6 +487,7 @@ void usb_pump_c(void)
         hid_poll();
         kbd_repeat_check();
         last_pump_ms = (uint32_t)(time_us_64() / 1000);
+        last_pump_us = timer_raw_us();
         in_task = false;
     }
 }
@@ -497,6 +515,51 @@ void plt_idle(void)
 void console_sleeping(uint8_t devn)
 {
     (void)devn;
+    usbkbd_task();
+}
+
+/*
+ * Console tty OUTPUT hook: pump if a long stream has starved the pump.
+ *
+ * The three thread-context pump sites all assume the process eventually
+ * stops running: plt_idle wants an idle kernel, console_sleeping wants a
+ * READER about to block, and the preempt trampoline (devices.c) is gated
+ * on !udata.u_insys.  A process that only WRITES reaches none of them -
+ * it is always runnable, it never reads the tty, and it is inside write()
+ * for almost the whole of a line, since every character is rendered to
+ * the display on the way past.
+ *
+ * WHAT THAT LOOKED LIKE, and it is worth writing down because the shape
+ * is so specific: a program streaming PRINT output could not be stopped
+ * with ^C from the USB keyboard, while ^C from the serial console
+ * worked.  Typing during the stream produced EXACTLY ONE character, the
+ * first key pressed, and it appeared only once the program had ended.
+ *
+ * That is the signature of a starved pump rather than a lost signal.
+ * hid_poll leaves exactly ONE report request in flight per keyboard, and
+ * tuh_hid_report_received_cb - which decodes the report and is the only
+ * thing that lets hid_poll re-arm ("deliberately NO re-arm") - runs only
+ * from tuh_task.  So the first keypress completed its transfer in
+ * hardware and sat there undelivered; every later keypress had no
+ * outstanding request to complete and was lost on the wire.  The serial
+ * side needs none of this: rawuart_getc is drained from the tick.
+ *
+ * Called per character, so the test has to be cheap: one 32-bit timer
+ * load and a compare, with a real pump at most every 5ms.  The keyboard
+ * is polled at 20ms (report_rate), so 5ms costs nothing in latency and
+ * matches usbkbd_starved's own threshold.
+ */
+void usbkbd_pump_if_starved(void)
+{
+    /* in_task: a HID callback that prints would arrive back here on the
+     * dedicated USB stack, and usb_pump_stacked would switch to the
+     * stack it is already running on. */
+    if (!usbh_inited || in_task || udata.u_ininterrupt) {
+        return;
+    }
+    if ((uint32_t)(timer_raw_us() - last_pump_us) < 5000u) {
+        return;
+    }
     usbkbd_task();
 }
 

@@ -2187,6 +2187,17 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
     TextChanged = false;
     while (1)
     {
+        /* BEFORE the wait, not after it.  This used to sit below the
+         * key-polling loop, so the function-key line was only drawn
+         * once a key had been pressed: entering the editor left the
+         * bottom line blank until the reader either typed something or
+         * waited out the 50 empty polls - five seconds - that make
+         * PrintStatus redraw it.  That was the reported symptom, and
+         * the same off-by-one keystroke applied to every later redraw
+         * printScreen asked for. */
+        if (drawstatusline)
+            PrintFunctKeys(EDIT);
+        drawstatusline = false;
         statuscount = 0;
         ShowCursor(true);
         /* Once, not once per poll.  MMBasic's ShowCursor drove a hardware
@@ -2205,9 +2216,6 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
         } while (c == -1);
         ShowCursor(false);
 
-        if (drawstatusline)
-            PrintFunctKeys(EDIT);
-        drawstatusline = false;
         if (c == TAB)
         {
             strcpy((char *)buf, "        ");

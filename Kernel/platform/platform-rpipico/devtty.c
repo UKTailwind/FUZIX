@@ -167,6 +167,17 @@ void tty_putc(uint_fast8_t minor, uint_fast8_t c)
         return;
     struct ttydriver *drv = &ttydrivers[map->drv];
     drv->putc(map->tty, c);
+#ifdef CONFIG_PC3_USB_KBD
+    /* A process that only WRITES starves the USB host pump, and then
+     * the keyboard stops existing - see usbkbd_pump_if_starved for the
+     * whole story.  Here rather than in console_putc because this is
+     * one path with one exit, where console_putc has four and holds
+     * escape-sequence state across them. */
+    {
+        extern void usbkbd_pump_if_starved(void);
+        usbkbd_pump_if_starved();
+    }
+#endif
 }
 
 ttyready_t tty_writeready(uint_fast8_t minor)
