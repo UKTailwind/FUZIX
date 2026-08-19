@@ -3191,15 +3191,276 @@ both machines and compare. On the board, `sum FILE`.
 
 \newpage
 
+\newpage
+
+# Commands at the `#` prompt {#shell-commands}
+
+The shell is the Bourne shell and the machine underneath it is a
+V7-style Unix, so most of what you know already works. This chapter is
+about the rest: the programs that exist because this is a Pico Computer
+rather than a PDP-11, and the handful of places where the tools have
+been brought forward from 1979.
+
+Everything named here is on the card. That is checked rather than
+promised — `mancheck.sh` extracts every command name from this chapter
+and the next and looks for it in the built image, and the release will
+not go out if one is missing. The list used to be maintained by hand
+and had drifted badly: it offered a games collection of some thirty
+titles, an editor called `ue`, and an assembler, none of which were
+ever installed.
+
+## The machine itself: `picoctl`
+
+Everything the kernel will do on request that has no better home.
+
+```
+# picoctl flash                  reboot into the UF2 bootloader
+# picoctl keymap uk              us uk de fr es be
+# picoctl mode 2                 set the display mode
+# picoctl mode                   ... and back to the 80x40 text console
+# picoctl usbreset               re-enumerate after the DPDT switch
+# picoctl numlock                report
+# picoctl numlock off            for the keyboard plugged in now
+# picoctl numlock on 04b3:3025   for one that is not
+# picoctl numlock off --once     do not save it
+```
+
+`picoctl flash` is the polite way to reach the bootloader: `sync`,
+`remount -n / ro`, `sync`, then `picoctl flash`, and the drive appears
+without anyone touching the board.
+
+**Num lock is a property of the keyboard, not of the machine.** A
+keyboard with no numeric keypad usually overlays one onto
+`7890/uiop/jkl;/m` while num lock is on, and its own firmware does that
+from the LED report the host sends. Nothing in the USB descriptors
+distinguishes such a keyboard — a Raspberry Pi keyboard and a full-size
+Lenovo return byte-identical HID report descriptors — so the setting is
+remembered per keyboard in `/etc/numlock`, written when you change it
+and replayed by `/etc/rc`. That is why it survives a reboot and why
+each of your keyboards keeps its own answer.
+
+## Pictures
+
+These four are the programs `SAVE IMAGE`, `LOAD IMAGE`, `LOAD JPG` and
+`LOAD PNG` run, and they are just as useful typed at the prompt. All
+of them want a graphics mode — `picoctl mode 2` if you are at the text
+console.
+
+```
+# saveimage shot.bmp                     the whole screen
+# saveimage part.bmp 160 120 320 240     x y w h
+# loadimage shot.bmp                     at 0,0
+# loadimage tiger.bmp 0 0 4              dither mode 4
+# loadjpg photo.jpg                      at 0,0
+# loadjpg photo.jpg 0 0 0 0 0 2          binned 2:1, so 640x480 fits
+# loadpng logo.png 40 20                 at x,y
+# loadpng logo.png 0 0 -1                let the screen show through
+# loadpng -s logo.png > logo.spr         decode to a SPRITE, on stdout
+```
+
+The full argument lists, which are MMBasic's:
+
+| | |
+|---|---|
+| `saveimage` | `file.bmp [x y w h]` |
+| `loadimage` | `file.bmp [x [y [mode [ximage [yimage]]]]]` |
+| `loadjpg` | `file.jpg [x [y [mode [ximage [yimage [scale]]]]]]` |
+| `loadpng` | `file.png [x [y [transparent [cutoff]]]]` |
+
+`ximage`/`yimage` are the offset **into the picture**, so a large image
+can be cropped rather than scaled. `saveimage` writes a 24-bit BMP of
+any rectangle. `loadimage` is MMBasic's own BMP decoder and reads
+1/4/8/16/24/32-bit files, `BI_BITFIELDS` and RLE4/RLE8, dithering only
+when asked.
+
+**`transparent` defaults to 0, which is palette black**, so a PNG with
+a transparent surround draws a black box on a white screen. That looks
+like a bug and is not — a real PicoMite does the same, and the default
+is chosen so that `SPRITE LOADPNG` and `SPRITE SHOW`, which both treat
+index 0 as see-through, meet in the middle. Pass **-1** to let the
+screen show through instead. `cutoff` is the alpha above which a pixel
+counts as opaque.
+
+`loadjpg` decodes a block at a time, so its memory does not grow with
+the picture. `loadpng` cannot work that way — PNG filters refer to the
+row above and the whole image must be inflated first — so it takes the
+big buffers from the PSRAM arena and costs the process pool nothing.
+
+The `-s` form needs no graphics mode at all: it writes the decoded
+sprite to standard output as two 16-bit sizes followed by one colour
+index per byte. That is how `SPRITE LOADPNG` works, and it is also the
+way to convert artwork from the shell.
+
+## Sound
+
+```
+# playmp3 track.mp3            volume 80 by default
+# playmp3 track.mp3 40         0 to 100
+# playmp3 track.mp3 &          in the background, and carry on working
+# playwav clip.wav 60
+# playflac album.flac
+# playmod tune.mod 70          MOD, and it loops
+# playmod tune.mod 70 noloop   ... or plays once
+```
+
+| | |
+|---|---|
+| `playmp3`, `playwav`, `playflac` | `file [volume 0-100]` |
+| `playmod` | `file.mod [volume] [noloop]` |
+
+These are what `PLAY MP3`, `PLAY WAV`, `PLAY FLAC` and `PLAY MODFILE`
+run. **One plays at a time**: a second is refused by name and pid
+rather than allowed to talk over the first. Stop one with `kill -2`,
+or `PLAY STOP` from BASIC. `playmp3` decodes at about six times real
+time and leaves most of the machine to whatever else is running.
+
+`PLAY SOUND` and `PLAY TONE` have no command-line equivalent — the
+synthesiser lives in the kernel's DAC interrupt and is reached through
+`/dev/sys`.
+
+## Languages and the toolchain
+
+Each of these has a chapter of its own; this is the summary.
+
+```
+# cc prog.c                     -> prog.bc, and run it with ./prog.bc
+# cc prog.bas                   BASIC in one step, via mmbc
+# mmbc prog.bas                 -> prog.c, and stop there
+# bcdump prog.bc                disassemble the bytecode
+# bbcbasic                      BBC BASIC, with its own editor
+# fforth                        a complete ANS Forth
+# dc                            the V7 desk calculator
+```
+
+| | |
+|---|---|
+| `cc` | `[-o out] [-v] [-k] [-Ldir] file.c \| file.bas` |
+| `mmbc` | `source.bas [-o out.c] [--report] [--strict] [--fcc]` |
+| `bcdump` | `file.bc` |
+
+`cc prog.bas` is the whole build in one command: it runs `mmbc` first
+and writes `prog.mb.c`, a deliberately different name from `prog.c` so
+that compiling `prog.bas` can never overwrite C you wrote yourself.
+`mmbc --report` lists implied globals and any line it could not
+translate; `--strict` stops on the first of them instead of commenting
+it out and carrying on.
+
+`bcrun` executes a `.bc` file, and is what the `#!`-less `./prog.bc`
+actually invokes.
+
+## Editors
+
+```
+# mmedit prog.bas         MMBasic's own, with its function keys
+# vi hello.c              levee, a compact vi
+# ed                      the V7 line editor, still here
+```
+
+`mmedit` is described in its own chapter. `vi` and `levee` are two
+names for one program.
+
+## Getting files on and off
+
+```
+# fat ls                       list the FAT partition
+# fat ls basic                 ... a directory of it
+# fat get "my program.bas" /root/prog.bas
+# fat info
+# uue report.txt               -> report.uue, to paste into a terminal
+# uud prog.uue                 decode, recreating the original name
+# rx file                      XMODEM in, over /dev/tty2
+# sx file                      ... and out
+# dosread                      FAT12/16 floppy-era transfers
+# tar                          the classic archiver
+```
+
+`fat` takes `[-d device]` before its subcommand. The FAT partition is
+the one Windows can see, so it is the easy way to move a file from a
+PC; `uue`/`uud` need nothing but the console, and have a chapter of
+their own.
+
+## The clock, and housekeeping
+
+```
+# setdate                      show the time
+# setdate -w                   write the system time to the DS3231
+# setdate -a                   ask for a new one
+# df                           space
+# free                         memory, and what the swapper took
+# ps                           processes
+# uptime                       how long since the last boot
+# mount                        what is mounted
+# umount /dev/hdb3             ... and unmount it
+# remount -n / ro              read-only, before flashing
+# fsck /dev/hdb2               check a filesystem
+# sync                         flush the buffers
+# shutdown                     the tidy way to stop
+# halt                         ... and the blunt one
+# reboot                       start again
+```
+
+`setdate` also takes `-u` for UTC and `-0` to zero the clock.
+`swapon` exists but has nothing to do: there is no swap device any
+more, because the kernel takes an allocation the size of the process
+out of PSRAM when it needs to swap one out. `free` reports that.
+
+`setboot`, `prtroot` and `substroot` choose and report which partition
+the kernel boots from — see Appendix B.
+
+## Where this is not 1979
+
+Fuzix is a V7-style Unix and most of the userland is period-correct.
+These are the places it is deliberately not, and they are worth knowing
+because they are what makes shell work on the machine bearable.
+
+* **`awk` is Lucent's one true awk** — the maintained descendant of the
+  V7 original, by one of its authors, not a subset. Associative
+  arrays, user-defined functions, `getline` in each of its forms,
+  output pipes, dynamic regular expressions, `printf` and the maths
+  library. See [Text processing](#text-processing).
+* **The C library can print a fraction.** `printf("%f", x)` used to
+  print the letter `f`. `%e`, `%f` and `%g` work now, in `printf` and
+  `scanf`, and so do `%j` and `%z`. A bytecode program's `printf`
+  gained `%e` and `%g` too, where before they printed themselves *and*
+  misaligned every argument after them.
+* **`[` exists.** `/bin/test` was there and `/bin/[` was not, so every
+  bracket test in every shell script failed with `[: not found`.
+* **`sed`, `find`, `expr`, `seq` and `uname`** were all being compiled
+  and simply never installed. They are installed.
+* **`grep -q`, `ls -t` and `ls -1`** — small additions, and the ones a
+  script reaches for first.
+* **`mmedit`** is not a Unix tool at all: it is MMBasic's own
+  full-screen editor, keyword colouring and function keys included.
+
+**What is still period-correct**, so that a script does not surprise
+you: `grep` has basic regular expressions only and no `-E`; `sed` is
+MINIX's, with no `-E`; `sort` uses the V7 key syntax `+beg -end`
+rather than `-k`; `diff` has no `-u`. The table in
+[Text processing](#text-processing) has the detail.
+
+## What is not here
+
+A short list, because a manual that names a command the card does not
+have wastes more of your time than one that stays quiet.
+
+There is no `less`, `make`, `m4`, `factor`, `units` or `mail`, and no
+assembler. `/usr/games` holds `advent` — the original Colossal Cave —
+and `cowsay`, and that is all: the Scott Adams, Mysterious Adventures
+and Z-machine collections are not installed. There is no network, so
+`ssh` cannot do anything useful. `man` is present and so are its
+pages, in `/usr/man/man1`.
+
+
+ewpage
+
 # The filesystem and included software
 
 ## Layout
 
 ```
-/bin          core utilities (always available)
-/usr/bin      larger tools, BBC BASIC, fat, picoctl
-/usr/games    the games collection
-/usr/lib/bbc  BBC BASIC library directory (@lib$)
+/bin          core utilities, and picoctl, fat, uue/uud, setdate
+/usr/bin      the toolchain, BBC BASIC, the editors, the media tools
+/usr/games    advent and cowsay
 /usr/lib/cc   the C compiler passes, and its headers in include/
 /usr/man      manual pages (man <name>)
 /dev          devices - see below
@@ -3229,93 +3490,21 @@ the same place. `free` reports both.
 
 ## Applications
 
-**Editors:** `mmedit` (MMBasic's own full-screen editor — see its
-chapter), `vi` (levee), `ue` (a WordStar-diamond micro-Emacs:
-Ctrl-W write, Ctrl-Q quit), `ed`.
+The programs that make this machine what it is have a chapter of their
+own: [Commands at the `#` prompt](#shell-commands) covers
+`picoctl`, the image and sound players, the toolchain, the editors and
+the file-transfer tools, with their arguments.
 
-**Shell & core:** Bourne `sh`, and the classic set —
-`ls ll cp mv ln rm mkdir rmdir cat more head tail grep fgrep
-sed awk tr cut sort uniq wc find xargs diff diff3 cmp comm join split
-rev tar dd df du free ps kill killall uptime date cal banner echo
-sleep tee touch which who su passwd stty mount umount sync fsck
-mkfs fdisk chmod chown chgrp od seq dc expr test [ uname
-cron at write wall`
-(and more — see `ls /bin /usr/bin`).
+**Shell and core:** Bourne `sh` and the classic set — `ls ll cp mv ln
+rm mkdir rmdir cat more head tail grep fgrep sed awk tr cut sort uniq
+wc find xargs diff diff3 cmp comm join split rev tar dd df du free ps
+kill killall uptime date cal banner echo sleep tee touch which who su
+passwd stty mount umount sync fsck mkfs fdisk chmod chown chgrp od seq
+dc expr test uname cron at write wall` — and more, so `ls /bin
+/usr/bin` is the authority rather than this paragraph.
 
-This list is checked against the build recipe rather than remembered:
-it used to promise `less`, `hd`, `factor`, `units`, `m4`, `make` and
-`mail`, none of which were ever installed. A manual that names a
-command the card does not have is worse than one that stays quiet, so
-if you find something here that is missing, that is a bug in one of
-them.
-
-**Machine tools:** `picoctl` (keyboard layout, num lock, display mode,
-reboot to the flasher), `picogpio`/`gpiotool`, `gfxtest` (display test card),
-`setdate` (DS3231), `flashrom`, `setboot`, `dosread`/`doswrite`
-(FAT12/16 floppy-era transfers), `fat`, `uue`/`uud` (serial file
-transfer — see that chapter).
-
-**Images:** `saveimage` writes any part of the screen as a 24-bit BMP,
-`loadimage` puts one back:
-
-```
-# saveimage shot.bmp                     the whole screen
-# saveimage part.bmp 160 120 320 240     x y w h
-# loadimage shot.bmp                     at 0,0
-# loadimage tiger.bmp 0 0 4              with dither mode 4
-```
-
-`loadimage` is MMBasic's BMP decoder, so it reads 1/4/8/16/24/32-bit
-files, `BI_BITFIELDS`, and RLE4/RLE8, and dithers only when asked.
-These are the programs `SAVE IMAGE` and `LOAD IMAGE` run, and they are
-just as useful from the shell.
-
-`loadjpg` and `loadpng` are the same idea for the other two formats,
-and are what `LOAD JPG` and `LOAD PNG` run:
-
-```
-# loadjpg photo.jpg                      at 0,0
-# loadjpg photo.jpg 0 0 0 0 0 2          binned 2:1, so 640x480 fits
-# loadpng logo.png 40 20                 at x,y
-# loadpng logo.png 0 0 -1                let the screen show through
-# loadpng -s logo.png > logo.spr         decode to a SPRITE, on stdout
-```
-
-`loadjpg` is MMBasic's picojpeg and decodes a block at a time, so its
-memory does not grow with the picture. `loadpng` is MMBasic's upng,
-which cannot work that way — it inflates the whole image first — so it
-uses the PSRAM arena and costs the process pool nothing.
-
-The `-s` form is how `SPRITE LOADPNG` works: it writes the decoded
-sprite to standard output as two 16-bit sizes followed by one colour
-index per byte, and the runtime reads that straight into a sprite
-buffer. It needs no graphics mode, so it is also the way to convert
-artwork from the shell.
-
-**Sound:** `playmp3` plays an MP3 file through the audio DAC:
-
-```
-# playmp3 track.mp3            volume 80 by default
-# playmp3 track.mp3 40         0 to 100
-# playmp3 track.mp3 &          in the background, and carry on working
-```
-
-It decodes at about six times real time and takes almost nothing from
-whatever else is running. This is the program `PLAY MP3` runs, and one
-plays at a time — a second is refused by name and pid rather than
-allowed to talk over the first. Stop one with `kill -2` (or, from
-BASIC, `PLAY STOP`).
-
-**Languages:** `bbcbasic`, `cc` (the on-board C compiler — see its
-own chapter, with `cpp`, `bcrun` and `bcdump`), `fforth` (a complete
-ANS Forth), the `as09`/`ld09` assembler pair, and `dc`.
-
-**Games** (`/usr/games`): the original Colossal Cave `advent`, the
-complete Scott Adams `adv01`–`adv14` and Mysterious Adventures
-`myst01`–`myst11` collections, Infocom Z-machine interpreters
-`z1`–`z8` and `l9x` (Level 9), `startrek`, `hamurabi`, `backgammon`,
-`invaders`, `2048`, `moo`, `ttt`, `fish`, `arithmetic`, `fortune`,
-`cowsay`, `wump`.
+**Games** (`/usr/games`): `advent`, the original Colossal Cave, and
+`cowsay`.
 
 ## Text processing {#text-processing}
 

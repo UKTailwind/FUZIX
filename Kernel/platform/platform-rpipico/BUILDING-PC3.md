@@ -211,6 +211,18 @@ master copy of `mmb_runtime.h` is in the mmb2c repository, so fix it
 there and re-run `fcc/sync-runtime.sh` or the next sync puts the stale
 number back.
 
+**And run**
+
+    sh mancheck.sh
+
+which takes every command the manual shows you typing at the `#` prompt
+and looks for it in the built image. The manual used to keep that list
+by hand, warned in its own text that "a manual that names a command the
+card does not have is worse than one that stays quiet", and then named
+`ue`, `gfxtest`, `flashrom`, `as09`/`ld09`, a `/usr/lib/bbc` that does
+not exist and thirty games of which two are installed. Naming a danger
+is not checking for it.
+
 ## 8. The manuals
 
 There are two, and both are plain pandoc:
