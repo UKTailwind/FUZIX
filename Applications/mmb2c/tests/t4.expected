@@ -1,0 +1,21 @@
+1 call-colon-call ok
+show 1 2
+show 3 4
+show 9 10
+show 11 12
+show 13 14
+2 function in condition ok
+3 function else ok
+4 s$ = xy
+5 comment after THEN ok
+6 trailing colon ok
+7 loop by label, b = 3
+8 jumping out from inside a block IF
+8 escaped at i = 3
+9 exiting do
+9 i = 3
+10 nested ok
+11 IF inside CASE ok
+12 SELECT inside IF ok
+13 triple nest ok
+14 done

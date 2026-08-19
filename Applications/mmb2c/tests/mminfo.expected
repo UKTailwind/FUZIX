@@ -1,0 +1,44 @@
+-- what this machine is
+device   [Fuzix]
+platform [PC3]
+drive    [A:]
+same      1
+version   1
+-- OPTION BASE is known when we translate
+base      0
+-- pin names
+gp0       0
+gp8       8
+gp47      47
+pinno     8
+pinno$    13
+pinno bare 1 47
+-- font metrics follow FONT
+1,1       8 x 12
+3,1       16 x 24
+1,2       16 x 24
+-- the text cursor
+hpos      0  0
+vpos      0  0
+-- files
+file      1
+size      5
+dir       0
+isdir     1
+dirasfile-1
+missing   0
+nosize   -1
+-- PATH and CURRENT are argv[0], so test the shape
+path/     1
+current   1
+-- KEYDOWN: nothing is held under the gates
+count     0
+first     0
+locks     0
+-- CONST is local to the SUB it is written in
+one      a string here
+two       6
+three     4
+four     the local one
+outer    global banner
+outer2    99

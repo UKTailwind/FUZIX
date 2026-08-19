@@ -1,0 +1,42 @@
+colons: 1 2 3
+spaced: 4 5
+empty statements survive
+1 then-only, taken
+3 then branch
+4 else branch
+5 all three ran
+5 b,c = 11 12
+6 b,c = 0 0
+7 then
+7 b = 21
+8 else
+8 b = 32
+9 THEN GOTO worked
+10 bare GOTO worked
+11 line number target worked
+12 nested single line
+13 inner else
+14 IF after a colon
+15a
+15b
+16 block then
+18 elseif taken
+19 else taken
+20 outer
+20 inner
+20 single line inside block
+21 AND ok
+22 OR ok
+23 NOT ok
+24 string compare ok
+25 string else ok
+26 hit three
+26 c = 3 i = 4
+27 two
+27 i = 3
+29 carried on for 1
+29 exiting early for 9
+28 done
+30 small 4
+30 medium 40
+30 large 400

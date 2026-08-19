@@ -1,0 +1,77 @@
+-- rounding --
+ 9-3 9-2
+ 45 46-34-35
+ 7-1 0 1
+-- trig --
+ 0 1 0
+ 1.570796327 0 0.7853981634
+ 0.7853981634
+ 180 3.141592654
+ 12 2 1
+ 1 0 0 3
+ 3.926990817
+-- integers and bits --
+800F0000FFFF0044
+ 2 7 5 16 16
+ 1 0
+ 0 1
+ 9 2
+-- STR$ (manual examples) --
+[123.456]
+[123.456]
+[+123.456]
+[   123.456]
+[  +123.456]
+[  -123.456]
+[  -123.45600]
+[    -1.23456e+02]
+[    53]
+[    53.00]
+[****53.00]
+-- FORMAT$ --
+[45]
+[45]
+[   3.142]
+[3.142   ]
+[value = 042.00 units]
+[1.2345e+03]
+[-7.5]
+-- strings --
+ 11 72 101
+Hello|World|Wor
+HELLO WORLD|hello world
+[   ][----][AAA]
+ 7 0 5
+ 3.25 255 0
+AB
+[xx   ]
+[   xx]
+[xx]
+[42]
+[boo]
+['boo, zoo']
+-- CHOICE --
+hello|bye
+ 4 5
+-- BOUND --
+ 44 45 0
+ 9
+bound inside a sub = 9
+-- date and time --
+ 946684800
+[01-01-2000 00:00:00]
+[Saturday][Saturday]
+[Thursday]
+ 10 8
+timer ok
+-- binary conversion --
+ 4 8
+-12345
+ 65535
+ 3.25
+-2
+-- RGB --
+FFA500|FFA500|FFFFFF
+-- TAB --
+col1               col20     col30
+done

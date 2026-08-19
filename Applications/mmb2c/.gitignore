@@ -1,0 +1,26 @@
+# build output
+*.o
+*.a
+*.out
+/build/
+tests/xcheck/xcheck
+
+# translator output and the programs built from it
+*.c.bak
+/tests/*.c
+/tests/t1
+/tests/t2
+/tests/t3
+/tests/t4
+/tests/t5
+/tests/t6
+/tests/t7
+/tests/t8
+
+# scratch files the tests leave behind
+/tests/work/
+*.mpy
+__pycache__/
+
+# hand-written harness sources, not translator output
+!/tests/blitharness.c

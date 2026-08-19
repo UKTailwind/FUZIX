@@ -1,0 +1,5 @@
+wrote  10110001 read 10110001
+pin0  1 pin1  0 pin4  1 pin7  1
+wrote  11000011 read 11000011 (two groups)
+                 as one group 11000011
+cleared          read 00000000
