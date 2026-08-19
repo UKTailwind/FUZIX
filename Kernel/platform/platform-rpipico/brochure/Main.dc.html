@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #c62d1f; text-decoration: none; }
+    a:hover { color: #8f1f14; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="--accent: {{accent}}; width: 794px; height: 1123px; background: #f4f3f0; color: #14161a; font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; position: relative;">
+
+  <!-- top bar -->
+  <div style="height: 6px; background: var(--accent, #c62d1f); flex-shrink: 0;"></div>
+  <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 20px 56px 0 56px; flex-shrink: 0; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: #6a6f77;">
+    <div style="display: flex; gap: 12px; align-items: baseline;">
+      <span style="color: #14161a; font-weight: 600;">Fuzix</span>
+      <span>for the Pico Computer 3</span>
+    </div>
+    <div>v0.17 &middot; August 2026</div>
+  </div>
+
+  <!-- headline -->
+  <div style="padding: 46px 56px 34px 56px; display: flex; flex-direction: column; gap: 22px; flex-shrink: 0;">
+    <h1 style="margin: 0; font-size: 86px; line-height: 0.92; font-weight: 800; letter-spacing: -0.035em;">Unix,<br><span style="color: var(--accent, #c62d1f);">self&#8209;hosted.</span></h1>
+    <p style="margin: 0; font-size: 19px; line-height: 1.5; max-width: 620px; color: #33383f; text-wrap: pretty;">A genuine multi-tasking Unix on a single RP2350 microcontroller &mdash; booting from SD card, driving an HDMI screen and a USB keyboard, and carrying a complete C compiler that runs <em style="font-style: normal; font-weight: 600; color: #14161a;">on the machine itself</em>. No cross-development. No PC in the loop.</p>
+  </div>
+
+  <!-- photo -->
+  <div style="width: 794px; height: 336px; overflow: hidden; flex-shrink: 0; position: relative; background: #2a1512;">
+    <img src="board.jpg" alt="The Pico Computer 3 board" style="width: 100%; height: 100%; object-fit: cover; object-position: center 44%; display: block;">
+    <div style="position: absolute; left: 0; bottom: 0; padding: 8px 16px; background: rgba(15,17,20,0.82); color: #f4f3f0; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase;">Pico Computer 3 &middot; RP2350B &middot; open hardware</div>
+  </div>
+
+  <!-- stat band -->
+  <div style="background: #0f1114; color: #f4f3f0; padding: 26px 56px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; flex-shrink: 0;">
+    <div style="display: flex; flex-direction: column; gap: 5px;">
+      <div style="font-size: 30px; font-weight: 700; letter-spacing: -0.02em;">375<span style="font-size: 16px; font-weight: 500; color: #9aa1a9;"> MHz</span></div>
+      <div style="font-size: 12.5px; color: #9aa1a9; line-height: 1.3;">Dual Cortex-M33</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 5px;">
+      <div style="font-size: 30px; font-weight: 700; letter-spacing: -0.02em;">8<span style="font-size: 16px; font-weight: 500; color: #9aa1a9;"> MB</span></div>
+      <div style="font-size: 12.5px; color: #9aa1a9; line-height: 1.3;">PSRAM for heap &amp; swap</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 5px;">
+      <div style="font-size: 30px; font-weight: 700; letter-spacing: -0.02em;">64</div>
+      <div style="font-size: 12.5px; color: #9aa1a9; line-height: 1.3;">Concurrent processes</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 5px;">
+      <div style="font-size: 30px; font-weight: 700; letter-spacing: -0.02em;">80&times;40</div>
+      <div style="font-size: 12.5px; color: #9aa1a9; line-height: 1.3;">Colour console on HDMI</div>
+    </div>
+  </div>
+
+  <!-- pillars -->
+  <div style="flex-grow: 1; padding: 30px 56px 0 56px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 26px;">
+    <div style="display: flex; flex-direction: column; gap: 9px;">
+      <div style="width: 26px; height: 3px; background: var(--accent, #c62d1f);"></div>
+      <h3 style="margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em;">A real Unix</h3>
+      <p style="margin: 0; font-size: 14px; line-height: 1.45; color: #4b5058;">Pre-emptive multitasking, pipes, a Bourne shell and the classic V7 userland &mdash; plus the one true <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px;">awk</span>, <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px;">vi</span> and man pages.</p>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 9px;">
+      <div style="width: 26px; height: 3px; background: var(--accent, #c62d1f);"></div>
+      <h3 style="margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em;">It compiles itself</h3>
+      <p style="margin: 0; font-size: 14px; line-height: 1.45; color: #4b5058;">A complete C89 toolchain on the board, generating native ARM code. Write it, build it and run it without leaving the machine.</p>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 9px;">
+      <div style="width: 26px; height: 3px; background: var(--accent, #c62d1f);"></div>
+      <h3 style="margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em;">Two BASICs as well</h3>
+      <p style="margin: 0; font-size: 14px; line-height: 1.45; color: #4b5058;">R.&nbsp;T.&nbsp;Russell&#39;s BBC BASIC with graphics and sound, and an MMBasic translator that compiles to native code.</p>
+    </div>
+  </div>
+
+  <!-- footer -->
+  <div style="flex-shrink: 0; padding: 0 56px 26px 56px; display: flex; flex-direction: column; gap: 12px;">
+    <div style="height: 1px; background: #d7d5cf;"></div>
+    <div style="display: flex; justify-content: space-between; align-items: baseline; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: #6a6f77;">
+      <span>Firmware, kernel and PCB designs are open source</span>
+      <span style="color: #14161a; font-weight: 600;">github.com/UKTailwind</span>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#c62d1f","options":["#c62d1f","#0f1114","#1d6fa8","#7a5cc4"],"section":"Theme"},"$preview":{"width":794,"height":1123}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#c62d1f' };
+  }
+}
+</script>
+</body>
+</html>

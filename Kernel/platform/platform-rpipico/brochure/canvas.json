@@ -1,0 +1,8 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "title": "1 · Cover", "x": 0, "y": 0, "w": 794, "h": 1123, "print": "fixed" },
+    { "file": "Inside.dc.html", "title": "2 · What it does", "x": 874, "y": 0, "w": 794, "h": 1123, "print": "fixed" },
+    { "file": "Specs.dc.html", "title": "3 · The machine", "x": 1748, "y": 0, "w": 794, "h": 1123, "print": "fixed" }
+  ],
+  "launch": { "view": "canvas" }
+}

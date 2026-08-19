@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #c62d1f; text-decoration: none; }
+    a:hover { color: #8f1f14; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="--accent: {{accent}}; width: 794px; height: 1123px; background: #f4f3f0; color: #14161a; font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="height: 6px; background: var(--accent, #c62d1f); flex-shrink: 0;"></div>
+
+  <!-- header -->
+  <div style="padding: 22px 56px 0 56px; display: flex; justify-content: space-between; align-items: baseline; flex-shrink: 0; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: #6a6f77;">
+    <span style="color: var(--accent, #c62d1f); font-weight: 600;">02 &mdash; What it does</span>
+    <span>Fuzix for the Pico Computer 3</span>
+  </div>
+
+  <!-- statement -->
+  <div style="padding: 18px 56px 22px 56px; display: flex; flex-direction: column; gap: 12px; flex-shrink: 0;">
+    <h2 style="margin: 0; font-size: 38px; line-height: 1.03; font-weight: 800; letter-spacing: -0.028em; max-width: 640px;">The only Pico that builds its own programs.</h2>
+    <p style="margin: 0; font-size: 16px; line-height: 1.5; max-width: 660px; color: #4b5058; text-wrap: pretty;">Everything below happens at the <span style="font-family: 'IBM Plex Mono', monospace; font-size: 15px;">#</span> prompt on the board. Nothing is cross-compiled, downloaded or flashed &mdash; the editor, the compiler, the runtime and the program all live on the SD card.</p>
+  </div>
+
+  <!-- transcript + compiler story -->
+  <div style="padding: 0 56px; display: grid; grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr); gap: 30px; flex-shrink: 0;">
+    <div style="background: #0f1114; border-radius: 3px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;">
+      <pre style="margin: 0; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.62; color: #d8dce1; white-space: pre-wrap;"><span style="color: #7f868f;">login:</span> root
+<span style="color: #e0553f;">#</span> cc bench.bas
+wrote bench.mb.c
+.....................................
+<span style="color: #e0553f;">#</span> ./bench.bc
+MMBASIC benchmark (C) KnivD 2016
+Performance:    <span style="color: #7fd18f;">55353</span> grains</pre>
+      <div style="height: 1px; background: #2a2e34; margin-top: auto;"></div>
+      <p style="margin: 0; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.55; color: #9aa1a9;">A published MMBasic benchmark, unmodified. The same program under the MMBasic interpreter, on the same board at the same clock, scores about 12,000.</p>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <h3 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.015em;">A C compiler, not a cross&#8209;compiler</h3>
+        <p style="margin: 0; font-size: 14.5px; line-height: 1.5; color: #4b5058;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; font-weight: 500; color: #14161a;">cc</span> is a complete C89 toolchain running on the hardware. It translates each function into native Thumb-2 for the Cortex-M33, so compiled programs run as machine code &mdash; not as an interpreted intermediate.</p>
+      </div>
+      <div style="background: #ffffff; border: 1px solid #dcdad4; border-radius: 3px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px;">
+        <div style="font-size: 32px; font-weight: 700; letter-spacing: -0.025em; line-height: 1;">167,000<span style="font-size: 15px; font-weight: 500; color: #6a6f77;"> Dhry/s</span></div>
+        <div style="font-size: 13px; line-height: 1.4; color: #6a6f77;">Dhrystone 2.1, compiled on the machine &mdash; 44% of the same benchmark cross-compiled by <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">gcc&nbsp;-O2</span> for the same chip.</div>
+      </div>
+      <p style="margin: 0; font-size: 14.5px; line-height: 1.5; color: #4b5058;">Its bytecode is language-neutral by design, so other front ends can share the back end &mdash; <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; font-weight: 500; color: #14161a;">mmbc</span>, the MMBasic translator, is the first.</p>
+    </div>
+  </div>
+
+  <!-- benchmark chart -->
+  <div style="margin: 20px 56px 0 56px; background: #ffffff; border: 1px solid #dcdad4; border-radius: 3px; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; flex-shrink: 0;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 16px;">
+      <h3 style="margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em;">A 3,200-line astronomical calculation</h3>
+      <span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6a6f77;">solar_eclipse.bas</span>
+    </div>
+    <div style="display: grid; grid-template-columns: 168px minmax(0, 1fr) 62px; gap: 9px 14px; align-items: center;">
+      <span style="font-size: 14px; color: #4b5058;">MMBasic interpreter</span>
+      <span style="display: block; height: 15px; width: 100%; background: #d7d5cf;"></span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; text-align: right; color: #4b5058;">12.5 s</span>
+
+      <span style="font-size: 14px; color: #4b5058;">MicroPython</span>
+      <span style="display: block; height: 15px; width: 70.4%; background: #d7d5cf;"></span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; text-align: right; color: #4b5058;">8.8 s</span>
+
+      <span style="font-size: 14px; font-weight: 600; color: #14161a;">Fuzix &mdash; mmbc + cc</span>
+      <span style="display: block; height: 15px; width: 17.4%; background: var(--accent, #c62d1f);"></span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; text-align: right; color: #14161a;">2.17 s</span>
+    </div>
+    <div style="height: 1px; background: #e6e4de;"></div>
+    <p style="margin: 0; font-size: 13px; line-height: 1.45; color: #6a6f77;">Same source, same board, same clock. Every digit of the printed answer is identical in all three &mdash; the speed is the only thing that changes.</p>
+  </div>
+
+  <!-- three languages -->
+  <div style="flex-grow: 1; padding: 20px 56px 0 56px; display: flex; flex-direction: column; gap: 11px;">
+    <h3 style="margin: 0; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #6a6f77; font-weight: 500;">Three languages, one machine</h3>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px;">
+      <div style="display: flex; flex-direction: column; gap: 8px; border-top: 3px solid var(--accent, #c62d1f); padding-top: 12px;">
+        <h4 style="margin: 0; font-size: 16px; font-weight: 700;">C</h4>
+        <p style="margin: 0; font-size: 13.5px; line-height: 1.45; color: #4b5058;">Full C89 bar bitfields, doubles on the RP2350 co-processor, and <strong style="font-weight: 600; color: #14161a;">32 board headers</strong> &mdash; graphics, pins, I²C, SPI, sound.</p>
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: #14161a; background: #e9e7e1; padding: 5px 8px; border-radius: 2px; align-self: flex-start; margin-top: auto;">cc prog.c</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px; border-top: 3px solid var(--accent, #c62d1f); padding-top: 12px;">
+        <h4 style="margin: 0; font-size: 16px; font-weight: 700;">MMBasic</h4>
+        <p style="margin: 0; font-size: 13.5px; line-height: 1.45; color: #4b5058;">One command: <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12.5px;">mmbc</span> translates it to C and <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12.5px;">cc</span> compiles it native. 220 of MMBasic&#39;s 353 keywords.</p>
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: #14161a; background: #e9e7e1; padding: 5px 8px; border-radius: 2px; align-self: flex-start; margin-top: auto;">cc prog.bas</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px; border-top: 3px solid var(--accent, #c62d1f); padding-top: 12px;">
+        <h4 style="margin: 0; font-size: 16px; font-weight: 700;">BBC BASIC</h4>
+        <p style="margin: 0; font-size: 13.5px; line-height: 1.45; color: #4b5058;">R.&nbsp;T.&nbsp;Russell&#39;s own. MODE&nbsp;0&ndash;5, four-channel sound with ENVELOPE, ADVAL joysticks, inline assembler.</p>
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: #14161a; background: #e9e7e1; padding: 5px 8px; border-radius: 2px; align-self: flex-start; margin-top: auto;">bbcbasic</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- footer -->
+  <div style="flex-shrink: 0; padding: 0 56px 20px 56px; display: flex; flex-direction: column; gap: 10px;">
+    <div style="height: 1px; background: #d7d5cf;"></div>
+    <div style="display: flex; justify-content: space-between; align-items: baseline; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: #6a6f77;">
+      <span>And a complete ANS Forth, <span style="color: #14161a;">fforth</span>, because why not</span>
+      <span>2</span>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#c62d1f","options":["#c62d1f","#0f1114","#1d6fa8","#7a5cc4"],"section":"Theme"},"$preview":{"width":794,"height":1123}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#c62d1f' };
+  }
+}
+</script>
+</body>
+</html>

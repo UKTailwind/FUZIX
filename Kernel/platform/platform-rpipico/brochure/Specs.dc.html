@@ -1,0 +1,115 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #c62d1f; text-decoration: none; }
+    a:hover { color: #8f1f14; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="--accent: {{accent}}; width: 794px; height: 1123px; background: #f4f3f0; color: #14161a; font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="height: 6px; background: var(--accent, #c62d1f); flex-shrink: 0;"></div>
+
+  <!-- header -->
+  <div style="padding: 22px 56px 0 56px; display: flex; justify-content: space-between; align-items: baseline; flex-shrink: 0; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: #6a6f77;">
+    <span style="color: var(--accent, #c62d1f); font-weight: 600;">03 &mdash; The machine</span>
+    <span>Fuzix for the Pico Computer 3</span>
+  </div>
+
+  <div style="padding: 20px 56px 0 56px; flex-shrink: 0;">
+    <h2 style="margin: 0; font-size: 33px; line-height: 1.04; font-weight: 800; letter-spacing: -0.028em;">Specifications, and what&#39;s on the card.</h2>
+  </div>
+
+  <!-- specs + contents -->
+  <div style="padding: 22px 56px 0 56px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 30px; flex-shrink: 0;">
+
+    <div style="display: flex; flex-direction: column;">
+      <span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #6a6f77; padding-bottom: 9px;">Hardware &amp; kernel</span>
+      <div style="display: flex; flex-direction: column;">
+        <div style="display: grid; grid-template-columns: 98px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px solid #dcdad4;"><span style="font-size: 13px; font-weight: 600;">Processor</span><span style="font-size: 13px; line-height: 1.4; color: #4b5058;">RP2350B, dual Cortex-M33 at 375 MHz</span></div>
+        <div style="display: grid; grid-template-columns: 98px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px solid #dcdad4;"><span style="font-size: 13px; font-weight: 600;">Memory</span><span style="font-size: 13px; line-height: 1.4; color: #4b5058;">340 KB of program RAM in 4 KB pages &mdash; 64 processes, or ~292 KB for one</span></div>
+        <div style="display: grid; grid-template-columns: 98px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px solid #dcdad4;"><span style="font-size: 13px; font-weight: 600;">PSRAM</span><span style="font-size: 13px; line-height: 1.4; color: #4b5058;">8 MB, holding program heaps and swapped-out processes</span></div>
+        <div style="display: grid; grid-template-columns: 98px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px solid #dcdad4;"><span style="font-size: 13px; font-weight: 600;">Scheduling</span><span style="font-size: 13px; line-height: 1.4; color: #4b5058;">Pre-emptive &mdash; a runaway program can always be stopped</span></div>
+        <div style="display: grid; grid-template-columns: 98px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px solid #dcdad4;"><span style="font-size: 13px; font-weight: 600;">Display</span><span style="font-size: 13px; line-height: 1.4; color: #4b5058;">HDMI at 640&times;480 &mdash; an 80&times;40 colour ANSI console, mirrored to USB-C serial</span></div>
+        <div style="display: grid; grid-template-columns: 98px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px solid #dcdad4;"><span style="font-size: 13px; font-weight: 600;">Keyboard</span><span style="font-size: 13px; line-height: 1.4; color: #4b5058;">USB HID, six layouts: US, UK, DE, FR, ES, BE</span></div>
+        <div style="display: grid; grid-template-columns: 98px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px solid #dcdad4;"><span style="font-size: 13px; font-weight: 600;">Storage</span><span style="font-size: 13px; line-height: 1.4; color: #4b5058;">SD card root on FS32 &mdash; 32-bit block numbers, so up to 2 TB. 15 MB of flash holds a recovery system</span></div>
+        <div style="display: grid; grid-template-columns: 98px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px solid #dcdad4;"><span style="font-size: 13px; font-weight: 600;">Audio</span><span style="font-size: 13px; line-height: 1.4; color: #4b5058;">PCM5102 I²S DAC to a 3.5 mm jack</span></div>
+        <div style="display: grid; grid-template-columns: 98px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px solid #dcdad4;"><span style="font-size: 13px; font-weight: 600;">Clock</span><span style="font-size: 13px; line-height: 1.4; color: #4b5058;">DS3231, battery-backed, read and set from the shell</span></div>
+        <div style="display: grid; grid-template-columns: 98px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px solid #dcdad4; border-bottom: 1px solid #dcdad4;"><span style="font-size: 13px; font-weight: 600;">Other I/O</span><span style="font-size: 13px; line-height: 1.4; color: #4b5058;">Second serial port, QWIIC I²C, four joystick inputs, four ADC channels, PWM and servo</span></div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #6a6f77;">On the SD card</span>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13.5px; font-weight: 600;">The V7 userland</span><span style="font-size: 13px; line-height: 1.45; color: #4b5058;">Bourne <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">sh</span> and the classic set &mdash; ls, cp, grep, sed, find, sort, tar, dd, ps, cron and the rest.</span></div>
+          <div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13.5px; font-weight: 600;">The one true awk</span><span style="font-size: 13px; line-height: 1.45; color: #4b5058;">Lucent&#39;s, by one of the original authors. Associative arrays, functions, getline &mdash; not a subset.</span></div>
+          <div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13.5px; font-weight: 600;">Three editors</span><span style="font-size: 13px; line-height: 1.45; color: #4b5058;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">mmedit</span>, MMBasic&#39;s own full-screen editor with keyword colouring; <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">vi</span>; and V7&#39;s <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">ed</span>.</span></div>
+          <div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13.5px; font-weight: 600;">Headers for the board</span><span style="font-size: 13px; line-height: 1.45; color: #4b5058;">One per primitive &mdash; graphics, pins, I²C, SPI, one-wire, sprites, sound &mdash; so a program carries only what it names, plus <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">pc3io.h</span> for the pin and ADC registers.</span></div>
+          <div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13.5px; font-weight: 600;">Media</span><span style="font-size: 13px; line-height: 1.45; color: #4b5058;">MP3, WAV, FLAC and MOD playback; JPEG, PNG and BMP loading; sprites and an off-screen framebuffer.</span></div>
+          <div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13.5px; font-weight: 600;">Manual pages, and a cave</span><span style="font-size: 13px; line-height: 1.45; color: #4b5058;">Plus a FAT partition a PC can drop files onto, and <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">advent</span> &mdash; the original Colossal Cave.</span></div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 9px; border-top: 1px solid #dcdad4; padding-top: 11px;">
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #6a6f77;">What it is not</span>
+        <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #4b5058;">There is no networking, so nothing to browse and nowhere to <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">ssh</span> to. <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">cc</span> has no linker or assembler, so a program is one source file, and bitfields are the one piece of C89 missing. The V7 tools are period-correct where it shows: <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">grep</span> has no <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">-E</span>, <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">diff</span> has no <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">-u</span>. All of it is in the manual rather than discovered the hard way.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- getting it running -->
+  <div style="padding: 18px 56px 0 56px; display: flex; flex-direction: column; gap: 11px; flex-shrink: 0;">
+    <span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #6a6f77;">Getting it running</span>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px 28px;">
+      <div style="display: flex; gap: 11px; align-items: flex-start;"><span style="flex-shrink: 0; width: 21px; height: 21px; border-radius: 11px; background: var(--accent, #c62d1f); color: #ffffff; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center;">1</span><span style="font-size: 13px; line-height: 1.45; color: #4b5058;">Hold BOOT, click RESET, and drag <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #14161a;">fuzix.uf2</span> onto the drive that appears.</span></div>
+      <div style="display: flex; gap: 11px; align-items: flex-start;"><span style="flex-shrink: 0; width: 21px; height: 21px; border-radius: 11px; background: var(--accent, #c62d1f); color: #ffffff; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center;">2</span><span style="font-size: 13px; line-height: 1.45; color: #4b5058;">Write the ready-made card image to a 1 GB or larger SD card with any raw-image tool.</span></div>
+      <div style="display: flex; gap: 11px; align-items: flex-start;"><span style="flex-shrink: 0; width: 21px; height: 21px; border-radius: 11px; background: var(--accent, #c62d1f); color: #ffffff; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center;">3</span><span style="font-size: 13px; line-height: 1.45; color: #4b5058;">Plug in a monitor and a USB keyboard and switch on. At the <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #14161a;">bootdev:</span> prompt, type <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #14161a;">hdb2</span> &mdash; the root partition on the card.</span></div>
+      <div style="display: flex; gap: 11px; align-items: flex-start;"><span style="flex-shrink: 0; width: 21px; height: 21px; border-radius: 11px; background: var(--accent, #c62d1f); color: #ffffff; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center;">4</span><span style="font-size: 13px; line-height: 1.45; color: #4b5058;">Log in as <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #14161a;">root</span>. There is no password.</span></div>
+    </div>
+  </div>
+
+  <div style="flex-grow: 1;"></div>
+
+  <!-- links -->
+  <div style="background: #0f1114; color: #f4f3f0; padding: 20px 56px 16px 56px; display: flex; flex-direction: column; gap: 14px; flex-shrink: 0;">
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <h3 style="margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -0.02em;">All of it is open source.</h3>
+      <p style="margin: 0; font-size: 13px; line-height: 1.45; color: #9aa1a9; max-width: 580px;">The kernel, the compiler, the userland, both manuals and the board&#39;s own design files. Build it from a clean clone, or write the image and go.</p>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px 28px;">
+      <div style="display: flex; flex-direction: column; gap: 1px;"><span style="font-size: 12px; color: #9aa1a9;">Kernel and the PC3 port &mdash; branch <span style="font-family: 'IBM Plex Mono', monospace;">pc3</span></span><span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 13px; color: #ffffff;">github.com/UKTailwind/FUZIX</span></div>
+      <div style="display: flex; flex-direction: column; gap: 1px;"><span style="font-size: 12px; color: #9aa1a9;">PCB design files for the board</span><span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 13px; color: #ffffff;">github.com/UKTailwind/Pico-Computer-3</span></div>
+      <div style="display: flex; flex-direction: column; gap: 1px;"><span style="font-size: 12px; color: #9aa1a9;">MicroPython for the same board</span><span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 13px; color: #ffffff;">github.com/UKTailwind/micropython</span></div>
+      <div style="display: flex; flex-direction: column; gap: 1px;"><span style="font-size: 12px; color: #9aa1a9;">MMBasic firmware</span><span style="font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-size: 13px; color: #ffffff;">github.com/UKTailwind/PicoMite</span></div>
+    </div>
+  </div>
+
+  <!-- credits -->
+  <div style="flex-shrink: 0; background: #0f1114; padding: 0 56px 16px 56px;">
+    <div style="height: 1px; background: #2a2e34; margin-bottom: 10px;"></div>
+    <p style="margin: 0; font-size: 11.5px; line-height: 1.5; color: #7f868f;">Fuzix by Alan Cox &middot; BBC BASIC by R.&nbsp;T.&nbsp;Russell &middot; MMBasic by Geoff Graham and Peter Mather &middot; Pico Computer 3 hardware and this port by Peter Mather</p>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#c62d1f","options":["#c62d1f","#0f1114","#1d6fa8","#7a5cc4"],"section":"Theme"},"$preview":{"width":794,"height":1123}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#c62d1f' };
+  }
+}
+</script>
+</body>
+</html>
