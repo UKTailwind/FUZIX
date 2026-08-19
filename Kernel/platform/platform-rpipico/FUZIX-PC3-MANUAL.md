@@ -55,632 +55,60 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## New in v0.16
+## New in v0.17
 
-Porting other people's MMBasic programs, and the things that stopped it.
+The machine keeps its keyboard, and BASIC finishes a category.
 
-**`PLAY WAV` and `PLAY FLAC`**, beside `PLAY MP3`. One statement each
-with a different decoder behind it, and `PLAY STOP` reaches all three
-the same way. See [Music](#music).
+**A program that only printed could not be stopped from the USB
+keyboard.** `Ctrl-C` from a serial terminal worked; from the keyboard
+it was ignored. The keystroke was never decoded rather than lost on the
+way to the program: the USB host stack is pumped when the kernel idles,
+when a reader is about to block, and when a spinning process is
+pre-empted — and a process that only *writes* reaches none of the
+three, because it is always runnable, never reads the tty, and is
+inside `write()` for almost the whole of a line. There is now a fourth
+pump on the output path. The symptom was worth recording: typing during
+such a program produced exactly one character, the first key pressed,
+and only once the program had ended.
 
-**`KEYDOWN()`** — which keys are *held*, up to six at once, rather than
-which key was typed. A game needs this and `INKEY$` structurally cannot
-give it: a character stream has no way to say "up and fire together".
-The USB boot report already carried exactly the six codes MMBasic
-exposes; nothing outside the kernel could ask for them. See
-[`KEYDOWN`](#keydown).
+**`LOAD JPG`, `LOAD PNG` and `SPRITE LOADPNG`.** MMBasic's own picojpeg
+and upng, as separate programs, so a BASIC program that never touches
+an image carries no decoder. Note the transparency default: it is 0,
+which is palette black, so a PNG with a transparent surround draws a
+black box unless you pass **-1**. A real PicoMite does the same. See
+[Running another program](#running-another-program-system-save-image-load-image-load-jpg-load-png)
+and [Commands at the `#` prompt](#shell-commands).
 
-**Pin names.** `SETPIN GP4, DIN` and `PIN(GP4)` now mean what they say.
-This closes a trap as much as it adds a convenience: without it, `GP4`
-in a program that had not declared it became an implied variable worth
-zero, so `PIN(GP4)` quietly read **GP0**. See [Pin names](#gp-names).
+**`ARRAY SLICE` and `ARRAY INSERT`** — one line through an array of two
+or more dimensions, far quicker than the equivalent `FOR` loop, and
+spelled `MATH SLICE`/`MATH INSERT` as well because the interpreter runs
+both through the same two functions. **`COLOUR MAP`** turns a whole
+array of colour codes into RGB888 in one statement. That empties the
+"finish what is already there" category: 220 of MMBasic's 353 names now
+translate.
 
-**`MM.INFO()` answers seventeen things** rather than three — the
-program's own path, whether a file or directory exists and how big it
-is, the current font's cell, the text cursor, `OPTION BASE`, and what
-machine this is. `MM.INFO$()` is the same function, as in MMBasic.
-See [Asking the machine about itself](#mm-info).
+**`DIM s(4) = (1,2,3,4)` under `OPTION BASE 1` filled the wrong
+elements** — `s(1)` held 2 and `s(4)` held nothing. Silent wrong
+answers, in a shape no program would suspect.
 
-**`MM.DEVICE$` is now `"Fuzix"`** and not `"Fuzix on PC3"`. It names the
-firmware; the board moved to `MM.INFO(PLATFORM)`, which is MMBasic's own
-division of the two. A program testing `INSTR(MM.DEVICE$, "PicoMite")`
-gets a clean no either way.
+**A refused batch of pixels is an error.** `LOAD IMAGE`, `LOAD JPG` and
+`LOAD PNG` ignored what the kernel told them, so a picture could be
+quietly incomplete — up to 256 pixels of it. They stop now.
 
-**`CONST` inside a `SUB` is local to it**, as MMBasic has always had it
-(`cmd_const` sets `V_LOCAL` when it is not at the top level). Every
-`CONST` used to go into the globals whatever scope it was written in, so
-two routines that each declared their own collided — and the error
-surfaced somewhere else entirely, as an unrelated variable of the same
-name "already declared as STRING". Shared library code declares
-constants inside routines constantly, so this blocked whole programs
-rather than single lines.
+**`mmedit`'s function-key line was always one keystroke late**: blank on
+entering the editor until you pressed something, or for the five
+seconds it took the status line to redraw itself. Measured 5.43 s
+before and 0.43 s after.
 
-Two smaller things found while fixing that one, both of which had never
-been exercised by any test: a global `CONST` and a `LOCAL` of the same
-name generated the same C name, and a program using `MM.CMDLINE$`
-crashed on the board before its first statement.
+**This chapter is now the only one of its kind.** Everything the older
+"New in" sections described that is still true of the machine has been
+moved into the section that documents it — the pin timings into the pin
+chapter, `PAUSE`'s behaviour into the timer chapter, the recursion
+limit into the chapter on making a program fit, and so on. A release
+note is a poor place to look something up.
 
-## New in v0.15
 
-The machine can play a game, and everything in this release is
-something that had to be true before it could.
-
-**`BLIT`, `SPRITE` and the flash slots.** `BLIT` copies a rectangle
-of screen anywhere, reads and writes the flash slots MMBasic keeps
-images in, and works against the off-screen framebuffer as well as the
-display. On top of it sits the `SPRITE` family — load, show, move,
-hide, collision detection, transparency, and a two-axis `SPRITE
-SCROLL`. A rectangle now crosses into the kernel once rather than once
-per row, which is what makes a screenful of sprites affordable.
-
-`SPRITE LOADPNG` builds a sprite straight from a PNG:
-
-```
-SPRITE LOADPNG [#]n, fname$ [,transparent] [,cutoff]
-```
-
-The decoding happens in another process and the sprite arrives down a
-pipe, so a program that loads twenty sprites still carries no decoder.
-`transparent` defaults to **0** and `cutoff` to **30**, both as in the
-reference, and the default is the point: `SPRITE SHOW` skips colour 0
-because that is the sprite transparent colour's own default, so a PNG's
-see-through pixels become see-through sprite pixels with no arguments at
-all. Pass a different index to paint them instead, or a *negative* value
-to substitute that index for opaque black — which is how artwork whose
-black would vanish against a black background is kept visible.
-
-**The synthesiser moved into the kernel.** `PLAY SOUND` and `PLAY
-TONE` used to be rendered by a separate program keeping a fifth of a
-second of audio queued ahead. That is fine for music and impossible
-for a game: a program changing pitch every 20 ms was heard a tenth of
-a second late, and the renderer and the game could not both fit in
-memory at once, so the machine spent its time swapping them past each
-other. The four voices are now rendered in the interrupt that feeds
-the DAC, exactly where MMBasic renders them, and a `PLAY SOUND` is
-heard in the next buffer the hardware asks for. `PLAY MODFILE` and
-`PLAY MODSAMPLE` play tracker modules.
-
-**A program's own font.** `DefineFont` takes MMBasic's hex block and
-gives the program fonts 10 to 16, usable everywhere a built-in font
-is. The data is byte-compatible with MMBasic's, so a font written for
-a PicoMite is pasted in and works.
-
-**The compiler bug that made all of it fail.** picofrog froze the
-machine with no crash message, in native code and in bytecode alike.
-The compiler was emitting a stack frame of whatever size the locals
-added up to — 261 bytes in the function that moved the frog — and an
-odd frame leaves the interpreter's stack pointer odd, so the next
-64-bit store through a by-reference local wrote across an alignment
-boundary and took a fault the display mode hid. Frames are rounded
-now. It would have reached any program with enough locals and a
-`FLOAT` passed by reference, so it is worth knowing it was there.
-
-**The keyboard.** AltGr types the third character on a key at last,
-the console and the BASIC `INKEY$` path share one decoder rather than
-two that had drifted, and the USB stack survives a keyboard being
-unplugged, replugged or reset mid-session instead of taking the
-machine down with it.
-
-**Smaller things.** `cc prog.bas` translates and compiles in one
-command. `ELSE IF` written as two words translates, which is how
-MMBasic spells it. Stopping a program with `Ctrl-C` no longer leaves
-the terminal in the state the program set it to — which had been
-logging people out, because a shell reading a raw terminal sees an
-instant end of input and takes it for a hangup. `mmedit` colours
-`DefineFont`, `SPRITE`, `BLIT` and `FLASH` as the translatable
-keywords they became. Forty-six MMBasic example programs live in
-`/root/MMBasic` with a README saying what each one shows.
-
-## New in v0.14
-
-The buses stopped being three different programs, and the display
-gained a layer.
-
-**One implementation of the data arguments.** `I2C`, `SPI` and
-`ONEWIRE` all take their data the same way in MMBasic — a list of
-values, a string, a whole array, or a long string — because MMBasic
-writes that handling once and calls it from three places. Here it had
-been written twice, and the two copies had drifted apart: a write list
-never checked that its count matched, so `I2C2 WRITE a, 0, 3, 1, 2`
-sent a third byte off the stack; reading into a list of variables did
-not exist at all; neither array form was bounds checked; `SPI` reported
-`I2C2`'s error messages because it called `I2C2`'s helper; and the
-buffers held bytes, so `SPI OPEN speed, mode, 16` sent the low half of
-each word — and read twice as far as the buffer went, because the
-transfer counts units and not bytes. There is one implementation now
-and one set of rules, and `ONEWIRE` needed no argument handling of its
-own when it arrived, which is the point of doing it this way.
-
-**`LONGSTRING` as bus data.** `SPI WRITE n, LONGSTRING a()` and the
-matching `READ`, on every bus. A BASIC string stops at 255 bytes and a
-240-pixel RGB565 row is 480, so a panel row used to take two writes.
-It has to be spelled out, because a long string *is* an integer array:
-written `a()` it is a numeric array and sends one byte per eight-byte
-cell. That is MMBasic's behaviour and it stays.
-
-**`ONEWIRE` and `TEMPR`.** `ONEWIRE RESET`, `WRITE` and `READ`, with
-`MM.ONEWIRE`, and `TEMPR(pin)` and `TEMPR START` for a DS18B20. Bit
-banged in your own program's time, which this machine can do because a
-pin is a register access rather than a system call. **`TEMPR` sleeps
-through the conversion** where MMBasic spins: three quarters of a
-second is a long time on a machine with other processes in it.
-
-**`FRAMEBUFFER LAYER` and `FRAMEBUFFER MERGE`.** A second off-screen
-buffer that goes *over* the first, with one colour transparent, so the
-background is drawn once and only the thing on top is redrawn. This is
-MMBasic's TFT model, so a program written for a PicoMite with a panel
-on it runs here unchanged. In `MODE 2` the whole loop — clear the
-layer, draw, merge, wait for the frame — runs at 60 frames a second.
-
-**`MM.VER` answers the release you are running.** It had said 0.10
-since v0.10, through three releases that were not v0.10, because the
-number lived in a second place and only a comment asked for it to be
-kept in step. `relcheck.sh` compares the three places it is written
-down and the release cannot go out with them disagreeing.
-
-The editor colours six more keywords correctly, `TEMPR START` and
-`LINE INPUT` among them: it could not see a command MMBasic spells as
-two words.
-
-## New in v0.13
-
-Two releases in one. The machine gains the Unix tools you would expect
-to find on it, the C library gained something it turns out never to
-have had — and BASIC finished a category of MMBasic statements that had
-been half-done for several releases.
-
-**BASIC.** The drawing statements are complete: `POLYGON` (convex or
-concave, with the even-odd rule MMBasic uses), `BEZIER`, and `FILL` for
-flood-filling a region. The pins gained `PORT` in both directions and
-`PULSE`. And the statements that reach *into* a value rather than
-replacing it are all there now: `LMID`, `BIT`, `BYTE`, `FLAG`, `FLAGS`,
-along with `POS` and `FLUSH`.
-
-Two of those are worth a sentence each. **`PORT` changes every pin in a
-bank on the same clock edge** — the bits that differ are worked out
-first and posted as one masked store — which is the whole reason to use
-it for a bus rather than writing the pins one at a time. And **`PAUSE`
-now services interrupts while it waits**, as MMBasic's does. It never
-did before, and a program that arms a `SETTICK` usually has a main loop
-of little but `PAUSE`, so the handler could go its whole life without
-running once.
-
-**Unix.**
-
-* **`awk`** — Lucent's one true awk, the maintained descendant of the
-  V7 original. Associative arrays, user-defined functions, regular
-  expressions, `getline`, pipes and `printf`, all of it. See
-  [Text processing](#text-processing).
-* **`sed`, `find`, `expr`, `seq`, `uname`, and `[`** — every one of
-  these was **already being compiled** and simply never installed.
-  `[` is the one that matters: `/bin/test` existed and `/bin/[` did
-  not, so every bracket test in every shell script failed with
-  `[: not found`.
-* **`grep -q`**, and **`ls -t`** and **`ls -1`**.
-* **The C library can print a fraction.** `printf("%f", x)` used to
-  print the letter `f` — the conversion was behind a build option no
-  target defined, and the function it called did not exist anywhere in
-  the tree. `%e`, `%f` and `%g` now work, in `printf` and in `scanf`,
-  and so do `%j` and `%z`. A bytecode program's `printf` gained `%e`
-  and `%g` too, where before they printed themselves *and* misaligned
-  every argument after them.
-* **The flash disk is fifteen megabytes**, up from two. The kernel gets
-  1 MB of the chip and the disk takes the rest — and the chip is 16 MB,
-  which the build had never been told. See
-  [Appendix B](#appendix-b-boot-options).
-
-## New in v0.12
-
-The theme is the outside world again, but reaching further out. v0.11
-gave the machine pins it could drive; this one gives it buses, and a
-way to put its own text on something at the far end of one.
-
-* **I2C2** works from BASIC, with MMBasic's option word and its OPEN
-  timeout — see the I2C2 section for the two deliberate differences
-  from a PicoMite. A BMP180 on GP38/GP39 reads through MMBasic's own
-  reference program unchanged apart from the bus.
-* **The RTC alarm** is armable and was re-tested properly. The v0.11
-  note that it worked was taken from a test that could not tell an
-  alarm from the DS3231's 1 Hz square wave, and had in fact been
-  measuring the square wave.
-* **`printf` understands `%lld` and `%llX`.** It did not, silently,
-  which made every `&H` constant zero in a program translated *on the
-  board*.
-* **SPI** on the header pins — see the SPI section. An ILI9341 driven
-  from BASIC fills its 240×320 screen in 26 ms.
-* **Every peripheral got faster.** `clk_peri` had been left on the USB
-  PLL at 48 MHz whatever the system clock was doing, so SPI could not
-  exceed 24 MHz, and the UART and SD card were on the same 48 MHz. It
-  now follows `clk_sys`.
-* **The built-in fonts can be read.** `MM.INFO(FONT ADDRESS n)` gives
-  the address of a font's glyph data, and **`PEEK`** — which did not
-  exist at all before — reads it. Together they let a program draw
-  MMBasic's own text onto a display the firmware knows nothing about.
-  Both spellings are MMBasic's. See the section on the glyphs, and the
-  worked barometric station that uses them.
-
-## New in v0.11
-
-This release is about the **outside world**. The machine could already
-draw, make a noise and compile its own BASIC; what it could not do was
-control anything. It can now — and the pin work is between one and two
-orders of magnitude faster than the way it used to be done, because it
-stopped being a system call.
-
-* **Pins are owned, and come back.** `SETPIN` claims a pin from the
-  kernel, and the claim is released — with the pin **reset to an
-  input** — when your program ends, however it ends, including being
-  killed or crashing. A program that dies driving a relay no longer
-  leaves it driven. Claiming a pin another program holds is refused
-  rather than quietly fought over, and only the I/O header can be
-  claimed at all, so a BASIC program can no longer take a pin the SD
-  card or the display is using.
-* **A pin is now a register access, not a system call** — about ten
-  nanoseconds against 1.5 µs. That is what makes bit-banging a protocol
-  from BASIC possible at all, and it is why the rest of this list could
-  be built without adding kernel drivers for any of it.
-* **Analogue in**: `SETPIN n, AIN` reads volts, `ARAW` the raw count,
-  using MMBasic's own ten-sample sort-and-discard filter.
-* **Pin interrupts**: `SETPIN n, INTH|INTL|INTB, handler`, with the
-  handler an ordinary `SUB`.
-* **`SETTICK`** — four periodic timers, with `PAUSE`, `RESUME` and
-  catch-up that drops missed ticks rather than queueing them. Measured
-  at 1999.98 ms for twenty 100 ms ticks.
-* **`ON KEY`**, both forms — one that fires on any key and leaves it for
-  `INKEY$`, one that claims a single key and eats it.
-* **`INKEY$` works.** It never had, on this machine: the console's line
-  editor was taking every keystroke before a program could see it, and
-  nothing had exercised it hard enough to notice. A program reading keys
-  now holds the terminal, and gives it back for `INPUT` and at exit.
-* **`PWM`** and **`SERVO`**, with MMBasic's arithmetic and its
-  frequency range — 50 Hz to 100 kHz verified on a scope, and servo
-  positions from 0.8 ms to 2.2 ms.
-* **`PULLUP` and `PULLDOWN`** on the input modes, and hysteresis on
-  every input, as MMBasic does.
-* **GP32**, the DS3231's alarm line, is readable. (Setting an alarm is
-  not yet possible — see the pin section.)
-* **`/dev/i2c`** for C programs, sharing the QWIIC bus with the kernel's
-  own clock.
-
-Two things this exposed and fixed along the way: the compiler could be
-run twice at once and corrupt its own output, and its progress dots
-ignored redirection. Both are gone.
-
-## New in v0.10
-
-This release fills in the MMBasic translator's two largest gaps — the
-rest of the drawing statements, and structures — and makes the whole
-machine faster.
-
-* **`BOX`, `RBOX`, `TRIANGLE` and `ARC` translate.** With `CIRCLE`,
-  `TEXT` and `MAP` already in, the PicoMite drawing set is now
-  covered. Each primitive is a header of static C functions, one
-  header per primitive, so a compiled program carries only the
-  primitives it actually uses — the compiler discards the rest. The
-  same headers are callable from plain C; the C manual documents them.
-* **`TYPE ... END TYPE` — MMBasic structures.** Nested types, member
-  arrays, structure arrays, `LOCAL`s, by-reference parameters,
-  whole-structure assignment, `STRUCT COPY`/`CLEAR`/`SWAP`, and
-  `STRUCT(SIZEOF/OFFSET/TYPE)` folded to compile-time constants. The
-  firmware's byte layout is reproduced exactly — sizes, offsets,
-  padding and the length-byte string format — so `STRUCT(SIZEOF "t")`
-  answers the same number here and on a PicoMite, and assigning an
-  over-length string to a `LENGTH n` member raises `String too long`
-  just as the firmware does. Verified side by side against a real
-  PicoMite running the firmware's own structure test suite: every
-  feature implemented here passes identically there. What does not
-  translate is refused by name rather than mistranslated; the
-  translator chapter lists it.
-* **A class of board-only crashes in compiled programs is fixed.**
-  `bcrun` could size a program's memory arena so that the stack ended
-  up misaligned for the ARM's paired-register stores, and the
-  Cortex-M33 faults on those regardless of its unaligned-access
-  support. Neither the host runner nor qemu enforces that, so the
-  crash existed only on real hardware. The arena is now rounded so
-  the stack is always 8-byte aligned.
-* **`ON ERROR SKIP`/`IGNORE`, with `MM.ERRNO` and `MM.ERRMSG$`.** A
-  program can survive an error instead of stopping at it, exactly as it
-  can on a PicoMite — and the errors themselves now fire where the
-  interpreter fires them. That was the larger half of the work: float
-  division by zero used to answer `inf` rather than stopping, `SQR(-1)`
-  and `LOG(0)` answered `nan` and `-inf`, string concatenation past 255
-  characters truncated instead of erroring, and `ASC("")` errored where
-  a PicoMite returns 0. Each of those was a program that behaved
-  differently here and said nothing about it. There is a section on all
-  of this below.
-* **The arithmetic checks are paid for only by programs that can use
-  them.** A program with no `ON ERROR` cannot trap an error, so `mmbc`
-  compiles its float divisions to the machine's own divide and its
-  `SQR`/`LOG`/`ASIN`/`ACOS` to direct libm calls — full speed, C
-  answers (`inf`/`nan`) if the argument was bad. The moment `ON ERROR`
-  appears, every one of those becomes the checked, trappable statement
-  the interpreter has. "What `ON ERROR` costs", below, has the numbers.
-* **The machine can say what it is.** `MM.VER` gives the release as a
-  number (0.10 reads higher than 0.09), `MM.DEVICE$` names the firmware
-  and `MM.CMDLINE$` gives the arguments the program was started with, so
-  a translated program can be used as a proper command. Naming the
-  machine needed a new kernel call: which board this is was something
-  the kernel knew and only the boot banner ever said. *(In this release
-  `MM.DEVICE$` answered `Fuzix on PC2` / `Fuzix on PC3`. Since v0.16 it
-  is `Fuzix` alone and the board is `MM.INFO(PLATFORM)` — see
-  [Asking the machine about itself](#mm-info).)*
-* **`mmedit`'s Find works from the machine's own keyboard.** `F3` opened
-  the prompt and then ignored Enter, because a serial terminal sends CR
-  where the USB keyboard sends LF and the prompt only accepted the
-  first. Every prompt now takes either, so `F3`, `F10` and the rest
-  behave the same on the HDMI console as over a serial line.
-* **`mmedit` takes the screen back from a graphics mode.** Editing after
-  a program that ended in `MODE 2` meant typing into a console the
-  monitor was not showing. The editor now switches to `MODE 1` while it
-  runs and restores the mode when it leaves, so the program's screen
-  comes back as it was.
-* **`mmedit` colours the new statements correctly.** `Box`, `RBox`,
-  `Triangle`, `Arc`, `Type`, `End Type`, `Struct` and `Struct(` now
-  show as translatable (cyan) rather than interpreter-only (blue), and
-  so do the `MM.` functions `mmbc` understands — while `MM.WATCHDOG`,
-  `MM.INFO` and the rest it does not are honestly blue, where the
-  editor used to call everything translatable.
-* **The kernel's crash report leads with `r4`–`r7`** — the registers
-  that actually locate the fault in compiled code — so a report copied
-  from the screen is useful even when cut short.
-
-And a group of changes that make everything on the machine faster,
-without any program being written differently:
-
-* **The C library's string routines are newlib's.** Every program in
-  the userland — the compiler, the translator, `bcrun`, the editor,
-  your own C — was using the generic byte-at-a-time `memcpy`, `memset`,
-  `memmove`, `strlen`, `strcmp` and their relatives: about nine cycles
-  a byte on this processor. Twenty-one objects are now taken from the
-  ARM toolchain's own `libc.a` at build time, so the machine runs the
-  routines that were written and tuned for it. On identical bytecode:
-  the grains benchmark 52,052 → **55,163**, the solar eclipse predictor
-  2.022 → **1.953 s**, a graphics frame 78.81 → **74.03 ms**. The
-  compiler is a program in that userland too, so compiling the eclipse
-  went from 7 seconds to 6.
-* **Integer division uses the divide instruction.** MMBasic integers
-  are 64 bits wide and this processor's `SDIV` is 32, so every `\` and
-  `MOD` went through a software routine that is roughly twenty times
-  the cost of the instruction — even when both numbers were small.
-  When they both fit in 32 bits, which in practice is nearly always,
-  the instruction is used directly. The grains benchmark gains about
-  1%, the eclipse predictor 2%.
-* **`PIXEL` no longer pays a system call per point.** Plotting a point
-  cost about 1.3 µs of crossing into the kernel to store 15 ns of
-  pixel — 96% overhead. Points now queue and go across in one call, up
-  to 512 at a time or every 10 ms, whichever comes first, and any
-  other drawing statement flushes the queue first so the order on
-  screen is exactly the order in the program. A pure-`PIXEL` demo
-  (`ripple.bas`) went from 217 ms a frame at v0.9 to **171** — 21%.
-  A program that already builds its points into an array and plots
-  them with the array form of `PIXEL` is unaffected: that was, and
-  remains, the fastest way to plot a lot of points.
-  One deliberate behaviour change comes with this: a `PIXEL` outside
-  the screen is now **dropped**, as the interpreter drops it, where
-  before the coordinates wrapped and the point appeared somewhere
-  else. A program that relied on the wrapping will look different.
-* **Recursion goes 255 levels deep, not 15.** The old limit was
-  nothing to do with the stack. A by-reference argument occupies a slot
-  that cannot be released until the call returns, there were sixteen
-  slots, and so a routine that passed an argument by reference to
-  itself stopped at fifteen. There are now 256, which costs 2 KB and
-  is measured at 255 levels for every shape of recursive routine —
-  with locals, with local strings, with a string expression built at
-  each level. Beyond that a program stops with `Expression too
-  complex` rather than misbehaving. For scale: a recursive walk over a
-  million-node balanced tree is twenty levels deep. A program that
-  recurses without any terminating condition is still a program that
-  crashes the machine; the depth guard does not cover compiled
-  routines that the translator has turned into native code.
-* **Four C89 gaps in the preprocessor.** `?:` in an `#if`, the `#line`
-  directive, `__LINE__` inside an `#if`, and macro arguments being
-  expanded before `##` pastes them. The host build of the compiler uses
-  `gcc -E`, so the machine's own preprocessor had never been tested by
-  anything; it has its own test suite now. C conformance measured on
-  the machine goes from 156 to **160 of 175**.
-* **`cc1` folded signed constant division as unsigned.** `-7/2` in a
-  constant expression came out as an enormous positive number. Both
-  operands are now cast to a signed type before folding.
-
-## New in v0.9
-
-This release takes the 32 MB limit off the filesystem and makes
-compiled code substantially faster.
-
-* **A 2 TB disk format.** Block numbers are 32-bit and inodes 256
-  bytes, in place of the 16-bit block number that capped a filesystem
-  at 32 MB. The shipped card now has an 800 MB root rather than 32 MB,
-  a single file can reach 1 GB, and the format itself goes to 2 TB.
-  **Old cards and new kernels do not mix**: each refuses the other by
-  name rather than misreading it, so flash the kernel and write the
-  card in the same sitting.
-* **Compiled code is over 60% faster.** Dhrystone 2.1, compiled on the
-  machine, went from 102,842 to 166,834 per second — 44% of the same
-  benchmark cross-compiled by `gcc -O2` for this chip. Almost none of
-  that came from generating cleverer instructions; it came from
-  *keeping hot code native*. Library symbols are bound once at load
-  instead of being looked up on every call, the hottest local in a
-  function is held in a register, and compound assignment on 64-bit
-  and double values is inlined rather than calling out to the runtime
-  — that last one had been costing every MMBasic `FOR` loop a crossing
-  out of native code on every single iteration.
-* **The console survives a lost UART interrupt.** Three console wedges
-  during large serial transfers shared one state: the interrupt
-  enabled and pending, but never delivered. Why delivery is lost is
-  still not understood, but it is no longer fatal — the handler now
-  drains both directions and the 5 ms tick is a full polled rescue, so
-  the console degrades to polled instead of dying.
-* **`vi`.** The editor has always been on the card, but only under its
-  own name, `levee`. It now answers to `vi` as well: one file, two
-  names, no extra space.
-* **`mmedit`'s function keys work from a serial terminal.** They always
-  worked from a USB keyboard on the HDMI console, but a terminal such
-  as TeraTerm spells F1–F4 differently — `ESC [ 11 ~` where the console
-  sends `ESC O P` — and the editor silently ignored the spelling it did
-  not know. Since the editor is driven almost entirely by function
-  keys, that made it close to unusable over the serial port. It now
-  accepts every sequence MMBasic's own `MMInkey` accepts, including
-  the shifted forms.
-* **`INKEY$` returns MMBasic's key codes.** A terminal sends an arrow
-  or a function key as a several-byte escape sequence; MMBasic hands
-  back one code for it, and until now a translated program here saw
-  the raw bytes one at a time instead. So `IF INKEY$ = CHR$(&H80)` —
-  the way every PicoMite program tests for cursor-up — quietly never
-  matched. `INKEY$` now reassembles the sequence and returns the same
-  single code the PicoMite does: `&H80`–`&H83` for the cursor keys,
-  `&H91`–`&H9C` for F1–F12, and the editing cluster besides. Anything
-  it does not recognise is handed back byte by byte, as before, so
-  nothing is swallowed.
-* **`vi` can edit a real file.** Levee shipped with a 4 KB buffer — a
-  fair share of an 8-bit micro, and not of this machine. It is now
-  64 KB.
-
-## New in v0.8
-
-This release gives the machine music, pins, and MMBasic's own text.
-
-* **MP3 playback.** `PLAY MP3 f$` plays a file *while your program
-  carries on running* — the decoder is a separate process feeding a
-  deep buffer in the kernel, so nothing has to be refilled from a main
-  loop. `PLAY VOLUME n` sets the level and is remembered; `PLAY STOP`
-  stops whatever is playing, including a player left behind by a
-  program you interrupted. A translated BASIC benchmark still runs at
-  **89% of full speed** with music playing.
-* **`SETPIN` and `PIN`** — all forty-eight GPIOs of the RP2350B, not
-  the 28 an RP2040 has. `SETPIN n, DIN|DOUT|AIN|ARAW|OFF`, `PIN(n) = v`
-  and the `PIN(n)` function, with analogue in volts or raw counts. Pins
-  are owned, and come back reset when your program ends; and a pin read
-  or write is a register access, not a system call.
-* **`TEXT`, `FONT` and all nine of MMBasic's fonts**, held in flash so
-  they cost no RAM at all. `TEXT` takes the full alignment and scale
-  arguments.
-* **`MAP`, statement and function**, with `CLS [colour]`: the sixteen
-  colours can be remapped exactly as in MMBasic, and the defaults are
-  now MMBasic's own HDMI values rather than an approximation.
-* **`PAUSE` gives the CPU up** instead of spinning, so a program that
-  waits no longer holds the machine — and the fraction of a second it
-  cannot sleep is bounded at 99 ms however long the pause.
-* **Programs are much smaller.** MMBasic's scratch memory is now sized
-  per program rather than fixed, taking a translated program's static
-  data from 61,904 bytes to 12,748.
-* **Maths runs on the DCP.** `SIN`, `COS`, `EXP` and the rest are
-  shared out of kernel flash and use the RP2350's double-precision
-  co-processor: about **2.7× faster** than the copy that used to be
-  linked into every program, and it costs no program memory.
-* **A C library fix that reaches everything.** `<limits.h>` declared
-  `INT_MAX` as 32767 on a machine whose `int` is 32 bits. Any program
-  that compared against it — or sized a buffer with it — was working
-  from a number two thousand times too small. Every binary on the card
-  has been rebuilt.
-
-The kernel and the card are a matched pair, as always: the card's
-programs are statically linked, so a new kernel with an old card runs
-the old C library.
-
-## New in v0.7
-
-Most of the kernel now executes from flash instead of being copied into
-RAM at boot, and the memory that frees goes to programs.
-
-* **340 KB of program RAM**, up from 312, and a single process can have
-  about **292 KB**. 90,676 bytes of kernel code used to be copied into
-  RAM at boot; 45,000 of them are gone, and what is left has room to
-  grow. Costs nothing measurable: the display DMAs out of RAM
-  continuously, so RAM bandwidth is contended while the flash cache is
-  a separate path.
-* **64 processes**, up from 30, with the open-file and inode tables
-  sized to match — the shell gives every background job its own
-  `/dev/null`, so the file table ran dry before the process table did.
-* **`FRAMEBUFFER`** — `CREATE`, `WRITE N|F`, `COPY s,d[,B]`, `CLOSE`,
-  `WAIT`. Draw off-screen and show the frame in one go. A
-  redraw-and-show frame costs about 4.4 ms against the 17 ms the
-  display gives you, and `COPY ...,B` holds a loop to the refresh rate.
-* **`PRINT @(x, y [, mode])`** puts text at a pixel position. In a
-  graphics mode `PRINT` now *draws* the characters, as MMBasic does,
-  rather than sending them to the console — so text follows the drawing
-  into the framebuffer instead of the console scrolling the display out
-  from under it. `mode` 1 draws over what is there, 2 swaps ink and
-  paper.
-* **`INKEY$`** — which was not implemented at all, and because it ends
-  in `$` was quietly being treated as an ordinary empty string
-  variable, so `LOOP UNTIL INKEY$ <> ""` could never exit.
-* **`PIXEL x(), y(), c()`** — the array form, one call for a whole run
-  of points instead of one syscall each.
-* **Text scrolls the same way everywhere.** A `PRINT` on the last line
-  scrolls in a graphics mode exactly as it does on the console, because
-  it is now literally the same code.
-* **A stretched ellipse outline is no longer dotted** — the fix from
-  MMBasic's own `DrawCircle`.
-* **`PRINT "x";` reaches the screen.** A partial line used to sit in a
-  buffer until the next newline, so a program printing "Calculating… "
-  and then working for half a minute showed nothing until it finished.
-* **BBC BASIC works again.** It sizes its workspace by asking for
-  memory until the kernel refuses; v0.6 let it take every last block,
-  leaving the shell nowhere to return to. A process may now grow only
-  as far as leaves room for the largest other one.
-* **The boot banner names the PC3 release**, alongside Fuzix's own
-  version — they are different numbers, and only one of them used to be
-  on screen.
-
-## New in v0.6
-
-This release is about memory. A translated BASIC program could not hold
-a framebuffer-sized array, and a large one could not be loaded at all;
-both are fixed, and the same work made everything faster.
-
-* **BASIC arrays and strings live in the PSRAM heap.** They used to sit
-  in the 48 KB the interpreter gave a program, so a 38,400 byte array —
-  one MODE 1 framebuffer — did not fit at all. Globals go in one block
-  taken once; `LOCAL` arrays and strings get a block per invocation,
-  freed on the way out, which is what makes recursion correct. Simple
-  variables stay where they are: they are the hot ones, and SRAM is
-  3.7× faster to reach than PSRAM.
-* **Programs are 15% faster.** A program address is now a machine
-  address rather than an offset into a 48 KB window, so every access
-  stops paying for the conversion. The solar eclipse went from 3.31 to
-  2.80 seconds, and the heap change above costs about half a percent
-  on top.
-* **A process may use all of program RAM.** The old 256 KB ceiling was
-  the size of a fixed swap slot, and swap has not worked that way for
-  a while.
-* **`SYSTEM`, `SAVE IMAGE` and `LOAD IMAGE` work from large programs
-  again.** `fork` needed the process resident twice over, so anything
-  past half of memory could not do it. The parent is now staged into
-  PSRAM instead.
-* **A memory leak fixed** that cost 132 KB — of 312 KB — every time a
-  program failed to start, for the rest of that boot.
-* **A C library bug fixed** that made `fread` and `fseek` disagree
-  about a file's position and quietly return the wrong bytes. It needed
-  a file small enough to fit one buffer, which is why it went unnoticed:
-  it took down the compiler on a 305-byte object while 100 KB ones were
-  fine. It is not specific to this machine and has been reported
-  upstream.
-
-## New in v0.5
-
-* **MMBasic draws.** `MODE`, `COLOUR`, `PIXEL`, `LINE`, `CIRCLE` and
-  `RGB()` are translated and run on the HDMI display — a whole shape
-  crosses into the kernel in one call, so a 640-point line costs one
-  syscall rather than 640.
-* **`SAVE IMAGE` and `LOAD IMAGE`**, with MMBasic's BMP decoder:
-  1/4/8/16/24/32-bit files, RLE4 and RLE8, and its dithering modes.
-* **`SYSTEM`** — a BASIC program can run another program and wait for
-  it, which is how `SAVE IMAGE` and `LOAD IMAGE` are built.
-* **`mmedit`**, MMBasic's editor, ported.
-* **`TIMER` is a float** off a 64-bit microsecond clock, and **`RND`
-  returns 53 bits** from splitmix64 rather than 15 from the C library.
-* The SD root filesystem is now **built from source** by
-  `mksdimage.sh` — it had no build recipe before — and is **64000
-  blocks** rather than the 65535 that sat on `blkno_t`'s ceiling.
-* A **filesystem corruption fixed** that had been destroying cards
-  under repeated large-file rewrites: `f_trunc` freed a file's double
-  indirect block and left the inode still pointing at it. It bit any
-  file over 273 blocks. See the release notes.
-* **Panic messages now reach the serial port.** They were being
-  truncated to about eleven characters by an interrupt-driven UART
-  that stopped with the machine.
-
-\newpage
+ewpage
 
 # Installing Fuzix
 
@@ -1472,6 +900,11 @@ the first two HDMI modes:
 | `MODE 1` | 640×480 | monochrome |
 | `MODE 2` | 320×240 | 16, from MMBasic's RGB121 set |
 
+A `PIXEL` outside the screen is **dropped**, which is what the
+interpreter does. Older releases here masked the coordinates instead,
+so `PIXEL 1030, 100` appeared at x=6 — a program written against that
+will look different.
+
 `RGB()` takes the usual named colours and `RGB(r,g,b)`. `COLOUR` sets
 the current drawing colour, which every statement uses when no colour
 is given. `LINE`, `CIRCLE` and the rest take MMBasic's argument order,
@@ -2194,6 +1627,16 @@ All **forty-eight** GPIOs of the RP2350B are available — the wider part
 is why the PC3 can put the real-time clock's alarm on GP32, which a
 28-pin RP2040 could not reach.
 
+**A pin is a register access, not a system call** — about ten
+nanoseconds against the 1.5 microseconds a crossing into the kernel
+costs. That is what makes bit-banging a protocol from BASIC possible at
+all, and it is why `ONEWIRE` and the rest are written in your own
+program's time rather than as kernel drivers. The kernel still owns the
+pin: `SETPIN` claims it, claiming one another program holds is refused,
+and the claim is released — with the pin **reset to an input** — when
+your program ends, however it ends. A program that dies driving a relay
+does not leave it driven.
+
 `n` is the **GPIO number**, not MMBasic's connector-pin numbering. The
 GPIO number is what the schematic, the kernel, and every other tool on
 this machine use, and inventing a second numbering for one statement
@@ -2691,6 +2134,14 @@ counter and fires at the period you asked for. Nothing else about the
 behaviour differs; if you are porting a program whose timing was tuned
 against a PicoMite, it will run very slightly faster here.
 
+**`PAUSE` gives the CPU up rather than spinning**, so a waiting program
+does not hold the machine against everything else on it. The fraction
+it cannot sleep through is bounded at 99 ms however long the pause.
+**And `PAUSE` services interrupts while it waits**, as MMBasic's does:
+that matters more than it sounds, because a program that arms a
+`SETTICK` usually has a main loop of little but `PAUSE`, and a handler
+in such a loop would otherwise never run at all.
+
 Every read and write is a call into the kernel — comparable to drawing
 one pixel, which is over a microsecond. That is ample for a switch or
 an LED and nowhere near enough to bit-bang a protocol; write that in C,
@@ -2914,6 +2365,15 @@ part between the top of the file and the first `Sub`, is compiled as
 one function. A game whose whole loop lives in the main line can grow
 that one function past the cap and end up with its hottest code being
 its slowest.
+
+**Recursion goes 255 levels deep.** The limit is not the stack: a
+by-reference argument occupies a slot that cannot be released until the
+call returns, and there are 256 of them. Past that a program stops with
+`Expression too complex` rather than misbehaving. For scale, a
+recursive walk over a million-node balanced tree is twenty levels deep.
+The guard does not cover routines the translator has turned into native
+code, so a routine that recurses with no terminating condition is still
+a program that crashes the machine.
 
 The rules below come from porting PicoMan (Geoff Graham's PacMan,
 1,250 lines, graphics-heavy). As it arrived it compiled to 101 KB of
@@ -3475,7 +2935,7 @@ Key devices:
 |-------------|--------------------------------------------------|
 | `/dev/tty1` | The console (HDMI + USB keyboard + serial mirror) |
 | `/dev/tty2` | The GP0/GP1 serial port                          |
-| `/dev/hda`  | On-board NAND flash filesystem                   |
+| `/dev/hda`  | On-board flash filesystem, 15 MB                 |
 | `/dev/hdb1`–`hdb3` | SD card partitions (root is `hdb2`)       |
 | `/dev/rtc`  | The DS3231 clock (`setdate` reads and sets it)   |
 | `/dev/sys`  | Platform control (graphics, sound, ADVAL ioctls) |
