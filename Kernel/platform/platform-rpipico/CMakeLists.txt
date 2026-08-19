@@ -89,6 +89,20 @@ add_compile_definitions(
 
 pico_sdk_init()
 
+# The SDK's TinyUSB must be 0.20 - the USB HOST fixes this machine's
+# keyboard and hub depend on, and what the PC3's MMBasic firmware uses.
+# It cannot be pinned by git (see usbcheck.sh for why), so it is
+# asserted at configure time instead, before anything is compiled.
+execute_process(
+	COMMAND sh ${CMAKE_CURRENT_LIST_DIR}/usbcheck.sh ${PICO_SDK_PATH}
+	RESULT_VARIABLE USBCHECK_RC
+	OUTPUT_VARIABLE USBCHECK_OUT
+	ERROR_VARIABLE  USBCHECK_ERR)
+if(NOT USBCHECK_RC EQUAL 0)
+	message(FATAL_ERROR "${USBCHECK_ERR}")
+endif()
+message(STATUS "${USBCHECK_OUT}")
+
 include_directories(
 	.
 	../..
