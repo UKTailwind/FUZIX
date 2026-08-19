@@ -266,6 +266,18 @@ int main(void)
     }
 #endif
 
+
+#ifdef CONFIG_PC3_NET
+    /* Step 0: this call exists so the CYW43 driver and lwIP are LINKED
+     * and can be measured in the map.  It returns immediately - see
+     * net_cyw43.c - and touches no pin.  --gc-sections is on, so
+     * without a reachable call the whole subsystem would be discarded
+     * and the measurement would read zero. */
+    {
+        extern void pc3_net_init(void);
+        pc3_net_init();
+    }
+#endif
     if ((U_DATA__U_SP_OFFSET != offsetof(struct u_data, u_sp)) ||
         (U_DATA__U_PTAB_OFFSET != offsetof(struct u_data, u_ptab)) ||
         (P_TAB__P_PID_OFFSET != offsetof(struct p_tab, p_pid)) ||

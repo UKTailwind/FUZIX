@@ -330,3 +330,23 @@
 *sound.c.o(.text.sound_envelope)
 *sound.c.o(.text.sound_pcm_close)
 *sound.c.o(.text.sound_pcm_stat)
+
+/* ---- CYW43 Wi-Fi and lwIP (PC3_NET builds only).
+ *
+ * These patterns match nothing unless the network stack is linked, so
+ * they are unconditional here.  Without them the link fails: the SDK's
+ * RAM .data section claims every .text and .rodata not named in these
+ * files, and the radio's firmware blob alone is a quarter of a megabyte
+ * (measured: "region RAM overflowed by 300312 bytes").
+ *
+ * Against this file's own rule - a cache miss here cannot hurt.  None
+ * of it is on the scanout path, and the packet rate over a gSPI link
+ * is four orders of magnitude below the pixel rate.  The one thing to
+ * watch when the radio is actually brought up is the poll arch's GPIO
+ * interrupt handler, which is small and only sets a work-pending flag;
+ * if its latency ever measures, name it back into RAM here. ---- */
+*lwip*.o(.text*)
+*cyw43*.o(.text*)
+*cybt_*.o(.text*)
+*async_context*.o(.text*)
+*net_cyw43.c.o(.text*)

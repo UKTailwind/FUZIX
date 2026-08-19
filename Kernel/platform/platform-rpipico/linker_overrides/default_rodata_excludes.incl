@@ -76,3 +76,14 @@
  * RAM. */
 *sound.c.o(.rodata.SineTable*)
 *sound.c.o(.rodata.triangletable*)
+
+/* ---- CYW43 Wi-Fi and lwIP (PC3_NET builds only).  The firmware blob
+ * the driver DMAs into the chip at init is const data - about 230K of
+ * it - and it is read once per boot, over a link that runs at a few
+ * megabits.  Flash is exactly where it belongs.  See the matching
+ * block in default_text_excludes.incl. ---- */
+*lwip*.o(.rodata*)
+*cyw43*.o(.rodata*)
+*cybt_*.o(.rodata*)
+*async_context*.o(.rodata*)
+*net_cyw43.c.o(.rodata*)

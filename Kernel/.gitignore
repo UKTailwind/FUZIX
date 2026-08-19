@@ -7,6 +7,7 @@ fuzix.ihx
 fuzix.tmp
 hogs.txt
 build
+build-net
 relocs.dat
 version.c
 /font/font8x8_exp2.c

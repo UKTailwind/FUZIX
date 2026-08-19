@@ -87,6 +87,45 @@ add_compile_definitions(
     TOTALMEM=${TOTALMEM}
 		)
 
+# ---- CYW43 Wi-Fi / lwIP --------------------------------------------
+#
+# OFF by default and it must stay that way until the cost is known:
+# the kernel's RAM region has under 2K of headroom (see
+# linker_overrides/memory_ram.incl) and anything this adds to .bss
+# comes out of the process pool.  cmake -DPC3_NET=1 links it.
+#
+# PICO_CYW43_SUPPORTED is a CMake variable the SDK tests before it even
+# defines the pico_cyw43_arch targets, and it is normally set by the
+# board header.  This port builds with PICO_BOARD=pico2 - the plain
+# Pico 2 header - and overrides what the PC3 actually is by hand
+# (PICO_RP2350A=0, the 16M flash, PSRAM on GP47), so the radio has to
+# be declared here the same way.  Keeping the board header unchanged is
+# the point: it makes the with/without builds differ in one thing only,
+# which is what makes the measurement a measurement.
+#
+# The pins are the standard CYW43 wiring, which is what the PC3 uses.
+# They are ALSO the Pico Computer 2's SD chip select (GP29) and LED
+# (GP25) - see net_cyw43.c and board.c.
+option(PC3_NET "link the CYW43 driver and lwIP" OFF)
+if(PC3_NET)
+	set(PICO_CYW43_SUPPORTED 1)
+	add_compile_definitions(
+		CONFIG_PC3_NET=1
+		CYW43_DEFAULT_PIN_WL_REG_ON=23
+		CYW43_DEFAULT_PIN_WL_DATA_OUT=24
+		CYW43_DEFAULT_PIN_WL_DATA_IN=24
+		CYW43_DEFAULT_PIN_WL_HOST_WAKE=24
+		CYW43_DEFAULT_PIN_WL_CLOCK=29
+		CYW43_DEFAULT_PIN_WL_CS=25
+		# The gSPI link is clocked from clk_sys, and the SDK's fixed
+		# divider of 2 is tuned for ~125MHz: at 375 it overclocks the
+		# chip and the symptom is "hdr mismatch" / ioctl timeouts.
+		# This lets the divider be set at runtime, as MMBasic and the
+		# PC3's MicroPython both do.
+		CYW43_PIO_CLOCK_DIV_DYNAMIC=1
+	)
+endif()
+
 pico_sdk_init()
 
 # The SDK's TinyUSB must be 0.20 - the USB HOST fixes this machine's
@@ -195,6 +234,15 @@ target_link_libraries(fuzix
 	hardware_spi
 	tinyusb_device
 )
+
+# The poll flavour of the arch layer: no async_context worker threads
+# and no alarm-pool entries (this port allows itself two, one of which
+# is the system tick).  lwIP is driven from the kernel's own pump
+# instead, which is the same choice MMBasic's WEB builds make.
+if(PC3_NET)
+	target_sources(fuzix PRIVATE net_cyw43.c)
+	target_link_libraries(fuzix pico_cyw43_arch_lwip_poll)
+endif()
 
 pico_set_float_implementation(fuzix none)
 pico_set_double_implementation(fuzix pico)
