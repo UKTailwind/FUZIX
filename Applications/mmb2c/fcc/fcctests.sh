@@ -6,7 +6,7 @@
 #   bash fcc/fcctests.sh
 
 M=$(cd "$(dirname "$0")/.." && pwd)
-FCC=${FCC:-/home/peter/src/FUZIX/Applications/CC}
+FCC=${FCC:-$(cd "$(dirname "$0")/../../CC" && pwd)}
 BIN=$FCC/host-armm0
 W=${W:-/tmp/fccbuild}
 mkdir -p "$W"

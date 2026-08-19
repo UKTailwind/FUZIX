@@ -3061,7 +3061,7 @@ engineering history and `PC3-GFX-DESIGN.md` for the display design.
 # Appendix C: MMBasic coverage
 
 This is what `mmbc` translates today. It is generated from the
-translator's own tables (`fcc/coverage.py` in the mmb2c repository), so
+translator's own tables (`Applications/mmb2c/fcc/coverage.py`), so
 it says what the program does rather than what anyone remembers it
 doing.
 

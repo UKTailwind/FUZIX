@@ -1,7 +1,7 @@
 #!/bin/bash
 # P5 A/B: sizes and qemu wall time, THUMB_NORSKIP=1 = pair kept.
 CC=$(cd "$(dirname "$0")/../.." && pwd)
-M=/home/peter/src/mmb2c
+M=$(cd "$(dirname "$0")/../../../mmb2c" && pwd)
 W=/tmp/ccp5
 Q="qemu-arm $CC/qemu-armm0/bcrun"
 SEIN=$M/tests/solar_eclipse.in

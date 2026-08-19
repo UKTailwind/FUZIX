@@ -25,6 +25,8 @@
 
 R=$(cd "$(dirname "$0")/../.." && pwd)
 CC=$R/Applications/CC
+# The MMBasic translator, the mm runtime headers and the BASIC corpus.
+MMB=$R/Applications/mmb2c
 SRC=$R/Images/rpipico/pc3-sd.img
 OUT=$R/Images/rpipico/pc3-sd-cc.img
 W=${W:-/tmp/mkccimage}
@@ -74,15 +76,16 @@ echo "--- installing"
 	done
 	# what mmbc-generated C includes: the runtime's interface and the
 	# FCC-view headers (math.h etc. map to bcrun natives)
-	# EVERY mmb_*.h, by glob, for the reason sync-runtime.sh uses one:
-	# a glob cannot forget.  This was a hand-written list and the list
-	# was wrong twice.  mmb_spi.h was missing at v0.11, so a fresh card
-	# compiled everything except a program that opened SPI; then at
-	# v0.15 mmb_play.h, mmb_blit.h, mmb_sprite.h and mmb_flash.h were
-	# all missing at once - which is to say the release whose theme was
-	# games shipped a card that could not compile a program using PLAY,
-	# BLIT or SPRITE.  Found by building a four-line program ON THE
-	# BOARD; every host gate passed, because the host has the headers.
+	# EVERY mmb_*.h, by glob: a glob cannot forget.  It used to be a
+	# hand-written list here AND a second one in the sync script, and
+	# between them they were wrong twice.  mmb_spi.h was missing at
+	# v0.11, so a fresh card compiled everything except a program that
+	# opened SPI; then at v0.15 mmb_play.h, mmb_blit.h, mmb_sprite.h
+	# and mmb_flash.h were all missing at once - which is to say the
+	# release whose theme was games shipped a card that could not
+	# compile a program using PLAY, BLIT or SPRITE.  Found by building
+	# a four-line program ON THE BOARD; every host gate passed,
+	# because the host had the headers.  There is one copy now.
 	#
 	# What the list used to record, and is worth keeping: these are the
 	# geometry and peripheral primitives, static functions with one
@@ -93,7 +96,7 @@ echo "--- installing"
 	# code and finds the others by their own include guards - that is
 	# the emitter's business, not this script's; staging order does not
 	# matter.
-	for f in "$CC"/mmb_*.h; do
+	for f in "$MMB"/mmb_*.h; do
 		echo "get $f $(basename "$f")"
 	done
 	# The pin and ADC REGISTERS, which mmb_gpio.h reaches for directly
@@ -102,14 +105,16 @@ echo "--- installing"
 	# same file from the C library as <sys/pc3io.h>.  One source, staged
 	# twice, so the two cannot drift.
 	echo "get $R/Library/include/sys/pc3io.h pc3io.h"
-	for f in "$CC"/hosttest/fcc-include/*.h; do
-		echo "get $f $(basename "$f")"
+	# By name, not by glob: fcc/include also holds a stdlib.h, and the
+	# card wants ctest-include's, staged above.
+	for f in math.h ctype.h stdint.h time.h; do
+		echo "get $MMB/fcc/include/$f $f"
 	done
 	echo "cd /usr/bin"
 	echo "bget $CC/hwtest/ccbc.s cc"
 	echo "chmod 755 cc"
 	# mmbc: the MMBasic -> C translator (mmb2c.py rewritten in C,
-	# byte-identical by that repo's gates) - BASIC self-hosts:
+	# byte-identical to it by mmb2c/mmbc/cgate.sh) - BASIC self-hosts:
 	#   mmbc prog.bas ; cc prog.c ; ./prog.bc
 	# saveimage and loadimage are what SAVE IMAGE and LOAD IMAGE run:
 	# whole operations, so they are programs rather than runtime, and
@@ -153,13 +158,27 @@ echo "--- installing"
 	for f in "$CC"/hosttest/samples/*.c; do
 		echo "get $f $(basename "$f")"
 	done
-	# BASIC samples for mmbc (synced from the mmb2c repo).  These are
-	# the WHOLE corpus, probes and regressions included, and they are
-	# here for the board-side testing that needs them.  The curated
-	# subset a user should read lives in /root/MMBasic with a README -
-	# mksdimage.sh installs that from devtools/mkexamples.sh.
-	for f in "$CC"/hwtest/*.bas "$CC"/hwtest/*.in; do
-		[ -r "$f" ] && echo "get $f $(basename "$f")"
+	# The BASIC corpus, from Applications/mmb2c.  samples/ goes whole -
+	# those programs need a screen, a keyboard or a device, so the host
+	# gates cannot run them and the board is the only place they mean
+	# anything.  From tests/ only the names in tests/card.list, because
+	# most of that directory exists for the gates.
+	#
+	# tests FIRST, then samples: port, pulse and settick exist in both
+	# and are DIFFERENT programs - the sample is the board demo and is
+	# the one wanted here.  Staging order decides that, so it is said
+	# out loud below rather than left to whoever edits these two loops.
+	while read -r b; do
+		case $b in ''|\#*) continue ;; esac
+		[ -r "$MMB/tests/$b" ] || {
+			echo "card.list names $b, which tests/ does not have" >&2
+			exit 1; }
+		echo "get $MMB/tests/$b $b"
+	done < "$MMB/tests/card.list"
+	for f in "$MMB"/samples/*.bas; do
+		b=$(basename "$f")
+		[ -r "$MMB/tests/$b" ] && echo "note: samples/$b shadows tests/$b" >&2
+		echo "get $f $b"
 	done
 	# The board-side sample runner, so the C suite can be re-run on the
 	# machine itself without sending anything: sh rs.sh > out.txt.

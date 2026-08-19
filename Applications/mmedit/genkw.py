@@ -16,7 +16,8 @@ import os
 import sys
 
 MMB = "/mnt/d/Dropbox/PicoMite/PicoMiteV6.03.00/AllCommands.h"
-MMB2C = "/home/peter/src/mmb2c/mmb2c.py"
+MMB2C = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     os.pardir, "mmb2c", "mmb2c.py")
 
 src = open(MMB, encoding="utf-8", errors="replace").read().split("\n")
 

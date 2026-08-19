@@ -6,10 +6,12 @@ keyword: `MATH <subcommand>` operates on arrays in place, and
 for each, so the main coverage list counts MATH as "translated" and says
 nothing at all about the 67 members underneath.
 """
+import os
 import re
 
 REF = "/mnt/d/Dropbox/PicoMite/PicoMiteV6.03.00/core/MATHS.c"
-MMB2C = "/home/peter/src/mmb2c/mmb2c.py"
+MMB2C = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     os.pardir, "mmb2c.py")
 
 s = open(REF, encoding="utf-8", errors="replace").read()
 i = s.index("void cmd_math")

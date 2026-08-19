@@ -20,6 +20,15 @@ CCOPTS += -DARENA_TABLES
 
 include Makefile.common
 
+# The MMBasic translator and the mm runtime live in Applications/mmb2c
+# and are compiled from there, not from copies.  They used to be
+# verbatim copies in this directory kept in step by two sync scripts,
+# and the copies went stale silently more than once - a header added
+# to the card but not to the sync list, and once the whole translator.
+# vpath means there is one of each again.
+vpath %.c ../mmb2c/mmbc ../mmb2c
+vpath %.h ../mmb2c/mmbc ../mmb2c
+
 # Both compiler passes are recursive descent over expression trees, and
 # a large generated program - a three thousand line BASIC translation -
 # drives them deeper than the platform's 8K default.  The window is
@@ -47,10 +56,12 @@ bcrun: bcrun.o
 # is exactly what shipped, so it is worth being blunt about it.  The
 # fallbacks exist so the host gates can run a program that draws;
 # nothing else should ever get them.
-bcrun.o: CCOPTS += -DMM_PC3
+# -I../mmb2c: bcrun_mm.c lives here and #includes "mmb_runtime.c",
+# which does not, so the quoted include has to fall back to a path.
+bcrun.o: CCOPTS += -DMM_PC3 -I../mmb2c
 
-# The MMBasic -> C translator (masters in the mmb2c repo, synced by
-# fcc/sync-mmbc.sh; byte-identical to mmb2c.py by that repo's gates).
+# The MMBasic -> C translator (../mmb2c/mmbc, byte-identical to
+# mmb2c.py by mmbc/cgate.sh).
 # MMBC_ARENA: pools live in one PSRAM arena allocation - the second
 # arena client after cc2.
 MMBC_OBJ = mmbc_main.o mmbc_lex.o mmbc_util.o mmbc_tab.o mmbc_sym.o \

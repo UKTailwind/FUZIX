@@ -21,8 +21,10 @@ all: $(OBJDIR)/bcrun
 
 # fnum.c: see the note in Makefile.host - _fnum is the C library's and
 # this build does not link Fuzix's.
-$(OBJDIR)/bcrun: bcrun.c bcrun_mm.c mmb_runtime.c mmb_runtime.h bytecode.h ../../Library/libs/fnum.c | $(OBJDIR)
-	$(CROSS) $(CFLAGS) -o $@ bcrun.c ../../Library/libs/fnum.c -lm
+# mmb_runtime.c/.h live in Applications/mmb2c; -I../mmb2c is what
+# lets bcrun_mm.c's #include "mmb_runtime.c" find it from here.
+$(OBJDIR)/bcrun: bcrun.c bcrun_mm.c ../mmb2c/mmb_runtime.c ../mmb2c/mmb_runtime.h bytecode.h ../../Library/libs/fnum.c | $(OBJDIR)
+	$(CROSS) $(CFLAGS) -I../mmb2c -o $@ bcrun.c ../../Library/libs/fnum.c -lm
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)

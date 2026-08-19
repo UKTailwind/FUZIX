@@ -43,7 +43,7 @@ bld dhry-noic.bc THUMB_NOICOPY=1
 bld dhry-new.bc  IGNORE=0
 
 # The eclipse the same three ways, via the mmb2c pipeline if present
-M=/home/peter/src/mmb2c
+M=$(cd "$(dirname "$0")/../../../mmb2c" && pwd)
 if [ -f "$M/tests/solar_eclipse.bas" ]; then
 	python3 "$M/mmb2c.py" "$M/tests/solar_eclipse.bas" --fcc \
 		-o "$W/se.c" > /dev/null 2>&1 || exit 1

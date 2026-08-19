@@ -39,6 +39,6 @@ fail=0
 for bc in /tmp/fccbuild/t[0-9].bc; do
 	one "$bc" || fail=1
 done
-one /tmp/fccbuild/solar_eclipse.bc /home/peter/src/mmb2c/tests/solar_eclipse.in || fail=1
+one /tmp/fccbuild/solar_eclipse.bc "$(cd "$(dirname "$0")/../../mmb2c" && pwd)"/tests/solar_eclipse.in || fail=1
 one /tmp/ccbench/bench.bc || fail=1
 exit $fail

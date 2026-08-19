@@ -1,0 +1,40 @@
+# Which tests/ programs go on the SD card, one name per line.
+#
+# samples/*.bas all go, by glob - this list is only for the
+# tests, which mostly exist for the host gates.  Three names
+# appear in BOTH directories (port, pulse, settick) and are
+# different programs: the sample is the board demo and wins,
+# which is why it is staged second.  mkccimage.sh says so when
+# it happens rather than resolving it quietly.
+#
+# Until this list existed the set was whatever two sync
+# scripts and a few hand copies had left in hwtest: 21 names
+# in fcc/sync-mmbc.sh, and five more (bitbyte, lscomms,
+# onewire, posflush, spi) that nothing maintained at all.
+bench.bas
+bitbyte.bas
+box.bas
+circle.bas
+circrnd.bas
+fbdemo.bas
+forktest.bas
+imgfmt.bas
+imgloop.bas
+imgm1c.bas
+imgtrip.bas
+localheap.bas
+lscomms.bas
+onewire.bas
+palette.bas
+pixart.bas
+posflush.bas
+ripple.bas
+rtest.bas
+saveimg.bas
+solar_eclipse.bas
+sombrero.bas
+spi.bas
+t1.bas
+tri.bas
+wtest.bas
+solar_eclipse.in

@@ -31,7 +31,7 @@
 # fcctests.sh; THUMB_* knobs pass through to cc2.
 
 M=$(cd "$(dirname "$0")/.." && pwd)
-FCC=${FCC:-/home/peter/src/FUZIX/Applications/CC}
+FCC=${FCC:-$(cd "$(dirname "$0")/../../CC" && pwd)}
 BIN=$FCC/host-armm0
 QBC="qemu-arm $FCC/qemu-armm0/bcrun"
 W=${W:-/tmp/fccqemu}

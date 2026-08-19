@@ -56,8 +56,11 @@ all: $(OBJDIR)/cc0 $(OBJDIR)/cc1 $(OBJDIR)/cc2 $(TOOLS)
 # links the host's libc, which has no such symbol.  Compiling the same
 # source both ways is also what keeps %e and %g identical between this
 # bcrun and the board's - which is the whole point of the gates.
-$(OBJDIR)/bcrun: bcrun.c bcrun_mm.c mmb_runtime.c mmb_runtime.h bytecode.h ../../Library/libs/fnum.c | $(OBJDIR)
-	$(HOSTCC) $(HOSTCFLAGS) -o $@ bcrun.c ../../Library/libs/fnum.c -lm
+# mmb_runtime.c/.h live in Applications/mmb2c and are named in full:
+# this rule is the only place they appear here, so a vpath would be
+# more machinery than the job needs.
+$(OBJDIR)/bcrun: bcrun.c bcrun_mm.c ../mmb2c/mmb_runtime.c ../mmb2c/mmb_runtime.h bytecode.h ../../Library/libs/fnum.c | $(OBJDIR)
+	$(HOSTCC) $(HOSTCFLAGS) -I../mmb2c -o $@ bcrun.c ../../Library/libs/fnum.c -lm
 
 $(OBJDIR)/bcdump: bcdump.c bytecode.h | $(OBJDIR)
 	$(HOSTCC) $(HOSTCFLAGS) -o $@ bcdump.c

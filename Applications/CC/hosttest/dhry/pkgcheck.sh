@@ -5,7 +5,7 @@ CC=$(cd "$(dirname "$0")/../.." && pwd)
 W=/tmp/ccperf-board
 Q="qemu-arm $CC/qemu-armm0/bcrun"
 cd "$W" || exit 1
-SEIN=/home/peter/src/mmb2c/tests/solar_eclipse.in
+SEIN=$(cd "$(dirname "$0")/../../../mmb2c" && pwd)/tests/solar_eclipse.in
 for f in dhry-base.bc dhry-r4.bc dhry-cf.bc dhry-nos.bc dhry-noic.bc \
 	 dhry-new.bc; do
 	$Q "$f" > "$f.out" 2>&1 || { echo "RUN FAIL $f"; exit 1; }

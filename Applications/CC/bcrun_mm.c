@@ -7,8 +7,8 @@
  *	of it wants external linkage.
  *
  *	mmb_runtime.c and mmb_runtime.h are verbatim copies of the master
- *	files in the mmb2c repo - edit them THERE and re-run
- *	fcc/sync-runtime.sh, or the reference build and this one drift.
+ *	files in Applications/mmb2c, compiled from there (-I../mmb2c).
+ *	They used to be copies here, which drifted.
  *
  *	The scheme: the runtime's own code runs on native pointers,
  *	untouched.  Every entry point a translated program can call gets

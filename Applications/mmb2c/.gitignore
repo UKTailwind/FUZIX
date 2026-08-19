@@ -24,3 +24,6 @@ __pycache__/
 
 # hand-written harness sources, not translator output
 !/tests/blitharness.c
+
+# cc scratch, rewritten by every compile
+.symtmp

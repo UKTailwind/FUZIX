@@ -221,9 +221,8 @@ mechanism. **Run**
 which reads all three and exits 1 if they disagree. Two things it
 knows that the eye does not: `MM.VER` is MMBasic's `major.mmpp`, so the
 minor part is padded to two digits and `0.9` there is `0.09`; and the
-master copy of `mmb_runtime.h` is in the mmb2c repository, so fix it
-there and re-run `fcc/sync-runtime.sh` or the next sync puts the stale
-number back.
+release number lives in `Applications/mmb2c/mmb_runtime.h`, which is
+where `MM.VER` is compiled from.
 
 **And run**
 
@@ -272,11 +271,24 @@ The splice is by *marker* — from `## Statements` down to, but not
 including, `## MATH sub-commands`. An earlier script did it by line
 number and went stale the moment anything above the appendix moved.
 
-## What is not in this repository
+## Where the translator lives
 
-`mmb2c`, the MMBasic-to-C translator, is developed separately: the
-Python reference implementation and its test suite live there. What is
-needed to *build* is here — `Applications/CC/mmbc_*.c` are verbatim
-copies, kept in step by that repo's `fcc/sync-mmbc.sh`, and the same
-goes for `mmb_runtime.c/.h` via `fcc/sync-runtime.sh`. Nothing in this
-build reaches outside the tree.
+`Applications/mmb2c` — the MMBasic-to-C translator, the Python
+reference implementation it is checked against, the mm runtime, and the
+BASIC corpus. `Applications/CC` compiles `mmbc` and `bcrun` straight
+out of it (`vpath` in `Makefile.armm0`, `-I../mmb2c` for the runtime),
+and `mkccimage.sh` stages the headers and the sample programs from
+there too.
+
+It used to be a separate repository whose contents were **copied** into
+`Applications/CC` by two sync scripts, and the copies went stale in
+silence: a header added to the card image but not to the sync list, so
+a fresh card compiled everything except a program that named it; and
+once the whole translator, so the board rejected a keyword the gates
+had just passed. Both scripts are gone. There is one copy of each file
+now, and nothing to re-run.
+
+Its own gates — `mmbc/cgate.sh` for byte-identity against `mmb2c.py`,
+`fcc/fcctests.sh` and `fcc/qemutests.sh` for the pipeline — run from
+`Applications/mmb2c` and find `Applications/CC` beside them. Nothing in
+this build reaches outside the tree.

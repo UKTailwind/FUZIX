@@ -2,7 +2,7 @@
 # Regenerate tests/type.expected and tests/structtest.expected from
 # host-armm0 bcrun runs of the already-built objects.
 M=$(cd "$(dirname "$0")/.." && pwd)
-FCC=${FCC:-/home/peter/src/FUZIX/Applications/CC}
+FCC=${FCC:-$(cd "$(dirname "$0")/../../CC" && pwd)}
 "$FCC/host-armm0/bcrun" /tmp/fccbuild/type.bc \
 	> "$M/tests/type.expected" 2>&1
 cd /tmp && "$FCC/host-armm0/bcrun" /tmp/fccbuild/structtest.bc \

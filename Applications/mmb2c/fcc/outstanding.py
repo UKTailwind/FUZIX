@@ -4,10 +4,12 @@ MMBasic's token names carry the trailing '(' ("Abs(") and its command
 table carries PIO assembler pseudo-ops and two comment artefacts, so
 both sides need normalising before they can be compared at all.
 """
+import os
 import re
 
 MMB = "/mnt/d/Dropbox/PicoMite/PicoMiteV6.03.00/AllCommands.h"
-MMB2C = "/home/peter/src/mmb2c/mmb2c.py"
+MMB2C = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     os.pardir, "mmb2c.py")
 
 src = open(MMB, encoding="utf-8", errors="replace").read().split("\n")
 

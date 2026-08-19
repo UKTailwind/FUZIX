@@ -12,5 +12,5 @@ which is what `make samples` checks:
     make samples        translate and build every samples/*.bas
                         (never run - there is nothing here to run on)
 
-`fcc/sync-mmbc.sh` copies them onto the SD card image alongside the
+`../CC/mkccimage.sh` puts them onto the SD card image alongside the
 tests, so they are on the board to be run by hand.

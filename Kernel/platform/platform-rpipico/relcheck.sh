@@ -26,16 +26,15 @@
 # Run from the gates and at step 3 of the release recipe.  Exit 1 on any
 # disagreement.
 #
-# The master copy of mmb_runtime.h is in the mmb2c repository; this
-# checks the copy fcc/sync-runtime.sh leaves here, which is the one that
-# reaches the card.  Fix the master and re-sync, or the next sync puts
-# the stale number back.
+# mmb_runtime.h lives in Applications/mmb2c, and there is one of it -
+# this used to check a synced copy in Applications/CC, so a fix could be
+# made in the right place and still not reach the card.
 
 D=$(dirname "$0")
 R=$(cd "$D/../../.." && pwd)
 
 CFG=$D/config.h
-RT=$R/Applications/CC/mmb_runtime.h
+RT=$R/Applications/mmb2c/mmb_runtime.h
 MAN=$D/FUZIX-PC3-MANUAL.md
 
 for f in "$CFG" "$RT" "$MAN"; do
@@ -65,8 +64,7 @@ echo "  MM_RELEASE    $mmv      (mmb_runtime.h, MM.VER)"
 
 if [ "$mmv" != "$want" ]; then
 	echo "MM_RELEASE is $mmv, should be $want for PC3_RELEASE \"$rel\"" >&2
-	echo "  edit the MASTER in the mmb2c repository, then re-run" >&2
-	echo "  fcc/sync-runtime.sh" >&2
+	echo "  edit Applications/mmb2c/mmb_runtime.h" >&2
 	rc=1
 fi
 
