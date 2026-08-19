@@ -17,42 +17,44 @@
 
 set -e
 OUT=${1:-/tmp/mmbasic}
-M=/home/peter/src/mmb2c
-H=/home/peter/src/FUZIX/Applications/CC/hwtest
+# The BASIC corpus: samples/ are the board programs, tests/ the
+# gate ones.  Both used to be copied flat into Applications/CC/
+# hwtest, which the manifest below used to point at.
+M=$(cd "$(dirname "$0")/../../../../Applications/mmb2c" && pwd)
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
 # name:source:one line for the README
 LIST="
-t1:$H/t1.bas:the language itself - CONST, DIM, types, SUB and FUNCTION
-bitbyte:$H/bitbyte.bas:BIT, BYTE, FLAG and LMID assignment
-localheap:$H/localheap.bas:LOCAL arrays and strings, and where they live
-varroom:$H/varroom.bas:how much variable space a program has
-tickpause:$H/tickpause.bas:SETTICK, and whether it runs during PAUSE
-pixart:$H/pixart.bas:MODE, COLOUR and PIXEL - start here for graphics
-palette:$H/palette.bas:the sixteen colours of MODE 2
-box:$H/box.bas:BOX and RBOX, every argument form
-circle:$H/circle.bas:CIRCLE, outline and filled
-tri:$H/tri.bas:TRIANGLE and ARC
-ellipse:$H/ellipse.bas:an ellipse with a stretched aspect
+t1:$M/tests/t1.bas:the language itself - CONST, DIM, types, SUB and FUNCTION
+bitbyte:$M/tests/bitbyte.bas:BIT, BYTE, FLAG and LMID assignment
+localheap:$M/tests/localheap.bas:LOCAL arrays and strings, and where they live
+varroom:$M/samples/varroom.bas:how much variable space a program has
+tickpause:$M/samples/tickpause.bas:SETTICK, and whether it runs during PAUSE
+pixart:$M/tests/pixart.bas:MODE, COLOUR and PIXEL - start here for graphics
+palette:$M/tests/palette.bas:the sixteen colours of MODE 2
+box:$M/tests/box.bas:BOX and RBOX, every argument form
+circle:$M/tests/circle.bas:CIRCLE, outline and filled
+tri:$M/tests/tri.bas:TRIANGLE and ARC
+ellipse:$M/samples/ellipse.bas:an ellipse with a stretched aspect
 polygon:$M/samples/polygon.bas:POLYGON, checked by reading the pixels back
 bezier:$M/samples/bezier.bas:BEZIER curves
 fill:$M/samples/fill.bas:FILL in both modes, timed
 blitbench:$M/samples/blitbench.bas:the 4bpp pixel engine, path by path, in ns per pixel
 xorplot:$M/samples/xorplot.bas:the XOR pattern, and what readback says about it
-maptest:$H/maptest.bas:MAP - changing what the sixteen colours mean
-fbtext:$H/fbtext.bas:PRINT @(x,y) - text on a graphics screen
-fbfont:$H/fbfont.bas:TEXT and the nine built-in fonts
-fontaddr:$H/fontaddr.bas:MM.INFO(FONT ADDRESS) and PEEK - the glyphs themselves
-fbscroll:$H/fbscroll.bas:scrolling a graphics screen
-fbpage:$H/fbpage.bas:an attractor, double buffered through FRAMEBUFFER
-fborbit:$H/fborbit.bas:an orbit plotted into an off-screen buffer
-layerdemo:$H/layerdemo.bas:FRAMEBUFFER LAYER and MERGE
-bubble:$H/bubble.bas:Bubble Universe - the demo, in MODE 2
-sombrero:$H/sombrero.bas:a plotted sombrero surface
-ripple:$H/ripple.bas:the hidden-line ripple surface
-circrnd:$H/circrnd.bas:ten thousand random filled circles, timed
+maptest:$M/samples/maptest.bas:MAP - changing what the sixteen colours mean
+fbtext:$M/samples/fbtext.bas:PRINT @(x,y) - text on a graphics screen
+fbfont:$M/samples/fbfont.bas:TEXT and the nine built-in fonts
+fontaddr:$M/samples/fontaddr.bas:MM.INFO(FONT ADDRESS) and PEEK - the glyphs themselves
+fbscroll:$M/samples/fbscroll.bas:scrolling a graphics screen
+fbpage:$M/samples/fbpage.bas:an attractor, double buffered through FRAMEBUFFER
+fborbit:$M/samples/fborbit.bas:an orbit plotted into an off-screen buffer
+layerdemo:$M/samples/layerdemo.bas:FRAMEBUFFER LAYER and MERGE
+bubble:$M/samples/bubble.bas:Bubble Universe - the demo, in MODE 2
+sombrero:$M/tests/sombrero.bas:a plotted sombrero surface
+ripple:$M/tests/ripple.bas:the hidden-line ripple surface
+circrnd:$M/tests/circrnd.bas:ten thousand random filled circles, timed
 spritepix:$M/samples/spritepix.bas:the SPRITE family, verified by PIXEL()
 blitpix:$M/samples/blitpix.bas:BLIT against the framebuffer
 scrollpix:$M/samples/scrollpix.bas:SPRITE SCROLL
@@ -60,20 +62,20 @@ brownian:$M/samples/brownian.bas:sprites colliding - Brownian motion, double buf
 flashpix:$M/samples/flashpix.bas:the flash slots BLIT can read and write
 playdemo:$M/samples/playdemo.bas:PLAY SOUND and PLAY TONE
 moddemo:$M/samples/moddemo.bas:PLAY MODFILE and MODSAMPLE (wants a .mod file)
-saveimg:$H/saveimg.bas:SAVE IMAGE, and running another program with SYSTEM
-imgtrip:$H/imgtrip.bas:SAVE IMAGE and LOAD IMAGE, there and back
+saveimg:$M/tests/saveimg.bas:SAVE IMAGE, and running another program with SYSTEM
+imgtrip:$M/tests/imgtrip.bas:SAVE IMAGE and LOAD IMAGE, there and back
 port:$M/samples/port.bas:PORT - eight pins as one number (I/O header)
 switches:$M/samples/switches.bas:check a button array on GP34-GP41 (I/O header)
 pulse:$M/samples/pulse.bas:PULSE - a timed inversion on one pin (I/O header)
-spi:$H/spi.bas:SPI on the I/O header
+spi:$M/tests/spi.bas:SPI on the I/O header
 tempr:$M/samples/tempr.bas:ONEWIRE and TEMPR - a DS18B20 on GP26
-bmp180:$H/bmp180.bas:a BMP180 pressure sensor on I2C2, over the I/O header (SETPIN + I2C2 OPEN)
+bmp180:$M/samples/bmp180.bas:a BMP180 pressure sensor on I2C2, over the I/O header (SETPIN + I2C2 OPEN)
 bmp180q:$M/samples/bmp180q.bas:the same sensor on the QWIIC socket - the fixed bus needs no SETPIN or OPEN
 i2cscan:$M/samples/i2cscan.bas:I2C CHECK over the QWIIC bus; finds the DS3231 at &h68 whatever else is fitted
-alarm:$H/alarm.bas:the DS3231 real time clock and its alarm
+alarm:$M/samples/alarm.bas:the DS3231 real time clock and its alarm
 qnh:$M/samples/qnh.bas:a whole application - sensors, graphics and files
 bench:$M/tests/bench.bas:KnivD's MMBasic benchmark - the number to compare
-eclipse:$H/solar_eclipse.bas:a solar eclipse computed from first principles
+eclipse:$M/tests/solar_eclipse.bas:a solar eclipse computed from first principles
 picofrog:$M/samples/picofrog.bas:a complete arcade game (keyboard: arrows, space)
 vaders:$M/samples/vaders.bas:Pico-Vaders, ported from the Game*Mite (keyboard)
 picoman:$M/samples/picoman.bas:PicoMan from the Game*Mite - fully native (see the manual's making-it-fit chapter)
