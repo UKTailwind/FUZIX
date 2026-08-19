@@ -49,6 +49,10 @@ int edx, edy;           /* text column and line at the top left corner */
 int curx, cury;         /* cursor, relative to that corner */
 unsigned char *txtp;    /* the cursor's position in the text itself */
 int drawstatusline;
+/* A message from editDisplayMsg is on the bottom line and has not
+ * been read yet.  MarkMode has always had this as its local errmsg;
+ * the main loop needed one too - see FullScreenEditor. */
+static int msg_showing;
 int insert;
 int tempx;              /* preferred column, tracked across up/down */
 int TextChanged;
@@ -755,6 +759,7 @@ void PrintFunctKeys(int typ)
         PrintString(VT100_C_NORMAL);
     PrintString("\033[K"); // clear to the end of the line on a vt100 emulator
     SCursor(x, y);
+    msg_showing = false; // the legend is what is on that line now
 }
 
 // print the current status
@@ -770,7 +775,11 @@ void PrintStatus(void)
     // Redraw the function-key line whenever the legend would change (tier
     // boundary crossed) or the status has shrunk (stale chars from the prior
     // wider status would otherwise linger on the right of the legend).
-    if (want_funct != g_funct_string || cur_width < g_status_width)
+    // ...but never while a message is up, or PrintFunctKeys erases it.
+    // drawstatusline stays set, so the main loop repaints the legend
+    // once the reader has pressed a key.
+    if (!msg_showing &&
+        (want_funct != g_funct_string || cur_width < g_status_width))
     {
         PrintFunctKeys(g_funct_typ); // updates g_funct_string / g_status_width
     }
@@ -809,6 +818,7 @@ void editDisplayMsg(unsigned char *msg)
     MX470Display(CLEAR_TO_EOL); // clear to the end of line on the MX470 display only
     PositionCursor(txtp);
     drawstatusline = true;
+    msg_showing = true;
 }
 
 // save the program in the editing buffer into the program memory
@@ -2194,10 +2204,20 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
          * waited out the 50 empty polls - five seconds - that make
          * PrintStatus redraw it.  That was the reported symptom, and
          * the same off-by-one keystroke applied to every later redraw
-         * printScreen asked for. */
-        if (drawstatusline)
+         * printScreen asked for.
+         *
+         * But NOT over a message.  editDisplayMsg sets drawstatusline
+         * precisely because it has just overwritten the legend, and
+         * repainting it here erased the message in the same output
+         * flush that drew it - " BEAUTIFIED " went up and came straight
+         * back down, and so did NOT FOUND, CLIPBOARD IS EMPTY and the
+         * rest.  A message is held until the reader presses a key,
+         * which is what MarkMode has always done with errmsg. */
+        if (drawstatusline && !msg_showing)
+        {
             PrintFunctKeys(EDIT);
-        drawstatusline = false;
+            drawstatusline = false;
+        }
         statuscount = 0;
         ShowCursor(true);
         /* Once, not once per poll.  MMBasic's ShowCursor drove a hardware
@@ -2215,6 +2235,16 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
                 PrintStatus();
         } while (c == -1);
         ShowCursor(false);
+
+        /* The key has arrived, so the message has had its moment: put
+         * the legend back before that key is acted on, exactly where
+         * MMBasic put it. */
+        msg_showing = false;
+        if (drawstatusline)
+        {
+            PrintFunctKeys(EDIT);
+            drawstatusline = false;
+        }
 
         if (c == TAB)
         {
