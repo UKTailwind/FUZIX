@@ -24,8 +24,22 @@ use. SDK 2.3.0 bundles 0.18; after the SDK is fetched (or in a local
 SDK), upgrade its copy in place — the bundled tree is a git checkout,
 so it is one command:
 
-    git -C build/_deps/pico_sdk-src/lib/tinyusb fetch origin tag 0.20.0
-    git -C build/_deps/pico_sdk-src/lib/tinyusb checkout -f 0.20.0
+    git -C $SDK/lib/tinyusb fetch --depth 1 origin tag 0.20.0
+    git -C $SDK/lib/tinyusb checkout -f 0.20.0
+
+where `$SDK` is the SDK this build actually uses. **Check, do not
+assume** — `PICO_SDK_PATH` in `build/CMakeCache.txt` is the authority,
+and with a local SDK there is no `build/_deps/pico_sdk-src` at all:
+
+    grep PICO_SDK_PATH build/CMakeCache.txt
+    sed -n 's/^#define TUSB_VERSION_MINOR *//p' $SDK/lib/tinyusb/src/tusb_option.h
+
+That is not hypothetical. Until 2026-08-19 this page said 0.20 was
+required while the kernel was being built against the **0.18** the SDK
+bundles, because the command above named a `_deps` path that does not
+exist here — so it could not be run, and nothing checked. Every gate
+was green throughout. The MicroPython port is a third answer again: it
+compiles its OWN `lib/tinyusb` submodule, at 0.19, not the SDK's copy.
 
 (Any clone of tinyusb that has the tag works as the fetch source.)
 The SDK fetch is pinned to tag 2.3.0 with FetchContent updates
