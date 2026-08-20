@@ -142,3 +142,130 @@ first, then keep going.
 
 The number to beat: **90,676 bytes**, of which perhaps 30-50K is
 genuinely cold.
+
+# Stage 3: what is still in RAM, measured (2026-08-20)
+
+Reviewed because networking needed a 4K block of the process pool
+(PC3-NET-PLAN.md) and this file's own rule says the valve is to move
+more code to flash rather than take memory from the pool.
+
+**66,595 bytes of code and read-only data still execute from RAM.**
+Every figure below is a measured `.data` delta from a real link, not an
+estimate: the item was added to the excludes, the kernel relinked, and
+the section size read from the map.
+
+## Two mechanical findings first
+
+**The .incl files are not link dependencies.** `make` does not relink
+when an excludes file changes, because
+`pico_add_linker_script_override_path` is called without `FILES` or
+`GLOB_FILES`. Editing placement and rebuilding measures NOTHING and
+looks like the change had no effect. `rm build/fuzix.elf` first. This
+cost a wrong measurement here before it was noticed.
+
+**Read-only data is almost entirely unclaimed.** Only libm, lwIP and
+the cyw43 driver name `.rodata` for flash. Everything else's constants
+sit in RAM, and the largest single item in the whole RAM image is the
+8,430-byte merged string pool - every kprintf format string in the
+kernel, which the map attributes to `devices.c.o` because ld merges
+`.rodata.*.str1.4` across objects and lists the first contributor.
+
+An earlier note here worried that the pool cannot move because
+`rawflash.c` and dhara run while the flash is busy and a `kprintf` on
+that path would then read its format string from XIP. That objection
+does not survive: **printf.c is already in flash.** If such a call were
+reachable it would already hang, whatever the strings do.
+
+## The list, in priority order
+
+### 1. Cold code and the string pool - measured -5,848
+
+    main.c text                boot, plt_param, fatal_exception_handler
+    pico_sync/mutex.c          SDK, cold
+    hardware_claim/claim.c     SDK, cold
+    pico_runtime_init          SDK, boot only
+    pico_multicore             core1 launch, once
+    pico_stdio, pico_stdio_uart
+    rodata for: main.c start.c filesys.c swapper.c usbkbd.c
+                ds3231.c inode.c devio.c process.c kdata.c
+
+Nothing here is on a timed path. This alone is more than the 4K block
+networking took, so it can be paid back and the pool returned to 336K.
+
+Test: boot, `ls -lR /`, a compile, and write to the flash disk while
+something is printing.
+
+### 2. usbh.c - measured -6,584
+
+TinyUSB's host state machine. Runs from `tuh_task()` in thread
+context, which is this port's pump.
+
+**One function in it is called from the ISR**: `hcd_event_handler`,
+which `hcd_rp2040.c` calls to queue an event. Under this file's rule
+that function stays in RAM, and since a claim is per input section the
+honest form is to name the sections wanted in flash rather than the
+whole object - `process_enumeration` alone is 1,764 bytes of the
+6,584 and runs once per plug-in.
+
+Test: unplug and replug the keyboard, through the hub, several times.
+Enumeration is the fragile part of this machine's USB.
+
+### 3. The SDK double-precision maths - measured -5,984
+
+    double_sci_m33.S  4,562
+    double_aeabi_dcp.S  894
+    double_conv_m33.S   524
+
+sin/cos/exp/log and the conversions, reached from BBC BASIC and from
+translated BASIC through libm_table.c. `libm.a` and `double_math.c`
+are already in flash, so this is finishing a job that was started.
+
+The risk is real but bounded: these are leaf routines, each well under
+the XIP cache, and a float-heavy loop calls the same one repeatedly.
+
+Test: `utils/libmbench` before and after. This one has a number, so
+there is no reason to guess.
+
+### 4. display.c graphics - measured -4,992
+
+The `display_gfx_*` family: rect, bitmap, scroll2, pixels, merge. Not
+the scanout - that is core1 and the DMA - but it is drawing code, and
+drawing runs *while* the screen is being scanned out of PSRAM. Fetching
+these instructions over the QMI competes with exactly that.
+
+This is the port's known sore point, so it is last despite being easy:
+console.c went to flash and measured clean, which is the precedent
+that says it is worth trying, not proof that it works.
+
+Test: `utils/ripple`, `utils/linebench`, `utils/blitbench`, and a
+person looking at the screen for flecking.
+
+### Total if all four land: -23,408 bytes, or nearly six 4K blocks.
+
+## What must NOT move, and why
+
+    journal.c 2,656  } dhara, the flash FTL: cannot execute from the
+    map.c     1,636  } device it is erasing
+    flash.c     846  } hardware_flash, same
+    rawflash.c       } already excluded for the same reason
+
+    rawuart.c 2,188  UART interrupt
+    hcd_rp2040 2,026 USB interrupt
+    rp2040_usb  772  USB interrupt helpers
+    irq.c     1,738  SDK interrupt dispatch
+    time.c    2,272  alarm pool - the system tick lives here
+
+    psram.c     772  retimes the QMI; must not be fetched through it
+    clocks.c    534  runs across the clock change, same argument
+    core1.c     400  the scanout loop itself
+
+    sound.c   1,664  already claimed for flash: what is left is
+                     __not_in_flash_func by source, the synth in the
+                     DMA interrupt.  Not reachable from these files.
+
+## Awkward, left for later
+
+`tty.c` (2,258) and `process.c` (2,114) are each partly reachable from
+interrupt context - `tty_inproc` from the UART ISR, the scheduler from
+the tick - so they need a function-level list rather than an object
+one. Together they are another 4K for somebody with the patience.
