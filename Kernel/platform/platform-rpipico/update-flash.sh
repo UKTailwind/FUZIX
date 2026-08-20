@@ -667,6 +667,22 @@ if [ "$PC3_NET" = 1 ]; then
 		echo "update-flash.sh: PC3_NET=1 needs utils/tlsget.stripped" >&2
 		exit 1
 	fi
+	if [ ! -f utils/tlsca.stripped ]; then
+		echo "update-flash.sh: PC3_NET=1 needs utils/tlsca.stripped" >&2
+		exit 1
+	fi
+	# The CA bundle.  Small on purpose: every certificate in it is
+	# parsed into mbedtls state out of the same lwIP heap the packet
+	# buffers come from, so three to five roots is the useful range
+	# and the full Mozilla set (~200K) will not parse at all.  These
+	# four cover Let's Encrypt, DigiCert and Amazon; add whatever the
+	# sites you use are actually signed by, which is not guessable -
+	# example.com is currently rooted at SSL.com and none of these
+	# will verify it.
+	if [ ! -f ca.pem ]; then
+		echo "update-flash.sh: PC3_NET=1 needs ca.pem" >&2
+		exit 1
+	fi
 	echo "--- networking: /bin/wifi, the netd tools, and /etc/wifi.conf"
 	../../../Standalone/ucp ${IMG} > /tmp/ucp-wifi.log 2>&1 <<EOF
 cd /bin
@@ -684,9 +700,13 @@ bget $NETD/httpd httpd
 chmod 0755 httpd
 bget utils/tlsget.stripped tlsget
 chmod 0755 tlsget
+bget utils/tlsca.stripped tlsca
+chmod 0755 tlsca
 cd /etc
 bget wifi.conf
 chmod 0600 wifi.conf
+bget ca.pem
+chmod 0644 ca.pem
 exit
 EOF
 	if grep -q "error" /tmp/ucp-wifi.log; then

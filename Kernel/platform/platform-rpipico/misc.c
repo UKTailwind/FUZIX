@@ -1102,6 +1102,7 @@ int plt_dev_ioctl(uarg_t request, char *data)
     if (request == NETIOC_TLSCA)
     {
         extern int netlw_tls_ca(const void *, unsigned);
+        extern int netlw_tls_verifying(void);
         struct net_ca ca;
 
         if (esuper())
@@ -1110,16 +1111,21 @@ int plt_dev_ioctl(uarg_t request, char *data)
             return -1;
         /* A CA bundle is kilobytes, so it is not copied into the
            kernel: mbedtls parses it where it lies.  valaddr is what
-           makes that safe, and it is not optional. */
-        if (ca.len == 0 || valaddr_r(ca.buf, ca.len) != ca.len) {
+           makes that safe, and it is not optional.
+
+           len 0 is not an error, it is the way back: drop the bundle
+           and return to encrypted-but-unauthenticated. */
+        if (ca.len && valaddr_r(ca.buf, ca.len) != ca.len) {
             udata.u_error = EFAULT;
             return -1;
         }
-        if (netlw_tls_ca(ca.buf, ca.len)) {
+        if (netlw_tls_ca(ca.len ? ca.buf : NULL, ca.len)) {
             udata.u_error = EINVAL;
             return -1;
         }
-        return 0;
+        /* 1 when certificates are checked from now on, 0 when they
+           are not, so the caller can say which without guessing. */
+        return netlw_tls_verifying();
     }
 #endif
     return -1;

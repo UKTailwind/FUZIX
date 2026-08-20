@@ -860,14 +860,57 @@ int netlw_tls_ca(const void *ca, unsigned len)
 {
     struct altcp_tls_config *cfg;
 
+    /* len 0: forget the bundle and go back to encrypted-but-not
+       authenticated, which is MMBasic's WEB TLS NOVERIFY. */
+    if (ca == NULL || len == 0) {
+        if (tls_config)
+            altcp_tls_free_config(tls_config);
+        tls_config = NULL;
+        tls_verify = 0;
+        return NETLW_OK;
+    }
+
     cfg = altcp_tls_create_config_client(ca, len);
     if (cfg == NULL)
         return NETLW_NOMEM;
+
+    /*
+     *	FORCE VERIFICATION, and this line is the whole point.
+     *
+     *	lwIP's ALTCP_MBEDTLS_AUTHMODE defaults to
+     *	MBEDTLS_SSL_VERIFY_OPTIONAL (altcp_tls_mbedtls_opts.h), and
+     *	OPTIONAL means mbedtls runs the check, records the answer in
+     *	mbedtls_ssl_get_verify_result(), and then COMPLETES THE
+     *	HANDSHAKE ANYWAY.  Nothing here reads that result, so without
+     *	this call loading a CA bundle would parse every certificate in
+     *	it and change nothing: the failure mode is a machine that looks
+     *	like it authenticates and does not.
+     *
+     *	MMBasic carries the same line, and its comment records the same
+     *	reason - see picomite_tls_set_ca() in its WiFi.c.
+     *
+     *	The cast is the only door.  struct altcp_tls_config is private
+     *	to altcp_tls_mbedtls.c and there is no accessor, but its first
+     *	member is the mbedtls_ssl_config and lwIP's own code relies on
+     *	that.  If the SDK ever reorders it this goes quietly wrong,
+     *	which is why tlsca reports what it did and why the CA test
+     *	below is worth running after an SDK bump.
+     */
+    mbedtls_ssl_conf_authmode((mbedtls_ssl_config *)cfg,
+                              MBEDTLS_SSL_VERIFY_REQUIRED);
+
     if (tls_config)
         altcp_tls_free_config(tls_config);
     tls_config = cfg;
     tls_verify = 1;
     return NETLW_OK;
+}
+
+/*	Does this machine check certificates?  For tlsca to report, so a
+ *	user is never left guessing whether a session is authenticated. */
+int netlw_tls_verifying(void)
+{
+    return tls_verify;
 }
 
 int netlw_tcp_bind(uint8_t slot, uint32_t ip, uint16_t *port)
