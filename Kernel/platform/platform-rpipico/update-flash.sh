@@ -671,14 +671,18 @@ if [ "$PC3_NET" = 1 ]; then
 		echo "update-flash.sh: PC3_NET=1 needs utils/tlsca.stripped" >&2
 		exit 1
 	fi
-	# The CA bundle.  Small on purpose: every certificate in it is
-	# parsed into mbedtls state out of the same lwIP heap the packet
-	# buffers come from, so three to five roots is the useful range
-	# and the full Mozilla set (~200K) will not parse at all.  These
-	# four cover Let's Encrypt, DigiCert and Amazon; add whatever the
-	# sites you use are actually signed by, which is not guessable -
-	# example.com is currently rooted at SSL.com and none of these
-	# will verify it.
+	# The CA bundle: nine roots, ~11K.  Small on purpose - every
+	# certificate is parsed into mbedtls state out of the same lwIP
+	# heap the packet buffers use, and the full Mozilla set (~200K)
+	# will not parse at all.
+	#
+	# WHICH roots is not guessable, and the obvious guesses are
+	# wrong.  A survey of ordinary sites found Cloudflare mostly
+	# rooted at GTS Root R4, example.com at SSL.com, openai.com at
+	# ISRG Root X2 and github.com at Sectigo E46 - none of which were
+	# in the first bundle, which had the RSA roots the web has
+	# largely moved off.  Check before assuming:
+	#   openssl s_client -connect HOST:443 -servername HOST -showcerts
 	if [ ! -f ca.pem ]; then
 		echo "update-flash.sh: PC3_NET=1 needs ca.pem" >&2
 		exit 1
