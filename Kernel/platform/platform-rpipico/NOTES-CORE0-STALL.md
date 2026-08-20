@@ -1,9 +1,12 @@
 # CORE0 STALLED — open, undiagnosed
 
-2026-08-20. Twice during the networking work the machine stopped dead
-and core1 reported `CORE0 STALLED`. Not reproducible on demand. This
-note records the evidence and what it rules in and out, so that whoever
-picks it up does not start from nothing.
+2026-08-20. Three times during the networking work the machine stopped
+dead and core1 reported `CORE0 STALLED`. **The fault is older than that
+work** — it has been seen on this port before the CYW43 existed — but
+these are the first captures taken with the core1 watchdog running.
+Not reproducible on demand. This note records the evidence and what it
+rules in and out, so that whoever picks it up does not start from
+nothing.
 
 **Status: open. Not diagnosed, not fixed, and not understood.** What
 follows separates what was seen from what is inferred, because the
@@ -116,16 +119,29 @@ it was not short of stack.
 
 ## Circumstances worth noting
 
-**All three followed a TLS or Wi-Fi operation within a minute or so.**
-That is the only condition common to all of them. It is three samples,
-but the third rules out the alternative the first two suggested: it
-happened during a `mkdir` on a quiet console, so it is not about
-console load, and it is not about being inside network code at the
+**It predates networking.** This is the most important fact in the note
+and it does not come from the three captures above — it comes from the
+author of the port, who has seen this lockup before the CYW43 work
+existed. Treat networking as a possible *aggravator* and not as the
+cause; a hunt that starts inside lwIP or mbedtls is starting in the
+wrong place.
+
+That said, all three captures here followed a TLS or Wi-Fi operation
+within a minute or so, and the third rules out what the first two
+suggested: it happened during a `mkdir` on a quiet console, so it is
+not about console load, and not about being inside network code at the
 time — the network work had already finished.
 
-That points at something the radio, lwIP or mbedtls *leaves behind* —
-a timer, a DMA channel, an interrupt, a piece of allocated PSRAM —
-rather than at something being executed when the machine dies.
+So if networking does aggravate it, the mechanism is something left
+behind rather than something being executed: a timer, a DMA channel, an
+interrupt left armed, a piece of PSRAM. And whatever the underlying
+fault is, it is reachable without any of that.
+
+**The pre-networking history is the cheapest evidence available and is
+not written down anywhere.** Before instrumenting anything, ask what
+those earlier lockups had in common — what was running, whether the
+display was in a graphics mode, whether sound was playing. Three
+captures from one day are a small sample beside months of use.
 
 Candidates, in no particular order and none tested:
 
@@ -170,17 +186,16 @@ In the order that costs least:
 
 ## What it costs today
 
-Three times in one day, and the third was on the v0.18 release kernel
-doing nothing more than `mkdir` a few seconds after a TLS fetch. The
-first two could be written off as a test harness driving the console
-flat out; the third cannot.
+The machine locks up hard: no output, no console, and the reset button
+is the only way out. It does not appear to corrupt the filesystem — the
+card fsck'd clean after each of the three captures here — but anything
+unsaved is lost.
 
-**This affects normal use of networking.** A machine that has joined a
-network and fetched something over TLS may lock up hard some seconds or
-minutes later, with no output, needing the reset button. It does not
-appear to corrupt the filesystem — the card fsck'd clean each time —
-but everything unsaved is lost.
+It is **not** new in v0.18 and not caused by networking; it was present
+before that work. What the networking work contributed is three
+captures with the instrumentation running, which is more than existed
+before, and a possible way to provoke it.
 
-It is not known whether a machine that never touches the network is
-affected. Nothing in months of use before this work behaved this way,
-which is suggestive but not evidence.
+Frequency is unknown and the three here are not a fair sample: they
+came from a day of unusually hard use, with a test harness driving the
+console and the machine being reflashed and rebooted continually.
