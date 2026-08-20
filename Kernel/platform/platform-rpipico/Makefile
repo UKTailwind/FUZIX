@@ -32,18 +32,12 @@ ifeq ($(SUBTARGET),pico2_w)
 TOTALMEM=336
 endif
 
-# CYW43 Wi-Fi.  OFF unless asked:
+# CYW43 Wi-Fi is ALWAYS built in - there is one kernel, and it is the
+# one in build/.  It used to be "make PC3_NET=1" into a second build
+# directory, which produced two kernels indistinguishable on the
+# console; the first thing that cost was a Pico Computer 2 test flashed
+# with the wrong one.  See CMakeLists.txt.
 #
-#	rm -rf build && make SUBTARGET=pico2 PC3_NET=1
-#
-# The rm matters.  build/Makefile is only regenerated when
-# CMakeLists.txt or a source file is newer than it, so changing this
-# value alone will NOT re-run cmake and the old cached setting stays.
-# See PC3-NET-PLAN.md for what it costs (one 4K block of the pool).
-ifndef PC3_NET
-PC3_NET=0
-endif
-
 PICOTOOLFLAGS= --family rp2040
 ifeq (${SUBTARGET}, pico2)
 PICOTOOLFLAGS= --family data
@@ -67,7 +61,7 @@ FORCE:
 
 build/Makefile: CMakeLists.txt $(wildcard ../../*.[chS]) $(wildcard ../../*/*.[chS])
 	mkdir -p build
-	(cd build && cmake -DPICO_BOARD=${SUBTARGET} -DTOTALMEM=${TOTALMEM} -DPC3_NET=${PC3_NET} ..)
+	(cd build && cmake -DPICO_BOARD=${SUBTARGET} -DTOTALMEM=${TOTALMEM} ..)
 
 # "world" builds the kernel and the userland.  It used to also build a
 # filesystem image into the flash above the kernel, with mkftl and a

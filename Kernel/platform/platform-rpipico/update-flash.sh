@@ -621,12 +621,12 @@ fi
 
 # CYW43 networking: /bin/wifi and the pro-forma /etc/wifi.conf.
 #
-# Gated on the SAME switch the kernel is built with, because on a
-# PC3_NET=0 kernel the ioctls do not exist and the command can only
-# print "Not a typewriter" - a worse thing to find in /bin than
-# nothing at all.
-#
-#	PC3_NET=1 sh mksdimage.sh	(it inherits the environment)
+# Not gated any more.  There is one kernel and it always has the
+# networking ioctls in it, so these always belong on the card; whether
+# a machine gets on a network is a question for /etc/wifi.conf.  This
+# used to follow a PC3_NET switch that had to agree with the one the
+# kernel was built with, and two switches that must agree are one more
+# than is safe.
 #
 # The Makefile no longer runs this script at all: it used to build the
 # on-board flash root, and that device is gone.  mksdimage.sh is the
@@ -647,28 +647,26 @@ fi
 # rebuilt is a card that is one fsck away from being wrong.  ping,
 # htget, dig, ntpdate and httpd are the whole visible network userland;
 # tlsget is the TLS one and lives with the platform utils.
-PC3_NET=${PC3_NET:-0}
-if [ "$PC3_NET" = 1 ]; then
 	if [ ! -f utils/wifi.stripped ]; then
-		echo "update-flash.sh: PC3_NET=1 needs utils/wifi.stripped" >&2
+		echo "update-flash.sh: the card needs utils/wifi.stripped" >&2
 		echo "  (cd utils && make wifi && arm-none-eabi-strip wifi -o wifi.stripped)" >&2
 		exit 1
 	fi
 	NETD=../../../Applications/netd
 	for f in ping htget dig ntpdate httpd; do
 		if [ ! -f "$NETD/$f" ]; then
-			echo "update-flash.sh: PC3_NET=1 needs $NETD/$f" >&2
+			echo "update-flash.sh: the card needs $NETD/$f" >&2
 			echo "  (cd Applications/netd && make -f Makefile.armm0 \\" >&2
 			echo "     FUZIX_ROOT=\$PWD/../.. USERCPU=armm0 PLATFORM=armm0)" >&2
 			exit 1
 		fi
 	done
 	if [ ! -f utils/tlsget.stripped ]; then
-		echo "update-flash.sh: PC3_NET=1 needs utils/tlsget.stripped" >&2
+		echo "update-flash.sh: the card needs utils/tlsget.stripped" >&2
 		exit 1
 	fi
 	if [ ! -f utils/tlsca.stripped ]; then
-		echo "update-flash.sh: PC3_NET=1 needs utils/tlsca.stripped" >&2
+		echo "update-flash.sh: the card needs utils/tlsca.stripped" >&2
 		exit 1
 	fi
 	# The CA bundle: nine roots, ~11K.  Small on purpose - every
@@ -684,7 +682,7 @@ if [ "$PC3_NET" = 1 ]; then
 	# largely moved off.  Check before assuming:
 	#   openssl s_client -connect HOST:443 -servername HOST -showcerts
 	if [ ! -f ca.pem ]; then
-		echo "update-flash.sh: PC3_NET=1 needs ca.pem" >&2
+		echo "update-flash.sh: the card needs ca.pem" >&2
 		exit 1
 	fi
 	echo "--- networking: /bin/wifi, the netd tools, and /etc/wifi.conf"
@@ -719,6 +717,5 @@ EOF
 		exit 1
 	fi
 	rm -f /tmp/ucp-wifi.log
-fi
 
 ../../../Standalone/fsck -a ${IMG}

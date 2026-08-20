@@ -70,6 +70,30 @@ From this directory:
 `TOTALMEM=336` — the amount of SRAM given to user processes. The
 result is `build/fuzix.uf2`.
 
+**There is one kernel and it always has networking in it.** The CYW43
+driver, lwIP and mbedtls are linked unconditionally; whether a machine
+gets on a network is a question for `/etc/wifi.conf`, not for the
+build. It costs the process pool nothing, because lwIP's memory is in
+PSRAM. On a Pico Computer 2 the radio is never powered — those pins
+are that board's SD chip select and LED, and `board_is_pc2()` refuses
+at `NETIOC_UP`, so `wifi` there says "no radio (Pico Computer 2)".
+
+This was briefly a `PC3_NET` cmake option building into `build-net/`.
+Two build directories meant two kernels that look identical on the
+console, and the first thing that cost was a PC2 test flashed with the
+wrong one — the symptom being "Not a typewriter" from a command that
+should have said "no radio".
+
+**`rm -rf build` costs more than it looks.** It takes the SDK checkout
+with it, including TinyUSB 0.20 — which is a working-tree checkout
+that no repository here records, so a fresh clone brings the SDK's own
+0.18 and the USB host fixes the keyboard and hub depend on are gone.
+The cmake step refuses and prints the two `git -C .../tinyusb` commands
+that put it back; run those and build again. Prefer `make -C build`
+or deleting `build/fuzix.elf` when all you want is a relink — see the
+note on `linker_overrides/` below, which is the usual reason for
+wanting one.
+
 336 of the 512 KB, because the kernel keeps the other 176. It used to
 keep more: it was built `PICO_COPY_TO_RAM`, which copied all 90,676
 bytes of `.text` into RAM at boot. Most of it now executes from flash
