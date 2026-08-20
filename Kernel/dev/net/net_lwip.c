@@ -60,6 +60,91 @@ void netlw_wake(uint8_t slot)
 	wakeup(sock_wake + slot);
 }
 
+/*
+ *	The events.  All of these run in the platform's poll context -
+ *	thread mode, inside the kernel's pump - so they may touch the
+ *	socket table and call wakeup(), exactly as a device interrupt
+ *	handler would, and they cannot land in the middle of a syscall.
+ */
+static struct socket *netproto_create(void);
+
+void netlw_connected(uint8_t slot)
+{
+	struct socket *s = sockets + slot;
+
+	if (s->s_state == SS_CONNECTING) {
+		uint32_t ip;
+		uint16_t port;
+
+		netlw_peer(slot, &ip, &port);
+		s->dst_addr.sa.family = AF_INET;
+		s->dst_addr.sa.sin.sin_family = AF_INET;
+		s->dst_addr.sa.sin.sin_addr.s_addr = ip;
+		s->dst_addr.sa.sin.sin_port = port;
+		s->dst_len = sizeof(struct sockaddr_in);
+		s->s_state = SS_CONNECTED;
+	}
+	netlw_wake(slot);
+}
+
+/*
+ *	The peer sent FIN.  There may still be data queued that userland
+ *	has not read, so this is not the end of the socket - SI_EOF says
+ *	"when the queue runs dry, that is the end", and netproto_read
+ *	returns 0 rather than sleeping once both are true.
+ */
+void netlw_closed(uint8_t slot)
+{
+	struct socket *s = sockets + slot;
+
+	s->s_iflags |= SI_EOF;
+	if (s->s_state == SS_CONNECTED)
+		s->s_state = SS_CLOSEWAIT;
+	netlw_wake(slot);
+}
+
+/*
+ *	The connection died - refused, reset, or timed out.  lwIP has
+ *	already freed the pcb by the time this arrives, which is why the
+ *	platform side forgets it rather than closing it.
+ */
+void netlw_reset(uint8_t slot, int err)
+{
+	struct socket *s = sockets + slot;
+
+	s->s_error = (err == NETLW_RESET) ? ECONNRESET : ECONNREFUSED;
+	s->s_iflags |= SI_EOF;
+	if (s->s_state == SS_CONNECTING)
+		s->s_state = SS_CLOSED;
+	else if (s->s_state < SS_CLOSED)
+		s->s_state = SS_CLOSED;
+	netlw_wake(slot);
+}
+
+/*
+ *	An incoming connection on a listener.  The child is a socket in
+ *	its own right from this moment, but it has no inode until
+ *	accept() harvests it: the syscall layer builds that, which is
+ *	why SS_ACCEPTWAIT exists as a state rather than a queue.
+ */
+int netlw_accept_slot(uint8_t listener)
+{
+	struct socket *s = netproto_create();
+
+	if (s == NULL)
+		return -1;
+	net_setup(s);
+	s->s_class = SOCK_STREAM;
+	s->s_type = SOCK_STREAM;
+	s->s_parent = listener;
+	s->s_state = SS_ACCEPTWAIT;
+	/* It inherits the address it was accepted on. */
+	memcpy(&s->src_addr, &sockets[listener].src_addr,
+	       sizeof(struct ksockaddr));
+	s->src_len = sockets[listener].src_len;
+	return s->s_num;
+}
+
 static struct socket *netproto_create(void)
 {
 	register struct socket *s = sockets;
@@ -94,12 +179,22 @@ int netproto_socket(void)
 		udata.u_error = EAFNOSUPPORT;
 		return 0;
 	}
-	if (udata.u_net.args[2] != SOCK_DGRAM ||
-	    (udata.u_net.args[3] != 0 &&
-	     udata.u_net.args[3] != IPPROTO_UDP)) {
-		/* SOCK_STREAM lands here until the TCP half exists.  An
-		   honest EPROTONOSUPPORT is better than a socket that
-		   accepts a connect() and never connects. */
+	if (udata.u_net.args[2] == SOCK_DGRAM) {
+		if (udata.u_net.args[3] != 0 &&
+		    udata.u_net.args[3] != IPPROTO_UDP) {
+			udata.u_error = EPROTONOSUPPORT;
+			return 0;
+		}
+	} else if (udata.u_net.args[2] == SOCK_STREAM) {
+		if (udata.u_net.args[3] != 0 &&
+		    udata.u_net.args[3] != IPPROTO_TCP) {
+			udata.u_error = EPROTONOSUPPORT;
+			return 0;
+		}
+	} else {
+		/* SOCK_RAW lands here.  ping(1) wants it and lwIP can do
+		   it; an honest EPROTONOSUPPORT is better than a socket
+		   that never carries anything. */
 		udata.u_error = EPROTONOSUPPORT;
 		return 0;
 	}
@@ -108,14 +203,21 @@ int netproto_socket(void)
 		udata.u_error = ENFILE;
 		return 0;
 	}
-	if (netlw_udp_new(s->proto.slot)) {
-		udata.u_error = ENOBUFS;
-		return 0;
+	if (udata.u_net.args[2] == SOCK_DGRAM) {
+		if (netlw_udp_new(s->proto.slot)) {
+			udata.u_error = ENOBUFS;
+			return 0;
+		}
+	} else {
+		if (netlw_tcp_new(s->proto.slot)) {
+			udata.u_error = ENOBUFS;
+			return 0;
+		}
 	}
 	net_setup(s);
 	s->s_class = udata.u_net.args[2];
 	s->s_state = SS_UNCONNECTED;
-	s->s_type = SOCK_DGRAM;
+	s->s_type = udata.u_net.args[2];
 	udata.u_net.sock = s->s_num;
 	return 0;
 }
@@ -127,7 +229,7 @@ void netproto_setup(struct socket *s)
 
 void netproto_free(struct socket *s)
 {
-	netlw_udp_free(s->proto.slot);
+	netlw_free(s->proto.slot);
 	s->s_state = SS_UNUSED;
 }
 
@@ -159,9 +261,15 @@ int netproto_find_local(struct ksockaddr *ka)
 static int do_bind(struct socket *s)
 {
 	uint16_t port = s->src_addr.sa.sin.sin_port;
+	int r;
 
-	if (netlw_udp_bind(s->proto.slot,
-			   s->src_addr.sa.sin.sin_addr.s_addr, &port)) {
+	if (is_datagram(s))
+		r = netlw_udp_bind(s->proto.slot,
+				   s->src_addr.sa.sin.sin_addr.s_addr, &port);
+	else
+		r = netlw_tcp_bind(s->proto.slot,
+				   s->src_addr.sa.sin.sin_addr.s_addr, &port);
+	if (r) {
 		udata.u_error = EADDRINUSE;
 		return -1;
 	}
@@ -207,11 +315,18 @@ int netproto_bind(struct socket *s)
 }
 
 /*
- *	connect() on a datagram socket only records where sends go, so
- *	it completes here and now.  The core returns 1 after calling
+ *	connect().
+ *
+ *	On a datagram socket this only records where sends go, so it is
+ *	complete the moment it returns.  The core returns 1 after calling
  *	this - it is written for a stack that has to wait for a SYN - so
- *	set the wake flag or run_sockfunc would sleep waiting for an
- *	event that has already happened.
+ *	set the wake flag, or run_sockfunc sleeps waiting for an event
+ *	that has already happened.
+ *
+ *	A stream socket really does wait: SS_CONNECTING here, and
+ *	netlw_connected() or netlw_reset() from the pump decides which
+ *	way it goes.  The core re-enters this call when woken, sees the
+ *	new state, and finishes.
  */
 int netproto_begin_connect(struct socket *s)
 {
@@ -221,8 +336,67 @@ int netproto_begin_connect(struct socket *s)
 	}
 	memcpy(&s->dst_addr, &udata.u_net.addrbuf, sizeof(struct ksockaddr));
 	s->dst_len = sizeof(struct sockaddr_in);
-	s->s_state = SS_CONNECTED;
-	sock_wake[s->s_num] = 1;
+
+	if (is_datagram(s)) {
+		s->s_state = SS_CONNECTED;
+		sock_wake[s->s_num] = 1;
+		return 0;
+	}
+
+	if (netlw_tcp_connect(s->proto.slot,
+			      s->dst_addr.sa.sin.sin_addr.s_addr,
+			      s->dst_addr.sa.sin.sin_port)) {
+		udata.u_error = ENOBUFS;
+		s->s_state = SS_CLOSED;
+		sock_wake[s->s_num] = 1;
+		return 0;
+	}
+	s->s_state = SS_CONNECTING;
+	return 0;
+}
+
+int netproto_listen(struct socket *s)
+{
+	if (netlw_tcp_listen(s->proto.slot)) {
+		udata.u_error = ENOBUFS;
+		return 0;
+	}
+	s->s_state = SS_LISTENING;
+	return 0;
+}
+
+/*
+ *	Has a connection arrived?  The children are ordinary sockets
+ *	carrying our number as their parent; the core turns the one we
+ *	return into a file descriptor.
+ */
+struct socket *netproto_sockpending(struct socket *s)
+{
+	register struct socket *n = sockets;
+	uint_fast8_t i;
+
+	for (i = 0; i < NSOCKET; i++) {
+		if (n->s_state == SS_ACCEPTWAIT && n->s_parent == s->s_num)
+			return n;
+		n++;
+	}
+	return NULL;
+}
+
+int netproto_accept_complete(struct socket *s)
+{
+	uint32_t ip;
+	uint16_t port;
+
+	netlw_peer(s->proto.slot, &ip, &port);
+	s->dst_addr.sa.family = AF_INET;
+	s->dst_addr.sa.sin.sin_family = AF_INET;
+	s->dst_addr.sa.sin.sin_addr.s_addr = ip;
+	s->dst_addr.sa.sin.sin_port = port;
+	s->dst_len = sizeof(struct sockaddr_in);
+	/* accept() hands the address back to the caller. */
+	memcpy(&udata.u_net.addrbuf, &s->dst_addr, sizeof(struct ksockaddr));
+	udata.u_net.addrlen = sizeof(struct sockaddr_in);
 	return 0;
 }
 
@@ -245,6 +419,28 @@ arg_t netproto_write(struct socket *s, struct ksockaddr *ka)
 	 */
 	if (ka == &s->src_addr && s->s_state == SS_CONNECTED && s->dst_len)
 		ka = &s->dst_addr;
+
+	if (!is_datagram(s)) {
+		/* A stream takes what it can and the caller comes back for
+		   the rest; write() is allowed to be partial.  Zero means
+		   the send window is full, and the sent callback wakes us
+		   when the peer acknowledges something. */
+		r = netlw_tcp_send(s->proto.slot, udata.u_base,
+				   udata.u_count);
+		if (r == 0) {
+			s->s_iflags |= SI_THROTTLE;
+			return 1;
+		}
+		if (r < 0) {
+			udata.u_error = (r == NETLW_NOMEM) ? ENOBUFS : EPIPE;
+			if (r != NETLW_NOMEM)
+				udata.u_net.sig = SIGPIPE;
+			return 0;
+		}
+		udata.u_done += r;
+		udata.u_base += r;
+		return 0;
+	}
 
 	if (ka->sa.family != AF_INET || ka->sa.sin.sin_addr.s_addr == 0) {
 		udata.u_error = EDESTADDRREQ;
@@ -279,6 +475,30 @@ int netproto_read(struct socket *s)
 	if (udata.u_count == 0)
 		return 0;
 
+	if (!is_datagram(s)) {
+		r = netlw_tcp_recv(s->proto.slot, udata.u_base,
+				   udata.u_count);
+		if (r == NETLW_EOF)
+			return 0;	/* read() returns 0: end of stream */
+		if (r == NETLW_EMPTY) {
+			if (s->s_iflags & SI_EOF)
+				return 0;
+			if (s->s_error) {
+				udata.u_error = s->s_error;
+				s->s_error = 0;
+				return 0;
+			}
+			return 1;	/* sleep; the receive callback wakes us */
+		}
+		if (r < 0) {
+			udata.u_error = ECONNRESET;
+			return 0;
+		}
+		udata.u_done += r;
+		udata.u_base += r;
+		return 0;
+	}
+
 	r = netlw_udp_recv(s->proto.slot, udata.u_base, udata.u_count,
 			   &ip, &port);
 	if (r == NETLW_EMPTY) {
@@ -301,8 +521,29 @@ int netproto_read(struct socket *s)
 	return 0;
 }
 
+/*
+ *	close().  This must not block - exit() and execve() reach it too.
+ *
+ *	A listener takes its unharvested children with it: they exist
+ *	only because it accepted them and nothing else can ever reach
+ *	them.  The recursion is one deep, since a child is never a
+ *	listener.
+ */
 int netproto_close(struct socket *s)
 {
+	if (s->s_state == SS_LISTENING) {
+		register struct socket *n = sockets;
+		uint8_t p = s->s_num;
+		uint_fast8_t i;
+
+		for (i = 0; i < NSOCKET; i++) {
+			if (n->s_state != SS_UNUSED && n->s_parent == p)
+				netproto_close(n);
+			n++;
+		}
+	}
+	if (!is_datagram(s))
+		netlw_tcp_close(s->proto.slot);
 	netproto_free(s);
 	return 0;
 }
@@ -319,35 +560,14 @@ arg_t netproto_ioctl(struct socket *s, int req, char *data)
 }
 
 /*
- *	The stream half.  netproto_socket refuses SOCK_STREAM, so none of
- *	these can be reached; they exist because netdev.h says they must
- *	and because an empty function is a clearer statement of what is
- *	missing than a link error.
+ *	netdev.h declares this one, and nothing in the core calls it -
+ *	the accept path goes through netproto_sockpending and
+ *	netproto_accept_complete instead.
  */
-int netproto_listen(struct socket *s)
-{
-	used(s);
-	udata.u_error = EOPNOTSUPP;
-	return 0;
-}
-
 int netproto_accept(struct socket *s)
 {
 	used(s);
-	udata.u_error = EOPNOTSUPP;
 	return 0;
-}
-
-int netproto_accept_complete(struct socket *s)
-{
-	used(s);
-	return 0;
-}
-
-struct socket *netproto_sockpending(struct socket *s)
-{
-	used(s);
-	return NULL;
 }
 
 arg_t netproto_shutdown(struct socket *s, uint8_t how)

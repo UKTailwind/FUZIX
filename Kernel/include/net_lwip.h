@@ -39,20 +39,44 @@
 #define NETLW_DOWN	(-3)
 #define NETLW_EMPTY	(-4)	/* recv: nothing queued */
 #define NETLW_BIG	(-5)	/* send: datagram too large */
+#define NETLW_EOF	(-6)	/* recv: the peer closed */
+#define NETLW_RESET	(-7)	/* the connection died */
 
 /* Provided by the platform */
 int netlw_isup(void);
 uint32_t netlw_myip(void);
+void netlw_free(uint8_t slot);
+void netlw_peer(uint8_t slot, uint32_t *ip, uint16_t *port);
+
 int netlw_udp_new(uint8_t slot);
-void netlw_udp_free(uint8_t slot);
 int netlw_udp_bind(uint8_t slot, uint32_t ip, uint16_t *port);
 int netlw_udp_send(uint8_t slot, const void *buf, uint16_t len,
 		   uint32_t ip, uint16_t port);
 int netlw_udp_recv(uint8_t slot, void *buf, uint16_t max,
 		   uint32_t *ip, uint16_t *port);
 
-/* Provided by net_lwip.c, called from the platform's poll context when
-   a datagram arrives: wakes anyone sleeping in recvfrom. */
-void netlw_wake(uint8_t slot);
+int netlw_tcp_new(uint8_t slot);
+int netlw_tcp_bind(uint8_t slot, uint32_t ip, uint16_t *port);
+int netlw_tcp_connect(uint8_t slot, uint32_t ip, uint16_t port);
+int netlw_tcp_listen(uint8_t slot);
+/* Returns bytes accepted - which may be fewer than offered, or 0 when
+   the send window is full - or a negative NETLW_ code. */
+int netlw_tcp_send(uint8_t slot, const void *buf, uint16_t len);
+int netlw_tcp_recv(uint8_t slot, void *buf, uint16_t max);
+void netlw_tcp_close(uint8_t slot);
+
+/*
+ *	Provided by net_lwip.c and called from the platform's poll
+ *	context.  This is the whole of the upward interface: everything
+ *	that happens to a connection while nobody is in a syscall
+ *	arrives through one of these.
+ */
+void netlw_wake(uint8_t slot);		/* data or room; wake a sleeper */
+void netlw_connected(uint8_t slot);	/* connect() completed */
+void netlw_closed(uint8_t slot);	/* peer sent FIN */
+void netlw_reset(uint8_t slot, int err);/* connection died; pcb is gone */
+/* An incoming connection: returns a socket slot for it, or -1 if the
+   table is full, in which case the platform refuses the connection. */
+int netlw_accept_slot(uint8_t listener);
 
 #endif

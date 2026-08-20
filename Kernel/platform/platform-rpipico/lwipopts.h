@@ -87,6 +87,26 @@ extern unsigned char pc3_lwip_heap[];
 #define LWIP_NETIF_LINK_CALLBACK    1
 #define LWIP_DHCP_DOES_ACD_CHECK    0
 
+/*
+ * SO_REUSE, and net_cyw43.c sets SOF_REUSEADDR on every TCP socket.
+ *
+ * Not a preference: Fuzix has no setsockopt, so a program CANNOT ask
+ * for it, and without it lwIP's tcp_bind refuses any port that still
+ * has a connection in TIME_WAIT - it walks tcp_tw_pcbs unless the flag
+ * is set.  The board proved the consequence: a server that accepts one
+ * connection and exits cannot be restarted for two minutes, reporting
+ * "bind: Address already in use" with no way to override it.
+ *
+ * The thing SO_REUSEADDR guards against is a stray segment from the
+ * old connection landing in a new one on the same four-tuple.  Against
+ * a server that cannot restart, that is the better risk to take, and
+ * it is the default every Unix server sets by hand anyway.
+ *
+ * TCP only.  UDP pcbs do not get the flag, so two sockets still cannot
+ * share a datagram port.
+ */
+#define SO_REUSE                    1
+
 #define PBUF_POOL_SIZE              16
 #define TCP_MSS                     1460
 #define TCP_WND                     (4 * TCP_MSS)

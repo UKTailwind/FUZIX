@@ -52,6 +52,7 @@
 #include "lwip/ip4_addr.h"
 #include "lwip/udp.h"
 #include "lwip/pbuf.h"
+#include "lwip/tcp.h"
 
 /* The socket seam.  Only stdint.h behind it, so it is safe to include
    on this side of the header line - see net_lwip.h. */
@@ -259,11 +260,61 @@ struct udpq {
     uint16_t port;              /* network order */
 };
 
-static struct udpsock {
-    struct udp_pcb *pcb;
-    struct udpq q[UDPQ];
-    uint8_t head, tail;
-} udpsock[NETLW_NSOCKET];
+/*
+ * One table for both protocols.  A socket is a datagram or a stream
+ * and never both, so the per-protocol state shares a union: the
+ * datagram queue above, or a chain of receive pbufs and how far into
+ * the head of it userland has read.
+ */
+#define LW_FREE 0
+#define LW_UDP  1
+#define LW_TCP  2
+
+static struct lwsock {
+    void *pcb;                  /* struct udp_pcb * or struct tcp_pcb * */
+    uint8_t kind;
+    union {
+        struct {
+            struct udpq q[UDPQ];
+            uint8_t head, tail;
+        } u;
+        struct {
+            struct pbuf *rx;    /* received, not yet read */
+            uint16_t off;       /* consumed from the head pbuf */
+        } t;
+    };
+} lwsock[NETLW_NSOCKET];
+
+/*
+ * Give a slot back.  Both protocols land here, because the socket
+ * layer frees a socket without caring which it was.
+ */
+void netlw_tcp_close(uint8_t slot);
+
+void netlw_free(uint8_t slot)
+{
+    struct lwsock *l = lwsock + slot;
+
+    if (l->kind == LW_UDP) {
+        while (l->u.tail != l->u.head) {
+            pbuf_free(l->u.q[l->u.tail].p);
+            l->u.tail = (l->u.tail + 1) % UDPQ;
+        }
+        if (l->pcb)
+            udp_remove(l->pcb);
+    } else if (l->kind == LW_TCP) {
+        if (l->t.rx) {
+            pbuf_free(l->t.rx);
+            l->t.rx = NULL;
+        }
+        /* netproto_close has already closed the pcb; if the socket is
+           being torn down some other way, do not leak it. */
+        if (l->pcb)
+            netlw_tcp_close(slot);
+    }
+    l->pcb = NULL;
+    l->kind = LW_FREE;
+}
 
 int netlw_isup(void)
 {
@@ -284,74 +335,61 @@ static void udp_rx(void *arg, struct udp_pcb *pcb, struct pbuf *p,
                    const ip_addr_t *addr, u16_t port)
 {
     unsigned slot = (unsigned)(uintptr_t)arg;
-    struct udpsock *u = udpsock + slot;
-    uint8_t next = (u->head + 1) % UDPQ;
+    struct lwsock *l = lwsock + slot;
+    uint8_t next = (l->u.head + 1) % UDPQ;
 
     (void)pcb;
     if (p == NULL)
         return;
-    if (next == u->tail) {
+    if (next == l->u.tail) {
         pbuf_free(p);           /* queue full: drop, as UDP may */
         return;
     }
-    u->q[u->head].p = p;
-    u->q[u->head].src = ip4_addr_get_u32(ip_2_ip4(addr));
-    u->q[u->head].port = lwip_htons(port);
-    u->head = next;
+    l->u.q[l->u.head].p = p;
+    l->u.q[l->u.head].src = ip4_addr_get_u32(ip_2_ip4(addr));
+    l->u.q[l->u.head].port = lwip_htons(port);
+    l->u.head = next;
     netlw_wake((uint8_t)slot);
 }
 
 int netlw_udp_new(uint8_t slot)
 {
-    struct udpsock *u = udpsock + slot;
+    struct lwsock *l = lwsock + slot;
 
-    if (u->pcb)
+    if (l->pcb)
         return NETLW_INUSE;
-    u->pcb = udp_new();
-    if (u->pcb == NULL)
+    l->pcb = udp_new();
+    if (l->pcb == NULL)
         return NETLW_NOMEM;
-    u->head = u->tail = 0;
-    udp_recv(u->pcb, udp_rx, (void *)(uintptr_t)slot);
+    l->kind = LW_UDP;
+    l->u.head = l->u.tail = 0;
+    udp_recv(l->pcb, udp_rx, (void *)(uintptr_t)slot);
     return NETLW_OK;
-}
-
-void netlw_udp_free(uint8_t slot)
-{
-    struct udpsock *u = udpsock + slot;
-
-    while (u->tail != u->head) {
-        pbuf_free(u->q[u->tail].p);
-        u->tail = (u->tail + 1) % UDPQ;
-    }
-    if (u->pcb) {
-        udp_remove(u->pcb);
-        u->pcb = NULL;
-    }
 }
 
 int netlw_udp_bind(uint8_t slot, uint32_t ip, uint16_t *port)
 {
-    struct udpsock *u = udpsock + slot;
+    struct lwsock *l = lwsock + slot;
     ip_addr_t a;
 
-    if (u->pcb == NULL)
+    if (l->pcb == NULL)
         return NETLW_NOMEM;
     ip_addr_set_ip4_u32(&a, ip);
-    if (udp_bind(u->pcb, &a, lwip_ntohs(*port)) != ERR_OK)
+    if (udp_bind(l->pcb, &a, lwip_ntohs(*port)) != ERR_OK)
         return NETLW_INUSE;
-    *port = lwip_htons(u->pcb->local_port);
+    *port = lwip_htons(((struct udp_pcb *)l->pcb)->local_port);
     return NETLW_OK;
 }
 
 int netlw_udp_send(uint8_t slot, const void *buf, uint16_t len,
                    uint32_t ip, uint16_t port)
 {
-    struct udpsock *u = udpsock + slot;
+    struct lwsock *l = lwsock + slot;
     struct pbuf *p;
     ip_addr_t a;
     err_t e;
 
-    if (u->pcb == NULL)
+    if (l->pcb == NULL)
         return NETLW_NOMEM;
     if (!netlw_isup())
         return NETLW_DOWN;
@@ -363,7 +401,7 @@ int netlw_udp_send(uint8_t slot, const void *buf, uint16_t len,
     if (len)
         pbuf_take(p, buf, len);
     ip_addr_set_ip4_u32(&a, ip);
-    e = udp_sendto(u->pcb, p, &a, lwip_ntohs(port));
+    e = udp_sendto(l->pcb, p, &a, lwip_ntohs(port));
     pbuf_free(p);
     if (e == ERR_MEM || e == ERR_BUF)
         return NETLW_NOMEM;
@@ -375,13 +413,13 @@ int netlw_udp_send(uint8_t slot, const void *buf, uint16_t len,
 int netlw_udp_recv(uint8_t slot, void *buf, uint16_t max,
                    uint32_t *ip, uint16_t *port)
 {
-    struct udpsock *u = udpsock + slot;
+    struct lwsock *l = lwsock + slot;
     struct udpq *q;
     uint16_t n;
 
-    if (u->tail == u->head)
+    if (l->u.tail == l->u.head)
         return NETLW_EMPTY;
-    q = u->q + u->tail;
+    q = l->u.q + l->u.tail;
     n = q->p->tot_len;
     if (n > max)
         n = max;                /* recvfrom truncates and drops the rest */
@@ -391,7 +429,278 @@ int netlw_udp_recv(uint8_t slot, void *buf, uint16_t max,
     *port = q->port;
     pbuf_free(q->p);
     q->p = NULL;
-    u->tail = (u->tail + 1) % UDPQ;
+    l->u.tail = (l->u.tail + 1) % UDPQ;
     return n;
+}
+
+/*
+ *	TCP.
+ *
+ *	Receive data is NOT copied anywhere on arrival: the pbufs are
+ *	chained onto the socket and stay there, in PSRAM, until userland
+ *	reads them.  tcp_recved() is called as those bytes are consumed
+ *	and not before, so lwIP's receive window closes when a program
+ *	stops reading and opens when it starts again.  That is the whole
+ *	of the flow control and it costs no buffer of our own.
+ */
+
+static err_t tcp_rx(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
+{
+    unsigned slot = (unsigned)(uintptr_t)arg;
+    struct lwsock *l = lwsock + slot;
+
+    (void)pcb;
+    if (p == NULL) {            /* the peer sent FIN */
+        netlw_closed((uint8_t)slot);
+        return ERR_OK;
+    }
+    if (err != ERR_OK) {
+        pbuf_free(p);
+        return err;
+    }
+    if (l->t.rx)
+        pbuf_cat(l->t.rx, p);   /* takes the reference with it */
+    else
+        l->t.rx = p;
+    netlw_wake((uint8_t)slot);
+    return ERR_OK;
+}
+
+/* Room in the send window: somebody blocked in write() can go again. */
+static err_t tcp_txroom(void *arg, struct tcp_pcb *pcb, u16_t len)
+{
+    (void)pcb; (void)len;
+    netlw_wake((uint8_t)(uintptr_t)arg);
+    return ERR_OK;
+}
+
+static err_t tcp_done(void *arg, struct tcp_pcb *pcb, err_t err)
+{
+    (void)pcb;
+    netlw_connected((uint8_t)(uintptr_t)arg);
+    (void)err;
+    return ERR_OK;
+}
+
+/*
+ *	The connection died.  lwIP has ALREADY freed the pcb before
+ *	calling this, so the pointer must be forgotten and never closed
+ *	or aborted - doing either is a double free.
+ */
+static void tcp_died(void *arg, err_t err)
+{
+    unsigned slot = (unsigned)(uintptr_t)arg;
+
+    lwsock[slot].pcb = NULL;
+    netlw_reset((uint8_t)slot, err == ERR_RST ? NETLW_RESET : NETLW_DOWN);
+}
+
+static void tcp_arm(unsigned slot, struct tcp_pcb *pcb)
+{
+    tcp_arg(pcb, (void *)(uintptr_t)slot);
+    tcp_recv(pcb, tcp_rx);
+    tcp_sent(pcb, tcp_txroom);
+    tcp_err(pcb, tcp_died);
+}
+
+static err_t tcp_acc(void *arg, struct tcp_pcb *newpcb, err_t err)
+{
+    unsigned listener = (unsigned)(uintptr_t)arg;
+    int slot;
+
+    if (err != ERR_OK || newpcb == NULL)
+        return ERR_VAL;
+    slot = netlw_accept_slot((uint8_t)listener);
+    if (slot < 0)
+        return ERR_MEM;         /* no socket free: lwIP refuses it */
+    lwsock[slot].kind = LW_TCP;
+    lwsock[slot].pcb = newpcb;
+    lwsock[slot].t.rx = NULL;
+    lwsock[slot].t.off = 0;
+    tcp_arm((unsigned)slot, newpcb);
+    netlw_wake((uint8_t)listener);
+    return ERR_OK;
+}
+
+int netlw_tcp_new(uint8_t slot)
+{
+    struct lwsock *l = lwsock + slot;
+    struct tcp_pcb *pcb;
+
+    if (l->pcb)
+        return NETLW_INUSE;
+    pcb = tcp_new();
+    if (pcb == NULL)
+        return NETLW_NOMEM;
+    l->kind = LW_TCP;
+    l->pcb = pcb;
+    l->t.rx = NULL;
+    l->t.off = 0;
+    /* Every TCP socket, because no program can ask for it: Fuzix has
+       no setsockopt.  Without it a server cannot rebind its port until
+       the last connection leaves TIME_WAIT, two minutes later.  See
+       lwipopts.h. */
+    ip_set_option(pcb, SOF_REUSEADDR);
+    tcp_arm(slot, pcb);
+    return NETLW_OK;
+}
+
+int netlw_tcp_bind(uint8_t slot, uint32_t ip, uint16_t *port)
+{
+    struct lwsock *l = lwsock + slot;
+    ip_addr_t a;
+
+    if (l->pcb == NULL)
+        return NETLW_NOMEM;
+    ip_addr_set_ip4_u32(&a, ip);
+    if (tcp_bind(l->pcb, &a, lwip_ntohs(*port)) != ERR_OK)
+        return NETLW_INUSE;
+    *port = lwip_htons(((struct tcp_pcb *)l->pcb)->local_port);
+    return NETLW_OK;
+}
+
+int netlw_tcp_connect(uint8_t slot, uint32_t ip, uint16_t port)
+{
+    struct lwsock *l = lwsock + slot;
+    ip_addr_t a;
+
+    if (l->pcb == NULL)
+        return NETLW_NOMEM;
+    if (!netlw_isup())
+        return NETLW_DOWN;
+    ip_addr_set_ip4_u32(&a, ip);
+    if (tcp_connect(l->pcb, &a, lwip_ntohs(port), tcp_done) != ERR_OK)
+        return NETLW_NOMEM;
+    return NETLW_OK;
+}
+
+/*
+ *	tcp_listen_with_backlog REPLACES the pcb with a smaller one and
+ *	frees the original, so the returned pointer has to be stored -
+ *	keeping the old one is a use after free.
+ */
+int netlw_tcp_listen(uint8_t slot)
+{
+    struct lwsock *l = lwsock + slot;
+    struct tcp_pcb *lpcb;
+
+    if (l->pcb == NULL)
+        return NETLW_NOMEM;
+    lpcb = tcp_listen_with_backlog((struct tcp_pcb *)l->pcb, 2);
+    if (lpcb == NULL)
+        return NETLW_NOMEM;
+    l->pcb = lpcb;
+    tcp_arg(lpcb, (void *)(uintptr_t)slot);
+    tcp_accept(lpcb, tcp_acc);
+    return NETLW_OK;
+}
+
+int netlw_tcp_send(uint8_t slot, const void *buf, uint16_t len)
+{
+    struct lwsock *l = lwsock + slot;
+    struct tcp_pcb *pcb = l->pcb;
+    uint16_t room;
+    err_t e;
+
+    if (pcb == NULL)
+        return NETLW_RESET;
+    room = tcp_sndbuf(pcb);
+    if (room == 0)
+        return 0;               /* window full: the caller sleeps */
+    if (len > room)
+        len = room;
+    /* COPY: buf is the caller's, and on this platform that means a
+       user address which may be swapped out before the segment is
+       acknowledged. */
+    e = tcp_write(pcb, buf, len, TCP_WRITE_FLAG_COPY);
+    if (e == ERR_MEM)
+        return 0;
+    if (e != ERR_OK)
+        return NETLW_RESET;
+    /* Push it now rather than waiting for the next segment to fill:
+       an interactive session is mostly single keystrokes. */
+    tcp_output(pcb);
+    return len;
+}
+
+int netlw_tcp_recv(uint8_t slot, void *buf, uint16_t max)
+{
+    struct lwsock *l = lwsock + slot;
+    uint8_t *out = buf;
+    uint16_t done = 0;
+
+    if (l->t.rx == NULL)
+        return l->pcb ? NETLW_EMPTY : NETLW_EOF;
+
+    while (done < max && l->t.rx) {
+        struct pbuf *p = l->t.rx;
+        uint16_t n = p->len - l->t.off;
+
+        if (n > (uint16_t)(max - done))
+            n = max - done;
+        memcpy(out + done, (uint8_t *)p->payload + l->t.off, n);
+        done += n;
+        l->t.off += n;
+        if (l->t.off == p->len) {
+            /* pbuf_dechain would leave the rest unreferenced; take the
+               head off the chain and drop our reference to it. */
+            l->t.rx = p->next;
+            if (l->t.rx)
+                pbuf_ref(l->t.rx);
+            pbuf_free(p);
+            l->t.off = 0;
+        }
+    }
+    /* Only now does the window open again. */
+    if (done && l->pcb)
+        tcp_recved(l->pcb, done);
+    return done;
+}
+
+/*
+ *	Closing.
+ *
+ *	A LISTENER IS NOT A CONNECTION, and lwIP will not let you pretend
+ *	otherwise: tcp_recv(), tcp_sent() and tcp_err() each assert that
+ *	the pcb is not in LISTEN, and an assert here is panic() - a BKPT,
+ *	which on a board with no debugger is a HardFault and a dead
+ *	machine.  Clearing all five callbacks unconditionally killed the
+ *	kernel the first time a server exited, with "invalid socket state
+ *	for recv callback" as the only clue.  A listening pcb has only
+ *	the accept callback to clear, and tcp_close is what frees it -
+ *	tcp_abort would be wrong, there is no connection to reset.
+ */
+void netlw_tcp_close(uint8_t slot)
+{
+    struct lwsock *l = lwsock + slot;
+    struct tcp_pcb *pcb = l->pcb;
+
+    if (pcb == NULL)
+        return;
+    l->pcb = NULL;              /* before anything can call back into us */
+    tcp_arg(pcb, NULL);         /* the one setter with no state assert */
+    if (pcb->state == LISTEN) {
+        tcp_accept(pcb, NULL);
+        tcp_close(pcb);
+        return;
+    }
+    tcp_recv(pcb, NULL);
+    tcp_sent(pcb, NULL);
+    tcp_err(pcb, NULL);
+    if (tcp_close(pcb) != ERR_OK)
+        tcp_abort(pcb);         /* no memory to send FIN: hang up */
+}
+
+void netlw_peer(uint8_t slot, uint32_t *ip, uint16_t *port)
+{
+    struct lwsock *l = lwsock + slot;
+    struct tcp_pcb *pcb = l->pcb;
+
+    *ip = 0;
+    *port = 0;
+    if (l->kind == LW_TCP && pcb) {
+        *ip = ip4_addr_get_u32(ip_2_ip4(&pcb->remote_ip));
+        *port = lwip_htons(pcb->remote_port);
+    }
 }
 #endif /* CONFIG_PC3_NET */

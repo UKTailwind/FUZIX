@@ -403,11 +403,50 @@ parse walked two bytes past every answer. All four together were
 Those seven are all upstream code and all worth reporting: this is
 plausibly the first little-endian machine to run the netd suite.
 
-### What is not done
+### TCP - DONE ON THE BOARD, 2026-08-20
 
-TCP. `netproto_socket` refuses `SOCK_STREAM` with `EPROTONOSUPPORT`
-rather than accepting a connect that can never complete, so `telnet`,
-`htget` and `httpd` are still out. That is the next piece.
+    # htget http://example.com/ page
+    # htget http://192.168.1.194:8000/big.txt big
+    # cksum big
+    4278553573 269335 big          <- byte-identical to the source
+
+Client and server both. 269,335 bytes fetched in 1.0 s with the
+checksum matching, which is what exercises the receive path properly:
+pbufs are chained onto the socket as they arrive and stay in PSRAM
+until userland reads them, `tcp_recved()` is called only as bytes are
+consumed, and that - not a buffer of our own - is the flow control.
+The listener side ran five accept-and-exit cycles without a leak.
+
+`connect()` is asynchronous the same way the radio's join is:
+`SS_CONNECTING`, and `netlw_connected()` or `netlw_reset()` from the
+pump decides which way it goes. Costs 32 bytes of `.bss` - the
+per-socket union means a stream's receive chain shares the space a
+datagram's queue would have used.
+
+**Two bugs, both found only by running it, both in the join between
+lwIP's rules and Unix's.**
+
+*A listener is not a connection.* `tcp_recv()`, `tcp_sent()` and
+`tcp_err()` each assert `pcb->state != LISTEN`, and an assert is
+`panic()` - a `BKPT`, which on a board with no debugger is a HardFault
+and a dead machine. Clearing all five callbacks in `netlw_tcp_close`
+killed the kernel the moment the first server exited. The dump is
+worth keeping as a method: `pc` resolved to `__breakpoint`, so it was
+an assert rather than a wild pointer, and `r4` held a *flash* address -
+`objdump -s` on the image at that address printed "invalid socket
+state for recv callback", which names the exact line.
+
+*TIME_WAIT.* lwIP's `tcp_bind` walks `tcp_tw_pcbs` unless
+`SOF_REUSEADDR` is set, and `SO_REUSE` defaults off, so a server that
+accepted one connection could not rebind its port for two minutes:
+"bind: Address already in use", five times running. Fuzix has no
+`setsockopt`, so no program can ask for the flag - the kernel sets it
+on every TCP socket now, and `lwipopts.h` says why. Diagnosed by
+waiting the interval out rather than guessing: the bind succeeded on
+its own three minutes later, which distinguished lwIP's TIME_WAIT from
+a leaked socket of ours.
+
+### What is not done
 
 `dig` mis-parses some answers (`codeberg.org` came back as 84.140.0.0)
 - its own copy of the same wire structs, not yet fixed.
