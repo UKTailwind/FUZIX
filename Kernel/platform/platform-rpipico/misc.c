@@ -82,6 +82,17 @@ void preempt_handler(void)
         usbkbd_task();
     }
 #endif
+#ifdef CONFIG_PC3_NET
+    {
+        /* Same argument as the USB pump above, and the reason the
+           network pump needs this site as well as plt_idle: a process
+           that never idles and never sleeps on the tty would otherwise
+           starve lwIP's timers, and TCP would stall for the length of
+           a compile. */
+        extern void pc3_net_poll(void);
+        pc3_net_poll();
+    }
+#endif
     di();
     need_resched = 0;
     if (nready > 1 && runticks >= udata.u_ptab->p_priority) {
@@ -1044,6 +1055,47 @@ int plt_dev_ioctl(uarg_t request, char *data)
     {
         extern void sound_mm_stop(void);
         sound_mm_stop();
+        return 0;
+    }
+#endif
+#ifdef CONFIG_PC3_NET
+    if (request == NETIOC_UP)
+    {
+        extern int pc3_net_up(const char *, const char *, unsigned);
+        struct net_join j;
+        int r;
+
+        if (esuper())
+            return -1;
+        if (uget(data, &j, sizeof(j)))
+            return -1;
+        /* A short SSID or key is fine; a run-on one is not - uget
+           copied whatever the caller had. */
+        j.ssid[sizeof(j.ssid) - 1] = 0;
+        j.key[sizeof(j.key) - 1] = 0;
+        r = pc3_net_up(j.ssid, j.key[0] ? j.key : NULL, j.auth);
+        if (r == 0)
+            return 0;
+        udata.u_error = (r == PC3_NET_ENODEV) ? ENODEV :
+                        (r == PC3_NET_EINVAL) ? EINVAL : EIO;
+        return -1;
+    }
+    if (request == NETIOC_STATUS)
+    {
+        extern int pc3_net_status(struct net_status *);
+        struct net_status st;
+
+        if (pc3_net_status(&st))
+            return -1;
+        return uput(&st, data, sizeof(st));
+    }
+    if (request == NETIOC_DOWN)
+    {
+        extern void pc3_net_down(void);
+
+        if (esuper())
+            return -1;
+        pc3_net_down();
         return 0;
     }
 #endif

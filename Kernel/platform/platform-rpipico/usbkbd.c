@@ -502,10 +502,24 @@ void usbkbd_task(void)
 }
 
 /* Override the weak asm plt_idle (tricks.S): pump USB whenever the
- * kernel idles, then nap until the next interrupt. */
+ * kernel idles, then nap until the next interrupt.
+ *
+ * The network pump lives here too, and for the same reason it was put
+ * here for USB: thread context, empty kernel stack, and it runs
+ * whenever nothing else wants the CPU.  It is a no-op until somebody
+ * has brought the radio up.  __wfi() is still correct with it - the
+ * CYW43's host-wake interrupt is one of the things that will end the
+ * nap.
+ */
 void plt_idle(void)
 {
     usbkbd_task();
+#ifdef CONFIG_PC3_NET
+    {
+        extern void pc3_net_poll(void);
+        pc3_net_poll();
+    }
+#endif
     __wfi();
 }
 

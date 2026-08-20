@@ -22,8 +22,17 @@
  * no way in because the machine would not boot.  What is left is a
  * genuinely stopped oscillator, which no amount of asking will fix.
  *
- * Runs before the SD card comes up; the CYW43 (PC3 only) is unused by
- * Fuzix, so the SD wiring is the only consequence.
+ * Runs before the SD card comes up, so the SD wiring is the immediate
+ * consequence.  It is no longer the only one: in a PC3_NET build
+ * net_cyw43.c asks board_is_pc2() before it powers the radio, because
+ * the CYW43's clock and chip select are GP29 and GP25 - and on a Pico
+ * Computer 2 GP29 is the SD card's chip select and GP25 is the LED.
+ * Getting this detection wrong there would clock the card's chip
+ * select at MHz underneath a mounted filesystem.
+ *
+ * That check cannot be made at boot: this runs from device_init(),
+ * long after plt_init, so anything asking earlier gets the default
+ * rather than the answer.  net_cyw43.c asks at NETIOC_UP instead.
  */
 
 #include <kernel.h>

@@ -123,24 +123,76 @@ The rest is ordinary: sem 246, unique_id 132, gpio 108, dma 108,
 claim 79, irq 32, pio 19 - SDK helpers that were never referenced
 before and are not named for flash.
 
-## Step 1 - the radio, no stack
+## Step 1 - the radio, no stack. WRITTEN, NOT YET RUN.
 
-`cyw43_arch_init()`, join a network, print the MAC and the association
-result. Proves the gSPI PIO divider at 375MHz (the SDK's fixed divider
-of 2 is tuned for 125MHz and the symptom of getting this wrong is "hdr
-mismatch" / ioctl timeouts - `CYW43_PIO_CLOCK_DIV_DYNAMIC` is already
-set in the CMakeLists for it), that the PIO SM and 2 DMA channels do
-not collide with sound and the scanout, that the pump keeps the driver
-serviced, and that the PSU holds up under TX.
+Three ioctls on `/dev/sys` (`net_cyw43.c`, dispatched from `misc.c`)
+and a userland tool:
 
-**Gate everything on `board_is_pc2()` first.** The CYW43 is on
-GP23/24/25/29. On a Pico Computer 2 - same kernel image, see `board.c` -
-GP29 is the SD card's chip select and GP25 is the LED. Bringing the
-radio up there clocks the SD chip select at MHz. `board.c` currently
-says "the CYW43 (PC3 only) is unused by Fuzix, so the SD wiring is the
-only consequence"; that comment stops being true at step 1.
+    NETIOC_UP      0x0040   struct net_join    power up, start joining
+    NETIOC_STATUS  0x0041   struct net_status  link state, MAC, lease, RSSI
+    NETIOC_DOWN    0x0042                      leave
 
-Credentials come from a file on the card, never from the repo.
+    utils/wifi.c:  wifi                     status
+                   wifi <ssid> <key> [auth] join and wait for an address
+                   wifi -f [file]           join from /etc/wifi.conf (0600)
+                   wifi down
+
+**Joining is asynchronous.** `NETIOC_UP` starts the association and
+returns; the waiting is done by `wifi`, polling `NETIOC_STATUS` once a
+second. That is not tidiness - a Fuzix syscall is not preempted, so a
+blocking join would stop the whole machine, keyboard included, for the
+length of a DHCP negotiation. The one thing that does block is the
+first `NETIOC_UP` of a boot, which uploads ~230K of firmware to the
+chip: a few hundred milliseconds, once.
+
+The pump is wired into both thread-context sites that already pump
+TinyUSB - `plt_idle` (usbkbd.c) and `preempt_handler` (misc.c). The
+second matters as much as the first: without it a process that never
+idles and never sleeps on the tty would starve lwIP's timers, and TCP
+would stall for the length of a compile. `cyw43_arch_poll()` runs
+lwIP's timers too, via the poll async_context, so there is no separate
+`sys_check_timeouts()` to make.
+
+**Gated on `board_is_pc2()`**, checked at `NETIOC_UP` rather than at
+boot - `board_detect()` runs from `device_init()`, long after
+`plt_init`, so there is no honest answer to give earlier. The comments
+in `board.c` and `main.c` that said the radio was unused have been
+corrected rather than left to rot.
+
+### The trap this hit: two sets of headers
+
+`net_cyw43.c` includes **no Fuzix kernel headers at all**, and that is
+load-bearing. lwIP and the pico-sdk pull in newlib's `<stdio.h>` and
+`<sys/time.h>`, whose `ssize_t` and `time_t` are not the kernel's, and
+one translation unit containing both is a wall of conflicting-types
+errors. So the SDK world lives in that file behind plain `int` returns
+(`PC3_NET_E*` in `pico_ioctl.h`), and `misc.c` does the `uget`/`uput`
+and the errno translation. The auth constants are mapped on the SDK
+side for the same reason.
+
+It cost nothing in RAM: `.data` and `.bss` are byte-identical to the
+step 3 measurement, because all of it is named for flash.
+
+### What running it should show
+
+    # wifi <ssid> <key>
+    joining
+    joined, no address
+    up
+    mac 28:cd:c1:xx:xx:xx
+    ip      192.168.1.42
+    netmask 255.255.255.0
+    gateway 192.168.1.1
+
+and `wifi` alone reports the same afterwards. Failures to expect first:
+"hdr mismatch" or an ioctl timeout means the gSPI PIO divider is wrong
+for 375MHz (`net_set_pio_clkdiv`, MMBasic's algorithm); a hang at
+`NETIOC_UP` with no message means the firmware upload is not getting
+through at all.
+
+Watch three things beyond whether it joins: whether the keyboard
+survives the firmware upload, whether the display flecks while the
+radio is associated and idle-polling, and what the PSU does under TX.
 
 ## Step 2 - DHCP, then one packet each way
 
