@@ -269,3 +269,25 @@ person looking at the screen for flecking.
 interrupt context - `tty_inproc` from the UART ISR, the scheduler from
 the tick - so they need a function-level list rather than an object
 one. Together they are another 4K for somebody with the patience.
+
+## A warning about benchmarking any of this
+
+Removing the flash filesystem shrank the image by about 6.5K and moved
+every flash address after it. `bench` jumped by much more than the
+change could account for, and the explanation is cache set assignment:
+two hot flash-resident routines - `log` and `sin` in that case - either
+share an XIP cache set or they do not, entirely according to where the
+addresses fall. Nothing about the code changed.
+
+So:
+
+* A step change in a benchmark after a placement change is **expected**,
+  in either direction, and it is not evidence that the moved code was
+  hot. Every item on the list above shifts the addresses of everything
+  after it.
+* A gain won this way can be lost by the next unrelated commit that
+  changes the image size, with nothing in the diff to suggest why.
+* Judge a placement change on the RAM it recovers, which is
+  deterministic, and treat the timing as weather. If a timing result
+  matters, it needs the interleaved A/B in PC3-DEVNOTES.md, and even
+  then it is measuring this build, not this decision.
