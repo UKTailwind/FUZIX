@@ -50,10 +50,15 @@ if(DEFINED ENV{PC3_NO_KBD_LEDS})
 endif()
 # ---- CYW43 Wi-Fi / lwIP --------------------------------------------
 #
-# OFF by default and it must stay that way until the cost is known:
-# the kernel's RAM region has under 2K of headroom (see
-# linker_overrides/memory_ram.incl) and anything this adds to .bss
-# comes out of the process pool.  cmake -DPC3_NET=1 links it.
+# OFF by default, because a radio nobody asked for should not be
+# powered and lwIP should not be linked.  cmake -DPC3_NET=1 links it.
+#
+# It costs the process pool NOTHING.  lwIP's heap and every one of its
+# pools live in PSRAM (lwipopts.h), which took the SRAM bill from five
+# 4K blocks to one; then the flash filesystem went (config.h) and gave
+# back nearly two.  A PC3_NET kernel and a plain one now carve main
+# SRAM identically - 336K of pool either way - and the network build
+# still leaves over 4K free in the kernel's own region.
 #
 # PICO_CYW43_SUPPORTED is a CMake variable the SDK tests before it even
 # defines the pico_cyw43_arch targets, and it is normally set by the
@@ -88,19 +93,6 @@ if(PC3_NET)
 endif()
 
 option(TOTALMEM "specify how much TOTALMEM is present" 0)
-# Networking costs the process pool exactly one 4K block: 336K -> 332K.
-# Measured, see PC3-NET-PLAN.md - and it is one block rather than five
-# only because lwIP's heap and every one of its pools now live in PSRAM
-# (lwipopts.h).  What is left in SRAM is cyw43_state, which holds the
-# buffers the PIO/DMA bus transfers use and therefore cannot move, plus
-# about 1.4K of newly RAM-resident SDK code.
-#
-# linker_overrides_net/memory_ram.incl carves the matching split.  The
-# two must agree and nothing checks that they do - the same warning the
-# base memory_ram.incl carries about TOTALMEM.
-if(PC3_NET)
-	set(TOTALMEM 332)
-endif()
 
 add_compile_definitions(
 		# The PC3 is an RP2350B: 48 GPIOs, ADC on GP40-47.  The pico2
@@ -252,13 +244,6 @@ endif()
 
 pico_set_float_implementation(fuzix none)
 pico_set_double_implementation(fuzix pico)
-# Added BEFORE the base directory on purpose: the SDK searches these
-# paths in the order they are added, so linker_overrides_net shadows
-# the one file it contains (memory_ram.incl - the SRAM split) and
-# everything else still comes from linker_overrides.
-if(PC3_NET)
-	pico_add_linker_script_override_path(fuzix ${CMAKE_CURRENT_LIST_DIR}/linker_overrides_net)
-endif()
 pico_add_linker_script_override_path(fuzix ${CMAKE_CURRENT_LIST_DIR}/linker_overrides)
 pico_add_extra_outputs(fuzix)
 

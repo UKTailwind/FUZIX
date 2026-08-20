@@ -417,9 +417,16 @@ because the resolver is in libc, and the DHCP server list is therefore
 not kept; picking it up would mean turning `LWIP_DNS` on for storage
 only and adding it to `NETIOC_STATUS` so `wifi` can write the file.
 
-**RAM: 488 bytes free.** Sockets cost 936 bytes of `.bss` on top of
-step 3. TCP will not fit in what is left, so it arrives with either
-the second 4K block or a hunt through the flash placement list.
+**RAM: 4,304 bytes free, and networking now costs the process pool
+NOTHING.** Sockets cost 936 bytes of `.bss` on top of step 3, which
+left 488 bytes and a 4K block borrowed from the pool. Then the flash
+filesystem went (config.h) and returned 7,904 bytes, so the block went
+back: a PC3_NET kernel and a plain one carve main SRAM identically,
+336K of pool either way. `linker_overrides_net/` and the `TOTALMEM
+332` override are gone with it.
+
+TCP has 4,304 bytes to fit in, and the measured list in
+PC3-FLASH-PLAN.md has ~23K more if it needs it.
 
 ## Not now
 
