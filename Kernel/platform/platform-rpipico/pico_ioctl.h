@@ -1038,6 +1038,24 @@ struct net_status {
 #define NETIOC_STATUS	0x0041		/* struct net_status */
 #define NETIOC_DOWN	0x0042		/* no argument */
 
+/*
+ * Load the machine's CA bundle, PEM (NUL terminated) or DER.  The
+ * kernel cannot read files, so userland reads it and passes the bytes;
+ * on this platform user memory is directly addressable, so what goes
+ * across is a pointer valaddr has checked, not a copy.
+ *
+ * Until this has been done, a TLS session is ENCRYPTED BUT NOT
+ * AUTHENTICATED - the peer can present any certificate it likes.  That
+ * is the same state MMBasic starts in before WEB TLS CA runs, and it
+ * is worth saying out loud rather than implying otherwise.
+ */
+struct net_ca {
+	void *buf;
+	uint32_t len;
+};
+
+#define NETIOC_TLSCA	0x0043		/* struct net_ca */
+
 /* net_cyw43.c returns these rather than setting udata.u_error itself:
  * it cannot include the kernel headers (see the file comment), so
  * misc.c does the translation.  Kernel side only. */

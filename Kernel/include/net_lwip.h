@@ -32,6 +32,22 @@
  */
 #define NETLW_NSOCKET	8
 
+/*
+ * TLS is asked for as a protocol on a stream socket:
+ *
+ *	socket(AF_INET, SOCK_STREAM, IPPROTO_TLS)
+ *
+ * 254 is one of the two numbers RFC 3692 reserves for experiments, so
+ * it cannot collide with a real protocol.  A private number is the
+ * only place to put this: Fuzix has no setsockopt, so there is nowhere
+ * to say "upgrade this socket" after the fact.
+ */
+#define IPPROTO_TLS	254
+
+/* Per-socket ioctl, before connect: the SNI name and what the peer's
+   certificate is checked against.  In the SIOC* number space. */
+#define SIOCTLSHOST	0x0420
+
 /* Errors, so that neither side has to know the other's errno */
 #define NETLW_OK	0
 #define NETLW_NOMEM	(-1)
@@ -66,6 +82,12 @@ int netlw_raw_send(uint8_t slot, const void *buf, uint16_t len, uint32_t ip);
 int netlw_raw_recv(uint8_t slot, void *buf, uint16_t max, uint32_t *ip);
 
 int netlw_tcp_new(uint8_t slot);
+/* TLS, client side.  netlw_tls_host must be called before connect:
+   it is the SNI name and what the certificate is checked against,
+   and connect() carries an address and nothing else. */
+int netlw_tls_new(uint8_t slot);
+int netlw_tls_host(uint8_t slot, const char *name);
+int netlw_tls_ca(const void *ca, unsigned len);
 int netlw_tcp_bind(uint8_t slot, uint32_t ip, uint16_t *port);
 int netlw_tcp_connect(uint8_t slot, uint32_t ip, uint16_t port);
 int netlw_tcp_listen(uint8_t slot);
@@ -82,6 +104,17 @@ void netlw_tcp_close(uint8_t slot);
  *	arrives through one of these.
  */
 void netlw_wake(uint8_t slot);		/* data or room; wake a sleeper */
+/* The kernel clock in seconds.  TLS needs it to decide whether a
+   certificate has expired, so a machine with a wrong clock cannot
+   verify one - which is why this port bothers with a DS3231 and
+   ntpdate. */
+uint32_t netlw_now(void);
+/* DIAGNOSTIC: the lowest word the kernel stack may use, which is just
+   above udata - the stack grows down into it, so overflowing means
+   corrupting the process table.  Used to paint the stack and measure
+   how deep the pump actually goes. */
+uint32_t *netlw_kstack_bottom(void);
+uint32_t *netlw_kstack_top(void);
 void netlw_connected(uint8_t slot);	/* connect() completed */
 void netlw_closed(uint8_t slot);	/* peer sent FIN */
 void netlw_reset(uint8_t slot, int err);/* connection died; pcb is gone */

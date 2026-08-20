@@ -126,3 +126,10 @@
    so its constants can be read from one too.  A miss there is latency
    rather than breakage, but it is the one object in this list where
    that is true, and it is worth about a hundred bytes. */
+
+/* ---- mbedtls tables: AES S-boxes, curve parameters, OID tables.
+ * Constants, and large ones. ---- */
+*/mbedtls/*(.rodata*)
+*pico_mbedtls*(.rodata*)
+
+*pico_rand*(.rodata*)

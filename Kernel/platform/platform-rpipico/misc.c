@@ -6,6 +6,7 @@
 #include "pico_ioctl.h"
 #include "config.h"
 #include "psram.h"
+#include <pico/platform/sections.h>	/* __uninitialized_psram */
 #ifdef CONFIG_PC3_DISPLAY
 #include "display.h"
 #endif
@@ -89,8 +90,8 @@ void preempt_handler(void)
            that never idles and never sleeps on the tty would otherwise
            starve lwIP's timers, and TCP would stall for the length of
            a compile. */
-        extern void pc3_net_poll(void);
-        pc3_net_poll();
+        extern void pc3_net_poll_c(void);
+        pc3_net_poll_c();
     }
 #endif
     di();
@@ -1096,6 +1097,28 @@ int plt_dev_ioctl(uarg_t request, char *data)
         if (esuper())
             return -1;
         pc3_net_down();
+        return 0;
+    }
+    if (request == NETIOC_TLSCA)
+    {
+        extern int netlw_tls_ca(const void *, unsigned);
+        struct net_ca ca;
+
+        if (esuper())
+            return -1;
+        if (uget(data, &ca, sizeof(ca)))
+            return -1;
+        /* A CA bundle is kilobytes, so it is not copied into the
+           kernel: mbedtls parses it where it lies.  valaddr is what
+           makes that safe, and it is not optional. */
+        if (ca.len == 0 || valaddr_r(ca.buf, ca.len) != ca.len) {
+            udata.u_error = EFAULT;
+            return -1;
+        }
+        if (netlw_tls_ca(ca.buf, ca.len)) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
         return 0;
     }
 #endif

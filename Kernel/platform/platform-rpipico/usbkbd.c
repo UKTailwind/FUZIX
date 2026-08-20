@@ -516,8 +516,8 @@ void plt_idle(void)
     usbkbd_task();
 #ifdef CONFIG_PC3_NET
     {
-        extern void pc3_net_poll(void);
-        pc3_net_poll();
+        extern void pc3_net_poll_c(void);
+        pc3_net_poll_c();
     }
 #endif
     __wfi();

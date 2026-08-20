@@ -75,6 +75,10 @@ endif()
 option(PC3_NET "link the CYW43 driver and lwIP" OFF)
 if(PC3_NET)
 	set(PICO_CYW43_SUPPORTED 1)
+	# TLS: our own mbedtls config, adapted from MMBasic's proven one.
+	# Changing that file does NOT rebuild mbedtls - the dependency is
+	# not tracked - so a clean build directory is required after edits.
+	set(PICO_MBEDTLS_CONFIG_FILE ${CMAKE_CURRENT_LIST_DIR}/mbedtls_config.h)
 	add_compile_definitions(
 		CONFIG_PC3_NET=1
 		CYW43_DEFAULT_PIN_WL_REG_ON=23
@@ -239,7 +243,8 @@ target_link_libraries(fuzix
 # instead, which is the same choice MMBasic's WEB builds make.
 if(PC3_NET)
 	target_sources(fuzix PRIVATE net_cyw43.c ../../dev/net/net_lwip.c)
-	target_link_libraries(fuzix pico_cyw43_arch_lwip_poll)
+	target_link_libraries(fuzix pico_cyw43_arch_lwip_poll
+		pico_lwip_mbedtls pico_mbedtls)
 endif()
 
 pico_set_float_implementation(fuzix none)

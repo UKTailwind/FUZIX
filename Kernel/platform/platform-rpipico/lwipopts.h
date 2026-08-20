@@ -65,7 +65,26 @@ extern unsigned char pc3_lwip_heap[];
    The MEMP_NUM_* limits below stop applying once the pools come from
    the heap; they are kept as documentation of the intended shape and
    as the numbers to restore if this ever has to go back to SRAM. */
-#define MEM_SIZE                    (64 * 1024)
+#define MEM_SIZE                    (128 * 1024)
+
+/*
+ * TLS.
+ *
+ * altcp is the abstraction that lets one piece of code drive either a
+ * plain TCP connection or a TLS one, and MMBasic's WEB builds turn it
+ * on unconditionally for exactly that reason: the client path is the
+ * same whether or not the session is encrypted.  net_lwip.c does the
+ * same, so there is one implementation of connect/read/write/close.
+ *
+ * MEM_SIZE is now the TLS budget as well as the packet budget, because
+ * altcp_tls installs its own mbedtls allocator over lwIP's heap.  One
+ * session with a 16K record buffer peaks around 40K; 128K leaves room
+ * for a certificate chain being parsed at the same time, and it is in
+ * PSRAM, where 128K is 1.6% of what is there.
+ */
+#define LWIP_ALTCP                  1
+#define LWIP_ALTCP_TLS              1
+#define LWIP_ALTCP_TLS_MBEDTLS      1
 
 /* Protocols.  DNS is off: Fuzix's libc has its own resolver
    (Library/libs/resolv.c) and the netd applications use it, so a

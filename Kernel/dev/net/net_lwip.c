@@ -61,6 +61,41 @@ void netlw_wake(uint8_t slot)
 }
 
 /*
+ *	DIAGNOSTIC.  The lowest word the kernel stack may use: it grows
+ *	down from PROGLOAD towards udata, and udata is what it lands in
+ *	when it runs out.  The pump paints from here upwards to find out
+ *	how deep it really goes.
+ */
+uint32_t *netlw_kstack_bottom(void)
+{
+	return (uint32_t *)((uint8_t *)&udata + sizeof(udata));
+}
+
+/*
+ *	...and the top it grows down from.  The pair bound the region the
+ *	platform's poll may paint and scan: below the bottom is struct
+ *	u_data itself, which is live, and painting it would be the very
+ *	corruption the measurement exists to prevent.
+ */
+uint32_t *netlw_kstack_top(void)
+{
+	return (uint32_t *)((uint8_t *)&udata + UDATA_SIZE);
+}
+
+/*
+ *	The clock, for TLS certificate validity.  It is here rather than
+ *	on the platform side because rdtime32 is a kernel call, and the
+ *	platform side cannot include kernel headers.
+ */
+uint32_t netlw_now(void)
+{
+	uint32_t t;
+
+	rdtime32(&t);
+	return t;
+}
+
+/*
  *	The events.  All of these run in the platform's poll context -
  *	thread mode, inside the kernel's pump - so they may touch the
  *	socket table and call wakeup(), exactly as a device interrupt
@@ -188,7 +223,8 @@ int netproto_socket(void)
 		}
 	} else if (udata.u_net.args[2] == SOCK_STREAM) {
 		if (udata.u_net.args[3] != 0 &&
-		    udata.u_net.args[3] != IPPROTO_TCP) {
+		    udata.u_net.args[3] != IPPROTO_TCP &&
+		    udata.u_net.args[3] != IPPROTO_TLS) {
 			udata.u_error = EPROTONOSUPPORT;
 			return 0;
 		}
@@ -208,7 +244,9 @@ int netproto_socket(void)
 	if (udata.u_net.args[2] == SOCK_DGRAM)
 		r = netlw_udp_new(s->proto.slot);
 	else if (udata.u_net.args[2] == SOCK_STREAM)
-		r = netlw_tcp_new(s->proto.slot);
+		r = (udata.u_net.args[3] == IPPROTO_TLS) ?
+		    netlw_tls_new(s->proto.slot) :
+		    netlw_tcp_new(s->proto.slot);
 	else
 		r = netlw_raw_new(s->proto.slot, udata.u_net.args[3]);
 	if (r) {
@@ -579,9 +617,28 @@ int netproto_close(struct socket *s)
 
 arg_t netproto_ioctl(struct socket *s, int req, char *data)
 {
-	used(s);
-	used(req);
-	used(data);
+	/*
+	 *	The name this socket is connecting to.  TLS needs it twice
+	 *	over - as the SNI extension in the hello, and as the name
+	 *	the server's certificate has to match - and connect() has
+	 *	nowhere to carry it.  Must be set before connect.
+	 */
+	if (req == SIOCTLSHOST) {
+		char name[64];
+
+		if (s->s_state != SS_UNCONNECTED && s->s_state != SS_BOUND) {
+			udata.u_error = EISCONN;
+			return -1;
+		}
+		if (uget(data, name, sizeof(name)))
+			return -1;
+		name[sizeof(name) - 1] = 0;
+		if (netlw_tls_host(s->proto.slot, name)) {
+			udata.u_error = EINVAL;
+			return -1;
+		}
+		return 0;
+	}
 	/* The SIOCxIF* set belongs here.  Nothing needs it yet: the
 	   address comes from DHCP and the wifi command reports it. */
 	udata.u_error = EINVAL;

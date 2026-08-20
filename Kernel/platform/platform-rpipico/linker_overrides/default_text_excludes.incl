@@ -381,3 +381,20 @@
 *pico_multicore/multicore.c.o(.text*)
 *pico_stdio/stdio.c.o(.text*)
 *pico_stdio_uart/stdio_uart.c.o(.text*)
+
+/* ---- mbedtls.  A quarter of a megabyte of cipher and bignum code
+ * that would otherwise land in RAM and fail the link outright.  None
+ * of it is on the scanout path or in an interrupt: it runs in the
+ * pump, driven by arriving packets, at handshake time. ---- */
+*/mbedtls/*(.text*)
+*pico_mbedtls*(.text*)
+
+/* Entropy for TLS.  Called at handshake time, from the pump. */
+*pico_rand*(.text*)
+
+/* usbh.c and the SDK double maths were briefly moved here to pay for a
+ * dedicated 16K pump stack.  That stack is gone - the kernel stack
+ * itself grew instead (config.h, UDATA_BLKS), which costs process pool
+ * rather than SRAM - so both are back in RAM where they perform best.
+ * They remain on the shelf in PC3-FLASH-PLAN.md, measured, if SRAM is
+ * ever needed again. */

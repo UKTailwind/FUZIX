@@ -220,7 +220,39 @@
 
 /* Program layout */
 
-#define UDATA_BLKS  3
+/*
+ * The udata block: struct u_data at the bottom, the kernel stack
+ * growing down onto it from the top, and PROGLOAD immediately above.
+ * 3 blocks (1.5K) was the figure for a system whose deepest kernel
+ * call was a filesystem one.
+ *
+ * TLS changed that.  mbedtls runs inside the network pump, which is
+ * reached from plt_idle - so it is NESTED on top of whichever syscall
+ * just went to sleep, on that process's kernel stack.  A handshake
+ * took a 1.5K stack down through udata and 176 bytes out of the bottom
+ * of progbase (sp=0x2002bf50 against a progbase of 0x2002c000), which
+ * corrupted the process table and killed the machine.
+ *
+ * MEASURED, not guessed: net_cyw43.c painted the region and watched it
+ * during a real handshake to example.com.  Peak 2,460 bytes.  That is
+ * also exactly consistent with the crash - sp reached 1,712 bytes down
+ * a stack that only had 1,156 usable - and it is far less than the 6.5K
+ * and 16K that two earlier guesses spent.
+ *
+ * 12 blocks is 6,144, less struct u_data's 328 = 5,816 of stack: 2.4x
+ * the measured peak.  The margin is there because certificate
+ * VERIFICATION has not been measured - the handshake above had no CA
+ * bundle loaded, and chain walking is the deeper path.  net_cyw43.c
+ * keeps a canary just above udata that says so if this is ever wrong.
+ *
+ * The cost is per RESIDENT PROCESS: udata lives inside the process
+ * image, so every resident process pays the extra 4,608 bytes, which is
+ * one more 4K pool block each.  That is what buys TLS.
+ *
+ * UDATA_SIZE_ASM in cpu-armm0/kernel-armm0.def must match; main.c
+ * panics "bad offsets" at boot if it does not.
+ */
+#define UDATA_BLKS  12
 #define UDATA_SIZE  (UDATA_BLKS << BLKSHIFT)
 
 #ifndef TOTALMEM
