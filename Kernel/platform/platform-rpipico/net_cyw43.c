@@ -178,6 +178,10 @@ void pc3_net_poll_c(void)
 
     net_busy = 1;
     cyw43_arch_poll();
+    /* Loopback delivery.  LWIP_NETIF_LOOPBACK queues a packet sent to
+       one of our own addresses and, under NO_SYS, nothing hands it on
+       until this is called. */
+    netif_poll_all();
     net_busy = 0;
 
     for (p = lo; p < hi && *p == PUMP_PAINT; p++)

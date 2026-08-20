@@ -123,6 +123,32 @@ extern unsigned char pc3_lwip_heap[];
 #define LWIP_DHCP_DOES_ACD_CHECK    0
 
 /*
+ * Loopback: 127.0.0.1, and the board's own address.
+ *
+ * Without this a program on the PC3 cannot talk to a server on the
+ * PC3.  The SYN went out to the wire addressed to ourselves and never
+ * came back, so `htget http://<my own ip>/` simply hung - which is a
+ * poor thing to discover while writing a client to test your server.
+ *
+ * LWIP_NETIF_LOOPBACK is the one that matters: it makes a packet
+ * addressed to a netif's OWN address turn round rather than go out.
+ * LWIP_HAVE_LOOPIF follows it (opt.h defines it as LWIP_NETIF_LOOPBACK
+ * && !LWIP_SINGLE_NETIF, and we have no LWIP_SINGLE_NETIF), and that
+ * is what puts a real 127.0.0.1 interface up.
+ *
+ * The queue is capped rather than left at the default 0, which means
+ * unlimited: these pbufs come out of the PSRAM heap that everything
+ * else shares, and a program looping on a socket to itself should hit
+ * flow control, not the heap.
+ *
+ * NO_SYS, so nothing delivers these on its own - netif_poll_all() runs
+ * from the pump in net_cyw43.c.  Without that call the packets queue
+ * and are never seen, which looks exactly like the hang this fixes.
+ */
+#define LWIP_NETIF_LOOPBACK         1
+#define LWIP_LOOPBACK_MAX_PBUFS     8
+
+/*
  * SO_REUSE, and net_cyw43.c sets SOF_REUSEADDR on every TCP socket.
  *
  * Not a preference: Fuzix has no setsockopt, so a program CANNOT ask
