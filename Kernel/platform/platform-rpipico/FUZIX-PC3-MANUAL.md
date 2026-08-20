@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.17 — August 2026"
+date: "Release v0.18 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -55,7 +55,52 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## New in v0.17
+## New in v0.18
+
+**The machine has networking.** Wi-Fi through the Pico 2 W's CYW43
+radio, a full TCP/IP stack, and TLS that actually checks certificates.
+See [Networking](#networking) for setting it up and using it, and
+[Commands at the `#` prompt](#shell-commands) for the programs.
+
+In short: put your network in `/etc/wifi.conf`, run `wifi -f`, and the
+machine is on the internet. `ping`, `ntpdate`, `dig`, `htget` and
+`tlsget` are clients; `httpd` is a small web server; `tlsca` loads the
+certificate bundle that makes TLS *authenticated* rather than merely
+encrypted.
+
+It costs the memory available to your programs **one 4 KB block per
+running program** — the price of the larger kernel stack a TLS
+handshake needs. Nothing else changed: the packet buffers live in
+PSRAM, not in the pool your programs come out of.
+
+**There is one kernel, and it has networking in it.** On a Pico
+Computer 2 the radio is never powered — those pins are that machine's
+SD card and LED — and `wifi` says so:
+
+    # wifi
+    no radio (Pico Computer 2)
+
+**BASIC cannot reach the network yet.** `mmbc` does not translate
+MMBasic's `WEB` commands in this release; that is the next piece of
+work. Everything above is available from the `#` prompt and from C.
+
+**Three older bugs were found and fixed while doing this**, none of
+them network bugs:
+
+- **`kill` did not work** on a process looping inside the kernel,
+  because signal 15 was never dispatched at all. That is also why the
+  filesystem kept needing `fsck` after a reboot: `killall` left
+  processes running, so the disc was never cleanly unmounted.
+- **A socket file descriptor did not know which socket it was**, so a
+  program holding two at once — any server — destroyed its own listener
+  on the first connection.
+- **`htget` saved chunked replies with the HTTP framing still in the
+  file**, so a fetched page began with a line like `22f` and ended with
+  `0`.
+
+The first two are in Fuzix's own core and are being offered upstream.
+
+## Also in v0.17
 
 The machine keeps its keyboard, and BASIC finishes a category.
 
@@ -2668,6 +2713,181 @@ both machines and compare. On the board, `sum FILE`.
 
 \newpage
 
+# Networking {#networking}
+
+The Pico Computer 3 has a CYW43 radio, and from v0.18 Fuzix can use it:
+Wi-Fi, DHCP, TCP/IP, DNS and TLS. This chapter is how to get on a
+network and what you can do once you are.
+
+A Pico Computer 2 has no radio — those pins are its SD card and LED —
+and the same kernel runs on both. It will tell you:
+
+    # wifi
+    no radio (Pico Computer 2)
+
+## Joining a network
+
+Put your network in `/etc/wifi.conf`. It ships with the format in its
+own comments and you replace one line:
+
+    MYNETWORK MYPASSWORD 2
+
+Three fields: the SSID, the key, and the authentication type — `0`
+open, `1` WPA-TKIP, `2` WPA2-AES, `3` WPA2 mixed. **`2` is what almost
+every home network wants.** If the SSID or the password contains a
+space you cannot use this file; use the command form below instead.
+
+The file holds a password in plain text. It ships mode 600 and `wifi`
+complains if it finds otherwise, but anyone who can read the card can
+read the key.
+
+Then:
+
+    # wifi -f
+    joining
+    up, -61 dBm
+    ip      192.168.1.245
+    mask    255.255.255.0
+    gateway 192.168.1.254
+    dns     192.168.1.254
+
+That is a DHCP lease. `wifi -f` also writes `/etc/resolv.conf` from it,
+which is what makes names work.
+
+Without the file:
+
+    # wifi MYNETWORK MYPASSWORD          joins, without saving anything
+    # wifi                               reports what the radio is doing
+    # wifi -d                            disconnect
+
+**Bringing the radio up stops the machine for about half a second.**
+The kernel uploads 230 KB of firmware to the chip, and a Fuzix system
+call is not interrupted, so nothing else runs during it — including the
+keyboard. Joining the network afterwards does *not* block: that part
+runs in the background while you carry on.
+
+To have it join at boot, add `wifi -f` to `/etc/rc`.
+
+## Setting the clock
+
+Do this before anything involving TLS:
+
+    # ntpdate time.cloudflare.com
+    Thu Aug 20 18:19:37 2026
+    # setdate -w
+
+`ntpdate` sets the system clock from the internet; `setdate -w` writes
+it to the battery-backed DS3231 so it survives a power cut. **A
+certificate is only valid between two dates**, so a machine that thinks
+it is 1970 will reject every certificate on the internet and the error
+will not mention the clock.
+
+## Looking around
+
+    # ping -c 4 8.8.8.8
+    45 bytes from 8.8.8.8 (8.8.8.8) req=0 time=9.6 ms
+    ...
+    sent 4, recv 4, 100%
+    rtt min/avg/max = 9.6/39.2/95.0 ms
+
+`ping` without `-c` runs until you press `Ctrl-C`, and prints the same
+summary when you do.
+
+    # dig example.com                    look up a name
+    # htget http://example.com/ page.htm fetch a page over HTTP
+
+`htget` takes a URL and a filename. It understands chunked replies, so
+what lands in the file is the page and not the HTTP framing.
+
+## TLS, and why the certificates matter
+
+    # tlsget 104.20.23.154 example.com /
+
+`tlsget` takes an **address and a name separately** — the address to
+connect to, the name for the certificate and for SNI. Keeping the
+resolver out of it makes it a test of the connection and nothing else.
+
+Out of the box a TLS session is **encrypted but not authenticated**.
+Nobody in the middle can read it, but anyone in the middle can pretend
+to be the far end, because nothing is checking that the certificate
+belongs to who it claims. To fix that, load the bundle of certificate
+authorities that ships on the card:
+
+    # tlsca /etc/ca.pem
+    TLS: 11085 bytes loaded, certificates are CHECKED
+
+From then on a connection whose certificate does not check out is
+refused rather than made. To go back:
+
+    # tlsca -n
+    TLS: certificates are NOT checked
+
+**Which authorities you need is not guessable.** The bundle carries
+nine roots covering Let's Encrypt, Google, DigiCert, Amazon, SSL.com
+and Sectigo, which between them cover most of the web — but sites move
+between authorities, and a site signed by one that is not in the file
+will be refused. To find out what a site actually uses, from a
+desktop machine:
+
+    openssl s_client -connect HOST:443 -servername HOST -showcerts
+
+and add the root it names to `/etc/ca.pem`. Keep the file small: every
+certificate in it is parsed on each connection, out of the same memory
+the packet buffers use. Nine roots is comfortable; the full browser set
+of about 150 is far too big and will not load at all.
+
+## Serving
+
+There is a small web server:
+
+    # mkdir /tmp/www
+    # cd /tmp/www
+    # echo hello > index.html
+    # httpd &
+
+It serves files from the directory it was started in, on port 8080, one
+connection at a time. `httpd 80` to choose the port. `/` is
+`index.html`, a missing file is a 404, and a path containing `..` is
+refused.
+
+**Stop it before you flash or reboot.** A running server holds the
+filesystem open, so `remount -n / ro` will refuse, and the disc goes
+down dirty:
+
+    # kill %1
+
+## Talking to yourself
+
+The machine can reach its own servers, either through `127.0.0.1` or
+through its own address:
+
+    # htget http://127.0.0.1:8080/index.html got.htm
+
+## When it does not work
+
+**`no radio (Pico Computer 2)`** — the machine has no Wi-Fi. Nothing to
+be done.
+
+**`NETIOC_STATUS: Not a typewriter`** — the kernel has no networking in
+it. From v0.18 there is only one kernel and it always does, so this
+means an older kernel, or a card newer than the kernel it is running
+on. Flash the matching `fuzix.uf2`.
+
+**`connect: Connection refused` from `tlsget`** — with certificates
+being checked, this is what a failed certificate looks like as well as
+what a genuinely refused connection looks like. Try `tlsca -n` and
+connect again: if it works then, the certificate is the problem and the
+site's root is missing from your bundle.
+
+**Names do not resolve but addresses work** — `/etc/resolv.conf` is
+written by `wifi -f`. If you joined with `wifi SSID KEY` instead, it
+was not written.
+
+**It joined but nothing works** — check `wifi` for the link status and
+`ping` your gateway before blaming anything further away.
+
+\newpage
+
 # Commands at the `#` prompt {#shell-commands}
 
 The shell is the Bourne shell and the machine underneath it is a
@@ -2857,6 +3077,28 @@ names for one program.
 the one Windows can see, so it is the easy way to move a file from a
 PC; `uue`/`uud` need nothing but the console, and have a chapter of
 their own.
+
+## Networking
+
+See [Networking](#networking) for what these do and how to set the
+machine up. On a Pico Computer 2 they are all present, and `wifi` will
+tell you there is no radio.
+
+```
+# wifi                         what the radio is doing
+# wifi -f                      join the network in /etc/wifi.conf
+# wifi MYSSID MYKEY            join without using the file
+# wifi -d                      disconnect
+# ntpdate time.cloudflare.com  set the clock from the internet
+# ping -c 4 8.8.8.8            ICMP, with round-trip times
+# dig example.com              look up a name
+# htget http://host/page f     fetch a page over HTTP into f
+# tlsget 1.2.3.4 host /        fetch over TLS (address, then name)
+# tlsca /etc/ca.pem            check certificates from now on
+# tlsca -n                     ... and stop checking
+# httpd &                      serve this directory on port 8080
+# httpd 80 &                   ... on a port of your choosing
+```
 
 ## The clock, and housekeeping
 

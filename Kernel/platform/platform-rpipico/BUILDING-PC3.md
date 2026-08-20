@@ -295,6 +295,77 @@ The splice is by *marker* — from `## Statements` down to, but not
 including, `## MATH sub-commands`. An earlier script did it by line
 number and went stale the moment anything above the appendix moved.
 
+## 9. Cutting a release — the checklist
+
+The steps above in the order a release needs them, with the gates. Run
+it top to bottom; each gate exits non-zero and says what is wrong.
+
+**1. Decide the number and put it in all three places.**
+
+    $EDITOR config.h                        PC3_RELEASE
+    $EDITOR ../../../Applications/mmb2c/mmb_runtime.h    MM_RELEASE
+    $EDITOR FUZIX-PC3-MANUAL.md             the date: line
+    sh relcheck.sh                          # GATE - all three agree
+
+Remember `MM.VER` is `major.mmpp`, so the minor part is two digits:
+`0.9` in `config.h` is `0.09` in `mmb_runtime.h`. `relcheck.sh` knows.
+
+**2. Build the kernel.**
+
+    make TARGET=rpipico SUBTARGET=pico2
+    sh usbcheck.sh build/_deps/pico_sdk-src # GATE - TinyUSB 0.20
+    sh ioctlcheck.sh                        # GATE - no duplicate codes
+
+There is one kernel and it has networking in it. Do not `rm -rf build`
+unless you mean to restore the TinyUSB checkout afterwards — see §2.
+
+**3. Build the userland, from the C library up.**
+
+    sh relink-userland.sh
+    (cd ../../../Applications/netd && make -f Makefile.armm0 \
+        FUZIX_ROOT=$PWD/../.. USERCPU=armm0 PLATFORM=armm0)
+    sh ../../../Applications/CC/hwtest/stageall.sh
+
+The netd line is easy to forget: `relink-userland.sh` does not cover
+it, and the network tools are statically linked like everything else.
+
+**4. Build the card.**
+
+    sh mksdimage.sh
+    bash ../../../Applications/CC/mkccimage.sh
+    sh ../../../Applications/CC/hwtest/verifyimage.sh  # GATE
+    sh mancheck.sh                                     # GATE
+
+`verifyimage.sh` compares sizes against what was staged. That catches a
+stale file and would NOT catch one of the right length and the wrong
+content, so for anything you have just changed, read it back off the
+image and look at it — `ucp` `bput` extracts, `bget` inserts, which is
+the opposite way round from what the names suggest.
+
+**5. The manuals.**
+
+    python3 ../../../../mmb2c/fcc/coverage.py    # regenerate Appendix C
+    pandoc FUZIX-PC3-MANUAL.md -o FUZIX-PC3-MANUAL.pdf
+    pandoc PC3-C-MANUAL.md     -o PC3-C-MANUAL.pdf
+
+**6. Prove it on hardware. Both boards.**
+
+Nothing above runs a single instruction on a Pico. Flash the kernel and
+write the card, then:
+
+- **Pico Computer 3** — boot, log in, `wifi -f`, `ntpdate`,
+  `tlsca /etc/ca.pem`, a TLS fetch, `httpd` served from a browser, and
+  something from BASIC and from `cc`.
+- **Pico Computer 2** — boot, and check `wifi` says
+  `no radio (Pico Computer 2)` rather than anything else. Then
+  `sync; remount -n / ro; sync` and confirm the card is clean: the
+  radio pins are that board's SD chip select, so a quiet filesystem
+  afterwards is the thing being tested.
+
+A card image is not verified until it has been written and booted.
+
+**7. Tag it**, and publish the kernel, the card image and both PDFs.
+
 ## Where the translator lives
 
 `Applications/mmb2c` — the MMBasic-to-C translator, the Python

@@ -683,6 +683,134 @@ ioctl(sys, PSRAMIOC_STAT, &st);      /* total, free, largest */
   bulk sequential copy runs at 53 MB/s. Put big, streamed things there;
   keep hot, randomly-accessed things in your own memory.
 
+# Networking
+
+Unlike everything else in this manual, **most of this is not an ioctl**.
+Sockets are Fuzix's own, so a C program uses the calls you already
+know:
+
+```c
+int fd = socket(AF_INET, SOCK_STREAM, 0);
+connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+write(fd, req, n);
+while ((n = read(fd, buf, sizeof buf)) > 0)
+        ...
+close(fd);
+```
+
+`AF_INET` only. `SOCK_STREAM`, `SOCK_DGRAM` and `SOCK_RAW` all work —
+`ping` is a raw socket. Servers work: `bind`, `listen`, `accept`.
+
+## What is missing, and what to do instead
+
+**There is no `select()` and no `poll()`.** They are not compiled into
+this kernel, so you cannot wait on several descriptors at once.
+
+**Non-blocking sockets do work**, which covers most of what you would
+have wanted `select` for:
+
+```c
+fcntl(fd, F_SETFL, O_NDELAY);
+n = read(fd, buf, sizeof buf);
+if (n < 0 && errno == EAGAIN)
+        /* nothing there yet - go and do something else */
+```
+
+Any socket operation that would have slept returns -1 with `EAGAIN`
+instead: `read`, `write`, `connect` and `accept` alike. So a program
+can round-robin over several sockets itself, at the cost of a spin —
+put a `sleep` or some other work in the loop rather than burning the
+processor, because there is nothing to block on.
+
+Forking is the other answer and often the better one: a Fuzix process
+is cheap, so a server can fork a child per connection, and a program
+that must watch a socket *and* the keyboard can fork one process for
+each and talk over a pipe.
+
+**There is no `setsockopt`.** `SO_REUSEADDR` is therefore set on every
+TCP socket by the kernel, because without it a server could not rebind
+its own port for two minutes after it exited.
+
+**`accept()` blocks** and returns a new descriptor, as usual. Closing
+that descriptor closes only that connection; the listener stays up.
+
+## Bringing the radio up
+
+This part *is* ioctls on `/dev/sys`, because it is the radio rather
+than the socket layer. `pico_ioctl.h` is the authority.
+
+```c
+#include "pico_ioctl.h"
+
+struct net_join j;
+strcpy(j.ssid, "MYNETWORK");
+strcpy(j.key,  "MYPASSWORD");
+j.auth = 2;                              /* WPA2-AES */
+ioctl(sys, NETIOC_UP, &j);               /* blocks ~0.5s, once */
+
+struct net_status st;
+ioctl(sys, NETIOC_STATUS, &st);          /* poll until st.ready */
+
+ioctl(sys, NETIOC_DOWN, 0);
+```
+
+`NETIOC_UP` uploads 230 KB of firmware to the chip and does not return
+until that is done — about half a second during which nothing else
+runs, including the keyboard. Association afterwards is asynchronous:
+poll `NETIOC_STATUS` rather than expecting `NETIOC_UP` to mean
+"connected". `st.present` is 0 on a Pico Computer 2, where `NETIOC_UP`
+returns `ENODEV` without powering anything, because those pins are that
+board's SD chip select and LED.
+
+Ordinary programs do not need any of this — `wifi -f` has done it
+before your program runs.
+
+## TLS
+
+A TLS socket is an ordinary socket with two differences:
+
+```c
+#define IPPROTO_TLS 254
+#define SIOCTLSHOST 0x0420
+
+int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TLS);
+ioctl(fd, SIOCTLSHOST, "example.com");   /* BEFORE connect */
+connect(fd, ...);
+```
+
+The name must be set before `connect`, and it is used twice: as the SNI
+extension in the handshake, and as the name the certificate has to
+match. `connect()` carries an address and nothing else, which is why
+this is an ioctl.
+
+After that it is `read`, `write` and `close` on a descriptor. That is
+deliberate: the same code serves plain TCP and TLS, which is what will
+let `mmbc` emit one implementation for both.
+
+**Certificates are not checked unless a bundle has been loaded** — see
+`tlsca` in the user manual. A program can load one itself:
+
+```c
+struct net_ca ca;
+ca.buf = pem;                            /* PEM, NUL-terminated */
+ca.len = pemlen + 1;                     /* the NUL COUNTS */
+int checked = ioctl(sys, NETIOC_TLSCA, &ca);
+```
+
+The length **must include the terminator**: that is how mbedtls tells
+PEM from DER, and without it the bundle is read as DER and rejected
+whole. `len` of 0 clears the bundle. The call returns 1 if certificates
+are checked from then on and 0 if they are not.
+
+A failed certificate surfaces as `ECONNREFUSED` from `connect`, which
+is honest about the outcome and says nothing about the cause. If a
+connection fails only when a bundle is loaded, that is why.
+
+## Loopback
+
+`127.0.0.1` works, and so does the machine's own address, so a program
+can talk to a server on the same board.
+
 # Miscellaneous
 
 ```c
