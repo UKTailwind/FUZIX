@@ -81,7 +81,10 @@ void my_open( int argc, char *argv[]){
 	exit(1);
     }
 
-    addr.sin_port = port;
+    /* Network order.  Without this the query goes to port 0x7B00
+       (31488) on a little-endian machine, which is why this has only
+       ever worked where htons() is the identity. */
+    addr.sin_port = htons(port);
     addr.sin_family = AF_INET;
     if (connect(fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
 	perror("connect");
@@ -93,7 +96,10 @@ void my_open( int argc, char *argv[]){
 int main( int argc, char *argv[] ){
     int retries;
     int rv;
-    uint32_t uv = 0;
+    /* time_t, NOT uint32_t.  It is 64 bits on some Fuzix platforms
+       and "ctime((time_t *)&uv)" then reads four bytes of stack past
+       the end of it - which is what dated a good reply to 1890. */
+    time_t uv = 0;
     int tz = 0;
     struct ntp_t *ptr = (struct ntp_t *)buf;
 
@@ -141,15 +147,17 @@ int main( int argc, char *argv[] ){
 
  process:
 
-    uv = ptr->xmit.sec;
-    uv -= 2208988800L;
+    /* Same again: the timestamp arrives big-endian, and reading it raw
+       on a little-endian machine dated this reply to 1869. */
+    uv = (time_t)ntohl(ptr->xmit.sec);
+    uv -= 2208988800LL;	/* 1900 -> 1970; too big for a signed long */
     uv += tz * 60 * 60;
 
     if (disflg || !setflg)
-	printf(ctime((time_t *)&uv));
+	printf(ctime(&uv));
 
     if (setflg){
-	rv = stime((time_t *)&uv);
+	rv = stime(&uv);
 	if (rv){
 	    perror( "stime" );
 	    exit(1);

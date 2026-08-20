@@ -29,7 +29,7 @@ struct header{
     uint16_t ancount;  /* number of answers */
     uint16_t nscount;  /* number of suggested name servers */
     uint16_t arcount;  /* number of suggested name server IP addresses */
-};
+} __attribute__((packed));
 
 /* Tail of Returned resource records (RR's) */
 struct RRtail{
@@ -37,7 +37,10 @@ struct RRtail{
     uint16_t class;   /* which network class, 1 = inet */
     uint32_t ttl;     /* time to live of records in secounds */
     uint16_t rdlen;   /* length of following data field, 4 for IP addresses */
-};
+} __attribute__((packed));
+/* packed: this is laid over the wire, where it is 10 bytes.  A compiler
+   that aligns the uint32_t makes it 12, and then "ptr += sizeof(struct
+   RRtail)" walks two bytes past every answer. */
 
 #define MAXADDRS 4  /* max number of address stored in hostent struct */
 
@@ -62,7 +65,7 @@ static int send_question( char *name ){
     memset( p, 0, sizeof(buf) );
     p->id = 42;     /* "random" query ID */
     p->cntl = 0x1;  /* request a recursive query */
-    p->qdcount = 1; /* one question */
+    p->qdcount = htons(1); /* one question - NETWORK order */
     /* fill out name string */
 
     while(1){
@@ -186,6 +189,13 @@ struct hostent *gethostbyname( char *name ){
 	struct RRtail *t;
 	int i,j;
 
+	/* The counts and the RR type/length arrive big-endian.  Read
+	   raw on a little-endian machine, ancount of 1 becomes 256 and
+	   the parse walks off the end - which is why this returned
+	   "cannot resolve hostname" on the first port to run it here. */
+	h->qdcount = ntohs(h->qdcount);
+	h->ancount = ntohs(h->ancount);
+
 	if( h->id != 42 )  /* correct session ID ? */
 	    goto error;
 
@@ -234,14 +244,14 @@ struct hostent *gethostbyname( char *name ){
 	    /* point to rest of RR structure */
 	    t = (struct RRtail *)ptr;
 	    ptr += sizeof( struct RRtail);
-	    if( t->type == 0x01 ){
-		for( j=0; j<t->rdlen; j++ )
+	    if( ntohs(t->type) == 0x01 ){
+		for( j=0; j<ntohs(t->rdlen); j++ )
 		    addrs[lno][j] = *ptr++;
 		list[lno] = &addrs[lno][0];
 		lno++;
 	    }
 	    else{
-		ptr += t->rdlen;
+		ptr += ntohs(t->rdlen);
 	    }
 	}
 	list[lno] = NULL;
