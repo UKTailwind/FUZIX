@@ -145,7 +145,6 @@
 #define CONFIG_NET_LWIP
 #endif
 #undef CONFIG_NET_NATIVE
-#undef CONFIG_NET_NATIVE
 /* Profil syscall support (not yet complete) */
 #undef CONFIG_PROFIL
 /* Multiple processes in memory at once */
