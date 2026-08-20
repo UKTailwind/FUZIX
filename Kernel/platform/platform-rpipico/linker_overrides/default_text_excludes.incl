@@ -362,3 +362,22 @@
  * rate a program calls recvfrom, and every packet it touches has
  * already crossed a serial link at a few megabits. ---- */
 *net_lwip.c.o(.text*)
+
+/* ---- SDK code that runs once, or not at all.
+ *
+ * mutex/claim are the SDK's own bookkeeping, called at init and by the
+ * cyw43 driver at human speed.  runtime_init walks the init list before
+ * main() - at that point the flash is still on boot2's timing, which is
+ * why executing from it there is safe.  multicore launches core1 once.
+ * The two stdio files are linked but unreachable: this kernel has its
+ * own printf and never calls the SDK's.
+ *
+ * NOT clocks.c, and NOT main.c - see the note above about the clock
+ * switch.  This is the boot code AROUND that, not the switch itself.
+ * ---- */
+*pico_sync/mutex.c.o(.text*)
+*hardware_claim/claim.c.o(.text*)
+*pico_runtime_init/runtime_init.c.o(.text*)
+*pico_multicore/multicore.c.o(.text*)
+*pico_stdio/stdio.c.o(.text*)
+*pico_stdio_uart/stdio_uart.c.o(.text*)

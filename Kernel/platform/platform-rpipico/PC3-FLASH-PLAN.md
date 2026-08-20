@@ -291,3 +291,30 @@ So:
   deterministic, and treat the timing as weather. If a timing result
   matters, it needs the interleaved A/B in PC3-DEVNOTES.md, and even
   then it is measuring this build, not this decision.
+## Stage 3 applied: item 1, measured -4,912 (2026-08-20)
+
+Free SRAM in the kernel region: **3,960 -> 8,832 bytes**, with the
+process pool untouched at 336K.
+
+What went, against what the list above proposed:
+
+* All the read-only data, which was the bulk of it. Nothing executes a
+  constant, so the text rules do not apply - with one exception kept
+  out deliberately: `tty.c`, whose code runs from the UART interrupt
+  (`tty_inproc`), so its constants can be read from one. That is worth
+  about forty bytes and is not worth the argument.
+* The cold SDK objects: mutex, claim, runtime_init, multicore, and the
+  two stdio files this kernel never calls.
+* **NOT `main.c`'s text**, which the proposal had in it and this file
+  forbids four paragraphs above: it raises clk_sys, and the code doing
+  that cannot be fetched from the flash whose clock it is changing.
+  Its *constants* did move - by the time anything prints, the QMI has
+  been re-timed. That is 1,028 bytes of the original -5,848 estimate.
+
+Board-verified: boots, `picoctl keymap uk` (which reads the six
+keymaps, now in flash), a `cc` compile and run at 875us a sieve
+against 865 before, wifi joins, DNS and NTP resolve, and a 269,335
+byte TCP fetch with a matching checksum.
+
+Still on the shelf, measured: usbh.c -6,584, the SDK double maths
+-5,984, display.c graphics -4,992.
