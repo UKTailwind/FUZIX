@@ -446,6 +446,37 @@ waiting the interval out rather than guessing: the bind succeeded on
 its own three minutes later, which distinguished lwIP's TIME_WAIT from
 a leaked socket of ours.
 
+### Raw sockets, so ping(1) - DONE ON THE BOARD, 2026-08-20
+
+    # ping 192.168.1.254
+    45 bytes from 192.168.1.254 (192.168.1.254) req=0
+    45 bytes from 192.168.1.254 (192.168.1.254) req=1
+
+Send takes the payload and lwIP builds the IP header, as a BSD raw
+socket without IP_HDRINCL does; receive hands back the whole IP
+packet, which is what ping parses. `SOCK_RAW` is root-only, as
+everywhere else, since it can forge anything. A raw socket has no
+port, so bind and autobind skip the ephemeral-port search entirely -
+the search would have spun for ever comparing one raw socket's port 0
+against another's.
+
+**The bug worth keeping.** The receive callback first returned 1,
+meaning "consumed", and lwIP then takes the packet no further: not to
+any other raw pcb, and not to the ICMP layer. Both halves showed up on
+the board. Two pings running, and only the first ever saw a reply - it
+was eating the second's. And while either ran, the machine stopped
+answering pings from anywhere else, because the echo REQUESTS were
+being swallowed before lwIP could reply; ping printed them as "Bad id
+1", which is the clue, read the right way round.
+
+BSD gives a raw socket a *copy* and lets the stack carry on, so that
+is what it does now - `pbuf_clone` and return 0. Verified both ways at
+once: the board pinging its router while answering pings from a PC.
+
+Two things that looked like bugs and were not: this PC never answers a
+ping (Windows Firewall drops inbound echo), and processes blocked in
+`read()` on a socket need `kill -9` rather than a plain `kill`.
+
 ### What is not done
 
 `dig` mis-parses some answers (`codeberg.org` came back as 84.140.0.0)

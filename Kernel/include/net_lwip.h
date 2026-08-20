@@ -55,6 +55,16 @@ int netlw_udp_send(uint8_t slot, const void *buf, uint16_t len,
 int netlw_udp_recv(uint8_t slot, void *buf, uint16_t max,
 		   uint32_t *ip, uint16_t *port);
 
+/*
+ *	Raw sockets, which on this machine means ping(1).  Send takes the
+ *	payload only - lwIP builds the IP header, as a BSD raw socket
+ *	without IP_HDRINCL does - and receive hands back the whole IP
+ *	packet, header included, because that is what ping parses.
+ */
+int netlw_raw_new(uint8_t slot, uint8_t proto);
+int netlw_raw_send(uint8_t slot, const void *buf, uint16_t len, uint32_t ip);
+int netlw_raw_recv(uint8_t slot, void *buf, uint16_t max, uint32_t *ip);
+
 int netlw_tcp_new(uint8_t slot);
 int netlw_tcp_bind(uint8_t slot, uint32_t ip, uint16_t *port);
 int netlw_tcp_connect(uint8_t slot, uint32_t ip, uint16_t port);

@@ -170,6 +170,7 @@ static struct socket *netproto_create(void)
 int netproto_socket(void)
 {
 	register struct socket *s;
+	int r;
 
 	if (!netlw_isup()) {
 		udata.u_error = ENETDOWN;
@@ -191,11 +192,12 @@ int netproto_socket(void)
 			udata.u_error = EPROTONOSUPPORT;
 			return 0;
 		}
-	} else {
-		/* SOCK_RAW lands here.  ping(1) wants it and lwIP can do
-		   it; an honest EPROTONOSUPPORT is better than a socket
-		   that never carries anything. */
+	} else if (udata.u_net.args[2] != SOCK_RAW) {
 		udata.u_error = EPROTONOSUPPORT;
+		return 0;
+	} else if (udata.u_euid != 0) {
+		/* As everywhere else: a raw socket can forge anything. */
+		udata.u_error = EACCES;
 		return 0;
 	}
 	s = netproto_create();
@@ -203,17 +205,17 @@ int netproto_socket(void)
 		udata.u_error = ENFILE;
 		return 0;
 	}
-	if (udata.u_net.args[2] == SOCK_DGRAM) {
-		if (netlw_udp_new(s->proto.slot)) {
-			udata.u_error = ENOBUFS;
-			return 0;
-		}
-	} else {
-		if (netlw_tcp_new(s->proto.slot)) {
-			udata.u_error = ENOBUFS;
-			return 0;
-		}
+	if (udata.u_net.args[2] == SOCK_DGRAM)
+		r = netlw_udp_new(s->proto.slot);
+	else if (udata.u_net.args[2] == SOCK_STREAM)
+		r = netlw_tcp_new(s->proto.slot);
+	else
+		r = netlw_raw_new(s->proto.slot, udata.u_net.args[3]);
+	if (r) {
+		udata.u_error = ENOBUFS;
+		return 0;
 	}
+	s->s_protocol = udata.u_net.args[3];
 	net_setup(s);
 	s->s_class = udata.u_net.args[2];
 	s->s_state = SS_UNCONNECTED;
@@ -263,6 +265,15 @@ static int do_bind(struct socket *s)
 	uint16_t port = s->src_addr.sa.sin.sin_port;
 	int r;
 
+	/* A raw socket has no port to bind - lwIP bound it to the
+	   protocol number when it was created. */
+	if (s->s_class == SOCK_RAW) {
+		s->src_addr.sa.family = AF_INET;
+		s->src_addr.sa.sin.sin_port = 0;
+		s->src_len = sizeof(struct sockaddr_in);
+		s->s_state = SS_BOUND;
+		return 0;
+	}
 	if (is_datagram(s))
 		r = netlw_udp_bind(s->proto.slot,
 				   s->src_addr.sa.sin.sin_addr.s_addr, &port);
@@ -286,6 +297,13 @@ int netproto_autobind(struct socket *s)
 {
 	s->src_addr.sa.family = AF_INET;
 	s->src_addr.sa.sin.sin_addr.s_addr = 0;
+	/* Raw has no port, so there is nothing to search for a free one
+	   of - and the search below would spin for ever comparing port 0
+	   against another raw socket's port 0. */
+	if (s->s_class == SOCK_RAW) {
+		s->src_addr.sa.sin.sin_port = 0;
+		return do_bind(s);
+	}
 	do {
 		s->src_addr.sa.sin.sin_port = ntohs(autoport);	/* a swap is a swap */
 		inc_autoport();
@@ -450,8 +468,14 @@ arg_t netproto_write(struct socket *s, struct ksockaddr *ka)
 		udata.u_error = EMSGSIZE;
 		return 0;
 	}
-	r = netlw_udp_send(s->proto.slot, udata.u_base, udata.u_count,
-			   ka->sa.sin.sin_addr.s_addr, ka->sa.sin.sin_port);
+	if (s->s_class == SOCK_RAW)
+		r = netlw_raw_send(s->proto.slot, udata.u_base,
+				   udata.u_count,
+				   ka->sa.sin.sin_addr.s_addr);
+	else
+		r = netlw_udp_send(s->proto.slot, udata.u_base, udata.u_count,
+				   ka->sa.sin.sin_addr.s_addr,
+				   ka->sa.sin.sin_port);
 	if (r == NETLW_NOMEM) {
 		/* Out of pbufs: the pump will free some.  Sleeping here is
 		   what the core's return-1 contract is for. */
@@ -499,8 +523,13 @@ int netproto_read(struct socket *s)
 		return 0;
 	}
 
-	r = netlw_udp_recv(s->proto.slot, udata.u_base, udata.u_count,
-			   &ip, &port);
+	port = 0;
+	if (s->s_class == SOCK_RAW)
+		r = netlw_raw_recv(s->proto.slot, udata.u_base,
+				   udata.u_count, &ip);
+	else
+		r = netlw_udp_recv(s->proto.slot, udata.u_base, udata.u_count,
+				   &ip, &port);
 	if (r == NETLW_EMPTY) {
 		if (s->s_iflags & SI_EOF)
 			return 0;

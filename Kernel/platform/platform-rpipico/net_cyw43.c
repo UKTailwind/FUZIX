@@ -53,6 +53,7 @@
 #include "lwip/udp.h"
 #include "lwip/pbuf.h"
 #include "lwip/tcp.h"
+#include "lwip/raw.h"
 
 /* The socket seam.  Only stdint.h behind it, so it is safe to include
    on this side of the header line - see net_lwip.h. */
@@ -269,6 +270,7 @@ struct udpq {
 #define LW_FREE 0
 #define LW_UDP  1
 #define LW_TCP  2
+#define LW_RAW  3
 
 static struct lwsock {
     void *pcb;                  /* struct udp_pcb * or struct tcp_pcb * */
@@ -295,13 +297,19 @@ void netlw_free(uint8_t slot)
 {
     struct lwsock *l = lwsock + slot;
 
-    if (l->kind == LW_UDP) {
+    if (l->kind == LW_UDP || l->kind == LW_RAW) {
+        /* Both queue whole datagrams the same way; only the pcb they
+           came from differs. */
         while (l->u.tail != l->u.head) {
             pbuf_free(l->u.q[l->u.tail].p);
             l->u.tail = (l->u.tail + 1) % UDPQ;
         }
-        if (l->pcb)
-            udp_remove(l->pcb);
+        if (l->pcb) {
+            if (l->kind == LW_RAW)
+                raw_remove(l->pcb);
+            else
+                udp_remove(l->pcb);
+        }
     } else if (l->kind == LW_TCP) {
         if (l->t.rx) {
             pbuf_free(l->t.rx);
@@ -520,6 +528,116 @@ static err_t tcp_acc(void *arg, struct tcp_pcb *newpcb, err_t err)
     tcp_arm((unsigned)slot, newpcb);
     netlw_wake((uint8_t)listener);
     return ERR_OK;
+}
+
+
+/*
+ *	Raw sockets.  The queue is the datagram one - a raw socket is a
+ *	datagram socket with the protocol number in place of a port - so
+ *	the only new code is the callback and the two ends of it.
+ */
+/*
+ *	A RAW SOCKET TAKES A COPY AND RETURNS 0, ALWAYS.
+ *
+ *	Returning 1 tells lwIP the packet is consumed, and then it goes
+ *	no further: not to any other raw pcb, and not to the ICMP layer.
+ *	That was the first version, and the board showed both halves of
+ *	what it costs.  Two ping processes, and only the first ever saw a
+ *	reply - it was eating the second's.  And while either was
+ *	running the machine stopped answering pings from anywhere else,
+ *	because the echo REQUESTS were being swallowed before lwIP could
+ *	reply to them; ping printed them as "Bad id 1", which is the
+ *	clue that took a while to read the right way round.
+ *
+ *	BSD semantics are that a raw socket gets a copy and the stack
+ *	carries on, so that is what this does.  The copy costs a pbuf per
+ *	ICMP packet, which is what a correct raw socket costs.
+ */
+static u8_t raw_rx(void *arg, struct raw_pcb *pcb, struct pbuf *p,
+                   const ip_addr_t *addr)
+{
+    unsigned slot = (unsigned)(uintptr_t)arg;
+    struct lwsock *l = lwsock + slot;
+    uint8_t next = (l->u.head + 1) % UDPQ;
+    struct pbuf *c;
+
+    (void)pcb;
+    if (next == l->u.tail)
+        return 0;               /* our queue is full; not lwIP's problem */
+    c = pbuf_clone(PBUF_RAW, PBUF_RAM, p);
+    if (c == NULL)
+        return 0;
+    l->u.q[l->u.head].p = c;    /* the whole IP packet, header and all */
+    l->u.q[l->u.head].src = ip4_addr_get_u32(ip_2_ip4(addr));
+    l->u.q[l->u.head].port = 0;
+    l->u.head = next;
+    netlw_wake((uint8_t)slot);
+    return 0;                   /* lwIP still owns p and still handles it */
+}
+
+int netlw_raw_new(uint8_t slot, uint8_t proto)
+{
+    struct lwsock *l = lwsock + slot;
+
+    if (l->pcb)
+        return NETLW_INUSE;
+    l->pcb = raw_new(proto);
+    if (l->pcb == NULL)
+        return NETLW_NOMEM;
+    l->kind = LW_RAW;
+    l->u.head = l->u.tail = 0;
+    raw_bind(l->pcb, IP_ANY_TYPE);
+    raw_recv(l->pcb, raw_rx, (void *)(uintptr_t)slot);
+    return NETLW_OK;
+}
+
+int netlw_raw_send(uint8_t slot, const void *buf, uint16_t len, uint32_t ip)
+{
+    struct lwsock *l = lwsock + slot;
+    struct pbuf *p;
+    ip_addr_t a;
+    err_t e;
+
+    if (l->pcb == NULL)
+        return NETLW_NOMEM;
+    if (!netlw_isup())
+        return NETLW_DOWN;
+    /* PBUF_IP, not PBUF_TRANSPORT: leave lwIP room to put the IP
+       header in front of what the caller gave us. */
+    p = pbuf_alloc(PBUF_IP, len, PBUF_RAM);
+    if (p == NULL)
+        return NETLW_NOMEM;
+    if (len)
+        pbuf_take(p, buf, len);
+    ip_addr_set_ip4_u32(&a, ip);
+    e = raw_sendto(l->pcb, p, &a);
+    pbuf_free(p);
+    if (e == ERR_MEM || e == ERR_BUF)
+        return NETLW_NOMEM;
+    if (e != ERR_OK)
+        return NETLW_DOWN;
+    return NETLW_OK;
+}
+
+int netlw_raw_recv(uint8_t slot, void *buf, uint16_t max, uint32_t *ip)
+{
+    struct lwsock *l = lwsock + slot;
+    struct udpq *q;
+    uint16_t n;
+
+    if (l->u.tail == l->u.head)
+        return NETLW_EMPTY;
+    q = l->u.q + l->u.tail;
+    n = q->p->tot_len;
+    if (n > max)
+        n = max;
+    if (n)
+        pbuf_copy_partial(q->p, buf, n, 0);
+    *ip = q->src;
+    pbuf_free(q->p);
+    q->p = NULL;
+    l->u.tail = (l->u.tail + 1) % UDPQ;
+    return n;
 }
 
 int netlw_tcp_new(uint8_t slot)
