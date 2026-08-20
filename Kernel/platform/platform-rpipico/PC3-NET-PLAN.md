@@ -514,10 +514,16 @@ ships to someone who mixes versions.
 of the DNS wire structs, and only one of them has been fixed - dig
 still mis-parses some answers (codeberg.org came back as 84.140.0.0).
 
-A process blocked in read() on a socket has needed `kill -9` rather
-than a plain kill.  That is worth understanding rather than living
-with: killall is what rc.reboot uses, so a process that ignores SIGTERM
-is also a filesystem that goes down dirty.
+The libc resolver is flaky when another program is using the radio:
+`ntpdate pool.ntp.org` failed once in three with a `ping` running and
+not at all in four without.  One retry succeeds, so it is timing or
+answer-shape rather than a hard fault - `time.cloudflare.com` never
+failed.  Reproduce by backgrounding a ping and resolving in a loop.
+
+A process blocked in read() on a socket needed `kill -9` rather
+than a plain kill.  FIXED - it was signal 15 never being dispatched
+at all (Kernel/process.c); see the commit.  It is also why the
+filesystem kept going down dirty: killall is what rc.reboot uses.
 
 **RAM: 3,960 bytes free, and networking now costs the process pool
 NOTHING.** Sockets cost 936 bytes of `.bss` on top of step 3, which
