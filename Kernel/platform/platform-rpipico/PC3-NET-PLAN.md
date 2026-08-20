@@ -123,10 +123,26 @@ The rest is ordinary: sem 246, unique_id 132, gpio 108, dma 108,
 claim 79, irq 32, pio 19 - SDK helpers that were never referenced
 before and are not named for flash.
 
-## Step 1 - the radio, no stack. ON THE BOARD, 2026-08-20.
+## Step 1 - the radio, no stack. DONE ON THE BOARD, 2026-08-20.
 
-Everything below is verified on hardware except joining a real network,
-which needs credentials. What the board says:
+**It has an address.**
+
+    # wifi -f
+    joining
+    joined, no address
+    up, -63 dBm
+    mac 28:cd:c1:19:4e:c2
+    ip      192.168.1.245
+    netmask 255.255.255.0
+    gateway 192.168.1.254
+
+A real association and a real DHCP lease, on a Pico Computer 3 running
+Fuzix. The whole negotiation ran on the kernel's pump while `wifi` was
+asleep in `sleep(1)`. The lease survives other work and the RSSI moves
+between calls (-61, -62, -63), so the driver is genuinely talking to
+the chip each time rather than reporting a cached answer.
+
+The steps to it, and what each proved:
 
     # free
              total         used         free
@@ -166,9 +182,20 @@ before any association are not a second bug - `cyw43_lwip.c` always
 `netif_add`s with its `CYW43_DEFAULT_IP_*` values and DHCP overwrites
 them on the lease.
 
-Still unverified: an actual association and lease, whether the USB
-keyboard survives the firmware upload (the console did), and what the
-display does with the radio associated.
+**The credentials file ships.** `/etc/wifi.conf` is a pro-forma with
+its own format in its own comments, installed mode 600 by
+`update-flash.sh` along with `/bin/wifi`, both gated on `PC3_NET=1` so
+a non-network kernel does not carry a command that can only answer
+"Not a typewriter". A user replaces one line. `wifi ssid key` still
+works without the file at all.
+
+That found a second bug worth keeping: `readconf` read the file into a
+160-byte buffer, saw 160 bytes of comment, and announced there were no
+credentials. It reads a line at a time now.
+
+Still unverified: whether the USB keyboard survives the firmware
+upload (the console did), and what the display does with the radio
+associated - both need eyes on the machine.
 
 ### How it was written
 

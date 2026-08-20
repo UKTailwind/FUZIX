@@ -619,4 +619,46 @@ if grep -q 'error 28' /tmp/ucp-flash.log; then
 	# kernel build over a fallback filesystem.  Loud instead.
 fi
 
+# CYW43 networking: /bin/wifi and the pro-forma /etc/wifi.conf.
+#
+# Gated on the SAME switch the kernel is built with, because on a
+# PC3_NET=0 kernel the ioctls do not exist and the command can only
+# print "Not a typewriter" - a worse thing to find in /bin than
+# nothing at all.
+#
+#	PC3_NET=1 make image		(the Makefile exports it)
+#
+# The pro-forma is the point of shipping it rather than leaving people
+# to discover the format: it carries the syntax in its own comments and
+# a user replaces one line.  Mode 600 from the start, because the line
+# they replace it with holds a password.
+#
+# A separate ucp pass rather than lines in the big heredoc above, so
+# that "not included" means no ucp input at all rather than a blank
+# line the log has to be trusted to ignore.
+PC3_NET=${PC3_NET:-0}
+if [ "$PC3_NET" = 1 ]; then
+	if [ ! -f utils/wifi.stripped ]; then
+		echo "update-flash.sh: PC3_NET=1 needs utils/wifi.stripped" >&2
+		echo "  (cd utils && make wifi && arm-none-eabi-strip wifi -o wifi.stripped)" >&2
+		exit 1
+	fi
+	echo "--- networking: /bin/wifi and the pro-forma /etc/wifi.conf"
+	../../../Standalone/ucp ${IMG} > /tmp/ucp-wifi.log 2>&1 <<EOF
+cd /bin
+bget utils/wifi.stripped wifi
+chmod 0755 wifi
+cd /etc
+bget wifi.conf
+chmod 0600 wifi.conf
+exit
+EOF
+	if grep -q "error" /tmp/ucp-wifi.log; then
+		echo "update-flash.sh: ucp failed installing the wifi files:" >&2
+		cat /tmp/ucp-wifi.log >&2
+		exit 1
+	fi
+	rm -f /tmp/ucp-wifi.log
+fi
+
 ../../../Standalone/fsck -a ${IMG}

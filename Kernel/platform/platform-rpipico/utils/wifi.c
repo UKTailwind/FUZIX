@@ -88,35 +88,48 @@ static int status(int verbose)
     return st.link == 3 ? 0 : 1;
 }
 
-/* Read "ssid key [auth]" out of the credentials file. */
+/* Read "ssid key [auth]" out of the credentials file.
+ *
+ * A line at a time, because the file is mostly comment: the shipped
+ * pro-forma is 629 bytes of explanation with the credentials at the
+ * bottom, and a read() into a fixed buffer saw only the comments and
+ * announced there were no credentials.  That is what the board said
+ * the first time this ran. */
 static int readconf(const char *path, struct net_join *j)
 {
     struct stat s;
     char buf[160];
     char *p, *q;
-    int fd, n;
+    FILE *f;
 
-    fd = open(path, O_RDONLY, 0);
-    if (fd < 0) {
+    f = fopen(path, "r");
+    if (f == NULL) {
         perror(path);
         return -1;
     }
-    if (fstat(fd, &s) == 0 && (s.st_mode & 077))
+    if (stat(path, &s) == 0 && (s.st_mode & 077))
         fprintf(stderr, "%s: readable by others - chmod 600 it\n", path);
-    n = read(fd, buf, sizeof(buf) - 1);
-    close(fd);
-    if (n <= 0) {
-        fprintf(stderr, "%s: empty\n", path);
-        return -1;
-    }
-    buf[n] = 0;
-    p = strchr(buf, '\n');
-    if (p)
-        *p = 0;
 
-    p = buf;
-    while (*p == ' ')
-        p++;
+    /* First line that is not blank and not a comment.  The file is
+       meant to be edited by hand, so it has to be allowed to say what
+       its own format is. */
+    for (;;) {
+        if (fgets(buf, sizeof(buf), f) == NULL) {
+            fclose(f);
+            fprintf(stderr, "%s: no credentials, only comments\n", path);
+            return -1;
+        }
+        p = strchr(buf, '\n');
+        if (p)
+            *p = 0;
+        p = buf;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p && *p != '#')
+            break;
+    }
+    fclose(f);
+
     q = strchr(p, ' ');
     if (!q) {
         fprintf(stderr, "%s: want \"ssid key [auth]\"\n", path);

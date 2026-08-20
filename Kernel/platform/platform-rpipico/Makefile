@@ -87,7 +87,7 @@ build/Makefile: CMakeLists.txt $(wildcard ../../*.[chS]) $(wildcard ../../*/*.[c
 # 512-byte record and mkftl emits the whole region.  It is not a
 # release asset and is written once.
 image:: world
-	./update-flash.sh
+	PC3_NET=${PC3_NET} ./update-flash.sh
 	../../../Standalone/mkftl -s 15360 -e 0x1000 -g 10 filesystem.img -o filesystem.ftl
 	${PICOTOOL} uf2 convert filesystem.ftl -t bin filesystem.uf2 -o 0x10100000 ${PICOTOOLFLAGS}
 
