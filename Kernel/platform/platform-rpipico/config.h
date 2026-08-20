@@ -143,6 +143,11 @@
 #ifdef CONFIG_PC3_NET
 #define CONFIG_NET
 #define CONFIG_NET_LWIP
+/* CONFIG_NET_TRACE prints every socket call's socket, command and
+ * state, plus each netproto_free.  Off; define it here when a socket
+ * misbehaves.  It is what found IN2SOCK never being set - the trace
+ * showed a close() on the accepted child freeing socket 0, which was
+ * the listener. */
 #endif
 #undef CONFIG_NET_NATIVE
 /* Profil syscall support (not yet complete) */

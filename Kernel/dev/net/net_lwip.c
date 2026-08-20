@@ -269,6 +269,10 @@ void netproto_setup(struct socket *s)
 
 void netproto_free(struct socket *s)
 {
+#ifdef CONFIG_NET_TRACE
+	kprintf("net: FREE sock %d state %d parent %d\n", s->s_num,
+		s->s_state, s->s_parent);
+#endif
 	netlw_free(s->proto.slot);
 	s->s_state = SS_UNUSED;
 }
