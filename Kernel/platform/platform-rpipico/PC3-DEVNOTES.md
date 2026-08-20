@@ -112,7 +112,7 @@ run on hardware.**
   filesystem changes: `dd if=Images/rpipico/filesys.img
   of=Images/rpipico/pc3-sd.img bs=512 seek=133120 conv=notrunc`.
 - SD card layout: p1 = 64M FAT (unformatted placeholder), p2 = 32M Fuzix
-  root (boot `hdb2`), p3 = 4M type 0x7F. Users write pc3-sd.img whole.
+  root (boot `hda2`), p3 = 4M type 0x7F. Users write pc3-sd.img whole.
 - The user flashes hardware; never assume you can.
 - WSL DNS is fixed (2026-07-28) — no more /etc/hosts pinning. The cause
   was systemd-resolved having no upstream at all (`resolvectl status` ->

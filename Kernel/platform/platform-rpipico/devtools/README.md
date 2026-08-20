@@ -87,5 +87,5 @@ Recovery is a raw `\x03`, which is why it is worth having a script that
 can send control characters rather than only whole lines.
 
 After any reset the board waits at `bootdev:`. A bare CR does not
-re-prompt, so silence there does **not** mean it is dead - send `hdb2`,
+re-prompt, so silence there does **not** mean it is dead - send `hda2`,
 then `root`.

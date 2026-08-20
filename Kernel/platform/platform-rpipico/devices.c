@@ -194,11 +194,11 @@ void device_init(void)
 			        NULL, &tick_timer))
 	panic("tick");
 
-    /* The flash device is too small to be useful, and a corrupt flash will
-     * cause a crash on startup... oddly. */
-#ifdef CONFIG_PICO_FLASH
-    flash_dev_init();
-#endif
+    /* No flash_dev_init() here any more, and config.h has the whole
+     * argument: the on-board flash filesystem was never a release
+     * asset and it pinned 7,912 bytes of SRAM in place, because code
+     * cannot execute from a device it is erasing.  The SD card is hda
+     * now and the PSRAM swap disc is hdb. */
 #ifdef CONFIG_NET
 	netdev_init();
 #endif

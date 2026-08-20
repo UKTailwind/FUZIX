@@ -626,7 +626,11 @@ fi
 # print "Not a typewriter" - a worse thing to find in /bin than
 # nothing at all.
 #
-#	PC3_NET=1 make image		(the Makefile exports it)
+#	PC3_NET=1 sh mksdimage.sh	(it inherits the environment)
+#
+# The Makefile no longer runs this script at all: it used to build the
+# on-board flash root, and that device is gone.  mksdimage.sh is the
+# only caller now, and it builds the SD card.
 #
 # The pro-forma is the point of shipping it rather than leaving people
 # to discover the format: it carries the syntax in its own comments and

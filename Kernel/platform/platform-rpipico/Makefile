@@ -69,27 +69,12 @@ build/Makefile: CMakeLists.txt $(wildcard ../../*.[chS]) $(wildcard ../../*/*.[c
 	mkdir -p build
 	(cd build && cmake -DPICO_BOARD=${SUBTARGET} -DTOTALMEM=${TOTALMEM} -DPC3_NET=${PC3_NET} ..)
 
-# The flash disk is everything above FLASH_OFFSET (globals.h, 1M), and
-# these numbers describe the same region devflash.c does:
-#
-#   -s 15360        PICO_FLASH_SIZE_BYTES (16M) - FLASH_OFFSET, in KB
-#   -o 0x10100000   XIP base + FLASH_OFFSET
-#
-# mkftl must be given the SAME device devflash.c computes, or the FTL's
-# metadata describes a different disk from the one the kernel mounts.
-#
-# The offset was 0x10018000 - the 96K FLASH_OFFSET used before the
-# bricking described in globals.h - so flashing this uf2 would have
-# written the disk over the kernel and done it again.  Change one of
-# these and you must change all of them.
-#
-# filesystem.uf2 is ~30M because a uf2 carries 256 payload bytes per
-# 512-byte record and mkftl emits the whole region.  It is not a
-# release asset and is written once.
+# "world" builds the kernel and the userland.  It used to also build a
+# filesystem image into the flash above the kernel, with mkftl and a
+# uf2 offset that had to agree with FLASH_OFFSET; that device is gone
+# (config.h), and update-flash.sh survives only because mksdimage.sh
+# builds the SD root with it.
 image:: world
-	PC3_NET=${PC3_NET} ./update-flash.sh
-	../../../Standalone/mkftl -s 15360 -e 0x1000 -g 10 filesystem.img -o filesystem.ftl
-	${PICOTOOL} uf2 convert filesystem.ftl -t bin filesystem.uf2 -o 0x10100000 ${PICOTOOLFLAGS}
 
 diskimage:
 
