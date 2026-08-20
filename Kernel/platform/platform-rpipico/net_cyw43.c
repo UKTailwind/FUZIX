@@ -50,6 +50,12 @@
 #include <pico/platform/sections.h>
 #include "lwip/netif.h"
 #include "lwip/ip4_addr.h"
+#include "lwip/udp.h"
+#include "lwip/pbuf.h"
+
+/* The socket seam.  Only stdint.h behind it, so it is safe to include
+   on this side of the header line - see net_lwip.h. */
+#include <net_lwip.h>
 
 #include "pico_ioctl.h"
 
@@ -221,4 +227,171 @@ int pc3_net_status(struct net_status *st)
     return 0;
 }
 
+
+/*
+ *	--------------------------------------------------------------
+ *	The lwIP side of Fuzix's sockets.  net_lwip.h has the contract;
+ *	Kernel/dev/net/net_lwip.c is the other side of it and never sees
+ *	a pbuf.  Datagrams only so far.
+ *
+ *	No locking anywhere below, and that is a property of the machine
+ *	rather than an oversight: the receive callback runs in the pump,
+ *	which is plt_idle and the PendSV trampoline, and neither can
+ *	land inside a syscall.  So a queue manipulated by both cannot be
+ *	manipulated by both at once.  If lwIP is ever driven from a real
+ *	interrupt this stops being true.
+ *	--------------------------------------------------------------
+ */
+
+/*
+ *	Four datagrams per socket.  It is a queue depth, not a buffer:
+ *	the data stays in the pbufs, which are in PSRAM.  Four is what a
+ *	resolver or an NTP client needs (one reply, plus room for a
+ *	duplicate and a stray), and a fifth arriving before userland
+ *	reads is dropped - which is what UDP is allowed to do and what
+ *	an ethernet card would do to us anyway.
+ */
+#define UDPQ	4
+
+struct udpq {
+    struct pbuf *p;
+    uint32_t src;               /* network order, as lwIP holds it */
+    uint16_t port;              /* network order */
+};
+
+static struct udpsock {
+    struct udp_pcb *pcb;
+    struct udpq q[UDPQ];
+    uint8_t head, tail;
+} udpsock[NETLW_NSOCKET];
+
+int netlw_isup(void)
+{
+    return net_ready &&
+        cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) == CYW43_LINK_UP;
+}
+
+uint32_t netlw_myip(void)
+{
+    struct netif *nif = netif_default;
+
+    if (!net_ready || nif == NULL)
+        return 0;
+    return ip4_addr_get_u32(netif_ip4_addr(nif));
+}
+
+static void udp_rx(void *arg, struct udp_pcb *pcb, struct pbuf *p,
+                   const ip_addr_t *addr, u16_t port)
+{
+    unsigned slot = (unsigned)(uintptr_t)arg;
+    struct udpsock *u = udpsock + slot;
+    uint8_t next = (u->head + 1) % UDPQ;
+
+    (void)pcb;
+    if (p == NULL)
+        return;
+    if (next == u->tail) {
+        pbuf_free(p);           /* queue full: drop, as UDP may */
+        return;
+    }
+    u->q[u->head].p = p;
+    u->q[u->head].src = ip4_addr_get_u32(ip_2_ip4(addr));
+    u->q[u->head].port = lwip_htons(port);
+    u->head = next;
+    netlw_wake((uint8_t)slot);
+}
+
+int netlw_udp_new(uint8_t slot)
+{
+    struct udpsock *u = udpsock + slot;
+
+    if (u->pcb)
+        return NETLW_INUSE;
+    u->pcb = udp_new();
+    if (u->pcb == NULL)
+        return NETLW_NOMEM;
+    u->head = u->tail = 0;
+    udp_recv(u->pcb, udp_rx, (void *)(uintptr_t)slot);
+    return NETLW_OK;
+}
+
+void netlw_udp_free(uint8_t slot)
+{
+    struct udpsock *u = udpsock + slot;
+
+    while (u->tail != u->head) {
+        pbuf_free(u->q[u->tail].p);
+        u->tail = (u->tail + 1) % UDPQ;
+    }
+    if (u->pcb) {
+        udp_remove(u->pcb);
+        u->pcb = NULL;
+    }
+}
+
+int netlw_udp_bind(uint8_t slot, uint32_t ip, uint16_t *port)
+{
+    struct udpsock *u = udpsock + slot;
+    ip_addr_t a;
+
+    if (u->pcb == NULL)
+        return NETLW_NOMEM;
+    ip_addr_set_ip4_u32(&a, ip);
+    if (udp_bind(u->pcb, &a, lwip_ntohs(*port)) != ERR_OK)
+        return NETLW_INUSE;
+    *port = lwip_htons(u->pcb->local_port);
+    return NETLW_OK;
+}
+
+int netlw_udp_send(uint8_t slot, const void *buf, uint16_t len,
+                   uint32_t ip, uint16_t port)
+{
+    struct udpsock *u = udpsock + slot;
+    struct pbuf *p;
+    ip_addr_t a;
+    err_t e;
+
+    if (u->pcb == NULL)
+        return NETLW_NOMEM;
+    if (!netlw_isup())
+        return NETLW_DOWN;
+    p = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
+    if (p == NULL)
+        return NETLW_NOMEM;
+    /* buf may be a user address: this platform is
+       CONFIG_USERMEM_DIRECT and valaddr() has already checked it. */
+    if (len)
+        pbuf_take(p, buf, len);
+    ip_addr_set_ip4_u32(&a, ip);
+    e = udp_sendto(u->pcb, p, &a, lwip_ntohs(port));
+    pbuf_free(p);
+    if (e == ERR_MEM || e == ERR_BUF)
+        return NETLW_NOMEM;
+    if (e != ERR_OK)
+        return NETLW_DOWN;
+    return NETLW_OK;
+}
+
+int netlw_udp_recv(uint8_t slot, void *buf, uint16_t max,
+                   uint32_t *ip, uint16_t *port)
+{
+    struct udpsock *u = udpsock + slot;
+    struct udpq *q;
+    uint16_t n;
+
+    if (u->tail == u->head)
+        return NETLW_EMPTY;
+    q = u->q + u->tail;
+    n = q->p->tot_len;
+    if (n > max)
+        n = max;                /* recvfrom truncates and drops the rest */
+    if (n)
+        pbuf_copy_partial(q->p, buf, n, 0);
+    *ip = q->src;
+    *port = q->port;
+    pbuf_free(q->p);
+    q->p = NULL;
+    u->tail = (u->tail + 1) % UDPQ;
+    return n;
+}
 #endif /* CONFIG_PC3_NET */

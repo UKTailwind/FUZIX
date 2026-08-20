@@ -350,3 +350,8 @@
 *cybt_*.o(.text*)
 *async_context*.o(.text*)
 *net_cyw43.c.o(.text*)
+
+/* ---- Fuzix sockets over lwIP.  Entered from a syscall at whatever
+ * rate a program calls recvfrom, and every packet it touches has
+ * already crossed a serial link at a few megabits. ---- */
+*net_lwip.c.o(.text*)

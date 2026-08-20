@@ -133,8 +133,18 @@
 #undef CONFIG_IDUMP
 /* Enable to make ^A drop back into the monitor */
 #undef CONFIG_MONITOR
-/* Enable to support network stack */
-#undef CONFIG_NET
+/* Enable to support network stack.
+ *
+ * CONFIG_NET brings in syscall_net.c and network.c - the BSD-ish
+ * socket layer that has been compiled and disabled in this port since
+ * it was written - and CONFIG_NET_LWIP selects dev/net/net_lwip.c as
+ * the backend under it.  Both follow PC3_NET, because the sockets are
+ * useless without the radio and the radio is optional. */
+#ifdef CONFIG_PC3_NET
+#define CONFIG_NET
+#define CONFIG_NET_LWIP
+#endif
+#undef CONFIG_NET_NATIVE
 #undef CONFIG_NET_NATIVE
 /* Profil syscall support (not yet complete) */
 #undef CONFIG_PROFIL
@@ -223,12 +233,20 @@
 #if TOTALMEM == 0
 #error TOTALMEM should have been defined via cmake
 #endif
+/* NETMEM stays 0 even with CONFIG_NET on, unlike every other port.
+ *
+ * It is the slice of the process pool a network stack takes for its
+ * buffers, and 10K is the usual figure.  Here the buffers are not in
+ * the pool at all - lwIP's heap and every one of its pools live in
+ * PSRAM (lwipopts.h) - so taking 10K would be taking it twice.  What
+ * networking really costs this pool is one 4K block, and that is paid
+ * once in TOTALMEM (332 rather than 336) and in the matching
+ * linker_overrides_net/memory_ram.incl.
+ *
+ * If this ever becomes non-zero, USERMEM stops matching the PROGPOOL
+ * region and progbase[] ends up smaller than the memory reserved for
+ * it.  Nothing checks that. */
 #define NETMEM 0
-
-#ifdef CONFIG_NET
-#undef NETMEM
-#define NETMEM 10
-#endif
 
 #define USERMEM ((TOTALMEM-NETMEM)*1024)
 

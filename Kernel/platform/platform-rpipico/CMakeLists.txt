@@ -253,7 +253,7 @@ target_link_libraries(fuzix
 # is the system tick).  lwIP is driven from the kernel's own pump
 # instead, which is the same choice MMBasic's WEB builds make.
 if(PC3_NET)
-	target_sources(fuzix PRIVATE net_cyw43.c)
+	target_sources(fuzix PRIVATE net_cyw43.c ../../dev/net/net_lwip.c)
 	target_link_libraries(fuzix pico_cyw43_arch_lwip_poll)
 endif()
 

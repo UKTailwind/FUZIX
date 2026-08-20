@@ -339,17 +339,87 @@ mid-transfer, watching the screen. If PSRAM pbufs fleck the display,
 the fallback is not "back to SRAM" - it is the five-block version, and
 that is a decision with a number attached rather than a guess.
 
-## Step 4 - the first socket
+## Step 4 - sockets. DATAGRAMS DONE ON THE BOARD, 2026-08-20.
 
-`CONFIG_NET` on, `net_lwip.c` with the UDP path only (bind/sendto/
-recvfrom), and run the *existing* `ntpdate` and `dig` from userland.
-Then TCP client (htget, telnet), then listen/accept (httpd).
+    # ntpdate -d pool.ntp.org
+    Thu Aug 20 09:30:01 2026
+    # dig www.example.com
+    answers:
+    www.example.com.            A     23.154.192.12
+    # ntpdate -s -o 1 162.159.200.1
+    # date
+    Thu Aug 20 10:25:49 GMT 2026
 
-Association has no place in Fuzix's ioctl set: put `PIOC_WIFI_JOIN` /
-`_STATUS` / `_SCAN` on the platform `/dev/sys` ioctl (`pico_ioctl.h`,
-covered by `ioctlcheck.sh`), the way sound and i2c already do it, and
-keep `net_lwip.c` itself platform-neutral so it could serve other
-Fuzix ports.
+A Fuzix machine resolving a name and setting its clock from the
+internet, through `socket()`, `connect()`, `write()` and `read()` on
+its own socket layer. `CONFIG_NET` is on and `dev/net/net_lwip.c` is
+the backend under it.
+
+### The shape
+
+`net_lwip.c` implements the `netproto_*` hooks and **never sees a
+pbuf**. Everything lwIP is behind `include/net_lwip.h`, a seam of
+eight functions that the platform implements in `net_cyw43.c`. That
+split is forced rather than chosen: lwIP and the SDK pull in newlib's
+`<stdio.h>` and `<sys/time.h>`, whose `ssize_t` and `time_t` are not
+the kernel's, so one translation unit cannot hold both sets of
+headers. The upside is that `net_lwip.c` is platform-neutral and
+could serve any Fuzix port with an lwIP under it.
+
+Receive queues four datagrams per socket - a queue depth, not a
+buffer, since the data stays in pbufs in PSRAM. A fifth is dropped,
+which is what UDP allows and what an ethernet card would do to us
+anyway. No locking anywhere: the receive callback runs in the pump,
+which cannot land inside a syscall.
+
+### Bugs this found, in code older than the port
+
+**One in the kernel core.** `network.c`'s `net_write()` passes
+`s->src_addr` as the destination. For a stack where the connection
+carries the address that is harmless and every other backend ignores
+the argument; for connected UDP it posts the datagram to ourselves.
+Worked around in `netproto_write` with the reasoning written down -
+the real fix belongs in `network.c` and should be reported upstream
+first, since every other port shares that file.
+
+**Three in `ntpdate`.** It has only ever run on big-endian Fuzix
+machines, so nothing in it converts:
+
+* `addr.sin_port = port` with no `htons`, so the query went to network
+  port 0x7B00 (31488). This is why the first three attempts said
+  "timeout" and it had nothing to do with the sockets. A UDP listener
+  on this PC, on 31488, is what proved it.
+* `uv = ptr->xmit.sec` with no `ntohl` - a good reply dated to 1890.
+* `uint32_t uv` passed to `ctime((time_t *)&uv)`, and `time_t` is 64
+  bits here, so `ctime` read four bytes of stack past the end of it.
+
+**Four in `gethostbyname`.** `qdcount` written without `htons` (the
+server sees 256 questions), `ancount`/`qdcount`/`type`/`rdlen` read
+without `ntohs`, and `struct RRtail` laid over the wire unpacked - 10
+bytes on the wire, 12 once the compiler aligns the `uint32_t`, so the
+parse walked two bytes past every answer. All four together were
+"cannot resolve hostname".
+
+Those seven are all upstream code and all worth reporting: this is
+plausibly the first little-endian machine to run the netd suite.
+
+### What is not done
+
+TCP. `netproto_socket` refuses `SOCK_STREAM` with `EPROTONOSUPPORT`
+rather than accepting a connect that can never complete, so `telnet`,
+`htget` and `httpd` are still out. That is the next piece.
+
+`dig` mis-parses some answers (`codeberg.org` came back as 84.140.0.0)
+- its own copy of the same wire structs, not yet fixed.
+
+`/etc/resolv.conf` is written by hand. lwIP is built with `LWIP_DNS 0`
+because the resolver is in libc, and the DHCP server list is therefore
+not kept; picking it up would mean turning `LWIP_DNS` on for storage
+only and adding it to `NETIOC_STATUS` so `wifi` can write the file.
+
+**RAM: 488 bytes free.** Sockets cost 936 bytes of `.bss` on top of
+step 3. TCP will not fit in what is left, so it arrives with either
+the second 4K block or a hunt through the flash placement list.
 
 ## Not now
 
