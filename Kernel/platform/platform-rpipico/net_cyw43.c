@@ -205,9 +205,17 @@ int pc3_net_status(struct net_status *st)
         st->rssi = 0;
     nif = netif_default;
     if (nif) {
-        st->ip = ip4_addr_get_u32(netif_ip4_addr(nif));
-        st->mask = ip4_addr_get_u32(netif_ip4_netmask(nif));
-        st->gw = ip4_addr_get_u32(netif_ip4_gw(nif));
+        /* ip4_addr_get_u32 is the address as lwIP stores it, which is
+           NETWORK order - first octet in the low byte on this machine.
+           struct net_status says host order, so swap here rather than
+           leave every reader to know.  The board printed a netmask of
+           0.255.255.255 before this was here.
+           Note that a mask and gateway appear before any association:
+           cyw43_lwip.c always netif_adds with its CYW43_DEFAULT_IP_*
+           placeholders and DHCP overwrites them on the lease. */
+        st->ip = lwip_ntohl(ip4_addr_get_u32(netif_ip4_addr(nif)));
+        st->mask = lwip_ntohl(ip4_addr_get_u32(netif_ip4_netmask(nif)));
+        st->gw = lwip_ntohl(ip4_addr_get_u32(netif_ip4_gw(nif)));
     }
     net_busy = 0;
     return 0;

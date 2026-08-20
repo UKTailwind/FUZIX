@@ -123,7 +123,54 @@ The rest is ordinary: sem 246, unique_id 132, gpio 108, dma 108,
 claim 79, irq 32, pio 19 - SDK helpers that were never referenced
 before and are not named for flash.
 
-## Step 1 - the radio, no stack. WRITTEN, NOT YET RUN.
+## Step 1 - the radio, no stack. ON THE BOARD, 2026-08-20.
+
+Everything below is verified on hardware except joining a real network,
+which needs credentials. What the board says:
+
+    # free
+             total         used         free
+    Mem:       332           76          256
+    Swap:     7980            0         7980
+    # wifi pc3-net-probe wrongkey 2
+    joining
+    no such network
+    # wifi
+    no such network
+    mac 28:cd:c1:19:4e:c2
+    ip      0.0.0.0
+    netmask 255.255.255.0
+    gateway 192.168.0.1
+
+That is a lot of the design confirmed in three lines. The firmware
+uploaded over the gSPI link at 375MHz, so `net_set_pio_clkdiv` is
+right and there is no "hdr mismatch". lwIP came up with its heap in
+PSRAM. The PIO state machine and the DMA channels were claimed without
+disturbing sound or the scanout. The chip answered with its own MAC.
+And the association state advanced from "joining" to a verdict while
+`wifi` was asleep in `sleep(1)` - which can only happen if
+`pc3_net_poll()` is being called from `plt_idle`, so the pump works.
+
+`free` is the flash proof, not the banner: 336 -> 332 is the block the
+process pool gave up, and 8048 -> 7980 is the PSRAM the lwIP heap took
+off the top of the swap disc. Before flashing, the same `wifi` binary
+on the old kernel said "NETIOC_STATUS: Not a typewriter", which is the
+right answer from a kernel that has never heard of the ioctl.
+
+**One bug, found by running it.** The first run printed `netmask
+0.255.255.255` and `gateway 1.0.168.192`: `ip4_addr_get_u32` returns
+the address in network order and `struct net_status` says host order.
+Fixed with `lwip_ntohl` in the kernel rather than by teaching every
+reader the convention. The placeholder mask and gateway that show
+before any association are not a second bug - `cyw43_lwip.c` always
+`netif_add`s with its `CYW43_DEFAULT_IP_*` values and DHCP overwrites
+them on the lease.
+
+Still unverified: an actual association and lease, whether the USB
+keyboard survives the firmware upload (the console did), and what the
+display does with the radio associated.
+
+### How it was written
 
 Three ioctls on `/dev/sys` (`net_cyw43.c`, dispatched from `misc.c`)
 and a userland tool:
