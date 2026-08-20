@@ -80,7 +80,23 @@ extern unsigned char pc3_lwip_heap[];
 #define LWIP_UDP                    1
 #define LWIP_TCP                    1
 #define LWIP_DHCP                   1
-#define LWIP_DNS                    0
+/*
+ * LWIP_DNS is on for STORAGE ONLY, and that is the whole of it.
+ *
+ * The resolver lives in Fuzix's libc (Library/libs/resolv.c), which
+ * every netd application already uses, and a second one in the kernel
+ * would be duplicate code and duplicate memory.  What lwIP is for here
+ * is the DHCP half: dhcp.c only asks the server for a DNS list, and
+ * only keeps what comes back, when LWIP_DNS is compiled in.  Without
+ * it there is nothing to write into /etc/resolv.conf and a user has to
+ * know their own nameserver by heart.
+ *
+ * So: one table entry, because nothing in this kernel ever does a
+ * lookup, and two servers, because that is what a lease carries.
+ */
+#define LWIP_DNS                    1
+#define DNS_TABLE_SIZE              1
+#define DNS_MAX_SERVERS             2
 #define LWIP_IGMP                   0
 #define LWIP_NETIF_HOSTNAME         1
 #define LWIP_NETIF_STATUS_CALLBACK  1

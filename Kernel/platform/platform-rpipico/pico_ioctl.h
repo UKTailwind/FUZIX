@@ -1030,6 +1030,7 @@ struct net_status {
 	uint32_t ip;		/* host order */
 	uint32_t mask;
 	uint32_t gw;
+	uint32_t dns[2];	/* from the DHCP lease; 0 if none */
 	int32_t rssi;		/* dBm, 0 if unknown */
 };
 

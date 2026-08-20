@@ -54,6 +54,7 @@
 #include "lwip/pbuf.h"
 #include "lwip/tcp.h"
 #include "lwip/raw.h"
+#include "lwip/dns.h"
 
 /* The socket seam.  Only stdint.h behind it, so it is safe to include
    on this side of the header line - see net_lwip.h. */
@@ -224,6 +225,18 @@ int pc3_net_status(struct net_status *st)
         st->ip = lwip_ntohl(ip4_addr_get_u32(netif_ip4_addr(nif)));
         st->mask = lwip_ntohl(ip4_addr_get_u32(netif_ip4_netmask(nif)));
         st->gw = lwip_ntohl(ip4_addr_get_u32(netif_ip4_gw(nif)));
+        {
+            /* Whatever the lease carried.  lwIP keeps these only
+               because LWIP_DNS is compiled in - see lwipopts.h. */
+            const ip_addr_t *d;
+            int i;
+            for (i = 0; i < 2; i++) {
+                d = dns_getserver(i);
+                if (d)
+                    st->dns[i] =
+                        lwip_ntohl(ip4_addr_get_u32(ip_2_ip4(d)));
+            }
+        }
     }
     net_busy = 0;
     return 0;

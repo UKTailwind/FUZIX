@@ -16,6 +16,10 @@
  * if it finds otherwise.  Nothing writes it automatically: a password
  * belongs in a file the owner made, not in one a program guessed at.
  *
+ * On a successful join it writes /etc/resolv.conf from the lease, the
+ * way a DHCP client should - only when the servers have changed, and
+ * never fatally if the root is read-only.
+ *
  * Joining is asynchronous in the kernel (NETIOC_UP returns as soon as
  * the association is started), so the waiting happens HERE, in a
  * process that can be interrupted, rather than inside a syscall that
@@ -29,9 +33,11 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <errno.h>
 #include "../pico_ioctl.h"
 
-#define CONF "/etc/wifi.conf"
+#define CONF   "/etc/wifi.conf"
+#define RESOLV "/etc/resolv.conf"
 
 static int sysfd;
 
@@ -55,6 +61,52 @@ static const char *linkname(int link, int wifi)
     case 3: return "up";
     }
     return "?";
+}
+
+/*
+ * Write /etc/resolv.conf from the lease.
+ *
+ * This is the dhclient half of the job: the DHCP server told us the
+ * nameservers, and without writing them down a user has to know their
+ * own by heart.  Only when they have actually changed - the file is on
+ * the SD card and rewriting it on every join is wear for nothing - and
+ * never fatal, since a read-only root is a perfectly reasonable state
+ * to join a network in.
+ */
+static void writeresolv(const struct net_status *st)
+{
+    char want[80];
+    char have[80];
+    int fd, n;
+
+    if (!st->dns[0])
+        return;
+    n = sprintf(want, "nameserver %lu.%lu.%lu.%lu\n",
+                (st->dns[0] >> 24) & 0xff, (st->dns[0] >> 16) & 0xff,
+                (st->dns[0] >> 8) & 0xff, st->dns[0] & 0xff);
+    if (st->dns[1])
+        n += sprintf(want + n, "nameserver %lu.%lu.%lu.%lu\n",
+                     (st->dns[1] >> 24) & 0xff, (st->dns[1] >> 16) & 0xff,
+                     (st->dns[1] >> 8) & 0xff, st->dns[1] & 0xff);
+
+    fd = open(RESOLV, O_RDONLY, 0);
+    if (fd >= 0) {
+        int got = read(fd, have, sizeof(have) - 1);
+        close(fd);
+        if (got == n && !memcmp(have, want, n))
+            return;             /* already says exactly this */
+    }
+    fd = open(RESOLV, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        fprintf(stderr, "%s: %s (leaving it alone)\n", RESOLV,
+                strerror(errno));
+        return;
+    }
+    if (write(fd, want, n) != n)
+        perror(RESOLV);
+    else
+        printf("wrote %s\n", RESOLV);
+    close(fd);
 }
 
 static int status(int verbose)
@@ -84,6 +136,10 @@ static int status(int verbose)
         putip("ip     ", (unsigned long)st.ip);
         putip("netmask", (unsigned long)st.mask);
         putip("gateway", (unsigned long)st.gw);
+        if (st.dns[0])
+            putip("dns    ", (unsigned long)st.dns[0]);
+        if (st.dns[1])
+            putip("dns    ", (unsigned long)st.dns[1]);
     }
     return st.link == 3 ? 0 : 1;
 }
@@ -164,8 +220,10 @@ static int waitup(void)
             printf("%s\n", linkname(st.link, st.wifi));
             return 1;
         }
-        if (st.link == 3)
+        if (st.link == 3) {
+            writeresolv(&st);
             return status(0);
+        }
         if (st.link != last) {
             printf("%s\n", linkname(st.link, st.wifi));
             last = st.link;

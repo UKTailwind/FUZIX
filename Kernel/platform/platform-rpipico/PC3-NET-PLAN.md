@@ -477,17 +477,49 @@ Two things that looked like bugs and were not: this PC never answers a
 ping (Windows Firewall drops inbound echo), and processes blocked in
 `read()` on a socket need `kill -9` rather than a plain `kill`.
 
+### /etc/resolv.conf, from the lease - DONE ON THE BOARD, 2026-08-20
+
+    # wifi -f
+    joining
+    joined, no address
+    wrote /etc/resolv.conf
+    up, -57 dBm
+    ...
+    dns     192.168.1.254
+    # ntpdate -d pool.ntp.org
+    Thu Aug 20 11:54:44 2026
+
+A name resolved through a file nobody typed. `LWIP_DNS` is on for
+STORAGE ONLY - the resolver is still Fuzix's libc one, which every
+netd application already uses, and a second in the kernel would be
+duplicate code and duplicate memory. What lwIP is for is the DHCP
+half: `dhcp.c` only asks for a nameserver list, and only keeps what
+comes back, when `LWIP_DNS` is compiled in. One table entry and two
+servers; +312 bytes of `.bss`.
+
+`wifi` writes the file when the lease's servers differ from what is
+there, which makes a second join silent, and never fatally - a
+read-only root is a reasonable state to join a network in.
+
+**The ioctl structs have no versioning.** `struct net_status` grew by
+two words, and the kernel's `uput` copies its own `sizeof` into
+whatever the caller passed: an old `wifi` against a new kernel writes
+eight bytes past its buffer. Nothing detects that. Send the binary
+before running it, or give the struct a length field if this ever
+ships to someone who mixes versions.
+
 ### What is not done
 
-`dig` mis-parses some answers (`codeberg.org` came back as 84.140.0.0)
-- its own copy of the same wire structs, not yet fixed.
+`dig` and `gethostbyname` are separate programs with separate copies
+of the DNS wire structs, and only one of them has been fixed - dig
+still mis-parses some answers (codeberg.org came back as 84.140.0.0).
 
-`/etc/resolv.conf` is written by hand. lwIP is built with `LWIP_DNS 0`
-because the resolver is in libc, and the DHCP server list is therefore
-not kept; picking it up would mean turning `LWIP_DNS` on for storage
-only and adding it to `NETIOC_STATUS` so `wifi` can write the file.
+A process blocked in read() on a socket has needed `kill -9` rather
+than a plain kill.  That is worth understanding rather than living
+with: killall is what rc.reboot uses, so a process that ignores SIGTERM
+is also a filesystem that goes down dirty.
 
-**RAM: 4,304 bytes free, and networking now costs the process pool
+**RAM: 3,960 bytes free, and networking now costs the process pool
 NOTHING.** Sockets cost 936 bytes of `.bss` on top of step 3, which
 left 488 bytes and a 4K block borrowed from the pool. Then the flash
 filesystem went (config.h) and returned 7,904 bytes, so the block went
