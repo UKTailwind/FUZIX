@@ -139,7 +139,7 @@ The image lays the card out as three partitions:
 | Partition | Size   | Type       | Purpose                                  |
 |-----------|--------|------------|------------------------------------------|
 | 1         | 128 MB | FAT        | File interchange with Windows/macOS/Linux |
-| 2         | 800 MB | Fuzix root | The Unix filesystem (boot device `hdb2`) |
+| 2         | 800 MB | Fuzix root | The Unix filesystem (boot device `hda2`) |
 | 3         | 4 MB   | 0x7F       | Reserved                                 |
 
 The root filesystem is 1,638,400 blocks of 512 bytes with 25,600
@@ -2871,7 +2871,7 @@ their own.
 # mount                        what is mounted
 # umount /dev/hdb3             ... and unmount it
 # remount -n / ro              read-only, before flashing
-# fsck /dev/hdb2               check a filesystem
+# fsck /dev/hda2               check a filesystem
 # sync                         flush the buffers
 # shutdown                     the tidy way to stop
 # halt                         ... and the blunt one
@@ -2954,8 +2954,8 @@ Key devices:
 |-------------|--------------------------------------------------|
 | `/dev/tty1` | The console (HDMI + USB keyboard + serial mirror) |
 | `/dev/tty2` | The GP0/GP1 serial port                          |
-| `/dev/hda`  | On-board flash filesystem, 15 MB                 |
-| `/dev/hdb1`–`hdb3` | SD card partitions (root is `hdb2`)       |
+| `/dev/hda1`–`hda15` | SD card partitions (root is `hda2`)      |
+| `/dev/hdb`  | The PSRAM disc, used for swap                    |
 | `/dev/rtc`  | The DS3231 clock (`setdate` reads and sets it)   |
 | `/dev/sys`  | Platform control (graphics, sound, ADVAL ioctls) |
 
@@ -3047,7 +3047,7 @@ to any GPIO.
 
 The kernel command line (held by the bootloader) accepts:
 
-* `hda` / `hdb2` … — root device override
+* `hda2` … — root device override (partition 2 of the SD card)
 * `kbd=us|uk|de|fr|es|be` — early keyboard layout override (the
   layout in `/etc/rc` then applies for the session)
 

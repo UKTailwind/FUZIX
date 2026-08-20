@@ -1,6 +1,13 @@
 /*
  * WHAT MAY EXECUTE FROM FLASH.
  *
+ * NOTE, 2026-08-20: the third rule below - "reached while flash is
+ * busy" - no longer has anything to apply to.  The on-board flash
+ * filesystem is gone (config.h), so nothing in this kernel erases or
+ * programs the flash at run time and there is no window in which
+ * fetching from XIP is unsafe.  The rule is kept because it is the one
+ * that would bite if a flash writer ever came back.
+ *
  * The kernel used to be built PICO_COPY_TO_RAM, which put all 90,676
  * bytes of .text into RAM at boot.  RAM is the scarce thing here - it
  * is shared with the 308K process pool, and adding the text primitives

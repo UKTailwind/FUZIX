@@ -58,11 +58,10 @@ add_compile_definitions(
 		# place - GP34-37 joystick reads and the GP41-44 ADC were
 		# both dead until this.
 		PICO_RP2350A=0
-		# The PC2 and PC3 always carry 16M.  The pico2 board header
-		# defaults to 4M, and devflash.c sizes the dhara disk as
-		# PICO_FLASH_SIZE_BYTES - FLASH_OFFSET, so the default confined
-		# the disk to the first quarter of the chip and left twelve
-		# megabytes doing nothing at all.
+		# The PC2 and PC3 always carry 16M and the pico2 board header
+		# defaults to 4M.  Nothing sizes a disk from this any more -
+		# the flash filesystem is gone, see config.h - but the chip is
+		# what it is and the SDK should be told.
 		PICO_FLASH_SIZE_BYTES=\(16*1024*1024\)
 		PICO_HEAP_SIZE=0x0
 		PICO_NO_BINARY_INFO=1
@@ -113,13 +112,11 @@ include_directories(
 
 add_executable(fuzix
 	devices.c
-	devflash.c
 	devsdspi.c
 	devtty.c
 	elf.c 
 	main.c
 	misc.c
-	rawflash.c
 	console.c
 	arena.c
 	devpsram.c
@@ -148,9 +145,6 @@ add_executable(fuzix
 	../../dev/mbr.c
 	../../dev/devsd_discard.c
 	../../dev/devsd.c
-	../../lib/dhara/error.c
-	../../lib/dhara/journal.c
-	../../lib/dhara/map.c
 	../../lib/hexdump.c
 	../../blk512.c
 	../../devio.c
@@ -188,7 +182,6 @@ target_link_libraries(fuzix
 	hardware_adc
 	hardware_dma
 	hardware_exception
-	hardware_flash
 	hardware_i2c
 	hardware_pio
 	hardware_pwm
@@ -200,20 +193,4 @@ pico_set_float_implementation(fuzix none)
 pico_set_double_implementation(fuzix pico)
 pico_add_linker_script_override_path(fuzix ${CMAKE_CURRENT_LIST_DIR}/linker_overrides)
 pico_add_extra_outputs(fuzix)
-
-# The dhara flash disk starts at FLASH_OFFSET (globals.h).  If the
-# kernel image reaches it, dhara's journal "repair" erases the image's
-# own tail on first boot and the board is dead until reflashed - found
-# the hard way when the kernel outgrew the old 96K offset.  Refuse to
-# build an image that can eat itself.
-#
-# The limit is READ from globals.h by flashcheck.sh.  It was a
-# hand-copied $((512*1024)) right here, so when FLASH_OFFSET moved to
-# 1M the build carried on checking against 512K - a guard that
-# disagrees with the thing it guards is worse than none.
-add_custom_command(TARGET fuzix POST_BUILD
-	COMMAND sh ${CMAKE_CURRENT_LIST_DIR}/flashcheck.sh
-		${CMAKE_CURRENT_LIST_DIR}/globals.h fuzix.bin
-	VERBATIM
-	WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 

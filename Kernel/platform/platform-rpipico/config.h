@@ -182,35 +182,32 @@
 #undef CONFIG_FONT8X8
 
 /*
- * Built in NAND flash (/dev/hda, dhara over the XIP flash).
+ * There is NO on-board flash filesystem, and the absence is worth as
+ * much as the device was.
  *
- * OFF, and this is why it was "unstable". rawflash.c calls
- * flash_range_erase/flash_range_program guarded by nothing but di(),
- * and on RP2350 at this clock those calls do two things to the rest of
- * the machine:
+ * It was a dhara FTL over the XIP flash, mounted /dev/hda, and it was
+ * never a release asset: root has always been the SD card and swap is
+ * a PSRAM allocation.  What it cost was out of all proportion to that:
  *
- *  - boot2 re-runs inside them and leaves QMI M0 at CLKDIV=2. At
- *    375MHz that is ~189MHz flash SPI, well above spec, and it is not
- *    restored afterwards. MMBasic wraps every call to save and restore
- *    qmi_hw->m[0].timing/rfmt - and m[1] with it, which is the PSRAM.
+ *  - 7,912 bytes of SRAM, measured.  dhara's journal and map, devflash,
+ *    rawflash and the SDK's hardware_flash all had to be RAM-RESIDENT,
+ *    because code cannot execute from a device it is erasing.  That is
+ *    two 4K blocks of the process pool.
  *
- *  - they invalidate the XIP cache. psram.c sets XIP_CTRL_WRITABLE_M1,
- *    so PSRAM is cached write-back, which means the swap device's
- *    dirty lines live in that cache. Invalidating without cleaning
- *    first throws them away. MMBasic walks XIP_MAINTENANCE_BASE over
- *    16K to commit them before it lets that happen; we do not clean
- *    that cache anywhere at all.
+ *  - a standing rule over every future placement decision.  "Must not
+ *    be reached while the flash is busy" is the constraint that made
+ *    linker_overrides/ dangerous to edit, and it existed only for this.
  *
- * Both are now handled in rawflash.c, following MMBasic's FileIO.c
- * rather than re-deriving them.
+ *  - four numbers that had to agree - FLASH_OFFSET, the Makefile's uf2
+ *    offset, mkftl's -s, and PICO_FLASH_SIZE_BYTES - where a stale one
+ *    wrote the disk over the kernel image.  That had already bricked a
+ *    board once.
  *
- * Left ON deliberately even though root is on SD and swap is in PSRAM,
- * so this device earns little: turning it off renumbers every block
- * device - the SD moves from hdb to hda and the PSRAM disc from hdc to
- * hdb - which silently breaks "swapon /dev/hdc" in rc, every bootdev
- * habit, and the manual. Not worth it for a device that is now safe.
+ * So the SD card is now hda and the PSRAM swap disc is hdb.  The boot
+ * prompt wants "hda2" where it used to want "hdb2".  Nothing else in
+ * the system moved: rc has had no swapon since swap stopped being a
+ * device, which was the other half of the old argument for keeping it.
  */
-#define CONFIG_PICO_FLASH
 
 /* Program layout */
 
@@ -279,7 +276,8 @@ extern uint8_t progbase[USERMEM];
  * Boot cmd line.
  * [BOOTDEVICE] [tty=<TTYLIST>]
  * 
- * <BOOTDEVICE> - use `hda` for built-in flash or `hdbX` for SD card, where X is partition number
+ * <BOOTDEVICE> - `hdaX` for the SD card, where X is the partition
+ *      number.  The root partition is 2, so: hda2
  * <TTYLIST> - list of TTY devices in order. If not specified system will
  *      map USB devices to tty1-4 and UART0 to tty5 if USB is connected. Or UART0 to tty1 etc if not.
  *      Example: `tty=usb1,uart1,usb2`

@@ -17,11 +17,11 @@ you can enable swapping to the SD card for up to 15.
 
 Out of the box:
 
-- /dev/hda is the NAND flash, containing the root filesystem. It can be
-  partitioned but there's no real point, so it isn't.
+- /dev/hda is the SD card, and partition 2 is the root filesystem.
+  Fuzix understands DOS partition tables.  It is not hot swappable: the
+  card is only probed at boot.
 
-- /dev/hdb is the SD card. Fuzix understands DOS partition tables. It's not hot
-  swappable as the SD card is only probed at boot time.
+- /dev/hdb is the PSRAM disc.
 
 If you have an SD card reader, connect the SD card to the following pins:
 
@@ -80,8 +80,7 @@ To build Pico and Pico W image, run: `make TARGET=rpipico SUBTARGET=pico_w
 diskimage` To build Pico 2 and Pico 2 W, run: `make TARGET=rpipico
 SUBTARGET=pico2 diskimage`
 
-Go to `Kernel/platform/platform-rpipico`. You will see `build/fuzix.uf2` and
-`filesystem.uf2`.
+Go to `Kernel/platform/platform-rpipico`.  You will see `build/fuzix.uf2`.
 
 ### Installing Kernel
 
@@ -90,30 +89,14 @@ Go to `Kernel/platform/platform-rpipico`. You will see `build/fuzix.uf2` and
   will restart into FUZIX.
 - To update the kernel, repeat the same procedure.
 
-### Installing filesystem onto flash
+### The flash filesystem is gone
 
-The Pico's built-in NAND flash is supported, appearing as `/dev/hda` insize
-Fuzix (the SD card is on `/dev/hdb`).  It's mapped via the Dhara FTL library, so
-you get proper wear levelling.  The FTL library requires empty flash sectors to
-work efficiently; the Fuzix filesystem has trim support, so the FTL library gets
-notified when sectors become free, but if the filesystem gets very full and
-Dhara runs out it can get extremely slow as it constantly does garbage
-collection.
-
-To flash the image either:
-
-- Follow the same steps as for the kernel using `filesystem.uf2` file.
-- Using picotool
-  - Connect a terminal to UART 0 on the Pico.
-  - Copy `filesystem.ftl` to the board by executing `picotool load
-    filesystem.ftl -t bin -o 0x10018000`.
-
-### Installing filesystem onto SD card
-
-If you want to use an SD card, note that only filesystems up to 32MB are
-supported.
-
-Filesystem image files are located in `FUZIX/Images/rpipico`.
+Earlier versions of this port put a Dhara FTL over the XIP flash and
+mounted it as `/dev/hda`. It was removed: it was never a release asset
+- the SD card has always been the root - and it pinned 7,912 bytes of
+SRAM in place, because code cannot execute from a device it is
+erasing. `config.h` has the full argument. There is no
+`filesystem.uf2` any more, and `mkftl` is not run.
 
 Partition SD card on your computer using MBR partition scheme then create 32MB
 partition. If using Linux or MacOS you can then copy `filesys.img` or
@@ -155,7 +138,7 @@ Then use the `swapon` command to enable swap. You can see swap usage with
 Device    Boot  Head Sector Cylinder   Head Sector Cylinder  Type  Sector count
 
 /dev/hdb1        33      3        0     38      6        1    83          4096
-/dev/hdb2        38      7        1     58      8       18    83         65536
+/dev/hda2        38      7        1     58      8       18    83         65536
 # swapon /dev/hdb1 4096
 # free
          total         used         free

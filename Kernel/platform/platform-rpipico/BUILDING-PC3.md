@@ -56,7 +56,7 @@ loses the memory size. Clear everything in `build/` except `_deps`.
 ## 1. The host tools
 
 `mkfs`, `ucp` and `fsck` build and write the Fuzix filesystem, and
-`mkftl` makes the flash image. They are ordinary host programs:
+They are ordinary host programs:
 
     make -C Standalone
 
@@ -139,7 +139,7 @@ giving `Images/rpipico/pc3-sd-cc.img` and a `.gz` beside it.
 The layout as shipped, for a 1 GB card:
 
     p1  0x0C  LBA    2048   262144 sectors  128 MB  FAT, for interchange
-    p2  0x83  LBA  264192  1638400 sectors  800 MB  Fuzix root  (hdb2)
+    p2  0x83  LBA  264192  1638400 sectors  800 MB  Fuzix root  (hda2)
     p3  0x7F  LBA 1902592     8192 sectors    4 MB  reserved
 
 **`mkcard.sh` is the only place that layout is written down.** It takes
