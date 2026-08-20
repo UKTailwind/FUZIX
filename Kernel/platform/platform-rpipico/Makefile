@@ -32,6 +32,18 @@ ifeq ($(SUBTARGET),pico2_w)
 TOTALMEM=336
 endif
 
+# CYW43 Wi-Fi.  OFF unless asked:
+#
+#	rm -rf build && make SUBTARGET=pico2 PC3_NET=1
+#
+# The rm matters.  build/Makefile is only regenerated when
+# CMakeLists.txt or a source file is newer than it, so changing this
+# value alone will NOT re-run cmake and the old cached setting stays.
+# See PC3-NET-PLAN.md for what it costs (one 4K block of the pool).
+ifndef PC3_NET
+PC3_NET=0
+endif
+
 PICOTOOLFLAGS= --family rp2040
 ifeq (${SUBTARGET}, pico2)
 PICOTOOLFLAGS= --family data
@@ -55,7 +67,7 @@ FORCE:
 
 build/Makefile: CMakeLists.txt $(wildcard ../../*.[chS]) $(wildcard ../../*/*.[chS])
 	mkdir -p build
-	(cd build && cmake -DPICO_BOARD=${SUBTARGET} -DTOTALMEM=${TOTALMEM} ..)
+	(cd build && cmake -DPICO_BOARD=${SUBTARGET} -DTOTALMEM=${TOTALMEM} -DPC3_NET=${PC3_NET} ..)
 
 # The flash disk is everything above FLASH_OFFSET (globals.h, 1M), and
 # these numbers describe the same region devflash.c does:
