@@ -640,6 +640,13 @@ fi
 # A separate ucp pass rather than lines in the big heredoc above, so
 # that "not included" means no ucp input at all rather than a blank
 # line the log has to be trusted to ignore.
+#
+# The netd tools come with it.  They were hand-copied onto a running
+# board while networking was being written, which meant the card had
+# programs no recipe could reproduce - and a card that cannot be
+# rebuilt is a card that is one fsck away from being wrong.  ping,
+# htget, dig, ntpdate and httpd are the whole visible network userland;
+# tlsget is the TLS one and lives with the platform utils.
 PC3_NET=${PC3_NET:-0}
 if [ "$PC3_NET" = 1 ]; then
 	if [ ! -f utils/wifi.stripped ]; then
@@ -647,11 +654,36 @@ if [ "$PC3_NET" = 1 ]; then
 		echo "  (cd utils && make wifi && arm-none-eabi-strip wifi -o wifi.stripped)" >&2
 		exit 1
 	fi
-	echo "--- networking: /bin/wifi and the pro-forma /etc/wifi.conf"
+	NETD=../../../Applications/netd
+	for f in ping htget dig ntpdate httpd; do
+		if [ ! -f "$NETD/$f" ]; then
+			echo "update-flash.sh: PC3_NET=1 needs $NETD/$f" >&2
+			echo "  (cd Applications/netd && make -f Makefile.armm0 \\" >&2
+			echo "     FUZIX_ROOT=\$PWD/../.. USERCPU=armm0 PLATFORM=armm0)" >&2
+			exit 1
+		fi
+	done
+	if [ ! -f utils/tlsget.stripped ]; then
+		echo "update-flash.sh: PC3_NET=1 needs utils/tlsget.stripped" >&2
+		exit 1
+	fi
+	echo "--- networking: /bin/wifi, the netd tools, and /etc/wifi.conf"
 	../../../Standalone/ucp ${IMG} > /tmp/ucp-wifi.log 2>&1 <<EOF
 cd /bin
 bget utils/wifi.stripped wifi
 chmod 0755 wifi
+bget $NETD/ping ping
+chmod 0755 ping
+bget $NETD/htget htget
+chmod 0755 htget
+bget $NETD/dig dig
+chmod 0755 dig
+bget $NETD/ntpdate ntpdate
+chmod 0755 ntpdate
+bget $NETD/httpd httpd
+chmod 0755 httpd
+bget utils/tlsget.stripped tlsget
+chmod 0755 tlsget
 cd /etc
 bget wifi.conf
 chmod 0600 wifi.conf
