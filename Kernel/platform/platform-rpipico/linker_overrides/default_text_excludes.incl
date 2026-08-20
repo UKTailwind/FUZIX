@@ -337,3 +337,64 @@
 *sound.c.o(.text.sound_envelope)
 *sound.c.o(.text.sound_pcm_close)
 *sound.c.o(.text.sound_pcm_stat)
+
+/* ---- CYW43 Wi-Fi and lwIP (PC3_NET builds only).
+ *
+ * These patterns match nothing unless the network stack is linked, so
+ * they are unconditional here.  Without them the link fails: the SDK's
+ * RAM .data section claims every .text and .rodata not named in these
+ * files, and the radio's firmware blob alone is a quarter of a megabyte
+ * (measured: "region RAM overflowed by 300312 bytes").
+ *
+ * Against this file's own rule - a cache miss here cannot hurt.  None
+ * of it is on the scanout path, and the packet rate over a gSPI link
+ * is four orders of magnitude below the pixel rate.  The one thing to
+ * watch when the radio is actually brought up is the poll arch's GPIO
+ * interrupt handler, which is small and only sets a work-pending flag;
+ * if its latency ever measures, name it back into RAM here. ---- */
+*lwip*.o(.text*)
+*cyw43*.o(.text*)
+*cybt_*.o(.text*)
+*async_context*.o(.text*)
+*net_cyw43.c.o(.text*)
+
+/* ---- Fuzix sockets over lwIP.  Entered from a syscall at whatever
+ * rate a program calls recvfrom, and every packet it touches has
+ * already crossed a serial link at a few megabits. ---- */
+*net_lwip.c.o(.text*)
+
+/* ---- SDK code that runs once, or not at all.
+ *
+ * mutex/claim are the SDK's own bookkeeping, called at init and by the
+ * cyw43 driver at human speed.  runtime_init walks the init list before
+ * main() - at that point the flash is still on boot2's timing, which is
+ * why executing from it there is safe.  multicore launches core1 once.
+ * The two stdio files are linked but unreachable: this kernel has its
+ * own printf and never calls the SDK's.
+ *
+ * NOT clocks.c, and NOT main.c - see the note above about the clock
+ * switch.  This is the boot code AROUND that, not the switch itself.
+ * ---- */
+*pico_sync/mutex.c.o(.text*)
+*hardware_claim/claim.c.o(.text*)
+*pico_runtime_init/runtime_init.c.o(.text*)
+*pico_multicore/multicore.c.o(.text*)
+*pico_stdio/stdio.c.o(.text*)
+*pico_stdio_uart/stdio_uart.c.o(.text*)
+
+/* ---- mbedtls.  A quarter of a megabyte of cipher and bignum code
+ * that would otherwise land in RAM and fail the link outright.  None
+ * of it is on the scanout path or in an interrupt: it runs in the
+ * pump, driven by arriving packets, at handshake time. ---- */
+*/mbedtls/*(.text*)
+*pico_mbedtls*(.text*)
+
+/* Entropy for TLS.  Called at handshake time, from the pump. */
+*pico_rand*(.text*)
+
+/* usbh.c and the SDK double maths were briefly moved here to pay for a
+ * dedicated 16K pump stack.  That stack is gone - the kernel stack
+ * itself grew instead (config.h, UDATA_BLKS), which costs process pool
+ * rather than SRAM - so both are back in RAM where they perform best.
+ * They remain on the shelf in PC3-FLASH-PLAN.md, measured, if SRAM is
+ * ever needed again. */

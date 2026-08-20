@@ -95,14 +95,23 @@ while read -r b; do
 done < "$S/staged.list"
 
 echo "--- the headers the generated C includes"
-same /usr/lib/cc/include/mmb_runtime.h "$R/Applications/CC/mmb_runtime.h"
+# From Applications/mmb2c, which is where mkccimage.sh stages them from.
+# It used to say Applications/CC, and mmb2c MOVED - so $want was the
+# size of a file that does not exist, i.e. empty, and this reported
+# mmb_runtime.h STALE on every card whether or not it was.  A check
+# that always fails is a check nobody reads, and this is the one file
+# whose staleness makes cc reject generated programs with "type
+# mismatch".  The glob below had the same dead path and so matched
+# nothing at all: it verified every mmb_*.h by checking none of them.
+MMB=$R/Applications/mmb2c
+same /usr/lib/cc/include/mmb_runtime.h "$MMB/mmb_runtime.h"
 # EVERY mmb_*.h in the tree, by the same glob mkccimage.sh stages them
 # with - not a list beside a list.  Two hand-written lists drifted from
 # each other twice: mmb_spi.h was in neither at v0.11, and at v0.15
 # mmb_play/blit/sprite/flash.h were shipped by neither, so a card that
 # verified clean could not compile a program that made a sound.  A
 # header present in the tree and absent from the card now FAILS here.
-for f in "$R"/Applications/CC/mmb_*.h; do
+for f in "$MMB"/mmb_*.h; do
 	same "/usr/lib/cc/include/$(basename "$f")" "$f"
 done
 

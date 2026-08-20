@@ -82,6 +82,23 @@ static int make_socket(uint16_t sock)
 	ino->c_node.i_mode = F_SOCK | 0777;
 	ino->c_readers = 1;
 	ino->c_writers = 1;
+	/*
+	 *	Record WHICH socket this inode is.  Every path back from an
+	 *	inode to a socket goes through IN2SOCK, which reads exactly
+	 *	this field - sock_read, sock_write, sock_close, sock_ioctl -
+	 *	and nothing has ever written it.  A fresh inode gives zero,
+	 *	so every socket fd in the system claimed to be socket 0.
+	 *
+	 *	A client never noticed: its one socket usually IS slot 0, so
+	 *	the wrong answer was the right one.  A server is where it
+	 *	bites.  accept() returns a child in slot 1, and close()ing
+	 *	that child ran netproto_close(sockets[0]) - the LISTENER -
+	 *	which, being a listener, first recurses over its children.
+	 *	One HTTP request destroyed the whole server, and the next
+	 *	accept() reported EALREADY because its socket had become
+	 *	SS_UNUSED underneath it.
+	 */
+	IN2SOCK(ino) = sock;
 
 	/* Do we need a reverse lookup ? */
 	udata.u_net.sock = sock;

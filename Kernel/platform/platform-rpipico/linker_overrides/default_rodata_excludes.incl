@@ -76,3 +76,60 @@
  * RAM. */
 *sound.c.o(.rodata.SineTable*)
 *sound.c.o(.rodata.triangletable*)
+
+/* ---- CYW43 Wi-Fi and lwIP (PC3_NET builds only).  The firmware blob
+ * the driver DMAs into the chip at init is const data - about 230K of
+ * it - and it is read once per boot, over a link that runs at a few
+ * megabits.  Flash is exactly where it belongs.  See the matching
+ * block in default_text_excludes.incl. ---- */
+*lwip*.o(.rodata*)
+*cyw43*.o(.rodata*)
+*cybt_*.o(.rodata*)
+*async_context*.o(.rodata*)
+*net_cyw43.c.o(.rodata*)
+
+/* ---- CONSTANTS, which nothing executes.
+ *
+ * Read-only data was almost entirely unclaimed until now: only libm and
+ * the network stack named any, so every kernel string and table sat in
+ * RAM.  The single largest item in the whole RAM image was the merged
+ * string pool - every kprintf format string in the kernel - which ld
+ * attributes to devices.c.o because it merges .rodata.*.str1.4 across
+ * objects and lists the first contributor.
+ *
+ * The old worry was that rawflash and dhara print while the flash is
+ * busy.  That has been true of nothing since the flash filesystem was
+ * removed, and it was already unfounded: printf.c itself is in flash,
+ * so a kprintf on such a path would have hung long ago.
+ *
+ * A constant is not code.  Nothing here can be "reached from an
+ * interrupt" in the sense the text rules mean - the worst case is one
+ * cache miss on a format string in a panic path that is already
+ * fetching its formatter from flash. ---- */
+*devices.c.o(.rodata*)
+*main.c.o(.rodata*)
+*start.c.o(.rodata*)
+*filesys.c.o(.rodata*)
+*swapper.c.o(.rodata*)
+*usbkbd.c.o(.rodata*)
+*ds3231.c.o(.rodata*)
+*inode.c.o(.rodata*)
+*devio.c.o(.rodata*)
+*process.c.o(.rodata*)
+*kdata.c.o(.rodata*)
+*console.c.o(.rodata*)
+*lineedit.c.o(.rodata*)
+*misc.c.o(.rodata*)
+*syscall_fs.c.o(.rodata*)
+*syscall_proc.c.o(.rodata*)
+/* NOT tty.c: its code is called from the UART interrupt (tty_inproc),
+   so its constants can be read from one too.  A miss there is latency
+   rather than breakage, but it is the one object in this list where
+   that is true, and it is worth about a hundred bytes. */
+
+/* ---- mbedtls tables: AES S-boxes, curve parameters, OID tables.
+ * Constants, and large ones. ---- */
+*/mbedtls/*(.rodata*)
+*pico_mbedtls*(.rodata*)
+
+*pico_rand*(.rodata*)

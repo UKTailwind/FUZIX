@@ -996,4 +996,72 @@ struct pinlock_req {
 
 #endif	/* PC3_PINLOCK_ABI */
 
+/*
+ * CYW43 Wi-Fi (PC3_NET builds).  PC3-NET-PLAN.md.
+ *
+ * Association has no place in Fuzix's own network ioctls - those are
+ * the BSD SIOCxIF* set in netdev.h and they describe an interface that
+ * is already up - so joining a network lives here with the rest of the
+ * platform's private calls, the way sound and i2c do.
+ *
+ * NETIOC_UP is asynchronous.  It powers the radio and starts the join;
+ * it does NOT wait for association or for DHCP, because a Fuzix
+ * syscall is not preempted and a blocking join would stop the machine
+ * for the length of a DHCP negotiation.  Userland polls NETIOC_STATUS.
+ *
+ * The one thing NETIOC_UP does block for is the first call's firmware
+ * upload - about 230K over the PIO SPI link, a few hundred ms, once
+ * per boot.
+ */
+struct net_join {
+	char ssid[33];		/* NUL terminated */
+	char key[65];		/* NUL terminated; empty for an open net */
+	uint8_t auth;		/* 0 open, 1 WPA-TKIP, 2 WPA2-AES, 3 mixed */
+	uint8_t pad[3];
+};
+
+struct net_status {
+	uint8_t present;	/* radio fitted (0 on a Pico Computer 2) */
+	uint8_t ready;		/* driver initialised */
+	uint8_t link;		/* cyw43_tcpip_link_status: 3 = has an IP */
+	int8_t wifi;		/* cyw43_wifi_link_status; negative is a fault */
+	uint8_t mac[6];
+	uint8_t pad[2];
+	uint32_t ip;		/* host order */
+	uint32_t mask;
+	uint32_t gw;
+	uint32_t dns[2];	/* from the DHCP lease; 0 if none */
+	int32_t rssi;		/* dBm, 0 if unknown */
+};
+
+#define NETIOC_UP	0x0040		/* struct net_join */
+#define NETIOC_STATUS	0x0041		/* struct net_status */
+#define NETIOC_DOWN	0x0042		/* no argument */
+
+/*
+ * Load the machine's CA bundle, PEM (NUL terminated) or DER.  The
+ * kernel cannot read files, so userland reads it and passes the bytes;
+ * on this platform user memory is directly addressable, so what goes
+ * across is a pointer valaddr has checked, not a copy.
+ *
+ * Until this has been done, a TLS session is ENCRYPTED BUT NOT
+ * AUTHENTICATED - the peer can present any certificate it likes.  That
+ * is the same state MMBasic starts in before WEB TLS CA runs, and it
+ * is worth saying out loud rather than implying otherwise.
+ */
+struct net_ca {
+	void *buf;
+	uint32_t len;
+};
+
+#define NETIOC_TLSCA	0x0043		/* struct net_ca */
+
+/* net_cyw43.c returns these rather than setting udata.u_error itself:
+ * it cannot include the kernel headers (see the file comment), so
+ * misc.c does the translation.  Kernel side only. */
+#define PC3_NET_ENODEV	(-1)		/* no radio - a Pico Computer 2 */
+#define PC3_NET_EIO	(-2)		/* the driver said no */
+#define PC3_NET_EINVAL	(-3)
+
+
 #endif

@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <ctype.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -60,6 +61,142 @@ int xread(void)
     return len;
 }
 
+/*
+ *	The body, and the chunked encoding it may arrive in.
+ *
+ *	This asks for HTTP/1.1, which is an invitation to chunk, and the
+ *	code used to copy whatever came down the socket straight into the
+ *	file.  So a chunked reply landed on disk complete with its
+ *	framing: example.com saved as "22f", the body, and a "0" - the
+ *	hex length of the one chunk and the end marker, written out as if
+ *	they were content.
+ *
+ *	One buffer for the whole body, seeded with whatever the header
+ *	parser had already pulled off the socket, so the two do not have
+ *	to share xread()'s hand-back.
+ */
+static char bbuf[512];
+static int blen, bpos;
+
+static void body_init(void)
+{
+    blen = bpos = 0;
+    if (bufend > readp) {
+        blen = bufend - readp;
+        memcpy(bbuf, readp, blen);
+    }
+    readp = bufend = buf;
+}
+
+/* True while there is a byte to be had; refills when empty. */
+static int body_fill(void)
+{
+    int n;
+
+    if (bpos < blen)
+        return 1;
+    n = read(sock, bbuf, sizeof(bbuf));
+    if (n < 0) {
+        perror("read");
+        exit(1);
+    }
+    blen = n;
+    bpos = 0;
+    return n > 0;
+}
+
+static int body_getc(void)
+{
+    if (!body_fill())
+        return -1;
+    return (unsigned char)bbuf[bpos++];
+}
+
+/* A CRLF line from the body stream: the chunk header, or the empty
+   line that follows a chunk's data. */
+static int body_line(char *p, int max)
+{
+    int c, n = 0;
+
+    for (;;) {
+        c = body_getc();
+        if (c == -1)
+            return -1;
+        if (c == '\n')
+            break;
+        if (c != '\r' && n < max - 1)
+            p[n++] = c;
+    }
+    p[n] = 0;
+    return n;
+}
+
+static void body_out(int of, int len)
+{
+    if (write(of, bbuf + bpos, len) != len) {
+        perror("write");
+        exit(1);
+    }
+    bpos += len;
+}
+
+static void copy_plain(int of)
+{
+    while (body_fill()) {
+        body_out(of, blen - bpos);
+        write(1, ".", 1);
+    }
+}
+
+static void copy_chunked(int of)
+{
+    char line[64];
+    long n;
+    int avail;
+
+    for (;;) {
+        if (body_line(line, sizeof(line)) < 0)
+            return;                     /* truncated */
+        /* "1a2b" or "1a2b;ext=value" - strtol stops at the ';' */
+        n = strtol(line, NULL, 16);
+        if (n <= 0)
+            return;                     /* 0: last chunk, trailers ignored */
+        while (n > 0) {
+            if (!body_fill())
+                return;                 /* truncated */
+            avail = blen - bpos;
+            if (avail > n)
+                avail = (int)n;
+            body_out(of, avail);
+            n -= avail;
+        }
+        body_line(line, sizeof(line));  /* the CRLF after the data */
+        write(1, ".", 1);
+    }
+}
+
+/* "Transfer-Encoding: chunked", case-insensitively, value anywhere in
+   the field - it may be a list, and "chunked" is always last. */
+static int hdr_chunked(const char *l)
+{
+    static const char te[] = "transfer-encoding:";
+    static const char ch[] = "chunked";
+    int i;
+
+    for (i = 0; te[i]; i++)
+        if (tolower((unsigned char)l[i]) != te[i])
+            return 0;
+    for (; l[i]; i++) {
+        int j;
+        for (j = 0; ch[j]; j++)
+            if (tolower((unsigned char)l[i + j]) != ch[j])
+                break;
+        if (ch[j] == 0)
+            return 1;
+    }
+    return 0;
+}
+
 int xreadline(void)
 {
     int len;
@@ -102,7 +239,7 @@ int main(int argc, char *argv[])
     char *fp;
     int of;
     int code;
-    int len;
+    int chunked = 0;
     uint8_t looped = 0;
 
     if (argc != 3) {
@@ -186,6 +323,8 @@ int main(int argc, char *argv[])
             writes(2, buf);
         do {
             xreadline();
+            if (hdr_chunked(buf))
+                chunked = 1;
             if (code != 200)
                 writes(2, buf);
         } while(*buf != '\n');
@@ -201,16 +340,12 @@ int main(int argc, char *argv[])
         perror(argv[2]);
         exit(1);
     }
-    /* FIXME: if we saw a Transfer-Encoding: chunked" we need to do this
-       bit differently */
     if (code == 200) {
-        while((len = xread()) > 0) {
-            if (write(of, buf, len) != len) {
-                perror("write");
-                exit(1);
-            }
-            write(1,".",1);
-        }
+        body_init();
+        if (chunked)
+            copy_chunked(of);
+        else
+            copy_plain(of);
     }
     write(1,"\n",1);
     close(of);

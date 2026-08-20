@@ -1,6 +1,10 @@
 ROOT = ../..
 include $(ROOT)/Target/rules.armm0
 CFLAGS += -DNETD_LITTLE_ENDIAN
+# ping's round-trip time: the Pico Computer 3 has a microsecond timer
+# reachable with three loads and no syscall (sys/pc3io.h).  Without it
+# ping falls back to gettimeofday, whose tv_usec Fuzix leaves at zero.
+CFLAGS += -DPC3_US_CLOCK
 
 SRCS  = netd.c slip.c uip.c uiplib.c timer.c clock-arch.c uip_arp.c telnet.c
 SRCS += echoping.c dig.c gethostbyname.c httpd.c coconic.c ping.c ntpdate.c

@@ -23,7 +23,10 @@ int net_syscall(void)
 	udata.u_error = 0;
 	udata.u_retval = 0;
 
-//	kprintf("cmd %d state %d\n", udata.u_net.args[0], s->s_state);
+#ifdef CONFIG_NET_TRACE
+	kprintf("net: sock %d cmd %d state %d\n", udata.u_net.sock,
+		udata.u_net.args[0], s->s_state);
+#endif
 	switch (udata.u_net.args[0]) {
 	case 0:		/* socket */
 		return netproto_socket();

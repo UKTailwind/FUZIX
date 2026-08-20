@@ -684,8 +684,31 @@ static uint_fast8_t chksigset(struct sigbits *sb, uint_fast8_t b)
 		svec = &udata.u_sigvec[15]; /* ++ done at start */
 	}
 
-	/* Dispatch the lowest numbered signal */
-	for (; j < 15; ++j) {
+	/*
+	 *	Dispatch the lowest numbered signal.
+	 *
+	 *	16, not 15.  Each bank is sixteen bits and the top bit of
+	 *	each was never examined: signal 15 is SIGTERM and signal 31
+	 *	is the last of the second bank.  ssig() sets bit 15 quite
+	 *	happily (sigm = 1 << (sig & 15)), so a SIGTERM arrived,
+	 *	woke the process, and was then never acted on - and worse,
+	 *	chksigs() went on to clear PFL_CHKSIG because this said
+	 *	there was nothing pending, so every later check returned
+	 *	early and the signal became invisible for good.
+	 *
+	 *	It looked like it worked, which is why it lasted: a process
+	 *	woken inside a syscall that returns on any wake (sleep(1) is
+	 *	alarm plus pause) comes back to userland and exits by
+	 *	itself, so "kill" appeared to kill it.  A process that loops
+	 *	inside the kernel until its work is done - a socket read
+	 *	waiting for a packet - never returned and could only be
+	 *	killed with -9.  That is also killall, so it is a
+	 *	filesystem that goes down dirty on reboot.
+	 *
+	 *	u_sigvec is NSIGS (32) entries, so svec reaches [15] and
+	 *	[31] without running off the end.
+	 */
+	for (; j < 16; ++j) {
 		svec++;
 		/* FIXME: optimise by setting up m once and shifting */
 		m = 1 << j;

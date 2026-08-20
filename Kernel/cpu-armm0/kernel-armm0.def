@@ -1,4 +1,6 @@
-#define UDATA_SIZE_ASM		(512*3)
+/* Must equal UDATA_SIZE (UDATA_BLKS << BLKSHIFT) in the platform's
+   config.h; main.c checks the two at boot and panics if they differ. */
+#define UDATA_SIZE_ASM		(512*12)
 
 #define U_DATA__U_SP_OFFSET 24
 #define U_DATA__U_PTAB_OFFSET 0

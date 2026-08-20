@@ -4,8 +4,6 @@
   (C) 2017, Brett M. Gordon, GPL2 under Fuzix
 
   todo:
-  * add timestamp to packets to measure delta-t
-  * add time max/min/avg/sdev stats like real ping
   * check for endian problems
 */
 
@@ -18,7 +16,28 @@
 #include <arpa/inet.h>
 #include <signal.h>
 #include <time.h>
+#define _BSD_SOURCE		/* gettimeofday, for the round-trip time */
+#include <sys/time.h>
 #include "netdb.h"
+
+/*
+  The clock for the round-trip time.
+
+  gettimeofday() is the portable answer and it is not good enough here:
+  Fuzix's fills tv_usec with a hard zero, so every reply times as 0 ms.
+  Nor is CLOCK_MONOTONIC - the tick is the finest thing the kernel
+  offers a portable caller, and even at this port's 200Hz that is 5ms
+  against LAN round trips of about the same.
+
+  PC3_US_CLOCK (set by Makefile.armm0) uses the Pico Computer 3's
+  microsecond timer instead.  It is three register loads and no syscall
+  - there is no MMU on that board - so the measurement costs nothing
+  against the thing being measured.  Everywhere else this falls back to
+  gettimeofday and prints whole seconds, as before.
+*/
+#ifdef PC3_US_CLOCK
+#include <sys/pc3io.h>
+#endif
 
 #define AF_INET     1
 #define SOCK_RAW    1
@@ -54,20 +73,77 @@ int id;
 int seq=0;
 int sent=0;
 int nrecv=0;
+int count=0;			/* -c: 0 means until interrupted */
+/* all in microseconds, whatever the clock underneath */
+long rtt_min=-1;
+long rtt_max=0;
+long rtt_sum=0;
 
 void alarm_handler( int signum ){
     return;
 }
 
-void int_handler( int signum ){
+#ifdef PC3_US_CLOCK
+
+typedef long long pingtime_t;
+
+pingtime_t time_now( void ){
+    return pc3_us64();
+}
+
+long us_since( pingtime_t t0 ){
+    return (long)(pc3_us64() - t0);
+}
+
+#else
+
+typedef struct timeval pingtime_t;
+
+pingtime_t time_now( void ){
+    struct timeval t;
+
+    gettimeofday( &t, NULL );
+    return t;
+}
+
+long us_since( pingtime_t t0 ){
+    struct timeval now;
+
+    gettimeofday( &now, NULL );
+    return (now.tv_sec - t0.tv_sec) * 1000000L
+	 + (long)now.tv_usec - (long)t0.tv_usec;
+}
+
+#endif
+
+/* microseconds as milliseconds to one decimal place, without floats */
+void msprint( long us ){
+    printf("%ld.%ld", us/1000L, (us%1000L)/100L );
+}
+
+void stats( void ){
     printf("sent %d, recv %d, %d%%\n",
-	   sent, nrecv, nrecv*100/sent );
+	   sent, nrecv, sent ? nrecv*100/sent : 0 );
+    if( nrecv ){
+	printf("rtt min/avg/max = ");
+	msprint( rtt_min );
+	printf("/");
+	msprint( rtt_sum/nrecv );
+	printf("/");
+	msprint( rtt_max );
+	printf(" ms\n");
+    }
+}
+
+void int_handler( int signum ){
+    stats();
     exit(0);
 }
 
-/* print a IP address */
+/* print a IP address.  Unsigned: as char these came out as
+   "-64.-88.1.-2" on a machine with a signed plain char. */
 void ipprint( uint32_t *a ){
-    char *b = (char *)a;
+    unsigned char *b = (unsigned char *)a;
     printf("%d.%d.%d.%d", b[0], b[1], b[2], b[3] );
 }
 
@@ -131,24 +207,34 @@ void my_open( int argc, char *argv[]){
 int main( int argc, char *argv[] ){
     int x;
     time_t t;
+    long rtt;
+    pingtime_t t_send;
     struct icmp *icmpbuf;
     struct ip *ipbuf;
     struct ip *ipbuf2;
+    char *host;
 
     srand(time(&t));
     id = rand();
 
     signal(SIGINT, int_handler);
 
+    if( argc > 2 && !strcmp( argv[1], "-c" ) ){
+	count = atoi( argv[2] );
+	argv += 2;
+	argc -= 2;
+    }
     if( argc < 2 ){
-	fprintf( stderr,"usage: ping hostname\n");
+	fprintf( stderr,"usage: ping [-c count] hostname\n");
 	exit(1);
     }
+    host = argv[1];
 
     my_open( argc, argv );
-    
 
-    while(1){
+
+    while( !count || sent < count ){
+	t_send = time_now();
 	sendping();
 	/* FIXME: this breaks if the alarm occurs before the read under
 	   load - sigsetjmp/siglongjmp needed I think */
@@ -183,11 +269,20 @@ int main( int argc, char *argv[] ){
             }
 	    /* passed filters, so this must be one of our pings */
 	    nrecv++;
-	    printf("%d bytes from %s (", x, argv[1] );
+	    rtt = us_since( t_send );
+	    if( rtt_min < 0 || rtt < rtt_min ) rtt_min = rtt;
+	    if( rtt > rtt_max ) rtt_max = rtt;
+	    rtt_sum += rtt;
+	    printf("%d bytes from %s (", x, host );
 	    ipprint( &ipbuf->src );
-	    printf(") req=%d", ntohs(icmpbuf->seq));
-	    printf("\n");
+	    printf(") req=%d time=", ntohs(icmpbuf->seq));
+	    msprint( rtt );
+	    printf(" ms\n");
 	}
+	if( count && sent >= count )
+	    break;
 	sleep(1);
     }
+    stats();
+    return 0;
 }

@@ -213,6 +213,15 @@ void device_init(void)
     }
 #endif
 
+#ifdef CONFIG_NET
+    {
+        /* Just clears the socket table.  Nothing touches the radio
+         * here - that waits for NETIOC_UP, see net_cyw43.c. */
+        extern void netdev_init(void);
+        netdev_init();
+    }
+#endif
+
     sd_rawinit();
     devsd_init();
 

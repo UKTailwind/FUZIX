@@ -619,4 +619,106 @@ if grep -q 'error 28' /tmp/ucp-flash.log; then
 	# kernel build over a fallback filesystem.  Loud instead.
 fi
 
+# CYW43 networking: /bin/wifi and the pro-forma /etc/wifi.conf.
+#
+# Gated on the SAME switch the kernel is built with, because on a
+# PC3_NET=0 kernel the ioctls do not exist and the command can only
+# print "Not a typewriter" - a worse thing to find in /bin than
+# nothing at all.
+#
+#	PC3_NET=1 sh mksdimage.sh	(it inherits the environment)
+#
+# The Makefile no longer runs this script at all: it used to build the
+# on-board flash root, and that device is gone.  mksdimage.sh is the
+# only caller now, and it builds the SD card.
+#
+# The pro-forma is the point of shipping it rather than leaving people
+# to discover the format: it carries the syntax in its own comments and
+# a user replaces one line.  Mode 600 from the start, because the line
+# they replace it with holds a password.
+#
+# A separate ucp pass rather than lines in the big heredoc above, so
+# that "not included" means no ucp input at all rather than a blank
+# line the log has to be trusted to ignore.
+#
+# The netd tools come with it.  They were hand-copied onto a running
+# board while networking was being written, which meant the card had
+# programs no recipe could reproduce - and a card that cannot be
+# rebuilt is a card that is one fsck away from being wrong.  ping,
+# htget, dig, ntpdate and httpd are the whole visible network userland;
+# tlsget is the TLS one and lives with the platform utils.
+PC3_NET=${PC3_NET:-0}
+if [ "$PC3_NET" = 1 ]; then
+	if [ ! -f utils/wifi.stripped ]; then
+		echo "update-flash.sh: PC3_NET=1 needs utils/wifi.stripped" >&2
+		echo "  (cd utils && make wifi && arm-none-eabi-strip wifi -o wifi.stripped)" >&2
+		exit 1
+	fi
+	NETD=../../../Applications/netd
+	for f in ping htget dig ntpdate httpd; do
+		if [ ! -f "$NETD/$f" ]; then
+			echo "update-flash.sh: PC3_NET=1 needs $NETD/$f" >&2
+			echo "  (cd Applications/netd && make -f Makefile.armm0 \\" >&2
+			echo "     FUZIX_ROOT=\$PWD/../.. USERCPU=armm0 PLATFORM=armm0)" >&2
+			exit 1
+		fi
+	done
+	if [ ! -f utils/tlsget.stripped ]; then
+		echo "update-flash.sh: PC3_NET=1 needs utils/tlsget.stripped" >&2
+		exit 1
+	fi
+	if [ ! -f utils/tlsca.stripped ]; then
+		echo "update-flash.sh: PC3_NET=1 needs utils/tlsca.stripped" >&2
+		exit 1
+	fi
+	# The CA bundle: nine roots, ~11K.  Small on purpose - every
+	# certificate is parsed into mbedtls state out of the same lwIP
+	# heap the packet buffers use, and the full Mozilla set (~200K)
+	# will not parse at all.
+	#
+	# WHICH roots is not guessable, and the obvious guesses are
+	# wrong.  A survey of ordinary sites found Cloudflare mostly
+	# rooted at GTS Root R4, example.com at SSL.com, openai.com at
+	# ISRG Root X2 and github.com at Sectigo E46 - none of which were
+	# in the first bundle, which had the RSA roots the web has
+	# largely moved off.  Check before assuming:
+	#   openssl s_client -connect HOST:443 -servername HOST -showcerts
+	if [ ! -f ca.pem ]; then
+		echo "update-flash.sh: PC3_NET=1 needs ca.pem" >&2
+		exit 1
+	fi
+	echo "--- networking: /bin/wifi, the netd tools, and /etc/wifi.conf"
+	../../../Standalone/ucp ${IMG} > /tmp/ucp-wifi.log 2>&1 <<EOF
+cd /bin
+bget utils/wifi.stripped wifi
+chmod 0755 wifi
+bget $NETD/ping ping
+chmod 0755 ping
+bget $NETD/htget htget
+chmod 0755 htget
+bget $NETD/dig dig
+chmod 0755 dig
+bget $NETD/ntpdate ntpdate
+chmod 0755 ntpdate
+bget $NETD/httpd httpd
+chmod 0755 httpd
+bget utils/tlsget.stripped tlsget
+chmod 0755 tlsget
+bget utils/tlsca.stripped tlsca
+chmod 0755 tlsca
+cd /etc
+bget wifi.conf
+chmod 0600 wifi.conf
+bget ca.pem
+chmod 0644 ca.pem
+exit
+EOF
+	if grep -q "error" /tmp/ucp-wifi.log; then
+		echo "update-flash.sh: ucp failed installing the wifi files:" >&2
+		cat /tmp/ucp-wifi.log >&2
+		exit 1
+	fi
+	rm -f /tmp/ucp-wifi.log
+fi
+
 ../../../Standalone/fsck -a ${IMG}

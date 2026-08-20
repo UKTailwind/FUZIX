@@ -56,8 +56,19 @@ delay argument on the other scripts is now belt and braces.
 boot. If the kernel has panicked, `picoctl` cannot run and the board
 needs BOOTSEL by hand.
 
-From BOOTSEL, the board appears as drive **F:** labelled `RP2350`
-(`F:\INFO_UF2.TXT` confirms it). Copy the uf2 and it reboots itself:
+After it reboots it stops at `bootdev:` and then at `login:`, and
+`fzsh.py` can answer neither - it waits for `# `. `fzboot.py` sends one
+line to whatever prompt is there:
+
+    python fzboot.py hdb2 ; python fzboot.py root
+
+From BOOTSEL the board appears as a drive labelled `RP2350`
+(`INFO_UF2.TXT` confirms it). **The letter is not fixed** - it has been
+F: and H: on the same machine, so find it rather than assuming:
+
+    Get-Volume | Where-Object { $_.FileSystemLabel -like "RP2*" }
+
+Copy the uf2 and it reboots itself:
 
     Copy-Item <path>\Kernel\platform\platform-rpipico\build\fuzix.uf2 F:\
 

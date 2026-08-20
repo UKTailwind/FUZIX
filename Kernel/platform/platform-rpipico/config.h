@@ -133,8 +133,22 @@
 #undef CONFIG_IDUMP
 /* Enable to make ^A drop back into the monitor */
 #undef CONFIG_MONITOR
-/* Enable to support network stack */
-#undef CONFIG_NET
+/* Enable to support network stack.
+ *
+ * CONFIG_NET brings in syscall_net.c and network.c - the BSD-ish
+ * socket layer that has been compiled and disabled in this port since
+ * it was written - and CONFIG_NET_LWIP selects dev/net/net_lwip.c as
+ * the backend under it.  Both follow PC3_NET, because the sockets are
+ * useless without the radio and the radio is optional. */
+#ifdef CONFIG_PC3_NET
+#define CONFIG_NET
+#define CONFIG_NET_LWIP
+/* CONFIG_NET_TRACE prints every socket call's socket, command and
+ * state, plus each netproto_free.  Off; define it here when a socket
+ * misbehaves.  It is what found IN2SOCK never being set - the trace
+ * showed a close() on the accepted child freeing socket 0, which was
+ * the listener. */
+#endif
 #undef CONFIG_NET_NATIVE
 /* Profil syscall support (not yet complete) */
 #undef CONFIG_PROFIL
@@ -211,7 +225,39 @@
 
 /* Program layout */
 
-#define UDATA_BLKS  3
+/*
+ * The udata block: struct u_data at the bottom, the kernel stack
+ * growing down onto it from the top, and PROGLOAD immediately above.
+ * 3 blocks (1.5K) was the figure for a system whose deepest kernel
+ * call was a filesystem one.
+ *
+ * TLS changed that.  mbedtls runs inside the network pump, which is
+ * reached from plt_idle - so it is NESTED on top of whichever syscall
+ * just went to sleep, on that process's kernel stack.  A handshake
+ * took a 1.5K stack down through udata and 176 bytes out of the bottom
+ * of progbase (sp=0x2002bf50 against a progbase of 0x2002c000), which
+ * corrupted the process table and killed the machine.
+ *
+ * MEASURED, not guessed: net_cyw43.c painted the region and watched it
+ * during a real handshake to example.com.  Peak 2,460 bytes.  That is
+ * also exactly consistent with the crash - sp reached 1,712 bytes down
+ * a stack that only had 1,156 usable - and it is far less than the 6.5K
+ * and 16K that two earlier guesses spent.
+ *
+ * 12 blocks is 6,144, less struct u_data's 328 = 5,816 of stack: 2.4x
+ * the measured peak.  The margin is there because certificate
+ * VERIFICATION has not been measured - the handshake above had no CA
+ * bundle loaded, and chain walking is the deeper path.  net_cyw43.c
+ * keeps a canary just above udata that says so if this is ever wrong.
+ *
+ * The cost is per RESIDENT PROCESS: udata lives inside the process
+ * image, so every resident process pays the extra 4,608 bytes, which is
+ * one more 4K pool block each.  That is what buys TLS.
+ *
+ * UDATA_SIZE_ASM in cpu-armm0/kernel-armm0.def must match; main.c
+ * panics "bad offsets" at boot if it does not.
+ */
+#define UDATA_BLKS  12
 #define UDATA_SIZE  (UDATA_BLKS << BLKSHIFT)
 
 #ifndef TOTALMEM
@@ -220,12 +266,20 @@
 #if TOTALMEM == 0
 #error TOTALMEM should have been defined via cmake
 #endif
+/* NETMEM stays 0 even with CONFIG_NET on, unlike every other port.
+ *
+ * It is the slice of the process pool a network stack takes for its
+ * buffers, and 10K is the usual figure.  Here the buffers are not in
+ * the pool at all - lwIP's heap and every one of its pools live in
+ * PSRAM (lwipopts.h) - so taking 10K would be taking it twice.  What
+ * networking really costs this pool is one 4K block, and that is paid
+ * once in TOTALMEM (332 rather than 336) and in the matching
+ * linker_overrides_net/memory_ram.incl.
+ *
+ * If this ever becomes non-zero, USERMEM stops matching the PROGPOOL
+ * region and progbase[] ends up smaller than the memory reserved for
+ * it.  Nothing checks that. */
 #define NETMEM 0
-
-#ifdef CONFIG_NET
-#undef NETMEM
-#define NETMEM 10
-#endif
 
 #define USERMEM ((TOTALMEM-NETMEM)*1024)
 

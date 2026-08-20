@@ -48,6 +48,54 @@ endif()
 if(DEFINED ENV{PC3_NO_KBD_LEDS})
 	add_compile_definitions(PC3_NO_KBD_LEDS=1)
 endif()
+# ---- CYW43 Wi-Fi / lwIP --------------------------------------------
+#
+# OFF by default, because a radio nobody asked for should not be
+# powered and lwIP should not be linked.  cmake -DPC3_NET=1 links it.
+#
+# It costs the process pool NOTHING.  lwIP's heap and every one of its
+# pools live in PSRAM (lwipopts.h), which took the SRAM bill from five
+# 4K blocks to one; then the flash filesystem went (config.h) and gave
+# back nearly two.  A PC3_NET kernel and a plain one now carve main
+# SRAM identically - 336K of pool either way - and the network build
+# still leaves over 4K free in the kernel's own region.
+#
+# PICO_CYW43_SUPPORTED is a CMake variable the SDK tests before it even
+# defines the pico_cyw43_arch targets, and it is normally set by the
+# board header.  This port builds with PICO_BOARD=pico2 - the plain
+# Pico 2 header - and overrides what the PC3 actually is by hand
+# (PICO_RP2350A=0, the 16M flash, PSRAM on GP47), so the radio has to
+# be declared here the same way.  Keeping the board header unchanged is
+# the point: it makes the with/without builds differ in one thing only,
+# which is what makes the measurement a measurement.
+#
+# The pins are the standard CYW43 wiring, which is what the PC3 uses.
+# They are ALSO the Pico Computer 2's SD chip select (GP29) and LED
+# (GP25) - see net_cyw43.c and board.c.
+option(PC3_NET "link the CYW43 driver and lwIP" OFF)
+if(PC3_NET)
+	set(PICO_CYW43_SUPPORTED 1)
+	# TLS: our own mbedtls config, adapted from MMBasic's proven one.
+	# Changing that file does NOT rebuild mbedtls - the dependency is
+	# not tracked - so a clean build directory is required after edits.
+	set(PICO_MBEDTLS_CONFIG_FILE ${CMAKE_CURRENT_LIST_DIR}/mbedtls_config.h)
+	add_compile_definitions(
+		CONFIG_PC3_NET=1
+		CYW43_DEFAULT_PIN_WL_REG_ON=23
+		CYW43_DEFAULT_PIN_WL_DATA_OUT=24
+		CYW43_DEFAULT_PIN_WL_DATA_IN=24
+		CYW43_DEFAULT_PIN_WL_HOST_WAKE=24
+		CYW43_DEFAULT_PIN_WL_CLOCK=29
+		CYW43_DEFAULT_PIN_WL_CS=25
+		# The gSPI link is clocked from clk_sys, and the SDK's fixed
+		# divider of 2 is tuned for ~125MHz: at 375 it overclocks the
+		# chip and the symptom is "hdr mismatch" / ioctl timeouts.
+		# This lets the divider be set at runtime, as MMBasic and the
+		# PC3's MicroPython both do.
+		CYW43_PIO_CLOCK_DIV_DYNAMIC=1
+	)
+endif()
+
 option(TOTALMEM "specify how much TOTALMEM is present" 0)
 
 add_compile_definitions(
@@ -188,6 +236,16 @@ target_link_libraries(fuzix
 	hardware_spi
 	tinyusb_device
 )
+
+# The poll flavour of the arch layer: no async_context worker threads
+# and no alarm-pool entries (this port allows itself two, one of which
+# is the system tick).  lwIP is driven from the kernel's own pump
+# instead, which is the same choice MMBasic's WEB builds make.
+if(PC3_NET)
+	target_sources(fuzix PRIVATE net_cyw43.c ../../dev/net/net_lwip.c)
+	target_link_libraries(fuzix pico_cyw43_arch_lwip_poll
+		pico_lwip_mbedtls pico_mbedtls)
+endif()
 
 pico_set_float_implementation(fuzix none)
 pico_set_double_implementation(fuzix pico)

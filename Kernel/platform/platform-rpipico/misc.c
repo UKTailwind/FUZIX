@@ -6,6 +6,7 @@
 #include "pico_ioctl.h"
 #include "config.h"
 #include "psram.h"
+#include <pico/platform/sections.h>	/* __uninitialized_psram */
 #ifdef CONFIG_PC3_DISPLAY
 #include "display.h"
 #endif
@@ -80,6 +81,17 @@ void preempt_handler(void)
          * the USB host stack when a spinning process has starved it */
         extern void usbkbd_task(void);
         usbkbd_task();
+    }
+#endif
+#ifdef CONFIG_PC3_NET
+    {
+        /* Same argument as the USB pump above, and the reason the
+           network pump needs this site as well as plt_idle: a process
+           that never idles and never sleeps on the tty would otherwise
+           starve lwIP's timers, and TCP would stall for the length of
+           a compile. */
+        extern void pc3_net_poll_c(void);
+        pc3_net_poll_c();
     }
 #endif
     di();
@@ -1045,6 +1057,75 @@ int plt_dev_ioctl(uarg_t request, char *data)
         extern void sound_mm_stop(void);
         sound_mm_stop();
         return 0;
+    }
+#endif
+#ifdef CONFIG_PC3_NET
+    if (request == NETIOC_UP)
+    {
+        extern int pc3_net_up(const char *, const char *, unsigned);
+        struct net_join j;
+        int r;
+
+        if (esuper())
+            return -1;
+        if (uget(data, &j, sizeof(j)))
+            return -1;
+        /* A short SSID or key is fine; a run-on one is not - uget
+           copied whatever the caller had. */
+        j.ssid[sizeof(j.ssid) - 1] = 0;
+        j.key[sizeof(j.key) - 1] = 0;
+        r = pc3_net_up(j.ssid, j.key[0] ? j.key : NULL, j.auth);
+        if (r == 0)
+            return 0;
+        udata.u_error = (r == PC3_NET_ENODEV) ? ENODEV :
+                        (r == PC3_NET_EINVAL) ? EINVAL : EIO;
+        return -1;
+    }
+    if (request == NETIOC_STATUS)
+    {
+        extern int pc3_net_status(struct net_status *);
+        struct net_status st;
+
+        if (pc3_net_status(&st))
+            return -1;
+        return uput(&st, data, sizeof(st));
+    }
+    if (request == NETIOC_DOWN)
+    {
+        extern void pc3_net_down(void);
+
+        if (esuper())
+            return -1;
+        pc3_net_down();
+        return 0;
+    }
+    if (request == NETIOC_TLSCA)
+    {
+        extern int netlw_tls_ca(const void *, unsigned);
+        extern int netlw_tls_verifying(void);
+        struct net_ca ca;
+
+        if (esuper())
+            return -1;
+        if (uget(data, &ca, sizeof(ca)))
+            return -1;
+        /* A CA bundle is kilobytes, so it is not copied into the
+           kernel: mbedtls parses it where it lies.  valaddr is what
+           makes that safe, and it is not optional.
+
+           len 0 is not an error, it is the way back: drop the bundle
+           and return to encrypted-but-unauthenticated. */
+        if (ca.len && valaddr_r(ca.buf, ca.len) != ca.len) {
+            udata.u_error = EFAULT;
+            return -1;
+        }
+        if (netlw_tls_ca(ca.len ? ca.buf : NULL, ca.len)) {
+            udata.u_error = EINVAL;
+            return -1;
+        }
+        /* 1 when certificates are checked from now on, 0 when they
+           are not, so the caller can say which without guessing. */
+        return netlw_tls_verifying();
     }
 #endif
     return -1;
