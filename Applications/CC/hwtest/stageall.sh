@@ -13,6 +13,28 @@ CC=$(cd "$(dirname "$0")/.." && pwd)
 R=$(cd "$CC/../.." && pwd)
 S=$CC/hwtest
 
+# BUILD FIRST.  This script used to strip and nothing else, while its
+# own comment claimed that "getting a STALE one is worse, so this
+# restages the lot every time" - and restaging a stale binary is exactly
+# what it did.  It shipped a v0.18 card whose bcrun had been compiled
+# before MM_RELEASE was bumped, so MM.VER answered 0.17 on it: the very
+# bug relcheck.sh was written to prevent, through the one door it does
+# not cover.  relcheck compares the three SOURCES; the card carries a
+# BINARY, and nothing tied the two together.
+#
+# make is a no-op when everything is current, so this costs nothing on a
+# release that did run relink-userland.sh first - and saves the release
+# that did not.  Objects are not deleted here: relink-userland.sh does
+# that, and does it for the C library too, which is the case make cannot
+# see for itself.
+make -f Makefile.armm0 -C "$CC" FUZIX_ROOT="$R" USERCPU=armm0 >/dev/null
+make -f Makefile.armm0 -C "$R/Applications/cpp" FUZIX_ROOT="$R" \
+	USERCPU=armm0 >/dev/null
+make -f Makefile.armm0 -C "$R/Applications/mmedit" FUZIX_ROOT="$R" \
+	USERCPU=armm0 >/dev/null
+make -C "$R/Kernel/platform/platform-rpipico/utils" FUZIX_ROOT="$R" \
+	>/dev/null
+
 # Every program staged is recorded in staged.list, and mkccimage.sh
 # and verifyimage.sh install and check exactly that.  They used to keep
 # hand-written lists of their own, which is how playmp3 missed a whole

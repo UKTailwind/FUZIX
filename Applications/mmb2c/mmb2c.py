@@ -705,6 +705,7 @@ class Conv(object):
         self.uses_mappal = False
         self.uses_gpio = False
         self.uses_port = False      # PORT: pulls in mmb_port.h
+        self.uses_math = False      # MATH C_ADD etc: pulls in mmb_math.h
         self.uses_pulse = False     # PULSE: pulls in mmb_pulse.h
         self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
         self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
@@ -6033,11 +6034,11 @@ class Conv(object):
             return
         if up == 'ARRAY':
             self.i += 1
-            self.do_array_cmd()
+            self.do_array_cmd(False)
             return
         if up == 'MATH' and not self.is_op('(', 1):
             self.i += 1
-            self.do_array_cmd()
+            self.do_array_cmd(True)
             return
         if up in ('TIMER', 'DATE$', 'TIME$') and self.is_op('=', 1):
             self.i += 2
@@ -6593,11 +6594,49 @@ class Conv(object):
         self.emit('}')
 
     # -- ARRAY / MATH whole array commands -----------------------------------
-    def do_array_cmd(self):
+    # C_MUL has two spellings in MMBasic and C_MULT is the older one;
+    # cmd_math checks for both.  The value is the C operator.
+    CCOMB = {'C_ADD': '+', 'C_SUB': '-', 'C_MUL': '*', 'C_MULT': '*',
+             'C_DIV': '/', 'C_AND': '&', 'C_OR': '|', 'C_XOR': '^'}
+
+    def do_array_cmd(self, is_math):
         t = self.nxt()
         if t[0] != T_ID:
             self.err("ARRAY/MATH needs a sub-command")
         op = t[2]
+        if op in self.CCOMB:
+            # MATH C_ADD a(), b(), c()   - c(i) = a(i) op b(i)
+            #
+            # MATH only: MMBasic has these in cmd_math and nowhere else,
+            # so ARRAY C_ADD is a syntax error there and is one here.
+            #
+            # The loops live in mmb_math.h, included only by a program
+            # that asks for one - the same bargain as the graphics and
+            # pin headers.  Not the runtime: fourteen one-line loops
+            # would be fourteen more wrappers in bcrun and fourteen
+            # more names in its table, carried by every program on the
+            # machine whether or not it says C_ADD.
+            if not is_math:
+                self.err("%s is a MATH sub-command, not an ARRAY one" % op)
+            a = self.arrayref()
+            self.expect_op(',')
+            b = self.arrayref()
+            self.expect_op(',')
+            c = self.arrayref()
+            if a.ty == TY_S or b.ty == TY_S or c.ty == TY_S:
+                self.err("%s does not apply to a string array" % op)
+            if a.ty != b.ty or b.ty != c.ty:
+                self.err("%s needs all three arrays to be the same type"
+                         % op)
+            aptr, acnt = self.array_flat(a)
+            bptr, bcnt = self.array_flat(b)
+            cptr, ccnt = self.array_flat(c)
+            self.uses_math = True
+            self.emit("mmg_carr_%s(%s, %s, %s, %s, %s, %s, '%s');"
+                      % ('i' if a.ty == TY_I else 'f',
+                         aptr, acnt, bptr, bcnt, cptr, ccnt,
+                         self.CCOMB[op]))
+            return
         if op == 'SET':
             val = self.expr()
             self.expect_op(',')
@@ -8367,6 +8406,10 @@ class Conv(object):
         # table SETPIN fills in.
         if self.uses_port:
             wr('#include "mmb_port.h"\n')
+        # MATH C_ADD and the rest.  Needs nothing but the runtime's own
+        # types and MM_RAISE, so it can sit anywhere after that.
+        if self.uses_math:
+            wr('#include "mmb_math.h"\n')
         if self.uses_pulse:
             wr('#include "mmb_pulse.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a

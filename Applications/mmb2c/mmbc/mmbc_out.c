@@ -437,6 +437,10 @@ void conv_write(FILE *f)
        SETPIN fills in. */
     if (cv.uses_port)
         fprintf(f, "#include \"mmb_port.h\"\n");
+    /* MATH C_ADD and the rest.  Needs nothing but the runtime's own
+       types and MM_RAISE, so it can sit anywhere after that. */
+    if (cv.uses_math)
+        fprintf(f, "#include \"mmb_math.h\"\n");
     if (cv.uses_pulse)
         fprintf(f, "#include \"mmb_pulse.h\"\n");
     /* After mmb_gpio.h, which it uses to read the pins.  Only a program

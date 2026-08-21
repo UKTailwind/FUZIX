@@ -43,7 +43,7 @@ static void do_cat(void);
 static void do_erase(void);
 static void do_on_goto(void);
 static void do_on_error(void);
-static void do_array_cmd(void);
+static void do_array_cmd(int is_math);
 static void do_open(void);
 static void do_close(void);
 static void do_fileword(const char *up);
@@ -2319,12 +2319,12 @@ void statement_inner(void)
     }
     if (strcmp(up, "ARRAY") == 0) {
         cv.i++;
-        do_array_cmd();
+        do_array_cmd(0);
         return;
     }
     if (strcmp(up, "MATH") == 0 && !is_op("(", 1)) {
         cv.i++;
-        do_array_cmd();
+        do_array_cmd(1);
         return;
     }
     if ((strcmp(up, "TIMER") == 0 || strcmp(up, "DATE$") == 0
@@ -3613,14 +3613,64 @@ static void do_on_goto(void)
 
 /* -- ARRAY / MATH whole array commands ------------------------------- */
 
-static void do_array_cmd(void)
+/* C_MUL has two spellings in MMBasic and C_MULT is the older one;
+   cmd_math checks for both.  The value is the C operator. */
+static const struct { const char *kw; char op; } ccomb[] = {
+    { "C_ADD", '+' }, { "C_SUB", '-' }, { "C_MUL", '*' },
+    { "C_MULT", '*' }, { "C_DIV", '/' }, { "C_AND", '&' },
+    { "C_OR", '|' },  { "C_XOR", '^' }, { NULL, 0 }
+};
+
+static void do_array_cmd(int is_math)
 {
     struct tok *t = nxt();
     const char *op;
+    int k;
 
     if (t->kind != T_ID)
         cv_err("ARRAY/MATH needs a sub-command");
     op = t->up;
+    for (k = 0; ccomb[k].kw; k++) {
+        if (strcmp(op, ccomb[k].kw) != 0)
+            continue;
+        /* MATH C_ADD a(), b(), c()   - c(i) = a(i) op b(i)
+         *
+         * MATH only: MMBasic has these in cmd_math and nowhere else,
+         * so ARRAY C_ADD is a syntax error there and is one here.
+         *
+         * The loops live in mmb_math.h, included only by a program that
+         * asks for one - the same bargain as the graphics and pin
+         * headers.  Not the runtime: fourteen one-line loops would be
+         * fourteen more wrappers in bcrun and fourteen more names in
+         * its table, carried by every program on the machine whether or
+         * not it says C_ADD. */
+        {
+            struct sym *a, *b, *c;
+            struct flat af, bf, cf;
+
+            if (!is_math)
+                cv_err("%s is a MATH sub-command, not an ARRAY one", op);
+            a = arrayref(1);
+            expect_op(",");
+            b = arrayref(1);
+            expect_op(",");
+            c = arrayref(1);
+            if (a->ty == TY_S || b->ty == TY_S || c->ty == TY_S)
+                cv_err("%s does not apply to a string array", op);
+            if (a->ty != b->ty || b->ty != c->ty)
+                cv_err("%s needs all three arrays to be the same type",
+                       op);
+            af = array_flat(a);
+            bf = array_flat(b);
+            cf = array_flat(c);
+            cv.uses_math = 1;
+            emit(sfmt("mmg_carr_%s(%s, %s, %s, %s, %s, %s, '%c');",
+                      a->ty == TY_I ? "i" : "f",
+                      af.ptr, af.cnt, bf.ptr, bf.cnt, cf.ptr, cf.cnt,
+                      ccomb[k].op));
+        }
+        return;
+    }
     if (strcmp(op, "SET") == 0) {
         struct val val = expr();
         struct sym *sym;
