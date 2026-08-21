@@ -1,10 +1,11 @@
 /* fat - read files from a FAT partition into Fuzix.
  *
- * The Pico Computer 3 SD card keeps a FAT partition (/dev/hdb1) that
+ * The Pico Computer 3 SD card keeps a FAT partition (/dev/hda1) that
  * Windows/macOS/Linux mount directly; this reads it from the Fuzix
  * side so the card itself carries files between the two worlds.
  *
  *	fat ls [path]		list a directory (default: root)
+ *	fat ls dir/4*		... or what matches a pattern in it
  *	fat get path [dest]	copy a FAT file into Fuzix
  *	fat info		filesystem details
  *	fat -d /dev/xxx ...	use another device
@@ -24,7 +25,11 @@
 #define SECSZ	512
 #define LFNMAX	64
 
-static const char *devname = "/dev/hdb1";
+/* The SD card is hda.  It was hdb while the on-board flash filesystem
+   existed and took hda; that device is gone (config.h), the card moved
+   up, and this default did not - so "fat ls" answered "cannot open
+   /dev/hdb1" on every machine until -d was given by hand. */
+static const char *devname = "/dev/hda1";
 static int dev;
 
 static uint8_t sec[SECSZ];		/* directory/data sector */
@@ -292,16 +297,94 @@ static uint8_t *lookup(const char *path, uint32_t *dirclus)
 
 /* --- commands ------------------------------------------------------------ */
 
+/* '*' and '?', case-insensitively: FAT names are not case sensitive,
+   and neither is the DOS convention these patterns come from.
+   Backtracking on the last '*' rather than recursing, so a pattern like
+   "a*b*c*d*" cannot cost exponential time on a long name. */
+static int lc(int c)
+{
+	return (c >= 'A' && c <= 'Z') ? c + 32 : c;
+}
+
+static int globmatch(const char *pat, const char *s)
+{
+	const char *star = NULL, *ss = s;
+
+	while (*s) {
+		if (*pat == '?' || (*pat && lc(*pat) == lc(*s))) {
+			pat++;
+			s++;
+		} else if (*pat == '*') {
+			star = pat++;
+			ss = s;
+		} else if (star) {
+			pat = star + 1;
+			s = ++ss;
+		} else {
+			return 0;
+		}
+	}
+	while (*pat == '*')
+		pat++;
+	return *pat == 0;
+}
+
+static int haswild(const char *s)
+{
+	for (; *s; s++)
+		if (*s == '*' || *s == '?')
+			return 1;
+	return 0;
+}
+
 static int do_ls(const char *path)
 {
+	static char dirpart[LFNMAX + 1];
 	struct dirit it;
 	uint32_t dirclus;
 	uint8_t *e;
+	const char *pat = NULL;
+	const char *name;
+	int found = 0;
 
 	while (path && *path == '/')
 		path++;
 	if (path && *path == 0)
 		path = NULL;
+
+	/*
+	 * A wildcard in the LAST component makes this a search rather than
+	 * a path: "physics/4*" lists what matches 4* inside physics, and
+	 * "4*" does the same in the root.  Only the last component - a
+	 * pattern in a directory name would mean walking several
+	 * directories, which ls does not do anywhere else either.
+	 */
+	if (path && haswild(path)) {
+		const char *slash = strrchr(path, '/');
+
+		if (slash == NULL) {
+			pat = path;
+			path = NULL;
+		} else {
+			size_t n = (size_t)(slash - path);
+
+			if (n > LFNMAX) {
+				fprintf(stderr, "fat: %s: path too long\n",
+					path);
+				return 1;
+			}
+			memcpy(dirpart, path, n);
+			dirpart[n] = 0;
+			pat = slash + 1;
+			path = dirpart;
+			if (haswild(path)) {
+				fprintf(stderr, "fat: %s: a wildcard is only "
+					"allowed in the last part\n", pat - 1);
+				return 1;
+			}
+		}
+	}
+
 	e = lookup(path, &dirclus);
 	if (path && e == NULL) {
 		fprintf(stderr, "fat: %s: not found\n", path);
@@ -309,6 +392,11 @@ static int do_ls(const char *path)
 	}
 	if (e) {
 		if (!(e[11] & 0x10)) {	/* a plain file: list it alone */
+			if (pat) {
+				fprintf(stderr, "fat: %s: not a directory\n",
+					path);
+				return 1;
+			}
 			printf("%8lu  %s\n", (unsigned long)rd32(e + 28),
 			       lfn[0] ? lfn : sname);
 			return 0;
@@ -317,12 +405,20 @@ static int do_ls(const char *path)
 	}
 	dit_open(&it, dirclus);
 	while ((e = dit_next(&it)) != NULL) {
-		if (e[11] & 0x10)
-			printf("   <dir>  %s\n", lfn[0] ? lfn : sname);
-		else
-			printf("%8lu  %s\n", (unsigned long)rd32(e + 28),
-			       lfn[0] ? lfn : sname);
+		name = lfn[0] ? lfn : sname;
+		if (pat == NULL || globmatch(pat, name)) {
+			found++;
+			if (e[11] & 0x10)
+				printf("   <dir>  %s\n", name);
+			else
+				printf("%8lu  %s\n",
+				       (unsigned long)rd32(e + 28), name);
+		}
 		lfn[0] = 0;
+	}
+	if (pat && !found) {
+		fprintf(stderr, "fat: %s: no match\n", pat);
+		return 1;
 	}
 	return 0;
 }
@@ -397,7 +493,8 @@ static int do_info(void)
 static void usage(void)
 {
 	fprintf(stderr,
-	    "usage: fat [-d device] ls [path]\n"
+	    "usage: fat [-d device] ls [path]      path may end in a\n"
+	    "                                      pattern: dir/4*\n"
 	    "       fat [-d device] get path [dest]\n"
 	    "       fat [-d device] info\n");
 	exit(1);
