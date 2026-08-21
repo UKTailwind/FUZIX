@@ -25,6 +25,7 @@ static void do_settick(void);
 static void do_i2c2(void);
 static void do_i2c0(void);
 static void do_onewire(void);
+static void do_web(void);
 static void do_spi(void);
 static void do_on_key(void);
 static const char *int_target(void);
@@ -1723,6 +1724,11 @@ void statement_inner(void)
         }
         return;
     }
+    if (strcmp(up, "WEB") == 0) {
+        cv.i++;
+        do_web();
+        return;
+    }
     if (strcmp(up, "ONEWIRE") == 0) {
         cv.i++;
         do_onewire();
@@ -2593,6 +2599,52 @@ static void do_spi(void)
     else
         comms_rx("SPI READ", n, sfmt("  mmspi_read(%s, %%s);", n),
                  sfmt("  mmspi_read_bytes(%s, %%s);", n));
+}
+
+/* mmb2c.py's do_web.  The WEB family, arriving in stages
+   (PLAN-web.md §11).  Stage 1 is UDP:
+
+     WEB UDP SERVER PORT n     bind the receive socket
+     WEB UDP INTERRUPT sub|0   fire on a received datagram
+     WEB UDP SEND ip$, port, msg$
+
+   SERVER PORT is the WebMite's saved OPTION UDP SERVER PORT as a
+   statement - a compiled program owns its own sockets (PLAN-web.md
+   §3.2); the OPTION spelling is accepted as an alias so WebMite
+   listings move across unedited.  Anything else under WEB names the
+   stage it is waiting on rather than pretending to be an unknown
+   command. */
+static void do_web(void)
+{
+    if (accept_kw("UDP")) {
+        if (is_kw("SERVER", 0) && is_kw("PORT", 1)) {
+            cv.i += 2;
+            cv.uses_udp = 1;
+            emit(sfmt("mmg_udp_port(%s);", as_int(expr())));
+            return;
+        }
+        if (accept_kw("INTERRUPT")) {
+            cv.uses_udp = 1;
+            cv.uses_interrupts = 1;
+            emit(sfmt("mmi_udp_int(%s);", int_target()));
+            return;
+        }
+        if (accept_kw("SEND")) {
+            const char *ip, *port, *msg;
+
+            cv.uses_udp = 1;
+            ip = as_str(expr());
+            expect_op(",");
+            port = as_int(expr());
+            expect_op(",");
+            msg = as_str(expr());
+            emit(sfmt("mmg_udp_send(%s, %s, %s);", ip, port, msg));
+            return;
+        }
+        cv_err("WEB UDP takes SERVER PORT, INTERRUPT or SEND");
+    }
+    cv_err("this WEB command is not implemented yet - the family "
+           "arrives in stages (PLAN-web.md)");
 }
 
 /* mmb2c.py's do_onewire.

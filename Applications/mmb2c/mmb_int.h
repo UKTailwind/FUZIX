@@ -185,6 +185,26 @@ MMG_FN void mmi_mod_int(mm_int_fn fn)
 }
 #endif
 
+/*	WEB UDP INTERRUPT.  Registered here rather than in mmb_udp.h
+ *	because arming is this file's business (__mm_int_armed) - the
+ *	sprite pattern.  A 0 disarms, and the count follows it both
+ *	ways.  Compiled only when the program uses UDP. */
+#ifdef MMB_UDP_H
+static mm_int_fn mm_udp_fn;
+
+MMG_FN void mmi_udp_int(mm_int_fn fn)
+{
+	if (fn) {
+		if (mm_udp_fn == 0)
+			__mm_int_armed++;
+	} else if (mm_udp_fn) {
+		__mm_int_armed--;
+	}
+	mm_udp_fn = fn;
+	mm_udp_rx = 0;
+}
+#endif
+
 /*	SPRITE INTERRUPT / STINTERRUPT handlers.  Registered here rather
  *	than in mmb_sprite.h because arming is this file's business
  *	(__mm_int_armed), and the poll below already owns the scan order.
@@ -500,6 +520,27 @@ MMG_FN void mm_int_poll(void)
 		mm_play_kind = MMP_KIND_NONE;
 		mm_int_fire(mm_mod_fn);
 		return;
+	}
+#endif
+
+	/*	The network one-shots sit between the collision and pin
+	 *	scans, which is where the WebMite checks its own
+	 *	(MM_Misc.c:10015-10029).  Decimated on the console-key
+	 *	clock: the poll is a recvfrom, a syscall, and this runs
+	 *	after every statement. */
+#ifdef MMB_UDP_H
+	if (mm_udp_fn && mm_udp_fd >= 0) {
+		long long unow = MMI_US();
+
+		if (unow >= mm_udp_next) {
+			mm_udp_next = unow + MM_INT_CON_US;
+			mmg_udp_poll();
+			if (mm_udp_rx) {
+				mm_udp_rx = 0;
+				mm_int_fire((mm_int_fn)mm_udp_fn);
+				return;
+			}
+		}
 	}
 #endif
 

@@ -1815,6 +1815,18 @@ static MMINTEGER mm_us_now(void)
 {
 #if defined(MM_FCC) || defined(MM_HOSTED)
     return time_us64();
+#elif defined(_POSIX_C_SOURCE) && !defined(_WIN32) && !defined(MM_PC3)
+    /* WALL time, not clock(): glibc's clock() is CPU time, which
+       stops while PAUSE sleeps - so a Timer-bounded PAUSE loop never
+       timed out on the host, and anything decimated on mm_us was
+       starved the same way.  Found by the webudp gate test
+       (2026-08-21).  Only the native host gates ever get here: bcrun
+       defines MM_HOSTED (board and host alike) and takes the branch
+       above, so the kernel clock paths are untouched - the MM_PC3
+       exclusion is belt and braces. */
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (MMINTEGER)ts.tv_sec * 1000000 + (MMINTEGER)(ts.tv_nsec / 1000);
 #else
     return (MMINTEGER)((double)clock() * 1000000.0 / (double)CLOCKS_PER_SEC);
 #endif

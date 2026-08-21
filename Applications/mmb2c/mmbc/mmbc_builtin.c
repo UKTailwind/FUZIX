@@ -336,6 +336,17 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval("mm_errno()", TY_I);
     if (strcmp(up, "MM.ERRMSG$") == 0)
         return mkval("mm_errmsg()", TY_S);
+    if (strcmp(up, "MM.MESSAGE$") == 0) {
+        /* the last UDP datagram - the WebMite's messagebuff.  A static
+           in mmb_udp.h, not a scratch temp, so the reader costs
+           nothing and survives mm_release. */
+        cv.uses_udp = 1;
+        return mkval("mm_udp_message()", TY_S);
+    }
+    if (strcmp(up, "MM.ADDRESS$") == 0) {
+        cv.uses_udp = 1;
+        return mkval("mm_udp_address()", TY_S);
+    }
     if (strcmp(up, "MM.VER") == 0)
         return mkval("mm_ver()", TY_F);
     if (strcmp(up, "MM.DEVICE$") == 0)

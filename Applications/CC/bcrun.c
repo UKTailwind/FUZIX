@@ -23,11 +23,11 @@
 #include <stdint.h>
 #include <math.h>
 #include <time.h>
+#include <sys/socket.h>		/* the lc_socket family of libcalls */
+#include <netinet/in.h>
+#include <sys/ioctl.h>
 #ifdef __linux__
 #include <sys/mman.h>		/* executable code buffer for native fns */
-#ifdef MM_PC3
-#include <sys/ioctl.h>		/* the PSRAM heap request, once, at load */
-#endif
 #endif
 #include "bytecode.h"
 
@@ -1421,7 +1421,12 @@ static void lib_free(unsigned long ptr)
  *	they cannot be called directly, as the SDK is linked into the
  *	kernel and not into userland.
  */
+#ifndef __linux__
+/* Fuzix's sys/ioctl.h carries the request numbers but not the call -
+   that is syscalls.h - so declare it; the hosted build's sys/ioctl.h
+   declares it itself, differently, and must be left alone. */
 extern int ioctl(int, int, ...);
+#endif
 /* Fuzix's sys/time.h defines struct timeval but does not declare this. */
 extern int gettimeofday(struct timeval *, void *);
 
@@ -2072,6 +2077,203 @@ static void lc_unlink(void)
 	A = unlink(getstr((unsigned long)arg(0)));
 }
 
+/* ---- sockets ---------------------------------------------------------
+ *
+ *	Nine doors to the network syscalls, and nothing more: every WEB
+ *	family lives program-side in the mmb_net.h/mmb_udp.h/... headers
+ *	(PLAN-web.md §2.1), and any C program compiled by cc gets
+ *	sockets through the same names.
+ *
+ *	The ABI a program bakes in is FUZIX'S (mmb_net.h): on the board
+ *	these are straight calls.  A Linux-hosted bcrun - the fcc and
+ *	qemu gates - translates the handful of values that differ:
+ *	AF_INET 1->2, SOCK_STREAM 3->1, SOCK_RAW 1->3, O_NDELAY
+ *	16->O_NONBLOCK, F_GETFL/F_SETFL 0/1->host, IPPROTO_TLS
+ *	254->plain TCP (TLS is the board kernel's), and the family
+ *	field inside a sockaddr.  The layout itself is byte-identical
+ *	(family u16 LE, port and address network order, 16 bytes), so
+ *	only the family value is patched, never the shape.
+ */
+
+#ifdef __linux__
+static int nx_type(int t)
+{
+	if (t == 3)
+		return SOCK_STREAM;
+	if (t == 2)
+		return SOCK_DGRAM;
+	if (t == 1)
+		return SOCK_RAW;
+	return t;
+}
+
+/* a program-built (Fuzix-family) sockaddr_in, patched for the host */
+static void nx_sa_in(struct sockaddr_in *dst, unsigned long va)
+{
+	memcpy(dst, vptr(va), 16);
+	dst->sin_family = AF_INET;
+}
+#endif
+
+static void lc_socket(void)
+{
+	int d = (int)arg(0), t = (int)arg(1), p = (int)arg(2);
+
+#ifdef __linux__
+	A = socket(d == 1 ? AF_INET : d, nx_type(t), p == 254 ? 0 : p);
+#else
+	A = socket(d, t, p);
+#endif
+}
+
+static void lc_connect(void)
+{
+	unsigned long sa = arg(1);
+
+	if (VM_OOBN(sa, 16)) fault("bad address");
+#ifdef __linux__
+	{
+		struct sockaddr_in a;
+		nx_sa_in(&a, sa);
+		A = connect((int)arg(0), (struct sockaddr *)&a, sizeof(a));
+	}
+#else
+	A = connect((int)arg(0), (struct sockaddr *)vptr(sa), (int)arg(2));
+#endif
+}
+
+static void lc_bind(void)
+{
+	unsigned long sa = arg(1);
+
+	if (VM_OOBN(sa, 16)) fault("bad address");
+#ifdef __linux__
+	{
+		struct sockaddr_in a;
+		nx_sa_in(&a, sa);
+		A = bind((int)arg(0), (struct sockaddr *)&a, sizeof(a));
+	}
+#else
+	A = bind((int)arg(0), (struct sockaddr *)vptr(sa), (int)arg(2));
+#endif
+}
+
+static void lc_listen(void)
+{
+	A = listen((int)arg(0), (int)arg(1));
+}
+
+static void lc_accept(void)
+{
+	unsigned long sa = arg(1), sl = arg(2);
+	struct sockaddr_in a;
+	socklen_t al = sizeof(a);
+	int r = accept((int)arg(0), (struct sockaddr *)&a, &al);
+
+#ifdef __linux__
+	if (r >= 0)
+		a.sin_family = 1;	/* back to the Fuzix value */
+#endif
+	if (sa) {
+		if (VM_OOBN(sa, 16)) fault("bad address");
+		if (r >= 0)
+			memcpy(vptr(sa), &a, 16);
+	}
+	if (sl) {
+		if (VM_OOBN(sl, 4)) fault("bad address");
+		wr32(sl, 16);
+	}
+	A = r;
+}
+
+static void lc_sendto(void)
+{
+	unsigned long b = arg(1), n = arg(2), sa = arg(4);
+
+	if (VM_OOBN(b, n)) fault("bad address");
+	if (sa == 0) {
+		/* connected-socket form; write(), because Fuzix libc has
+		   no send() and flags have nothing to say here */
+		A = write((int)arg(0), vptr(b), n);
+		return;
+	}
+	if (VM_OOBN(sa, 16)) fault("bad address");
+#ifdef __linux__
+	{
+		struct sockaddr_in a;
+		nx_sa_in(&a, sa);
+		A = sendto((int)arg(0), vptr(b), n, (int)arg(3),
+			   (struct sockaddr *)&a, sizeof(a));
+	}
+#else
+	A = sendto((int)arg(0), vptr(b), n, (int)arg(3),
+		   (struct sockaddr *)vptr(sa), (int)arg(5));
+#endif
+}
+
+static void lc_recvfrom(void)
+{
+	unsigned long b = arg(1), n = arg(2), sa = arg(4), sl = arg(5);
+	struct sockaddr_in a;
+	socklen_t al = sizeof(a);
+	int r;
+
+	if (VM_OOBN(b, n)) fault("bad address");
+	r = recvfrom((int)arg(0), vptr(b), n, (int)arg(3),
+		     sa ? (struct sockaddr *)&a : NULL, sa ? &al : NULL);
+#ifdef __linux__
+	if (r >= 0 && sa)
+		a.sin_family = 1;	/* back to the Fuzix value */
+#endif
+	if (sa) {
+		if (VM_OOBN(sa, 16)) fault("bad address");
+		if (r >= 0)
+			memcpy(vptr(sa), &a, 16);
+	}
+	if (sl) {
+		if (VM_OOBN(sl, 4)) fault("bad address");
+		wr32(sl, 16);
+	}
+	A = r;
+}
+
+static void lc_ioctl(void)
+{
+	int rq = (int)arg(1);
+	unsigned long p = arg(2);
+
+#ifdef __linux__
+	/* The board-only requests (SIOCTLSHOST 0x0420, NETIOC_*
+	   0x0040..0x0043) succeed silently, so the same .bc
+	   structure-tests under the host gates. */
+	if (rq == 0x0420 || (rq >= 0x0040 && rq <= 0x0043)) {
+		A = 0;
+		return;
+	}
+#endif
+	if (p && VM_OOBN(p, 1)) fault("bad address");
+	A = ioctl((int)arg(0), rq, p ? vptr(p) : NULL);
+}
+
+static void lc_fcntl(void)
+{
+	int c = (int)arg(1);
+	long v = arg(2);
+
+#ifdef __linux__
+	if (c == 0) {			/* F_GETFL */
+		long r = fcntl((int)arg(0), F_GETFL, 0);
+		A = (r < 0) ? r : ((r & O_NONBLOCK) ? 16 : 0);
+		return;
+	}
+	if (c == 1) {			/* F_SETFL */
+		A = fcntl((int)arg(0), F_SETFL, (v & 16) ? O_NONBLOCK : 0);
+		return;
+	}
+#endif
+	A = fcntl((int)arg(0), c, (int)v);
+}
+
 static void lc_adval(void)
 {
 	A = lib_adval((int)arg(0));
@@ -2136,6 +2338,11 @@ static const struct {
 	{ "open", lc_open }, { "creat", lc_creat }, { "close", lc_close },
 	{ "read", lc_read }, { "write", lc_write }, { "lseek", lc_lseek },
 	{ "unlink", lc_unlink },
+	{ "socket", lc_socket }, { "connect", lc_connect },
+	{ "bind", lc_bind }, { "listen", lc_listen },
+	{ "accept", lc_accept },
+	{ "sendto", lc_sendto }, { "recvfrom", lc_recvfrom },
+	{ "ioctl", lc_ioctl }, { "fcntl", lc_fcntl },
 	{ "adval", lc_adval }, { "time_us", lc_time_us },
 	{ "time_us64", lc_time_us64 },
 	{ NULL, NULL }

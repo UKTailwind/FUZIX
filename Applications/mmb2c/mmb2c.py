@@ -104,6 +104,7 @@ BUILTINS = {
     'MM.ONEWIRE': (0, 0), 'MM.I2C': (0, 0),
     'POS': (0, 0),
     'MM.ERRNO': (0, 0), 'MM.ERRMSG$': (0, 0),
+    'MM.MESSAGE$': (0, 0), 'MM.ADDRESS$': (0, 0),
     'MM.VER': (0, 0), 'MM.DEVICE$': (0, 0), 'MM.CMDLINE$': (0, 0),
     'MM.FONTHEIGHT': (0, 0), 'MM.FONTWIDTH': (0, 0),
     'MM.HPOS': (0, 0), 'MM.VPOS': (0, 0),
@@ -716,6 +717,8 @@ class Conv(object):
         self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
         self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
         self.uses_onewire = False   # ONEWIRE/TEMPR: mmb_onewire.h
+        self.uses_net = False       # the socket floor: mmb_net.h
+        self.uses_udp = False       # WEB UDP: mmb_udp.h
         self.uses_play = False
         self.uses_blit = False      # BLIT family: mmb_blit.h
         self.uses_flash = False     # pseudo flash slots: mmb_flash.h
@@ -2245,6 +2248,15 @@ class Conv(object):
             return ('mm_errno()', TY_I)
         if up == 'MM.ERRMSG$':
             return ('mm_errmsg()', TY_S)
+        if up == 'MM.MESSAGE$':
+            # the last UDP datagram - the WebMite's messagebuff.  A
+            # static in mmb_udp.h, not a scratch temp, so the reader
+            # costs nothing and survives mm_release.
+            self.uses_udp = True
+            return ('mm_udp_message()', TY_S)
+        if up == 'MM.ADDRESS$':
+            self.uses_udp = True
+            return ('mm_udp_address()', TY_S)
         if up == 'MM.VER':
             return ('mm_ver()', TY_F)
         if up == 'MM.DEVICE$':
@@ -3673,6 +3685,15 @@ class Conv(object):
                 self.err('OPTION CONSOLE wants SERIAL, SCREEN, BOTH '
                          'or NONE')
             self.emit('mm_console(%d);' % mode)
+            return
+        if t[2] == 'UDP' and self.is_kw('SERVER', 1) and \
+                self.is_kw('PORT', 2):
+            # The WebMite's saved option, as the same statement WEB UDP
+            # SERVER PORT emits - PLAN-web.md §3.2, so a WebMite
+            # program's own OPTION line keeps working.
+            self.i += 3
+            self.uses_udp = True
+            self.emit('mmg_udp_port(%s);' % self.as_int(self.expr()))
             return
         self.skip_statement()
 
@@ -5565,6 +5586,10 @@ class Conv(object):
             return
         if up == 'I2C':
             self.do_i2c0()
+            return
+        if up == 'WEB':
+            self.i += 1
+            self.do_web()
             return
         if up == 'ONEWIRE':
             self.i += 1
@@ -7704,6 +7729,44 @@ class Conv(object):
                              addr, opt, n, dst))
             self.comms_rx('I2C2 READ', n, call)
 
+    def do_web(self):
+        """The WEB family, arriving in stages (PLAN-web.md §11).
+        Stage 1 is UDP:
+
+           WEB UDP SERVER PORT n     bind the receive socket
+           WEB UDP INTERRUPT sub|0   fire on a received datagram
+           WEB UDP SEND ip$, port, msg$
+
+        SERVER PORT is the WebMite's saved OPTION UDP SERVER PORT as a
+        statement - a compiled program owns its own sockets
+        (PLAN-web.md §3.2); the OPTION spelling is accepted as an
+        alias so WebMite listings move across unedited.  Anything else
+        under WEB names the stage it is waiting on rather than
+        pretending to be an unknown command."""
+        if self.accept_kw('UDP'):
+            if self.is_kw('SERVER') and self.is_kw('PORT', 1):
+                self.i += 2
+                self.uses_udp = True
+                self.emit('mmg_udp_port(%s);' % self.as_int(self.expr()))
+                return
+            if self.accept_kw('INTERRUPT'):
+                self.uses_udp = True
+                self.uses_interrupts = True
+                self.emit('mmi_udp_int(%s);' % self.int_target())
+                return
+            if self.accept_kw('SEND'):
+                self.uses_udp = True
+                ip = self.as_str(self.expr())
+                self.expect_op(',')
+                port = self.as_int(self.expr())
+                self.expect_op(',')
+                msg = self.as_str(self.expr())
+                self.emit('mmg_udp_send(%s, %s, %s);' % (ip, port, msg))
+                return
+            self.err("WEB UDP takes SERVER PORT, INTERRUPT or SEND")
+        self.err("this WEB command is not implemented yet - the family "
+                 "arrives in stages (PLAN-web.md)")
+
     def do_onewire(self):
         """ONEWIRE RESET pin
            ONEWIRE WRITE pin, flag, count, <data>
@@ -8475,6 +8538,15 @@ class Conv(object):
             wr('#include "mmb_misc.h"\n')
         if self.uses_pulse:
             wr('#include "mmb_pulse.h"\n')
+        # The socket floor, then its families - before mmb_int.h,
+        # whose network poll exists only under their include guards,
+        # the mmb_sprite.h pattern.
+        if self.uses_udp:
+            self.uses_net = True
+        if self.uses_net:
+            wr('#include "mmb_net.h"\n')
+        if self.uses_udp:
+            wr('#include "mmb_udp.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a
         # program that arms an interrupt carries any of it.
         if self.uses_interrupts:

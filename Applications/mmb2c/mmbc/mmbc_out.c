@@ -468,6 +468,15 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_misc.h\"\n");
     if (cv.uses_pulse)
         fprintf(f, "#include \"mmb_pulse.h\"\n");
+    /* The socket floor, then its families - before mmb_int.h, whose
+       network poll exists only under their include guards, the
+       mmb_sprite.h pattern. */
+    if (cv.uses_udp)
+        cv.uses_net = 1;
+    if (cv.uses_net)
+        fprintf(f, "#include \"mmb_net.h\"\n");
+    if (cv.uses_udp)
+        fprintf(f, "#include \"mmb_udp.h\"\n");
     /* After mmb_gpio.h, which it uses to read the pins.  Only a program
        that arms an interrupt carries any of it. */
     if (cv.uses_interrupts)

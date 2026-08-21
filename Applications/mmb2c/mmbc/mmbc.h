@@ -396,6 +396,8 @@ struct conv {
     int uses_pulse;             /* PULSE: pulls in mmb_pulse.h */
     int uses_onewire;           /* ONEWIRE/TEMPR: mmb_onewire.h */
     int uses_comms;             /* I2C/SPI data forms: mmb_comms.h */
+    int uses_net;               /* the socket floor: mmb_net.h */
+    int uses_udp;               /* WEB UDP: mmb_udp.h */
     int uses_wait;              /* a serviced PAUSE: pulls in mmb_wait.h */
     int uses_play;              /* PLAY: emit the volume it remembers */
     int uses_blit;              /* BLIT family: mmb_blit.h */

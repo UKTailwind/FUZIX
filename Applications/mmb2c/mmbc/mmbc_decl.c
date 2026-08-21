@@ -621,6 +621,16 @@ void do_option(void)
         emit(sfmt("mm_console(%d);", mode));
         return;
     }
+    if (strcmp(t->up, "UDP") == 0 && is_kw("SERVER", 1)
+        && is_kw("PORT", 2)) {
+        /* The WebMite's saved option, as the same statement WEB UDP
+           SERVER PORT emits - PLAN-web.md §3.2, so a WebMite
+           program's own OPTION line keeps working. */
+        cv.i += 3;
+        cv.uses_udp = 1;
+        emit(sfmt("mmg_udp_port(%s);", as_int(expr())));
+        return;
+    }
     skip_statement();
 }
 
