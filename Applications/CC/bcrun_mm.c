@@ -988,15 +988,10 @@ static unsigned long mmrt_bytes(void)
 
 static unsigned long mmrt_reserve(unsigned long base)
 {
-	unsigned long i;
-
-	/* sym_name, not strtab: the loader no longer holds every name -
-	   it fetches the few it wants out of the object file. */
-	for (i = 0; i < h.h_nsym; i++)
-		if (sym[i].s_type == BC_SYM_LIB &&
-		    strncmp(sym_name((unsigned)i), "mm_", 3) == 0)
-			break;
-	if (i == h.h_nsym)
+	/* The one answer scan_mm_imports settled before mem[] was sized:
+	   deciding here from the in-memory symbols again is how the pool
+	   could exist without having been counted, or the reverse. */
+	if (!mm_imports)
 		return base;
 
 	base = (base + 7) & ~7UL;

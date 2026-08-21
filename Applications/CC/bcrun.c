@@ -2294,6 +2294,54 @@ static unsigned long symval(unsigned s)
 
 static long file_base;		/* header offset: 0, or past a #! line */
 
+/*
+ *	Does this object import any mm_* runtime name?
+ *
+ *	Decided ONCE, streamed straight off the file before mem[] is
+ *	sized - the symbol table is not in memory yet, and holding it
+ *	across the mem[] malloc is exactly what the loader is arranged
+ *	to avoid.  Both consumers share the answer: the sizing adds the
+ *	4,240-byte scratch/by-ref pool only for a program that will use
+ *	it (it was counted into EVERY program's space, C programs
+ *	included), and mmrt_reserve carves the pool from the same flag
+ *	instead of scanning the symbols a second time.  One decision,
+ *	so the two can never disagree about whether the pool exists.
+ *
+ *	Cost: one 12-byte read per symbol, plus a seek and a 3-byte
+ *	read per library symbol until the first mm_ name.  cc2 numbers
+ *	library symbols first, so a BASIC program answers within a few
+ *	records; a C program pays a seek per import, once, at load.
+ */
+static int mm_imports;
+
+static void scan_mm_imports(FILE *f)
+{
+	long symoff = file_base + (long)(sizeof(h) + h.h_code + h.h_data
+			+ h.h_nfixup * sizeof(struct bc_fixup));
+	long stroff = symoff + (long)(h.h_nsym * sizeof(struct bc_sym));
+	unsigned long i;
+
+	mm_imports = 0;
+	for (i = 0; i < h.h_nsym; i++) {
+		struct bc_sym s;
+		char nm[3];
+
+		if (fseek(f, symoff + (long)(i * sizeof(struct bc_sym)),
+			  SEEK_SET) ||
+		    fread(&s, sizeof(s), 1, f) != 1)
+			return;
+		if (s.s_type != BC_SYM_LIB)
+			continue;
+		if (fseek(f, stroff + (long)s.s_name, SEEK_SET) ||
+		    fread(nm, 1, 3, f) != 3)
+			return;
+		if (nm[0] == 'm' && nm[1] == 'm' && nm[2] == '_') {
+			mm_imports = 1;
+			return;
+		}
+	}
+}
+
 static void load(const char *path)
 {
 	FILE *f = fopen(path, "rb");
@@ -2364,6 +2412,15 @@ static void load(const char *path)
 			(void *)code, (unsigned long)h.h_code,
 			(unsigned long)h.h_entry);
 
+	/* Settle whether the mm runtime pool will exist BEFORE mem[] is
+	   sized; the file is put back where the data read expects it. */
+	{
+		long here = ftell(f);
+		scan_mm_imports(f);
+		if (fseek(f, here, SEEK_SET))
+			fault("seek");
+	}
+
 #ifdef __linux__
 	/* Linux (and so qemu-arm, the development-side executor for
 	   native code) enforces NX on malloc'd memory; the board's flat
@@ -2405,8 +2462,13 @@ static void load(const char *path)
 	 * 17 qemu tests failed the moment this was not conditional.
 	 */
 	{
+		/* The mm pool is counted only for a program that imports
+		   the runtime: it was 4,240 bytes of every C program's
+		   space, and scan_mm_imports above is the same answer
+		   mmrt_reserve will act on, so the two cannot drift. */
 		unsigned long need = NULLGUARD + h.h_data + 8 + h.h_bss
-				     + mmrt_bytes() + STACKROOM + MEM_SLACK;
+				     + (mm_imports ? mmrt_bytes() : 0)
+				     + STACKROOM + MEM_SLACK;
 		const char *e = getenv("BCRUN_MEM");
 
 		if (e)
@@ -3583,16 +3645,6 @@ static int run(void)
 static int prog_argc;
 static char **prog_argv;
 
-/*
- *	The arguments the PROGRAM was given - everything after the .bc
- *	name.  A translated program's main() is dispatched with no
- *	arguments (see run()), so MM.CMDLINE$ cannot come from its own
- *	argv the way it does in the hosted build; bcrun holds the real
- *	command line and hands it over through w_argv_bind.
- */
-static int prog_argc;
-static char **prog_argv;
-
 int main(int argc, char *argv[])
 {
 	int i = 1;
@@ -3617,8 +3669,6 @@ int main(int argc, char *argv[])
 	}
 	if (prof_on || getenv("BCRUN_SITES"))
 		atexit(prof_dump);	/* mm_end() exits through here */
-	prog_argc = argc - i;
-	prog_argv = argv + i;
 	prog_argc = argc - i;
 	prog_argv = argv + i;
 	load(argv[i]);

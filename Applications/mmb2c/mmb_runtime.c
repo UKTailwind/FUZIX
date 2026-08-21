@@ -59,7 +59,14 @@ static int mm_poisoned(void)
  * Two characters per marker, so the fatal run reads as a ladder:
  * the last rung printed names the code that never came back.
  */
-#if defined(MM_PC3) || defined(__FUZIX__)
+/*
+ * -DMM_DIAG compiles the hunt kit back in; without it every marker is
+ * a no-op costing nothing.  Off by default since 2026-08-21: the hunts
+ * these served (picofrog, the CORE0 stall) are closed, and the
+ * always-resident cost - text plus a 256-byte buffer in every process -
+ * is exactly the class of weight this runtime is being slimmed of.
+ */
+#if defined(MM_DIAG) && (defined(MM_PC3) || defined(__FUZIX__))
 #define MM_TB_FR ((volatile unsigned int *)0x40078018)  /* UARTFR  */
 #define MM_TB_DR ((volatile unsigned int *)0x40078000)  /* UARTDR  */
 static int mm_tb_on(void)
@@ -3745,6 +3752,13 @@ static int mm_rd1(void)
  * backspace handling, which is the whole reason the per-call flip
  * existed in the first place.
  */
+/* MM_RAWDEBUG tracing, part of the MM_DIAG hunt kit (see mm_tb). */
+#ifdef MM_DIAG
+#define MM_RAWDBG getenv("MM_RAWDEBUG")
+#else
+#define MM_RAWDBG 0
+#endif
+
 static struct termios mm_tty_cooked;    /* as we found it */
 static struct termios mm_tty_raw;       /* as we want it */
 static int mm_tty_held;                 /* we have it raw now */
@@ -3778,10 +3792,10 @@ static int mm_raw_hold(void)
     if (mm_tty_held)
         return 1;
     if (!mm_tty_have) {
-        if (getenv("MM_RAWDEBUG"))
+        if (MM_RAWDBG)
             fprintf(stderr, "[rawhold: isatty=%d]\r\n", isatty(0));
         if (!isatty(0) || tcgetattr(0, &mm_tty_cooked) != 0) {
-            if (getenv("MM_RAWDEBUG"))
+            if (MM_RAWDBG)
                 fprintf(stderr, "[rawhold: no tty, errno %d]\r\n", errno);
             return 0;
         }
@@ -3792,12 +3806,12 @@ static int mm_raw_hold(void)
         mm_tty_have = 1;
     }
     if (tcsetattr(0, TCSANOW, &mm_tty_raw) != 0) {
-        if (getenv("MM_RAWDEBUG"))
+        if (MM_RAWDBG)
             fprintf(stderr, "[rawhold: tcsetattr failed, errno %d]\r\n",
                     errno);
         return 0;
     }
-    if (getenv("MM_RAWDEBUG")) {
+    if (MM_RAWDBG) {
         struct termios back;
         if (tcgetattr(0, &back) == 0)
             fprintf(stderr, "[rawhold: held, lflag 0x%lx VMIN %d]\r\n",
@@ -4664,6 +4678,16 @@ MMINTEGER mm_bg(void) { return mm_gfx_bg; }
  * is 5142ns against 350ns in-process, which over the solar eclipse's
  * 219,063 routine calls is 40% of its running time.
  */
+/*
+ * NOT COMPILED INTO BCRUN.  Under MM_HOSTED the three allocator names
+ * resolve to bcrun_mm.c's w_heap/w_lheap/w_lfree, which take blocks
+ * from the VM heap (PSRAM on the board) - these bodies were never
+ * reachable there, but being extern the linker kept them anyway: 168
+ * bytes of text and the 4K arena below as bss IN EVERY PROCESS, for
+ * code nothing could call.
+ */
+#ifndef MM_HOSTED
+
 void *mm_heap(unsigned long n)
 {
     void *p = malloc(n ? n : (unsigned long)1);
@@ -4743,6 +4767,8 @@ void mm_lfree(void *p)
     }
     free(p);
 }
+
+#endif /* !MM_HOSTED - the allocators live in bcrun_mm.c there */
 
 /* Defined with the FRAMEBUFFER block at the end of the file, and called
  * from both MODE implementations: a mode change discards the off-screen
@@ -4872,6 +4898,7 @@ struct mm_gfx_fontinfo {
  *	trace at the statement boundary shows only that the statement
  *	never finished.  This sits at the boundary that matters.
  */
+#ifdef MM_DIAG
 static int mm_iotrace(void)
 {
     static int cached = -1;
@@ -4890,6 +4917,13 @@ static int mm_txtcopy(void)
         cached = getenv("MM_TXTCOPY") ? 1 : 0;
     return cached;
 }
+#else
+/* Constant 0 leaves every `if (mm_iotrace())` block dead, and the
+   compiler drops the block, its strings and mm_gtext's copy buffer
+   with it.  See the MM_DIAG note above mm_tb. */
+#define mm_iotrace() 0
+#define mm_txtcopy() 0
+#endif
 
 /*
  *	...and then WAIT for it to get out.
@@ -4903,6 +4937,7 @@ static int mm_txtcopy(void)
  *	Busy, not a sleep: this must not depend on the scheduler running
  *	again, which is the thing in question.
  */
+#ifdef MM_DIAG
 static void mm_iodrain(void)
 {
     MMINTEGER t0 = mm_us();
@@ -4910,6 +4945,9 @@ static void mm_iodrain(void)
     while (mm_us() - t0 < 30000)
         ;
 }
+#else
+#define mm_iodrain() ((void)0)
+#endif
 
 MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h)
 {
