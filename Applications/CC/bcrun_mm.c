@@ -545,31 +545,9 @@ static void w_fb_cur(void)   { A = mm_fb_cur(); }
 static void w_fb_copy(void)  { mm_fb_copy(LL(0), LL(2), LL(4)); A = 0; }
 static void w_fb_wait(void)  { mm_fb_wait(); A = 0; }
 
-/* LONGSTRING */
-static void w_ls_len(void)   { A = mm_ls_len(PI(0)); }
-static void w_ls_clear(void) { mm_ls_clear(PI(0), I(1)); A = 0; }
-static void w_ls_append(void){ mm_ls_append(PI(0), I(1), Ps(2)); A = 0; }
-static void w_ls_load(void)  { mm_ls_load(PI(0), I(1), LL(2), Ps(4)); A = 0; }
-static void w_ls_copy(void)  { mm_ls_copy(PI(0), I(1), PI(2)); A = 0; }
-static void w_ls_concat(void){ mm_ls_concat(PI(0), I(1), PI(2)); A = 0; }
-static void w_ls_left(void)  { mm_ls_left(PI(0), I(1), PI(2), LL(3)); A = 0; }
-static void w_ls_right(void) { mm_ls_right(PI(0), I(1), PI(2), LL(3)); A = 0; }
-static void w_ls_mid(void)   { mm_ls_mid(PI(0), I(1), PI(2), LL(3), LL(5)); A = 0; }
-static void w_ls_replace(void){ mm_ls_replace(PI(0), I(1), Ps(2), LL(3)); A = 0; }
-/* (array, cells, start, num, string) - 1 + 1 + 2 + 2 slots, so the
-   string lands at 6.  Count them; a wrong index here reads half of the
-   previous argument and the failure is silent. */
-static void w_ls_lmid(void)  { mm_ls_lmid(PI(0), I(1), LL(2), LL(4), Ps(6)); A = 0; }
-static void w_ls_resize(void){ mm_ls_resize(PI(0), I(1), LL(2)); A = 0; }
-static void w_ls_setbyte(void){ mm_ls_setbyte(PI(0), I(1), LL(2), LL(4)); A = 0; }
-static void w_ls_trim(void)  { mm_ls_trim(PI(0), I(1), LL(2)); A = 0; }
-static void w_ls_ucase(void) { mm_ls_ucase(PI(0)); A = 0; }
-static void w_ls_lcase(void) { mm_ls_lcase(PI(0)); A = 0; }
+/* LONGSTRING is program-side now (mmb_lstring.h) except the two file
+   forms, whose channel is bcrun's own stdio stream. */
 static void w_ls_print(void) { mm_ls_print(LL(0), PI(2), I(3)); A = 0; }
-static void w_ls_getstr(void){ A = mm_off(mm_ls_getstr(PI(0), LL(1), LL(3))); }
-static void w_ls_getbyte(void){ A = mm_ls_getbyte(PI(0), LL(1), I(3)); }
-static void w_ls_instr(void) { A = mm_ls_instr(PI(0), Ps(1), LL(2)); }
-static void w_ls_compare(void){ A = mm_ls_compare(PI(0), PI(1)); }
 static void w_ls_input(void) { A = mm_ls_input(PI(0), I(1), LL(2), LL(4)); }
 
 /* GOSUB / RETURN */
@@ -847,27 +825,7 @@ static const struct mmwrap {
 	{ "mm_fb_copy",		w_fb_copy },
 	{ "mm_fb_merge",	w_fb_merge },
 	{ "mm_fb_wait",		w_fb_wait },
-	{ "mm_ls_len",		w_ls_len },
-	{ "mm_ls_clear",	w_ls_clear },
-	{ "mm_ls_append",	w_ls_append },
-	{ "mm_ls_load",		w_ls_load },
-	{ "mm_ls_copy",		w_ls_copy },
-	{ "mm_ls_concat",	w_ls_concat },
-	{ "mm_ls_left",		w_ls_left },
-	{ "mm_ls_right",	w_ls_right },
-	{ "mm_ls_mid",		w_ls_mid },
-	{ "mm_ls_replace",	w_ls_replace },
-	{ "mm_ls_lmid",	w_ls_lmid },
-	{ "mm_ls_resize",	w_ls_resize },
-	{ "mm_ls_setbyte",	w_ls_setbyte },
-	{ "mm_ls_trim",		w_ls_trim },
-	{ "mm_ls_ucase",	w_ls_ucase },
-	{ "mm_ls_lcase",	w_ls_lcase },
 	{ "mm_ls_print",	w_ls_print },
-	{ "mm_ls_getstr",	w_ls_getstr },
-	{ "mm_ls_getbyte",	w_ls_getbyte },
-	{ "mm_ls_instr",	w_ls_instr },
-	{ "mm_ls_compare",	w_ls_compare },
 	{ "mm_ls_input",	w_ls_input },
 	{ "mm_gosub_push",	w_gosub_push },
 	{ "mm_gosub_pop",	w_gosub_pop },

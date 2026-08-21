@@ -2536,193 +2536,15 @@ void mm_set_time(const char *t)
 #define MM_LS_DATA(a)  ((char *)&(a)[1])
 #define MM_LS_CAP(c)   (((c) - 1) * (int)sizeof(MMINTEGER))
 
-MMINTEGER mm_ls_len(const MMINTEGER *a) { return a[0] < 0 ? 0 : a[0]; }
-
-static void mm_ls_fit(int cells, MMINTEGER want)
-{
-    if (want < 0 || want > MM_LS_CAP(cells))
-        mm_error("Long string is too small for this operation");
-}
-
-void mm_ls_clear(MMINTEGER *a, int cells) { (void)cells; a[0] = 0; }
-
-void mm_ls_append(MMINTEGER *a, int cells, const char *s)
-{
-    MMINTEGER n = mm_ls_len(a), k = mm_slen(s);
-    mm_ls_fit(cells, n + k);
-    memcpy(MM_LS_DATA(a) + n, s + 1, (size_t)k);
-    a[0] = n + k;
-}
-
-void mm_ls_load(MMINTEGER *a, int cells, MMINTEGER n, const char *s)
-{
-    MMINTEGER k = mm_slen(s);
-    if (n < 0) n = 0;
-    if (n > k) n = k;
-    mm_ls_fit(cells, n);
-    memcpy(MM_LS_DATA(a), s + 1, (size_t)n);
-    a[0] = n;
-}
-
-void mm_ls_copy(MMINTEGER *d, int dcells, const MMINTEGER *s)
-{
-    MMINTEGER n = mm_ls_len(s);
-    mm_ls_fit(dcells, n);
-    memmove(MM_LS_DATA(d), MM_LS_DATA((MMINTEGER *)s), (size_t)n);
-    d[0] = n;
-}
-
-void mm_ls_concat(MMINTEGER *d, int dcells, const MMINTEGER *s)
-{
-    MMINTEGER n = mm_ls_len(d), k = mm_ls_len(s);
-    mm_ls_fit(dcells, n + k);
-    memmove(MM_LS_DATA(d) + n, MM_LS_DATA((MMINTEGER *)s), (size_t)k);
-    d[0] = n + k;
-}
-
-void mm_ls_left(MMINTEGER *d, int dcells, const MMINTEGER *s, MMINTEGER n)
-{
-    MMINTEGER k = mm_ls_len(s);
-    if (n < 0) n = 0;
-    if (n > k) n = k;
-    mm_ls_fit(dcells, n);
-    memmove(MM_LS_DATA(d), MM_LS_DATA((MMINTEGER *)s), (size_t)n);
-    d[0] = n;
-}
-
-void mm_ls_right(MMINTEGER *d, int dcells, const MMINTEGER *s, MMINTEGER n)
-{
-    MMINTEGER k = mm_ls_len(s);
-    if (n < 0) n = 0;
-    if (n > k) n = k;
-    mm_ls_fit(dcells, n);
-    memmove(MM_LS_DATA(d), MM_LS_DATA((MMINTEGER *)s) + (k - n), (size_t)n);
-    d[0] = n;
-}
-
-void mm_ls_mid(MMINTEGER *d, int dcells, const MMINTEGER *s,
-               MMINTEGER start, MMINTEGER n)
-{
-    MMINTEGER k = mm_ls_len(s), avail;
-    if (start < 1) start = 1;
-    if (start > k) { d[0] = 0; return; }
-    avail = k - start + 1;
-    if (n < 0 || n > avail) n = avail;
-    mm_ls_fit(dcells, n);
-    memmove(MM_LS_DATA(d), MM_LS_DATA((MMINTEGER *)s) + (start - 1), (size_t)n);
-    d[0] = n;
-}
-
-void mm_ls_replace(MMINTEGER *a, int cells, const char *s, MMINTEGER start)
-{
-    MMINTEGER k = mm_slen(s);
-    if (start < 1) start = 1;
-    mm_ls_fit(cells, start - 1 + k);
-    memcpy(MM_LS_DATA(a) + (start - 1), s + 1, (size_t)k);
-    if (start - 1 + k > mm_ls_len(a)) a[0] = start - 1 + k;
-}
-
-/*
- * LMID(a(), start [, num]) = s$
- *
- * MMBasic's cmd_lmid (MM_Misc.c:1192), and it is NOT the long-string
- * twin of LONGSTRING REPLACE above.  REPLACE overwrites in place;
- * this SPLICES - num bytes at start are taken out and the string put
- * in, so the long string gets longer or shorter unless the two happen
- * to be the same length.  Leaving num out means "as many as the
- * replacement has", which is the overwrite case and the common one.
- *
- * The selection is checked against the current length before the
- * result is checked against the capacity, so a program that asks for
- * an impossible slice hears about the slice rather than about the
- * size.
- *
- * THE BOUND IS ONE TIGHTER THAN MMBASIC'S, deliberately.  cmd_lmid
- * tests "start + (num - 1) - 1 > currentlength", which is off by one
- * and lets a selection run one byte past the end: LMID(a(), 10, 2) on
- * a ten-byte string passes there, and the tail it then has to move is
- * minus one byte long.  Here that is refused.  Erring on a slice that
- * does not exist is a better answer than a memmove of (size_t)-1, and
- * no program that stays inside its string can tell the difference.
- */
-void mm_ls_lmid(MMINTEGER *a, int cells, MMINTEGER start, MMINTEGER num,
-                const char *s)
-{
-    MMINTEGER cur = mm_ls_len(a);
-    MMINTEGER rl = mm_slen(s);
-    MMINTEGER change;
-
-    if (start < 1 || start > cur) {
-        mm_error("Start position is out of bounds");
-        return;
-    }
-    if (num < 0)
-        num = rl;               /* omitted: as long as the replacement */
-    if (num > cur) {
-        mm_error("Selection exceeds length of string");
-        return;
-    }
-    if (start + num - 1 > cur) {
-        mm_error("Selection exceeds length of string");
-        return;
-    }
-    start--;                    /* position 1 is offset 0 */
-    change = rl - num;
-    if (change == 0) {
-        memcpy(MM_LS_DATA(a) + start, s + 1, (size_t)rl);
-        return;
-    }
-    mm_ls_fit(cells, cur + change);
-    /*	Move the tail before writing, and move it with memmove: the two
-     *	regions overlap whenever the replacement is shorter. */
-    memmove(MM_LS_DATA(a) + start + rl, MM_LS_DATA(a) + start + num,
-            (size_t)(cur - start - num));
-    memcpy(MM_LS_DATA(a) + start, s + 1, (size_t)rl);
-    a[0] = cur + change;
-}
-
-void mm_ls_resize(MMINTEGER *a, int cells, MMINTEGER n)
-{
-    mm_ls_fit(cells, n);
-    a[0] = n;
-}
-
-void mm_ls_setbyte(MMINTEGER *a, int cells, MMINTEGER n, MMINTEGER v)
-{
-    /* SETBYTE and LGETBYTE respect OPTION BASE; the caller has already
-       folded the base in, so n is 0 based here */
-    mm_ls_fit(cells, n + 1);
-    MM_LS_DATA(a)[n] = (char)(unsigned char)(v & 0xFF);
-    if (n + 1 > mm_ls_len(a)) a[0] = n + 1;
-}
-
-void mm_ls_trim(MMINTEGER *a, int cells, MMINTEGER n)
-{
-    MMINTEGER k = mm_ls_len(a);
-    (void)cells;
-    if (n < 0) n = 0;
-    if (n > k) n = k;
-    memmove(MM_LS_DATA(a), MM_LS_DATA(a) + n, (size_t)(k - n));
-    a[0] = k - n;
-}
-
-void mm_ls_ucase(MMINTEGER *a)
-{
-    MMINTEGER i, n = mm_ls_len(a);
-    char *p = MM_LS_DATA(a);
-    for (i = 0; i < n; i++) p[i] = (char)toupper((unsigned char)p[i]);
-}
-
-void mm_ls_lcase(MMINTEGER *a)
-{
-    MMINTEGER i, n = mm_ls_len(a);
-    char *p = MM_LS_DATA(a);
-    for (i = 0; i < n; i++) p[i] = (char)tolower((unsigned char)p[i]);
-}
+/* Everything except mm_ls_print and mm_ls_input moved to
+ * mmb_lstring.h (2026-08-21): memcpy arithmetic over the program's
+ * own arrays, compiled into the program that uses it - the mmb_math.h
+ * bargain.  These two stay because a file channel is bcrun's own
+ * stdio stream, which only bcrun can hand to fputc and fread. */
 
 void mm_ls_print(MMINTEGER fnbr, const MMINTEGER *a, int nl)
 {
-    MMINTEGER i, n = mm_ls_len(a);
+    MMINTEGER i, n = a[0] < 0 ? 0 : a[0];
     const char *p = MM_LS_DATA((MMINTEGER *)a);
     /* write the bytes straight out: going through mm_chr() would burn a
        scratch buffer per character */
@@ -2736,56 +2558,13 @@ void mm_ls_print(MMINTEGER fnbr, const MMINTEGER *a, int nl)
     if (nl) mm_fpr_nl(fnbr);
 }
 
-char *mm_ls_getstr(const MMINTEGER *a, MMINTEGER start, MMINTEGER len)
-{
-    char *t = mm_tmp();
-    MMINTEGER n = mm_ls_len(a), avail;
-    if (start < 1) start = 1;
-    if (start > n) return t;
-    avail = n - start + 1;
-    if (len < 0 || len > avail) len = avail;
-    if (len > MM_STRLEN)
-        MM_RAISEV("LGETSTR$ result is longer than 255 characters", mm_ssink());
-    mm_ssetn(t, MM_LS_DATA((MMINTEGER *)a) + (start - 1), (int)len);
-    return t;
-}
-
-MMINTEGER mm_ls_getbyte(const MMINTEGER *a, MMINTEGER n, int base)
-{
-    MMINTEGER k = n - base;              /* fold OPTION BASE into 0 based */
-    if (k < 0 || k >= mm_ls_len(a)) mm_error("LGETBYTE index out of range");
-    return (MMINTEGER)(unsigned char)MM_LS_DATA((MMINTEGER *)a)[k];
-}
-
-MMINTEGER mm_ls_instr(const MMINTEGER *a, const char *pat, MMINTEGER start)
-{
-    MMINTEGER n = mm_ls_len(a), i;
-    int lp = mm_slen(pat);
-    const char *p = MM_LS_DATA((MMINTEGER *)a);
-    if (start < 1) start = 1;
-    if (lp == 0 || start > n - lp + 1) return 0;
-    for (i = start; i + lp - 1 <= n; i++)
-        if (memcmp(p + i - 1, pat + 1, (size_t)lp) == 0) return i;
-    return 0;
-}
-
-MMINTEGER mm_ls_compare(const MMINTEGER *a, const MMINTEGER *b)
-{
-    MMINTEGER la = mm_ls_len(a), lb = mm_ls_len(b);
-    MMINTEGER n = la < lb ? la : lb;
-    int r = n ? memcmp(MM_LS_DATA((MMINTEGER *)a),
-                       MM_LS_DATA((MMINTEGER *)b), (size_t)n) : 0;
-    if (r) return r < 0 ? -1 : 1;
-    if (la == lb) return 0;
-    return la < lb ? -1 : 1;
-}
-
 MMINTEGER mm_ls_input(MMINTEGER *a, int cells, MMINTEGER fnbr, MMINTEGER n)
 {
     MMINTEGER got;
     if (fnbr < 1) MM_RAISEV("LINPUT only works with a file", 0);
     if (n < 0) n = 0;
-    mm_ls_fit(cells, n);
+    if (n > MM_LS_CAP(cells))
+        MM_RAISEV("Long string is too small for this operation", 0);
     {
         FILE *f = mm_ls_file(fnbr);
         if (!f) return 0;

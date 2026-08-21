@@ -2027,6 +2027,7 @@ void statement_inner(void)
         v = expr();
         if (v.ty != TY_S)
             cv_err("LMID() assignment needs a string");
+        cv.uses_lstring = 1;
         emit(sfmt("mm_ls_lmid(%s, %s, %s, %s, %s);", f.ptr, f.cnt,
                   as_int(start), has_num ? as_int(num) : "-1LL", v.code));
         return;
@@ -3011,6 +3012,7 @@ static void do_longstring(void)
     if (t->kind != T_ID)
         cv_err("LONGSTRING needs a sub-command");
     op = t->up;
+    cv.uses_lstring = 1;
 
     if (strcmp(op, "CLEAR") == 0 || strcmp(op, "UCASE") == 0
         || strcmp(op, "LCASE") == 0) {

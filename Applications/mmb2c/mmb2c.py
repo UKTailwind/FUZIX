@@ -708,6 +708,7 @@ class Conv(object):
         self.uses_math = False      # MATH C_ADD etc: pulls in mmb_math.h
         self.uses_sort = False      # SORT: pulls in mmb_sort.h
         self.uses_array = False     # whole-array ops/REDIM/MATH(): mmb_array.h
+        self.uses_lstring = False   # LONGSTRING: pulls in mmb_lstring.h
         self.uses_pulse = False     # PULSE: pulls in mmb_pulse.h
         self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
         self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
@@ -2452,6 +2453,7 @@ class Conv(object):
         if up in ('LLEN', 'LGETSTR$', 'LGETBYTE', 'LINSTR', 'LCOMPARE',
                   'LINPUT'):
             self.expect_op('(')
+            self.uses_lstring = True
             ptr, cells = self.lsref()
             if up == 'LLEN':
                 self.expect_op(')')
@@ -5802,6 +5804,7 @@ class Conv(object):
             v = self.expr()
             if v[1] != TY_S:
                 self.err("LMID() assignment needs a string")
+            self.uses_lstring = True
             self.emit('mm_ls_lmid(%s, %s, %s, %s, %s);'
                       % (ptr, cells, start, num, v[0]))
             return
@@ -6164,6 +6167,7 @@ class Conv(object):
         if t[0] != T_ID:
             self.err("LONGSTRING needs a sub-command")
         op = t[2]
+        self.uses_lstring = True
 
         if op in ('CLEAR', 'UCASE', 'LCASE'):
             ptr, cells = self.lsref()
@@ -8428,6 +8432,10 @@ class Conv(object):
         # call - every array parameter's count goes through it.
         if self.uses_array:
             wr('#include "mmb_array.h"\n')
+        # LONGSTRING's memcpy arithmetic; only the two file forms keep
+        # a runtime crossing (the channel is bcrun's own stream).
+        if self.uses_lstring:
+            wr('#include "mmb_lstring.h"\n')
         if self.uses_pulse:
             wr('#include "mmb_pulse.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a

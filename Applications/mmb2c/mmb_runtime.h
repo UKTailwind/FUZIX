@@ -389,33 +389,10 @@ void mm_set_time(const char *t);         /* TIME$ =                    */
  * element count, and refuses to run past the end - the manual calls an
  * overflow "undefined", so a clean error is a strict improvement.
  * ------------------------------------------------------------------- */
-MMINTEGER mm_ls_len(const MMINTEGER *a);
-void mm_ls_clear  (MMINTEGER *a, int cells);
-void mm_ls_append (MMINTEGER *a, int cells, const char *s);
-void mm_ls_load   (MMINTEGER *a, int cells, MMINTEGER n, const char *s);
-void mm_ls_copy   (MMINTEGER *d, int dcells, const MMINTEGER *s);
-void mm_ls_concat (MMINTEGER *d, int dcells, const MMINTEGER *s);
-void mm_ls_left   (MMINTEGER *d, int dcells, const MMINTEGER *s, MMINTEGER n);
-void mm_ls_right  (MMINTEGER *d, int dcells, const MMINTEGER *s, MMINTEGER n);
-void mm_ls_mid    (MMINTEGER *d, int dcells, const MMINTEGER *s,
-                   MMINTEGER start, MMINTEGER n);   /* n < 0 = to the end */
-void mm_ls_replace(MMINTEGER *a, int cells, const char *s, MMINTEGER start);
-/* LMID(a(), start [, num]) = s$ - a splice, not an overwrite: num
- * bytes at start come out and the string goes in, so the long string
- * changes length.  num < 0 means "as long as the replacement". */
-void mm_ls_lmid   (MMINTEGER *a, int cells, MMINTEGER start, MMINTEGER num,
-                   const char *s);
-void mm_ls_resize (MMINTEGER *a, int cells, MMINTEGER n);
-void mm_ls_setbyte(MMINTEGER *a, int cells, MMINTEGER n, MMINTEGER v);
-void mm_ls_trim   (MMINTEGER *a, int cells, MMINTEGER n);
-void mm_ls_ucase  (MMINTEGER *a);
-void mm_ls_lcase  (MMINTEGER *a);
+/* The computation lives in mmb_lstring.h, compiled into the program
+ * that uses it.  These two stay: a file channel is bcrun's own stdio
+ * stream, which only bcrun can hand to fputc and fread. */
 void mm_ls_print  (MMINTEGER fnbr, const MMINTEGER *a, int nl);
-
-char      *mm_ls_getstr (const MMINTEGER *a, MMINTEGER start, MMINTEGER len);
-MMINTEGER  mm_ls_getbyte(const MMINTEGER *a, MMINTEGER n, int base);
-MMINTEGER  mm_ls_instr  (const MMINTEGER *a, const char *pat, MMINTEGER start);
-MMINTEGER  mm_ls_compare(const MMINTEGER *a, const MMINTEGER *b);
 MMINTEGER  mm_ls_input  (MMINTEGER *a, int cells, MMINTEGER fnbr, MMINTEGER n);
 
 /* ---- GOSUB / RETURN --------------------------------------------------

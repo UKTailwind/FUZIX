@@ -450,6 +450,10 @@ void conv_write(FILE *f)
        call - every array parameter's count goes through it. */
     if (cv.uses_array)
         fprintf(f, "#include \"mmb_array.h\"\n");
+    /* LONGSTRING's memcpy arithmetic; only the two file forms keep a
+       runtime crossing (the channel is bcrun's own stream). */
+    if (cv.uses_lstring)
+        fprintf(f, "#include \"mmb_lstring.h\"\n");
     if (cv.uses_pulse)
         fprintf(f, "#include \"mmb_pulse.h\"\n");
     /* After mmb_gpio.h, which it uses to read the pins.  Only a program

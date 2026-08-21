@@ -634,6 +634,7 @@ struct val builtin_raw(const char *up)
         struct val b;
 
         expect_op("(");
+        cv.uses_lstring = 1;
         ls = lsref();
         if (strcmp(up, "LLEN") == 0) {
             expect_op(")");

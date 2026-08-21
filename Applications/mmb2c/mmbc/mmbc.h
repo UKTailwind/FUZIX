@@ -389,6 +389,7 @@ struct conv {
     int uses_math;              /* MATH C_ADD etc: pulls in mmb_math.h */
     int uses_sort;              /* SORT: pulls in mmb_sort.h */
     int uses_array;             /* whole-array ops/REDIM/MATH(): mmb_array.h */
+    int uses_lstring;           /* LONGSTRING: pulls in mmb_lstring.h */
     int uses_pulse;             /* PULSE: pulls in mmb_pulse.h */
     int uses_onewire;           /* ONEWIRE/TEMPR: mmb_onewire.h */
     int uses_comms;             /* I2C/SPI data forms: mmb_comms.h */
