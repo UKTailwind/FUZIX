@@ -1,201 +1,100 @@
-# CORE0 STALLED — open, undiagnosed
+# CORE0 STALLED — diagnosed and fixed, 2026-08-21
 
-2026-08-20. Three times during the networking work the machine stopped
-dead and core1 reported `CORE0 STALLED`. **The fault is older than that
-work** — it has been seen on this port before the CYW43 existed — but
-these are the first captures taken with the core1 watchdog running.
-Not reproducible on demand. This note records the evidence and what it
-rules in and out, so that whoever picks it up does not start from
-nothing.
+A deadlock in the console output path. `lineedit`'s `put()` spun on
+`tty_writeready()`, and every `lineedit` path runs inside
+`tty_interrupt()`, which `timer_tick_cb` calls with `di()` held. Once
+the 256-byte transmit ring filled, its only two drainers were the
+transmit interrupt — masked, so it could never run — and
+`rawuart_tx_poll()`, which is a *later step of the very tick now
+spinning*. An echo or redraw burst bigger than the ring hung core0 for
+good.
 
-**Status: open. Not diagnosed, not fixed, and not understood.** What
-follows separates what was seen from what is inferred, because the
-inference is thin.
+Fixed in `lineedit.c` (commit `abe9b1b7f`): drop the pre-check spin and
+call `tty_putc(1, c)` directly. `rawuart_putc` already handles a full
+ring in both contexts — in thread context it waits on the interrupt,
+and when masked it pumps the ring into the FIFO itself. The worst case
+degrades to a burst clocked out at wire speed, or a BEL on an over-long
+line. Never a lockup.
 
-## The three captures
+**Status: believed fixed, watch for recurrence.** One piece of evidence
+below does not fit cleanly and is worth knowing about if it comes back.
 
-Verbatim, and they are the whole primary evidence:
+## The proof
 
-    [CORE0 STALLED phase=0 beat=0000563E nsys=000001FA]   (repeated, identical)
-    [CORE0 STALLED phase=0 beat=0000A7D7 nsys=000001FA]
-    [CORE0 STALLED phase=0 beat=0000E958 nsys=000002EA]   (repeated, identical)
+Reproduced deterministically on a PC2: a ~100-character history line,
+up-arrow, then down-arrow — whose `erase_line` emits about 300 rubouts
+in a single tick.
 
-1. During `time ./tlsget 104.20.23.154 example.com /`, on a kernel
-   carrying a 16K dedicated pump stack, before TLS worked. Uptime about
-   110s.
-2. Shortly after a successful `wifi -f`, running a shell line that made
-   a directory, wrote a file, copied another and listed the result.
-   Uptime about 215s.
-3. On the v0.18 release kernel, during `mkdir -p /tmp/www` — as
-   ordinary a system call as exists — a few seconds after `wifi -f`,
-   `ntpdate`, `tlsca /etc/ca.pem` and a successful `tlsget`. Uptime
-   about 298s.
+The `[u0 ...]` report is what sealed it:
 
-**The third is the most informative and the most alarming.** The work
-in progress was a `mkdir`. Nothing heavy, nothing to do with the
-network, and the console was nearly idle — so "heavy console output
-plus networking", which the first two suggested, is not the condition.
-What all three share is that **a TLS or Wi-Fi operation had happened
-shortly before**.
+    en=1 pd=1 ac=0 pm=1 ri=0020 (TXRIS)   ring full, h=081 t=082
 
-Once it happens, it stays: core1 repeats the line every two seconds
-indefinitely, with every field frozen. The machine does not recover.
+The transmit interrupt enabled, pending, and asserting — and
+undeliverable, because PRIMASK really was held.
 
-## Reading the fields
+## What this corrects
 
-From `display.c`'s `disp_core1_watch()`, which fires when
-`pc3_tickbeat` has not moved for ~120 frames (about two seconds) and
-then repeats every two seconds for as long as the condition holds.
+**`pm=1` was the clue, not noise.** `NOTES-console-wedge.md` reads
+"PRIMASK set (normal - the report prints from the tick)" and this note
+previously repeated that reasoning. For this failure it was exactly
+backwards: PRIMASK being set was the fault, not an artefact of where the
+report is printed from. A field that is *usually* uninteresting is not
+the same as one that can be skipped.
 
-**`phase=0` is the loudest fact.** `pc3_tickphase` is set at each step
-of `timer_tick_cb()` and set back to 0 on the way out, and the comment
-there says exactly what 0 means:
+**Three triggers, one mechanism.** They looked like different faults and
+are not — each is a large echo or redraw burst generated inside
+`tty_interrupt()` under the tick's mask:
 
-> 0 = left the tick cleanly. If the watchdog reports a stall at phase 0
-> then the body is not the problem at all: the tick finished and was
-> simply never called again, which puts the fault in the alarm pool or
-> in what PendSV went off and did.
+- keyboard and serial together — more characters drained per tick;
+- a fast stream into `cat` — `lineedit` echoes every byte in cooked mode;
+- long concatenated command lines — one-tick overflow.
 
-So the tick did not hang inside itself. It completed and was never
-re-entered.
+**Wi-Fi was an aggravator, not a cause**, which matches the prior the
+author held throughout and which this note originally recorded as
+unproven. More busy and masked windows elsewhere mean the ring is more
+often full when a burst lands. Anyone who had started the hunt inside
+lwIP or mbedtls would have been in the wrong file.
 
-**`beat`** is the tick counter at the freeze: 0x563E = 22,078 and
-0xA7D7 = 42,967, so about 110 and 215 seconds of uptime at 200Hz.
-Different in the two events; nothing suggests a fixed time.
+**Why MMBasic never locks up here.** It runs echo and line editing in
+thread context with interrupts on, so its identical full-ring spin
+always has a live drainer. The worst it suffers is dropped receive
+bytes. That is the shape the fix restores: pace or drop, never wedge.
 
-**`nsys`** is `pc3_syscount`, incremented on entry to
-`syscall_handler()`. Its purpose is precisely to answer "is core0 alive
-at all?" — climbing while the tick is dead means core0 is running
-userland and only the timer stopped; frozen means core0 is not
-executing. In the first event it was **frozen across all five repeats**,
-which says core0 was not taking syscalls for at least ten seconds.
+## The loose end
 
-## What `nsys` says, and a wrong turn worth recording
+The three captures in this note all reported **`phase=0`**. The
+reproduction and the fix are **`phase=2`**.
 
-The first two events both froze at `nsys=0x1FA` (506) and that looked
-like the strongest lead in the case — the same syscall count at the
-moment of death, in two runs of different length and different work,
-suggesting a *reproducible point* in a fixed startup sequence.
+`pc3_tickphase` is set to 2 immediately before `tty_interrupt()` and
+back to 0 on the way out of the tick, so a hang inside `lineedit` under
+the tick reports 2 — as the reproduction did. `phase=0` says the tick
+completed and was never re-entered, which is a different statement.
 
-**The third event killed that.** It froze at 0x2EA (746). Three
-samples, two values, and the two that matched were the two runs whose
-scripts were most alike. So the count is not a fixed point; it is just
-where that particular run had got to.
+That may simply be a sampling artefact, or those three may have been the
+same deadlock reached by a path that leaves the phase at 0. But it is
+the one fact here that the mechanism does not obviously account for, so:
+**if `CORE0 STALLED` is ever seen again, look at the phase first.** A
+`phase=2` recurrence means the fix is incomplete. A `phase=0` recurrence
+means there is a second fault and this note was closed too early.
 
-What the counter still tells us is what it was built to tell us. `bl
-syscall_handler` in `tricks.S` is the only syscall path, so it counts
-every system call, and in events 1 and 3 it was **frozen across every
-repeat** — ten seconds and several minutes respectively. Core0 was not
-taking system calls. Combined with `phase=0`, the picture is a core0
-that has stopped executing rather than a timer that has stopped
-firing.
+The captures, for that comparison:
 
-Recording the wrong turn because it is the kind that wastes a day: two
-matching numbers out of two samples is not a pattern, and the third
-sample was cheap.
+    [CORE0 STALLED phase=0 beat=0000563E nsys=000001FA]   during tlsget
+    [CORE0 STALLED phase=0 beat=0000A7D7 nsys=000001FA]   after wifi -f
+    [CORE0 STALLED phase=0 beat=0000E958 nsys=000002EA]   during mkdir
 
-## What this is NOT
+## Method, worth keeping
 
-**Not the 2026 tick re-arm freeze.** That one was a hand-rolled
-`hardware_alarm_set_target` left unarmed after a missed deadline. It
-was fixed by moving the tick to the SDK's alarm pool, which keeps an
-ordered list and re-fires immediately on a miss — see the note in
-`CMakeLists.txt`, which states that the pool "cannot end up unarmed".
-`phase=0` says the tick was never called again, so either that claim is
-too strong, or core0 stopped executing and the pool never got the
-chance. The second is more likely and is what `nsys` was supposed to
-settle.
+Two things in this hunt were worth more than the reasoning:
 
-**Not the console wedge** (`NOTES-console-wedge.md`). That has a
-different signature — `[u0 ...]` from `rawuart_report`, with the tick
-provably ALIVE (`tk` counting in every capture). Here the tick is dead.
-They may still share a cause, but they are not the same event and
-should not be merged in the analysis.
+**A deterministic reproduction ended it.** Three captures over a day of
+hard use produced a plausible story that was wrong in its central claim
+(that networking was implicated). One keystroke sequence that fails
+every time produced the mechanism in an afternoon.
 
-**Not the TLS stack overflow.** That was diagnosed and fixed
-separately: a handshake needs 2,460 bytes of kernel stack and had
-1,156. The first stall happened on a kernel that had 16K available, so
-it was not short of stack.
-
-## Circumstances worth noting
-
-**It predates networking.** This is the most important fact in the note
-and it does not come from the three captures above — it comes from the
-author of the port, who has seen this lockup before the CYW43 work
-existed. Treat networking as a possible *aggravator* and not as the
-cause; a hunt that starts inside lwIP or mbedtls is starting in the
-wrong place.
-
-That said, all three captures here followed a TLS or Wi-Fi operation
-within a minute or so, and the third rules out what the first two
-suggested: it happened during a `mkdir` on a quiet console, so it is
-not about console load, and not about being inside network code at the
-time — the network work had already finished.
-
-So if networking does aggravate it, the mechanism is something left
-behind rather than something being executed: a timer, a DMA channel, an
-interrupt left armed, a piece of PSRAM. And whatever the underlying
-fault is, it is reachable without any of that.
-
-**The pre-networking history is the cheapest evidence available and is
-not written down anywhere.** Before instrumenting anything, ask what
-those earlier lockups had in common — what was running, whether the
-display was in a graphics mode, whether sound was playing. Three
-captures from one day are a small sample beside months of use.
-
-Candidates, in no particular order and none tested:
-
-- **core0 halted outright.** A fault handler that ran, printed its dump
-  somewhere invisible, and stopped. `picofrog` died this way for a week
-  because the panic text went to a framebuffer that was not on screen.
-  Worth checking whether the fault path can be reached with the console
-  in a state where its output goes nowhere.
-- **A bus stall.** The QMI serves both PSRAM and flash, lwIP's heap is
-  in PSRAM, and the scanout is reading continuously. A stalled core0
-  with a live core1 is consistent with core0 waiting on a bus that
-  core1 is not.
-- **An interrupts-off deadlock** in a path only networking reaches.
-- **The alarm pool** genuinely losing the tick, which would contradict
-  the reasoning in `CMakeLists.txt` and would matter well beyond
-  networking.
-
-## How to make progress
-
-In the order that costs least:
-
-1. **Try to reproduce it deliberately.** Three events in one day, all
-   within a minute of network activity, is close to a recipe already:
-   boot, `wifi -f`, `tlsca`, a `tlsget`, then a loop doing trivial
-   filesystem work and printing nothing. If that dies within a few
-   minutes, everything below becomes cheap. A reproduction is worth
-   more than any amount of the rest of this list.
-2. **Make core1 say more.** It is the only thing still running, it can
-   already write the UART directly, and it is not constrained by what
-   core0 is doing. Print core0's stacked PC — core1 cannot read core0's
-   registers directly, but core0 can leave a breadcrumb: store the
-   syscall number and a timestamp somewhere core1 can read, and have
-   core1 report the last one and its age. That turns "core0 is stuck"
-   into "core0 is stuck in this call, and has been for N ms".
-3. **Watch the QMI.** If a bus stall is suspected, core1 can sample
-   whether it is itself seeing PSRAM latency at the moment core0 dies.
-4. **Try to provoke it.** Networking plus saturated console output is
-   the only common factor. A loop doing `htget` of something large
-   while a second process writes continuously to the console would be
-   the cheapest attempt at reproduction, and a reproduction is worth
-   more than any amount of the above.
-
-## What it costs today
-
-The machine locks up hard: no output, no console, and the reset button
-is the only way out. It does not appear to corrupt the filesystem — the
-card fsck'd clean after each of the three captures here — but anything
-unsaved is lost.
-
-It is **not** new in v0.18 and not caused by networking; it was present
-before that work. What the networking work contributed is three
-captures with the instrumentation running, which is more than existed
-before, and a possible way to provoke it.
-
-Frequency is unknown and the three here are not a fair sample: they
-came from a day of unusually hard use, with a test harness driving the
-console and the machine being reflashed and rebooted continually.
+**Two matching numbers are not a pattern.** The first two captures both
+froze at `nsys=0x1FA` and this note called that "the strongest lead in
+the case", reasoning at length about a reproducible point in a fixed
+startup sequence. The third capture read `0x2EA` and the whole edifice
+went. The two that matched were simply the two runs whose scripts were
+most alike.

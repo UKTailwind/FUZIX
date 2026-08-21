@@ -12,7 +12,8 @@ Both printed the rawuart stall report to the screen as the last line:
     [u0 tk=00005650 en=1 pd=1 ac=0 pm=1 bp=00 ri=0470 h=0c8 t=0c9]  (~30s after boot)
 
 Decode: ticks alive at report time; uart IRQ enabled+pending, handler
-not active; PRIMASK set (normal - the report prints from the tick);
+not active; PRIMASK set - **and see the correction below, because that
+was read as normal and was not**;
 ri=0470 = RX+TX+RT raw PLUS **OE: receive overrun**; second event's tx
 ring full (h+1==t).  Above the report: only echoed transfer payload -
 and console_putc paints the SCREEN before the uart (console.c), so a
@@ -97,3 +98,30 @@ Remaining refinements, host side first: uusend should verify the
 echo per line and RESEND the damaged line instead of just warning;
 the second-report instrumentation above is still worth having the
 day the mechanism is hunted for real.
+
+## 2026-08-21: the mechanism, and a correction to this note
+
+Found, and it was a deadlock in the console OUTPUT path rather than
+anything stranding an interrupt.  `lineedit`'s `put()` spun on
+`tty_writeready()`, and every `lineedit` path runs inside
+`tty_interrupt()`, which `timer_tick_cb` calls with `di()` held.  Once
+the 256-byte tx ring filled, its only two drainers were the tx
+interrupt - masked, so it could never run - and `rawuart_tx_poll()`,
+which is a LATER STEP OF THE VERY TICK now spinning.  An echo or redraw
+burst bigger than the ring hung core0 for good.  Fixed in `lineedit.c`
+(`abe9b1b7f`); see `NOTES-CORE0-STALL.md` for the full account.
+
+**This note read `pm=1` as normal - "the report prints from the tick" -
+and that was exactly backwards.**  PRIMASK being set WAS the fault: the
+tx interrupt was enabled, pending and asserting, and undeliverable
+because the mask really was held.  The field was dismissed as an
+artefact of where the report is printed from, and it was the clue.
+
+A field that is usually uninteresting is not the same as one that can
+be skipped, and writing "normal" beside it in a note is how a reader
+two months later skips it too.
+
+The polled rescue described above is still right and still wanted - it
+is what keeps a genuinely lost interrupt from killing the console - but
+it was never going to help here, because the tick that would do the
+rescuing was the thing that was stuck.
