@@ -2834,10 +2834,13 @@ refused rather than made. To go back:
     TLS: certificates are NOT checked
 
 **Which authorities you need is not guessable.** The bundle carries
-nine roots covering Let's Encrypt, Google, DigiCert, Amazon, SSL.com
+ten roots covering Let's Encrypt, Google, DigiCert, Amazon, SSL.com
 and Sectigo, which between them cover most of the web — but sites move
 between authorities, and a site signed by one that is not in the file
-will be refused. To find out what a site actually uses, from a
+will be refused. Even the *same* authority can trip this: Cloudflare's
+`1.1.1.1` chains to SSL.com's older ECC root, not their 2022 one, and
+only a bundle carrying the right certificate — not merely the right
+company — verifies it. To find out what a site actually uses, from a
 desktop machine:
 
     openssl s_client -connect HOST:443 -servername HOST -showcerts
