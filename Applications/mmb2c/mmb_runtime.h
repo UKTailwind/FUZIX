@@ -289,32 +289,9 @@ typedef struct {
     const char *s;          /* the source text, MMBasic length prefixed */
 } MMDataItem;
 
-void       mm_data_init(const MMDataItem *tbl, int n);
-/* The form mmb2c emits: four parallel primitive arrays, so no struct
- * layout crosses the bcrun VM boundary.  In the hosted (bcrun) build
- * the string table stays a VM offset - see mmb_runtime.c. */
-/* mm_data_init5 is the one the translator emits: any column it can
-   prove dead is NULL, and a NULL kind column means every item is
-   `ukind`.  A DATA item costs 24 bytes with every column present and
-   the data segment is bounded at 64K, so this is the difference
-   between a large table fitting and not - see mmb_runtime.c. */
-#ifdef MM_HOSTED
-void       mm_data_init5(const int *kind, int ukind, const MMFLOAT *f,
-                         const MMINTEGER *i, unsigned long s, int n);
-void       mm_data_init4(const int *kind, const MMFLOAT *f,
-                         const MMINTEGER *i, unsigned long s, int n);
-#else
-void       mm_data_init5(const int *kind, int ukind, const MMFLOAT *f,
-                         const MMINTEGER *i, const char **s, int n);
-void       mm_data_init4(const int *kind, const MMFLOAT *f,
-                         const MMINTEGER *i, const char **s, int n);
-#endif
-void       mm_restore(int index);
-MMFLOAT    mm_read_f(void);
-MMINTEGER  mm_read_i(void);
-char      *mm_read_s(void);
-void       mm_read_save(void);
-void       mm_read_unsave(void);       /* READ RESTORE                */
+/* The table walkers live in mmb_data.h, compiled into the program
+ * whose tables they walk; only the MMDataItem type and the MM_D_*
+ * kinds stay here, shared with hand-written driver code. */
 
 /* ---- SORT: in mmb_sort.h, compiled into the program that sorts ---- */
 

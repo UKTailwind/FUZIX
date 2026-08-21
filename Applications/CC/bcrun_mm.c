@@ -109,13 +109,6 @@ static long long time_us64(void)
 #define fabs(x)      ((mfns[15].f1)(x))
 #define fmod(x, y)   ((mfns[18].f2)((x), (y)))
 
-/* The runtime's hosted islands read the DATA string table through
-   these (it holds 32-bit VM pointers whatever the host width). */
-/* NULL, not mem: the DATA string table holds machine addresses like
-   everything else, so mm_d4_str's "base + entry" must add nothing. */
-unsigned char *mm_vm_base(void) { return NULL; }
-unsigned long mm_vm_rd32(unsigned long a) { return rd32(a); }
-
 #define MM_HOSTED 1
 #include "mmb_runtime.c"
 
@@ -308,38 +301,9 @@ static void w_files(void)    { mm_files(Ps(0)); A = 0; }
  * are program-side now (mmb_array.h); only mm_arr_count below keeps a
  * crossing, because every array parameter's count goes through it. */
 
-/* DATA / READ / RESTORE
- *
- * init5 is the one the translator emits: any column it can prove dead
- * is a null VM pointer, and a null kind column means every item is
- * `ukind`.  Pa() maps a VM pointer to a host one and gives NULL for a
- * null VM pointer, so the optional columns need no special case here. */
-static void w_data_init5(void)
-{
-	mm_data_init5((const int *)(void *)Pa(0), I(1),
-		      (const MMFLOAT *)(void *)Pa(2),
-		      (const MMINTEGER *)(void *)Pa(3),
-		      (unsigned long)(uint32_t)arg(4), I(5));
-	A = 0;
-}
-
-static void w_data_init4(void)
-{
-	/* the string table stays a VM offset: its elements are 32-bit
-	   VM pointers, unreadable through a host pointer on a 64-bit
-	   machine */
-	mm_data_init4((const int *)(void *)Pa(0),
-		      (const MMFLOAT *)(void *)Pa(1),
-		      (const MMINTEGER *)(void *)Pa(2),
-		      (unsigned long)(uint32_t)arg(3), I(4));
-	A = 0;
-}
-static void w_restore(void)  { mm_restore(I(0)); A = 0; }
-static void w_read_f(void)   { A = dput(mm_read_f()); }
-static void w_read_i(void)   { A = mm_read_i(); }
-static void w_read_s(void)   { A = mm_off(mm_read_s()); }
-static void w_read_save(void){ mm_read_save(); A = 0; }
-static void w_read_unsave(void){ mm_read_unsave(); A = 0; }
+/* DATA / READ / RESTORE is program-side now (mmb_data.h): the tables
+ * are the program's own data and the cursor its own state.  The
+ * VM-offset shim for the string table went with it. */
 
 /* SORT is program-side now (mmb_sort.h): pure computation over the
    program's own arrays, so no crossing exists for it any more. */
@@ -707,14 +671,6 @@ static const struct mmwrap {
 	{ "mm_at",		w_at },
 	{ "mm_dir",		w_dir },
 	{ "mm_files",		w_files },
-	{ "mm_data_init5",	w_data_init5 },
-	{ "mm_data_init4",	w_data_init4 },
-	{ "mm_restore",		w_restore },
-	{ "mm_read_f",		w_read_f },
-	{ "mm_read_i",		w_read_i },
-	{ "mm_read_s",		w_read_s },
-	{ "mm_read_save",	w_read_save },
-	{ "mm_read_unsave",	w_read_unsave },
 	{ "mm_arr_count",	w_arr_count },
 	{ "mm_pause",		w_pause },
 	{ "mm_error_s",		w_error_s },

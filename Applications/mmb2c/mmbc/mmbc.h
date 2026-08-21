@@ -391,6 +391,7 @@ struct conv {
     int uses_array;             /* whole-array ops/REDIM/MATH(): mmb_array.h */
     int uses_lstring;           /* LONGSTRING: pulls in mmb_lstring.h */
     int uses_datetime;          /* DATE$/TIME$/EPOCH etc: mmb_datetime.h */
+    int uses_data;              /* DATA/READ/RESTORE: mmb_data.h */
     int uses_pulse;             /* PULSE: pulls in mmb_pulse.h */
     int uses_onewire;           /* ONEWIRE/TEMPR: mmb_onewire.h */
     int uses_comms;             /* I2C/SPI data forms: mmb_comms.h */

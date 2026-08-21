@@ -710,6 +710,7 @@ class Conv(object):
         self.uses_array = False     # whole-array ops/REDIM/MATH(): mmb_array.h
         self.uses_lstring = False   # LONGSTRING: pulls in mmb_lstring.h
         self.uses_datetime = False  # DATE$/TIME$/EPOCH etc: mmb_datetime.h
+        self.uses_data = False      # DATA/READ/RESTORE: mmb_data.h
         self.uses_pulse = False     # PULSE: pulls in mmb_pulse.h
         self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
         self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
@@ -6310,6 +6311,7 @@ class Conv(object):
 
     # -- DATA / READ / RESTORE ---------------------------------------------
     def do_read(self):
+        self.uses_data = True
         if self.accept_kw('SAVE'):
             self.emit('mm_read_save();')
             return
@@ -6346,6 +6348,7 @@ class Conv(object):
                 break
 
     def do_restore(self):
+        self.uses_data = True
         if self.stmt_end():
             self.emit('mm_restore(0);')
             return
@@ -8444,6 +8447,11 @@ class Conv(object):
         # Calendar arithmetic over time(), which is already a libcall.
         if self.uses_datetime:
             wr('#include "mmb_datetime.h"\n')
+        # A DATA table with no READ still calls mm_data_init5 from main.
+        if self.data:
+            self.uses_data = True
+        if self.uses_data:
+            wr('#include "mmb_data.h"\n')
         if self.uses_pulse:
             wr('#include "mmb_pulse.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a

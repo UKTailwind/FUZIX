@@ -457,6 +457,11 @@ void conv_write(FILE *f)
     /* Calendar arithmetic over time(), which is already a libcall. */
     if (cv.uses_datetime)
         fprintf(f, "#include \"mmb_datetime.h\"\n");
+    /* A DATA table with no READ still calls mm_data_init5 from main. */
+    if (cv.ndata > 0)
+        cv.uses_data = 1;
+    if (cv.uses_data)
+        fprintf(f, "#include \"mmb_data.h\"\n");
     if (cv.uses_pulse)
         fprintf(f, "#include \"mmb_pulse.h\"\n");
     /* After mmb_gpio.h, which it uses to read the pins.  Only a program

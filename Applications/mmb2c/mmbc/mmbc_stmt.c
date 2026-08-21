@@ -3197,6 +3197,7 @@ static void do_return(void)
 
 static void do_read(void)
 {
+    cv.uses_data = 1;
     if (accept_kw("SAVE")) {
         emit("mm_read_save();");
         return;
@@ -3242,6 +3243,7 @@ static void do_read(void)
 
 static void do_restore(void)
 {
+    cv.uses_data = 1;
     struct tok *t;
     const char *canon = NULL;
     struct label *l;
