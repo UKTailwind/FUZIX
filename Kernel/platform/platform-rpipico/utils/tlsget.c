@@ -44,7 +44,11 @@ int main(int argc, char *argv[])
     int fd, n, total = 0, port;
 
     if (argc < 2) {
-        fprintf(stderr, "usage: tlsget host [path] [port]\n");
+        /* The IP comes first and it really is an IP: there is no
+           resolver in here on purpose (see the top of the file), and
+           this line once said "host", which sent a whole debugging
+           session to 255.255.255.255. */
+        fprintf(stderr, "usage: tlsget ip [hostname] [path] [port]\n");
         return 1;
     }
     ip = argv[1];
