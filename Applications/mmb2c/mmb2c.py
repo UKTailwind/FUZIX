@@ -706,6 +706,7 @@ class Conv(object):
         self.uses_gpio = False
         self.uses_port = False      # PORT: pulls in mmb_port.h
         self.uses_math = False      # MATH C_ADD etc: pulls in mmb_math.h
+        self.uses_sort = False      # SORT: pulls in mmb_sort.h
         self.uses_pulse = False     # PULSE: pulls in mmb_pulse.h
         self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
         self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
@@ -6372,6 +6373,7 @@ class Conv(object):
                         if not self.stmt_end():
                             count = self.as_int(self.expr())
         kind = {TY_I: 'i', TY_F: 'f', TY_S: 's'}[sym.ty]
+        self.uses_sort = True
         self.emit('mm_sort_%s(%s, %s, %s, (int)(%s), (int)(%s), (int)(%s));'
                   % (kind, ptr, idx, cnt, start, count, flags))
 
@@ -8410,6 +8412,10 @@ class Conv(object):
         # types and MM_RAISE, so it can sit anywhere after that.
         if self.uses_math:
             wr('#include "mmb_math.h"\n')
+        # SORT's shell sort, the same bargain as mmb_math.h: only a
+        # program that sorts carries the engine.
+        if self.uses_sort:
+            wr('#include "mmb_sort.h"\n')
         if self.uses_pulse:
             wr('#include "mmb_pulse.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a

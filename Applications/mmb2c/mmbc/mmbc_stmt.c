@@ -3295,6 +3295,7 @@ static void do_sort(void)
         }
     }
     kind = sym->ty == TY_I ? "i" : sym->ty == TY_F ? "f" : "s";
+    cv.uses_sort = 1;
     emit(sfmt("mm_sort_%s(%s, %s, %s, (int)(%s), (int)(%s), (int)(%s));",
               kind, f.ptr, idx, f.cnt, start, count, flags));
 }

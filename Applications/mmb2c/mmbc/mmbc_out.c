@@ -441,6 +441,10 @@ void conv_write(FILE *f)
        types and MM_RAISE, so it can sit anywhere after that. */
     if (cv.uses_math)
         fprintf(f, "#include \"mmb_math.h\"\n");
+    /* SORT's shell sort, the same bargain as mmb_math.h: only a
+       program that sorts carries the engine. */
+    if (cv.uses_sort)
+        fprintf(f, "#include \"mmb_sort.h\"\n");
     if (cv.uses_pulse)
         fprintf(f, "#include \"mmb_pulse.h\"\n");
     /* After mmb_gpio.h, which it uses to read the pins.  Only a program

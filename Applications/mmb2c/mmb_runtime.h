@@ -322,14 +322,7 @@ char      *mm_read_s(void);
 void       mm_read_save(void);
 void       mm_read_unsave(void);       /* READ RESTORE                */
 
-/* ---- SORT ----------------------------------------------------------
- * flags: bit0 reverse, bit1 case independent, bit2 empty strings last */
-void mm_sort_i(MMINTEGER *a, MMINTEGER *idx, int total, int start,
-               int count, int flags);
-void mm_sort_f(MMFLOAT   *a, MMINTEGER *idx, int total, int start,
-               int count, int flags);
-void mm_sort_s(char (*a)[MM_STRSZ], MMINTEGER *idx, int total, int start,
-               int count, int flags);
+/* ---- SORT: in mmb_sort.h, compiled into the program that sorts ---- */
 
 /* An array handed to a SUB comes with its bounds: { rank, ub1, ub2, ... }
  * so the callee can index any rank and ask BOUND() about it.          */

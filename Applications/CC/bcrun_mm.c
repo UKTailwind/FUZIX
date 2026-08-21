@@ -362,10 +362,8 @@ static void w_read_s(void)   { A = mm_off(mm_read_s()); }
 static void w_read_save(void){ mm_read_save(); A = 0; }
 static void w_read_unsave(void){ mm_read_unsave(); A = 0; }
 
-/* SORT */
-static void w_sort_i(void)   { mm_sort_i(PI(0), PI(1), I(2), I(3), I(4), I(5)); A = 0; }
-static void w_sort_f(void)   { mm_sort_f(PF(0), PI(1), I(2), I(3), I(4), I(5)); A = 0; }
-static void w_sort_s(void)   { mm_sort_s(PSA(0), PI(1), I(2), I(3), I(4), I(5)); A = 0; }
+/* SORT is program-side now (mmb_sort.h): pure computation over the
+   program's own arrays, so no crossing exists for it any more. */
 
 /* whole array operations */
 static void w_arr_count(void){ A = mm_arr_count(PI(0)); }
@@ -797,9 +795,6 @@ static const struct mmwrap {
 	{ "mm_read_s",		w_read_s },
 	{ "mm_read_save",	w_read_save },
 	{ "mm_read_unsave",	w_read_unsave },
-	{ "mm_sort_i",		w_sort_i },
-	{ "mm_sort_f",		w_sort_f },
-	{ "mm_sort_s",		w_sort_s },
 	{ "mm_arr_count",	w_arr_count },
 	{ "mm_arr_set_i",	w_arr_set_i },
 	{ "mm_arr_set_f",	w_arr_set_f },

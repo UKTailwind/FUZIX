@@ -2312,102 +2312,11 @@ void mm_read_unsave(void)
 }
 
 /* ================= SORT ============================================
- * Shell sort, in place, moving the optional index array in step.  No
- * scratch memory, no recursion - both matter on a Pico.
+ * Moved to mmb_sort.h (2026-08-21): the shell sort is pure computation
+ * over the program's own arrays, so it is compiled into the program
+ * that sorts - the mmb_math.h bargain - instead of sitting in bcrun
+ * under every program on the machine.
  * ================================================================== */
-
-static int mm_scmp_ci(const char *a, const char *b)
-{
-    int la = mm_slen(a), lb = mm_slen(b), n = la < lb ? la : lb, i, ca, cb;
-    for (i = 1; i <= n; i++) {
-        ca = toupper((unsigned char)a[i]);
-        cb = toupper((unsigned char)b[i]);
-        if (ca != cb) return ca < cb ? -1 : 1;
-    }
-    if (la == lb) return 0;
-    return la < lb ? -1 : 1;
-}
-
-static int mm_sort_cmp_s(const char *a, const char *b, int flags)
-{
-    int r;
-    if (flags & 4) {                       /* empty strings to the end */
-        int ea = mm_slen(a) == 0, eb = mm_slen(b) == 0;
-        if (ea != eb) return ea ? 1 : -1;
-    }
-    r = (flags & 2) ? mm_scmp_ci(a, b) : mm_scmp(a, b);
-    return (flags & 1) ? -r : r;
-}
-
-static void mm_sort_range(int *start, int *count, int total)
-{
-    if (*start < 0) *start = 0;
-    if (*start > total) *start = total;
-    if (*count < 0 || *start + *count > total) *count = total - *start;
-}
-
-#define MM_SHELL_BODY(TYPE, LESS)                                       \
-    do {                                                                \
-        int gap, i, j;                                                  \
-        for (gap = count / 2; gap > 0; gap /= 2)                        \
-            for (i = gap; i < count; i++) {                             \
-                TYPE tv = a[start + i];                                 \
-                MMINTEGER ti = idx ? idx[start + i] : 0;                \
-                for (j = i; j >= gap && (LESS); j -= gap) {             \
-                    a[start + j] = a[start + j - gap];                  \
-                    if (idx) idx[start + j] = idx[start + j - gap];     \
-                }                                                       \
-                a[start + j] = tv;                                      \
-                if (idx) idx[start + j] = ti;                           \
-            }                                                           \
-    } while (0)
-
-static void mm_seed_index(MMINTEGER *idx, int total)
-{
-    int i;
-    if (!idx) return;
-    for (i = 0; i < total; i++) idx[i] = i;
-}
-
-void mm_sort_i(MMINTEGER *a, MMINTEGER *idx, int total, int start,
-               int count, int flags)
-{
-    mm_sort_range(&start, &count, total);
-    mm_seed_index(idx, total);
-    if (flags & 1) MM_SHELL_BODY(MMINTEGER, a[start + j - gap] < tv);
-    else           MM_SHELL_BODY(MMINTEGER, a[start + j - gap] > tv);
-}
-
-void mm_sort_f(MMFLOAT *a, MMINTEGER *idx, int total, int start,
-               int count, int flags)
-{
-    mm_sort_range(&start, &count, total);
-    mm_seed_index(idx, total);
-    if (flags & 1) MM_SHELL_BODY(MMFLOAT, a[start + j - gap] < tv);
-    else           MM_SHELL_BODY(MMFLOAT, a[start + j - gap] > tv);
-}
-
-void mm_sort_s(char (*a)[MM_STRSZ], MMINTEGER *idx, int total, int start,
-               int count, int flags)
-{
-    int gap, i, j;
-    char tv[MM_STRSZ];
-    mm_sort_range(&start, &count, total);
-    mm_seed_index(idx, total);
-    for (gap = count / 2; gap > 0; gap /= 2)
-        for (i = gap; i < count; i++) {
-            MMINTEGER ti = idx ? idx[start + i] : 0;
-            mm_sset(tv, a[start + i]);
-            for (j = i; j >= gap
-                    && mm_sort_cmp_s(a[start + j - gap], tv, flags) > 0;
-                 j -= gap) {
-                mm_sset(a[start + j], a[start + j - gap]);
-                if (idx) idx[start + j] = idx[start + j - gap];
-            }
-            mm_sset(a[start + j], tv);
-            if (idx) idx[start + j] = ti;
-        }
-}
 
 /* ================= whole array operations ========================== */
 
