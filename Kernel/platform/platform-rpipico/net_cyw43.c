@@ -260,8 +260,16 @@ int pc3_net_up(const char *ssid, const char *key, unsigned auth)
         net_set_pio_clkdiv();
         net_busy = 1;
         err = cyw43_arch_init();
-        if (!err)
+        if (!err) {
             cyw43_arch_enable_sta_mode();
+            /* NO powersave, as the WebMite sets it (WiFi.c:258): the
+               default lets the radio doze between beacons, and the AP
+               drops unicast sent to a dozing client - measured here as
+               2 of 5 UDP datagrams lost board-to-board and 3-300 ms
+               ping jitter, both gone with the doze off.  TCP had been
+               hiding it behind retransmits. */
+            cyw43_wifi_pm(&cyw43_state, CYW43_NO_POWERSAVE_MODE);
+        }
         net_busy = 0;
         if (err) {
             kprintf("cyw43: init failed %d\n", err);
@@ -272,6 +280,8 @@ int pc3_net_up(const char *ssid, const char *key, unsigned auth)
 
     net_busy = 1;
     err = cyw43_arch_wifi_connect_async(ssid, key, authmap[auth]);
+    if (!err)
+        cyw43_wifi_pm(&cyw43_state, CYW43_NO_POWERSAVE_MODE);
     net_busy = 0;
     if (err)
         return PC3_NET_EIO;
