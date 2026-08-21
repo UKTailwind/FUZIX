@@ -157,10 +157,12 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
 
         return mkval(sfmt("(((%s) >> (%s)) & 1LL)", a0, a1), TY_I);
     }
-    if (strcmp(up, "FLAG") == 0)
+    if (strcmp(up, "FLAG") == 0) {
         /* FLAG(n) - one scratch bit.  The assigning form is a
            statement, so a FLAG that reaches here is a read. */
+        cv.uses_misc = 1;
         return mkval(sfmt("mm_flag_get(%s)", n(0)), TY_I);
+    }
     if (strcmp(up, "LEN") == 0)
         return mkval(sfmt("(MMINTEGER)mm_slen(%s)", s(0)), TY_I);
     if (strcmp(up, "ASC") == 0)
@@ -169,6 +171,7 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         const char *a0 = s(0);
         const char *a1 = n(1);
 
+        cv.uses_misc = 1;
         return mkval(sfmt("mm_byte(%s, %s)", a0, a1), TY_I);
     }
     if (strcmp(up, "VAL") == 0)
@@ -289,6 +292,7 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         const char *a0 = s(0);
         const char *a1 = n(1);
 
+        cv.uses_misc = 1;
         return mkval(sfmt("mm_field(%s, %s, %s, %s)", a0, a1, delim, quote),
                      TY_S);
     }
@@ -424,6 +428,7 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         /* MAP(n) - the colour entry n stands for by default, which is
            what a program must ask for to land on that entry.
            Unaffected by remapping, as MMBasic's fun_map is. */
+        cv.uses_misc = 1;
         return mkval(sfmt("mm_map_get(%s)", n(0)), TY_I);
     }
     cv_err("built-in %s() is not supported yet", up);
@@ -527,6 +532,7 @@ struct val builtin_raw(const char *up)
             }
         }
         expect_op(")");
+        cv.uses_misc = 1;
         return mkval(sfmt("mm_trim(%s, %s, %s)", src.code, mask, where),
                      TY_S);
     }
@@ -584,6 +590,7 @@ struct val builtin_raw(const char *up)
         konst = sfmt("MM_B_%s", tyname);
         isflt = strcmp(tyname, "SINGLE") == 0
             || strcmp(tyname, "DOUBLE") == 0;
+        cv.uses_misc = 1;
         if (strcmp(up, "BIN2STR$") == 0) {
             if (isflt)
                 return mkval(sfmt("mm_bin2str(%s, %s, 0, %s)",
@@ -993,6 +1000,10 @@ struct val builtin_raw(const char *up)
                    it - the same flag MM.CMDLINE$ raises. */
                 if (strcmp(key, "PATH") == 0 || strcmp(key, "CURRENT") == 0)
                     cv.uses_cmdline = 1;
+                /* mm_flags_get lives in mmb_misc.h with the rest of
+                   the FLAG family. */
+                if (strcmp(key, "FLAGS") == 0)
+                    cv.uses_misc = 1;
                 expect_op(")");
                 return mkval(plain[i].call, plain[i].ty);
             }

@@ -462,6 +462,10 @@ void conv_write(FILE *f)
         cv.uses_data = 1;
     if (cv.uses_data)
         fprintf(f, "#include \"mmb_data.h\"\n");
+    /* The small pure families: GOSUB, BIT/BYTE/FLAG, BIN2STR$,
+       TRIM$/FIELD$ and the MAP() arithmetic. */
+    if (cv.uses_misc)
+        fprintf(f, "#include \"mmb_misc.h\"\n");
     if (cv.uses_pulse)
         fprintf(f, "#include \"mmb_pulse.h\"\n");
     /* After mmb_gpio.h, which it uses to read the pins.  Only a program

@@ -711,6 +711,7 @@ class Conv(object):
         self.uses_lstring = False   # LONGSTRING: pulls in mmb_lstring.h
         self.uses_datetime = False  # DATE$/TIME$/EPOCH etc: mmb_datetime.h
         self.uses_data = False      # DATA/READ/RESTORE: mmb_data.h
+        self.uses_misc = False      # GOSUB/BIT/FLAG/BIN2STR etc: mmb_misc.h
         self.uses_pulse = False     # PULSE: pulls in mmb_pulse.h
         self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
         self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
@@ -2137,12 +2138,14 @@ class Conv(object):
         if up == 'FLAG':
             # FLAG(n) - one scratch bit.  The assigning form is a
             # statement, so a FLAG that reaches here is a read.
+            self.uses_misc = True
             return ('mm_flag_get(%s)' % n(0), TY_I)
         if up == 'LEN':
             return ('(MMINTEGER)mm_slen(%s)' % s(0), TY_I)
         if up == 'ASC':
             return ('mm_asc(%s)' % s(0), TY_I)
         if up == 'BYTE':
+            self.uses_misc = True
             return ('mm_byte(%s, %s)' % (s(0), n(1)), TY_I)
         if up == 'VAL':
             return ('mm_val(%s)' % s(0), TY_F)
@@ -2212,6 +2215,7 @@ class Conv(object):
         if up == 'FIELD$':
             delim = s(2) if len(args) > 2 else '"\\001" ","'
             quote = s(3) if len(args) > 3 else '"\\000" ""'
+            self.uses_misc = True
             return ('mm_field(%s, %s, %s, %s)'
                     % (s(0), n(1), delim, quote), TY_S)
         if up == 'MM.SPISPEED':
@@ -2279,6 +2283,7 @@ class Conv(object):
             # MAP(n) - the colour entry n stands for by default, which
             # is what a program must ask for to land on that entry.
             # Unaffected by remapping, as MMBasic's fun_map is.
+            self.uses_misc = True
             return ('mm_map_get(%s)' % n(0), TY_I)
         if up == 'PORT':
             # PORT(pin, nbits [, pin, nbits]...) - several pins read as
@@ -2386,6 +2391,7 @@ class Conv(object):
                             self.err("TRIM$() 'where' must be L, R or B")
                         where = '(mm_slen(%s) ? %s[1] : 0)' % (w[0], w[0])
             self.expect_op(')')
+            self.uses_misc = True
             return ('mm_trim(%s, %s, %s)' % (src[0], mask, where), TY_S)
 
         if up in ('DATETIME$', 'DAY$', 'EPOCH'):
@@ -2426,6 +2432,7 @@ class Conv(object):
             self.expect_op(')')
             const = 'MM_B_' + tyname
             isflt = tyname in ('SINGLE', 'DOUBLE')
+            self.uses_misc = True
             if up == 'BIN2STR$':
                 if isflt:
                     return ('mm_bin2str(%s, %s, 0, %s)'
@@ -3575,6 +3582,10 @@ class Conv(object):
                 # program asks for something that needs it - the same
                 # flag MM.CMDLINE$ raises.
                 self.uses_cmdline = True
+            if key == 'FLAGS':
+                # mm_flags_get lives in mmb_misc.h with the rest of
+                # the FLAG family.
+                self.uses_misc = True
             self.expect_op(')')
             return self.MMINFO_PLAIN[key]
 
@@ -5769,6 +5780,7 @@ class Conv(object):
             self.expect_op(')')
             self.expect_op('=')
             v = self.as_int(self.expr())
+            self.uses_misc = True
             if up == 'BIT':
                 self.emit('mm_bit_assign(&(%s), %s, %s);' % (tgt, n, v))
             else:
@@ -5783,12 +5795,14 @@ class Conv(object):
             self.expect_op(')')
             self.expect_op('=')
             v = self.as_int(self.expr())
+            self.uses_misc = True
             self.emit('mm_flag_assign(%s, %s);' % (n, v))
             return
         if up == 'FLAGS' and self.is_op('=', 1):
             # FLAGS = value - all sixty-four at once.  Reading them is
             # MM.INFO(FLAGS), which is where MMBasic put it.
             self.i += 2
+            self.uses_misc = True
             self.emit('mm_flags_set(%s);' % self.as_int(self.expr()))
             return
         if up == 'LMID' and self.is_op('(', 1):
@@ -5913,6 +5927,7 @@ class Conv(object):
                     self.err("COLOUR MAP works on integer arrays")
                 sp, sc = self.array_flat(src)
                 dp, dc = self.array_flat(dst)
+                self.uses_misc = True
                 self.emit('mm_colour_map(%s, %s, %s, %s, %s, %s);'
                           % (sp, sc, dp, dc, cmap, cmapn))
                 return
@@ -6296,6 +6311,7 @@ class Conv(object):
         self.note_goto(canon)
         if self.mode == 'scan':
             self.gosub_sites.setdefault(here, []).append(site)
+        self.uses_misc = True
         self.emit('mm_gosub_push(%d); goto %s;' % (site, clabel(canon)))
         self.raw('__GR%d: ;' % site)
 
@@ -6303,6 +6319,7 @@ class Conv(object):
         sites = self.gosub_sites.get(self.gosub_key(), [])
         if not sites:
             self.err("RETURN without any GOSUB in this part of the program")
+        self.uses_misc = True
         self.emit('switch (mm_gosub_pop()) {')
         for site in sites:
             self.emit('    case %d: goto __GR%d;' % (site, site))
@@ -8452,6 +8469,10 @@ class Conv(object):
             self.uses_data = True
         if self.uses_data:
             wr('#include "mmb_data.h"\n')
+        # The small pure families: GOSUB, BIT/BYTE/FLAG, BIN2STR$,
+        # TRIM$/FIELD$ and the MAP() arithmetic.
+        if self.uses_misc:
+            wr('#include "mmb_misc.h"\n')
         if self.uses_pulse:
             wr('#include "mmb_pulse.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a

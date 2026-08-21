@@ -200,10 +200,7 @@ char *mm_hex   (MMINTEGER v, MMINTEGER width);
 char *mm_oct   (MMINTEGER v, MMINTEGER width);
 char *mm_bin   (MMINTEGER v, MMINTEGER width);
 
-MMINTEGER mm_byte  (const char *s, MMINTEGER n);
-char *mm_trim  (const char *src, const char *mask, int where); /* L R or B */
-char *mm_field (const char *s, MMINTEGER fnbr, const char *delims,
-                const char *quotes);
+/* BYTE(), TRIM$() and FIELD$() are in mmb_misc.h */
 char *mm_format(MMFLOAT val, const char *fmt);
 
 /* ---- date and time: in mmb_datetime.h, compiled into the program --- */
@@ -219,9 +216,7 @@ char *mm_format(MMFLOAT val, const char *fmt);
 #define MM_B_UINT8  7
 #define MM_B_SINGLE 8
 #define MM_B_DOUBLE 9
-char     *mm_bin2str  (int type, MMFLOAT fv, MMINTEGER iv, int big);
-MMFLOAT   mm_str2bin_f(int type, const char *s, int big);
-MMINTEGER mm_str2bin_i(int type, const char *s, int big);
+/* the converters themselves are in mmb_misc.h */
 
 /* ---- files ----------------------------------------------------------
  * Channels 1..MM_MAXFILES map onto stdio FILE*.  Channel 0 is the
@@ -364,30 +359,14 @@ void mm_timer_set(MMFLOAT ms);           /* TIMER = n, milliseconds    */
 void mm_ls_print  (MMINTEGER fnbr, const MMINTEGER *a, int nl);
 MMINTEGER  mm_ls_input  (MMINTEGER *a, int cells, MMINTEGER fnbr, MMINTEGER n);
 
-/* ---- GOSUB / RETURN --------------------------------------------------
- * A GOSUB compiles to "push a site id, goto the label" and a RETURN to a
- * switch on the popped id that jumps back.  MMBasic allows 50 levels.  */
+/* GOSUB/RETURN and the BIT()=/BYTE()=/FLAG family are in mmb_misc.h;
+ * the stack depth is MMBasic's 50 levels. */
 #ifndef MM_MAXGOSUB
 #define MM_MAXGOSUB 50
 #endif
-void mm_gosub_push(int site);
-int  mm_gosub_pop (void);
 
 /* MID$(s, start, num) = repl$   (the statement form) */
 void mm_mid_assign(char *dst, MMINTEGER start, MMINTEGER num, const char *repl);
-/* BIT(v, n) = 0|1 and BYTE(s$, n) = 0..255 - assignments that reach
- * into a variable.  The type check is the translator's; these do the
- * range checks, and raise rather than clamp because MMBasic's getint
- * does. */
-void mm_bit_assign(MMINTEGER *p, MMINTEGER n, MMINTEGER v);
-void mm_byte_assign(char *s, MMINTEGER n, MMINTEGER v);
-/* FLAG(n) = 0|1, FLAGS = v, and the two readers.  Sixty-four bits of
- * scratch for the program's own use, cleared at start - and per
- * process here, which MMBasic's single global could not be. */
-void mm_flag_assign(MMINTEGER n, MMINTEGER v);
-void mm_flags_set(MMINTEGER v);
-MMINTEGER mm_flag_get(MMINTEGER n);
-MMINTEGER mm_flags_get(void);
 
 /* ---- graphics (PC3) --------------------------------------------------
  * Colours are ALWAYS RGB888, as everywhere in MMBasic; the kernel
@@ -440,23 +419,8 @@ void mm_map(MMINTEGER index, MMINTEGER rgb);
 void mm_map_set(void);
 void mm_map_reset(void);
 
-/* The MAP() function: the colour entry n stands for by default, which
- * is MMBasic's fun_map - the inverse of the bit extraction above, and
- * deliberately NOT affected by any remapping. */
-MMINTEGER mm_map_get(MMINTEGER index);
-
-/* COLOUR MAP in%(), out%() [, map%()] - a whole array of colour codes
- * 0-15 turned into RGB888, either through the default palette (map
- * NULL, so mm_map_get answers) or through a 16-entry table the program
- * supplies.  in and out may be the same array: each element is read
- * before it is written.
- *
- * The three size checks are MMBasic's own and are made here, where the
- * counts exist even for an array whose bounds the program worked out:
- * in and out must match, and a supplied palette must be exactly 16
- * entries long.  mapn is ignored when map is NULL. */
-void mm_colour_map(const MMINTEGER *in, int n, MMINTEGER *out, int outn,
-                   const MMINTEGER *map, int mapn);
+/* MAP() and COLOUR MAP - the fixed default-palette arithmetic - are in
+ * mmb_misc.h; MAP the statement (the live palette) stays below. */
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb);
 MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y);
 

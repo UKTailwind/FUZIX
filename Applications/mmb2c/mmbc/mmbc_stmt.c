@@ -1975,6 +1975,7 @@ void statement_inner(void)
         expect_op(")");
         expect_op("=");
         v = as_int(expr());
+        cv.uses_misc = 1;
         if (isbit)
             emit(sfmt("mm_bit_assign(&(%s), %s, %s);", tgt, n, v));
         else
@@ -1992,6 +1993,7 @@ void statement_inner(void)
         expect_op(")");
         expect_op("=");
         v = as_int(expr());
+        cv.uses_misc = 1;
         emit(sfmt("mm_flag_assign(%s, %s);", n, v));
         return;
     }
@@ -1999,6 +2001,7 @@ void statement_inner(void)
         /* FLAGS = value - all sixty-four at once.  Reading them is
            MM.INFO(FLAGS), which is where MMBasic put it. */
         cv.i += 2;
+        cv.uses_misc = 1;
         emit(sfmt("mm_flags_set(%s);", as_int(expr())));
         return;
     }
@@ -2161,6 +2164,7 @@ void statement_inner(void)
                 cv_err("COLOUR MAP works on integer arrays");
             sf = array_flat(src);
             df = array_flat(dst);
+            cv.uses_misc = 1;
             emit(sfmt("mm_colour_map(%s, %s, %s, %s, %s, %s);",
                       sf.ptr, sf.cnt, df.ptr, df.cnt, cmap, cmapn));
             return;
@@ -3174,6 +3178,7 @@ static void emit_gosub(const char *canon, const char *disp)
         GROW(g->sites, g->n, g->cap);
         g->sites[g->n++] = site;
     }
+    cv.uses_misc = 1;
     emit(sfmt("mm_gosub_push(%d); goto %s;", site, clabel(canon)));
     raw(sfmt("__GR%d: ;", site));
 }
@@ -3185,6 +3190,7 @@ static void do_return(void)
 
     if (g == NULL || g->n == 0)
         cv_err("RETURN without any GOSUB in this part of the program");
+    cv.uses_misc = 1;
     emit("switch (mm_gosub_pop()) {");
     for (k = 0; k < g->n; k++)
         emit(sfmt("    case %d: goto __GR%d;", g->sites[k],

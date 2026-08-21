@@ -928,100 +928,7 @@ void mm_mid_assign(char *dst, MMINTEGER start, MMINTEGER num, const char *repl)
         dst[start + i] = repl[1 + i];
 }
 
-/*
- * BIT(intvar, n) = 0|1  and  BYTE(strvar$, n) = 0..255
- *
- * MMBasic's cmd_bit and cmd_byte (Commands.c:5641, 5669).  Both are
- * assignments that reach INTO a variable rather than replacing it, and
- * both check the type of that variable - "Not an integer", "Not a
- * string".  Those two checks are not here: the translator knows the
- * type of an lvalue when it generates the call, so it refuses at
- * TRANSLATION time and the message names the line.  What is left is
- * the range checking, which depends on values only known at run time.
- *
- * MMBasic uses getint(x, lo, hi) for both, which raises rather than
- * clamps, so these raise too.  That is the opposite of MID$ above,
- * which clamps - and it is not an inconsistency to tidy away: MMBasic
- * clamps in one and raises in the other, and a program can depend on
- * either.
- */
-void mm_bit_assign(MMINTEGER *p, MMINTEGER n, MMINTEGER v)
-{
-    if (n < 0 || n > 63) {
-        mm_error("Bit number is out of bounds");
-        return;
-    }
-    if (v < 0 || v > 1) {
-        mm_error("Bit value must be 0 or 1");
-        return;
-    }
-    if (v)
-        *p |= (MMINTEGER)1 << n;
-    else
-        *p &= ~((MMINTEGER)1 << n);
-}
-
-void mm_byte_assign(char *s, MMINTEGER n, MMINTEGER v)
-{
-    /*	One based, and the upper bound is the string's CURRENT length -
-     *	BYTE writes a character that is already there and never extends
-     *	the string.  s[0] is the length byte, so s[n] is the nth
-     *	character with no adjustment, which is why MMBasic indexes it
-     *	exactly this way. */
-    if (n < 1 || n > (MMINTEGER)mm_slen(s)) {
-        mm_error("Byte position is out of bounds");
-        return;
-    }
-    if (v < 0 || v > 255) {
-        mm_error("Byte value must be 0 to 255");
-        return;
-    }
-    s[n] = (char)(unsigned char)v;
-}
-
-/*
- * FLAG(n) = 0|1, FLAGS = value, FLAG(n), MM.INFO(FLAGS)
- *
- * Sixty-four bits of nothing in particular.  MMBasic's g_flag
- * (Commands.c:221) is written and read by these four and touched by
- * nothing else in the firmware; it is a scratch register for the
- * program's own use, and its one real property is that it is CLEARED
- * WHEN A PROGRAM STARTS (MMBasic.c:6524).
- *
- * A static here gets that for free and gets something MMBasic could
- * not: it is per process, so two BASIC programs running at once have
- * one each rather than trampling on a single global.
- */
-static MMINTEGER mm_flags_v;
-
-void mm_flag_assign(MMINTEGER n, MMINTEGER v)
-{
-    if (n < 0 || n > 63) {
-        mm_error("Flag number is out of bounds");
-        return;
-    }
-    if (v < 0 || v > 1) {
-        mm_error("Flag value must be 0 or 1");
-        return;
-    }
-    if (v)
-        mm_flags_v |= (MMINTEGER)1 << n;
-    else
-        mm_flags_v &= ~((MMINTEGER)1 << n);
-}
-
-void mm_flags_set(MMINTEGER v) { mm_flags_v = v; }
-
-MMINTEGER mm_flag_get(MMINTEGER n)
-{
-    if (n < 0 || n > 63) {
-        mm_error("Flag number is out of bounds");
-        return 0;
-    }
-    return (mm_flags_v >> n) & 1;
-}
-
-MMINTEGER mm_flags_get(void) { return mm_flags_v; }
+/* BIT()=/BYTE()=/FLAG moved to mmb_misc.h (2026-08-21). */
 
 char *mm_ucase(const char *s)
 {
@@ -1122,71 +1029,7 @@ char *mm_hex(MMINTEGER v, MMINTEGER w) { return mm_base(v, w, 16); }
 char *mm_oct(MMINTEGER v, MMINTEGER w) { return mm_base(v, w,  8); }
 char *mm_bin(MMINTEGER v, MMINTEGER w) { return mm_base(v, w,  2); }
 
-/* ---- BYTE(), TRIM$(), FIELD$() ------------------------------------ */
-
-MMINTEGER mm_byte(const char *s, MMINTEGER n)
-{
-    if (n < 1 || n > mm_slen(s))
-        MM_RAISEV("Index out of bounds in BYTE()", 0);
-    return (MMINTEGER)(unsigned char)s[n];
-}
-
-static int mm_in_mask(char c, const char *mask)
-{
-    int n = mm_slen(mask), i;
-    for (i = 1; i <= n; i++) if (mask[i] == c) return 1;
-    return 0;
-}
-
-char *mm_trim(const char *src, const char *mask, int where)
-{
-    int len = mm_slen(src), start = 1, end = len;
-    char *t = mm_tmp();
-    if (where == 'L' || where == 'B')
-        while (start <= end && mm_in_mask(src[start], mask)) start++;
-    if (where == 'R' || where == 'B')
-        while (end >= start && mm_in_mask(src[end], mask)) end--;
-    mm_ssetn(t, src + start, end - start + 1);
-    return t;
-}
-
-/* mirrors scan_for_delimiter() in core/Functions.c */
-static int mm_scan_delim(int start, const char *p, const char *delims,
-                         const char *quotes)
-{
-    int i, n = mm_slen(p);
-    char qidx;
-    for (i = start; i <= n && !mm_in_mask(p[i], delims); i++) {
-        if (mm_in_mask(p[i], quotes)) {
-            qidx = p[i];
-            i++;
-            while (i < n && p[i] != qidx) i++;
-        }
-    }
-    return i;
-}
-
-char *mm_field(const char *p, MMINTEGER fnbr, const char *delims,
-               const char *quotes)
-{
-    char *t = mm_tmp();
-    int i = 1, j, k, n = mm_slen(p);
-    while (--fnbr > 0) {
-        i = mm_scan_delim(i, p, delims, quotes);
-        if (i > n) return t;
-        i++;
-    }
-    while (i <= n && p[i] == ' ') i++;
-    j = mm_scan_delim(i, p, delims, quotes);
-    k = j - i;
-    if (k < 0) k = 0;
-    mm_ssetn(t, p + i, k);
-    k = mm_slen(t);
-    while (k > 0 && t[k] == ' ') k--;
-    t[0] = (char)(unsigned char)k;
-    t[k + 1] = 0;
-    return t;
-}
+/* ---- BYTE(), TRIM$(), FIELD$(): moved to mmb_misc.h ---------------- */
 
 /* ---- FORMAT$() ----------------------------------------------------- */
 /* mirrors format_float() in core/MM_Misc.c: exactly one specifier,
@@ -1328,83 +1171,7 @@ char *mm_format(MMFLOAT val, const char *fmtstr)
  * mmb_math.h bargain.  The DATE$=/TIME$= writers went with it, since
  * they adjust the clock offset that lives there now. */
 
-/* ---- BIN2STR$ / STR2BIN --------------------------------------------- */
-
-char *mm_bin2str(int type, MMFLOAT fv, MMINTEGER iv, int big)
-{
-    unsigned char raw[8];
-    int n, i;
-    char *t = mm_tmp();
-    float f32;
-    double f64;
-    switch (type) {
-    case MM_B_INT64: case MM_B_UINT64: n = 8; break;
-    case MM_B_INT32: case MM_B_UINT32: n = 4; break;
-    case MM_B_INT16: case MM_B_UINT16: n = 2; break;
-    case MM_B_INT8:  case MM_B_UINT8:  n = 1; break;
-    case MM_B_SINGLE: n = 4; break;
-    default:          n = 8; break;
-    }
-    if (type == MM_B_SINGLE)      { f32 = (float)fv;  memcpy(raw, &f32, 4); }
-    else if (type == MM_B_DOUBLE) { f64 = (double)fv; memcpy(raw, &f64, 8); }
-    else {
-        unsigned long long u = (unsigned long long)iv;
-        long long lo = 0, hi = 0;
-        switch (type) {
-        case MM_B_INT32:  lo = -2147483648LL; hi = 2147483647LL; break;
-        case MM_B_UINT32: lo = 0;             hi = 4294967295LL; break;
-        case MM_B_INT16:  lo = -32768;        hi = 32767;        break;
-        case MM_B_UINT16: lo = 0;             hi = 65535;        break;
-        case MM_B_INT8:   lo = -128;          hi = 127;          break;
-        case MM_B_UINT8:  lo = 0;             hi = 255;          break;
-        default:          lo = 0;             hi = 0;            break;
-        }
-        if (hi != 0 && (iv < lo || iv > hi))
-            MM_RAISEV("Overflow", mm_ssink());
-        for (i = 0; i < n; i++) raw[i] = (unsigned char)((u >> (8 * i)) & 0xFF);
-    }
-    if (big) { for (i = 0; i < n / 2; i++)
-                   { unsigned char c = raw[i]; raw[i] = raw[n-1-i]; raw[n-1-i] = c; } }
-    mm_ssetn(t, (const char *)raw, n);
-    return t;
-}
-
-MMFLOAT mm_str2bin_f(int type, const char *s, int big)
-{
-    unsigned char raw[8];
-    int n = (type == MM_B_SINGLE) ? 4 : 8, i;
-    float f32; double f64;
-    if (mm_slen(s) != n) MM_RAISEV("String length", 0.0);
-    memcpy(raw, s + 1, (size_t)n);
-    if (big) { for (i = 0; i < n / 2; i++)
-                   { unsigned char c = raw[i]; raw[i] = raw[n-1-i]; raw[n-1-i] = c; } }
-    if (type == MM_B_SINGLE) { memcpy(&f32, raw, 4); return (MMFLOAT)f32; }
-    memcpy(&f64, raw, 8); return (MMFLOAT)f64;
-}
-
-MMINTEGER mm_str2bin_i(int type, const char *s, int big)
-{
-    unsigned char raw[8];
-    unsigned long long u = 0;
-    int n, i;
-    switch (type) {
-    case MM_B_INT64: case MM_B_UINT64: n = 8; break;
-    case MM_B_INT32: case MM_B_UINT32: n = 4; break;
-    case MM_B_INT16: case MM_B_UINT16: n = 2; break;
-    default:                           n = 1; break;
-    }
-    if (mm_slen(s) != n) MM_RAISEV("String length", 0);
-    memcpy(raw, s + 1, (size_t)n);
-    if (big) { for (i = 0; i < n / 2; i++)
-                   { unsigned char c = raw[i]; raw[i] = raw[n-1-i]; raw[n-1-i] = c; } }
-    for (i = n - 1; i >= 0; i--) u = (u << 8) | raw[i];
-    switch (type) {                      /* sign extend the signed forms */
-    case MM_B_INT32: return (MMINTEGER)(int32_t)u;
-    case MM_B_INT16: return (MMINTEGER)(int16_t)u;
-    case MM_B_INT8:  return (MMINTEGER)(int8_t)u;
-    default:         return (MMINTEGER)(int64_t)u;
-    }
-}
+/* ---- BIN2STR$ / STR2BIN: moved to mmb_misc.h ------------------------ */
 
 /* ================= files ===========================================
  * MMBasic channels 1..MM_MAXFILES sit on plain stdio FILE*.  Channel 0
@@ -2248,22 +2015,7 @@ MMINTEGER mm_ls_input(MMINTEGER *a, int cells, MMINTEGER fnbr, MMINTEGER n)
     return got;
 }
 
-/* ================= GOSUB / RETURN ================================== */
-
-static int mm_gstack[MM_MAXGOSUB];
-static int mm_gsp = 0;
-
-void mm_gosub_push(int site)
-{
-    if (mm_gsp >= MM_MAXGOSUB) MM_RAISE("Too many nested GOSUB");
-    mm_gstack[mm_gsp++] = site;
-}
-
-int mm_gosub_pop(void)
-{
-    if (mm_gsp <= 0) mm_error("RETURN without GOSUB");
-    return mm_gstack[--mm_gsp];
-}
+/* ============ GOSUB / RETURN: moved to mmb_misc.h ================== */
 
 /* ================= misc ============================================ */
 
@@ -3282,61 +3034,8 @@ void mm_cls(MMINTEGER rgb)
     fflush(stdout);
 }
 
-/*
- * The MAP() function - MMBasic's fun_map, which for a 16-colour mode
- * spreads the four bits of the colour number back out into RGB888:
- * one bit of red, two of green, one of blue.
- *
- * It answers for the DEFAULT palette and takes no notice of what MAP
- * has since done to entry n, which looks odd until you see that it is
- * the exact inverse of RGB121() - the fixed rule that turns a colour
- * into an entry number.  So MAP(n) tells you which colour a program
- * must ask for to land on entry n, which is the question worth asking
- * before remapping it.
- *
- * Common to both builds: it is arithmetic, and the answer does not
- * depend on there being a screen.
- */
-MMINTEGER mm_map_get(MMINTEGER index)
-{
-    MMINTEGER n = index & 15;
-
-    return ((n & 8) << 20) | ((n & 6) << 13) | ((n & 1) << 7);
-}
-
-/*
- * COLOUR MAP - the array form of MAP().
- *
- * MMBasic (cmd_colourmap in Draw.c) starts from a copy of RGB121map and
- * overwrites all sixteen entries when the third array is given, so a
- * supplied map is used INSTEAD of the palette, never merged with it.
- * That is what the NULL here selects between.
- *
- * The index check is MMBasic's, plus the negative case it does not
- * make: MMBasic tests only `in >= 16` and would read map[-n] for a
- * negative code.  No valid program can tell the difference.
- */
-void mm_colour_map(const MMINTEGER *in, int n, MMINTEGER *out, int outn,
-                   const MMINTEGER *map, int mapn)
-{
-    int i;
-
-    if (outn != n)
-        MM_RAISE("Array size mismatch");
-    if (map) {
-        if (mapn != 16)
-            MM_RAISE("Array size not 16 elements");
-        for (i = 0; i < 16; i++)
-            if (map[i] < 0 || map[i] > 0xFFFFFF)
-                MM_RAISE("Invalid colour");
-    }
-    for (i = 0; i < n; i++) {
-        MMINTEGER c = in[i];
-        if (c < 0 || c > 15)
-            MM_RAISE("Input range error on element");
-        out[i] = map ? map[c] : mm_map_get(c);
-    }
-}
+/* MAP()/COLOUR MAP arithmetic moved to mmb_misc.h (2026-08-21); the
+ * live palette (MAP the statement) keeps its kernel crossing. */
 
 /* ---- graphics (PC3) --------------------------------------------------
  * MMBasic's contract: callers speak RGB888 and the primitive converts.

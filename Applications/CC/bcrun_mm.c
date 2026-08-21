@@ -241,26 +241,13 @@ static void w_str_i(void)    { A = mm_off(mm_str_i(LL(0), LL(2), LL(4), Ps(6)));
 static void w_hex(void)      { A = mm_off(mm_hex(LL(0), LL(2))); }
 static void w_oct(void)      { A = mm_off(mm_oct(LL(0), LL(2))); }
 static void w_bin(void)      { A = mm_off(mm_bin(LL(0), LL(2))); }
-static void w_byte(void)     { A = mm_byte(Ps(0), LL(1)); }
-static void w_trim(void)     { A = mm_off(mm_trim(Ps(0), Ps(1), I(2))); }
-static void w_field(void)    { A = mm_off(mm_field(Ps(0), LL(1), Ps(3), Ps(4))); }
 static void w_format(void)   { A = mm_off(mm_format(D(0), Ps(2))); }
 static void w_mid_assign(void) { mm_mid_assign(Ps(0), LL(1), LL(3), Ps(5)); A = 0; }
-/* BIT/BYTE/FLAG: the assignment forms and the two flag readers. */
-static void w_bit_assign(void) { mm_bit_assign(PI(0), LL(1), LL(3)); A = 0; }
-static void w_byte_assign(void){ mm_byte_assign(Ps(0), LL(1), LL(3)); A = 0; }
-static void w_flag_assign(void){ mm_flag_assign(LL(0), LL(2)); A = 0; }
-static void w_flags_set(void)  { mm_flags_set(LL(0)); A = 0; }
-static void w_flag_get(void)   { A = mm_flag_get(LL(0)); }
-static void w_flags_get(void)  { A = mm_flags_get(); }
+/* BYTE()/TRIM$/FIELD$, BIT/BYTE/FLAG, BIN2STR$/STR2BIN, GOSUB and the
+   MAP() arithmetic are all program-side now (mmb_misc.h). */
 
 /* date and time are program-side now (mmb_datetime.h): calendar
    arithmetic over time(), which is already a libcall. */
-
-/* BIN2STR$ / STR2BIN */
-static void w_bin2str(void)  { A = mm_off(mm_bin2str(I(0), D(1), LL(3), I(5))); }
-static void w_str2bin_f(void){ A = dput(mm_str2bin_f(I(0), Ps(1), I(2))); }
-static void w_str2bin_i(void){ A = mm_str2bin_i(I(0), Ps(1), I(2)); }
 
 /* files */
 static void w_open(void)     { mm_open(Ps(0), I(1), LL(2)); A = 0; }
@@ -484,15 +471,12 @@ static void w_gtext(void)    { mm_gtext(LL(0), LL(2), LL(4), LL(6),
    themselves are static functions in mmb_gpio.h, so a program that
    touches no pins carries none of them. */
 static void w_gpio(void)     { A = mm_gpio(LL(0), LL(2), LL(4)); }
-/* MAP - the palette.  mm_map collects an entry, mm_map_set applies the
-   lot during blanking, mm_map_get answers what a number stands for. */
+/* MAP - the LIVE palette.  mm_map collects an entry, mm_map_set
+   applies the lot during blanking; the MAP() arithmetic and COLOUR
+   MAP are program-side in mmb_misc.h. */
 static void w_map(void)      { mm_map(LL(0), LL(2)); A = 0; }
 static void w_map_set(void)  { mm_map_set(); A = 0; }
 static void w_map_reset(void){ mm_map_reset(); A = 0; }
-static void w_map_get(void)  { A = mm_map_get(LL(0)); }
-/* COLOUR MAP: the palette is NULL when the program gave none, and
-   mm_ptr passes 0 through unchanged, so PI(4) is NULL there. */
-static void w_colour_map(void){ mm_colour_map(PI(0), I(1), PI(2), I(3), PI(4), I(5)); A = 0; }
 /* FRAMEBUFFER - 0 is the screen, 1 the off-screen buffer */
 static void w_fb_create(void){ mm_fb_create(LL(0)); A = 0; }
 static void w_fb_close(void) { mm_fb_close(LL(0)); A = 0; }
@@ -506,10 +490,6 @@ static void w_fb_wait(void)  { mm_fb_wait(); A = 0; }
    forms, whose channel is bcrun's own stdio stream. */
 static void w_ls_print(void) { mm_ls_print(LL(0), PI(2), I(3)); A = 0; }
 static void w_ls_input(void) { A = mm_ls_input(PI(0), I(1), LL(2), LL(4)); }
-
-/* GOSUB / RETURN */
-static void w_gosub_push(void){ mm_gosub_push(I(0)); A = 0; }
-static void w_gosub_pop(void){ A = mm_gosub_pop(); }
 
 /* misc */
 static void w_error(void)    { mm_error(Pa(0)); }
@@ -627,20 +607,8 @@ static const struct mmwrap {
 	{ "mm_hex",		w_hex },
 	{ "mm_oct",		w_oct },
 	{ "mm_bin",		w_bin },
-	{ "mm_byte",		w_byte },
-	{ "mm_trim",		w_trim },
-	{ "mm_field",		w_field },
 	{ "mm_format",		w_format },
 	{ "mm_mid_assign",	w_mid_assign },
-	{ "mm_bit_assign",	w_bit_assign },
-	{ "mm_byte_assign",	w_byte_assign },
-	{ "mm_flag_assign",	w_flag_assign },
-	{ "mm_flags_set",	w_flags_set },
-	{ "mm_flag_get",	w_flag_get },
-	{ "mm_flags_get",	w_flags_get },
-	{ "mm_bin2str",		w_bin2str },
-	{ "mm_str2bin_f",	w_str2bin_f },
-	{ "mm_str2bin_i",	w_str2bin_i },
 	{ "mm_open",		w_open },
 	{ "mm_close",		w_close },
 	{ "mm_flush",		w_flush },
@@ -750,8 +718,6 @@ static const struct mmwrap {
 	{ "mm_map",		w_map },
 	{ "mm_map_set",		w_map_set },
 	{ "mm_map_reset",	w_map_reset },
-	{ "mm_map_get",		w_map_get },
-	{ "mm_colour_map",	w_colour_map },
 	{ "mm_fontinfo",	w_fontinfo },
 	{ "mm_fontaddr",	w_fontaddr },
 	{ "mm_fontdef",		w_fontdef },
@@ -768,8 +734,6 @@ static const struct mmwrap {
 	{ "mm_fb_wait",		w_fb_wait },
 	{ "mm_ls_print",	w_ls_print },
 	{ "mm_ls_input",	w_ls_input },
-	{ "mm_gosub_push",	w_gosub_push },
-	{ "mm_gosub_pop",	w_gosub_pop },
 	{ "mm_error",		w_error },
 	{ "mm_end",		w_end },
 	{ "mm_timer",		w_timer },
