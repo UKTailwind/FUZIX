@@ -309,25 +309,9 @@ static void w_at(void)       { A = mm_off(mm_at(LL(0), LL(2), LL(4))); }
 static void w_dir(void)      { A = mm_off(mm_dir(Ps(0), I(1), I(2))); }
 static void w_files(void)    { mm_files(Ps(0)); A = 0; }
 
-/* DIM a(n) and REDIM: an array whose bounds are worked out while the
- * program runs.  The allocation and the free are the PROGRAM's (they
- * go through w_heap/w_lfree to the VM heap), so what crosses here is
- * only the arithmetic and the copy. */
-static void w_arr_bytes(void)
-{
-	A = (long)(mm_arr_bytes((const MMINTEGER *)(void *)Pa(0),
-			     (unsigned long)(uint32_t)arg(1)));
-}
-
-static void w_arr_swap(void)
-{
-	A = mm_off((char *)mm_arr_swap((void *)Pa(0), PI(1),
-				       (const MMINTEGER *)(void *)Pa(2),
-				       (void *)Pa(3),
-				       (unsigned long)(uint32_t)arg(4),
-				       I(5)));
-}
-
+/* DIM a(n)/REDIM's arithmetic and every other whole-array operation
+ * are program-side now (mmb_array.h); only mm_arr_count below keeps a
+ * crossing, because every array parameter's count goes through it. */
 
 /* DATA / READ / RESTORE
  *
@@ -365,35 +349,8 @@ static void w_read_unsave(void){ mm_read_unsave(); A = 0; }
 /* SORT is program-side now (mmb_sort.h): pure computation over the
    program's own arrays, so no crossing exists for it any more. */
 
-/* whole array operations */
+/* the one whole-array crossing left - see the note above */
 static void w_arr_count(void){ A = mm_arr_count(PI(0)); }
-static void w_arr_set_i(void){ mm_arr_set_i(PI(0), I(1), LL(2)); A = 0; }
-static void w_arr_set_f(void){ mm_arr_set_f(PF(0), I(1), D(2)); A = 0; }
-static void w_arr_set_s(void){ mm_arr_set_s(PSA(0), I(1), Ps(2)); A = 0; }
-static void w_arr_add_i(void){ mm_arr_add_i(PI(0), I(1), LL(2), PI(4)); A = 0; }
-static void w_arr_add_f(void){ mm_arr_add_f(PF(0), I(1), D(2), PF(4)); A = 0; }
-static void w_arr_add_s(void){ mm_arr_add_s(PSA(0), I(1), Ps(2), PSA(3)); A = 0; }
-static void w_arr_scale_i(void){ mm_arr_scale_i(PI(0), I(1), LL(2), PI(4)); A = 0; }
-static void w_arr_scale_f(void){ mm_arr_scale_f(PF(0), I(1), D(2), PF(4)); A = 0; }
-/* ARRAY SLICE / ARRAY INSERT: six arguments, and every one of them is a
-   pointer or an int, so here the slot number IS the parameter number. */
-static void w_arr_copy_i(void){ mm_arr_copy_i(PI(0), I(1), PI(2), I(3), I(4), I(5)); A = 0; }
-static void w_arr_copy_f(void){ mm_arr_copy_f(PF(0), I(1), PF(2), I(3), I(4), I(5)); A = 0; }
-static void w_arr_copy_s(void){ mm_arr_copy_s(PSA(0), I(1), PSA(2), I(3), I(4), I(5)); A = 0; }
-
-/* MATH() array reductions */
-static void w_st_sum_i(void) { A = dput(mm_st_sum_i(PI(0), I(1))); }
-static void w_st_sum_f(void) { A = dput(mm_st_sum_f(PF(0), I(1))); }
-static void w_st_mean_i(void){ A = dput(mm_st_mean_i(PI(0), I(1))); }
-static void w_st_mean_f(void){ A = dput(mm_st_mean_f(PF(0), I(1))); }
-static void w_st_sd_i(void)  { A = dput(mm_st_sd_i(PI(0), I(1))); }
-static void w_st_sd_f(void)  { A = dput(mm_st_sd_f(PF(0), I(1))); }
-static void w_st_max_i(void) { A = dput(mm_st_max_i(PI(0), I(1), PI(2))); }
-static void w_st_max_f(void) { A = dput(mm_st_max_f(PF(0), I(1), PI(2))); }
-static void w_st_min_i(void) { A = dput(mm_st_min_i(PI(0), I(1), PI(2))); }
-static void w_st_min_f(void) { A = dput(mm_st_min_f(PF(0), I(1), PI(2))); }
-static void w_st_med_i(void) { A = dput(mm_st_med_i(PI(0), I(1))); }
-static void w_st_med_f(void) { A = dput(mm_st_med_f(PF(0), I(1))); }
 
 /* misc Tier A */
 static void w_pause(void)    { mm_pause(D(0)); A = 0; }
@@ -785,8 +742,6 @@ static const struct mmwrap {
 	{ "mm_at",		w_at },
 	{ "mm_dir",		w_dir },
 	{ "mm_files",		w_files },
-	{ "mm_arr_bytes",	w_arr_bytes },
-	{ "mm_arr_swap",	w_arr_swap },
 	{ "mm_data_init5",	w_data_init5 },
 	{ "mm_data_init4",	w_data_init4 },
 	{ "mm_restore",		w_restore },
@@ -796,29 +751,6 @@ static const struct mmwrap {
 	{ "mm_read_save",	w_read_save },
 	{ "mm_read_unsave",	w_read_unsave },
 	{ "mm_arr_count",	w_arr_count },
-	{ "mm_arr_set_i",	w_arr_set_i },
-	{ "mm_arr_set_f",	w_arr_set_f },
-	{ "mm_arr_set_s",	w_arr_set_s },
-	{ "mm_arr_add_i",	w_arr_add_i },
-	{ "mm_arr_add_f",	w_arr_add_f },
-	{ "mm_arr_add_s",	w_arr_add_s },
-	{ "mm_arr_scale_i",	w_arr_scale_i },
-	{ "mm_arr_scale_f",	w_arr_scale_f },
-	{ "mm_arr_copy_i",	w_arr_copy_i },
-	{ "mm_arr_copy_f",	w_arr_copy_f },
-	{ "mm_arr_copy_s",	w_arr_copy_s },
-	{ "mm_st_sum_i",	w_st_sum_i },
-	{ "mm_st_sum_f",	w_st_sum_f },
-	{ "mm_st_mean_i",	w_st_mean_i },
-	{ "mm_st_mean_f",	w_st_mean_f },
-	{ "mm_st_sd_i",		w_st_sd_i },
-	{ "mm_st_sd_f",		w_st_sd_f },
-	{ "mm_st_max_i",	w_st_max_i },
-	{ "mm_st_max_f",	w_st_max_f },
-	{ "mm_st_min_i",	w_st_min_i },
-	{ "mm_st_min_f",	w_st_min_f },
-	{ "mm_st_med_i",	w_st_med_i },
-	{ "mm_st_med_f",	w_st_med_f },
 	{ "mm_pause",		w_pause },
 	{ "mm_error_s",		w_error_s },
 	{ "mm_err_bind",	w_err_bind },

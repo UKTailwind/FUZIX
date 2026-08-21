@@ -707,6 +707,7 @@ class Conv(object):
         self.uses_port = False      # PORT: pulls in mmb_port.h
         self.uses_math = False      # MATH C_ADD etc: pulls in mmb_math.h
         self.uses_sort = False      # SORT: pulls in mmb_sort.h
+        self.uses_array = False     # whole-array ops/REDIM/MATH(): mmb_array.h
         self.uses_pulse = False     # PULSE: pulls in mmb_pulse.h
         self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
         self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
@@ -2673,6 +2674,7 @@ class Conv(object):
                 self.expect_op(')')
                 fn = {'SUM': 'sum', 'MEAN': 'mean', 'SD': 'sd',
                       'MAX': 'max', 'MIN': 'min', 'MEDIAN': 'med'}[name]
+                self.uses_array = True
                 if name in ('MAX', 'MIN'):
                     return ('mm_st_%s_%s(%s, %s, %s)'
                             % (fn, sfx, ptr, cnt, idx), TY_F)
@@ -3880,6 +3882,7 @@ class Conv(object):
         # bcrun only a call made BY the program reaches the VM's
         # allocator, so a block the native runtime malloc'd would be a
         # machine address in a cell the VM owns.
+        self.uses_array = True
         self.emit('  %s = mm_heap((unsigned long)'
                   'mm_arr_bytes(%s, %s));' % (np, nb, self.elsize(s)))
         self.emit('  %s = mm_arr_swap(%s, %s, %s, %s, %s, %d);'
@@ -6502,6 +6505,7 @@ class Conv(object):
             return 'memset(&%s, 0, sizeof %s);' % (sym.acc, sym.acc)
         if sym.is_array:
             ptr, cnt = self.array_flat(sym)
+            self.uses_array = True
             if sym.ty == TY_S:
                 return 'mm_arr_set_s(%s, %s, "\\000" "");' % (ptr, cnt)
             return 'mm_arr_set_%s(%s, %s, 0);' % (
@@ -6644,6 +6648,7 @@ class Conv(object):
             self.expect_op(',')
             sym = self.arrayref()
             ptr, cnt = self.array_flat(sym)
+            self.uses_array = True
             if sym.ty == TY_S:
                 if val[1] != TY_S:
                     self.err("a string array needs a string value")
@@ -6665,6 +6670,7 @@ class Conv(object):
                 self.err("%s needs both arrays to be the same type" % op)
             sptr, scnt = self.array_flat(src)
             dptr, dcnt = self.array_flat(dst)
+            self.uses_array = True
             if src.ty == TY_S:
                 if op == 'SCALE':
                     self.err("SCALE does not apply to a string array")
@@ -6721,6 +6727,7 @@ class Conv(object):
             ptr, step, n = self.array_vector(arr, parts, blank)
             lptr, lcnt = self.array_line(line)
             sfx = {TY_I: 'i', TY_F: 'f', TY_S: 's'}[arr.ty]
+            self.uses_array = True
             if op == 'SLICE':
                 self.emit('mm_arr_copy_%s(%s, 1, %s, %s, %s, %s);'
                           % (sfx, lptr, ptr, step, n, lcnt))
@@ -8416,6 +8423,11 @@ class Conv(object):
         # program that sorts carries the engine.
         if self.uses_sort:
             wr('#include "mmb_sort.h"\n')
+        # Whole-array ops, dynamic DIM/REDIM and the MATH() reductions:
+        # the same bargain again.  mm_arr_count alone stays a runtime
+        # call - every array parameter's count goes through it.
+        if self.uses_array:
+            wr('#include "mmb_array.h"\n')
         if self.uses_pulse:
             wr('#include "mmb_pulse.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a

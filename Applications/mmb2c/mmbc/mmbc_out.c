@@ -445,6 +445,11 @@ void conv_write(FILE *f)
        program that sorts carries the engine. */
     if (cv.uses_sort)
         fprintf(f, "#include \"mmb_sort.h\"\n");
+    /* Whole-array ops, dynamic DIM/REDIM and the MATH() reductions:
+       the same bargain again.  mm_arr_count alone stays a runtime
+       call - every array parameter's count goes through it. */
+    if (cv.uses_array)
+        fprintf(f, "#include \"mmb_array.h\"\n");
     if (cv.uses_pulse)
         fprintf(f, "#include \"mmb_pulse.h\"\n");
     /* After mmb_gpio.h, which it uses to read the pins.  Only a program

@@ -333,70 +333,10 @@ int mm_arr_count(const MMINTEGER *bounds);
  * already has, so indexing, BOUND() and whole-array operations need no
  * new code.  MM_MAXDIM is MMBasic's own (configuration.h). */
 #define MM_MAXDIM 5
-/* The translator emits the allocation and the free around these - see
-   mmb_runtime.c: under bcrun only a call made BY the program reaches
-   the VM's allocator, so the runtime may not allocate memory the
-   program will hold a pointer to. */
-unsigned long mm_arr_bytes(const MMINTEGER *nb, unsigned long elsize);
-/* Takes the OLD pointer by value and returns it; the program stores the
-   new one into its own variable itself.  No pointer-to-pointer crosses
-   the boundary, which is what makes this correct under bcrun on a
-   64-bit host, where a program pointer is a 32-bit VM cell. */
-void *mm_arr_swap(void *old, MMINTEGER *b, const MMINTEGER *nb,
-                  void *newblock, unsigned long elsize, int preserve);
 
-/* ---- whole array operations (ARRAY SET/ADD, MATH SET/SCALE/ADD) ---- */
-void mm_arr_set_i  (MMINTEGER *a, int n, MMINTEGER v);
-void mm_arr_set_f  (MMFLOAT   *a, int n, MMFLOAT   v);
-void mm_arr_set_s  (char (*a)[MM_STRSZ], int n, const char *v);
-void mm_arr_add_i  (const MMINTEGER *in, int n, MMINTEGER v, MMINTEGER *out);
-void mm_arr_add_f  (const MMFLOAT   *in, int n, MMFLOAT   v, MMFLOAT   *out);
-void mm_arr_add_s  (char (*in)[MM_STRSZ], int n, const char *v,
-                    char (*out)[MM_STRSZ]);
-void mm_arr_scale_i(const MMINTEGER *in, int n, MMINTEGER v, MMINTEGER *out);
-void mm_arr_scale_f(const MMFLOAT   *in, int n, MMFLOAT   v, MMFLOAT   *out);
-
-/* ---- ARRAY SLICE / ARRAY INSERT (and MATH SLICE / MATH INSERT) -----
- * One vector out of, or into, an array of two or more dimensions: the
- * caller names every index but one, and the vector runs along the
- * dimension left blank.
- *
- * MMBasic works the offsets out at run time from its own storage order
- * (array_slice in Commands.c, where off[i] is a running product of the
- * bounds).  Here the translator knows the rank and the bounds, so it
- * hands over just four numbers - where the vector starts, how far
- * apart its elements are, how many there are, and how long the
- * one-dimensional side is - and ONE strided copy serves both directions
- * and all three types.  SLICE steps the source, INSERT steps the
- * destination; nothing here knows which.
- *
- * `flat` is the length of the one-dimensional array and must equal `n`:
- * that comparison is MMBasic's "Size mismatch between slice and target
- * array", and it is made here rather than by the translator because a
- * bound may not exist until the program runs.  It rides on this call
- * instead of a guard of its own so that a SLICE is one statement, which
- * is what keeps a function holding one inside the native compiler
- * (see PLAN-codesize.md). */
-void mm_arr_copy_i(MMINTEGER *dst, int dstep, const MMINTEGER *src,
-                   int sstep, int n, int flat);
-void mm_arr_copy_f(MMFLOAT *dst, int dstep, const MMFLOAT *src,
-                   int sstep, int n, int flat);
-void mm_arr_copy_s(char (*dst)[MM_STRSZ], int dstep, char (*src)[MM_STRSZ],
-                   int sstep, int n, int flat);
-
-/* ---- MATH() array reductions ---------------------------------------- */
-MMFLOAT mm_st_sum_i (const MMINTEGER *a, int n);
-MMFLOAT mm_st_sum_f (const MMFLOAT   *a, int n);
-MMFLOAT mm_st_mean_i(const MMINTEGER *a, int n);
-MMFLOAT mm_st_mean_f(const MMFLOAT   *a, int n);
-MMFLOAT mm_st_sd_i  (const MMINTEGER *a, int n);
-MMFLOAT mm_st_sd_f  (const MMFLOAT   *a, int n);
-MMFLOAT mm_st_max_i (const MMINTEGER *a, int n, MMINTEGER *idx);
-MMFLOAT mm_st_max_f (const MMFLOAT   *a, int n, MMINTEGER *idx);
-MMFLOAT mm_st_min_i (const MMINTEGER *a, int n, MMINTEGER *idx);
-MMFLOAT mm_st_min_f (const MMFLOAT   *a, int n, MMINTEGER *idx);
-MMFLOAT mm_st_med_i (const MMINTEGER *a, int n);
-MMFLOAT mm_st_med_f (const MMFLOAT   *a, int n);
+/* The rest of the array family - DIM a(n)/REDIM's arithmetic, ARRAY
+ * SET/ADD/SCALE/SLICE/INSERT and the MATH() reductions - lives in
+ * mmb_array.h, compiled into the program that uses it. */
 
 /* ---- misc Tier A ---------------------------------------------------- */
 void mm_pause   (MMFLOAT ms);

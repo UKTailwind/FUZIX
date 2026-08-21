@@ -757,6 +757,7 @@ void emit_dim_alloc(struct sym *s, const char **dims, int ndims,
        bcrun only a call made BY the program reaches the VM's
        allocator, so a block the native runtime malloc'd would be a
        machine address in a cell the VM owns. */
+    cv.uses_array = 1;
     emit(sfmt("  %s = mm_heap((unsigned long)"
               "mm_arr_bytes(%s, %s));", np, nb, elsize_of(s)));
     emit(sfmt("  %s = mm_arr_swap(%s, %s, %s, %s, %s, %d);",

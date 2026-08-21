@@ -3476,6 +3476,7 @@ char *zero_of(struct sym *sym)
     }
     if (sym->is_array) {
         struct flat f = array_flat(sym);
+        cv.uses_array = 1;
         if (sym->ty == TY_S)
             return sfmt("mm_arr_set_s(%s, %s, \"\\000\" \"\");",
                         f.ptr, f.cnt);
@@ -3679,6 +3680,7 @@ static void do_array_cmd(int is_math)
         expect_op(",");
         sym = arrayref(1);
         f = array_flat(sym);
+        cv.uses_array = 1;
         if (sym->ty == TY_S) {
             if (val.ty != TY_S)
                 cv_err("a string array needs a string value");
@@ -3706,6 +3708,7 @@ static void do_array_cmd(int is_math)
             cv_err("%s needs both arrays to be the same type", op);
         sf = array_flat(src);
         df = array_flat(dst);
+        cv.uses_array = 1;
         if (src->ty == TY_S) {
             if (strcmp(op, "SCALE") == 0)
                 cv_err("SCALE does not apply to a string array");
@@ -3774,6 +3777,7 @@ static void do_array_cmd(int is_math)
         v = array_vector(arr, parts, nparts, blank);
         lf = array_line(line);
         sfx = arr->ty == TY_I ? "i" : (arr->ty == TY_F ? "f" : "s");
+        cv.uses_array = 1;
         if (strcmp(op, "SLICE") == 0)
             emit(sfmt("mm_arr_copy_%s(%s, 1, %s, %s, %s, %s);",
                       sfx, lf.ptr, v.ptr, v.step, v.cnt, lf.cnt));

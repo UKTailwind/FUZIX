@@ -1059,6 +1059,7 @@ struct val builtin_raw(const char *up)
                 : strcmp(name, "SD") == 0 ? "sd"
                 : strcmp(name, "MAX") == 0 ? "max"
                 : strcmp(name, "MIN") == 0 ? "min" : "med";
+            cv.uses_array = 1;
             if (strcmp(name, "MAX") == 0 || strcmp(name, "MIN") == 0)
                 return mkval(sfmt("mm_st_%s_%s(%s, %s, %s)",
                                   fn, sfx, fl.ptr, fl.cnt, idx), TY_F);
