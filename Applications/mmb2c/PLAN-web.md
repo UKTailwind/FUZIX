@@ -493,11 +493,37 @@ the libcalls, a header family, both translators' emission, the poll
 hook, and the interrupt machinery — every structural risk, at
 datagram simplicity.
 
-**Stage 2 — TCP client.**  The DNS resolver into mmb_net.h;
-mmb_webc.h with OPEN TCP CLIENT / CLIENT REQUEST (drop-before-write)
-/ READ / WRITE / CLOSE.  Board test: BASIC client against the other
-board's httpd(8); then a name-resolved internet fetch; then the
-retic GetLatLong request shape against api.openweathermap.org.
+**Stage 2 — TCP client.  DONE, BOARD-PROVEN 2026-08-21.**  The DNS
+resolver into mmb_net.h (gethostbyname.c as statics: resolv.conf
+cached, A-queries, resend at 1.5 s, bounds-checked reply walk, and
+wrap-safe deadline macros over the 31-bit mm_us); mmb_webc.h with
+OPEN TCP CLIENT / CLIENT REQUEST (drop-before-write, then the
+reference's first-data timeout + fixed 500 ms drain) / READ / WRITE /
+CLOSE; WEB UDP SEND resolves names through the same door.  Board:
+BASIC GET from the other board's httpd(8) (200 OK, body verified);
+example.com fetched by name; then retic.bas's own OWM geocoding
+request verbatim — reversed LF CR terminator included — 2,650 bytes
+of JSON collected across segments.  Stage-1 webudp.bc (old headers)
+still byte-perfect under the new bcrun: the skew promise, observed.
+
+What stage 2 settled, inherited by the rest:
+
+- **No BASIC interrupts fire inside client waits** — MMBasic's wait
+  loops pump lwIP but never check_interrupt, so bare deadline loops
+  are the faithful shape and mmb_webc.h needs nothing from mmb_int.h.
+- **bcrun ignores SIGPIPE**: a write on a peer-closed socket comes
+  back as an error a program can see, as the WebMite's write
+  failures do — not a signal that kills the process.
+- **No errno crosses the libcall boundary**, so a refused connection
+  costs the open timeout rather than failing fast — much what the
+  WebMite's refused open does.  Revisit only if a real program hurts.
+- The client's observable semantics are pinned by
+  tests/webcharness.c against a real forked server (greeting via
+  READ, two-segment drain join, byte-verified 3000-byte WRITE, the
+  discard rule); webtcpe.bas compiles the family through the real
+  fcc dialect in every gate and checks the timeout error path.
+- Gates at landing: make check ok, cgate 0, fcctests 65/0,
+  qemutests 66/0.
 
 **Stage 3 — TLS client + email.**  OPEN TLS CLIENT/STREAM, TLS
 CA/NOVERIFY.  Board test: cert-checked fetch from a real site, then

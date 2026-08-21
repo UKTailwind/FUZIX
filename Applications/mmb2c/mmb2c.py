@@ -719,6 +719,7 @@ class Conv(object):
         self.uses_onewire = False   # ONEWIRE/TEMPR: mmb_onewire.h
         self.uses_net = False       # the socket floor: mmb_net.h
         self.uses_udp = False       # WEB UDP: mmb_udp.h
+        self.uses_webclient = False # WEB TCP/TLS client: mmb_webc.h
         self.uses_play = False
         self.uses_blit = False      # BLIT family: mmb_blit.h
         self.uses_flash = False     # pseudo flash slots: mmb_flash.h
@@ -7731,11 +7732,19 @@ class Conv(object):
 
     def do_web(self):
         """The WEB family, arriving in stages (PLAN-web.md §11).
-        Stage 1 is UDP:
+        Stage 1, UDP:
 
            WEB UDP SERVER PORT n     bind the receive socket
            WEB UDP INTERRUPT sub|0   fire on a received datagram
            WEB UDP SEND ip$, port, msg$
+
+        Stage 2, the TCP client:
+
+           WEB OPEN TCP CLIENT host$, port [,timeout]
+           WEB TCP CLIENT REQUEST req$, a%() [,timeout]
+           WEB TCP CLIENT READ a%() [,timeout]
+           WEB TCP CLIENT WRITE ls%() [,timeout]
+           WEB CLOSE TCP CLIENT
 
         SERVER PORT is the WebMite's saved OPTION UDP SERVER PORT as a
         statement - a compiled program owns its own sockets
@@ -7764,6 +7773,59 @@ class Conv(object):
                 self.emit('mmg_udp_send(%s, %s, %s);' % (ip, port, msg))
                 return
             self.err("WEB UDP takes SERVER PORT, INTERRUPT or SEND")
+        if self.accept_kw('OPEN'):
+            if self.is_kw('TCP') and self.is_kw('CLIENT', 1):
+                self.i += 2
+                self.uses_webclient = True
+                host = self.as_str(self.expr())
+                self.expect_op(',')
+                port = self.as_int(self.expr())
+                tmo = '5000'
+                if self.accept_op(','):
+                    tmo = self.as_int(self.expr())
+                self.emit('mmg_webc_open(%s, %s, %s, 0);'
+                          % (host, port, tmo))
+                return
+            self.err("this WEB OPEN form is not implemented yet - the "
+                     "family arrives in stages (PLAN-web.md)")
+        if self.accept_kw('CLOSE'):
+            if self.is_kw('TCP') and self.is_kw('CLIENT', 1):
+                self.i += 2
+                self.uses_webclient = True
+                self.emit('mmg_webc_close();')
+                return
+            self.err("this WEB CLOSE form is not implemented yet - the "
+                     "family arrives in stages (PLAN-web.md)")
+        if self.is_kw('TCP') and self.is_kw('CLIENT', 1):
+            self.i += 2
+            self.uses_webclient = True
+            if self.accept_kw('REQUEST'):
+                req = self.as_str(self.expr())
+                self.expect_op(',')
+                ptr, cells = self.lsref()
+                tmo = '5000'
+                if self.accept_op(','):
+                    tmo = self.as_int(self.expr())
+                self.emit('mmg_webc_request(%s, %s, %s, %s);'
+                          % (req, ptr, cells, tmo))
+                return
+            if self.accept_kw('READ'):
+                ptr, cells = self.lsref()
+                tmo = '5000'
+                if self.accept_op(','):
+                    tmo = self.as_int(self.expr())
+                self.emit('mmg_webc_read(%s, %s, %s);'
+                          % (ptr, cells, tmo))
+                return
+            if self.accept_kw('WRITE'):
+                ptr, cells = self.lsref()
+                tmo = '10000'
+                if self.accept_op(','):
+                    tmo = self.as_int(self.expr())
+                self.emit('mmg_webc_write(%s, %s);' % (ptr, tmo))
+                return
+            self.err("WEB TCP CLIENT takes REQUEST, READ or WRITE "
+                     "(STREAM arrives in stages - PLAN-web.md)")
         self.err("this WEB command is not implemented yet - the family "
                  "arrives in stages (PLAN-web.md)")
 
@@ -8541,10 +8603,12 @@ class Conv(object):
         # The socket floor, then its families - before mmb_int.h,
         # whose network poll exists only under their include guards,
         # the mmb_sprite.h pattern.
-        if self.uses_udp:
+        if self.uses_udp or self.uses_webclient:
             self.uses_net = True
         if self.uses_net:
             wr('#include "mmb_net.h"\n')
+        if self.uses_webclient:
+            wr('#include "mmb_webc.h"\n')
         if self.uses_udp:
             wr('#include "mmb_udp.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a

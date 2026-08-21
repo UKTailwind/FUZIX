@@ -19,9 +19,9 @@
  *	(MM_Misc.c:10015-10029).  The socket is O_NDELAY so the poll
  *	never sleeps.
  *
- *	Stage 1 takes dotted-quad addresses only; a hostname errors the
- *	way the WebMite's failed lookup does.  The resolver arrives with
- *	the TCP client (stage 2) and drops in ahead of mmn_aton here.
+ *	SEND takes a dotted quad or a hostname - the mmb_net.h resolver
+ *	(stage 2) sits behind mmn_aton exactly as MMudp.c's DNS path
+ *	sits behind ip4addr_aton.
  *
  *	Faithful details: a datagram longer than 255 bytes is truncated
  *	(a BASIC string is the destination), nulls inside are kept - the
@@ -67,8 +67,15 @@ MMG_FN void mmg_udp_send(const char *ip, MMINTEGER port, const char *msg)
 	unsigned char ip4[4], sa[16];
 	int fd, n;
 
-	if (!mmn_aton(ip, ip4))
-		mm_error("Failed to find UDP address");
+	if (!mmn_aton(ip, ip4)) {
+		/* a name, then - MMudp.c resolves here too, with the
+		   same 5 s bound its Timer4 gives DNS */
+		n = mmn_resolve(ip, ip4, 5000);
+		if (n < 0)
+			mm_error("Failed to find UDP address");
+		if (n == 0)
+			mm_error("Failed to convert web address");
+	}
 	if (port < 1 || port > 65535)
 		mm_error("Number out of bounds");
 	/* A fresh socket per send, as MMudp.c makes a fresh pcb: the

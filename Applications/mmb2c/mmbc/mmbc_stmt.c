@@ -2602,11 +2602,19 @@ static void do_spi(void)
 }
 
 /* mmb2c.py's do_web.  The WEB family, arriving in stages
-   (PLAN-web.md §11).  Stage 1 is UDP:
+   (PLAN-web.md §11).  Stage 1, UDP:
 
      WEB UDP SERVER PORT n     bind the receive socket
      WEB UDP INTERRUPT sub|0   fire on a received datagram
      WEB UDP SEND ip$, port, msg$
+
+   Stage 2, the TCP client:
+
+     WEB OPEN TCP CLIENT host$, port [,timeout]
+     WEB TCP CLIENT REQUEST req$, a%() [,timeout]
+     WEB TCP CLIENT READ a%() [,timeout]
+     WEB TCP CLIENT WRITE ls%() [,timeout]
+     WEB CLOSE TCP CLIENT
 
    SERVER PORT is the WebMite's saved OPTION UDP SERVER PORT as a
    statement - a compiled program owns its own sockets (PLAN-web.md
@@ -2642,6 +2650,71 @@ static void do_web(void)
             return;
         }
         cv_err("WEB UDP takes SERVER PORT, INTERRUPT or SEND");
+    }
+    if (accept_kw("OPEN")) {
+        if (is_kw("TCP", 0) && is_kw("CLIENT", 1)) {
+            const char *host, *port, *tmo = "5000";
+
+            cv.i += 2;
+            cv.uses_webclient = 1;
+            host = as_str(expr());
+            expect_op(",");
+            port = as_int(expr());
+            if (accept_op(","))
+                tmo = as_int(expr());
+            emit(sfmt("mmg_webc_open(%s, %s, %s, 0);", host, port, tmo));
+            return;
+        }
+        cv_err("this WEB OPEN form is not implemented yet - the "
+               "family arrives in stages (PLAN-web.md)");
+    }
+    if (accept_kw("CLOSE")) {
+        if (is_kw("TCP", 0) && is_kw("CLIENT", 1)) {
+            cv.i += 2;
+            cv.uses_webclient = 1;
+            emit("mmg_webc_close();");
+            return;
+        }
+        cv_err("this WEB CLOSE form is not implemented yet - the "
+               "family arrives in stages (PLAN-web.md)");
+    }
+    if (is_kw("TCP", 0) && is_kw("CLIENT", 1)) {
+        struct flat ls;
+        const char *tmo;
+
+        cv.i += 2;
+        cv.uses_webclient = 1;
+        if (accept_kw("REQUEST")) {
+            const char *req = as_str(expr());
+
+            expect_op(",");
+            ls = lsref();
+            tmo = "5000";
+            if (accept_op(","))
+                tmo = as_int(expr());
+            emit(sfmt("mmg_webc_request(%s, %s, %s, %s);",
+                      req, ls.ptr, ls.cnt, tmo));
+            return;
+        }
+        if (accept_kw("READ")) {
+            ls = lsref();
+            tmo = "5000";
+            if (accept_op(","))
+                tmo = as_int(expr());
+            emit(sfmt("mmg_webc_read(%s, %s, %s);",
+                      ls.ptr, ls.cnt, tmo));
+            return;
+        }
+        if (accept_kw("WRITE")) {
+            ls = lsref();
+            tmo = "10000";
+            if (accept_op(","))
+                tmo = as_int(expr());
+            emit(sfmt("mmg_webc_write(%s, %s);", ls.ptr, tmo));
+            return;
+        }
+        cv_err("WEB TCP CLIENT takes REQUEST, READ or WRITE "
+               "(STREAM arrives in stages - PLAN-web.md)");
     }
     cv_err("this WEB command is not implemented yet - the family "
            "arrives in stages (PLAN-web.md)");

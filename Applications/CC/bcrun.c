@@ -26,6 +26,7 @@
 #include <sys/socket.h>		/* the lc_socket family of libcalls */
 #include <netinet/in.h>
 #include <sys/ioctl.h>
+#include <signal.h>		/* SIGPIPE ignored: socket writes error */
 #ifdef __linux__
 #include <sys/mman.h>		/* executable code buffer for native fns */
 #endif
@@ -3865,6 +3866,10 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "usage: bcrun [-t] program.bc\n");
 		return 1;
 	}
+	/* A write on a peer-closed socket must come back as an error a
+	   program can see, not a SIGPIPE that kills it - MMBasic has no
+	   signals, and its WEB write failures are errors. */
+	signal(SIGPIPE, SIG_IGN);
 	mem_init();
 	mfns_share();
 	force_bytecode = getenv("BCRUN_BYTECODE") != NULL;

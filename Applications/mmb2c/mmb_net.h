@@ -58,9 +58,12 @@ int recvfrom(int __fd, void *__buf, int __n, int __fl, void *__sa,
 	     void *__lenp);
 int ioctl(int __fd, int __req, void *__p);
 int fcntl(int __fd, int __cmd, int __v);
+int open(const char *__path, int __flags);
 int close(int __fd);
 int read(int __fd, void *__buf, int __n);
 int write(int __fd, void *__buf, int __n);
+
+#define mmn_open_ro(p)			open(p, 0)	/* O_RDONLY is 0 */
 
 #define mmn_socket(d, t, p)		socket(d, t, p)
 #define mmn_connect(fd, sa, l)		connect(fd, (void *)(sa), l)
@@ -120,6 +123,7 @@ MMG_FN int mmn_ioctl(int fd, int req, void *p)
 	return ioctl(fd, req, p);
 }
 #define mmn_fcntl(fd, c, v)		fcntl(fd, c, v)
+#define mmn_open_ro(p)			open(p, O_RDONLY)
 #define mmn_close(fd)			close(fd)
 #define mmn_read(fd, b, n)		read(fd, (void *)(b), n)
 #define mmn_write(fd, b, n)		write(fd, (void *)(b), n)
@@ -197,6 +201,188 @@ MMG_FN void mmn_ndelay(int fd)
 {
 	mmn_fcntl(fd, MMN_F_SETFL, mmn_fcntl(fd, MMN_F_GETFL, 0)
 		  | MMN_O_NDELAY);
+}
+
+/*
+ *	Wrap-safe deadline arithmetic.  mm_us() crosses the libcall
+ *	boundary in 31 bits on the board, so deadlines are never compared
+ *	as absolutes: take a start, subtract unsigned, and the difference
+ *	is right across the wrap.  (unsigned long is 32 bits there, 64 on
+ *	the host - correct in both.)
+ */
+#define MMN_US()		((unsigned long)mm_us())
+#define MMN_SINCE(t0)		((unsigned long)(MMN_US() - (t0)))
+
+/*
+ *	The resolver - Applications/netd/gethostbyname.c re-expressed as
+ *	statics, the PLAN-web.md §5 bargain: DNS over the sendto/recvfrom
+ *	doors, compiled only into a program that names a host.  Recursive
+ *	A queries only, like the original.
+ */
+
+/*	First word of each /etc/resolv.conf "nameserver" line, cached:
+ *	the file does not change under a running program, and a compile
+ *	of the parse per lookup would be pure waste. */
+static unsigned char mmn_ns[4];
+static signed char mmn_ns_state;	/* 0 unread, 1 good, -1 none */
+
+MMG_FN int mmn_aton_span(const char *p, int len, unsigned char *ip4)
+{
+	char m[20];
+
+	if (len < 7 || len > 15)
+		return 0;
+	m[0] = (char)len;
+	memcpy(m + 1, p, len);
+	return mmn_aton(m, ip4);
+}
+
+MMG_FN int mmn_nameserver(unsigned char *ip4)
+{
+	char buf[257];
+	int fd, n, i, j, k;
+
+	if (mmn_ns_state == 0) {
+		mmn_ns_state = -1;
+		fd = mmn_open_ro("/etc/resolv.conf");
+		if (fd >= 0) {
+			n = mmn_read(fd, buf, 256);
+			mmn_close(fd);
+			if (n < 0)
+				n = 0;
+			buf[n] = 0;
+			for (i = 0; i < n; ) {
+				/* one line: [ws] nameserver [ws] a.b.c.d */
+				j = i;
+				while (j < n && buf[j] != '\n')
+					j++;
+				while (i < j && (buf[i] == ' ' || buf[i] == '\t'))
+					i++;
+				if (j - i > 11 &&
+				    memcmp(buf + i, "nameserver", 10) == 0 &&
+				    (buf[i + 10] == ' ' || buf[i + 10] == '\t')) {
+					i += 10;
+					while (i < j && (buf[i] == ' ' || buf[i] == '\t'))
+						i++;
+					k = i;
+					while (k < j && buf[k] > ' ')
+						k++;
+					if (mmn_aton_span(buf + i, k - i, mmn_ns)) {
+						mmn_ns_state = 1;
+						break;
+					}
+				}
+				i = j + 1;
+			}
+		}
+	}
+	if (mmn_ns_state != 1)
+		return 0;
+	memcpy(ip4, mmn_ns, 4);
+	return 1;
+}
+
+/*	1 resolved, 0 no answer within the timeout, -1 no nameserver /
+ *	no socket.  The query id comes off the clock so a stale reply
+ *	from an earlier attempt is never mistaken for this one. */
+MMG_FN int mmn_resolve(const char *host, unsigned char *ip4,
+		       long tmo_ms)
+{
+	unsigned char q[300], r[512], ns[4], sa[16], src[16];
+	int fd, qn, i, n, len, labels, ancount, ty, rdlen;
+	int hl = mm_slen(host);
+	unsigned int id;
+	unsigned long t0, lastsend;
+	int sl;
+
+	if (hl < 1 || hl > 200)
+		return -1;
+	if (!mmn_nameserver(ns))
+		return -1;
+	fd = mmn_socket(MMN_AF_INET, MMN_SOCK_DGRAM, MMN_IPPROTO_UDP);
+	if (fd < 0)
+		return -1;
+	mmn_ndelay(fd);
+	mmn_sin(sa, ns, 53);
+
+	id = (unsigned int)MMN_US() & 0xFFFF;
+	memset(q, 0, 12);
+	q[0] = (unsigned char)(id >> 8);
+	q[1] = (unsigned char)id;
+	q[2] = 0x01;			/* RD */
+	q[5] = 1;			/* QDCOUNT */
+	qn = 12;
+	/* the name, as length-prefixed labels */
+	i = 1;
+	while (i <= hl) {
+		labels = 0;
+		len = qn++;
+		while (i <= hl && host[i] != '.' && labels < 63) {
+			q[qn++] = (unsigned char)host[i++];
+			labels++;
+		}
+		q[len] = (unsigned char)labels;
+		if (labels == 0) {
+			mmn_close(fd);
+			return -1;	/* "..", or a trailing dot */
+		}
+		if (i <= hl && host[i] == '.')
+			i++;
+	}
+	q[qn++] = 0;
+	q[qn++] = 0; q[qn++] = 1;	/* QTYPE A */
+	q[qn++] = 0; q[qn++] = 1;	/* QCLASS IN */
+
+	t0 = MMN_US();
+	lastsend = t0 - 2000000UL;	/* so the first send happens now */
+	while ((long)MMN_SINCE(t0) < tmo_ms * 1000L) {
+		if (MMN_SINCE(lastsend) >= 1500000UL) {
+			lastsend = MMN_US();
+			mmn_sendto(fd, q, qn, 0, sa, 16);
+		}
+		sl = 16;
+		n = mmn_recvfrom(fd, r, (int)sizeof(r), 0, src, &sl);
+		if (n < 12) {
+			mm_pause(2.0);
+			continue;
+		}
+		if (r[0] != (unsigned char)(id >> 8) ||
+		    r[1] != (unsigned char)id)
+			continue;
+		ancount = (r[6] << 8) | r[7];
+		/* skip the question we asked */
+		i = 12;
+		while (i < n && r[i] != 0)
+			i += r[i] + 1;
+		i += 5;
+		while (ancount-- > 0 && i + 10 <= n) {
+			/* the answer's name: a compression pointer or
+			   labels */
+			if (r[i] & 0xC0)
+				i += 2;
+			else {
+				while (i < n && r[i] != 0)
+					i += r[i] + 1;
+				i++;
+			}
+			if (i + 10 > n)
+				break;
+			ty = (r[i] << 8) | r[i + 1];
+			rdlen = (r[i + 8] << 8) | r[i + 9];
+			i += 10;
+			if (ty == 1 && rdlen == 4 && i + 4 <= n) {
+				memcpy(ip4, r + i, 4);
+				mmn_close(fd);
+				return 1;
+			}
+			i += rdlen;
+		}
+		/* a reply with no A record is a real answer: NO */
+		mmn_close(fd);
+		return 0;
+	}
+	mmn_close(fd);
+	return 0;
 }
 
 #endif /* MMB_NET_H */
