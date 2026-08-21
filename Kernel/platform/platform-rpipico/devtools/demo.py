@@ -1,6 +1,6 @@
 """Drive the PC3 through a demonstration, at a pace a camera can follow.
 
-  python demo.py                    the whole thing, from the bootdev: prompt
+  python demo.py                    the whole thing, from the login: prompt
   python demo.py --list             the scenes, and how long each one takes
   python demo.py --scene graphics   one scene, for rehearsing a single part
   python demo.py --from eclipse     pick up part way through
@@ -217,15 +217,14 @@ def heredoc(ser, name, lines):
 
 
 def sc_boot(ser):
-    """From the bootdev: prompt to a shell."""
-    # The board has usually been sitting at the prompt since long before
-    # the camera started, so there is nothing left to receive.  A bare
-    # Return makes it print the prompt again, which is both what we wait
-    # for and a tidy thing for the video to open on.
+    """From the login: prompt to a shell."""
+    # Since v0.19 the kernel answers bootdev: itself, so a booted board
+    # sits at login: - and it has usually been sitting there since long
+    # before the camera started, so there is nothing left to receive.
+    # A bare Return makes it print the prompt again, which is both what
+    # we wait for and a tidy thing for the video to open on.
     #
-    settled_on(ser, send_raw(ser, b"\r", settle=1.5), "bootdev:")
-    beat(2)
-    settled_on(ser, type_line(ser, "hdb2", settle=8), "login:")
+    settled_on(ser, send_raw(ser, b"\r", settle=1.5), "login:")
     beat(2)
     type_line(ser, "root", settle=3)
     beat(3)

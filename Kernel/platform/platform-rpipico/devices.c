@@ -255,6 +255,19 @@ void device_init(void)
         usbkbd_init();
     }
 #endif
+
+    /* Answer the bootdev: prompt ourselves.  Since the flash disc went
+     * there is exactly one root this machine can have - partition 2 of
+     * the SD card - and a question with one answer is not a question.
+     *
+     * The escape hatches are already in the mechanism, not added here:
+     * set_boot_line waits 10 ticks and seeds NOTHING if a key is
+     * pending, so holding a key through boot still gets the prompt
+     * (for tty=... options, or another partition); and the seeded line
+     * is consumed on its first use, so if hda2 will not mount - no
+     * card, wrong card - the mount loop in start.c comes back around
+     * to the prompt instead of asking hda2 for ever. */
+    set_boot_line("hda2");
 }
 
 /* vim: sw=4 ts=4 et: */

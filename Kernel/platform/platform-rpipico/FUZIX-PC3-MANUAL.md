@@ -116,6 +116,13 @@ nothing version-specific, so it runs under the old `bcrun` too. The
 card ships the matched set; the rule only bites a `.bc` kept from an
 earlier release.
 
+**The machine boots itself.** The `bootdev:` prompt had exactly one
+sensible answer — `hda2`, partition 2 of the SD card — and a question
+with one answer is not a question, so the kernel now gives it. Hold
+any key during boot to get the prompt back (for `tty=...` options or
+another partition); if the automatic mount fails, the prompt appears
+by itself.
+
 **The hunt instrumentation is out of the way.** The tracing that
 earlier releases carried in every process for chasing crashes —
 `MM_TB`, `MM_IOTRACE` and friends — is now compiled out unless
@@ -196,9 +203,9 @@ file up to 1 GB.
 
 **A v0.9 kernel and a v0.9 card go together.** The two formats are
 not interchangeable and neither pretends otherwise: a v0.9 kernel
-refuses an older card by name at the `bootdev:` prompt, and an older
-kernel refuses a v0.9 one. Flash `fuzix.uf2` and write the card in
-the same sitting.
+refuses an older card by name — the automatic mount fails and the
+`bootdev:` prompt appears — and an older kernel refuses a v0.9 one.
+Flash `fuzix.uf2` and write the card in the same sitting.
 
 Since v0.5 the filesystem has been built from source by
 `mksdimage.sh`, so the card can be reproduced rather than merely
@@ -215,11 +222,18 @@ why the FAT partition and the `fat` command exist.
 Connect a monitor to the HDMI port and/or a terminal program (for
 example TeraTerm at 115200) to the USB-C console port. Switch on:
 the kernel banner, board identification and device probe appear on
-both, then:
+both, the root filesystem mounts itself from the SD card, then:
 
 ```
 login: root
 ```
+
+There is nothing to type before `login:`. Earlier releases stopped at
+a `bootdev:` prompt whose only sensible answer was `hda2`; since
+v0.19 the kernel answers it. **Hold any key while the machine boots**
+to get the prompt back — that is how to name a different partition or
+pass `tty=...` options — and if the automatic mount fails (no card,
+or a card the kernel refuses), the prompt appears by itself.
 
 There is no password. The system arrives at a Bourne shell; the
 console is an 80×40 colour terminal (termcap type `pc3`) and the USB
