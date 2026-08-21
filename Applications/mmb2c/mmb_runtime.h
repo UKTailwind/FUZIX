@@ -206,13 +206,7 @@ char *mm_field (const char *s, MMINTEGER fnbr, const char *delims,
                 const char *quotes);
 char *mm_format(MMFLOAT val, const char *fmt);
 
-/* ---- date and time -------------------------------------------------- */
-MMINTEGER mm_epoch_now(void);
-MMINTEGER mm_epoch_str(const char *datetime);
-char *mm_datetime(MMINTEGER epoch);
-char *mm_time_str(void);
-char *mm_date_str(void);
-char *mm_day     (MMINTEGER epoch);
+/* ---- date and time: in mmb_datetime.h, compiled into the program --- */
 
 /* ---- BIN2STR$ / STR2BIN --------------------------------------------- */
 #define MM_B_INT64  0
@@ -378,8 +372,6 @@ MMINTEGER mm_play_send(MMINTEGER op, MMINTEGER a, MMINTEGER b,
                        MMINTEGER p1, MMINTEGER p2, MMINTEGER p3);
 MMINTEGER mm_play_stop(void);
 void mm_timer_set(MMFLOAT ms);           /* TIMER = n, milliseconds    */
-void mm_set_date(const char *d);         /* DATE$ =                    */
-void mm_set_time(const char *t);         /* TIME$ =                    */
 
 /* ---- LONGSTRING ------------------------------------------------------
  * The firmware's convention (see misc/Custom.c): a long string lives in

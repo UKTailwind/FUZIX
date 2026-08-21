@@ -3789,8 +3789,10 @@ static void do_array_cmd(int is_math)
         return;
     }
     if (strcmp(op, "RANDOMIZE") == 0) {
-        if (stmt_end())
+        if (stmt_end()) {
+            cv.uses_datetime = 1;
             emit("mm_randomize(mm_epoch_now());");
+        }
         else
             emit(sfmt("mm_randomize(%s);", as_int(expr())));
         return;

@@ -454,6 +454,9 @@ void conv_write(FILE *f)
        runtime crossing (the channel is bcrun's own stream). */
     if (cv.uses_lstring)
         fprintf(f, "#include \"mmb_lstring.h\"\n");
+    /* Calendar arithmetic over time(), which is already a libcall. */
+    if (cv.uses_datetime)
+        fprintf(f, "#include \"mmb_datetime.h\"\n");
     if (cv.uses_pulse)
         fprintf(f, "#include \"mmb_pulse.h\"\n");
     /* After mmb_gpio.h, which it uses to read the pins.  Only a program

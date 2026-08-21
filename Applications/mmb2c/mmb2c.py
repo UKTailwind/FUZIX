@@ -709,6 +709,7 @@ class Conv(object):
         self.uses_sort = False      # SORT: pulls in mmb_sort.h
         self.uses_array = False     # whole-array ops/REDIM/MATH(): mmb_array.h
         self.uses_lstring = False   # LONGSTRING: pulls in mmb_lstring.h
+        self.uses_datetime = False  # DATE$/TIME$/EPOCH etc: mmb_datetime.h
         self.uses_pulse = False     # PULSE: pulls in mmb_pulse.h
         self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
         self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
@@ -2153,8 +2154,10 @@ class Conv(object):
         if up == 'TIMER':
             return ('mm_timer()', TY_F)
         if up == 'DATE$':
+            self.uses_datetime = True
             return ('mm_date_str()', TY_S)
         if up == 'TIME$':
+            self.uses_datetime = True
             return ('mm_time_str()', TY_S)
         if up == 'CWD$':
             return ('mm_cwd()', TY_S)
@@ -2385,6 +2388,7 @@ class Conv(object):
             return ('mm_trim(%s, %s, %s)' % (src[0], mask, where), TY_S)
 
         if up in ('DATETIME$', 'DAY$', 'EPOCH'):
+            self.uses_datetime = True
             self.expect_op('(')
             if self.is_kw('NOW'):
                 self.i += 1
@@ -6741,6 +6745,7 @@ class Conv(object):
             return
         if op == 'RANDOMIZE':
             if self.stmt_end():
+                self.uses_datetime = True
                 self.emit('mm_randomize(mm_epoch_now());')
             else:
                 self.emit('mm_randomize(%s);' % self.as_int(self.expr()))
@@ -8436,6 +8441,9 @@ class Conv(object):
         # a runtime crossing (the channel is bcrun's own stream).
         if self.uses_lstring:
             wr('#include "mmb_lstring.h"\n')
+        # Calendar arithmetic over time(), which is already a libcall.
+        if self.uses_datetime:
+            wr('#include "mmb_datetime.h"\n')
         if self.uses_pulse:
             wr('#include "mmb_pulse.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a

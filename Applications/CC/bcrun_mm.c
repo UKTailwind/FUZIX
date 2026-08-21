@@ -261,13 +261,8 @@ static void w_flags_set(void)  { mm_flags_set(LL(0)); A = 0; }
 static void w_flag_get(void)   { A = mm_flag_get(LL(0)); }
 static void w_flags_get(void)  { A = mm_flags_get(); }
 
-/* date and time */
-static void w_epoch_now(void){ A = mm_epoch_now(); }
-static void w_epoch_str(void){ A = mm_epoch_str(Ps(0)); }
-static void w_datetime(void) { A = mm_off(mm_datetime(LL(0))); }
-static void w_time_str(void) { A = mm_off(mm_time_str()); }
-static void w_date_str(void) { A = mm_off(mm_date_str()); }
-static void w_day(void)      { A = mm_off(mm_day(LL(0))); }
+/* date and time are program-side now (mmb_datetime.h): calendar
+   arithmetic over time(), which is already a libcall. */
 
 /* BIN2STR$ / STR2BIN */
 static void w_bin2str(void)  { A = mm_off(mm_bin2str(I(0), D(1), LL(3), I(5))); }
@@ -454,8 +449,6 @@ static void w_play_send(void) { A = mm_play_send(LL(0), LL(2), LL(4),
 static void w_snd_cmd(void)   { A = mm_snd_cmd(LL(0), LL(2), LL(4),
 					       LL(6), LL(8), LL(10)); }
 static void w_snd_stop(void)  { A = mm_snd_stop(); }
-static void w_set_date(void) { mm_set_date(Ps(0)); A = 0; }
-static void w_set_time(void) { mm_set_time(Ps(0)); A = 0; }
 
 /* graphics - every argument and result is RGB888, as in MMBasic */
 static void w_pixel(void)    { mm_pixel(LL(0), LL(2), LL(4)); A = 0; }
@@ -681,12 +674,6 @@ static const struct mmwrap {
 	{ "mm_flags_set",	w_flags_set },
 	{ "mm_flag_get",	w_flag_get },
 	{ "mm_flags_get",	w_flags_get },
-	{ "mm_epoch_now",	w_epoch_now },
-	{ "mm_epoch_str",	w_epoch_str },
-	{ "mm_datetime",	w_datetime },
-	{ "mm_time_str",	w_time_str },
-	{ "mm_date_str",	w_date_str },
-	{ "mm_day",		w_day },
 	{ "mm_bin2str",		w_bin2str },
 	{ "mm_str2bin_f",	w_str2bin_f },
 	{ "mm_str2bin_i",	w_str2bin_i },
@@ -783,8 +770,6 @@ static const struct mmwrap {
 	{ "mm_play_send",	w_play_send },
 	{ "mm_snd_cmd",		w_snd_cmd },
 	{ "mm_snd_stop",	w_snd_stop },
-	{ "mm_set_date",	w_set_date },
-	{ "mm_set_time",	w_set_time },
 	{ "mm_pixel",		w_pixel },
 	{ "mm_pixel_get",	w_pixel_get },
 	{ "mm_cls",		w_cls },

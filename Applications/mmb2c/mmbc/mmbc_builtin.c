@@ -192,10 +192,14 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval(sfmt("mm_tab(%s)", n(0)), TY_S);
     if (strcmp(up, "TIMER") == 0)
         return mkval("mm_timer()", TY_F);
-    if (strcmp(up, "DATE$") == 0)
+    if (strcmp(up, "DATE$") == 0) {
+        cv.uses_datetime = 1;
         return mkval("mm_date_str()", TY_S);
-    if (strcmp(up, "TIME$") == 0)
+    }
+    if (strcmp(up, "TIME$") == 0) {
+        cv.uses_datetime = 1;
         return mkval("mm_time_str()", TY_S);
+    }
     if (strcmp(up, "CWD$") == 0)
         return mkval("mm_cwd()", TY_S);
     if (strcmp(up, "INKEY$") == 0)
@@ -531,6 +535,7 @@ struct val builtin_raw(const char *up)
         || strcmp(up, "EPOCH") == 0) {
         const char *arg = NULL;
 
+        cv.uses_datetime = 1;
         expect_op("(");
         if (is_kw("NOW", 0)) {
             cv.i += 1;

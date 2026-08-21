@@ -1323,165 +1323,10 @@ char *mm_format(MMFLOAT val, const char *fmtstr)
     return t;
 }
 
-/* ---- date and time -------------------------------------------------- */
-
-static const char *mm_daynames[8] = { "", "Monday", "Tuesday", "Wednesday",
-                                      "Thursday", "Friday", "Saturday",
-                                      "Sunday" };
-
-extern MMINTEGER mm_clock_offset(void);
-MMINTEGER mm_epoch_now(void) { return (MMINTEGER)time(NULL) + mm_clock_offset(); }
-
-/* civil from days (Howard Hinnant's algorithm) - the inverse of
- * mm_days_from_civil below.  Doing the calendar ourselves rather than
- * through gmtime() keeps the runtime off struct tm, which the Fuzix
- * bytecode world does not have, and makes the answers identical on
- * every platform. */
-static void mm_civil_from_days(long long z, int *y, int *m, int *d)
-{
-    long long era, doe, yoe, doy, mp, yy;
-    z += 719468;
-    era = (z >= 0 ? z : z - 146096) / 146097;
-    doe = z - era * 146097;
-    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    yy = yoe + era * 400;
-    doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    mp = (5 * doy + 2) / 153;
-    *d = (int)(doy - (153 * mp + 2) / 5 + 1);
-    *m = (int)(mp + (mp < 10 ? 3 : -9));
-    *y = (int)(yy + (*m <= 2));
-}
-
-static void mm_break_epoch(MMINTEGER e, int *Y, int *M, int *D,
-                           int *h, int *m, int *s, int *wd)
-{
-    long long days = (e >= 0 ? e : e - 86399) / 86400;
-    long long sec = e - days * 86400;
-    mm_civil_from_days(days, Y, M, D);
-    *h = (int)(sec / 3600);
-    *m = (int)((sec / 60) % 60);
-    *s = (int)(sec % 60);
-    /* 1970-01-01 was a Thursday; 1 = Monday .. 7 = Sunday */
-    *wd = (int)(((days + 3) % 7 + 7) % 7) + 1;
-}
-
-/* days from civil (Howard Hinnant's algorithm) - avoids timegm */
-static long long mm_days_from_civil(int y, int m, int d)
-{
-    long long yy = y;
-    long long era, yoe, doy, doe;
-    yy -= m <= 2;
-    era = (yy >= 0 ? yy : yy - 399) / 400;
-    yoe = yy - era * 400;
-    doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + doe - 719468;
-}
-
-/* "h:m[:s]" -> fields; how many were parsed.  Replaces sscanf, which
- * neither MSVC (deprecation) nor the Fuzix bytecode runtime is happy
- * with, and this is the only scanning the runtime ever did. */
-static int mm_parse_hms(const char *q, int *h, int *m, int *s)
-{
-    int n = 0;
-    int *out[3];
-    out[0] = h; out[1] = m; out[2] = s;
-    while (n < 3) {
-        int v = 0, got = 0;
-        while (*q == ' ') q++;
-        while (*q >= '0' && *q <= '9') { v = v * 10 + (*q++ - '0'); got = 1; }
-        if (!got)
-            break;
-        *out[n++] = v;
-        if (*q == ':') q++;
-        else break;
-    }
-    return n;
-}
-
-/* accepts "dd-mm-yyyy[ hh:mm:ss]", "dd-mm-yy...", "yyyy-mm-dd..."  and
- * '/' as an alternative separator */
-MMINTEGER mm_epoch_str(const char *ds)
-{
-    const char *p = mm_cstr(ds);
-    int a = 0, b = 0, c = 0, h = 0, mi = 0, se = 0, d, m, y;
-    int n = 0;
-    const char *q = p;
-    int vals[3];
-    while (*q == ' ') q++;
-    for (n = 0; n < 3; n++) {
-        int v = 0, got = 0;
-        while (*q >= '0' && *q <= '9') { v = v * 10 + (*q++ - '0'); got = 1; }
-        if (!got) MM_RAISEV("Invalid date", 0);
-        vals[n] = v;
-        if (n < 2) { if (*q == '-' || *q == '/') q++;
-                     else MM_RAISEV("Invalid date", 0); }
-    }
-    a = vals[0]; b = vals[1]; c = vals[2];
-    while (*q == ' ') q++;
-    if (*q) {
-        if (mm_parse_hms(q, &h, &mi, &se) < 2) { h = mi = se = 0; }
-    }
-    if (a > 1000) { y = a; m = b; d = c; }
-    else          { d = a; m = b; y = c; }
-    if (y >= 0 && y < 100) y += 2000;
-    if (d < 1 || d > 31 || m < 1 || m > 12 || y < 1902 || y > 2999)
-        mm_error("Invalid date");
-    return (MMINTEGER)(mm_days_from_civil(y, m, d) * 86400LL
-                       + h * 3600LL + mi * 60LL + se);
-}
-
-char *mm_datetime(MMINTEGER e)
-{
-    char b[32];
-    char *t = mm_tmp();
-    int Y, M, D, h, m, s, wd;
-    mm_break_epoch(e, &Y, &M, &D, &h, &m, &s, &wd);
-    mm_int_to_str_pad(b, D, '0', 2, 10);      b[2]  = '-';
-    mm_int_to_str_pad(b + 3, M, '0', 2, 10);  b[5]  = '-';
-    mm_int_to_str_pad(b + 6, Y, '0', 4, 10);  b[10] = ' ';
-    mm_int_to_str_pad(b + 11, h, '0', 2, 10); b[13] = ':';
-    mm_int_to_str_pad(b + 14, m, '0', 2, 10); b[16] = ':';
-    mm_int_to_str_pad(b + 17, s, '0', 2, 10);
-    b[19] = 0;
-    mm_ssetc(t, b);
-    return t;
-}
-
-char *mm_time_str(void)
-{
-    char b[16];
-    char *t = mm_tmp();
-    int Y, M, D, h, m, s, wd;
-    mm_break_epoch(mm_epoch_now(), &Y, &M, &D, &h, &m, &s, &wd);
-    mm_int_to_str_pad(b, h, '0', 2, 10);      b[2] = ':';
-    mm_int_to_str_pad(b + 3, m, '0', 2, 10);  b[5] = ':';
-    mm_int_to_str_pad(b + 6, s, '0', 2, 10);  b[8] = 0;
-    mm_ssetc(t, b);
-    return t;
-}
-
-char *mm_date_str(void)
-{
-    char b[16];
-    char *t = mm_tmp();
-    int Y, M, D, h, m, s, wd;
-    mm_break_epoch(mm_epoch_now(), &Y, &M, &D, &h, &m, &s, &wd);
-    mm_int_to_str_pad(b, D, '0', 2, 10);      b[2] = '-';
-    mm_int_to_str_pad(b + 3, M, '0', 2, 10);  b[5] = '-';
-    mm_int_to_str_pad(b + 6, Y, '0', 4, 10);  b[10] = 0;
-    mm_ssetc(t, b);
-    return t;
-}
-
-char *mm_day(MMINTEGER e)
-{
-    char *t = mm_tmp();
-    int Y, M, D, h, m, s, wd;
-    mm_break_epoch(e, &Y, &M, &D, &h, &m, &s, &wd);
-    mm_ssetc(t, mm_daynames[wd]);
-    return t;
-}
+/* ---- date and time: moved to mmb_datetime.h (2026-08-21) ------------
+ * Calendar arithmetic over time(), which is already a libcall - the
+ * mmb_math.h bargain.  The DATE$=/TIME$= writers went with it, since
+ * they adjust the clock offset that lives there now. */
 
 /* ---- BIN2STR$ / STR2BIN --------------------------------------------- */
 
@@ -2498,33 +2343,13 @@ void mm_error_s(const char *mmstr)
     mm_error(mm_cstr(msg));
 }
 
-/* Microseconds, not milliseconds: see mm_us_now above. */
+/* Microseconds, not milliseconds: see mm_us_now above.  The clock
+ * offset DATE$=/TIME$= adjust moved to mmb_datetime.h with them. */
 static MMINTEGER mm_timer_base = 0;
-static MMINTEGER mm_clock_off  = 0;      /* DATE$= / TIME$= adjustment */
-MMINTEGER mm_clock_offset(void) { return mm_clock_off; }
 
 void mm_timer_set(MMFLOAT ms)
 {
     mm_timer_base = mm_us_now() - (MMINTEGER)(ms * 1000.0);
-}
-
-void mm_set_date(const char *d)
-{
-    /* keep the current time of day, move the date */
-    MMINTEGER now = mm_epoch_now();
-    MMINTEGER tod = now % 86400;
-    char buf[MM_STRSZ];
-    mm_sset(buf, d);
-    mm_clock_off += (mm_epoch_str(buf) + tod) - now;
-}
-
-void mm_set_time(const char *t)
-{
-    MMINTEGER now = mm_epoch_now();
-    MMINTEGER day = now - (now % 86400);
-    int h = 0, m = 0, sec = 0;
-    mm_parse_hms(mm_cstr(t), &h, &m, &sec);
-    mm_clock_off += (day + h * 3600 + m * 60 + sec) - now;
 }
 
 /* ================= LONGSTRING ======================================
