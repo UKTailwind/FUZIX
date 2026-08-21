@@ -75,8 +75,24 @@ void lineedit_init(void)
 
 static void put(uint_fast8_t c)
 {
-    while (tty_writeready(1) != TTY_READY_NOW)
-        tight_loop_contents();
+    /*
+     * Every lineedit path runs inside tty_interrupt(), which timer_tick_cb
+     * calls with di() held (PRIMASK set).  The old spin on tty_writeready()
+     * deadlocked core0 there: once the 256-byte tx ring fills, its only
+     * drainers are the tx interrupt (masked, so it can never run) and
+     * rawuart_tx_poll() (a LATER step of the very tick now stuck spinning).
+     * A redraw burst larger than the ring - a down-arrow off a long history
+     * line emits ~300 rubout bytes in one tick - therefore hung the machine
+     * for good: CORE0 STALLED phase=2, with the tx IRQ enabled+pending and
+     * PRIMASK=1 in the [u0 ...] report.
+     *
+     * rawuart_putc already handles a full ring correctly in BOTH contexts:
+     * in thread context it waits on the tx interrupt, and when masked it
+     * self-pumps the ring into the FIFO itself ("be the interrupt
+     * ourselves").  So drive it directly and let it do the waiting - the
+     * worst case degrades to a burst clocked out at wire speed, never a
+     * lockup.  This is the arrangement MMBasic uses: drop/pace, never wedge.
+     */
     tty_putc(1, c);
 }
 
