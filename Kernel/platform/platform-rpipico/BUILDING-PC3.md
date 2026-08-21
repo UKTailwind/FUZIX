@@ -344,7 +344,7 @@ the opposite way round from what the names suggest.
 
 **5. The manuals.**
 
-    python3 ../../../../mmb2c/fcc/coverage.py    # regenerate Appendix C
+    python3 ../../../Applications/mmb2c/fcc/coverage.py   # regenerate Appendix C
     pandoc FUZIX-PC3-MANUAL.md -o FUZIX-PC3-MANUAL.pdf
     pandoc PC3-C-MANUAL.md     -o PC3-C-MANUAL.pdf
 

@@ -1,5 +1,17 @@
 # PLAN-codesize: fitting native programs in the process pool
 
+## STATUS 2026-08-21: the floor itself shrank (v0.19)
+
+The bcrun-floor numbers below (~104.5K) predate the v0.19 slimming:
+bcrun is now 80.4K of text and 10.1K of bss (was 99.4K/14.7K), because
+the pure-computation runtime families (SORT, whole-array/MATH(),
+LONGSTRING, DATA/READ, date/time, GOSUB/BIT/FLAG/BIN2STR$/TRIM$/
+FIELD$/MAP()) compile into the program that uses them - six mmb_*.h
+headers, the mmb_math.h bargain.  A program's own code grows by the
+families it uses (robots +4.6K of code) against the ~24K every process
+stops carrying.  The per-option analysis below still stands; only the
+floor row is smaller.
+
 2026-08-17.  Written after PicoMan became the first game that had to be
 built `BCODE_ONLY=1` to load.  The user's verdict: PicoMan is not a
 large program by MMBasic standards, and dropping to bytecode is a

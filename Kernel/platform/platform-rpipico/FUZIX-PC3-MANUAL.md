@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.18 — August 2026"
+date: "Release v0.19 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -55,7 +55,7 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## New in v0.18
+## New in v0.19
 
 **The machine has networking.** Wi-Fi through the Pico 2 W's CYW43
 radio, a full TCP/IP stack, and TLS that actually checks certificates.
@@ -84,7 +84,45 @@ SD card and LED — and `wifi` says so:
 MMBasic's `WEB` commands in this release; that is the next piece of
 work. Everything above is available from the `#` prompt and from C.
 
-**Three older bugs were found and fixed while doing this**, none of
+**Every program on the machine has about 24 KB more room.** `bcrun` —
+the shared floor under every compiled program, BASIC and C alike — has
+lost a fifth of its size: 99 KB of code down to 80 KB, and 4.5 KB of
+its fixed RAM gone with it. A plain C program also gets 4 KB of its
+own address space back that was being reserved for BASIC machinery it
+never used.
+
+The mechanism: the parts of the MMBasic runtime that are pure
+computation over the program's own data — `SORT`, the whole-array
+operations and the `MATH()` reductions, `LONGSTRING`, `DATA`/`READ`,
+date and time, `GOSUB`, `BIN2STR$`, `TRIM$`/`FIELD$`, the `BIT`/`FLAG`
+family — no longer live inside `bcrun` where every program paid for
+them. The translator now compiles each into the program that uses it,
+exactly as the drawing primitives always have been: a program that
+never sorts carries no sort, and one that does pays a few hundred
+bytes for its own copy. Nothing a BASIC program can observe changed —
+the test suite is byte-identical before and after, on the hardware as
+well as under the gates.
+
+**What you must do about it: recompile, and do not mix the halves.**
+A `.bc` built by an older `mmbc` asks `bcrun` for those functions by
+name, and the new `bcrun` refuses it when it loads:
+
+    prog.bc: no runtime function "mm_sort_i"
+
+That message means one thing: the program is older than the runtime —
+recompile it (`mmbc prog.bas` then `cc prog.c`) and it runs. The
+constraint is one-directional: a **freshly built** program imports
+nothing version-specific, so it runs under the old `bcrun` too. The
+card ships the matched set; the rule only bites a `.bc` kept from an
+earlier release.
+
+**The hunt instrumentation is out of the way.** The tracing that
+earlier releases carried in every process for chasing crashes —
+`MM_TB`, `MM_IOTRACE` and friends — is now compiled out unless
+`bcrun` is built with `-DMM_DIAG`. One flag brings the whole kit back;
+until then it costs nothing.
+
+**Three older bugs were found and fixed along the way**, none of
 them network bugs:
 
 - **`kill` did not work** on a process looping inside the kernel,
@@ -99,51 +137,6 @@ them network bugs:
   `0`.
 
 The first two are in Fuzix's own core and are being offered upstream.
-
-## Also in v0.17
-
-The machine keeps its keyboard, and BASIC finishes a category.
-
-**A program that only printed could not be stopped from the USB
-keyboard.** `Ctrl-C` from a serial terminal worked; from the keyboard
-it was ignored. The keystroke was never decoded rather than lost on the
-way to the program: the USB host stack is pumped when the kernel idles,
-when a reader is about to block, and when a spinning process is
-pre-empted — and a process that only *writes* reaches none of the
-three, because it is always runnable, never reads the tty, and is
-inside `write()` for almost the whole of a line. There is now a fourth
-pump on the output path. The symptom was worth recording: typing during
-such a program produced exactly one character, the first key pressed,
-and only once the program had ended.
-
-**`LOAD JPG`, `LOAD PNG` and `SPRITE LOADPNG`.** MMBasic's own picojpeg
-and upng, as separate programs, so a BASIC program that never touches
-an image carries no decoder. Note the transparency default: it is 0,
-which is palette black, so a PNG with a transparent surround draws a
-black box unless you pass **-1**. A real PicoMite does the same. See
-[Running another program](#running-another-program-system-save-image-load-image-load-jpg-load-png)
-and [Commands at the `#` prompt](#shell-commands).
-
-**`ARRAY SLICE` and `ARRAY INSERT`** — one line through an array of two
-or more dimensions, far quicker than the equivalent `FOR` loop, and
-spelled `MATH SLICE`/`MATH INSERT` as well because the interpreter runs
-both through the same two functions. **`COLOUR MAP`** turns a whole
-array of colour codes into RGB888 in one statement. That empties the
-"finish what is already there" category: 220 of MMBasic's 353 names now
-translate.
-
-**`DIM s(4) = (1,2,3,4)` under `OPTION BASE 1` filled the wrong
-elements** — `s(1)` held 2 and `s(4)` held nothing. Silent wrong
-answers, in a shape no program would suspect.
-
-**A refused batch of pixels is an error.** `LOAD IMAGE`, `LOAD JPG` and
-`LOAD PNG` ignored what the kernel told them, so a picture could be
-quietly incomplete — up to 256 pixels of it. They stop now.
-
-**`mmedit`'s function-key line was always one keystroke late**: blank on
-entering the editor until you pressed something, or for the five
-seconds it took the status line to redraw itself. Measured 5.43 s
-before and 0.43 s after.
 
 **This chapter is now the only one of its kind.** Everything the older
 "New in" sections described that is still true of the machine has been
@@ -2416,9 +2409,13 @@ bytecode.
 
 A compiled program pays for its size twice. First there is the obvious
 budget: a process gets about 330 KB, `bcrun` and its working space take
-about 170 KB of that, and what remains holds your code (which expands
-about 1.8× when it is translated to native ARM), your variables and
-your stack. Second, and less obvious: any single `Sub`, `Function` or
+about 145 KB of that (170 KB before v0.19 slimmed it), and what
+remains holds your code (which expands about 1.8× when it is
+translated to native ARM), your variables and your stack. Since v0.19
+your code also includes copies of the runtime families the program
+actually uses — `SORT`, `LONGSTRING`, `DATA` and the rest — a few
+hundred bytes each, in exchange for the 24 KB every program no longer
+carries for all of them at once. Second, and less obvious: any single `Sub`, `Function` or
 main line whose bytecode exceeds the translator's buffers stays
 **interpreted**, which runs about 2.7× slower — and the main line, the
 part between the top of the file and the first `Sub`, is compiled as

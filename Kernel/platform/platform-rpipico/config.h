@@ -402,7 +402,7 @@ extern uint8_t progbase[USERMEM];
  * answers, and it sat three releases behind this one without anything
  * noticing.  `sh relcheck.sh` now compares the two and the manual.
  */
-#define PC3_RELEASE "0.18"
+#define PC3_RELEASE "0.19"
 
 /*
  * The port's own copyright line.  It goes here rather than in start.c's
