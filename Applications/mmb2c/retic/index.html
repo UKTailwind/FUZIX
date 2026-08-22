@@ -1,0 +1,117 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<link rel="icon" type="image/x-icon" sizes="16x16" href="data:image/png;base64,AAABAAEAEBAQAAEABAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAP//ADMA/wD/AAQAFf8AAAIACABZAP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFAAUAVQBVAAUABQUABQBQBVAFBQAFAFAFBQAAVQBVAAUFBQAAAAAABVAAAAAAAAAAAAAAAAAAACREMzERAAAAJkRDMxEQAAAmZEQzMREAAAZmREMzERAAAGZkRDMxEQAABmZEQzMREAAAZmREMzERAAAGZkRDMxH//wAAuzMAALrtAACa7QAArzMAAKv/AACf/wAA//8AAAA/AAAAHwAAAA8AAIAHAADAAwAA4AEAAPAAAAD4AAAA" />
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>Watering System Controller</title>
+  <script type = "text/JavaScript">
+     <!--
+        function AutoRefresh( t ) {{
+           setTimeout("location.replace(\"index.html\");", t);
+        }
+     //-->
+  </script>  
+  <style type="text/css">
+<!--
+body {{
+	font: 100% Verdana, Arial, Helvetica, sans-serif;
+	background: #666666; margin: 0; padding: 0; text-align: center; color: #000000;
+}
+.oneColElsCtr #container {{
+	width: 41em; background-color: #fffaf3;
+	margin: 0 auto; /* the auto margins (in conjunction with a width) center the page */
+	border: 1px solid #000000;
+	text-align: left; /* this overrides the text-align: center on the body element. */
+}
+.oneColElsCtr #mainContent {{
+	padding: 0 20px; /* remember that padding is the space inside the div box and margin is the space outside the div box */
+	background-color: #fffaf3;
+}
+-->
+</style></head>
+<body class="oneColElsCtr" onload = "JavaScript:AutoRefresh({RefreshTime});">
+<div id="container">
+  <div id="mainContent">
+    <table width="580" border="0">
+      <tr>
+        <td width="240" align="middle"><a href="https://www.siliconchip.com.au"><img src="https://www.siliconchip.com.au/Images/SiliconChipLogoTran.gif"  width="180" align="middle" /></a></td>
+        <td width="340" align="middle"><h2>Watering System<BR/>Controller</h2></td>
+      </tr>
+    </table>
+    <BR />
+    <form id="form1" name="form1" method="post" action="">
+      <table width="600" border="0">
+        <tr>
+          <td width="30"  height="38" align="left" valign="top">&nbsp;</td>
+          <td width="188" align="left" valign="top">{Title(0)}</td>
+          <td width="158" align="left" valign="top" style="text-align: center">{Status(0)}</td>
+          <td width="114" align="left" valign="top">{                                                      ConfigB(0)}</td>
+          <td width="110" align="left" valign="top">{                                                      RunNow(0)} </td>
+        </tr>
+        <tr>
+          <td width="30"  height="38" align="left" valign="top">&nbsp;</td>
+          <td align="left" valign="top">{Title(1)}</td>
+          <td align="left" valign="top" style="text-align: center">{Status(1)}</td>
+          <td align="left" valign="top">{                                                                  ConfigB(1)}</td>
+          <td align="left" valign="top">{                                                                  RunNow(1)}</td>
+        </tr>
+        <tr>
+          <td align="left" height="38" valign="top">&nbsp;</td>
+          <td align="left" valign="top">{Title(2)}</td>
+          <td align="left" valign="top" style="text-align: center">{Status(2)}</td>
+          <td align="left" valign="top">{                                                                  ConfigB(2)}</td>
+          <td align="left" valign="top">{                                                                  RunNow(2)}</td>
+        </tr>
+        <tr>
+          <td align="left" height="38" valign="top">&nbsp;</td>
+          <td align="left" valign="top">{Title(3)}</td>
+          <td align="left" valign="top" style="text-align: center">{Status(3)}</td>
+          <td align="left" valign="top">{                                                                  ConfigB(3)}</td>
+          <td align="left" valign="top">{                                                                  RunNow(3)} </td>
+        </tr>
+        <tr>
+          <td align="left" height="38" valign="top">&nbsp;</td>
+          <td align="left" valign="top">{Title(4)}</td>
+          <td align="left" valign="top" style="text-align: center">{Status(4)}</td>
+          <td align="left" valign="top">{                                                                  ConfigB(4)}</td>
+          <td align="left" valign="top">{                                                                  RunNow(4)}</td>
+        </tr>
+        <tr>
+          <td align="left" height="38" valign="top">&nbsp;</td>
+          <td align="left" valign="top">{Title(5)}</td>
+          <td align="left" valign="top" style="text-align: center">{Status(5)}</td>
+          <td align="left" valign="top">{                                                                  ConfigB(5)}</td>
+          <td align="left" valign="top">{                                                                  RunNow(5)}</td>
+        </tr>
+        <tr>
+          <td align="left" height="38" valign="top">&nbsp;</td>
+          <td align="left" valign="top">{Title(6)}</td>
+          <td align="left" valign="top" style="text-align: center">{Status(6)}</td>
+          <td align="left" valign="top">{                                                                  ConfigB(6)}</td>
+          <td align="left" valign="top">{                                                                  RunNow(6)}</td>
+        </tr>
+        <tr>
+          <td align="left" height="38" valign="top">&nbsp;</td>
+          <td align="left" valign="top">{Title(7)}</td>
+          <td align="left" valign="top" style="text-align: center">{Status(7)}</td>
+          <td align="left" valign="top">{                                                                  ConfigB(7)}</td>
+          <td align="left" valign="top">{                                                                  RunNow(7)}</td>
+        </tr>
+      </table>
+
+     <p style="text-align: center; width=200; font-size: large;">{                                         SetupB}</p>
+     <p style="text-align: center; width=200; font-size: large;">{                                         CancelB}</p>
+    </form>
+    
+   <div align="center"><p style="color: #00C;">{                                                           StatusMsg} {timeup}</p></div>
+   <div align="center"><p style="color: #F00; font-weight: bold;">{                                        ErrorStatusMsg}</p></div>
+    <p>&nbsp;</p>
+    <hr />
+    <p style="text-align: center;  font-size: small; ">MMBasic Ver {mm.ver}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;retic.bas Ver {Ver}<br />
+    <!-- end #mainContent -->
+      <a href="http://geoffg.net/retic.html" target="_blank">http://geoffg.net/retic.html</a><br />
+    <a href="http://siliconchip.com.au" target="_blank">http://siliconchip.com.au</a></p>
+</div>
+<!-- end #container --></div>
+</body>
+</html>

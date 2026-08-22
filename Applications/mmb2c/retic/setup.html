@@ -1,0 +1,97 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <link rel="shortcut icon" href="https://www.siliconchip.com.au/favicon.ico?v=2">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>General Settings</title>
+<style type="text/css">
+<!--
+body {{
+	font: 100% Verdana, Arial, Helvetica, sans-serif;
+	background: #666666; margin: 0; padding: 0; text-align: center; color: #000000;
+}
+.oneColElsCtr #container {{
+	width: 41em; background-color: #fffaf3;
+	margin: 0 auto; /* the auto margins (in conjunction with a width) center the page */
+	border: 1px solid #000000;
+	text-align: left; /* this overrides the text-align: center on the body element. */
+}
+.oneColElsCtr #mainContent {{
+	padding: 0 20px; /* remember that padding is the space inside the div box and margin is the space outside the div box */
+	background-color: #fffaf3;
+}
+-->
+</style></head>
+<body class="oneColElsCtr">
+<div id="container">
+  <div id="mainContent">
+    <h2><a href="https://www.siliconchip.com.au"><img src="https://www.siliconchip.com.au/Images/SiliconChipLogoTran.gif" width="180" align="middle" /></a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;General Settings</h2>
+    <form id="form1" name="form1" method="post" action="">
+      <p><BR />Location:</p>
+      <p><span style="font-size: 14px">The location is required to determine the time zone, daylight saving, sun rise/set and the weather.&nbsp; If it is not set AEST time will be used. </span></p>
+      <p>City Name: <input name="OWMCity" type="text" id="OWMCity" size="30" maxlength="40" value="{OWMCity}" />
+     &nbsp; &nbsp;&nbsp; Country Code: <input name="OWMCountry" type="text" id="OWMCountry" size="1" maxlength="2" value="{OWMCountry}" />
+     <br /> 
+       {                                                                  LocationTestMsg} 
+       {                                                                  LocationDataMsg}
+     <br />    
+     <span style="font-size: 14px">The country code is generally the first two letters of the country (called the ALPHA-2 code), <a href="https://www.iban.com/country-codes" target="_blank">click here for the full list</a>.&nbsp; 
+     Use the TEST button to test the settings. &nbsp;
+     If you cannot find your city try a nearby larger city and if that fails chose a city in the same timezone with the same daylight saving rules.&nbsp; </span></p>
+     <p> &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+     <input type="submit" name="OWMTest" id="OWMTest" value=" TEST " />
+     </p>
+     <hr />
+     
+     <p>Sensors:<p/>
+     <table width="632" height="83" border="0">
+      <tr>
+        <td height="26">Detect Abnormal Water Flow:</td> 
+        <td><input type="checkbox" name="FlowDetect" {FlowDetect} /> Enable (not available on this hardware yet - leave OFF)</td>
+        <td>{ResetFlowMsg}</td>
+      </tr>
+      <tr>
+        <td height="26">Installed Rain Sensor:</td>
+        <td><input type="checkbox" name="RainDetect" {RainDetect} /> Enabled</td>
+        <td>(contacts open on rain)</td>
+      </tr>
+     </table>
+      <p><span style="font-size: 14px">Detecting abnormal water flow requires that a flow meter be installed at the pump 
+      or master valve outlet with its output signal connected to the flow input terminal.</span></p>
+
+     <hr />
+      <p>Email Settings:</p>
+      <p><span style="font-size: 14px">Emails are optional and are sent through <strong>Gmail</strong>.
+      Turn on 2-Step Verification for your Google account, then create an App Password at
+      <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a>
+      (16 characters, shown once - remove the spaces) and enter it below with your Gmail address:</span>
+      Gmail address: <input name="Smtp2GoUser" type="text" id="Smtp2GoUser" size="24" maxlength="80" value="{                       Smtp2GoUser}" />
+     &nbsp; App Password:&nbsp;
+        <input name="Smtp2GoPasswd" type="text" id="Smtp2GoPasswd" size="24" maxlength="80" value="{                       Smtp2GoPasswd}" />
+      </p>
+      <p><span style="font-size: 14px">Enter the sender address and the recipient (they can be the same).&nbsp; Note that the sender (ie, the From Address)
+      must be your Gmail address.</span> </p>
+      <p>From Email Address: 
+        <input name="EmailFrom" type="text" id="EmailFrom" size="50" maxlength="80" value="{EmailFrom}" /> 
+      </p>
+      <p>To Email Address:&nbsp;&nbsp;&nbsp;&nbsp; <input name="EmailTo" type="text" id="EmailTo" size="50" maxlength="80" value="{EmailTo}" /></p>
+      <p>Notifications:<br />
+      &nbsp; &nbsp; <input type="checkbox" name="EMTime" id="EMTime" {EMTime} /> Send email if unable to get the current time/date<br />
+      &nbsp; &nbsp; <input type="checkbox" name="EMW" id="EMW" {EMW}/> Send email if unable to get the weather forecast<br />
+      &nbsp; &nbsp; <input type="checkbox" name="EMFlow" id="EMFlow" {EMFlow} /> Send email if abnormal water flow is detected<br />
+      &nbsp; &nbsp; <input type="checkbox" name="EMStatus" id="EMStatus" {EMStatus} /> Send a weekly email with the current status<br />
+      </p>
+      <p>  {EmailTestMsg} 
+      &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+      <input type="submit" name="EmailTest" value="SEND TEST EMAIL" /> </p>
+     <hr />
+      <p>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+      <input type="submit" name="SubmitForm" id="Submit" value=" SAVE CHANGES " />
+      </p>
+      {                                                                  SavedMsg} 
+    <p align="center"><input type="button" onclick="window.location.href='index.html';" value=" RETURN TO HOME PAGE " /></p> 
+    </form>
+<!-- end #mainContent --></div>
+<!-- end #container --></div>
+</body>
+</html>

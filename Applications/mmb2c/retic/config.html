@@ -1,0 +1,129 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <link rel="shortcut icon" href="https://www.siliconchip.com.au/favicon.ico?v=2">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>Configure Schedule</title>
+<style type="text/css">
+<!--
+body {{
+	font: 100% Verdana, Arial, Helvetica, sans-serif;
+	background: #666666; margin: 0; padding: 0; text-align: center; color: #000000;
+}
+.oneColElsCtr #container {{
+	width: 41em; background-color: #fffaf3;
+	margin: 0 auto; /* the auto margins (in conjunction with a width) center the page */
+	border: 1px solid #000000;
+	text-align: left; /* this overrides the text-align: center on the body element. */
+}
+.oneColElsCtr #mainContent {{
+	padding: 0 20px; /* remember that padding is the space inside the div box and margin is the space outside the div box */
+	background-color: #fffaf3;
+}
+-->
+</style></head>
+<body class="oneColElsCtr">
+<div id="container">
+  <div id="mainContent">
+    <h2><a href="https://www.siliconchip.com.au"><img src="https://www.siliconchip.com.au/Images/SiliconChipLogoTran.gif" width="180" align="middle" /></a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;Configure Schedule {str$(pnbr + 1)} </h2>
+    <BR />
+    <form id="form1" name="form1" method="post" action="">
+      <table width="632" border="0">
+        <tr>
+          <td width="92" height="84" align="left" valign="top">Schedule:</td>
+          <td width="14" align="left" valign="top">&nbsp;</td>
+          <td width="512" align="left" valign="top">Title
+            <input type="text" name="Title" value="{Title(pnbr)}" maxlength="20" /> (max 20 characters)<p>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+            <input type="checkbox" name="Enabled" {Enabled(pnbr)}/> Enable this schedule
+          </td>
+        </tr>
+        <tr>
+          <td width="92" height="68" align="left" valign="top">Active Period (inclusive):</td>
+          <td align="left" valign="top">&nbsp;</td>
+          <td align="left" valign="top">
+              &nbsp;Start date: <label>&nbsp;&nbsp;&nbsp; Day
+              <input type="text" name="StartDay" value="{StartDay(pnbr)}" size="1" maxlength="2" />
+              </label> <label>&nbsp; Month
+              <input type="text" name="StartMonth" value="{StartMonth(pnbr)}" size="1" maxlength="2" />
+              <br />
+              &nbsp;End date: &nbsp; &nbsp;&nbsp;&nbsp; Day
+              <input type="text" name="EndDay" value="{EndDay(pnbr)}" size="1" maxlength="2" />
+              &nbsp; Month <input type="text" name="EndMonth" value="{EndMonth(pnbr)}" size="1" maxlength="2" />
+            </label>
+          </td>
+        </tr>
+        <tr>
+          <td height="88" align="left" valign="top">Watering Days:</td>
+          <td align="left" valign="top">&nbsp;</td>
+          <td align="left" valign="top">
+            <input type="checkbox" name="RunDOW0" {RunDOW(0,pnbr)} /> Su &nbsp; 
+            <input type="checkbox" name="RunDOW1" {RunDOW(1,pnbr)} /> Mo &nbsp;   
+            <input type="checkbox" name="RunDOW2" {RunDOW(2,pnbr)} /> Tu &nbsp; 
+            <input type="checkbox" name="RunDOW3" {RunDOW(3,pnbr)} /> We &nbsp; 
+            <input type="checkbox" name="RunDOW4" {RunDOW(4,pnbr)} /> Th &nbsp; 
+            <input type="checkbox" name="RunDOW5" {RunDOW(5,pnbr)} /> Fr &nbsp; 
+            <input type="checkbox" name="RunDOW6" {RunDOW(6,pnbr)} /> Sa<br />
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; -or- <br />
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; run every
+            <input type="text" name="RunDays" value="{RunDays(pnbr)}" size="2" maxlength="3" /> days </td>
+        </tr>
+        <tr>
+          <td height="60" align="left" valign="top">Start Watering:</td>
+          <td align="left" valign="top">&nbsp;</td>
+          <td align="left" valign="top"> &nbsp;
+            &nbsp; <input type="text" name="RunHours" value="{RunHours(pnbr)}" size="1" maxlength="2" />  hours&nbsp; 
+            <label> <input type="text" name="RunMints" value="{RunMints(pnbr)}" size="1" maxlength="2" /> minutes</label>
+            &nbsp;
+            <select name="RunStart">
+              <option value="Sw0" {Sw(0)} >After midnight  </option>
+              <option value="Sw1" {Sw(1)} >Before sunrise</option>
+              <option value="Sw2" {Sw(2)} >After sunrise</option>
+              <option value="Sw3" {Sw(3)} >Before sunset</option>
+              <option value="Sw4" {Sw(4)} >After sunset</option>
+          </select></td>
+        </tr>
+        <tr>
+          <td height="77" align="left" valign="top">Run Time (minutes):</td>
+          <td align="left" valign="top">&nbsp;</td>
+          <td align="left" valign="top">
+            Valve 1 <input name="ValveR0" value="{ValveR(0,pnbr)}" type="text" size="1" maxlength="3" />
+            &nbsp; Valve 2 <input name="ValveR1" value="{ValveR(1,pnbr)}" type="text" size="1" maxlength="3" />
+  			&nbsp; Valve 3 <input name="ValveR2" value="{ValveR(2,pnbr)}" type="text" size="1" maxlength="3" />
+  			&nbsp; Valve 4 <input name="ValveR3" value="{ValveR(3,pnbr)}" type="text" size="1" maxlength="3" />  
+            <br /> Valve 5 <input name="ValveR4" value="{ValveR(4,pnbr)}" type="text" size="1" maxlength="3" />
+  			&nbsp; Valve 6 <input name="ValveR5" value="{ValveR(5,pnbr)}" type="text" size="1" maxlength="3" />
+  			&nbsp; Valve 7 <input name="ValveR6" value="{ValveR(6,pnbr)}" type="text" size="1" maxlength="3" />
+  			&nbsp; Valve 8 <input name="ValveR7" value="{ValveR(7,pnbr)}" type="text" size="1" maxlength="3" />
+          </td>
+        </tr>
+        <tr>
+          <td height="61" align="left" valign="top">Weather Forecast:</td>
+          <td align="left" valign="top">&nbsp;</td>
+          <td align="left" valign="top"><label>
+            <input type="checkbox" name="Rain" {Rain(pnbr)} />
+            Skip schedule if rain is forecast in the next 24 hours<br />
+            Add <input name="RunIncrease" value="{RunIncrease(pnbr)}" type="text" size="1" maxlength="3" />
+            % to run time if forecast max is over
+  			<input name="TempThresh" type="text" value="{TempThresh(pnbr)}" size="1" maxlength="2" /> &deg;C</label>
+          </td>
+        </tr>
+        <tr>
+          <td align="left" valign="top">&nbsp;</td>
+          <td align="left" valign="top">&nbsp;</td>
+          <td align="left" valign="top"><label>
+          &nbsp; &nbsp;&nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp; &nbsp; 
+          <input type="submit" name="SubmitForm" value=" SAVE CHANGES " />
+          </label></td>
+        </tr>
+      </table>
+    </form>
+    {SavedMsg} {ErrorMsg1} {ErrorMsg2} {ErrorMsg3}
+    <p align="center"><input type="button" onclick="window.location.href='index.html';" value=" RETURN TO HOME PAGE " /></p> 
+    <BR />
+  <!-- end #mainContent --></div>
+<!-- end #container --></div>
+</body>
+</html>
