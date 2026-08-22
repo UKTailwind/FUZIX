@@ -576,10 +576,44 @@ Named findings:
 - Gates at landing: make check ok, cgate 0, fcctests 67/0,
   qemutests 68/0.
 
-**Stage 5 — TRANSMIT PAGE.**  Call-site substitution (§4).  Test:
-retic's real index/config/setup pages served with fixture variable
-values, byte-compared side-by-side against a WebMite serving the
-same (the authority rule).
+**Stage 5 — TRANSMIT PAGE.  DONE, BOARD-PROVEN 2026-08-22.**  The §4
+call-site substitution, exactly as designed: the translator reads
+the page at translate time (next to the program), compiles every
+{expression} through the normal pipeline INLINE at the statement -
+globals, sub locals, by-ref parameters and function calls all
+resolve, proven by the webpage.bas gate emitting v_n / v_loc /
+*p_pnbr / mm_str_i(...) - and emits a __mmwebsub_N table of
+normalised texts that mm_webpg_next matches braces against at run
+time.  Both translators, byte-identical on the FIRST diff; the
+engine (mm_webpg_* in mmb_webs.h) carries the reference's whole
+observable algorithm: 0x1A dropped, '{{' literal, expression to the
+FIRST '}' string-blind, float/int/string formatted exactly, two
+CRLF pairs in the counted body (correct order - the fixed one), one
+Content-Length'd 200.
+
+Board proof, the user's suggestion: **live BMP180 readings served
+into a page** - bmp180web.bas reads the sensor on the QWIIC bus
+every 2 s and the page substitutes { Str$(temperature%/10, 4, 1) },
+{ Str$(pressureinHpa, 4, 1) }, {UT%}, {UP%}, {nreads%}; two PC
+fetches showed 24.1 -> 24.2 C, moving raw values, and the refresh
+counter advancing 2 -> 13 - re-evaluated per request, not cached.
+The on-board mmbc did the pre-scan from the card itself.
+
+Implementation notes that will matter later:
+- mmbc tokenizes fragments through tokenize_frag(), a non-resetting
+  lexer entry: tokenize() resets the scratch pool the suspended
+  line's token texts live in.
+- The emitted loop wraps each substitution in its own
+  mm_mark/mm_release - ninety string expressions in one statement
+  would otherwise pile scratch temps until the NEXT statement's
+  release.
+- Truncation: page + bufsize (default 4096) is the capacity, excess
+  dropped - kinder than the reference's hard stop at +256
+  (MMtcpserver.c:652), noted as a divergence in its favour.
+- The side-by-side against a real WebMite serving retic's pages
+  moves to stage 8 with the retic run itself.
+- Gates at landing: make check ok, cgate 0, fcctests 68/0,
+  qemutests 69/0.
 
 **Stage 6 — JSON$ and the stream forms.**  mmb_json.h; TCP/TLS
 STREAM ring buffers.  Test: the retic weather-JSON path against

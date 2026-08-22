@@ -266,11 +266,21 @@ static void addtok(struct tok *out, int *nt, int lineno,
  * scratch pool: the previous line's tokens and strings die here. */
 int tokenize(const char *line, int lineno, struct tok *out)
 {
+    scratch_reset();
+    return tokenize_frag(line, lineno, out);
+}
+
+/* The same lexer WITHOUT the scratch reset: a page expression is
+   tokenized mid-statement (do_web_page), and resetting would free the
+   texts the suspended line's tokens still point at.  The pool grows by
+   the fragments' texts for the length of that one line, which is
+   bounded by the page's expression count. */
+int tokenize_frag(const char *line, int lineno, struct tok *out)
+{
     int nt = 0;
     int i = 0;
     int n;
 
-    scratch_reset();
     n = (int)strlen(line);
     while (i < n) {
         char c = line[i];

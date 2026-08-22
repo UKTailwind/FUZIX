@@ -272,6 +272,57 @@ def cblock_safe(text):
     return ''.join(c if 32 <= ord(c) < 127 else ' ' for c in out)
 
 
+def websub_norm(s):
+    """A page expression's table key: verbatim inside a "string
+    literal", upcased with whitespace dropped outside one.
+    mm_webpg_next (mmb_webs.h) applies the same rule at run time, and
+    the two MUST agree or a page's expressions stop matching."""
+    out = []
+    q = False
+    for c in s:
+        if c == '"':
+            q = not q
+            out.append(c)
+            continue
+        if q:
+            out.append(c)
+            continue
+        if c in ' \t\r\n':
+            continue
+        out.append(c.upper())
+    return ''.join(out)
+
+
+def websub_scan(text):
+    """Every {expression} in a page, raw text in first-seen order,
+    deduped by normalised key.  '{{' is a literal '{', 0x1A is xmodem
+    padding, and an expression ends at the FIRST '}' - string-blind,
+    exactly as the reference collects it (MMtcpserver.c:656-664) and
+    exactly as the engine collects it."""
+    keys, raws, seen = [], [], {}
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        i += 1
+        if c != '{':
+            continue
+        if i < n and text[i] == '{':
+            i += 1
+            continue
+        j = i
+        while j < n and text[j] != '}':
+            j += 1
+        raw = text[i:j].replace('\x1a', '')
+        i = j + 1
+        key = websub_norm(raw)
+        if key == '' or key in seen:
+            continue
+        seen[key] = True
+        keys.append(key)
+        raws.append(raw)
+    return keys, raws
+
+
 def tokenize(line, lineno):
     """Turn one source line into a list of (kind, text, upper) tuples."""
     out = []
@@ -721,6 +772,9 @@ class Conv(object):
         self.uses_udp = False       # WEB UDP: mmb_udp.h
         self.uses_webclient = False # WEB TCP/TLS client: mmb_webc.h
         self.uses_webserver = False # WEB TCP server: mmb_webs.h
+        # one entry per TRANSMIT PAGE call site: the normalised
+        # expression texts, emitted as __mmwebsub_N at file scope
+        self.websubs = []
         self.uses_play = False
         self.uses_blit = False      # BLIT family: mmb_blit.h
         self.uses_flash = False     # pseudo flash slots: mmb_flash.h
@@ -7921,10 +7975,81 @@ class Conv(object):
                 self.emit('mmg_webs_file(%s, %s, %s);'
                           % (conn, fname, mime))
                 return
-            self.err("WEB TRANSMIT takes CODE or FILE "
-                     "(PAGE arrives in stages - PLAN-web.md)")
+            if self.accept_kw('PAGE'):
+                self.do_web_page()
+                return
+            self.err("WEB TRANSMIT takes CODE, FILE or PAGE")
         self.err("this WEB command is not implemented yet - the family "
                  "arrives in stages (PLAN-web.md)")
+
+    def do_web_page(self):
+        """WEB TRANSMIT PAGE conn, "file" [, bufsize] - PLAN-web.md §4,
+        the call-site substitution.  The page is read HERE, at
+        translate time, and every {expression} in it is compiled
+        through the normal expression pipeline INLINE in this
+        statement - where the enclosing sub's locals and parameters
+        are simply in scope, which is what lets retic.bas write
+        {Title(pnbr)} and {str$(pnbr+1)}.  The emitted switch is
+        dispatched by mm_webpg_next matching each brace's normalised
+        text against the __mmwebsub_N table, so a page reorganised on
+        the card keeps working; an expression the table has never
+        seen raises at run time, naming it."""
+        conn = self.as_int(self.expr())
+        self.expect_op(',')
+        t = self.peek()
+        if t is None or t[0] != T_STR:
+            self.err("WEB TRANSMIT PAGE needs a literal page name: a "
+                     "computed one cannot be pre-scanned (PLAN-web.md)")
+        self.i += 1
+        fname = t[1]
+        bufsize = '4096'
+        if self.accept_op(','):
+            bufsize = self.as_int(self.expr())
+        self.uses_webserver = True
+        if self.mode != 'emit':
+            return
+        # next to the program, or absolute - and it must exist NOW
+        d = self.srcname.replace('\\', '/').rsplit('/', 1)
+        base = d[0] + '/' if len(d) == 2 else ''
+        path = fname if fname[:1] == '/' else base + fname
+        try:
+            f = open(path, 'rb')
+            text = f.read().decode('latin-1')
+            f.close()
+        except OSError:
+            self.err("cannot read page '%s': it must exist at "
+                     "translate time, next to the program" % fname)
+        keys, raws = websub_scan(text)
+        tno = len(self.websubs)
+        self.websubs.append(keys)
+        self.emit('{ struct mm_webpg __pg; int __pi;')
+        self.emit('mm_webpg_start(&__pg, %s, %s, %s);'
+                  % (conn, c_string_literal(fname), bufsize))
+        self.emit('while ((__pi = mm_webpg_next(&__pg, __mmwebsub_%d, '
+                  '%d)) >= 0) {' % (tno, len(keys)))
+        self.emit('    unsigned __pgm = mm_mark();')
+        self.emit('    switch (__pi) {')
+        save = (self.toks, self.i)
+        for ci, raw in enumerate(raws):
+            self.toks = tokenize(raw, self.lineno)
+            self.i = 0
+            v = self.expr()
+            if not self.at_end():
+                self.err("page expression '{%s}' does not parse as one "
+                         "expression" % raw)
+            if v[1] == TY_S:
+                put = 'mm_webpg_put_s'
+            elif v[1] == TY_F:
+                put = 'mm_webpg_put_f'
+            else:
+                put = 'mm_webpg_put_i'
+            self.emit('    case %d: %s(&__pg, %s); break;'
+                      % (ci, put, v[0]))
+        self.toks, self.i = save
+        self.emit('    }')
+        self.emit('    mm_release(__pgm);')
+        self.emit('}')
+        self.emit('mm_webpg_send(&__pg); }')
 
     def do_onewire(self):
         """ONEWIRE RESET pin
@@ -8869,6 +8994,20 @@ class Conv(object):
             # the same for SPI's three, in whatever order they were
             # written - mmb_spi.h works out which pin is which signal
             wr('static int __mmspi_a, __mmspi_b, __mmspi_c;\n')
+        # TRANSMIT PAGE's expression tables, one per call site: the
+        # normalised texts mm_webpg_next matches braces against.
+        # Emitted before the routine bodies that reference them.
+        for tno, keys in enumerate(self.websubs):
+            wr('\n/* WEB TRANSMIT PAGE call site %d: %d expressions '
+               '*/\n' % (tno, len(keys)))
+            wr('static const char *const __mmwebsub_%d[%d] = {\n'
+               % (tno, max(1, len(keys))))
+            if not keys:
+                wr('    "",\n')
+            for k in keys:
+                wr('    "%s",\n'
+                   % k.replace('\\', '\\\\').replace('"', '\\"'))
+            wr('};\n')
         # DefineFont: the glyphs live in this program's image and the
         # kernel is given their address, so they are `static const' -
         # nothing copies them and nothing may move them.

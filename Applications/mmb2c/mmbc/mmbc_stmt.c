@@ -26,6 +26,7 @@ static void do_i2c2(void);
 static void do_i2c0(void);
 static void do_onewire(void);
 static void do_web(void);
+static void do_web_page(void);
 static void do_spi(void);
 static void do_on_key(void);
 static const char *int_target(void);
@@ -2806,11 +2807,200 @@ static void do_web(void)
             emit(sfmt("mmg_webs_file(%s, %s, %s);", conn, fname, mime));
             return;
         }
-        cv_err("WEB TRANSMIT takes CODE or FILE "
-               "(PAGE arrives in stages - PLAN-web.md)");
+        if (accept_kw("PAGE")) {
+            do_web_page();
+            return;
+        }
+        cv_err("WEB TRANSMIT takes CODE, FILE or PAGE");
     }
     cv_err("this WEB command is not implemented yet - the family "
            "arrives in stages (PLAN-web.md)");
+}
+
+/* mmb2c.py's websub_norm: a page expression's table key - verbatim
+   inside a "string literal", upcased with whitespace dropped outside
+   one.  mm_webpg_next applies the same rule at run time, and the three
+   MUST agree or a page's expressions stop matching. */
+static int websub_norm(const char *s, int n, char *out, int max)
+{
+    int q = 0, o = 0, i;
+    char c;
+
+    for (i = 0; i < n && o < max - 1; i++) {
+        c = s[i];
+        if (c == '"') {
+            q = !q;
+            out[o++] = c;
+            continue;
+        }
+        if (q) {
+            out[o++] = c;
+            continue;
+        }
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+            continue;
+        if (c >= 'a' && c <= 'z')
+            c = (char)(c - 'a' + 'A');
+        out[o++] = c;
+    }
+    out[o] = 0;
+    return o;
+}
+
+/* The fragment sub-parse's saved line: static, not stack - a board
+   process cannot spare MAXTOKS of tok on its stack, and do_web_page
+   never nests. */
+static struct tok websub_save[MAXTOKS];
+
+/* mmb2c.py's do_web_page.  WEB TRANSMIT PAGE conn, "file"
+   [, bufsize] - PLAN-web.md §4, the call-site substitution: the page
+   is read HERE, at translate time, and every {expression} in it is
+   compiled through the normal expression pipeline INLINE in this
+   statement, where the enclosing sub's locals and parameters are in
+   scope.  The emitted switch is dispatched by mm_webpg_next matching
+   each brace's normalised text against the __mmwebsub_N table. */
+static void do_web_page(void)
+{
+    const char *conn, *bufsize = "4096", *fname;
+    struct tok *t;
+    char path[256], key[160];
+    char *text;
+    long size, got;
+    FILE *f;
+    struct websubtab *tab;
+    int tno, i, n, j, kl, k, ci, saven, savei;
+    const char *base;
+
+    conn = as_int(expr());
+    expect_op(",");
+    t = peek(0);
+    if (t == NULL || t->kind != T_STR)
+        cv_err("WEB TRANSMIT PAGE needs a literal page name: a "
+               "computed one cannot be pre-scanned (PLAN-web.md)");
+    cv.i++;
+    fname = pstr(t->text);
+    if (accept_op(","))
+        bufsize = as_int(expr());
+    cv.uses_webserver = 1;
+    if (cv.mode != M_EMIT)
+        return;
+    if (cv.nwebsubs >= MAXWEBSUB)
+        cv_err("too many WEB TRANSMIT PAGE call sites");
+    /* next to the program, or absolute - and it must exist NOW */
+    base = strrchr(cv.srcname, '/');
+    if (fname[0] == '/' || base == NULL)
+        snprintf(path, sizeof(path), "%s", fname);
+    else
+        snprintf(path, sizeof(path), "%.*s/%s",
+                 (int)(base - cv.srcname), cv.srcname, fname);
+    f = fopen(path, "rb");
+    if (f == NULL)
+        cv_err(sfmt("cannot read page '%s': it must exist at "
+                    "translate time, next to the program", fname));
+    fseek(f, 0, SEEK_END);
+    size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    text = malloc((size_t)size + 1);
+    if (text == NULL) {
+        fclose(f);
+        cv_err("out of memory reading the page");
+    }
+    got = (long)fread(text, 1, (size_t)size, f);
+    fclose(f);
+    text[got < 0 ? 0 : got] = 0;
+    n = (int)got;
+
+    tab = &cv.websubs[cv.nwebsubs];
+    tno = cv.nwebsubs++;
+    tab->n = 0;
+
+    /* pass 1 - mmb2c.py's websub_scan: every {expression}, raw text
+       kept for compilation, deduped by normalised key */
+    {
+        static const char *raws[MAXWEBKEYS];
+
+        i = 0;
+        while (i < n) {
+            char c = text[i++];
+            char raw[160];
+            int rn = 0;
+
+            if (c != '{')
+                continue;
+            if (i < n && text[i] == '{') {
+                i++;
+                continue;
+            }
+            j = i;
+            while (j < n && text[j] != '}')
+                j++;
+            while (i < j && rn < (int)sizeof(raw) - 1) {
+                if (text[i] != '\x1a')
+                    raw[rn++] = text[i];
+                i++;
+            }
+            raw[rn] = 0;
+            i = j + 1;
+            kl = websub_norm(raw, rn, key, (int)sizeof(key));
+            if (kl == 0)
+                continue;
+            for (k = 0; k < tab->n; k++)
+                if (strcmp(tab->keys[k], key) == 0)
+                    break;
+            if (k < tab->n)
+                continue;
+            if (tab->n >= MAXWEBKEYS)
+                cv_err("too many expressions in one page");
+            raws[tab->n] = pstr(raw);
+            tab->keys[tab->n] = pstr(key);
+            tab->n++;
+        }
+        free(text);
+
+        emit("{ struct mm_webpg __pg; int __pi;");
+        emit(sfmt("mm_webpg_start(&__pg, %s, %s, %s);",
+                  conn, c_string_literal(fname), bufsize));
+        emit(sfmt("while ((__pi = mm_webpg_next(&__pg, __mmwebsub_%d, "
+                  "%d)) >= 0) {", tno, tab->n));
+        emit("    unsigned __pgm = mm_mark();");
+        emit("    switch (__pi) {");
+
+        /* pass 2: compile each raw text through the normal expression
+           pipeline, IN the enclosing scope, via the non-resetting
+           lexer (the suspended line's token texts stay live) */
+        saven = cv.ntoks;
+        savei = cv.i;
+        memcpy(websub_save, cv.toks,
+               (size_t)cv.ntoks * sizeof(struct tok));
+        for (ci = 0; ci < tab->n; ci++) {
+            struct val v;
+            const char *put;
+
+            cv.ntoks = tokenize_frag(raws[ci], cv.lineno, cv.toks);
+            cv.i = 0;
+            v = expr();
+            if (!at_end())
+                cv_err(sfmt("page expression '{%s}' does not parse as "
+                            "one expression", raws[ci]));
+            if (v.ty == TY_S)
+                put = "mm_webpg_put_s";
+            else if (v.ty == TY_F)
+                put = "mm_webpg_put_f";
+            else
+                put = "mm_webpg_put_i";
+            emit(sfmt("    case %d: %s(&__pg, %s); break;", ci, put,
+                      v.code));
+        }
+        cv.ntoks = saven;
+        cv.i = savei;
+        memcpy(cv.toks, websub_save,
+               (size_t)saven * sizeof(struct tok));
+    }
+
+    emit("    }");
+    emit("    mm_release(__pgm);");
+    emit("}");
+    emit("mm_webpg_send(&__pg); }");
 }
 
 /* mmb2c.py's do_onewire.

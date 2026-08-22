@@ -338,4 +338,224 @@ MMG_FN void mmg_webs_file(MMINTEGER n, const char *fname, const char *mime)
 	mmg_webs_slotclose(i);
 }
 
+/* ================= WEB TRANSMIT PAGE ================================
+ *
+ *	The engine half of PLAN-web.md §4's call-site substitution.  The
+ *	translator pre-scans the page, compiles every {expression} inline
+ *	at the statement - where the caller's locals and parameters are
+ *	simply in scope - and emits a table of the expressions'
+ *	NORMALISED texts.  At run time this engine streams the page,
+ *	normalises each {...} the same way, and hands back its table
+ *	index; the emitted switch evaluates and appends the value.
+ *	Matching by text, not position, is what lets a page reorganised
+ *	on the card keep working.
+ *
+ *	The reference algorithm is MMtcpserver.c:609-757: 0x1A dropped
+ *	(xmodem padding), '{{' a literal '{', the expression ends at the
+ *	FIRST '}' (string-blind, as the reference is), values formatted
+ *	float / int / string exactly as there, two CRLF pairs inside the
+ *	counted body (the reference's reversed bytes were a bug, fixed
+ *	upstream), and the whole reply is one Content-Length'd 200.
+ *
+ *	Capacity: page size + bufsize (default 4096), the reference's
+ *	own argument; what will not fit is dropped, which is kinder
+ *	than the reference's hard stop at +256 (MMtcpserver.c:652).
+ *	An expression the table does not know raises, naming it - the
+ *	§4 draft choice, review-owned: the WebMite would render 0.
+ */
+
+struct mm_webpg {
+	int slot;			/* -1: nothing to do (404'd/raised) */
+	char *src;
+	long slen, spos;
+	char *body;
+	long blen, bcap;
+};
+
+MMG_FN void mm_webpg_putn(struct mm_webpg *pg, const char *p, long n)
+{
+	long room = pg->bcap - pg->blen;
+
+	if (n > room)
+		n = room;
+	if (n > 0) {
+		memcpy(pg->body + pg->blen, p, (size_t)n);
+		pg->blen += n;
+	}
+}
+
+MMG_FN void mm_webpg_put_s(struct mm_webpg *pg, const char *m)
+{
+	mm_webpg_putn(pg, m + 1, mm_slen(m));
+}
+
+MMG_FN void mm_webpg_put_i(struct mm_webpg *pg, MMINTEGER v)
+{
+	char b[24];
+
+	mm_int_to_str(b, v, 10);
+	mm_webpg_putn(pg, b, (long)strlen(b));
+}
+
+MMG_FN void mm_webpg_put_f(struct mm_webpg *pg, MMFLOAT v)
+{
+	char b[40];
+
+	mm_float_to_str(b, v, 0, MM_AUTO_PRECISION, ' ');
+	mm_webpg_putn(pg, b, (long)strlen(b));
+}
+
+MMG_FN void mm_webpg_free(struct mm_webpg *pg)
+{
+	if (pg->src)
+		mm_lfree(pg->src);
+	if (pg->body)
+		mm_lfree(pg->body);
+	pg->src = pg->body = 0;
+	pg->slot = -1;
+}
+
+MMG_FN void mm_webpg_start(struct mm_webpg *pg, MMINTEGER n,
+			   const char *fname, MMINTEGER bufsize)
+{
+	char path[256];
+	long size, got;
+	int i = mmg_webs_slot(n), fd, fl, rd;
+
+	pg->slot = -1;
+	pg->src = pg->body = 0;
+	pg->slen = pg->spos = pg->blen = 0;
+	if (i < 0)
+		return;			/* the raise was made */
+	if (mm_webs_fd[i] < 0) {
+		mm_error("No connection");
+		return;
+	}
+	fl = mm_slen(fname);
+	if (fl == 0) {
+		mm_error("Cannot find file");
+		return;
+	}
+	memcpy(path, fname + 1, fl);
+	path[fl] = 0;
+	size = (long)mm_filesize(fname);
+	fd = size < 0 ? -1 : mmn_open_ro(path);
+	if (fd < 0) {
+		mmg_webs_put(i, "HTTP/1.0 404\r\n\r\n", 16);
+		mmg_webs_slotclose(i);
+		return;
+	}
+	if (bufsize < 0)
+		bufsize = 0;
+	pg->src = (char *)mm_lheap((unsigned long)size + 1);
+	got = 0;
+	while (got < size) {
+		rd = mmn_read(fd, pg->src + got,
+			      (int)(size - got > 4096 ? 4096 : size - got));
+		if (rd <= 0)
+			break;
+		got += rd;
+	}
+	mmn_close(fd);
+	pg->slen = got;
+	pg->bcap = got + (long)bufsize + 8;	/* + the CRLF CRLF tail */
+	pg->body = (char *)mm_lheap((unsigned long)pg->bcap);
+	pg->slot = i;
+}
+
+MMG_FN int mm_webpg_next(struct mm_webpg *pg,
+			 const char *const *tab, int ntab)
+{
+	char ex[160];
+	static char msg[200];
+	int xn, q, k;
+	char c;
+
+	if (pg->slot < 0)
+		return -1;
+	while (pg->spos < pg->slen) {
+		c = pg->src[pg->spos++];
+		if (c == 26)
+			continue;
+		if (c != '{') {
+			mm_webpg_putn(pg, &c, 1);
+			continue;
+		}
+		if (pg->spos < pg->slen && pg->src[pg->spos] == '{') {
+			pg->spos++;
+			c = '{';
+			mm_webpg_putn(pg, &c, 1);
+			continue;
+		}
+		/*	Collect to the first '}', normalised as the
+		 *	translator normalised the table: verbatim inside a
+		 *	"string literal", upcased with whitespace dropped
+		 *	outside one. */
+		xn = 0;
+		q = 0;
+		while (pg->spos < pg->slen) {
+			c = pg->src[pg->spos++];
+			if (c == '}')
+				break;
+			if (c == '"')
+				q = !q;
+			if (!q && (c == ' ' || c == '\t' ||
+				   c == '\r' || c == '\n'))
+				continue;
+			if (!q && c >= 'a' && c <= 'z')
+				c = (char)(c - 'a' + 'A');
+			if (xn < (int)sizeof(ex) - 1)
+				ex[xn++] = c;
+		}
+		ex[xn] = 0;
+		for (k = 0; k < ntab; k++)
+			if (strcmp(tab[k], ex) == 0)
+				return k;
+		memcpy(msg, "page expression not compiled in: {", 34);
+		memcpy(msg + 34, ex, (size_t)xn);
+		msg[34 + xn] = '}';
+		msg[35 + xn] = 0;
+		mm_webpg_free(pg);
+		mm_error(msg);
+		return -1;
+	}
+	/*	The end: the tail, once. */
+	mm_webpg_putn(pg, "\r\n\r\n", 4);
+	pg->spos = pg->slen + 1;
+	return -1;
+}
+
+MMG_FN void mm_webpg_send(struct mm_webpg *pg)
+{
+	char hdr[96];
+	int hl, nd;
+	char d[12];
+	long v;
+	int i = pg->slot;
+
+	if (i < 0) {
+		mm_webpg_free(pg);
+		return;
+	}
+	memcpy(hdr, "HTTP/1.1 200 OK\r\nServer:CPi\r\nConnection:close\r\n"
+	       "Content-type:text/html\r\nContent-Length:", 86);
+	hl = 86;
+	v = pg->blen;
+	nd = 0;
+	if (v == 0)
+		d[nd++] = '0';
+	while (v > 0 && nd < 12) {
+		d[nd++] = (char)('0' + v % 10);
+		v /= 10;
+	}
+	while (nd > 0)
+		hdr[hl++] = d[--nd];
+	memcpy(hdr + hl, "\r\n\r\n", 4);
+	hl += 4;
+	if (mmg_webs_put(i, hdr, hl) == 0)
+		mmg_webs_put(i, pg->body, pg->blen);
+	mmg_webs_slotclose(i);
+	mm_webpg_free(pg);
+}
+
 #endif /* MMB_WEBS_H */

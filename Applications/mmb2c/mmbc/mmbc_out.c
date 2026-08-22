@@ -681,6 +681,34 @@ void conv_write(FILE *f)
         /* the same for SPI's three, in whatever order they were
            written - mmb_spi.h works out which pin is which signal */
         fprintf(f, "static int __mmspi_a, __mmspi_b, __mmspi_c;\n");
+    /* TRANSMIT PAGE's expression tables, one per call site: the
+       normalised texts mm_webpg_next matches braces against.
+       Emitted before the routine bodies that reference them. */
+    {
+        int wi, k;
+
+        for (wi = 0; wi < cv.nwebsubs; wi++) {
+            fprintf(f, "\n/* WEB TRANSMIT PAGE call site %d: %d "
+                    "expressions */\n", wi, cv.websubs[wi].n);
+            fprintf(f,
+                    "static const char *const __mmwebsub_%d[%d] = {\n",
+                    wi, cv.websubs[wi].n > 0 ? cv.websubs[wi].n : 1);
+            if (cv.websubs[wi].n == 0)
+                fprintf(f, "    \"\",\n");
+            for (k = 0; k < cv.websubs[wi].n; k++) {
+                const char *p = cv.websubs[wi].keys[k];
+
+                fprintf(f, "    \"");
+                for (; *p; p++) {
+                    if (*p == '\\' || *p == '"')
+                        fputc('\\', f);
+                    fputc(*p, f);
+                }
+                fprintf(f, "\",\n");
+            }
+            fprintf(f, "};\n");
+        }
+    }
     /* DefineFont: the glyphs live in this program's image and the
        kernel is given their address, so they are `static const' -
        nothing copies them and nothing may move them. */

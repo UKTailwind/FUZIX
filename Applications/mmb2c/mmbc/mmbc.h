@@ -63,6 +63,7 @@ struct tok {
 #define MAXTOKS 512
 
 int tokenize(const char *line, int lineno, struct tok *out);
+int tokenize_frag(const char *line, int lineno, struct tok *out);
 
 /* ---- string helpers (mmbc_lex.c) ---- */
 
@@ -400,6 +401,15 @@ struct conv {
     int uses_udp;               /* WEB UDP: mmb_udp.h */
     int uses_webclient;         /* WEB TCP/TLS client: mmb_webc.h */
     int uses_webserver;         /* WEB TCP server: mmb_webs.h */
+    /* one entry per TRANSMIT PAGE call site: the normalised
+       expression texts, emitted as __mmwebsub_N at file scope */
+#define MAXWEBSUB 16
+#define MAXWEBKEYS 128
+    struct websubtab {
+        const char *keys[MAXWEBKEYS];
+        int n;
+    } websubs[MAXWEBSUB];
+    int nwebsubs;
     int uses_wait;              /* a serviced PAUSE: pulls in mmb_wait.h */
     int uses_play;              /* PLAY: emit the volume it remembers */
     int uses_blit;              /* BLIT family: mmb_blit.h */
