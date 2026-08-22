@@ -261,7 +261,28 @@ Gates as ever: make check with new tests/*.bas, cgate 0 diff, fcc,
 qemu, ioctlcheck unchanged (no new ioctls — claims only).
 
 
-## Status — stage 1 BOARD-PROVEN, 2026-08-22
+## Status — COMPLETE AND BOARD-PROVEN END TO END, 2026-08-22
+
+The whole plan shipped the day it was written.  On top of stage 1
+below: `WS2812` and `BITSTREAM` are BASIC statements in both
+translators (cgate 0 diff; fcc 76/0; qemu 77/0; tests/pioout.bas under
+the gates), `mmb_pioout.h` carries the MMBasic-exact semantics onto
+the fixed programs, and the crossing is a new `mm_pobuf` libcall (its
+own name, so an old bcrun refuses instead of turning a failure into a
+pointer — and on the HOST bcrun the model buffer is mmap'd low with
+the VM, because a PIE static's address does not fit the program's
+32-bit pointers; that segfault cost one gate run).  Card-native proof
+on COM14: the board's own mmbc+cc compiled ws.bas, `BITSTREAM
+gp2, 2000, d()` counted EXACTLY 2000 edges on the loop, the `WS2812`
+zero-frame counted exactly 576, and the real 12-LED strip (a B-type;
+the bench's earlier darkness was the 5V-supply/3.3V-data threshold,
+not the wire) cycled red/green/blue/off from BASIC.  The user manual
+gained the two statements' sections; the coverage list moved both
+names to translated (226/353, category 3 down to its honest four).
+
+Not done, by design: the two-pin BITSTREAM form (refused by name).
+
+### Stage 1 as it happened
 
 utils/pioouttest **all passed** on COM14 (GP2→GP4 loop + the real
 12-LED strip on GP7): 2000-edge bitstream counted EXACTLY 2000; FIN

@@ -480,6 +480,9 @@ static void w_gpio(void)     { A = mm_gpio(LL(0), LL(2), LL(4)); }
    that a .bc using counting is refused by name on an old bcrun instead
    of misbehaving through mm_gpio's default case. */
 static void w_pinct(void)    { A = mm_pinct(LL(0), LL(2), LL(4)); }
+/* The PIO output word buffer (WS2812/BITSTREAM) - its own name so an
+   old bcrun refuses instead of turning a failure into a pointer. */
+static void w_pobuf(void)    { A = mm_pobuf(); }
 /* MAP - the LIVE palette.  mm_map collects an entry, mm_map_set
    applies the lot during blanking; the MAP() arithmetic and COLOUR
    MAP are program-side in mmb_misc.h. */
@@ -727,6 +730,7 @@ static const struct mmwrap {
 	{ "mm_pixels",		w_pixels },
 	{ "mm_gpio",		w_gpio },
 	{ "mm_pinct",		w_pinct },
+	{ "mm_pobuf",		w_pobuf },
 	{ "mm_map",		w_map },
 	{ "mm_map_set",		w_map_set },
 	{ "mm_map_reset",	w_map_reset },

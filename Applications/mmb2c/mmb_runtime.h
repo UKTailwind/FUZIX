@@ -665,6 +665,14 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
 #define MM_PINCT_OFF  5
 MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
 
+/* The PIO output word buffer (WS2812/BITSTREAM, mmb_pioout.h): the
+ * address of the kernel's PSRAM buffer the DMA reads - the DMA must
+ * never read process memory on this machine (the swapper moves it).
+ * 0 if unavailable.  Its own libcall NAME for the usual skew reason:
+ * a program using the strip commands on an old bcrun is refused at
+ * load instead of turning -1 into a pointer. */
+MMINTEGER mm_pobuf(void);
+
 /* The ioctls, from the kernel's gpio.h.  Duplicated rather than
  * included, as the graphics numbers are, so the runtime does not need
  * the FUZIX tree on its include path.  Keep them in step. */
@@ -678,6 +686,7 @@ MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
 #define MM_GPIOC_CNT_READ 0x053A
 #define MM_GPIOC_CNT_SET  0x053B
 #define MM_GPIOC_CNT_OFF  0x053C
+#define MM_GPIOC_PIOOUT_BUF 0x053D
 /* pinlock, from the kernel's pico_ioctl.h - on /dev/sys, not /dev/gpio */
 #define MM_PLKIOC_CLAIM  0x0026
 /* and the classes it names.  PLK_PIN and PLK_ADC are all SETPIN needs;
@@ -685,6 +694,10 @@ MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
 #define MM_PLK_PIN       0
 #define MM_PLK_PWM       3
 #define MM_PLK_ADC       4
+/* the PIO output machinery (mmb_pioout.h): the reserved PIO1 state
+ * machine and DMA channel, single indices the kernel's pinlock knows */
+#define MM_PLK_PIO       5
+#define MM_PLK_DMA       6
 
 /* RP2350B.  Not 28: that is the RP2040's count, and it put the PC3's
  * own DS3231 alarm on GP32 out of reach. */

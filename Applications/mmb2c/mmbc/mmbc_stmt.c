@@ -1997,6 +1997,81 @@ void statement_inner(void)
                   strcmp(mode, "MMG_PIN_DIN") == 0 ? setpin_pull() : "0"));
         return;
     }
+    if (strcmp(up, "WS2812") == 0) {
+        /* WS2812 type, pin, nbr, colours%()  - type is an unquoted
+           O|B|S|W, MMBasic's own spelling (External.c:4448); W is the
+           S timing with four colour bytes.  nbr = 1 may take a scalar
+           colour instead of an array (4482-4486), decided here by the
+           text as PIXEL's two forms are.  Emitted onto the fixed PIO
+           programs - PLAN-pioout.md, mmb_pioout.h. */
+        const char *ty, *pin, *nbr;
+
+        cv.i++;
+        if (accept_kw("O"))
+            ty = "MMG_WS_O";
+        else if (accept_kw("B"))
+            ty = "MMG_WS_B";
+        else if (accept_kw("S"))
+            ty = "MMG_WS_S";
+        else if (accept_kw("W"))
+            ty = "MMG_WS_W";
+        else {
+            cv_err("WS2812 takes a type of O, B, S or W");
+            return;
+        }
+        expect_op(",");
+        pin = as_int(expr());
+        expect_op(",");
+        nbr = as_int(expr());
+        expect_op(",");
+        cv.uses_gpio = 1;
+        cv.uses_pioout = 1;
+        if (is_array_arg()) {
+            struct sym *s = arrayref(1);
+            struct flat fl;
+            if (s->ty != TY_I) {
+                cv_err("WS2812 wants an integer array");
+                return;
+            }
+            fl = array_flat(s);
+            emit(sfmt("mmg_ws2812(%s, %s, %s, %s, %s);",
+                      ty, pin, nbr, fl.ptr, fl.cnt));
+        } else {
+            const char *col = as_int(expr());
+            emit(sfmt("mmg_ws2812_one(%s, %s, %s, %s);",
+                      ty, pin, nbr, col));
+        }
+        return;
+    }
+    if (strcmp(up, "BITSTREAM") == 0) {
+        /* BITSTREAM pin, n, array() [, mode] - n timed transitions,
+           the array elements microseconds (float or integer arrays
+           both, as parsenumberarray takes); mode 1 is the
+           open-collector form.  Same engine as WS2812. */
+        const char *pin, *n, *mode = "0";
+        struct sym *s;
+        struct flat fl;
+
+        cv.i++;
+        pin = as_int(expr());
+        expect_op(",");
+        n = as_int(expr());
+        expect_op(",");
+        s = arrayref(1);
+        if (s->ty == TY_S) {
+            cv_err("BITSTREAM wants a number array");
+            return;
+        }
+        fl = array_flat(s);
+        if (accept_op(","))
+            mode = as_int(expr());
+        cv.uses_gpio = 1;
+        cv.uses_pioout = 1;
+        emit(sfmt("%s(%s, %s, %s, %s, %s);",
+                  s->ty == TY_I ? "mmg_bitstream_i" : "mmg_bitstream_f",
+                  pin, n, fl.ptr, fl.cnt, mode));
+        return;
+    }
     if (strcmp(up, "PIN") == 0 && is_op("(", 1)) {
         /* PIN(n) = value.  The reading form is a function, handled in
            the expression parser; a statement starting with PIN can

@@ -769,6 +769,15 @@ PC3_FN void pc3_pioout_start(const unsigned long *words, unsigned long n)
 	PC3_REG(PC3_PIO1_CTRL + PC3_PIO_SET) = 1UL << PIOOUT_SM;
 }
 
+/*	Override the pin direction the setup drove: an exec'd SET
+ *	PINDIRS through the same SET mapping.  The open-collector
+ *	bitstream starts RELEASED (dir 0, the pull-up holds the line),
+ *	which the setup's output default is wrong for. */
+PC3_FN void pc3_pioout_dir(int d)
+{
+	PC3_REG(PC3_SM_INSTR) = 0xE080UL | (d ? 1 : 0);
+}
+
 /*	Still emitting?  Done means the DMA has handed over every word
  *	AND the machine has drained the FIFO and stalled on an empty
  *	OUT - the stall bit was cleared at setup, so its return is the

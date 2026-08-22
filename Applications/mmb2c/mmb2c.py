@@ -890,6 +890,7 @@ class Conv(object):
         self.fonts = {}
         self.uses_mappal = False
         self.uses_gpio = False
+        self.uses_pioout = False    # WS2812/BITSTREAM: mmb_pioout.h
         self.uses_port = False      # PORT: pulls in mmb_port.h
         self.uses_math = False      # MATH C_ADD etc: pulls in mmb_math.h
         self.uses_sort = False      # SORT: pulls in mmb_sort.h
@@ -6088,6 +6089,67 @@ class Conv(object):
             pull = self.setpin_pull() if mode == 'MMG_PIN_DIN' else '0'
             self.emit('mmg_setpin(%s, %s, %s);' % (pin, mode, pull))
             return
+        if up == 'WS2812':
+            # WS2812 type, pin, nbr, colours%()  - type is an unquoted
+            # O|B|S|W, MMBasic's own spelling (External.c:4448); W is
+            # the S timing with four colour bytes.  nbr = 1 may take a
+            # scalar colour instead of an array (4482-4486), decided
+            # here by the text as PIXEL's two forms are.  Emitted onto
+            # the fixed PIO programs - PLAN-pioout.md, mmb_pioout.h.
+            self.i += 1
+            if self.accept_kw('O'):
+                ty = 'MMG_WS_O'
+            elif self.accept_kw('B'):
+                ty = 'MMG_WS_B'
+            elif self.accept_kw('S'):
+                ty = 'MMG_WS_S'
+            elif self.accept_kw('W'):
+                ty = 'MMG_WS_W'
+            else:
+                self.err("WS2812 takes a type of O, B, S or W")
+            self.expect_op(',')
+            pin = self.as_int(self.expr())
+            self.expect_op(',')
+            nbr = self.as_int(self.expr())
+            self.expect_op(',')
+            self.uses_gpio = True
+            self.uses_pioout = True
+            if self.is_array_arg():
+                s = self.arrayref()
+                if s.ty != TY_I:
+                    self.err("WS2812 wants an integer array")
+                ptr, cnt = self.array_flat(s)
+                self.emit('mmg_ws2812(%s, %s, %s, %s, %s);'
+                          % (ty, pin, nbr, ptr, cnt))
+            else:
+                col = self.as_int(self.expr())
+                self.emit('mmg_ws2812_one(%s, %s, %s, %s);'
+                          % (ty, pin, nbr, col))
+            return
+        if up == 'BITSTREAM':
+            # BITSTREAM pin, n, array() [, mode] - n timed transitions,
+            # the array elements microseconds (float or integer arrays
+            # both, as parsenumberarray takes); mode 1 is the
+            # open-collector form.  Same engine as WS2812.
+            self.i += 1
+            pin = self.as_int(self.expr())
+            self.expect_op(',')
+            n = self.as_int(self.expr())
+            self.expect_op(',')
+            s = self.arrayref()
+            if s.ty == TY_S:
+                self.err("BITSTREAM wants a number array")
+            ptr, cnt = self.array_flat(s)
+            mode = '0'
+            if self.accept_op(','):
+                mode = self.as_int(self.expr())
+            self.uses_gpio = True
+            self.uses_pioout = True
+            fn = ('mmg_bitstream_i' if s.ty == TY_I
+                  else 'mmg_bitstream_f')
+            self.emit('%s(%s, %s, %s, %s, %s);'
+                      % (fn, pin, n, ptr, cnt, mode))
+            return
         if up == 'PIN' and self.is_op('(', 1):
             # PIN(n) = value.  The reading form is a function, handled
             # in the expression parser; a statement starting with PIN
@@ -9085,6 +9147,10 @@ class Conv(object):
             wr('#include "mmb_play.h"\n')
         if self.uses_gpio:
             wr('#include "mmb_gpio.h"\n')
+        # After mmb_gpio.h, whose claims and mode table it shares:
+        # WS2812 and BITSTREAM on the fixed PIO programs.
+        if self.uses_pioout:
+            wr('#include "mmb_pioout.h"\n')
         # After mmb_gpio.h: PORT validates against the same mmg_mode
         # table SETPIN fills in.
         if self.uses_port:

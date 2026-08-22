@@ -9,14 +9,14 @@ and it lives in `fcc/catmap.py`.
 
 | | in MMBasic | translated | not translated |
 |---|---|---|---|
-| commands | 226 | **132** | 94 |
+| commands | 226 | **134** | 92 |
 | functions | 127 | **92** | 35 |
-| total | 353 | **224** | 129 |
+| total | 353 | **226** | 127 |
 
-The 129 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
-Draw3D each appear twice, CtrlVal as both a command and a function - so there are **126 distinct
+The 127 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
+Draw3D each appear twice, CtrlVal as both a command and a function - so there are **124 distinct
 names**. Of those, **19 are false negatives** (the thing works and the scanner cannot see it),
-leaving **107 real gaps**, of which 76 are in categories 4 and 5 and are not intended to close.
+leaving **105 real gaps**, of which 76 are in categories 4 and 5 and are not intended to close.
 
 ## What this count cannot tell you
 
@@ -45,7 +45,7 @@ four inside its "excluded from the documentation" block.
 
 1. **Finish what is already there** - 0
 2. **Real value, moderate work** - 25
-3. **Possible, wants your steer first** - 6
+3. **Possible, wants your steer first** - 4
 4. **Deliberately out** - 52
 5. **Not applicable to this machine** - 24
 
@@ -75,28 +75,19 @@ unmasked microsecond poll whose checksum catches a corrupted read, IR
 send is an unmasked toggle loop, `Pulsin(` and `Distance(` are plain
 busy-waits: all are userland register work on this machine.
 
-## Category 3 - Possible, wants your steer first (6)
+## Category 3 - Possible, wants your steer first (4)
 
-**Commands:** `Bitstream`, `Memory`, `RESOLUTION`, `Refresh`, `WS2812`
+**Commands:** `Memory`, `RESOLUTION`, `Refresh`
 
 **Functions:** `GetScanLine`
 
-`WS2812` and `Bitstream` are MMBasic's two genuinely
-interrupts-off commands (`DEVICE SERIALRX/TX`, the others, are in
-category 5 with the rest of `Device`).  A WS2812 frame cannot be
-paused - more than ~50us of gap latches the strip - so the mask lasts
-30us per LED, up to 10ms at the 256-LED cap; `BITSTREAM` masks for
-the sum of its user-supplied durations, which is unbounded.  On this
-multi-process machine that is one program stopping every other
-program's interrupts: console bytes drop after 2.8ms of mask during
-serial input, every process's audio glitches past the DMA block
-cushion, and the counting inputs - which pend one edge - go silently
-inexact.  So the bit-bang route is REJECTED here.  The way BACK IN is
-designed (PLAN-pioout.md, 2026-08-22): fixed executor programs loaded
-into PIO1 at boot beside the I2S program, userland pre-calculates the
-timing words and DMAs them to a claimed state machine — zero CPU,
-zero interrupt impact, and it does not wait for the full user-PIO
-runtime.  These two names leave this list when that plan lands.
+(`WS2812` and `Bitstream` used to sit here as MMBasic's two
+genuinely interrupts-off commands, rejected for bit-banging on a
+multi-process machine.  They SHIPPED 2026-08-22 through PLAN-pioout's
+fixed PIO1 programs - hardware drives the wire, the machine keeps
+running, and the counting inputs proved the streams exact on the
+board.  `DEVICE SERIALRX/TX`, the other maskers, stay in category 5
+with the rest of `Device`.)
 
 ## Category 4 - Deliberately out (52)
 
@@ -119,9 +110,9 @@ category 2, instead of a language inside the language.
 
 **Functions:** `Click(`, `CtrlVal(`, `DEVICE(`, `GPS(`, `MsgBox(`, `SPI2(`, `Touch(`
 
-## Translated: the 132 commands
+## Translated: the 134 commands
 
-`Arc`, `Array Add`, `Array Insert`, `Array Set`, `Array Slice`, `Bezier`, `Bit(`, `Blit`, `Box`, `Byte(`, `CLS`, `CPU`, `Call`, `Case`, `Case Else`, `Cat`, `Chdir`, `Circle`, `Clear`, `Close`, `Color`, `Colour`, `Colour Map`, `Const`, `Continue`, `Copy`, `Data`, `Date$`, `DefineFont`, `Dim`, `Do`, `Else`, `Else If`, `ElseIf`, `End`, `End DefineFont`, `End Function`, `End If`, `End Select`, `End Sub`, `End Type`, `EndIf`, `Erase`, `Error`, `Exit`, `Exit Do`, `Exit For`, `Exit Function`, `Exit Sub`, `FRAMEBUFFER`, `Files`, `Fill`, `Flag(`, `Flags`, `Flash`, `Flush`, `Font`, `For`, `Function`, `GUI`, `GUI`, `GoSub`, `GoTo`, `I2C`, `I2C2`, `If`, `Inc`, `Input`, `Kill`, `LMid(`, `Let`, `Line`, `Line Input`, `Load`, `Local`, `LongString`, `Loop`, `MID$(`, `MODE`, `Map`, `Map`, `Map(`, `Map(`, `Math`, `Mkdir`, `Mode`, `Next`, `On`, `OneWire`, `Open`, `Option`, `PWM`, `Pause`, `Pin(`, `Pixel`, `Play`, `Poke`, `Polygon`, `Port(`, `Print`, `Pulse`, `RBox`, `RTC`, `Randomize`, `Randomize`, `ReDim`, `Read`, `Rename`, `Restore`, `Return`, `Rmdir`, `SPI`, `Save`, `Seek`, `Select Case`, `Servo`, `SetPin`, `SetTick`, `Sort`, `Sprite`, `Static`, `Struct`, `Sub`, `TEMPR START`, `Text`, `Time$`, `Timer`, `Triangle`, `Type`, `WEB`, `WatchDog`, `While`
+`Arc`, `Array Add`, `Array Insert`, `Array Set`, `Array Slice`, `Bezier`, `Bit(`, `Bitstream`, `Blit`, `Box`, `Byte(`, `CLS`, `CPU`, `Call`, `Case`, `Case Else`, `Cat`, `Chdir`, `Circle`, `Clear`, `Close`, `Color`, `Colour`, `Colour Map`, `Const`, `Continue`, `Copy`, `Data`, `Date$`, `DefineFont`, `Dim`, `Do`, `Else`, `Else If`, `ElseIf`, `End`, `End DefineFont`, `End Function`, `End If`, `End Select`, `End Sub`, `End Type`, `EndIf`, `Erase`, `Error`, `Exit`, `Exit Do`, `Exit For`, `Exit Function`, `Exit Sub`, `FRAMEBUFFER`, `Files`, `Fill`, `Flag(`, `Flags`, `Flash`, `Flush`, `Font`, `For`, `Function`, `GUI`, `GUI`, `GoSub`, `GoTo`, `I2C`, `I2C2`, `If`, `Inc`, `Input`, `Kill`, `LMid(`, `Let`, `Line`, `Line Input`, `Load`, `Local`, `LongString`, `Loop`, `MID$(`, `MODE`, `Map`, `Map`, `Map(`, `Map(`, `Math`, `Mkdir`, `Mode`, `Next`, `On`, `OneWire`, `Open`, `Option`, `PWM`, `Pause`, `Pin(`, `Pixel`, `Play`, `Poke`, `Polygon`, `Port(`, `Print`, `Pulse`, `RBox`, `RTC`, `Randomize`, `Randomize`, `ReDim`, `Read`, `Rename`, `Restore`, `Return`, `Rmdir`, `SPI`, `Save`, `Seek`, `Select Case`, `Servo`, `SetPin`, `SetTick`, `Sort`, `Sprite`, `Static`, `Struct`, `Sub`, `TEMPR START`, `Text`, `Time$`, `Timer`, `Triangle`, `Type`, `WEB`, `WS2812`, `WatchDog`, `While`
 
 ## Translated: the 92 functions
 

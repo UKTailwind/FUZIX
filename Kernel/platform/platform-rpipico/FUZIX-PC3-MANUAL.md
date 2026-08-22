@@ -1969,6 +1969,66 @@ a slice.
 
 Scope-verified on GP0 at all five positions.
 
+## `WS2812` — LED strips {#ws2812}
+
+```basic
+DIM INTEGER c(11)
+FOR i = 0 TO 11 : c(i) = RGB(255, 0, 0) : NEXT i
+WS2812 B, 7, 12, c()             ' twelve red LEDs on GP7
+WS2812 B, 7, 1, RGB(0, 255, 0)   ' one LED may take a scalar colour
+```
+
+`WS2812 type, pin, nbr, colours%()` — MMBasic's statement, letter for
+letter.  *type* is an unquoted `O` (original WS2812), `B` (WS2812B),
+`S` (SK6812) or `W` (SK6812 RGBW — four bytes per LED, white in bits
+31–24 of the colour).  *nbr* is 1–256; each colour integer is the
+usual `RGB()` layout.
+
+What is different underneath — and it is a machine-wide difference —
+is HOW the wire is driven.  A PicoMite masks every interrupt for the
+whole frame, which the machine's owner may do to their own firmware;
+one process may not do it to every other process here.  Instead the
+kernel keeps small PIO programs resident beside the I2S sound program,
+and the statement packs the colour words into a kernel buffer, points
+a DMA channel at it, and lets the HARDWARE clock the waveform out.
+Audio keeps playing, counting inputs stay exact, the console keeps
+echoing — the calling program alone waits for its frame.  The bit
+timings were measured on the wire to the microsecond against the
+reference's own numbers.
+
+**Pins: GP0–GP7 and GP26 only** — the PIO block that drives this
+shares the machine's audio pins' window and cannot reach GP34–46.
+And the electrical rule that costs everyone an evening once: a strip
+POWERED at 5 V wants ~3.5 V on its data line, which a 3.3 V GPIO does
+not reach — power the strip at 3.3 V, or level-shift the data.
+
+After the frame the pin is an ordinary driven-low digital output,
+exactly as on a PicoMite.  The reset gap between frames is enforced
+automatically from one statement to the next.
+
+## `BITSTREAM` — arbitrary timed transitions {#bitstream}
+
+```basic
+DIM INTEGER d(99)
+FOR i = 0 TO 99 : d(i) = 250 : NEXT i
+BITSTREAM 2, 100, d()            ' 100 transitions, 250us apart
+BITSTREAM 2, 100, d(), 1         ' open-collector form
+```
+
+`BITSTREAM pin, n, array() [, mode]` — *n* (1–10000) timed
+transitions; each element is the microseconds to hold after it
+(0–67108, integer or float array).  Mode 0 toggles the driven level,
+starting from the pin's current output latch; mode 1 is MMBasic's
+open-collector form — the pin starts released under a pull-up, each
+transition toggles drive-low against released, and an odd *n* is
+refused with the reference's own words.  Same engine, same pin rule
+(GP0–GP7, GP26), same property: the machine keeps running — a
+PicoMite masks interrupts for the SUM of the durations, which for a
+long stream is seconds of dead machine, and here it is none.  The
+timing grid is 50 ns, finer than the reference's own.  Element
+truth was proven with the counting inputs: a 2000-transition stream
+counts exactly 2000 edges on a looped-back pin.
+
 ## `SETTICK` — periodic timers
 
 ```basic

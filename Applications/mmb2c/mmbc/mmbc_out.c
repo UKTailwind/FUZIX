@@ -433,6 +433,10 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_play.h\"\n");
     if (cv.uses_gpio)
         fprintf(f, "#include \"mmb_gpio.h\"\n");
+    /* After mmb_gpio.h, whose claims and mode table it shares:
+       WS2812 and BITSTREAM on the fixed PIO programs. */
+    if (cv.uses_pioout)
+        fprintf(f, "#include \"mmb_pioout.h\"\n");
     /* After mmb_gpio.h: PORT validates against the same mmg_mode table
        SETPIN fills in. */
     if (cv.uses_port)

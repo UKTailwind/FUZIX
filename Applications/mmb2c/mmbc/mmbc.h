@@ -389,6 +389,7 @@ struct conv {
     int uses_fbsel;             /* FRAMEBUFFER buffer named at run time */
     int uses_mappal;
     int uses_gpio;
+    int uses_pioout;            /* WS2812/BITSTREAM: mmb_pioout.h */
     int uses_port;              /* PORT: pulls in mmb_port.h */
     int uses_math;              /* MATH C_ADD etc: pulls in mmb_math.h */
     int uses_sort;              /* SORT: pulls in mmb_sort.h */

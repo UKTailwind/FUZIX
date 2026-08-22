@@ -198,22 +198,13 @@ against the reference's actual loops, 2026-08-22.  `Humid` is an
 unmasked microsecond poll whose checksum catches a corrupted read, IR
 send is an unmasked toggle loop, `Pulsin(` and `Distance(` are plain
 busy-waits: all are userland register work on this machine.""",
-    3: """`WS2812` and `Bitstream` are MMBasic's two genuinely
-interrupts-off commands (`DEVICE SERIALRX/TX`, the others, are in
-category 5 with the rest of `Device`).  A WS2812 frame cannot be
-paused - more than ~50us of gap latches the strip - so the mask lasts
-30us per LED, up to 10ms at the 256-LED cap; `BITSTREAM` masks for
-the sum of its user-supplied durations, which is unbounded.  On this
-multi-process machine that is one program stopping every other
-program's interrupts: console bytes drop after 2.8ms of mask during
-serial input, every process's audio glitches past the DMA block
-cushion, and the counting inputs - which pend one edge - go silently
-inexact.  So the bit-bang route is REJECTED here.  The way BACK IN is
-designed (PLAN-pioout.md, 2026-08-22): fixed executor programs loaded
-into PIO1 at boot beside the I2S program, userland pre-calculates the
-timing words and DMAs them to a claimed state machine — zero CPU,
-zero interrupt impact, and it does not wait for the full user-PIO
-runtime.  These two names leave this list when that plan lands.""",
+    3: """(`WS2812` and `Bitstream` used to sit here as MMBasic's two
+genuinely interrupts-off commands, rejected for bit-banging on a
+multi-process machine.  They SHIPPED 2026-08-22 through PLAN-pioout's
+fixed PIO1 programs - hardware drives the wire, the machine keeps
+running, and the counting inputs proved the streams exact on the
+board.  `DEVICE SERIALRX/TX`, the other maskers, stay in category 5
+with the rest of `Device`.)""",
     4: """The 22 PIO assembly names (`Jmp` ... `Set`, the `IRQ` rows and the
 `_label`/`_wrap`/`_program` directives) are out **of the translator by
 design, not out of the machine** - decided 2026-08-22.  The plan: a

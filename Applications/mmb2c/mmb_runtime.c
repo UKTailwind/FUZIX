@@ -5142,6 +5142,20 @@ MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
     return op == MM_PINCT_READ ? (MMINTEGER)cr.v : 0;
 }
 
+/* Where the kernel's PIO-output word buffer is (see mmb_runtime.h). */
+MMINTEGER mm_pobuf(void)
+{
+    struct { unsigned long addr, words; } pb;
+
+    if (mm_gpio_fd == -2)
+        mm_gpio_fd = open("/dev/gpio", O_RDWR);
+    if (mm_gpio_fd < 0)
+        return 0;
+    if (ioctl(mm_gpio_fd, MM_GPIOC_PIOOUT_BUF, &pb))
+        return 0;
+    return (MMINTEGER)pb.addr;
+}
+
 #else   /* host: no display, but translated programs must still run */
 
 /* Nothing is ever queued here, so the rule costs a call the optimiser
@@ -5185,6 +5199,35 @@ MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
         return 0;
     }
     return -1;
+}
+
+/* The PIO output word buffer, modelled: a real buffer the packing
+ * writes into, so the arithmetic that builds colour and duration
+ * words runs under the gates even though nothing is driven.
+ *
+ * NOT a static array, and the reason is the host bcrun: it maps its
+ * program memory low (0x30000000, MAP_32BIT) because the translated
+ * program's pointers are 32-bit, while a PIE binary's BSS sits above
+ * 4GB - a static here reached the program as a truncated pointer and
+ * the fcc gate segfaulted.  So the model buffer is mapped low the
+ * same way. */
+#include <sys/mman.h>
+MMINTEGER mm_pobuf(void)
+{
+    static void *pobuf;
+
+    if (!pobuf) {
+#ifdef MAP_32BIT
+        pobuf = mmap(NULL, 40000, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+#else
+        pobuf = mmap((void *)0x38000000UL, 40000, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
+        if (pobuf == MAP_FAILED)
+            pobuf = 0;
+    }
+    return (MMINTEGER)(unsigned long)(uintptr_t)pobuf;
 }
 
 /* With no screen to draw on, PRINT stays on the console and @(x,y)
