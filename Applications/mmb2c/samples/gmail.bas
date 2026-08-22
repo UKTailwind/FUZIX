@@ -1,10 +1,11 @@
 ' gmail.bas - send a mail through Gmail from compiled BASIC.
 ' PLAN-web.md S12.4: implicit TLS on 465, AUTH LOGIN with an App
-' Password.  Credentials come from /etc/gmail.conf - three lines:
+' Password.  Credentials come from /etc/gmail.conf - two lines:
 '   your.address@gmail.com
-'   destination@wherever
 '   the16charapppassword
-' so they live on the card, not in any program or transcript.
+' so they live on the card, not in any program or transcript.  The
+' DESTINATION is the program's business, not the machine's: it is
+' the command line ("./gmail dest@wherever"), or yourself if absent.
 '
 ' The Pause after OPEN lets Gmail's 220 greeting arrive and queue;
 ' the first REQUEST then discards it (the WebMite drops it the same
@@ -16,9 +17,10 @@ Dim String mfrom, mto, pass
 
 Open "/etc/gmail.conf" For Input As #1
 Line Input #1, mfrom
-Line Input #1, mto
 Line Input #1, pass
 Close #1
+mto = MM.CMDLINE$
+If mto = "" Then mto = mfrom
 
 WEB TLS CA "/etc/ca.pem"
 WEB OPEN TLS CLIENT "smtp.gmail.com", 465, 20000

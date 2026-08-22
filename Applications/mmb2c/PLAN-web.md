@@ -535,9 +535,11 @@ parse) - machine state, as tlsca(8) is.  Board: /etc/ca.pem loaded,
 www.google.com over 443 through a VERIFIED handshake (8 KB, 200 OK)
 - and the negative that makes "verified" mean something:
 expired.badssl.com REFUSED.  samples/gmail.bas is the §12.4 recipe,
-reading credentials from /etc/gmail.conf on the card (three lines:
-from-address, to-address, 16-char app password), with retic's own
-pure-BASIC base64.  PROVEN 2026-08-22: real credentials on COM17,
+reading credentials from /etc/gmail.conf on the card (two lines:
+from-address, 16-char app password — the DESTINATION is a program
+parameter, MM.CMDLINE$ in the sample, not machine state), with
+retic's own pure-BASIC base64.  PROVEN 2026-08-22: real credentials
+on COM17,
 compiled and run from the card, Gmail answered `250 2.0.0 OK` and
 the mail arrived — the §12.4 loose end is closed.
 
