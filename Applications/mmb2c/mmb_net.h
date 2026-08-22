@@ -475,8 +475,10 @@ MMG_FN void mmg_web_ntp(MMFLOAT adjust, const char *server)
  *	console (the child inherits it; nothing to collect).  The
  *	WebMite build this campaign replicates has no PING of its own,
  *	so this is the one WEB statement that is a mapping without a
- *	reference: ping exits non-zero when the host never answered,
- *	and mm_run_exec turns that into the raise a program can trap.
+ *	reference.  ping(8) prints its sent/recv summary and exits 0
+ *	even when nothing answered - board-observed - so an unanswered
+ *	ping is NOT a raise; only a failure to resolve or to open the
+ *	socket exits non-zero, which mm_run_exec turns into one.
  */
 MMG_FN void mmg_web_ping(const char *addr, MMINTEGER count)
 {

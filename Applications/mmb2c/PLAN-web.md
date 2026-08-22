@@ -670,6 +670,67 @@ What the stage flushed out — a long chase, all keepers:
 mappings, MM.INFO entries, and the §12.2 non-WEB gaps: OPTION
 ESCAPE, MATH BASE64, MM.INFO(UPTIME), path mapping.
 
+*Status (2026-08-22): translator side DONE, four commits, all gates
+green at every step (final: make check ok, cgate 0 diff, fcctests
+74/0, qemutests 75/0).*
+
+- **OPTION ESCAPE** (`83c09c4b3`): positional literal decoding in
+  BOTH tokenizers - scan_escape() finds the statement once per
+  source, so every pass of every pre-scan answers consistently.  The
+  reference's decode replicated to the letter, including the parts
+  its own comment gets wrong (\ddd is three DECIMAL digits), \q for
+  the quote (the closing-quote scan is strchr even in escape mode,
+  so a literal quote has no other spelling), unknown escapes passing
+  through, trailing backslash literal, NUL refused.
+  tests/optescape.bas pins every branch.
+- **MATH(BASE64 ENCODE/DECODE in$, out$)** (`fcfe2557c`):
+  fun_math's odd call shape kept - retic passes the enclosing
+  Function's result variable as the output and takes the returned
+  length.  Maths.c's loops to the letter (unknown chars decode as 0,
+  '=' is 64, partial trailing groups ignored); scratch buffer so
+  in-place is safe; input_target() shared so the output argument is
+  exactly an INPUT target.  Strings only - the array forms are
+  refused, not diverged.  tests/mathb64.bas: RFC 4648 vectors.
+- **WEB NTP / PING / CONNECT + MM.INFO(UPTIME)** (`07259795e`):
+  argv-building onto ntpdate(8) (new -O seconds flag for the
+  fractional-hour zones; reference's -12..14 float gate and message;
+  empty server$ = pool.ntp.org as cmd_ntp's *argv[2] test; timeout
+  parsed and dropped), ping(8) (no PING in the replicated WebMite -
+  the mapping is the reference), and wifi(8) for the join (NOT
+  persisted; /etc/wifi.conf keeps the boot answer).  WEB CONNECT
+  alone is the WebMite's link gate: "WIFI not connected" off
+  NETIOC_STATUS byte 2.  UPTIME = mm_us()/1e6 as FLOAT, the
+  reference's own formula.  tests/webnpc.bas compile-gates the
+  forms; board proof below.
+- **Path mapping** (`63d4c25e2`): mm_fname() in the runtime, ONE
+  place for OPEN/KILL/RENAME/COPY/MKDIR/CHDIR/EXISTS/FILESIZE -
+  "A:/x", "A:\x" and "A:x" all reach plain x, backslashes become
+  slashes.  A BARE leading / is deliberately NATIVE (absolute):
+  /etc/gmail.conf and /etc/ca.pem are load-bearing; §12.4 carries
+  the divergence.  tests/pathmap.bas: one file through all three
+  spellings.
+
+*Board proof (2026-08-22, BOTH boards - COM14's catch-up push rode
+this same install, so it is now fully current through stage 7):*
+mathb64/optescape/pathmap compiled ON each board with the new mmbc
+and ran byte-identical to the host; jsonpath on COM14 likewise
+(its first JSON$ run).  samples/stage7.bas on both: MM.INFO(UPTIME)
+counts from boot; WEB CONNECT passes with the radio joined; WEB
+PING board-to-board answered 2/2 at 3-7 ms both directions; WEB
+NTP 1 moved each clock to UTC+1 (12:07 -> 13:09 GMT-labelled).
+Findings the smoke caught:
+- **/bin shadows /usr/bin on the board PATH**: the card image's own
+  ntpdate in /bin kept answering after the new one landed in
+  /usr/bin - the stale-binary shape again, caught because the new
+  -O flag errored.  Card-image binaries must be replaced in /bin
+  (both boards fixed: cp /usr/bin/ntpdate /bin/ntpdate).
+- **ping(8) exits 0 even at 0 received** (prints "sent 2, recv 0,
+  0%") - so an unanswered WEB PING is NOT a raise; only
+  resolve/socket failure raises.  The mmb_net.h comment says so
+  now.
+- **The development PC firewalls ICMP**: ping the other board, not
+  the PC, when testing.
+
 **Stage 8 — retic.bas** (§12): migrate per §12.4, run on a board
 with real schedules and the web UI driven from a browser.  The
 milestone that says the family is done.
