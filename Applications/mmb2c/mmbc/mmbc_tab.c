@@ -65,6 +65,7 @@ static const struct builtin builtins[] = {
     { "DIR$", 0, 2 },
     { "LLEN", 1, 1 }, { "LGETSTR$", 3, 3 }, { "LGETBYTE", 2, 2 },
     { "LINSTR", 2, 3 }, { "LCOMPARE", 2, 2 }, { "LINPUT", 3, 3 },
+    { "JSON$", 2, 2 },
     { NULL, 0, 0 }
 };
 
@@ -75,6 +76,7 @@ static const char *rawarg[] = {
     "MM.INFO", "MM.INFO$", "PEEK", "SPRITE",
     "EOF", "LOC", "LOF", "INPUT$", "DIR$",
     "LLEN", "LGETSTR$", "LGETBYTE", "LINSTR", "LCOMPARE", "LINPUT",
+    "JSON$",
     NULL
 };
 
@@ -84,7 +86,7 @@ static const char *strfuncs[] = {
     "BIN$", "UCASE$", "LCASE$", "SPACE$", "STRING$", "LTRIM$",
     "RTRIM$", "TAB", "FORMAT$", "TRIM$", "FIELD$", "DATE$",
     "TIME$", "DATETIME$", "DAY$", "BIN2STR$", "INPUT$", "DIR$",
-    "CWD$", "INKEY$", "LGETSTR$",
+    "CWD$", "INKEY$", "LGETSTR$", "JSON$",
     NULL
 };
 

@@ -649,6 +649,24 @@ struct val builtin_raw(const char *up)
                           "| ((%s) & 0xFF))", ri, gi, bi), TY_I);
     }
 
+    if (strcmp(up, "JSON$") == 0) {
+        /* the streaming path-walker over a LONGSTRING document -
+           mmb_json.h, fun_json's surface */
+        struct flat ls;
+        struct val p;
+
+        expect_op("(");
+        cv.uses_json = 1;
+        ls = lsref();
+        expect_op(",");
+        p = expr();
+        if (p.ty != TY_S)
+            cv_err("JSON$ needs a string path");
+        expect_op(")");
+        return mkval(sfmt("mm_json(%s, %s, %s)",
+                          ls.ptr, ls.cnt, p.code), TY_S);
+    }
+
     if (strcmp(up, "LLEN") == 0 || strcmp(up, "LGETSTR$") == 0
         || strcmp(up, "LGETBYTE") == 0 || strcmp(up, "LINSTR") == 0
         || strcmp(up, "LCOMPARE") == 0 || strcmp(up, "LINPUT") == 0) {

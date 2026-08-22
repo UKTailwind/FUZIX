@@ -114,6 +114,7 @@ BUILTINS = {
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
     'LINSTR': (2, 3), 'LCOMPARE': (2, 2), 'LINPUT': (3, 3),
+    'JSON$': (2, 2),
 }
 
 # built-ins whose arguments cannot be parsed as plain expressions
@@ -121,14 +122,15 @@ RAWARG = ('CHOICE', 'BOUND', 'TRIM$', 'DATETIME$', 'DAY$', 'EPOCH',
           'BIN2STR$', 'STR2BIN', 'RGB', 'MATH',
           'MM.INFO', 'MM.INFO$', 'PEEK', 'SPRITE',
           'EOF', 'LOC', 'LOF', 'INPUT$', 'DIR$',
-          'LLEN', 'LGETSTR$', 'LGETBYTE', 'LINSTR', 'LCOMPARE', 'LINPUT')
+          'LLEN', 'LGETSTR$', 'LGETBYTE', 'LINSTR', 'LCOMPARE', 'LINPUT',
+          'JSON$')
 
 # built-ins that return a string (and therefore consume a scratch buffer)
 STRFUNCS = ('CHR$', 'LEFT$', 'RIGHT$', 'MID$', 'STR$', 'HEX$', 'OCT$',
             'BIN$', 'UCASE$', 'LCASE$', 'SPACE$', 'STRING$', 'LTRIM$',
             'RTRIM$', 'TAB', 'FORMAT$', 'TRIM$', 'FIELD$', 'DATE$',
             'TIME$', 'DATETIME$', 'DAY$', 'BIN2STR$', 'INPUT$', 'DIR$',
-            'CWD$', 'INKEY$', 'LGETSTR$')
+            'CWD$', 'INKEY$', 'LGETSTR$', 'JSON$')
 
 # BIN2STR$ / STR2BIN type names -> the runtime's MM_B_* constants
 BINTYPES = ('INT64', 'UINT64', 'INT32', 'UINT32', 'INT16', 'UINT16',
@@ -772,6 +774,7 @@ class Conv(object):
         self.uses_udp = False       # WEB UDP: mmb_udp.h
         self.uses_webclient = False # WEB TCP/TLS client: mmb_webc.h
         self.uses_webserver = False # WEB TCP server: mmb_webs.h
+        self.uses_json = False      # JSON$: mmb_json.h
         # one entry per TRANSMIT PAGE call site: the normalised
         # expression texts, emitted as __mmwebsub_N at file scope
         self.websubs = []
@@ -2529,6 +2532,19 @@ class Conv(object):
             return ('((((%s) & 0xFF) << 16) | (((%s) & 0xFF) << 8) '
                     '| ((%s) & 0xFF))'
                     % (self.as_int(r), self.as_int(g), self.as_int(b)), TY_I)
+
+        if up == 'JSON$':
+            # the streaming path-walker over a LONGSTRING document -
+            # mmb_json.h, fun_json's surface
+            self.expect_op('(')
+            self.uses_json = True
+            ptr, cells = self.lsref()
+            self.expect_op(',')
+            p = self.expr()
+            if p[1] != TY_S:
+                self.err("JSON$ needs a string path")
+            self.expect_op(')')
+            return ('mm_json(%s, %s, %s)' % (ptr, cells, p[0]), TY_S)
 
         if up in ('LLEN', 'LGETSTR$', 'LGETBYTE', 'LINSTR', 'LCOMPARE',
                   'LINPUT'):
@@ -8835,6 +8851,10 @@ class Conv(object):
             wr('#include "mmb_webs.h"\n')
         if self.uses_udp:
             wr('#include "mmb_udp.h"\n')
+        # JSON$'s streaming walker: pure computation over the
+        # program's own buffer, no net dependency.
+        if self.uses_json:
+            wr('#include "mmb_json.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a
         # program that arms an interrupt carries any of it.
         if self.uses_interrupts:

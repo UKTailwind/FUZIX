@@ -40,18 +40,36 @@
  *	  chatter is not reproduced (it grew OPTION SUPPRESSSTATUS for a
  *	  reason); the error texts are its own.
  *
- *	A connection refused costs the open timeout rather than failing
- *	fast: the libcall boundary carries no errno, so "still
- *	connecting" and "refused" both read as connect() != 0 until the
- *	deadline.  The WebMite's refused open ends in much the same
- *	timeout.  A peer RESET during a wait looks the same way; a peer
- *	CLOSE is seen properly (read 0 = EOF).
+ *	errno crosses the libcall boundary as the neterr door (Fuzix
+ *	numbering), because the polls need it: a refused connect fails
+ *	fast instead of burning the timeout, and a reset - or the TLS
+ *	close-notify racing a reply - ends a collect instead of reading
+ *	as "still waiting" until the deadline, which is what it did
+ *	until a server's 503-and-close proved it (PLAN-web.md stage-6
+ *	notes).  A peer CLOSE is read 0 = EOF, as ever.
  */
 
 #include "mmb_net.h"
 
 static int mm_webc_fd = -1;
 static signed char mm_webc_eof;
+
+/*	The polling pause.  mm_pause under 100 ms SPINS (usleep's
+ *	decisecond floor), and a spinning process starves the kernel's
+ *	TLS receive: measured on the board, a hot O_NDELAY loop saw
+ *	NOTHING for 30 s (6.5 M polls) where a blocking read got the
+ *	reply - fast responses squeak through, slow ones never arrive.
+ *	So: spin only through a short fast-response window, then REALLY
+ *	sleep in decisecond steps, which hands the machine to the pump
+ *	(and to every other process - 30 s of spin was hostile anyway).
+ */
+MMG_FN void mmw_poll_pause(unsigned long t0)
+{
+	if (MMN_SINCE(t0) < 250000UL)
+		mm_pause(2.0);
+	else
+		mm_pause(100.0);
+}
 
 MMG_FN void mmg_webc_close(void)
 {
@@ -122,6 +140,17 @@ MMG_FN void mmg_webc_open(const char *host, MMINTEGER port,
 		r = mmn_connect(fd, sa, 16);
 		if (r == 0)
 			break;
+		r = mmn_errno();
+		if (r != MMN_EAGAIN && r != MMN_EALREADY &&
+		    r != MMN_EINPROGRESS) {
+			/* refused, reset, unreachable: fail NOW rather
+			   than burning the timeout */
+			mmn_close(fd);
+			mm_error(tls ?
+			  "No response from TLS server (handshake timeout)" :
+			  "No response from client");
+			return;
+		}
 		if ((long)MMN_SINCE(t0) >= (long)tmo * 1000L) {
 			mmn_close(fd);
 			mm_error(tls ?
@@ -129,10 +158,12 @@ MMG_FN void mmg_webc_open(const char *host, MMINTEGER port,
 			  "No response from client");
 			return;
 		}
-		mm_pause(2.0);
+		mmw_poll_pause(t0);
 	}
 	mm_webc_fd = fd;
 }
+
+
 
 /*	Collect into the LONGSTRING buffer until the deadline; first_us
  *	bounds the wait for the FIRST byte, then the fixed 500 ms drain
@@ -151,18 +182,22 @@ MMG_FN long mmg_webc_collect(MMINTEGER *a, int cells, long tmo_ms)
 		return 0;
 	}
 	a[0] = 0;
-	/* phase one: the first data, or the timeout */
+	/* phase one: the first data, or the timeout.  A read error
+	   that is NOT EAGAIN is the connection dying (reset, or the
+	   TLS close-notify racing the reply) - found the hard way:
+	   without the errno check a reset read as "still waiting"
+	   until the timeout. */
 	for (;;) {
 		n = mmn_read(mm_webc_fd, dst, (int)cap);
 		if (n > 0)
 			break;
-		if (n == 0) {
+		if (n == 0 || mmn_errno() != MMN_EAGAIN) {
 			mm_webc_eof = 1;
 			return 0;
 		}
 		if ((long)MMN_SINCE(t0) >= tmo_ms * 1000L)
 			return 0;
-		mm_pause(2.0);
+		mmw_poll_pause(t0);
 	}
 	got = n;
 	a[0] = got;
@@ -183,11 +218,11 @@ MMG_FN long mmg_webc_collect(MMINTEGER *a, int cells, long tmo_ms)
 			}
 			continue;
 		}
-		if (n == 0) {
+		if (n == 0 || mmn_errno() != MMN_EAGAIN) {
 			mm_webc_eof = 1;
 			break;
 		}
-		mm_pause(2.0);
+		mmw_poll_pause(t0);
 	}
 	return got;
 }
@@ -202,7 +237,7 @@ MMG_FN void mmg_webc_drain(void)
 	for (;;) {
 		n = mmn_read(mm_webc_fd, sink, (int)sizeof(sink));
 		if (n <= 0) {
-			if (n == 0)
+			if (n == 0 || mmn_errno() != MMN_EAGAIN)
 				mm_webc_eof = 1;
 			return;
 		}
@@ -232,11 +267,12 @@ MMG_FN void mmg_webc_request(const char *req, MMINTEGER *a, int cells,
 			sent += n;
 			continue;
 		}
-		if ((long)MMN_SINCE(t0) >= (long)tmo * 1000L) {
+		if ((n < 0 && mmn_errno() != MMN_EAGAIN) ||
+		    (long)MMN_SINCE(t0) >= (long)tmo * 1000L) {
 			mm_error("write failed");
 			return;
 		}
-		mm_pause(2.0);
+		mmw_poll_pause(t0);
 	}
 	if (mmg_webc_collect(a, cells, (long)tmo) == 0 && a[0] == 0)
 		mm_error("No response from server");
@@ -359,11 +395,12 @@ MMG_FN void mmg_webc_write(const MMINTEGER *a, MMINTEGER tmo)
 			sent += n;
 			continue;
 		}
-		if ((long)MMN_SINCE(t0) >= (long)tmo * 1000L) {
+		if ((n < 0 && mmn_errno() != MMN_EAGAIN) ||
+		    (long)MMN_SINCE(t0) >= (long)tmo * 1000L) {
 			mm_error("Send timeout");
 			return;
 		}
-		mm_pause(2.0);
+		mmw_poll_pause(t0);
 	}
 }
 

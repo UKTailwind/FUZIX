@@ -27,6 +27,7 @@
 #include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <signal.h>		/* SIGPIPE ignored: socket writes error */
+#include <errno.h>		/* the neterr libcall */
 #ifdef __linux__
 #include <sys/mman.h>		/* executable code buffer for native fns */
 #endif
@@ -2256,6 +2257,27 @@ static void lc_ioctl(void)
 	A = ioctl((int)arg(0), rq, p ? vptr(p) : NULL);
 }
 
+/*	errno, for the socket paths: a poll loop must tell EAGAIN from
+ *	a connection that died, or a reset reads as "still waiting"
+ *	until the timeout - which is exactly what it did (PLAN-web.md,
+ *	stage 6).  The value crossing is the FUZIX numbering, like every
+ *	other constant in the .bc ABI; EAGAIN is 11 on both worlds, and
+ *	the hosted build maps the few that differ. */
+static void lc_neterr(void)
+{
+	int e = errno;
+
+#ifdef __linux__
+	if (e == EALREADY)
+		e = 39;
+	else if (e == EINPROGRESS)
+		e = 54;
+	else if (e == ECONNRESET)
+		e = 45;
+#endif
+	A = e;
+}
+
 static void lc_fcntl(void)
 {
 	int c = (int)arg(1);
@@ -2344,6 +2366,7 @@ static const struct {
 	{ "accept", lc_accept },
 	{ "sendto", lc_sendto }, { "recvfrom", lc_recvfrom },
 	{ "ioctl", lc_ioctl }, { "fcntl", lc_fcntl },
+	{ "neterr", lc_neterr },
 	{ "adval", lc_adval }, { "time_us", lc_time_us },
 	{ "time_us64", lc_time_us64 },
 	{ NULL, NULL }

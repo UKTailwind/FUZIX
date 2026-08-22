@@ -401,6 +401,7 @@ struct conv {
     int uses_udp;               /* WEB UDP: mmb_udp.h */
     int uses_webclient;         /* WEB TCP/TLS client: mmb_webc.h */
     int uses_webserver;         /* WEB TCP server: mmb_webs.h */
+    int uses_json;              /* JSON$: mmb_json.h */
     /* one entry per TRANSMIT PAGE call site: the normalised
        expression texts, emitted as __mmwebsub_N at file scope */
 #define MAXWEBSUB 16

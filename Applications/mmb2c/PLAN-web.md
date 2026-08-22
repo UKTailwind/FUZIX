@@ -615,9 +615,51 @@ Implementation notes that will matter later:
 - Gates at landing: make check ok, cgate 0, fcctests 68/0,
   qemutests 69/0.
 
-**Stage 6 — JSON$ and the stream forms.**  mmb_json.h; TCP/TLS
-STREAM ring buffers.  Test: the retic weather-JSON path against
-recorded and live OWM replies.
+**Stage 6 — JSON$.  DONE, BOARD-PROVEN 2026-08-22** (the STREAM ring
+forms — which retic never uses — moved to the later list).
+mmb_json.h is fun_json's surface as a streaming path-walker: strict
+structural validation first ("Invalid JSON data"), then the
+reference's exact path state machine — intermediate fields
+case-sensitive, the FINAL field case-insensitive, the walk always
+ending in a field lookup (their jsontest.bas documents the
+path-ends-in-index → "" consequence), [n] as the n'th CHILD (object
+or array, GetArrayItem's own tolerance), escapes decoded \uXXXX to
+UTF-8 with surrogate pairs, number/bool/string/null/missing leaves
+formatted exactly, object leaf the one raise.  jsonpath.bas pins
+every vector in all three execution modes AND on the board; the
+WebMite's own jsontest.bas ran on the PC3 against live open-meteo —
+TLS fetch, header strip, seven paths incl. the UTF-8 degree sign,
+ten stress parses at 0.94 ms each, no drift.
+
+What the stage flushed out — a long chase, all keepers:
+
+- **errno now crosses as the `neterr` libcall** (Fuzix numbering;
+  hosted bcrun maps EALREADY/EINPROGRESS/ECONNRESET; EAGAIN is 11 on
+  both worlds).  The client's polls needed it: a refused connect now
+  fails fast, and a reset (or a TLS close-notify racing a reply)
+  ends a collect instead of reading as "still waiting" to the
+  deadline.  Stage 3's deferral, called due.
+- **The client's polls now SLEEP after a 250 ms fast window**
+  (mmw_poll_pause): mm_pause under 100 ms spins (usleep's decisecond
+  floor), and a measured 6.5 M-poll spin starved the kernel's TLS
+  receive where a blocking read succeeded — and 30 s of spin was
+  hostile to every other process anyway.
+- **An M-string slice fed to mm_atof MUST be NUL-terminated**: the
+  board's conversion reads to a terminator, and a stale one made
+  every number leaf inherit the PREVIOUS leaf's tail digits (16.0
+  parsed as 16.01147, each value chaining the last's suffix) —
+  invisible on the host, where the fixture gate stayed green.  The
+  clean fixture run on the board plus one live-vs-PC document diff
+  is what cornered it.
+- Open-meteo intermittently sits on the heavy 16-day × 6-variable
+  query for minutes (its 503 arrived once in many tries); the
+  samples/jsontest.bas here trims to 3 days × 2 variables, which
+  answers reliably.  Not our stack: proven by the same client
+  collecting google's 42 KB and every trimmed variant.
+- tlsget(8)'s req[256] OVERFLOWS on a ~200-char path - it hung
+  where BASIC was blamed.  Worth its own small fix.
+- Gates at landing: make check ok, cgate 0, fcctests 69/0,
+  qemutests 70/0.
 
 **Stage 7 — the rest of the surface.**  WEB NTP / PING / CONNECT
 mappings, MM.INFO entries, and the §12.2 non-WEB gaps: OPTION

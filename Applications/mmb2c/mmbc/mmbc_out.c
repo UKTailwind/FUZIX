@@ -481,6 +481,10 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_webs.h\"\n");
     if (cv.uses_udp)
         fprintf(f, "#include \"mmb_udp.h\"\n");
+    /* JSON$'s streaming walker: pure computation over the program's
+       own buffer, no net dependency. */
+    if (cv.uses_json)
+        fprintf(f, "#include \"mmb_json.h\"\n");
     /* After mmb_gpio.h, which it uses to read the pins.  Only a program
        that arms an interrupt carries any of it. */
     if (cv.uses_interrupts)

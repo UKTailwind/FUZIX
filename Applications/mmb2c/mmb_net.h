@@ -69,6 +69,14 @@ int write(int __fd, void *__buf, int __n);
 #define mmn_open_ro(p)			open(p, 0)	/* O_RDONLY is 0 */
 #define mmn_open_rw(p)			open(p, MMN_O_RDWR)
 
+/* errno through the neterr libcall, Fuzix numbering (bcrun's hosted
+   build maps the few Linux values that differ) */
+int neterr(void);
+#define mmn_errno()			neterr()
+#define MMN_EAGAIN	11
+#define MMN_EALREADY	39
+#define MMN_EINPROGRESS	54
+
 #define mmn_socket(d, t, p)		socket(d, t, p)
 #define mmn_connect(fd, sa, l)		connect(fd, (void *)(sa), l)
 #define mmn_bind(fd, sa, l)		bind(fd, (void *)(sa), l)
@@ -132,6 +140,11 @@ MMG_FN int mmn_ioctl(int fd, int req, void *p)
 #define mmn_fcntl(fd, c, v)		fcntl(fd, c, v)
 #define mmn_open_ro(p)			open(p, O_RDONLY)
 #define mmn_open_rw(p)			open(p, O_RDWR)
+#include <errno.h>
+#define mmn_errno()			errno
+#define MMN_EAGAIN	EAGAIN
+#define MMN_EALREADY	EALREADY
+#define MMN_EINPROGRESS	EINPROGRESS
 #define mmn_close(fd)			close(fd)
 #define mmn_read(fd, b, n)		read(fd, (void *)(b), n)
 #define mmn_write(fd, b, n)		write(fd, (void *)(b), n)
