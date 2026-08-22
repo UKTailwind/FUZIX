@@ -592,8 +592,16 @@ void mm_console(MMINTEGER mode)
      * is not serial at all.  The kernel puts it back when the process
      * ends, so a program that dies here cannot leave the machine with a
      * console nobody can see.
+     *
+     * In a graphics mode the display half is off WHATEVER the bits say:
+     * there the screen sink is the glyph engine (mm_gputc), and the tty
+     * is standing in for MMBasic's serial console alone.  Leave the
+     * mirror on and one PRINT paints twice - once through the glyph
+     * engine where the @ put it, and once more as console cells over
+     * the program's own picture, which no PicoMite ever does.  mm_mode
+     * applies the same rule when the mode changes.
      */
-    mm_con_mirror(mm_console_opt & 2);
+    mm_con_mirror(mm_gon ? 0 : (mm_console_opt & 2));
 }
 
 static void mm_puts_raw(const char *cstr)
@@ -4294,6 +4302,12 @@ void mm_mode(MMINTEGER n)
     mm_gon = (n == 2);
     mm_gx = mm_gy = 0;
     mm_gpmode = 0;
+    /* The same rule mm_console applies: in a graphics mode the tty is
+     * MMBasic's serial console and nothing else, so the kernel must not
+     * render it as cells over the picture - PRINT's screen copy comes
+     * from the glyph engine above.  Back in MODE 1 the console IS the
+     * screen again, and the mirror follows the SCREEN bit as before. */
+    mm_con_mirror(mm_gon ? 0 : (mm_console_opt & 2));
 }
 
 /* mm_pixel is with the batch machinery below: it is an append now. */
