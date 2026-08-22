@@ -92,6 +92,7 @@ static int dump_tokens(const char *inpath)
         fprintf(stderr, "mmbc: cannot read %s\n", inpath);
         return 1;
     }
+    scan_escape();
     for (idx = 0; idx < src_nlines; idx++) {
         int lineno = idx + 1;
         jmp_buf jb, *saved = err_jmp;
@@ -124,6 +125,7 @@ static const char *convert(const char *inpath, const char *outpath,
         fprintf(stderr, "mmbc: cannot read %s\n", inpath);
         return NULL;
     }
+    scan_escape();                /* OPTION ESCAPE's positional gate */
     memset(&cv, 0, sizeof(cv));
     cv.srcname = inpath;
     cv.lenient = lenient;

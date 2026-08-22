@@ -585,6 +585,14 @@ void do_option(void)
         cv.opt_base = atoi(w->text);
         return;
     }
+    if (strcmp(t->up, "ESCAPE") == 0) {
+        /* The decoding already happened, in the tokenizer, and
+         * positionally - see scan_escape().  The statement itself
+         * emits nothing; recognising it here just keeps it out of
+         * skip_statement's silent bin. */
+        cv.i++;
+        return;
+    }
     if (strcmp(t->up, "CONSOLE") == 0) {
         /* OPTION CONSOLE SERIAL | SCREEN | BOTH | NONE
          *

@@ -251,6 +251,188 @@ static const char *ops2[] = { "<=", ">=", "<>", "=<", "=>", "><",
  * only arise after ')' and the like: the arr(i).member form. */
 static const char ops1[] = "+-*/\\^=<>(),;:?@#.";
 
+/* ------------------------------------------------- OPTION ESCAPE
+ *
+ * The reference decodes escape sequences at string-literal EVALUATION
+ * (MMBasic.c evaluate(), guarded by OptionEscape); a translator has no
+ * run time, so the rule here is positional: literals textually after
+ * the OPTION ESCAPE statement decode, literals before it do not.
+ * There is no OFF form.  The closing quote is found exactly as before
+ * - the reference scans with strchr(p, '"') even in escape mode,
+ * which is why \q exists - so only the body decode changes, never the
+ * token boundaries.  escape_line/escape_col are set once per source by
+ * scan_escape(), so every tokenize() of any line answers consistently
+ * no matter which pre-scan pass asks. */
+
+int escape_line = 0;    /* 1-based line of OPTION ESCAPE, 0 = off */
+int escape_col = 0;     /* column just past the ESCAPE keyword */
+
+void scan_escape(void)
+{
+    int idx;
+
+    escape_line = 0;
+    escape_col = 0;
+    for (idx = 0; idx < src_nlines; idx++) {
+        const char *line = src_lines[idx];
+        int n = (int)strlen(line);
+        int i = 0;
+        int at_stmt = 1;
+
+        while (i < n) {
+            char c = line[i];
+
+            if (c == '\'' || c == '\x1a')
+                break;
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+                i++;
+                continue;
+            }
+            if (c == '"') {
+                i++;
+                while (i < n && line[i] != '"')
+                    i++;
+                i++;
+                at_stmt = 0;
+                continue;
+            }
+            if (c == ':') {
+                at_stmt = 1;
+                i++;
+                continue;
+            }
+            if (is_alpha(c)) {
+                int j = i;
+                char word[8];
+                int wl;
+
+                while (j < n && is_idchar(line[j]))
+                    j++;
+                wl = j - i;
+                if (wl < 8) {
+                    int q;
+
+                    for (q = 0; q < wl; q++) {
+                        char u = line[i + q];
+                        word[q] = ('a' <= u && u <= 'z')
+                            ? (char)(u - 32) : u;
+                    }
+                    word[wl] = 0;
+                } else {
+                    word[0] = 0;
+                }
+                if (strcmp(word, "REM") == 0)
+                    break;
+                if (at_stmt && strcmp(word, "OPTION") == 0) {
+                    int k = j;
+                    int m;
+
+                    while (k < n && (line[k] == ' ' || line[k] == '\t'))
+                        k++;
+                    m = k;
+                    while (m < n && is_idchar(line[m]))
+                        m++;
+                    if (m - k == 6) {
+                        /* not strncasecmp: the Fuzix libc is the one
+                         * that links on the board, and unproven names
+                         * in it are the board-only-gap trap */
+                        static const char want[] = "ESCAPE";
+                        int q;
+
+                        for (q = 0; q < 6; q++) {
+                            char u = line[k + q];
+
+                            if ('a' <= u && u <= 'z')
+                                u = (char)(u - 32);
+                            if (u != want[q])
+                                break;
+                        }
+                        if (q == 6) {
+                            escape_line = idx + 1;
+                            escape_col = m;
+                            return;
+                        }
+                    }
+                }
+                i = j;
+                at_stmt = 0;
+                continue;
+            }
+            at_stmt = 0;
+            i++;
+        }
+    }
+}
+
+static const char esc_chars[] = "\\abefnqrtv";
+static const char esc_values[] = {
+    '\\', '\a', '\b', '\x1b', '\f', '\n', '"', '\r', '\t', '\v' };
+
+/* The reference's decode loop (MMBasic.c evaluate), to the letter:
+ * \ddd is three DECIMAL digits despite the comment there saying octal,
+ * \&hh is two hex digits, single-character escapes come from a fixed
+ * table with \q for the quote, an unknown escape passes its character
+ * through, a backslash that is the last character before the closing
+ * quote stays literal (the tp > p+1 test), and a decoded zero byte is
+ * an error - an M-string could hold one, but the reference refuses it
+ * and so do we. */
+static char *mm_unescape(const char *body, int lineno)
+{
+    size_t n = strlen(body);
+    char *out = salloc(n + 1);
+    size_t i = 0, j = 0;
+
+    while (i < n) {
+        char c = body[i];
+
+        if (c == '\\' && i + 1 < n) {
+            i++;
+            c = body[i];
+            if (is_digit_c((unsigned char)c) && i + 2 < n
+                && is_digit_c((unsigned char)body[i + 1])
+                && is_digit_c((unsigned char)body[i + 2])) {
+                int v = (c - 48) * 100 + (body[i + 1] - 48) * 10
+                    + (body[i + 2] - 48);
+
+                i += 3;
+                if (v == 0)
+                    mm_error("line %d: OPTION ESCAPE: NUL in string"
+                             " literal", lineno);
+                out[j++] = (char)(v & 0xFF);
+            } else if (c == '&' && i + 2 < n
+                       && is_hexd((unsigned char)body[i + 1])
+                       && is_hexd((unsigned char)body[i + 2])) {
+                int v = 0;
+                int q;
+
+                for (q = 1; q <= 2; q++) {
+                    int d = body[i + q];
+
+                    d = is_digit_c(d) ? d - '0'
+                        : (d >= 'a' ? d - 'a' + 10 : d - 'A' + 10);
+                    v = (v << 4) | d;
+                }
+                i += 3;
+                if (v == 0)
+                    mm_error("line %d: OPTION ESCAPE: NUL in string"
+                             " literal", lineno);
+                out[j++] = (char)v;
+            } else {
+                const char *found = strchr(esc_chars, c);
+
+                out[j++] = (found != NULL && c != 0)
+                    ? esc_values[found - esc_chars] : c;
+                i++;
+            }
+        } else {
+            out[j++] = c;
+            i++;
+        }
+    }
+    out[j] = 0;
+    return out;
+}
+
 static void addtok(struct tok *out, int *nt, int lineno,
                    int kind, const char *text, const char *up)
 {
@@ -405,6 +587,10 @@ int tokenize_frag(const char *line, int lineno, struct tok *out)
             buf = salloc((size_t)(j - i));
             memcpy(buf, line + i + 1, (size_t)(j - i - 1));
             buf[j - i - 1] = 0;
+            if (escape_line && (lineno > escape_line
+                                || (lineno == escape_line
+                                    && i > escape_col)))
+                buf = mm_unescape(buf, lineno);
             addtok(out, &nt, lineno, T_STR, buf, "");
             i = j + 1;
             continue;

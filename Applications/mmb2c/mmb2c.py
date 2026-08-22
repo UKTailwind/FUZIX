@@ -325,6 +325,132 @@ def websub_scan(text):
     return keys, raws
 
 
+# ------------------------------------------------- OPTION ESCAPE
+#
+# The reference decodes escape sequences at string-literal EVALUATION
+# (MMBasic.c evaluate(), guarded by OptionEscape), so once OPTION
+# ESCAPE has executed every literal in the program decodes.  A
+# translator has no run time, so the rule here is positional: literals
+# textually after the OPTION ESCAPE statement decode, literals before
+# it do not.  For the way every real program writes it - OPTION ESCAPE
+# at the top - the two rules describe the same program.  There is no
+# OFF form (MM_Misc.c only ever sets OptionEscape true).
+#
+# The closing quote is found exactly as before: the reference scans
+# with strchr(p, '"') even in escape mode, which is why \q exists - a
+# literal quote cannot be written any other way.  Only the body decode
+# changes, never the token boundaries.
+#
+# ESCAPE_LINE/ESCAPE_COL are set once per source by scan_escape(), so
+# every tokenize() of any line answers consistently no matter which
+# pre-scan pass asks, or in what order it walks the lines.
+
+ESCAPE_LINE = 0     # 1-based line of the OPTION ESCAPE statement, 0 = off
+ESCAPE_COL = 0      # column just past the ESCAPE keyword on that line
+
+
+def scan_escape(lines):
+    """Find the first OPTION ESCAPE statement; set the positional gate."""
+    global ESCAPE_LINE, ESCAPE_COL
+    ESCAPE_LINE = 0
+    ESCAPE_COL = 0
+    for idx in range(len(lines)):
+        line = lines[idx]
+        n = len(line)
+        i = 0
+        at_stmt = True
+        while i < n:
+            c = line[i]
+            if c == "'" or c == '\x1a':
+                break
+            if c in ' \t\r\n':
+                i += 1
+                continue
+            if c == '"':
+                i += 1
+                while i < n and line[i] != '"':
+                    i += 1
+                i += 1
+                at_stmt = False
+                continue
+            if c == ':':
+                at_stmt = True
+                i += 1
+                continue
+            if is_alpha(c):
+                j = i
+                while j < n and is_idchar(line[j]):
+                    j += 1
+                word = line[i:j].upper()
+                if word == 'REM':
+                    break
+                if at_stmt and word == 'OPTION':
+                    k = j
+                    while k < n and line[k] in ' \t':
+                        k += 1
+                    m = k
+                    while m < n and is_idchar(line[m]):
+                        m += 1
+                    if line[k:m].upper() == 'ESCAPE':
+                        ESCAPE_LINE = idx + 1
+                        ESCAPE_COL = m
+                        return
+                i = j
+                at_stmt = False
+                continue
+            at_stmt = False
+            i += 1
+
+
+_ESC_CHARS = '\\abefnqrtv'
+_ESC_VALUES = '\\\a\b\x1b\f\n"\r\t\v'
+
+
+def mm_unescape(body, lineno):
+    """The reference's decode loop (MMBasic.c evaluate), to the letter:
+    \\ddd is three DECIMAL digits despite the comment there saying
+    octal, \\&hh is two hex digits, single-character escapes come from
+    a fixed table with \\q for the quote, an unknown escape passes its
+    character through, a backslash that is the last character before
+    the closing quote stays literal (the tp > p+1 test), and a decoded
+    zero byte is an error - an M-string could hold one, but the
+    reference refuses it and so do we."""
+    out = []
+    i = 0
+    n = len(body)
+    while i < n:
+        c = body[i]
+        if c == '\\' and i + 1 < n:
+            i += 1
+            c = body[i]
+            if ('0' <= c <= '9' and i + 2 < n
+                    and '0' <= body[i + 1] <= '9'
+                    and '0' <= body[i + 2] <= '9'):
+                v = ((ord(c) - 48) * 100 + (ord(body[i + 1]) - 48) * 10
+                     + (ord(body[i + 2]) - 48))
+                i += 3
+                if v == 0:
+                    raise MMError("line %d: OPTION ESCAPE: NUL in string"
+                                  " literal" % lineno)
+                out.append(chr(v & 0xFF))
+            elif (c == '&' and i + 2 < n
+                    and is_hexd(body[i + 1]) and is_hexd(body[i + 2])):
+                v = int(body[i + 1:i + 3], 16)
+                i += 3
+                if v == 0:
+                    raise MMError("line %d: OPTION ESCAPE: NUL in string"
+                                  " literal" % lineno)
+                out.append(chr(v))
+            else:
+                k = _ESC_CHARS.find(c)
+                out.append(_ESC_VALUES[k] if k >= 0 else c)
+                i += 1
+        else:
+            out.append(c)
+            i += 1
+    return ''.join(out)
+
+
 def tokenize(line, lineno):
     """Turn one source line into a list of (kind, text, upper) tuples."""
     out = []
@@ -401,7 +527,12 @@ def tokenize(line, lineno):
                 j += 1
             if j >= n:
                 raise MMError("line %d: unterminated string" % lineno)
-            out.append((T_STR, ''.join(buf), ''))
+            s = ''.join(buf)
+            if ESCAPE_LINE and (lineno > ESCAPE_LINE
+                                or (lineno == ESCAPE_LINE
+                                    and i > ESCAPE_COL)):
+                s = mm_unescape(s, lineno)
+            out.append((T_STR, s, ''))
             i = j + 1
             continue
         two = line[i:i + 2]
@@ -695,6 +826,7 @@ class Conv(object):
 
     def __init__(self, lines, srcname='program'):
         self.lines = lines            # list of source lines
+        scan_escape(lines)            # OPTION ESCAPE's positional gate
         self.srcname = srcname
         self.globals = {}             # canonical -> Sym
         self.routines = {}            # canonical -> Routine
@@ -3771,6 +3903,13 @@ class Conv(object):
                 self.err('OPTION CONSOLE wants SERIAL, SCREEN, BOTH '
                          'or NONE')
             self.emit('mm_console(%d);' % mode)
+            return
+        if t[2] == 'ESCAPE':
+            # The decoding already happened, in the tokenizer, and
+            # positionally - see scan_escape().  The statement itself
+            # emits nothing; recognising it here just keeps it out of
+            # skip_statement's silent bin.
+            self.i += 1
             return
         if t[2] == 'UDP' and self.is_kw('SERVER', 1) and \
                 self.is_kw('PORT', 2):
@@ -9334,6 +9473,7 @@ def dump_tokens(inpath):
     f = open(inpath, 'r')
     lines = f.readlines()
     f.close()
+    scan_escape(lines)
     for idx in range(len(lines)):
         lineno = idx + 1
         try:

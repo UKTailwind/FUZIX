@@ -131,6 +131,9 @@ void mm_error(const char *fmt, ...);
 
 extern char **src_lines;        /* with trailing \n kept, like readline() */
 extern int src_nlines;
+extern int escape_line;         /* OPTION ESCAPE's positional gate: */
+extern int escape_col;          /* set once per source by scan_escape() */
+void scan_escape(void);
 
 /* ---- static word tables (mmbc_tab.c) ---- */
 
