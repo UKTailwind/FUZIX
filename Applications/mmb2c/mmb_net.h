@@ -46,6 +46,8 @@
 #define MMN_F_GETFL	0
 #define MMN_F_SETFL	1
 #define MMN_SIOCTLSHOST	0x0420
+#define MMN_O_RDWR	2
+#define MMN_NETIOC_TLSCA 0x0043	/* pico_ioctl.h is the authority */
 
 /* Resolved by name: the board's libc, or bcrun's lc_ wrappers. */
 int socket(int __d, int __t, int __p);
@@ -64,6 +66,7 @@ int read(int __fd, void *__buf, int __n);
 int write(int __fd, void *__buf, int __n);
 
 #define mmn_open_ro(p)			open(p, 0)	/* O_RDONLY is 0 */
+#define mmn_open_rw(p)			open(p, MMN_O_RDWR)
 
 #define mmn_socket(d, t, p)		socket(d, t, p)
 #define mmn_connect(fd, sa, l)		connect(fd, (void *)(sa), l)
@@ -100,6 +103,8 @@ int write(int __fd, void *__buf, int __n);
 #define MMN_F_GETFL	F_GETFL
 #define MMN_F_SETFL	F_SETFL
 #define MMN_SIOCTLSHOST	0x0420
+#define MMN_O_RDWR	O_RDWR
+#define MMN_NETIOC_TLSCA 0x0043
 
 #define mmn_socket(d, t, p)		socket(d, t, p)
 #define mmn_connect(fd, sa, l)		\
@@ -124,6 +129,7 @@ MMG_FN int mmn_ioctl(int fd, int req, void *p)
 }
 #define mmn_fcntl(fd, c, v)		fcntl(fd, c, v)
 #define mmn_open_ro(p)			open(p, O_RDONLY)
+#define mmn_open_rw(p)			open(p, O_RDWR)
 #define mmn_close(fd)			close(fd)
 #define mmn_read(fd, b, n)		read(fd, (void *)(b), n)
 #define mmn_write(fd, b, n)		write(fd, (void *)(b), n)

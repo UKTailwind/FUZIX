@@ -7774,7 +7774,15 @@ class Conv(object):
                 return
             self.err("WEB UDP takes SERVER PORT, INTERRUPT or SEND")
         if self.accept_kw('OPEN'):
+            # TCP and TLS CLIENT differ by one flag: the protocol on
+            # the socket, and the SNI name the header sends first -
+            # the two lines tlsget.c promised.
+            tls = -1
             if self.is_kw('TCP') and self.is_kw('CLIENT', 1):
+                tls = 0
+            elif self.is_kw('TLS') and self.is_kw('CLIENT', 1):
+                tls = 1
+            if tls >= 0:
                 self.i += 2
                 self.uses_webclient = True
                 host = self.as_str(self.expr())
@@ -7783,11 +7791,24 @@ class Conv(object):
                 tmo = '5000'
                 if self.accept_op(','):
                     tmo = self.as_int(self.expr())
-                self.emit('mmg_webc_open(%s, %s, %s, 0);'
-                          % (host, port, tmo))
+                self.emit('mmg_webc_open(%s, %s, %s, %d);'
+                          % (host, port, tmo, tls))
                 return
             self.err("this WEB OPEN form is not implemented yet - the "
                      "family arrives in stages (PLAN-web.md)")
+        if self.is_kw('TLS'):
+            if self.is_kw('CA', 1):
+                self.i += 2
+                self.uses_webclient = True
+                self.emit('mmg_webc_tlsca(%s);'
+                          % self.as_str(self.expr()))
+                return
+            if self.is_kw('NOVERIFY', 1):
+                self.i += 2
+                self.uses_webclient = True
+                self.emit('mmg_webc_tlsnoverify();')
+                return
+            self.err("WEB TLS takes CA or NOVERIFY")
         if self.accept_kw('CLOSE'):
             if self.is_kw('TCP') and self.is_kw('CLIENT', 1):
                 self.i += 2

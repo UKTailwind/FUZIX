@@ -2652,7 +2652,16 @@ static void do_web(void)
         cv_err("WEB UDP takes SERVER PORT, INTERRUPT or SEND");
     }
     if (accept_kw("OPEN")) {
-        if (is_kw("TCP", 0) && is_kw("CLIENT", 1)) {
+        /* TCP and TLS CLIENT differ by one flag: the protocol on the
+           socket, and the SNI name the header sends first - the two
+           lines tlsget.c promised. */
+        int tls = -1;
+
+        if (is_kw("TCP", 0) && is_kw("CLIENT", 1))
+            tls = 0;
+        else if (is_kw("TLS", 0) && is_kw("CLIENT", 1))
+            tls = 1;
+        if (tls >= 0) {
             const char *host, *port, *tmo = "5000";
 
             cv.i += 2;
@@ -2662,11 +2671,27 @@ static void do_web(void)
             port = as_int(expr());
             if (accept_op(","))
                 tmo = as_int(expr());
-            emit(sfmt("mmg_webc_open(%s, %s, %s, 0);", host, port, tmo));
+            emit(sfmt("mmg_webc_open(%s, %s, %s, %d);",
+                      host, port, tmo, tls));
             return;
         }
         cv_err("this WEB OPEN form is not implemented yet - the "
                "family arrives in stages (PLAN-web.md)");
+    }
+    if (is_kw("TLS", 0)) {
+        if (is_kw("CA", 1)) {
+            cv.i += 2;
+            cv.uses_webclient = 1;
+            emit(sfmt("mmg_webc_tlsca(%s);", as_str(expr())));
+            return;
+        }
+        if (is_kw("NOVERIFY", 1)) {
+            cv.i += 2;
+            cv.uses_webclient = 1;
+            emit("mmg_webc_tlsnoverify();");
+            return;
+        }
+        cv_err("WEB TLS takes CA or NOVERIFY");
     }
     if (accept_kw("CLOSE")) {
         if (is_kw("TCP", 0) && is_kw("CLIENT", 1)) {

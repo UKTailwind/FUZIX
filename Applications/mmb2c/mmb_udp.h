@@ -44,20 +44,27 @@ MMG_FN void mmg_udp_port(MMINTEGER port)
 {
 	unsigned char sa[16];
 
+	/* raises clean up first and return after: ON ERROR SKIP comes
+	   back from mm_error - the mmb_webc.h rule */
 	if (mm_udp_fd >= 0) {
 		mmn_close(mm_udp_fd);
 		mm_udp_fd = -1;
 	}
-	if (port < 1 || port > 65535)
+	if (port < 1 || port > 65535) {
 		mm_error("Number out of bounds");
+		return;
+	}
 	mm_udp_fd = mmn_socket(MMN_AF_INET, MMN_SOCK_DGRAM, MMN_IPPROTO_UDP);
-	if (mm_udp_fd < 0)
+	if (mm_udp_fd < 0) {
 		mm_error("Failed to allocate UDP server pcb");
+		return;
+	}
 	mmn_sin(sa, 0, (int)port);	/* INADDR_ANY */
 	if (mmn_bind(mm_udp_fd, sa, 16) < 0) {
 		mmn_close(mm_udp_fd);
 		mm_udp_fd = -1;
 		mm_error("failed to bind UDP port");
+		return;
 	}
 	mmn_ndelay(mm_udp_fd);
 }
@@ -71,19 +78,27 @@ MMG_FN void mmg_udp_send(const char *ip, MMINTEGER port, const char *msg)
 		/* a name, then - MMudp.c resolves here too, with the
 		   same 5 s bound its Timer4 gives DNS */
 		n = mmn_resolve(ip, ip4, 5000);
-		if (n < 0)
+		if (n < 0) {
 			mm_error("Failed to find UDP address");
-		if (n == 0)
+			return;
+		}
+		if (n == 0) {
 			mm_error("Failed to convert web address");
+			return;
+		}
 	}
-	if (port < 1 || port > 65535)
+	if (port < 1 || port > 65535) {
 		mm_error("Number out of bounds");
+		return;
+	}
 	/* A fresh socket per send, as MMudp.c makes a fresh pcb: the
 	   source port is ephemeral and the receive socket is never
 	   disturbed. */
 	fd = mmn_socket(MMN_AF_INET, MMN_SOCK_DGRAM, MMN_IPPROTO_UDP);
-	if (fd < 0)
+	if (fd < 0) {
 		mm_error("Failed to allocate UDP send pcb");
+		return;
+	}
 	mmn_sin(sa, ip4, (int)port);
 	n = mmn_sendto(fd, msg + 1, mm_slen(msg), 0, sa, 16);
 	mmn_close(fd);

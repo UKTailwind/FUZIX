@@ -525,10 +525,27 @@ What stage 2 settled, inherited by the rest:
 - Gates at landing: make check ok, cgate 0, fcctests 65/0,
   qemutests 66/0.
 
-**Stage 3 — TLS client + email.**  OPEN TLS CLIENT/STREAM, TLS
-CA/NOVERIFY.  Board test: cert-checked fetch from a real site, then
-the §12.4 Gmail send end-to-end — which retires the email migration
-before the server work even starts.
+**Stage 3 — TLS client + email.  CODE DONE, TLS BOARD-PROVEN
+2026-08-22; the Gmail send awaits credentials on the card.**  OPEN
+TLS CLIENT is the one-flag difference tlsget.c promised (IPPROTO_TLS
++ SIOCTLSHOST when the host was typed as a name); WEB TLS
+CA/NOVERIFY is tlsca(8)'s recipe program-side (bundle read, +1 NUL,
+NETIOC_TLSCA on /dev/sys, mm_lheap'd and freed after the kernel's
+parse) - machine state, as tlsca(8) is.  Board: /etc/ca.pem loaded,
+www.google.com over 443 through a VERIFIED handshake (8 KB, 200 OK)
+- and the negative that makes "verified" mean something:
+expired.badssl.com REFUSED.  samples/gmail.bas is the §12.4 recipe,
+reading credentials from ./gmail.conf on the card, with retic's own
+pure-BASIC base64.
+
+The stage's find, retroactive to stages 1-2: **a trapped raise
+returns.**  retic wraps every WEB call in ON ERROR SKIP, and
+mm_error comes back when trapping is armed - so every raise in the
+three net headers now cleans up first and returns after (the open's
+timeout raise would have looped for ever on a dead fd).  Proven on
+the board: the expired-cert test traps the raise and continues.
+Gates at landing: make check ok, cgate 0, fcctests 66/0, qemutests
+67/0.  TLS STREAM stays stage 6.
 
 **Stage 4 — server.**  Listener, slots, poll hook, TCP
 INTERRUPT/READ/SEND/CLOSE, TRANSMIT FILE/CODE.  Board test: driven
