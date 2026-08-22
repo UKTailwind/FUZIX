@@ -418,3 +418,11 @@
 *countpin.c.o(.text.cnt_config)
 *countpin.c.o(.text.countpin_reset)
 *countpin.c.o(.text.cnt_timer_check)
+
+/* ---- pioout.c, whole object ----
+ *
+ * The fixed PIO output programs.  Everything here is cold - boot-time
+ * loading and the death-sweep - because the HOT path is the PIO state
+ * machine itself, which fetches nothing from any bus we share: the
+ * whole point of the design (PLAN-pioout.md). */
+*pioout.c.o(.text*)

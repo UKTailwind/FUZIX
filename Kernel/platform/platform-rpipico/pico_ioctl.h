@@ -1046,6 +1046,72 @@ struct cntreq {
 #endif	/* PC3_COUNT_ABI */
 
 /*
+ * The fixed PIO output programs - WS2812 and BITSTREAM (PLAN-pioout.md,
+ * kernel pioout.c).  No ioctls at all: the kernel loads five programs
+ * into PIO1 beside the I2S program at boot and reserves ONE state
+ * machine and ONE DMA channel; userland claims them through PLKIOC
+ * (classes PLK_PIO and PLK_DMA below) and then drives the registers
+ * itself, <sys/pc3io.h> having the accessors.  These constants are the
+ * whole contract: WHERE the programs are and WHICH resources to claim.
+ *
+ * The origins are load-bearing - the jmp targets inside the images are
+ * absolute - so pioout.c asserts the load landed exactly here.
+ *
+ * PIO block map, machine-wide: PIO0 is reserved for the user-PIO
+ * runtime (the separate-assembler plan), PIO1 is I2S plus this, PIO2
+ * is the CYW43's PIO-SPI bus.  PIO1's GPIOBASE is pinned to 0 by the
+ * I2S pins, so a program here can drive GP0-GP31 only: of the I/O
+ * header that is GP0-GP7 and GP26.
+ */
+#ifndef PC3_PIOOUT_ABI
+#define PC3_PIOOUT_ABI
+
+#define PIOOUT_ORG_BS	0	/* bitstream, driven: 3 instrs   */
+#define PIOOUT_ORG_BSOC	3	/* bitstream, open-collector: 3  */
+#define PIOOUT_ORG_WSO	6	/* WS2812 timing O: 4            */
+#define PIOOUT_ORG_WSB	10	/* WS2812 timing B: 4            */
+#define PIOOUT_ORG_WSS	14	/* WS2812 timing S (and W): 4    */
+
+#define PIOOUT_SM	1	/* the reserved PIO1 state machine    */
+#define PIOOUT_PLK_IDX	5	/* its PLK_PIO idx: pio*4 + sm = 4+1  */
+#define PIOOUT_DMA_CH	11	/* the reserved DMA channel = PLK_DMA idx */
+
+/* One SM clock for every program here: 20MHz from the 375MHz system
+ * clock (divider 18.75 - exact in the 16.8 fixed-point register), so
+ * the bitstream grid is 50ns and the WS2812 delay fields are in the
+ * reference's own 0.05us units. */
+#define PIOOUT_CLKDIV	((18 << 16) | (192 << 8))
+
+/* THE WORD BUFFER, and why it exists: THE DMA MUST NEVER READ PROCESS
+ * MEMORY.  This kernel's swapper rearranges the process pool in 4K
+ * chunks on EVERY context switch (swapper.c's first paragraph), so a
+ * user array's physical bytes move whenever the owner sleeps or is
+ * preempted - the DMA then reads whichever process's chunks landed
+ * there, and a garbage duration word parks the state machine in its
+ * delay loop for most of a minute.  Found the hard way: a stream that
+ * was exact under a busy-poll wedged the moment its owner slept, and
+ * even "passing" runs lost the few words that moved during timeslice
+ * preemptions.
+ *
+ * So the kernel reserves ONE buffer in PSRAM at boot (the arena heap
+ * never moves), sized for BITSTREAM's 10000-element cap, and this
+ * ioctl - on /dev/gpio with its GPIOC_ neighbours - answers where it
+ * is.  Userland copies its words in (a store; there is no MMU) and
+ * points the DMA THERE.  Arbitration is the PLK_PIO claim, as for the
+ * machine itself. */
+#define PIOOUT_BUF_WORDS 10000
+
+struct pioout_buf {
+	unsigned long addr;
+	unsigned long words;	/* PIOOUT_BUF_WORDS, so callers need not
+				   hardcode it */
+};
+
+#define GPIOC_PIOOUT_BUF 0x053D		/* struct pioout_buf, out */
+
+#endif	/* PC3_PIOOUT_ABI */
+
+/*
  * CYW43 Wi-Fi (PC3_NET builds).  PC3-NET-PLAN.md.
  *
  * Association has no place in Fuzix's own network ioctls - those are

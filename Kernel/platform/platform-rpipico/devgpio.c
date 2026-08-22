@@ -4,6 +4,7 @@
 #include "picosdk.h"
 #include "pico_ioctl.h"
 #include "countpin.h"
+#include "pioout.h"
 
 /*
  * Raspberry Pi Pico GPIO.
@@ -48,6 +49,10 @@ int gpio_ioctl(uarg_t request, char *data)
        struct gpioreq. */
     if (request >= GPIOC_CNT_FIN && request <= GPIOC_CNT_OFF)
         return countpin_ioctl(request, data);
+
+    /* The PIO output word buffer (pioout.c) - same reasoning. */
+    if (request == GPIOC_PIOOUT_BUF)
+        return pioout_ioctl(request, data);
 
     if (uget(data, &gr, sizeof(struct gpioreq)) == -1)
         return -1;

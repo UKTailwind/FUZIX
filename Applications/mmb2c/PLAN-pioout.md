@@ -183,11 +183,31 @@ Everything follows the counting-inputs precedent:
   the calling PROGRAM waits; the machine no longer does.  The wait
   polls with the same courtesy sleeps the WEB client waits use.
 
-DMA source addresses: BASIC arrays live in bcrun's data, which is the
-process pool in SRAM — so the DMA reads SRAM, not PSRAM, and the QMI
-locality rule is not in play.  (A future C caller with an array in the
-PSRAM arena still works; at one word per >=1 us element the QMI
-traffic is negligible.)
+**DMA source addresses — CORRECTED BY THE BOARD, 2026-08-22.**  The
+paragraph that stood here said BASIC arrays live in SRAM so the DMA
+could read them in place.  WRONG, and the board said so on the first
+run: **this kernel's swapper rearranges the process pool in 4K chunks
+on EVERY context switch** (swapper.c's opening comment — it is how
+every process runs at the same PROGLOAD), so a user array's physical
+bytes move whenever its owner sleeps or is even preempted.  The DMA
+then reads whichever process's chunks landed underneath — a garbage
+duration word parks the SM in its delay loop for most of a minute —
+and on switch-in the bytes shuffle back, so the array always LOOKS
+intact afterwards.  Diagnosed with pioprobe2's cold matrix: busy-poll
+streams ran at exactly full speed, sleeping streams froze at the
+initial FIFO burst, and even "passing" busy-poll runs lost the 1-9
+words that moved during timeslice preemptions.
+
+So the DMA reads a **kernel-owned PSRAM buffer** (the arena heap never
+moves): 10000 words — BITSTREAM's cap — reserved at pioout_init,
+address answered by `GPIOC_PIOOUT_BUF` (0x053D, ioctlcheck 73).
+Userland copies its words in (a store; no MMU) and points the DMA
+there; the PLK_PIO claim arbitrates the buffer exactly as it does the
+machine.  DMA-from-PSRAM through the QMI is now board-proven at these
+rates (one word per >=1us element, 33k words/s for WS2812 — the
+scanout shares the QMI but the FIFO absorbs and the numbers are
+noise; a pathological all-1us BITSTREAM is ~4MB/s and is noted, not
+feared).
 
 
 ## 5. The BASIC surface (MMBasic-exact)
@@ -240,6 +260,34 @@ The feature shipped last is the measurement rig for this one:
 Gates as ever: make check with new tests/*.bas, cgate 0 diff, fcc,
 qemu, ioctlcheck unchanged (no new ioctls — claims only).
 
+
+## Status — stage 1 BOARD-PROVEN, 2026-08-22
+
+utils/pioouttest **all passed** on COM14 (GP2→GP4 loop + the real
+12-LED strip on GP7): 2000-edge bitstream counted EXACTLY 2000; FIN
+latched exactly 1000 from a stream running THROUGH the owner's sleep
+(the shape that found the swapper); PER 100-cycle latch exactly
+200ms; open-collector 199 edges (the counted start-state, see the
+test); a WS2812 zero-frame's 576 edges EXACT; five colour frames sent
+to the strip; SIGKILL mid-stream left pin+SM+DMA claimable and the
+next stream exact.  pioprobe/pioprobe2 (kept in utils/) are the
+diagnosis harnesses that cornered the swapper interaction — cold
+per-process runs, one ingredient each.
+
+Two lessons paid for and recorded: the swapper correction above, and
+**PIO instruction memory is WRITE-ONLY** — pioout_init's original
+readback verify panicked a perfectly good load on first boot (the
+kernel wedged with tty echo alive and no shell, which is what a
+panic's IRQs-on spin looks like from a serial console).  The offset
+assert stays; the images are proven by counting their edges on the
+wire.
+
+First-run-after-boot note: the very first CIN run of a fresh boot
+once read 1991/2000; five repeats and every later run were exact.
+Unexplained, watched for, not chased — recorded so a recurrence has
+a trail.
+
+Next: stage 3 (the BASIC surface).
 
 ## 7. Order of work
 

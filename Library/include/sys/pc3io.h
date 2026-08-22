@@ -610,4 +610,174 @@ PC3_FN int pc3_adc_read(int chan)
 	return pc3_adc_conv();
 }
 
+/* ---- the fixed PIO output programs: WS2812 and BITSTREAM ----
+ *
+ *	PLAN-pioout.md.  The kernel loads five programs into PIO1 beside
+ *	the I2S program at boot and reserves ONE state machine and ONE
+ *	DMA channel; a program claims them (PLK_PIO / PLK_DMA above,
+ *	plus PLK_PIN for the pin) and drives these registers itself.
+ *	Pre-calculate the timing words, point the DMA at them, enable
+ *	the machine, poll for done.
+ *
+ *	THE ONE HARD RULE: PIO1's CTRL register is shared with the I2S
+ *	state machine, so it is touched ONLY through the atomic
+ *	set/clear aliases - a plain read-modify-write there can stop
+ *	the audio.  Only the atomic spellings appear below.
+ *
+ *	Pins: GP0-GP7 and GP26 only.  PIO1's GPIOBASE is pinned to 0 by
+ *	the I2S pins, so GP34-46 are out of its window - the kernel
+ *	asserts this at boot.
+ *
+ *	As everywhere in this file the authority is the kernel's
+ *	pico_ioctl.h - keep the ABI block in step. */
+
+#ifndef PC3_PIOOUT_ABI
+#define PC3_PIOOUT_ABI
+
+#define PIOOUT_ORG_BS	0	/* bitstream, driven: 3 instrs   */
+#define PIOOUT_ORG_BSOC	3	/* bitstream, open-collector: 3  */
+#define PIOOUT_ORG_WSO	6	/* WS2812 timing O: 4            */
+#define PIOOUT_ORG_WSB	10	/* WS2812 timing B: 4            */
+#define PIOOUT_ORG_WSS	14	/* WS2812 timing S (and W): 4    */
+
+#define PIOOUT_SM	1
+#define PIOOUT_PLK_IDX	5	/* PLK_PIO idx: pio*4 + sm       */
+#define PIOOUT_DMA_CH	11	/* = PLK_DMA idx                 */
+
+#define PIOOUT_CLKDIV	((18UL << 16) | (192UL << 8))	/* 20MHz, 50ns */
+
+/*	THE WORD BUFFER - the DMA must NEVER read process memory: this
+ *	kernel's swapper rearranges the pool in 4K chunks on every
+ *	context switch, so a user array's bytes move whenever its owner
+ *	sleeps or is preempted, and the DMA would read whichever
+ *	process's chunks landed underneath.  The kernel reserves one
+ *	buffer in PSRAM (which never moves) at boot; ask where with
+ *	GPIOC_PIOOUT_BUF on /dev/gpio, copy the words in (a store -
+ *	there is no MMU), and point the DMA THERE.  The PLK_PIO claim is
+ *	the arbitration. */
+#define PIOOUT_BUF_WORDS 10000
+
+struct pioout_buf {
+	unsigned long addr;
+	unsigned long words;
+};
+
+#define GPIOC_PIOOUT_BUF 0x053D
+
+#endif	/* PC3_PIOOUT_ABI */
+
+#define PC3_PIO1	0x50300000UL
+#define PC3_PIO_SET	0x2000UL	/* the atomic aliases */
+#define PC3_PIO_CLR	0x3000UL
+#define PC3_PIO_XOR	0x1000UL
+
+#define PC3_PIO1_CTRL	(PC3_PIO1 + 0x000)
+#define PC3_PIO1_FDEBUG	(PC3_PIO1 + 0x008)
+#define PC3_PIO1_TXF	(PC3_PIO1 + 0x010 + 4UL * PIOOUT_SM)
+#define PC3_PIO1_SMREG	(PC3_PIO1 + 0x0C8 + 0x18UL * PIOOUT_SM)
+#define PC3_SM_CLKDIV	(PC3_PIO1_SMREG + 0x00)
+#define PC3_SM_EXECCTRL	(PC3_PIO1_SMREG + 0x04)
+#define PC3_SM_SHIFTCTRL (PC3_PIO1_SMREG + 0x08)
+#define PC3_SM_INSTR	(PC3_PIO1_SMREG + 0x10)
+#define PC3_SM_PINCTRL	(PC3_PIO1_SMREG + 0x14)
+
+#define PC3_DMA		0x50000000UL
+#define PC3_DMACH	(PC3_DMA + 0x40UL * PIOOUT_DMA_CH)
+#define PC3_DMA_READ	(PC3_DMACH + 0x00)
+#define PC3_DMA_WRITE	(PC3_DMACH + 0x04)
+#define PC3_DMA_COUNT	(PC3_DMACH + 0x08)
+#define PC3_DMA_CTRL	(PC3_DMACH + 0x0C)
+#define PC3_DMA_BUSY	(1UL << 26)
+
+/*	Stop the output SM and put it back to a clean start: FIFOs
+ *	flushed (the FJOIN_RX double-XOR is the SDK's own trick), the
+ *	machine and its clock divider restarted.  Idempotent. */
+PC3_FN void pc3_pioout_stop(void)
+{
+	PC3_REG(PC3_PIO1_CTRL + PC3_PIO_CLR) = 1UL << PIOOUT_SM;
+	PC3_REG(PC3_SM_SHIFTCTRL + PC3_PIO_XOR) = 1UL << 31;	/* FJOIN_RX */
+	PC3_REG(PC3_SM_SHIFTCTRL + PC3_PIO_XOR) = 1UL << 31;
+	PC3_REG(PC3_PIO1_CTRL + PC3_PIO_SET) =
+		(1UL << (4 + PIOOUT_SM)) | (1UL << (8 + PIOOUT_SM));
+}
+
+/*	Point a pin at PIO1 and connect the pad - pc3_pin_out's dance
+ *	with funcsel 7 instead of SIO. */
+PC3_FN void pc3_pioout_pin(int pin)
+{
+	PC3_REG(PC3_PAD(pin) + PC3_SET) = PC3_PAD_IE;
+	PC3_REG(PC3_PAD(pin) + PC3_CLR) = PC3_PAD_OD | PC3_PAD_ISO;
+	PC3_REG(PC3_GPIO_CTRL(pin)) = 7;
+}
+
+/*	Configure the stopped SM to run the program at org..org+len-1 on
+ *	the given pin.  ws is 0 for the bitstream executors (OUT drives
+ *	the pin, shift RIGHT so bit 0 - the level - leaves first), else
+ *	the WS2812 autopull threshold (24, or 32 for RGBW; side-set
+ *	drives the pin, shift LEFT so the MSB leaves first; 32 is passed
+ *	as 32 and lands in the 5-bit field as 0, which is how the
+ *	hardware spells it).
+ *
+ *	The three SM_INSTR writes are immediate-execute: SET PINS drives
+ *	the starting level, SET PINDIRS makes the pin an output, and the
+ *	JMP parks the machine at the program's origin so enabling starts
+ *	in the right place. */
+PC3_FN void pc3_pioout_setup(int org, int len, int pin, int ws, int level)
+{
+	pc3_pioout_stop();
+	PC3_REG(PC3_SM_CLKDIV) = PIOOUT_CLKDIV;
+	PC3_REG(PC3_SM_EXECCTRL) =
+		((unsigned long)(org + len - 1) << 12) |
+		((unsigned long)org << 7);
+	if (ws)
+		PC3_REG(PC3_SM_SHIFTCTRL) = (1UL << 30) | (1UL << 17) |
+			(((unsigned long)(ws & 31)) << 25);
+	else
+		PC3_REG(PC3_SM_SHIFTCTRL) = (1UL << 30) | (1UL << 17) |
+			(1UL << 19);
+	/*	SET_BASE/COUNT always name the pin, for the two immediate
+	 *	SETs below; the WS2812 programs drive through side-set and
+	 *	the executors through OUT, so those fields differ. */
+	if (ws)
+		PC3_REG(PC3_SM_PINCTRL) =
+			(1UL << 29) | (1UL << 26) |
+			((unsigned long)pin << 10) |
+			((unsigned long)pin << 5);
+	else
+		PC3_REG(PC3_SM_PINCTRL) =
+			(1UL << 26) | (1UL << 20) |
+			((unsigned long)pin << 5) |
+			(unsigned long)pin;
+	PC3_REG(PC3_SM_INSTR) = 0xE000UL | (level ? 1 : 0);	/* set pins */
+	PC3_REG(PC3_SM_INSTR) = 0xE081UL;	/* set pindirs, 1 */
+	PC3_REG(PC3_SM_INSTR) = 0x0000UL | (unsigned long)org;	/* jmp org */
+	PC3_REG(PC3_PIO1_FDEBUG) = 1UL << (24 + PIOOUT_SM);	/* W1C stall */
+}
+
+/*	Feed the words and start: DMA paced by the SM's TX DREQ
+ *	(PIO1 TX for this machine is DREQ 8+sm), then the machine
+ *	enabled.  Returns immediately; pc3_pioout_busy() answers until
+ *	done.  CHAIN_TO = own channel means no chaining. */
+PC3_FN void pc3_pioout_start(const unsigned long *words, unsigned long n)
+{
+	PC3_REG(PC3_DMA_READ) = (unsigned long)words;
+	PC3_REG(PC3_DMA_WRITE) = PC3_PIO1_TXF;
+	PC3_REG(PC3_DMA_COUNT) = n;
+	PC3_REG(PC3_DMA_CTRL) = 1UL | (2UL << 2) | (1UL << 4) |
+		((unsigned long)PIOOUT_DMA_CH << 13) |
+		((unsigned long)(8 + PIOOUT_SM) << 17);
+	PC3_REG(PC3_PIO1_CTRL + PC3_PIO_SET) = 1UL << PIOOUT_SM;
+}
+
+/*	Still emitting?  Done means the DMA has handed over every word
+ *	AND the machine has drained the FIFO and stalled on an empty
+ *	OUT - the stall bit was cleared at setup, so its return is the
+ *	honest end-of-wire, not just end-of-memory. */
+PC3_FN int pc3_pioout_busy(void)
+{
+	if (PC3_REG(PC3_DMA_CTRL) & PC3_DMA_BUSY)
+		return 1;
+	return !(PC3_REG(PC3_PIO1_FDEBUG) & (1UL << (24 + PIOOUT_SM)));
+}
+
 #endif

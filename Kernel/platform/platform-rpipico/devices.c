@@ -249,6 +249,15 @@ void device_init(void)
     }
 #endif
 
+    {
+        /* The fixed PIO output programs (WS2812/BITSTREAM), loaded
+           beside the I2S program - after sound_init so PIO1's layout
+           is settled, though pioout.c claims by explicit number and
+           would survive either order. */
+        extern void pioout_init(void);
+        pioout_init();
+    }
+
 #ifdef CONFIG_PC3_USB_KBD
     {
         extern void usbkbd_init(void);

@@ -42,6 +42,7 @@
 #include "pico_ioctl.h"
 #include "pinlock.h"
 #include "countpin.h"
+#include "pioout.h"
 #include <hardware/gpio.h>
 #include <hardware/i2c.h>
 #include <hardware/spi.h>
@@ -122,11 +123,20 @@ static int claimable(uint8_t cls, uint8_t idx)
 		return idx < 12;	/* the kernel uses no slices */
 	case PLK_ADC:
 		return idx == 0;
+	case PLK_PIO:
+		/* Exactly the output SM pioout.c reserved at boot (idx is
+		   pio*4+sm).  Sound's I2S machine and the whole of PIO0
+		   (the user-PIO runtime's block) and PIO2 (the CYW43 bus)
+		   stay refused. */
+		return idx == PIOOUT_PLK_IDX;
+	case PLK_DMA:
+		/* Likewise the one channel reserved for it. */
+		return idx == PIOOUT_DMA_CH;
 	default:
-		/* PIO and DMA: sound holds a state machine in pio1 and the
-		   display holds DMA channels.  Which ones is a survey, not a
-		   guess, and an honest EINVAL beats a claim that looks like
-		   it worked. */
+		/* Anything else in PIO or DMA space: sound holds a state
+		   machine in pio1 and the display holds DMA channels.
+		   Which others are free is a survey, not a guess, and an
+		   honest EINVAL beats a claim that looks like it worked. */
 		return 0;
 	}
 }
@@ -188,6 +198,15 @@ static void reset_one(uint8_t cls, uint8_t idx)
 		break;
 	case PLK_PWM:
 		pwm_set_enabled(idx, false);
+		break;
+	case PLK_PIO:
+		/* Only the pioout SM is claimable, so this is it: stop and
+		   clean, so a program killed mid-frame leaves a half-lit
+		   strip and a working machine. */
+		pioout_sm_reset();
+		break;
+	case PLK_DMA:
+		pioout_dma_reset();
 		break;
 	case PLK_ADC:
 		/* Nothing to undo: the converter holds no state that

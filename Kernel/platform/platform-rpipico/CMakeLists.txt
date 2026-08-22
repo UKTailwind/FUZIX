@@ -201,6 +201,7 @@ add_executable(fuzix
 	spiuser.c
 	pinlock.c
 	countpin.c
+	pioout.c
 	usbdescriptors.c
 	../../dev/devi2c.c
 	../../dev/blkdev.c
