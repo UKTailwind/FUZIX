@@ -1730,6 +1730,33 @@ void statement_inner(void)
         do_web();
         return;
     }
+    if (strcmp(up, "WATCHDOG") == 0) {
+        /* Accepted and DELIBERATELY a no-op (PLAN-web.md 12.2): the
+         * RP2350 watchdog belongs to the kernel on a multi-process
+         * machine, and restart-on-death is an rc loop here.  The
+         * warning is the honesty. */
+        cv.i++;
+        cv_warn("WATCHDOG is accepted but does nothing here: "
+                "the hardware watchdog belongs to the kernel; "
+                "use an rc restart loop for wedge recovery");
+        if (is_kw("OFF", 0))
+            cv.i++;
+        else if (!stmt_end())
+            as_int(expr());
+        return;
+    }
+    if (strcmp(up, "CPU") == 0) {
+        /* CPU RESTART - the WebMite reboots; a process re-executes
+         * itself (mm_restart execs argv[0]).  uses_cmdline so the
+         * generated main binds argv and the name is known. */
+        cv.i++;
+        if (!is_kw("RESTART", 0))
+            cv_err("only CPU RESTART is supported");
+        cv.i++;
+        cv.uses_cmdline = 1;
+        emit("mm_restart();");
+        return;
+    }
     if (strcmp(up, "ONEWIRE") == 0) {
         cv.i++;
         do_onewire();

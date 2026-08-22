@@ -961,6 +961,8 @@ struct val builtin_raw(const char *up)
              * microsecond clock - the kernel's on the board, so
              * seconds since boot */
             { "UPTIME",     "((MMFLOAT)mm_us() / 1000000.0)", TY_F },
+            /* the current drive's capacity in bytes, via statvfs */
+            { "DISK SIZE",  "mm_disksize()", TY_I },
             { NULL, NULL, 0 }
         };
         static const struct { const char *kw, *call; } witharg[] = {

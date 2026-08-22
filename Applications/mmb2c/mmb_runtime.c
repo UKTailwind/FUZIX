@@ -1812,10 +1812,33 @@ MMINTEGER mm_filesize(const char *path)
 #endif
 }
 
+/* MM.INFO(DISK SIZE) - the current drive's capacity in bytes.  The
+   WebMite answers for its flash drive; here it is the filesystem the
+   program runs on, asked through statvfs - which the Fuzix libc
+   builds from _statfs's FS32 superblock and glibc answers natively,
+   so one call serves the board, bcrun on the host, and the native
+   gates alike.  0 when it cannot be asked: the one caller pattern
+   (retic's log rotation, size > DISK SIZE/3) then rotates every
+   time rather than never, the safe direction. */
+#if defined(_WIN32)
+MMINTEGER mm_disksize(void) { return 0; }
+#else
+#include <sys/statvfs.h>
+MMINTEGER mm_disksize(void)
+{
+    struct statvfs v;
+
+    if (statvfs(".", &v) != 0)
+        return 0;
+    return (MMINTEGER)v.f_blocks * (MMINTEGER)v.f_bsize;
+}
+#endif
+
 #else  /* MM_NO_DIRS */
 MMINTEGER mm_exists_file(const char *p) { (void)p; return 0; }
 MMINTEGER mm_exists_dir(const char *p) { (void)p; return 0; }
 MMINTEGER mm_filesize(const char *p) { (void)p; return -1; }
+MMINTEGER mm_disksize(void) { return 0; }
 void mm_mkdir(const char *p) { (void)p; mm_error("MKDIR is not available in this build"); }
 void mm_rmdir(const char *p) { (void)p; mm_error("RMDIR is not available in this build"); }
 void mm_chdir(const char *p) { (void)p; mm_error("CHDIR is not available in this build"); }
@@ -3166,6 +3189,11 @@ MMINTEGER mm_run_pipe_read(int fd, void *buf, int n)
     return -1;
 }
 
+void mm_restart(void)
+{
+    mm_error("CPU RESTART needs the native runtime");
+}
+
 MMINTEGER mm_play_start(void)
 {
     mm_error("running a program needs the native runtime");
@@ -3242,6 +3270,35 @@ int mm_run_pipe(void)
     close(fds[1]);
     mm_pipe_pid = pid;
     return fds[0];
+}
+
+/*
+ * CPU RESTART - the WebMite reboots the processor; a process on this
+ * machine re-executes ITSELF, which is what the statement means where
+ * retic uses it: start this program over because the network never
+ * came up.  argv[0] is re-executed exactly as the shell resolved it -
+ * mm_argv_bind keeps it, and the translator raises uses_cmdline for
+ * CPU RESTART so it is always bound (under bcrun the wrapper reads
+ * the real prog_argv regardless).  A relative argv[0] needs the cwd
+ * unchanged, which is a program that never CHDIRs - retic's shape.
+ */
+void mm_restart(void)
+{
+    char *av[2];
+
+    if (!mm_argv0[0]) {
+        mm_error("CPU RESTART does not know the program's own name");
+        return;
+    }
+    fflush(stdout);
+    mm_gflush();
+#if defined(MM_PC3) || defined(__FUZIX__)
+    sync();                     /* mm_run_exec says why */
+#endif
+    av[0] = mm_argv0;
+    av[1] = NULL;
+    execv(mm_argv0, av);
+    mm_error("CPU RESTART could not re-execute the program");
 }
 
 /* One read from the pipe.  Here rather than in mmb_sprite.h because

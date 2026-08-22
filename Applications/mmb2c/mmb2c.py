@@ -3771,6 +3771,8 @@ class Conv(object):
         # microsecond clock - the kernel's on the board, so seconds
         # since boot, which is what the WebMite's index.html shows
         'UPTIME':     ('((MMFLOAT)mm_us() / 1000000.0)', TY_F),
+        # the current drive's capacity in bytes, via statvfs
+        'DISK SIZE':  ('mm_disksize()', TY_I),
     }
     # ... and the ones that take an expression after the keyword.
     MMINFO_ARG = {
@@ -5856,6 +5858,31 @@ class Conv(object):
         if up == 'WEB':
             self.i += 1
             self.do_web()
+            return
+        if up == 'WATCHDOG':
+            # Accepted and DELIBERATELY a no-op (PLAN-web.md 12.2):
+            # the RP2350 watchdog belongs to the kernel on a
+            # multi-process machine, and restart-on-death is an rc
+            # loop here.  The warning is the honesty.
+            self.i += 1
+            self.warn('WATCHDOG is accepted but does nothing here: '
+                      'the hardware watchdog belongs to the kernel; '
+                      'use an rc restart loop for wedge recovery')
+            if self.is_kw('OFF'):
+                self.i += 1
+            elif not self.stmt_end():
+                self.as_int(self.expr())
+            return
+        if up == 'CPU':
+            # CPU RESTART - the WebMite reboots; a process re-executes
+            # itself (mm_restart execs argv[0]).  uses_cmdline so the
+            # generated main binds argv and the name is known.
+            self.i += 1
+            if not self.is_kw('RESTART'):
+                self.err('only CPU RESTART is supported')
+            self.i += 1
+            self.uses_cmdline = True
+            self.emit('mm_restart();')
             return
         if up == 'ONEWIRE':
             self.i += 1

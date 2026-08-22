@@ -319,6 +319,9 @@ void mm_run_arg  (const char *mmstr);
 void mm_run_arg_i(MMINTEGER v);
 void mm_run_arg_f(MMFLOAT v);
 MMINTEGER mm_run_exec(void);
+/* CPU RESTART: re-execute argv[0] - process-level restart, which is
+ * what the statement means on a machine where the CPU is shared. */
+void mm_restart(void);
 /* Start it and do NOT wait - PLAY MP3, where the music has to carry on
  * while the BASIC program does.  Returns the pid. */
 MMINTEGER mm_run_bg(void);
@@ -794,6 +797,7 @@ char *mm_drive(void);               /* MM.INFO(DRIVE)   always "A:"    */
 MMINTEGER mm_exists_file(const char *path); /* 1 file, -1 dir, 0 none  */
 MMINTEGER mm_exists_dir(const char *path);
 MMINTEGER mm_filesize(const char *path);    /* -1 none, -2 a directory */
+MMINTEGER mm_disksize(void);                /* MM.INFO(DISK SIZE); 0 unknown */
 MMINTEGER mm_pinno(const char *name);       /* "GP8" -> 8              */
 MMINTEGER mm_fontwidth(void);       /* MM.FONTWIDTH,  cell x scale     */
 MMINTEGER mm_fontheight(void);      /* MM.FONTHEIGHT, cell x scale     */

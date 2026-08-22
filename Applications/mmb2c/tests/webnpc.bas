@@ -13,6 +13,14 @@ If ok% <> 0 Then
   WEB PING "host.example.com", 2
   WEB CONNECT
   WEB CONNECT "myssid", "mykey"
+  CPU RESTART
 End If
+' WATCHDOG is accepted, warned about at translate time, and emits
+' nothing - so it can sit on the live path
+WatchDog 60000
+WatchDog OFF
+' DISK SIZE is statvfs on the real runtimes and 0 in the fcc gate's,
+' so the pin is the shape
+If Mm.Info(DISK SIZE) >= 0 Then Print "disk ok"
 Print "compiled"
 End
