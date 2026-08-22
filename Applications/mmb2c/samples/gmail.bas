@@ -1,6 +1,6 @@
 ' gmail.bas - send a mail through Gmail from compiled BASIC.
 ' PLAN-web.md S12.4: implicit TLS on 465, AUTH LOGIN with an App
-' Password.  Credentials come from ./gmail.conf - three lines:
+' Password.  Credentials come from /etc/gmail.conf - three lines:
 '   your.address@gmail.com
 '   destination@wherever
 '   the16charapppassword
@@ -14,7 +14,7 @@ Const cr = Chr$(13) + Chr$(10)
 Dim Integer b(512)
 Dim String mfrom, mto, pass
 
-Open "gmail.conf" For Input As #1
+Open "/etc/gmail.conf" For Input As #1
 Line Input #1, mfrom
 Line Input #1, mto
 Line Input #1, pass
