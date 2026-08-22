@@ -1670,10 +1670,13 @@ would cause more confusion than the incompatibility does.
 | `INTL` | … on a **high-to-low** edge |
 | `INTB` | … on **either** edge |
 | `PWM`  | a PWM output, driven by the `PWM` statement |
+| `FIN`  | a **frequency** input — `PIN()` answers in Hz |
+| `CIN`  | a **counting** input — `PIN()` is the live edge count |
+| `PIN`  | a **period** input — `PIN()` answers in milliseconds |
 | `OFF`  | not configured |
 
-MMBasic's remaining modes — frequency and counting — are not
-translated, and are reported by name.
+The three counting modes have their own section below; they are the
+one family that works on **GP4–GP7 only**.
 
 Input modes take MMBasic's optional pull:
 
@@ -1712,6 +1715,56 @@ behave the same — because a double holds 0, 1 and every 12-bit count
 exactly. The reason is that translated C has to know the type when it
 is generated, and nothing at that point knows what mode a pin will be
 in.
+
+### The counting inputs: `FIN`, `CIN` and `PIN`
+
+```basic
+SETPIN 4, FIN                ' frequency, 1-second gate
+SETPIN 4, FIN, 100           ' … over a 100 ms gate
+SETPIN 4, CIN                ' count rising edges
+SETPIN 4, CIN, 3             ' … count both edges
+SETPIN 4, PIN                ' period of one cycle, in ms
+SETPIN 4, PIN, 50            ' … averaged over 50 cycles
+PRINT PIN(4)
+PIN(4) = 0                   ' CIN only: zero (or set) the count
+```
+
+These count **edges in hardware**, in an interrupt, which is why they
+are the one pin family whose work lives in the kernel rather than in
+your program — a poll at statement speed would miss pulses and is not
+pretended. The count pins are **fixed: GP4–GP7**, this machine's
+version of MMBasic's four `OPTION COUNT` pins (`OPTION COUNT` itself,
+which *moves* them, is refused by name). Any other pin gives `Pin
+cannot do that`.
+
+The semantics are MMBasic's exactly:
+
+* **`FIN [, gate]`** — rising edges are counted over a repeating
+  *gate* (1–100000 ms, default 1000), and `PIN()` returns the last
+  **completed** gate's count scaled to Hz. The reading updates once
+  per gate and is **0 until the first gate completes**. A short gate
+  answers sooner but in coarser steps: at `100` the answer moves in
+  10 Hz steps.
+* **`CIN [, option]`** — `PIN()` is the **live** 64-bit count.
+  `PIN(n) = v` stores *v* into the counter — any value, though `0` is
+  the one every program uses. *option*: 1 counts rising edges
+  (default), 2 falling, 3 both; 1 and 4 add a pull-down, 2 and 5 a
+  pull-up.
+* **`PIN [, cycles]`** — the period, in **milliseconds**, averaged
+  over *cycles* (1–10000, default 1). Yes, the mode word is `PIN` —
+  that is MMBasic's own spelling. Note the default of 1 cycle carries
+  a pull-down, as it does on a PicoMite.
+
+`SETPIN n, OFF`, any reconfiguration, or your program ending — however
+it ends — stops the counting and returns the pin to ordinary duty.
+
+Measured on this machine against its own PWM (the two share a crystal,
+so the figures are exact, not approximate): `FIN` reads 1000.0 at
+1 kHz on the default gate and tracks 100 kHz exactly; a 100 kHz input
+costs the machine nothing you can measure from BASIC (the same busy
+loop timed 10.22 ms under 1 kHz of edges and 10.25 ms under 100 kHz);
+and counting loses nothing while `PLAY SOUND` runs. The edge handler
+and its dispatcher run from RAM for exactly that reason.
 
 **Pins are now owned.** `SETPIN` claims the pin from the kernel, and
 claiming one that another program holds gives `Pin cannot do that`
@@ -2560,10 +2613,10 @@ never in a program listing.
 
 `WEB MQTT`, the `STREAM` client forms, and `WEB SCAN` are not
 translated yet; each is refused by name at translate time, never
-silently accepted. `OPTION COUNT` pins (the WebMite's hardware edge
-counters, used by flow meters) need a kernel facility that does not
-exist yet — see the migration section for what that means to a
-program that uses them.
+silently accepted. The WebMite's hardware edge counters — `SETPIN
+FIN/CIN/PIN`, the flow-meter path — **work** (see the `SETPIN`
+section: fixed on GP4–GP7); only `OPTION COUNT` itself, which moves
+the pins, stays refused.
 
 ## Migrating a WebMite program {#webmite-migration}
 
@@ -2624,12 +2677,13 @@ character. Anything genuinely untranslated is likewise refused **by
 name** at translate time — the port starts with `mmbc prog.bas` and
 reading what it says.
 
-**Flow meters wait on the kernel.** `OPTION COUNT` / `SETPIN n, CIN`
-count edges in hardware and `Pin()` reads *and zeroes* the count; a
-poll cannot honestly replace that, so it is not pretended. retic
-degrades gracefully — flow detection is a checkbox, off by default,
-and the sampling block is commented out until the kernel grows a
-counting facility.
+**Flow meters: move them to GP4–GP7.** `SETPIN n, CIN` counts edges
+in hardware and `Pin()` reads and zeroes the count, exactly as on the
+WebMite — but the four count pins are **fixed at GP4–GP7** here, so
+delete the `OPTION COUNT` line (it is refused by name) and change the
+pin number. retic's sampling block predates the facility and is still
+commented out; re-enabling it is the one-line pin change plus
+uncommenting.
 
 To see all of this working, from the card:
 
