@@ -49,8 +49,15 @@ CAT = {
     # ---- 2: real value, moderate work ------------------------------
     # Peripherals: a pin here is a register access, not a syscall, so
     # each is a small userland driver (PC3-IO-PLAN.md).
-    "WS2812": 2, "IR": 2, "Humid": 2, "Distance(": 2, "Pulsin(": 2,
-    "OneShot": 2, "Bitstream": 2, "SYNC": 2, "Slew": 2, "Keypad": 2,
+    # NOTE (reviewed 2026-08-22, reading the reference's actual loops):
+    # NONE of these peripherals masks interrupts in MMBasic.  Humid's
+    # DHmem is an unmasked us-clock poll whose checksum catches an
+    # IRQ-corrupted read (External.c:4033); IR send is an unmasked 13us
+    # toggle loop (2715); Pulsin/Distance are unmasked busy-waits.  So
+    # all are plain userland work here - registers plus pc3_us64() -
+    # and cheaper than this table once assumed.
+    "IR": 2, "Humid": 2, "Distance(": 2, "Pulsin(": 2,
+    "OneShot": 2, "SYNC": 2, "Slew": 2, "Keypad": 2,
     "Stepper": 2, "FM": 2, "Calc": 2,
     # Json$(, WatchDog and CPU were category 2 until the WEB campaign
     # delivered all three (v0.20); their entries are gone because an
@@ -86,6 +93,14 @@ CAT = {
     # These want a decision about the machine, not just work.
     "RESOLUTION": 3, "Refresh": 3, "GetScanLine": 3,
     "Memory": 3,                    # POKE's family; no MMU to disagree
+    # The interrupts-off pair - reviewed 2026-08-22, see NOTES[3].
+    # MMBasic runs WS2812 (External.c:4530) and BITSTREAM (4919, 5068)
+    # under disable_interrupts_pico(); a WS2812 frame is 30us/LED
+    # unpausable (a >50us gap latches the strip), BITSTREAM masks for
+    # the SUM of user durations - unbounded.  Acceptable when the
+    # machine's owner pauses their own firmware; on a multi-process
+    # machine it is one program blacking out every other's interrupts.
+    "WS2812": 3, "Bitstream": 3,
 
     # ---- 4: deliberately out ---------------------------------------
     # Immediate-mode and interpreter-only: a translated program is
@@ -176,7 +191,28 @@ NOTES = {
 category 4 note for the decided split: the PIO assembly language gets
 its own assembler and never enters the translator.  What mmbc owes is
 what a program does around an imported binary: load it, configure and
-start a state machine, feed and drain the FIFOs, read `Pio(`.""",
+start a state machine, feed and drain the FIFOs, read `Pio(`.
+
+None of the peripherals here needs interrupts disabled - checked
+against the reference's actual loops, 2026-08-22.  `Humid` is an
+unmasked microsecond poll whose checksum catches a corrupted read, IR
+send is an unmasked toggle loop, `Pulsin(` and `Distance(` are plain
+busy-waits: all are userland register work on this machine.""",
+    3: """`WS2812` and `Bitstream` are MMBasic's two genuinely
+interrupts-off commands (`DEVICE SERIALRX/TX`, the others, are in
+category 5 with the rest of `Device`).  A WS2812 frame cannot be
+paused - more than ~50us of gap latches the strip - so the mask lasts
+30us per LED, up to 10ms at the 256-LED cap; `BITSTREAM` masks for
+the sum of its user-supplied durations, which is unbounded.  On this
+multi-process machine that is one program stopping every other
+program's interrupts: console bytes drop after 2.8ms of mask during
+serial input, every process's audio glitches past the DMA block
+cushion, and the counting inputs - which pend one edge - go silently
+inexact.  So the bit-bang route is REJECTED here, and both commands
+wait for the PIO runtime instead: WS2812 is the canonical PIO program
+(the datasheet's own example) and BITSTREAM is a timed-toggle stream
+a state machine runs with zero CPU and zero interrupt impact.  When
+the PIO surface lands, WS2812 is its natural first showcase.""",
     4: """The 22 PIO assembly names (`Jmp` ... `Set`, the `IRQ` rows and the
 `_label`/`_wrap`/`_program` directives) are out **of the translator by
 design, not out of the machine** - decided 2026-08-22.  The plan: a

@@ -44,8 +44,8 @@ four inside its "excluded from the documentation" block.
 ## The five categories
 
 1. **Finish what is already there** - 0
-2. **Real value, moderate work** - 27
-3. **Possible, wants your steer first** - 4
+2. **Real value, moderate work** - 25
+3. **Possible, wants your steer first** - 6
 4. **Deliberately out** - 52
 5. **Not applicable to this machine** - 24
 
@@ -57,9 +57,9 @@ misled us before (`DefineFont` and `BLIT MEMORY` both read as missing while they
 
 `Rem`, `/*`, `*/`, `Blit Memory`, `+`, `-`, `^`, `*`, `/`, `\\`, `<<`, `>>`, `<>`, `>=`, `<=`, `<`, `>`, `=`, `@(`
 
-## Category 2 - Real value, moderate work (27)
+## Category 2 - Real value, moderate work (25)
 
-**Commands:** `ADC`, `Bitstream`, `Calc`, `Draw3D`, `FM`, `Frame`, `Humid`, `IR`, `Keypad`, `Mandelbrot`, `OneShot`, `PIO`, `Ray`, `SYNC`, `Slew`, `Stepper`, `TILE`, `Tilemap`, `Turtle`, `WS2812`
+**Commands:** `ADC`, `Calc`, `Draw3D`, `FM`, `Frame`, `Humid`, `IR`, `Keypad`, `Mandelbrot`, `OneShot`, `PIO`, `Ray`, `SYNC`, `Slew`, `Stepper`, `TILE`, `Tilemap`, `Turtle`
 
 **Functions:** `DRAW3D(`, `Distance(`, `Frame(`, `Pio(`, `Pulsin(`, `Ray(`, `Tilemap(`
 
@@ -69,11 +69,33 @@ its own assembler and never enters the translator.  What mmbc owes is
 what a program does around an imported binary: load it, configure and
 start a state machine, feed and drain the FIFOs, read `Pio(`.
 
-## Category 3 - Possible, wants your steer first (4)
+None of the peripherals here needs interrupts disabled - checked
+against the reference's actual loops, 2026-08-22.  `Humid` is an
+unmasked microsecond poll whose checksum catches a corrupted read, IR
+send is an unmasked toggle loop, `Pulsin(` and `Distance(` are plain
+busy-waits: all are userland register work on this machine.
 
-**Commands:** `Memory`, `RESOLUTION`, `Refresh`
+## Category 3 - Possible, wants your steer first (6)
+
+**Commands:** `Bitstream`, `Memory`, `RESOLUTION`, `Refresh`, `WS2812`
 
 **Functions:** `GetScanLine`
+
+`WS2812` and `Bitstream` are MMBasic's two genuinely
+interrupts-off commands (`DEVICE SERIALRX/TX`, the others, are in
+category 5 with the rest of `Device`).  A WS2812 frame cannot be
+paused - more than ~50us of gap latches the strip - so the mask lasts
+30us per LED, up to 10ms at the 256-LED cap; `BITSTREAM` masks for
+the sum of its user-supplied durations, which is unbounded.  On this
+multi-process machine that is one program stopping every other
+program's interrupts: console bytes drop after 2.8ms of mask during
+serial input, every process's audio glitches past the DMA block
+cushion, and the counting inputs - which pend one edge - go silently
+inexact.  So the bit-bang route is REJECTED here, and both commands
+wait for the PIO runtime instead: WS2812 is the canonical PIO program
+(the datasheet's own example) and BITSTREAM is a timed-toggle stream
+a state machine runs with zero CPU and zero interrupt impact.  When
+the PIO surface lands, WS2812 is its natural first showcase.
 
 ## Category 4 - Deliberately out (52)
 
