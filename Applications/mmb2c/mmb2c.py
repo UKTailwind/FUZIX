@@ -720,6 +720,7 @@ class Conv(object):
         self.uses_net = False       # the socket floor: mmb_net.h
         self.uses_udp = False       # WEB UDP: mmb_udp.h
         self.uses_webclient = False # WEB TCP/TLS client: mmb_webc.h
+        self.uses_webserver = False # WEB TCP server: mmb_webs.h
         self.uses_play = False
         self.uses_blit = False      # BLIT family: mmb_blit.h
         self.uses_flash = False     # pseudo flash slots: mmb_flash.h
@@ -3565,6 +3566,20 @@ class Conv(object):
             self.expect_op(')')
             return ('%dLL' % self.opt_base, TY_I)
 
+        # The network answers.  IP ADDRESS asks the kernel
+        # (NETIOC_STATUS) and is "0.0.0.0" when there is no join - the
+        # WebMite's own idle answer, which retic.bas polls for at
+        # startup.  MAX CONNECTIONS is the slot count, 8 on both.
+        if two == 'IP ADDRESS':
+            self.i += 1
+            self.expect_op(')')
+            self.uses_net = True
+            return ('mmn_ipaddr()', TY_S)
+        if two == 'MAX CONNECTIONS':
+            self.i += 1
+            self.expect_op(')')
+            return ('8LL', TY_I)
+
         # Two words first, so EXISTS DIR is never read as EXISTS.
         for words, key in ((2, two), (1, one)):
             if key is None:
@@ -3695,6 +3710,13 @@ class Conv(object):
             self.i += 3
             self.uses_udp = True
             self.emit('mmg_udp_port(%s);' % self.as_int(self.expr()))
+            return
+        if t[2] == 'TCP' and self.is_kw('SERVER', 1) and \
+                self.is_kw('PORT', 2):
+            # likewise for the TCP server's saved option
+            self.i += 3
+            self.uses_webserver = True
+            self.emit('mmg_webs_port(%s);' % self.as_int(self.expr()))
             return
         self.skip_statement()
 
@@ -7847,6 +7869,60 @@ class Conv(object):
                 return
             self.err("WEB TCP CLIENT takes REQUEST, READ or WRITE "
                      "(STREAM arrives in stages - PLAN-web.md)")
+        # the server family - stage 4
+        if self.is_kw('TCP') and self.is_kw('SERVER', 1) \
+                and self.is_kw('PORT', 2):
+            self.i += 3
+            self.uses_webserver = True
+            self.emit('mmg_webs_port(%s);' % self.as_int(self.expr()))
+            return
+        if self.is_kw('TCP') and self.is_kw('INTERRUPT', 1):
+            self.i += 2
+            self.uses_webserver = True
+            self.uses_interrupts = True
+            self.emit('mmi_webs_int(%s);' % self.int_target())
+            return
+        if self.is_kw('TCP') and self.is_kw('READ', 1):
+            self.i += 2
+            self.uses_webserver = True
+            conn = self.as_int(self.expr())
+            self.expect_op(',')
+            ptr, cells = self.lsref()
+            self.emit('mmg_webs_read(%s, %s, %s);' % (conn, ptr, cells))
+            return
+        if self.is_kw('TCP') and self.is_kw('SEND', 1):
+            self.i += 2
+            self.uses_webserver = True
+            conn = self.as_int(self.expr())
+            self.expect_op(',')
+            ptr, cells = self.lsref()
+            self.emit('mmg_webs_send(%s, %s);' % (conn, ptr))
+            return
+        if self.is_kw('TCP') and self.is_kw('CLOSE', 1):
+            self.i += 2
+            self.uses_webserver = True
+            self.emit('mmg_webs_close(%s);' % self.as_int(self.expr()))
+            return
+        if self.accept_kw('TRANSMIT'):
+            if self.accept_kw('CODE'):
+                conn = self.as_int(self.expr())
+                self.expect_op(',')
+                self.uses_webserver = True
+                self.emit('mmg_webs_code(%s, %s);'
+                          % (conn, self.as_int(self.expr())))
+                return
+            if self.accept_kw('FILE'):
+                conn = self.as_int(self.expr())
+                self.expect_op(',')
+                fname = self.as_str(self.expr())
+                self.expect_op(',')
+                mime = self.as_str(self.expr())
+                self.uses_webserver = True
+                self.emit('mmg_webs_file(%s, %s, %s);'
+                          % (conn, fname, mime))
+                return
+            self.err("WEB TRANSMIT takes CODE or FILE "
+                     "(PAGE arrives in stages - PLAN-web.md)")
         self.err("this WEB command is not implemented yet - the family "
                  "arrives in stages (PLAN-web.md)")
 
@@ -8624,12 +8700,14 @@ class Conv(object):
         # The socket floor, then its families - before mmb_int.h,
         # whose network poll exists only under their include guards,
         # the mmb_sprite.h pattern.
-        if self.uses_udp or self.uses_webclient:
+        if self.uses_udp or self.uses_webclient or self.uses_webserver:
             self.uses_net = True
         if self.uses_net:
             wr('#include "mmb_net.h"\n')
         if self.uses_webclient:
             wr('#include "mmb_webc.h"\n')
+        if self.uses_webserver:
+            wr('#include "mmb_webs.h"\n')
         if self.uses_udp:
             wr('#include "mmb_udp.h"\n')
         # After mmb_gpio.h, which it uses to read the pins.  Only a

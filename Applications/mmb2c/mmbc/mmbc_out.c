@@ -471,12 +471,14 @@ void conv_write(FILE *f)
     /* The socket floor, then its families - before mmb_int.h, whose
        network poll exists only under their include guards, the
        mmb_sprite.h pattern. */
-    if (cv.uses_udp || cv.uses_webclient)
+    if (cv.uses_udp || cv.uses_webclient || cv.uses_webserver)
         cv.uses_net = 1;
     if (cv.uses_net)
         fprintf(f, "#include \"mmb_net.h\"\n");
     if (cv.uses_webclient)
         fprintf(f, "#include \"mmb_webc.h\"\n");
+    if (cv.uses_webserver)
+        fprintf(f, "#include \"mmb_webs.h\"\n");
     if (cv.uses_udp)
         fprintf(f, "#include \"mmb_udp.h\"\n");
     /* After mmb_gpio.h, which it uses to read the pins.  Only a program

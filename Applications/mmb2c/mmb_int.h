@@ -205,6 +205,23 @@ MMG_FN void mmi_udp_int(mm_int_fn fn)
 }
 #endif
 
+/*	WEB TCP INTERRUPT - the server's, same shape. */
+#ifdef MMB_WEBS_H
+static mm_int_fn mm_webs_fn;
+
+MMG_FN void mmi_webs_int(mm_int_fn fn)
+{
+	if (fn) {
+		if (mm_webs_fn == 0)
+			__mm_int_armed++;
+	} else if (mm_webs_fn) {
+		__mm_int_armed--;
+	}
+	mm_webs_fn = fn;
+	mm_webs_rx = 0;
+}
+#endif
+
 /*	SPRITE INTERRUPT / STINTERRUPT handlers.  Registered here rather
  *	than in mmb_sprite.h because arming is this file's business
  *	(__mm_int_armed), and the poll below already owns the scan order.
@@ -525,9 +542,25 @@ MMG_FN void mm_int_poll(void)
 
 	/*	The network one-shots sit between the collision and pin
 	 *	scans, which is where the WebMite checks its own
-	 *	(MM_Misc.c:10015-10029).  Decimated on the console-key
-	 *	clock: the poll is a recvfrom, a syscall, and this runs
-	 *	after every statement. */
+	 *	(MM_Misc.c:10015-10029) - the server's TCP first, then
+	 *	UDP, its order.  Decimated on the console-key clock: each
+	 *	poll is a syscall or several, and this runs after every
+	 *	statement. */
+#ifdef MMB_WEBS_H
+	if (mm_webs_lfd >= 0) {
+		long long wnow = MMI_US();
+
+		if (wnow >= mm_webs_next) {
+			mm_webs_next = wnow + MM_INT_CON_US;
+			mmg_webs_poll();
+			if (mm_webs_fn && mm_webs_rx) {
+				mm_webs_rx = 0;
+				mm_int_fire(mm_webs_fn);
+				return;
+			}
+		}
+	}
+#endif
 #ifdef MMB_UDP_H
 	if (mm_udp_fn && mm_udp_fd >= 0) {
 		long long unow = MMI_US();

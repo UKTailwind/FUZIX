@@ -2741,6 +2741,74 @@ static void do_web(void)
         cv_err("WEB TCP CLIENT takes REQUEST, READ or WRITE "
                "(STREAM arrives in stages - PLAN-web.md)");
     }
+    /* the server family - stage 4 */
+    if (is_kw("TCP", 0) && is_kw("SERVER", 1) && is_kw("PORT", 2)) {
+        cv.i += 3;
+        cv.uses_webserver = 1;
+        emit(sfmt("mmg_webs_port(%s);", as_int(expr())));
+        return;
+    }
+    if (is_kw("TCP", 0) && is_kw("INTERRUPT", 1)) {
+        cv.i += 2;
+        cv.uses_webserver = 1;
+        cv.uses_interrupts = 1;
+        emit(sfmt("mmi_webs_int(%s);", int_target()));
+        return;
+    }
+    if (is_kw("TCP", 0) && is_kw("READ", 1)) {
+        struct flat ls;
+        const char *conn;
+
+        cv.i += 2;
+        cv.uses_webserver = 1;
+        conn = as_int(expr());
+        expect_op(",");
+        ls = lsref();
+        emit(sfmt("mmg_webs_read(%s, %s, %s);", conn, ls.ptr, ls.cnt));
+        return;
+    }
+    if (is_kw("TCP", 0) && is_kw("SEND", 1)) {
+        struct flat ls;
+        const char *conn;
+
+        cv.i += 2;
+        cv.uses_webserver = 1;
+        conn = as_int(expr());
+        expect_op(",");
+        ls = lsref();
+        emit(sfmt("mmg_webs_send(%s, %s);", conn, ls.ptr));
+        return;
+    }
+    if (is_kw("TCP", 0) && is_kw("CLOSE", 1)) {
+        cv.i += 2;
+        cv.uses_webserver = 1;
+        emit(sfmt("mmg_webs_close(%s);", as_int(expr())));
+        return;
+    }
+    if (accept_kw("TRANSMIT")) {
+        if (accept_kw("CODE")) {
+            const char *conn = as_int(expr());
+
+            expect_op(",");
+            cv.uses_webserver = 1;
+            emit(sfmt("mmg_webs_code(%s, %s);", conn, as_int(expr())));
+            return;
+        }
+        if (accept_kw("FILE")) {
+            const char *conn, *fname, *mime;
+
+            conn = as_int(expr());
+            expect_op(",");
+            fname = as_str(expr());
+            expect_op(",");
+            mime = as_str(expr());
+            cv.uses_webserver = 1;
+            emit(sfmt("mmg_webs_file(%s, %s, %s);", conn, fname, mime));
+            return;
+        }
+        cv_err("WEB TRANSMIT takes CODE or FILE "
+               "(PAGE arrives in stages - PLAN-web.md)");
+    }
     cv_err("this WEB command is not implemented yet - the family "
            "arrives in stages (PLAN-web.md)");
 }

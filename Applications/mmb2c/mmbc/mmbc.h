@@ -399,6 +399,7 @@ struct conv {
     int uses_net;               /* the socket floor: mmb_net.h */
     int uses_udp;               /* WEB UDP: mmb_udp.h */
     int uses_webclient;         /* WEB TCP/TLS client: mmb_webc.h */
+    int uses_webserver;         /* WEB TCP server: mmb_webs.h */
     int uses_wait;              /* a serviced PAUSE: pulls in mmb_wait.h */
     int uses_play;              /* PLAY: emit the volume it remembers */
     int uses_blit;              /* BLIT family: mmb_blit.h */

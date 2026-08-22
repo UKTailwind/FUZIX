@@ -547,10 +547,34 @@ the board: the expired-cert test traps the raise and continues.
 Gates at landing: make check ok, cgate 0, fcctests 66/0, qemutests
 67/0.  TLS STREAM stays stage 6.
 
-**Stage 4 — server.**  Listener, slots, poll hook, TCP
-INTERRUPT/READ/SEND/CLOSE, TRANSMIT FILE/CODE.  Board test: driven
-by a python client from the PC for readable failures, then by the
-other board's stage-2 BASIC client — BASIC serving BASIC.
+**Stage 4 — server.  DONE, BOARD-PROVEN 2026-08-22.**  mmb_webs.h:
+one listener + 8 slots behind an O_NDELAY poll (accept, per-slot
+reads, 5 s idle reaping), hooked into mm_int_poll AHEAD of UDP (the
+WebMite's order); READ self-polls so an interrupt-less reader loop
+still accepts, the way ProcessWeb always pumps.  TCP
+INTERRUPT/READ/SEND/CLOSE, TRANSMIT CODE (digits over "404") and
+TRANSMIT FILE (the reference's Server:CPi header byte for byte),
+plus MM.INFO(IP ADDRESS) via NETIOC_STATUS and MM.INFO(MAX
+CONNECTIONS) — both of which retic's handler uses.  Board: a
+compiled server in retic's exact handler shape served the PC's
+Invoke-WebRequest (204 root, 200 + exact body for the file) and the
+other board's stage-2 BASIC client (200, body verified) — BASIC
+serving BASIC.  MM.INFO(IP ADDRESS) answered live on the board.
+
+Named findings:
+- A one-process client-REQUEST-to-own-server round trip DEADLOCKS BY
+  DESIGN on both firmwares (interrupts fire at statement
+  boundaries), so live paths are proven by websharness.c's forked
+  client (request delivery, null-to-space, consume-once, the
+  TRANSMIT FILE bytes, SEND, slot cycling) and by the two-board run;
+  webservz.bas gates the peer-less semantics in all three execution
+  modes.
+- The uusend cwd trap struck again: the server 404'd its file
+  because the session cwd was /root/cc and hello.txt was in /root —
+  TRANSMIT FILE resolves relative to the PROGRAM'S cwd, which the
+  migration guide must say out loud.
+- Gates at landing: make check ok, cgate 0, fcctests 67/0,
+  qemutests 68/0.
 
 **Stage 5 — TRANSMIT PAGE.**  Call-site substitution (§4).  Test:
 retic's real index/config/setup pages served with fixture variable

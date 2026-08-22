@@ -48,6 +48,7 @@
 #define MMN_SIOCTLSHOST	0x0420
 #define MMN_O_RDWR	2
 #define MMN_NETIOC_TLSCA 0x0043	/* pico_ioctl.h is the authority */
+#define MMN_NETIOC_STATUS 0x0041
 
 /* Resolved by name: the board's libc, or bcrun's lc_ wrappers. */
 int socket(int __d, int __t, int __p);
@@ -105,6 +106,7 @@ int write(int __fd, void *__buf, int __n);
 #define MMN_SIOCTLSHOST	0x0420
 #define MMN_O_RDWR	O_RDWR
 #define MMN_NETIOC_TLSCA 0x0043
+#define MMN_NETIOC_STATUS 0x0041
 
 #define mmn_socket(d, t, p)		socket(d, t, p)
 #define mmn_connect(fd, sa, l)		\
@@ -286,6 +288,38 @@ MMG_FN int mmn_nameserver(unsigned char *ip4)
 		return 0;
 	memcpy(ip4, mmn_ns, 4);
 	return 1;
+}
+
+/*
+ *	MM.INFO(IP ADDRESS) - the machine's address out of NETIOC_STATUS
+ *	on /dev/sys, "0.0.0.0" when there is no radio, no join, or no
+ *	/dev/sys (the hosted gates).  net_status.ip is HOST order, and
+ *	wifi(8) prints it high byte first - so bytes 15..12 of the
+ *	little-endian struct are a.b.c.d, in that order.
+ */
+static char mmn_ipbuf[17];
+
+MMG_FN char *mmn_ipaddr(void)
+{
+	unsigned char st[48];
+	int sys, i;
+
+	memset(st, 0, sizeof(st));
+	sys = mmn_open_rw("/dev/sys");
+	if (sys >= 0) {
+		mmn_ioctl(sys, MMN_NETIOC_STATUS, st);
+		mmn_close(sys);
+	}
+	i = 1;
+	i += mmn_decb(mmn_ipbuf + i, st[15]);
+	mmn_ipbuf[i++] = '.';
+	i += mmn_decb(mmn_ipbuf + i, st[14]);
+	mmn_ipbuf[i++] = '.';
+	i += mmn_decb(mmn_ipbuf + i, st[13]);
+	mmn_ipbuf[i++] = '.';
+	i += mmn_decb(mmn_ipbuf + i, st[12]);
+	mmn_ipbuf[0] = (char)(i - 1);
+	return mmn_ipbuf;
 }
 
 /*	1 resolved, 0 no answer within the timeout, -1 no nameserver /

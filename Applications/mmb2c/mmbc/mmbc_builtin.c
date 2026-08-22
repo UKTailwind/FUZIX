@@ -975,6 +975,21 @@ struct val builtin_raw(const char *up)
             expect_op(")");
             return mkval(sfmt("%dLL", cv.opt_base), TY_I);
         }
+        /* The network answers.  IP ADDRESS asks the kernel
+           (NETIOC_STATUS) and is "0.0.0.0" when there is no join - the
+           WebMite's own idle answer, which retic.bas polls for at
+           startup.  MAX CONNECTIONS is the slot count, 8 on both. */
+        if (strcmp(two, "IP ADDRESS") == 0) {
+            (void)nxt();
+            expect_op(")");
+            cv.uses_net = 1;
+            return mkval("mmn_ipaddr()", TY_S);
+        }
+        if (strcmp(two, "MAX CONNECTIONS") == 0) {
+            (void)nxt();
+            expect_op(")");
+            return mkval("8LL", TY_I);
+        }
         for (words = 2; words >= 1; words--) {
             const char *key = (words == 2) ? two : t->up;
             if (key[0] == 0)

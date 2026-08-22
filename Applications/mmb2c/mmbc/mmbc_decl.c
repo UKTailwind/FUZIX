@@ -631,6 +631,14 @@ void do_option(void)
         emit(sfmt("mmg_udp_port(%s);", as_int(expr())));
         return;
     }
+    if (strcmp(t->up, "TCP") == 0 && is_kw("SERVER", 1)
+        && is_kw("PORT", 2)) {
+        /* likewise for the TCP server's saved option */
+        cv.i += 3;
+        cv.uses_webserver = 1;
+        emit(sfmt("mmg_webs_port(%s);", as_int(expr())));
+        return;
+    }
     skip_statement();
 }
 
