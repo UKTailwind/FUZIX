@@ -735,6 +735,36 @@ Findings the smoke caught:
 with real schedules and the web UI driven from a browser.  The
 milestone that says the family is done.
 
+*Status (2026-08-22): the milestone is REACHED.*  The port lives in
+`retic/` (retic.bas + the three pages + MIGRATION.md, every change
+marked 'PC3:).  Both translators produce byte-identical C for the
+whole 49 KB program - three pages and ~90 call-site substitutions
+included.  Compiled ON the board (mmbc + cc, 204,666 bytes) and
+proven live on COM17 against curl from the PC:
+
+- Boot: WiFi from /etc/wifi.conf, `WEB ntp`, DefaultTimeZone
+  applied, server up on port 80, interrupt armed.
+- All three pages served with every substitution evaluated and
+  ZERO unresolved braces - index's AutoRefresh timer was literally
+  the milliseconds to the board's local midnight.  (The bare
+  uptime float after StatusMsg is the ORIGINAL page's own
+  `{StatusMsg} {timeup}` - faithful, not ours.)
+- POST /config0.html: "Configuration Saved OK", the +→space MID$()=
+  decode, CheckValue, and `A:/settings.dat` written through the
+  drive mapping (707 bytes, V1.3 format).  Restart loaded it back -
+  the persistence round trip.
+- RUN NOW → "Running: Front Lawn Valve #1" with the STOP button;
+  STOP → "Schedule Stopped"; valves = real GPIOs (GP0-7/GP34-37).
+- The OWM setup test in one POST: "Found Perth, Western Australia,
+  AU", timezone 8 from the API, the clock re-set to AWST, sunrise
+  06:46, forecast fetched - TCP client + JSON$ + WEB NTP tz
+  end-to-end against the live services.
+- Email is byte-for-byte the twice-proven Gmail sequence; the setup
+  page's test button remains for a run with real credentials.
+
+Still open to CLOSE the stage: the §12.4 side-by-side against a
+real WebMite (user hardware), and the browser email test.
+
 **Stage 9 — manuals**: user manual (networking-from-BASIC chapter +
 the Migrating-a-WebMite-program section), C manual (sockets for cc
 users), coverage list regeneration.
