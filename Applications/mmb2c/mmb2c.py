@@ -2883,6 +2883,35 @@ class Conv(object):
         if up == 'MATH':
             self.expect_op('(')
             t = self.nxt()
+            if t[0] == T_ID and t[2] == 'BASE64':
+                # MATH(BASE64 ENCODE in$, out$): returns the length,
+                # writes the string into the second argument -
+                # fun_math's own odd call shape, and how retic.bas
+                # writes it (the out argument being the enclosing
+                # Function's result variable).  Strings only; the
+                # reference also takes arrays, which nothing has
+                # needed yet - refused, not diverged.
+                w = self.nxt()
+                if w[0] != T_ID or w[2] not in ('ENCODE', 'DECODE'):
+                    self.err('MATH(BASE64 ...) wants ENCODE or DECODE')
+                a = self.expr()
+                if a[1] != TY_S:
+                    self.err('MATH(BASE64 %s) needs a string' % w[2])
+                self.expect_op(',')
+                t2 = self.peek()
+                if t2 is None or t2[0] != T_ID:
+                    self.err('MATH(BASE64 %s) output must be a string'
+                             ' variable' % w[2])
+                tgt, ty, cap = self.input_target()
+                if ty != TY_S:
+                    self.err('MATH(BASE64 %s) output must be a string'
+                             ' variable' % w[2])
+                self.expect_op(')')
+                self.uses_math = True
+                fn = 'mmg_b64_enc' if w[2] == 'ENCODE' else 'mmg_b64_dec'
+                return ('%s(%s, %s, %d)'
+                        % (fn, a[0], tgt,
+                           255 if cap is None else cap), TY_I)
             if t[0] == T_ID and t[2] in MATHARRAY:
                 name = t[2]
                 sym = self.arrayref()

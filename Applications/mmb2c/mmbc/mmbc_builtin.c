@@ -1088,6 +1088,43 @@ struct val builtin_raw(const char *up)
 
         expect_op("(");
         t = nxt();
+        if (t->kind == T_ID && strcmp(t->up, "BASE64") == 0) {
+            /* MATH(BASE64 ENCODE in$, out$): returns the length,
+             * writes the string into the second argument - fun_math's
+             * own odd call shape, and how retic.bas writes it (the
+             * out argument being the enclosing Function's result
+             * variable).  Strings only; the reference also takes
+             * arrays, which nothing has needed yet - refused, not
+             * diverged. */
+            struct tok *w = nxt();
+            struct val a;
+            struct tok *t2;
+            struct val tgt;
+            int cap;
+            const char *fn;
+
+            if (w->kind != T_ID || (strcmp(w->up, "ENCODE") != 0
+                                    && strcmp(w->up, "DECODE") != 0))
+                cv_err("MATH(BASE64 ...) wants ENCODE or DECODE");
+            a = expr();
+            if (a.ty != TY_S)
+                cv_err("MATH(BASE64 %s) needs a string", w->up);
+            expect_op(",");
+            t2 = peek(0);
+            if (t2 == NULL || t2->kind != T_ID)
+                cv_err("MATH(BASE64 %s) output must be a string"
+                       " variable", w->up);
+            tgt = input_target(&cap);
+            if (tgt.ty != TY_S)
+                cv_err("MATH(BASE64 %s) output must be a string"
+                       " variable", w->up);
+            expect_op(")");
+            cv.uses_math = 1;
+            fn = strcmp(w->up, "ENCODE") == 0 ? "mmg_b64_enc"
+                : "mmg_b64_dec";
+            return mkval(sfmt("%s(%s, %s, %d)", fn, a.code, tgt.code,
+                              cap == 0 ? 255 : cap), TY_I);
+        }
         if (t->kind == T_ID && matharray_in(t->up)) {
             const char *name = t->up;
             struct sym *sym = arrayref(1);

@@ -49,7 +49,7 @@ static void do_array_cmd(int is_math);
 static void do_open(void);
 static void do_close(void);
 static void do_fileword(const char *up);
-static struct val input_target(int *cap);
+struct val input_target(int *cap);   /* shared: MATH(BASE64) uses it */
 static void do_input(void);
 static void do_line_input(void);
 static int looks_like_assignment(void);
@@ -4283,7 +4283,7 @@ static void do_fileword(const char *up)
  * everything else - a plain string has room for its NUL and takes
  * mm_sset.
  */
-static struct val input_target(int *cap)
+struct val input_target(int *cap)
 {
     struct tok *t = nxt();
     struct sym *sym;

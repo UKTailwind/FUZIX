@@ -516,6 +516,7 @@ void errors_add_dedup(const char *msg);      /* the statement-site form */
  * only the entry point is shared here. */
 
 struct val expr(void);
+struct val input_target(int *cap);  /* mmbc_stmt.c; MATH(BASE64) too */
 
 /* ---- declaration passes (mmbc_decl.c) ---- */
 
