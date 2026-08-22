@@ -438,4 +438,83 @@ MMG_FN int mmn_resolve(const char *host, unsigned char *ip4,
 	return 0;
 }
 
+/*
+ *	WEB NTP [offset [, server$ [, timeout]]] - MMntp.c's cmd_ntp
+ *	mapped onto ntpdate(8), the plan's "no new code beyond argv
+ *	building".  The offset is FLOAT hours, -12..14 with the
+ *	reference's own gate and message, applied as whole seconds
+ *	(timeadjust = adjust * 3600, the reference's truncation) through
+ *	ntpdate's -O; -s sets the clock and prints nothing.  An empty
+ *	server$ means the default, as the reference's *argv[2] test does.
+ *	The reference's third argument - a DNS/reply timeout - is parsed
+ *	and dropped by the translator: ntpdate carries its own 3 x 2 s
+ *	retry cadence, which is inside MMBasic's 5 s default anyway.
+ *	Failure (no DNS, no reply) is a non-zero exit, which mm_run_exec
+ *	raises - retic retries WEB NTP in a loop under ON ERROR, and a
+ *	trapped raise returns.
+ */
+MMG_FN void mmg_web_ntp(MMFLOAT adjust, const char *server)
+{
+	if (adjust < -12.0 || adjust > 14.0)
+		MM_RAISE("Invalid Time Offset");
+	if (mm_slen(server) == 0)
+		server = "\014" "pool.ntp.org";
+	mm_run_begin();
+	mm_run_arg("\007" "ntpdate");
+	mm_run_arg("\002" "-s");
+	if (adjust != 0.0) {
+		mm_run_arg("\002" "-O");
+		mm_run_arg_i((MMINTEGER)(adjust * 3600.0));
+	}
+	mm_run_arg(server);
+	mm_run_exec();
+}
+
+/*
+ *	WEB PING addr$ [, count] - ping(8), stdout straight to the
+ *	console (the child inherits it; nothing to collect).  The
+ *	WebMite build this campaign replicates has no PING of its own,
+ *	so this is the one WEB statement that is a mapping without a
+ *	reference: ping exits non-zero when the host never answered,
+ *	and mm_run_exec turns that into the raise a program can trap.
+ */
+MMG_FN void mmg_web_ping(const char *addr, MMINTEGER count)
+{
+	mm_run_begin();
+	mm_run_arg("\004" "ping");
+	mm_run_arg("\002" "-c");
+	mm_run_arg_i(count);
+	mm_run_arg(addr);
+	mm_run_exec();
+}
+
+/*
+ *	WEB CONNECT, no arguments: the WebMite's own gate at the top of
+ *	cmd_web - link up or error "WIFI not connected" (WiFi.c:583).
+ *	net_status.link is byte 2; 3 = associated with an address.  On
+ *	the hosted gates /dev/sys is absent or the ioctl no-ops to a
+ *	zeroed struct, so the answer there is the raise - right for a
+ *	machine with no radio.
+ *
+ *	WEB CONNECT ssid$, pass$ spawns wifi(8) instead (translator-
+ *	built argv): it joins, waits for DHCP, and exits non-zero on
+ *	timeout, and it does NOT persist - /etc/wifi.conf stays the
+ *	owner of the boot-time join, the divergence PLAN-web.md 12.2
+ *	documents.
+ */
+MMG_FN void mmg_web_connect_chk(void)
+{
+	unsigned char st[48];
+	int sys;
+
+	memset(st, 0, sizeof(st));
+	sys = mmn_open_rw("/dev/sys");
+	if (sys < 0)
+		MM_RAISE("WIFI not connected");
+	mmn_ioctl(sys, MMN_NETIOC_STATUS, st);
+	mmn_close(sys);
+	if (st[2] != 3)
+		MM_RAISE("WIFI not connected");
+}
+
 #endif /* MMB_NET_H */

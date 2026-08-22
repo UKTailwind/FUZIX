@@ -956,6 +956,11 @@ struct val builtin_raw(const char *up)
             { "VERSION",    "mm_ver()", TY_F },
             { "ERRNO",      "mm_errno()", TY_I },
             { "ERRMSG",     "mm_errmsg()", TY_S },
+            /* the reference is time_us_64()/1000000.0 as a FLOAT
+             * (MM_Misc.c fun_info UPTIME); mm_us() is the same 64-bit
+             * microsecond clock - the kernel's on the board, so
+             * seconds since boot */
+            { "UPTIME",     "((MMFLOAT)mm_us() / 1000000.0)", TY_F },
             { NULL, NULL, 0 }
         };
         static const struct { const char *kw, *call; } witharg[] = {

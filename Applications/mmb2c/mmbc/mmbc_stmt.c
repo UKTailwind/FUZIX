@@ -2813,6 +2813,64 @@ static void do_web(void)
         }
         cv_err("WEB TRANSMIT takes CODE, FILE or PAGE");
     }
+    if (accept_kw("NTP")) {
+        /* WEB NTP [offset [, server$ [, timeout]]] - cmd_ntp
+         * (MMntp.c) mapped onto ntpdate(8); mmb_net.h says how.  The
+         * timeout is parsed and dropped: ntpdate carries its own
+         * retry cadence, inside MMBasic's 5 s default. */
+        const char *off = "0.0";
+        const char *server = c_string_literal("");
+
+        cv.uses_net = 1;
+        if (!stmt_end()) {
+            off = as_flt(expr());
+            if (accept_op(",")) {
+                server = as_str(expr());
+                if (accept_op(","))
+                    as_int(expr());
+            }
+        }
+        emit(sfmt("mmg_web_ntp(%s, %s);", off, server));
+        return;
+    }
+    if (accept_kw("PING")) {
+        /* WEB PING addr$ [, count] - ping(8) with its output on the
+         * console; the replicated WebMite build has no PING of its
+         * own, so the mapping is the reference (PLAN-web.md 12.2). */
+        const char *addr;
+        const char *cnt = "4";
+
+        cv.uses_net = 1;
+        addr = as_str(expr());
+        if (accept_op(","))
+            cnt = as_int(expr());
+        emit(sfmt("mmg_web_ping(%s, %s);", addr, cnt));
+        return;
+    }
+    if (accept_kw("CONNECT")) {
+        /* No arguments: the WebMite's link gate - error "WIFI not
+         * connected" when the radio has no address.  With ssid$,
+         * pass$: wifi(8) joins and waits, NOT persisted -
+         * /etc/wifi.conf stays the owner of the boot-time join
+         * (PLAN-web.md 12.2). */
+        const char *ssid;
+        const char *key;
+
+        cv.uses_net = 1;
+        if (stmt_end()) {
+            emit("mmg_web_connect_chk();");
+            return;
+        }
+        ssid = as_str(expr());
+        expect_op(",");
+        key = as_str(expr());
+        emit("mm_run_begin();");
+        emit(sfmt("mm_run_arg(%s);", c_string_literal("wifi")));
+        emit(sfmt("mm_run_arg(%s);", ssid));
+        emit(sfmt("mm_run_arg(%s);", key));
+        emit("mm_run_exec();");
+        return;
+    }
     cv_err("this WEB command is not implemented yet - the family "
            "arrives in stages (PLAN-web.md)");
 }

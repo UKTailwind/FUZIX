@@ -53,7 +53,7 @@ void alarm_handler( int signum ){
 }
 
 void pusage( void ){
-    fprintf(stderr, "ntpdate -sd [-o tz] server\n");
+    fprintf(stderr, "ntpdate -sd [-o tz] [-O seconds] server\n");
     exit(1);
 }
 
@@ -101,9 +101,10 @@ int main( int argc, char *argv[] ){
        the end of it - which is what dated a good reply to 1890. */
     time_t uv = 0;
     int tz = 0;
+    long tzsec = 0;
     struct ntp_t *ptr = (struct ntp_t *)buf;
 
-    while ((rv = getopt( argc, argv, "p:o:ds" )) > 0 ){
+    while ((rv = getopt( argc, argv, "p:o:O:ds" )) > 0 ){
 	switch (rv){
 	case 'p':
 	    port = atoi( optarg );
@@ -114,6 +115,13 @@ int main( int argc, char *argv[] ){
 		fprintf(stderr, "bad timezone\n");
 		exit(1);
 	    }
+	    break;
+	case 'O':
+	    /* an offset in whole SECONDS, on top of -o: half-hour and
+	       quarter-hour zones exist and -o's integer hours cannot
+	       say them.  No range gate: the caller (BASIC's WEB NTP)
+	       has already applied MMBasic's own -12..14 hour check. */
+	    tzsec = atol( optarg );
 	    break;
 	case 's':
 	    setflg = 1;
@@ -152,6 +160,7 @@ int main( int argc, char *argv[] ){
     uv = (time_t)ntohl(ptr->xmit.sec);
     uv -= 2208988800LL;	/* 1900 -> 1970; too big for a signed long */
     uv += tz * 60 * 60;
+    uv += tzsec;
 
     if (disflg || !setflg)
 	printf(ctime(&uv));

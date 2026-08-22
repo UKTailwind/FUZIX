@@ -3766,6 +3766,11 @@ class Conv(object):
         'VERSION':    ('mm_ver()', TY_F),
         'ERRNO':      ('mm_errno()', TY_I),
         'ERRMSG':     ('mm_errmsg()', TY_S),
+        # the reference is time_us_64()/1000000.0 as a FLOAT
+        # (MM_Misc.c fun_info UPTIME); mm_us() is the same 64-bit
+        # microsecond clock - the kernel's on the board, so seconds
+        # since boot, which is what the WebMite's index.html shows
+        'UPTIME':     ('((MMFLOAT)mm_us() / 1000000.0)', TY_F),
     }
     # ... and the ones that take an expression after the keyword.
     MMINFO_ARG = {
@@ -8163,6 +8168,53 @@ class Conv(object):
                 self.do_web_page()
                 return
             self.err("WEB TRANSMIT takes CODE, FILE or PAGE")
+        if self.accept_kw('NTP'):
+            # WEB NTP [offset [, server$ [, timeout]]] - cmd_ntp
+            # (MMntp.c) mapped onto ntpdate(8); mmb_net.h says how.
+            # The timeout is parsed and dropped: ntpdate carries its
+            # own retry cadence, inside MMBasic's 5 s default.
+            self.uses_net = True
+            off = '0.0'
+            server = c_string_literal('')
+            if not self.stmt_end():
+                off = self.as_flt(self.expr())
+                if self.accept_op(','):
+                    server = self.as_str(self.expr())
+                    if self.accept_op(','):
+                        self.as_int(self.expr())
+            self.emit('mmg_web_ntp(%s, %s);' % (off, server))
+            return
+        if self.accept_kw('PING'):
+            # WEB PING addr$ [, count] - ping(8) with its output on
+            # the console; the replicated WebMite build has no PING
+            # of its own, so the mapping is the reference
+            # (PLAN-web.md 12.2).
+            self.uses_net = True
+            addr = self.as_str(self.expr())
+            cnt = '4'
+            if self.accept_op(','):
+                cnt = self.as_int(self.expr())
+            self.emit('mmg_web_ping(%s, %s);' % (addr, cnt))
+            return
+        if self.accept_kw('CONNECT'):
+            # No arguments: the WebMite's link gate - error "WIFI not
+            # connected" when the radio has no address.  With ssid$,
+            # pass$: wifi(8) joins and waits, NOT persisted -
+            # /etc/wifi.conf stays the owner of the boot-time join
+            # (PLAN-web.md 12.2).
+            self.uses_net = True
+            if self.stmt_end():
+                self.emit('mmg_web_connect_chk();')
+                return
+            ssid = self.as_str(self.expr())
+            self.expect_op(',')
+            key = self.as_str(self.expr())
+            self.emit('mm_run_begin();')
+            self.emit('mm_run_arg(%s);' % c_string_literal('wifi'))
+            self.emit('mm_run_arg(%s);' % ssid)
+            self.emit('mm_run_arg(%s);' % key)
+            self.emit('mm_run_exec();')
+            return
         self.err("this WEB command is not implemented yet - the family "
                  "arrives in stages (PLAN-web.md)")
 
