@@ -1210,6 +1210,57 @@ static MMChan *mm_ch(MMINTEGER fnbr, int forwrite)
     return &mm_chan[fnbr];
 }
 
+/*
+ * MMBasic filename -> this machine's, in one place.
+ *
+ * A WebMite program writes "A:/settings.dat" - drive letter, root of
+ * the internal flash - and MMBasic accepts backslashes as separators.
+ * This machine has one filesystem and no drive letters (MM.INFO(DRIVE)
+ * already answers a constant "A:"), so the drive prefix comes OFF,
+ * along with the slash that follows it: the drive root maps to the
+ * directory the program runs from, which is where a migrated
+ * program's files landed.  "A:x" without the slash is drive-relative
+ * in MMBasic and maps the same way.  Backslashes become slashes.
+ *
+ * A BARE leading slash is NOT touched: on the WebMite "/x" is the
+ * root of the current drive, but on this machine an absolute path is
+ * meaningful and already load-bearing - /etc/gmail.conf, /etc/ca.pem
+ * - so the native meaning wins.  PLAN-web.md 12.4 carries the
+ * divergence for the migration section.
+ *
+ * Two buffers, not one: mm_rename hands rename(2) both names at once.
+ */
+static char mm_fnbuf[2][MM_STRSZ];
+
+static const char *mm_fname_in(const char *mmstr, int which)
+{
+    const char *c = mm_cstr(mmstr);
+    const char *p = c;
+    const char *q;
+    char *o;
+    int bs = 0;
+
+    if ((p[0] == 'A' || p[0] == 'a' || p[0] == 'B' || p[0] == 'b')
+        && p[1] == ':') {
+        p += 2;
+        if (p[0] == '/' || p[0] == '\\')
+            p++;
+    }
+    for (q = p; *q; q++)
+        if (*q == '\\')
+            bs = 1;
+    if (p == c && !bs)
+        return c;                  /* the common case: untouched */
+    o = mm_fnbuf[which];
+    for (q = p; *q && (q - p) < MM_STRSZ - 1; q++)
+        o[q - p] = (*q == '\\') ? '/' : *q;
+    o[q - p] = 0;
+    return o;
+}
+
+#define mm_fname(s)  mm_fname_in(s, 0)
+#define mm_fname2(s) mm_fname_in(s, 1)
+
 void mm_open(const char *fname, int mode, MMINTEGER fnbr)
 {
     const char *m;
@@ -1222,8 +1273,8 @@ void mm_open(const char *fname, int mode, MMINTEGER fnbr)
     case MM_F_APPEND: m = "ab";  break;
     default:          m = "r+b"; break;          /* RANDOM */
     }
-    f = fopen(mm_cstr(fname), m);
-    if (!f && mode == MM_F_RANDOM) f = fopen(mm_cstr(fname), "w+b");
+    f = fopen(mm_fname(fname), m);
+    if (!f && mode == MM_F_RANDOM) f = fopen(mm_fname(fname), "w+b");
     if (!f) {
         /* an MMBasic string is at most MM_STRLEN bytes, so this cannot
            overrun and needs no snprintf */
@@ -1509,25 +1560,26 @@ void mm_kill(const char *fname)
 #ifdef MM_HOSTED
     /* Fuzix libc has no ISO C remove(); unlink is already declared by
      * bcrun's own headers in the hosted translation unit. */
-    if (unlink(mm_cstr(fname)) != 0) MM_RAISE("Cannot delete the file");
+    if (unlink(mm_fname(fname)) != 0) MM_RAISE("Cannot delete the file");
 #else
-    if (remove(mm_cstr(fname)) != 0) MM_RAISE("Cannot delete the file");
+    if (remove(mm_fname(fname)) != 0) MM_RAISE("Cannot delete the file");
 #endif
 }
 
 void mm_rename(const char *from, const char *to)
 {
-    if (rename(mm_cstr(from), mm_cstr(to)) != 0) mm_error("Cannot rename");
+    if (rename(mm_fname(from), mm_fname2(to)) != 0)
+        mm_error("Cannot rename");
 }
 
 void mm_copy(const char *from, const char *to)
 {
-    FILE *a = fopen(mm_cstr(from), "rb");
+    FILE *a = fopen(mm_fname(from), "rb");
     FILE *b;
     char buf[512];
     size_t n;
     if (!a) MM_RAISE("Cannot open the source file");
-    b = fopen(mm_cstr(to), "wb");
+    b = fopen(mm_fname2(to), "wb");
     if (!b) { fclose(a); MM_RAISE("Cannot open the destination file"); }
     while ((n = fread(buf, 1, sizeof buf, a)) > 0) fwrite(buf, 1, n, b);
     fclose(a);
@@ -1550,9 +1602,10 @@ void mm_copy(const char *from, const char *to)
 void mm_mkdir(const char *path)
 {
 #ifdef _WIN32
-    if (_mkdir(mm_cstr(path)) != 0) MM_RAISE("Cannot create the directory");
+    if (_mkdir(mm_fname(path)) != 0) MM_RAISE("Cannot create the directory");
 #else
-    if (mkdir(mm_cstr(path), 0777) != 0) MM_RAISE("Cannot create the directory");
+    if (mkdir(mm_fname(path), 0777) != 0)
+        MM_RAISE("Cannot create the directory");
 #endif
 }
 
@@ -1568,9 +1621,9 @@ void mm_rmdir(const char *path)
 void mm_chdir(const char *path)
 {
 #ifdef _WIN32
-    if (_chdir(mm_cstr(path)) != 0) MM_RAISE("Cannot change directory");
+    if (_chdir(mm_fname(path)) != 0) MM_RAISE("Cannot change directory");
 #else
-    if (chdir(mm_cstr(path)) != 0) MM_RAISE("Cannot change directory");
+    if (chdir(mm_fname(path)) != 0) MM_RAISE("Cannot change directory");
 #endif
 }
 
@@ -1716,12 +1769,12 @@ MMINTEGER mm_exists_file(const char *path)
 {
 #ifdef _WIN32
     struct _stat st;
-    if (_stat(mm_cstr(path), &st) != 0)
+    if (_stat(mm_fname(path), &st) != 0)
         return 0;
     return (st.st_mode & _S_IFDIR) ? -1 : 1;
 #else
     struct stat st;
-    if (stat(mm_cstr(path), &st) != 0)
+    if (stat(mm_fname(path), &st) != 0)
         return 0;
     return S_ISDIR(st.st_mode) ? -1 : 1;
 #endif
@@ -1731,12 +1784,12 @@ MMINTEGER mm_exists_dir(const char *path)
 {
 #ifdef _WIN32
     struct _stat st;
-    if (_stat(mm_cstr(path), &st) != 0)
+    if (_stat(mm_fname(path), &st) != 0)
         return 0;
     return (st.st_mode & _S_IFDIR) ? 1 : 0;
 #else
     struct stat st;
-    if (stat(mm_cstr(path), &st) != 0)
+    if (stat(mm_fname(path), &st) != 0)
         return 0;
     return S_ISDIR(st.st_mode) ? 1 : 0;
 #endif
@@ -1746,12 +1799,12 @@ MMINTEGER mm_filesize(const char *path)
 {
 #ifdef _WIN32
     struct _stat st;
-    if (_stat(mm_cstr(path), &st) != 0)
+    if (_stat(mm_fname(path), &st) != 0)
         return -1;
     return (st.st_mode & _S_IFDIR) ? -2 : (MMINTEGER)st.st_size;
 #else
     struct stat st;
-    if (stat(mm_cstr(path), &st) != 0)
+    if (stat(mm_fname(path), &st) != 0)
         return -1;
     /* MMBasic's FileSize answers -2 for a directory and -1 for nothing
        there, so a caller can tell the two apart without a second call. */
