@@ -117,6 +117,21 @@ sh "$P/devtools/mkexamples.sh" "$EX/mmbasic" > "$FS.ex.log" 2>&1 || {
 		done
 		echo "cd .."
 	fi
+	# The reticulation controller ships the same way robots does: the
+	# program with its data - here the three web pages and the
+	# migration notes - beside it, run from its own directory (the
+	# pages resolve against the cwd, and CPU RESTART re-execs by
+	# relative path).  bget for everything: the pages are text today,
+	# but a binary-safe copy never corrupts and a text-mode one might.
+	if [ -d "$EX/mmbasic/retic" ]; then
+		echo "mkdir retic"
+		echo "cd retic"
+		for f in "$EX"/mmbasic/retic/*; do
+			[ -f "$f" ] || continue
+			echo "bget $f $(basename "$f")"
+		done
+		echo "cd .."
+	fi
 	echo "exit"
 } | "$R/Standalone/ucp" "$FS" > "$FS.ucp.log" 2>&1
 if grep -q "error number" "$FS.ucp.log"; then
@@ -127,6 +142,9 @@ fi
 echo "    $(ls "$EX"/mmbasic/*.bas | wc -l) programs in /root/MMBasic"
 if [ -d "$EX/mmbasic/robots" ]; then
 	echo "    $(find "$EX"/mmbasic/robots -type f | wc -l) robots resource files"
+fi
+if [ -d "$EX/mmbasic/retic" ]; then
+	echo "    $(find "$EX"/mmbasic/retic -type f | wc -l) retic files"
 fi
 rm -rf "$EX" "$FS.ucp.log" "$FS.ex.log"
 

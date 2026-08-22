@@ -137,6 +137,26 @@ else
     echo "  robots from the manifest." >&2
 fi
 
+# The reticulation controller - the WEB family's acceptance
+# application (Geoff Graham's retic.bas, ported; see its
+# MIGRATION.md).  Unlike robots' art, everything it needs is IN the
+# git tree, so this is unconditional and FATAL if short: a retic/
+# without its pages serves 404s, which looks like a broken port
+# rather than a missing file.  It lives in its own directory for the
+# same reason robots does - the pages are found relative to where it
+# runs, and CPU RESTART re-execs it by relative path.
+RETIC=$M/retic
+mkdir -p "$OUT/retic"
+for f in retic.bas index.html config.html setup.html MIGRATION.md; do
+    if [ ! -f "$RETIC/$f" ]; then
+        echo "mkexamples: $RETIC/$f missing - not building a card with"\
+             "half a reticulation controller" >&2
+        exit 1
+    fi
+    cp "$RETIC/$f" "$OUT/retic/$f"
+done
+echo "retic: 5 files"
+
 # The README, built from the same manifest so the two cannot drift.
 {
     cat <<'HEAD'
@@ -186,6 +206,17 @@ started:
     mmbc robots.bas
     cc robots.c
     ./robots.bc
+
+retic/ is a whole product: Geoff Graham's WebMite reticulation
+(sprinkler) controller, ported - a web server you configure from a
+browser at this machine's address on port 80.  Its MIGRATION.md
+lists every change the port made and why.  Like robots it must be
+run from its own directory (the web pages live beside it):
+
+    cd /root/MMBasic/retic
+    mmbc retic.bas -o retic.c
+    cc -o retic retic.c
+    ./retic
 
 It takes a few minutes to compile.  Play it with the arrow keys and
 space, or with a switch array on GP34-GP41 (the Game*Mite layout).
