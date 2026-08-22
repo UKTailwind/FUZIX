@@ -1898,6 +1898,47 @@ void statement_inner(void)
             mode = "MMG_PIN_PWM";
             cv.uses_pwm = 1;
         }
+        else if (accept_kw("FIN")) {
+            /* SETPIN pin, FIN [, gate] - the counting inputs, and CIN
+               and PIN below.  GP4-GP7 only (MMBasic's INT1-INT4, fixed
+               on this machine - no OPTION COUNT), the one pin family
+               whose work lives in the kernel; mmb_gpio.h and
+               PLAN-count.md have the story.  The optional third
+               argument is validated at RUN time as MMBasic's getint is
+               - it can be an expression, like the pin. */
+            const char *arg;
+            cv.uses_gpio = 1;
+            if (accept_op(","))
+                arg = as_int(expr());
+            else
+                arg = "1000";
+            emit(sfmt("mmg_setpin_fin(%s, %s);", pin, arg));
+            return;
+        }
+        else if (accept_kw("CIN")) {
+            const char *arg;
+            cv.uses_gpio = 1;
+            if (accept_op(","))
+                arg = as_int(expr());
+            else
+                arg = "1";
+            emit(sfmt("mmg_setpin_cin(%s, %s);", pin, arg));
+            return;
+        }
+        else if (accept_kw("PIN")) {
+            /* Period: the mode WORD is PIN, matched here before the
+               pin-pair fallthrough can read it as an expression -
+               MMBasic checkstrings it the same way (External.c:1604
+               area). */
+            const char *arg;
+            cv.uses_gpio = 1;
+            if (accept_op(","))
+                arg = as_int(expr());
+            else
+                arg = "1";
+            emit(sfmt("mmg_setpin_per(%s, %s);", pin, arg));
+            return;
+        }
         else {
             /* SETPIN sda, scl, I2C2   - the pin-PAIR form
                SETPIN p1, p2, p3, SPI  - the pin-TRIPLE form
@@ -1916,9 +1957,9 @@ void statement_inner(void)
             expect_op(",");
             if (!accept_kw("SPI")) {
                 cv_err("SETPIN takes DIN, DOUT, AIN, ARAW, "
-                       "INTH, INTL, INTB, PWM or OFF, or a pin pair "
-                       "followed by I2C2, or a pin triple followed by "
-                       "SPI");
+                       "INTH, INTL, INTB, PWM, FIN, CIN, PIN or OFF, "
+                       "or a pin pair followed by I2C2, or a pin "
+                       "triple followed by SPI");
                 return;
             }
             cv.uses_spi = 1;

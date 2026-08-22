@@ -244,6 +244,13 @@
  * it: ITABSIZE x 192 extra bytes overflowed RAM by 10K. ---- */
 *hardware_i2c/i2c.c.o(.text*)
 *hardware_pio/pio.c.o(.text*)
+/* gpio.c is here MINUS gpio_default_irq_handler: the counting inputs
+ * (countpin.c) take an edge interrupt per pulse through that dispatcher
+ * at priority 0, so it must run from RAM.  A pre-link objcopy renames
+ * its section to .time_critical.* (relocate_gpio_irq_to_ram.cmake,
+ * ported from PicoMite), which this .text* glob then no longer matches;
+ * the SDK's RAM .data section collects .time_critical* instead.  ~100
+ * bytes of RAM against ~3K if the whole object moved back. */
 *hardware_gpio/gpio.c.o(.text*)
 *hardware_adc/adc.c.o(.text*)
 *hardware_spi/spi.c.o(.text*)
@@ -398,3 +405,16 @@
  * rather than SRAM - so both are back in RAM where they perform best.
  * They remain on the shelf in PC3-FLASH-PLAN.md, measured, if SRAM is
  * ever needed again. */
+
+/* ---- countpin.c, the cold side only ----
+ *
+ * The counting inputs (SETPIN FIN/CIN/PER).  The two callbacks -
+ * cnt_gpio_cb, taking an edge per pulse at priority 0, and cnt_tick_cb,
+ * the 1ms gate - are the hottest interrupt code in the kernel and stay
+ * in RAM by NOT being named here.  What is listed is the syscall-side
+ * ioctl (with cnt_config usually inlined into it) and the teardown
+ * paths, which run at SETPIN speed and process death. */
+*countpin.c.o(.text.countpin_ioctl)
+*countpin.c.o(.text.cnt_config)
+*countpin.c.o(.text.countpin_reset)
+*countpin.c.o(.text.cnt_timer_check)

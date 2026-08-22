@@ -6001,6 +6001,41 @@ class Conv(object):
             elif self.accept_kw('PWM'):
                 mode = 'MMG_PIN_PWM'
                 self.uses_pwm = True
+            elif self.accept_kw('FIN'):
+                # SETPIN pin, FIN [, gate] - the counting inputs, and
+                # CIN and PIN below.  GP4-GP7 only (MMBasic's INT1-INT4,
+                # fixed on this machine - no OPTION COUNT), the one pin
+                # family whose work lives in the kernel; mmb_gpio.h and
+                # PLAN-count.md have the story.  The optional third
+                # argument is validated at RUN time as MMBasic's getint
+                # is - it can be an expression, like the pin.
+                self.uses_gpio = True
+                if self.accept_op(','):
+                    arg = self.as_int(self.expr())
+                else:
+                    arg = '1000'
+                self.emit('mmg_setpin_fin(%s, %s);' % (pin, arg))
+                return
+            elif self.accept_kw('CIN'):
+                self.uses_gpio = True
+                if self.accept_op(','):
+                    arg = self.as_int(self.expr())
+                else:
+                    arg = '1'
+                self.emit('mmg_setpin_cin(%s, %s);' % (pin, arg))
+                return
+            elif self.accept_kw('PIN'):
+                # Period: the mode WORD is PIN, matched here before the
+                # pin-pair fallthrough can read it as an expression -
+                # MMBasic checkstrings it the same way (External.c:1604
+                # area).
+                self.uses_gpio = True
+                if self.accept_op(','):
+                    arg = self.as_int(self.expr())
+                else:
+                    arg = '1'
+                self.emit('mmg_setpin_per(%s, %s);' % (pin, arg))
+                return
             else:
                 # SETPIN sda, scl, I2C2      - the pin-PAIR form
                 # SETPIN p1, p2, p3, SPI     - the pin-TRIPLE form
@@ -6022,9 +6057,9 @@ class Conv(object):
                 self.expect_op(',')
                 if not self.accept_kw('SPI'):
                     self.err("SETPIN takes DIN, DOUT, AIN, ARAW, "
-                             "INTH, INTL, INTB, PWM or OFF, or a pin "
-                             "pair followed by I2C2, or a pin triple "
-                             "followed by SPI")
+                             "INTH, INTL, INTB, PWM, FIN, CIN, PIN "
+                             "or OFF, or a pin pair followed by I2C2, "
+                             "or a pin triple followed by SPI")
                 self.uses_spi = True
                 # Any order: which signal each pin carries is decided by
                 # the pin number, not by its position here, exactly as

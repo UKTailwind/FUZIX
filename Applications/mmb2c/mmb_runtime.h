@@ -640,12 +640,44 @@ char *mm_inkey(void);
 #define MM_GPIO_CLAIM 3
 MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
 
+/* The counting inputs - SETPIN FIN/CIN/PER on GP4-GP7 (kernel:
+ * countpin.c; design: PLAN-count.md).  The ONE pin mode that is not a
+ * register store: counting needs an interrupt, so the counters live in
+ * the kernel and every crossing goes through here.
+ *
+ * A NEW libcall rather than new ops inside mm_gpio, deliberately: the
+ * FIN gate does not fit mm_gpio's byte-packed wire struct, and - the
+ * deciding reason - bcrun's skew protection refuses by libcall NAME,
+ * so a program using counting on an old bcrun is refused at load
+ * instead of misbehaving through mm_gpio's default case.
+ *
+ * op is one of the six below.  val carries the gate/option/cycles for
+ * a configure, the new count for SET, and comes back as the reading
+ * for READ (live count on CIN, the last completed gate's latch on
+ * FIN/PER - the scaling to Hz or ms is mmb_gpio.h's).  Configure, SET
+ * and OFF return 0 or -1 refused; a refused READ returns 0, because
+ * -1 is a value a CIN counter can legitimately hold (Pin(n) = -1). */
+#define MM_PINCT_FIN  0
+#define MM_PINCT_CIN  1
+#define MM_PINCT_PER  2
+#define MM_PINCT_READ 3
+#define MM_PINCT_SET  4
+#define MM_PINCT_OFF  5
+MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
+
 /* The ioctls, from the kernel's gpio.h.  Duplicated rather than
  * included, as the graphics numbers are, so the runtime does not need
  * the FUZIX tree on its include path.  Keep them in step. */
 #define MM_GPIOC_SET     0x0531
 #define MM_GPIOC_SETRW   0x0534
 #define MM_GPIOC_GETBYTE 0x0533
+/* and the counting block, from the kernel's pico_ioctl.h */
+#define MM_GPIOC_CNT_FIN  0x0537
+#define MM_GPIOC_CNT_CIN  0x0538
+#define MM_GPIOC_CNT_PER  0x0539
+#define MM_GPIOC_CNT_READ 0x053A
+#define MM_GPIOC_CNT_SET  0x053B
+#define MM_GPIOC_CNT_OFF  0x053C
 /* pinlock, from the kernel's pico_ioctl.h - on /dev/sys, not /dev/gpio */
 #define MM_PLKIOC_CLAIM  0x0026
 /* and the classes it names.  PLK_PIN and PLK_ADC are all SETPIN needs;

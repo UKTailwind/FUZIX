@@ -2,6 +2,8 @@
 #include <kdata.h>
 #include <gpio.h>
 #include "picosdk.h"
+#include "pico_ioctl.h"
+#include "countpin.h"
 
 /*
  * Raspberry Pi Pico GPIO.
@@ -40,6 +42,12 @@ int gpio_ioctl(uarg_t request, char *data)
 
     if (request == GPIOC_COUNT)
         return NUM_PINS;
+
+    /* The counting inputs, GP4-GP7 (countpin.c).  Routed before the
+       uget below because their requests carry struct cntreq, not
+       struct gpioreq. */
+    if (request >= GPIOC_CNT_FIN && request <= GPIOC_CNT_OFF)
+        return countpin_ioctl(request, data);
 
     if (uget(data, &gr, sizeof(struct gpioreq)) == -1)
         return -1;

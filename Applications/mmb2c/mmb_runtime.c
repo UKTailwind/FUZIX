@@ -5107,6 +5107,41 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
     return r ? -1 : 0;
 }
 
+/* The counting inputs (see mmb_runtime.h for why this is its own
+ * libcall).  The struct is the kernel's cntreq, laid out by hand for
+ * the reason mm_gpio's is: the runtime does not carry the FUZIX tree
+ * on its include path.  val doubles as the configure argument - the
+ * kernel reads arg for a configure and val for SET, and filling both
+ * costs nothing. */
+MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
+{
+    struct {
+        unsigned char pin, pad1;
+        unsigned short pad2;
+        long arg;
+        long long v;
+    } cr;
+    static const unsigned short req[6] = {
+        MM_GPIOC_CNT_FIN, MM_GPIOC_CNT_CIN, MM_GPIOC_CNT_PER,
+        MM_GPIOC_CNT_READ, MM_GPIOC_CNT_SET, MM_GPIOC_CNT_OFF
+    };
+
+    if (op < 0 || op > 5)
+        return -1;
+    if (mm_gpio_fd == -2)
+        mm_gpio_fd = open("/dev/gpio", O_RDWR);
+    if (mm_gpio_fd < 0)
+        return op == MM_PINCT_READ ? 0 : -1;
+    cr.pin = (unsigned char)pin;
+    cr.pad1 = 0;
+    cr.pad2 = 0;
+    cr.arg = (long)val;
+    cr.v = val;
+    if (ioctl(mm_gpio_fd, req[op], &cr))
+        return op == MM_PINCT_READ ? 0 : -1;
+    return op == MM_PINCT_READ ? (MMINTEGER)cr.v : 0;
+}
+
 #else   /* host: no display, but translated programs must still run */
 
 /* Nothing is ever queued here, so the rule costs a call the optimiser
@@ -5121,6 +5156,35 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
 {
     (void)op; (void)pin; (void)val;
     return 0;
+}
+
+/* The counting inputs, MODELLED rather than stubbed - the hostlatch
+ * philosophy from mmb_gpio.h: nothing counts here, but Pin(n) = v
+ * followed by Pin(n) must round-trip, so the one thing the host CAN
+ * check - the program's own arithmetic around PIN - is on the tested
+ * path.  A configure zeroes the counter as the kernel's does; READ
+ * gives it back; the count pins are GP4-GP7 as on the board, so a
+ * program asking for the wrong pin fails under the gates too. */
+MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
+{
+    static MMINTEGER cnt[4];
+
+    if (pin < 4 || pin > 7)
+        return op == MM_PINCT_READ ? 0 : -1;
+    switch (op) {
+    case MM_PINCT_FIN:
+    case MM_PINCT_CIN:
+    case MM_PINCT_PER:
+    case MM_PINCT_OFF:
+        cnt[pin - 4] = 0;
+        return 0;
+    case MM_PINCT_READ:
+        return cnt[pin - 4];
+    case MM_PINCT_SET:
+        cnt[pin - 4] = val;
+        return 0;
+    }
+    return -1;
 }
 
 /* With no screen to draw on, PRINT stays on the console and @(x,y)

@@ -41,6 +41,7 @@
 #include "config.h"
 #include "pico_ioctl.h"
 #include "pinlock.h"
+#include "countpin.h"
 #include <hardware/gpio.h>
 #include <hardware/i2c.h>
 #include <hardware/spi.h>
@@ -149,6 +150,12 @@ static void reset_one(uint8_t cls, uint8_t idx)
 {
 	switch (cls) {
 	case PLK_PIN:
+		/* Counting first, and it cannot be skipped: gpio_init()
+		   does NOT clear IO_BANK0's interrupt enables, so a
+		   program killed while SETPIN FIN/CIN/PER was live would
+		   otherwise leave a priority-0 IRQ counting into dead
+		   state forever.  A no-op for every pin but GP4-GP7. */
+		countpin_reset(idx);
 		gpio_init(idx);		/* SIO, dir in, out low */
 		gpio_set_dir(idx, GPIO_IN);
 		gpio_disable_pulls(idx);

@@ -154,6 +154,15 @@ MMG_FN int mmg_claim(MMINTEGER pin, MMINTEGER cls)
  *	the pin is from the pin itself (External.c:1686) and so does this
  *	- the mapping is arithmetic on the RP2350, not a table. */
 #define MMG_PIN_PWM	8
+/*	The counting inputs: frequency, count, and period (whose MMBasic
+ *	mode word is PIN).  GP4-GP7 only - MMBasic's INT1-INT4, fixed on
+ *	this machine (no OPTION COUNT) - and the ONE pin family that is
+ *	not a register store from here: counting needs an interrupt, so
+ *	the counters live in the kernel (countpin.c) and every touch goes
+ *	through mm_pinct.  PLAN-count.md is the design. */
+#define MMG_PIN_FIN	9
+#define MMG_PIN_CIN	10
+#define MMG_PIN_PER	11
 
 static unsigned char mmg_mode[MM_GPIO_NPINS];
 
@@ -185,6 +194,20 @@ MMG_FN int mmg_adc_chan(MMINTEGER pin)
  *	Hysteresis is not an option there and is not one here: every
  *	digital input MMBasic configures gets the Schmitt trigger, and
  *	pc3_pin_in does the same. */
+/*	Leaving a counting mode has to tell the kernel: its edge IRQ and
+ *	its counter do not stop themselves.  MMBasic's ExtCfg begins every
+ *	reconfiguration by disabling the pin's count interrupt
+ *	(External.c:790-821), and this is that head in our shape - called
+ *	by mmg_setpin for every ordinary mode INCLUDING OFF, and by the
+ *	count configurations themselves (where the kernel also resets, so
+ *	a FIN-to-CIN change is safe from either end). */
+MMG_FN void mmg_cnt_leave(MMINTEGER pin)
+{
+	if (mmg_mode[pin] == MMG_PIN_FIN || mmg_mode[pin] == MMG_PIN_CIN
+	    || mmg_mode[pin] == MMG_PIN_PER)
+		mm_pinct(MM_PINCT_OFF, pin, 0);
+}
+
 MMG_FN void mmg_setpin(MMINTEGER pin, MMINTEGER mode, MMINTEGER pull)
 {
 	int ch;
@@ -193,6 +216,7 @@ MMG_FN void mmg_setpin(MMINTEGER pin, MMINTEGER mode, MMINTEGER pull)
 		mm_error("Invalid pin");
 		return;
 	}
+	mmg_cnt_leave(pin);
 	if (mode == MMG_PIN_AIN || mode == MMG_PIN_ARAW) {
 		ch = mmg_adc_chan(pin);
 		/*	One converter shared by every channel, so the ADC
@@ -231,6 +255,56 @@ MMG_FN void mmg_setpin(MMINTEGER pin, MMINTEGER mode, MMINTEGER pull)
 	mmg_mode[pin] = (unsigned char)mode;
 }
 
+/*	The counting configurations.  One shared core, three thin names,
+ *	so a program using only CIN carries almost nothing of FIN.
+ *
+ *	The third argument is remembered per count pin because PIN()
+ *	needs it to scale: the kernel latches raw counts (edges per gate
+ *	for FIN, ms per window for PER) and the arithmetic that MMBasic
+ *	does in fun_pin (External.c:2140-2159) is done here.  Four
+ *	entries indexed pin-4, and the index is safe because the mode is
+ *	only ever set after the KERNEL accepted the pin - it refuses
+ *	anything but GP4-GP7, which is MMBasic's "not an interrupt
+ *	enabled pin" check (External.c:1090) in our shape.
+ *
+ *	Ranges are MMBasic's getint() bounds at the SETPIN
+ *	(External.c:1960-1977); the pin itself can be any expression, so
+ *	all of it is run-time checking, as it is there. */
+static long mmg_cntarg[4];
+
+MMG_FN void mmg_setpin_cnt(MMINTEGER pin, MMINTEGER mode, MMINTEGER op,
+			   MMINTEGER arg, MMINTEGER lo, MMINTEGER hi,
+			   const char *emsg)
+{
+	if (pin < 0 || pin >= MM_GPIO_NPINS)
+		MM_RAISE("Invalid pin");
+	if (arg < lo || arg > hi)
+		MM_RAISE(emsg);
+	mmg_cnt_leave(pin);
+	if (mmg_claim(pin, MM_PLK_PIN) || mm_pinct(op, pin, arg))
+		MM_RAISE("Pin cannot do that");
+	mmg_cntarg[pin - 4] = (long)arg;
+	mmg_mode[pin] = (unsigned char)mode;
+}
+
+MMG_FN void mmg_setpin_fin(MMINTEGER pin, MMINTEGER gate)
+{
+	mmg_setpin_cnt(pin, MMG_PIN_FIN, MM_PINCT_FIN, gate, 1, 100000,
+		       "Invalid gate time");
+}
+
+MMG_FN void mmg_setpin_cin(MMINTEGER pin, MMINTEGER option)
+{
+	mmg_setpin_cnt(pin, MMG_PIN_CIN, MM_PINCT_CIN, option, 1, 10,
+		       "Invalid count option");
+}
+
+MMG_FN void mmg_setpin_per(MMINTEGER pin, MMINTEGER cycles)
+{
+	mmg_setpin_cnt(pin, MMG_PIN_PER, MM_PINCT_PER, cycles, 1, 10000,
+		       "Invalid cycle count");
+}
+
 /*	PIN(n) = v.  Kept separate from the read so that a program doing
  *	only one of them carries only that one.
  *
@@ -243,6 +317,12 @@ MMG_FN void mmg_pin_put(MMINTEGER pin, MMINTEGER val)
 {
 	if (pin < 0 || pin >= MM_GPIO_NPINS)
 		mm_error("Invalid pin");
+	else if (mmg_mode[pin] == MMG_PIN_CIN)
+		/*	Pin(n) = v on a counting input stores v into the
+		 *	live count - ANY v, not just the zero every program
+		 *	actually writes (External.c:603-613).  FIN and PER
+		 *	fall through to MMBasic's refusal below. */
+		mm_pinct(MM_PINCT_SET, pin, val);
 	else if (mmg_mode[pin] != MMG_PIN_DOUT)
 		mm_error("Pin is not an output");
 	else
@@ -285,6 +365,27 @@ MMG_FN MMFLOAT mmg_pin_get(MMINTEGER pin)
 		 *	what it is driving; an interrupt pin is a digital
 		 *	input and reads as one. */
 		return (MMFLOAT)pc3_pin_get((int)pin);
+
+	case MMG_PIN_CIN:
+		/*	The LIVE count, as MMBasic reads it (fun_pin puts
+		 *	CIN in the digital group, External.c:2121, and
+		 *	ExtInp answers INT1Count, 1565-1569).  A double is
+		 *	exact to 2^53 edges - 285 years at a megahertz. */
+		return (MMFLOAT)mm_pinct(MM_PINCT_READ, pin, 0);
+
+	case MMG_PIN_FIN:
+		/*	The last completed gate's count, scaled to Hz -
+		 *	fun_pin's value*1000/gate (External.c:2151-2159).
+		 *	Zero until the first gate completes, faithfully. */
+		return (MMFLOAT)mm_pinct(MM_PINCT_READ, pin, 0)
+			* (MMFLOAT)1000.0 / (MMFLOAT)mmg_cntarg[pin - 4];
+
+	case MMG_PIN_PER:
+		/*	Milliseconds per cycle, averaged over the cycles
+		 *	asked for - fun_pin's value/cycles (External.c:
+		 *	2140-2148). */
+		return (MMFLOAT)mm_pinct(MM_PINCT_READ, pin, 0)
+			/ (MMFLOAT)mmg_cntarg[pin - 4];
 
 	case MMG_PIN_ARAW:
 		/*	The raw count, one conversion, no averaging - which

@@ -134,10 +134,14 @@ add_compile_definitions(
 		#
 		# It costs static RAM only - the default pool and its entries are
 		# static objects, not malloc'd, which matters because PICO_HEAP_SIZE
-		# is 0 here.  Two entries (24 bytes each) is one for the tick and
-		# one spare; the SDK default of 16 would be 384 bytes this port
-		# has not got.  Alarm 0 keeps the tick on the same hardware alarm
-		# and the same IRQ it has always used.
+		# is 0 here.  Two entries (24 bytes each): one for the tick, one
+		# for the counting inputs' 1ms gate timer (countpin.c), which
+		# exists only while a SETPIN FIN/PER is live.  The SDK default of
+		# 16 would be 384 bytes this port has not got.  If a third
+		# consumer ever appears, raise this - countpin.c refuses the
+		# SETPIN rather than gating at zero when the pool is full.
+		# Alarm 0 keeps the tick on the same hardware alarm and the same
+		# IRQ it has always used.
 		PICO_TIME_DEFAULT_ALARM_POOL_MAX_TIMERS=2
 		PICO_TIME_DEFAULT_ALARM_POOL_HARDWARE_ALARM_NUM=0
     TOTALMEM=${TOTALMEM}
@@ -196,6 +200,7 @@ add_executable(fuzix
 	i2cuser.c
 	spiuser.c
 	pinlock.c
+	countpin.c
 	usbdescriptors.c
 	../../dev/devi2c.c
 	../../dev/blkdev.c
@@ -257,5 +262,19 @@ target_link_libraries(fuzix pico_cyw43_arch_lwip_poll
 pico_set_float_implementation(fuzix none)
 pico_set_double_implementation(fuzix pico)
 pico_add_linker_script_override_path(fuzix ${CMAKE_CURRENT_LIST_DIR}/linker_overrides)
+
+# The SDK's GPIO IRQ dispatcher must execute from RAM (the counting
+# inputs take an edge interrupt per pulse through it) while the rest of
+# gpio.c stays in flash where the FS32 space move put it.  A pre-link
+# section rename does it - see relocate_gpio_irq_to_ram.cmake, ported
+# from PicoMite, which verifies or dies.
+add_custom_command(TARGET fuzix PRE_LINK
+	COMMAND ${CMAKE_COMMAND}
+		-DOBJ_ROOT=${CMAKE_BINARY_DIR}/CMakeFiles/fuzix.dir
+		-DOBJCOPY=${CMAKE_OBJCOPY}
+		-DOBJDUMP=${CMAKE_OBJDUMP}
+		-P ${CMAKE_CURRENT_LIST_DIR}/relocate_gpio_irq_to_ram.cmake
+	COMMENT "Relocating gpio_default_irq_handler to RAM")
+
 pico_add_extra_outputs(fuzix)
 

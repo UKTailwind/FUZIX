@@ -88,6 +88,43 @@ struct pinlock_req {
 
 #endif	/* PC3_PINLOCK_ABI */
 
+/* ---- the counting inputs: SETPIN FIN / CIN / PER (kernel countpin.c).
+ *
+ *	The one pin mode that is NOT a register store from here: counting
+ *	needs an interrupt, so the counters live in the kernel and these
+ *	ioctls - on /dev/gpio, not /dev/sys - configure and read them.
+ *	The count pins are FIXED: GP4-GP7 only, and the caller must hold
+ *	the pin's PLK_PIN claim first.  arg is the FIN gate in ms
+ *	(1..100000), the PER cycles to average (1..10000) or the CIN
+ *	option (1..10 - MMBasic's table: 2 falling, >=3 both edges; 1/4
+ *	pull-down, 2/5 pull-up).  READ fills val with the live count
+ *	(CIN) or the last completed gate's latched value (FIN: edges per
+ *	gate; PER: elapsed ms per cycles); SET stores val into the live
+ *	count, CIN only.  As everywhere in this file, the authority is
+ *	the kernel's pico_ioctl.h - keep them in step.  Guarded like
+ *	PC3_PINLOCK_ABI above: a program may include this AND the
+ *	kernel's pico_ioctl.h, and both carry the ABI. ---- */
+
+#ifndef PC3_COUNT_ABI
+#define PC3_COUNT_ABI
+
+struct cntreq {
+	unsigned char pin;		/* GPIO number, 4..7 */
+	unsigned char pad1;
+	unsigned short pad2;
+	long arg;
+	long long val;
+};
+
+#define GPIOC_CNT_FIN	0x0537
+#define GPIOC_CNT_CIN	0x0538
+#define GPIOC_CNT_PER	0x0539
+#define GPIOC_CNT_READ	0x053A
+#define GPIOC_CNT_SET	0x053B
+#define GPIOC_CNT_OFF	0x053C
+
+#endif	/* PC3_COUNT_ABI */
+
 /* ---- registers (RP2350: addressmap.h, sio.h, pads_bank0.h, adc.h) ---- */
 
 #define PC3_REG(a)	(*(volatile unsigned long *)(a))

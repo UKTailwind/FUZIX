@@ -997,6 +997,55 @@ struct pinlock_req {
 #endif	/* PC3_PINLOCK_ABI */
 
 /*
+ * Counting inputs - SETPIN FIN / CIN / PER (mmb2c's PLAN-count.md,
+ * countpin.c here).
+ *
+ * These are /dev/gpio codes, NOT /dev/sys ones: they extend the GPIOC_
+ * block from Kernel/include/gpio.h (0x0530-0x0536 upstream) and are
+ * dispatched by devgpio.c to countpin.c.  They live here rather than in
+ * the shared kernel header because the facility is this platform's, and
+ * because ioctlcheck.sh reads this file - the flat space it polices is
+ * /dev/sys's, but a number unique across BOTH devices is cheap and one
+ * table beats two.
+ *
+ * The count pins are FIXED: GP4-GP7, MMBasic's INT1-INT4 in order.
+ * arg is the FIN gate in ms (1..100000), the PER cycles to average
+ * (1..10000), or the CIN option (1..10 - MMBasic's edge/pull table:
+ * 2 falling, >=3 both edges; 1/4 pull-down, 2/5 pull-up).  READ fills
+ * val with the LIVE count (CIN) or the last completed gate's latched
+ * value (FIN/PER); SET stores val into the live count, CIN only, any
+ * value - both exactly as MMBasic's Pin() behaves.
+ *
+ * The caller must hold the pin's PLK_PIN claim.  Counting is the one
+ * pin mode where the kernel holds state and an interrupt, so here the
+ * advisory lock is enforced, and pinlock's death-sweep is what
+ * guarantees a killed program's count IRQ dies with it.
+ *
+ * Guarded like PC3_PINLOCK_ABI above and for the same reason: a
+ * userland program includes <sys/pc3io.h> AND this file, and both
+ * carry the ABI.
+ */
+#ifndef PC3_COUNT_ABI
+#define PC3_COUNT_ABI
+
+struct cntreq {
+	uint8_t pin;		/* GPIO number, 4..7 */
+	uint8_t pad1;
+	uint16_t pad2;
+	int32_t arg;
+	int64_t val;
+};
+
+#define GPIOC_CNT_FIN	0x0537		/* struct cntreq: frequency input */
+#define GPIOC_CNT_CIN	0x0538		/* struct cntreq: counting input */
+#define GPIOC_CNT_PER	0x0539		/* struct cntreq: period input */
+#define GPIOC_CNT_READ	0x053A		/* struct cntreq: val out */
+#define GPIOC_CNT_SET	0x053B		/* struct cntreq: val in, CIN only */
+#define GPIOC_CNT_OFF	0x053C		/* struct cntreq: stop counting */
+
+#endif	/* PC3_COUNT_ABI */
+
+/*
  * CYW43 Wi-Fi (PC3_NET builds).  PC3-NET-PLAN.md.
  *
  * Association has no place in Fuzix's own network ioctls - those are
