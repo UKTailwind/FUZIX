@@ -52,10 +52,9 @@ CAT = {
     "WS2812": 2, "IR": 2, "Humid": 2, "Distance(": 2, "Pulsin(": 2,
     "OneShot": 2, "Bitstream": 2, "SYNC": 2, "Slew": 2, "Keypad": 2,
     "Stepper": 2, "FM": 2, "Calc": 2,
-    # Language and data
-    "Json$(": 2,
-    # System: reads of state the kernel already keeps
-    "WatchDog": 2, "CPU": 2,
+    # Json$(, WatchDog and CPU were category 2 until the WEB campaign
+    # delivered all three (v0.20); their entries are gone because an
+    # entry for a translated name is dead weight that goes stale.
     # Graphics primitives and toys, each self-contained
     "TILE": 2, "Tilemap": 2, "Tilemap(": 2, "Turtle": 2,
     "Frame": 2, "Frame(": 2, "Ray": 2, "Ray(": 2,
@@ -134,7 +133,10 @@ CAT = {
     # take.  Not a gap in the language.
     "GPS(": 5, "Star": 5, "Astro": 5, "Location": 5,
     "MsgBox(": 5, "CtrlVal(": 5, "Click(": 5, "Backlight": 5,
-    "WEB": 5, "Gamepad": 5, "TMC22xx": 5,
+    # WEB sat here as "not applicable" until v0.20 shipped the whole
+    # family through the kernel's own sockets - the judgement was about
+    # the Pico W's radio API, and the machine grew a better answer.
+    "Gamepad": 5, "TMC22xx": 5,
     "Device": 5, "DEVICE(": 5,
     "Keyboard": 5, "Mouse": 5,      # the kernel owns the USB HID devices
     # MMBasic's second SPI bus lands on the pins the SD card uses, and
