@@ -55,102 +55,51 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## New in v0.19
+## New in v0.20
 
-**The machine has networking.** Wi-Fi through the Pico 2 W's CYW43
-radio, a full TCP/IP stack, and TLS that actually checks certificates.
-See [Networking](#networking) for setting it up and using it, and
-[Commands at the `#` prompt](#shell-commands) for the programs.
+**BASIC has the network.** v0.19 gave the machine networking and said
+"BASIC cannot reach it yet"; this release removes that sentence.
+`mmbc` now translates MMBasic's `WEB` family: UDP, the TCP and TLS
+client, the eight-connection web server with interrupt-driven
+dispatch, `WEB TRANSMIT PAGE` with `{expression}` substitution,
+`JSON$`, `WEB NTP`, `WEB PING` and `WEB CONNECT` — plus the pieces a
+WebMite program leans on around them: `OPTION ESCAPE`,
+`MATH(BASE64 ...)`, `MM.INFO(IP ADDRESS / UPTIME / DISK SIZE / MAX
+CONNECTIONS)`, and `A:/file` drive-letter paths. See [Networking from
+BASIC](#web-family) for all of it.
 
-In short: put your network in `/etc/wifi.conf`, run `wifi -f`, and the
-machine is on the internet. `ping`, `ntpdate`, `dig`, `htget` and
-`tlsget` are clients; `httpd` is a small web server; `tlsca` loads the
-certificate bundle that makes TLS *authenticated* rather than merely
-encrypted.
+**The card ships a whole product to prove it.** `/root/MMBasic/retic`
+is Geoff Graham's WebMite reticulation (sprinkler) controller — a
+real shipped application: a web server you configure from a browser,
+schedules, weather from Open Weather Map, email alerts. It compiles
+on the machine and runs. Its `MIGRATION.md` lists every change the
+port needed, and [Migrating a WebMite program](#webmite-migration) is
+the general recipe those changes illustrate.
 
-It costs the memory available to your programs **one 4 KB block per
-running program** — the price of the larger kernel stack a TLS
-handshake needs. Nothing else changed: the packet buffers live in
-PSRAM, not in the pool your programs come out of.
+**Email, from BASIC, through Gmail.** SMTP over TLS on port 465 with
+an App Password — the recipe is in the WEB section, proven against
+the real server. The certificate bundle the machine ships already
+chains Gmail.
 
-**There is one kernel, and it has networking in it.** On a Pico
-Computer 2 the radio is never powered — those pins are that machine's
-SD card and LED — and `wifi` says so:
+**The radio no longer dozes.** The CYW43's power-save mode was never
+being disabled, so the access point held unicast packets for a
+sleeping client: pings wandered between 3 and 300 ms and UDP lost
+packets, with TCP's retransmits papering over it since v0.18. Fixed
+in the kernel — ping now answers in about a millisecond, and
+everything on the network feels it.
 
-    # wifi
-    no radio (Pico Computer 2)
+**Two statements mean something different here, on purpose.**
+`WATCHDOG` is accepted and does nothing — the RP2350's watchdog
+belongs to the kernel on a machine that runs many processes, and the
+translator says so in a warning; wedge recovery is a restart loop in
+`/etc/rc`. `CPU RESTART` re-executes the program rather than
+rebooting the processor, which is what a program that says it means:
+start me over. Both are in the migration section.
 
-**BASIC cannot reach the network yet.** `mmbc` does not translate
-MMBasic's `WEB` commands in this release; that is the next piece of
-work. Everything above is available from the `#` prompt and from C.
-
-**Every program on the machine has about 24 KB more room.** `bcrun` —
-the shared floor under every compiled program, BASIC and C alike — has
-lost a fifth of its size: 99 KB of code down to 80 KB, and 4.5 KB of
-its fixed RAM gone with it. A plain C program also gets 4 KB of its
-own address space back that was being reserved for BASIC machinery it
-never used.
-
-The mechanism: the parts of the MMBasic runtime that are pure
-computation over the program's own data — `SORT`, the whole-array
-operations and the `MATH()` reductions, `LONGSTRING`, `DATA`/`READ`,
-date and time, `GOSUB`, `BIN2STR$`, `TRIM$`/`FIELD$`, the `BIT`/`FLAG`
-family — no longer live inside `bcrun` where every program paid for
-them. The translator now compiles each into the program that uses it,
-exactly as the drawing primitives always have been: a program that
-never sorts carries no sort, and one that does pays a few hundred
-bytes for its own copy. Nothing a BASIC program can observe changed —
-the test suite is byte-identical before and after, on the hardware as
-well as under the gates.
-
-**What you must do about it: recompile, and do not mix the halves.**
-A `.bc` built by an older `mmbc` asks `bcrun` for those functions by
-name, and the new `bcrun` refuses it when it loads:
-
-    prog.bc: no runtime function "mm_sort_i"
-
-That message means one thing: the program is older than the runtime —
-recompile it (`mmbc prog.bas` then `cc prog.c`) and it runs. The
-constraint is one-directional: a **freshly built** program imports
-nothing version-specific, so it runs under the old `bcrun` too. The
-card ships the matched set; the rule only bites a `.bc` kept from an
-earlier release.
-
-**The machine boots itself.** The `bootdev:` prompt had exactly one
-sensible answer — `hda2`, partition 2 of the SD card — and a question
-with one answer is not a question, so the kernel now gives it. Hold
-any key during boot to get the prompt back (for `tty=...` options or
-another partition); if the automatic mount fails, the prompt appears
-by itself.
-
-**The hunt instrumentation is out of the way.** The tracing that
-earlier releases carried in every process for chasing crashes —
-`MM_TB`, `MM_IOTRACE` and friends — is now compiled out unless
-`bcrun` is built with `-DMM_DIAG`. One flag brings the whole kit back;
-until then it costs nothing.
-
-**Three older bugs were found and fixed along the way**, none of
-them network bugs:
-
-- **`kill` did not work** on a process looping inside the kernel,
-  because signal 15 was never dispatched at all. That is also why the
-  filesystem kept needing `fsck` after a reboot: `killall` left
-  processes running, so the disc was never cleanly unmounted.
-- **A socket file descriptor did not know which socket it was**, so a
-  program holding two at once — any server — destroyed its own listener
-  on the first connection.
-- **`htget` saved chunked replies with the HTTP framing still in the
-  file**, so a fetched page began with a line like `22f` and ended with
-  `0`.
-
-The first two are in Fuzix's own core and are being offered upstream.
-
-**This chapter is now the only one of its kind.** Everything the older
-"New in" sections described that is still true of the machine has been
-moved into the section that documents it — the pin timings into the pin
-chapter, `PAUSE`'s behaviour into the timer chapter, the recursion
-limit into the chapter on making a program fit, and so on. A release
-note is a poor place to look something up.
+**The usual rule after upgrading: recompile.** A `.bc` that uses the
+new statements asks the new `bcrun` for functions an old one does not
+have, and is refused by name at load. A freshly built program imports
+nothing version-specific. The card ships the matched set.
 
 
 ewpage
@@ -2419,6 +2368,278 @@ is simply memory that this program can read.
 The whole program is 15 KB of BASIC and compiles to about 63 KB of
 bytecode.
 
+## Networking from BASIC: the WEB family {#web-family}
+
+The [Networking](#networking) chapter gets the machine onto a
+network; this section is what a BASIC program can do once it is
+there. The `WEB` family is the WebMite's — MMBasic on a Pico W —
+and a WebMite program's networking moves across as it is written,
+with the differences collected in
+[Migrating a WebMite program](#webmite-migration).
+
+One difference sits in front of everything else: on a WebMite the
+network credentials and the server port are *saved options*, set once
+at the prompt. Here the machine joins from `/etc/wifi.conf` at boot,
+and a program that serves says so itself, with a statement:
+
+    WEB TCP SERVER PORT 80
+
+The `OPTION TCP SERVER PORT 80` and `OPTION UDP SERVER PORT n`
+spellings are accepted as aliases, so a WebMite listing runs
+unedited.
+
+`WEB CONNECT` with no arguments checks the link and raises
+`WIFI not connected` if the radio has no address — the same gate the
+WebMite applies. With arguments — `WEB CONNECT ssid$, pass$` — it
+joins that network for this run, without saving anything;
+`/etc/wifi.conf` remains the owner of the boot-time answer.
+
+### UDP
+
+    WEB UDP SERVER PORT 7777          ' bind the receive socket
+    WEB UDP INTERRUPT GotOne          ' a sub to run per datagram
+    WEB UDP SEND "192.168.1.79", 7777, "hello"
+
+Inside the interrupt sub the WebMite's variables are live:
+`MM.MESSAGE$` is the datagram and `MM.ADDRESS$` the sender.
+Interrupts fire between statements, exactly as the WebMite's do; a
+program that never reaches a statement boundary (one long `PAUSE` is
+fine, a tight pure loop is not) never sees one. The first datagram
+to a peer the machine has not talked to before can be lost to the
+ARP exchange — the WebMite's stack sheds it the same way — so
+protocols start with a greeting, or simply send twice.
+
+### The TCP client
+
+    Dim Integer b(512)                ' a LONGSTRING holds the reply
+    WEB OPEN TCP CLIENT "api.openweathermap.org", 80
+    WEB TCP CLIENT REQUEST "GET /data/2.5/weather?..." + Chr$(10) + Chr$(13), b()
+    WEB CLOSE TCP CLIENT
+    Print LGetStr$(b(), 1, 200)
+
+`REQUEST` writes, then collects the reply into the LONGSTRING until
+it has been quiet for half a second; `READ` collects without writing;
+`WRITE` writes without collecting. One behaviour is worth knowing
+because two firmwares share it for different reasons: **`REQUEST`
+discards anything that arrived before it writes.** That is what lets
+an SMTP conversation ignore the server's banner — the greeting lands
+after `OPEN`, and the first `REQUEST` throws it away before sending
+`EHLO`, so every command gets *its own* answer.
+
+Timeouts are optional trailing arguments (`OPEN`'s default is 5
+seconds). A refused connection, a reset, and a timeout all raise
+errors a program traps the WebMite way, `ON ERROR SKIP` before the
+statement and `MM.ERRNO` after.
+
+One deliberate WebMite fidelity: no interrupts fire while a client
+statement is waiting, and a program cannot fetch from **its own**
+server — the interrupt that would answer cannot run until the fetch
+finishes. Both firmwares deadlock that shape (the client times out);
+test a server from another machine.
+
+### TLS
+
+    WEB TLS CA "/etc/ca.pem"          ' check certificates from now on
+    WEB OPEN TLS CLIENT "www.google.com", 443, 20000
+
+`TLS CLIENT` is `TCP CLIENT` with the handshake underneath;
+`REQUEST`, `READ`, `WRITE` and `CLOSE` are then the same statements.
+Until `WEB TLS CA` has loaded a bundle the session is encrypted but
+**not authenticated** — the WebMite starts in the same state — and
+after it, a bad certificate refuses the connection: expired.badssl.com
+stays closed while google answers. `WEB TLS NOVERIFY` turns checking
+back off. The machine's bundle is `/etc/ca.pem`, the same file the
+shell's `tlsca` uses.
+
+### The server
+
+    WEB TCP SERVER PORT 80
+    WEB TCP INTERRUPT WebInterrupt
+
+    Sub WebInterrupt
+      Local Integer a%, b(512)
+      For a% = 1 To MM.Info(MAX CONNECTIONS)
+        LongString CLEAR b()
+        WEB TCP READ a%, b()
+        If LLen(b()) > 0 Then
+          If LInStr(b(), "GET / HTTP") > 0 Then
+            WEB TRANSMIT PAGE a%, "index.html"
+          Else
+            WEB TRANSMIT CODE a%, 404
+          EndIf
+        EndIf
+      Next a%
+    End Sub
+
+Eight connections (`MM.INFO(MAX CONNECTIONS)` = 8, as the WebMite),
+each polled by number from the interrupt: `WEB TCP READ` fills a
+LONGSTRING with the request, `WEB TCP SEND conn, b()` answers with a
+LONGSTRING, `WEB TRANSMIT CODE conn, n` sends a bare status,
+`WEB TRANSMIT FILE conn, name$, mime$` sends a file, and
+`WEB TCP CLOSE conn` hangs up. NUL bytes in a request arrive as
+spaces, idle connections are reaped, and the interrupt fires between
+statements of whatever the main program is doing.
+
+### Serving a page with live values: `WEB TRANSMIT PAGE`
+
+    WEB TRANSMIT PAGE a%, "index.html"
+
+The page is HTML with expressions in braces:
+
+    <p>Temperature {Str$(t, 1, 1)} at {Time$}</p>
+
+Each `{expression}` is evaluated when the page is served and its
+value replaces the brace. This is the WebMite's page mechanism, and
+a compiled program keeps it by compiling every expression the page
+uses **at the statement that names the page** — with whatever
+variables, parameters and functions are in scope right there, which
+is why a page can say `{Title(pnbr)}` inside a sub whose parameter
+is `pnbr`. At run time the engine matches each brace against that
+compiled set *by text*, so the page on the card can be edited freely
+— reworded, reordered, restyled — as long as every expression it
+uses still appears somewhere in the compiled set; a brace the
+program has never seen raises an error naming it. `{{` puts a
+literal brace in the page. The page file lives beside the program
+and is read at *translate* time too, so translate in its directory.
+
+### `JSON$`
+
+    v$ = Json$(b(), "sys.sunrise")
+    v$ = Json$(b(), "list[0].main.temp")
+
+The WebMite's own dotted-path walker, to the letter: intermediate
+names are case-sensitive and the final one is not, `[n]` selects the
+n-th child, numbers come back formatted as MMBasic formats them,
+`null` and a missing name are `""`, and asking for an object rather
+than a value is the one error. Structural validation happens first,
+so `Invalid JSON data` means the document, not the path.
+
+### The clock, a ping, and email
+
+    WEB NTP                     ' set the clock from pool.ntp.org, UTC
+    WEB NTP 9.5                 ' ... to UTC+9:30
+    WEB NTP 2, "time.example"   ' offset and server
+    WEB PING "192.168.1.79", 4  ' ping(8), output on the console
+
+`WEB NTP` runs `ntpdate` underneath and takes the WebMite's
+arguments: a float offset in hours (-12 to 14, half-hour zones
+included) applied to the clock, because MMBasic's clock is local
+time. An unanswered `WEB PING` is not an error — `ping` reports
+`recv 0` and carries on; only a name that will not resolve raises.
+
+Email is SMTP written with the client statements, and the recipe
+that works in 2026 is Gmail with an App Password: turn on 2-Step
+Verification, create the password at myaccount.google.com/apppasswords
+(16 characters, shown once — remove the spaces), then:
+
+    Const cr = Chr$(13) + Chr$(10)
+    Dim Integer b(512)
+    WEB TLS CA "/etc/ca.pem"
+    WEB OPEN TLS CLIENT "smtp.gmail.com", 465, 20000
+    Pause 300
+    WEB TCP CLIENT REQUEST "EHLO pc3" + cr, b()
+    WEB TCP CLIENT REQUEST "AUTH LOGIN" + cr, b()
+    WEB TCP CLIENT REQUEST b64$(addr$) + cr, b()
+    WEB TCP CLIENT REQUEST b64$(apppass$) + cr, b()
+    WEB TCP CLIENT REQUEST "MAIL FROM:<" + addr$ + ">" + cr, b()
+    WEB TCP CLIENT REQUEST "RCPT TO:<" + to$ + ">" + cr, b()
+    WEB TCP CLIENT REQUEST "DATA" + cr, b()
+    WEB TCP CLIENT REQUEST "From: ..." + cr + "." + cr, b()
+    If LInStr(b(), "250 2.0.0") > 0 Then Print "sent"
+    WEB CLOSE TCP CLIENT
+
+Port 465 is implicit TLS, which both firmwares have; port 587 is
+STARTTLS, which neither does. The greeting is discarded by the first
+`REQUEST` (the rule above), `MATH(BASE64 ENCODE in$, out$)` does the
+encoding (`b64$` above wraps it), and Gmail's acceptance line is
+`250 2.0.0 OK`. `/root/MMBasic/retic` sends its alerts exactly this
+way. Keep the App Password in a file (`/etc/` is the convention),
+never in a program listing.
+
+### What is not there
+
+`WEB MQTT`, the `STREAM` client forms, and `WEB SCAN` are not
+translated yet; each is refused by name at translate time, never
+silently accepted. `OPTION COUNT` pins (the WebMite's hardware edge
+counters, used by flow meters) need a kernel facility that does not
+exist yet — see the migration section for what that means to a
+program that uses them.
+
+## Migrating a WebMite program {#webmite-migration}
+
+A compiler is not an interpreter, and this machine is not a Pico W —
+so a WebMite program usually needs a handful of small, honest edits.
+This section is the complete list of kinds. The worked example is on
+the card: `/root/MMBasic/retic` is a real, shipped WebMite product
+(Geoff Graham's reticulation controller, 49 KB of BASIC and three
+web pages), and every line its port touched is marked `'PC3:` with
+the reason, catalogued in its `MIGRATION.md`.
+
+**Saved options become machine configuration.** The WebMite stores
+options in flash; here the same facts live where a Unix system keeps
+them:
+
+| WebMite | Pico Computer 3 |
+|---|---|
+| `OPTION WIFI "ssid", "key"` | `/etc/wifi.conf`, joined at boot |
+| `OPTION TCP SERVER PORT 80` (saved) | the statement, at the top of the program |
+| `OPTION TELNET CONSOLE ON` | not carried; the serial console is the console |
+| `OPTION AUTORUN ON` | accepted and ignored; autorun is a line in `/etc/rc` |
+
+**Paths mostly work as written.** `A:/settings.dat`, `A:\file` and
+`A:file` all reach the plain name, resolved against the directory
+the program runs from — `MM.INFO(DRIVE)` answers a constant `"A:"`
+for the programs that save and restore it. The one edit: a **bare
+leading slash** is a real absolute path on this machine
+(`/etc/ca.pem` is load-bearing), where the WebMite read it as the
+drive root — so a page named `"/index.html"` becomes `"index.html"`.
+
+**Pins move to this machine's header.** The I/O header brings out
+GP0–GP7, GP26 and GP34–GP46; everything else belongs to the board.
+A WebMite program's pin constants are usually gathered at the top —
+retic's all were — so this is a table edit, not a hunt.
+
+**Two statements keep their purpose and change their mechanism.**
+`WATCHDOG` is accepted and does nothing, with a translate-time
+warning: the hardware watchdog belongs to the kernel, and wedge
+recovery on a Unix machine is a restart loop in `/etc/rc`.
+`CPU RESTART` re-executes the program instead of rebooting the
+processor — run the program from its own directory so the relative
+re-exec finds it.
+
+**Email means Gmail now.** retic shipped with SendGrid and SMTP2GO;
+the first is unusable and the second's free tier is gone. The Gmail
+sequence in the previous section replaces both — in retic it is a
+drop-in for the two provider branches, the setup page's username and
+password fields become the Gmail address and App Password, and the
+success test becomes `250 2.0.0`.
+
+**The compiler is stricter than the interpreter, and it will tell
+you.** MMBasic's expression evaluator silently ignores trailing text
+after a complete expression, and its pre-scan tolerates a `Sub` with
+no `End Sub`. retic V1.3 — a shipped product — carries four stray
+`)` and one missing `End Sub` that MMBasic never noticed. The
+translator refuses each with a line number; every fix is one
+character. Anything genuinely untranslated is likewise refused **by
+name** at translate time — the port starts with `mmbc prog.bas` and
+reading what it says.
+
+**Flow meters wait on the kernel.** `OPTION COUNT` / `SETPIN n, CIN`
+count edges in hardware and `Pin()` reads *and zeroes* the count; a
+poll cannot honestly replace that, so it is not pretended. retic
+degrades gracefully — flow detection is a checkbox, off by default,
+and the sampling block is commented out until the kernel grows a
+counting facility.
+
+To see all of this working, from the card:
+
+    # cd /root/MMBasic/retic
+    # mmbc retic.bas -o retic.c
+    # cc -o retic retic.c
+    # ./retic
+
+then point a browser at the machine's address.
+
 ## Making a big program fit — and run fast {#making-it-fit}
 
 A compiled program pays for its size twice. First there is the obvious
@@ -3337,28 +3558,29 @@ translate time, not at run time.
 | `CALL` | `CASE` | `CAT` | `CHDIR` |
 | `CIRCLE` | `CLEAR` | `CLOSE` | `CLS` |
 | `COLOR` | `COLOUR` | `CONST` | `CONTINUE` |
-| `COPY` | `DATA` | `DATE$` | `DEFINEFONT` |
-| `DIM` | `DO` | `ELSE` | `ELSEIF` |
-| `END` | `ENDIF` | `ERASE` | `ERROR` |
-| `EXIT` | `FILES` | `FILL` | `FLAG` |
-| `FLAGS` | `FLASH` | `FLUSH` | `FONT` |
-| `FOR` | `FRAMEBUFFER` | `FUNCTION` | `GOSUB` |
-| `GOTO` | `GUI` | `I2C` | `I2C2` |
-| `IF` | `INC` | `INPUT` | `KILL` |
-| `LET` | `LINE` | `LMID` | `LOAD` |
-| `LOCAL` | `LONGSTRING` | `LOOP` | `MAP` |
-| `MATH` | `MKDIR` | `MODE` | `NEXT` |
-| `ON` | `ONEWIRE` | `OPEN` | `OPTION` |
-| `PAUSE` | `PIN` | `PIXEL` | `PLAY` |
-| `POKE` | `POLYGON` | `PORT` | `PRINT` |
-| `PULSE` | `PWM` | `RANDOMIZE` | `RBOX` |
-| `READ` | `REDIM` | `RENAME` | `RESTORE` |
-| `RETURN` | `RMDIR` | `RTC` | `SAVE` |
-| `SEEK` | `SELECT` | `SERVO` | `SETPIN` |
-| `SETTICK` | `SORT` | `SPI` | `SPRITE` |
-| `STATIC` | `STRUCT` | `SUB` | `SYSTEM` |
-| `TEMPR` | `TEXT` | `TIME$` | `TIMER` |
-| `TRIANGLE` | `TYPE` | `WEND` | `WHILE` |
+| `COPY` | `CPU` | `DATA` | `DATE$` |
+| `DEFINEFONT` | `DIM` | `DO` | `ELSE` |
+| `ELSEIF` | `END` | `ENDIF` | `ERASE` |
+| `ERROR` | `EXIT` | `FILES` | `FILL` |
+| `FLAG` | `FLAGS` | `FLASH` | `FLUSH` |
+| `FONT` | `FOR` | `FRAMEBUFFER` | `FUNCTION` |
+| `GOSUB` | `GOTO` | `GUI` | `I2C` |
+| `I2C2` | `IF` | `INC` | `INPUT` |
+| `KILL` | `LET` | `LINE` | `LMID` |
+| `LOAD` | `LOCAL` | `LONGSTRING` | `LOOP` |
+| `MAP` | `MATH` | `MKDIR` | `MODE` |
+| `NEXT` | `ON` | `ONEWIRE` | `OPEN` |
+| `OPTION` | `PAUSE` | `PIN` | `PIXEL` |
+| `PLAY` | `POKE` | `POLYGON` | `PORT` |
+| `PRINT` | `PULSE` | `PWM` | `RANDOMIZE` |
+| `RBOX` | `READ` | `REDIM` | `RENAME` |
+| `RESTORE` | `RETURN` | `RMDIR` | `RTC` |
+| `SAVE` | `SEEK` | `SELECT` | `SERVO` |
+| `SETPIN` | `SETTICK` | `SORT` | `SPI` |
+| `SPRITE` | `STATIC` | `STRUCT` | `SUB` |
+| `SYSTEM` | `TEMPR` | `TEXT` | `TIME$` |
+| `TIMER` | `TRIANGLE` | `TYPE` | `WATCHDOG` |
+| `WEB` | `WEND` | `WHILE` |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -3375,23 +3597,24 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `DIR$` | `EOF` | `EPOCH` | `EXP` |
 | `FIELD$` | `FIX` | `FLAG` | `FORMAT$` |
 | `HEX$` | `INKEY$` | `INPUT$` | `INSTR` |
-| `INT` | `KEYDOWN` | `LCASE$` | `LCOMPARE` |
-| `LEFT$` | `LEN` | `LGETBYTE` | `LGETSTR$` |
-| `LINPUT` | `LINSTR` | `LLEN` | `LOC` |
-| `LOF` | `LOG` | `LTRIM$` | `MAP` |
-| `MATH` | `MAX` | `MID$` | `MIN` |
-| `MM.CMDLINE$` | `MM.DEVICE$` | `MM.ERRMSG$` | `MM.ERRNO` |
-| `MM.FONTHEIGHT` | `MM.FONTWIDTH` | `MM.HPOS` | `MM.HRES` |
-| `MM.I2C` | `MM.INFO` | `MM.INFO$` | `MM.ONEWIRE` |
-| `MM.SPISPEED` | `MM.VER` | `MM.VPOS` | `MM.VRES` |
-| `OCT$` | `PEEK` | `PI` | `PIN` |
-| `PIXEL` | `PORT` | `POS` | `RAD` |
-| `RGB` | `RIGHT$` | `RND` | `RTRIM$` |
-| `SGN` | `SIN` | `SPACE$` | `SPI` |
-| `SPRITE` | `SQR` | `STR$` | `STR2BIN` |
-| `STRING$` | `STRUCT` | `TAB` | `TAN` |
-| `TEMPR` | `TIME$` | `TIMER` | `TRIM$` |
-| `UCASE$` | `VAL` |  |  |
+| `INT` | `JSON$` | `KEYDOWN` | `LCASE$` |
+| `LCOMPARE` | `LEFT$` | `LEN` | `LGETBYTE` |
+| `LGETSTR$` | `LINPUT` | `LINSTR` | `LLEN` |
+| `LOC` | `LOF` | `LOG` | `LTRIM$` |
+| `MAP` | `MATH` | `MAX` | `MID$` |
+| `MIN` | `MM.ADDRESS$` | `MM.CMDLINE$` | `MM.DEVICE$` |
+| `MM.ERRMSG$` | `MM.ERRNO` | `MM.FONTHEIGHT` | `MM.FONTWIDTH` |
+| `MM.HPOS` | `MM.HRES` | `MM.I2C` | `MM.INFO` |
+| `MM.INFO$` | `MM.MESSAGE$` | `MM.ONEWIRE` | `MM.SPISPEED` |
+| `MM.VER` | `MM.VPOS` | `MM.VRES` | `OCT$` |
+| `PEEK` | `PI` | `PIN` | `PIXEL` |
+| `PORT` | `POS` | `RAD` | `RGB` |
+| `RIGHT$` | `RND` | `RTRIM$` | `SGN` |
+| `SIN` | `SPACE$` | `SPI` | `SPRITE` |
+| `SQR` | `STR$` | `STR2BIN` | `STRING$` |
+| `STRUCT` | `TAB` | `TAN` | `TEMPR` |
+| `TIME$` | `TIMER` | `TRIM$` | `UCASE$` |
+| `VAL` |  |  |  |
 
 ## MATH() sub-functions
 

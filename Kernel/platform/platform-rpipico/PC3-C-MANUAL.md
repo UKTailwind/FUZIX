@@ -727,7 +727,20 @@ Any socket operation that would have slept returns -1 with `EAGAIN`
 instead: `read`, `write`, `connect` and `accept` alike. So a program
 can round-robin over several sockets itself, at the cost of a spin —
 put a `sleep` or some other work in the loop rather than burning the
-processor, because there is nothing to block on.
+processor, because there is nothing to block on. That advice is
+measured, not manners: on a TLS socket a hot `O_NDELAY` read loop
+starves the kernel of the time it needs to *decrypt* what has
+arrived — six million polls in thirty seconds returned nothing on a
+socket a blocking read drained at once. Sleep between polls and the
+data appears.
+
+**There is no resolver in the C library.** `gethostbyname` is not in
+the libc the on-board `cc` links; the network tools that resolve
+names (`dig`, `htget`, `ntpdate`) carry their own. A C program takes
+a dotted quad, reads `/etc/resolv.conf` and asks the nameserver
+itself (the DNS query is ~40 lines — `dig`'s source in
+`Applications/netd` is the worked example), or runs `dig` and reads
+its output.
 
 Forking is the other answer and often the better one: a Fuzix process
 is cheap, so a server can fork a child per connection, and a program
