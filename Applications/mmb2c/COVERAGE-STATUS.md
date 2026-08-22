@@ -16,14 +16,14 @@ and it lives in `fcc/catmap.py`.
 The 129 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
 Draw3D each appear twice, CtrlVal as both a command and a function - so there are **126 distinct
 names**. Of those, **19 are false negatives** (the thing works and the scanner cannot see it),
-leaving **107 real gaps**, of which 53 are in categories 4 and 5 and are not intended to close.
+leaving **107 real gaps**, of which 76 are in categories 4 and 5 and are not intended to close.
 
 ## What this count cannot tell you
 
 **A name counted as translated may be only PARTLY translated, and this list cannot see the
 difference.** The unit here is a row in AllCommands.h, and several rows are whole families:
 
-* `Math` is one row and **67 members** - see the MATH section at the end, where 15 are in.
+* `Math` is one row and **67 members** - the MATH section at the end counts them honestly.
 * `GUI` is one row and only `GUI BITMAP` is translated.
 * `Load` is one row covering `IMAGE`, `BMP`, `JPG` and `PNG` here, and a dozen forms in MMBasic.
 * `Option`, `MM.INFO` and `Print` each take a list of sub-keywords, some in and some not.
@@ -44,9 +44,9 @@ four inside its "excluded from the documentation" block.
 ## The five categories
 
 1. **Finish what is already there** - 0
-2. **Real value, moderate work** - 25
-3. **Possible, wants your steer first** - 29
-4. **Deliberately out** - 29
+2. **Real value, moderate work** - 27
+3. **Possible, wants your steer first** - 4
+4. **Deliberately out** - 52
 5. **Not applicable to this machine** - 24
 
 ## False negatives: implemented, invisible to the scan
@@ -57,23 +57,38 @@ misled us before (`DefineFont` and `BLIT MEMORY` both read as missing while they
 
 `Rem`, `/*`, `*/`, `Blit Memory`, `+`, `-`, `^`, `*`, `/`, `\\`, `<<`, `>>`, `<>`, `>=`, `<=`, `<`, `>`, `=`, `@(`
 
-## Category 2 - Real value, moderate work (25)
+## Category 2 - Real value, moderate work (27)
 
-**Commands:** `ADC`, `Bitstream`, `Calc`, `Draw3D`, `FM`, `Frame`, `Humid`, `IR`, `Keypad`, `Mandelbrot`, `OneShot`, `Ray`, `SYNC`, `Slew`, `Stepper`, `TILE`, `Tilemap`, `Turtle`, `WS2812`
+**Commands:** `ADC`, `Bitstream`, `Calc`, `Draw3D`, `FM`, `Frame`, `Humid`, `IR`, `Keypad`, `Mandelbrot`, `OneShot`, `PIO`, `Ray`, `SYNC`, `Slew`, `Stepper`, `TILE`, `Tilemap`, `Turtle`, `WS2812`
 
-**Functions:** `DRAW3D(`, `Distance(`, `Frame(`, `Pulsin(`, `Ray(`, `Tilemap(`
+**Functions:** `DRAW3D(`, `Distance(`, `Frame(`, `Pio(`, `Pulsin(`, `Ray(`, `Tilemap(`
 
-## Category 3 - Possible, wants your steer first (29)
+`PIO` and `Pio(` are here as the RUNTIME surface only - see the
+category 4 note for the decided split: the PIO assembly language gets
+its own assembler and never enters the translator.  What mmbc owes is
+what a program does around an imported binary: load it, configure and
+start a state machine, feed and drain the FIFOs, read `Pio(`.
 
-**Commands:** `IRQ`, `IRQ CLEAR`, `IRQ NEXT`, `IRQ NOWAIT`, `IRQ PREV`, `IRQ SET`, `IRQ WAIT`, `In`, `Jmp`, `Memory`, `Mov`, `Nop`, `Out`, `PIO`, `Pull`, `Push`, `RESOLUTION`, `Refresh`, `Set`, `Wait`, `_end program`, `_label`, `_line`, `_program`, `_side set`, `_wrap`, `_wrap target`
+## Category 3 - Possible, wants your steer first (4)
 
-**Functions:** `GetScanLine`, `Pio(`
+**Commands:** `Memory`, `RESOLUTION`, `Refresh`
 
-## Category 4 - Deliberately out (29)
+**Functions:** `GetScanLine`
 
-**Commands:** `Autosave`, `CMM2 Load`, `CMM2 Run`, `CSub`, `Chain`, `Configure`, `Drive`, `Edit`, `Edit File`, `End CSub`, `Execute`, `Help`, `IReturn`, `Interrupt`, `Library`, `List`, `New`, `Ram`, `Run`, `Trace`, `Update Firmware`, `VAR`, `XModem`, `YModem`
+## Category 4 - Deliberately out (52)
+
+**Commands:** `Autosave`, `CMM2 Load`, `CMM2 Run`, `CSub`, `Chain`, `Configure`, `Drive`, `Edit`, `Edit File`, `End CSub`, `Execute`, `Help`, `IRQ`, `IRQ CLEAR`, `IRQ NEXT`, `IRQ NOWAIT`, `IRQ PREV`, `IRQ SET`, `IRQ WAIT`, `IReturn`, `In`, `Interrupt`, `Jmp`, `Library`, `List`, `Mov`, `New`, `Nop`, `Out`, `Pull`, `Push`, `Ram`, `Run`, `Set`, `Trace`, `Update Firmware`, `VAR`, `Wait`, `XModem`, `YModem`, `_end program`, `_label`, `_line`, `_program`, `_side set`, `_wrap`, `_wrap target`
 
 **Functions:** `Eval(`, `SChange$(`, `TopBottom(`, `base$(`, `~(`
+
+The 22 PIO assembly names (`Jmp` ... `Set`, the `IRQ` rows and the
+`_label`/`_wrap`/`_program` directives) are out **of the translator by
+design, not out of the machine** - decided 2026-08-22.  The plan: a
+SEPARATE ASSEMBLER, built from MMBasic's own PIO assembler code, whose
+output a BASIC program imports; the assembly language is that tool's
+input exactly as C is `cc`'s input and not `mmbc`'s.  This keeps the
+translator's PIO obligation to the small runtime surface noted under
+category 2, instead of a language inside the language.
 
 ## Category 5 - Not applicable to this machine (24)
 

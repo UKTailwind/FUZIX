@@ -84,8 +84,8 @@ W.append("## What this count cannot tell you\n")
 W.append("**A name counted as translated may be only PARTLY translated, "
          "and this list cannot see the\ndifference.** The unit here is a "
          "row in AllCommands.h, and several rows are whole families:\n")
-W.append("* `Math` is one row and **67 members** - see the MATH section "
-         "at the end, where 15 are in.")
+W.append("* `Math` is one row and **67 members** - the MATH section at "
+         "the end counts them honestly.")
 W.append("* `GUI` is one row and only `GUI BITMAP` is translated.")
 W.append("* `Load` is one row covering `IMAGE`, `BMP`, `JPG` and `PNG` "
          "here, and a dozen forms in MMBasic.")
@@ -135,6 +135,9 @@ for k in (1, 2, 3, 4, 5):
         W.append("**Commands:** `" + "`, `".join(sorted(c)) + "`\n")
     if f:
         W.append("**Functions:** `" + "`, `".join(sorted(f)) + "`\n")
+    note = getattr(catmap, "NOTES", {}).get(k)
+    if note:
+        W.append(note + "\n")
 
 if unknown:
     W.append("## UNCLASSIFIED - add these to fcc/catmap.py (%d)\n"

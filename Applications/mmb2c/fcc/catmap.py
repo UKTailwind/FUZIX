@@ -61,16 +61,28 @@ CAT = {
     "Mandelbrot": 2,
     "Draw3D": 2, "DRAW3D(": 2,
 
+    # ---- PIO: the steer was given, 2026-08-22 ----------------------
+    # The decision: a SEPARATE ASSEMBLER, built from MMBasic's own PIO
+    # assembler code, whose output a BASIC program IMPORTS.  So the
+    # instruction set and the directives - the language inside the
+    # language - never enter the translator at all; they are the input
+    # of the assembler, exactly as C is the input of cc and not of
+    # mmbc.  Category 4 is therefore their honest home: deliberately
+    # out OF THE TRANSLATOR, alive elsewhere.
+    "_wrap target": 4, "_wrap": 4, "_line": 4, "_program": 4,
+    "_end program": 4, "_side set": 4, "_label": 4,
+    "Jmp": 4, "Wait": 4, "In": 4, "Out": 4, "Push": 4, "Pull": 4,
+    "Mov": 4, "Nop": 4, "Set": 4,
+    "IRQ SET": 4, "IRQ WAIT": 4, "IRQ CLEAR": 4, "IRQ NOWAIT": 4,
+    "IRQ PREV": 4, "IRQ NEXT": 4, "IRQ": 4,
+    # What mmbc DOES still owe is the runtime surface a program uses
+    # around an imported binary: load a program, configure and start a
+    # state machine, feed and drain the FIFOs, and the Pio( reads.
+    # That is ordinary category-2 work now, much smaller than the
+    # block looked when it was all-or-nothing.
+    "PIO": 2, "Pio(": 2,
+
     # ---- 3: possible, wants your steer first -----------------------
-    # The PIO block is all or nothing and is the biggest single win
-    # left; it is also a language inside the language.
-    "PIO": 3, "Pio(": 3,
-    "_wrap target": 3, "_wrap": 3, "_line": 3, "_program": 3,
-    "_end program": 3, "_side set": 3, "_label": 3,
-    "Jmp": 3, "Wait": 3, "In": 3, "Out": 3, "Push": 3, "Pull": 3,
-    "Mov": 3, "Nop": 3, "Set": 3,
-    "IRQ SET": 3, "IRQ WAIT": 3, "IRQ CLEAR": 3, "IRQ NOWAIT": 3,
-    "IRQ PREV": 3, "IRQ NEXT": 3, "IRQ": 3,
     # These want a decision about the machine, not just work.
     "RESOLUTION": 3, "Refresh": 3, "GetScanLine": 3,
     "Memory": 3,                    # POKE's family; no MMU to disagree
@@ -153,4 +165,24 @@ NAMES = {
     4: "Deliberately out",
     5: "Not applicable to this machine",
     "FN": "FALSE NEGATIVE - implemented, invisible to the scan",
+}
+
+# Prose that belongs IN the generated document, per category - decided
+# approaches, not just name lists.  mkstatus.py prints an entry after
+# its category's lists.  Judgement text lives here with the judgements,
+# so a regeneration can never lose a decision.
+NOTES = {
+    2: """`PIO` and `Pio(` are here as the RUNTIME surface only - see the
+category 4 note for the decided split: the PIO assembly language gets
+its own assembler and never enters the translator.  What mmbc owes is
+what a program does around an imported binary: load it, configure and
+start a state machine, feed and drain the FIFOs, read `Pio(`.""",
+    4: """The 22 PIO assembly names (`Jmp` ... `Set`, the `IRQ` rows and the
+`_label`/`_wrap`/`_program` directives) are out **of the translator by
+design, not out of the machine** - decided 2026-08-22.  The plan: a
+SEPARATE ASSEMBLER, built from MMBasic's own PIO assembler code, whose
+output a BASIC program imports; the assembly language is that tool's
+input exactly as C is `cc`'s input and not `mmbc`'s.  This keeps the
+translator's PIO obligation to the small runtime surface noted under
+category 2, instead of a language inside the language.""",
 }
