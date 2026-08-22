@@ -208,11 +208,12 @@ multi-process machine that is one program stopping every other
 program's interrupts: console bytes drop after 2.8ms of mask during
 serial input, every process's audio glitches past the DMA block
 cushion, and the counting inputs - which pend one edge - go silently
-inexact.  So the bit-bang route is REJECTED here, and both commands
-wait for the PIO runtime instead: WS2812 is the canonical PIO program
-(the datasheet's own example) and BITSTREAM is a timed-toggle stream
-a state machine runs with zero CPU and zero interrupt impact.  When
-the PIO surface lands, WS2812 is its natural first showcase.""",
+inexact.  So the bit-bang route is REJECTED here.  The way BACK IN is
+designed (PLAN-pioout.md, 2026-08-22): fixed executor programs loaded
+into PIO1 at boot beside the I2S program, userland pre-calculates the
+timing words and DMAs them to a claimed state machine — zero CPU,
+zero interrupt impact, and it does not wait for the full user-PIO
+runtime.  These two names leave this list when that plan lands.""",
     4: """The 22 PIO assembly names (`Jmp` ... `Set`, the `IRQ` rows and the
 `_label`/`_wrap`/`_program` directives) are out **of the translator by
 design, not out of the machine** - decided 2026-08-22.  The plan: a
