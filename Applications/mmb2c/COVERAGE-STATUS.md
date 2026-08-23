@@ -10,13 +10,13 @@ and it lives in `fcc/catmap.py`.
 | | in MMBasic | translated | not translated |
 |---|---|---|---|
 | commands | 226 | **134** | 92 |
-| functions | 127 | **92** | 35 |
-| total | 353 | **226** | 127 |
+| functions | 127 | **94** | 33 |
+| total | 353 | **228** | 125 |
 
-The 127 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
-Draw3D each appear twice, CtrlVal as both a command and a function - so there are **124 distinct
+The 125 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
+Draw3D each appear twice, CtrlVal as both a command and a function - so there are **122 distinct
 names**. Of those, **19 are false negatives** (the thing works and the scanner cannot see it),
-leaving **105 real gaps**, of which 79 are in categories 4 and 5 and are not intended to close.
+leaving **103 real gaps**, of which 79 are in categories 4 and 5 and are not intended to close.
 
 ## What this count cannot tell you
 
@@ -44,7 +44,7 @@ four inside its "excluded from the documentation" block.
 ## The five categories
 
 1. **Finish what is already there** - 0
-2. **Real value, moderate work** - 22
+2. **Real value, moderate work** - 20
 3. **Possible, wants your steer first** - 4
 4. **Deliberately out** - 54
 5. **Not applicable to this machine** - 25
@@ -57,11 +57,11 @@ misled us before (`DefineFont` and `BLIT MEMORY` both read as missing while they
 
 `Rem`, `/*`, `*/`, `Blit Memory`, `+`, `-`, `^`, `*`, `/`, `\\`, `<<`, `>>`, `<>`, `>=`, `<=`, `<`, `>`, `=`, `@(`
 
-## Category 2 - Real value, moderate work (22)
+## Category 2 - Real value, moderate work (20)
 
 **Commands:** `ADC`, `Draw3D`, `Frame`, `Humid`, `IR`, `Keypad`, `Mandelbrot`, `OneShot`, `PIO`, `Ray`, `SYNC`, `Slew`, `TILE`, `Tilemap`, `Turtle`
 
-**Functions:** `DRAW3D(`, `Distance(`, `Frame(`, `Pio(`, `Pulsin(`, `Ray(`, `Tilemap(`
+**Functions:** `DRAW3D(`, `Frame(`, `Pio(`, `Ray(`, `Tilemap(`
 
 `PIO` and `Pio(` are here as the RUNTIME surface only - see the
 category 4 note for the decided split: the PIO assembly language gets
@@ -71,21 +71,24 @@ start a state machine, feed and drain the FIFOs, read `Pio(`.
 
 None of the peripherals here needs interrupts disabled - checked
 against the reference's actual loops, 2026-08-22.  `Humid` is an
-unmasked microsecond poll whose checksum catches a corrupted read, IR
-send is an unmasked toggle loop, `Pulsin(` and `Distance(` are plain
-busy-waits.
+unmasked microsecond poll whose checksum catches a corrupted read and
+IR send is an unmasked toggle loop.
 
-**But "does MMBasic mask?" was the wrong question for this machine**,
-and the 2026-08-23 audit says so: our 5ms system tick holds `di()`
-across its entire body whatever else is running, and any userland spin
-longer than 5ms gets the USB host pump injected into it.  A measuring
-loop is therefore interrupted here even when the reference's is not.
-`Humid` survives that on its checksum and `IR SEND` can go through the
-shipped BITSTREAM PIO path instead of a loop, but `Pulsin(` and
-`Distance(` want the worst-case interruption measured on the board
-before either is promised.  `OneShot` and IR RECEIVE were never part of
-that review: both are GPIO edge interrupts with their own timers in the
-reference, not userland register work.
+**But "does MMBasic mask?" was the wrong question for this machine.**
+Our 5ms system tick holds `di()` across its entire body whatever else
+is running, and any userland spin longer than 5ms gets the USB host
+pump injected into it - and a second runnable process takes a spinning
+measurement off the CPU for HALF A SECOND.  A measuring loop is
+therefore wrong here even where the reference's is right.
+
+`Pulsin(` and `Distance(` were in this category until that was
+measured (utils/spingap.c); they SHIPPED 2026-08-23 by having the
+kernel timestamp the edges instead - PLAN-pulsin.md.  That is the
+shape for what is left: `Humid` survives a busy loop on its checksum,
+`IR SEND` is a list of edge durations and can go through the shipped
+BITSTREAM PIO path, and `OneShot` and IR RECEIVE are GPIO edge
+interrupts in the reference too - they want the capture, not a
+loop.
 
 ## Category 3 - Possible, wants your steer first (4)
 
@@ -126,9 +129,9 @@ category 2, instead of a language inside the language.
 
 `Arc`, `Array Add`, `Array Insert`, `Array Set`, `Array Slice`, `Bezier`, `Bit(`, `Bitstream`, `Blit`, `Box`, `Byte(`, `CLS`, `CPU`, `Call`, `Case`, `Case Else`, `Cat`, `Chdir`, `Circle`, `Clear`, `Close`, `Color`, `Colour`, `Colour Map`, `Const`, `Continue`, `Copy`, `Data`, `Date$`, `DefineFont`, `Dim`, `Do`, `Else`, `Else If`, `ElseIf`, `End`, `End DefineFont`, `End Function`, `End If`, `End Select`, `End Sub`, `End Type`, `EndIf`, `Erase`, `Error`, `Exit`, `Exit Do`, `Exit For`, `Exit Function`, `Exit Sub`, `FRAMEBUFFER`, `Files`, `Fill`, `Flag(`, `Flags`, `Flash`, `Flush`, `Font`, `For`, `Function`, `GUI`, `GUI`, `GoSub`, `GoTo`, `I2C`, `I2C2`, `If`, `Inc`, `Input`, `Kill`, `LMid(`, `Let`, `Line`, `Line Input`, `Load`, `Local`, `LongString`, `Loop`, `MID$(`, `MODE`, `Map`, `Map`, `Map(`, `Map(`, `Math`, `Mkdir`, `Mode`, `Next`, `On`, `OneWire`, `Open`, `Option`, `PWM`, `Pause`, `Pin(`, `Pixel`, `Play`, `Poke`, `Polygon`, `Port(`, `Print`, `Pulse`, `RBox`, `RTC`, `Randomize`, `Randomize`, `ReDim`, `Read`, `Rename`, `Restore`, `Return`, `Rmdir`, `SPI`, `Save`, `Seek`, `Select Case`, `Servo`, `SetPin`, `SetTick`, `Sort`, `Sprite`, `Static`, `Struct`, `Sub`, `TEMPR START`, `Text`, `Time$`, `Timer`, `Triangle`, `Type`, `WEB`, `WS2812`, `WatchDog`, `While`
 
-## Translated: the 92 functions
+## Translated: the 94 functions
 
-`ACos(`, `ASin(`, `Abs(`, `And`, `As`, `Asc(`, `Atan2(`, `Atn(`, `Bin2str$(`, `Bit(`, `Bound(`, `Byte(`, `Call(`, `Choice(`, `Chr$(`, `Cint(`, `Cos(`, `Cwd$`, `Date$`, `DateTime$(`, `Day$(`, `Deg(`, `Dir$(`, `Else`, `Eof(`, `Epoch(`, `Exp(`, `Field$(`, `Fix(`, `Flag(`, `For`, `Format$(`, `GoSub`, `GoTo`, `INV`, `Inkey$`, `Input$(`, `Instr(`, `Int(`, `Json$(`, `KeyDown(`, `LCompare(`, `LGetByte(`, `LGetStr$(`, `LInStr(`, `LInput(`, `LLen(`, `Len(`, `Loc(`, `Lof(`, `Log(`, `MM.Info(`, `Map(`, `Map(`, `Math(`, `Mid$(`, `Mod`, `Not`, `Or`, `Peek(`, `Pi`, `Pin(`, `Pixel(`, `Port(`, `Pos`, `RGB(`, `Rad(`, `Rnd`, `Rnd(`, `SPI(`, `Sgn(`, `Sin(`, `Space$(`, `Sqr(`, `Step`, `Str$(`, `Str2bin(`, `String$(`, `Struct(`, `TEMPR(`, `Tab(`, `Tan(`, `Then`, `Time$`, `Timer`, `To`, `Trim$(`, `Until`, `Val(`, `While`, `Xor`, `sprite(`
+`ACos(`, `ASin(`, `Abs(`, `And`, `As`, `Asc(`, `Atan2(`, `Atn(`, `Bin2str$(`, `Bit(`, `Bound(`, `Byte(`, `Call(`, `Choice(`, `Chr$(`, `Cint(`, `Cos(`, `Cwd$`, `Date$`, `DateTime$(`, `Day$(`, `Deg(`, `Dir$(`, `Distance(`, `Else`, `Eof(`, `Epoch(`, `Exp(`, `Field$(`, `Fix(`, `Flag(`, `For`, `Format$(`, `GoSub`, `GoTo`, `INV`, `Inkey$`, `Input$(`, `Instr(`, `Int(`, `Json$(`, `KeyDown(`, `LCompare(`, `LGetByte(`, `LGetStr$(`, `LInStr(`, `LInput(`, `LLen(`, `Len(`, `Loc(`, `Lof(`, `Log(`, `MM.Info(`, `Map(`, `Map(`, `Math(`, `Mid$(`, `Mod`, `Not`, `Or`, `Peek(`, `Pi`, `Pin(`, `Pixel(`, `Port(`, `Pos`, `Pulsin(`, `RGB(`, `Rad(`, `Rnd`, `Rnd(`, `SPI(`, `Sgn(`, `Sin(`, `Space$(`, `Sqr(`, `Step`, `Str$(`, `Str2bin(`, `String$(`, `Struct(`, `TEMPR(`, `Tab(`, `Tan(`, `Then`, `Time$`, `Timer`, `To`, `Trim$(`, `Until`, `Val(`, `While`, `Xor`, `sprite(`
 
 
 ## The MATH family

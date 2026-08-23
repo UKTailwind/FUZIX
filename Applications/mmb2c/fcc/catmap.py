@@ -77,7 +77,7 @@ CAT = {
     # OneShot and IR RECEIVE were not part of that review at all: both
     # are GPIO edge interrupts with their own timers in the reference
     # (External.c:286-345, 6106-6188), not userland register work.
-    "IR": 2, "Humid": 2, "Distance(": 2, "Pulsin(": 2,
+    "IR": 2, "Humid": 2,
     "OneShot": 2, "SYNC": 2, "Slew": 2, "Keypad": 2,
     # Json$(, WatchDog and CPU were category 2 until the WEB campaign
     # delivered all three (v0.20); their entries are gone because an
@@ -226,21 +226,24 @@ start a state machine, feed and drain the FIFOs, read `Pio(`.
 
 None of the peripherals here needs interrupts disabled - checked
 against the reference's actual loops, 2026-08-22.  `Humid` is an
-unmasked microsecond poll whose checksum catches a corrupted read, IR
-send is an unmasked toggle loop, `Pulsin(` and `Distance(` are plain
-busy-waits.
+unmasked microsecond poll whose checksum catches a corrupted read and
+IR send is an unmasked toggle loop.
 
-**But "does MMBasic mask?" was the wrong question for this machine**,
-and the 2026-08-23 audit says so: our 5ms system tick holds `di()`
-across its entire body whatever else is running, and any userland spin
-longer than 5ms gets the USB host pump injected into it.  A measuring
-loop is therefore interrupted here even when the reference's is not.
-`Humid` survives that on its checksum and `IR SEND` can go through the
-shipped BITSTREAM PIO path instead of a loop, but `Pulsin(` and
-`Distance(` want the worst-case interruption measured on the board
-before either is promised.  `OneShot` and IR RECEIVE were never part of
-that review: both are GPIO edge interrupts with their own timers in the
-reference, not userland register work.""",
+**But "does MMBasic mask?" was the wrong question for this machine.**
+Our 5ms system tick holds `di()` across its entire body whatever else
+is running, and any userland spin longer than 5ms gets the USB host
+pump injected into it - and a second runnable process takes a spinning
+measurement off the CPU for HALF A SECOND.  A measuring loop is
+therefore wrong here even where the reference's is right.
+
+`Pulsin(` and `Distance(` were in this category until that was
+measured (utils/spingap.c); they SHIPPED 2026-08-23 by having the
+kernel timestamp the edges instead - PLAN-pulsin.md.  That is the
+shape for what is left: `Humid` survives a busy loop on its checksum,
+`IR SEND` is a list of edge durations and can go through the shipped
+BITSTREAM PIO path, and `OneShot` and IR RECEIVE are GPIO edge
+interrupts in the reference too - they want the capture, not a
+loop.""",
     3: """(`WS2812` and `Bitstream` used to sit here as MMBasic's two
 genuinely interrupts-off commands, rejected for bit-banging on a
 multi-process machine.  They SHIPPED 2026-08-22 through PLAN-pioout's
