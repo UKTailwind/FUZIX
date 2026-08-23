@@ -83,10 +83,7 @@ CAT = {
     # delivered all three (v0.20); their entries are gone because an
     # entry for a translated name is dead weight that goes stale.
     # Graphics primitives and toys, each self-contained
-    "TILE": 2, "Tilemap": 2, "Tilemap(": 2, "Turtle": 2,
-    "Frame": 2, "Frame(": 2, "Ray": 2, "Ray(": 2,
-    "Mandelbrot": 2,
-    "Draw3D": 2, "DRAW3D(": 2,
+    "TILE": 2, "Tilemap": 2, "Tilemap(": 2,
 
     # ---- PIO: the steer was given, 2026-08-22 ----------------------
     # The decision: a SEPARATE ASSEMBLER, built from MMBasic's own PIO
@@ -113,6 +110,15 @@ CAT = {
     # These want a decision about the machine, not just work.
     "RESOLUTION": 3, "Refresh": 3, "GetScanLine": 3,
     "Memory": 3,                    # POKE's family; no MMU to disagree
+    # DECISION PENDING, and NOT IMMINENT - the user, 2026-08-23.  Both
+    # are real engines rather than toys and both are wanted eventually;
+    # neither is queued.  Turtle is ~600 reference lines of pen state
+    # over primitives we already have, Draw3D ~1,850 of transform and
+    # projection with its own object table.  They sit here rather than
+    # in category 2 so that "moderate work, real value" keeps meaning
+    # "somebody could pick this up tomorrow".
+    "Turtle": 3,
+    "Draw3D": 3, "DRAW3D(": 3,
     # WS2812 and Bitstream sat here as the interrupts-off pair until
     # they SHIPPED on 2026-08-22 through PLAN-pioout's fixed PIO1
     # programs (NOTES[3] tells the story).  Their entries are gone
@@ -129,6 +135,14 @@ CAT = {
     # and FM is Editor.c's file manager, sitting beside Edit above.
     # Both are this rule, not exceptions to it.
     "Calc": 4, "FM": 4,
+    # NEVER - the user, 2026-08-23, and these are his own commands so
+    # the judgement is the author's.  `Mandelbrot` is a silly easter
+    # egg in MMBasic and nothing should carry it forward; `Ray` and
+    # `Frame` are likewise not wanted here.  Recorded as decisions
+    # rather than as gaps, so no future review proposes them again.
+    "Mandelbrot": 4,
+    "Ray": 4, "Ray(": 4,
+    "Frame": 4, "Frame(": 4,
     "Chain": 4, "Configure": 4, "Help": 4, "Ram": 4,
     "XModem": 4, "YModem": 4,
     "CMM2 Load": 4, "CMM2 Run": 4,
@@ -244,14 +258,28 @@ shape for what is left: `Humid` survives a busy loop on its checksum,
 BITSTREAM PIO path, and `OneShot` and IR RECEIVE are GPIO edge
 interrupts in the reference too - they want the capture, not a
 loop.""",
-    3: """(`WS2812` and `Bitstream` used to sit here as MMBasic's two
+    3: """`Turtle` and `Draw3D` are here by decision, 2026-08-23:
+wanted eventually, **not imminent**, and deliberately not in category 2
+so that "moderate work, real value" keeps meaning "somebody could pick
+this up tomorrow".  Both are engines rather than toys - Turtle is pen
+state over primitives that already exist, Draw3D is transform,
+projection and an object table of its own.
+
+(`WS2812` and `Bitstream` used to sit here as MMBasic's two
 genuinely interrupts-off commands, rejected for bit-banging on a
 multi-process machine.  They SHIPPED 2026-08-22 through PLAN-pioout's
 fixed PIO1 programs - hardware drives the wire, the machine keeps
 running, and the counting inputs proved the streams exact on the
 board.  `DEVICE SERIALRX/TX`, the other maskers, stay in category 5
 with the rest of `Device`.)""",
-    4: """The 22 PIO assembly names (`Jmp` ... `Set`, the `IRQ` rows and the
+    4: """`Mandelbrot`, `Ray` and `Frame` are **NEVER**, decided
+2026-08-23 by MMBasic's own author: Mandelbrot is a silly easter egg
+there and not something to carry forward, and the other two are not
+wanted on this machine.  They are recorded here as DECISIONS rather
+than left in category 2 as gaps, so that no future review proposes
+them again - which is what this table is for.
+
+The 22 PIO assembly names (`Jmp` ... `Set`, the `IRQ` rows and the
 `_label`/`_wrap`/`_program` directives) are out **of the translator by
 design, not out of the machine** - decided 2026-08-22.  The plan: a
 SEPARATE ASSEMBLER, built from MMBasic's own PIO assembler code, whose

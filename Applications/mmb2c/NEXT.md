@@ -104,9 +104,12 @@ Each is small, self-contained, and needs no decision:
 * **`SYNC`** — 47 lines of arithmetic over `time_us_64` in the
   reference, and `pc3_us64()` plus `mmb_wait.h`'s deadline loop are both
   here. A frame metronome is what every translated game wants.
-* **`Mandelbrot`** — ~300 lines across translator and header, no kernel
-  work, no new libcall, and a board test anyone can see from across the
-  room. The cheapest complete category-2 name there is.
+* **`IR SEND`** — a list of edge durations, which is exactly what the
+  shipped `BITSTREAM` PIO path already takes. No kernel work at all,
+  and better-than-reference timing; the only cost is PIO1's pin window
+  (GP0–GP7, GP26). The measurement that reshaped this family is in
+  PLAN-pulsin.md: a busy-wait cannot be trusted here, so anything that
+  can be handed to hardware should be.
 * **`array_matrix()` and the vector/matrix members that need it** —
   `array_flat` hands out only (pointer, count); every `M_*` member plus
   `V_MULT` needs a 2-D accessor, and `array_vector` already computes
@@ -130,25 +133,26 @@ Each is small, self-contained, and needs no decision:
   rasters' blanking/total constants (45/525 and 38/806) are MMBasic's
   `fun_getscanline` constants verbatim.
 
-### 5. The timing peripherals need a measurement first
+### 5. The rest of the timing family, now the measurement exists
 
-`Pulsin(`, `Distance(`, `Humid`, `OneShot`, IR receive. The 2026-08-22
-review cleared these on "MMBasic does not mask interrupts" — the wrong
-question for this machine. The 5 ms system tick holds `di()` across its
-whole body (`devices.c:83-139`) whatever else is running, and any
-userland spin over 5 ms has the USB host pump injected into it
-(`devices.c:123-133`). An HC-SR04 echo at 2 m is 11.6 ms and a DHT frame
-is ~6 ms: both attract it every time.
+**The probe was run and `Pulsin(`/`Distance(` shipped on it**
+(PLAN-pulsin.md). The number: a userland spin here loses 14–18 µs about
+345 times a second to the tick, and **half a second** whenever a second
+process is runnable. So the question for the rest of the family is no
+longer "does MMBasic mask interrupts" but "what measures this without
+a spin":
 
-**So the first item is not a command, it is a one-hour board probe** of
-the worst-case interruption of a userland busy-wait. That number decides
-whether these ship as honest userland loops with a detect-and-retry
-guard or need kernel help. `Humid` survives on its checksum whatever the
-answer.
-
-**`IR SEND` does not need the measurement at all**: it is a list of edge
-durations, which is exactly what the shipped `BITSTREAM` PIO path takes.
-Zero kernel work, and the pin window (GP0-GP7, GP26) is the only cost.
+* **`IR SEND`** — nothing to decide, see item 4: it is a list of edge
+  durations and the shipped `BITSTREAM` PIO path already takes exactly
+  that.
+* **`OneShot` and IR RECEIVE** — GPIO edge interrupts with their own
+  timers in the reference, so they want the edge CAPTURE that
+  `Pulsin(` now runs on (`countpin.c`, `GPIOC_CNT_CAP`), not a loop.
+  IR receive additionally needs the 1 ms assembly timer MMBasic runs
+  its state machine on.
+* **`Humid`** — the one that can still be an honest busy-wait, because
+  a DHT frame carries a checksum: a corrupted read is detectable and
+  retryable, which is precisely why the reference gets away with it.
 
 ### 6. PIO, in four pieces
 
@@ -224,12 +228,20 @@ thing to fix.
   `REFRESH` has no target but a no-op is exactly what MMBasic does with
   `AUTOREFRESH ON`, so it is a ten-line compatibility shim the day a
   ported program needs it.
-* **Graphics: `Turtle`, `Tilemap`, `Frame`, `Ray`, `Draw3D`** — eleven
-  names, seven engines, spanning 69 to 1,850 reference lines. Nothing is
-  blocked on graphics capability; the question is which are wanted.
-  `Frame` is not a graphics feature at all — it is a TUI panel system
-  our ANSI console would host for free, and the whole expense is a
-  19-subcommand parse written twice.
+* **Graphics: `Turtle` and `Draw3D`** — wanted eventually, **decided
+  2026-08-23 to be not imminent**, and in category 3 rather than 2 so
+  that "somebody could pick this up tomorrow" keeps meaning something.
+  Turtle is pen state over primitives that already exist; Draw3D is
+  transform, projection and an object table of its own (~1,850
+  reference lines).
+
+  **`Mandelbrot`, `Ray` and `Frame` are NEVER** — decided the same day
+  by MMBasic's own author: Mandelbrot is a silly easter egg there, and
+  the other two are not wanted here. They are category 4 now, recorded
+  as decisions rather than gaps, so no future review proposes them
+  again. Do not resurrect them from an old plan document.
+
+  `TILE` and `Tilemap` stay in category 2 and are unaffected.
 
 ## Open in the FUZIX tree, not here
 

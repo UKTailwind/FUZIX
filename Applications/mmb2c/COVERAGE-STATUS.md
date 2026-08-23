@@ -16,7 +16,7 @@ and it lives in `fcc/catmap.py`.
 The 125 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
 Draw3D each appear twice, CtrlVal as both a command and a function - so there are **122 distinct
 names**. Of those, **19 are false negatives** (the thing works and the scanner cannot see it),
-leaving **103 real gaps**, of which 79 are in categories 4 and 5 and are not intended to close.
+leaving **103 real gaps**, of which 84 are in categories 4 and 5 and are not intended to close.
 
 ## What this count cannot tell you
 
@@ -44,9 +44,9 @@ four inside its "excluded from the documentation" block.
 ## The five categories
 
 1. **Finish what is already there** - 0
-2. **Real value, moderate work** - 20
-3. **Possible, wants your steer first** - 4
-4. **Deliberately out** - 54
+2. **Real value, moderate work** - 12
+3. **Possible, wants your steer first** - 7
+4. **Deliberately out** - 59
 5. **Not applicable to this machine** - 25
 
 ## False negatives: implemented, invisible to the scan
@@ -57,11 +57,11 @@ misled us before (`DefineFont` and `BLIT MEMORY` both read as missing while they
 
 `Rem`, `/*`, `*/`, `Blit Memory`, `+`, `-`, `^`, `*`, `/`, `\\`, `<<`, `>>`, `<>`, `>=`, `<=`, `<`, `>`, `=`, `@(`
 
-## Category 2 - Real value, moderate work (20)
+## Category 2 - Real value, moderate work (12)
 
-**Commands:** `ADC`, `Draw3D`, `Frame`, `Humid`, `IR`, `Keypad`, `Mandelbrot`, `OneShot`, `PIO`, `Ray`, `SYNC`, `Slew`, `TILE`, `Tilemap`, `Turtle`
+**Commands:** `ADC`, `Humid`, `IR`, `Keypad`, `OneShot`, `PIO`, `SYNC`, `Slew`, `TILE`, `Tilemap`
 
-**Functions:** `DRAW3D(`, `Frame(`, `Pio(`, `Ray(`, `Tilemap(`
+**Functions:** `Pio(`, `Tilemap(`
 
 `PIO` and `Pio(` are here as the RUNTIME surface only - see the
 category 4 note for the decided split: the PIO assembly language gets
@@ -90,11 +90,18 @@ BITSTREAM PIO path, and `OneShot` and IR RECEIVE are GPIO edge
 interrupts in the reference too - they want the capture, not a
 loop.
 
-## Category 3 - Possible, wants your steer first (4)
+## Category 3 - Possible, wants your steer first (7)
 
-**Commands:** `Memory`, `RESOLUTION`, `Refresh`
+**Commands:** `Draw3D`, `Memory`, `RESOLUTION`, `Refresh`, `Turtle`
 
-**Functions:** `GetScanLine`
+**Functions:** `DRAW3D(`, `GetScanLine`
+
+`Turtle` and `Draw3D` are here by decision, 2026-08-23:
+wanted eventually, **not imminent**, and deliberately not in category 2
+so that "moderate work, real value" keeps meaning "somebody could pick
+this up tomorrow".  Both are engines rather than toys - Turtle is pen
+state over primitives that already exist, Draw3D is transform,
+projection and an object table of its own.
 
 (`WS2812` and `Bitstream` used to sit here as MMBasic's two
 genuinely interrupts-off commands, rejected for bit-banging on a
@@ -104,11 +111,18 @@ running, and the counting inputs proved the streams exact on the
 board.  `DEVICE SERIALRX/TX`, the other maskers, stay in category 5
 with the rest of `Device`.)
 
-## Category 4 - Deliberately out (54)
+## Category 4 - Deliberately out (59)
 
-**Commands:** `Autosave`, `CMM2 Load`, `CMM2 Run`, `CSub`, `Calc`, `Chain`, `Configure`, `Drive`, `Edit`, `Edit File`, `End CSub`, `Execute`, `FM`, `Help`, `IRQ`, `IRQ CLEAR`, `IRQ NEXT`, `IRQ NOWAIT`, `IRQ PREV`, `IRQ SET`, `IRQ WAIT`, `IReturn`, `In`, `Interrupt`, `Jmp`, `Library`, `List`, `Mov`, `New`, `Nop`, `Out`, `Pull`, `Push`, `Ram`, `Run`, `Set`, `Trace`, `Update Firmware`, `VAR`, `Wait`, `XModem`, `YModem`, `_end program`, `_label`, `_line`, `_program`, `_side set`, `_wrap`, `_wrap target`
+**Commands:** `Autosave`, `CMM2 Load`, `CMM2 Run`, `CSub`, `Calc`, `Chain`, `Configure`, `Drive`, `Edit`, `Edit File`, `End CSub`, `Execute`, `FM`, `Frame`, `Help`, `IRQ`, `IRQ CLEAR`, `IRQ NEXT`, `IRQ NOWAIT`, `IRQ PREV`, `IRQ SET`, `IRQ WAIT`, `IReturn`, `In`, `Interrupt`, `Jmp`, `Library`, `List`, `Mandelbrot`, `Mov`, `New`, `Nop`, `Out`, `Pull`, `Push`, `Ram`, `Ray`, `Run`, `Set`, `Trace`, `Update Firmware`, `VAR`, `Wait`, `XModem`, `YModem`, `_end program`, `_label`, `_line`, `_program`, `_side set`, `_wrap`, `_wrap target`
 
-**Functions:** `Eval(`, `SChange$(`, `TopBottom(`, `base$(`, `~(`
+**Functions:** `Eval(`, `Frame(`, `Ray(`, `SChange$(`, `TopBottom(`, `base$(`, `~(`
+
+`Mandelbrot`, `Ray` and `Frame` are **NEVER**, decided
+2026-08-23 by MMBasic's own author: Mandelbrot is a silly easter egg
+there and not something to carry forward, and the other two are not
+wanted on this machine.  They are recorded here as DECISIONS rather
+than left in category 2 as gaps, so that no future review proposes
+them again - which is what this table is for.
 
 The 22 PIO assembly names (`Jmp` ... `Set`, the `IRQ` rows and the
 `_label`/`_wrap`/`_program` directives) are out **of the translator by
