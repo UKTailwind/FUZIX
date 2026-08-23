@@ -1768,12 +1768,19 @@ and its dispatcher run from RAM for exactly that reason.
 
 ### Measuring a pulse: `Pulsin(` and `Distance(` {#pulsin}
 
+> **The measured pin must be GP4, GP5, GP6 or GP7.** Nothing else can
+> be measured: another pin gives `Pulsin needs GP4, GP5, GP6 or GP7`
+> at translate-run time rather than a wrong number. For `DISTANCE` the
+> restriction is on the **echo** pin only — the trigger may be any
+> header pin. It is the same fixed set the counting inputs use, and for
+> the same reason: these are the pins whose interrupt the kernel owns.
+
 ```basic
 SETPIN GP5, DIN
 w = PULSIN(GP5, 1)              ' the next HIGH pulse, in microseconds
 w = PULSIN(GP5, 0, 5000)        ' the next LOW one, giving up after 5 ms
-d = DISTANCE(GP4)               ' an HC-SR04 on one wire, in centimetres
-d = DISTANCE(GP2, GP5)          ' ... or with separate trigger and echo
+d = DISTANCE(GP1, GP7)          ' HC-SR04: trigger any pin, echo GP4-GP7
+d = DISTANCE(GP4)               ' ... or a 3-pin device on one wire
 ```
 
 `PULSIN(pin, polarity [, t1 [, t2]])` returns the width in
@@ -1783,8 +1790,7 @@ both may be 5 µs to 10 seconds. `DISTANCE(trig [, echo])` returns
 centimetres, **-1** if no echo came back and **-2** if the sensor never
 answered at all.
 
-**The echo pin must be GP4, GP5, GP6 or GP7**, and any other pin is
-refused by name. That restriction buys something worth having.
+#### Why the pins are fixed
 
 MMBasic measures a pulse by spinning on the pin and a microsecond
 clock, which is the right answer on a machine running one program. It
@@ -1799,15 +1805,27 @@ So the kernel timestamps both edges in the interrupt that already
 serves the counting inputs, and `PULSIN` reads the times rather than
 watching the pin. Your program can be as late as the machine makes it
 and still get the right answer; what is left is the interrupt latency,
-under a microsecond normally. Measured against the board's own PWM, a
-250 µs pulse reads 250 µs every time — **and reads 250 µs while another
-program spins flat out**, which is the whole point.
+under a microsecond normally. **That interrupt exists on GP4–GP7 and
+nowhere else, which is exactly where the pin restriction comes from.**
+A version that worked on any pin would have to go back to spinning, and
+would be right when the machine was idle and wrong when it was busy.
 
-Two consequences to know about. `PULSIN` and `DISTANCE` use the same
-hardware as `SETPIN ... FIN/CIN/PIN`, so a pin cannot be a counter and
-a pulse measurement at once — and one pin at a time is being measured.
-And a pin so noisy that more than sixteen edges arrive between two
-looks gets **-1** rather than a guess.
+Measured against the board's own PWM, a 250 µs pulse reads 250 µs every
+time — **and reads 250 µs while another program spins flat out**. An
+HC-SR04 on GP1/GP7 reads a reflector at 20 cm as 21.5 cm, fifteen
+readings without a flicker, and the same fifteen under that same load.
+
+#### Three more things to know
+
+* `PULSIN` and `DISTANCE` use the same hardware as
+  `SETPIN ... FIN/CIN/PIN`, so a pin cannot be a counter and a pulse
+  measurement at once, and **one pin at a time** is being measured.
+* A pin so noisy that more than sixteen edges arrive between two looks
+  gets **-1** rather than a guess.
+* A sensor that answers oddly is worth believing. `DISTANCE` returning
+  a small constant means the echo line really is that short: on the
+  bench that turned out to be a 5 V module given 3.3 V on its trigger,
+  and the reading was correct about a wire that was wrong.
 
 **Pins are now owned.** `SETPIN` claims the pin from the kernel, and
 claiming one that another program holds gives `Pin cannot do that`
@@ -3748,33 +3766,34 @@ translate time, not at run time.
 |   |   |   |   |
 |---|---|---|---|
 | `?` | `ARC` | `ARRAY` | `BEZIER` |
-| `BIT` | `BLIT` | `BOX` | `BYTE` |
-| `CALL` | `CASE` | `CAT` | `CHDIR` |
-| `CIRCLE` | `CLEAR` | `CLOSE` | `CLS` |
-| `COLOR` | `COLOUR` | `CONST` | `CONTINUE` |
-| `COPY` | `CPU` | `DATA` | `DATE$` |
-| `DEFINEFONT` | `DIM` | `DO` | `ELSE` |
-| `ELSEIF` | `END` | `ENDIF` | `ERASE` |
-| `ERROR` | `EXIT` | `FILES` | `FILL` |
-| `FLAG` | `FLAGS` | `FLASH` | `FLUSH` |
-| `FONT` | `FOR` | `FRAMEBUFFER` | `FUNCTION` |
-| `GOSUB` | `GOTO` | `GUI` | `I2C` |
-| `I2C2` | `IF` | `INC` | `INPUT` |
-| `KILL` | `LET` | `LINE` | `LMID` |
-| `LOAD` | `LOCAL` | `LONGSTRING` | `LOOP` |
-| `MAP` | `MATH` | `MKDIR` | `MODE` |
-| `NEXT` | `ON` | `ONEWIRE` | `OPEN` |
-| `OPTION` | `PAUSE` | `PIN` | `PIXEL` |
-| `PLAY` | `POKE` | `POLYGON` | `PORT` |
-| `PRINT` | `PULSE` | `PWM` | `RANDOMIZE` |
-| `RBOX` | `READ` | `REDIM` | `RENAME` |
-| `RESTORE` | `RETURN` | `RMDIR` | `RTC` |
-| `SAVE` | `SEEK` | `SELECT` | `SERVO` |
-| `SETPIN` | `SETTICK` | `SORT` | `SPI` |
-| `SPRITE` | `STATIC` | `STRUCT` | `SUB` |
-| `SYSTEM` | `TEMPR` | `TEXT` | `TIME$` |
-| `TIMER` | `TRIANGLE` | `TYPE` | `WATCHDOG` |
-| `WEB` | `WEND` | `WHILE` |  |
+| `BIT` | `BITSTREAM` | `BLIT` | `BOX` |
+| `BYTE` | `CALL` | `CASE` | `CAT` |
+| `CHDIR` | `CIRCLE` | `CLEAR` | `CLOSE` |
+| `CLS` | `COLOR` | `COLOUR` | `CONST` |
+| `CONTINUE` | `COPY` | `CPU` | `DATA` |
+| `DATE$` | `DEFINEFONT` | `DIM` | `DO` |
+| `ELSE` | `ELSEIF` | `END` | `ENDIF` |
+| `ERASE` | `ERROR` | `EXIT` | `FILES` |
+| `FILL` | `FLAG` | `FLAGS` | `FLASH` |
+| `FLUSH` | `FONT` | `FOR` | `FRAMEBUFFER` |
+| `FUNCTION` | `GOSUB` | `GOTO` | `GUI` |
+| `I2C` | `I2C2` | `IF` | `INC` |
+| `INPUT` | `KILL` | `LET` | `LINE` |
+| `LMID` | `LOAD` | `LOCAL` | `LONGSTRING` |
+| `LOOP` | `MAP` | `MATH` | `MKDIR` |
+| `MODE` | `NEXT` | `ON` | `ONEWIRE` |
+| `OPEN` | `OPTION` | `PAUSE` | `PIN` |
+| `PIXEL` | `PLAY` | `POKE` | `POLYGON` |
+| `PORT` | `PRINT` | `PULSE` | `PWM` |
+| `RANDOMIZE` | `RBOX` | `READ` | `REDIM` |
+| `RENAME` | `RESTORE` | `RETURN` | `RMDIR` |
+| `RTC` | `SAVE` | `SEEK` | `SELECT` |
+| `SERVO` | `SETPIN` | `SETTICK` | `SORT` |
+| `SPI` | `SPRITE` | `STATIC` | `STRUCT` |
+| `SUB` | `SYSTEM` | `TEMPR` | `TEXT` |
+| `TIME$` | `TIMER` | `TRIANGLE` | `TYPE` |
+| `WATCHDOG` | `WEB` | `WEND` | `WHILE` |
+| `WS2812` |  |  |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -3788,27 +3807,27 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `BIT` | `BOUND` | `BYTE` | `CHOICE` |
 | `CHR$` | `CINT` | `COS` | `CWD$` |
 | `DATE$` | `DATETIME$` | `DAY$` | `DEG` |
-| `DIR$` | `EOF` | `EPOCH` | `EXP` |
-| `FIELD$` | `FIX` | `FLAG` | `FORMAT$` |
-| `HEX$` | `INKEY$` | `INPUT$` | `INSTR` |
-| `INT` | `JSON$` | `KEYDOWN` | `LCASE$` |
-| `LCOMPARE` | `LEFT$` | `LEN` | `LGETBYTE` |
-| `LGETSTR$` | `LINPUT` | `LINSTR` | `LLEN` |
-| `LOC` | `LOF` | `LOG` | `LTRIM$` |
-| `MAP` | `MATH` | `MAX` | `MID$` |
-| `MIN` | `MM.ADDRESS$` | `MM.CMDLINE$` | `MM.DEVICE$` |
-| `MM.ERRMSG$` | `MM.ERRNO` | `MM.FONTHEIGHT` | `MM.FONTWIDTH` |
-| `MM.HPOS` | `MM.HRES` | `MM.I2C` | `MM.INFO` |
-| `MM.INFO$` | `MM.MESSAGE$` | `MM.ONEWIRE` | `MM.SPISPEED` |
-| `MM.VER` | `MM.VPOS` | `MM.VRES` | `OCT$` |
-| `PEEK` | `PI` | `PIN` | `PIXEL` |
-| `PORT` | `POS` | `RAD` | `RGB` |
-| `RIGHT$` | `RND` | `RTRIM$` | `SGN` |
-| `SIN` | `SPACE$` | `SPI` | `SPRITE` |
-| `SQR` | `STR$` | `STR2BIN` | `STRING$` |
-| `STRUCT` | `TAB` | `TAN` | `TEMPR` |
-| `TIME$` | `TIMER` | `TRIM$` | `UCASE$` |
-| `VAL` |  |  |  |
+| `DIR$` | `DISTANCE` | `EOF` | `EPOCH` |
+| `EXP` | `FIELD$` | `FIX` | `FLAG` |
+| `FORMAT$` | `HEX$` | `INKEY$` | `INPUT$` |
+| `INSTR` | `INT` | `JSON$` | `KEYDOWN` |
+| `LCASE$` | `LCOMPARE` | `LEFT$` | `LEN` |
+| `LGETBYTE` | `LGETSTR$` | `LINPUT` | `LINSTR` |
+| `LLEN` | `LOC` | `LOF` | `LOG` |
+| `LTRIM$` | `MAP` | `MATH` | `MAX` |
+| `MID$` | `MIN` | `MM.ADDRESS$` | `MM.CMDLINE$` |
+| `MM.DEVICE$` | `MM.ERRMSG$` | `MM.ERRNO` | `MM.FONTHEIGHT` |
+| `MM.FONTWIDTH` | `MM.HPOS` | `MM.HRES` | `MM.I2C` |
+| `MM.INFO` | `MM.INFO$` | `MM.MESSAGE$` | `MM.ONEWIRE` |
+| `MM.SPISPEED` | `MM.VER` | `MM.VPOS` | `MM.VRES` |
+| `OCT$` | `PEEK` | `PI` | `PIN` |
+| `PIXEL` | `PORT` | `POS` | `PULSIN` |
+| `RAD` | `RGB` | `RIGHT$` | `RND` |
+| `RTRIM$` | `SGN` | `SIN` | `SPACE$` |
+| `SPI` | `SPRITE` | `SQR` | `STR$` |
+| `STR2BIN` | `STRING$` | `STRUCT` | `TAB` |
+| `TAN` | `TEMPR` | `TIME$` | `TIMER` |
+| `TRIM$` | `UCASE$` | `VAL` |  |
 
 ## MATH() sub-functions
 
@@ -4230,7 +4249,13 @@ the character itself are accepted and drawn normally.
 
 Of the pins, `SETPIN n, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|PWM|OFF`,
 `PIN(n) =` and `PIN(n)` are done, and so are `PORT` in both directions
-and `PULSE`. `PORT(pin, nbits [, pin, nbits]…)` reads or writes
+and `PULSE`. The counting inputs — `SETPIN n, FIN|CIN|PIN` — and the
+pulse measurements `PULSIN(` and `DISTANCE(` are done as well, and all
+five are **fixed on GP4–GP7**: they need the interrupt the kernel owns
+on those four pins, and any other pin is refused by name rather than
+measured badly. `WS2812` and `BITSTREAM` are done too, and those go the
+other way — they are driven by PIO, so their pins are **GP0–GP7 and
+GP26**. `PORT(pin, nbits [, pin, nbits]…)` reads or writes
 several pins as one number, and **the first pin of a group is the
 least significant bit** — `PORT(0,8) = 1` lights GP0, not GP7. Every
 pin in a bank changes on the same clock edge, which is the whole

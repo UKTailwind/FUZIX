@@ -5,8 +5,14 @@
 
 The lists come from mmb2c.py itself - the statement dispatch in
 statement_inner() and the BUILTINS table - so the appendix cannot drift
-away from what the translator actually does.  Regenerate it whenever
-coverage changes and paste the output into the manual appendix.
+away from what the translator actually does.
+
+DO NOT PASTE THE WHOLE OUTPUT OVER APPENDIX C.  The manual's appendix
+opens with the two tables this prints and then continues with pages of
+hand-written detail - the MATH sections, error handling, I2C2, SPI,
+one-wire, and a "Not covered" that says far more than the one below.
+Replacing the appendix wholesale deletes all of it, which is exactly
+what happened once.  Take the two TABLES and leave the prose alone.
 """
 import re
 import sys
@@ -53,9 +59,40 @@ for name, lo, hi in re.findall(r"'([A-Z0-9.$]+)': \((\d+), (\d+)\)", tbl):
 funcs['STRUCT'] = (2, 2)
 
 mathfn = re.search(r"MATHFUNCS = \{([^}]*)\}", text).group(1)
-mathfn = sorted(re.findall(r"'([A-Z0-9]+)'", mathfn))
+mathfn = re.findall(r"'([A-Z0-9]+)'", mathfn)
+# ... and the two families that are HAND branches in expr rather than
+# table entries, because their argument shapes do not fit a table:
+# BASE64 writes into its second argument, and the CRCs take one to
+# seven arguments with any of them omittable.  A table scan cannot see
+# either, so this appendix listed five scalar MATH functions while the
+# manual's own prose documented BASE64 - asserted against the source so
+# a rename here is loud rather than silent, exactly as fcc/mathstatus.py
+# registers the same two.
+assert "'BASE64'" in text, "the MATH BASE64 branch left mmb2c.py"
+assert "CRCWIDTH = {" in text, "the MATH CRC table left mmb2c.py"
+mathfn += ["BASE64"]
+mathfn += re.findall(r"'(CRC[0-9]+)'",
+                     re.search(r"CRCWIDTH = \{([^}]*)\}", text).group(1))
+mathfn = sorted(set(mathfn))
 matharr = re.search(r"MATHARRAY = \(([^)]*)\)", text).group(1)
 matharr = sorted(re.findall(r"'([A-Z0-9]+)'", matharr))
+
+# The IN-PLACE sub-commands, which are statements rather than functions
+# and so belong in their own list: what do_array_cmd dispatches, plus
+# the component-wise family from the table three lines above it - the
+# blind spot that hid all eight of those from COVERAGE-STATUS.md.
+blk = text[text.index("def do_array_cmd"):]
+blk = blk[:blk.index("\n    def ", 10)]
+mathcmd = set(re.findall(r"'([A-Z_0-9]+)'", blk))
+assert "CCOMB = {" in text, "the MATH C_* table left mmb2c.py"
+mathcmd |= set(re.findall(r"'([A-Z_0-9]+)'",
+                          re.search(r"CCOMB = \{([^}]*)\}", text).group(1)))
+# do_array_cmd's block mentions words that are not sub-commands (the
+# error text, the type names); keep the ones MMBasic actually has.
+mathcmd &= {"SET", "ADD", "SCALE", "RANDOMIZE", "SLICE", "INSERT",
+            "C_ADD", "C_SUB", "C_MUL", "C_MULT", "C_DIV", "C_AND",
+            "C_OR", "C_XOR"}
+mathcmd = sorted(mathcmd)
 
 if "--check" in sys.argv:
     print("statements %d, functions %d, MATH scalar %d, MATH array %d"
@@ -100,13 +137,19 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 """)
 print(cols(sorted(funcs)))
 print("""
-## MATH() sub-functions
+## MATH
 
-Scalar: %s
+Scalar functions, `MATH(name ...)`: %s
 
-Whole-array (one number out of an array): %s
+Whole-array functions, one number out of an array: %s
+
+In place on arrays, `MATH name ...`: %s
+
+`ARRAY` is accepted as a spelling of `MATH` for the in-place forms, as
+it is in MMBasic.
 """ % (", ".join("`%s`" % f for f in mathfn),
-       ", ".join("`%s`" % f for f in matharr)))
+       ", ".join("`%s`" % f for f in matharr),
+       ", ".join("`%s`" % f for f in mathcmd)))
 print("""## Types and structure
 
 `INTEGER` (64-bit), `FLOAT` (double), `STRING`, and arrays of each, up
@@ -116,9 +159,20 @@ the usual control flow.
 
 ## Not covered
 
-Everything to do with the firmware's own hardware - display, sound,
-GPIO, I2C, SPI, one-wire, interrupts, `SETPIN`, `PIN`, `PORT` - along
-with the editor, `RUN`, `LIST`, `EDIT`, `LOAD`, `SAVE` and the rest of
-the immediate-mode environment. Some of the hardware statements are the
-subject of current work; the immediate-mode ones will never apply, as a
-translated program is compiled and run, not typed at a prompt.""")
+The immediate-mode environment - the editor, `RUN`, `LIST`, `EDIT`,
+`NEW`, `SAVE` and the rest - will never apply, because a translated
+program is compiled and run rather than typed at a prompt. MMBasic's
+in-language PIO assembly is deliberately out too: it gets an assembler
+of its own, so that a PIO block can be written once and imported.
+
+What remains are the hardware statements this port has not reached yet
+rather than a class it cannot reach: the display, sound, the GPIO
+family, `SETPIN`, `PIN`, `PORT`, I2C, SPI, one-wire and the interrupt
+sources are all here. `Applications/mmb2c/COVERAGE-STATUS.md` in the
+source tree is the honest name-by-name list, generated the same way
+this appendix is, and it says which of the rest are wanted, which want
+a decision first, and which do not apply to this machine.
+
+Anything not listed anywhere here is refused BY NAME at translate time,
+with its line number - so you find out before you run it, not while it
+is running.""")

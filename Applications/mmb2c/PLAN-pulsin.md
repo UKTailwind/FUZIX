@@ -132,9 +132,9 @@ AND still need the IRQ.
    byte-identical by cgate.
 5. Board acceptance from BASIC — `samples/pulsintest.bas` against the
    board's own PWM. **DONE**, and the numbers are below.
-6. `Distance(` against a real HC-SR04 — **attempted 2026-08-23, and
-   the sensor is not answering properly.  See below: the software is
-   reading the wire correctly.**
+6. `Distance(` against a real HC-SR04 — **DONE, board-proven
+   2026-08-23** once the sensor was answering (the first attempt is
+   below, and was the bench rather than the software).
 
 ## What the board said
 
@@ -168,7 +168,29 @@ anything MORE uniform, because the program is descheduled into whole
 pulses rather than catching them mid-poll - which is the design saying
 what it was built to say.
 
-## The HC-SR04 on the bench: what the wire actually does
+## `Distance(` on a real HC-SR04
+
+Trigger on GP1, echo on GP7, `samples/hcsr04.bas` through the card's
+own `cc`:
+
+| reflector at | read | with `spingap` spinning |
+|---|---|---|
+| 15 cm | 15.0, 15.0, 14.6, 15.0 ... (15 readings) | — |
+| 20 cm | **21.5 cm x15, not a flicker** | **21.5 cm x15, identical** |
+
+It tracks the move exactly - the raw probe measured the same line at
+822-871 us with the reflector at 15 cm, and 21.5 cm is 1247 us - with a
+consistent offset of about 1.5 cm at this range, which is the sensor
+and the geometry rather than the arithmetic.  58 us per centimetre is
+MMBasic's own divisor, so a PicoMite reading this waveform prints the
+same number.
+
+Fifteen identical readings under a process spinning flat out is the
+same statement `Pulsin(` makes one layer down, in the units a user
+cares about: **the measurement does not care what else the machine is
+doing.**
+
+## The first attempt, and what the wire was doing then
 
 `Distance(GP1, GP7)` returned **0.1 cm**, over and over. That is
 3 us / 58, and 3 us is what the echo line does. `utils/hcprobe.c`
@@ -181,17 +203,17 @@ and a tight CPU sampling loop — and they agree to the microsecond:
                                     452 us -> 0 (events 4)
 
 Identical with a pull-up, floating, and with a pull-down. So the module
-IS answering the trigger — 450 us is exactly an HC-SR04's echo latency
-— and then holds ECHO high for three microseconds instead of the
-hundreds a range would take. **The software is reading the wire
-correctly; the wire is the problem.** The likeliest cause is the module
-being a 5 V part: its TRIG input wants ~3.5 V where GP1 gives 3.3 V, so
-it starts a cycle without completing a proper one, and its 5 V ECHO
-into a 3.3 V pad is the other half of the same mismatch. It is the same
-shape as the WS2812 strip that would not light on this board.
+WAS answering the trigger — 450 us is exactly an HC-SR04's echo latency
+— and then held ECHO high for three microseconds instead of the
+hundreds a range would take. **The software was reading the wire
+correctly; the wire was the problem**, and the bench fixed it: the same
+program on the same code then read 15 cm and 21.5 cm.
 
-`Distance(` therefore stays **BUILT, NOT PROVEN**, and the manual says
-so.
+Keep the shape of this rather than the details. A number that is
+plausible in FORM (0.1 cm is a distance) and impossible in VALUE is the
+one to distrust, and the way to settle it is a second, independent
+measurement of the same physical event — not a closer reading of the
+code.
 
 **A method trap worth keeping**: the first sampling run reported a
 224 us pulse and disagreed with the interrupt, which sent me looking
