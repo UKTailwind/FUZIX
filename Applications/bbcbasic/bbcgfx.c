@@ -38,6 +38,9 @@
 #define GFXIOC_MODE   0x0003
 #define GFXIOC_PAL    0x0004
 #define GFXIOC_BLIT   0x0005
+/* Same flat number space, same device: does console output reach the
+ * DISPLAY as well as the uart.  See con_mirror() below. */
+#define PICOIOC_CONMIRROR 0x0038
 struct gfx_blit {
     uint16_t offset;
     uint16_t len;
@@ -265,6 +268,30 @@ static void text_char(int ch)
 }
 
 /* --- mode control --------------------------------------------------------- */
+/* The kernel console's SCREEN half, while the mode is ours.
+ *
+ * This used to need no asking: entering a graphics mode made the
+ * console fall silent, which is what the serial mirror in the VDU
+ * dispatch below was written against.  The console now RENDERS in a
+ * graphics mode instead - as pixels, in its own 8x12 font - so that
+ * MMBasic's PRINT works in MODE 2, and the mirror's putchar() started
+ * painting every character into our framebuffer a second time, on top
+ * of the 8x8 glyph we had just drawn ourselves.
+ *
+ * PICOIOC_CONMIRROR turns that half off and leaves the uart alone,
+ * which is exactly the split the mirror wants: the serial console
+ * still gets the text stream, the display gets only our own drawing.
+ * It is the same ioctl MMBasic's runtime uses for OPTION CONSOLE
+ * SERIAL, and like it the kernel gives the mirror back when the
+ * process ends, so a crash cannot leave a machine whose display shows
+ * nothing anyone types.  An older kernel refuses the call; the refusal
+ * is ignored, as there. */
+static void con_mirror(int on)
+{
+    if (fd >= 0)
+        ioctl(fd, PICOIOC_CONMIRROR, (void *)(long)(on ? 1 : 0));
+}
+
 static int gfx_enter(int n)
 {
     int m;
@@ -296,6 +323,7 @@ static int gfx_enter(int n)
         break;
     }
     curmode = n;
+    con_mirror(0);
     memset(fb, 0, sizeof(fb));
     gx[0] = gx[1] = gx[2] = gy[0] = gy[1] = gy[2] = 0;
     ox = oy = 0;
@@ -314,8 +342,10 @@ static int gfx_enter(int n)
 static void gfx_exit(void)
 {
     int m = 0xFF;
-    if (curmode >= 0 && fd >= 0)
+    if (curmode >= 0 && fd >= 0) {
         ioctl(fd, GFXIOC_MODE, &m);
+        con_mirror(1);
+    }
     curmode = -1;
 }
 
@@ -451,9 +481,10 @@ int fuzix_gfx_vdu(int code, int data1, int data2)
             vdu == 11 || vdu == 12 || vdu == 13 || vdu == 30 ||
             vdu == 127) {
             text_char(vdu);
-            /* Mirror text to the serial console as a plain stream
-             * (the kernel console is suspended in graphics modes, so
-             * this write reaches only the uart). */
+            /* Mirror text to the serial console as a plain stream.
+             * con_mirror(0) at MODE time is what keeps this off the
+             * display - without it the console draws it again, in its
+             * own font, over the glyph above. */
             if (vdu == 12)
                 fputs("\033[2J\033[H", stdout);
             else if (vdu == 30)

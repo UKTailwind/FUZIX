@@ -65,16 +65,40 @@ static volatile uint8_t con_gfx_active;
  * it back on when that process ends - see console_mirror_reset. */
 static volatile uint8_t con_to_display = 1;
 
+static void con_cursor_off(void);
+static void con_cursor_on(void);
+
+/* The CURSOR goes with the flag, and that is not decoration.
+ *
+ * Everything else the console paints arrives through con_output, which
+ * this flag gates - but the cursor is painted by whoever moved it, and
+ * a MODE change paints one at (0,0) before the program has asked for
+ * anything.  In a graphics mode that is an inverted 8x12 CELL in the
+ * program's framebuffer: bbcbasic drew its own 8x8 glyph over the top
+ * four fifths of it and left a white 8x4 block under the prompt until
+ * something happened to redraw that row.
+ *
+ * So going quiet TAKES THE CELL BACK (the graphics cursor is an XOR,
+ * so the second invert restores exactly what was under it), and coming
+ * back puts it where the cursor now is.  That makes the order the
+ * caller uses irrelevant: a program may ask before or after its mode
+ * change and get the same screen either way. */
 void console_mirror(int on)
 {
-    con_to_display = on ? 1 : 0;
+    if (on) {
+        con_to_display = 1;
+        con_cursor_on();
+    } else {
+        con_cursor_off();
+        con_to_display = 0;
+    }
 }
 
 /* On the way out of any process: a program that died holding the screen
  * must not leave the machine with a console nobody can see. */
 void console_mirror_reset(void)
 {
-    con_to_display = 1;
+    console_mirror(1);
 }
 
 #define CON_COLS con_cols
@@ -386,7 +410,11 @@ static void con_cursor_off(void)
 
 static void con_cursor_on(void)
 {
-    if (cursorhide)
+    /* Not while the screen half is off: the cell belongs to whatever
+     * program asked for the display to itself.  con_cursor_off is NOT
+     * gated - a cursor painted while mirroring was on must still be
+     * takeable back afterwards. */
+    if (cursorhide || !con_to_display)
         return;
     con_cursor_off();
     cursor_px = cx;
