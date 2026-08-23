@@ -4,12 +4,38 @@ Windows host, `pyserial`, console on COM11 at 115200.
 
 | script | what it does |
 |--------|--------------|
+| `reflash.py` | **flash a kernel**: sync, remount read-only, BOOTSEL, copy, wait for the prompt |
 | `fzsh.py`  | run shell commands: `python fzsh.py 25 "df" "ls /bin"` |
 | `fz2.py`   | run BBC BASIC lines |
 | `fz.py`    | probe / shell / basic, faster but less careful |
 | `uusend.py`| **send a file**: uuencodes it, types it into `cat`, runs `uud` |
 | `hwdiff.py`| run a bytecode program on the board and diff against a reference |
 | `xsend.py` | XMODEM sender. Kept for reference only - see below |
+
+## Flashing a kernel
+
+    set FZPORT=COM17
+    python reflash.py ../build/fuzix.uf2
+
+It syncs, remounts the root READ-ONLY, resets into BOOTSEL, finds the
+volume by its `INFO_UF2.TXT` (the drive letter moves - never assume
+one), copies, and waits for the console to come back.
+
+**The read-only step is the whole point.** `picoctl flash` calls the
+SDK's `reset_usb_boot()`, which is an immediate reset: the kernel
+unmounts nothing on the way out, so a root that was mounted read-write
+comes back dirty and the next boot spends several minutes in `fsck`.
+Cards older than the `mount -n -r` support cannot do it; the script
+says so and asks, and `--dirty-ok` answers for a script.
+
+## One command at a time on the console
+
+Anything sent to the board through `fzsh.py` must be **one plain
+command with no pipe, no quotes and no `$`**. PowerShell strips quotes
+on the way to a native exe and expands `$` before python sees them, and
+the shell on the far end reads what is left. A `grep -E "shut|halt"`
+once reached the board as a pipeline whose second stage was `halt`, and
+halted it. Put anything with structure in a file and `uusend` it.
 
 ## Sending files
 
