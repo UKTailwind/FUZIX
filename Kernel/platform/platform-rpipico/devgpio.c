@@ -50,6 +50,11 @@ int gpio_ioctl(uarg_t request, char *data)
     if (request >= GPIOC_CNT_FIN && request <= GPIOC_CNT_OFF)
         return countpin_ioctl(request, data);
 
+    /* Edge capture for Pulsin( and Distance( - struct capreq, which is
+       a different shape again (PLAN-pulsin.md). */
+    if (request == GPIOC_CNT_CAP || request == GPIOC_CNT_CAPRD)
+        return countpin_cap_ioctl(request, data);
+
     /* The PIO output word buffer (pioout.c) - same reasoning. */
     if (request == GPIOC_PIOOUT_BUF)
         return pioout_ioctl(request, data);

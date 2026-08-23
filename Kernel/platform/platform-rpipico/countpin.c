@@ -67,6 +67,7 @@
 #include <hardware/gpio.h>
 #include <hardware/irq.h>
 #include <hardware/sync.h>
+#include <hardware/timer.h>
 #include <pico/time.h>
 
 #define CNT_FIRST	4		/* GP4..GP7 = MMBasic INT1..INT4 */
@@ -76,6 +77,7 @@
 #define CNT_FIN		1
 #define CNT_CIN		2
 #define CNT_PER		3
+#define CNT_CAP		4		/* edge capture: Pulsin(, Distance( */
 
 struct cntpin {
 	uint8_t mode;
@@ -91,18 +93,68 @@ static uint8_t cnt_timer_on;
 static uint8_t cnt_cb_set;
 
 /*
+ *	EDGE CAPTURE - PLAN-pulsin.md, and the whole of Pulsin(/Distance(
+ *	on this machine.  ONE ring for the machine, because capture is
+ *	one pin at a time: a program measuring two pulses at once is not
+ *	a thing MMBasic can express either.
+ *
+ *	cap_seq counts every edge since arming and never resets, so
+ *	userland reading (seq - its own last) knows exactly how many
+ *	entries are new and whether the ring wrapped past it.
+ */
+static volatile uint32_t cap_us[PC3_CAP_RING];
+static volatile uint32_t cap_lvl;		/* bit k: level at cap_us[k] */
+static volatile uint32_t cap_seq;
+
+/*
  *	The edge.  TM_EXTI_Handler_x (External.c:6023-6041) minus the
  *	CFunction hook this machine does not have.  RAM-resident by
  *	omission from the excludes file.
  */
+/*	One edge into the capture ring.  RAM-resident with its caller. */
+static void cap_push(uint32_t us, unsigned level)
+{
+	uint32_t k = cap_seq & (PC3_CAP_RING - 1);
+
+	cap_us[k] = us;
+	if (level)
+		cap_lvl |= 1UL << k;
+	else
+		cap_lvl &= ~(1UL << k);
+	cap_seq++;
+}
+
 static void cnt_gpio_cb(uint gpio, uint32_t events)
 {
 	struct cntpin *c;
 
-	(void)events;
 	if (gpio - CNT_FIRST >= CNT_NPINS)
 		return;
 	c = &cnt[gpio - CNT_FIRST];
+	if (c->mode == CNT_CAP) {
+		/*	The timer register directly, not time_us_32(): that
+		 *	lives in flash and this handler is in RAM to stay
+		 *	out of the QMI core1 streams the display through. */
+		uint32_t now = timer_hw->timerawl;
+		uint32_t both = GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL;
+
+		if ((events & both) == both) {
+			/*	Both edges latched before we ran, so the
+			 *	pulse was shorter than the interrupt
+			 *	latency.  The pin's level NOW says which of
+			 *	them was last, which is the only ordering
+			 *	evidence there is. */
+			if (gpio_get(gpio)) {
+				cap_push(now, 0);
+				cap_push(now, 1);
+			} else {
+				cap_push(now, 1);
+				cap_push(now, 0);
+			}
+		} else
+			cap_push(now, (events & GPIO_IRQ_EDGE_RISE) ? 1 : 0);
+		return;
+	}
 	if (c->mode == CNT_PER) {
 		if (--c->left <= 0) {
 			c->value = (int32_t)c->count;
@@ -304,6 +356,89 @@ int countpin_ioctl(uarg_t request, char *data)
 		countpin_reset(cr.pin);
 		gpio_disable_pulls(cr.pin);
 		return 0;
+	}
+	udata.u_error = EINVAL;
+	return -1;
+}
+
+/*
+ *	Arm and read the edge capture - Pulsin( and Distance(.  A
+ *	separate entry point rather than another case above because its
+ *	request carries a ring rather than a struct cntreq, and because
+ *	arming must NOT reconfigure the pin: whatever SETPIN made it, up
+ *	to and including its pull, is what the reference measures.
+ */
+int countpin_cap_ioctl(uarg_t request, char *data)
+{
+	struct capreq cq;
+	struct cntpin *c;
+	uint32_t irq;
+	unsigned i;
+
+	if (uget(data, &cq, sizeof(struct capreq)) == -1)
+		return -1;
+	if ((uint_fast8_t)(cq.pin - CNT_FIRST) >= CNT_NPINS) {
+		udata.u_error = EINVAL;
+		return -1;
+	}
+#ifdef CONFIG_PC3_PINLOCK
+	if (pinlock_owner(PLK_PIN, cq.pin) != udata.u_ptab->p_pid) {
+		udata.u_error = EPERM;
+		return -1;
+	}
+#endif
+	c = &cnt[cq.pin - CNT_FIRST];
+
+	if (request == GPIOC_CNT_CAP) {
+		if (cq.arg == 0) {
+			if (c->mode == CNT_CAP)
+				countpin_reset(cq.pin);
+			return 0;
+		}
+		/* One at a time: a second pin would need a second ring
+		   and MMBasic cannot ask for one anyway. */
+		for (i = 0; i < CNT_NPINS; i++)
+			if (cnt[i].mode == CNT_CAP
+			    && i != (unsigned)(cq.pin - CNT_FIRST)) {
+				udata.u_error = EBUSY;
+				return -1;
+			}
+		irq = save_and_disable_interrupts();
+		cap_seq = 0;
+		cap_lvl = 0;
+		c->mode = CNT_CAP;
+		c->count = 0;
+		c->value = 0;
+		c->init = c->left = 0;
+		restore_interrupts(irq);
+		irq_set_priority(IO_IRQ_BANK0, 0);
+		if (!cnt_cb_set) {
+			gpio_set_irq_enabled_with_callback(cq.pin,
+				GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL,
+				true, cnt_gpio_cb);
+			cnt_cb_set = 1;
+		} else
+			gpio_set_irq_enabled(cq.pin,
+				GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL,
+				true);
+		return 0;
+	}
+	if (request == GPIOC_CNT_CAPRD) {
+		if (c->mode != CNT_CAP) {
+			udata.u_error = EINVAL;
+			return -1;
+		}
+		/* A snapshot, so seq and the entries it describes cannot
+		   disagree.  76 bytes with the edge held off is well
+		   under a microsecond, and the edge is latched meanwhile
+		   rather than lost. */
+		irq = save_and_disable_interrupts();
+		cq.seq = cap_seq;
+		cq.lvl = cap_lvl;
+		for (i = 0; i < PC3_CAP_RING; i++)
+			cq.us[i] = cap_us[i];
+		restore_interrupts(irq);
+		return uput(&cq, data, sizeof(struct capreq));
 	}
 	udata.u_error = EINVAL;
 	return -1;

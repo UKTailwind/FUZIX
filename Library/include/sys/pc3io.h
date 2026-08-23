@@ -123,6 +123,26 @@ struct cntreq {
 #define GPIOC_CNT_SET	0x053B
 #define GPIOC_CNT_OFF	0x053C
 
+/*	Edge capture, for Pulsin( and Distance( - PLAN-pulsin.md.  The
+ *	kernel timestamps both edges in the GPIO interrupt so a program
+ *	may be descheduled for half a second (which is this machine's
+ *	timeslice) and still read back an exact pulse width.  One pin at
+ *	a time, GP4-GP7, and arming does NOT touch the pin's
+ *	configuration: whatever SETPIN made it is what gets measured. */
+#define PC3_CAP_RING	16
+
+struct capreq {
+	unsigned char pin;		/* GPIO number, 4..7 */
+	unsigned char arg;		/* CAP: 1 arm, 0 disarm */
+	unsigned short pad;
+	unsigned long seq;		/* edges since arming */
+	unsigned long lvl;		/* bit k: level after us[k] */
+	unsigned long us[PC3_CAP_RING];
+};
+
+#define GPIOC_CNT_CAP	0x053E
+#define GPIOC_CNT_CAPRD	0x053F
+
 #endif	/* PC3_COUNT_ABI */
 
 /* ---- registers (RP2350: addressmap.h, sio.h, pads_bank0.h, adc.h) ---- */

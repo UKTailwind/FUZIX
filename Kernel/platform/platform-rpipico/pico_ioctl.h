@@ -1043,6 +1043,38 @@ struct cntreq {
 #define GPIOC_CNT_SET	0x053B		/* struct cntreq: val in, CIN only */
 #define GPIOC_CNT_OFF	0x053C		/* struct cntreq: stop counting */
 
+/*
+ *	EDGE CAPTURE, for Pulsin( and Distance( - PLAN-pulsin.md.
+ *
+ *	A userland busy-wait cannot measure a pulse on this machine: the
+ *	5ms tick holds di() across its body for 14-18us about 345 times a
+ *	second, and the moment a second process is runnable the timeslice
+ *	takes the measurer off the CPU for HALF A SECOND (utils/spingap.c
+ *	measured both).  Timestamping the edges in the GPIO interrupt
+ *	separates the accuracy of a measurement from the scheduling of
+ *	the program that asked for it: the process may be late by any
+ *	amount and still read back an exact width.
+ *
+ *	One pin at a time, GP4-GP7, and the pin keeps whatever SETPIN
+ *	made it - capture only turns both edges on.  The ring is powers
+ *	of two so a wrap is an AND; `seq` counts every edge ever seen, so
+ *	userland can tell "nothing new" from "I missed some" by watching
+ *	it advance more than the ring holds.
+ */
+#define PC3_CAP_RING	16
+
+struct capreq {
+	uint8_t pin;			/* GPIO number, 4..7 */
+	uint8_t arg;			/* CAP: 1 arm, 0 disarm */
+	uint16_t pad;
+	uint32_t seq;			/* edges since arming */
+	uint32_t lvl;			/* bit k: level after ring[k] */
+	uint32_t us[PC3_CAP_RING];	/* microseconds, low 32 bits */
+};
+
+#define GPIOC_CNT_CAP	0x053E		/* struct capreq: arm/disarm */
+#define GPIOC_CNT_CAPRD	0x053F		/* struct capreq: ring out */
+
 #endif	/* PC3_COUNT_ABI */
 
 /*
