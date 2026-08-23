@@ -138,6 +138,7 @@ struct capreq {
 	unsigned long seq;		/* edges since arming */
 	unsigned long lvl;		/* bit k: level after us[k] */
 	unsigned long us[PC3_CAP_RING];
+	unsigned long ev[PC3_CAP_RING];	/* the interrupt's event bits */
 };
 
 #define GPIOC_CNT_CAP	0x053E

@@ -1070,6 +1070,13 @@ struct capreq {
 	uint32_t seq;			/* edges since arming */
 	uint32_t lvl;			/* bit k: level after ring[k] */
 	uint32_t us[PC3_CAP_RING];	/* microseconds, low 32 bits */
+	/*	The interrupt's own event bits per entry (EDGE_RISE 8,
+	 *	EDGE_FALL 4), kept because the level alone cannot say why
+	 *	an entry exists - and the first HC-SR04 on the bench
+	 *	produced a FALL 3us after a RISE while the line stayed
+	 *	high, which is the kind of thing only this field can
+	 *	settle. */
+	uint32_t ev[PC3_CAP_RING];
 };
 
 #define GPIOC_CNT_CAP	0x053E		/* struct capreq: arm/disarm */

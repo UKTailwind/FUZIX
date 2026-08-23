@@ -104,6 +104,7 @@ static uint8_t cnt_cb_set;
  */
 static volatile uint32_t cap_us[PC3_CAP_RING];
 static volatile uint32_t cap_lvl;		/* bit k: level at cap_us[k] */
+static volatile uint32_t cap_ev[PC3_CAP_RING];	/* the interrupt's bits */
 static volatile uint32_t cap_seq;
 
 /*
@@ -112,11 +113,12 @@ static volatile uint32_t cap_seq;
  *	omission from the excludes file.
  */
 /*	One edge into the capture ring.  RAM-resident with its caller. */
-static void cap_push(uint32_t us, unsigned level)
+static void cap_push(uint32_t us, unsigned level, uint32_t events)
 {
 	uint32_t k = cap_seq & (PC3_CAP_RING - 1);
 
 	cap_us[k] = us;
+	cap_ev[k] = events;
 	if (level)
 		cap_lvl |= 1UL << k;
 	else
@@ -145,14 +147,15 @@ static void cnt_gpio_cb(uint gpio, uint32_t events)
 			 *	them was last, which is the only ordering
 			 *	evidence there is. */
 			if (gpio_get(gpio)) {
-				cap_push(now, 0);
-				cap_push(now, 1);
+				cap_push(now, 0, events);
+				cap_push(now, 1, events);
 			} else {
-				cap_push(now, 1);
-				cap_push(now, 0);
+				cap_push(now, 1, events);
+				cap_push(now, 0, events);
 			}
 		} else
-			cap_push(now, (events & GPIO_IRQ_EDGE_RISE) ? 1 : 0);
+			cap_push(now, (events & GPIO_IRQ_EDGE_RISE) ? 1 : 0,
+				 events);
 		return;
 	}
 	if (c->mode == CNT_PER) {
@@ -435,8 +438,10 @@ int countpin_cap_ioctl(uarg_t request, char *data)
 		irq = save_and_disable_interrupts();
 		cq.seq = cap_seq;
 		cq.lvl = cap_lvl;
-		for (i = 0; i < PC3_CAP_RING; i++)
+		for (i = 0; i < PC3_CAP_RING; i++) {
 			cq.us[i] = cap_us[i];
+			cq.ev[i] = cap_ev[i];
+		}
 		restore_interrupts(irq);
 		return uput(&cq, data, sizeof(struct capreq));
 	}

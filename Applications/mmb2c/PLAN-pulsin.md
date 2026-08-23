@@ -132,10 +132,9 @@ AND still need the IRQ.
    byte-identical by cgate.
 5. Board acceptance from BASIC — `samples/pulsintest.bas` against the
    board's own PWM. **DONE**, and the numbers are below.
-6. `Distance(` against a real HC-SR04, when one is to hand. The
-   sequence is the reference's line for line, but nothing has echoed
-   off a wall yet: until it has, treat `Distance(` as built rather
-   than proven.
+6. `Distance(` against a real HC-SR04 — **attempted 2026-08-23, and
+   the sensor is not answering properly.  See below: the software is
+   reading the wire correctly.**
 
 ## What the board said
 
@@ -168,6 +167,39 @@ PWM edges that do not land on its ticks. Under load the readings are if
 anything MORE uniform, because the program is descheduled into whole
 pulses rather than catching them mid-poll - which is the design saying
 what it was built to say.
+
+## The HC-SR04 on the bench: what the wire actually does
+
+`Distance(GP1, GP7)` returned **0.1 cm**, over and over. That is
+3 us / 58, and 3 us is what the echo line does. `utils/hcprobe.c`
+watches the same pulse two independent ways — the kernel's edge capture
+and a tight CPU sampling loop — and they agree to the microsecond:
+
+    echo reads 0 before the trigger
+    CPU sampled 2 transitions:      449 us -> 1     452 us -> 0
+    the interrupt recorded 2:       449 us -> 1 (events 8)
+                                    452 us -> 0 (events 4)
+
+Identical with a pull-up, floating, and with a pull-down. So the module
+IS answering the trigger — 450 us is exactly an HC-SR04's echo latency
+— and then holds ECHO high for three microseconds instead of the
+hundreds a range would take. **The software is reading the wire
+correctly; the wire is the problem.** The likeliest cause is the module
+being a 5 V part: its TRIG input wants ~3.5 V where GP1 gives 3.3 V, so
+it starts a cycle without completing a proper one, and its 5 V ECHO
+into a 3.3 V pad is the other half of the same mismatch. It is the same
+shape as the WS2812 strip that would not light on this board.
+
+`Distance(` therefore stays **BUILT, NOT PROVEN**, and the manual says
+so.
+
+**A method trap worth keeping**: the first sampling run reported a
+224 us pulse and disagreed with the interrupt, which sent me looking
+for a kernel bug that was not there. The sampler was printing INSIDE
+its loop, and a line of console output at 115200 takes ~1.6 ms - so it
+missed the real fall and reported the next one it happened to catch.
+Sample into memory, print afterwards. Two mechanisms that disagree are
+worth trusting only once both are innocent of their own instrument.
 
 One trap paid for on the way: the first run read 100 us for a 250 us
 request, and the capture was not at fault — this machine's `clk_sys` is

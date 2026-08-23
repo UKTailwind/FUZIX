@@ -5147,11 +5147,18 @@ MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
  * machine above wants two numbers per edge and there are usually one
  * or two new edges per poll - reading them individually would be six
  * syscalls where this is one. */
+/* THE THIRD COPY of this ABI: the kernel's pico_ioctl.h and the libc's
+ * sys/pc3io.h carry the other two, and the kernel's uput writes
+ * sizeof(struct capreq) into whatever this is - so a field added there
+ * and not here overruns this buffer.  ev[] is exactly that: it was
+ * added for the HC-SR04 diagnosis and this struct had to grow with it.
+ * Keep the three in step. */
 static struct mm_capreq {
     unsigned char pin, arg;
     unsigned short pad;
     unsigned long seq, lvl;
     unsigned long us[MM_CAP_RING];
+    unsigned long ev[MM_CAP_RING];      /* the interrupt's event bits */
 } mm_cap;
 
 MMINTEGER mm_pincap(MMINTEGER op, MMINTEGER pin, MMINTEGER arg)
