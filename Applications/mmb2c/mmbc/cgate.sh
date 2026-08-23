@@ -14,8 +14,17 @@ mkdir -p "$W"
 make -s -C "$M/mmbc" || exit 1
 
 total=0
-for src in "$M"/tests/*.bas; do
-	b=$(basename "$src" .bas)
+# samples/ as well as tests/: the samples are the only programs in the
+# tree that exercise GUI BITMAP, BEZIER and the ported applications
+# (robots, picofrog, vaders, websrv), so a translator change that broke
+# a shape only they use had nothing to fail against.  They need a
+# screen to RUN, which is why make check cannot run them - but the two
+# emitters can still be compared on them, which is what this gate does.
+for src in "$M"/tests/*.bas "$M"/samples/*.bas; do
+	case $src in
+	*/samples/*) b=s_$(basename "$src" .bas) ;;
+	*) b=$(basename "$src" .bas) ;;
+	esac
 	for mode in plain fcc; do
 		if [ $mode = fcc ]; then flag=--fcc; else flag=; fi
 		python3 "$M/mmb2c.py" $flag "$src" -o "$W/$b.$mode.py.c" \

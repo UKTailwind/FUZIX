@@ -44,9 +44,17 @@ CAT = {
     #
     # If a name reappears below as UNCLASSIFIED, the scan has stopped
     # seeing something that works.  That is the alarm, not a bug.
-    "ADC": 2,
 
     # ---- 2: real value, moderate work ------------------------------
+    # ADC: continuous sampling.  It sat above this divider for a while,
+    # inside category 1's comment block, reading as an unfinished
+    # leftover in a category the document declares empty.  It is not
+    # one: the kernel has no ADC path at all (the ADVAL selectors were
+    # removed, misc.c:885-913) and MMBasic DMAs the FIFO straight into
+    # the BASIC array, which this machine's DMA law forbids - so it is
+    # a kernel driver with its own .bss buffer, and the largest thing
+    # in this category.
+    "ADC": 2,
     # Peripherals: a pin here is a register access, not a syscall, so
     # each is a small userland driver (PC3-IO-PLAN.md).
     # NOTE (reviewed 2026-08-22, reading the reference's actual loops):
@@ -56,9 +64,21 @@ CAT = {
     # toggle loop (2715); Pulsin/Distance are unmasked busy-waits.  So
     # all are plain userland work here - registers plus pc3_us64() -
     # and cheaper than this table once assumed.
+    # ... but "does it mask?" was the wrong question for THIS machine,
+    # and the 2026-08-23 audit corrected it: the 5ms system tick holds
+    # di() across its whole body (devices.c:83-139) whatever else is
+    # running, and any userland spin over 5ms has the USB host pump
+    # injected into it (devices.c:123-133).  So an unmasked us-loop is
+    # not automatically safe here either.  Humid survives on its
+    # checksum, IR SEND can go through the shipped BITSTREAM PIO path
+    # instead of a loop, and Pulsin/Distance want the interruption
+    # budget measured on the board before they are promised.
+    #
+    # OneShot and IR RECEIVE were not part of that review at all: both
+    # are GPIO edge interrupts with their own timers in the reference
+    # (External.c:286-345, 6106-6188), not userland register work.
     "IR": 2, "Humid": 2, "Distance(": 2, "Pulsin(": 2,
     "OneShot": 2, "SYNC": 2, "Slew": 2, "Keypad": 2,
-    "Stepper": 2, "FM": 2, "Calc": 2,
     # Json$(, WatchDog and CPU were category 2 until the WEB campaign
     # delivered all three (v0.20); their entries are gone because an
     # entry for a translated name is dead weight that goes stale.
@@ -93,20 +113,22 @@ CAT = {
     # These want a decision about the machine, not just work.
     "RESOLUTION": 3, "Refresh": 3, "GetScanLine": 3,
     "Memory": 3,                    # POKE's family; no MMU to disagree
-    # The interrupts-off pair - reviewed 2026-08-22, see NOTES[3].
-    # MMBasic runs WS2812 (External.c:4530) and BITSTREAM (4919, 5068)
-    # under disable_interrupts_pico(); a WS2812 frame is 30us/LED
-    # unpausable (a >50us gap latches the strip), BITSTREAM masks for
-    # the SUM of user durations - unbounded.  Acceptable when the
-    # machine's owner pauses their own firmware; on a multi-process
-    # machine it is one program blacking out every other's interrupts.
-    "WS2812": 3, "Bitstream": 3,
+    # WS2812 and Bitstream sat here as the interrupts-off pair until
+    # they SHIPPED on 2026-08-22 through PLAN-pioout's fixed PIO1
+    # programs (NOTES[3] tells the story).  Their entries are gone
+    # because an entry for a translated name is dead weight that goes
+    # stale - the rule this file states for Json$/WatchDog/CPU above.
 
     # ---- 4: deliberately out ---------------------------------------
     # Immediate-mode and interpreter-only: a translated program is
     # compiled and run, not typed at a prompt.
     "List": 4, "Run": 4, "Trace": 4, "Execute": 4, "New": 4,
     "Edit": 4, "Edit File": 4, "VAR": 4, "Library": 4, "Autosave": 4,
+    # Calc and FM were at 2 until the 2026-08-23 audit read them: Calc
+    # is gated on `console` in MMBasic's own tokeniser (MMBasic.c:1349)
+    # and FM is Editor.c's file manager, sitting beside Edit above.
+    # Both are this rule, not exceptions to it.
+    "Calc": 4, "FM": 4,
     "Chain": 4, "Configure": 4, "Help": 4, "Ram": 4,
     "XModem": 4, "YModem": 4,
     "CMM2 Load": 4, "CMM2 Run": 4,
@@ -171,6 +193,15 @@ CAT = {
     # nothing a program could talk to.  SPI0 is the one that is wired
     # (PC3-SPI0 notes) and it is in.
     "SPI2": 5, "SPI2(": 5,
+    # Stepper was category 2 until the 2026-08-23 audit read it: 6,950
+    # lines behind a 100kHz timer interrupt (io/stepper.h:336) - and
+    # MMBasic itself REFUSES the whole command whenever I2S audio is
+    # configured (io/stepper.c:3752), which on the PC3 is permanent
+    # (sound.c:1157).  Replicating the reference exactly therefore
+    # means the command errors on every PC3 there is, so "not
+    # applicable to this machine" is the reference's own verdict rather
+    # than ours.
+    "Stepper": 5,
 }
 
 NAMES = {
@@ -197,7 +228,19 @@ None of the peripherals here needs interrupts disabled - checked
 against the reference's actual loops, 2026-08-22.  `Humid` is an
 unmasked microsecond poll whose checksum catches a corrupted read, IR
 send is an unmasked toggle loop, `Pulsin(` and `Distance(` are plain
-busy-waits: all are userland register work on this machine.""",
+busy-waits.
+
+**But "does MMBasic mask?" was the wrong question for this machine**,
+and the 2026-08-23 audit says so: our 5ms system tick holds `di()`
+across its entire body whatever else is running, and any userland spin
+longer than 5ms gets the USB host pump injected into it.  A measuring
+loop is therefore interrupted here even when the reference's is not.
+`Humid` survives that on its checksum and `IR SEND` can go through the
+shipped BITSTREAM PIO path instead of a loop, but `Pulsin(` and
+`Distance(` want the worst-case interruption measured on the board
+before either is promised.  `OneShot` and IR RECEIVE were never part of
+that review: both are GPIO edge interrupts with their own timers in the
+reference, not userland register work.""",
     3: """(`WS2812` and `Bitstream` used to sit here as MMBasic's two
 genuinely interrupts-off commands, rejected for bit-banging on a
 multi-process machine.  They SHIPPED 2026-08-22 through PLAN-pioout's

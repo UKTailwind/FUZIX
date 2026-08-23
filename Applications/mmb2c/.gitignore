@@ -22,8 +22,15 @@ tests/xcheck/xcheck
 *.mpy
 __pycache__/
 
-# hand-written harness sources, not translator output
+# hand-written harness sources, not translator output.  Every one of
+# them needs naming: /tests/*.c above hides them by default, HARNESS_SRC
+# in the Makefile is a wildcard, and `make check` passes either way - so
+# an untracked harness means a fresh clone silently runs fewer gates and
+# still says ok.  That is how guiharness.c and lineharness.c were lost
+# in the 2026-08-19 subtree move.
 !/tests/blitharness.c
+!/tests/webcharness.c
+!/tests/websharness.c
 
 # cc scratch, rewritten by every compile
 .symtmp

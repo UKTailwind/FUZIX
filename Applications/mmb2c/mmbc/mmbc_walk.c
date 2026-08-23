@@ -169,7 +169,17 @@ void statement(void)
                            pstr(sfmt("%*smm_release(__mark);",
                                      ind * 4, "")));
             cv.tmp_used = outer || cv.tmp_used;
-            mm_error("%s", err_msg);
+            {
+                /* err_msg is mm_error's OWN destination, so passing it
+                 * as the "%s" argument aliases vsnprintf's output onto
+                 * its input: the re-raised message came out empty and
+                 * `mmbc --strict` reported a blank line for every real
+                 * error it refused.  Copy it clear first. */
+                char again[sizeof err_msg];
+
+                memcpy(again, err_msg, sizeof again);
+                mm_error("%s", again);
+            }
         }
         failed = 1;
         failmsg = sstr(err_msg);

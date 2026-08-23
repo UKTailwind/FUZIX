@@ -144,9 +144,33 @@ if unknown:
              % len(unknown))
     W.append("`" + "`, `".join(nm for _, nm in unknown) + "`\n")
 
+# ... and the other direction, which nothing used to check: an entry in
+# catmap for a name that now TRANSLATES.  It changes no count - the
+# categories only classify gaps - but it is a decision recorded about
+# something that has since been done, and catmap's own stated policy is
+# that such an entry is dead weight.  WS2812 and Bitstream sat there for
+# a day; this is what would have said so.
+translated = set(cmds_yes) | set(fns_yes)
+dead = sorted(nm for nm in catmap.CAT if nm in translated)
+if dead:
+    W.append("## Dead entries in fcc/catmap.py - these names now "
+             "translate (%d)\n" % len(dead))
+    W.append("`" + "`, `".join(dead) + "`\n")
+
 W.append("## Translated: the %d commands\n" % len(cmds_yes))
 W.append("`" + "`, `".join(sorted(cmds_yes)) + "`\n")
 W.append("## Translated: the %d functions\n" % len(fns_yes))
 W.append("`" + "`, `".join(sorted(fns_yes)) + "`\n")
 
 print("\n".join(W))
+
+# The MATH section is the honest per-member count this document points
+# at as its own antidote to name-level flattery, and it lives in its own
+# generator.  It is appended HERE because the command in the docstring
+# above is the one people run, and running it without this line quietly
+# produced a COVERAGE-STATUS.md with the whole section missing.
+print()
+sys.stdout.flush()
+subprocess.check_call([sys.executable,
+                       os.path.join(os.path.dirname(
+                           os.path.abspath(__file__)), "mathstatus.py")])

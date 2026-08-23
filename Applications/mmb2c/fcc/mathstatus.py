@@ -40,6 +40,15 @@ have_fns |= {"BASE64", "ENCODE", "DECODE"}
 blk = t[t.index("def do_array_cmd"):]
 blk = blk[:blk.index("\n    def ", 10)]
 have_cmds = set(re.findall(r"'([A-Z_0-9]+)'", blk))
+# ... and the component-wise family, which do_array_cmd dispatches from
+# a table THREE LINES ABOVE ITSELF, so scanning the function body alone
+# missed all eight and this section reported C_ADD .. C_XOR as missing
+# for as long as they have been shipping (tests/cmath.bas, commit
+# bb838cbff).  Read the table itself, asserted the way the BASE64 line
+# above is so a rename here is loud rather than silent.
+assert "CCOMB = {" in t, "the MATH C_* table left mmb2c.py"
+have_cmds |= set(re.findall(
+    r"'([A-Z_0-9]+)'", re.search(r"CCOMB = \{([^}]*)\}", t).group(1)))
 have_cmds = {c for c in have_cmds if c in ref_cmds}
 
 
