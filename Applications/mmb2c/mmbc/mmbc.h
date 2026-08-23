@@ -414,6 +414,7 @@ struct conv {
     int uses_misc;              /* GOSUB/BIT/FLAG/BIN2STR etc: mmb_misc.h */
     int uses_pulse;             /* PULSE: pulls in mmb_pulse.h */
     int uses_onewire;           /* ONEWIRE/TEMPR: mmb_onewire.h */
+    int uses_pulsin;            /* Pulsin(/Distance(: mmb_pulsin.h */
     int uses_comms;             /* I2C/SPI data forms: mmb_comms.h */
     int uses_net;               /* the socket floor: mmb_net.h */
     int uses_udp;               /* WEB UDP: mmb_udp.h */

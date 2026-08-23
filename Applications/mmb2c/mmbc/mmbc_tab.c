@@ -50,6 +50,7 @@ static const struct builtin builtins[] = {
     { "SPI", 1, 1 },
     { "POS", 0, 0 },
     { "TEMPR", 1, 2 },
+    { "PULSIN", 2, 4 }, { "DISTANCE", 1, 2 },
     { "MM.ONEWIRE", 0, 0 }, { "MM.I2C", 0, 0 },
     { "MM.HRES", 0, 0 }, { "MM.VRES", 0, 0 },
     { "MM.SPISPEED", 0, 0 },

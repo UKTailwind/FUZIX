@@ -5142,6 +5142,44 @@ MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
     return op == MM_PINCT_READ ? (MMINTEGER)cr.v : 0;
 }
 
+/* Edge capture: Pulsin( and Distance( (see mmb_runtime.h).  The ring
+ * comes back whole in one ioctl and is cached here, because the state
+ * machine above wants two numbers per edge and there are usually one
+ * or two new edges per poll - reading them individually would be six
+ * syscalls where this is one. */
+static struct mm_capreq {
+    unsigned char pin, arg;
+    unsigned short pad;
+    unsigned long seq, lvl;
+    unsigned long us[MM_CAP_RING];
+} mm_cap;
+
+MMINTEGER mm_pincap(MMINTEGER op, MMINTEGER pin, MMINTEGER arg)
+{
+    if (mm_gpio_fd == -2)
+        mm_gpio_fd = open("/dev/gpio", O_RDWR);
+    if (mm_gpio_fd < 0)
+        return -1;
+    switch (op) {
+    case MM_PINCAP_ARM:
+    case MM_PINCAP_OFF:
+        mm_cap.pin = (unsigned char)pin;
+        mm_cap.arg = (op == MM_PINCAP_ARM);
+        mm_cap.seq = 0;
+        return ioctl(mm_gpio_fd, MM_GPIOC_CNT_CAP, &mm_cap) ? -1 : 0;
+    case MM_PINCAP_POLL:
+        mm_cap.pin = (unsigned char)pin;
+        if (ioctl(mm_gpio_fd, MM_GPIOC_CNT_CAPRD, &mm_cap))
+            return -1;
+        return (MMINTEGER)mm_cap.seq;
+    case MM_PINCAP_US:
+        return (MMINTEGER)mm_cap.us[arg & (MM_CAP_RING - 1)];
+    case MM_PINCAP_LVL:
+        return (mm_cap.lvl >> (arg & (MM_CAP_RING - 1))) & 1;
+    }
+    return -1;
+}
+
 /* Where the kernel's PIO-output word buffer is (see mmb_runtime.h). */
 MMINTEGER mm_pobuf(void)
 {
@@ -5199,6 +5237,18 @@ MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
         return 0;
     }
     return -1;
+}
+
+/* Edge capture, and there is nothing honest to model: no pins, so no
+ * edges, so no pulse.  Arming succeeds and the ring stays empty, which
+ * walks the caller's own timeout path and gives Pulsin( its -1 - the
+ * same answer a real board gives for a silent pin, and the one a host
+ * .expected file can be written against. */
+MMINTEGER mm_pincap(MMINTEGER op, MMINTEGER pin, MMINTEGER arg)
+{
+    (void)pin; (void)arg;
+    return (op == MM_PINCAP_ARM || op == MM_PINCAP_OFF
+            || op == MM_PINCAP_POLL) ? 0 : -1;
 }
 
 /* The PIO output word buffer, modelled: a real buffer the packing

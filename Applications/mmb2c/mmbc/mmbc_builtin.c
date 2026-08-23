@@ -416,6 +416,35 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         cv.uses_onewire = 1;
         return mkval(sfmt("mmow_tempr(%s, %s)", a0, a1), TY_F);
     }
+    if (strcmp(up, "PULSIN") == 0) {
+        /* Pulsin(pin, polarity [, t1 [, t2]]) - the width of the next
+           pulse in microseconds, or -1 on any timeout.  A missing t2 is
+           passed as -1 rather than by repeating t1, so a t1 that calls a
+           FUNCTION is evaluated once, as the reference evaluates it.
+           The measurement itself is the kernel's edge timestamps -
+           PLAN-pulsin.md says why a busy-wait cannot do this here. */
+        const char *a0 = n(0);
+        const char *a1 = n(1);
+        const char *a2 = nargs > 2 ? n(2) : "100000LL";
+        const char *a3 = nargs > 3 ? n(3) : "-1LL";
+
+        cv.uses_gpio = 1;
+        cv.uses_pulsin = 1;
+        return mkval(sfmt("mmg_pulsin(%s, %s, %s, %s)", a0, a1, a2, a3),
+                     TY_I);
+    }
+    if (strcmp(up, "DISTANCE") == 0) {
+        /* Distance(trig [, echo]) - centimetres, -1 no echo, -2 no
+           acknowledgement.  One pin means a 3-pin device where the
+           trigger and the echo are the same wire, and -1 is how that
+           reaches the runtime. */
+        const char *a0 = n(0);
+        const char *a1 = nargs > 1 ? n(1) : "-1LL";
+
+        cv.uses_gpio = 1;
+        cv.uses_pulsin = 1;
+        return mkval(sfmt("mmg_distance(%s, %s)", a0, a1), TY_F);
+    }
     if (strcmp(up, "MM.I2C") == 0)
         return mkval("mm_i2c_stat()", TY_I);
     if (strcmp(up, "MM.ONEWIRE") == 0) {

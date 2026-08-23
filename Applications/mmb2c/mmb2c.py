@@ -106,6 +106,7 @@ BUILTINS = {
     'BIN2STR$': (2, 3), 'STR2BIN': (2, 3), 'RGB': (1, 3), 'MATH': (1, 1),
     'PIXEL': (2, 2), 'MAP': (1, 1), 'PIN': (1, 1), 'SPI': (1, 1),
     'PORT': (2, 16), 'FLAG': (1, 1), 'TEMPR': (1, 2),
+    'PULSIN': (2, 4), 'DISTANCE': (1, 2),
     'MM.HRES': (0, 0), 'MM.VRES': (0, 0), 'MM.SPISPEED': (0, 0),
     'MM.ONEWIRE': (0, 0), 'MM.I2C': (0, 0),
     'POS': (0, 0),
@@ -930,6 +931,7 @@ class Conv(object):
         self.uses_wait = False      # a serviced PAUSE: pulls in mmb_wait.h
         self.uses_comms = False     # I2C/SPI data forms: mmb_comms.h
         self.uses_onewire = False   # ONEWIRE/TEMPR: mmb_onewire.h
+        self.uses_pulsin = False    # Pulsin(/Distance(: mmb_pulsin.h
         self.uses_net = False       # the socket floor: mmb_net.h
         self.uses_udp = False       # WEB UDP: mmb_udp.h
         self.uses_webclient = False # WEB TCP/TLS client: mmb_webc.h
@@ -2375,6 +2377,29 @@ class Conv(object):
             self.uses_onewire = True
             return ('mmow_tempr(%s, %s)'
                     % (n(0), n(1) if len(args) > 1 else '-1'), TY_F)
+        if up == 'PULSIN':
+            # Pulsin(pin, polarity [, t1 [, t2]]) - the width of the
+            # next pulse in microseconds, or -1 on any timeout.  A
+            # missing t2 is passed as -1 rather than by repeating t1,
+            # so a t1 that calls a FUNCTION is evaluated once, as the
+            # reference evaluates it.  The measurement itself is the
+            # kernel's edge timestamps - PLAN-pulsin.md says why a
+            # busy-wait cannot do this here.
+            self.uses_gpio = True
+            self.uses_pulsin = True
+            return ('mmg_pulsin(%s, %s, %s, %s)'
+                    % (n(0), n(1),
+                       n(2) if len(args) > 2 else '100000LL',
+                       n(3) if len(args) > 3 else '-1LL'), TY_I)
+        if up == 'DISTANCE':
+            # Distance(trig [, echo]) - centimetres, -1 no echo, -2 no
+            # acknowledgement.  One pin means a 3-pin device where the
+            # trigger and the echo are the same wire, and -1 is how
+            # that reaches the runtime.
+            self.uses_gpio = True
+            self.uses_pulsin = True
+            return ('mmg_distance(%s, %s)'
+                    % (n(0), n(1) if len(args) > 1 else '-1LL'), TY_F)
         if up == 'FLAG':
             # FLAG(n) - one scratch bit.  The assigning form is a
             # statement, so a FLAG that reaches here is a read.
@@ -9425,6 +9450,10 @@ class Conv(object):
         # detects by that header's guard.
         if self.uses_onewire:
             wr('#include "mmb_onewire.h"\n')
+        # Pulsin( and Distance(: after mmb_gpio.h, whose pin modes and
+        # register helpers they use, and after mmb_wait.h for mm_pause.
+        if self.uses_pulsin:
+            wr('#include "mmb_pulsin.h"\n')
         wr('#include <math.h>\n')
         wr('#include <string.h>\n')
         wr('#include <stdlib.h>\n\n')

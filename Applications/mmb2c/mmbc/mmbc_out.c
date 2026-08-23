@@ -525,6 +525,10 @@ void conv_write(FILE *f)
        that header's guard. */
     if (cv.uses_onewire)
         fprintf(f, "#include \"mmb_onewire.h\"\n");
+    /* Pulsin( and Distance(: after mmb_gpio.h, whose pin modes and
+       register helpers they use, and after mmb_wait.h for mm_pause. */
+    if (cv.uses_pulsin)
+        fprintf(f, "#include \"mmb_pulsin.h\"\n");
     fprintf(f, "#include <math.h>\n");
     fprintf(f, "#include <string.h>\n");
     fprintf(f, "#include <stdlib.h>\n\n");

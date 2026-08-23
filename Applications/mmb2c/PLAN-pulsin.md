@@ -131,7 +131,7 @@ AND still need the IRQ.
    argument counts, ranges and errors; `tests/pulsin.bas` — **DONE**,
    byte-identical by cgate.
 5. Board acceptance from BASIC — `samples/pulsintest.bas` against the
-   board's own PWM.
+   board's own PWM. **DONE**, and the numbers are below.
 6. `Distance(` against a real HC-SR04, when one is to hand. The
    sequence is the reference's line for line, but nothing has echoed
    off a wall yet: until it has, treat `Distance(` as built rather
@@ -152,6 +152,22 @@ That second row is the design's whole argument, measured: the same
 pulse, measured by a program the scheduler is taking off the CPU for
 half a second at a time, still reads within a microsecond. A busy-wait
 would have been wrong by up to 500,000.
+
+And from BASIC, `samples/pulsintest.bas` through the card's own `cc`:
+
+| | asked | read |
+|---|---|---|
+| idle | 250 us high | 249, 249, 250, 249, 249 |
+| idle | 750 us low | 750, 750, 751 |
+| idle | 1000 us high | 1000, 1000, 999 |
+| **with `spingap` spinning** | 250 / 750 / 1000 | **250 x5, 750 x3, 1000 x3** |
+| PWM off | — | -1, -1 |
+
+The +/-1 us idle is the microsecond timer's own quantisation against
+PWM edges that do not land on its ticks. Under load the readings are if
+anything MORE uniform, because the program is descheduled into whole
+pulses rather than catching them mid-poll - which is the design saying
+what it was built to say.
 
 One trap paid for on the way: the first run read 100 us for a 250 us
 request, and the capture was not at fault — this machine's `clk_sys` is

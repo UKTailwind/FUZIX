@@ -1766,6 +1766,49 @@ loop timed 10.22 ms under 1 kHz of edges and 10.25 ms under 100 kHz);
 and counting loses nothing while `PLAY SOUND` runs. The edge handler
 and its dispatcher run from RAM for exactly that reason.
 
+### Measuring a pulse: `Pulsin(` and `Distance(` {#pulsin}
+
+```basic
+SETPIN GP5, DIN
+w = PULSIN(GP5, 1)              ' the next HIGH pulse, in microseconds
+w = PULSIN(GP5, 0, 5000)        ' the next LOW one, giving up after 5 ms
+d = DISTANCE(GP4)               ' an HC-SR04 on one wire, in centimetres
+d = DISTANCE(GP2, GP5)          ' ... or with separate trigger and echo
+```
+
+`PULSIN(pin, polarity [, t1 [, t2]])` returns the width in
+microseconds, or **-1** if it timed out. `t1` bounds the wait for the
+pulse to start and `t2` the pulse itself; both default to 100 ms and
+both may be 5 µs to 10 seconds. `DISTANCE(trig [, echo])` returns
+centimetres, **-1** if no echo came back and **-2** if the sensor never
+answered at all.
+
+**The echo pin must be GP4, GP5, GP6 or GP7**, and any other pin is
+refused by name. That restriction buys something worth having.
+
+MMBasic measures a pulse by spinning on the pin and a microsecond
+clock, which is the right answer on a machine running one program. It
+is not the right answer here, and the measurement says so: a spin loop
+on this machine is interrupted for 14–18 µs about 345 times a second by
+the system tick alone, and **the moment a second program is runnable
+the scheduler takes the measuring loop off the CPU for half a second**.
+A pulse measured across that is not slightly wrong, it is meaningless —
+and nothing in a BASIC program could tell.
+
+So the kernel timestamps both edges in the interrupt that already
+serves the counting inputs, and `PULSIN` reads the times rather than
+watching the pin. Your program can be as late as the machine makes it
+and still get the right answer; what is left is the interrupt latency,
+under a microsecond normally. Measured against the board's own PWM, a
+250 µs pulse reads 250 µs every time — **and reads 250 µs while another
+program spins flat out**, which is the whole point.
+
+Two consequences to know about. `PULSIN` and `DISTANCE` use the same
+hardware as `SETPIN ... FIN/CIN/PIN`, so a pin cannot be a counter and
+a pulse measurement at once — and one pin at a time is being measured.
+And a pin so noisy that more than sixteen edges arrive between two
+looks gets **-1** rather than a guess.
+
 **Pins are now owned.** `SETPIN` claims the pin from the kernel, and
 claiming one that another program holds gives `Pin cannot do that`
 rather than quietly fighting over it. The claim is released — and the

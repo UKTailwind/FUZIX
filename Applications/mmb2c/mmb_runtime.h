@@ -665,6 +665,25 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
 #define MM_PINCT_OFF  5
 MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
 
+/* EDGE CAPTURE, which is how Pulsin( and Distance( are measured here -
+ * PLAN-pulsin.md.  A busy-wait cannot do it on this machine: the 5ms
+ * tick holds di() for 14-18us about 345 times a second, and a second
+ * runnable process takes the measurer off the CPU for HALF A SECOND.
+ * The kernel timestamps the edges in the GPIO interrupt instead, so
+ * the program may be arbitrarily late and still read an exact width.
+ *
+ * POLL does the one ioctl and caches the ring, returning the running
+ * edge count; US and LVL then read that cache by ring index, so a poll
+ * that finds three new edges costs one syscall and six lookups.  Its
+ * own libcall NAME for the usual skew reason. */
+#define MM_PINCAP_ARM  0
+#define MM_PINCAP_OFF  1
+#define MM_PINCAP_POLL 2
+#define MM_PINCAP_US   3
+#define MM_PINCAP_LVL  4
+#define MM_CAP_RING    16
+MMINTEGER mm_pincap(MMINTEGER op, MMINTEGER pin, MMINTEGER arg);
+
 /* The PIO output word buffer (WS2812/BITSTREAM, mmb_pioout.h): the
  * address of the kernel's PSRAM buffer the DMA reads - the DMA must
  * never read process memory on this machine (the swapper moves it).
@@ -687,6 +706,8 @@ MMINTEGER mm_pobuf(void);
 #define MM_GPIOC_CNT_SET  0x053B
 #define MM_GPIOC_CNT_OFF  0x053C
 #define MM_GPIOC_PIOOUT_BUF 0x053D
+#define MM_GPIOC_CNT_CAP   0x053E
+#define MM_GPIOC_CNT_CAPRD 0x053F
 /* pinlock, from the kernel's pico_ioctl.h - on /dev/sys, not /dev/gpio */
 #define MM_PLKIOC_CLAIM  0x0026
 /* and the classes it names.  PLK_PIN and PLK_ADC are all SETPIN needs;
