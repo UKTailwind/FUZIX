@@ -175,6 +175,7 @@ MMG_FN void mmi_tone_int(mm_int_fn fn)
  *	armed, nothing at all otherwise. */
 static mm_int_fn mm_mod_fn;
 static unsigned char mm_mod_watch;
+static long long mm_mod_next;		/* earliest us at which to ask */
 
 MMG_FN void mmi_mod_int(mm_int_fn fn)
 {
@@ -183,7 +184,39 @@ MMG_FN void mmi_mod_int(mm_int_fn fn)
 	mm_mod_fn = fn;
 	mm_mod_watch = 1;
 }
+
 #endif
+
+/*	PLAY MP3 / WAV / FLAC completion, on the same signal as MODFILE's
+ *	but OUTSIDE that guard: those three spawn a player and talk to
+ *	the kernel directly, so a program that plays an MP3 never pulls
+ *	in mmb_play.h at all.  All this needs is the runtime's own
+ *	mm_play_owner().
+ *
+ *	Each of the three players holds the PCM stream for its whole
+ *	life, so the owner going away IS the end of the sound -
+ *	including when PLAY STOP ends it, which is what MMBasic does too
+ *	(CloseAudio sets WAVcomplete and leaves the interrupt armed).
+ *
+ *	TWO PHASES, because the player is spawned rather than already
+ *	running: mm_play_watch is 2 until it has TAKEN the stream and 1
+ *	afterwards, so the gap between the fork and the player's first
+ *	ioctl cannot read as "finished".  A player that never takes it -
+ *	a file that will not open - would otherwise leave the handler
+ *	armed for ever, so the claim phase gives up after two seconds and
+ *	reports the sound as over, which by then it is. */
+static mm_int_fn mm_play_fn;
+static unsigned char mm_play_watch;
+static long long mm_play_next, mm_play_claim_by;
+
+MMG_FN void mmi_play_int(mm_int_fn fn)
+{
+	if (mm_play_fn == 0)
+		__mm_int_armed++;
+	mm_play_fn = fn;
+	mm_play_watch = 2;
+	mm_play_claim_by = MMI_US() + 2000000LL;
+}
 
 /*	WEB UDP INTERRUPT.  Registered here rather than in mmb_udp.h
  *	because arming is this file's business (__mm_int_armed) - the
@@ -532,13 +565,45 @@ MMG_FN void mm_int_poll(void)
 		mm_int_fire(mm_tone_fn);
 		return;
 	}
-	if (mm_mod_fn && mm_mod_watch && mm_play_owner() == 0) {
-		mm_mod_watch = 0;
-		mm_play_kind = MMP_KIND_NONE;
-		mm_int_fire(mm_mod_fn);
-		return;
+	/*	Both of the next two ask the KERNEL who owns the stream, so
+	 *	both are decimated like the network polls below rather than
+	 *	run per statement: an ioctl is ~1.7us against a 597ns bare
+	 *	trap floor, and 5ms of latency on the end of a song is not
+	 *	something an ear or a program can tell. */
+	if (mm_mod_fn && mm_mod_watch) {
+		long long unow = MMI_US();
+
+		if (unow >= mm_mod_next) {
+			mm_mod_next = unow + MM_INT_CON_US;
+			if (mm_play_owner() == 0) {
+				mm_mod_watch = 0;
+				mm_play_kind = MMP_KIND_NONE;
+				mm_int_fire(mm_mod_fn);
+				return;
+			}
+		}
 	}
 #endif
+	/*	... and the one-shot players, outside the guard for the
+	 *	reason given where it is armed. */
+	if (mm_play_fn && mm_play_watch) {
+		long long unow = MMI_US();
+
+		if (unow >= mm_play_next) {
+			int who;
+
+			mm_play_next = unow + MM_INT_CON_US;
+			who = (int)mm_play_owner();
+			if (mm_play_watch == 2
+			    && (who != 0 || unow >= mm_play_claim_by))
+				mm_play_watch = 1;
+			if (mm_play_watch == 1 && who == 0) {
+				mm_play_watch = 0;
+				mm_int_fire(mm_play_fn);
+				return;
+			}
+		}
+	}
 
 	/*	The network one-shots sit between the collision and pin
 	 *	scans, which is where the WebMite checks its own

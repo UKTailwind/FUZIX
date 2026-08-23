@@ -5693,11 +5693,23 @@ class Conv(object):
                     v = self.expr()
                     if v[1] != TY_S:
                         self.err('PLAY %s wants a file name' % kw)
+                    # ... and each takes a completion interrupt, as
+                    # MODFILE does.  It used to be DROPPED: the handler
+                    # was left for the statement parser to trip over and
+                    # the program played on with nothing armed.
+                    fn = None
+                    if self.accept_op(','):
+                        self.uses_interrupts = True
+                        fn = self.int_handler()
                     self.emit('mm_run_begin();')
                     self.emit('mm_run_arg(%s);' % c_string_literal(prog))
                     self.emit('mm_run_arg(%s);' % v[0])
                     self.emit('mm_run_arg_i(mm_play_volume);')
                     self.emit('mm_play_start();')
+                    if fn is not None:
+                        # after the spawn, so the watch starts with a
+                        # player to wait for
+                        self.emit('mmi_play_int(%s);' % fn)
                     return
             self.err('only PLAY MP3, WAV, FLAC, MODFILE, MODSAMPLE, SOUND, '
                      'TONE, VOLUME and STOP are translated')

@@ -1326,17 +1326,31 @@ void statement_inner(void)
             for (k = 0; k < 3; k++) {
                 if (is_kw(files[k][0], 1)) {
                     struct val v;
+                    const char *fn = NULL;
+
                     cv.i += 2;
                     v = expr();
                     if (v.ty != TY_S)
                         cv_err(sfmt("PLAY %s wants a file name",
                                     files[k][0]));
+                    /* ... and each takes a completion interrupt, as
+                       MODFILE does.  It used to be DROPPED: the handler
+                       was left for the statement parser to trip over and
+                       the program played on with nothing armed. */
+                    if (accept_op(",")) {
+                        cv.uses_interrupts = 1;
+                        fn = int_handler();
+                    }
                     emit("mm_run_begin();");
                     emit(sfmt("mm_run_arg(%s);",
                               c_string_literal(files[k][1])));
                     emit(sfmt("mm_run_arg(%s);", v.code));
                     emit("mm_run_arg_i(mm_play_volume);");
                     emit("mm_play_start();");
+                    if (fn != NULL)
+                        /* after the spawn, so the watch starts with a
+                           player to wait for */
+                        emit(sfmt("mmi_play_int(%s);", fn));
                     return;
                 }
             }
