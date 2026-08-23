@@ -441,6 +441,14 @@ struct sym *reference(const char *word, int as_array)
         note_touch(canon, s);
         return s;
     }
+    /* MM. is MMBasic's own namespace, not the program's: a name in it
+     * is a read we have not translated, and turning it into an implied
+     * variable makes it answer 0 for ever.  MM.WIDTH did exactly that -
+     * it compiled clean and printed 0 where a PicoMite prints 80.  The
+     * translated ones never reach here; they are matched in the builtin
+     * path above. */
+    if (strncmp(canon, "mm.", 3) == 0)
+        cv_err("%s is not translated", word);
     if (as_array)
         cv_err("array '%s' used but never DIMensioned", canon);
     ty = (sfx != TY_NONE) ? sfx : cv.opt_default;

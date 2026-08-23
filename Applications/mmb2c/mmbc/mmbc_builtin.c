@@ -111,15 +111,33 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         int k;
 
         for (k = 0; m[k].name; k++)
-            if (strcmp(up, m[k].name) == 0)
-                return mkval(sfmt("%s(%s)",
-                                  checks_on() ? m[k].chk : m[k].raw,
-                                  f(0)), TY_F);
+            if (strcmp(up, m[k].name) == 0) {
+                const char *cf = checks_on() ? m[k].chk : m[k].raw;
+
+                /* OPTION ANGLE DEGREES: the argument goes in divided
+                   (fun_sin/cos/tan), the answer comes out multiplied
+                   (fun_atn/asin/acos).  Nothing else in this list
+                   moves. */
+                if (cv.opt_angle != NULL
+                    && (strcmp(up, "SIN") == 0 || strcmp(up, "COS") == 0
+                        || strcmp(up, "TAN") == 0))
+                    return mkval(sfmt("%s((%s) / %s)", cf, f(0),
+                                      cv.opt_angle), TY_F);
+                if (cv.opt_angle != NULL
+                    && (strcmp(up, "ATN") == 0 || strcmp(up, "ASIN") == 0
+                        || strcmp(up, "ACOS") == 0))
+                    return mkval(sfmt("(%s(%s) * %s)", cf, f(0),
+                                      cv.opt_angle), TY_F);
+                return mkval(sfmt("%s(%s)", cf, f(0)), TY_F);
+            }
     }
     if (strcmp(up, "ATAN2") == 0) {
         const char *a0 = f(0);
         const char *a1 = f(1);
 
+        if (cv.opt_angle != NULL)
+            return mkval(sfmt("(atan2(%s, %s) * %s)", a0, a1,
+                              cv.opt_angle), TY_F);
         return mkval(sfmt("atan2(%s, %s)", a0, a1), TY_F);
     }
     if (strcmp(up, "DEG") == 0)

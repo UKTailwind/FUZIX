@@ -44,6 +44,12 @@ TYNAME = {TY_F: 'FLOAT', TY_I: 'INTEGER', TY_S: 'STRING'}
 # LENGTH an array element gets when the program does not say.
 MM_STRLEN = 255
 
+# OPTION ANGLE DEGREES: MMBasic's RADCONV (Functions.h:38), to its own
+# digits.  SIN/COS/TAN divide by it, ATN/ATAN2/ASIN/ACOS multiply by it
+# - the same operations in the same order as the reference, so a
+# side-by-side agrees to the last bit.
+RADCONV = '57.2957795130823229'
+
 # ----------------------------------------------------------------- tokens
 
 T_ID = 1
@@ -852,6 +858,14 @@ class Conv(object):
         self.opt_default = TY_F
         self.opt_explicit = False
         self.opt_base = 0
+        # OPTION ANGLE: MMBasic's `optionangle`, a plain multiplier
+        # (MM_Misc.c:5064).  1.0 is RADIANS and emits nothing; DEGREES
+        # is RADCONV and folds into the trig call sites, so a program
+        # in radians - which is every program that never says - pays
+        # nothing at all for this.
+        self.opt_angle = None
+        self.opt_angle_seen = False
+        self.opt_angle_line = 0
         # per pass state
         self.mode = 'scan'
         self.cur = None               # current Routine or None
@@ -1227,6 +1241,14 @@ class Conv(object):
                          % (canon, TYNAME[s.ty], TYNAME[sfx]))
             self.note_touch(canon, s)
             return s
+        # MM. is MMBasic's own namespace, not the program's: a name in
+        # it is a read we have not translated, and turning it into an
+        # implied variable makes it answer 0 for ever.  MM.WIDTH did
+        # exactly that - it compiled clean and printed 0 where a
+        # PicoMite prints 80.  The translated ones never reach here;
+        # they are matched in the builtin path above.
+        if canon.startswith('mm.'):
+            self.err("%s is not translated" % word)
         # not known -> implied global
         if as_array:
             self.err("array '%s' used but never DIMensioned" % canon)
@@ -2297,8 +2319,18 @@ class Conv(object):
                 cf = {'SQR': 'sqrt', 'SIN': 'sin', 'COS': 'cos',
                       'TAN': 'tan', 'ATN': 'atan', 'LOG': 'log',
                       'EXP': 'exp', 'ASIN': 'asin', 'ACOS': 'acos'}[up]
+            # OPTION ANGLE DEGREES: the argument goes in divided
+            # (fun_sin/cos/tan), the answer comes out multiplied
+            # (fun_atn/asin/acos).  Nothing else in this list moves.
+            if self.opt_angle and up in ('SIN', 'COS', 'TAN'):
+                return ('%s((%s) / %s)' % (cf, f(0), self.opt_angle), TY_F)
+            if self.opt_angle and up in ('ATN', 'ASIN', 'ACOS'):
+                return ('(%s(%s) * %s)' % (cf, f(0), self.opt_angle), TY_F)
             return ('%s(%s)' % (cf, f(0)), TY_F)
         if up == 'ATAN2':
+            if self.opt_angle:
+                return ('(atan2(%s, %s) * %s)'
+                        % (f(0), f(1), self.opt_angle), TY_F)
             return ('atan2(%s, %s)' % (f(0), f(1)), TY_F)
         if up == 'DEG':
             return ('((%s) * (180.0 / 3.14159265358979323846))' % f(0), TY_F)
@@ -3885,21 +3917,87 @@ class Conv(object):
                  "VPOS, OPTION BASE, PINNO, FILESIZE, EXISTS FILE, "
                  "EXISTS DIR, FONT ADDRESS n and FLASH ADDRESS n" % t[1])
 
+    # OPTION sub-keywords that configure a PicoMite rather than a
+    # program.  What they set does not exist on this machine (a panel,
+    # a keyboard layout, the editor, the flash-saved defaults), so a
+    # translated program computes and prints exactly the same with them
+    # or without them.  They are IGNORED, and warned about - never
+    # silently dropped.  Matched on the first word, which is enough:
+    # taken from the reference's own cmd_option (MM_Misc.c:4925-7722).
+    # Anything not here and not implemented above is refused BY NAME,
+    # because the alternative is what OPTION ANGLE used to do - change
+    # the answers and say nothing.
+    OPT_CONFIG = (
+        'AUDIO', 'AUTORUN', 'BACKLIGHT', 'BAUDRATE', 'CACHE', 'CASE',
+        'CDC', 'COLORCODE', 'COLOURCODE', 'CONTINUATION', 'CPUSPEED',
+        'DISK', 'DISPLAY', 'F1', 'F5', 'F6', 'F7', 'F8', 'F9', 'FAST',
+        'GPS', 'GUI', 'HDMI', 'HEARTBEAT', 'KEYBOARD', 'LCD', 'LCD320',
+        'LCDPANEL', 'LIST', 'LOCAL', 'LOGGING', 'MODBUFF', 'MOUSE',
+        'PICO', 'PIN', 'PLATFORM', 'POWER', 'PROFILING', 'PS2',
+        'PSRAM', 'RESET', 'RTC', 'SCREEN', 'SDCARD', 'SERIAL',
+        'SYSTEM', 'TELNET', 'TFTP', 'TOUCH', 'TRACECACHE', 'VCC',
+        'VGA', 'WEB', 'WIFI',
+    )
+
     def do_option(self):
         t = self.peek()
         if t is None:
             return
         if t[2] == 'DEFAULT':
+            # ... but only the four type words.  OPTION DEFAULT MODE and
+            # OPTION DEFAULT COLOURS are different statements that begin
+            # with the same word, and falling through here is how they
+            # used to vanish.
+            if self.is_kw('INTEGER', 1) or self.is_kw('FLOAT', 1) or \
+                    self.is_kw('STRING', 1) or self.is_kw('NONE', 1):
+                self.i += 1
+                w = self.nxt()
+                if w[2] == 'INTEGER':
+                    self.opt_default = TY_I
+                elif w[2] == 'FLOAT':
+                    self.opt_default = TY_F
+                elif w[2] == 'STRING':
+                    self.opt_default = TY_S
+                elif w[2] == 'NONE':
+                    self.opt_default = None
+                return
+        if t[2] == 'ANGLE':
+            # OPTION ANGLE DEGREES | RADIANS, exactly MMBasic's
+            # optionangle (MM_Misc.c:5064-5074): SIN/COS/TAN divide
+            # their argument by it and ATN/ATAN2/ASIN/ACOS multiply
+            # their result by it.  DEG( and RAD( are untouched.
+            #
+            # We fold it, because our output is compiled: it is decided
+            # for the whole program in the decl pass and costs nothing
+            # at all in radians.  The price of folding is that it cannot
+            # follow a program that changes its mind, so a second
+            # setting and a setting inside a routine are both refused
+            # rather than quietly applied to the wrong half.
+            # Each refusal here is FATAL rather than a commented-out
+            # line, because commenting this statement out is the bug:
+            # the program would translate, run, and be wrong.
             self.i += 1
             w = self.nxt()
-            if w[2] == 'INTEGER':
-                self.opt_default = TY_I
-            elif w[2] == 'FLOAT':
-                self.opt_default = TY_F
-            elif w[2] == 'STRING':
-                self.opt_default = TY_S
-            elif w[2] == 'NONE':
-                self.opt_default = None
+            if w[2] == 'DEGREES':
+                v = RADCONV
+            elif w[2] == 'RADIANS':
+                v = None
+            else:
+                self.note('OPTION ANGLE wants DEGREES or RADIANS')
+                self.skip_statement()
+                return
+            if self.cur is not None:
+                self.note('OPTION ANGLE is a whole-program setting and '
+                          'cannot be inside a SUB or FUNCTION')
+                return
+            if self.opt_angle_seen and self.opt_angle != v and \
+                    self.opt_angle_line != self.lineno:
+                self.note('OPTION ANGLE cannot change within a program '
+                          '(already set on line %d)' % self.opt_angle_line)
+                return
+            self.opt_angle = v
+            self.opt_angle_seen = True
+            self.opt_angle_line = self.lineno
             return
         if t[2] == 'EXPLICIT':
             self.i += 1
@@ -3964,6 +4062,25 @@ class Conv(object):
             self.uses_webserver = True
             self.emit('mmg_webs_port(%s);' % self.as_int(self.expr()))
             return
+        name = t[2] if t[0] == T_ID else str(t[1])
+        if name in self.OPT_CONFIG:
+            self.warn('OPTION %s configures a PicoMite; it has no effect '
+                      'on a translated program and is ignored' % name)
+            self.skip_statement()
+            return
+        # The three heads whose other forms ARE translated get their
+        # second word in the message, because OPTION DEFAULT INTEGER is
+        # translated and OPTION DEFAULT MODE is not, and "OPTION
+        # DEFAULT" would name both.  Everywhere else the first word is
+        # the whole statement's name and the rest is its arguments.
+        w = self.peek(1)
+        if name in ('DEFAULT', 'UDP', 'TCP') and w is not None and \
+                w[0] == T_ID:
+            name = '%s %s' % (name, w[2])
+        # Fatal, not commented out: an OPTION changes how the REST of
+        # the program behaves, so dropping the line leaves a program
+        # that translates and then answers differently.
+        self.note('OPTION %s is not translated' % name)
         self.skip_statement()
 
     # -- DIM / LOCAL / STATIC / CONST ------------------------------------

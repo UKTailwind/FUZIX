@@ -32,6 +32,12 @@
 #define TY_I 'i'                /* MMINTEGER (int64_t) */
 #define TY_S 's'                /* string, MMBasic layout [len][data][NUL] */
 #define TY_NONE 0               /* Python None */
+/* OPTION ANGLE DEGREES: MMBasic's RADCONV (Functions.h:38), to its own
+ * digits.  SIN/COS/TAN divide by it, ATN/ATAN2/ASIN/ACOS multiply by it
+ * - the same operations in the same order as the reference, so a
+ * side-by-side agrees to the last bit. */
+#define RADCONV "57.2957795130823229"
+
 /* MM_STRLEN in mmb_runtime.h: the characters a string can hold, and the
  * LENGTH an array element gets when the program does not say. */
 #define MM_STRLEN 255
@@ -351,6 +357,13 @@ struct conv {
     int gosub_n;
     int opt_default;            /* TY_* or TY_NONE (OPTION DEFAULT NONE) */
     int opt_explicit, opt_base;
+    /* OPTION ANGLE: MMBasic's `optionangle`, a plain multiplier
+     * (MM_Misc.c:5064).  NULL is RADIANS and emits nothing; RADCONV is
+     * DEGREES and folds into the trig call sites, so a program in
+     * radians - which is every program that never says - pays nothing
+     * at all for this. */
+    const char *opt_angle;
+    int opt_angle_seen, opt_angle_line;
     int mode;
     struct routine *cur;        /* NULL = main line */
     struct outbuf out_main, out_body;

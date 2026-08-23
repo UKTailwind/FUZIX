@@ -557,7 +557,13 @@ void do_option(void)
 
     if (t == NULL)
         return;
-    if (strcmp(t->up, "DEFAULT") == 0) {
+    if (strcmp(t->up, "DEFAULT") == 0
+        && (is_kw("INTEGER", 1) || is_kw("FLOAT", 1)
+            || is_kw("STRING", 1) || is_kw("NONE", 1))) {
+        /* ... but only the four type words.  OPTION DEFAULT MODE and
+         * OPTION DEFAULT COLOURS are different statements that begin
+         * with the same word, and falling through here is how they
+         * used to vanish. */
         cv.i++;
         w = nxt();
         if (strcmp(w->up, "INTEGER") == 0)
@@ -568,6 +574,51 @@ void do_option(void)
             cv.opt_default = TY_S;
         else if (strcmp(w->up, "NONE") == 0)
             cv.opt_default = TY_NONE;
+        return;
+    }
+    if (strcmp(t->up, "ANGLE") == 0) {
+        /* OPTION ANGLE DEGREES | RADIANS, exactly MMBasic's
+         * optionangle (MM_Misc.c:5064-5074): SIN/COS/TAN divide their
+         * argument by it and ATN/ATAN2/ASIN/ACOS multiply their result
+         * by it.  DEG( and RAD( are untouched.
+         *
+         * We fold it, because our output is compiled: it is decided for
+         * the whole program in the decl pass and costs nothing at all
+         * in radians.  The price of folding is that it cannot follow a
+         * program that changes its mind, so a second setting and a
+         * setting inside a routine are both refused rather than quietly
+         * applied to the wrong half.
+         *
+         * Each refusal here is FATAL rather than a commented-out line,
+         * because commenting this statement out is the bug: the program
+         * would translate, run, and be wrong. */
+        const char *v;
+
+        cv.i++;
+        w = nxt();
+        if (strcmp(w->up, "DEGREES") == 0)
+            v = RADCONV;
+        else if (strcmp(w->up, "RADIANS") == 0)
+            v = NULL;
+        else {
+            cv_note("OPTION ANGLE wants DEGREES or RADIANS");
+            skip_statement();
+            return;
+        }
+        if (cv.cur != NULL) {
+            cv_note("OPTION ANGLE is a whole-program setting and "
+                    "cannot be inside a SUB or FUNCTION");
+            return;
+        }
+        if (cv.opt_angle_seen && (cv.opt_angle == NULL) != (v == NULL)
+            && cv.opt_angle_line != cv.lineno) {
+            cv_note("OPTION ANGLE cannot change within a program "
+                    "(already set on line %d)", cv.opt_angle_line);
+            return;
+        }
+        cv.opt_angle = v;
+        cv.opt_angle_seen = 1;
+        cv.opt_angle_line = cv.lineno;
         return;
     }
     if (strcmp(t->up, "EXPLICIT") == 0) {
@@ -646,6 +697,55 @@ void do_option(void)
         cv.uses_webserver = 1;
         emit(sfmt("mmg_webs_port(%s);", as_int(expr())));
         return;
+    }
+    /* OPTION sub-keywords that configure a PicoMite rather than a
+     * program.  What they set does not exist on this machine (a panel,
+     * a keyboard layout, the editor, the flash-saved defaults), so a
+     * translated program computes and prints exactly the same with them
+     * or without them.  They are IGNORED, and warned about - never
+     * silently dropped.  Matched on the first word, which is enough:
+     * taken from the reference's own cmd_option (MM_Misc.c:4925-7722).
+     * Anything not here and not implemented above is refused BY NAME,
+     * because the alternative is what OPTION ANGLE used to do - change
+     * the answers and say nothing. */
+    {
+        static const char *const config[] = {
+            "AUDIO", "AUTORUN", "BACKLIGHT", "BAUDRATE", "CACHE", "CASE",
+            "CDC", "COLORCODE", "COLOURCODE", "CONTINUATION", "CPUSPEED",
+            "DISK", "DISPLAY", "F1", "F5", "F6", "F7", "F8", "F9", "FAST",
+            "GPS", "GUI", "HDMI", "HEARTBEAT", "KEYBOARD", "LCD", "LCD320",
+            "LCDPANEL", "LIST", "LOCAL", "LOGGING", "MODBUFF", "MOUSE",
+            "PICO", "PIN", "PLATFORM", "POWER", "PROFILING", "PS2",
+            "PSRAM", "RESET", "RTC", "SCREEN", "SDCARD", "SERIAL",
+            "SYSTEM", "TELNET", "TFTP", "TOUCH", "TRACECACHE", "VCC",
+            "VGA", "WEB", "WIFI", NULL
+        };
+        const char *name = (t->kind == T_ID) ? t->up : t->text;
+        int k;
+
+        for (k = 0; config[k] != NULL; k++) {
+            if (strcmp(name, config[k]) == 0) {
+                cv_warn("OPTION %s configures a PicoMite; it has no "
+                        "effect on a translated program and is ignored",
+                        name);
+                skip_statement();
+                return;
+            }
+        }
+        /* The three heads whose other forms ARE translated get their
+         * second word in the message, because OPTION DEFAULT INTEGER is
+         * translated and OPTION DEFAULT MODE is not, and "OPTION
+         * DEFAULT" would name both.  Everywhere else the first word is
+         * the whole statement's name and the rest is its arguments. */
+        w = peek(1);
+        if ((strcmp(name, "DEFAULT") == 0 || strcmp(name, "UDP") == 0
+             || strcmp(name, "TCP") == 0)
+            && w != NULL && w->kind == T_ID)
+            name = sfmt("%s %s", name, w->up);
+        /* Fatal, not commented out: an OPTION changes how the REST of
+         * the program behaves, so dropping the line leaves a program
+         * that translates and then answers differently. */
+        cv_note("OPTION %s is not translated", name);
     }
     skip_statement();
 }
