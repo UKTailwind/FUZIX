@@ -649,6 +649,105 @@ Two traps, both of which produce code that looks right and does nothing:
 `utils/locktest.c` exercises the whole thing, including killing a
 process that holds a pin and checking the pin comes back.
 
+# Counting inputs, and measuring a pulse
+
+These are the one pin family that is **not** yours to poll. GP4 to GP7
+are the pins the kernel's own GPIO interrupt sits on, and the counting
+and the timestamps happen inside it — so a program may be descheduled
+for half a second, which is this machine's timeslice, and still read
+back an exact answer. Any other pin gives `EINVAL`.
+
+The ioctls are on `/dev/gpio` and carry a `struct cntreq`:
+
+```c
+#include <sys/pc3io.h>
+
+int g = open("/dev/gpio", O_RDWR);
+struct cntreq c;
+
+c.pin = 5;
+c.arg = 1000;                           /* gate, in ms */
+ioctl(g, GPIOC_CNT_FIN, &c);            /* frequency on GP5 */
+
+ioctl(g, GPIOC_CNT_READ, &c);           /* c.val is the answer */
+ioctl(g, GPIOC_CNT_OFF, &c);
+```
+
+| ioctl | `arg` | what `GPIOC_CNT_READ` then answers |
+|---|---|---|
+| `GPIOC_CNT_FIN` | gate in ms, 1–100000 | Hz over the last **completed** gate — 0 until the first one finishes |
+| `GPIOC_CNT_CIN` | 1 rising, 2 falling, 3 both; 4 and 5 are 1 and 2 with the other pull | the live 64-bit edge count |
+| `GPIOC_CNT_PER` | cycles to average, 1–10000 | the period in ms |
+
+`GPIOC_CNT_SET` stores `c.val` into the counter and is **`CIN` only**;
+anything else gives `EINVAL`. `GPIOC_CNT_OFF` stops the counting and
+drops the pull. One mode per pin, and the kernel undoes all of it when
+the process ends however it ends.
+
+A short gate answers sooner and in coarser steps: at `arg = 100` an
+`FIN` reading moves in 10 Hz steps.
+
+## One pulse: edge capture
+
+`Pulsin(` and `Distance(` in BASIC are this underneath. `GPIOC_CNT_CAP`
+with `capreq.arg = 1` arms a pin and `0` disarms it; `GPIOC_CNT_CAPRD`
+reads back a ring of `PC3_CAP_RING` (16) timestamps in microseconds,
+with `seq` counting edges since arming and bit *k* of `lvl` giving the
+level after `us[k]`.
+
+Arming does **not** touch the pin's configuration — whatever set the pin
+up is what gets measured — and only one pin may be armed at a time.
+
+# Driving WS2812 and arbitrary timed output
+
+The kernel loads five fixed programs into PIO1 at boot, beside the I2S
+program that carries the sound, and reserves one state machine and one
+DMA channel for programs to use. Claim them, fill a buffer with timing
+words, point the DMA at it and let it run: a long stream costs the
+machine nothing while it plays.
+
+```c
+pc3_claim(PLK_PIO, PIOOUT_PLK_IDX);     /* the reserved state machine */
+pc3_claim(PLK_DMA, PIOOUT_DMA_CH);      /* and its DMA channel */
+pc3_claim(PLK_PIN, 7);                  /* the output pin */
+```
+
+The program to run is chosen by its origin in PIO1's instruction
+memory: `PIOOUT_ORG_BS` (bitstream, driven), `PIOOUT_ORG_BSOC`
+(bitstream, open-collector), and `PIOOUT_ORG_WSO`, `PIOOUT_ORG_WSB`,
+`PIOOUT_ORG_WSS` for the three WS2812 timings. Set the state machine's
+divider from `PIOOUT_CLKDIV`, which is what puts `BITSTREAM`'s
+durations into the reference's own units.
+
+**The DMA must never read process memory.** The swapper rearranges the
+process pool in 4 KB chunks on every context switch, so a local array's
+bytes move whenever its owner sleeps or is preempted, and the DMA would
+then read whichever process's chunks had landed underneath. The kernel
+reserves a buffer in PSRAM, which never moves. Ask where it is, copy
+the words in — a store, because there is no MMU — and point the DMA
+there:
+
+```c
+struct pioout_buf b;
+ioctl(g, GPIOC_PIOOUT_BUF, &b);         /* b.addr, b.words */
+```
+
+`PIOOUT_BUF_WORDS` (10000) is the ceiling. The `PLK_PIO` claim is what
+arbitrates the buffer between programs.
+
+Two hard rules, both of which produce code that looks right:
+
+* **PIO1's `CTRL` register is shared with the I2S state machine.**
+  Touch it only through the atomic set and clear aliases
+  (`PC3_PIO_SET`, `PC3_PIO_CLR`); a plain read-modify-write there can
+  stop the audio. Only the atomic spellings appear in the header.
+* **Pins GP0–GP7 and GP26 only.** PIO1's `GPIOBASE` is pinned to 0 by
+  the I2S pins, so GP34–GP46 are outside its window. The kernel
+  asserts this at boot.
+
+`pc3_pioout_stop()` in the header shuts the machine down;
+`utils/pioouttest.c` and `utils/striptest.c` exercise both programs.
+
 # ADVAL, and the clock
 
 ```c

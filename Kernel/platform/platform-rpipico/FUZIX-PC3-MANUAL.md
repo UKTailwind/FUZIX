@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.20 — August 2026"
+date: "Release v0.21 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -36,7 +36,9 @@ boot banner names the detected board.
 
 Headline specification as configured here:
 
-* CPU at 375 MHz (the XGA-capable clock, as MMBasic uses)
+* CPU at 378 MHz, which is what the video timings are cut from: the
+  text console lands on 640x480 at exactly 60.0 Hz and the graphics
+  modes on 1024x768 at 70.6 Hz
 * 340 KB of program RAM managed as 4 KB pages, with the 8 MB PSRAM
   behind it — up to 64 concurrent processes, and a single process may
   have about 292 KB of it. A swapped-out process is a PSRAM allocation
@@ -44,8 +46,10 @@ Headline specification as configured here:
   reserved for one that does not exist
 * Programs get their heap from the PSRAM too, so a BASIC array or a C
   `malloc` is limited by the 8 MB rather than by the process
-* Root filesystem on SD card; the on-board NAND flash holds a
-  recovery system
+* Root filesystem on SD card. The on-board flash holds the kernel and
+  nothing else: the flash filesystem that used to live above it was
+  taken out, because it pinned 7,912 bytes of SRAM in place - code
+  cannot execute from a device that is being erased
 * 80×40 colour ANSI console on HDMI, mirrored to the USB-C serial
   port, with USB keyboard support (six layouts)
 * Pre-emptive multitasking: a runaway program can always be stopped
@@ -55,51 +59,72 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## New in v0.20
+## New in v0.21
 
-**BASIC has the network.** v0.19 gave the machine networking and said
-"BASIC cannot reach it yet"; this release removes that sentence.
-`mmbc` now translates MMBasic's `WEB` family: UDP, the TCP and TLS
-client, the eight-connection web server with interrupt-driven
-dispatch, `WEB TRANSMIT PAGE` with `{expression}` substitution,
-`JSON$`, `WEB NTP`, `WEB PING` and `WEB CONNECT` — plus the pieces a
-WebMite program leans on around them: `OPTION ESCAPE`,
-`MATH(BASE64 ...)`, `MM.INFO(IP ADDRESS / UPTIME / DISK SIZE / MAX
-CONNECTIONS)`, and `A:/file` drive-letter paths. See [Networking from
-BASIC](#web-family) for all of it.
+**The machine has a manual.** `man` answered "No manual entry" for
+every command on the card until now, because the card carried exactly
+one page. It carries 158 now — one for every command in `/bin`,
+`/usr/bin` and `/usr/games` — plus the 27 system-call pages in section
+2, which had never been installed anywhere. See [The manual
+pages](#shell-commands).
 
-**The card ships a whole product to prove it.** `/root/MMBasic/retic`
-is Geoff Graham's WebMite reticulation (sprinkler) controller — a
-real shipped application: a web server you configure from a browser,
-schedules, weather from Open Weather Map, email alerts. It compiles
-on the machine and runs. Its `MIGRATION.md` lists every change the
-port needed, and [Migrating a WebMite program](#webmite-migration) is
-the general recipe those changes illustrate.
+They describe **the programs on this card** rather than the GNU ones of
+the same name, and each says where it differs, because several of those
+differences bite: `rm` silently ignores any argument beginning with a
+dash, `killall` takes no process name and signals everything,
+`expr` spells equality `==`, and `ssh` is a small shell rather than a
+remote login. A gate checks that every command has a page, that every
+page names a command, and that every page renders.
 
-**Email, from BASIC, through Gmail.** SMTP over TLS on port 465 with
-an App Password — the recipe is in the WEB section, proven against
-the real server. The certificate bundle the machine ships already
-chains Gmail.
+**Pins that count.** `SETPIN n, FIN`, `CIN` and `PER` make a pin a
+frequency, counting or period input, answered by `PIN(n)` in Hz, edges
+and milliseconds. `PULSIN(pin, state)` measures one pulse and
+`DISTANCE(trig, echo)` reads an HC-SR04 in centimetres. All of them are
+timestamped by the kernel in the interrupt it already runs, not by a
+program spinning on a pin — which is why they are right on a machine
+that is doing something else at the time. They live on **GP4 to GP7**,
+which is where that interrupt is, and the manual says so where it
+would otherwise disappoint you.
 
-**The radio no longer dozes.** The CYW43's power-save mode was never
-being disabled, so the access point held unicast packets for a
-sleeping client: pings wandered between 3 and 300 ms and UDP lost
-packets, with TCP's retransmits papering over it since v0.18. Fixed
-in the kernel — ping now answers in about a millisecond, and
-everything on the network feels it.
+**LED strips, and arbitrary timed output.** `WS2812` drives an
+addressable strip and `BITSTREAM` emits a list of timed transitions,
+both through a state machine on PIO1 with the pattern handed over by
+DMA. Neither stops the machine while it runs: a long `BITSTREAM` on
+MMBasic is seconds of dead interpreter and here it is none.
 
-**Two statements mean something different here, on purpose.**
-`WATCHDOG` is accepted and does nothing — the RP2350's watchdog
-belongs to the kernel on a machine that runs many processes, and the
-translator says so in a warning; wedge recovery is a restart loop in
-`/etc/rc`. `CPU RESTART` re-executes the program rather than
-rebooting the processor, which is what a program that says it means:
-start me over. Both are in the migration section.
+**Sound tells you when it has finished.** `PLAY MP3`, `PLAY WAV` and
+`PLAY FLAC` take a completion interrupt, as `PLAY MODFILE` already did;
+the handler used to be parsed and then quietly dropped, so the file
+played and nothing ever fired. It answers the end of a file promptly
+and a `PLAY STOP` about a second later - the [music
+section](#music) has the measured figures and says why.
+
+**`MATH(CRC8`, `CRC12`, `CRC16` and `CRC32`)**, with every argument the
+reference takes, and the catalogue forms — XMODEM, CCITT-FALSE, ARC,
+and the CRC-32 that zip and PNG use — all reachable. Three of the
+reference interpreter's answers are deliberately **not** copied, and
+Appendix C says which and why.
+
+**`OPTION ANGLE DEGREES`**, and — more usefully — `OPTION` stops
+swallowing what it does not know. An unrecognised option used to be
+accepted in silence and translated into nothing at all, so a program
+ran with its assumptions quietly ignored.
+
+**`fat put`.** The FAT partition now carries files in both directions,
+with long names and subdirectories, so the card is the route out as
+well as in.
+
+**And the clock is 378 MHz**, up from 375. The text console now lands
+on 640x480 at exactly 60.0 Hz rather than 59.5, and the graphics modes
+on 1024x768 at 70.6 Hz. Nothing else changes: the flash, PSRAM, UART
+and SD divisors are all worked out at runtime from whatever `clk_sys`
+turns out to be.
 
 **The usual rule after upgrading: recompile.** A `.bc` that uses the
 new statements asks the new `bcrun` for functions an old one does not
 have, and is refused by name at load. A freshly built program imports
 nothing version-specific. The card ships the matched set.
+
 
 
 ewpage
@@ -550,8 +575,8 @@ show each pass as it runs, and `-k` to keep the intermediates.
 `/usr/lib/cc`. The passes cannot be driven from the shell by hand — two
 of them read back from their own standard output, which needs a
 redirection the Bourne shell here does not have. Like BBC BASIC, the
-compiler lives on the SD card root and is not in the NAND recovery
-system.
+compiler lives on the SD card root; there is no second copy anywhere
+else, so a card that will not mount is a machine with no compiler.
 
 A small program takes about a second to compile. The dots `cc` prints
 are progress, one per top-level declaration.
@@ -1539,6 +1564,36 @@ with 4096-sample blocks wants about 32K and one written with 16384
 wants about 132K — out of a pool of 336K shared with everything else
 running. A file that will not open says so, and says how much it
 wanted, rather than failing silently.
+
+All three take an optional **completion interrupt**, as `PLAY MODFILE`
+does:
+
+```basic
+PLAY WAV "/root/chime.wav", Finished
+' ... the program carries straight on ...
+SUB Finished
+  PRINT "that's the end of it"
+END SUB
+```
+
+The handler runs when the file ends, and on `PLAY STOP` as well.
+
+**It is not instant, and the two cases differ.** At the end of a file it
+arrives about a third of a second after the last sound, which is the
+buffer draining. After `PLAY STOP` it takes **about a second**: the
+player holds the sound hardware until its buffer has drained and it has
+exited, and the handler fires on the hardware coming free rather than on
+the statement. Measured on this machine, a five-second file: end of file
+at 5.30 s, and a `PLAY STOP` at 3.79 s answered at 4.80 s. MMBasic
+answers a `STOP` at once, so a program ported from one that leans on
+that will feel the difference.
+
+Stopping a file in its **first two seconds** is later still - about 2.3
+seconds from the `PLAY` - because the watch has not yet seen the player
+take the hardware and waits out the two seconds it allows for that. The
+same two seconds are what a file that will not open costs: nothing takes
+the hardware, and the handler fires anyway, because by then the sound is
+certainly over.
 
 `PLAY VOLUME n` takes 0 to 100 and is remembered, so every later
 `PLAY MP3`, `PLAY WAV` or `PLAY FLAC` uses it until it is changed
@@ -3330,7 +3385,8 @@ refused.
 filesystem open, so `remount -n / ro` will refuse, and the disc goes
 down dirty:
 
-    # kill %1
+    # ps                 find its pid - the shell has no job numbers
+    # kill 1234
 
 ## Talking to yourself
 
@@ -3422,7 +3478,7 @@ console.
 # saveimage shot.bmp                     the whole screen
 # saveimage part.bmp 160 120 320 240     x y w h
 # loadimage shot.bmp                     at 0,0
-# loadimage tiger.bmp 0 0 4              dither mode 4
+# loadimage tiger.bmp 0 0 0 64 0        x y mode ximage yimage
 # loadjpg photo.jpg                      at 0,0
 # loadjpg photo.jpg 0 0 0 0 0 2          binned 2:1, so 640x480 fits
 # loadpng logo.png 40 20                 at x,y
@@ -3523,6 +3579,38 @@ it out and carrying on.
 `bcrun` executes a `.bc` file, and is what the `#!`-less `./prog.bc`
 actually invokes.
 
+## The manual pages
+
+Every command in this chapter has a manual page on the card, and `man`
+shows it:
+
+```
+# man sed                     the page for sed
+# man 2 open                  section 2, the system calls
+# man -w awk                  where the page is, and do not show it
+```
+
+`man` pipes into `more`, so `q` leaves and any other key goes on. It is
+not `nroff` — it has its own formatter built in, and understands the
+subset of `-man` the pages here are written in.
+
+The pages describe **the programs on this card**, not the GNU ones of
+the same names, and where they differ that is the first thing each page
+says. Some of those differences will bite:
+
+* `rm` silently ignores any argument beginning with `-`, so `rm -rf
+  junk` removes a file called `junk` and says nothing about the rest.
+* `killall` takes no process name. It signals everything except `init`,
+  itself and its parent.
+* `ssh` is a small shell, not a remote login.
+* `cat` has no options at all.
+* `expr` spells equality `==`; a plain `=` is a syntax error.
+* `sed` has no `\{n,m\}`, and treats it as literal text rather than
+  complaining.
+
+Section 2 holds the system calls, which is what you want when writing C
+on the machine: `man 2 open`, `man 2 read`, `man 2 fork`.
+
 ## Editors
 
 ```
@@ -3582,13 +3670,13 @@ tell you there is no radio.
 ```
 # setdate                      show the time
 # setdate -w                   write the system time to the DS3231
-# setdate -a                   ask for a new one
+# setdate -u                   ask for a new one
 # df                           space
 # free                         memory, and what the swapper took
 # ps                           processes
 # uptime                       how long since the last boot
 # mount                        what is mounted
-# umount /dev/hdb3             ... and unmount it
+# umount /dev/hda3             ... and unmount it
 # remount -n / ro              read-only, before flashing
 # fsck /dev/hda2               check a filesystem
 # sync                         flush the buffers
@@ -3597,7 +3685,10 @@ tell you there is no radio.
 # reboot                       start again
 ```
 
-`setdate` also takes `-u` for UTC and `-0` to zero the clock.
+`setdate -a` is the non-interactive form `/etc/rc` uses: it reads the
+DS3231 and gives up rather than prompting if there is nothing to read.
+`setdate -0` says that what you type is standard time, with no
+daylight-saving adjustment.
 
 `remount -n / ro` is worth doing before anything that might crash, not
 only before flashing: a crash with the root read-only costs a power
@@ -4352,8 +4443,9 @@ Of the sound, `PLAY MP3`, `PLAY WAV`, `PLAY FLAC`, `PLAY VOLUME`,
 `PLAY STOP`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE` and
 `PLAY MODSAMPLE` are done — `MIDI`, `LOAD SOUND` and the user-defined
 `U` waveform are not. `PLAY VOLUME` takes one level rather than one
-per channel. None of the file players takes the completion interrupt
-MMBasic allows on them.
+per channel. All of them take the completion
+interrupt MMBasic allows on them, though `PLAY STOP` reports about a
+second late where MMBasic reports at once.
 
 Of the statements that reach *into* something rather than replacing
 it, `MID$(s$,n,m) =`, `LMID(a(),start[,num]) =`, `BIT(v,n) =`,
