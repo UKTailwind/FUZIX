@@ -1,0 +1,35 @@
+.TH tee 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+tee \- copy standard input to standard output and to files
+.SH SYNOPSIS
+.B tee
+[\fB\-a\fR] [\fB\-i\fR] [\fIfile\fR ...]
+.SH DESCRIPTION
+.B tee
+reads standard input and writes it both to standard output and to each
+named
+.IR file .
+.SH OPTIONS
+.TP
+.B \-a
+Append to the files rather than truncating them.
+.TP
+.B \-i
+Ignore interrupts.
+.SH NOTES
+Up to 17 files may be named.
+.PP
+.B \-a
+is done by opening the file and seeking to the end once, not with
+.BR O_APPEND ,
+so two
+.B tee
+processes appending to the same file overwrite each other rather than
+interleaving.  A file that does not exist yet is created either way.
+.SH EXAMPLES
+.nf
+# ls -l | tee listing
+# cc prog.c 2>&1 | tee errs
+.fi
+.SH SEE ALSO
+.BR cat (1)

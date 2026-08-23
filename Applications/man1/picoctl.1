@@ -1,0 +1,80 @@
+.TH picoctl 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+picoctl \- control the machine itself
+.SH SYNOPSIS
+.B picoctl flash
+.br
+.B picoctl keymap
+.I country
+.br
+.B picoctl mode
+[\fInumber\fR]
+.br
+.B picoctl usbreset
+.br
+.B picoctl numlock
+[\fBon\fR|\fBoff\fR] [\fIvid\fB:\fIpid\fR] [\fB\-\-once\fR|\fB\-\-load\fR]
+.SH DESCRIPTION
+.B picoctl
+reaches the parts of the Pico Computer that are not files: the
+bootloader, the keyboard, the display mode and the USB host.
+.SH COMMANDS
+.TP
+.B flash
+Reboot into the UF2 bootloader, so a new kernel can be copied on.
+.I Remount the root read-only first.
+This is an immediate reset: the kernel unmounts nothing on the way out,
+so a root left read-write comes back dirty and the next boot spends
+minutes in
+.BR fsck .
+.TP
+.BI keymap " country"
+Set the keyboard layout: one of
+.BR us ,
+.BR uk ,
+.BR de ,
+.BR fr ,
+.BR es ,
+.BR be .
+.TP
+.BI mode " number"
+Set the display mode.  With no number, return to the 80x40 text
+console.
+.TP
+.B usbreset
+Re-enumerate the USB bus, after moving the DPDT switch between
+programming and hub.
+.TP
+.B numlock
+Report the num lock setting.
+.B numlock on
+or
+.B numlock off
+sets it for the keyboard plugged in now, and remembers it against that
+keyboard.  A
+.IB vid : pid
+sets it for a keyboard that is not plugged in.
+.B \-\-once
+changes it without saving.
+.B \-\-load
+replays the saved settings, which is what
+.B /etc/rc
+does at boot.
+.SH WHY NUM LOCK IS REMEMBERED PER KEYBOARD
+Whether a keyboard has a numeric keypad is not discoverable from its USB
+descriptors, so there is nothing to detect.  The setting is remembered
+against the keyboard identity instead.
+.SH EXAMPLES
+.nf
+# remount -n / ro
+# picoctl flash
+# picoctl keymap uk
+# picoctl mode 2
+# picoctl mode
+# picoctl numlock off
+# picoctl numlock on 04b3:3025
+.fi
+.SH SEE ALSO
+.BR remount (1),
+.BR reboot (1),
+.BR stty (1)

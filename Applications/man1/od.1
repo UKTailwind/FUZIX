@@ -1,0 +1,54 @@
+.TH od 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+od \- octal and hexadecimal dump
+.SH SYNOPSIS
+.B od
+[\fB\-bcdhovx\fR] [\fIfile\fR] [[\fB+\fR]\fIoffset\fR[\fB.\fR][\fBb\fR]]
+.SH DESCRIPTION
+.B od
+writes the contents of
+.I file
+in one or more formats, one line of output for every sixteen bytes of
+input, with the offset in octal at the left.  With no
+.IR file ,
+it reads standard input.
+.PP
+The default format is
+.BR \-o .
+.SH OPTIONS
+.TP
+.B \-b
+Bytes in octal.
+.TP
+.B \-c
+Bytes as characters, with escapes for the ones that will not print.
+.TP
+.B \-d
+Words in unsigned decimal.
+.TP
+.B \-h
+Words in hexadecimal.
+.TP
+.B \-o
+Words in octal.
+.TP
+.B \-x
+Words in hexadecimal.
+.TP
+.B \-v
+Show every line.  Without it, runs of identical lines are printed once
+followed by an asterisk.
+.SH THE OFFSET
+An offset given after the file name says where to start.  It is octal
+unless followed by a dot, which makes it decimal; a trailing
+.B b
+multiplies it by 512.
+.SH EXAMPLES
+.nf
+# od -c file
+# od -bc file
+# od -x prog.bc 1000.
+.fi
+.SH SEE ALSO
+.BR cat (1),
+.BR cmp (1)

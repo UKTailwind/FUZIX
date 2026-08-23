@@ -1,0 +1,38 @@
+.TH loadjpg 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+loadjpg \- draw a JPEG on the screen
+.SH SYNOPSIS
+.B loadjpg
+.I file
+[\fIx\fR [\fIy\fR [\fImode\fR [\fIximage\fR [\fIyimage\fR [\fIscale\fR]]]]]]
+.SH DESCRIPTION
+.B loadjpg
+decodes a JPEG and draws it with its top left corner at
+.IR "x y" ,
+0 0 by default.
+.I ximage
+and
+.I yimage
+start the picture at an offset within the image.
+.SH ARGUMENTS
+.TP
+.I scale
+1, 2, 4 or 8.  The picture is binned by this factor as it decodes, so a
+640x480 photograph fits a 320x240 screen at
+.I scale
+2 without a separate scaling pass and without the memory a full-size
+decode would need.
+.TP
+.I mode
+Read and ignored.  It holds its place in the argument list; it selects
+no dithering.
+.SH EXAMPLES
+.nf
+# loadjpg photo.jpg
+# loadjpg photo.jpg 20 10
+# loadjpg photo.jpg 0 0 0 0 0 2
+.fi
+.SH SEE ALSO
+.BR loadpng (1),
+.BR loadimage (1),
+.BR saveimage (1)

@@ -1,0 +1,44 @@
+.TH tlsget 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+tlsget \- fetch a page over TLS
+.SH SYNOPSIS
+.B tlsget
+.I "address name path"
+.SH DESCRIPTION
+.B tlsget
+opens a TLS connection to
+.IR address ,
+presents
+.I name
+for SNI and for checking the certificate, asks for
+.IR path ,
+and writes what comes back to standard output.
+.PP
+The address and the name are
+.I separate arguments
+on purpose.  Keeping the resolver out of it makes this a test of the
+connection and of nothing else.
+.SH EXAMPLES
+.nf
+# tlsget 104.20.23.154 example.com /
+.fi
+.SH NOTES
+Out of the box a TLS session here is encrypted but
+.I not authenticated:
+nobody in the middle can read it, but anybody in the middle can pretend
+to be the far end.
+.BR tlsca (1)
+turns the checking on.
+.PP
+Set the clock first with
+.BR ntpdate (1).
+A machine that thinks it is 1970 rejects every certificate there is.
+.PP
+A failure is reported as a refused connection whatever went wrong \- a
+bad certificate, an unreachable host and an unsupported cipher all look
+the same from here.
+.SH SEE ALSO
+.BR tlsca (1),
+.BR htget (1),
+.BR ntpdate (1),
+.BR dig (1)

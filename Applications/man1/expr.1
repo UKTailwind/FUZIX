@@ -1,0 +1,114 @@
+.TH expr 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+expr \- evaluate an expression
+.SH SYNOPSIS
+.B expr
+.I "argument ..."
+.SH DESCRIPTION
+.B expr
+evaluates the expression made from its arguments and writes the result
+to standard output.  Every operator and operand must be a separate
+argument, so the shell has to be kept from eating them:
+.B expr 3 \e* 4
+and not
+.BR "expr 3*4" .
+.SH OPERATORS
+In increasing order of precedence.
+.TP
+.IB e1 " | " e2
+.I e1
+if it is neither empty nor zero, otherwise
+.IR e2 .
+.TP
+.IB e1 " & " e2
+.I e1
+if
+.I e2
+is neither empty nor zero, otherwise 0.
+.TP
+.B < > <= >= == !=
+Compare, giving 1 or 0.  Numeric if both sides are numbers, otherwise
+by string.
+.TP
+.B + \-
+Add, subtract.
+.TP
+.B * / %
+Multiply, divide, remainder.
+.TP
+.IB e1 " : " e2
+Match the string
+.I e1
+against the regular expression
+.IR e2 ,
+anchored at the start.  The result is the number of characters matched,
+or the text of the first
+.BR \\( ... \\)
+group if there is one.
+.TP
+.BI len " e"
+The length of
+.IR e .
+.TP
+.BI ! " e"
+1 if
+.I e
+is empty or zero, otherwise 0.
+.TP
+.BI \- " e"
+Negate a number.
+.TP
+.BI ( " e" " )"
+Grouping.
+.TP
+.BI { " c" " , " t " }"
+.I t
+if
+.I c
+is true, otherwise 0.
+.TP
+.BI { " c" " , " t " , " f " }"
+.I t
+if
+.I c
+is true, otherwise
+.IR f .
+This conditional is an extension; other systems do not have it.
+.SH EXIT STATUS
+0 if the result is neither empty nor the number zero, 1 if it is, 2 for
+a bad expression.
+.SH NOTES
+Equality is
+.B ==
+here.  A plain
+.B =
+is
+.I not
+an operator and gives a syntax error \- which is the opposite of POSIX
+and of every other
+.B expr
+you will have met.  Watch for it in scripts brought from elsewhere.
+.PP
+There is no
+.BR match ,
+.BR substr ,
+.B index
+or
+.B length
+keyword.  Use
+.B :
+for match and
+.B len
+for length.
+.SH EXAMPLES
+.nf
+# expr 1 + 2
+# expr 10 / 3
+# expr abcdef : 'a.c'
+# expr len abcdef
+# n=`expr $n + 1`
+.fi
+.SH SEE ALSO
+.BR test (1),
+.BR sh (1),
+.BR dc (1)

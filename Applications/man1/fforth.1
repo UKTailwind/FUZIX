@@ -1,0 +1,26 @@
+.TH fforth 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+fforth \- a Forth interpreter
+.SH SYNOPSIS
+.B fforth
+[\fIfile\fR ...]
+.SH DESCRIPTION
+.B fforth
+is a small indirect-threaded Forth by David Given, written for FUZIX.
+It implements most of the ANS Forth core word set and passes most of the
+Hayes conformance tests.
+.PP
+Run with no arguments it reads from the terminal and answers
+.B ok
+after each line it likes.  Given files, it reads those first.
+.PP
+.B bye
+leaves.
+.SH NOTES
+This is a complete language on the machine, alongside BBC BASIC, the C
+compiler and the MMBasic translator.  It is the smallest of them and the
+quickest to start.
+.SH SEE ALSO
+.BR bbcbasic (1),
+.BR cc (1),
+.BR dc (1)

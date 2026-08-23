@@ -1,0 +1,79 @@
+.TH kill 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+kill \- send a signal to a process
+.SH SYNOPSIS
+.B kill
+[\fB\-\fIsignal\fR] \fIpid\fR ...
+.br
+.B kill \-l
+.SH DESCRIPTION
+.B kill
+sends a signal to each process.  Without one it sends
+.BR SIGTERM ,
+which asks the process to finish; a process may catch that and tidy up,
+or ignore it.
+.SH THE SIGNAL
+Either a number, as
+.BR \-9 ,
+or a full name
+.I with
+the
+.B SIG
+prefix and in capitals, as
+.BR \-SIGKILL .
+.PP
+.B \-KILL
+without the prefix is
+.I not
+accepted, and neither is
+.BR \-sigkill :
+both give
+.RB `` "unknown signal" ''.
+This is where most of the trouble with this command comes from.
+.TP
+.B \-l
+List the names and numbers this
+.B kill
+knows, and exit.
+.SH THE USEFUL SIGNALS
+.TP
+.B SIGHUP 1
+Hang up.
+.TP
+.B SIGINT 2
+Interrupt, as from the interrupt key.
+.TP
+.B SIGQUIT 3
+Quit.
+.TP
+.B SIGKILL 9
+Cannot be caught or ignored.  The last resort.
+.TP
+.B SIGTERM 15
+Terminate, politely.  The default.
+.TP
+.B SIGCONT 18
+Let a stopped process go on.
+.TP
+.B SIGSTOP 19
+Stop the process.
+.PP
+Signal 0 sends nothing but still checks that the process exists, so
+.B kill \-0
+is the way to ask.
+.SH NOTES
+The shell has no
+.B kill
+built in, so this program is what runs, and it takes process ids only \-
+not job numbers.
+.PP
+With no arguments at all it prints its usage and exits 0.
+.PP
+Killing process 1 does nothing useful:
+.B init
+should be told what to do with
+.BR telinit (1).
+.SH SEE ALSO
+.BR ps (1),
+.BR killall (1),
+.BR telinit (1)

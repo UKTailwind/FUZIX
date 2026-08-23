@@ -1,0 +1,47 @@
+.TH killall 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+killall \- signal every process on the machine
+.SH SYNOPSIS
+.B killall
+[\fIsignal\fR]
+.SH DESCRIPTION
+.B killall
+sends a signal to
+.I every
+process on the system except
+.BR init ,
+itself, and its own parent.  Without an argument it sends signal 15,
+.BR SIGTERM .
+.SH NOTES
+Read that again before using it.  This is not the Linux
+.BR killall .
+It takes no process name, and it does not stop at processes you own or
+at your own terminal: it is closer to the System V program of the same
+name, used by
+.B /etc/rc.halt
+when the machine is being shut down.
+.PP
+.B killall
+run from a shell will kill the other logins, background jobs,
+.BR httpd ,
+anything playing a sound, and whatever else is running.  Your own shell
+survives only because it is the parent.
+.PP
+To signal one program by name there is no ready-made command:
+.BR ps (1)
+to find the pid,
+.BR kill (1)
+to signal it.
+.SH THE SIGNAL
+A
+.I number
+only.  Names are not accepted here, unlike in
+.BR kill (1).
+.SH EXIT STATUS
+The number of processes signalled, or 255 if
+.B /dev/proc
+could not be read.
+.SH SEE ALSO
+.BR kill (1),
+.BR ps (1),
+.BR shutdown (1)

@@ -1,0 +1,70 @@
+.TH fat 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+fat \- read and write the FAT partition of the card
+.SH SYNOPSIS
+.B fat
+[\fB\-d\fI device\fR] \fBls\fR [\fIpath\fR]
+.br
+.B fat
+[\fB\-d\fI device\fR] \fBget\fI path\fR [\fIdest\fR]
+.br
+.B fat
+[\fB\-d\fI device\fR] \fBput\fI src\fR [\fIdest\fR]
+.br
+.B fat
+[\fB\-d\fI device\fR] \fBinfo\fR
+.SH DESCRIPTION
+The first partition of the card is FAT, so that files can be dropped on
+it from a PC.  FUZIX cannot mount a FAT filesystem;
+.B fat
+reaches into the partition from outside and copies files in and out.
+.PP
+This is the easy way to get a program onto the machine: format the FAT
+partition on the PC, copy files onto it, put the card back, and
+.B fat get
+them.
+.SH COMMANDS
+.TP
+.B ls
+List a directory.  The path may end in a pattern, as
+.BR "fat ls basic/4*" .
+.TP
+.B get
+Copy a file off the FAT partition.  Without a
+.IR dest ,
+it lands in the current directory under a lower-cased version of its
+name.
+.TP
+.B put
+Copy a file onto it.
+.I dest
+may name a directory to put it in.
+.TP
+.B info
+Report the size and shape of the filesystem.
+.SH OPTIONS
+.TP
+.BI \-d " device"
+The partition to work on.  The default is the FAT partition of the card
+this machine boots from.
+.SH EXAMPLES
+.nf
+# fat info
+# fat ls
+# fat ls basic
+# fat get "my program.bas" /root/prog.bas
+# fat get demo.bin
+# fat put report.txt
+.fi
+.SH NOTES
+FAT16 and FAT32 are both understood.  A name with a space in it needs
+quoting from the shell.
+.PP
+Format the FAT partition from Windows rather than with
+.BR mkfs.vfat :
+the two do not always agree about what the Pico bootloader will accept.
+.SH SEE ALSO
+.BR uue (1),
+.BR tar (1),
+.BR mount (1),
+.BR dosread (1)

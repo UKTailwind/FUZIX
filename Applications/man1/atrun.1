@@ -1,0 +1,26 @@
+.TH atrun 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+atrun \- run the jobs queued by at
+.SH SYNOPSIS
+.B atrun
+.SH DESCRIPTION
+.BR at (1)
+does not run anything itself: it writes a file into the spool directory
+naming the time.
+.B atrun
+looks through that directory and runs whatever is now due.
+.PP
+It is meant to be run once a minute from
+.BR cron (1),
+and is of no use typed by hand except to flush the queue.
+.SH NOTES
+Since
+.B cron
+is not started on this machine as shipped, nothing runs
+.B atrun
+either, and a job queued with
+.B at
+sits there until something does.
+.SH SEE ALSO
+.BR at (1),
+.BR cron (1)

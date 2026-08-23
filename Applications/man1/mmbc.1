@@ -1,0 +1,46 @@
+.TH mmbc 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+mmbc \- translate MMBasic to C
+.SH SYNOPSIS
+.B mmbc
+.I prog.bas
+.SH DESCRIPTION
+.B mmbc
+reads an MMBasic program and writes
+.IR prog.c ,
+which
+.BR cc (1)
+then compiles.  The three steps are:
+.nf
+
+# mmbc prog.bas          -> prog.c
+# cc prog.c              -> prog.bc
+# ./prog.bc              runs it
+
+.fi
+and
+.B cc prog.bas
+does all three at once.
+.PP
+This is a translator, not an interpreter.  The BASIC becomes C, the C
+becomes a program, and what runs is the program \- which is why a
+program written for the PicoMite runs faster here than on the machine it
+was written for.
+.SH WHAT IT COVERS
+The graphics, sound, pin, file, string and maths words of MMBasic, and
+the WEB family for networking.  What is implemented, and where it
+deliberately diverges from the reference, is in the PC3 manual.
+.SH ERRORS
+An unknown keyword or an unsupported option is reported and stops the
+translation.  It is not quietly dropped: a program that translates has
+had every statement in it understood.
+.SH EXAMPLES
+.nf
+# mmbc hello.bas
+# cc hello.c
+# ./hello.bc
+.fi
+.SH SEE ALSO
+.BR cc (1),
+.BR bcrun (1),
+.BR mmedit (1)

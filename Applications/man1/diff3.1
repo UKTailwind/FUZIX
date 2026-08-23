@@ -1,0 +1,77 @@
+.TH diff3 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+diff3 \- compare three files
+.SH SYNOPSIS
+.B diff3
+[\fB\-ex3\fR] \fIfile1 file2 file3\fR
+.SH DESCRIPTION
+.B diff3
+compares three versions of a file and reports the ranges that differ,
+which is what you want when two people have both changed a common
+ancestor.
+.PP
+Each difference is flagged with which files disagree:
+.TP
+.B ====
+All three are different.
+.TP
+.B ====1
+.I file1
+is the odd one out.
+.TP
+.B ====2
+.I file2
+is.
+.TP
+.B ====3
+.I file3
+is.
+.PP
+Under each flag come the ranges from each file, in
+.BR ed (1)
+notation, and the text.
+.SH OPTIONS
+.TP
+.B \-e
+Write an
+.BR ed (1)
+script that applies to
+.I file1
+the changes between
+.I file2
+and
+.IR file3 .
+This is the merge: pipe it into
+.B ed
+with a
+.B w
+and a
+.B q
+after it.
+.TP
+.B \-x
+Like
+.BR \-e ,
+but only for the parts where all three differ.
+.TP
+.B \-3
+Like
+.BR \-e ,
+but only for the parts where
+.I file3
+is the odd one out.
+.SH EXAMPLES
+.nf
+# diff3 mine.c base.c theirs.c
+# ( diff3 -e mine.c base.c theirs.c ; echo w ; echo q ) | ed - mine.c
+.fi
+.SH NOTES
+.B diff3
+calls
+.BR diff (1)
+twice, so it needs the memory for that on top of its own.
+.SH SEE ALSO
+.BR diff (1),
+.BR diffh (1),
+.BR ed (1),
+.BR cmp (1)

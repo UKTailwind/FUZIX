@@ -1,0 +1,23 @@
+.TH wall 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+wall \- write to every logged-in user
+.SH SYNOPSIS
+.B wall
+[\fIfile\fR]
+.SH DESCRIPTION
+.B wall
+reads
+.IR file ,
+or standard input, and writes it to the terminal of every user logged
+in, prefixed with a note saying who it came from.
+.SH NOTES
+The superuser reaches every terminal, whether or not
+.BR mesg (1)
+has turned messages off.
+.PP
+This is what a shutdown script uses to warn people.
+.SH SEE ALSO
+.BR write (1),
+.BR mesg (1),
+.BR who (1),
+.BR shutdown (1)

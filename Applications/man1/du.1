@@ -1,0 +1,40 @@
+.TH du 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+du \- how much space a directory tree uses
+.SH SYNOPSIS
+.B du
+[\fB\-asxdk\fR] [\fB\-l\fI levels\fR] [\fIdirectory\fR ...]
+.SH DESCRIPTION
+.B du
+walks each
+.I directory
+and prints how much space its files take, in 512-byte blocks, deepest
+first.  With no argument it starts at the current directory.
+.PP
+A file with more than one link is counted once.
+.SH OPTIONS
+.TP
+.B \-a
+Report every file, not just directories.
+.TP
+.B \-s
+Report only the total for each argument.
+.TP
+.BR \-x ", " \-d
+Do not cross onto another filesystem.
+.TP
+.B \-k
+Report kilobytes rather than 512-byte blocks.
+.TP
+.BI \-l " levels"
+Report only to this depth below each argument.
+.SH EXAMPLES
+.nf
+# du -s /root
+# du -k /usr/bin
+# du -a . | sort -nr
+.fi
+.SH SEE ALSO
+.BR df (1),
+.BR ls (1),
+.BR find (1)

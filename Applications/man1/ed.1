@@ -1,0 +1,200 @@
+.TH ed 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+ed \- the line editor
+.SH SYNOPSIS
+.B ed
+[\fB\-\fR] [\fIfile\fR]
+.SH DESCRIPTION
+.B ed
+edits text a line at a time.  It has no screen and no cursor: you name
+lines by number or by what they contain, and it does what you ask.  On a
+serial console with no terminal type set, it is the editor that always
+works.
+.PP
+.B ed
+is quiet.  It answers a mistake with a
+.B ?
+and nothing else.  Type
+.B P
+to have it prompt with a
+.BR * .
+.SH OPTIONS
+.TP
+.B \-
+Do not print the character counts after reading and writing.
+.TP
+.B \-q
+Let the quit signal through, and print counts.
+.SH ADDRESSES
+.TP
+.I n
+Line
+.IR n .
+.TP
+.B .
+The current line.
+.TP
+.B $
+The last line.
+.TP
+.BI / re /
+The next line matching
+.IR re ,
+wrapping round the end.
+.TP
+.BI ? re ?
+The previous line matching it.
+.TP
+.BI ' x
+The line marked
+.I x
+by the
+.B k
+command.
+.TP
+.BI + n
+Forward from the current line.
+.TP
+.BI \- n
+Back from the current line.
+.TP
+.B ,
+.B 1,$
+\- the whole file.
+.PP
+An address range is two addresses separated by a comma.
+.SH COMMANDS
+.TP
+.B a
+Append text after the addressed line.  A line holding only a dot ends
+the input.
+.TP
+.B i
+Insert text before it.
+.TP
+.B c
+Replace the addressed lines with typed text.
+.TP
+.B d
+Delete the addressed lines.
+.TP
+.B m
+Move the addressed lines to after another address.
+.TP
+.B t
+Copy them there instead.
+.TP
+.B j
+Join the addressed lines into one.
+.TP
+.B p
+Print them.
+.TP
+.B l
+Print them with non-printing characters shown.
+.TP
+.B P
+Turn the
+.B *
+prompt on or off.
+.TP
+.BI k x
+Mark the addressed line
+.IR x .
+.TP
+.BI s/ re / replacement /
+Substitute on the addressed lines.  A trailing
+.B g
+changes every occurrence on the line, a trailing
+.B p
+prints the result.
+.TP
+.BI g/ re / commands
+Run
+.I commands
+on every line matching
+.IR re .
+.TP
+.BI v/ re / commands
+The same for lines
+.I not
+matching.
+.TP
+.B u
+Undo the last change.  One level only.
+.TP
+.BI e " file"
+Start again on
+.IR file .
+.B E
+does it even if the buffer has unsaved changes.
+.TP
+.BI r " file"
+Read
+.I file
+in after the addressed line.
+.TP
+.BI w " file"
+Write the addressed lines, the whole buffer by default, to
+.I file
+or to the current file name.
+.B W
+appends instead.
+.TP
+.BI f " file"
+Show, or set, the current file name.
+.TP
+.B =
+Print the line number of the address.
+.TP
+.BI ! " command"
+Run a shell command.
+.TP
+.B q
+Quit.  It refuses once if there are unsaved changes;
+.B Q
+does not ask at all.
+.PP
+A bare newline prints the next line.
+.SH REGULAR EXPRESSIONS
+.BR . ,
+.BR * ,
+.BR [ ... ] ,
+.B ^
+and
+.B $
+at the ends, and
+.BR \\( ... \\)
+with
+.BR \\1 " to " \\9
+in the replacement.
+.B &
+in a replacement stands for the whole match.
+.SH FILES
+.TP
+.B /tmp/e*
+The edit buffer.  A file being edited is held here, not in memory, so
+the size of what you can edit is a question about
+.B /tmp
+rather than about the process.
+.SH EXAMPLES
+.nf
+# ed prog.bas
+a
+10 PRINT "hello"
+\&.
+w
+q
+.fi
+.SH NOTES
+Two editors on this machine are easier to get on with:
+.BR vi (1)
+for C and text, and
+.BR mmedit (1)
+for BASIC.  Keep
+.B ed
+for scripts, and for the day the screen handling will not cooperate.
+.SH SEE ALSO
+.BR vi (1),
+.BR mmedit (1),
+.BR sed (1)

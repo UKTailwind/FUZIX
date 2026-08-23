@@ -1,0 +1,37 @@
+.TH basename 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+basename \- strip directory and suffix from a name
+.SH SYNOPSIS
+.B basename
+.I name
+[\fIsuffix\fR]
+.SH DESCRIPTION
+.B basename
+removes any trailing slashes from
+.IR name ,
+then everything up to and including the last remaining slash, and
+prints what is left.  If
+.I suffix
+is given and
+.I name
+ends with it, that is removed too.
+.SH OPTIONS
+None.
+.SH EXAMPLES
+.nf
+# basename /usr/man/man1/ls.1
+ls.1
+# basename /usr/man/man1/ls.1 .1
+ls
+.fi
+.SH NOTES
+With no arguments, or with more than two,
+.B basename
+prints nothing and exits 0.
+.PP
+A suffix is not removed if doing so would leave nothing, so
+.B basename .1 .1
+prints
+.BR .1 .
+.SH SEE ALSO
+.BR dirname (1)

@@ -1,0 +1,35 @@
+.TH head 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+head \- print the first lines of a file
+.SH SYNOPSIS
+.B head
+[\fB\-\fIn\fR] [\fIfile\fR ...]
+.SH DESCRIPTION
+.B head
+prints the first
+.I n
+lines of each
+.IR file ,
+ten by default.  With no
+.IR file ,
+it reads standard input.
+.SH OPTIONS
+.TP
+.BI \- n
+Print
+.I n
+lines instead of ten.  Only the old form works:
+.B head \-20
+and not
+.BR "head \-n 20" .
+The count must be the first argument.
+.SH NOTES
+No header line is printed between files, even when several are named.
+.PP
+There is no
+.B \-c
+byte count.
+.SH SEE ALSO
+.BR tail (1),
+.BR more (1),
+.BR cat (1)

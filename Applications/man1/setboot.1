@@ -1,0 +1,35 @@
+.TH setboot 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+setboot \- show or set the boot command line
+.SH SYNOPSIS
+.B setboot
+.I device
+.br
+.B setboot
+.I device
+.I command
+.SH DESCRIPTION
+The first sector of a FUZIX filesystem has room for a short command
+line, which the kernel reads at boot and passes to
+.BR init .
+.B setboot
+prints what is there, or writes a new one.
+.SH ARGUMENTS
+.TP
+.I device
+The block device holding the filesystem, not the mount point.
+.TP
+.I command
+Up to 63 characters.  Longer is refused.
+.SH NOTES
+With no command set,
+.B setboot
+says
+.BR "No command set." .
+.PP
+This writes to block 0 of the device.  Getting the device wrong writes
+over the start of the wrong filesystem.
+.SH SEE ALSO
+.BR telinit (1),
+.BR reboot (1),
+.BR prtroot (1)

@@ -1,0 +1,58 @@
+.TH mount 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+mount \- mount a filesystem, or show what is mounted
+.SH SYNOPSIS
+.B mount
+.br
+.B mount
+[\fB\-t\fI type\fR] \fIdevice\fR \fIdirectory\fR
+.br
+.B mount \-a
+.SH DESCRIPTION
+With no arguments,
+.B mount
+prints what is currently mounted, from
+.BR /etc/mtab .
+.PP
+Given a
+.I device
+and a
+.IR directory ,
+it attaches that filesystem there.  Whatever was in the directory before
+is hidden until it is unmounted, not lost.
+.SH OPTIONS
+.TP
+.B \-a
+Mount everything listed in
+.B /etc/fstab
+that is not already mounted.
+.TP
+.BI \-t " type"
+The filesystem type.  FUZIX has one,
+.BR fuzix ,
+so this is rarely needed.
+.SH FILES
+.TP
+.B /etc/fstab
+What should be mounted, and where.
+.TP
+.B /etc/mtab
+What is mounted now.
+.B mount
+writes this; if it goes missing the list is lost, not the mounts.
+.SH EXAMPLES
+.nf
+# mount
+# mount /dev/hda3 /mnt
+# mount -a
+.fi
+.SH NOTES
+The FAT partition of the card is not mounted and cannot be:
+.BR fat (1)
+reads it from outside the filesystem.
+.SH SEE ALSO
+.BR umount (1),
+.BR remount (1),
+.BR df (1),
+.BR fsck (1),
+.BR fat (1)

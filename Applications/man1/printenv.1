@@ -1,0 +1,30 @@
+.TH printenv 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+printenv \- print the environment, or one variable of it
+.SH SYNOPSIS
+.B printenv
+[\fIname\fR]
+.SH DESCRIPTION
+With no argument,
+.B printenv
+prints the whole environment as
+.IB name = value
+lines.  With a
+.IR name ,
+it prints just that variable value.
+.SH OPTIONS
+None.
+.SH EXIT STATUS
+1 if
+.I name
+was given and is not set; 0 otherwise.
+.SH NOTES
+Only the first argument is looked at; the rest are ignored.
+.SH EXAMPLES
+.nf
+# printenv
+# printenv PATH
+.fi
+.SH SEE ALSO
+.BR env (1),
+.BR sh (1)

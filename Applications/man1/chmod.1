@@ -1,0 +1,72 @@
+.TH chmod 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+chmod \- change file mode
+.SH SYNOPSIS
+.B chmod
+[\fB\-R\fR] \fImode file ...\fR
+.SH DESCRIPTION
+.B chmod
+sets the permission bits of each
+.I file
+from
+.IR mode ,
+which may be octal or symbolic.
+.PP
+An octal mode is taken as written:
+.B 0755
+or
+.BR 755 .
+.PP
+A symbolic mode is one or more clauses separated by commas, each made of
+a class, an operator and a set of permissions.
+.TP
+class
+.B u
+user,
+.B g
+group,
+.B o
+other,
+.B a
+all.  If omitted, all classes are affected but bits set in the
+.B umask
+are left alone.
+.TP
+operator
+.B +
+adds,
+.B \-
+removes,
+.B =
+sets exactly.
+.TP
+permissions
+.B r
+read,
+.B w
+write,
+.B x
+execute,
+.B s
+set-uid or set-gid,
+.B t
+sticky.  A single
+.BR u ,
+.B g
+or
+.B o
+instead copies the bits that class already has.
+.SH OPTIONS
+.TP
+.B \-R
+Recurse into directories named on the command line.
+.SH EXAMPLES
+.nf
+# chmod 755 /bin/prog
+# chmod +x prog.sh
+# chmod go-w,u+r file
+.fi
+.SH SEE ALSO
+.BR chown (1),
+.BR chgrp (1),
+.BR ls (1)

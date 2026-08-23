@@ -1,0 +1,26 @@
+.TH cpp 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+cpp \- the C preprocessor
+.SH SYNOPSIS
+.B cpp
+[\fB\-D\fIname\fR[\fB=\fIvalue\fR]] [\fB\-I\fIdir\fR] [\fIinput\fR [\fIoutput\fR]]
+.SH DESCRIPTION
+.B cpp
+expands the
+.BR #include ,
+.BR #define ,
+.B #if
+family and macro calls, and writes the result.
+.BR cc (1)
+runs it for you;
+.B cpp
+by hand, or
+.BR "cc \-E" ,
+is for finding out what a macro actually expands to.
+.SH NOTES
+This is the board's own preprocessor, not
+.BR "gcc \-E" .
+A cross-compiled build uses gcc, so anything that works there is not
+evidence that it works here.  C89 is what to expect.
+.SH SEE ALSO
+.BR cc (1)

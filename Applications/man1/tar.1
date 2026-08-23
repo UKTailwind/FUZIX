@@ -1,0 +1,57 @@
+.TH tar 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+tar \- the tape archiver
+.SH SYNOPSIS
+.B tar
+.BR \-c | \-t | \-x
+[\fB\-vnk\fR] [\fB\-f\fI archive\fR] [\fB\-b\fI blocks\fR] [\fIfile\fR ...]
+.SH DESCRIPTION
+.B tar
+packs a set of files, with their directories, into one archive, and
+takes them out again.  The format is the ordinary one, so an archive
+made here can be unpacked on any other Unix and the other way round.
+.SH OPTIONS
+.TP
+.B \-c
+Create an archive from the named files.
+.TP
+.B \-t
+List what is in an archive.
+.TP
+.B \-x
+Extract from an archive.
+.TP
+.BI \-f " archive"
+Use this file rather than standard input or output.
+.TP
+.B \-v
+Say what is being done, file by file.
+.TP
+.B \-n
+Do not restore ownership.
+.TP
+.B \-k
+Keep existing files rather than overwriting them.
+.TP
+.BI \-b " blocks"
+Blocking factor.
+.SH EXAMPLES
+.nf
+# tar -cvf /mnt/backup.tar /root
+# tar -tf backup.tar
+# tar -xvf backup.tar
+.fi
+.SH NOTES
+There is no compression: no
+.BR \-z ,
+no
+.BR \-j .
+An archive is exactly as large as what went into it, rounded up.
+.PP
+Extracting an archive made elsewhere can create paths longer than this
+filesystem is happy with, and file names are limited to 100 characters
+by the format itself.
+.SH SEE ALSO
+.BR uue (1),
+.BR fat (1),
+.BR cp (1)

@@ -447,9 +447,8 @@ chmod 0755 levee
 # extra card space.  (Fuzix has no symbolic links.)
 ln levee vi
 
-cd /usr/man/man1
-bget ../../../Applications/levee/levee.1
-chmod 0644 levee.1
+# levee.1 and the rest of /usr/man are installed by the manual page
+# pass at the foot of this file, which walks the directories.
 
 cd /usr/lib
 bget ../../../Library/libs/liberror.txt
@@ -717,5 +716,80 @@ EOF
 		exit 1
 	fi
 	rm -f /tmp/ucp-wifi.log
+
+# ---------------------------------------------------------------------
+# The manual pages.
+#
+# The card carried exactly one - levee.1 - so `man awk' and `man sed'
+# answered "No manual entry" for every command on the machine.  This
+# installs a page for all of them.
+#
+# GENERATED RATHER THAN LISTED.  Everything else in this file is an
+# explicit bget line, which is right for binaries: the list IS the
+# decision about what the card holds.  Manual pages are not a decision -
+# every command should have one - and one bget plus one chmod each would
+# be three hundred lines here.  So this walks the directories, and
+# manpages.sh checks the result against what /bin actually holds: a
+# command with no page, or a page naming no command, fails the gate.
+#
+# WHERE THEY COME FROM.  Applications/man1 holds the pages written for
+# FUZIX.  The V7 commands keep the V7 pages that came with them, and
+# levee, man and sh likewise - installed from where they live, not
+# copied.  awk.1 is generated from upstream's page by mkawk1.sh, which
+# runs first so that a fresh clone has it.
+#
+# NOT V7's test.1: /bin/test is the Mark Williams one, which has -e, -nt
+# and -ot that V7's page does not describe.  Applications/man1/test.1 is
+# the page for the binary that is actually installed.
+#
+# Section 2 comes too.  Applications/man2 has 27 syscall pages that have
+# never been installed anywhere, and this machine is one people write C
+# on.
+echo "--- manual pages: /usr/man"
+MAN1=../../../Applications/man1
+sh $MAN1/mkawk1.sh > /dev/null
+
+V7MAN=../../../Applications/V7/cmd
+EXTRA="$V7MAN/at.1 $V7MAN/col.1 $V7MAN/comm.1 $V7MAN/crypt.1 $V7MAN/dc.1
+$V7MAN/deroff.1 $V7MAN/diff.1 $V7MAN/join.1 $V7MAN/look.1 $V7MAN/mesg.1
+$V7MAN/newgrp.1 $V7MAN/pr.1 $V7MAN/ptx.1 $V7MAN/rev.1 $V7MAN/split.1
+$V7MAN/su.1 $V7MAN/sum.1 $V7MAN/time.1 $V7MAN/tsort.1
+$V7MAN/sh/sh.1 ../../../Applications/util/man.1
+../../../Applications/levee/levee.1"
+
+# One page, several names.  Hard links rather than copies: same inode,
+# one directory entry each.  (Fuzix has no symbolic links.)
+ALIAS="cp.1:mv.1 cp.1:ln.1 reboot.1:halt.1 reboot.1:shutdown.1
+levee.1:vi.1 test.1:[.1 fsck.1:fsck-fuzix.1 uue.1:uud.1 rx.1:sx.1
+saveimage.1:loadimage.1 playmp3.1:playwav.1 playmp3.1:playflac.1
+bcrun.1:bcdump.1 true.1:false.1"
+
+{
+	echo "cd /usr/man"
+	echo "mkdir man2"
+	echo "chmod 0755 man2"
+	echo "cd /usr/man/man1"
+	for p in $MAN1/*.1 $EXTRA; do
+		b=`basename $p`
+		echo "bget $p $b"
+		echo "chmod 0644 $b"
+	done
+	for a in $ALIAS; do
+		echo "ln /usr/man/man1/`echo $a | cut -d: -f1` /usr/man/man1/`echo $a | cut -d: -f2`"
+	done
+	echo "cd /usr/man/man2"
+	for p in ../../../Applications/man2/*.2; do
+		b=`basename $p`
+		echo "bget $p $b"
+		echo "chmod 0644 $b"
+	done
+	echo "exit"
+} | ../../../Standalone/ucp ${IMG} > /tmp/ucp-man.log 2>&1
+if grep -q "error" /tmp/ucp-man.log; then
+	echo "update-flash.sh: ucp failed installing the manual pages:" >&2
+	cat /tmp/ucp-man.log >&2
+	exit 1
+fi
+rm -f /tmp/ucp-man.log
 
 ../../../Standalone/fsck -a ${IMG}

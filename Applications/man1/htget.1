@@ -1,0 +1,34 @@
+.TH htget 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+htget \- fetch a page over HTTP
+.SH SYNOPSIS
+.B htget
+.I url
+.I file
+.SH DESCRIPTION
+.B htget
+fetches
+.I url
+and writes the body to
+.IR file .
+It understands chunked replies, so what lands in the file is the page
+and not the HTTP framing.
+.SH EXAMPLES
+.nf
+# htget http://example.com/ page.htm
+# htget http://127.0.0.1:8080/index.html got.htm
+.fi
+.SH NOTES
+HTTP only.  For HTTPS use
+.BR tlsget (1),
+which takes the address and the name separately.
+.PP
+The radio must be up and
+.B /etc/resolv.conf
+written; see
+.BR wifi (1).
+.SH SEE ALSO
+.BR tlsget (1),
+.BR httpd (1),
+.BR wifi (1),
+.BR dig (1)

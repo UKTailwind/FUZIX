@@ -1,0 +1,147 @@
+.TH test 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+test, [ \- evaluate a condition
+.SH SYNOPSIS
+.B test
+.I expression
+.br
+.BI [ " expression" " ]"
+.SH DESCRIPTION
+.B test
+evaluates
+.I expression
+and exits 0 if it is true, 1 if it is false, and 2 if the expression
+itself was wrong.  It is what
+.B if
+and
+.B while
+in a shell script are built on.
+.PP
+.B [
+is the same program under another name; when called that way the last
+argument must be
+.BR ] .
+.SH FILE TESTS
+.TP
+.BI \-e " file"
+Exists.
+.TP
+.BI \-f " file"
+Exists and is an ordinary file.
+.TP
+.BI \-d " file"
+Exists and is a directory.
+.TP
+.BI \-b " file"
+Exists and is a block device.
+.TP
+.BI \-c " file"
+Exists and is a character device.
+.TP
+.BI \-p " file"
+Exists and is a FIFO.
+.TP
+.BI \-r " file"
+Readable.
+.TP
+.BI \-w " file"
+Writable.
+.TP
+.BI \-x " file"
+Executable.
+.TP
+.BI \-s " file"
+Exists and is not empty.
+.TP
+.BI \-u " file"
+Has the set-uid bit set.
+.TP
+.BI \-g " file"
+Has the set-gid bit set.
+.TP
+.IB file1 " \-ef " file2
+The same file: same device and inode.
+.TP
+.IB file1 " \-nt " file2
+.I file1
+is newer.
+.TP
+.IB file1 " \-ot " file2
+.I file1
+is older.
+.SH STRING TESTS
+.TP
+.BI \-z " string"
+Empty.
+.TP
+.BI \-n " string"
+Not empty.
+.TP
+.IB s1 " = " s2
+Equal.
+.TP
+.IB s1 " != " s2
+Not equal.
+.PP
+A bare
+.I string
+is true when it is not empty, which is the usual way to test that a
+variable is set.
+.SH NUMBER TESTS
+.IB n1 " \-eq " n2
+.br
+.IB n1 " \-ne " n2
+.br
+.IB n1 " \-lt " n2
+.br
+.IB n1 " \-le " n2
+.br
+.IB n1 " \-gt " n2
+.br
+.IB n1 " \-ge " n2
+.SH OTHER
+.TP
+.BI \-t " fd"
+That file descriptor is a terminal.
+.SH COMBINING
+.B !
+negates,
+.B \-a
+is and,
+.B \-o
+is or, and parentheses group \- though the shell needs them quoted, as
+.B \(
+and
+.BR \) .
+.SH EXAMPLES
+.nf
+if test -f /etc/wifi.conf
+then
+	wifi -f
+fi
+
+while [ -n "$1" ]
+do
+	echo $1
+	shift
+done
+.fi
+.SH NOTES
+This is the Mark Williams
+.BR test ,
+which is a good deal more complete than the V7 one: the file age tests
+.RB ( \-nt ,
+.BR \-ot ,
+.BR \-ef )
+and
+.B \-e
+are all here.
+.PP
+The shell has no
+.B test
+built in, so every
+.B if
+in a script is a fork and an exec.
+.SH SEE ALSO
+.BR sh (1),
+.BR expr (1)

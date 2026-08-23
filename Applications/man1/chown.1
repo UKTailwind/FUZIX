@@ -1,0 +1,32 @@
+.TH chown 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+chown \- change file owner
+.SH SYNOPSIS
+.B chown
+.I "owner file ..."
+.SH DESCRIPTION
+.B chown
+sets the owner of each
+.I file
+to
+.IR owner ,
+which is either a numeric uid or a name from
+.BR /etc/passwd .
+The group is left alone.
+.SH OPTIONS
+None.  There is no
+.BR \-R ,
+and the
+.I owner:group
+form is not accepted \- use
+.BR chgrp (1)
+for the group.
+.SH EXIT STATUS
+.B chown
+stops at the first file it cannot change and exits 1.  Files after that
+one are not touched.
+.SH NOTES
+Only the superuser may give a file away.
+.SH SEE ALSO
+.BR chgrp (1),
+.BR chmod (1)

@@ -1,0 +1,57 @@
+.TH tlsca 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+tlsca \- load the certificate authorities, or stop checking
+.SH SYNOPSIS
+.B tlsca
+.I file
+.br
+.B tlsca \-n
+.SH DESCRIPTION
+.B tlsca
+loads a bundle of certificate authorities from
+.IR file .
+From then on, a TLS connection whose certificate does not check out is
+refused rather than made.
+.SH OPTIONS
+.TP
+.B \-n
+Go back to not checking.  Connections are still encrypted.
+.SH EXAMPLES
+.nf
+# tlsca /etc/ca.pem
+TLS: 11085 bytes loaded, certificates are CHECKED
+# tlsca -n
+TLS: certificates are NOT checked
+.fi
+.SH WHICH AUTHORITIES YOU NEED IS NOT GUESSABLE
+The bundle that ships in
+.B /etc/ca.pem
+carries ten roots covering Let's Encrypt, Google, DigiCert, Amazon,
+SSL.com and Sectigo, which between them cover most of the web.  Sites
+move between authorities, and one signed by a root that is not in the
+file is refused.
+.PP
+Even the same company can trip this: Cloudflare's 1.1.1.1 chains to
+SSL.com's older ECC root, not their 2022 one, and only a bundle carrying
+the right
+.I certificate
+\- not merely the right company \- verifies it.  To find out what a site
+uses, from a desktop machine:
+.nf
+
+openssl s_client -connect HOST:443 -servername HOST -showcerts
+
+.fi
+and add the root it names.
+.SH KEEP THE FILE SMALL
+Every certificate in the bundle is parsed on each connection, out of the
+same memory the packet buffers use.  Nine or ten roots is comfortable;
+the full browser set of about 150 is far too big and will not load at
+all.
+.SH FILES
+.TP
+.B /etc/ca.pem
+.SH SEE ALSO
+.BR tlsget (1),
+.BR ntpdate (1),
+.BR wifi (1)

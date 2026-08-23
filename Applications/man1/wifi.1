@@ -1,0 +1,71 @@
+.TH wifi 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+wifi \- join a wireless network, or report on the radio
+.SH SYNOPSIS
+.B wifi
+.br
+.B wifi \-f
+.br
+.B wifi
+.I ssid key
+[\fItype\fR]
+.br
+.B wifi \-d
+.SH DESCRIPTION
+With no arguments,
+.B wifi
+reports what the radio is doing: whether it is associated, the signal
+strength, and the address, mask, gateway and nameserver of the DHCP
+lease.
+.SH OPTIONS
+.TP
+.B \-f
+Join the network named in
+.BR /etc/wifi.conf ,
+take a DHCP lease, and write
+.B /etc/resolv.conf
+from it.  Writing resolv.conf is what makes names work, so this is the
+form to use.
+.TP
+.I "ssid key" \fR[\fItype\fR]
+Join without using the file.  Nothing is saved.  Neither the SSID nor
+the key may contain a space.
+.TP
+.B \-d
+Disconnect.
+.SH THE CONFIGURATION FILE
+.B /etc/wifi.conf
+holds one line of three fields: the SSID, the key, and the
+authentication type \- 0 open, 1 WPA-TKIP, 2 WPA2-AES, 3 WPA2 mixed.
+Nearly every home network wants 2.
+.PP
+The file holds the key in plain text.  It ships mode 600 and
+.B wifi
+complains if it finds otherwise, but anyone who can read the card can
+read the key.
+.SH NOTES
+Bringing the radio up stops the machine for about half a second: the
+kernel uploads 230K of firmware to the chip, and a FUZIX system call is
+not interrupted, so nothing else runs while it happens \- including the
+keyboard.  Joining the network afterwards does not block.
+.PP
+A Pico Computer 2 has no radio; those pins are its SD card and its LED.
+The same kernel runs on both and says
+.B "no radio (Pico Computer 2)"
+rather than failing.
+.PP
+To join at boot, put
+.B wifi \-f
+in
+.BR /etc/rc .
+.SH FILES
+.TP
+.B /etc/wifi.conf
+.TP
+.B /etc/resolv.conf
+.SH SEE ALSO
+.BR ping (1),
+.BR dig (1),
+.BR ntpdate (1),
+.BR htget (1),
+.BR httpd (1)

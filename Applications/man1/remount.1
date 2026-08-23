@@ -1,0 +1,55 @@
+.TH remount 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+remount \- change a mounted filesystem between read-only and read-write
+.SH SYNOPSIS
+.B remount
+[\fB\-n\fR] \fIdevice\fR|\fIdirectory\fR \fBro\fR|\fBrw\fR
+.SH DESCRIPTION
+.B remount
+changes a filesystem that is already mounted, without unmounting it.
+The filesystem may be named by device or by mount point;
+.B remount
+looks it up in
+.B /etc/fstab
+and then in
+.BR /etc/mtab ,
+and failing both takes the name as given.
+.PP
+This is the only way to make the
+.I root
+safe, since the root cannot be unmounted.
+.SH OPTIONS
+.TP
+.B \-n
+Do not update
+.BR /etc/mtab .
+Needed when
+.B /etc
+is on the filesystem being made read-only, and what
+.BR reflash.py
+uses before resetting the board.
+.SH ARGUMENTS
+.TP
+.B ro
+Read-only.  Buffers are flushed first.
+.TP
+.B rw
+Read-write again.
+.SH EXAMPLES
+.nf
+# remount -n / ro          before flashing a kernel
+# remount / rw
+.fi
+.SH NOTES
+Making the root read-only before a reset is what saves the next boot
+from a long
+.BR fsck :
+.B picoctl flash
+resets immediately and unmounts nothing on the way out, so a root left
+read-write comes back dirty.
+.SH SEE ALSO
+.BR mount (1),
+.BR umount (1),
+.BR sync (1),
+.BR fsck (1),
+.BR picoctl (1)

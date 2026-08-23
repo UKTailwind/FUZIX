@@ -1,0 +1,23 @@
+.TH mmedit 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+mmedit \- the MMBasic full-screen editor
+.SH SYNOPSIS
+.B mmedit
+.I file
+.SH DESCRIPTION
+.B mmedit
+is MMBasic's own editor, working the way it does on a PicoMite: a
+full-screen editor with the function keys along the bottom, for people
+who already know it.
+.PP
+It is meant for BASIC but will edit any text file.
+.SH NOTES
+The function keys are the ones MMBasic uses.  A terminal that sends a
+different escape sequence for F1 to F4 than the console does is the
+usual reason a key seems dead;
+.B mmedit
+accepts both of the common spellings.
+.SH SEE ALSO
+.BR vi (1),
+.BR ed (1),
+.BR mmbc (1)

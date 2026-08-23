@@ -1,0 +1,52 @@
+.TH echo 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+echo \- write arguments to standard output
+.SH SYNOPSIS
+.B echo
+[\fB\-n\fR] [\fB\-e\fR] [\fIstring\fR ...]
+.SH DESCRIPTION
+.B echo
+writes its arguments separated by spaces, followed by a newline.
+.SH OPTIONS
+.TP
+.B \-n
+Do not write the trailing newline.
+.TP
+.B \-e
+Interpret backslash escapes in the arguments.
+.PP
+Options are only recognised before the first ordinary argument.
+.SH ESCAPES
+With
+.BR \-e :
+.B \\b
+backspace,
+.B \\f
+formfeed,
+.B \\n
+newline,
+.B \\r
+carriage return,
+.B \\t
+tab,
+.B \\v
+vertical tab,
+.B \\\\
+backslash,
+.B \\0\fInnn\fR
+a byte by octal code, and
+.B \\c
+which stops output there and leaves off the newline.
+.PP
+Without
+.BR \-e ,
+backslashes are printed as they stand.
+.SH NOTES
+The shell has no
+.B echo
+built in, so this program runs even for a bare
+.BR echo .
+That makes it convenient but not free: each one is a fork and an exec.
+.SH SEE ALSO
+.BR printenv (1),
+.BR sh (1)

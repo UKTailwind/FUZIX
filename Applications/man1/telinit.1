@@ -1,0 +1,43 @@
+.TH telinit 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+telinit \- change the run level
+.SH SYNOPSIS
+.B telinit
+.IR runlevel | \fBq\fR
+.SH DESCRIPTION
+.B telinit
+tells
+.B init
+to change run level.  It writes the request to
+.B /var/run/initctl
+and signals process 1.
+.SH ARGUMENTS
+.TP
+.B 0
+to
+.B 6
+The numbered run levels.  Which of them do what is set in
+.BR /etc/inittab .
+.TP
+.BR s ", " S
+Single user.
+.TP
+.B q
+Re-read
+.B /etc/inittab
+without changing level.  Use this after editing it.
+.SH NOTES
+One character only.
+.B telinit 12
+is an invalid run level, not run level 12.
+.PP
+.BR shutdown (1)
+and
+.BR reboot (1)
+are the ordinary way to stop the machine;
+.B telinit
+is for changing what is running while it stays up.
+.SH SEE ALSO
+.BR shutdown (1),
+.BR reboot (1),
+.BR kill (1)

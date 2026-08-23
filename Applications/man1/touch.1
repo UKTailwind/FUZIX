@@ -1,0 +1,38 @@
+.TH touch 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+touch \- update file timestamps, or create empty files
+.SH SYNOPSIS
+.B touch
+[\fB\-c\fR] \fIfile ...\fR
+.SH DESCRIPTION
+For each
+.I file
+that exists,
+.B touch
+sets both the access and the modification time to now.  For each one
+that does not, it creates an empty file with mode 0666 less the
+.BR umask .
+.SH OPTIONS
+.TP
+.B \-c
+Do not create missing files; pass over them quietly.
+.PP
+.B \-c
+is only recognised as the
+.I first
+argument.
+.SH NOTES
+There is no way to set a time other than the present: no
+.BR \-t ,
+no
+.BR \-r ,
+no
+.BR \-d .
+.PP
+Running
+.B touch
+with no arguments at all reads past the end of the argument list.  Give
+it at least one name.
+.SH SEE ALSO
+.BR date (1),
+.BR ls (1)

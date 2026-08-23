@@ -1,0 +1,73 @@
+.TH ls 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+ls \- list directory contents
+.SH SYNOPSIS
+.B ls
+[\fB\-1Radfilortu\fR] [\fIfile\fR ...]
+.SH DESCRIPTION
+.B ls
+lists each
+.IR file ,
+and the contents of each directory named.  With no arguments it lists
+the current directory.
+.PP
+Output is sorted by name unless
+.B \-t
+or
+.B \-f
+says otherwise, and is written in columns when standard output is a
+terminal and in a single column when it is not.
+.SH OPTIONS
+.TP
+.B \-1
+One name per line.
+.TP
+.B \-a
+Include names beginning with a dot.
+.TP
+.B \-d
+List a directory itself rather than its contents.
+.TP
+.B \-f
+Do not sort, and imply
+.BR \-a .
+.TP
+.B \-i
+Print the inode number in the first column.
+.TP
+.B \-l
+Long format: mode, link count, owner, group, size, time and name.
+.TP
+.B \-o
+Long format without the group.
+.TP
+.B \-r
+Reverse the sort order.
+.TP
+.B \-R
+Descend into subdirectories.
+.TP
+.B \-t
+Sort by modification time, newest first.
+.TP
+.B \-u
+Use the access time rather than the modification time, for sorting with
+.B \-t
+and for display with
+.BR \-l .
+.SH NOTES
+.B ll
+is a separate program, not an alias: it always gives a long listing and
+takes no options.
+.PP
+There is no
+.BR \-h ,
+no
+.B \-\-color
+and no
+.BR \-F .
+Sizes are in bytes.
+.SH SEE ALSO
+.BR ll (1),
+.BR find (1),
+.BR du (1)

@@ -1,0 +1,45 @@
+.TH bcrun 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+bcrun, bcdump \- run and disassemble a compiled program
+.SH SYNOPSIS
+.B bcrun
+.I file.bc
+[\fIargument\fR ...]
+.br
+.B bcdump
+.I file.bc
+.SH DESCRIPTION
+.B bcrun
+runs what
+.BR cc (1)
+produces.  You rarely name it: a
+.B .bc
+file is executable in its own right and finds
+.B bcrun
+by itself, so
+.B ./prog.bc
+is the usual way.
+.PP
+.B bcdump
+disassembles a
+.B .bc
+file, which is how to see what the compiler made of something \- in
+particular, which functions became native ARM and which stayed as
+bytecode.
+.SH ENVIRONMENT
+.TP
+.B BCRUN_BYTECODE
+Set to 1 to run everything as bytecode, ignoring the native spans.  This
+is for comparing the two, and makes a hot loop two to three times
+slower.
+.SH RECURSION
+.B bcrun
+checks the stack when a bytecode function is entered and stops the
+program cleanly if it has run out.  A function the compiler turned into
+native ARM has a three-instruction prologue with no check in it \- and a
+small recursive function is exactly the kind that gets translated.  A
+missing terminating condition on one of those is a reset of the machine,
+not an error message.  Honest depth is about 237 frames.
+.SH SEE ALSO
+.BR cc (1),
+.BR mmbc (1)

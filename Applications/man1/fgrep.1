@@ -1,0 +1,66 @@
+.TH fgrep 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+fgrep \- print lines containing a fixed string
+.SH SYNOPSIS
+.B fgrep
+[\fB\-chlnsv\fR] [\fB\-e\fR \fIstring\fR] ... [\fB\-f\fR \fIfile\fR] ... [\fIstring\fR] [\fIfile\fR ...]
+.SH DESCRIPTION
+.B fgrep
+searches each
+.I file
+for lines containing any of the given strings, and prints those that do.
+The strings are taken literally: no character means anything but itself,
+so nothing needs quoting against the shell except what the shell itself
+would eat.
+.PP
+With no
+.IR file ,
+it reads standard input.
+.SH OPTIONS
+.TP
+.B \-c
+Print only a count of matching lines per file.
+.TP
+.BI \-e " string"
+Add
+.I string
+to the set searched for.  May be repeated.
+.TP
+.BI \-f " file"
+Read the strings to search for from
+.IR file ,
+one per line.  May be repeated.
+.TP
+.B \-h
+Do not prefix output lines with the file name, even with several files.
+.TP
+.B \-l
+Print only the names of files that contain a match.
+.TP
+.B \-n
+Prefix each line with its line number.
+.TP
+.B \-s
+Suppress error messages about files that cannot be read.
+.TP
+.B \-v
+Print the lines that do
+.I not
+match.
+.PP
+If neither
+.B \-e
+nor
+.B \-f
+is given, the first non-option argument is the string.
+.SH NOTES
+There is no
+.BR \-i :
+.B fgrep
+is case sensitive and cannot be told otherwise.  Use
+.BR "grep \-i" .
+.SH EXIT STATUS
+0 if any line matched, 1 if none did.
+.SH SEE ALSO
+.BR grep (1),
+.BR awk (1)

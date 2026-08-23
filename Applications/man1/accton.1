@@ -1,0 +1,21 @@
+.TH accton 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+accton \- turn process accounting on or off
+.SH SYNOPSIS
+.B accton
+[\fIfile\fR]
+.SH DESCRIPTION
+With a
+.IR file ,
+.B accton
+tells the kernel to append a record to it as each process exits: the
+name, the time it used, and who ran it.  With no argument, accounting is
+turned off.
+.SH NOTES
+Only the superuser may do this, and the file must already exist.
+.PP
+The file grows without limit while accounting is on.  On a card that
+matters; truncate or remove it from time to time.
+.SH SEE ALSO
+.BR ac (1),
+.BR ps (1)

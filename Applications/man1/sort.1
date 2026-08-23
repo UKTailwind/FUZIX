@@ -1,0 +1,100 @@
+.TH sort 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+sort \- sort and merge text files
+.SH SYNOPSIS
+.B sort
+[\fB\-bcdfimnru\fR] [\fB\-t\fI x\fR] [\fB+\fIbeg\fR [\fB\-\fIend\fR]] [\fB\-o\fI outfile\fR] [\fIfile\fR ...]
+.SH DESCRIPTION
+.B sort
+sorts the lines of the named files together and writes the result to
+standard output.  With no
+.IR file ,
+or with
+.BR \- ,
+it reads standard input.
+.SH OPTIONS
+.TP
+.B \-b
+Ignore leading blanks when comparing.
+.TP
+.B \-c
+Check only: report whether the input is already sorted, and sort
+nothing.
+.TP
+.B \-d
+Dictionary order: compare only letters, digits and blanks.
+.TP
+.B \-f
+Fold case, so that upper and lower case sort together.
+.TP
+.B \-i
+Ignore characters outside the printable ASCII range.
+.TP
+.B \-m
+Merge: the inputs are already sorted.
+.TP
+.B \-n
+Compare leading numeric strings by value.  Implies
+.BR \-b .
+.TP
+.BI \-o " outfile"
+Write to
+.I outfile
+rather than standard output.  It may be one of the input files.
+.TP
+.B \-r
+Reverse the order.
+.TP
+.BI \-t x
+Use
+.I x
+as the field separator instead of blanks.
+.TP
+.B \-u
+Output only the first of a run of equal lines.
+.SH SORT KEYS
+Keys are given in the old positional form.
+.BI + beg
+starts the key at field
+.I beg
+counting from zero, and
+.BI \- end
+ends it before field
+.IR end .
+The flags
+.BR b ,
+.BR d ,
+.BR f ,
+.BR i ,
+.B n
+and
+.B r
+may be appended to a key so that they apply only to it.
+.PP
+There is no
+.B \-k
+option.
+.SH EXAMPLES
+.nf
+# sort names
+# sort -nr sizes
+# sort -t: +2n -3 /etc/passwd     by uid
+# sort -u -o list list
+.fi
+.SH FILES
+.TP
+.B /tmp/sort.*
+Sorted runs, while a large sort is in progress.
+.SH NOTES
+.B sort
+holds 40K of lines at a time.  Anything larger is written out as sorted
+runs in
+.B /tmp
+and merged at the end, up to 26 of them \- so a big sort needs room on
+the filesystem holding
+.BR /tmp ,
+and fails without it.
+.SH SEE ALSO
+.BR uniq (1),
+.BR comm (1),
+.BR join (1)

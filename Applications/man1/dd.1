@@ -1,0 +1,118 @@
+.TH dd 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+dd \- copy a file, converting as it goes
+.SH SYNOPSIS
+.B dd
+[\fIoption\fB=\fIvalue\fR] ...
+.SH DESCRIPTION
+.B dd
+copies from one file to another with a chosen block size, optionally
+converting the data on the way.  Everything is an
+.IB option = value
+pair; there are no dashes.
+.PP
+It is the tool for talking to devices, where the size of a read matters:
+copying a boot sector, writing an image to a partition, reading a fixed
+number of blocks from the middle of something.
+.SH OPTIONS
+.TP
+.BI if= file
+Read from
+.I file
+rather than standard input.
+.TP
+.BI of= file
+Write to
+.I file
+rather than standard output.
+.TP
+.BI ibs= n
+Input block size, 512 by default.
+.TP
+.BI obs= n
+Output block size.
+.TP
+.BI bs= n
+Both at once.  When input and output block sizes are the same, the data
+is copied straight through with no reblocking, which is faster and is
+what you want for a device.
+.TP
+.BI cbs= n
+Conversion buffer size, for the
+.B ascii
+and
+.B ebcdic
+conversions.
+.TP
+.BI skip= n
+Skip
+.I n
+input blocks before starting.
+.TP
+.BI seek= n
+Skip
+.I n
+output blocks before starting to write.
+.TP
+.BI count= n
+Copy only
+.I n
+input blocks.
+.TP
+.BI files= n
+Copy
+.I n
+files, for a tape.
+.TP
+.BI conv= keyword ,...
+One or more of:
+.B ascii
+convert EBCDIC to ASCII,
+.B ebcdic
+the other way,
+.B ibm
+the other way with a different table,
+.B lcase
+fold to lower case,
+.B ucase
+fold to upper case,
+.B swab
+swap every pair of bytes,
+.B noerror
+carry on after a read error,
+.B sync
+pad every input block out to the input block size.
+.SH SIZES
+A number may be followed by
+.B k
+for kilobytes,
+.B b
+for 512-byte blocks or
+.B w
+for words, and two numbers joined by
+.B x
+are multiplied.
+.SH OUTPUT
+.B dd
+reports on standard error how many whole and partial blocks it read and
+wrote.
+.SH EXAMPLES
+.nf
+# dd if=/dev/hda of=mbr.bin bs=512 count=1
+# dd if=image.bin of=/dev/hdb3 bs=4k
+# dd if=/dev/hda2 of=/dev/null bs=8k     read the whole partition
+.fi
+.SH NOTES
+.B of=
+truncates nothing and seeks nothing by itself: writing a short file over
+a longer one leaves the tail of the old one in place.  That is what
+makes
+.B dd
+right for patching part of a device and wrong as a general copy \- use
+.BR cp (1)
+for files.
+.SH SEE ALSO
+.BR cp (1),
+.BR bd (1),
+.BR od (1),
+.BR mkfs (1)

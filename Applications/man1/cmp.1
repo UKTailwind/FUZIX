@@ -1,0 +1,50 @@
+.TH cmp 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+cmp \- compare two files
+.SH SYNOPSIS
+.B cmp
+.I "file1 file2"
+.SH DESCRIPTION
+.B cmp
+compares the two files and says how they differ.
+.SH OPTIONS
+None.  There is no
+.BR \-s ,
+no
+.B \-l
+and no
+.BR \-i .
+.SH OUTPUT
+.B cmp
+is talkative where other systems are silent, and prints one of:
+.IP
+Files are links to each other
+.IP
+Files are identical
+.IP
+Files are different sizes
+.IP
+First file is shorter than second
+.IP
+Second file is shorter than first
+.IP
+Files differ at byte position \fIn\fR
+.PP
+Byte positions count from zero.
+.SH EXIT STATUS
+0 if the files are the same or are links to each other, 1 if they
+differ, 2 if a file could not be read.
+.SH NOTES
+Because there is no quiet option, a script that only wants the exit
+status should send the output to
+.BR /dev/null .
+.PP
+Two names for one inode are reported as links without either being read,
+so
+.B cmp
+is the cheap way to find out whether
+.B ln
+was used.
+.SH SEE ALSO
+.BR diff (1),
+.BR cksum (1)

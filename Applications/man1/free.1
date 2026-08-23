@@ -1,0 +1,24 @@
+.TH free 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+free \- show memory and swap use
+.SH SYNOPSIS
+.B free
+.SH DESCRIPTION
+.B free
+prints two lines, memory and swap, each with the total, the amount in
+use and the amount free, in kilobytes.  The numbers come from the kernel
+rather than from any file.
+.SH OPTIONS
+None.
+.SH NOTES
+The memory total is what the kernel has to give to processes, not the
+size of the chip: the kernel itself, its buffers and the video memory
+are already taken out.
+.PP
+Swap used will be non-zero whenever more processes have been resident
+than fit at once; that is normal and not a sign of trouble.
+.SH SEE ALSO
+.BR ps (1),
+.BR uptime (1),
+.BR swapon (1),
+.BR df (1)

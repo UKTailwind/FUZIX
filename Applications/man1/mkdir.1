@@ -1,0 +1,31 @@
+.TH mkdir 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+mkdir \- create directories
+.SH SYNOPSIS
+.B mkdir
+[\fB\-p\fR] \fIdirectory ...\fR
+.SH DESCRIPTION
+.B mkdir
+creates each
+.IR directory .
+The mode is 0777 less the current
+.BR umask .
+.SH OPTIONS
+.TP
+.B \-p
+Create any missing intermediate directories on the path, and do not
+treat an already existing directory as an error \- including the final
+one.
+.PP
+.B \-p
+is only recognised as the
+.I first
+argument.
+.SH NOTES
+There is no
+.B \-m
+option; set the mode afterwards with
+.BR chmod (1).
+.SH SEE ALSO
+.BR rmdir (1),
+.BR chmod (1)

@@ -1,0 +1,64 @@
+Section 1 manual pages for FUZIX
+================================
+
+`man' (Applications/util/man.c) reads pages from /usr/man/man<N>/ in the
+nroff -man subset that program understands: .TH .SH .SS .PP .TP .IP .RS
+.RE .B .I .BI .BR .IB .IR .RB .RI .nf .fi .br .sp and \" comments.  It
+is not nroff: it has no macro definitions (.de), no .ti, no .ds, and it
+prints a visible "**** Unknown formatter command" line into the middle
+of the page for anything else.
+
+Kernel/platform/platform-rpipico/manpages.sh is the gate: it builds
+man.c for the host, renders every page here and fails on that line;
+checks the built card image for a command with no page or a page naming
+no command; and checks that every SEE ALSO resolves.  Run it after
+touching anything in this directory.
+
+Other things man(1) does not have, all of which were tried and had to
+come back out: .TQ, .ti, .ds, .ns, .de.  A line beginning with a bare
+dot is read as a request, so an ed transcript needs \&. for its
+terminator.  \(aq and its relatives all render as an asterisk, so use
+plain quotes.  A literal backslash in the OUTPUT needs \\ in the
+source; \e renders as nothing at all, because man eats a backslash
+followed by any letter.
+
+WHY THIS DIRECTORY EXISTS
+
+The card carried one manual page - levee.1 - so `man awk' and `man sed'
+answered "No manual entry".  The pages here fill that in for the rest of
+what /bin holds.
+
+WHERE PAGES COME FROM
+
+  Applications/V7/cmd/*.1     the V7 originals, for the V7 binaries.
+                              Installed from where they are; not copied.
+  Applications/levee/levee.1  ditto, and it is `vi' here as well.
+  Applications/util/man.1     ditto.
+  Applications/awk/awk.1      upstream one-true-awk's page.  It uses
+                              .de macros man(1) cannot do, so mkawk1.sh
+                              converts it into awk.1 here.  The upstream
+                              file is not touched, in keeping with
+                              Applications/awk/PORTING.
+  this directory              everything else, written from the source
+                              of the binary that is actually installed.
+
+WRITTEN FROM THE SOURCE, NOT FROM MEMORY
+
+These are not Linux pages with the GNU options filed off.  Every option
+listed here was read out of the .c file that builds the binary on the
+card, and the divergences are the point: `rm' silently ignores -r,
+`killall' takes no process name and kills everything, `ssh' is a shell
+and not a remote login, `cat' has no options at all.  A page that
+promises a flag the binary does not have is worse than no page, which is
+the same rule mancheck.sh enforces for the manual.
+
+Where a command has a NOTES section it is because the FUZIX binary
+differs from what a hand trained on Linux or on V7 would expect.  Read
+those first.
+
+FOUR COMMANDS ARE INSTALLED TWICE
+
+update-flash.sh bgets su, sum, ed and dd from Applications/util and then
+again from Applications/V7/cmd.  The second write wins, so the V7 build
+is what boots and the V7 page is what is installed.  Confirmed by
+comparing on-card sizes against both candidates.

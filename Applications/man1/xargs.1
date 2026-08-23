@@ -1,0 +1,38 @@
+.TH xargs 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+xargs \- build command lines from standard input
+.SH SYNOPSIS
+.B xargs
+[\fB\-n\fI max\fR] [\fB\-s\fI chars\fR] [\fIcommand\fR [\fIargument\fR ...]]
+.SH DESCRIPTION
+.B xargs
+reads words from standard input and runs
+.I command
+with them appended to any
+.I arguments
+already given, repeating until the input runs out.  With no
+.IR command ,
+it runs
+.BR /bin/echo .
+.PP
+Words are separated by whitespace; quoting is not understood, so a file
+name containing a space arrives as two arguments.
+.SH OPTIONS
+.TP
+.BI \-n " max"
+Pass at most
+.I max
+words to each invocation.  The default is 20.
+.TP
+.BI \-s " chars"
+Accepted and remembered, but not yet used to limit anything.
+.SH LIMITS
+Up to 20 words per command line and 10 fixed arguments before them.
+.SH EXAMPLES
+.nf
+# ls *.bas | xargs wc -l
+# find / -name core | xargs rm
+.fi
+.SH SEE ALSO
+.BR find (1),
+.BR sh (1)

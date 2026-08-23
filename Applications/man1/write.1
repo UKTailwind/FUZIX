@@ -1,0 +1,30 @@
+.TH write 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+write \- send a message to another logged-in user
+.SH SYNOPSIS
+.B write
+.I user
+[\fIttyname\fR]
+.SH DESCRIPTION
+.B write
+copies what you type to the terminal of
+.IR user ,
+who sees it prefixed with your name and terminal.  End with the
+end-of-file key.
+.PP
+If the user is logged in more than once, give the
+.I ttyname
+to choose which.
+.SH NOTES
+The recipient must have messages enabled; see
+.BR mesg (1).
+Writing to a user who is not logged in, or who has messages off, gives
+a message and nothing is sent.
+.PP
+On a machine with one screen and one keyboard this is mostly useful for
+writing to another console \- the PC3 has several \- or across the
+serial line.
+.SH SEE ALSO
+.BR mesg (1),
+.BR wall (1),
+.BR who (1)

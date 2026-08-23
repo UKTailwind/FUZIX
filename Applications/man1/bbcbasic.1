@@ -1,0 +1,31 @@
+.TH bbcbasic 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+bbcbasic \- BBC BASIC
+.SH SYNOPSIS
+.B bbcbasic
+[\fIprogram\fR]
+.SH DESCRIPTION
+.B bbcbasic
+is a full BBC BASIC with its own line editor, its own file commands and
+an inline assembler.  Started with no argument it comes up at its own
+prompt; given a file name it loads that.
+.PP
+Unlike everything else here it is an interpreter: you type a program in
+and run it, with no compile step.  That makes it the quickest way to try
+something, and slower than
+.BR mmbc (1)
+once the program matters.
+.SH LOADING A PROGRAM
+It reads plain text as well as its own tokenised format, so a program
+fetched with
+.B fat get
+can be loaded directly.
+.SH NOTES
+Star commands reach the shell.  Where it differs from a real BBC Micro,
+and what its graphics and sound words do on this machine, is in the PC3
+manual.
+.SH SEE ALSO
+.BR mmbc (1),
+.BR cc (1),
+.BR fforth (1),
+.BR fat (1)

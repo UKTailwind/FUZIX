@@ -1,0 +1,40 @@
+.TH playmp3 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+playmp3, playwav, playflac \- play a sound file
+.SH SYNOPSIS
+.B playmp3
+.I file.mp3
+[\fIvolume\fR]
+.br
+.B playwav
+.I file.wav
+[\fIvolume\fR]
+.br
+.B playflac
+.I file.flac
+[\fIvolume\fR]
+.SH DESCRIPTION
+Each of these decodes its kind of file and plays it, printing the sample
+rate, the number of channels and the volume as it starts.
+.SH ARGUMENTS
+.TP
+.I volume
+0 to 100.  The default is 80.
+.SH RUNNING IN THE BACKGROUND
+Put an
+.B &
+after the command and the shell gives you the prompt back while it
+plays.  Note the process id the shell prints if you want to stop it
+early;
+.B kill
+takes that number, not a job number.
+.SH NOTES
+Only one player may hold the sound device at a time.  Starting a second
+while one is playing gets an error, not a mix.
+.PP
+Decoding an MP3 is real work for this machine.  It keeps up, but a
+compile running beside it will make it stutter.
+.SH SEE ALSO
+.BR playmod (1),
+.BR kill (1),
+.BR ps (1)

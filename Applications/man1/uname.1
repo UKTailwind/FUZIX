@@ -1,0 +1,40 @@
+.TH uname 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+uname \- print system information
+.SH SYNOPSIS
+.B uname
+[\fB\-amrsv\fR]
+.SH DESCRIPTION
+.B uname
+prints information about the system.  With no options it prints the
+system name, as if
+.B \-s
+had been given.
+.SH OPTIONS
+.TP
+.B \-s
+System name.
+.TP
+.B \-r
+Release.
+.TP
+.B \-v
+Version.
+.TP
+.B \-m
+Machine.
+.TP
+.B \-a
+All of them, in the order
+.BR s ,
+.BR r ,
+.BR v ,
+.BR m .
+.SH NOTES
+There is no
+.BR \-n :
+FUZIX keeps no node name, and there is nothing for it to print.
+.SH SEE ALSO
+.BR free (1),
+.BR uptime (1),
+.BR picoctl (1)

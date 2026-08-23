@@ -1,0 +1,28 @@
+.TH substroot 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+substroot \- run a command with the root device substituted in
+.SH SYNOPSIS
+.B substroot
+.I "command argument ..."
+.SH DESCRIPTION
+.B substroot
+finds the device the root is mounted from, replaces every argument that
+is a single
+.B %
+with that device name, and runs
+.IR command .
+.PP
+It exists so that a boot script can name the root device without knowing
+what it is.
+.SH EXAMPLES
+.nf
+# substroot fsck -a %
+# substroot remount % ro
+.fi
+.SH EXIT STATUS
+255 if the root device cannot be found or no command was given;
+otherwise whatever the command returns.
+.SH SEE ALSO
+.BR prtroot (1),
+.BR fsck (1),
+.BR remount (1)

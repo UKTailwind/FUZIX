@@ -1,0 +1,15 @@
+.TH pagesize 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+pagesize \- print the memory page size
+.SH SYNOPSIS
+.B pagesize
+.SH DESCRIPTION
+.B pagesize
+prints the size in bytes of the unit the kernel allocates memory in.
+.SH NOTES
+FUZIX does not page.  A process is a single contiguous run of memory,
+swapped out whole and back in whole; the number here is the granularity
+of that allocation, not the size of a virtual memory page.
+.SH SEE ALSO
+.BR free (1),
+.BR ps (1)

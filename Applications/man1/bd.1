@@ -1,0 +1,31 @@
+.TH bd 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+bd \- dump one block of a device
+.SH SYNOPSIS
+.B bd
+.I "device blkno"
+.SH DESCRIPTION
+.B bd
+reads block
+.I blkno
+of
+.I device
+and prints it as a hexadecimal and character dump.  Blocks are 512
+bytes.
+.SH OPTIONS
+None.
+.SH NOTES
+A tool for looking at a filesystem by hand: superblocks, inode blocks,
+directory blocks, a partition table.  It reads and never writes.
+.PP
+Reading a block of a mounted, busy filesystem shows what is on the card,
+which is not necessarily what the kernel has in its buffers.
+.SH EXAMPLES
+.nf
+# bd /dev/hda2 1        the superblock
+# bd /dev/hda 0         the partition table
+.fi
+.SH SEE ALSO
+.BR od (1),
+.BR fsck (1),
+.BR fdisk (1)

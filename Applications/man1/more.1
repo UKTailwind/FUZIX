@@ -1,0 +1,60 @@
+.TH more 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+more \- show a file a screen at a time
+.SH SYNOPSIS
+.B more
+[\fIfile\fR ...]
+.SH DESCRIPTION
+.B more
+prints each
+.I file
+24 lines at a time, stopping with
+.B \-\-More\-\-
+at the foot of each screenful.  With several files, each is announced
+by its name in angle brackets.
+.PP
+With no
+.IR file ,
+it pages standard input.  This is how
+.BR man (1)
+and anything else that ends in a pipe uses it.
+.SH KEYS
+At the
+.B \-\-More\-\-
+prompt:
+.TP
+.B q
+Quit.
+.TP
+.B n
+Go on to the next file, skipping the rest of this one.
+.TP
+anything else
+Show the next screenful.
+.PP
+A leading colon is ignored, so
+.B :q
+and
+.B :n
+work as well.
+.SH OPTIONS
+None.  There is no search, no backing up, and no line count option.
+.SH ENVIRONMENT
+.TP
+.B CTTY
+The controlling terminal, which
+.B more
+must open to read your keypresses when its input is a pipe.
+.B init
+sets this for every login session.  In a shell that did not come from
+.BR init ,
+paging a pipe fails with
+.BR "more: CTTY not set" .
+.SH NOTES
+The screen is assumed to be 80 columns by 24 lines, whatever the console
+is really set to.  On the 80x40 text console that means it pauses more
+often than it needs to.
+.SH SEE ALSO
+.BR cat (1),
+.BR man (1),
+.BR head (1)

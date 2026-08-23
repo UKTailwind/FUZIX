@@ -1,0 +1,23 @@
+.TH whoami 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+whoami \- print the effective user name
+.SH SYNOPSIS
+.B whoami
+.SH DESCRIPTION
+.B whoami
+prints the name in
+.B /etc/passwd
+of the
+.I effective
+user id, so after
+.BR su (1)
+it shows the new user.
+.SH OPTIONS
+None.
+.SH EXIT STATUS
+1, and no output, if the effective uid is not in
+.BR /etc/passwd .
+.SH SEE ALSO
+.BR logname (1),
+.BR id (1),
+.BR su (1)

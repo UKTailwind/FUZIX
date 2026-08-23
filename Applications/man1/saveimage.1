@@ -1,0 +1,42 @@
+.TH saveimage 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+saveimage, loadimage \- save and restore the screen as a BMP
+.SH SYNOPSIS
+.B saveimage
+.I file
+[\fIx y w h\fR]
+.br
+.B loadimage
+.I file
+[\fIx\fR [\fIy\fR [\fImode\fR [\fIximage\fR [\fIyimage\fR]]]]]
+.SH DESCRIPTION
+.B saveimage
+writes the screen to
+.I file
+as a BMP.  With four numbers it writes only that rectangle.
+.PP
+.B loadimage
+draws a BMP onto the screen with its top left corner at
+.IR "x y" ,
+0 0 by default.
+.I ximage
+and
+.I yimage
+take the picture from an offset within the file, so a large BMP can be
+used as a sheet to cut from.
+.SH THE MODE ARGUMENT
+.I mode
+is read and then ignored.  It is there so that the arguments after it
+stay in the places a program expects; it selects no dithering, and the
+colours are matched the same way whatever you pass.
+.SH EXAMPLES
+.nf
+# saveimage shot.bmp
+# saveimage part.bmp 160 120 320 240
+# loadimage shot.bmp
+# loadimage sheet.bmp 0 0 0 64 0
+.fi
+.SH SEE ALSO
+.BR loadjpg (1),
+.BR loadpng (1),
+.BR picoctl (1)

@@ -1,0 +1,26 @@
+.TH dirname 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+dirname \- strip the last component from a path
+.SH SYNOPSIS
+.B dirname
+.I name
+.SH DESCRIPTION
+.B dirname
+prints
+.I name
+with its last component removed, or a single dot if
+.I name
+has no slash in it.
+.SH OPTIONS
+None.
+.SH EXAMPLES
+.nf
+# dirname /usr/man/man1/ls.1
+/usr/man/man1
+.fi
+.SH NOTES
+With no argument, or with more than one,
+.B dirname
+prints nothing and exits 0.
+.SH SEE ALSO
+.BR basename (1)

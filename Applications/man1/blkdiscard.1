@@ -1,0 +1,26 @@
+.TH blkdiscard 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+blkdiscard \- tell a device its blocks are no longer wanted
+.SH SYNOPSIS
+.B blkdiscard
+[\fB\-f\fR] \fIdevice\fR
+.SH DESCRIPTION
+.B blkdiscard
+issues a discard, or TRIM, for the whole of
+.IR device .
+Flash media use it to know which blocks need not be preserved, which
+helps their wear levelling and can make later writes faster.
+.SH OPTIONS
+.TP
+.B \-f
+Do it without asking.
+.SH NOTES
+This destroys the contents of the device.  It is not an erase you can
+undo, and it is not something to run on a device that holds anything you
+want.
+.PP
+A device whose driver has no discard operation reports an error and
+nothing happens.
+.SH SEE ALSO
+.BR mkfs (1),
+.BR fdisk (1)

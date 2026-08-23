@@ -1,0 +1,50 @@
+.TH uniq 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+uniq \- report or filter repeated adjacent lines
+.SH SYNOPSIS
+.B uniq
+[\fB\-cdu\fR] [\fB+\fIn\fR] [\fB\-\fIn\fR] [\fIinput\fR [\fIoutput\fR]]
+.SH DESCRIPTION
+.B uniq
+copies
+.I input
+to
+.IR output ,
+dropping all but one of each run of
+.I adjacent
+equal lines.  Lines that are equal but not next to each other are not
+noticed, so the input is usually sorted first.
+.PP
+With no file names it reads standard input and writes standard output.
+.SH OPTIONS
+.TP
+.B \-c
+Prefix each line with the number of times it occurred.
+.TP
+.B \-d
+Print only the lines that were repeated, once each.
+.TP
+.B \-u
+Print only the lines that occurred exactly once.
+.TP
+.BI \- n
+Ignore the first
+.I n
+fields, and the blanks before them, when comparing.
+.TP
+.BI + n
+Ignore the first
+.I n
+characters when comparing.
+.SH EXAMPLES
+.nf
+# sort names | uniq
+# sort names | uniq -c | sort -nr
+# sort names | uniq -d       what is duplicated
+.fi
+.SH NOTES
+Unlike GNU uniq, the second file name is an output file, not a second
+input.  Naming a file that exists overwrites it.
+.SH SEE ALSO
+.BR sort (1),
+.BR comm (1)

@@ -1,0 +1,45 @@
+.TH prtroot 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+prtroot \- find which device the root is on
+.SH SYNOPSIS
+.B prtroot
+[\fB\-r\fR] [\fB\-i\fR]
+.SH DESCRIPTION
+.B prtroot
+looks through
+.B /dev
+for the block device whose number matches the device the root is mounted
+from, and prints it.  This is how a boot script finds out where it
+booted from, which the kernel does not otherwise say.
+.PP
+By default it prints the device followed by
+.B " / fuzix rw 0 0"
+\- a complete
+.B /etc/mtab
+line.
+.SH OPTIONS
+.TP
+.B \-r
+Print just the device name.
+.TP
+.B \-i
+Write the line to
+.B /etc/mtab
+instead of to standard output, replacing whatever was there.
+.B /etc/rc
+does this at boot so that
+.BR mount (1)
+and
+.BR df (1)
+have something to read.
+.SH NOTES
+If no matching device node exists it prints
+.BR /dev/unknown ,
+which is a sign that
+.B /dev
+is missing a node rather than that anything is wrong with the root.
+.SH SEE ALSO
+.BR substroot (1),
+.BR mount (1),
+.BR df (1),
+.BR remount (1)

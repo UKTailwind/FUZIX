@@ -1,0 +1,22 @@
+.TH sync 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+sync \- flush the buffer cache to disc
+.SH SYNOPSIS
+.B sync
+.SH DESCRIPTION
+.B sync
+writes out every modified block the kernel is holding, and returns when
+the writes have been handed to the driver.
+.SH OPTIONS
+None.
+.SH NOTES
+The kernel writes buffers out as it goes, so
+.B sync
+is not needed routinely.  It matters before pulling the card out or
+resetting the board by hand \-
+.BR shutdown (1)
+does it for you, and is the better habit.
+.SH SEE ALSO
+.BR shutdown (1),
+.BR umount (1),
+.BR remount (1)

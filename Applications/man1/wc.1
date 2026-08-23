@@ -1,0 +1,40 @@
+.TH wc 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+wc \- count lines, words and characters
+.SH SYNOPSIS
+.B wc
+[\fB\-lwc\fR] [\fIfile\fR ...]
+.SH DESCRIPTION
+.B wc
+counts lines, words and characters in each
+.IR file ,
+and prints a total if more than one was named.  With no
+.IR file ,
+it reads standard input.
+.PP
+With no options all three counts are printed.  Naming any of
+.BR \-l ,
+.B \-w
+or
+.B \-c
+selects just those, in the fixed order lines, words, characters.
+.SH OPTIONS
+.TP
+.B \-l
+Count lines.  A line is a newline or a formfeed, so an unterminated last
+line is not counted.
+.TP
+.B \-w
+Count words: runs of anything that is not whitespace.
+.TP
+.B \-c
+Count characters, which on FUZIX are bytes.
+.SH EXAMPLES
+.nf
+# wc prog.c
+# wc -l *.bas
+# who | wc -l
+.fi
+.SH SEE ALSO
+.BR cksum (1),
+.BR sum (1)

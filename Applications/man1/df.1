@@ -1,0 +1,35 @@
+.TH df 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+df \- report filesystem space
+.SH SYNOPSIS
+.B df
+[\fB\-ikf\fR] [\fIpath\fR ...]
+.SH DESCRIPTION
+.B df
+prints, for each mounted filesystem, its total size, how much is used
+and how much is free.  Given one or more
+.IR path s,
+it reports only the filesystems those paths are on.
+.SH OPTIONS
+.TP
+.B \-i
+Report inodes rather than blocks.  Worth remembering: a FUZIX filesystem
+can run out of inodes with blocks to spare, and the failure looks like a
+full disk.
+.TP
+.B \-k
+Report kilobytes rather than 512-byte blocks.
+.TP
+.B \-f
+Show the percentage free rather than the percentage used.
+.SH EXAMPLES
+.nf
+# df
+# df -k
+# df -i
+# df /root
+.fi
+.SH SEE ALSO
+.BR du (1),
+.BR mount (1),
+.BR free (1)

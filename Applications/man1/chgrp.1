@@ -1,0 +1,25 @@
+.TH chgrp 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+chgrp \- change file group
+.SH SYNOPSIS
+.B chgrp
+.I "group file ..."
+.SH DESCRIPTION
+.B chgrp
+sets the group of each
+.I file
+to
+.IR group ,
+which is either a numeric gid or a name from
+.BR /etc/group .
+The owner is left alone.
+.SH OPTIONS
+None.  There is no
+.BR \-R .
+.SH EXIT STATUS
+.B chgrp
+stops at the first file it cannot change and exits 1.  Files after that
+one are not touched.
+.SH SEE ALSO
+.BR chown (1),
+.BR chmod (1)

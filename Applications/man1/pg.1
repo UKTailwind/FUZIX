@@ -1,0 +1,48 @@
+.TH pg 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+pg \- page through a file, forwards and back
+.SH SYNOPSIS
+.B pg
+[\fIfile\fR ...]
+.SH DESCRIPTION
+.B pg
+shows each
+.I file
+twenty lines at a time, clearing the screen between pages.  With no
+.IR file ,
+it reads standard input.
+.PP
+What it has over
+.BR more (1)
+is that it can go
+.I back:
+it keeps the last 64 page positions in a 16K ring, so anything that has
+scrolled off recently can be looked at again.
+.SH KEYS
+It gives no prompt.  At the foot of a page it waits for one character.
+.TP
+newline
+The next page.
+.TP
+.B \-
+The previous page.  Also control-underscore.
+.TP
+.B /
+The oldest page still remembered.  Also control-Y.
+.TP
+.B !
+Start a shell.  Leaving the shell comes back to the same page.
+.PP
+There is no quit key.  Interrupt it, or page to the end.
+.SH NOTES
+Keys are read from
+.I standard error,
+not standard input, which is what lets
+.B pg
+page a pipe.  It follows that stderr must be the terminal:
+.B pg
+with stderr redirected reads nothing and stops.
+.SH SEE ALSO
+.BR more (1),
+.BR vi (1),
+.BR man (1)

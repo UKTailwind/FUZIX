@@ -1,0 +1,58 @@
+.TH cron 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+cron \- run commands at set times
+.SH SYNOPSIS
+.B cron
+.SH DESCRIPTION
+.B cron
+puts itself into the background and runs the commands listed in
+.B /usr/lib/crontab
+at the times given there.  It wakes once a minute, and re-reads the
+table whenever its modification time changes \- so an edit takes effect
+by itself, with nothing to signal.
+.SH THE TABLE
+Each line has five time fields and then a command.  The fields are
+minute, hour, day of month, month (1 to 12), and day of week (0 to 6
+from Sunday).  Each is either a number, several numbers separated by
+commas, or
+.B *
+for every value.  Everything after the fifth field is the command, run
+by
+.BR sh (1).
+.SH EXAMPLE
+.nf
+0 3 * * * /bin/fsck -a /dev/hdb3
+15,45 * * * * /root/poll.sh
+0 0 * * 0 /root/weekly.sh
+.fi
+.SH NOTES
+There is no table on this machine as shipped, and
+.B cron
+is not started by
+.BR /etc/rc .
+Create
+.B /usr/lib/crontab
+and run
+.B cron
+to use it.
+.PP
+There is no
+.B crontab
+command and no per-user table: one file, edited with an editor.
+.PP
+This is the V7
+.BR cron .
+Step values such as
+.B */5
+and named months are not understood, and neither are ranges with a
+hyphen.  Commands run as uid 1, not as root.
+.PP
+Output from a command goes nowhere.  Redirect it to a file if you want
+to see it.
+.SH FILES
+.TP
+.B /usr/lib/crontab
+.SH SEE ALSO
+.BR at (1),
+.BR sh (1),
+.BR sleep (1)

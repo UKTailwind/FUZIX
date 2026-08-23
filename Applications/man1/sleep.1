@@ -1,0 +1,30 @@
+.TH sleep 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+sleep \- do nothing for a while
+.SH SYNOPSIS
+.B sleep
+.IR number [ h | m | s ]
+.SH DESCRIPTION
+.B sleep
+waits for
+.I number
+seconds and exits.  A suffix of
+.B s
+means seconds,
+.B m
+minutes and
+.B h
+hours.
+.SH OPTIONS
+None.
+.SH EXAMPLES
+.nf
+# sleep 5
+# sleep 2m
+# playmod tune.mod & sleep 30 ; killall 15
+.fi
+.SH NOTES
+Whole units only: there are no fractional sleeps.
+.SH SEE ALSO
+.BR cron (8),
+.BR at (1)

@@ -1,0 +1,28 @@
+.TH who 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+who \- who is logged in
+.SH SYNOPSIS
+.B who
+.SH DESCRIPTION
+.B who
+lists the users currently logged in, one per line: name, terminal, the
+time they logged in, and the host they came from if any.  The list comes
+from
+.BR /var/run/utmp .
+.SH OPTIONS
+None.  There is no
+.BR "who am i" ;
+arguments are ignored.
+.SH NOTES
+The program also answers to the name
+.BR users ,
+in which case it prints just the names on one line \- but that link is
+not made on this machine.
+.SH FILES
+.TP
+.B /var/run/utmp
+.SH SEE ALSO
+.BR id (1),
+.BR logname (1),
+.BR uptime (1),
+.BR write (1)

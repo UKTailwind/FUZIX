@@ -1,0 +1,25 @@
+.TH mkfifo 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+mkfifo \- create named pipes
+.SH SYNOPSIS
+.B mkfifo
+.I "name ..."
+.SH DESCRIPTION
+.B mkfifo
+creates each
+.I name
+as a FIFO, with mode 0666 less the current
+.BR umask .
+.PP
+A FIFO is a pipe with a name in the filesystem: one process opens it for
+writing, another for reading, and data flows between them without either
+having to be the other child.  An open for reading blocks until a writer
+arrives, and the other way round.
+.SH OPTIONS
+None; there is no
+.BR \-m .
+.SH EXIT STATUS
+1 if any FIFO could not be created.
+.SH SEE ALSO
+.BR mknod (1),
+.BR sh (1)

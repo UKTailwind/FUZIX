@@ -1,0 +1,291 @@
+.TH sed 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+sed \- stream editor
+.SH SYNOPSIS
+.B sed
+[\fB\-n\fR] [\fB\-g\fR] \fIscript\fR [\fIfile\fR ...]
+.br
+.B sed
+[\fB\-n\fR] [\fB\-g\fR] [\fB\-e\fR \fIscript\fR] ... [\fB\-f\fR \fIscriptfile\fR] ... [\fIfile\fR ...]
+.SH DESCRIPTION
+.B sed
+copies each
+.I file
+to standard output, applying the editing commands in
+.I script
+to every line as it passes.  With no
+.IR file ,
+it reads standard input.
+.PP
+Each line is read into the
+.IR "pattern space" ,
+the commands are applied to it in order, and unless
+.B \-n
+was given the pattern space is printed and the cycle begins again.  A
+second buffer, the
+.IR "hold space" ,
+survives between cycles and is reached with
+.BR g ,
+.BR G ,
+.BR h ,
+.B H
+and
+.BR x .
+.SH OPTIONS
+.TP
+.BI \-e " script"
+Add
+.I script
+to the commands.  May be given more than once.
+.TP
+.BI \-f " scriptfile"
+Add the contents of
+.I scriptfile
+to the commands.  May be given more than once.
+.TP
+.B \-g
+Treat every
+.B s
+command as if it had the
+.B g
+flag.
+.TP
+.B \-n
+Do not print the pattern space at the end of each cycle.  Only
+.BR p ,
+.B P
+and
+.B w
+produce output.
+.PP
+If no
+.B \-e
+and no
+.B \-f
+is given, the first argument is the script.
+.SH ADDRESSES
+A command may be preceded by no address (every line), one address (lines
+that match), or two separated by a comma (from the first match to the
+next line matching the second).
+.TP
+.I n
+Line number
+.IR n .
+.TP
+.B $
+The last line of the last input file.
+.TP
+.BI / re /
+Lines matching the regular expression
+.IR re .
+An empty
+.B //
+reuses the last expression.
+.SH COMMANDS
+.TP
+.B a\\
+Append the text on the following lines after the current line.
+.TP
+.BI b " label"
+Branch to
+.IR label ,
+or to the end of the script if none is given.
+.TP
+.B c\\
+Replace the current line with the text on the following lines.
+.TP
+.B d
+Delete the pattern space and start the next cycle.
+.TP
+.B D
+Delete up to the first newline in the pattern space and restart the
+script without reading a new line.
+.TP
+.B g
+Copy the hold space over the pattern space.
+.TP
+.B G
+Append a newline and the hold space to the pattern space.
+.TP
+.B h
+Copy the pattern space over the hold space.
+.TP
+.B H
+Append a newline and the pattern space to the hold space.
+.TP
+.B i\\
+Insert the text on the following lines before the current line.
+.TP
+.B l
+Print the pattern space with non-printing characters shown as escapes.
+.TP
+.B n
+Print the pattern space (unless
+.BR \-n )
+and read the next line into it.
+.TP
+.B N
+Append a newline and the next input line to the pattern space.
+.TP
+.B p
+Print the pattern space.
+.TP
+.B P
+Print up to the first newline of the pattern space.
+.TP
+.B q
+Print the pattern space unless
+.BR \-n ,
+and exit.
+.TP
+.BI r " file"
+Read
+.I file
+and copy it out after the current line.
+.TP
+.BI s/ re / replacement /[flags]
+Substitute.  See below.
+.TP
+.BI t " label"
+Branch to
+.I label
+if any
+.B s
+has succeeded since the last input line or
+.BR t .
+.TP
+.BI T " label"
+Branch to
+.I label
+if no
+.B s
+has succeeded.
+.TP
+.BI w " file"
+Append the pattern space to
+.IR file .
+.TP
+.BI W " file"
+Append the first line of the pattern space to
+.IR file .
+.TP
+.B x
+Exchange the pattern and hold spaces.
+.TP
+.BI y/ from / to /
+Transliterate the characters of
+.I from
+into those of
+.IR to .
+.TP
+.B =
+Print the current line number.
+.TP
+.BI : label
+Define a branch target.
+.TP
+.B { }
+Group commands so that one address governs them all.
+.TP
+.B #
+Comment to end of line.
+.PP
+Commands may be separated by newlines or by semicolons.
+.SH THE s COMMAND
+Any character may be the delimiter, not just
+.BR / .
+In the replacement,
+.B &
+stands for the whole matched text, and
+.BR \\1 " to " \\9
+for the text matched by the corresponding
+.BR \\( ... \\)
+group.
+.PP
+The flags are:
+.TP
+.B g
+Replace every occurrence on the line, not just the first.
+.TP
+.B p
+Print the pattern space if a replacement was made.
+.TP
+.B P
+Print the first line of it.
+.TP
+.BI w " file"
+Write the pattern space to
+.I file
+if a replacement was made.
+.SH REGULAR EXPRESSIONS
+Basic regular expressions:
+.BR . ,
+.BR * ,
+.BR [ ... ] ,
+.BR [^ ... ] ,
+.B ^
+and
+.B $
+at the ends,
+.BR \\( ... \\)
+for grouping, and
+.BR \\1 " to " \\9
+for what those groups matched.
+.PP
+There are no intervals:
+.B \\{2,5\\}
+is not understood, and is
+.I silently treated as literal text
+rather than reported.  There is no
+.B \\+
+and no
+.BR \\? ,
+and no extended regular expressions.
+.SH NOTES
+This is the MINIX sed by Eric S. Raymond.  Beside the missing regular
+expression operators above, the differences from GNU sed that catch
+people out are:
+.TP
+.B \(bu
+The
+.B s
+command takes no occurrence number.
+.B s/a/X/2
+is rejected with a complaint about trailing garbage rather than
+replacing the second match.
+.TP
+.B \(bu
+There is no
+.B \-i
+in-place edit, no
+.BR \-r ,
+no
+.BR \-E ,
+and no
+.B I
+case-insensitive flag.
+.TP
+.B \(bu
+.B \-g
+is a FUZIX and MINIX extension, not a GNU one.
+.SH LIMITS
+1000 characters to a line, and the same to the hold space; 256 compiled
+commands; 256 numeric addresses; 10000 characters of text pool for the
+expressions and replacements; 10
+.B w
+files; 20 levels of braces; 50 labels.
+.SH EXIT STATUS
+0 normally, 2 for a bad script or an unreadable file.
+.SH EXAMPLES
+.nf
+# sed s/red/green/g report.txt
+# sed -n /ERROR/p log
+# sed -n 10,20p file
+# sed -e /^#/d -e /^$/d config
+# ls | sed s/.bas$/.bak/
+.fi
+.SH SEE ALSO
+.BR awk (1),
+.BR grep (1),
+.BR ed (1),
+.BR tr (1)

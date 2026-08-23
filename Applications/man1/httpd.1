@@ -1,0 +1,52 @@
+.TH httpd 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+httpd \- a small web server
+.SH SYNOPSIS
+.B httpd
+[\fIport\fR]
+.SH DESCRIPTION
+.B httpd
+serves files from the directory it was started in, on port 8080 unless
+another
+.I port
+is given, one connection at a time.
+.PP
+A request for
+.B /
+gets
+.BR index.html ,
+a missing file gets a 404, and a path containing
+.B ..
+is refused.
+.SH EXAMPLES
+.nf
+# mkdir /tmp/www
+# cd /tmp/www
+# echo hello > index.html
+# httpd &
+1234
+.fi
+.SH STOPPING IT
+Note the process id the shell prints when you background it, and
+.B kill
+that.  The shell has no job control and
+.B kill
+takes no job numbers, so
+.B kill %1
+does not work here; if you have lost the number,
+.B ps
+will find it.
+.PP
+Stop it before flashing or rebooting.  A running server holds the
+filesystem open, so
+.B remount \-n / ro
+refuses and the card goes down dirty.
+.SH NOTES
+The machine can reach its own server, through 127.0.0.1 or through its
+own address.
+.SH SEE ALSO
+.BR htget (1),
+.BR wifi (1),
+.BR remount (1),
+.BR kill (1),
+.BR ps (1)

@@ -1,0 +1,30 @@
+.TH date 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+date \- print the date and time
+.SH SYNOPSIS
+.B date
+[\fB\-u\fR]
+.SH DESCRIPTION
+.B date
+prints the current date and time in the traditional form, with the time
+zone name.
+.SH OPTIONS
+.TP
+.B \-u
+Use UTC rather than local time.
+.SH NOTES
+This
+.B date
+only reads the clock.  It cannot set it and it takes no
+.BI + format
+argument.
+.PP
+To set the time, or to move it between the kernel and the DS3231, use
+.BR setdate (1).
+To set it from the network, use
+.BR ntpdate (1).
+.SH SEE ALSO
+.BR setdate (1),
+.BR ntpdate (1),
+.BR cal (1),
+.BR uptime (1)

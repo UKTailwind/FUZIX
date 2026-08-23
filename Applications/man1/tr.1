@@ -1,0 +1,73 @@
+.TH tr 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+tr \- translate, squeeze or delete characters
+.SH SYNOPSIS
+.B tr
+[\fB\-cds\fR] [\fIstring1\fR [\fIstring2\fR]]
+.SH DESCRIPTION
+.B tr
+copies standard input to standard output, replacing each character found
+in
+.I string1
+with the character in the same position in
+.IR string2 .
+It reads no files; give it a pipe or a redirect.
+.SH OPTIONS
+.TP
+.B \-c
+Use the complement of
+.IR string1 :
+every character that is
+.I not
+in it.
+.TP
+.B \-d
+Delete the characters in
+.I string1
+rather than translating them.
+.TP
+.B \-s
+Squeeze: replace each run of the same output character with one of it.
+.SH STRINGS
+A range is written in brackets:
+.B [a\-z]
+means the characters from
+.B a
+to
+.BR z .
+This is the older syntax, and the brackets are not optional.  A bare
+.B a\-z
+is three characters \- an
+.BR a ,
+a hyphen and a
+.B z
+\- so
+.B tr a\-z A\-Z
+turns
+.B abc
+into
+.BR Abc .
+It does not complain; it quietly does something else.
+.PP
+.BI \e ooo
+is a character by octal code, and
+.BI \e c
+is
+.I c
+itself \- the way to include a bracket or a backslash.
+.PP
+There are no
+.B [:alpha:]
+style classes and no
+.B [c*n]
+repeats.
+.SH EXAMPLES
+.nf
+# tr [a-z] [A-Z] < file
+# tr -d [0-9] < file
+# tr -s " " < file
+# tr [a-zA-Z] [n-za-mN-ZA-M] < file
+.fi
+.SH SEE ALSO
+.BR sed (1),
+.BR cut (1)

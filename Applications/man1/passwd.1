@@ -1,0 +1,27 @@
+.TH passwd 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+passwd \- change a password
+.SH SYNOPSIS
+.B passwd
+[\fIname\fR]
+.SH DESCRIPTION
+.B passwd
+changes the password of
+.IR name ,
+or of the user running it.  It asks for the old password first unless
+the superuser is running it, then for the new one twice.
+.PP
+An ordinary user may only change their own password.
+.SH FILES
+.TP
+.B /etc/passwd
+Where the password is kept.  FUZIX has no shadow file: the hashes are in
+this world-readable file, as they were in V7.
+.SH NOTES
+A machine on a network with a readable
+.B /etc/passwd
+is not a machine to reuse a password on.
+.SH SEE ALSO
+.BR su (1),
+.BR id (1),
+.BR logname (1)

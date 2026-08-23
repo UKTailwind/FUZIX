@@ -1,0 +1,31 @@
+.TH fdisk 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+fdisk \- show or edit a partition table
+.SH SYNOPSIS
+.B fdisk
+[\fB\-l\fR] \fIdevice\fR
+.SH DESCRIPTION
+.B fdisk
+reads the MBR partition table of
+.I device
+and, without
+.BR \-l ,
+offers to change it.
+.SH OPTIONS
+.TP
+.B \-l
+List the table and exit, changing nothing.  This is the safe form and
+the one to reach for.
+.SH NOTES
+The card built by the PC3 tools has three partitions: a FAT one for
+exchanging files with a PC, the FUZIX root, and a small reserved one.
+The layout is written when the card image is made, and there is very
+little reason to change it on the machine.
+.PP
+Editing the table of the card you are running from does not move the
+data on it.  Get it wrong and the filesystem is unreachable.
+.SH SEE ALSO
+.BR mkfs (1),
+.BR mount (1),
+.BR df (1),
+.BR fat (1)

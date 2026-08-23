@@ -1,0 +1,32 @@
+.TH which 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+which \- show which file a command name runs
+.SH SYNOPSIS
+.B which
+.I "command ..."
+.SH DESCRIPTION
+For each
+.IR command ,
+.B which
+searches
+.B PATH
+and prints the full path of the first executable file of that name.
+.PP
+If
+.B PATH
+is not set,
+.B /bin
+is searched.
+.SH OPTIONS
+None.
+.SH EXIT STATUS
+0 if every name was found, 1 otherwise.  A name that is not found
+produces no output at all, only the status.
+.SH NOTES
+.B which
+knows nothing about the shell built-ins, so it will not tell you that
+.B cd
+is one.
+.SH SEE ALSO
+.BR sh (1),
+.BR printenv (1)

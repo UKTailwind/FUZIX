@@ -1,0 +1,40 @@
+.TH umount 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+umount \- unmount a filesystem
+.SH SYNOPSIS
+.B umount
+.I device
+|
+.I directory
+.br
+.B umount \-a
+.SH DESCRIPTION
+.B umount
+detaches a filesystem.  It may be named either by its device or by the
+directory it is mounted on;
+.B umount
+looks the other up in
+.BR /etc/mtab .
+.SH OPTIONS
+.TP
+.B \-a
+Unmount everything in
+.BR /etc/mtab ,
+except the root.
+.SH NOTES
+A filesystem cannot be unmounted while any process has a file open on it
+or has its working directory there.  The usual answer to
+.RB `` "device busy" ''
+is a shell sitting in that directory:
+.B cd /
+first.
+.PP
+Unmounting flushes the buffers for that filesystem, so it is what makes
+the card safe to remove.  For the root, which cannot be unmounted, use
+.BR remount (1)
+to make it read-only instead.
+.SH SEE ALSO
+.BR mount (1),
+.BR remount (1),
+.BR sync (1),
+.BR shutdown (1)

@@ -1,0 +1,27 @@
+.TH tty 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+tty \- print the name of this terminal
+.SH SYNOPSIS
+.B tty
+[\fB\-s\fR]
+.SH DESCRIPTION
+.B tty
+prints the path of the terminal on standard input, or
+.B not a tty
+if standard input is a file or a pipe.
+.SH OPTIONS
+.TP
+.B \-s
+Print nothing; give the answer in the exit status alone.
+.SH BUGS
+The exit status is always 0, whether or not standard input is a
+terminal, because the not-a-tty case is turned into that string before
+the status is worked out.  So
+.B \-s
+tells you nothing, and a script must look at the output instead.
+.PP
+An extra blank line is printed after the name.
+.SH SEE ALSO
+.BR stty (1),
+.BR who (1),
+.BR mesg (1)

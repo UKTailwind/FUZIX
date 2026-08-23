@@ -1,0 +1,57 @@
+.TH loadpng 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+loadpng \- draw a PNG on the screen, or turn one into a sprite
+.SH SYNOPSIS
+.B loadpng
+.I file
+[\fIx\fR [\fIy\fR [\fItransparent\fR [\fIcutoff\fR]]]]
+.br
+.B loadpng \-s
+.I file
+[\fItransparent\fR [\fIcutoff\fR]]
+.SH DESCRIPTION
+.B loadpng
+decodes a PNG and draws it at
+.IR "x y" ,
+0 0 by default.
+.PP
+With
+.BR \-s ,
+it writes a SPRITE to standard output instead of drawing anything.  This
+is how a BASIC program gets its sprites: decode once, redirect the
+result to a file, and load that.  A sprite needs no display, so
+.B \-s
+works with the screen in any mode.
+.SH ARGUMENTS
+.TP
+.I transparent
+The palette index to treat as transparent, 0 to 15.  When drawing,
+.B \-1
+means none, and is the default.
+.IP
+In the sprite form a
+.I negative
+value is MMBasic's sign trick: it substitutes that index for opaque
+black and makes index 0 the transparent one.
+.TP
+.I cutoff
+The alpha level, 1 to 254, at or below which a pixel counts as
+transparent.  The default is 20 when drawing and 30 for a sprite,
+matching what MMBasic uses for
+.B LOAD PNG
+and
+.B SPRITE LOADPNG
+respectively.
+.SH EXAMPLES
+.nf
+# loadpng logo.png 40 20
+# loadpng logo.png 0 0 -1
+# loadpng -s logo.png > logo.spr
+.fi
+.SH NOTES
+The PNG decoder works in the PSRAM arena.  A machine without PSRAM
+cannot run it.
+.SH SEE ALSO
+.BR loadjpg (1),
+.BR loadimage (1),
+.BR saveimage (1)

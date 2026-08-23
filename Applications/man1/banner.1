@@ -1,0 +1,26 @@
+.TH banner 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+banner \- print large letters
+.SH SYNOPSIS
+.B banner
+.I "string ..."
+.SH DESCRIPTION
+.B banner
+prints each argument in large letters across the screen, one banner per
+argument with a blank line between them.
+.PP
+Each letter is drawn out of copies of itself rather than out of a fixed
+character, so
+.B banner
+.B HELLO
+is drawn in H, E, L and O.  Capitals are seven rows high, lower case
+six, and case is kept as you typed it.
+.SH OPTIONS
+None.
+.SH NOTES
+Letters, digits and the common punctuation are all there.  Nothing wraps
+\- a long argument simply runs off the right of an 80 column screen, so
+break it into several arguments instead.
+.SH SEE ALSO
+.BR echo (1),
+.BR write (1)

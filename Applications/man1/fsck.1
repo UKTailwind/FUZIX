@@ -1,0 +1,62 @@
+.TH fsck 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+fsck, fsck\-fuzix \- check and repair a filesystem
+.SH SYNOPSIS
+.B fsck
+[\fB\-a\fR] [\fB\-y\fR] \fIdevice\fR
+.br
+.B fsck \-a
+.br
+.B fsck\-fuzix
+[\fB\-a\fR] [\fB\-y\fR] \fIdevice\fR
+.SH DESCRIPTION
+.B fsck
+checks a FUZIX filesystem and repairs what it finds: blocks claimed
+twice, blocks claimed by nothing, inodes whose link count is wrong,
+files no directory points at, and a free list that does not match
+reality.
+.PP
+.B fsck
+itself is a small front end.  It reads the superblock, and if the
+filesystem was cleanly unmounted it says so and stops there.  Anything
+else and it runs
+.B /bin/fsck\-fuzix
+to do the work, passing the options through.  Running
+.B fsck\-fuzix
+directly forces the full check.
+.SH OPTIONS
+.TP
+.B \-a
+Automatic: answer every question yes, and say less.  With no
+.I device
+as well, check everything named in
+.BR /etc/fstab .
+This is how
+.B /etc/rc
+runs it at boot.
+.TP
+.B \-y
+Answer yes to every question, but keep the running commentary.
+.SH THE FILESYSTEM MUST BE QUIET
+Never check a filesystem mounted read-write.  The kernel holds blocks in
+its buffer cache that
+.B fsck
+cannot see, so the two disagree about what is on the card and the repair
+makes matters worse rather than better.
+.PP
+For the root, use
+.B remount / ro
+first.
+.SH EXIT STATUS
+0 if the filesystem is clean; non-zero if it was repaired or could not
+be read; 16 for a usage error.
+.SH NOTES
+A boot that finds the root dirty runs the full check, and on a large
+card that takes minutes.  Stopping with
+.BR shutdown (1)
+avoids it.
+.SH SEE ALSO
+.BR mkfs (1),
+.BR mount (1),
+.BR remount (1),
+.BR shutdown (1)

@@ -1,0 +1,38 @@
+.TH rmdir 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+rmdir \- remove empty directories
+.SH SYNOPSIS
+.B rmdir
+[\fB\-p\fR] \fIdirectory ...\fR
+.SH DESCRIPTION
+.B rmdir
+removes each
+.IR directory ,
+which must already be empty.
+.SH OPTIONS
+.TP
+.B \-p
+Remove each leading path component as well, stopping at the first one
+that is not empty.  So
+.RB `` "rmdir \-p a/b/c" ''
+removes
+.BR a/b/c ,
+then
+.BR a/b ,
+then
+.BR a .
+.PP
+.B \-p
+is only recognised as the
+.I first
+argument.
+.SH EXIT STATUS
+1 if any directory could not be removed, 0 otherwise.
+.SH NOTES
+Running
+.B rmdir
+with no arguments at all reads past the end of the argument list.  Give
+it at least one name.
+.SH SEE ALSO
+.BR mkdir (1),
+.BR rm (1)

@@ -1,0 +1,45 @@
+.TH rx 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+rx, sx \- receive and send a file with XMODEM
+.SH SYNOPSIS
+.B rx
+[\fB\-t\fI tty\fR] [\fB\-b\fI baud\fR] [\fB\-f\fR] \fIfilename\fR
+.br
+.B sx
+[\fB\-t\fI tty\fR] [\fB\-b\fI baud\fR] \fIfilename\fR
+.SH DESCRIPTION
+.B rx
+receives a file over a serial port with the XMODEM protocol and writes
+it to
+.IR filename ;
+.B sx
+sends one.
+.SH OPTIONS
+.TP
+.BI \-t " tty"
+The port to use.  The default is
+.BR /dev/tty2 ,
+which on this machine is the second serial port and not the console.
+.TP
+.BI \-b " baud"
+The speed to set on that port.
+.TP
+.B \-f
+Overwrite an existing file.
+.SH NOTES
+These need a serial port that is
+.I not
+the console.  They watch the console for a keypress so that a transfer
+can be cancelled, so on a machine where the console is the link the
+first byte of the transfer reads as a cancel.
+.PP
+Over the console itself, use
+.BR uue (1)
+and
+.BR uud (1),
+which send printable text through the line discipline and need no
+second port.
+.SH SEE ALSO
+.BR uue (1),
+.BR fat (1),
+.BR stty (1)

@@ -1,0 +1,27 @@
+.TH diffh 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+diffh \- compare two large files
+.SH SYNOPSIS
+.B diffh
+.I "file1 file2"
+.SH DESCRIPTION
+.B diffh
+reports the differences between two files in the same form as
+.BR diff (1),
+but works a window at a time rather than holding both files in memory.
+.PP
+It is what
+.B diff
+falls back on for files too big to do properly, and the price is that it
+can miss a match that
+.B diff
+would have found: the answer is correct but not always the shortest one.
+.SH NOTES
+Use
+.BR diff (1)
+unless it runs out of memory.  On a machine this size, that happens
+sooner than you would like.
+.SH SEE ALSO
+.BR diff (1),
+.BR cmp (1),
+.BR comm (1)

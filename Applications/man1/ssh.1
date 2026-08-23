@@ -1,0 +1,60 @@
+.TH ssh 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+ssh \- the simple shell
+.SH SYNOPSIS
+.B ssh
+.SH DESCRIPTION
+Read this before typing it.
+.B ssh
+here is the
+.I simple shell
+from UZI: a small command interpreter, and nothing whatever to do with
+the secure shell.  It makes no network connection and takes no host
+name.
+.PP
+It reads commands, finds them on
+.BR PATH ,
+runs them, and understands redirection and background jobs.  It exists
+because it is small; the shell you actually get at login is
+.BR sh (1),
+the V7 Bourne shell, which is a great deal more capable.
+.SH BUILT-IN COMMANDS
+.B cd
+.BR exit ,
+.BR pwd ,
+.BR sync ,
+.BR umask ,
+.BR kill ,
+.B fg
+and
+.BR bg .
+An argument of the form
+.I name=value
+sets an environment variable.
+.SH REDIRECTION
+.BR < ,
+.B >
+and
+.B &
+work as you would expect.  Up to 16 arguments to a command.
+.SH NOTES
+There is no scripting here: no
+.BR if ,
+no
+.BR while ,
+no functions, no shell variables beyond the environment.  Write scripts
+for
+.BR sh (1).
+.PP
+To reach another machine over the network there is no client on this
+system.  Go the other way:
+.BR httpd (1)
+serves from the board, and
+.BR htget (1)
+and
+.BR tlsget (1)
+fetch from it.
+.SH SEE ALSO
+.BR sh (1),
+.BR htget (1),
+.BR httpd (1)

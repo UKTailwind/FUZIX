@@ -1,0 +1,85 @@
+.TH ps 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+ps \- report process status
+.SH SYNOPSIS
+.B ps
+[\fB\-aAeNrlf\fR] [\fB\-p\fI pidlist\fR] [\fB\-t\fI ttylist\fR] [\fB\-u\fI uidlist\fR]
+.SH DESCRIPTION
+.B ps
+prints a line for each process it is asked about.  With no options it
+shows your own processes on this terminal.
+.PP
+The information comes from
+.BR /dev/proc ,
+which the kernel provides; there is no
+.B /proc
+filesystem.
+.SH SELECTION
+.TP
+.BR \-A ", " \-e
+Every process.
+.TP
+.B \-a
+Every process that has a terminal.
+.TP
+.B \-r
+Only processes running or ready to run, rather than sleeping.
+.TP
+.BI \-p " pidlist"
+Only these process ids.
+.TP
+.BI \-t " ttylist"
+Only processes on these terminals.
+.TP
+.BI \-U " uidlist"
+Only processes owned by these users.
+.B \-u
+means the same as
+.BR \-U ,
+which is a deviation from the standard.
+.TP
+.B \-N
+Invert the selection: show what the other options did
+.I not
+select.
+.PP
+Lists are comma separated.
+.SH OUTPUT FORMAT
+.TP
+.B \-f
+Full listing: uid, pid, ppid, C, start time, tty, time and command.
+.TP
+.B \-l
+Long listing: adds flags, state, priority, nice, address, size and the
+wait channel.
+.SH STATES
+.TP
+.B R
+Running, or ready to run.
+.TP
+.B S
+Sleeping.
+.TP
+.B D
+Waiting on I/O, and not to be interrupted.
+.TP
+.B T
+Stopped.
+.TP
+.B Z
+A zombie, waiting for its parent to collect it.
+.TP
+.B F
+In the middle of a fork.
+.SH EXAMPLES
+.nf
+# ps
+# ps -ef
+# ps -l -p 1
+# ps -u root
+.fi
+.SH SEE ALSO
+.BR kill (1),
+.BR killall (1),
+.BR free (1),
+.BR uptime (1)

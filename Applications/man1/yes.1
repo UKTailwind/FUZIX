@@ -1,0 +1,23 @@
+.TH yes 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+yes \- print a string over and over
+.SH SYNOPSIS
+.B yes
+[\fIstring\fR]
+.SH DESCRIPTION
+.B yes
+writes
+.I string
+followed by a newline, endlessly, until the write fails \- which is what
+happens when the program it is feeding exits.  With no argument it
+writes
+.BR y .
+.SH OPTIONS
+None.
+.SH NOTES
+Only the first argument is used; the rest are ignored.
+.PP
+Run on a terminal by mistake it will fill the screen until you interrupt
+it.
+.SH SEE ALSO
+.BR sh (1)

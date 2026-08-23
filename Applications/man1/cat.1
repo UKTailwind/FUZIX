@@ -1,0 +1,42 @@
+.TH cat 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+cat \- concatenate files to standard output
+.SH SYNOPSIS
+.B cat
+[\fIfile\fR ...]
+.SH DESCRIPTION
+.B cat
+copies each
+.I file
+to standard output in turn.  With no
+.IR file ,
+or when a
+.I file
+is
+.BR \- ,
+it copies standard input.
+.PP
+A file that cannot be opened is reported on standard error and
+.B cat
+carries on with the next one.
+.SH OPTIONS
+None.  This
+.B cat
+has no options at all: no
+.BR \-n ,
+no
+.BR \-v ,
+no
+.BR \-e .
+An argument beginning with
+.B \-
+is taken as a file name, except for
+.B \-
+by itself.
+.SH EXIT STATUS
+Always 0, even if a file could not be read.
+.SH SEE ALSO
+.BR more (1),
+.BR head (1),
+.BR tail (1),
+.BR od (1)

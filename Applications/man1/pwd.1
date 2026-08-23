@@ -1,0 +1,25 @@
+.TH pwd 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+pwd \- print the working directory
+.SH SYNOPSIS
+.B pwd
+.SH DESCRIPTION
+.B pwd
+writes the absolute path of the current working directory.
+.SH OPTIONS
+None.
+.SH EXIT STATUS
+1, with a message, if the path cannot be determined \- which generally
+means a directory above the current one has been removed, or is not
+readable.
+.SH NOTES
+The shell has its own
+.B pwd
+built in;
+.B /bin/pwd
+is what a script gets when it runs the command by path, and what
+.BR ssh (1)
+runs.
+.SH SEE ALSO
+.BR sh (1),
+.BR ls (1)

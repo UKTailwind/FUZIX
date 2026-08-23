@@ -1,0 +1,44 @@
+.TH dosread 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+dosread, doswrite, dosdir, dosdel \- MS-DOS floppy-era file transfer
+.SH SYNOPSIS
+.B dosdir
+[\fB\-lr\fR] \fIdrive\fR [\fIdir\fR]
+.br
+.B dosread
+[\fB\-a\fR] \fIdrive dosfile\fR [\fIfile\fR]
+.br
+.B doswrite
+[\fB\-a\fR] \fIdrive dosfile\fR [\fIfile\fR]
+.br
+.B dosdel
+.I "drive dosfile"
+.SH DESCRIPTION
+One binary under four names, reading and writing FAT12 and FAT16 media
+the way MINIX did: a whole floppy, without a partition table.
+.PP
+The name it is called by decides what it does, so only
+.B dosread
+is installed here \- the other three would each need a link making.
+.SH OPTIONS
+.TP
+.B \-l
+Long listing.
+.TP
+.B \-r
+Recurse into subdirectories.
+.TP
+.B \-a
+Treat the file as text and convert the line endings between the DOS
+form and the Unix one.
+.SH NOTES
+For the card in this machine use
+.BR fat (1)
+instead: it understands the partition table and FAT32, which this does
+not.
+.B dosread
+is here for genuinely old media.
+.SH SEE ALSO
+.BR fat (1),
+.BR uue (1),
+.BR tar (1)

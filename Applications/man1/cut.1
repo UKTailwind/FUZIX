@@ -1,0 +1,78 @@
+.TH cut 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+cut \- select columns or fields from each line
+.SH SYNOPSIS
+.B cut
+.BI \-c list
+[\fIfile\fR ...]
+.br
+.B cut
+.BI \-f list
+[\fB\-d\fI x\fR] [\fB\-s\fR] [\fIfile\fR ...]
+.SH DESCRIPTION
+.B cut
+writes selected parts of each input line to standard output.  With no
+.IR file ,
+it reads standard input.
+.PP
+A
+.I list
+is a comma separated set of numbers and ranges counting from 1:
+.BR 1,4,7 ,
+.BR 3\-5 ,
+.B 3\-
+for everything from field 3 on, or
+.B \-5
+for everything up to field 5.
+.SH OPTIONS
+.TP
+.BI \-c list
+Select by character position.
+.TP
+.BI \-b list
+The same thing: on FUZIX a character is a byte.
+.TP
+.BI \-f list
+Select by field.
+.TP
+.BI \-d x
+Use
+.I x
+as the field separator instead of tab.
+.TP
+.B \-s
+With
+.BR \-f ,
+skip lines that contain no separator.  Without it, such lines are passed
+through whole.
+.TP
+.B \-n
+Accepted for POSIX and ignored.
+.SH EXAMPLES
+.nf
+# cut -d: -f1 /etc/passwd
+# cut -c1-8 file
+# ls -l | cut -c40-
+.fi
+.SH BUGS
+.B \-i
+is meant to make a run of separators count as one, which matters for
+columns lined up with spaces.  The test that guards it is inverted, so
+the flag is cleared in exactly the case where it would have worked:
+.B \-i
+does nothing in this build, and using it with
+.B \-f
+also prints a warning naming
+.B \-s
+rather than
+.BR \-i .
+.PP
+There is no
+.BR \-\-complement ,
+and
+.B \-d
+takes only a single character.
+.SH SEE ALSO
+.BR awk (1),
+.BR sed (1),
+.BR sort (1)

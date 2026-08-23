@@ -1,0 +1,20 @@
+.TH uptime 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+uptime \- how long the system has been up
+.SH SYNOPSIS
+.B uptime
+.SH DESCRIPTION
+.B uptime
+prints the time of day, how long since the machine booted, how many
+users are logged in, and the load averages over the last 1, 5 and 15
+minutes.
+.SH OPTIONS
+None.
+.SH NOTES
+The uptime comes from the monotonic clock, so it is right even if the
+time of day was set from the DS3231 or over the network after boot.
+.SH SEE ALSO
+.BR who (1),
+.BR free (1),
+.BR ps (1),
+.BR date (1)

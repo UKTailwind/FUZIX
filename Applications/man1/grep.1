@@ -1,0 +1,85 @@
+.TH grep 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+grep \- print lines matching a regular expression
+.SH SYNOPSIS
+.B grep
+[\fB\-cilnqsv\fR] [\fB\-e\fR] \fIexpression\fR [\fIfile\fR ...]
+.SH DESCRIPTION
+.B grep
+searches each
+.I file
+for lines matching
+.IR expression ,
+and prints those that do.  With no
+.IR file ,
+it reads standard input.  When more than one file is named, each output
+line is prefixed with the file name.
+.SH OPTIONS
+.TP
+.B \-c
+Print only a count of matching lines per file.
+.TP
+.BI \-e " expression"
+Take the next argument as the expression, even if it begins with a
+.BR \- .
+.TP
+.B \-i
+Ignore case.
+.TP
+.B \-l
+Print only the names of files that contain a match.
+.TP
+.B \-n
+Prefix each line with its line number.
+.TP
+.B \-q
+Print nothing; the exit status says whether there was a match.
+.TP
+.B \-s
+Suppress error messages about files that cannot be read.
+.TP
+.B \-v
+Print the lines that do
+.I not
+match.
+.SH REGULAR EXPRESSIONS
+Basic regular expressions:
+.BR . ,
+.BR * ,
+.BR [ ... ] ,
+.BR [^ ... ] ,
+.B ^
+and
+.B $
+anchoring at the ends of the line, and
+.BR \\( ... \\)
+for grouping.
+.PP
+There are no extended regular expressions.
+.B egrep
+is not installed, there is no
+.B \-E
+and no
+.BR \-F ,
+and
+.BR \\+ ,
+.B \\?
+and
+.B \\{n,m\\}
+are not understood.  For a fixed string,
+.BR fgrep (1)
+is faster and needs no quoting; for alternation, use
+.BR awk (1).
+.SH EXIT STATUS
+0 if any line matched, 1 if none did, 2 on error.
+.SH EXAMPLES
+.nf
+# grep ERROR /var/log/messages
+# grep -n PLAY prog.bas
+# grep -c . file            count the lines
+# grep -l TODO *.c
+.fi
+.SH SEE ALSO
+.BR fgrep (1),
+.BR sed (1),
+.BR awk (1)

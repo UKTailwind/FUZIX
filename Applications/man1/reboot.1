@@ -1,0 +1,50 @@
+.TH reboot 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+shutdown, halt, reboot \- stop or restart the machine
+.SH SYNOPSIS
+.B shutdown
+.br
+.B halt
+[\fB\-f\fR]
+.br
+.B reboot
+[\fB\-f\fR]
+.SH DESCRIPTION
+One binary under three names.
+.TP
+.B shutdown
+The polite one.  It asks
+.B init
+for run level 6, which runs
+.BR /etc/rc.halt :
+processes are killed, filesystems are unmounted, and the machine is left
+in a state the card can be pulled out of.  This is the one to use.
+.TP
+.B reboot
+Asks
+.B init
+for run level 5, and restarts the machine if
+.B init
+does not answer.
+.TP
+.B halt
+Stops the machine now, without asking
+.BR init .
+.SH OPTIONS
+.TP
+.B \-f
+Do not sync first.  Skips the tidy path entirely and goes straight to
+the kernel.  Everything not yet written is lost, and the next boot will
+run
+.BR fsck .
+There is very little reason to use this.
+.SH NOTES
+Only the superuser may stop the machine.
+.PP
+On the Pico Computer the machine does not power off; a halt leaves it
+stopped, and the reset button or a power cycle starts it again.
+.SH SEE ALSO
+.BR telinit (1),
+.BR sync (1),
+.BR remount (1),
+.BR fsck (1)

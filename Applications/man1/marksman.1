@@ -1,0 +1,30 @@
+.TH marksman 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+marksman \- show a Markdown document on the screen
+.SH SYNOPSIS
+.B marksman
+.I file
+.SH DESCRIPTION
+.B marksman
+formats a Markdown file for the terminal: headings, bold and italic,
+bulleted and numbered lists, named lists, tables, block quotes and
+fenced code, laid out to the width of the screen.
+.PP
+It is a viewer, not a search path.  Give it the name of a file.
+.SH NOTES
+This is a second and separate documentation system from
+.BR man (1).
+.B man
+reads nroff pages out of
+.BR /usr/man ;
+.B marksman
+reads Markdown out of wherever you point it.  The manual pages on this
+machine are the
+.B man
+kind.
+.PP
+Inline code marked with backticks is only handled as a whole block, not
+in the middle of a line.
+.SH SEE ALSO
+.BR man (1),
+.BR more (1)

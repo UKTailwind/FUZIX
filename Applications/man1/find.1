@@ -1,0 +1,152 @@
+.TH find 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+find \- walk a directory tree and act on what is there
+.SH SYNOPSIS
+.B find
+.I "directory ..."
+[\fIexpression\fR]
+.SH DESCRIPTION
+.B find
+descends each
+.I directory
+and evaluates
+.I expression
+against every file it meets.  If the expression contains no action, an
+implied
+.B \-print
+is added, so
+.B find .
+lists everything below the current directory.
+.SH PRIMARIES
+.TP
+.BI \-name " pattern"
+The file name matches
+.IR pattern ,
+in which
+.BR * ,
+.B ?
+and
+.B [ ]
+have their shell meanings.  Quote it against the shell.
+.TP
+.BI \-type " c"
+Type
+.IR c :
+.B f
+plain,
+.B d
+directory,
+.B b
+block device,
+.B c
+character device,
+.B p
+FIFO.
+.TP
+.BI \-perm " mode"
+The permission bits are exactly
+.IR mode ,
+which is octal.  A leading minus means all of those bits are set,
+whatever else is.
+.TP
+.BI \-links " n"
+Has
+.I n
+links.
+.TP
+.BI \-user " name"
+Owned by that user.
+.TP
+.BI \-group " name"
+In that group.
+.TP
+.BI \-size " n"
+Is
+.I n
+blocks of 512 bytes long.
+.TP
+.BI \-inum " n"
+Has that inode number.
+.TP
+.BI \-atime " n"
+Read
+.I n
+days ago.
+.TP
+.BI \-mtime " n"
+Written
+.I n
+days ago.
+.TP
+.BI \-ctime " n"
+Changed
+.I n
+days ago.
+.TP
+.BI \-newer " file"
+Modified more recently than
+.IR file .
+.PP
+Numbers may be written
+.I n
+for exactly,
+.BI + n
+for more than, or
+.BI \- n
+for less than.
+.SH ACTIONS
+.TP
+.B \-print
+Print the path.
+.TP
+.BI \-exec " command" " ;"
+Run
+.IR command .
+An argument of
+.B {}
+is replaced by the current path, and the semicolon that ends the command
+must be quoted from the shell.  True if the command exits 0.
+.TP
+.BI \-ok " command" " ;"
+The same, but ask first.
+.TP
+.B \-nop
+Do nothing, and be true.  Useful to stop the implied
+.BR \-print .
+.SH COMBINING
+.B \-a
+is and and may be left out,
+.B \-o
+is or,
+.B !
+negates, and parentheses group.  The shell needs the parentheses and
+the
+.B !
+quoted.
+.SH EXAMPLES
+.nf
+# find / -name core -print
+# find . -type f -mtime -1
+# find /tmp -mtime +7 -exec rm {} ;
+# find . -name *.bak -ok rm {} ;
+.fi
+.SH NOTES
+There is no
+.BR \-maxdepth ,
+no
+.BR \-delete ,
+no
+.B \-print0
+and no
+.BR \-regex .
+.PP
+Because
+.BR rm (1)
+ignores any argument starting with a dash,
+.B "find ... \-exec rm {} ;"
+is the way to remove a tree here.
+.SH SEE ALSO
+.BR ls (1),
+.BR rm (1),
+.BR xargs (1),
+.BR du (1)

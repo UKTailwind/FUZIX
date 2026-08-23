@@ -1,0 +1,22 @@
+.TH ll 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+ll \- long directory listing
+.SH SYNOPSIS
+.B ll
+[\fIdirectory\fR ...]
+.SH DESCRIPTION
+.B ll
+prints a long listing \- mode, link count, owner, group, size, date and
+name \- of each
+.IR directory ,
+or of the current directory if none is given.
+.SH OPTIONS
+None.  It is a separate program rather than an alias for
+.BR "ls \-l" ,
+and it accepts no flags.
+.SH NOTES
+Every argument must be a directory.  Naming a plain file gives
+.RB `` "ll: can't stat" ''
+rather than a listing of that one file.
+.SH SEE ALSO
+.BR ls (1)

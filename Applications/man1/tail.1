@@ -1,0 +1,48 @@
+.TH tail 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+tail \- print the last part of a file
+.SH SYNOPSIS
+.B tail
+[\fB\-f\fR] [\fB\-c\fI number\fR | \fB\-n\fI number\fR] [\fIfile\fR]
+.SH DESCRIPTION
+.B tail
+prints the last ten lines of
+.IR file ,
+or of standard input if none is named.
+.SH OPTIONS
+.TP
+.BI \-n " number"
+Print the last
+.I number
+lines.  A leading
+.B +
+counts forward from the start of the file instead.
+.TP
+.BI \-c " number"
+Count bytes rather than lines.
+.TP
+.B \-f
+After reaching the end, keep the file open and print anything more that
+is written to it, checking once a second.  Stop it with the interrupt
+key.
+.SH NOTES
+One file only: naming two is a usage error, not a heading followed by
+both.  So is giving
+.B \-c
+and
+.B \-n
+together.
+.PP
+When the input is a seekable file,
+.B tail
+seeks backwards from the end rather than reading the whole thing, so
+tailing a large log is cheap.
+.SH EXAMPLES
+.nf
+# tail /var/log/messages
+# tail -n 40 prog.c
+# tail -f /var/log/messages
+.fi
+.SH SEE ALSO
+.BR head (1),
+.BR more (1)

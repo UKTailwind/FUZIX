@@ -1,0 +1,35 @@
+.TH cal 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+cal \- print a calendar
+.SH SYNOPSIS
+.B cal
+[\fB\-jy\fR] [[\fImonth\fR] \fIyear\fR]
+.SH DESCRIPTION
+With no arguments,
+.B cal
+prints this month.  With a year, it prints the whole of that year; with
+a month and a year, that month.
+.PP
+The year must be given in full:
+.B cal 9 26
+is September of the year 26, not of 2026.
+.SH OPTIONS
+.TP
+.B \-j
+Print Julian days, numbered from the first of January.
+.TP
+.B \-y
+Print the current year.
+.SH NOTES
+The calendar is right back to the changeover: September 1752 is short of
+eleven days, as it was in England and her colonies.  Countries that
+changed at another time are not catered for.
+.SH EXAMPLES
+.nf
+# cal
+# cal 2026
+# cal 12 2026
+.fi
+.SH SEE ALSO
+.BR date (1),
+.BR setdate (1)

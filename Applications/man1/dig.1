@@ -1,0 +1,28 @@
+.TH dig 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+dig \- look up a name in the DNS
+.SH SYNOPSIS
+.B dig
+.I name
+.SH DESCRIPTION
+.B dig
+asks the nameserver in
+.B /etc/resolv.conf
+for the address of
+.I name
+and prints what comes back.
+.SH NOTES
+.B /etc/resolv.conf
+is written by
+.BR "wifi \-f" .
+If lookups fail while
+.BR ping (1)
+to a numeric address works, that file is the thing to look at.
+.SH EXAMPLES
+.nf
+# dig example.com
+.fi
+.SH SEE ALSO
+.BR wifi (1),
+.BR ping (1),
+.BR htget (1)

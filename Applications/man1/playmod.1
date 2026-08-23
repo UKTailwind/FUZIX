@@ -1,0 +1,29 @@
+.TH playmod 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+playmod \- play a MOD tracker file
+.SH SYNOPSIS
+.B playmod
+.I file.mod
+[\fIvolume\fR [\fBnoloop\fR]]
+.SH DESCRIPTION
+.B playmod
+plays an Amiga-style MOD file.  Unlike the sampled formats it is
+synthesised from a handful of short samples and a pattern list, so it is
+small on the card and cheap to play.
+.SH ARGUMENTS
+.TP
+.I volume
+0 to 100.
+.TP
+.B noloop
+Play once and stop.  Without it the tune repeats, which is what a MOD
+usually expects.
+.SH EXAMPLES
+.nf
+# playmod tune.mod 70
+# playmod tune.mod 70 noloop
+# playmod tune.mod 50 &
+.fi
+.SH SEE ALSO
+.BR playmp3 (1),
+.BR kill (1)

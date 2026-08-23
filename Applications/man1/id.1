@@ -1,0 +1,29 @@
+.TH id 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+id \- print user and group identity
+.SH SYNOPSIS
+.B id
+.SH DESCRIPTION
+.B id
+prints the real user and group ids, with their names from
+.B /etc/passwd
+and
+.BR /etc/group ,
+and the effective ones where they differ.
+.SH OPTIONS
+None.  There is no
+.BR \-u ,
+.B \-g
+or
+.BR \-n ;
+use
+.BR whoami (1)
+for the effective user name alone.
+.SH NOTES
+FUZIX has no supplementary group list, so there is nothing for a
+.B groups
+line to show.
+.SH SEE ALSO
+.BR whoami (1),
+.BR logname (1),
+.BR who (1)

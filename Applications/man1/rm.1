@@ -1,0 +1,49 @@
+.TH rm 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+rm \- remove files
+.SH SYNOPSIS
+.B rm
+.I "file ..."
+.SH DESCRIPTION
+.B rm
+unlinks each
+.IR file .
+A file whose last name is removed goes away; a file that still has
+another link, or that a running process still holds open, does not.
+.SH OPTIONS
+None.
+.SH NOTES
+This is the important one.
+.B rm
+does not merely lack
+.BR \-r ,
+.B \-f
+and
+.BR \-i :
+it
+.I silently ignores
+any argument that begins with a
+.BR \- .
+.PP
+.RB `` "rm \-rf junk" ''
+therefore removes the file called
+.B junk
+and says nothing about
+.BR \-rf .
+.RB `` "rm \-rf" ''
+on its own does nothing at all and exits 0.  Nothing warns you.
+.PP
+To remove a directory tree you must empty it yourself, deepest first,
+and then
+.BR rmdir (1)
+the directories \- or use
+.BR find (1)
+to drive
+.BR rm .
+.PP
+A file that cannot be removed is reported, but the exit status is still
+0.
+.SH SEE ALSO
+.BR rmdir (1),
+.BR find (1),
+.BR cp (1)

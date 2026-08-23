@@ -1,0 +1,60 @@
+.TH setdate 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+setdate \- set the clock, from the battery-backed one or by hand
+.SH SYNOPSIS
+.B setdate
+[\fB\-a\fR] [\fB\-u\fR] [\fB\-w\fR] [\fB\-0\fR]
+.SH DESCRIPTION
+FUZIX keeps two clocks: the kernel one, which starts at zero on every
+boot, and the DS3231 on the board, which keeps time while the power is
+off.
+.B setdate
+moves the time between them, or takes a new one from you.
+.PP
+With no options it reads the DS3231 and sets the kernel clock from it,
+saying nothing if that works.  If there is no clock to read, it asks you
+for the date and the time instead.
+.SH OPTIONS
+.TP
+.B \-a
+Automatic: read the DS3231 and set the kernel clock, and if that fails
+just exit 1 rather than asking.  This is what
+.B /etc/rc
+uses at boot, where there is nobody to answer.
+.TP
+.B \-u
+Ask, whatever the DS3231 says.  This is how you correct a wrong time.
+.TP
+.B \-w
+The other direction: write the kernel time out to the DS3231, so it
+survives the next power off.  Do this after setting the time by hand or
+with
+.BR ntpdate (1).
+.TP
+.B \-0
+The time you type is UTC rather than local.
+.SH ENTERING A TIME
+The date is asked for as
+.BR YYYY\-MM\-DD ,
+the time as
+.BR HH:MM:SS ,
+seconds optional.  An empty line at either prompt leaves that part
+alone.
+.SH EXAMPLES
+.nf
+# setdate            set the kernel clock from the DS3231
+# setdate -u         type a new date and time
+# setdate -w         save the current time to the DS3231
+# ntpdate time.cloudflare.com
+# setdate -w         ... and keep what it fetched
+.fi
+.SH EXIT STATUS
+1 if
+.B \-a
+was given and the DS3231 could not be read, or if
+.B \-w
+failed; 2 if the kernel refused the new time.
+.SH SEE ALSO
+.BR date (1),
+.BR ntpdate (1),
+.BR cal (1)

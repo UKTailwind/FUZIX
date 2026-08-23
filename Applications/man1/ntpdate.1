@@ -1,0 +1,29 @@
+.TH ntpdate 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+ntpdate \- set the clock from a time server
+.SH SYNOPSIS
+.B ntpdate
+.I server
+.SH DESCRIPTION
+.B ntpdate
+asks
+.I server
+for the time, sets the kernel clock to it, and prints the result.
+.PP
+It sets the kernel clock only.  Follow it with
+.B setdate \-w
+to write the time to the DS3231, so that it survives a power cut.
+.SH EXAMPLES
+.nf
+# ntpdate time.cloudflare.com
+# setdate -w
+.fi
+.SH NOTES
+Do this before anything involving TLS.  A certificate is only valid
+between two dates, so a machine that thinks it is 1970 rejects every
+certificate on the internet \- and the error will not mention the clock.
+.SH SEE ALSO
+.BR setdate (1),
+.BR date (1),
+.BR tlsca (1),
+.BR wifi (1)

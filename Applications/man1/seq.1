@@ -1,0 +1,51 @@
+.TH seq 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+seq \- print a sequence of numbers
+.SH SYNOPSIS
+.B seq
+[\fB\-s\fI separator\fR] [\fIfirst\fR [\fIincrement\fR]] \fIlast\fR
+.SH DESCRIPTION
+.B seq
+prints the integers from
+.I first
+to
+.IR last ,
+stepping by
+.IR increment .
+.I first
+and
+.I increment
+default to 1.  A newline follows the last number whatever the separator
+is.
+.SH OPTIONS
+.TP
+.BI \-s " separator"
+Print
+.I separator
+between the numbers instead of a newline.  It may be written joined to
+the flag, as
+.BR \-s, .
+.SH NOTES
+Integers only, and they are read with the C conventions, so
+.B 0x20
+and
+.B 040
+both mean 32.
+.PP
+Nothing is printed, and the exit status is still 0, if the sequence is
+empty: a
+.I last
+below
+.I first
+counts as empty, and so does an
+.I increment
+of zero.  There is no counting down.
+.SH EXAMPLES
+.nf
+# seq 5
+# seq 2 2 10
+# seq -s, 1 5
+.fi
+.SH SEE ALSO
+.BR xargs (1),
+.BR sh (1)

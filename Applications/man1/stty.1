@@ -1,0 +1,124 @@
+.TH stty 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+stty \- set or show terminal settings
+.SH SYNOPSIS
+.B stty
+.br
+.B stty \-a
+.br
+.B stty \-g
+.br
+.B stty
+.I "setting ..."
+.SH DESCRIPTION
+With no arguments,
+.B stty
+shows the settings of the terminal on standard input that differ from
+the defaults.  With settings, it changes them.
+.SH OPTIONS
+.TP
+.B \-a
+Show every setting, not just the ones that differ.
+.TP
+.B \-g
+Print the settings as four numbers, in a form that can be given back to
+.B stty
+later to restore them.
+.SH SETTINGS
+Each may be given as
+.I name
+to turn it on or
+.BI \- name
+to turn it off.
+.SS Speed
+.B ispeed
+.IR n ,
+.B ospeed
+.IR n ,
+or a bare number to set both.
+.SS Control
+.BR clocal ,
+.BR cread ,
+.BR cstopb ,
+.BR hupcl ,
+.BR parenb ,
+.BR parodd .
+.SS Input
+.BR brkint ,
+.BR icrnl ,
+.BR ignbrk ,
+.BR igncr ,
+.BR ignpar ,
+.BR inlcr ,
+.BR inpck ,
+.BR istrip ,
+.BR ixany ,
+.BR ixoff ,
+.BR ixon ,
+.BR parmrk .
+.SS Output
+.BR opost ,
+.BR onlcr ,
+.BR onoeot ,
+.BR xtabs .
+.SS Local
+.BR echo ,
+.BR echoe ,
+.BR echok ,
+.BR echonl ,
+.BR icanon ,
+.BR iexten ,
+.BR isig ,
+.BR lflusho ,
+.BR noflsh ,
+.BR tostop .
+.SS Control characters
+.BR eof ,
+.BR eol ,
+.BR erase ,
+.BR intr ,
+.BR kill ,
+.BR quit ,
+.BR susp ,
+.BR start ,
+.BR stop ,
+.BR rprnt ,
+.BR lnext ,
+.BR flush ,
+each followed by the character, which may be written as
+.BI ^ x
+for a control character or
+.B undef
+to disable it.  Also
+.B min
+and
+.BR time ,
+which are numbers.
+.SS Combinations
+.TP
+.B cooked
+The normal line-at-a-time mode, with echo and signals.
+.TP
+.B raw
+Character at a time, no echo, no signal characters.
+.SH EXAMPLES
+.nf
+# stty -a
+# stty erase ^H
+# stty raw
+# stty cooked
+.fi
+.SH NOTES
+.B stty
+acts on standard input, so it is the terminal you type the command on
+unless you redirect.  To set another one:
+.B stty raw < /dev/tty2
+.PP
+There is no
+.B sane
+setting.  If you leave a terminal in raw mode and lose the echo,
+.B stty cooked
+typed blind will bring it back.
+.SH SEE ALSO
+.BR tty (1),
+.BR who (1)

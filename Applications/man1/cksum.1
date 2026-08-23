@@ -1,0 +1,32 @@
+.TH cksum 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+cksum \- print a CRC checksum and byte count
+.SH SYNOPSIS
+.B cksum
+[\fIfile\fR ...]
+.SH DESCRIPTION
+.B cksum
+prints a checksum, a byte count and the name for each
+.IR file .
+With no
+.IR file ,
+or with
+.BR \- ,
+it reads standard input and prints no name.
+.PP
+The checksum is the 32-bit CRC of ISO/IEC 8802-3, which is what POSIX
+specifies, so the numbers agree with
+.B cksum
+on other systems.
+.SH OPTIONS
+None.
+.SH NOTES
+This is a different and much stronger checksum than
+.BR sum (1),
+and the two never agree.
+.SH EXIT STATUS
+1 if any file could not be read.
+.SH SEE ALSO
+.BR sum (1),
+.BR cmp (1),
+.BR wc (1)

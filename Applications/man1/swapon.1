@@ -1,0 +1,38 @@
+.TH swapon 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+swapon \- give the kernel a partition to swap on
+.SH SYNOPSIS
+.B swapon
+.I "device blocks"
+.SH DESCRIPTION
+.B swapon
+tells the kernel to use
+.I device
+for swap, using the first
+.I blocks
+blocks of it.
+.PP
+Swap is how more processes run than fit in memory at once: the swapper
+writes a whole process out and reads it back when it is next scheduled.
+.SH ARGUMENTS
+.TP
+.I device
+A block device with no filesystem and no partition table on it.
+.TP
+.I blocks
+At least 256.
+.SH SAFETY CHECKS
+.B swapon
+refuses if the first sector ends in the
+.B 55 AA
+signature of a partition table, or if the second sector begins with the
+FUZIX filesystem magic.  Both are there to stop you swapping over
+something you wanted.
+.SH NOTES
+Swap is normally set up by
+.B /etc/rc
+at boot; there is rarely a reason to run this by hand.
+.SH SEE ALSO
+.BR free (1),
+.BR mount (1),
+.BR mkfs (1)

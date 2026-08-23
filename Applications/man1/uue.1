@@ -1,0 +1,65 @@
+.TH uue 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+uue, uud \- encode a file as printable text, and decode it again
+.SH SYNOPSIS
+.B uue
+[\fB\-n\fR] \fIinputfile\fR [\fB\-\fR]
+.br
+.B uud
+[\fB\-n\fR] [\fB\-d\fR] [\fB\-s\fI dir\fR] [\fB\-t\fI dir\fR] [\fIinputfile\fR]
+.SH DESCRIPTION
+.B uue
+writes
+.IB inputfile .uue
+holding the file as printable text, with the original name recorded
+inside it.
+.B uud
+reads such a file and recreates the original under that name.
+.PP
+This is how files move over the serial console: the text can be pasted
+into a terminal or captured from one, and needs no second port and no
+protocol.
+.SH OPTIONS
+.TP
+.B \-n
+Do not check or write the checksum.
+.TP
+.B \-
+Write to standard output instead of to a file.
+.TP
+.B \-d
+Delete the encoded file after decoding it.
+.TP
+.BI \-s " dir"
+Look for the input in
+.IR dir .
+.TP
+.BI \-t " dir"
+Put the decoded file in
+.IR dir .
+.SH EXAMPLES
+Sending a file to the board:
+.nf
+# cat > prog.uue
+(paste the text, then the end-of-file key)
+# uud prog.uue
+.fi
+.PP
+Fetching one from it:
+.nf
+# uue report.txt
+# cat report.uue
+(capture the text in your terminal program)
+.fi
+.SH NOTES
+The encoded form is about a third larger than the original, and goes
+over the console at 115200 baud, so a 100K binary takes a couple of
+minutes.
+.PP
+.B uud
+takes the output name from inside the file, not from the command line.
+.SH SEE ALSO
+.BR rx (1),
+.BR sx (1),
+.BR tar (1),
+.BR fat (1)

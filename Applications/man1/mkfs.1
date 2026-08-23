@@ -1,0 +1,44 @@
+.TH mkfs 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+mkfs \- make a filesystem
+.SH SYNOPSIS
+.B mkfs
+[\fB\-f\fR] \fIdevice inodes blocks\fR
+.SH DESCRIPTION
+.B mkfs
+writes an empty FUZIX filesystem onto
+.IR device .
+.SH ARGUMENTS
+.TP
+.I inodes
+How many files the filesystem can ever hold.  This is a
+.I count of inodes,
+not a number of blocks to give them, and it cannot be changed
+afterwards.  A filesystem that runs out of inodes reports itself full
+with blocks still free, so do not be mean with it: about one inode per
+64 blocks is a reasonable rule, and 2048 a sensible floor.
+.TP
+.I blocks
+The size in 512-byte blocks.
+.SH OPTIONS
+.TP
+.B \-f
+Fast: clear only the inode blocks rather than every block on the device.
+The filesystem is just as correct; the difference is that old data
+remains in the blocks that have not been allocated yet.  On a large card
+this turns minutes into seconds.
+.SH NOTES
+This destroys whatever was on the device.  It does not ask.
+.PP
+The filesystem may fill its partition exactly: the FS32 format has no
+unreachable sector at the end that must be kept clear.
+.SH EXAMPLES
+.nf
+# mkfs /dev/hda3 2048 131072
+# mkfs -f /dev/hda3 2048 131072
+.fi
+.SH SEE ALSO
+.BR fsck (1),
+.BR mount (1),
+.BR fdisk (1),
+.BR df (1)

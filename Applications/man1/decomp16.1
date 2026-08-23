@@ -1,0 +1,34 @@
+.TH decomp16 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+decomp16 \- uncompress a 16-bit .Z file
+.SH SYNOPSIS
+.B decomp16
+[\fB\-\fIn\fR] [\fIinput\fR [\fIoutput\fR]]
+.SH DESCRIPTION
+.B decomp16
+reads a file compressed by the old Unix
+.B compress
+and writes the original.  With no file names it reads standard input and
+writes standard output.
+.SH OPTIONS
+.TP
+.BI \- n
+Split the work over
+.I n
+passes, 0 to 4, which trades time for memory.  On a machine this size
+that trade is sometimes the difference between decompressing a file and
+not.
+.SH NOTES
+Decompression only: there is no compressor here.  16-bit codes are the
+limit, which is what
+.B compress
+produced by default.
+.PP
+.BR man (1)
+will read a compressed manual page through this, if one is installed
+with a
+.B .Z
+suffix.
+.SH SEE ALSO
+.BR man (1),
+.BR tar (1)

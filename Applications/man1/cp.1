@@ -1,0 +1,69 @@
+.TH cp 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+cp, mv, ln \- copy, move and link files
+.SH SYNOPSIS
+.B cp
+.I "source dest"
+.br
+.B cp
+.I "source ... directory"
+.br
+.B mv
+.I "source dest"
+.br
+.B ln
+.I "source dest"
+.SH DESCRIPTION
+One binary provides all three commands; it looks at the name it was
+called by to decide what to do.
+.PP
+.B cp
+copies
+.I source
+to
+.IR dest ,
+or copies each
+.I source
+into
+.I directory
+under its own name.
+.PP
+.B mv
+does the same and then removes the original.
+.PP
+.B ln
+makes
+.I dest
+a second directory entry for the same file.  Both names then refer to
+one inode: changing the file through one name changes it under the
+other, and the file survives until the last name is removed.
+.SH OPTIONS
+None.  The POSIX options
+.RB ( \-i ,
+.BR \-f ,
+.BR \-p ,
+.BR \-R )
+are not implemented.
+.SH NOTES
+There are no symbolic links in FUZIX, so
+.B ln
+has no
+.B \-s
+and cannot make one.  A hard link cannot span filesystems and cannot
+point at a directory.
+.PP
+.B mv
+copies and then unlinks even when both names are on the same
+filesystem, where
+.BR rename (2)
+would be instant.  Moving a large file is as slow as copying it, and
+needs room for both copies while it runs.
+.PP
+Neither
+.B cp
+nor
+.B mv
+copies a directory tree.
+.SH SEE ALSO
+.BR rm (1),
+.BR mkdir (1)

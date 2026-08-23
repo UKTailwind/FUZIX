@@ -1,0 +1,44 @@
+.TH mknod 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+mknod \- create a device node or FIFO
+.SH SYNOPSIS
+.B mknod
+.I path
+.BR b | c
+.I "major minor"
+.br
+.B mknod
+.I path
+.B p
+.SH DESCRIPTION
+.B mknod
+creates a special file.
+.B b
+makes a block device,
+.B c
+a character device and
+.B p
+a FIFO.  Block and character devices need the
+.I major
+and
+.I minor
+numbers; a FIFO takes neither.
+.PP
+The node is created with mode 0777 less the current
+.BR umask ,
+so set the mode afterwards with
+.BR chmod (1)
+if it should not be world writable.
+.SH EXAMPLES
+The nodes /etc/rc expects are made when the card is built; these are the
+forms it uses.
+.nf
+# mknod /dev/tty1 c 5 1
+# mknod /dev/hda1 b 0 1
+.fi
+.SH NOTES
+Only the superuser may create a device node.
+.SH SEE ALSO
+.BR mkfifo (1),
+.BR chmod (1),
+.BR mount (1)

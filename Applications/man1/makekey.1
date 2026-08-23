@@ -1,0 +1,21 @@
+.TH makekey 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+makekey \- turn a key into an encryption key
+.SH SYNOPSIS
+.B makekey
+.SH DESCRIPTION
+.B makekey
+reads ten bytes from standard input and writes thirteen: eight bytes of
+key and two of salt, turned into a value for
+.BR crypt (1)
+to use.  The transformation is deliberately slow.
+.PP
+It is not run by hand.  It exists for
+.BR crypt (1)
+and for the editors that once encrypted files.
+.SH NOTES
+The algorithm behind this dates from the 1970s and is not a means of
+keeping anything secret from anyone who is trying.
+.SH SEE ALSO
+.BR crypt (1),
+.BR passwd (1)
