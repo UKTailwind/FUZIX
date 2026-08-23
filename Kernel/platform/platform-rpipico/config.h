@@ -46,7 +46,7 @@
  * runs clk_hstx = clk_sys/3: 25 MHz pixel = 640x480 at 59.5 Hz.
  * Flash QMI 62.5 MHz (div 6), PSRAM 125 MHz (div 3), UART/SD divisors
  * all derived at runtime from the actual clk_sys. */
-#define PC3_SYS_CLOCK_KHZ 375000
+#define PC3_SYS_CLOCK_KHZ 378000
 #define PC3_FLASH_MAX_HZ (63 * 1000 * 1000)
 #define PC3_PSRAM_CS_PIN 47
 
