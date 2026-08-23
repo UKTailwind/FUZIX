@@ -45,13 +45,34 @@ mp3bench.o: CCOPTS += $(OPT)
 # about and there is nothing to gain: measure first.
 playmp3.o: CCOPTS += $(FPFLAGS)
 
+# THE STRIPPED NETWORK PROGRAMS ARE PART OF `all'.
+#
+# update-flash.sh installs wifi, tlsget and tlsca onto the card from
+# `.stripped' names - the card has no room for the debug information and
+# these three carry a lot of it (wifi 105K unstripped, 15K stripped).
+# Nothing built them.  relink-userland.sh rebuilds wifi/tlsget/tlsca
+# here, this Makefile had no .stripped rule, and update-flash.sh only
+# checks that the file EXISTS - so at v0.21 the card was two days from
+# shipping three binaries linked against the previous C library while
+# every other program on it was fresh, and every gate would have stayed
+# green.  That is the same class as the hand-written staged lists in
+# Applications/CC/hwtest, and the same answer: the thing that builds
+# the binary writes the artefact the installer takes.
+#
+# They rebuild whenever the unstripped binary does, so a libc change
+# reaches the card by itself.
+STRIPPED = wifi.stripped tlsget.stripped tlsca.stripped
+
 .PHONY: all clean
 
-all: $(UTILSBIN) playmod loadjpg loadpng
+all: $(UTILSBIN) playmod loadjpg loadpng $(STRIPPED)
+
+%.stripped: %
+	$(STRIP) $(STRIP_OPT) -o $@ $<
 
 clean:
 	rm -f *.o
-	rm -f $(UTILSBIN) playmod loadjpg loadpng
+	rm -f $(UTILSBIN) playmod loadjpg loadpng $(STRIPPED)
 
 # playmod links the vendored hxcmod tracker alongside its own object
 playmod: playmod.o hxcmod.o
