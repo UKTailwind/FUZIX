@@ -2228,7 +2228,44 @@ nothing there" without a second call.
 selected, which is what the shape is for.
 
 Everything else MMBasic's `MM.INFO` reports is about hardware, a flash
-program store or a network that is not here.
+program store or a network that is not here — and asking for one of
+them is an error at translate time, not a zero. That is worth saying
+plainly because it used to be a zero: a read like `MM.WIDTH` fell
+through into the implied-variable rule and became a variable of that
+name, so the program compiled, ran, and printed 0. Nothing in the `MM.`
+namespace can become a variable now.
+
+## `OPTION` {#option}
+
+Seven `OPTION` statements are translated, and they mean what they mean
+in MMBasic: `BASE`, `DEFAULT`, `EXPLICIT`, `ANGLE`, `CONSOLE`, `ESCAPE`,
+and `UDP`/`TCP SERVER PORT`.
+
+**`OPTION ANGLE DEGREES` makes `SIN`, `COS` and `TAN` take degrees and
+`ATN`, `ATAN2`, `ASIN` and `ACOS` return them**, exactly as the
+interpreter does it — the argument divided by 57.2957795130823229 going
+in, the answer multiplied by it coming out. `DEG(` and `RAD(` are not
+affected; they are the explicit converters and say what they convert.
+`OPTION ANGLE RADIANS` is the default and the two spellings are the only
+ones accepted.
+
+Because a program here is compiled rather than interpreted, the setting
+is folded in at translate time: it applies to the whole program,
+including routines written above the `OPTION` line, and a program in
+radians pays nothing whatever for the feature. The cost of folding is
+that it cannot follow a program that changes its mind mid-run, so
+`OPTION ANGLE` inside a `SUB` or `FUNCTION`, or set twice to different
+values, is refused rather than applied to the wrong half of the program.
+
+**Everything else in the `OPTION` namespace divides in two.** The
+options that configure a PicoMite — a display panel, a keyboard layout,
+the editor, the flash-saved defaults, `OPTION AUTORUN`, `OPTION
+CPUSPEED` and the like — are **ignored with a warning**, because a
+translated program computes and prints exactly the same with or without
+them. Any other `OPTION`, including `OPTION COUNT` and `OPTION TAB`, is
+**refused by name, and fatally**: an `OPTION` changes how the rest of
+the program behaves, so quietly dropping the line would leave a program
+that translates and then answers differently.
 
 ## Pin names: `GP8` {#gp-names}
 
@@ -3736,11 +3773,65 @@ Scalar: `ATAN3`, `COSH`, `LOG10`, `SINH`, `TANH`
 
 Whole-array (one number out of an array): `MAX`, `MEAN`, `MEDIAN`, `MIN`, `SD`, `SUM`
 
+Codecs: `MATH(BASE64 ENCODE|DECODE in$, out$)`, which returns the length
+and writes its answer into the second argument, and the four CRCs.
+
+### The CRCs
+
+    MATH(CRC8  v [,length [,polynomial [,startmask [,endmask [,reverseIn [,reverseOut]]]]]])
+    MATH(CRC12 v ...)
+    MATH(CRC16 v ...)
+    MATH(CRC32 v ...)
+
+`v` is a string or a one-dimensional numeric array — an integer array or
+a float array, each element being one byte. An element above 255 is an
+error (`Variable > 255`); a negative one is cast to a byte in silence,
+as the interpreter casts it. A `length` of 0, or no `length` at all,
+means the whole of it.
+
+Everything after `v` has a default, and an **empty** argument takes its
+default too, so `MATH(CRC16 a$, , , &HFFFF)` sets only the start mask:
+
+| width | polynomial | start | end | reverses | range of the three masks |
+|---|---|---|---|---|---|
+| `CRC8` | `&H07` | 0 | 0 | off | 0..255 |
+| `CRC12` | `&H80D` | 0 | 0 | off | 0..4095 |
+| `CRC16` | `&H1021` | 0 | 0 | off | 0..65535 |
+| `CRC32` | `&H4C11DB7` | 0 | 0 | off | 0..&HFFFFFFFF |
+
+The published catalogue forms are all reachable, and these are the
+values every CRC specification quotes for the string `123456789`:
+
+| | |
+|---|---|
+| `MATH(CRC16 s$)` | `&H31C3` — CRC-16/XMODEM |
+| `MATH(CRC16 s$, , , &HFFFF)` | `&H29B1` — CRC-16/CCITT-FALSE |
+| `MATH(CRC16 s$, , &H8005, , , 1, 1)` | `&HBB3D` — CRC-16/ARC |
+| `MATH(CRC32 s$, , , &HFFFFFFFF, &HFFFFFFFF, 1, 1)` | `&HCBF43926` — the zip and PNG CRC |
+
+**Three deliberate differences from PicoMite 6.03.00**, agreed with its
+author, who is correcting the interpreter. Until that reaches a release,
+a side-by-side will differ here and nowhere else.
+
+* `CRC12` is masked to 12 bits. The interpreter never masks it, so its
+  answer carries a junk top nibble: `&HFEFB` there against `&HEFB` here,
+  and `&HEFB` is the canonical value.
+* `reverseOut` is read from the seventh argument. All four branches of
+  the interpreter test for a seventh argument and then read the sixth,
+  so `reverseOut` cannot be reached there at all — which is why the
+  reflected forms above are not available on a PicoMite today.
+* The end mask is applied **after** the output reversal, for all four
+  widths. The interpreter does it in that order for `CRC12` and `CRC16`
+  and the other way round for `CRC8` and `CRC32`; reverse-then-XOR is
+  what every published CRC means. With the default end mask of 0 the two
+  orders agree, so this shows only when a program passes both an end
+  mask and `reverseOut`.
+
 ## MATH sub-commands
 
 `MATH` is also a statement, and that is a different and much longer list
-in the interpreter. Six of it are translated — the ones that walk an
-array element by element, which is what most programs use it for:
+in the interpreter. Fourteen of it are translated — the ones that walk
+an array element by element, which is what most programs use it for:
 
 | | |
 |---|---|
@@ -3750,6 +3841,11 @@ array element by element, which is what most programs use it for:
 | `MATH RANDOMIZE [seed]` | seed the generator; no seed uses the clock |
 | `MATH SLICE a(), i, , k, b()` | copy one line of `a()` into `b()` |
 | `MATH INSERT a(), i, , k, b()` | copy `b()` back into that line |
+| `MATH C_ADD a(), b(), c()` | `c() = a() + b()`, element by element |
+
+`C_SUB`, `C_MUL`, `C_MULT`, `C_DIV`, `C_AND`, `C_OR` and `C_XOR` are the
+same shape as `C_ADD` — the `C_` is for component, not complex — and all
+eight need the three arrays to be the same type and the same length.
 
 `SET`, `ADD`, `SLICE` and `INSERT` take integer, float or string arrays;
 `SCALE` is numeric only, as it is there. `ARRAY` is accepted as a

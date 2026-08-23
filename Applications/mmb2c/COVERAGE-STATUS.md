@@ -137,7 +137,7 @@ category 2, instead of a language inside the language.
 translated and says nothing about the 67 members. Read from MMBasic's `core/MATHS.c` and mmb2c's
 `MATHFUNCS`, `MATHARRAY` and `do_array_cmd`.
 
-**28 of 67 members translated.**
+**32 of 67 members translated.**
 
 ### `MATH <subcommand>` - in-place, on arrays - 14 of 38
 
@@ -145,11 +145,11 @@ translated and says nothing about the 67 members. Read from MMBasic's `core/MATH
 
 **Not translated:** `AES128`, `FFT`, `INTERPOLATE`, `M_INVERSE`, `M_MULT`, `M_PRINT`, `M_TRANSPOSE`, `PID`, `POWER`, `Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`, `SENSORFUSION`, `SHIFT`, `SINC`, `V_CROSS`, `V_MULT`, `V_NORMALISE`, `V_PRINT`, `V_ROTATE`, `WINDOW`
 
-### `MATH(<subfunction> ...)` - returns a value - 14 of 29
+### `MATH(<subfunction> ...)` - returns a value - 18 of 29
 
-**Translated:** `ATAN3`, `BASE64`, `COSH`, `DECODE`, `ENCODE`, `LOG10`, `MAX`, `MEAN`, `MEDIAN`, `MIN`, `SD`, `SINH`, `SUM`, `TANH`
+**Translated:** `ATAN3`, `BASE64`, `COSH`, `CRC12`, `CRC16`, `CRC32`, `CRC8`, `DECODE`, `ENCODE`, `LOG10`, `MAX`, `MEAN`, `MEDIAN`, `MIN`, `SD`, `SINH`, `SUM`, `TANH`
 
-**Not translated:** `CHI`, `CHI_P`, `CORREL`, `CRC12`, `CRC16`, `CRC32`, `CRC8`, `CROSSING`, `DOTPRODUCT`, `INVERSE`, `MAGNITUDE`, `M_DETERMINANT`, `PHASE`, `PID`, `RAND`
+**Not translated:** `CHI`, `CHI_P`, `CORREL`, `CROSSING`, `DOTPRODUCT`, `INVERSE`, `MAGNITUDE`, `M_DETERMINANT`, `PHASE`, `PID`, `RAND`
 
 The split is not arbitrary. What is in is what a BASIC program
 actually reaches for - the whole-array reductions, the hyperbolic and
@@ -166,10 +166,12 @@ into three kinds:
   quaternions (`Q_*`) and the complex-number set (`C_*`). These are
   category 2: add on demand rather than as a block, because the 3D and
   graphics demos say which are wanted first.
-* **codecs and transforms** - `FFT`, `AES128`, `CRC8/12/16/32`,
-  `WINDOW`, `SINC`, `INTERPOLATE`. Bigger pieces, still pure
-  arithmetic. With `BASE64` in, **`MATH CRC` is the most asked for of
-  what remains**.
+* **codecs and transforms** - `FFT`, `AES128`, `WINDOW`, `SINC`,
+  `INTERPOLATE`. Bigger pieces, still pure arithmetic. `BASE64` and
+  all four `CRC`s have shipped; of the rest `WINDOW` and `INTERPOLATE`
+  are small and self-contained, `FFT` wants a steer (its complex forms
+  depend on MMBasic's column-major 2-D storage, which our arrays
+  deliberately do not have) and `AES128` has no demand behind it.
 * **the odd ones out** - `PID` and `SENSORFUSION` carry state between
   calls, `M_PRINT` and `V_PRINT` write to the console, `RAND` overlaps
   `RND`, and `SHIFT`/`POWER` are array surgery of the kind `SLICE` and

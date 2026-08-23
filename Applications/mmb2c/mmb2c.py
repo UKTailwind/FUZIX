@@ -161,6 +161,18 @@ MATHFUNCS = {'COSH': 1, 'SINH': 1, 'TANH': 1, 'LOG10': 1, 'ATAN3': 2}
 # the MATH() members that reduce a whole array to one number
 MATHARRAY = ('SUM', 'MEAN', 'SD', 'MAX', 'MIN', 'MEDIAN')
 
+# MATH(CRCn v [,length [,poly [,start [,end [,revIn [,revOut]]]]]]).
+# Neither table above can hold it - MATHFUNCS is a fixed argument
+# count and MATHARRAY is a whole-array reduction - so it is a branch of
+# its own, like MATH(BASE64.  Width -> (default polynomial, argument
+# range), from MATHS.h:44/58/66/82 and fun_math's four branches.
+CRCWIDTH = {
+    'CRC8':  (8,  '0x07'),
+    'CRC12': (12, '0x80D'),
+    'CRC16': (16, '0x1021'),
+    'CRC32': (32, '0x04C11DB7'),
+}
+
 OPS3 = ()
 OPS2 = ('<=', '>=', '<>', '=<', '=>', '><', '<<', '>>')
 # '.' is an operator ONLY when it survives identifier scanning - dots
@@ -907,6 +919,7 @@ class Conv(object):
         self.uses_pioout = False    # WS2812/BITSTREAM: mmb_pioout.h
         self.uses_port = False      # PORT: pulls in mmb_port.h
         self.uses_math = False      # MATH C_ADD etc: pulls in mmb_math.h
+        self.uses_crc = False       # MATH(CRCn ...): pulls in mmb_crc.h
         self.uses_sort = False      # SORT: pulls in mmb_sort.h
         self.uses_array = False     # whole-array ops/REDIM/MATH(): mmb_array.h
         self.uses_lstring = False   # LONGSTRING: pulls in mmb_lstring.h
@@ -2945,6 +2958,8 @@ class Conv(object):
                 return ('%s(%s, %s, %d)'
                         % (fn, a[0], tgt,
                            255 if cap is None else cap), TY_I)
+            if t[0] == T_ID and t[2] in CRCWIDTH:
+                return self.do_math_crc(t[2])
             if t[0] == T_ID and t[2] in MATHARRAY:
                 name = t[2]
                 sym = self.arrayref()
@@ -3814,6 +3829,47 @@ class Conv(object):
         'EXISTS FILE': ('mm_exists_file(%s)', TY_S, TY_I),
         'EXISTS DIR':  ('mm_exists_dir(%s)', TY_S, TY_I),
     }
+
+    def do_math_crc(self, name):
+        """MATH(CRC8|CRC12|CRC16|CRC32 v [,length [,polynomial
+        [,startmask [,endmask [,reverseIn [,reverseOut]]]]]]).
+
+        Any of the six may be written EMPTY to take its default -
+        `MATH(CRC16 a(), , , &HFFFF)` - which is what MMBasic's
+        `if (argc > 3 && *argv[4])` amounts to (MATHS.c:3128-3138), and
+        programs do write it.  The defaults are emitted as literals, so
+        a program that passes none of them pays nothing for them.
+
+        The engine and the three places it deliberately differs from
+        PicoMite 6.03.00 are in mmb_crc.h.
+        """
+        bits, poly = CRCWIDTH[name]
+        if self.is_array_arg():
+            sym = self.arrayref()
+            if sym.ty == TY_S:
+                self.err('MATH(%s ...) wants a number array or a string'
+                         % name)
+            ptr, cnt = self.array_flat(sym)
+            fn = 'mmg_crc_i' if sym.ty == TY_I else 'mmg_crc_f'
+            src = '%s, %s' % (ptr, cnt)
+        else:
+            a = self.expr()
+            if a[1] != TY_S:
+                self.err('MATH(%s ...) wants a number array or a string'
+                         % name)
+            fn = 'mmg_crc_s'
+            src = a[0]
+        args = ['0', poly, '0', '0', '0', '0']
+        for k in range(6):
+            if not self.accept_op(','):
+                break
+            if self.is_op(',') or self.is_op(')'):
+                continue                # an empty slot keeps the default
+            args[k] = self.as_int(self.expr())
+        self.expect_op(')')
+        self.uses_crc = True
+        return ('%s(%d, %s, %s)'
+                % (fn, bits, src, ', '.join(args)), TY_I)
 
     def do_mm_info(self):
         """MM.INFO(...) and MM.INFO$(...), which are one function."""
@@ -9276,6 +9332,11 @@ class Conv(object):
         # types and MM_RAISE, so it can sit anywhere after that.
         if self.uses_math:
             wr('#include "mmb_math.h"\n')
+        # The four CRCs, on the same terms: the engine goes in the
+        # program that asks for it and costs every other program
+        # nothing.
+        if self.uses_crc:
+            wr('#include "mmb_crc.h"\n')
         # SORT's shell sort, the same bargain as mmb_math.h: only a
         # program that sorts carries the engine.
         if self.uses_sort:

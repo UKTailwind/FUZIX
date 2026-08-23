@@ -18,6 +18,91 @@ static struct val mkval(const char *code, int ty)
     return v;
 }
 
+/* MATH(CRCn v [,length [,poly [,start [,end [,revIn [,revOut]]]]]]).
+ * mmb2c.py's CRCWIDTH table: width -> default polynomial.  Returns 0
+ * for a name that is not one of the four. */
+static int crc_width(const char *up)
+{
+    if (strcmp(up, "CRC8") == 0)
+        return 8;
+    if (strcmp(up, "CRC12") == 0)
+        return 12;
+    if (strcmp(up, "CRC16") == 0)
+        return 16;
+    if (strcmp(up, "CRC32") == 0)
+        return 32;
+    return 0;
+}
+
+static const char *crc_poly(int bits)
+{
+    switch (bits) {
+    case 8:
+        return "0x07";
+    case 12:
+        return "0x80D";
+    case 16:
+        return "0x1021";
+    default:
+        return "0x04C11DB7";
+    }
+}
+
+/* mmb2c.py `def do_math_crc`.  Any of the six optional arguments may be
+ * written EMPTY to take its default - `MATH(CRC16 a(), , , &HFFFF)` -
+ * which is what MMBasic's `if (argc > 3 && *argv[4])` amounts to
+ * (MATHS.c:3128-3138), and programs do write it.  The defaults are
+ * emitted as literals, so a program that passes none of them pays
+ * nothing for them.
+ *
+ * The engine and the three places it deliberately differs from
+ * PicoMite 6.03.00 are in mmb_crc.h. */
+static struct val do_math_crc(const char *name)
+{
+    int bits = crc_width(name);
+    const char *args[6];
+    const char *fn, *src;
+    int k;
+
+    if (is_array_arg()) {
+        struct sym *sym = arrayref(1);
+        struct flat fl;
+
+        if (sym->ty == TY_S)
+            cv_err("MATH(%s ...) wants a number array or a string",
+                   name);
+        fl = array_flat(sym);
+        fn = (sym->ty == TY_I) ? "mmg_crc_i" : "mmg_crc_f";
+        src = sfmt("%s, %s", fl.ptr, fl.cnt);
+    } else {
+        struct val a = expr();
+
+        if (a.ty != TY_S)
+            cv_err("MATH(%s ...) wants a number array or a string",
+                   name);
+        fn = "mmg_crc_s";
+        src = a.code;
+    }
+    args[0] = "0";
+    args[1] = crc_poly(bits);
+    args[2] = "0";
+    args[3] = "0";
+    args[4] = "0";
+    args[5] = "0";
+    for (k = 0; k < 6; k++) {
+        if (!accept_op(","))
+            break;
+        if (is_op(",", 0) || is_op(")", 0))
+            continue;               /* an empty slot keeps the default */
+        args[k] = as_int(expr());
+    }
+    expect_op(")");
+    cv.uses_crc = 1;
+    return mkval(sfmt("%s(%d, %s, %s, %s, %s, %s, %s, %s)", fn, bits,
+                      src, args[0], args[1], args[2], args[3], args[4],
+                      args[5]), TY_I);
+}
+
 struct val call_builtin(const char *up)
 {
     const struct builtin *b;
@@ -1112,6 +1197,7 @@ struct val builtin_raw(const char *up)
         struct tok *t;
 
         expect_op("(");
+        /* mmb2c.py's CRCWIDTH and do_math_crc, in the same order */
         t = nxt();
         if (t->kind == T_ID && strcmp(t->up, "BASE64") == 0) {
             /* MATH(BASE64 ENCODE in$, out$): returns the length,
@@ -1150,6 +1236,8 @@ struct val builtin_raw(const char *up)
             return mkval(sfmt("%s(%s, %s, %d)", fn, a.code, tgt.code,
                               cap == 0 ? 255 : cap), TY_I);
         }
+        if (t->kind == T_ID && crc_width(t->up) != 0)
+            return do_math_crc(t->up);
         if (t->kind == T_ID && matharray_in(t->up)) {
             const char *name = t->up;
             struct sym *sym = arrayref(1);

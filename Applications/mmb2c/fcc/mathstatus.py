@@ -36,6 +36,13 @@ have_fns |= set(re.findall(r"'([A-Z0-9]+)'",
 # the three checkstrings MMBasic's own fun_math makes for the feature.
 assert "'BASE64'" in t, "the MATH BASE64 branch left mmb2c.py"
 have_fns |= {"BASE64", "ENCODE", "DECODE"}
+# MATH(CRC8/12/16/32 ...) is a hand branch for the same reason - one to
+# seven arguments, any of them omittable - and is registered from its
+# own table so the four names cannot drift apart from what do_math_crc
+# actually dispatches.
+assert "CRCWIDTH = {" in t, "the MATH CRC table left mmb2c.py"
+have_fns |= set(re.findall(
+    r"'(CRC[0-9]+)'", re.search(r"CRCWIDTH = \{([^}]*)\}", t).group(1)))
 # the in-place sub-commands do_array_cmd dispatches
 blk = t[t.index("def do_array_cmd"):]
 blk = blk[:blk.index("\n    def ", 10)]
@@ -90,10 +97,12 @@ into three kinds:
   quaternions (`Q_*`) and the complex-number set (`C_*`). These are
   category 2: add on demand rather than as a block, because the 3D and
   graphics demos say which are wanted first.
-* **codecs and transforms** - `FFT`, `AES128`, `CRC8/12/16/32`,
-  `WINDOW`, `SINC`, `INTERPOLATE`. Bigger pieces, still pure
-  arithmetic. With `BASE64` in, **`MATH CRC` is the most asked for of
-  what remains**.
+* **codecs and transforms** - `FFT`, `AES128`, `WINDOW`, `SINC`,
+  `INTERPOLATE`. Bigger pieces, still pure arithmetic. `BASE64` and
+  all four `CRC`s have shipped; of the rest `WINDOW` and `INTERPOLATE`
+  are small and self-contained, `FFT` wants a steer (its complex forms
+  depend on MMBasic's column-major 2-D storage, which our arrays
+  deliberately do not have) and `AES128` has no demand behind it.
 * **the odd ones out** - `PID` and `SENSORFUSION` carry state between
   calls, `M_PRINT` and `V_PRINT` write to the console, `RAND` overlaps
   `RND`, and `SHIFT`/`POWER` are array surgery of the kind `SLICE` and

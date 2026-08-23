@@ -445,6 +445,10 @@ void conv_write(FILE *f)
        types and MM_RAISE, so it can sit anywhere after that. */
     if (cv.uses_math)
         fprintf(f, "#include \"mmb_math.h\"\n");
+    /* The four CRCs, on the same terms: the engine goes in the program
+       that asks for it and costs every other program nothing. */
+    if (cv.uses_crc)
+        fprintf(f, "#include \"mmb_crc.h\"\n");
     /* SORT's shell sort, the same bargain as mmb_math.h: only a
        program that sorts carries the engine. */
     if (cv.uses_sort)
