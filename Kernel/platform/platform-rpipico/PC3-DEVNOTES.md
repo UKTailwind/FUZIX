@@ -320,14 +320,32 @@ refreshed pc3-sd.img.  Next: resume the test list below (TIME$, file
 I/O, editor keys, assembler, recursion guard, multi-process), then
 MODE/PLOT/GCOL -> Phase-5 framebuffer design.
 
-File interchange: /usr/bin/fat (Applications/util/fat.c) reads the SD
-FAT partition from Fuzix - format hdb1 in Windows (FAT16 or FAT32,
-NOT exFAT), drop files on it, then `fat ls` / `fat get NAME [dest]` /
-`fat info` on the PC3.  Long filenames and subdirectories work; read
-only (write support = future task; dosread in util is the old Minix
-FAT12/16 tool, not useful here).  Host-testable: fat.c compiles
-native and takes -d <image>; validated against mkfs.fat -F16/-F32
-images with mtools-written LFN files before ever touching hardware.
+File interchange: /bin/fat (Applications/util/fat.c - this note said
+/usr/bin for a long time and that is WRONG; update-flash.sh puts the
+utils in /bin, and a copy in /usr/bin is silently shadowed) reads AND
+writes the SD FAT partition from Fuzix - format hda1 in Windows (FAT16
+or FAT32, NOT exFAT), then `fat ls` / `fat get NAME [dest]` /
+`fat put SRC [dest]` / `fat info` on the PC3.  Long filenames and
+subdirectories work in both directions; put writes long name entries
+with the ~N short name behind them, and keeps FAT32's FSInfo free
+count true rather than scanning the FAT.  It does not mkdir.
+
+Put's ordering is the whole safety argument and is deliberate: data
+and chain before the directory entry, old chain freed only after the
+entry points at the new one, every FAT copy written.  Worst case from
+an interrupted put is leaked clusters, never a file that half exists.
+
+Gate: fattest.sh (in this directory) builds fat.c with host gcc and
+runs it against FAT16 and FAT32 images at two cluster sizes each,
+checking every write with fsck.vfat, an mtools readback, a fat get
+readback and a byte compare of the FAT copies - 146 checks.  It found
+two real faults: `..` in a first level subdirectory holds cluster 0
+meaning root, which on FAT32 addressed two clusters BELOW the data
+area (this was a latent read-path bug too, so `fat ls sub/..` was
+already wrong), and the reader never verified LFN checksums, so a
+stale fragment could put another file's name on a file.
+fatboardcheck.sh then links it with arm-none-eabi-gcc and the Fuzix
+libc, because the host gate links glibc and would not see a gap.
 
 ## BBC BASIC (built; awaiting hardware test)
 

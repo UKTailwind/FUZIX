@@ -364,6 +364,9 @@ the FAT partition, then:
 >SAVE "MYPROG"          save tokenised for fast loading next time
 ```
 
+The round trip closes with `fat put myprog.bas`, which writes the
+edited program back onto the FAT partition for the PC to pick up.
+
 ## Graphics
 
 `MODE 0`–`5` switch the display to 1024×768 and provide the classic
@@ -3040,33 +3043,59 @@ any PC — this is how files travel to Fuzix, because nothing else can
 mount the Unix partition. Format it once in Windows (FAT or FAT32,
 **not exFAT**), then simply copy files onto it.
 
-On the Fuzix side, the `fat` command reads it (long filenames and
-subdirectories included):
+On the Fuzix side, the `fat` command reads and writes it (long
+filenames and subdirectories included):
 
 ```
 # fat info
-/dev/hdb1: FAT16, 32695 clusters of 2048 bytes (62 MB)
+/dev/hda1: FAT16, 32695 clusters of 2048 bytes (62 MB)
 # fat ls
     4523  My Program.bas
    <dir>  BASIC
 # fat ls basic
 # fat get "my program.bas" /root/prog.bas
 # fat get demo.bin                    (lowercased name in current dir)
+# fat put results.txt                 into the root, under its own name
+# fat put results.txt BASIC           into a directory
+# fat put prog.bas "My Program.bas"   naming it as well
 ```
 
-`fat` is read-only by design — the desktop does the writing. To move
-a file *out* of Fuzix, use the serial port, or write it with
-`doswrite` (the venerable Minix FAT12/16 tool, also included) if the
-partition is FAT16.
+`fat put` is the complement of `fat get`, and the card is then the
+route in *both* directions: write the file from Fuzix, switch the
+machine off, put the card in a PC. An existing file of the same name
+is replaced. Names are stored as the desktop stores them — a long
+name with spaces and mixed case arrives intact, and a plain lower case
+name like `results.txt` does not come back shouting.
+
+Two things it will not do. It does not create directories, so make
+them from the desktop (or `fat put x SOMEDIR` into one that exists).
+And it will not take a name FAT cannot hold — one containing
+`\ / : * ? " < > |`, or longer than 64 characters — rather than
+quietly storing something else under a name you did not choose.
+
+**Pulling the card out mid-write.** The order of writing is chosen so
+that this is survivable: the file's data reaches the card before the
+directory entry that names it, and when a file is replaced the old
+copy is released only after the entry points at the new one. Lose
+power at any moment and the directory still describes a file that is
+entirely there — the old one or the new one, never half of each. What
+can be left behind is space marked in use that no file claims, which
+the desktop's own check-disk reclaims. It is still worth letting the
+prompt come back before switching off.
+
+`doswrite` (the venerable Minix FAT12/16 tool) is also here, and
+predates `fat put`; it handles FAT16 only and knows nothing of long
+names.
 
 \newpage
 
 # Moving files over the serial port
 
-The FAT partition carries files *in*, but `fat` is read-only, so it
-cannot carry anything back *out*. The serial console can do both, in
-either direction, with nothing on the board but `uue` and `uud` — and
-it is the only route that needs no card swapping.
+The FAT partition carries files in both directions now that `fat put`
+exists, but it carries them at the speed of switching the machine off
+and walking the card to a PC. The serial console moves a file while
+the machine is still running, with nothing on the board but `uue` and
+`uud` — and it is the only route that needs no card swapping at all.
 
 The idea is older than the machine: `uuencode` turns any file into
 printable text, and printable text survives a terminal. Both tools are
@@ -3511,6 +3540,7 @@ names for one program.
 # fat ls                       list the FAT partition
 # fat ls basic                 ... a directory of it
 # fat get "my program.bas" /root/prog.bas
+# fat put results.txt          ... and back the other way
 # fat info
 # uue report.txt               -> report.uue, to paste into a terminal
 # uud prog.uue                 decode, recreating the original name
@@ -3521,8 +3551,8 @@ names for one program.
 ```
 
 `fat` takes `[-d device]` before its subcommand. The FAT partition is
-the one Windows can see, so it is the easy way to move a file from a
-PC; `uue`/`uud` need nothing but the console, and have a chapter of
+the one Windows can see, so it is the easy way to move a file to or
+from a PC; `uue`/`uud` need nothing but the console, and have a chapter of
 their own.
 
 ## Networking
@@ -3568,6 +3598,15 @@ tell you there is no radio.
 ```
 
 `setdate` also takes `-u` for UTC and `-0` to zero the clock.
+
+`remount -n / ro` is worth doing before anything that might crash, not
+only before flashing: a crash with the root read-only costs a power
+cycle and you are back at the prompt, where the same crash with it
+read-write means waiting through `fsck` on the next boot. **`mount`
+will not confirm that it took** — it reports `read-write` either way.
+The honest check is to try to write something: `touch x` fails while
+the root is read-only, and succeeds once `remount -n / rw` has put it
+back.
 `swapon` exists but has nothing to do: there is no swap device any
 more, because the kernel takes an allocation the size of the process
 out of PSRAM when it needs to swap one out. `free` reports that.
