@@ -372,9 +372,37 @@ struct gfx_batch {
  * transparent PRINT (its PrintPixelMode 1).  Returns the x coordinate
  * the text ended at, so a caller can lay out a line piece by piece.
  */
+/* Orientation of the glyphs within the run - MMBasic's Draw.h
+ * numbering, the third letter of TEXT's justify$.  V, I, U and D all
+ * need the FONT'S BITS to draw, and the fonts are the kernel's, so the
+ * whole family has to be decided on this side of the crossing; a
+ * caller that tried would need a copy of nine fonts to do it with.
+ *
+ * The rotations are MMBasic's GUIPrintChar: the glyph turns, the pen
+ * turns with it (inverted text runs right to left, U bottom to top, D
+ * top to bottom), and the anchor stays the pixel it would have been
+ * had the character not turned.  What GUIPrintChar does by building a
+ * rotated copy of the glyph in a scratch buffer, gfx_blit does by
+ * reading the original at a rotated index - same bits, no allocation,
+ * and no ceiling on how big a user font may be.
+ */
+#define GORIENT_N	0	/* normal                                */
+#define GORIENT_V	1	/* one glyph per line, downwards         */
+#define GORIENT_I	2	/* inverted - upside down, right to left */
+#define GORIENT_U	3	/* rotated 90 anticlockwise              */
+#define GORIENT_D	4	/* rotated 90 clockwise                  */
+
 struct gfx_text {
 	int16_t x, y;		/* top-left, in pixels */
-	uint8_t scale;		/* 1 = one cell of the font */
+	/* Low nibble the scale, 1 = one cell of the font; high nibble
+	 * one of GORIENT_*, so a caller built before there were
+	 * orientations - a scale of 1 to 15 and nothing else - asks for
+	 * GORIENT_N and gets exactly what it used to get.  The nibble is
+	 * why the field is not simply widened: the padding byte beside
+	 * it is uninitialised in every existing caller, and reading an
+	 * orientation out of stack litter is a bug that would appear
+	 * only sometimes. */
+	uint8_t scale;
 	uint8_t font;		/* 1..9, MMBasic's numbering; 0 means 1 */
 	int32_t fg;		/* RGB888 */
 	int32_t bg;		/* RGB888, or -1 for transparent */
@@ -382,6 +410,8 @@ struct gfx_text {
 	void *str;
 };
 #define GFXIOC_TEXT   0x001A
+#define GFX_TEXT_SCALE(s)  ((s) & 0x0F)
+#define GFX_TEXT_ORIENT(s) ((s) >> 4)
 
 /* The metrics of one of the built-in fonts.  A caller laying text out -
  * justifying it, centring it, deciding where the next line goes - needs

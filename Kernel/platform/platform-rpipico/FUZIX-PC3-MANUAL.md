@@ -1088,10 +1088,31 @@ paper around the letters. With no colours given, `COLOUR`'s are used.
 |---|---|---|
 | horizontal | `L` `C` `R` | x is the left, the centre, the right |
 | vertical | `T` `M` `B` | y is the top, the middle, the bottom |
-| orientation | `N` `V` | normal, or one character per line downwards |
+| orientation | `N` `V` `I` `U` `D` | which way the characters face |
 
-The other three orientations MMBasic offers — `I` inverted, `U` and `D`
-rotated — are **not yet drawn**; they are accepted and come out normal.
+All five orientations draw. `N` is normal and `V` puts one character
+per line downwards; the other three turn the character itself — `I`
+upside down and running right to left, `U` a quarter turn
+anticlockwise running upwards, `D` a quarter turn clockwise running
+downwards.
+
+Turning the character moves its cell, and that is worth knowing before
+you place one. The `x, y` you give is the pixel the character would
+have turned **about**, so it stays the top-left corner only for `N`
+and `V`: for `I` it is the bottom-right, for `D` the top-right, and
+for `U` the left edge just below the cell. Putting an upside-down
+character where an upright one would have gone therefore means adding
+the cell, not subtracting it:
+
+```basic
+Text 168, 30, "Y"                              ' upright, in that cell
+Text 168 + MM.Info(FontWidth) - 1, _
+     30 + MM.Info(FontHeight) - 1, "Y", "I"    ' upside down, same cell
+```
+
+`samples/textorient.bas` measures all five with `PIXEL()` and prints
+the numbers, and carries the transcript a real PicoMite gives for the
+same program.
 
 The nine fonts are MMBasic's own, so a character looks the same here as
 it does there. They live in the PC3's flash, which is why there is no
@@ -4454,8 +4475,8 @@ since v0.15 so are `BLIT` — including the flash slots it reads and
 writes — and the `SPRITE` family with its two-axis `SCROLL`. `TEXT`
 draws in any of MMBasic's nine built-in fonts, and in a font the
 program defines for itself with `DefineFont` (numbers 10 to 16), but
-only in its normal and vertical orientations — the three that rotate
-the character itself are accepted and drawn normally.
+in all five of MMBasic's orientations, the three that turn the
+character itself included.
 
 Of the pins, `SETPIN n, DIN|DOUT|AIN|ARAW|INTH|INTL|INTB|PWM|OFF`,
 `PIN(n) =` and `PIN(n)` are done, and so are `PORT` in both directions

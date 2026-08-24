@@ -4208,7 +4208,8 @@ void mm_font_cur(MMINTEGER *font, MMINTEGER *scale)
  * GUIPrintChar does.
  */
 void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
-              MMINTEGER fg, MMINTEGER bg, const char *s, MMINTEGER len)
+              MMINTEGER fg, MMINTEGER bg, const char *s, MMINTEGER len,
+              MMINTEGER orient)
 {
     struct mm_gfx_text gt;
     int r;
@@ -4229,7 +4230,12 @@ void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
         font = mm_gfont;
     gt.x = (short)x;
     gt.y = (short)y;
-    gt.scale = (unsigned char)scale;
+    /* Scale in the low nibble, orientation in the high one - see
+     * struct gfx_text in pico_ioctl.h for why it is packed and not
+     * given a field of its own. */
+    if (orient < 0 || orient > 4)
+        orient = 0;
+    gt.scale = (unsigned char)((scale & 0x0F) | ((int)orient << 4));
     gt.font = (unsigned char)font;
     gt.fg = (long)((fg == MM_CUR) ? mm_gfx_fg : (fg & 0xFFFFFF));
     gt.bg = (bg < 0) ? -1L : (long)(bg & 0xFFFFFF);
@@ -4280,10 +4286,12 @@ void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
            about to read, and the freeze looks like a read that never
            completes. */
         fprintf(stderr,
-                "TEXT p=%08lx len=%u x=%d y=%d f=%u sc=%u fg=%ld bg=%ld\r\n",
+                "TEXT p=%08lx len=%u x=%d y=%d f=%u sc=%u or=%u "
+                "fg=%ld bg=%ld\r\n",
                 (unsigned long)gt.str, (unsigned)gt.len,
                 (int)gt.x, (int)gt.y, (unsigned)gt.font,
-                (unsigned)gt.scale, (long)gt.fg, (long)gt.bg);
+                (unsigned)(gt.scale & 0x0F), (unsigned)(gt.scale >> 4),
+                (long)gt.fg, (long)gt.bg);
         fflush(stderr);
         mm_iodrain();
     }
@@ -5447,10 +5455,11 @@ void mm_map_set(void)   {}
 void mm_map_reset(void) {}
 
 void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
-              MMINTEGER fg, MMINTEGER bg, const char *s, MMINTEGER len)
+              MMINTEGER fg, MMINTEGER bg, const char *s, MMINTEGER len,
+              MMINTEGER orient)
 {
     (void)x; (void)y; (void)font; (void)scale;
-    (void)fg; (void)bg; (void)s; (void)len;
+    (void)fg; (void)bg; (void)s; (void)len; (void)orient;
 }
 
 void mm_line(MMINTEGER x1, MMINTEGER y1, MMINTEGER x2, MMINTEGER y2,

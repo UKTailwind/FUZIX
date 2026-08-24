@@ -85,14 +85,29 @@ static int mmg_just(const char *p, int *jh, int *jv, int *jo)
  *	TEXT itself.
  *
  *	The justification arithmetic is GUIPrintString's, unchanged, with
- *	its three cases: normal text moves by the whole string's width and
+ *	its five cases: normal text moves by the whole string's width and
  *	one cell's height, vertical text by one cell's width and the whole
- *	string's height, and the rotated ones by the two swapped.
+ *	string's height, and the rotated ones by the two swapped - and, for
+ *	I and D, ADDED rather than subtracted, because those three run the
+ *	other way along their axis.
  *
- *	Only N and V are drawn.  I, U and D rotate the GLYPH, which needs
- *	the font's bits on this side of the syscall; until that is done
- *	they are drawn normally rather than not at all, so a program that
- *	asks for them shows something wrong rather than nothing.
+ *	THE GLYPH TURNS ON THE OTHER SIDE OF THE CROSSING.  Where the run
+ *	starts is arithmetic on the cell and belongs here; turning the
+ *	characters needs the font's bits, and the fonts are the kernel's,
+ *	so the orientation goes with the run and GFXIOC_TEXT does the rest
+ *	(GORIENT_* in pico_ioctl.h).  That also puts the per-glyph part of
+ *	GUIPrintChar - its modx/mody and the direction the pen walks -
+ *	where the glyphs are, which is the same split the reference makes
+ *	between GUIPrintString and GUIPrintChar.
+ *
+ *	Until 2026-08-24 only N and V were drawn and I, U and D came out
+ *	upright.  That was not the harmless placeholder it was written as:
+ *	a program that asks for inverted text has already MOVED THE ANCHOR
+ *	to suit inverted text, so drawing it upright put it a whole cell
+ *	away from where it belonged rather than merely the right way up.
+ *	samples/vaders.bas is the case that showed it - the upside-down Y
+ *	of PLAY landed one character right and most of a line down, which
+ *	is exactly one cell of font 1 in each direction.
  *
  *	s and just are MMBasic strings - length byte first - not C ones,
  *	which is why the length is taken and not counted: a string here
@@ -105,7 +120,7 @@ static void mmg_text(int x, int y, const char *s, const char *just,
 	MMINTEGER cw = 0, ch = 0;
 	const char *text = mm_cstr(s);
 	int len = mm_slen(s);
-	int w, h, i;
+	int w, h;
 
 	/*
 	 * An omitted font or scale is the CURRENT one, which is what FONT
@@ -144,7 +159,15 @@ static void mmg_text(int x, int y, const char *s, const char *just,
 	w = (int)cw * scale;		/* one cell, scaled - GetFontWidth */
 	h = (int)ch * scale;
 
-	if (jo == MMG_ORIENT_V) {
+	/*
+	 * GUIPrintString's five blocks, in its order.  Read them as one
+	 * table: whichever axis the string runs along takes len * cell,
+	 * the other takes one cell, and the sign is which way the pen
+	 * walks.  The quarter turns swap w and h because their cell is
+	 * on its side.
+	 */
+	switch (jo) {
+	case MMG_ORIENT_V:
 		if (jh == MMG_JUST_CENTRE)
 			x -= w / 2;
 		else if (jh == MMG_JUST_RIGHT)
@@ -153,25 +176,51 @@ static void mmg_text(int x, int y, const char *s, const char *just,
 			y -= (len * h) / 2;
 		else if (jv == MMG_JUST_BOTTOM)
 			y -= len * h;
-		/* One call per glyph: the run the kernel draws is a row,
-		   and this is a column. */
-		for (i = 0; i < len; i++)
-			mm_gtext(x, y + i * h, font, scale, fc, bc,
-				 text + i, 1);
-		return;
+		break;
+	case MMG_ORIENT_I:
+		if (jh == MMG_JUST_CENTRE)
+			x += (len * w) / 2;
+		else if (jh == MMG_JUST_RIGHT)
+			x += len * w;
+		if (jv == MMG_JUST_MIDDLE)
+			y += h / 2;
+		else if (jv == MMG_JUST_BOTTOM)
+			y += h;
+		break;
+	case MMG_ORIENT_U:
+		if (jh == MMG_JUST_CENTRE)
+			x -= h / 2;
+		else if (jh == MMG_JUST_RIGHT)
+			x -= h;
+		if (jv == MMG_JUST_MIDDLE)
+			y += (len * w) / 2;
+		else if (jv == MMG_JUST_BOTTOM)
+			y += len * w;
+		break;
+	case MMG_ORIENT_D:
+		if (jh == MMG_JUST_CENTRE)
+			x += h / 2;
+		else if (jh == MMG_JUST_RIGHT)
+			x += h;
+		if (jv == MMG_JUST_MIDDLE)
+			y -= (len * w) / 2;
+		else if (jv == MMG_JUST_BOTTOM)
+			y -= len * w;
+		break;
+	default:
+		if (jh == MMG_JUST_CENTRE)
+			x -= (len * w) / 2;
+		else if (jh == MMG_JUST_RIGHT)
+			x -= len * w;
+		if (jv == MMG_JUST_MIDDLE)
+			y -= h / 2;
+		else if (jv == MMG_JUST_BOTTOM)
+			y -= h;
+		break;
 	}
-
-	if (jh == MMG_JUST_CENTRE)
-		x -= (len * w) / 2;
-	else if (jh == MMG_JUST_RIGHT)
-		x -= len * w;
-	if (jv == MMG_JUST_MIDDLE)
-		y -= h / 2;
-	else if (jv == MMG_JUST_BOTTOM)
-		y -= h;
 	/* text, not s: s points at the length byte, and drawing that as a
 	   character puts a blank cell in front of every string. */
-	mm_gtext(x, y, font, scale, fc, bc, text, len);
+	mm_gtext(x, y, font, scale, fc, bc, text, len, jo);
 }
 
 #endif /* MMB_GFX_TEXT_H */

@@ -471,7 +471,8 @@ static void w_font_cur(void) { mm_font_cur(PI(0), PI(1)); A = 0; }
    both.  One integer in, nothing out. */
 static void w_console(void)  { mm_console(LL(0)); A = 0; }
 static void w_gtext(void)    { mm_gtext(LL(0), LL(2), LL(4), LL(6),
-                                        LL(8), LL(10), Ps(12), LL(13));
+                                        LL(8), LL(10), Ps(12), LL(13),
+                                        LL(15));
                                A = 0; }
 /* GPIO - one crossing for all of SETPIN and PIN; the statements
    themselves are static functions in mmb_gpio.h, so a program that

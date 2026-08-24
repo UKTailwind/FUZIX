@@ -191,7 +191,7 @@ void console_mirror_reset(void);
 #define GFX_TEXT_W 8                    /* font 1's cell - the console's */
 #define GFX_TEXT_H 12
 int display_gfx_text(int x, int y, int font, int scale, int fc, int bc,
-                     const uint8_t *s, int len);
+                     const uint8_t *s, int len, int orient);
 /* Scroll the drawing target: rows > 0 up, < 0 down, vacated band
  * filled with fillc.  THE one implementation - the console's graphics
  * scroll calls it and GFXIOC_SCROLL hands it to userland, so a PRINT

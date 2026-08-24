@@ -6,9 +6,10 @@
 Add a statement, or change mmb_runtime.c/.h or the mmb_gfx*.h set, and
 these things on the board are involved:
 
-    /usr/lib/cc/include/mmb_runtime.h   what the on-board cc reads
-    /usr/lib/cc/include/mmb_gfx*.h      ditto - one header per primitive
-                                        (pts/circle/text/map + umbrella)
+    /usr/lib/cc/include/mmb_*.h         every header the on-board cc
+                                        reads - one per primitive or
+                                        family, taken by glob from
+                                        Applications/mmb2c
     /usr/bin/bcrun                      the runtime is compiled INTO it
     /usr/bin/mmbc                       the translator
     /usr/bin/mmedit                     its keyword colouring
@@ -26,6 +27,7 @@ Build first, from the FUZIX tree:
 
 then run this.  Everything is stripped on the way.
 """
+import glob
 import os
 import subprocess
 import sys
@@ -33,38 +35,25 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 FUZIX = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 CC = os.path.join(FUZIX, "Applications", "CC")
+MMB = os.path.join(FUZIX, "Applications", "mmb2c")
 MMEDIT = os.path.join(FUZIX, "Applications", "mmedit")
 STRIP = "arm-none-eabi-strip"
 TMP = os.environ.get("TEMP", "/tmp")
 
-HEADERS = [
-    (os.path.join(CC, "mmb_runtime.h"), "mmb_runtime.h",
-     "/usr/lib/cc/include/mmb_runtime.h"),
-    (os.path.join(CC, "mmb_gfx.h"), "mmb_gfx.h",
-     "/usr/lib/cc/include/mmb_gfx.h"),
-    (os.path.join(CC, "mmb_gfx_pts.h"), "mmb_gfx_pts.h",
-     "/usr/lib/cc/include/mmb_gfx_pts.h"),
-    (os.path.join(CC, "mmb_gfx_circle.h"), "mmb_gfx_circle.h",
-     "/usr/lib/cc/include/mmb_gfx_circle.h"),
-    (os.path.join(CC, "mmb_gfx_box.h"), "mmb_gfx_box.h",
-     "/usr/lib/cc/include/mmb_gfx_box.h"),
-    (os.path.join(CC, "mmb_gfx_rbox.h"), "mmb_gfx_rbox.h",
-     "/usr/lib/cc/include/mmb_gfx_rbox.h"),
-    (os.path.join(CC, "mmb_gfx_triangle.h"), "mmb_gfx_triangle.h",
-     "/usr/lib/cc/include/mmb_gfx_triangle.h"),
-    (os.path.join(CC, "mmb_gfx_arc.h"), "mmb_gfx_arc.h",
-     "/usr/lib/cc/include/mmb_gfx_arc.h"),
-    (os.path.join(CC, "mmb_gfx_text.h"), "mmb_gfx_text.h",
-     "/usr/lib/cc/include/mmb_gfx_text.h"),
-    (os.path.join(CC, "mmb_gfx_map.h"), "mmb_gfx_map.h",
-     "/usr/lib/cc/include/mmb_gfx_map.h"),
-    (os.path.join(CC, "mmb_gpio.h"), "mmb_gpio.h",
-     "/usr/lib/cc/include/mmb_gpio.h"),
-    (os.path.join(CC, "mmb_blit.h"), "mmb_blit.h",
-     "/usr/lib/cc/include/mmb_blit.h"),
-    (os.path.join(CC, "mmb_flash.h"), "mmb_flash.h",
-     "/usr/lib/cc/include/mmb_flash.h"),
-]
+# EVERY mmb_*.h, BY GLOB, from the one place they live.
+#
+# This was a hand-written list of thirteen, and it named them in
+# Applications/CC - where they were COPIES until the copies were
+# deleted, so by the time anyone ran it the list was thirteen paths to
+# nothing.  mkccimage.sh, which builds the card, has globbed this
+# directory for releases and says why in its own comment: "a glob
+# cannot forget".  The card and the incremental push now agree because
+# they ask the same question.
+HEADERS = [(p, os.path.basename(p),
+            "/usr/lib/cc/include/" + os.path.basename(p))
+           for p in sorted(glob.glob(os.path.join(MMB, "mmb_*.h")))]
+if not HEADERS:
+    sys.exit("no mmb_*.h in %s" % MMB)
 # The STRIPPED binaries, which stageall.sh has already produced in
 # hwtest/ - the same files the card image installs.  Stripping here
 # instead would mean running the cross toolchain, and this script runs

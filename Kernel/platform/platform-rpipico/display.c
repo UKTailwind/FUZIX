@@ -1812,8 +1812,27 @@ int display_gfx_rects(const struct gfx_rc *rc, int n, const uint32_t *col)
  *     MicroPython's framebuf so assets interchange between the two PC3
  *     environments, and the scanout expander is indifferent.
  */
-int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
-                       int fc, int bc, const uint8_t *bitmap)
+/* The blit above with the glyph turned - see GORIENT_* in pico_ioctl.h
+ * for why turning it is the kernel's job.
+ *
+ * Every orientation reads the SAME source bits; only the order changes,
+ * and for all four that order is linear in the destination pixel.  So
+ * each destination row needs one base and one step, worked out before
+ * the row starts, and the innermost loop stays the add it always was -
+ * no branch per pixel, no rotated copy, no scratch buffer, and a user
+ * font of any cell size works because nothing here is sized.
+ *
+ * The mapping is MMBasic's GUIPrintChar read backwards.  It builds the
+ * rotated glyph by walking the SOURCE and computing where each bit
+ * lands; this walks the DESTINATION and computes where each pixel came
+ * from, which is the same permutation inverted:
+ *
+ *   I   dest(k,i) <- source(width-1-k, height-1-i)
+ *   U   dest(k,i) <- source(width-1-i, k)        cell turns: h wide, w tall
+ *   D   dest(k,i) <- source(i, height-1-k)       cell turns: h wide, w tall
+ */
+static int gfx_blit(int x1, int y1, int width, int height, int scale,
+                    int fc, int bc, const uint8_t *bitmap, int orient)
 {
     enum gexp ex = gfx_exp;
     int w = gfx_width(ex);
@@ -1821,6 +1840,9 @@ int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
     int stride = (ex == EXP_CONSOLE) ? DISP_STRIDE : gfx_stride;
     int bpp = gfx_bpp(ex);
     int nbits = width * height;
+    /* The cell AS DRAWN.  A quarter turn swaps it; a half turn does not. */
+    int dw = (orient >= GORIENT_U) ? height : width;
+    int dh = (orient >= GORIENT_U) ? width : height;
     int i, j, k, m, x, y, c;
 
     if (!w)
@@ -1829,16 +1851,38 @@ int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
         return -1;
     /* wholly off-screen: MMBasic's own early out, before any work */
     if (x1 >= w || y1 >= h ||
-        x1 + width * scale < 0 || y1 + height * scale < 0)
+        x1 + dw * scale < 0 || y1 + dh * scale < 0)
         return 0;
 
-    for (i = 0; i < height; i++) {              /* source scan line */
+    for (i = 0; i < dh; i++) {                  /* destination row */
+        int base, step;
+
+        switch (orient) {
+        case GORIENT_I:
+            base = (height - 1 - i) * width + width - 1;
+            step = -1;
+            break;
+        case GORIENT_U:
+            base = width - 1 - i;
+            step = width;
+            break;
+        case GORIENT_D:
+            base = (height - 1) * width + i;
+            step = -width;
+            break;
+        default:                                /* N and V draw upright */
+            base = i * width;
+            step = 1;
+            break;
+        }
         for (j = 0; j < scale; j++) {           /* repeated to scale */
+            int n = base;
+
             y = y1 + i * scale + j;
-            if (y < 0 || y >= h)
+            if (y < 0 || y >= h) {
                 continue;
-            for (k = 0; k < width; k++) {       /* bit in that line */
-                int n = i * width + k;
+            }
+            for (k = 0; k < dw; k++, n += step) {
                 int set = (bitmap[n >> 3] >> ((nbits - n - 1) & 7)) & 1;
 
                 c = set ? fc : bc;
@@ -1870,6 +1914,15 @@ int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
     return 0;
 }
 
+/* The upright blit, which is every caller but text: GUI BITMAP, the
+ * sprites, and every character the console draws. */
+int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
+                       int fc, int bc, const uint8_t *bitmap)
+{
+    return gfx_blit(x1, y1, width, height, scale, fc, bc, bitmap,
+                    GORIENT_N);
+}
+
 /*
  * A run of text at a PIXEL position - MMBasic's GUIPrintChar, which is
  * how PRINT reaches the screen in a graphics mode.
@@ -1888,18 +1941,43 @@ int display_gfx_bitmap(int x1, int y1, int width, int height, int scale,
  * counter redrawn every frame is the case this exists for.
  */
 int display_gfx_text(int x, int y, int font, int scale, int fc, int bc,
-                     const uint8_t *s, int len)
+                     const uint8_t *s, int len, int orient)
 {
     int i, w, h, first, count, glyph;
     const uint8_t *fp = display_font(font, &w, &h, &first, &count);
+    int cw, ch, modx = 0, mody = 0;
 
     if (!fp)
         return -1;
     if (scale <= 0)
         scale = 1;
+    if (orient < GORIENT_N || orient > GORIENT_D)
+        orient = GORIENT_N;
     /* Bytes per glyph.  NOT h: that only holds for a font 8 pixels
      * wide, and of the nine only two are. */
     glyph = (w * h) / 8;
+    cw = (orient >= GORIENT_U) ? h : w;         /* the cell as drawn */
+    ch = (orient >= GORIENT_U) ? w : h;
+    /*
+     * Where the turned glyph sits relative to the anchor - GUIPrintChar's
+     * modx/mody, transliterated including the -1 that makes the anchor
+     * the pixel the character rotated ABOUT rather than the corner one
+     * past it.  U is the reference's own odd one out: it alone has no
+     * -1, so its anchor lands one pixel outside the cell where N, I and
+     * D all land inside.  Copied as it stands.  A PicoMite and a PC3
+     * side by side must put the same pixel in the same place, and a
+     * quiet one-pixel improvement here is a divergence a program can
+     * see and nobody can explain - see mmb_gfx_text.h, which carries
+     * the same note for the justification half.
+     */
+    if (orient == GORIENT_I) {
+        modx = -(w * scale - 1);
+        mody = -(h * scale - 1);
+    } else if (orient == GORIENT_U) {
+        mody = -(w * scale);
+    } else if (orient == GORIENT_D) {
+        modx = -(h * scale - 1);
+    }
 
     for (i = 0; i < len; i++) {
         int c = s[i];
@@ -1910,13 +1988,34 @@ int display_gfx_text(int x, int y, int font, int scale, int fc, int bc,
              * are the digits, is every other character.  Substituting a
              * space would index off the end of that font. */
             if (bc >= 0)
-                display_gfx_rect(x, y, x + w * scale - 1,
-                                 y + h * scale - 1, bc);
+                display_gfx_rect(x + modx, y + mody,
+                                 x + modx + cw * scale - 1,
+                                 y + mody + ch * scale - 1, bc);
         } else {
-            display_gfx_bitmap(x, y, w, h, scale, fc, bc,
-                               &fp[4 + (c - first) * glyph]);
+            gfx_blit(x + modx, y + mody, w, h, scale, fc, bc,
+                     &fp[4 + (c - first) * glyph], orient);
         }
-        x += w * scale;
+        /* The pen turns with the glyph - GUIPrintChar's tail.  Note U
+         * and D step by the glyph's WIDTH, not its height: the cell
+         * turned, so the advance along the line is the side that used
+         * to be across it. */
+        switch (orient) {
+        case GORIENT_V:
+            y += h * scale;
+            break;
+        case GORIENT_I:
+            x -= w * scale;
+            break;
+        case GORIENT_U:
+            y -= w * scale;
+            break;
+        case GORIENT_D:
+            y += w * scale;
+            break;
+        default:
+            x += w * scale;
+            break;
+        }
     }
     return x;
 }

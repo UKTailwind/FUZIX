@@ -582,8 +582,13 @@ void mm_font(MMINTEGER font, MMINTEGER scale);
  *
  * Where the run BEGINS is all of the work, and none of it is here: see
  * mmg_text in mmb_gfx.h. */
+/* orient is one of MMG_ORIENT_* (mmb_gfx_text.h), which is MMBasic's
+ * Draw.h numbering: the kernel turns the glyphs and walks the pen the
+ * way GUIPrintChar does, because the fonts are the kernel's and their
+ * bits never cross to this side. */
 void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
-              MMINTEGER fg, MMINTEGER bg, const char *s, MMINTEGER len);
+              MMINTEGER fg, MMINTEGER bg, const char *s, MMINTEGER len,
+              MMINTEGER orient);
 
 /* FRAMEBUFFER - draw off-screen, then show it in one go.  0 means the
  * screen ("N") and 1 the off-screen buffer ("F"), in every argument

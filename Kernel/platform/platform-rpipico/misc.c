@@ -416,7 +416,8 @@ int plt_dev_ioctl(uarg_t request, char *data)
             return -1;
         if (gt.len == 0)
             return 0;
-        if (gt.len > GFX_TEXT_MAX || gt.scale == 0) {
+        if (gt.len > GFX_TEXT_MAX || GFX_TEXT_SCALE(gt.scale) == 0 ||
+            GFX_TEXT_ORIENT(gt.scale) > GORIENT_D) {
             udata.u_error = EINVAL;
             return -1;
         }
@@ -432,11 +433,13 @@ int plt_dev_ioctl(uarg_t request, char *data)
             udata.u_error = EINVAL;
             return -1;
         }
-        return display_gfx_text(gt.x, gt.y, gt.font ? gt.font : 1, gt.scale,
+        return display_gfx_text(gt.x, gt.y, gt.font ? gt.font : 1,
+                                GFX_TEXT_SCALE(gt.scale),
                                 display_gfx_map((uint32_t)gt.fg),
                                 gt.bg < 0 ? -1
                                           : display_gfx_map((uint32_t)gt.bg),
-                                gt.str, (int)gt.len);
+                                gt.str, (int)gt.len,
+                                GFX_TEXT_ORIENT(gt.scale));
     }
     if (request == PICOIOC_RANDOM)
     {
