@@ -183,6 +183,55 @@ dimensions are refused. `tests/arrsize.bas` covers the size checks
 (blessed against the interpreter); `tests/sprite.bas` covers the 2-D
 load and its `Array Dimensions` boundary headless.
 
+**2026-08-24: phase 2, the matrix family.** `M_TRANSPOSE`, `M_MULT`,
+`M_INVERSE`, `V_MULT`, `V_ROTATE` and `MATH(M_DETERMINANT)`. **40 of 67
+members to 46**, and the vector and matrix family is now complete.
+
+Each is a transcription rather than a rewrite, which is what the
+storage-order change bought: they read a 2-D array flat and our flat
+order is MMBasic's. **The inverse is the reference's cofactor expansion,
+not an LU factorisation** - LU would be O(n^3) against O(n!), but the
+two do not round alike and a determinant is something a program PRINTS.
+`tests/mathm.bas` is byte-identical to the interpreter including the
+`6.123233996e-17` that falls out of `cos(90)`, which is what says the
+arithmetic order is the same one rather than merely the answer.
+
+The cofactor expansion is why `MMG_MDIM` exists: the reference
+allocates as it recurses and a header cannot, so there is a bound of 8 -
+past the point where the algorithm is the problem, an 8x8 inverse being
+64 cofactors of 5040 expansions each.
+
+**The one-element answer, and why it is ours alone.** MMBasic keeps an
+array's rank in the same `vartbl` entry as its bounds, where 0 means
+"simple variable", so **no dimension can have an extent of 1 under
+either OPTION BASE**: `DIM a(0)` is refused under BASE 0 and `DIM a(1)`
+under BASE 1, both with "Dimensions". That is structural there, not an
+oversight, and it means a 2x1 by 1x2 multiply cannot be written at all.
+
+We carry the rank separately, so those shapes are honest arrays here and
+the members work on them. The decision taken: **a 1x1 answer goes into a
+1x1 array**, `DIM c(0,0)`, and there is no scalar destination form.
+`M_MULT`'s contract stays "three 2-D arrays" with no special case, no
+new parse shape is invented, and the scalar route already exists and is
+blessed - `MATH(DOTPRODUCT)` is the same arithmetic and returns a
+number. `tests/mathm1.bas` shows the two agreeing, and carries the
+warning that a program using an extent-1 dimension will not run on a
+PicoMite - failing at the DIM, not at the MATH statement.
+
+`M_INVERSE` of a 1x1 is DEFINED here rather than copied: the
+reference's `cofactor()` would answer 0, its inner determinant of a 0x0
+minor falling through to zero. Unreachable there; wrong here.
+
+`V_ROTATE` takes four arrays of ONE type, float or integer. The
+reference takes any mix, and the mix that matters - exact geometry in,
+pixels out - is the one this refuses. An honest gap rather than sixteen
+combinations; say so if a program wants it.
+
+What is left of MATH is the statistics (`CORREL`, `CHI`, `CHI_P`,
+`CROSSING`), the quaternions, the transforms (`FFT`, `WINDOW`, `SINC`,
+`INTERPOLATE`), `AES128`, and the three that need something the machine
+does not have (`PID`, `SENSORFUSION`, `RAND`).
+
 ### 1. Nothing else may swallow a statement
 
 Two shipped features were computing wrong answers in silence, and the

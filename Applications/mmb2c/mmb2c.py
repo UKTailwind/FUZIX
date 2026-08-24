@@ -3012,6 +3012,15 @@ class Conv(object):
                            255 if cap is None else cap), TY_I)
             if t[0] == T_ID and t[2] in CRCWIDTH:
                 return self.do_math_crc(t[2])
+            if t[0] == T_ID and t[2] == 'M_DETERMINANT':
+                # MATH(M_DETERMINANT a())  - a square 2-D float array
+                a = self.arrayref()
+                if a.ty != TY_F:
+                    self.err("Argument 1 must be a floating point array")
+                self.expect_op(')')
+                p = self.array_plane(a)
+                self.uses_math = True
+                return ('mmg_mdet(%s, %s, %s)' % (p[0], p[1], p[2]), TY_F)
             if t[0] == T_ID and t[2] in ('MAGNITUDE', 'DOTPRODUCT'):
                 # MATH(MAGNITUDE a())        sqrt of the sum of squares
                 # MATH(DOTPRODUCT a(), b())  sum of the products
@@ -3068,7 +3077,8 @@ class Conv(object):
                 known = sorted(list(MATHFUNCS) + list(MATHARRAY)
                                + list(CRCWIDTH)
                                + ['BASE64 ENCODE', 'BASE64 DECODE',
-                                  'MAGNITUDE', 'DOTPRODUCT'])
+                                  'MAGNITUDE', 'DOTPRODUCT',
+                                  'M_DETERMINANT'])
                 self.err("MATH(%s ...) is not supported; translated are %s"
                          % (t[1], ', '.join(known)))
             name = t[2]
@@ -7563,6 +7573,98 @@ class Conv(object):
             self.emit('%s(%s);'
                       % ('mmg_vnorm' if op == 'V_NORMALISE' else 'mmg_vcross',
                          ', '.join(parts)))
+            return
+        if op in ('M_TRANSPOSE', 'M_MULT', 'M_INVERSE'):
+            # MATH M_TRANSPOSE a(), b()
+            # MATH M_MULT     a(), b(), c()
+            # MATH M_INVERSE  a(), b()
+            #
+            # Two-dimensional float arrays throughout, which is
+            # parsefloatarray's own restriction here (a dimension count
+            # of 2 in every one of them).  array_plane hands back
+            # MMBasic's own pair of names - dims[0] is the COLUMN count
+            # and dims[1] the row count - and the shape rules are
+            # checked at run time because a run-time DIM has no shape
+            # until then.
+            if not is_math:
+                self.err("%s is a MATH sub-command, not an ARRAY one" % op)
+            want = 3 if op == 'M_MULT' else 2
+            arrs = [self.arrayref()]
+            while self.accept_op(','):
+                arrs.append(self.arrayref())
+            if len(arrs) != want:
+                self.err("MATH %s takes %d arrays" % (op, want))
+            parts = []
+            for k, a in enumerate(arrs):
+                if a.ty != TY_F:
+                    self.err("Argument %d must be a floating point array"
+                             % (k + 1))
+                p = self.array_plane(a)
+                parts.extend([p[0], p[1], p[2]])
+            self.uses_math = True
+            fn = {'M_TRANSPOSE': 'mmg_mtrans', 'M_MULT': 'mmg_mmult',
+                  'M_INVERSE': 'mmg_minv'}[op]
+            self.emit('%s(%s);' % (fn, ', '.join(parts)))
+            return
+        if op == 'V_MULT':
+            # MATH V_MULT a(), b(), c()  - a matrix by a vector
+            #
+            # a is two-dimensional; b and c are one-dimensional, b as
+            # long as a's COLUMN count and c as long as its row count.
+            if not is_math:
+                self.err("V_MULT is a MATH sub-command, not an ARRAY one")
+            m = self.arrayref()
+            self.expect_op(',')
+            v = self.arrayref()
+            self.expect_op(',')
+            o = self.arrayref()
+            for k, a in enumerate((m, v, o)):
+                if a.ty != TY_F:
+                    self.err("Argument %d must be a floating point array"
+                             % (k + 1))
+            mp = self.array_plane(m)
+            vp, vn = self.array_line(v)
+            op_, on = self.array_line(o)
+            self.uses_math = True
+            self.emit('mmg_vmult(%s, %s, %s, %s, %s, %s, %s);'
+                      % (mp[0], mp[1], mp[2], vp, vn, op_, on))
+            return
+        if op == 'V_ROTATE':
+            # MATH V_ROTATE xo, yo, angle, xin(), yin(), xout(), yout()
+            #
+            # Four one-dimensional arrays of one type.  The angle goes
+            # in divided by OPTION ANGLE's multiplier, as SIN and COS
+            # do - cmd_math divides by `optionangle` before the cos and
+            # sin, and this is the same division at the same place.
+            if not is_math:
+                self.err("V_ROTATE is a MATH sub-command, not an ARRAY one")
+            ox = self.as_flt(self.expr())
+            self.expect_op(',')
+            oy = self.as_flt(self.expr())
+            self.expect_op(',')
+            ang = self.as_flt(self.expr())
+            if self.opt_angle:
+                ang = '((%s) / %s)' % (ang, self.opt_angle)
+            arrs = []
+            while self.accept_op(','):
+                arrs.append(self.arrayref())
+            if len(arrs) != 4:
+                self.err("MATH V_ROTATE takes four arrays: xin(), "
+                         "yin(), xout(), yout()")
+            ty = arrs[0].ty
+            if ty == TY_S:
+                self.err("MATH V_ROTATE needs numeric arrays")
+            for k, a in enumerate(arrs):
+                if a.ty != ty:
+                    self.err("MATH V_ROTATE needs all four arrays to be "
+                             "the same type (MMBasic takes any mix; this "
+                             "does not)")
+            parts = [ox, oy, ang]
+            for a in arrs:
+                parts.extend(self.array_line(a))
+            self.uses_math = True
+            self.emit('mmg_vrotate%s(%s);'
+                      % ('_i' if ty == TY_I else '', ', '.join(parts)))
             return
         if op in ('V_PRINT', 'M_PRINT'):
             # MATH V_PRINT a() [, HEX]   one line

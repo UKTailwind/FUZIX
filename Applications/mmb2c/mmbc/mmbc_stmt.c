@@ -4491,6 +4491,125 @@ static void do_array_cmd(int is_math)
                   want == 2 ? "mmg_vnorm" : "mmg_vcross", args));
         return;
     }
+    if (strcmp(op, "M_TRANSPOSE") == 0 || strcmp(op, "M_MULT") == 0
+        || strcmp(op, "M_INVERSE") == 0) {
+        /* MATH M_TRANSPOSE a(), b()
+         * MATH M_MULT     a(), b(), c()
+         * MATH M_INVERSE  a(), b()
+         *
+         * Two-dimensional float arrays throughout, which is
+         * parsefloatarray's own restriction here (a dimension count of
+         * 2 in every one of them).  array_plane hands back MMBasic's
+         * own pair of names - dims[0] is the COLUMN count and dims[1]
+         * the row count - and the shape rules are checked at run time
+         * because a run-time DIM has no shape until then. */
+        struct sym *arrs[3];
+        struct plane pl;
+        int want = strcmp(op, "M_MULT") == 0 ? 3 : 2;
+        int n = 0, k;
+        const char *args = NULL;
+        const char *fn;
+
+        if (!is_math)
+            cv_err("%s is a MATH sub-command, not an ARRAY one", op);
+        arrs[n++] = arrayref(1);
+        while (accept_op(",")) {
+            if (n == 3)
+                cv_err("MATH %s takes %d arrays", op, want);
+            arrs[n++] = arrayref(1);
+        }
+        if (n != want)
+            cv_err("MATH %s takes %d arrays", op, want);
+        for (k = 0; k < n; k++)
+            if (arrs[k]->ty != TY_F)
+                cv_err("Argument %d must be a floating point array", k + 1);
+        for (k = 0; k < n; k++) {
+            pl = array_plane(arrs[k]);
+            args = args ? sfmt("%s, %s, %s, %s", args, pl.ptr, pl.nc, pl.nr)
+                        : sfmt("%s, %s, %s", pl.ptr, pl.nc, pl.nr);
+        }
+        cv.uses_math = 1;
+        fn = strcmp(op, "M_TRANSPOSE") == 0 ? "mmg_mtrans"
+           : strcmp(op, "M_MULT") == 0 ? "mmg_mmult" : "mmg_minv";
+        emit(sfmt("%s(%s);", fn, args));
+        return;
+    }
+    if (strcmp(op, "V_MULT") == 0) {
+        /* MATH V_MULT a(), b(), c()  - a matrix by a vector
+         *
+         * a is two-dimensional; b and c are one-dimensional, b as long
+         * as a's COLUMN count and c as long as its row count. */
+        struct sym *m, *v, *o;
+        struct plane mp;
+        struct flat vf, of;
+
+        if (!is_math)
+            cv_err("V_MULT is a MATH sub-command, not an ARRAY one");
+        m = arrayref(1);
+        expect_op(",");
+        v = arrayref(1);
+        expect_op(",");
+        o = arrayref(1);
+        if (m->ty != TY_F)
+            cv_err("Argument 1 must be a floating point array");
+        if (v->ty != TY_F)
+            cv_err("Argument 2 must be a floating point array");
+        if (o->ty != TY_F)
+            cv_err("Argument 3 must be a floating point array");
+        mp = array_plane(m);
+        vf = array_line(v);
+        of = array_line(o);
+        cv.uses_math = 1;
+        emit(sfmt("mmg_vmult(%s, %s, %s, %s, %s, %s, %s);",
+                  mp.ptr, mp.nc, mp.nr, vf.ptr, vf.cnt, of.ptr, of.cnt));
+        return;
+    }
+    if (strcmp(op, "V_ROTATE") == 0) {
+        /* MATH V_ROTATE xo, yo, angle, xin(), yin(), xout(), yout()
+         *
+         * Four one-dimensional arrays of one type.  The angle goes in
+         * divided by OPTION ANGLE's multiplier, as SIN and COS do -
+         * cmd_math divides by `optionangle` before the cos and sin, and
+         * this is the same division at the same place. */
+        struct sym *arrs[4];
+        struct flat fl;
+        const char *ox, *oy, *ang, *args;
+        int n = 0, k, ty;
+
+        if (!is_math)
+            cv_err("V_ROTATE is a MATH sub-command, not an ARRAY one");
+        ox = as_flt(expr());
+        expect_op(",");
+        oy = as_flt(expr());
+        expect_op(",");
+        ang = as_flt(expr());
+        if (cv.opt_angle != NULL)
+            ang = sfmt("((%s) / %s)", ang, cv.opt_angle);
+        while (accept_op(",")) {
+            if (n == 4)
+                cv_err("MATH V_ROTATE takes four arrays: xin(), yin(), "
+                       "xout(), yout()");
+            arrs[n++] = arrayref(1);
+        }
+        if (n != 4)
+            cv_err("MATH V_ROTATE takes four arrays: xin(), yin(), "
+                   "xout(), yout()");
+        ty = arrs[0]->ty;
+        if (ty == TY_S)
+            cv_err("MATH V_ROTATE needs numeric arrays");
+        for (k = 0; k < 4; k++)
+            if (arrs[k]->ty != ty)
+                cv_err("MATH V_ROTATE needs all four arrays to be the "
+                       "same type (MMBasic takes any mix; this does not)");
+        args = sfmt("%s, %s, %s", ox, oy, ang);
+        for (k = 0; k < 4; k++) {
+            fl = array_line(arrs[k]);
+            args = sfmt("%s, %s, %s", args, fl.ptr, fl.cnt);
+        }
+        cv.uses_math = 1;
+        emit(sfmt("mmg_vrotate%s(%s);", ty == TY_I ? "_i" : "", args));
+        return;
+    }
     if (strcmp(op, "V_PRINT") == 0 || strcmp(op, "M_PRINT") == 0) {
         /* MATH V_PRINT a() [, HEX]   one line
          * MATH M_PRINT a()           one line per row

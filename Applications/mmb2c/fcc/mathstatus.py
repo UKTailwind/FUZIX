@@ -50,6 +50,10 @@ have_fns |= set(re.findall(
 # is loud.
 assert "'MAGNITUDE', 'DOTPRODUCT'" in t, "the MATH vector branch left mmb2c.py"
 have_fns |= {"MAGNITUDE", "DOTPRODUCT"}
+# MATH(M_DETERMINANT ...) is a hand branch for the same reason - a whole
+# 2-D array rather than a fixed argument count or a reduction.
+assert "'M_DETERMINANT'" in t, "the MATH M_DETERMINANT branch left mmb2c.py"
+have_fns |= {"M_DETERMINANT"}
 # the in-place sub-commands do_array_cmd dispatches
 blk = t[t.index("def do_array_cmd"):]
 blk = blk[:blk.index("\n    def ", 10)]
@@ -93,24 +97,31 @@ print("""The split is not arbitrary. What is in is what a BASIC program
 actually reaches for - the whole-array reductions, the hyperbolic and
 log/atan scalars, the in-place array operations, `BASE64` (which the
 Gmail recipe made load-bearing: it is the hand branch in `expr`, with
-MMBasic's own write-to-the-second-argument shape), and since
-2026-08-24 the eight members that needed no new machinery at all:
-`SHIFT`, `POWER`, `V_NORMALISE`, `V_CROSS`, `V_PRINT`, `M_PRINT`,
-`MAGNITUDE` and `DOTPRODUCT`. `tests/matha.bas` covers them, blessed
-line by line against a real MMBasic.
+MMBasic's own write-to-the-second-argument shape), and as of
+2026-08-24 the whole vector and matrix family: `SHIFT`, `POWER`,
+`V_NORMALISE`, `V_CROSS`, `V_PRINT`, `M_PRINT`, `MAGNITUDE`,
+`DOTPRODUCT`, then `M_TRANSPOSE`, `M_MULT`, `M_INVERSE`, `V_MULT`,
+`V_ROTATE` and `M_DETERMINANT`. `tests/matha.bas` and
+`tests/mathm.bas` cover them, blessed line by line against a real
+MMBasic - the inverse is the reference's cofactor expansion rather
+than an LU factorisation precisely so that it can be.
+
+`tests/mathm1.bas` is the exception that cannot be blessed, and says
+so: MMBasic keeps an array's rank in the same `vartbl` entry as its
+bounds, where 0 means "simple variable", so **no dimension can have an
+extent of 1 under either OPTION BASE** - `DIM a(0)` is refused under
+BASE 0 and `DIM a(1)` under BASE 1. We carry the rank separately, so
+a 1x1 matrix is an honest array here and a row vector times a column
+vector lands in one. A program that wants the NUMBER should still say
+`MATH(DOTPRODUCT)`.
 
 What is out divides into three kinds:
 
 * **pure arithmetic, no platform dependency, each independently
-  testable against the interpreter** - what is left of the matrix and
-  vector family (`M_MULT`, `M_INVERSE`, `M_TRANSPOSE`,
-  `M_DETERMINANT`, `V_MULT`, `V_ROTATE`), the statistics (`CORREL`,
+  testable against the interpreter** - the statistics (`CORREL`,
   `CHI`, `CHI_P`, `CROSSING`) and the quaternions (`Q_*`). These are
   category 2: add on demand rather than as a block, because the 3D and
-  graphics demos say which are wanted first. All six of the first
-  group walk a 2-D array FLAT, and since the storage-order change our
-  flat order is MMBasic's, so each is a transcription rather than a
-  rewrite. `array_plane()` already hands out what they need.
+  graphics demos say which are wanted first.
 * **codecs and transforms** - `FFT`, `AES128`, `WINDOW`, `SINC`,
   `INTERPOLATE`. Bigger pieces, still pure arithmetic. `BASE64` and
   all four `CRC`s have shipped; of the rest `WINDOW` and `INTERPOLATE`

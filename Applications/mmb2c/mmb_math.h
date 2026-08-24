@@ -248,9 +248,14 @@ MMG_FN MMINTEGER mmg_b64_dec(const char *in, char *out, int cap)
 
 /* <math.h> is included AFTER this header, so declare what is used here
  * rather than let it be guessed: an implicit declaration makes sqrt()
- * return int, which is not a warning but a wrong answer. */
+ * return int, which is not a warning but a wrong answer - and cc1 says
+ * so out loud when math.h's real declaration arrives ("type mismatch"),
+ * which is how the missing sin/cos here were found.  Anything this
+ * header calls out of libm belongs in this list. */
 double sqrt(double);
 double pow(double, double);
+double sin(double);
+double cos(double);
 
 /* No <string.h> here either - see the note on mmg_carr_i above. */
 MMG_FN char *mmg_mcpy(char *d, const char *s)
@@ -511,6 +516,321 @@ MMG_FN void mmg_mprint_i(const MMINTEGER *a, int nc, int nr, int stride)
 			mmg_pint(a[i * stride + j], 10);
 		}
 		mmg_puts("\r\n");
+	}
+}
+
+/*
+ *	MATH M_TRANSPOSE / M_MULT / M_INVERSE / V_MULT / V_ROTATE, and
+ *	the MATH() function M_DETERMINANT - the matrix family.
+ *
+ *	These read a 2-D array FLAT, and since the storage-order change
+ *	our flat order IS MMBasic's, so each is a transcription of
+ *	cmd_math rather than a strided rewrite.  MMBasic's own names are
+ *	kept: dims[0] is the COLUMN count and dims[1] the row count, so
+ *	the FIRST subscript is the column, a(col, row), and a row is
+ *	contiguous.  A program that writes a(row, col) gets the transpose
+ *	of what it meant - on a real PicoMite too.
+ *
+ *	THE DETERMINANT IS THE REFERENCE'S, cofactor expansion and all.
+ *	It is O(n!) where an LU factorisation would be O(n^3), but the
+ *	two do not round alike and a determinant is something a program
+ *	PRINTS.  Being the same number matters more here than being the
+ *	faster one, and nobody inverts a large matrix this way.
+ *
+ *	Hence MMG_MDIM.  The reference has no size limit because it
+ *	allocates as it recurses; a header cannot, so there is a bound,
+ *	and 8 is past the point where the algorithm is the problem - an
+ *	8x8 inverse is 64 cofactors of 5040 expansions each.
+ */
+
+#define MMG_MDIM 8
+
+/*	Scratch layout is the reference's: m[a * n + b] is (column a, row
+ *	b), which is `matrix[a][b]` there.  The load transposes into it
+ *	because cmd_math's does (`matrix[j][i] = *a1float++`), and the
+ *	arithmetic order follows from that - which is what keeps the last
+ *	bits the same.
+ */
+MMG_FN void mmg_m_load(const MMFLOAT *src, MMFLOAT *m, int n)
+{
+	int i, j;
+
+	for (i = 0; i < n; i++)
+		for (j = 0; j < n; j++)
+			m[j * n + i] = src[i * n + j];
+}
+
+/*	determinant(), transcribed.  The minor is built by the
+ *	reference's own running (m, n) walk rather than by index
+ *	arithmetic, so the terms are summed in the same order.
+ *
+ *	The reference recurses on an array of ROW POINTERS, so its minor
+ *	can sit in the top-left of a wider block and be read as if it
+ *	were its own size.  A flat array has no such freedom, so the
+ *	minor is repacked to its own width before the call - a copy the
+ *	reference does not make, and no arithmetic either way.
+ */
+MMG_FN MMFLOAT mmg_det(const MMFLOAT *matrix, int size)
+{
+	MMFLOAT m_minor[MMG_MDIM * MMG_MDIM];
+	MMFLOAT packed[MMG_MDIM * MMG_MDIM];
+	MMFLOAT s = 1, det = 0;
+	int i, j, m, n, c;
+
+	if (size == 1)
+		return matrix[0];
+	for (c = 0; c < size; c++) {
+		m = 0;
+		n = 0;
+		for (i = 0; i < size; i++) {
+			for (j = 0; j < size; j++) {
+				m_minor[i * MMG_MDIM + j] = 0;
+				if (i != 0 && j != c) {
+					m_minor[m * MMG_MDIM + n] =
+						matrix[i * size + j];
+					if (n < size - 2) {
+						n++;
+					} else {
+						n = 0;
+						m++;
+					}
+				}
+			}
+		}
+		for (i = 0; i < size - 1; i++)
+			for (j = 0; j < size - 1; j++)
+				packed[i * (size - 1) + j] =
+					m_minor[i * MMG_MDIM + j];
+		det = det + s * (matrix[c] * mmg_det(packed, size - 1));
+		s = -1 * s;
+	}
+	return det;
+}
+
+/*	cofactor() and the transpose() it ends with, which together give
+ *	the INVERSE rather than the cofactor matrix - the reference's
+ *	shape, kept. */
+MMG_FN void mmg_cofactor(const MMFLOAT *matrix, MMFLOAT *newmatrix, int size)
+{
+	MMFLOAT m_cofactor[MMG_MDIM * MMG_MDIM];
+	MMFLOAT matrix_cofactor[MMG_MDIM * MMG_MDIM];
+	MMFLOAT packed[MMG_MDIM * MMG_MDIM];
+	MMFLOAT d;
+	int p, q, m, n, i, j;
+
+	for (q = 0; q < size; q++) {
+		for (p = 0; p < size; p++) {
+			m = 0;
+			n = 0;
+			for (i = 0; i < size; i++) {
+				for (j = 0; j < size; j++) {
+					if (i != q && j != p) {
+						m_cofactor[m * MMG_MDIM + n] =
+							matrix[i * size + j];
+						if (n < size - 2) {
+							n++;
+						} else {
+							n = 0;
+							m++;
+						}
+					}
+				}
+			}
+			for (i = 0; i < size - 1; i++)
+				for (j = 0; j < size - 1; j++)
+					packed[i * (size - 1) + j] =
+						m_cofactor[i * MMG_MDIM + j];
+			matrix_cofactor[q * size + p] =
+				pow(-1, q + p) * mmg_det(packed, size - 1);
+		}
+	}
+	d = mmg_det(matrix, size);
+	for (i = 0; i < size; i++)
+		for (j = 0; j < size; j++)
+			newmatrix[i * size + j] =
+				matrix_cofactor[j * size + i] / d;
+}
+
+/*	MATH M_TRANSPOSE a(), b()
+ *
+ *	b's columns are a's rows and b's rows are a's columns.  Written
+ *	directly rather than through the reference's two scratch copies:
+ *	a move, not arithmetic, so nothing can round differently. */
+MMG_FN void mmg_mtrans(const MMFLOAT *a, int c1, int r1,
+                       MMFLOAT *b, int c2, int r2)
+{
+	int i, j;
+
+	if (c2 != r1 || r2 != c1)
+		MM_RAISE("Array size mismatch");
+	for (i = 0; i < r2; i++)
+		for (j = 0; j < c2; j++)
+			b[i * c2 + j] = a[j * c1 + i];
+}
+
+/*	MATH M_MULT a(), b(), c()      c = a x b
+ *
+ *	b's rows must equal a's columns; c is b's columns by a's rows.
+ *	The destination is refused as either source, which is the
+ *	reference's own check - the sum is accumulated in place.
+ *
+ *	A ONE ELEMENT ANSWER is legal here and is not on a real PicoMite.
+ *	MMBasic keeps an array's rank in the same table entry as its
+ *	bounds, where 0 means "simple variable", so no dimension can have
+ *	an extent of 1 under either OPTION BASE - DIM a(1) is refused
+ *	under BASE 1 for exactly the reason DIM a(0) is under BASE 0.  We
+ *	carry the rank separately, so DIM c(0,0) is an honest 1x1 matrix
+ *	and a row vector times a column vector lands in it.  A program
+ *	that wants the NUMBER rather than the matrix should say
+ *	MATH(DOTPRODUCT), which is the same arithmetic and returns one. */
+MMG_FN void mmg_mmult(const MMFLOAT *a, int c1, int r1,
+                      const MMFLOAT *b, int c2, int r2,
+                      MMFLOAT *c, int c3, int r3)
+{
+	int i, j, k;
+
+	if (r2 != c1)
+		MM_RAISE("Input array size mismatch");
+	if (c3 != c2 || r3 != r1)
+		MM_RAISE("Output array size mismatch");
+	if (c == a || c == b)
+		MM_RAISE("Destination array same as source");
+	for (i = 0; i < r3; i++) {
+		for (j = 0; j < c3; j++) {
+			MMFLOAT s = 0.0;
+
+			for (k = 0; k < c1; k++)
+				s += a[i * c1 + k] * b[k * c2 + j];
+			c[i * c3 + j] = s;
+		}
+	}
+}
+
+/*	MATH M_INVERSE a(), b()      square, and not the same array
+ *
+ *	1x1 is ours alone and is DEFINED rather than copied: the
+ *	reference's cofactor() would answer 0 for it, its inner
+ *	determinant of a 0x0 minor falling through to zero.  Unreachable
+ *	there, a 1x1 array being undeclarable; reachable here, so it is
+ *	the reciprocal, which is what the inverse of [x] is. */
+MMG_FN void mmg_minv(const MMFLOAT *a, int c1, int r1,
+                     MMFLOAT *b, int c2, int r2)
+{
+	MMFLOAT m[MMG_MDIM * MMG_MDIM], inv[MMG_MDIM * MMG_MDIM];
+	int i, j;
+
+	if (c2 != c1 || r2 != r1)
+		MM_RAISE("Array size mismatch");
+	if (c1 != r1)
+		MM_RAISE("Array must be square");
+	if (a == b)
+		MM_RAISE("Same array specified for input and output");
+	if (c1 > MMG_MDIM)
+		MM_RAISE("Array too large to invert");
+	if (c1 == 1) {
+		if (a[0] == 0.0)
+			MM_RAISE("Determinant of array is zero");
+		b[0] = 1.0 / a[0];
+		return;
+	}
+	mmg_m_load(a, m, c1);
+	if (mmg_det(m, c1) == 0.0)
+		MM_RAISE("Determinant of array is zero");
+	mmg_cofactor(m, inv, c1);
+	for (i = 0; i < r1; i++)
+		for (j = 0; j < c1; j++)
+			b[i * c1 + j] = inv[j * c1 + i];
+}
+
+/*	MATH(M_DETERMINANT a())      square */
+MMG_FN MMFLOAT mmg_mdet(const MMFLOAT *a, int nc, int nr)
+{
+	MMFLOAT m[MMG_MDIM * MMG_MDIM];
+
+	if (nc != nr)
+		MM_RAISEV("Array must be square", 0.0);
+	if (nc > MMG_MDIM)
+		MM_RAISEV("Array too large for a determinant", 0.0);
+	mmg_m_load(a, m, nc);
+	return mmg_det(m, nc);
+}
+
+/*	MATH V_MULT a(), b(), c()     a matrix by a vector
+ *
+ *	b is one-dimensional and as long as a's COLUMN count; c is
+ *	one-dimensional and as long as a's row count. */
+MMG_FN void mmg_vmult(const MMFLOAT *a, int nc, int nr,
+                      const MMFLOAT *b, int nb, MMFLOAT *c, int ncv)
+{
+	int i, j;
+
+	if (nb != nc || ncv != nr)
+		MM_RAISE("Array size mismatch");
+	if (c == a || c == b)
+		MM_RAISE("Destination array same as source");
+	for (i = 0; i < nr; i++) {
+		MMFLOAT s = 0.0;
+
+		for (j = 0; j < nc; j++)
+			s += a[i * nc + j] * b[j];
+		c[i] = s;
+	}
+}
+
+/*	MATH V_ROTATE xo, yo, angle, xin(), yin(), xout(), yout()
+ *
+ *	Four one-dimensional arrays of the same length.  Both inputs of a
+ *	point are read before either output is written, so an output may
+ *	be an input and a shape can be rotated in place - which is what
+ *	the reference buys with its GetTempMainMemory copies, without the
+ *	copies, and without a bound on the array length.
+ *
+ *	The angle arrives already divided by OPTION ANGLE's multiplier;
+ *	the translator does that, as it does for SIN and COS.
+ *
+ *	ALL FOUR ARRAYS ARE ONE TYPE, float or integer.  The reference
+ *	takes any mix of the two - parsenumberarray on each - and the mix
+ *	that matters, exact geometry in and pixels out, is the one this
+ *	refuses.  An honest gap rather than sixteen combinations; say so
+ *	if a program wants it.
+ */
+MMG_FN void mmg_vrotate(MMFLOAT ox, MMFLOAT oy, MMFLOAT ang,
+                        const MMFLOAT *xi, int nxi, const MMFLOAT *yi,
+                        int nyi, MMFLOAT *xo, int nxo,
+                        MMFLOAT *yo, int nyo)
+{
+	MMFLOAT ca = cos(ang), sa = sin(ang);
+	int i;
+
+	if (nyi != nxi || nxo != nxi || nyo != nxi)
+		MM_RAISE("Array size mismatch");
+	for (i = 0; i < nxi; i++) {
+		MMFLOAT x = xi[i] - ox;
+		MMFLOAT y = yi[i] - oy;
+
+		xo[i] = x * ca - y * sa + ox;
+		yo[i] = y * ca + x * sa + oy;
+	}
+}
+
+MMG_FN void mmg_vrotate_i(MMFLOAT ox, MMFLOAT oy, MMFLOAT ang,
+                          const MMINTEGER *xi, int nxi,
+                          const MMINTEGER *yi, int nyi,
+                          MMINTEGER *xo, int nxo,
+                          MMINTEGER *yo, int nyo)
+{
+	MMFLOAT ca = cos(ang), sa = sin(ang);
+	int i;
+
+	if (nyi != nxi || nxo != nxi || nyo != nxi)
+		MM_RAISE("Array size mismatch");
+	for (i = 0; i < nxi; i++) {
+		MMFLOAT x = (MMFLOAT)xi[i] - ox;
+		MMFLOAT y = (MMFLOAT)yi[i] - oy;
+
+		/* round(), as the reference does for an integer target */
+		xo[i] = mm_toint(x * ca - y * sa + ox);
+		yo[i] = mm_toint(y * ca + x * sa + oy);
 	}
 }
 #endif /* MMB_MATH_H */

@@ -1267,6 +1267,19 @@ struct val builtin_raw(const char *up)
         }
         if (t->kind == T_ID && crc_width(t->up) != 0)
             return do_math_crc(t->up);
+        if (t->kind == T_ID && strcmp(t->up, "M_DETERMINANT") == 0) {
+            /* MATH(M_DETERMINANT a())  - a square 2-D float array */
+            struct sym *a = arrayref(1);
+            struct plane p;
+
+            if (a->ty != TY_F)
+                cv_err("Argument 1 must be a floating point array");
+            expect_op(")");
+            p = array_plane(a);
+            cv.uses_math = 1;
+            return mkval(sfmt("mmg_mdet(%s, %s, %s)", p.ptr, p.nc, p.nr),
+                         TY_F);
+        }
         if (t->kind == T_ID && (strcmp(t->up, "MAGNITUDE") == 0
                                 || strcmp(t->up, "DOTPRODUCT") == 0)) {
             /* MATH(MAGNITUDE a())        sqrt of the sum of squares
@@ -1346,8 +1359,9 @@ struct val builtin_raw(const char *up)
             cv_err("MATH(%s ...) is not supported; translated are %s",
                    t->text,
                    "ATAN3, BASE64 DECODE, BASE64 ENCODE, COSH, CRC12, "
-                   "CRC16, CRC32, CRC8, DOTPRODUCT, LOG10, MAGNITUDE, "
-                   "MAX, MEAN, MEDIAN, MIN, SD, SINH, SUM, TANH");
+                   "CRC16, CRC32, CRC8, DOTPRODUCT, LOG10, "
+                   "M_DETERMINANT, MAGNITUDE, MAX, MEAN, MEDIAN, MIN, "
+                   "SD, SINH, SUM, TANH");
         {
             const char *name = t->up;
             struct val a = expr();
