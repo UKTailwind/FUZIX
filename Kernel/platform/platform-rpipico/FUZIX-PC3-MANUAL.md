@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.21 — August 2026"
+date: "Release v0.22 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -59,71 +59,61 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## New in v0.21
+## New in v0.22
 
-**The machine has a manual.** `man` answered "No manual entry" for
-every command on the card until now, because the card carried exactly
-one page. It carries 158 now — one for every command in `/bin`,
-`/usr/bin` and `/usr/games` — plus the 27 system-call pages in section
-2, which had never been installed anywhere. See [The manual
-pages](#shell-commands).
+**The arrays are laid out the way MMBasic lays them out.** They were
+not, and it mattered more than it sounds: a two-dimensional array was
+stored transposed, so `PEEK(VARADDR a(i,j))` answered the wrong
+address, `READ a()` filled the elements in the wrong order, and
+`REDIM PRESERVE` on a multi-dimensional array **corrupted** it. Under
+`OPTION BASE 1` an unreachable element 0 sat in every dimension and
+every whole-array walk read it, so `MATH(MAX)` over an all-negative
+array answered 0 and `MATH(MEAN)` divided by one too many.
 
-They describe **the programs on this card** rather than the GNU ones of
-the same name, and each says where it differs, because several of those
-differences bite: `rm` silently ignores any argument beginning with a
-dash, `killall` takes no process name and signals everything,
-`expr` spells equality `==`, and `ssh` is a small shell rather than a
-remote login. A gate checks that every command has a page, that every
-page names a command, and that every page renders.
+All of that is gone. `DIM a(3)` is three elements under `OPTION BASE 1`
+and four under `OPTION BASE 0`, exactly as it is on a PicoMite, and the
+storage is dense and in the same order either way. A program can read
+its own arrays with `VARADDR` and find what the interpreter would have
+put there.
 
-**Pins that count.** `SETPIN n, FIN`, `CIN` and `PER` make a pin a
-frequency, counting or period input, answered by `PIN(n)` in Hz, edges
-and milliseconds. `PULSIN(pin, state)` measures one pulse and
-`DISTANCE(trig, echo)` reads an HC-SR04 in centimetres. All of them are
-timestamped by the kernel in the interrupt it already runs, not by a
-program spinning on a pin — which is why they are right on a machine
-that is doing something else at the time. They live on **GP4 to GP7**,
-which is where that interrupt is, and the manual says so where it
-would otherwise disappoint you.
+**If you use `PEEK(VARADDR)` on a multi-dimensional array, or
+`REDIM PRESERVE`, read that paragraph again.** Those two change answers
+in this release. Everything that only ever indexes by name is
+unaffected, and produces byte-identical output before and after.
 
-**LED strips, and arbitrary timed output.** `WS2812` drives an
-addressable strip and `BITSTREAM` emits a list of timed transitions,
-both through a state machine on PIO1 with the pattern handed over by
-DMA. Neither stops the machine while it runs: a long `BITSTREAM` on
-MMBasic is seconds of dead interpreter and here it is none.
+**MATH, most of the way.** The `MATH` statement and `MATH()` function
+went from 32 of their 67 members to **54**:
 
-**Sound tells you when it has finished.** `PLAY MP3`, `PLAY WAV` and
-`PLAY FLAC` take a completion interrupt, as `PLAY MODFILE` already did;
-the handler used to be parsed and then quietly dropped, so the file
-played and nothing ever fired. It answers the end of a file promptly
-and a `PLAY STOP` about a second later - the [music
-section](#music) has the measured figures and says why.
+* the vector and matrix family - `V_NORMALISE`, `V_CROSS`, `V_MULT`,
+  `V_ROTATE`, `V_PRINT`, `M_TRANSPOSE`, `M_MULT`, `M_INVERSE`,
+  `M_PRINT`, and `MATH(MAGNITUDE`, `DOTPRODUCT`, `M_DETERMINANT)`;
+* the quaternions - `Q_CREATE`, `Q_EULER`, `Q_VECTOR`, `Q_INVERT`,
+  `Q_MULT`, `Q_ROTATE`;
+* `SHIFT`, `POWER` and `WINDOW` on whole arrays, and
+  `MATH(CROSSING)` for finding where a signal crosses a level.
 
-**`MATH(CRC8`, `CRC12`, `CRC16` and `CRC32`)**, with every argument the
-reference takes, and the catalogue forms — XMODEM, CCITT-FALSE, ARC,
-and the CRC-32 that zip and PNG use — all reachable. Three of the
-reference interpreter's answers are deliberately **not** copied, and
-Appendix C says which and why.
+Appendix C lists all of them and the handful of places where a member
+does something the name does not suggest - `SHIFT`'s bare `U`,
+`POWER`'s rounded exponent, `WINDOW`'s truncation into an integer
+array, and what `CROSSING` returns. Every one of those was found by
+running the statement on a real PicoMite and comparing, which is also
+how their error messages come to be the same strings.
 
-**`OPTION ANGLE DEGREES`**, and — more usefully — `OPTION` stops
-swallowing what it does not know. An unrecognised option used to be
-accepted in silence and translated into nothing at all, so a program
-ran with its assumptions quietly ignored.
+**`ARRAY ADD` and `MATH SCALE` now check the two arrays are the same
+length.** They did not, so a destination shorter than its source was
+written past the end in silence. And `ARRAY SCALE` is refused: it does
+not exist in MMBasic, which answers `Unknown command`.
 
-**`fat put`.** The FAT partition now carries files in both directions,
-with long names and subdirectories, so the card is the route out as
-well as in.
+**`SPRITE LOADARRAY` takes a two-dimensional array** as well as the
+one-dimensional one the interpreter requires. `DIM s(w-1, h-1)` walked
+flat is the raster row by row, so `s(x, y)` is the pixel at x, y.
 
-**And the clock is 378 MHz**, up from 375. The text console now lands
-on 640x480 at exactly 60.0 Hz rather than 59.5, and the graphics modes
-on 1024x768 at 70.6 Hz. Nothing else changes: the flash, PSRAM, UART
-and SD divisors are all worked out at runtime from whatever `clk_sys`
-turns out to be.
-
-**The usual rule after upgrading: recompile.** A `.bc` that uses the
-new statements asks the new `bcrun` for functions an old one does not
-have, and is refused by name at load. A freshly built program imports
-nothing version-specific. The card ships the matched set.
+**The usual rule after upgrading: recompile.** That is worth more than
+usual this time, because the array layout is part of the code a program
+was translated into. An old `.bc` is self-consistent and will still
+run, but it has the old layout inside it - so recompile anything that
+shares arrays with a newer program, or that reads them with `VARADDR`.
+The card ships the matched set.
 
 
 
@@ -3965,6 +3955,25 @@ Scalar: `ATAN3`, `COSH`, `LOG10`, `SINH`, `TANH`
 
 Whole-array (one number out of an array): `MAX`, `MEAN`, `MEDIAN`, `MIN`, `SD`, `SUM`
 
+Vector, matrix and signal:
+
+| | |
+|---|---|
+| `MATH(MAGNITUDE a())` | the square root of the sum of the squares. Any rank: a two-dimensional array is read as the flat vector it is |
+| `MATH(DOTPRODUCT a(), b())` | the sum of the products. One-dimensional, and the same length |
+| `MATH(M_DETERMINANT a())` | of a square two-dimensional array |
+| `MATH(CROSSING a() [, level] [, direction] [, confirm])` | where a signal first crosses `level`, or -1 |
+
+`CROSSING` defaults to a level of 0, a direction of 1 (upward; -1 is
+downward) and a confirm window of 1. The window is what rejects a
+single-sample spike: the crossing is only reported if the signal stays
+on the far side for that many samples. Two things about it are worth
+knowing before you use it. **What comes back is an offset from the
+first element, not a subscript** - under `OPTION BASE 1` you want
+`a(found + 1)`. And a crossing too near the end of the array to confirm
+**ends** the search rather than being skipped, so a late spike hides a
+real crossing after it. Both are the interpreter's behaviour.
+
 Codecs: `MATH(BASE64 ENCODE|DECODE in$, out$)`, which returns the length
 and writes its answer into the second argument, and the four CRCs.
 
@@ -4022,28 +4031,99 @@ a side-by-side will differ here and nowhere else.
 ## MATH sub-commands
 
 `MATH` is also a statement, and that is a different and much longer list
-in the interpreter. Fourteen of it are translated — the ones that walk
-an array element by element, which is what most programs use it for:
+in the interpreter. Thirty-two of it are translated. The element-by-
+element ones are what most programs use it for:
 
 | | |
 |---|---|
 | `MATH SET v, a()` | every element of `a()` becomes `v` |
 | `MATH ADD a(), v, b()` | `b() = a() + v`, element by element |
 | `MATH SCALE a(), v, b()` | `b() = a() * v`, element by element |
+| `MATH POWER a(), v, b()` | `b() = a() ^ v`, element by element |
+| `MATH SHIFT a%(), n, b%() [, U]` | shift each element left by `n`, or right by `-n` |
 | `MATH RANDOMIZE [seed]` | seed the generator; no seed uses the clock |
 | `MATH SLICE a(), i, , k, b()` | copy one line of `a()` into `b()` |
 | `MATH INSERT a(), i, , k, b()` | copy `b()` back into that line |
 | `MATH C_ADD a(), b(), c()` | `c() = a() + b()`, element by element |
+| `MATH WINDOW a(), lo, hi, b() [, min, max]` | rescale `a()` onto `lo`..`hi` |
 
 `C_SUB`, `C_MUL`, `C_MULT`, `C_DIV`, `C_AND`, `C_OR` and `C_XOR` are the
 same shape as `C_ADD` — the `C_` is for component, not complex — and all
 eight need the three arrays to be the same type and the same length.
 
 `SET`, `ADD`, `SLICE` and `INSERT` take integer, float or string arrays;
-`SCALE` is numeric only, as it is there. `ARRAY` is accepted as a
-spelling of `MATH` for all of them, and `ARRAY SLICE` and `ARRAY INSERT`
-are the spellings the manual uses — the interpreter runs both through
-the same two functions.
+`SCALE` and `POWER` are numeric only, as they are there, and `SHIFT` is
+integers only. `ARRAY` is accepted as a spelling of `MATH` for `SET`,
+`ADD`, `SLICE` and `INSERT`, and `ARRAY SLICE` and `ARRAY INSERT` are
+the spellings the manual uses — the interpreter runs both through the
+same two functions. **It is not a spelling of the rest**: `ARRAY SCALE`
+answers `Unknown command` on a real PicoMite, because `SCALE` and
+everything below it live only in `cmd_math`.
+
+Three of these have a detail that will bite a program written from the
+name alone, and all three are the interpreter's own:
+
+* `MATH SHIFT`'s fourth argument is a **bare** `U`, not `"U"`. Quoted,
+  a real PicoMite ignores it and gives you the arithmetic shift; we
+  refuse the quoted form rather than do that quietly.
+* `MATH POWER` into an **integer** array rounds the exponent to a whole
+  number first, so `POWER a%(), 2.7, b%()` cubes. Into a float array it
+  does not.
+* `MATH WINDOW` into an **integer** array truncates toward zero, where
+  everything else that lands a float in an integer rounds: 1 to 5
+  windowed onto 0..10 gives `0 2 5 7 10`, not `0 3 5 8 10`.
+
+### Vectors, matrices and quaternions
+
+The rest are the linear algebra, and they read a two-dimensional array
+the way the interpreter does: **`dims[0]` is the column count and
+`dims[1]` the row count**, so an array is `a(col, row)` and a row is
+contiguous. `DIM p(3,2)` is three wide and two tall. Writing
+`a(row, col)` gets you the transpose of what you meant, on a real
+PicoMite as much as here.
+
+| | |
+|---|---|
+| `MATH V_NORMALISE a(), b()` | `b()` is `a()` scaled to unit length |
+| `MATH V_CROSS a(), b(), c()` | the cross product; three elements each |
+| `MATH V_MULT a(), b(), c()` | a matrix by a vector |
+| `MATH V_ROTATE ox, oy, ang, xi(), yi(), xo(), yo()` | rotate points about an origin |
+| `MATH V_PRINT a()` / `MATH M_PRINT a()` | print a vector or a matrix |
+| `MATH M_TRANSPOSE a(), b()` | `b()` is `a()` transposed |
+| `MATH M_MULT a(), b(), c()` | matrix multiply |
+| `MATH M_INVERSE a(), b()` | `b()` is the inverse of a square `a()` |
+| `MATH Q_CREATE theta, x, y, z, q()` | a rotation about an axis |
+| `MATH Q_EULER yaw, pitch, roll, q()` | from Euler angles |
+| `MATH Q_VECTOR x, y, z, q()` | a vector as a quaternion |
+| `MATH Q_INVERT q(), n()` | the conjugate |
+| `MATH Q_MULT q1(), q2(), n()` | quaternion multiply |
+| `MATH Q_ROTATE q(), v(), n()` | rotate `v()` by `q()` |
+
+A **quaternion here is five floats, not four**: `w`, `x`, `y`, `z`, and
+a magnitude carried alongside. The first four are always normalised and
+element 4 holds the scale that was taken out, which is why
+`MATH Q_VECTOR 3, 4, 12, q()` answers a unit direction and `13`, and
+why `Q_ROTATE` hands the same `13` back. Every one of them refuses an
+array that is not exactly five long.
+
+`V_ROTATE` respects `OPTION ANGLE`, as `Q_CREATE` and `Q_EULER` do, and
+takes four arrays of one type - float or integer. The interpreter
+accepts any mix of the two; this does not.
+
+The inverse and the determinant use the interpreter's own cofactor
+expansion rather than a factorisation, so their last digits agree with
+it. That is O(n!), and the practical ceiling here is an 8x8.
+
+**One shape works here that a PicoMite cannot express.** MMBasic keeps
+an array's rank in the same table entry as its bounds, where 0 means
+"not an array", so no dimension can have an extent of 1 under either
+`OPTION BASE`: `DIM a(0)` is refused under BASE 0 and `DIM a(1)` under
+BASE 1. We keep the rank separately, so `DIM c(0,0)` is an honest 1x1
+matrix and a row vector times a column vector lands in one. A program
+that wants the number rather than the matrix should say
+`MATH(DOTPRODUCT)`, which is the same arithmetic and returns one — and
+a program that uses an extent-1 dimension will not run on a PicoMite,
+failing at the `DIM` rather than at the `MATH`.
 
 ### Slicing an array
 

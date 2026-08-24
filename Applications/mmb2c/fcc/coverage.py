@@ -73,6 +73,14 @@ assert "CRCWIDTH = {" in text, "the MATH CRC table left mmb2c.py"
 mathfn += ["BASE64"]
 mathfn += re.findall(r"'(CRC[0-9]+)'",
                      re.search(r"CRCWIDTH = \{([^}]*)\}", text).group(1))
+# The vector and matrix functions are hand branches for the same reason
+# - they take whole arrays rather than a fixed argument count, and are
+# not whole-array REDUCTIONS either, so neither table can hold them.
+# Same treatment: asserted against the source so a rename is loud.
+assert "'MAGNITUDE', 'DOTPRODUCT'" in text, "the MATH vector branch left mmb2c.py"
+assert "'M_DETERMINANT'" in text, "the MATH M_DETERMINANT branch left mmb2c.py"
+assert "'CROSSING'" in text, "the MATH CROSSING branch left mmb2c.py"
+mathfn += ["MAGNITUDE", "DOTPRODUCT", "M_DETERMINANT", "CROSSING"]
 mathfn = sorted(set(mathfn))
 matharr = re.search(r"MATHARRAY = \(([^)]*)\)", text).group(1)
 matharr = sorted(re.findall(r"'([A-Z0-9]+)'", matharr))
@@ -85,13 +93,30 @@ blk = text[text.index("def do_array_cmd"):]
 blk = blk[:blk.index("\n    def ", 10)]
 mathcmd = set(re.findall(r"'([A-Z_0-9]+)'", blk))
 assert "CCOMB = {" in text, "the MATH C_* table left mmb2c.py"
-mathcmd |= set(re.findall(r"'([A-Z_0-9]+)'",
-                          re.search(r"CCOMB = \{([^}]*)\}", text).group(1)))
-# do_array_cmd's block mentions words that are not sub-commands (the
-# error text, the type names); keep the ones MMBasic actually has.
-mathcmd &= {"SET", "ADD", "SCALE", "RANDOMIZE", "SLICE", "INSERT",
-            "C_ADD", "C_SUB", "C_MUL", "C_MULT", "C_DIV", "C_AND",
-            "C_OR", "C_XOR"}
+ccomb = set(re.findall(r"'([A-Z_0-9]+)'",
+                       re.search(r"CCOMB = \{([^}]*)\}", text).group(1)))
+mathcmd |= ccomb
+# do_array_cmd's block mentions words that are not sub-commands - the
+# error text, the type names - so the set above is too generous and has
+# to be narrowed to what the function actually DISPATCHES ON.
+#
+# This used to be a hand-kept list of fourteen names sitting inside the
+# generator, which is the one thing a generator must not have: it was
+# written before the vector, matrix, quaternion and WINDOW members and
+# silently filtered every one of them out, so the manual reported
+# fourteen sub-commands while the translator had thirty-two.  The
+# dispatch is the authority - `op == 'NAME'` and `op in ('A', 'B')` are
+# the only two shapes it uses - so read those and keep no list.
+disp = set(re.findall(r"op == '([A-Z_0-9]+)'", blk))
+for grp in re.findall(r"op in \(([^)]*)\)", blk):
+    disp |= set(re.findall(r"'([A-Z_0-9]+)'", grp))
+# ...and the component-wise family, which dispatches as `op in
+# self.CCOMB` and so has no quoted name in the function at all.  Its
+# eight members come from the table, and the first cut of this filter
+# intersected them straight back out again - the same eight the old
+# body-scan missed, lost a second time for a different reason.
+disp |= ccomb
+mathcmd &= disp
 mathcmd = sorted(mathcmd)
 
 if "--check" in sys.argv:
@@ -145,8 +170,10 @@ Whole-array functions, one number out of an array: %s
 
 In place on arrays, `MATH name ...`: %s
 
-`ARRAY` is accepted as a spelling of `MATH` for the in-place forms, as
-it is in MMBasic.
+`ARRAY` is accepted as a spelling of `MATH` for `SET`, `ADD`, `SLICE`
+and `INSERT`, as it is in MMBasic. It is NOT a spelling of the rest:
+`ARRAY SCALE` answers `Unknown command` on a real PicoMite, because
+`SCALE` and everything below it live only in `cmd_math`.
 """ % (", ".join("`%s`" % f for f in mathfn),
        ", ".join("`%s`" % f for f in matharr),
        ", ".join("`%s`" % f for f in mathcmd)))
