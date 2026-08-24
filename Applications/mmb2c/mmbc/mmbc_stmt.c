@@ -4491,6 +4491,104 @@ static void do_array_cmd(int is_math)
                   want == 2 ? "mmg_vnorm" : "mmg_vcross", args));
         return;
     }
+    if (strcmp(op, "Q_INVERT") == 0 || strcmp(op, "Q_MULT") == 0
+        || strcmp(op, "Q_ROTATE") == 0) {
+        /* MATH Q_INVERT q(), n()
+         * MATH Q_MULT   q1(), q2(), n()
+         * MATH Q_ROTATE q(), v(), n()
+         *
+         * A quaternion is FIVE floats - w, x, y, z and the magnitude
+         * taken out of them - so every array here is one-dimensional
+         * and exactly five long.  The length is checked in the header
+         * rather than here because a run-time DIM has no length until
+         * then; for a DIMmed array the count is a constant and cc1
+         * folds the test away. */
+        struct sym *arrs[3];
+        struct flat fl;
+        int want = strcmp(op, "Q_INVERT") == 0 ? 2 : 3;
+        int n = 0, k;
+        const char *args = NULL;
+        const char *fn;
+
+        if (!is_math)
+            cv_err("%s is a MATH sub-command, not an ARRAY one", op);
+        arrs[n++] = arrayref(1);
+        while (accept_op(",")) {
+            if (n == 3)
+                cv_err("MATH %s takes %d arrays", op, want);
+            arrs[n++] = arrayref(1);
+        }
+        if (n != want)
+            cv_err("MATH %s takes %d arrays", op, want);
+        for (k = 0; k < n; k++)
+            if (arrs[k]->ty != TY_F)
+                cv_err("Argument %d must be a 5 element floating point "
+                       "array", k + 1);
+        for (k = 0; k < n; k++) {
+            fl = array_line(arrs[k]);
+            args = args ? sfmt("%s, %s, %s", args, fl.ptr, fl.cnt)
+                        : sfmt("%s, %s", fl.ptr, fl.cnt);
+        }
+        cv.uses_math = 1;
+        fn = strcmp(op, "Q_INVERT") == 0 ? "mmg_q_invert"
+           : strcmp(op, "Q_MULT") == 0 ? "mmg_q_mult" : "mmg_q_rotate";
+        emit(sfmt("%s(%s);", fn, args));
+        return;
+    }
+    if (strcmp(op, "Q_CREATE") == 0 || strcmp(op, "Q_EULER") == 0
+        || strcmp(op, "Q_VECTOR") == 0) {
+        /* MATH Q_CREATE theta, x, y, z, q()
+         * MATH Q_EULER  yaw, pitch, roll, q()
+         * MATH Q_VECTOR x, y, z, q()
+         *
+         * OPTION ANGLE applies to the angles of the first two, as it
+         * does to SIN and COS.  Q_CREATE halves theta on the way in -
+         * cmd_math writes `theta / 2.0 / optionangle`, one division
+         * done once - and Q_EULER NEGATES the yaw, which is the
+         * reference's convention rather than a slip. */
+        const char *nums[4];
+        struct sym *q;
+        struct flat qf;
+        int nnum = strcmp(op, "Q_CREATE") == 0 ? 4 : 3;
+        int k;
+        const char *fn;
+        const char *args;
+
+        if (!is_math)
+            cv_err("%s is a MATH sub-command, not an ARRAY one", op);
+        nums[0] = as_flt(expr());
+        for (k = 1; k < nnum; k++) {
+            expect_op(",");
+            nums[k] = as_flt(expr());
+        }
+        expect_op(",");
+        q = arrayref(1);
+        if (q->ty != TY_F)
+            cv_err("Argument 4 must be a 5 element floating point array");
+        if (strcmp(op, "Q_CREATE") == 0) {
+            nums[0] = sfmt("(%s) / 2.0", nums[0]);
+            if (cv.opt_angle != NULL)
+                nums[0] = sfmt("((%s) / %s)", nums[0], cv.opt_angle);
+            fn = "mmg_q_create";
+        } else if (strcmp(op, "Q_EULER") == 0) {
+            nums[0] = sfmt("(-(%s))", nums[0]);
+            if (cv.opt_angle != NULL) {
+                nums[0] = sfmt("((%s) / %s)", nums[0], cv.opt_angle);
+                nums[1] = sfmt("((%s) / %s)", nums[1], cv.opt_angle);
+                nums[2] = sfmt("((%s) / %s)", nums[2], cv.opt_angle);
+            }
+            fn = "mmg_q_euler";
+        } else {
+            fn = "mmg_q_vector";
+        }
+        qf = array_line(q);
+        args = nums[0];
+        for (k = 1; k < nnum; k++)
+            args = sfmt("%s, %s", args, nums[k]);
+        cv.uses_math = 1;
+        emit(sfmt("%s(%s, %s, %s);", fn, args, qf.ptr, qf.cnt));
+        return;
+    }
     if (strcmp(op, "M_TRANSPOSE") == 0 || strcmp(op, "M_MULT") == 0
         || strcmp(op, "M_INVERSE") == 0) {
         /* MATH M_TRANSPOSE a(), b()

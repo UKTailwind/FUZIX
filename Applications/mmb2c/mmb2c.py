@@ -7574,6 +7574,81 @@ class Conv(object):
                       % ('mmg_vnorm' if op == 'V_NORMALISE' else 'mmg_vcross',
                          ', '.join(parts)))
             return
+        if op in ('Q_INVERT', 'Q_MULT', 'Q_ROTATE'):
+            # MATH Q_INVERT q(), n()
+            # MATH Q_MULT   q1(), q2(), n()
+            # MATH Q_ROTATE q(), v(), n()
+            #
+            # A quaternion is FIVE floats - w, x, y, z and the
+            # magnitude taken out of them - so every array here is
+            # one-dimensional and exactly five long.  The length is
+            # checked in the header rather than here because a
+            # run-time DIM has no length until then; for a DIMmed
+            # array the count is a constant and cc1 folds the test
+            # away.
+            if not is_math:
+                self.err("%s is a MATH sub-command, not an ARRAY one" % op)
+            want = 2 if op == 'Q_INVERT' else 3
+            arrs = [self.arrayref()]
+            while self.accept_op(','):
+                arrs.append(self.arrayref())
+            if len(arrs) != want:
+                self.err("MATH %s takes %d arrays" % (op, want))
+            parts = []
+            for k, a in enumerate(arrs):
+                if a.ty != TY_F:
+                    self.err("Argument %d must be a 5 element floating "
+                             "point array" % (k + 1))
+                parts.extend(self.array_line(a))
+            self.uses_math = True
+            fn = {'Q_INVERT': 'mmg_q_invert', 'Q_MULT': 'mmg_q_mult',
+                  'Q_ROTATE': 'mmg_q_rotate'}[op]
+            self.emit('%s(%s);' % (fn, ', '.join(parts)))
+            return
+        if op in ('Q_CREATE', 'Q_EULER', 'Q_VECTOR'):
+            # MATH Q_CREATE theta, x, y, z, q()
+            # MATH Q_EULER  yaw, pitch, roll, q()
+            # MATH Q_VECTOR x, y, z, q()
+            #
+            # OPTION ANGLE applies to the angles of the first two, as
+            # it does to SIN and COS.  Q_CREATE halves theta on the way
+            # in - cmd_math writes `theta / 2.0 / optionangle`, one
+            # division done once - and Q_EULER NEGATES the yaw, which
+            # is the reference's convention rather than a slip.
+            if not is_math:
+                self.err("%s is a MATH sub-command, not an ARRAY one" % op)
+            nnum = 4 if op == 'Q_CREATE' else 3
+            nums = [self.as_flt(self.expr())]
+            while len(nums) < nnum:
+                self.expect_op(',')
+                nums.append(self.as_flt(self.expr()))
+            self.expect_op(',')
+            q = self.arrayref()
+            if q.ty != TY_F:
+                self.err("Argument 4 must be a 5 element floating point "
+                         "array")
+
+            def ang(v, neg=False):
+                if neg:
+                    v = '(-(%s))' % v
+                if self.opt_angle:
+                    return '((%s) / %s)' % (v, self.opt_angle)
+                return v
+
+            if op == 'Q_CREATE':
+                nums[0] = ang('(%s) / 2.0' % nums[0])
+                fn = 'mmg_q_create'
+            elif op == 'Q_EULER':
+                nums[0] = ang(nums[0], True)
+                nums[1] = ang(nums[1])
+                nums[2] = ang(nums[2])
+                fn = 'mmg_q_euler'
+            else:
+                fn = 'mmg_q_vector'
+            qp, qn = self.array_line(q)
+            self.uses_math = True
+            self.emit('%s(%s, %s, %s);' % (fn, ', '.join(nums), qp, qn))
+            return
         if op in ('M_TRANSPOSE', 'M_MULT', 'M_INVERSE'):
             # MATH M_TRANSPOSE a(), b()
             # MATH M_MULT     a(), b(), c()

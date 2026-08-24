@@ -154,13 +154,13 @@ category 2, instead of a language inside the language.
 translated and says nothing about the 67 members. Read from MMBasic's `core/MATHS.c` and mmb2c's
 `MATHFUNCS`, `MATHARRAY` and `do_array_cmd`.
 
-**46 of 67 members translated.**
+**52 of 67 members translated.**
 
-### `MATH <subcommand>` - in-place, on arrays - 25 of 38
+### `MATH <subcommand>` - in-place, on arrays - 31 of 38
 
-**Translated:** `ADD`, `C_ADD`, `C_AND`, `C_DIV`, `C_MUL`, `C_MULT`, `C_OR`, `C_SUB`, `C_XOR`, `INSERT`, `M_INVERSE`, `M_MULT`, `M_PRINT`, `M_TRANSPOSE`, `POWER`, `RANDOMIZE`, `SCALE`, `SET`, `SHIFT`, `SLICE`, `V_CROSS`, `V_MULT`, `V_NORMALISE`, `V_PRINT`, `V_ROTATE`
+**Translated:** `ADD`, `C_ADD`, `C_AND`, `C_DIV`, `C_MUL`, `C_MULT`, `C_OR`, `C_SUB`, `C_XOR`, `INSERT`, `M_INVERSE`, `M_MULT`, `M_PRINT`, `M_TRANSPOSE`, `POWER`, `Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`, `RANDOMIZE`, `SCALE`, `SET`, `SHIFT`, `SLICE`, `V_CROSS`, `V_MULT`, `V_NORMALISE`, `V_PRINT`, `V_ROTATE`
 
-**Not translated:** `AES128`, `FFT`, `INTERPOLATE`, `PID`, `Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`, `SENSORFUSION`, `SINC`, `WINDOW`
+**Not translated:** `AES128`, `FFT`, `INTERPOLATE`, `PID`, `SENSORFUSION`, `SINC`, `WINDOW`
 
 ### `MATH(<subfunction> ...)` - returns a value - 21 of 29
 
@@ -176,10 +176,17 @@ MMBasic's own write-to-the-second-argument shape), and as of
 2026-08-24 the whole vector and matrix family: `SHIFT`, `POWER`,
 `V_NORMALISE`, `V_CROSS`, `V_PRINT`, `M_PRINT`, `MAGNITUDE`,
 `DOTPRODUCT`, then `M_TRANSPOSE`, `M_MULT`, `M_INVERSE`, `V_MULT`,
-`V_ROTATE` and `M_DETERMINANT`. `tests/matha.bas` and
-`tests/mathm.bas` cover them, blessed line by line against a real
-MMBasic - the inverse is the reference's cofactor expansion rather
-than an LU factorisation precisely so that it can be.
+`V_ROTATE` and `M_DETERMINANT`, and then the quaternions - `Q_CREATE`,
+`Q_EULER`, `Q_VECTOR`, `Q_INVERT`, `Q_MULT` and `Q_ROTATE`.
+`tests/matha.bas`, `tests/mathm.bas` and `tests/mathq.bas` cover them,
+blessed line by line against a real MMBasic - the inverse is the
+reference's cofactor expansion rather than an LU factorisation
+precisely so that it can be.
+
+A quaternion here is FIVE floats, not four: `w`, `x`, `y`, `z` and a
+MAGNITUDE carried alongside, the first four always normalised. That is
+MMBasic's convention, and it is why `Q_VECTOR` of (3, 4, 12) answers
+the unit vector and 13.
 
 `tests/mathm1.bas` is the exception that cannot be blessed, and says
 so: MMBasic keeps an array's rank in the same `vartbl` entry as its
@@ -193,10 +200,10 @@ vector lands in one. A program that wants the NUMBER should still say
 What is out divides into three kinds:
 
 * **pure arithmetic, no platform dependency, each independently
-  testable against the interpreter** - the statistics (`CORREL`,
-  `CHI`, `CHI_P`, `CROSSING`) and the quaternions (`Q_*`). These are
-  category 2: add on demand rather than as a block, because the 3D and
-  graphics demos say which are wanted first.
+  testable against the interpreter** - the statistics, and only the
+  statistics now: `CORREL`, `CHI`, `CHI_P` and `CROSSING`. Category 2,
+  to add on demand. `CHI_P` wants an incomplete gamma function, so
+  check what the Fuzix libc actually has before promising it.
 * **codecs and transforms** - `FFT`, `AES128`, `WINDOW`, `SINC`,
   `INTERPOLATE`. Bigger pieces, still pure arithmetic. `BASE64` and
   all four `CRC`s have shipped; of the rest `WINDOW` and `INTERPOLATE`

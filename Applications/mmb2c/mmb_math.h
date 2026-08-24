@@ -833,4 +833,176 @@ MMG_FN void mmg_vrotate_i(MMFLOAT ox, MMFLOAT oy, MMFLOAT ang,
 		yo[i] = mm_toint(y * ca + x * sa + oy);
 	}
 }
+
+/*
+ *	MATH Q_CREATE / Q_EULER / Q_VECTOR / Q_INVERT / Q_MULT / Q_ROTATE
+ *
+ *	A quaternion here is FIVE floats, not four: w, x, y, z, and a
+ *	MAGNITUDE carried alongside them.  The first four are always
+ *	normalised and element 4 holds the scale that was taken out, so
+ *	Q_VECTOR of (3, 4, 12) is the unit vector and 13, and Q_ROTATE
+ *	gives the rotated unit vector and the same 13 back.  That is
+ *	MMBasic's convention and the reason every one of these refuses an
+ *	array that is not exactly five long.
+ *
+ *	The error wording came from the interpreter, not the source:
+ *	cmd_math passes an argument number of 31 to parsefloatarray for
+ *	Q_MULT's and Q_ROTATE's destination, which looks like it would
+ *	print "Argument 31" and does not - that number is only used if
+ *	the argument is not an array at all, and the size check that
+ *	fires here is a separate StandardErrorParam(41, 3).  Asking the
+ *	board settled it in one run.
+ */
+
+/*	Refuse anything but a five element array, in MMBasic's words.
+ *	Returns 1 when it raised, because MM_RAISE returns from the
+ *	function it is written in and this is not that function. */
+MMG_FN int mmg_q_bad(int n, int argno)
+{
+	char m[64];
+	char *p = m;
+
+	if (n == 5)
+		return 0;
+	p = mmg_mcpy(p, "Argument ");
+	mm_int_to_str(p, (long long)argno, 10);
+	while (*p)
+		p++;
+	mmg_mcpy(p, " must be a 5 element floating point array");
+	mm_error(m);
+	return 1;
+}
+
+/*	Q_Mult and Q_Invert, transcribed.  Both read every input into
+ *	locals before writing anything, which is what lets the
+ *	destination be one of the sources - and Q_ROTATE below depends on
+ *	it twice over. */
+MMG_FN void mmg_q_mul(const MMFLOAT *q1, const MMFLOAT *q2, MMFLOAT *n)
+{
+	MMFLOAT a1 = q1[0], a2 = q2[0], b1 = q1[1], b2 = q2[1];
+	MMFLOAT c1 = q1[2], c2 = q2[2], d1 = q1[3], d2 = q2[3];
+	MMFLOAT m1 = q1[4], m2 = q2[4];
+
+	n[0] = a1 * a2 - b1 * b2 - c1 * c2 - d1 * d2;
+	n[1] = a1 * b2 + b1 * a2 + c1 * d2 - d1 * c2;
+	n[2] = a1 * c2 - b1 * d2 + c1 * a2 + d1 * b2;
+	n[3] = a1 * d2 + b1 * c2 - c1 * b2 + d1 * a2;
+	n[4] = m1 * m2;
+}
+
+MMG_FN void mmg_q_inv(const MMFLOAT *q, MMFLOAT *n)
+{
+	MMFLOAT a = q[0], b = q[1], c = q[2], d = q[3], m = q[4];
+
+	n[0] = a;
+	n[1] = -b;
+	n[2] = -c;
+	n[3] = -d;
+	n[4] = m;
+}
+
+/*	MATH Q_CREATE theta, x, y, z, q()
+ *
+ *	A rotation of theta about the axis (x, y, z).  The angle arrives
+ *	already divided by OPTION ANGLE's multiplier - the reference
+ *	divides theta/2 by it, which is the same thing done once. */
+MMG_FN void mmg_q_create(MMFLOAT halftheta, MMFLOAT x, MMFLOAT y, MMFLOAT z,
+                         MMFLOAT *q, int nq)
+{
+	MMFLOAT sineterm, mag;
+
+	if (mmg_q_bad(nq, 4))
+		return;
+	sineterm = sin(halftheta);
+	q[0] = cos(halftheta);
+	q[1] = x * sineterm;
+	q[2] = y * sineterm;
+	q[3] = z * sineterm;
+	mag = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+	q[0] = q[0] / mag;
+	q[1] = q[1] / mag;
+	q[2] = q[2] / mag;
+	q[3] = q[3] / mag;
+	q[4] = 1.0;
+}
+
+/*	MATH Q_EULER yaw, pitch, roll, q()
+ *
+ *	Note the YAW IS NEGATED, which is the reference's own convention
+ *	and not a slip: `MMFLOAT yaw = -getnumber(argv[0]) / optionangle`.
+ *	All three arrive divided by OPTION ANGLE's multiplier. */
+MMG_FN void mmg_q_euler(MMFLOAT yaw, MMFLOAT pitch, MMFLOAT roll,
+                        MMFLOAT *q, int nq)
+{
+	MMFLOAT s1, c1, s2, c2, s3, c3;
+
+	if (mmg_q_bad(nq, 4))
+		return;
+	s1 = sin(pitch / 2);
+	c1 = cos(pitch / 2);
+	s2 = sin(yaw / 2);
+	c2 = cos(yaw / 2);
+	s3 = sin(roll / 2);
+	c3 = cos(roll / 2);
+	q[1] = s1 * c2 * c3 - c1 * s2 * s3;
+	q[2] = c1 * s2 * c3 + s1 * c2 * s3;
+	q[3] = c1 * c2 * s3 - s1 * s2 * c3;
+	q[0] = c1 * c2 * c3 + s1 * s2 * s3;
+	q[4] = 1.0;
+}
+
+/*	MATH Q_VECTOR x, y, z, q()
+ *
+ *	A vector as a quaternion: w is zero, the direction is normalised
+ *	and the length goes in element 4.  No zero check, as there is
+ *	none there - an all-zero vector divides by zero and gives IEEE
+ *	infinities on both machines. */
+MMG_FN void mmg_q_vector(MMFLOAT x, MMFLOAT y, MMFLOAT z,
+                         MMFLOAT *q, int nq)
+{
+	MMFLOAT mag;
+
+	if (mmg_q_bad(nq, 4))
+		return;
+	mag = sqrt(x * x + y * y + z * z);
+	q[0] = 0.0;
+	q[1] = x / mag;
+	q[2] = y / mag;
+	q[3] = z / mag;
+	q[4] = mag;
+}
+
+/*	MATH Q_INVERT q(), n()      the conjugate, magnitude kept */
+MMG_FN void mmg_q_invert(const MMFLOAT *q, int nq, MMFLOAT *n, int nn)
+{
+	if (mmg_q_bad(nq, 1) || mmg_q_bad(nn, 2))
+		return;
+	mmg_q_inv(q, n);
+}
+
+/*	MATH Q_MULT q1(), q2(), n()    n = q1 x q2, magnitudes multiplied */
+MMG_FN void mmg_q_mult(const MMFLOAT *q1, int n1, const MMFLOAT *q2,
+                       int n2, MMFLOAT *n, int nn)
+{
+	if (mmg_q_bad(n1, 1) || mmg_q_bad(n2, 2) || mmg_q_bad(nn, 3))
+		return;
+	mmg_q_mul(q1, q2, n);
+}
+
+/*	MATH Q_ROTATE q(), v(), n()    n = q x v x q*
+ *
+ *	The scratch is the reference's, and it is what makes the
+ *	destination safe as either source: nothing is written to n until
+ *	both multiplications have read everything they need. */
+MMG_FN void mmg_q_rotate(const MMFLOAT *q1, int n1, const MMFLOAT *v1,
+                         int n2, MMFLOAT *n, int nn)
+{
+	MMFLOAT temp[5], qtemp[5];
+
+	if (mmg_q_bad(n1, 1) || mmg_q_bad(n2, 2) || mmg_q_bad(nn, 3))
+		return;
+	mmg_q_mul(q1, v1, temp);
+	mmg_q_inv(q1, qtemp);
+	mmg_q_mul(temp, qtemp, n);
+}
 #endif /* MMB_MATH_H */

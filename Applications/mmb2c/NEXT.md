@@ -232,6 +232,38 @@ What is left of MATH is the statistics (`CORREL`, `CHI`, `CHI_P`,
 `INTERPOLATE`), `AES128`, and the three that need something the machine
 does not have (`PID`, `SENSORFUSION`, `RAND`).
 
+**2026-08-24: the quaternions.** `Q_CREATE`, `Q_EULER`, `Q_VECTOR`,
+`Q_INVERT`, `Q_MULT`, `Q_ROTATE`. **46 of 67 members to 52.**
+
+A quaternion here is **five** floats, not four: `w`, `x`, `y`, `z` and a
+MAGNITUDE carried alongside, the first four always normalised and
+element 4 holding the scale that was taken out. That is why `Q_VECTOR`
+of (3, 4, 12) answers the unit vector and 13, and why `Q_ROTATE` hands
+the same 13 back with the rotated direction — and why every one of them
+refuses an array that is not exactly five long.
+
+Two conventions copied deliberately because they look like slips:
+`Q_EULER` **negates the yaw** (`-getnumber(argv[0]) / optionangle`), and
+`Q_CREATE` halves theta BEFORE dividing by `OPTION ANGLE` rather than
+after — one division done once, which is what `theta / 2.0 /
+optionangle` amounts to.
+
+`tests/mathq.bas` is byte-identical to the interpreter, 16 lines: seven
+of values and nine of refusals. **The refusal wordings came off the
+board rather than out of `MATHS.c`, and that was worth doing** —
+`cmd_math` passes an argument number of 31 to `parsefloatarray` for
+`Q_MULT`'s and `Q_ROTATE`'s destination, which reads like it would print
+"Argument 31" and never does. That number is only used if the argument
+is not an array at all; the size check that actually fires is a separate
+`StandardErrorParam(41, 3)`. Reading the source would have produced a
+wrong message with nothing to catch it.
+
+What is left of MATH is the statistics (`CORREL`, `CHI`, `CHI_P`,
+`CROSSING`), the transforms (`FFT`, `WINDOW`, `SINC`, `INTERPOLATE`),
+`AES128`, and the three that want something the machine does not have
+(`PID`, `SENSORFUSION`, `RAND` — the last still tied to the open
+`MATH RANDOMIZE` decision below).
+
 ### 1. Nothing else may swallow a statement
 
 Two shipped features were computing wrong answers in silence, and the
