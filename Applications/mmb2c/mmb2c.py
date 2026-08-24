@@ -10423,7 +10423,17 @@ def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
 
 def dump_tokens(inpath):
     """Debug aid for the C rewrite (mmbc): print the token stream in a
-    fixed format so `mmbc --tokens` can be byte-diffed against it."""
+    fixed format so `mmbc --tokens` can be byte-diffed against it.
+
+    WRITTEN AS BYTES, deliberately.  A token's text is a byte string -
+    OPTION ESCAPE turns \\xC8 into the single byte 0xC8, and that is what
+    ends up in the generated C - but Python holds it as the codepoint
+    U+00C8 and would print it through stdout as the two UTF-8 bytes
+    0xC3 0x88.  mmbc holds a byte and writes one.  The two token
+    streams then differ on a file that generates byte-identical C
+    (cgate says so), which is a gate failing for a reason that is not
+    in the product.  Latin-1 is the encoding that maps a codepoint
+    0-255 onto the one byte it came from."""
     f = open(inpath, 'r')
     lines = f.readlines()
     f.close()
@@ -10436,7 +10446,15 @@ def dump_tokens(inpath):
             print('ERR %d %s' % (lineno, str(e)))
             continue
         for kind, text, up in toks:
-            print('%d %d [%s] [%s]' % (lineno, kind, text, up))
+            line = '%d %d [%s] [%s]\n' % (lineno, kind, text, up)
+            try:
+                sys.stdout.buffer.write(line.encode('latin-1'))
+            except (UnicodeEncodeError, AttributeError):
+                sys.stdout.write(line)
+    try:
+        sys.stdout.buffer.flush()
+    except AttributeError:
+        pass
     return 0
 
 

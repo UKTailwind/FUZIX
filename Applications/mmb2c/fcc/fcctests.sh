@@ -55,3 +55,10 @@ for src in "$M"/tests/*.bas; do
 done
 echo
 echo "fcc pipeline: $pass passed, $fail failed"
+# The exit status is the gate.  This line was missing while every
+# sibling gate had it - qemutests.sh, tokgate.sh and cgate.sh all end
+# `[ $fail = 0 ]` - so fcctests reported "1 failed" and exited 0, and
+# anything running it in a list saw a pass.  Found at the v0.22 release,
+# where the release recipe's own step 1 says "each gate exits non-zero
+# and says what is wrong".
+[ $fail = 0 ]
