@@ -1,11 +1,13 @@
 ' ARRAY SLICE and ARRAY INSERT under OPTION BASE 1.
 '
 ' The manual's own two examples, run verbatim, because this is where the
-' element counts can go wrong: our arrays are declared with bound + 1
-' elements whatever OPTION BASE says, so under BASE 1 element 0 exists
-' and is unreachable, and every count has to have it taken back off.
-' MMBasic allocates only what it can index, so the two agree on the
-' answer while disagreeing about the storage.
+' element counts can go wrong.  They used to: our arrays were declared
+' with bound + 1 elements whatever OPTION BASE said, so under BASE 1 an
+' unreachable element 0 sat in every dimension and every count had to
+' have it taken back off.  They are allocated dense now, exactly as
+' MMBasic allocates them, so the two agree about the storage as well as
+' the answer - and this test is what caught the last place that had not
+' been told, the initialiser list on `sourcearray(4) = (1, 2, 3, 4)`.
 Option Base 1
 Dim integer targetarray(3, 4, 5)
 Dim integer sourcearray(4) = (1, 2, 3, 4)

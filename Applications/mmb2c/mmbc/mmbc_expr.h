@@ -76,8 +76,14 @@ struct vec { const char *ptr; const char *step; const char *cnt; };
 const char *subscript_of(struct sym *s, const char **parts, int nparts);
 const char *bnd_acc(struct sym *s);
 const char *usable(const char *txt);
+const char *count_of(const char *bound);
+const char *rebase(const char *part);
+const char *unbase(const char *txt);
 void dim_sizes(struct sym *s, int rank, const char **out);
 struct flat array_line(struct sym *s);
+struct plane { const char *ptr; const char *nc; const char *nr;
+               const char *stride; };
+struct plane array_plane(struct sym *s);
 struct vec array_vector(struct sym *s, const char **parts, int nparts,
                         int blank);
 struct flat lsref(void);

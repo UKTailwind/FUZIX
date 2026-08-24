@@ -224,4 +224,293 @@ MMG_FN MMINTEGER mmg_b64_dec(const char *in, char *out, int cap)
 	return k;
 }
 
+
+/*
+ *	MATH SHIFT / POWER / V_NORMALISE / V_CROSS / V_PRINT / M_PRINT,
+ *	and the MATH() functions MAGNITUDE and DOTPRODUCT.
+ *
+ *	The same bargain as the C_ operations above: pure arithmetic over
+ *	whole arrays, compiled into the program that asks for one and
+ *	costing every other program nothing.
+ *
+ *	Every error string here came out of a real MMBasic 6.03.02, not
+ *	out of the source - run the failing statement under ON ERROR SKIP
+ *	and print MM.ERRMSG$.  "Size mismatch" for SHIFT and "Array size
+ *	mismatch" for the rest is not a typo: cmd_math really does use
+ *	error() for one and StandardError(16) for the others.
+ *
+ *	The TYPE errors MMBasic raises here ("Argument 1 must be an
+ *	integer array", "... a floating point array") are the translator's
+ *	job rather than this header's: it knows the types before the
+ *	program runs, so it refuses in its own words instead of emitting
+ *	a check that can never fire.
+ */
+
+/* <math.h> is included AFTER this header, so declare what is used here
+ * rather than let it be guessed: an implicit declaration makes sqrt()
+ * return int, which is not a warning but a wrong answer. */
+double sqrt(double);
+double pow(double, double);
+
+/* No <string.h> here either - see the note on mmg_carr_i above. */
+MMG_FN char *mmg_mcpy(char *d, const char *s)
+{
+	while ((*d = *s++) != 0)
+		d++;
+	return d;
+}
+
+MMG_FN void mmg_puts(const char *s)
+{
+	while (*s)
+		mm_putc((unsigned char)*s++);
+}
+
+/*	MATH SHIFT a%(), n, b%() [, "U"]
+ *
+ *	b(i) = a(i) << n, or >> -n when n is negative.  The optional "U"
+ *	makes a right shift logical rather than arithmetic; MMBasic looks
+ *	at it only when the shift is negative, and so does this.
+ *
+ *	The value is cast through uint64_t on the way LEFT in the
+ *	reference as well - shifting a negative int64_t left is undefined
+ *	in C, and this is one of the places the firmware got that right.
+ */
+MMG_FN void mmg_shift(const MMINTEGER *a, int na, MMINTEGER sh,
+                      MMINTEGER *b, int nb, int unsgn)
+{
+	int i;
+
+	if (sh < -63 || sh > 63) {
+		char m[64];
+		char *q = m;
+
+		mm_int_to_str(q, (long long)sh, 10);
+		while (*q)
+			q++;
+		mmg_mcpy(q, " is invalid (valid is -63 to 63)");
+		MM_RAISE(m);
+	}
+	if (na != nb)
+		MM_RAISE("Size mismatch");
+	if (sh > 0)
+		for (i = 0; i < na; i++)
+			b[i] = (MMINTEGER)(((unsigned long long)a[i]) << sh);
+	else if (unsgn)
+		for (i = 0; i < na; i++)
+			b[i] = (MMINTEGER)(((unsigned long long)a[i]) >> (-sh));
+	else
+		for (i = 0; i < na; i++)
+			b[i] = a[i] >> (-sh);
+}
+
+/*	MATH POWER a(), n, b()      b(i) = a(i) ^ n
+ *
+ *	Two things copied from cmd_math that look like mistakes and are
+ *	not:
+ *
+ *	  - n == 1.0 is a COPY, not pow(x, 1).  The reference branches on
+ *	    it, and pow() is not required to return x exactly.
+ *	  - into an INTEGER array the exponent is rounded to a whole
+ *	    number FIRST, so POWER a%(), 2.7, b%() cubes rather than
+ *	    raising to 2.7 and rounding the result.  Into a float array
+ *	    the exponent is used as written.
+ *
+ *	Both arrays must be the same type, which is ARRAY ADD's rule here
+ *	rather than MMBasic's - the reference converts between them.
+ */
+MMG_FN void mmg_pow_f(const MMFLOAT *a, int na, MMFLOAT p,
+                      MMFLOAT *b, int nb)
+{
+	int i;
+
+	if (na != nb)
+		MM_RAISE("Array size mismatch");
+	if (p == 1.0)
+		for (i = 0; i < na; i++)
+			b[i] = a[i];
+	else
+		for (i = 0; i < na; i++)
+			b[i] = pow(a[i], p);
+}
+
+MMG_FN void mmg_pow_i(const MMINTEGER *a, int na, MMFLOAT p,
+                      MMINTEGER *b, int nb)
+{
+	MMFLOAT e;
+	int i;
+
+	if (na != nb)
+		MM_RAISE("Array size mismatch");
+	if (p == 1.0) {
+		for (i = 0; i < na; i++)
+			b[i] = a[i];
+		return;
+	}
+	e = (MMFLOAT)mm_toint(p);
+	for (i = 0; i < na; i++)
+		b[i] = mm_toint(pow((MMFLOAT)a[i], e));
+}
+
+/*	MATH(MAGNITUDE a())         sqrt of the sum of the squares
+ *
+ *	Any rank: parsefloatarray is called with 0 for its dimension
+ *	count, so a 2-D array is legal and is read as the flat vector it
+ *	is.
+ */
+MMG_FN MMFLOAT mmg_magnitude(const MMFLOAT *a, int n)
+{
+	MMFLOAT m = 0.0;
+	int i;
+
+	for (i = 0; i < n; i++)
+		m += a[i] * a[i];
+	return sqrt(m);
+}
+
+/*	MATH(DOTPRODUCT a(), b())   one-dimensional, equal length */
+MMG_FN MMFLOAT mmg_dot(const MMFLOAT *a, int na, const MMFLOAT *b, int nb)
+{
+	MMFLOAT d = 0.0;
+	int i;
+
+	if (na != nb)
+		MM_RAISEV("Array size mismatch", 0.0);
+	for (i = 0; i < na; i++)
+		d += a[i] * b[i];
+	return d;
+}
+
+/*	MATH V_NORMALISE a(), b()   b = a / |a|
+ *
+ *	NO ZERO CHECK, and deliberately: the reference divides by the
+ *	magnitude with a bare '/', so an all-zero vector gives IEEE
+ *	infinities there and gives them here.  Adding the check would
+ *	stop a program that runs on a real PicoMite.
+ *
+ *	The magnitude is summed over the whole source before anything is
+ *	written, which is what lets b() and a() be the same array.
+ */
+MMG_FN void mmg_vnorm(const MMFLOAT *a, int na, MMFLOAT *b, int nb)
+{
+	MMFLOAT m = 0.0;
+	int i;
+
+	if (na != nb)
+		MM_RAISE("Array size mismatch");
+	for (i = 0; i < na; i++)
+		m += a[i] * a[i];
+	m = sqrt(m);
+	for (i = 0; i < na; i++)
+		b[i] = a[i] / m;
+}
+
+/*	MATH V_CROSS a(), b(), c()  c = a x b, three elements each
+ *
+ *	a and b are copied out first, so the destination may be either
+ *	source - cmd_math does the same, and a program that writes
+ *	V_CROSS a(), b(), a() depends on it.
+ */
+MMG_FN void mmg_vcross(const MMFLOAT *a, int na, const MMFLOAT *b, int nb,
+                       MMFLOAT *c, int nc)
+{
+	MMFLOAT u[3], v[3];
+	int i;
+
+	if (na != 3)
+		MM_RAISE("Argument 1 must be a 3 element floating point array");
+	if (nb != 3)
+		MM_RAISE("Argument 2 must be a 3 element floating point array");
+	if (nc != 3)
+		MM_RAISE("Argument 3 must be a 3 element floating point array");
+	for (i = 0; i < 3; i++) {
+		u[i] = a[i];
+		v[i] = b[i];
+	}
+	c[0] = u[1] * v[2] - u[2] * v[1];
+	c[1] = u[2] * v[0] - u[0] * v[2];
+	c[2] = u[0] * v[1] - u[1] * v[0];
+}
+
+/*	MATH V_PRINT a() [, HEX]  and  MATH M_PRINT a()
+ *
+ *	The formats are PFlt and PInt from PicoMite.c: a float through
+ *	FloatToStr(s, v, 4, 4, ' '), an integer through IntToStr in base
+ *	10 or base 16, ", " between them and CRLF at the end.  They go
+ *	straight out rather than through PRINT, so the console's column
+ *	tracking is not involved - which is what the reference does too.
+ *
+ *	M_PRINT walks a row at a time.  A row is contiguous here because
+ *	the first BASIC subscript is the adjacent one, so `stride` is the
+ *	size of the FIRST dimension: equal to nc under OPTION BASE 0, and
+ *	one more than it under BASE 1, where our arrays keep an
+ *	unreachable element 0 and MMBasic's do not.
+ */
+MMG_FN void mmg_pflt(MMFLOAT v)
+{
+	char b[80];
+
+	mm_float_to_str(b, v, 4, 4, ' ');
+	mmg_puts(b);
+}
+
+MMG_FN void mmg_pint(MMINTEGER v, int base)
+{
+	char b[80];
+
+	mm_int_to_str(b, (long long)v, base);
+	mmg_puts(b);
+}
+
+MMG_FN void mmg_vprint_f(const MMFLOAT *a, int n)
+{
+	int i;
+
+	for (i = 0; i < n; i++) {
+		if (i)
+			mmg_puts(", ");
+		mmg_pflt(a[i]);
+	}
+	mmg_puts("\r\n");
+}
+
+MMG_FN void mmg_vprint_i(const MMINTEGER *a, int n, int base)
+{
+	int i;
+
+	for (i = 0; i < n; i++) {
+		if (i)
+			mmg_puts(", ");
+		mmg_pint(a[i], base);
+	}
+	mmg_puts("\r\n");
+}
+
+MMG_FN void mmg_mprint_f(const MMFLOAT *a, int nc, int nr, int stride)
+{
+	int i, j;
+
+	for (i = 0; i < nr; i++) {
+		for (j = 0; j < nc; j++) {
+			if (j)
+				mmg_puts(", ");
+			mmg_pflt(a[i * stride + j]);
+		}
+		mmg_puts("\r\n");
+	}
+}
+
+MMG_FN void mmg_mprint_i(const MMINTEGER *a, int nc, int nr, int stride)
+{
+	int i, j;
+
+	for (i = 0; i < nr; i++) {
+		for (j = 0; j < nc; j++) {
+			if (j)
+				mmg_puts(", ");
+			mmg_pint(a[i * stride + j], 10);
+		}
+		mmg_puts("\r\n");
+	}
+}
 #endif /* MMB_MATH_H */

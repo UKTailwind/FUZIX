@@ -9,7 +9,7 @@ nothing at all about the 67 members underneath.
 import os
 import re
 
-REF = "/mnt/d/Dropbox/PicoMite/PicoMiteV6.03.00/core/MATHS.c"
+REF = "/mnt/d/Dropbox/PicoMite/PicoMite/core/MATHS.c"
 MMB2C = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      os.pardir, "mmb2c.py")
 
@@ -43,6 +43,13 @@ have_fns |= {"BASE64", "ENCODE", "DECODE"}
 assert "CRCWIDTH = {" in t, "the MATH CRC table left mmb2c.py"
 have_fns |= set(re.findall(
     r"'(CRC[0-9]+)'", re.search(r"CRCWIDTH = \{([^}]*)\}", t).group(1)))
+# MATH(MAGNITUDE ...) and MATH(DOTPRODUCT ...) are hand branches too -
+# they take whole arrays rather than the fixed argument count MATHFUNCS
+# holds, and are not whole-array REDUCTIONS either, so neither table can
+# carry them.  Same treatment: asserted against the source so a rename
+# is loud.
+assert "'MAGNITUDE', 'DOTPRODUCT'" in t, "the MATH vector branch left mmb2c.py"
+have_fns |= {"MAGNITUDE", "DOTPRODUCT"}
 # the in-place sub-commands do_array_cmd dispatches
 blk = t[t.index("def do_array_cmd"):]
 blk = blk[:blk.index("\n    def ", 10)]
@@ -84,27 +91,35 @@ print("\n".join(a))
 print("\n".join(b))
 print("""The split is not arbitrary. What is in is what a BASIC program
 actually reaches for - the whole-array reductions, the hyperbolic and
-log/atan scalars, the in-place array operations, and `BASE64` (which the
+log/atan scalars, the in-place array operations, `BASE64` (which the
 Gmail recipe made load-bearing: it is the hand branch in `expr`, with
-MMBasic's own write-to-the-second-argument shape). What is out divides
-into three kinds:
+MMBasic's own write-to-the-second-argument shape), and since
+2026-08-24 the eight members that needed no new machinery at all:
+`SHIFT`, `POWER`, `V_NORMALISE`, `V_CROSS`, `V_PRINT`, `M_PRINT`,
+`MAGNITUDE` and `DOTPRODUCT`. `tests/matha.bas` covers them, blessed
+line by line against a real MMBasic.
+
+What is out divides into three kinds:
 
 * **pure arithmetic, no platform dependency, each independently
-  testable against the interpreter** - the matrix and vector family
-  (`M_MULT`, `M_INVERSE`, `M_TRANSPOSE`, `M_DETERMINANT`, `V_CROSS`,
-  `V_NORMALISE`, `V_MULT`, `V_ROTATE`, `MAGNITUDE`, `DOTPRODUCT`), the
-  statistics (`CORREL`, `CHI`, `CHI_P`, `CROSSING`, `PHASE`), the
-  quaternions (`Q_*`) and the complex-number set (`C_*`). These are
+  testable against the interpreter** - what is left of the matrix and
+  vector family (`M_MULT`, `M_INVERSE`, `M_TRANSPOSE`,
+  `M_DETERMINANT`, `V_MULT`, `V_ROTATE`), the statistics (`CORREL`,
+  `CHI`, `CHI_P`, `CROSSING`) and the quaternions (`Q_*`). These are
   category 2: add on demand rather than as a block, because the 3D and
-  graphics demos say which are wanted first.
+  graphics demos say which are wanted first. All six of the first
+  group walk a 2-D array FLAT, and since the storage-order change our
+  flat order is MMBasic's, so each is a transcription rather than a
+  rewrite. `array_plane()` already hands out what they need.
 * **codecs and transforms** - `FFT`, `AES128`, `WINDOW`, `SINC`,
   `INTERPOLATE`. Bigger pieces, still pure arithmetic. `BASE64` and
   all four `CRC`s have shipped; of the rest `WINDOW` and `INTERPOLATE`
-  are small and self-contained, `FFT` wants a steer (its complex forms
-  depend on MMBasic's column-major 2-D storage, which our arrays
-  deliberately do not have) and `AES128` has no demand behind it.
+  are small and self-contained, `FFT` is now merely large rather than
+  undecided (its complex forms want MMBasic's 2-D storage order, which
+  our arrays have had since the storage-order change, and `PHASE` and
+  `INVERSE` come with it), and `AES128` has no demand behind it.
 * **the odd ones out** - `PID` and `SENSORFUSION` carry state between
-  calls, `M_PRINT` and `V_PRINT` write to the console, `RAND` overlaps
-  `RND`, and `SHIFT`/`POWER` are array surgery of the kind `SLICE` and
-  `INSERT` were before they shipped alongside `ARRAY SLICE`.
+  calls and want an IMU this machine does not have, and `RAND` needs
+  the Mersenne twister `MATH RANDOMIZE` is supposed to seed (see
+  NEXT.md, where that divergence is still open).
 """)

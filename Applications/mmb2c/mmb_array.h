@@ -46,9 +46,23 @@
  * program runs.  The allocation and the free are emitted AROUND these
  * by the translator - under bcrun only a call made by the program
  * reaches the VM's allocator - so what is here is the arithmetic and
- * the copy, which are safe anywhere.  PRESERVE's only-the-last-index
- * rule is MMBasic's (cmd_redim): the elements are row-major, so
- * growing an earlier subscript would scramble them.
+ * the copy, which are safe anywhere.
+ *
+ * PRESERVE's only-the-last-index rule is MMBasic's (cmd_redim), and
+ * the flat memcpy below is right only because our storage order is
+ * MMBasic's: the FIRST subscript is adjacent, so an element's offset
+ * is i0 + i1*d0 + i2*d0*d1 + ... and the size of the LAST dimension
+ * appears in no multiplier.  Growing it therefore leaves every
+ * existing element where it was, and copying the old block's prefix
+ * preserves them.  Growing any earlier one would scramble them, which
+ * is what the check refuses.
+ *
+ * This used to be wrong.  While the C arrays were declared in source
+ * order - the LAST subscript adjacent - it was the last dimension
+ * whose size multiplied every earlier subscript, so the rule and the
+ * copy were exactly inverted: REDIM PRESERVE a(n,2) on a(1,1) holding
+ * 1,2,3,4 gave 1,4,3,0.  The storage order is the fix; nothing here
+ * changed.
  */
 MMG_FN unsigned long mm_arr_bytes(const MMINTEGER *nb, unsigned long elsize)
 {
@@ -99,27 +113,60 @@ MMG_FN void mm_arr_set_f(MMFLOAT *a, int n, MMFLOAT v)
 MMG_FN void mm_arr_set_s(char (*a)[MM_STRSZ], int n, const char *v)
 { int i; for (i = 0; i < n; i++) mm_sset(a[i], v); }
 
+/* ---- ARRAY ADD and MATH SCALE ------------------------------------
+ *
+ * Both take a source, a value and a destination, and BOTH check the two
+ * arrays are the same length - which these did not until 2026-08-24,
+ * when a destination shorter than its source was written past the end
+ * in silence.
+ *
+ * The two wordings are different and that is not a slip.  Asked on a
+ * real MMBasic 6.03.02: ARRAY ADD raises "Array size mismatch"
+ * (StandardError(16), in array_add) and MATH SCALE raises "Size
+ * mismatch" (a bare error(), in cmd_math).  The same probe answered a
+ * third question - ARRAY SCALE is "Unknown command" there, because
+ * SCALE lives only in cmd_math.
+ */
 MMG_FN void mm_arr_add_i(const MMINTEGER *in, int n, MMINTEGER v,
-                         MMINTEGER *out)
-{ int i; for (i = 0; i < n; i++) out[i] = in[i] + v; }
+                         MMINTEGER *out, int no)
+{
+    int i;
+    if (n != no) MM_RAISE("Array size mismatch");
+    for (i = 0; i < n; i++) out[i] = in[i] + v;
+}
 
-MMG_FN void mm_arr_add_f(const MMFLOAT *in, int n, MMFLOAT v, MMFLOAT *out)
-{ int i; for (i = 0; i < n; i++) out[i] = in[i] + v; }
+MMG_FN void mm_arr_add_f(const MMFLOAT *in, int n, MMFLOAT v, MMFLOAT *out,
+                         int no)
+{
+    int i;
+    if (n != no) MM_RAISE("Array size mismatch");
+    for (i = 0; i < n; i++) out[i] = in[i] + v;
+}
 
 MMG_FN void mm_arr_add_s(char (*in)[MM_STRSZ], int n, const char *v,
-                         char (*out)[MM_STRSZ])
+                         char (*out)[MM_STRSZ], int no)
 {
     int i;
     char t[MM_STRSZ];
+    if (n != no) MM_RAISE("Array size mismatch");
     for (i = 0; i < n; i++) { mm_sset(t, mm_scat(in[i], v)); mm_sset(out[i], t); }
 }
 
 MMG_FN void mm_arr_scale_i(const MMINTEGER *in, int n, MMINTEGER v,
-                           MMINTEGER *out)
-{ int i; for (i = 0; i < n; i++) out[i] = in[i] * v; }
+                           MMINTEGER *out, int no)
+{
+    int i;
+    if (n != no) MM_RAISE("Size mismatch");
+    for (i = 0; i < n; i++) out[i] = in[i] * v;
+}
 
-MMG_FN void mm_arr_scale_f(const MMFLOAT *in, int n, MMFLOAT v, MMFLOAT *out)
-{ int i; for (i = 0; i < n; i++) out[i] = in[i] * v; }
+MMG_FN void mm_arr_scale_f(const MMFLOAT *in, int n, MMFLOAT v, MMFLOAT *out,
+                           int no)
+{
+    int i;
+    if (n != no) MM_RAISE("Size mismatch");
+    for (i = 0; i < n; i++) out[i] = in[i] * v;
+}
 
 /* ---- ARRAY SLICE / ARRAY INSERT: one strided copy serves both
  * directions and all three types.  `flat` is the one-dimensional

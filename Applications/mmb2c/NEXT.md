@@ -47,7 +47,141 @@ through fixed PIO1 programs, `OPTION ANGLE`, `MATH CRC8/12/16/32`,
 `PLAY MP3/WAV/FLAC` completion interrupts — and the two silent
 divergences below, which is the part worth remembering.
 
+**2026-08-24: multi-dimensional array storage order.** Our C arrays were
+declared in source order, so the LAST BASIC subscript was the adjacent
+one — the transpose of MMBasic, which stores the FIRST adjacent
+(`findvar`, `MMBasic.c:4871-4878`). The layout is not an implementation
+detail, because a program reads it with `VARADDR`, so it is now
+MMBasic's: the C dimensions are declared reversed and `subscript()`
+indexes reversed. Both translators, five sites each, `tests/order.bas`
+pins it.
+
+Three things were computing wrong answers and now do not:
+
+* `PEEK(VARADDR a(i,j))` gave the transposed offset — and for a
+  non-square array the wrong stride as well.
+* `READ a()` into a 2-D array filled the elements in our order, not
+  MMBasic's: `DATA 1,2,3,4` into `a(1,1)` gave `1 3 2 4`.
+* **`REDIM PRESERVE` on a multi-dimensional array corrupted it**, and
+  that one was wrong on its own terms rather than merely different.
+  `mm_arr_swap` enforces MMBasic's only-the-last-index rule and copies
+  the old block's prefix, which preserves everything only when the last
+  dimension's size multiplies no subscript — true of MMBasic's layout,
+  false of the one we had. `REDIM PRESERVE p(n,2)` on a `p(1,1)` holding
+  1,2,3,4 gave `1 4 3 0`.
+
+`MATH(CRC…)` and `SORT` over a 2-D array, and comms tx/rx of one, were
+divergent for the same reason and are not any more. `ARRAY`/`MATH SLICE`
+and `INSERT` were **not** affected: `array_vector` reached the same
+elements from the other end, and only its stride changed.
+
+`tests/order.bas` pins all of it, and **all 14 of its lines are blessed
+against a real MMBasic** — byte for byte, `devtools/ab.py` is the check
+and `devtools/mmbrun.py` the transport.
+
+Thirteen of them agreed on the first run. The fourteenth,
+`REDIM PRESERVE`, did not — and the fault was the interpreter's:
+MMBasic 6.03.02 preserved **nothing**, for 1-D, float and string arrays
+as well, at every size including a PSRAM-resident one. It was fixed in
+the reference and the two now agree. Ours had been wrong too, and
+differently: `1 4 3 0`, scrambled with an element lost.
+
+It cost nothing measurable: `make check` unchanged (nothing needed
+re-blessing), `cgate.sh` back to 0, and on the board a 32x32 sweep runs
+at 74 ms in either index order, before and after, at the same code size.
+Arrays live in SRAM, which has no data cache, so the stride is free.
+
+`linear_index()` in both translators is now a leftover — it decomposes a
+flat position into a subscript list, and the flat position is the answer.
+It can be replaced by a cast and an index whenever someone is in there.
+
+**2026-08-24: the first batch of MATH additions.** `SHIFT`, `POWER`,
+`V_NORMALISE`, `V_CROSS`, `V_PRINT`, `M_PRINT`, `MATH(MAGNITUDE)` and
+`MATH(DOTPRODUCT)` — the eight members that needed no new machinery.
+32 of 67 members to **40 of 67**. `tests/matha.bas` covers all eight,
+values and error wordings alike, and every one of its 30 lines is
+blessed against a real MMBasic with `devtools/ab.py`.
+
+Three things the interpreter had to settle, none of them guessable from
+the source:
+
+* **`MATH SHIFT`'s fourth argument is a bare `U`.** Quoted, `"U"` is
+  silently ignored and you get the ARITHMETIC shift — `checkstring`
+  compares the argument's own text and the quotes are part of it. A
+  wrong answer rather than an error there, so we refuse the quoted form
+  instead of copying the silence.
+* **`MATH POWER` into an integer array rounds the exponent first**, so
+  `POWER a%(), 2.7, b%()` cubes. Into a float array it does not.
+* The error wordings, which are not uniform: `SHIFT` raises
+  `Size mismatch` and everything else `Array size mismatch`, because
+  `cmd_math` uses `error()` for one and `StandardError(16)` for the
+  rest. All of them came out of `MM.ERRMSG$` under `ON ERROR SKIP`,
+  not out of the source.
+
+`array_plane()` landed with `M_PRINT` and is what the remaining `M_*`
+family needs; with the storage order now MMBasic's, those six are
+transcriptions rather than rewrites.
+
+**2026-08-24, later: OPTION BASE 1 arrays are dense.** Found while
+adding the batch above, in code that had been shipping: every
+whole-array walk folded in an unreachable element 0. `MATH(MAX)` over
+an all-negative array answered **0** where MMBasic answers -5;
+`MATH(MEAN)` divided by one too many; `MATH(MEDIAN)` took the median of
+one element more than existed. `SUM` and `MIN` looked right only on the
+data I first tried — `MIN` over positives is wrong the same way `MAX`
+was.
+
+The root cause was the array, not the reductions: `DIM a(3)` is FOUR
+elements under BASE 0 and THREE under BASE 1, and we allocated four
+either way. So the fix is where the cause is — `count_of()` allocates
+what the program can reach, `rebase()` turns a subscript into an index
+from element 0, and BASE 1 storage is now dense and identical to
+MMBasic's, as BASE 0 already was.
+
+That fixed a class, not six symptoms: `VARADDR` under BASE 1, `READ a()`,
+`SORT`, `MATH(CRC…)`, comms tx/rx and the reductions all came right at
+once. `tests/optbase1.bas` pins them, 19 lines blessed against the
+interpreter.
+
+**The one design choice worth knowing.** The hidden bounds table an
+array parameter carries now holds the element COUNT LESS ONE, not the
+upper bound the program wrote. Under BASE 0 they are the same number;
+under BASE 1 they differ by one. Holding the count is what let
+`mm_arr_count`, `emit_dim_alloc` and the subscript fold stay exactly as
+they were — `BOUND()` is the single place that adds the base back, via
+`unbase()`. Nothing a BASE 0 program generates changed by a character,
+which is how the gates stayed readable through the change.
+
 ## Next
+
+**2026-08-24, later still: the array size checks, and SPRITE LOADARRAY
+in two dimensions.**
+
+`ARRAY ADD` and `MATH SCALE` never checked that source and destination
+were the same length — `mm_arr_add_i` and friends took one count and
+never looked at the destination's, so a short destination was written
+past the end in silence. Both check now, and **the two wordings differ
+on purpose**: asked on a real MMBasic under `ON ERROR SKIP`, `ARRAY ADD`
+raises `Array size mismatch` (`StandardError(16)`, in `array_add`) and
+`MATH SCALE` raises `Size mismatch` (a bare `error()`, in `cmd_math`).
+
+The same probe answered a question nobody had asked: **`ARRAY SCALE` is
+"Unknown command" on a real MMBasic** — `SCALE` lives only in
+`cmd_math`, and `cmd_array` has no such sub-command. We accepted it;
+it is refused now, in our own words. The earlier entry in this file had
+that wrong twice: it said `ARRAY SCALE` raised `Array size mismatch`,
+when it does not exist at all, and the wording it quoted belongs to
+`ADD`.
+
+`SPRITE LOADARRAY` now takes a one- OR two-dimensional array. The 1-D
+form is MMBasic's own and unchanged — `w * h` pixels in sequence. The
+2-D form is ours: MMBasic refuses it with "Argument 4 must be a 1D
+numerical array", and it costs no code here because the first BASIC
+subscript is the adjacent one, so `DIM s(w-1, h-1)` walked flat IS the
+raster, row by row, with `s(x, y)` the pixel at x, y. Three or more
+dimensions are refused. `tests/arrsize.bas` covers the size checks
+(blessed against the interpreter); `tests/sprite.bas` covers the 2-D
+load and its `Array Dimensions` boundary headless.
 
 ### 1. Nothing else may swallow a statement
 
@@ -110,18 +244,22 @@ Each is small, self-contained, and needs no decision:
   (GP0–GP7, GP26). The measurement that reshaped this family is in
   PLAN-pulsin.md: a busy-wait cannot be trusted here, so anything that
   can be handed to hardware should be.
-* **`array_matrix()` and the vector/matrix members that need it** —
-  `array_flat` hands out only (pointer, count); every `M_*` member plus
-  `V_MULT` needs a 2-D accessor, and `array_vector` already computes
-  per-dimension strides, so the helper is a 30-line copy of it. Then
-  `M_TRANSPOSE`, `V_MULT`, `M_MULT`, `V_CROSS`, `V_NORMALISE`,
-  `MAGNITUDE`, `DOTPRODUCT`. `tests/solar_eclipse.bas:3068-3130`
+* **the vector/matrix members** — and this got cheaper. Four of them
+  never needed a 2-D accessor at all: `MAGNITUDE`, `DOTPRODUCT`,
+  `V_NORMALISE` and `V_CROSS` call `parsefloatarray(..., 1, ...)` in
+  the reference, so they are 1-D float loops, about 60 lines of header
+  between them. The rest — `V_MULT`, `V_ROTATE`, `M_TRANSPOSE`,
+  `M_MULT`, `M_INVERSE`, `M_DETERMINANT` — walk a 2-D array flat, and
+  since the storage-order change our flat order IS MMBasic's, so they
+  are straight transcriptions rather than strided rewrites. No
+  `array_matrix()` helper is needed. `tests/solar_eclipse.bas:3068-3130`
   hand-writes `matxvec` and `transpose` over 3x3 arrays, which is the
   only demand evidence in the tree.
   **Watch the convention**: MMBasic's `farr2d(arr,d1,a,b) = arr[b*d1+a]`
   means subscript 0 is the COLUMN, the transpose of how the eclipse
   writes it. A program "simplified" to use `MATH V_MULT` without
-  transposing would silently compute the wrong thing.
+  transposing would silently compute the wrong thing — and that is a
+  fact about MMBasic, not about our layout, so it survives the change.
 * **`MEMORY COPY` and `MEMORY SET`** — no new libcall and no kernel
   change: `memcpy`, `memmove` and `memset` are already in bcrun's table
   and `memcpy` has a native fast slot. But note what the old entry got
@@ -202,10 +340,10 @@ thing to fix.
 
 ## Wants your steer before any work
 
-* **`FFT`** — the only MATH member with a real design question: its
-  complex forms depend on MMBasic storing the first subscript adjacent
-  in a 2-D array, which is the opposite of our layout. `MAGNITUDE` and
-  `PHASE` are unaffected and are a clean cheap subset.
+* **`FFT`** — **the design question is gone.** Its complex forms want
+  MMBasic storing the first subscript adjacent in a 2-D array, and that
+  is now our layout too, so what is left is size, not a decision.
+  `MAGNITUDE` and `PHASE` remain a clean cheap subset.
 * **`ADC`** — continuous sampling, and the only category-2 name blocked
   by the machine rather than by effort: MMBasic DMAs the ADC FIFO
   straight into the BASIC array, which the DMA law forbids here, and the

@@ -160,7 +160,7 @@ static void global_decls(struct outbuf *o)
             dims = sstr("");
             if (s->is_array)
                 for (d = 0; d < s->ndims; d++)
-                    dims = sfmt("%s[%s]", dims, s->dims[d]);
+                    dims = sfmt("%s[%s]", dims, s->dims[s->ndims - 1 - d]);
             ob_add(&heap, sfmt("struct t_%s %s%s;%s", s->stype, cn,
                                dims, note));
         } else if (s->is_array && s->dynamic) {
@@ -173,7 +173,7 @@ static void global_decls(struct outbuf *o)
         } else if (s->is_array) {
             dims = sstr("");
             for (d = 0; d < s->ndims; d++)
-                dims = sfmt("%s[%s]", dims, s->dims[d]);
+                dims = sfmt("%s[%s]", dims, s->dims[s->ndims - 1 - d]);
             if (s->ty == TY_S)
                 ob_add(&heap, sfmt("char %s%s[%s];%s", cn, dims,
                                    strsz_of(s), note));
@@ -238,7 +238,7 @@ static void local_structs(struct outbuf *o)
                 dims = sstr("");
                 if (s->is_array)
                     for (d = 0; d < s->ndims; d++)
-                        dims = sfmt("%s[%s]", dims, s->dims[d]);
+                        dims = sfmt("%s[%s]", dims, s->dims[s->ndims - 1 - d]);
                 ob_add(o, sfmt("    struct t_%s %s%s;", s->stype, cn,
                                dims));
             } else if (s->is_array && s->dynamic) {
@@ -249,7 +249,7 @@ static void local_structs(struct outbuf *o)
             } else if (s->is_array) {
                 dims = sstr("");
                 for (d = 0; d < s->ndims; d++)
-                    dims = sfmt("%s[%s]", dims, s->dims[d]);
+                    dims = sfmt("%s[%s]", dims, s->dims[s->ndims - 1 - d]);
                 if (s->ty == TY_S)
                     ob_add(o, sfmt("    char %s%s[%s];", cn, dims,
                                    strsz_of(s)));

@@ -884,6 +884,19 @@ void statement_inner(void)
             sym = arrayref(1);
             if (sym->ty != TY_I)
                 cv_err("SPRITE LOADARRAY wants an integer array");
+            /* ONE OR TWO dimensions.  MMBasic takes only one -
+               parsenumberarray with a dimension count of 1, and
+               "Argument 4 must be a 1D numerical array" otherwise - and
+               reads it as w*h pixels in sequence, which is what the 1-D
+               form does here too.
+
+               The 2-D form is ours, and it costs no code: the first
+               BASIC subscript is the adjacent one, so DIM s(w-1,h-1)
+               walked flat IS the raster, row by row, with s(x, y) the
+               pixel a program would expect at x, y. */
+            if (!(sym->is_param || sym->dynamic) && sym->ndims > 2)
+                cv_err("SPRITE LOADARRAY wants a one- or "
+                       "two-dimensional array");
             fl = array_flat(sym);
             emit(sfmt("mms_loadarray(%s, %s, %s, %s, %s);",
                       n, w, h, fl.ptr, fl.cnt));
@@ -4329,9 +4342,16 @@ static void do_array_cmd(int is_math)
         return;
     }
     if (strcmp(op, "ADD") == 0 || strcmp(op, "SCALE") == 0) {
+        /* ARRAY ADD src(), v, dst()   and   MATH SCALE src(), v, dst()
+         *
+         * SCALE is MATH's alone: `ARRAY SCALE` answers "Unknown
+         * command" on a real MMBasic, because cmd_array has no such
+         * sub-command and only cmd_math does. */
         struct sym *src, *dst;
         struct val val;
         struct flat sf, df;
+        if (strcmp(op, "SCALE") == 0 && !is_math)
+            cv_err("SCALE is a MATH sub-command, not an ARRAY one");
         src = arrayref(1);
         expect_op(",");
         val = expr();
@@ -4347,8 +4367,8 @@ static void do_array_cmd(int is_math)
                 cv_err("SCALE does not apply to a string array");
             if (val.ty != TY_S)
                 cv_err("a string array needs a string value");
-            emit(sfmt("mm_arr_add_s(%s, %s, %s, %s);",
-                      sf.ptr, sf.cnt, val.code, df.ptr));
+            emit(sfmt("mm_arr_add_s(%s, %s, %s, %s, %s);",
+                      sf.ptr, sf.cnt, val.code, df.ptr, df.cnt));
             return;
         }
         {
@@ -4356,8 +4376,164 @@ static void do_array_cmd(int is_math)
                                   src->ty == TY_I ? "i" : "f");
             const char *cval = src->ty == TY_I ? as_int(val)
                                                : as_flt(val);
-            emit(sfmt("%s(%s, %s, %s, %s);",
-                      fn, sf.ptr, sf.cnt, cval, df.ptr));
+            emit(sfmt("%s(%s, %s, %s, %s, %s);",
+                      fn, sf.ptr, sf.cnt, cval, df.ptr, df.cnt));
+        }
+        return;
+    }
+    if (strcmp(op, "POWER") == 0) {
+        /* MATH POWER a(), n, b()  - b(i) = a(i) ^ n
+         *
+         * MATH only, as the C_ operations are: cmd_math has it and
+         * cmd_array does not.  Shaped exactly like ADD and SCALE, and
+         * refuses mixed types for the same reason they do. */
+        struct sym *src, *dst;
+        struct val val;
+        struct flat sf, df;
+
+        if (!is_math)
+            cv_err("POWER is a MATH sub-command, not an ARRAY one");
+        src = arrayref(1);
+        expect_op(",");
+        val = expr();
+        expect_op(",");
+        dst = arrayref(1);
+        if (src->ty == TY_S || dst->ty == TY_S)
+            cv_err("POWER does not apply to a string array");
+        if (src->ty != dst->ty)
+            cv_err("POWER needs both arrays to be the same type "
+                   "(MMBasic converts between integer and float here; "
+                   "this does not, as ARRAY ADD does not)");
+        sf = array_flat(src);
+        df = array_flat(dst);
+        cv.uses_math = 1;
+        emit(sfmt("mmg_pow_%s(%s, %s, %s, %s, %s);",
+                  src->ty == TY_I ? "i" : "f",
+                  sf.ptr, sf.cnt, as_flt(val), df.ptr, df.cnt));
+        return;
+    }
+    if (strcmp(op, "SHIFT") == 0) {
+        /* MATH SHIFT a%(), n, b%() [, U]
+         *
+         * Integer arrays only - "Argument 1 must be an integer array"
+         * is MMBasic's own refusal, made here because the types are
+         * known before the program runs. */
+        struct sym *src, *dst;
+        struct flat sf, df;
+        const char *n;
+        const char *unsgn = "0";
+
+        if (!is_math)
+            cv_err("SHIFT is a MATH sub-command, not an ARRAY one");
+        src = arrayref(1);
+        if (src->ty != TY_I)
+            cv_err("Argument 1 must be an integer array");
+        expect_op(",");
+        n = as_int(expr());
+        expect_op(",");
+        dst = arrayref(1);
+        if (dst->ty != TY_I)
+            cv_err("Argument 3 must be an integer array");
+        if (accept_op(",")) {
+            /* BARE U, not "U" - checked on a real MMBasic, where the
+             * quoted form silently gives the ARITHMETIC shift:
+             * checkstring compares the argument's own text, and the
+             * quotes are part of it.  That is a wrong answer rather
+             * than an error there, so this refuses it instead of
+             * copying the silence. */
+            if (!accept_kw("U"))
+                cv_err("MATH SHIFT's fourth argument is U, unquoted "
+                       "(a real MMBasic ignores \"U\" and shifts "
+                       "arithmetically)");
+            unsgn = "1";
+        }
+        sf = array_flat(src);
+        df = array_flat(dst);
+        cv.uses_math = 1;
+        emit(sfmt("mmg_shift(%s, %s, %s, %s, %s, %s);",
+                  sf.ptr, sf.cnt, n, df.ptr, df.cnt, unsgn));
+        return;
+    }
+    if (strcmp(op, "V_NORMALISE") == 0 || strcmp(op, "V_CROSS") == 0) {
+        /* MATH V_NORMALISE a(), b()      b = a / |a|
+         * MATH V_CROSS     a(), b(), c() c = a x b
+         *
+         * One-dimensional float arrays: parsefloatarray takes 1 for its
+         * dimension count in both.  array_line enforces the rank and
+         * hands back the count MMBasic counts - the REACHABLE elements,
+         * which is one fewer per dimension than ours under BASE 1. */
+        struct sym *arrs[3];
+        struct flat fl[3];
+        int want = strcmp(op, "V_NORMALISE") == 0 ? 2 : 3;
+        int n = 0, k;
+        const char *args = NULL;
+
+        if (!is_math)
+            cv_err("%s is a MATH sub-command, not an ARRAY one", op);
+        arrs[n++] = arrayref(1);
+        while (accept_op(",")) {
+            if (n == 3)
+                cv_err("MATH %s takes %d arrays", op, want);
+            arrs[n++] = arrayref(1);
+        }
+        if (n != want)
+            cv_err("MATH %s takes %d arrays", op, want);
+        for (k = 0; k < n; k++)
+            if (arrs[k]->ty != TY_F)
+                cv_err("Argument %d must be a floating point array", k + 1);
+        for (k = 0; k < n; k++) {
+            fl[k] = array_line(arrs[k]);
+            args = args ? sfmt("%s, %s, %s", args, fl[k].ptr, fl[k].cnt)
+                        : sfmt("%s, %s", fl[k].ptr, fl[k].cnt);
+        }
+        cv.uses_math = 1;
+        emit(sfmt("%s(%s);",
+                  want == 2 ? "mmg_vnorm" : "mmg_vcross", args));
+        return;
+    }
+    if (strcmp(op, "V_PRINT") == 0 || strcmp(op, "M_PRINT") == 0) {
+        /* MATH V_PRINT a() [, HEX]   one line
+         * MATH M_PRINT a()           one line per row
+         *
+         * HEX is a literal, and only for an integer array: the
+         * reference raises "Trying to print a float in HEX" at run
+         * time, which is a translate-time refusal here. */
+        struct sym *sym;
+        int hexed = 0;
+
+        if (!is_math)
+            cv_err("%s is a MATH sub-command, not an ARRAY one", op);
+        sym = arrayref(1);
+        if (sym->ty == TY_S)
+            cv_err("MATH %s needs a numeric array", op);
+        if (accept_op(",")) {
+            struct tok *h = nxt();
+
+            if (h->kind != T_ID || strcmp(h->up, "HEX") != 0)
+                cv_err("MATH %s's second argument is HEX", op);
+            if (strcmp(op, "M_PRINT") == 0)
+                cv_err("MATH M_PRINT takes one argument");
+            if (sym->ty == TY_F)
+                cv_err("Trying to print a float in HEX");
+            hexed = 1;
+        }
+        cv.uses_math = 1;
+        if (strcmp(op, "V_PRINT") == 0) {
+            struct flat f = array_line(sym);
+
+            if (sym->ty == TY_I)
+                emit(sfmt("mmg_vprint_i(%s, %s, %d);",
+                          f.ptr, f.cnt, hexed ? 16 : 10));
+            else
+                emit(sfmt("mmg_vprint_f(%s, %s);", f.ptr, f.cnt));
+            return;
+        }
+        {
+            struct plane p = array_plane(sym);
+
+            emit(sfmt("mmg_mprint_%s(%s, %s, %s, %s);",
+                      sym->ty == TY_I ? "i" : "f",
+                      p.ptr, p.nc, p.nr, p.stride));
         }
         return;
     }
@@ -5501,7 +5677,7 @@ static void emit_local_decl(struct sym *s)
         const char *dims = "";
         int k;
         for (k = 0; k < s->ndims; k++)
-            dims = sfmt("%s[%s]", dims, s->dims[k]);
+            dims = sfmt("%s[%s]", dims, s->dims[s->ndims - 1 - k]);
         if (s->ty == TY_S)
             emit(sfmt("%schar %s%s[%s];", pfx, s->acc, dims,
                       strsz_of(s)));

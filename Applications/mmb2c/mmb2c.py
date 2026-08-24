@@ -1777,16 +1777,43 @@ class Conv(object):
             # into one offset using the bounds handed in alongside it.
             # An array DIMmed with a run-time bound is the same shape and
             # folds the same way, out of its own bounds table.
+            #
+            # The fold runs from the LEFT, j a running product of the
+            # earlier bounds, because that is what findvar does
+            # (MMBasic.c:4871-4878).  The bounds table itself stays in
+            # source order - BOUND() reports out of it.
             b = self.bnd_acc(s)
-            off = parts[0]
-            for k in range(1, len(parts)):
-                off = '((%s) * ((%s)[%d] + 1) + (%s))' % (off, b, k + 1,
-                                                          parts[k])
+            ix = [self.rebase(p) for p in parts]
+            off = ix[0]
+            j = '1'
+            for k in range(1, len(ix)):
+                j = '((%s) * ((%s)[%d] + 1))' % (j, b, k)
+                off = '((%s) + (%s) * (%s))' % (off, ix[k], j)
             return '%s[%s]' % (s.acc, off)
         if len(parts) != len(s.dims):
             self.err("'%s' has %d dimension(s), %d given"
                      % (s.name, len(s.dims), len(parts)))
-        return s.acc + ''.join('[' + p + ']' for p in parts)
+        # REVERSED, and the declaration is reversed to match, so that
+        # a(i, j) lands at i + j * d1.  MMBasic stores the FIRST
+        # subscript adjacent (findvar, MMBasic.c:4871-4878) and a
+        # program is entitled to see that through VARADDR, so the
+        # storage order is part of the language, not ours to choose.
+        #
+        # rebase() is what makes OPTION BASE 1 dense: element 0 of the C
+        # array IS a(1), so there is no unreachable slot for a whole
+        # array walk to trip over.
+        return s.acc + ''.join('[' + self.rebase(p) + ']'
+                               for p in reversed(parts))
+
+    def rebase(self, part):
+        """A BASIC subscript as an index from element 0.
+
+        Under OPTION BASE 0 they are the same thing and the text is
+        handed back untouched, so nothing a BASE 0 program generates
+        changes by a character."""
+        if not self.opt_base:
+            return part
+        return '((%s) - %d)' % (part, self.opt_base)
 
     def bnd_acc(self, s):
         """The bounds table { rank, ub1, ... } that goes with a flat
@@ -2985,6 +3012,32 @@ class Conv(object):
                            255 if cap is None else cap), TY_I)
             if t[0] == T_ID and t[2] in CRCWIDTH:
                 return self.do_math_crc(t[2])
+            if t[0] == T_ID and t[2] in ('MAGNITUDE', 'DOTPRODUCT'):
+                # MATH(MAGNITUDE a())        sqrt of the sum of squares
+                # MATH(DOTPRODUCT a(), b())  sum of the products
+                #
+                # Float arrays both, which is parsefloatarray's own
+                # restriction.  MAGNITUDE takes ANY rank (dimension
+                # count 0 in the reference) and reads the array flat;
+                # DOTPRODUCT is one-dimensional, so it goes through
+                # array_line and counts what a program can reach.
+                name = t[2]
+                a = self.arrayref()
+                if a.ty != TY_F:
+                    self.err("Argument 1 must be a floating point array")
+                self.uses_math = True
+                if name == 'MAGNITUDE':
+                    self.expect_op(')')
+                    ptr, cnt = self.array_flat(a)
+                    return ('mmg_magnitude(%s, %s)' % (ptr, cnt), TY_F)
+                self.expect_op(',')
+                b = self.arrayref()
+                if b.ty != TY_F:
+                    self.err("Argument 2 must be a floating point array")
+                self.expect_op(')')
+                ap, an = self.array_line(a)
+                bp, bn = self.array_line(b)
+                return ('mmg_dot(%s, %s, %s, %s)' % (ap, an, bp, bn), TY_F)
             if t[0] == T_ID and t[2] in MATHARRAY:
                 name = t[2]
                 sym = self.arrayref()
@@ -3012,10 +3065,12 @@ class Conv(object):
                             % (fn, sfx, ptr, cnt, idx), TY_F)
                 return ('mm_st_%s_%s(%s, %s)' % (fn, sfx, ptr, cnt), TY_F)
             if t[0] != T_ID or t[2] not in MATHFUNCS:
-                self.err("MATH(%s ...) is not supported; translated are "
-                         "%s and the array reductions %s"
-                         % (t[1], ', '.join(sorted(MATHFUNCS)),
-                            ', '.join(MATHARRAY)))
+                known = sorted(list(MATHFUNCS) + list(MATHARRAY)
+                               + list(CRCWIDTH)
+                               + ['BASE64 ENCODE', 'BASE64 DECODE',
+                                  'MAGNITUDE', 'DOTPRODUCT'])
+                self.err("MATH(%s ...) is not supported; translated are %s"
+                         % (t[1], ', '.join(known)))
             name = t[2]
             a = self.expr()
             if MATHFUNCS[name] == 2:
@@ -3068,15 +3123,31 @@ class Conv(object):
             return ('(char (*)[MM_STRSZ])%s' % s.acc, cnt)
         return ('(%s *)%s' % (CTYPE[s.ty], s.acc), cnt)
 
-    def usable(self, txt):
-        """How many elements of a dimension the program can reach.
+    def count_of(self, bound):
+        """The number of elements a declared upper bound asks for.
 
-        Our arrays are declared with bound + 1 elements whatever OPTION
-        BASE says, so under BASE 1 element 0 exists and is out of reach.
-        MMBasic allocates only what it can index, so a count it compares
-        against has to have that element taken back off."""
+        `DIM a(3)` is four elements under OPTION BASE 0 and THREE under
+        BASE 1, and MMBasic allocates exactly that many either way.  We
+        do now as well: an array here holds what the program can reach
+        and nothing besides, so a whole-array walk sees what MMBasic's
+        does and VARADDR reports what MMBasic reports.
+
+        It did not use to.  Element 0 was kept under BASE 1 and every
+        flat walk read it - `MATH(MAX)` over an all-negative array
+        answered 0, `MATH(MEAN)` divided by one too many, `READ a()`
+        filled from the wrong end.  The phantom element was the cause of
+        all of them."""
         if self.opt_base:
-            return '(%s) - %d' % (txt, self.opt_base)
+            return '(%s) - %d + 1' % (bound, self.opt_base)
+        return '(%s) + 1' % bound
+
+    def usable(self, txt):
+        """A dimension's element count, given its declared C size.
+
+        These are the same number now - the declaration allocates only
+        reachable elements (see count_of) - so this is the identity.  It
+        is kept as the one place that says so, and because every caller
+        reads better for naming what it wants."""
         return txt
 
     def array_line(self, s):
@@ -3100,13 +3171,13 @@ class Conv(object):
         `parts` is one index per dimension with None where the statement
         left a blank, and the line runs along that dimension.
 
-        Our C arrays carry the BASIC subscripts in source order, so the
-        LAST one is adjacent - the opposite of MMBasic's storage, where
-        the FIRST is.  The stride is therefore the product of the sizes to
-        the RIGHT of the blank index, and 1 when the blank index is last.
-        MMBasic reaches the same elements from the other end (array_slice
-        builds off[] as a running product from the left): the addresses
-        differ, the set of elements does not."""
+        Our C arrays are declared with their dimensions REVERSED so
+        that the FIRST BASIC subscript is adjacent, which is MMBasic's
+        own storage order (see subscript()).  The stride is therefore
+        the product of the sizes to the LEFT of the blank index, and 1
+        when the blank index is first - the same running product from
+        the left that MMBasic's array_slice builds off[] from, so the
+        addresses agree element for element."""
         if s.ty == TY_S:
             self.no_length_array(s)
         if not (s.is_param or s.dynamic) and len(s.dims) < 2:
@@ -3116,9 +3187,37 @@ class Conv(object):
         idx = list(parts)
         idx[blank] = '(int)(%d)' % self.opt_base
         ptr = '&' + self.subscript(s, idx)
-        rest = sz[blank + 1:]
+        rest = sz[:blank]
         return (ptr, ' * '.join(rest) if rest else '1',
                 self.usable(sz[blank]))
+
+    def array_plane(self, s):
+        """(first element, columns, rows, row stride) of a 2-D array.
+
+        MMBasic's own names: cmd_math reads dims[0] as the COLUMN count
+        and dims[1] as the row count, and farr2d(arr, d1, a, b) is
+        arr[b * d1 + a] - so the first subscript is the column and a row
+        is contiguous.  It is contiguous here too, the storage order
+        being the same one.
+
+        The stride is the FIRST dimension's declared size rather than
+        the column count, and the two differ under OPTION BASE 1: our
+        arrays keep an unreachable element 0 in every dimension and
+        MMBasic's do not, so the rows here are one element further
+        apart than the count of what is in them."""
+        if not s.is_array:
+            self.err("'%s' is not an array" % s.name)
+        if s.is_param or s.dynamic:
+            self.err("'%s' is a run-time array, and this wants one whose "
+                     "shape is known when it is translated" % s.name)
+        if len(s.dims) != 2:
+            self.err("'%s' has %d dimension(s), and this wants a "
+                     "two-dimensional array" % (s.name, len(s.dims)))
+        if s.ty == TY_S:
+            self.no_length_array(s)
+        sz = self.dim_sizes(s, 2)
+        ptr = '&' + self.subscript(s, ['(int)(%d)' % self.opt_base] * 2)
+        return (ptr, self.usable(sz[0]), self.usable(sz[1]), sz[0])
 
     def no_length_array(self, s):
         """Refuse to hand a LENGTH array to anything that walks its
@@ -3154,7 +3253,13 @@ class Conv(object):
 
     def bound_of(self, sym, dim):
         """BOUND() resolves at compile time for a real array; an array
-        parameter carries its bounds in a hidden extra argument."""
+        parameter carries its bounds in a hidden extra argument.
+
+        What that argument holds is the element COUNT less one, not the
+        upper bound the program wrote - the two differ under OPTION BASE
+        1, and holding the count is what lets mm_arr_count and the
+        subscript fold stay arithmetic-free of the base.  BOUND() is
+        therefore the one place that adds it back."""
         if dim is None:
             k = 1                      # "defaults to one if not specified"
             kexpr = '1'
@@ -3170,14 +3275,21 @@ class Conv(object):
                   else '__b_' + sym.name.replace('.', '__'))
             if k == 0:
                 return str(self.opt_base)
-            return '(%s)[%s]' % (nm, kexpr)
+            return self.unbase('(%s)[%s]' % (nm, kexpr))
         if k is None:
             self.err("BOUND() on a DIMmed array needs a constant dimension")
         if k == 0:
             return str(self.opt_base)
         if k > len(sym.dims):
             return '0'
-        return '((%s) - 1)' % sym.dims[k - 1]
+        return self.unbase('((%s) - 1)' % sym.dims[k - 1])
+
+    def unbase(self, txt):
+        """A stored count-less-one turned back into the upper bound the
+        program wrote.  Identity under OPTION BASE 0."""
+        if not self.opt_base:
+            return txt
+        return '((%s) + %d)' % (txt, self.opt_base)
 
 
     # ==================================================================
@@ -4208,7 +4320,7 @@ class Conv(object):
                     # which is what an array parameter already is here.
                     if not const_c_expr(b):
                         dyn = True
-                    dims.append('(%s) + 1' % b)
+                    dims.append(self.count_of(b))
                     if not self.accept_op(','):
                         break
                 self.expect_op(')')
@@ -4432,7 +4544,7 @@ class Conv(object):
             self.expect_op('(')
             dims = []
             while True:
-                dims.append('(%s) + 1' % self.as_int(self.expr()))
+                dims.append(self.count_of(self.as_int(self.expr())))
                 if not self.accept_op(','):
                     break
             self.expect_op(')')
@@ -4486,20 +4598,22 @@ class Conv(object):
         cmd_dim (Commands.c:8658) fills the values into linear array
         memory, and MMBasic arrays store the FIRST subscript varying
         fastest - so DIM a(3,1) = (p,q,...) sets a(0,0), a(1,0),
-        a(2,0), a(3,0), a(0,1), ...  Our C arrays are declared the
-        other way round (the last subscript is adjacent), so the flat
-        position maps to a subscript LIST rather than to a flat
-        offset.  The divisions below are built from k (a literal) and
-        the dimension sizes (constant expressions by the time an array
-        is static), so cc1 folds every one of them to a plain index.
+        a(2,0), a(3,0), a(0,1), ...  Our storage order is that one, so
+        flat position k IS element k; what is left to do is turn k into
+        the subscript LIST subscript() wants, the C array being
+        declared with its dimensions reversed.  The divisions below are
+        built from k (a literal) and the dimension sizes (constant
+        expressions by the time an array is static), so cc1 folds every
+        one of them to a plain index.
 
-        OPTION BASE 1 counts here too, and used not to: MMBasic's linear
-        memory begins at index 1 in every dimension, while ours keeps an
-        unreachable element 0, so the values landed one place early and
-        the last one was never written at all.  DIM s(4) = (1,2,3,4) left
-        s(1) holding 2 and s(4) holding nothing."""
+        What comes out is a C INDEX, not a BASIC subscript - this
+        builds the accessor itself rather than going through
+        subscript(), so nothing rebases it afterwards.  Element k of the
+        list is C index k under either OPTION BASE now that BASE 1
+        storage is dense, and adding the base here is what put
+        DIM s(4) = (1,2,3,4) one place late and wrote off the end."""
         if len(s.dims) == 1:
-            return '%s[%d]' % (s.acc, k + self.opt_base)
+            return '%s[%d]' % (s.acc, k)
         if s.dynamic:
             self.err("an initialiser list on a run-time DIM is only "
                      "supported for 1-D arrays")
@@ -4513,11 +4627,9 @@ class Conv(object):
                 e = '(%d) / (%s)' % (k, div)
             if j < len(s.dims) - 1:
                 e = '(%s) %% (%s)' % (e, u)
-            if self.opt_base:
-                e = '(%s) + %d' % (e, self.opt_base)
             subs.append('(%s)' % e)
             div = u if div is None else '(%s) * (%s)' % (div, u)
-        return s.acc + ''.join('[' + p + ']' for p in subs)
+        return s.acc + ''.join('[' + p + ']' for p in reversed(subs))
 
     def do_const(self):
         while True:
@@ -5332,6 +5444,20 @@ class Conv(object):
                 sym = self.arrayref()
                 if sym.ty != TY_I:
                     self.err('SPRITE LOADARRAY wants an integer array')
+                # ONE OR TWO dimensions.  MMBasic takes only one -
+                # parsenumberarray with a dimension count of 1, and
+                # "Argument 4 must be a 1D numerical array" otherwise -
+                # and reads it as w*h pixels in sequence, which is what
+                # the 1-D form does here too.
+                #
+                # The 2-D form is ours, and it costs no code: the first
+                # BASIC subscript is the adjacent one, so DIM s(w-1,h-1)
+                # walked flat IS the raster, row by row, with s(x, y) the
+                # pixel a program would expect at x, y.
+                if not (sym.is_param or sym.dynamic) \
+                        and len(sym.dims) > 2:
+                    self.err('SPRITE LOADARRAY wants a one- or '
+                             'two-dimensional array')
                 ptr, cnt = self.array_flat(sym)
                 self.emit('mms_loadarray(%s, %s, %s, %s, %s);'
                           % (n, w, h, ptr, cnt))
@@ -7314,6 +7440,13 @@ class Conv(object):
                           % (ptr, cnt, self.as_flt(val)))
             return
         if op in ('ADD', 'SCALE'):
+            # ARRAY ADD src(), v, dst()   and   MATH SCALE src(), v, dst()
+            #
+            # SCALE is MATH's alone: `ARRAY SCALE` answers "Unknown
+            # command" on a real MMBasic, because cmd_array has no such
+            # sub-command and only cmd_math does.
+            if op == 'SCALE' and not is_math:
+                self.err("SCALE is a MATH sub-command, not an ARRAY one")
             src = self.arrayref()
             self.expect_op(',')
             val = self.expr()
@@ -7329,14 +7462,143 @@ class Conv(object):
                     self.err("SCALE does not apply to a string array")
                 if val[1] != TY_S:
                     self.err("a string array needs a string value")
-                self.emit('mm_arr_add_s(%s, %s, %s, %s);'
-                          % (sptr, scnt, val[0], dptr))
+                self.emit('mm_arr_add_s(%s, %s, %s, %s, %s);'
+                          % (sptr, scnt, val[0], dptr, dcnt))
                 return
             fn = 'mm_arr_%s_%s' % (op.lower(),
                                    'i' if src.ty == TY_I else 'f')
             conv = self.as_int if src.ty == TY_I else self.as_flt
-            self.emit('%s(%s, %s, %s, %s);'
-                      % (fn, sptr, scnt, conv(val), dptr))
+            self.emit('%s(%s, %s, %s, %s, %s);'
+                      % (fn, sptr, scnt, conv(val), dptr, dcnt))
+            return
+        if op == 'POWER':
+            # MATH POWER a(), n, b()  - b(i) = a(i) ^ n
+            #
+            # MATH only, as the C_ operations are: cmd_math has it and
+            # cmd_array does not.  Shaped exactly like ADD and SCALE,
+            # and refuses mixed types for the same reason they do.
+            if not is_math:
+                self.err("POWER is a MATH sub-command, not an ARRAY one")
+            src = self.arrayref()
+            self.expect_op(',')
+            val = self.expr()
+            self.expect_op(',')
+            dst = self.arrayref()
+            if src.ty == TY_S or dst.ty == TY_S:
+                self.err("POWER does not apply to a string array")
+            if src.ty != dst.ty:
+                self.err("POWER needs both arrays to be the same type "
+                         "(MMBasic converts between integer and float "
+                         "here; this does not, as ARRAY ADD does not)")
+            sptr, scnt = self.array_flat(src)
+            dptr, dcnt = self.array_flat(dst)
+            self.uses_math = True
+            self.emit('mmg_pow_%s(%s, %s, %s, %s, %s);'
+                      % ('i' if src.ty == TY_I else 'f',
+                         sptr, scnt, self.as_flt(val), dptr, dcnt))
+            return
+        if op == 'SHIFT':
+            # MATH SHIFT a%(), n, b%() [, "U"]
+            #
+            # Integer arrays only - "Argument 1 must be an integer
+            # array" is MMBasic's own refusal, made here because the
+            # types are known before the program runs.  The "U" is a
+            # literal in the reference too (checkstring on argv[6]),
+            # not an expression.
+            if not is_math:
+                self.err("SHIFT is a MATH sub-command, not an ARRAY one")
+            src = self.arrayref()
+            if src.ty != TY_I:
+                self.err("Argument 1 must be an integer array")
+            self.expect_op(',')
+            n = self.as_int(self.expr())
+            self.expect_op(',')
+            dst = self.arrayref()
+            if dst.ty != TY_I:
+                self.err("Argument 3 must be an integer array")
+            unsgn = '0'
+            if self.accept_op(','):
+                # BARE U, not "U" - checked on a real MMBasic, where
+                # the quoted form silently gives the ARITHMETIC shift:
+                # checkstring compares the argument's own text, and the
+                # quotes are part of it.  That is a wrong answer rather
+                # than an error there, so this refuses it instead of
+                # copying the silence.
+                if not self.accept_kw('U'):
+                    self.err("MATH SHIFT's fourth argument is U, "
+                             'unquoted (a real MMBasic ignores "U" and '
+                             'shifts arithmetically)')
+                unsgn = '1'
+            sptr, scnt = self.array_flat(src)
+            dptr, dcnt = self.array_flat(dst)
+            self.uses_math = True
+            self.emit('mmg_shift(%s, %s, %s, %s, %s, %s);'
+                      % (sptr, scnt, n, dptr, dcnt, unsgn))
+            return
+        if op in ('V_NORMALISE', 'V_CROSS'):
+            # MATH V_NORMALISE a(), b()      b = a / |a|
+            # MATH V_CROSS     a(), b(), c() c = a x b
+            #
+            # One-dimensional float arrays: parsefloatarray takes 1 for
+            # its dimension count in both.  array_line enforces the
+            # rank and hands back the count MMBasic counts - the
+            # REACHABLE elements, which is one fewer per dimension than
+            # ours under OPTION BASE 1.
+            if not is_math:
+                self.err("%s is a MATH sub-command, not an ARRAY one" % op)
+            arrs = [self.arrayref()]
+            while self.accept_op(','):
+                arrs.append(self.arrayref())
+            want = 2 if op == 'V_NORMALISE' else 3
+            if len(arrs) != want:
+                self.err("MATH %s takes %d arrays" % (op, want))
+            for a in arrs:
+                if a.ty != TY_F:
+                    self.err("Argument %d must be a floating point array"
+                             % (arrs.index(a) + 1))
+            parts = []
+            for a in arrs:
+                parts.extend(self.array_line(a))
+            self.uses_math = True
+            self.emit('%s(%s);'
+                      % ('mmg_vnorm' if op == 'V_NORMALISE' else 'mmg_vcross',
+                         ', '.join(parts)))
+            return
+        if op in ('V_PRINT', 'M_PRINT'):
+            # MATH V_PRINT a() [, HEX]   one line
+            # MATH M_PRINT a()           one line per row
+            #
+            # HEX is a literal, and only for an integer array: the
+            # reference raises "Trying to print a float in HEX" at run
+            # time, which is a translate-time refusal here.
+            if not is_math:
+                self.err("%s is a MATH sub-command, not an ARRAY one" % op)
+            sym = self.arrayref()
+            if sym.ty == TY_S:
+                self.err("MATH %s needs a numeric array" % op)
+            hexed = False
+            if self.accept_op(','):
+                h = self.nxt()
+                if h[0] != T_ID or h[2] != 'HEX':
+                    self.err("MATH %s's second argument is HEX" % op)
+                if op == 'M_PRINT':
+                    self.err("MATH M_PRINT takes one argument")
+                if sym.ty == TY_F:
+                    self.err("Trying to print a float in HEX")
+                hexed = True
+            self.uses_math = True
+            sfx = 'i' if sym.ty == TY_I else 'f'
+            if op == 'V_PRINT':
+                ptr, cnt = self.array_line(sym)
+                if sym.ty == TY_I:
+                    self.emit('mmg_vprint_i(%s, %s, %d);'
+                              % (ptr, cnt, 16 if hexed else 10))
+                else:
+                    self.emit('mmg_vprint_f(%s, %s);' % (ptr, cnt))
+                return
+            ptr, nc, nr, stride = self.array_plane(sym)
+            self.emit('mmg_mprint_%s(%s, %s, %s, %s);'
+                      % (sfx, ptr, nc, nr, stride))
             return
         if op in ('SLICE', 'INSERT'):
             # ARRAY SLICE  from(), i1, , i3, to()     - read one line out
@@ -9020,7 +9282,7 @@ class Conv(object):
             self.emit('static int __once_%s = 0;'
                       % s.name.replace('.', '__'))
         if s.is_array:
-            dims = ''.join('[%s]' % d for d in s.dims)
+            dims = ''.join('[%s]' % d for d in reversed(s.dims))
             if s.ty == TY_S:
                 self.emit('%schar %s%s[%s];'
                           % (pfx, s.acc, dims, self.strsz(s)))
@@ -9160,7 +9422,7 @@ class Conv(object):
             if s.implied:
                 note = '   /* implied, first seen line %d */' % s.where
             if s.stype is not None:
-                dims = ''.join('[%s]' % d for d in s.dims) \
+                dims = ''.join('[%s]' % d for d in reversed(s.dims)) \
                     if s.is_array else ''
                 heap.append('struct t_%s %s%s;%s'
                             % (s.stype, cn, dims, note))
@@ -9172,7 +9434,7 @@ class Conv(object):
                             % self.dyn_decl(s, cn))
                 heap.append('MMINTEGER __b_%s[MM_MAXDIM + 1];' % cn)
             elif s.is_array:
-                dims = ''.join('[%s]' % d for d in s.dims)
+                dims = ''.join('[%s]' % d for d in reversed(s.dims))
                 if s.ty == TY_S:
                     heap.append('char %s%s[%s];%s'
                                 % (cn, dims, self.strsz(s), note))
@@ -9224,7 +9486,7 @@ class Conv(object):
                     continue
                 cn = cvar(lnm)
                 if s.stype is not None:
-                    dims = ''.join('[%s]' % d for d in s.dims) \
+                    dims = ''.join('[%s]' % d for d in reversed(s.dims)) \
                         if s.is_array else ''
                     out.append('    struct t_%s %s%s;'
                                % (s.stype, cn, dims))
@@ -9233,7 +9495,7 @@ class Conv(object):
                                % self.dyn_decl(s, cn))
                     out.append('    MMINTEGER __b_%s[MM_MAXDIM + 1];' % cn)
                 elif s.is_array:
-                    dims = ''.join('[%s]' % d for d in s.dims)
+                    dims = ''.join('[%s]' % d for d in reversed(s.dims))
                     if s.ty == TY_S:
                         out.append('    char %s%s[%s];'
                                    % (cn, dims, self.strsz(s)))

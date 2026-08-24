@@ -83,4 +83,27 @@ PRINT "3: " MM.ERRMSG$
 SPRITE RESTORE
 PRINT "x4: "; SPRITE(X, #4)
 SPRITE CLOSE ALL
+
+' LOADARRAY takes a two-dimensional array as well as MMBasic's
+' one-dimensional one.  It is the same runtime call on the same flat
+' pointer - the first BASIC subscript is the adjacent one, so a(x, y)
+' walked flat IS the raster row by row, which tests/order.bas pins.
+' What is checkable headless is that the shape is accepted and that the
+' element count is still counted the same way.
+DIM two%(7, 7)
+FOR i% = 0 TO 7
+  FOR j% = 0 TO 7
+    two%(i%, j%) = RGB(255,255,255)
+  NEXT j%
+NEXT i%
+SPRITE LOADARRAY #6, 8, 8, two%()
+PRINT "2d: "; SPRITE(W, #6); " "; SPRITE(H, #6)
+SPRITE CLOSE #6
+
+DIM small%(2, 2)
+ON ERROR SKIP 1
+SPRITE LOADARRAY #7, 8, 8, small%()
+PRINT "2d short: "; MM.ERRMSG$
+
+SPRITE CLOSE ALL
 PRINT "sprite surface ok"

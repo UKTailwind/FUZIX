@@ -7,7 +7,7 @@ both sides need normalising before they can be compared at all.
 import os
 import re
 
-MMB = "/mnt/d/Dropbox/PicoMite/PicoMiteV6.03.00/AllCommands.h"
+MMB = "/mnt/d/Dropbox/PicoMite/PicoMite/AllCommands.h"
 MMB2C = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      os.pardir, "mmb2c.py")
 

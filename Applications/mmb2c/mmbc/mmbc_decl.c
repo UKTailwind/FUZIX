@@ -937,7 +937,7 @@ void do_redim(void)
         expect_op("(");
         for (;;) {
             GROW(dims, ndims, cdims);
-            dims[ndims++] = pstr(sfmt("(%s) + 1", as_int(expr())));
+            dims[ndims++] = pstr(count_of(as_int(expr())));
             if (!accept_op(","))
                 break;
         }
@@ -1002,7 +1002,7 @@ void do_declare(const char *kw)
                 if (!const_c_expr(b))
                     dyn = 1;
                 GROW(dims, ndims, cdims);
-                dims[ndims++] = sfmt("(%s) + 1", b);
+                dims[ndims++] = count_of(b);
                 if (!accept_op(","))
                     break;
             }
@@ -1175,26 +1175,31 @@ static void emit_initialiser(struct sym *s, int is_static)
  * cmd_dim (Commands.c:8658) fills the values into linear array memory,
  * and MMBasic arrays store the FIRST subscript varying fastest - so
  * DIM a(3,1) = (p,q,...) sets a(0,0), a(1,0), a(2,0), a(3,0), a(0,1),
- * ...  Our C arrays are declared the other way round (the last
- * subscript is adjacent), so the flat position maps to a subscript
- * LIST rather than to a flat offset.  The divisions below are built
- * from k (a literal) and the dimension sizes (constant expressions by
- * the time an array is static), so cc1 folds every one of them to a
- * plain index. */
+ * ...  Our storage order is that one, so flat position k IS element k;
+ * what is left to do is turn k into the subscript LIST subscript_of
+ * wants, the C array being declared with its dimensions reversed.  The
+ * divisions below are built from k (a literal) and the dimension sizes
+ * (constant expressions by the time an array is static), so cc1 folds
+ * every one of them to a plain index.
+ *
+ * What comes out is a C INDEX, not a BASIC subscript - this builds the
+ * accessor itself rather than going through subscript_of, so nothing
+ * rebases it afterwards.  Element k of the list is C index k under
+ * either OPTION BASE now that BASE 1 storage is dense. */
 static char *linear_index(struct sym *s, int k)
 {
     char *out;
     const char *div;
+    const char *subs[MAXARGS];
     int j;
 
     if (s->ndims == 1)
-        return sfmt("%s[%d]", s->acc, k + cv.opt_base);
+        return sfmt("%s[%d]", s->acc, k);
     if (s->dynamic) {
         cv_err("an initialiser list on a run-time DIM is only "
                "supported for 1-D arrays");
         return NULL;
     }
-    out = sfmt("%s", s->acc);
     div = NULL;
     for (j = 0; j < s->ndims; j++) {
         const char *u = usable(s->dims[j]);
@@ -1206,11 +1211,12 @@ static char *linear_index(struct sym *s, int k)
             e = sfmt("(%d) / (%s)", k, div);
         if (j < s->ndims - 1)
             e = sfmt("(%s) %% (%s)", e, u);
-        if (cv.opt_base)
-            e = sfmt("(%s) + %d", e, cv.opt_base);
-        out = sfmt("%s[(%s)]", out, e);
+        subs[j] = e;
         div = (div == NULL) ? u : sfmt("(%s) * (%s)", div, u);
     }
+    out = sfmt("%s", s->acc);
+    for (j = s->ndims - 1; j >= 0; j--)
+        out = sfmt("%s[(%s)]", out, subs[j]);
     return out;
 }
 

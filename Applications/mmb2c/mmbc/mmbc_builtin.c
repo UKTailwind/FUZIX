@@ -1267,6 +1267,40 @@ struct val builtin_raw(const char *up)
         }
         if (t->kind == T_ID && crc_width(t->up) != 0)
             return do_math_crc(t->up);
+        if (t->kind == T_ID && (strcmp(t->up, "MAGNITUDE") == 0
+                                || strcmp(t->up, "DOTPRODUCT") == 0)) {
+            /* MATH(MAGNITUDE a())        sqrt of the sum of squares
+             * MATH(DOTPRODUCT a(), b())  sum of the products
+             *
+             * Float arrays both, which is parsefloatarray's own
+             * restriction.  MAGNITUDE takes ANY rank (dimension count 0
+             * in the reference) and reads the array flat; DOTPRODUCT is
+             * one-dimensional, so it goes through array_line and counts
+             * what a program can reach. */
+            int mag = strcmp(t->up, "MAGNITUDE") == 0;
+            struct sym *a = arrayref(1);
+            struct sym *b;
+            struct flat fa, fb;
+
+            if (a->ty != TY_F)
+                cv_err("Argument 1 must be a floating point array");
+            cv.uses_math = 1;
+            if (mag) {
+                expect_op(")");
+                fa = array_flat(a);
+                return mkval(sfmt("mmg_magnitude(%s, %s)",
+                                  fa.ptr, fa.cnt), TY_F);
+            }
+            expect_op(",");
+            b = arrayref(1);
+            if (b->ty != TY_F)
+                cv_err("Argument 2 must be a floating point array");
+            expect_op(")");
+            fa = array_line(a);
+            fb = array_line(b);
+            return mkval(sfmt("mmg_dot(%s, %s, %s, %s)",
+                              fa.ptr, fa.cnt, fb.ptr, fb.cnt), TY_F);
+        }
         if (t->kind == T_ID && matharray_in(t->up)) {
             const char *name = t->up;
             struct sym *sym = arrayref(1);
@@ -1307,12 +1341,13 @@ struct val builtin_raw(const char *up)
                               fn, sfx, fl.ptr, fl.cnt), TY_F);
         }
         if (t->kind != T_ID || mathfunc_get(t->up) == 0)
-            /* the joined lists = ', '.join(sorted(MATHFUNCS)) and
-             * ', '.join(MATHARRAY) - keep in step with mmbc_tab.c */
-            cv_err("MATH(%s ...) is not supported; translated are "
-                   "%s and the array reductions %s", t->text,
-                   "ATAN3, COSH, LOG10, SINH, TANH",
-                   "SUM, MEAN, SD, MAX, MIN, MEDIAN");
+            /* sorted(MATHFUNCS + MATHARRAY + CRCWIDTH + the hand
+             * branches) - keep in step with mmb2c.py and mmbc_tab.c */
+            cv_err("MATH(%s ...) is not supported; translated are %s",
+                   t->text,
+                   "ATAN3, BASE64 DECODE, BASE64 ENCODE, COSH, CRC12, "
+                   "CRC16, CRC32, CRC8, DOTPRODUCT, LOG10, MAGNITUDE, "
+                   "MAX, MEAN, MEDIAN, MIN, SD, SINH, SUM, TANH");
         {
             const char *name = t->up;
             struct val a = expr();

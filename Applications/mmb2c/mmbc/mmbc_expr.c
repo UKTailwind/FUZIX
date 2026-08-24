@@ -511,19 +511,34 @@ const char *subscript_of(struct sym *s, const char **parts, int nparts)
          * An array DIMmed with a run-time bound is the same shape and
          * folds the same way, out of its own bounds table. */
         const char *b = bnd_acc(s);
-        const char *off = parts[0];
+        const char *off = rebase(parts[0]);
+        const char *j = "1";
 
-        for (k = 1; k < nparts; k++)
-            off = sfmt("((%s) * ((%s)[%d] + 1) + (%s))", off, b, k + 1,
-                       parts[k]);
+        /* The fold runs from the LEFT, j a running product of the
+         * earlier bounds, because that is what findvar does
+         * (MMBasic.c:4871-4878).  The bounds table itself stays in
+         * source order - BOUND() reports out of it. */
+        for (k = 1; k < nparts; k++) {
+            j = sfmt("((%s) * ((%s)[%d] + 1))", j, b, k);
+            off = sfmt("((%s) + (%s) * (%s))", off, rebase(parts[k]), j);
+        }
         return sfmt("%s[%s]", s->acc, off);
     }
     if (nparts != s->ndims)
         cv_err("'%s' has %d dimension(s), %d given",
                s->name, s->ndims, nparts);
+    /* REVERSED, and the declaration is reversed to match, so that
+     * a(i, j) lands at i + j * d1.  MMBasic stores the FIRST subscript
+     * adjacent (findvar, MMBasic.c:4871-4878) and a program is entitled
+     * to see that through VARADDR, so the storage order is part of the
+     * language, not ours to choose.
+     *
+     * rebase() is what makes OPTION BASE 1 dense: element 0 of the C
+     * array IS a(1), so there is no unreachable slot for a whole array
+     * walk to trip over. */
     res = s->acc;
-    for (k = 0; k < nparts; k++)
-        res = sfmt("%s[%s]", res, parts[k]);
+    for (k = nparts - 1; k >= 0; k--)
+        res = sfmt("%s[%s]", res, rebase(parts[k]));
     return res;
 }
 
@@ -534,16 +549,52 @@ const char *bnd_acc(struct sym *s)
     return s->dynamic ? s->bacc : bname(s->name);
 }
 
-/* How many elements of a dimension the program can reach.
+/* The number of elements a declared upper bound asks for.
  *
- * Our arrays are declared with bound + 1 elements whatever OPTION BASE
- * says, so under BASE 1 element 0 exists and is out of reach.  MMBasic
- * allocates only what it can index, so a count it compares against has
- * to have that element taken back off. */
-const char *usable(const char *txt)
+ * DIM a(3) is four elements under OPTION BASE 0 and THREE under BASE 1,
+ * and MMBasic allocates exactly that many either way.  We do now as
+ * well: an array here holds what the program can reach and nothing
+ * besides, so a whole-array walk sees what MMBasic's does and VARADDR
+ * reports what MMBasic reports.
+ *
+ * It did not use to.  Element 0 was kept under BASE 1 and every flat
+ * walk read it - MATH(MAX) over an all-negative array answered 0,
+ * MATH(MEAN) divided by one too many, READ a() filled from the wrong
+ * end.  The phantom element was the cause of all of them. */
+const char *count_of(const char *bound)
 {
     if (cv.opt_base)
-        return sfmt("(%s) - %d", txt, cv.opt_base);
+        return sfmt("(%s) - %d + 1", bound, cv.opt_base);
+    return sfmt("(%s) + 1", bound);
+}
+
+/* A BASIC subscript as an index from element 0.  Under OPTION BASE 0
+ * they are the same thing and the text is handed back untouched, so
+ * nothing a BASE 0 program generates changes by a character. */
+const char *rebase(const char *part)
+{
+    if (!cv.opt_base)
+        return part;
+    return sfmt("((%s) - %d)", part, cv.opt_base);
+}
+
+/* A stored count-less-one turned back into the upper bound the program
+ * wrote.  Identity under OPTION BASE 0. */
+const char *unbase(const char *txt)
+{
+    if (!cv.opt_base)
+        return txt;
+    return sfmt("((%s) + %d)", txt, cv.opt_base);
+}
+
+/* A dimension's element count, given its declared C size.
+ *
+ * These are the same number now - the declaration allocates only
+ * reachable elements (see count_of) - so this is the identity.  It is
+ * kept as the one place that says so, and because every caller reads
+ * better for naming what it wants. */
+const char *usable(const char *txt)
+{
     return txt;
 }
 
@@ -587,18 +638,55 @@ struct flat array_line(struct sym *s)
     return r;
 }
 
+/* (first element, columns, rows, row stride) of a 2-D array.
+ *
+ * MMBasic's own names: cmd_math reads dims[0] as the COLUMN count and
+ * dims[1] as the row count, and farr2d(arr, d1, a, b) is arr[b*d1 + a] -
+ * so the first subscript is the column and a row is contiguous.  It is
+ * contiguous here too, the storage order being the same one.
+ *
+ * The stride is the FIRST dimension's declared size rather than the
+ * column count, and the two differ under OPTION BASE 1: our arrays keep
+ * an unreachable element 0 in every dimension and MMBasic's do not, so
+ * the rows here are one element further apart than the count of what is
+ * in them. */
+struct plane array_plane(struct sym *s)
+{
+    const char *sz[MAXARGS];
+    const char *idx[2];
+    struct plane r;
+
+    if (!s->is_array)
+        cv_err("'%s' is not an array", s->name);
+    if (s->is_param || s->dynamic)
+        cv_err("'%s' is a run-time array, and this wants one whose shape "
+               "is known when it is translated", s->name);
+    if (s->ndims != 2)
+        cv_err("'%s' has %d dimension(s), and this wants a "
+               "two-dimensional array", s->name, s->ndims);
+    if (s->ty == TY_S)
+        no_length_array(s);
+    dim_sizes(s, 2, sz);
+    idx[0] = idx[1] = sfmt("(int)(%d)", cv.opt_base);
+    r.ptr = sfmt("&%s", subscript_of(s, idx, 2));
+    r.nc = usable(sz[0]);
+    r.nr = usable(sz[1]);
+    r.stride = sz[0];
+    return r;
+}
+
 /* (first element, stride, length) of one line through an array.
  *
  * `parts` is one index per dimension with NULL where the statement left
  * a blank, and the line runs along that dimension.
  *
- * Our C arrays carry the BASIC subscripts in source order, so the LAST
- * one is adjacent - the opposite of MMBasic's storage, where the FIRST
- * is.  The stride is therefore the product of the sizes to the RIGHT of
- * the blank index, and 1 when the blank index is last.  MMBasic reaches
- * the same elements from the other end (array_slice builds off[] as a
- * running product from the left): the addresses differ, the set of
- * elements does not. */
+ * Our C arrays are declared with their dimensions REVERSED so that the
+ * FIRST BASIC subscript is adjacent, which is MMBasic's own storage
+ * order (see subscript_of).  The stride is therefore the product of the
+ * sizes to the LEFT of the blank index, and 1 when the blank index is
+ * first - the same running product from the left that MMBasic's
+ * array_slice builds off[] from, so the addresses agree element for
+ * element. */
 struct vec array_vector(struct sym *s, const char **parts, int nparts,
                         int blank)
 {
@@ -618,7 +706,7 @@ struct vec array_vector(struct sym *s, const char **parts, int nparts,
     idx[blank] = sfmt("(int)(%d)", cv.opt_base);
     r.ptr = sfmt("&%s", subscript_of(s, idx, nparts));
     r.step = NULL;
-    for (k = blank + 1; k < nparts; k++)
+    for (k = 0; k < blank; k++)
         r.step = r.step ? sfmt("%s * %s", r.step, sz[k]) : sz[k];
     if (r.step == NULL)
         r.step = "1";
@@ -1345,6 +1433,14 @@ const char *channel(void)
 /* BOUND() resolves at compile time for a real array; an array
  * parameter carries its bounds in a hidden extra argument.
  * dim: Python None -> has_dim = 0. */
+/* BOUND() resolves at compile time for a real array; an array
+ * parameter carries its bounds in a hidden extra argument.
+ *
+ * What that argument holds is the element COUNT less one, not the upper
+ * bound the program wrote - the two differ under OPTION BASE 1, and
+ * holding the count is what lets mm_arr_count and the subscript fold
+ * stay arithmetic-free of the base.  BOUND() is therefore the one place
+ * that adds it back. */
 const char *bound_of(struct sym *sym, struct val dim, int has_dim)
 {
     long k = 0;
@@ -1388,7 +1484,7 @@ const char *bound_of(struct sym *sym, struct val dim, int has_dim)
 
         if (has_k && k == 0)
             return sfmt("%d", cv.opt_base);
-        return sfmt("(%s)[%s]", nm, kexpr);
+        return unbase(sfmt("(%s)[%s]", nm, kexpr));
     }
     if (!has_k)
         cv_err("BOUND() on a DIMmed array needs a constant dimension");
@@ -1404,6 +1500,6 @@ const char *bound_of(struct sym *sym, struct val dim, int has_dim)
             idx += sym->ndims;
         if (idx < 0)
             mm_error("line %d: BOUND() dimension out of range", cv.lineno);
-        return sfmt("((%s) - 1)", sym->dims[idx]);
+        return unbase(sfmt("((%s) - 1)", sym->dims[idx]));
     }
 }
