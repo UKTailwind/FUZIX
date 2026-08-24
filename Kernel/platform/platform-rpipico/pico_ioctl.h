@@ -484,6 +484,27 @@ struct gfx_fontdef {
  * new kernel must fail rather than call the wrong slot. */
 #define PICOIOC_LIBM  0x0020
 
+/* The hardware random number generator.  data -> a uint32_t that
+ * receives 32 bits from the RP2350's ring-oscillator entropy source,
+ * through the SDK's get_rand_32().
+ *
+ * WHY A SYSCALL RATHER THAN A LIBRARY CALL: get_rand_32() is an SDK
+ * function and reads chip registers, so a user process cannot make it.
+ * There is no /dev/random here either.  Without this, the only entropy
+ * a program could reach was the microsecond clock - which is fine for
+ * scattering a seed and useless for anything that has to be
+ * unguessable.
+ *
+ * MMBasic's RND on an RP2350 is rand() reseeded from this every
+ * hundred calls, and that is what mmb_runtime.c does with it.  It is
+ * NOT what MATH(RAND) uses: that is a Mersenne Twister seeded by MATH
+ * RANDOMIZE, and the two are a separate pair.
+ *
+ * One 32-bit read per call.  The generator is free-running, so there
+ * is no state to open or close and nothing to serialise against - any
+ * process may ask at any time. */
+#define PICOIOC_RANDOM 0x0044
+
 /* Which machine this is.  data -> an int that receives 2 or 3, the same
  * answer the boot banner prints, from the same detection (the DS3231's
  * 32 kHz on GP27).  A program that wants to name itself - MMBasic's

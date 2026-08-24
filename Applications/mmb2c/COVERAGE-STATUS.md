@@ -154,7 +154,7 @@ category 2, instead of a language inside the language.
 translated and says nothing about the 67 members. Read from MMBasic's `core/MATHS.c` and mmb2c's
 `MATHFUNCS`, `MATHARRAY` and `do_array_cmd`.
 
-**54 of 67 members translated.**
+**55 of 67 members translated.**
 
 ### `MATH <subcommand>` - in-place, on arrays - 32 of 38
 
@@ -162,11 +162,11 @@ translated and says nothing about the 67 members. Read from MMBasic's `core/MATH
 
 **Not translated:** `AES128`, `FFT`, `INTERPOLATE`, `PID`, `SENSORFUSION`, `SINC`
 
-### `MATH(<subfunction> ...)` - returns a value - 22 of 29
+### `MATH(<subfunction> ...)` - returns a value - 23 of 29
 
-**Translated:** `ATAN3`, `BASE64`, `COSH`, `CRC12`, `CRC16`, `CRC32`, `CRC8`, `CROSSING`, `DECODE`, `DOTPRODUCT`, `ENCODE`, `LOG10`, `MAGNITUDE`, `MAX`, `MEAN`, `MEDIAN`, `MIN`, `M_DETERMINANT`, `SD`, `SINH`, `SUM`, `TANH`
+**Translated:** `ATAN3`, `BASE64`, `COSH`, `CRC12`, `CRC16`, `CRC32`, `CRC8`, `CROSSING`, `DECODE`, `DOTPRODUCT`, `ENCODE`, `LOG10`, `MAGNITUDE`, `MAX`, `MEAN`, `MEDIAN`, `MIN`, `M_DETERMINANT`, `RAND`, `SD`, `SINH`, `SUM`, `TANH`
 
-**Not translated:** `CHI`, `CHI_P`, `CORREL`, `INVERSE`, `PHASE`, `PID`, `RAND`
+**Not translated:** `CHI`, `CHI_P`, `CORREL`, `INVERSE`, `PHASE`, `PID`
 
 The split is not arbitrary. What is in is what a BASIC program
 actually reaches for - the whole-array reductions, the hyperbolic and

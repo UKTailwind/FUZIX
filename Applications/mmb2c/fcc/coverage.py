@@ -80,7 +80,8 @@ mathfn += re.findall(r"'(CRC[0-9]+)'",
 assert "'MAGNITUDE', 'DOTPRODUCT'" in text, "the MATH vector branch left mmb2c.py"
 assert "'M_DETERMINANT'" in text, "the MATH M_DETERMINANT branch left mmb2c.py"
 assert "'CROSSING'" in text, "the MATH CROSSING branch left mmb2c.py"
-mathfn += ["MAGNITUDE", "DOTPRODUCT", "M_DETERMINANT", "CROSSING"]
+assert "'RAND'" in text, "the MATH RAND branch left mmb2c.py"
+mathfn += ["MAGNITUDE", "DOTPRODUCT", "M_DETERMINANT", "CROSSING", "RAND"]
 mathfn = sorted(set(mathfn))
 matharr = re.search(r"MATHARRAY = \(([^)]*)\)", text).group(1)
 matharr = sorted(re.findall(r"'([A-Z0-9]+)'", matharr))

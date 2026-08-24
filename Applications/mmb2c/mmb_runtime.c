@@ -814,32 +814,59 @@ MMINTEGER mm_sgn(MMFLOAT v) { return v > 0.0 ? 1 : (v < 0.0 ? -1 : 0); }
  * does repeat a sequence and a run on the board can be compared
  * against the same program on the development machine.
  */
-static int mm_seeded = 0;
-static unsigned long long mm_rng_state;
+
+
+/* RND, RANDOMIZE, and what they are NOT.
+ *
+ * On the RP2350 MMBasic's RND is rand(), reseeded every hundred calls
+ * from the hardware generator, and RANDOMIZE is a NO-OP - it is an
+ * RP2040 statement and there is nothing for it to do on a chip whose
+ * RND is already hardware-random.  Neither is reproducible and neither
+ * is seedable, so there is no sequence here to match: what has to be
+ * true is that RND is unpredictable, that it lies in 0..0.999999, and
+ * that RANDOMIZE does not change it.
+ *
+ * MATH RANDOMIZE and MATH(RAND) are a SEPARATE PAIR on a Mersenne
+ * Twister and are in mmb_mt.h.  This used to be one generator serving
+ * both, which made MATH RANDOMIZE reseed RND - reproducible here,
+ * hardware-random there.
+ *
+ * THE RESEED SOURCE IS THE ONE DIVERGENCE and it is the machine's
+ * fault rather than a choice: get_rnd_32() is an SDK call, this is a
+ * user process under Fuzix, and the kernel exposes no /dev/random and
+ * no ioctl for the TRNG.  The microsecond clock is what a user process
+ * can reach.  Give the kernel a path to the hardware generator and
+ * this becomes one line.
+ */
+static int mm_rnd_calls = 0;
 
 void mm_randomize(MMINTEGER seed)
 {
-    mm_rng_state = (unsigned long long)seed;
-    mm_seeded = 1;
+    /* RANDOMIZE is a no-op on this machine, as it is on an RP2350.
+       The argument is evaluated by the caller and discarded here. */
+    (void)seed;
 }
 
-static unsigned long long mm_rng_next(void)
-{
-    unsigned long long z;
-
-    mm_rng_state += 0x9E3779B97F4A7C15ULL;
-    z = mm_rng_state;
-    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
-    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
-    return z ^ (z >> 31);
-}
 
 MMFLOAT mm_rnd(void)
 {
-    if (!mm_seeded)
-        mm_randomize((MMINTEGER)time(NULL));
-    /* 2^53, the last integer a double counts to one at a time */
-    return (MMFLOAT)(mm_rng_next() >> 11) * (1.0 / 9007199254740992.0);
+    /* rand() reseeded every hundred calls, which is the shape the
+       reference uses.  RAND_MAX is 32767 on some libcs and 2^31-1 on
+       others, so the division is by (RAND_MAX + 1.0) rather than by a
+       constant - the range is 0..0.999999 either way. */
+    if (mm_rnd_calls == 0 || mm_rnd_calls >= 100) {
+        /* The HARDWARE generator, through PICOIOC_RANDOM.  It answers
+           0 only where there is no kernel to ask - the host build -
+           and the microsecond clock stands in there so a host run is
+           still varied.  mm_us(), not mm_us_now(): that static is
+           defined further down this file. */
+        MMINTEGER e = mm_rand32();
+
+        srand((unsigned int)(e ? e : mm_us()));
+        mm_rnd_calls = 0;
+    }
+    mm_rnd_calls++;
+    return (MMFLOAT)rand() / ((MMFLOAT)RAND_MAX + 1.0);
 }
 
 /* ================= string functions ================================ */
@@ -4606,6 +4633,8 @@ MMINTEGER mm_colour_index(MMINTEGER rgb)
  */
 #define MM_GFXIOC_INFO 0x000E
 #define MM_PICOIOC_BOARD 0x002C         /* pico_ioctl.h is the authority */
+#define MM_PICOIOC_RANDOM 0x0044        /* ditto - the hardware RNG */
+#define MM_PICOIOC_RANDOM 0x0044        /* ditto - the hardware RNG */
 
 struct mm_gfx_info {
     unsigned short width, height, stride;
@@ -4656,6 +4685,24 @@ int mm_board_no(void)
     if (mm_gfx_open() >= 0)
         (void)ioctl(mm_gfx_fd, MM_PICOIOC_BOARD, &n);
     return n;
+}
+
+/* 32 bits from the RP2350's hardware entropy source, through
+   PICOIOC_RANDOM.  0 if the kernel cannot be asked, which is the
+   caller's signal to fall back to the clock.
+
+   RND reseeds rand() from this every hundred calls, which is what
+   MMBasic does on an RP2350; MATH(RAND) uses it for the Mersenne
+   Twister's first seed when a program never said MATH RANDOMIZE.
+   Those are separate generators and this is the only thing they
+   share. */
+MMINTEGER mm_rand32(void)
+{
+    unsigned long r = 0;
+
+    if (mm_gfx_open() >= 0)
+        (void)ioctl(mm_gfx_fd, MM_PICOIOC_RANDOM, &r);
+    return (MMINTEGER)r;
 }
 
 char *mm_device(void) { return mm_dev_name(0); }
@@ -5437,6 +5484,11 @@ MMINTEGER mm_fb_geom(void) { return -1; }
 /* No kernel to ask on the host, and the gates compare output: say PC3,
    which is what the board build says when the ioctl is missing too. */
 int mm_board_no(void) { return 3; }
+
+/* No hardware generator either.  0 says so, and the caller seeds from
+   the clock instead - which is what the reference does when it has no
+   better source, and what keeps a host run varied. */
+MMINTEGER mm_rand32(void) { return 0; }
 
 char *mm_device(void) { return mm_dev_name(0); }
 

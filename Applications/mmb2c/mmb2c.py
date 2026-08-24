@@ -921,6 +921,7 @@ class Conv(object):
         self.uses_port = False      # PORT: pulls in mmb_port.h
         self.uses_math = False      # MATH C_ADD etc: pulls in mmb_math.h
         self.uses_crc = False       # MATH(CRCn ...): pulls in mmb_crc.h
+        self.uses_mt = False        # MATH RANDOMIZE / MATH(RAND)
         self.uses_sort = False      # SORT: pulls in mmb_sort.h
         self.uses_array = False     # whole-array ops/REDIM/MATH(): mmb_array.h
         self.uses_lstring = False   # LONGSTRING: pulls in mmb_lstring.h
@@ -3012,6 +3013,13 @@ class Conv(object):
                            255 if cap is None else cap), TY_I)
             if t[0] == T_ID and t[2] in CRCWIDTH:
                 return self.do_math_crc(t[2])
+            if t[0] == T_ID and t[2] == 'RAND':
+                # MATH(RAND) - the Mersenne Twister, the pair to MATH
+                # RANDOMIZE.  Takes no argument.  NOT RND, which is
+                # rand() reseeded from the clock and is not seedable.
+                self.expect_op(')')
+                self.uses_mt = True
+                return ('mmg_mt_rand()', TY_F)
             if t[0] == T_ID and t[2] == 'CROSSING':
                 # MATH(CROSSING a() [, level] [, direction] [, confirm])
                 #
@@ -3104,7 +3112,7 @@ class Conv(object):
                                + list(CRCWIDTH)
                                + ['BASE64 ENCODE', 'BASE64 DECODE',
                                   'MAGNITUDE', 'DOTPRODUCT',
-                                  'M_DETERMINANT', 'CROSSING'])
+                                  'M_DETERMINANT', 'CROSSING', 'RAND'])
                 self.err("MATH(%s ...) is not supported; translated are %s"
                          % (t[1], ', '.join(known)))
             name = t[2]
@@ -6891,9 +6899,16 @@ class Conv(object):
             self.do_return()
             return
         if up == 'RANDOMIZE':
+            # A NO-OP on this machine, as it is on an RP2350: RND is
+            # already hardware-random there and RANDOMIZE is an RP2040
+            # statement.  The argument is optional and, when present,
+            # still EVALUATED - it may call a FUNCTION - and discarded.
+            #
+            # This is not MATH RANDOMIZE, which seeds the Mersenne
+            # Twister that only MATH(RAND) draws from.
             self.i += 1
-            v = self.expr()
-            self.emit('mm_randomize(%s);' % self.as_int(v))
+            if not self.stmt_end():
+                self.emit('(void)(%s);' % self.as_int(self.expr()))
             return
         if t[0] == T_ID:
             self.do_assign_or_call()
@@ -7915,11 +7930,27 @@ class Conv(object):
                           % (sfx, ptr, step, lptr, n, lcnt))
             return
         if op == 'RANDOMIZE':
+            # MATH RANDOMIZE seeds the Mersenne Twister, and ONLY that
+            # - it has nothing to do with RND.  This used to call
+            # mm_randomize and so reseeded RND's generator, which made
+            # a seeded program reproducible here and hardware-random on
+            # a PicoMite.
+            #
+            # With no argument the reference leaves the generator
+            # unseeded, so the first MATH(RAND) takes the microseconds
+            # since boot; that is what the header does, so emit
+            # nothing rather than seeding from the clock here.
+            if not is_math:
+                self.err("RANDOMIZE is a MATH sub-command here; the "
+                         "bare RANDOMIZE statement is a no-op, as it "
+                         "is on an RP2350")
+            self.uses_mt = True
             if self.stmt_end():
-                self.uses_datetime = True
-                self.emit('mm_randomize(mm_epoch_now());')
+                self.emit('/* MATH RANDOMIZE with no seed: the first '
+                          'MATH(RAND) seeds from the clock */')
             else:
-                self.emit('mm_randomize(%s);' % self.as_int(self.expr()))
+                self.emit('mmg_mt_seed((unsigned long)%s);'
+                          % self.as_int(self.expr()))
             return
         self.err("MATH/ARRAY %s is not supported" % t[1])
 
@@ -9900,6 +9931,11 @@ class Conv(object):
         # nothing.
         if self.uses_crc:
             wr('#include "mmb_crc.h"\n')
+        # MATH RANDOMIZE and MATH(RAND).  Its own header rather than
+        # part of mmb_math.h because the Mersenne state is 624 words,
+        # and mmb_math.h is included for any MATH member at all.
+        if self.uses_mt:
+            wr('#include "mmb_mt.h"\n')
         # SORT's shell sort, the same bargain as mmb_math.h: only a
         # program that sorts carries the engine.
         if self.uses_sort:

@@ -1267,6 +1267,14 @@ struct val builtin_raw(const char *up)
         }
         if (t->kind == T_ID && crc_width(t->up) != 0)
             return do_math_crc(t->up);
+        if (t->kind == T_ID && strcmp(t->up, "RAND") == 0) {
+            /* MATH(RAND) - the Mersenne Twister, the pair to MATH
+               RANDOMIZE.  Takes no argument.  NOT RND, which is rand()
+               reseeded from the clock and is not seedable. */
+            expect_op(")");
+            cv.uses_mt = 1;
+            return mkval("mmg_mt_rand()", TY_F);
+        }
         if (t->kind == T_ID && strcmp(t->up, "CROSSING") == 0) {
             /* MATH(CROSSING a() [, level] [, direction] [, confirm])
              *
@@ -1396,7 +1404,7 @@ struct val builtin_raw(const char *up)
                    "ATAN3, BASE64 DECODE, BASE64 ENCODE, COSH, CRC12, "
                    "CRC16, CRC32, CRC8, CROSSING, DOTPRODUCT, "
                    "LOG10, M_DETERMINANT, MAGNITUDE, MAX, MEAN, MEDIAN, "
-                   "MIN, SD, SINH, SUM, TANH");
+                   "MIN, RAND, SD, SINH, SUM, TANH");
         {
             const char *name = t->up;
             struct val a = expr();

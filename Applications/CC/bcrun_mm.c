@@ -316,6 +316,7 @@ static void w_int_err_pop(void)  { mm_int_err_pop(); A = 0; }
 /* SETTICK's clock off the board.  On the PC3 the generated code reads
    TIMER0 itself (pc3_us64) and never comes through here. */
 static void w_us(void)           { A = mm_us(); }
+static void w_rand32(void)       { A = mm_rand32(); }
 /* ON KEY: peek at the next decoded key, and eat it.  A key the poll
    does not want stays queued for INKEY$. */
 static void w_key_peek(void)     { A = mm_key_peek(); }
@@ -660,6 +661,7 @@ static const struct mmwrap {
 	{ "mm_int_err_push",	w_int_err_push },
 	{ "mm_int_err_pop",	w_int_err_pop },
 	{ "mm_us",		w_us },
+	{ "mm_rand32",		w_rand32 },
 	{ "mm_key_peek",	w_key_peek },
 	{ "mm_key_drop",	w_key_drop },
 	{ "mm_rtcreg",	w_rtcreg },

@@ -449,6 +449,11 @@ void conv_write(FILE *f)
        that asks for it and costs every other program nothing. */
     if (cv.uses_crc)
         fprintf(f, "#include \"mmb_crc.h\"\n");
+    /* MATH RANDOMIZE and MATH(RAND).  Its own header rather than part
+       of mmb_math.h because the Mersenne state is 624 words, and
+       mmb_math.h is included for any MATH member at all. */
+    if (cv.uses_mt)
+        fprintf(f, "#include \"mmb_mt.h\"\n");
     /* SORT's shell sort, the same bargain as mmb_math.h: only a
        program that sorts carries the engine. */
     if (cv.uses_sort)

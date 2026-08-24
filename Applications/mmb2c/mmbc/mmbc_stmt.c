@@ -2540,10 +2540,16 @@ void statement_inner(void)
         return;
     }
     if (strcmp(up, "RANDOMIZE") == 0) {
-        struct val v;
+        /* A NO-OP on this machine, as it is on an RP2350: RND is
+           already hardware-random there and RANDOMIZE is an RP2040
+           statement.  The argument is optional and, when present,
+           still EVALUATED - it may call a FUNCTION - and discarded.
+
+           This is not MATH RANDOMIZE, which seeds the Mersenne
+           Twister that only MATH(RAND) draws from. */
         cv.i++;
-        v = expr();
-        emit(sfmt("mm_randomize(%s);", as_int(v)));
+        if (!stmt_end())
+            emit(sfmt("(void)(%s);", as_int(expr())));
         return;
     }
     if (t->kind == T_ID) {
@@ -4873,12 +4879,26 @@ static void do_array_cmd(int is_math)
         return;
     }
     if (strcmp(op, "RANDOMIZE") == 0) {
-        if (stmt_end()) {
-            cv.uses_datetime = 1;
-            emit("mm_randomize(mm_epoch_now());");
-        }
+        /* MATH RANDOMIZE seeds the Mersenne Twister, and ONLY that -
+           it has nothing to do with RND.  This used to call
+           mm_randomize and so reseeded RND's generator, which made a
+           seeded program reproducible here and hardware-random on a
+           PicoMite.
+
+           With no argument the reference leaves the generator
+           unseeded, so the first MATH(RAND) takes the microseconds
+           since boot; that is what the header does, so emit nothing
+           rather than seeding from the clock here. */
+        if (!is_math)
+            cv_err("RANDOMIZE is a MATH sub-command here; the bare "
+                   "RANDOMIZE statement is a no-op, as it is on an "
+                   "RP2350");
+        cv.uses_mt = 1;
+        if (stmt_end())
+            emit("/* MATH RANDOMIZE with no seed: the first "
+                 "MATH(RAND) seeds from the clock */");
         else
-            emit(sfmt("mm_randomize(%s);", as_int(expr())));
+            emit(sfmt("mmg_mt_seed((unsigned long)%s);", as_int(expr())));
         return;
     }
     cv_err("MATH/ARRAY %s is not supported", t->text);

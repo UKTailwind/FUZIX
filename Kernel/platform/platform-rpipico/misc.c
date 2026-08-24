@@ -18,6 +18,7 @@
 #endif
 #include <pico/multicore.h>
 #include <pico/bootrom.h>
+#include <pico/rand.h>		/* get_rand_32, PICOIOC_RANDOM */
 #include <hardware/watchdog.h>
 #include <hardware/exception.h>
 #include "rawuart.h"
@@ -436,6 +437,16 @@ int plt_dev_ioctl(uarg_t request, char *data)
                                 gt.bg < 0 ? -1
                                           : display_gfx_map((uint32_t)gt.bg),
                                 gt.str, (int)gt.len);
+    }
+    if (request == PICOIOC_RANDOM)
+    {
+        /* 32 bits of hardware entropy.  Free-running, so no open, no
+         * close, and no lock - see pico_ioctl.h. */
+        uint32_t r = get_rand_32();
+
+        if (uput(&r, data, sizeof(r)))
+            return -1;
+        return 0;
     }
     if (request == PICOIOC_BOARD)
     {

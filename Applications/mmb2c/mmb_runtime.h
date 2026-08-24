@@ -749,6 +749,7 @@ void mm_int_err_pop(void);
 /* Microseconds since start - SETTICK's clock off the board, where
  * mmb_int.h reads TIMER0 itself. */
 MMINTEGER mm_us(void);
+MMINTEGER mm_rand32(void);          /* the hardware RNG; 0 if unavailable */
 /* ON KEY: the next decoded key without consuming it (0 = none), and the
  * consume.  A key the poll peeks and does not want stays queued for
  * INKEY$, which is what makes the any-key form's "the key is still

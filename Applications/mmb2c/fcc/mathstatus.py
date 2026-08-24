@@ -58,6 +58,11 @@ have_fns |= {"M_DETERMINANT"}
 # three optional and omittable tails, like the CRC family.
 assert "'CROSSING'" in t, "the MATH CROSSING branch left mmb2c.py"
 have_fns |= {"CROSSING"}
+# MATH(RAND) takes no argument at all, so neither table can hold it
+# either.  It is the pair to MATH RANDOMIZE and draws from the Mersenne
+# Twister in mmb_mt.h - nothing to do with RND.
+assert "'RAND'" in t, "the MATH RAND branch left mmb2c.py"
+have_fns |= {"RAND"}
 # the in-place sub-commands do_array_cmd dispatches
 blk = t[t.index("def do_array_cmd"):]
 blk = blk[:blk.index("\n    def ", 10)]

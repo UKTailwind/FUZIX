@@ -406,6 +406,7 @@ struct conv {
     int uses_port;              /* PORT: pulls in mmb_port.h */
     int uses_math;              /* MATH C_ADD etc: pulls in mmb_math.h */
     int uses_crc;               /* MATH(CRCn ...): pulls in mmb_crc.h */
+    int uses_mt;                /* MATH RANDOMIZE / MATH(RAND) */
     int uses_sort;              /* SORT: pulls in mmb_sort.h */
     int uses_array;             /* whole-array ops/REDIM/MATH(): mmb_array.h */
     int uses_lstring;           /* LONGSTRING: pulls in mmb_lstring.h */

@@ -250,6 +250,7 @@ target_link_libraries(fuzix
 	hardware_pwm
 	hardware_spi
 	tinyusb_device
+	pico_rand
 )
 
 # The poll flavour of the arch layer: no async_context worker threads
