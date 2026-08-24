@@ -140,15 +140,18 @@ What is out divides into three kinds:
   which is all that is left of the statistics. Category 2, to add on
   demand. `CHI_P` wants an incomplete gamma function, so check what
   the Fuzix libc actually has before promising it.
-* **codecs and transforms** - `FFT`, `AES128`, `WINDOW`, `SINC`,
-  `INTERPOLATE`. Bigger pieces, still pure arithmetic. `BASE64` and
-  all four `CRC`s have shipped; of the rest `WINDOW` and `INTERPOLATE`
-  are small and self-contained, `FFT` is now merely large rather than
-  undecided (its complex forms want MMBasic's 2-D storage order, which
-  our arrays have had since the storage-order change, and `PHASE` and
-  `INVERSE` come with it), and `AES128` has no demand behind it.
+* **codecs and transforms** - `FFT` with its companions `PHASE` and
+  `INVERSE`, then `SINC`, `INTERPOLATE` and `AES128`. Bigger pieces,
+  still pure arithmetic. `BASE64`, all four `CRC`s and `WINDOW` have
+  shipped; of the rest `INTERPOLATE` is small and self-contained,
+  `FFT` is now merely large rather than undecided (its complex forms
+  want MMBasic's 2-D storage order, which our arrays have had since
+  the storage-order change, and `PHASE` and `INVERSE` come with it),
+  and `AES128` has no demand behind it.
 * **the odd ones out** - `PID` and `SENSORFUSION` carry state between
-  calls and want an IMU this machine does not have, and `RAND` needs
-  the Mersenne twister `MATH RANDOMIZE` is supposed to seed (see
-  NEXT.md, where that divergence is still open).
+  calls and want an IMU this machine does not have.  `RAND` used to be
+  here; it SHIPPED 2026-08-24 with its own Mersenne twister in
+  `mmb_mt.h`, seeded by `MATH RANDOMIZE` and by nothing else - see
+  that header for the one deliberate divergence (69069, not the
+  reference's 6069).
 """)
