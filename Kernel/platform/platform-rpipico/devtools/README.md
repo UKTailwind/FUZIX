@@ -10,7 +10,41 @@ Windows host, `pyserial`, console on COM11 at 115200.
 | `fz.py`    | probe / shell / basic, faster but less careful |
 | `uusend.py`| **send a file**: uuencodes it, types it into `cat`, runs `uud` |
 | `hwdiff.py`| run a bytecode program on the board and diff against a reference |
+| `mmbrun.py`| **run a .bas on a real MMBasic** (`MMPORT`, default COM14) and print what it printed |
+| `ab.py`    | run it there and diff against a blessed `.expected` - exit 1 on any difference |
 | `xsend.py` | XMODEM sender. Kept for reference only - see below |
+
+## A/B against the interpreter
+
+`mmbrun.py` is the other half of every "is this what MMBasic does?"
+question: it transfers a `.bas` to a PicoMite over the console and runs
+it, so a translated program's output can be diffed against the
+interpreter's own.
+
+    set MMPORT=COM14
+    python mmbrun.py ../../../../Applications/mmb2c/tests/order.bas
+
+**AUTOSAVE is the transfer, not a line editor.** MMBasic has no
+command-line editor that takes `10 PRINT X` - typing that is an
+expression syntax error. `AUTOSAVE` reads the console straight into
+program memory until Ctrl-Z (`misc/FileIO.c:6205`, which also accepts F1
+and F2), and that is what this sends. 20 ms between lines: the console
+keeps up with more, the tokeniser between lines does not always.
+
+`ab.py` is the same thing as a check rather than a report:
+
+    python ab.py ../../../../Applications/mmb2c/tests/order.bas                  ../../../../Applications/mmb2c/tests/order.expected
+
+It strips the terminal's escape sequences and the prompt, compares line
+by line, and exits non-zero on any difference - so a `.expected` blessed
+this way stays blessed.
+
+The interpreter is the authority on behaviour, but **not blindly**: it
+has bugs of its own, and `tests/order.bas` found one. Thirteen of its
+fourteen lines agreed on the first run; the fourteenth said MMBasic's
+`REDIM PRESERVE` preserved nothing at all, which turned out to be true
+and was fixed in the reference. When a line disagrees, the reference is
+where to look second, not where to stop.
 
 ## Flashing a kernel
 
@@ -49,6 +83,33 @@ cancel. The tools assume a separate port - `rx file < /dev/tty2` would
 work if a second adapter were ever wired to GP0/GP1.
 
 ## Keeping the board's binaries current
+
+`mmbc` goes stale the same way `bcrun` does, and for a translator change
+that is the whole point of the exercise - the board has its own copy and
+it is the one a program compiled ON the board goes through:
+
+    cd Applications/CC
+    make -f Makefile.armm0 FUZIX_ROOT=$PWD/../.. USERCPU=armm0 mmbc
+    arm-none-eabi-strip mmbc -o mmbc.stripped
+    python uusend.py <path>/mmbc.stripped mmbc.new 0
+    python fzsh.py 25 "mv mmbc.new /usr/bin/mmbc"
+    python fzsh.py 25 "chmod +x /usr/bin/mmbc"
+
+165K takes about 140 seconds. The toolchain is in **`/usr/bin`**, not
+`/bin`.
+
+**And the headers go with it.** The `mmb_*.h` families are compiled INTO
+the program, so a new member in one of them is not in the translator at
+all - the board's copy lives in **`/usr/lib/cc/include/`**:
+
+    python uusend.py <path>/mmb_math.h mm.h 0
+    python fzsh.py 25 "mv mm.h /usr/lib/cc/include/mmb_math.h"
+
+Forget this and the symptom points the wrong way: `cc` compiles happily
+and `bcrun` says **`no runtime function "mmg_shift"`**, which reads like
+a missing entry in bcrun's table and is really a stale header - the
+function was never found to inline, so it was left as an external.
+
 
 `bcrun` on the card goes stale. A `.bc` built by a newer cc2 then fails
 with `bad opcode at pc N`, which reads like a code generator bug and is
