@@ -3012,6 +3012,32 @@ class Conv(object):
                            255 if cap is None else cap), TY_I)
             if t[0] == T_ID and t[2] in CRCWIDTH:
                 return self.do_math_crc(t[2])
+            if t[0] == T_ID and t[2] == 'CROSSING':
+                # MATH(CROSSING a() [, level] [, direction] [, confirm])
+                #
+                # A one-dimensional number array; the three tails are
+                # optional and may be written empty, as the CRC family's
+                # are.  What comes back is an OFFSET from the first
+                # element, not a subscript - under OPTION BASE 1 a
+                # program wants a(found + 1).  That is the reference's
+                # behaviour.
+                a = self.arrayref()
+                if a.ty == TY_S:
+                    self.err("Argument 1 must be a 1D numerical array")
+                args = ['0.0', '1', '1']
+                for k in range(3):
+                    if not self.accept_op(','):
+                        break
+                    if self.is_op(',') or self.is_op(')'):
+                        continue        # an empty slot keeps the default
+                    v = self.expr()
+                    args[k] = self.as_flt(v) if k == 0 else self.as_int(v)
+                self.expect_op(')')
+                ptr, cnt = self.array_line(a)
+                self.uses_math = True
+                return ('mmg_crossing_%s(%s, %s, %s)'
+                        % ('i' if a.ty == TY_I else 'f', ptr, cnt,
+                           ', '.join(args)), TY_I)
             if t[0] == T_ID and t[2] == 'M_DETERMINANT':
                 # MATH(M_DETERMINANT a())  - a square 2-D float array
                 a = self.arrayref()
@@ -3078,7 +3104,7 @@ class Conv(object):
                                + list(CRCWIDTH)
                                + ['BASE64 ENCODE', 'BASE64 DECODE',
                                   'MAGNITUDE', 'DOTPRODUCT',
-                                  'M_DETERMINANT'])
+                                  'M_DETERMINANT', 'CROSSING'])
                 self.err("MATH(%s ...) is not supported; translated are %s"
                          % (t[1], ', '.join(known)))
             name = t[2]
@@ -3200,6 +3226,19 @@ class Conv(object):
         rest = sz[:blank]
         return (ptr, ' * '.join(rest) if rest else '1',
                 self.usable(sz[blank]))
+
+    def window_var(self):
+        """A scalar numeric variable for MATH WINDOW to write a range
+        into.  MMBasic takes a float or an integer and answers "Invalid
+        variable" for anything else; the type is known here, so the
+        refusal is made now and in its own words."""
+        t = self.nxt()
+        if t[0] != T_ID:
+            self.err("MATH WINDOW's range targets must be variables")
+        sym = self.reference(t[1], False)
+        if sym.is_array or sym.ty == TY_S:
+            self.err("Invalid variable")
+        return (sym.acc, sym.ty)
 
     def array_plane(self, s):
         """(first element, columns, rows, row stride) of a 2-D array.
@@ -7573,6 +7612,54 @@ class Conv(object):
             self.emit('%s(%s);'
                       % ('mmg_vnorm' if op == 'V_NORMALISE' else 'mmg_vcross',
                          ', '.join(parts)))
+            return
+        if op == 'WINDOW':
+            # MATH WINDOW in(), outmin, outmax, out() [, minvar, maxvar]
+            #
+            # Any rank, and any mix of float and integer between in and
+            # out - which is the point of the statement rather than an
+            # accident, so all four combinations are here where ARRAY
+            # ADD refuses them.  The last two are both or neither, and
+            # receive the INPUT's own range.
+            if not is_math:
+                self.err("WINDOW is a MATH sub-command, not an ARRAY one")
+            src = self.arrayref()
+            self.expect_op(',')
+            omin = self.as_flt(self.expr())
+            self.expect_op(',')
+            omax = self.as_flt(self.expr())
+            self.expect_op(',')
+            dst = self.arrayref()
+            if src.ty == TY_S or dst.ty == TY_S:
+                self.err("MATH WINDOW needs numeric arrays")
+            lo = hi = None
+            if self.accept_op(','):
+                lo = self.window_var()
+                self.expect_op(',')
+                hi = self.window_var()
+            sptr, scnt = self.array_flat(src)
+            dptr, dcnt = self.array_flat(dst)
+            fn = 'mmg_window_%s%s' % ('i' if src.ty == TY_I else 'f',
+                                      'i' if dst.ty == TY_I else 'f')
+            self.uses_math = True
+            if lo is None:
+                self.emit('%s(%s, %s, %s, %s, %s, %s, NULL, NULL);'
+                          % (fn, sptr, scnt, omin, omax, dptr, dcnt))
+                return
+            a = self.newtmp('wlo')
+            b = self.newtmp('whi')
+            self.tmp_used = True
+            self.emit('{ MMFLOAT %s, %s;' % (a, b))
+            self.emit('  %s(%s, %s, %s, %s, %s, %s, &%s, &%s);'
+                      % (fn, sptr, scnt, omin, omax, dptr, dcnt, a, b))
+            # An INTEGER target truncates, as the reference's
+            # (long long int) cast does - not mm_toint, which rounds.
+            for tgt, tmp in ((lo, a), (hi, b)):
+                acc, ty = tgt
+                self.emit('  %s = %s;'
+                          % (acc, tmp if ty == TY_F
+                             else '(MMINTEGER)%s' % tmp))
+            self.emit('}')
             return
         if op in ('Q_INVERT', 'Q_MULT', 'Q_ROTATE'):
             # MATH Q_INVERT q(), n()

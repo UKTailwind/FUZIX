@@ -54,6 +54,10 @@ have_fns |= {"MAGNITUDE", "DOTPRODUCT"}
 # 2-D array rather than a fixed argument count or a reduction.
 assert "'M_DETERMINANT'" in t, "the MATH M_DETERMINANT branch left mmb2c.py"
 have_fns |= {"M_DETERMINANT"}
+# MATH(CROSSING ...) is a hand branch too - a whole array followed by
+# three optional and omittable tails, like the CRC family.
+assert "'CROSSING'" in t, "the MATH CROSSING branch left mmb2c.py"
+have_fns |= {"CROSSING"}
 # the in-place sub-commands do_array_cmd dispatches
 blk = t[t.index("def do_array_cmd"):]
 blk = blk[:blk.index("\n    def ", 10)]
@@ -102,8 +106,10 @@ MMBasic's own write-to-the-second-argument shape), and as of
 `V_NORMALISE`, `V_CROSS`, `V_PRINT`, `M_PRINT`, `MAGNITUDE`,
 `DOTPRODUCT`, then `M_TRANSPOSE`, `M_MULT`, `M_INVERSE`, `V_MULT`,
 `V_ROTATE` and `M_DETERMINANT`, and then the quaternions - `Q_CREATE`,
-`Q_EULER`, `Q_VECTOR`, `Q_INVERT`, `Q_MULT` and `Q_ROTATE`.
-`tests/matha.bas`, `tests/mathm.bas` and `tests/mathq.bas` cover them,
+`Q_EULER`, `Q_VECTOR`, `Q_INVERT`, `Q_MULT` and `Q_ROTATE`, and then `MATH(CROSSING)` and
+`MATH WINDOW`.
+`tests/matha.bas`, `tests/mathm.bas`, `tests/mathq.bas` and
+`tests/mathw.bas` cover them,
 blessed line by line against a real MMBasic - the inverse is the
 reference's cofactor expansion rather than an LU factorisation
 precisely so that it can be.
@@ -125,10 +131,10 @@ vector lands in one. A program that wants the NUMBER should still say
 What is out divides into three kinds:
 
 * **pure arithmetic, no platform dependency, each independently
-  testable against the interpreter** - the statistics, and only the
-  statistics now: `CORREL`, `CHI`, `CHI_P` and `CROSSING`. Category 2,
-  to add on demand. `CHI_P` wants an incomplete gamma function, so
-  check what the Fuzix libc actually has before promising it.
+  testable against the interpreter** - `CORREL`, `CHI` and `CHI_P`,
+  which is all that is left of the statistics. Category 2, to add on
+  demand. `CHI_P` wants an incomplete gamma function, so check what
+  the Fuzix libc actually has before promising it.
 * **codecs and transforms** - `FFT`, `AES128`, `WINDOW`, `SINC`,
   `INTERPOLATE`. Bigger pieces, still pure arithmetic. `BASE64` and
   all four `CRC`s have shipped; of the rest `WINDOW` and `INTERPOLATE`

@@ -638,6 +638,26 @@ struct flat array_line(struct sym *s)
     return r;
 }
 
+/* A scalar numeric variable for MATH WINDOW to write a range into.
+ * MMBasic takes a float or an integer and answers "Invalid variable"
+ * for anything else; the type is known here, so the refusal is made now
+ * and in its own words. */
+struct wvar window_var(void)
+{
+    struct tok *t = nxt();
+    struct sym *sym;
+    struct wvar r;
+
+    if (t->kind != T_ID)
+        cv_err("MATH WINDOW's range targets must be variables");
+    sym = reference(t->text, 0);
+    if (sym->is_array || sym->ty == TY_S)
+        cv_err("Invalid variable");
+    r.acc = sym->acc;
+    r.ty = sym->ty;
+    return r;
+}
+
 /* (first element, columns, rows, row stride) of a 2-D array.
  *
  * MMBasic's own names: cmd_math reads dims[0] as the COLUMN count and

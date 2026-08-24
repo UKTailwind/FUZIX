@@ -4491,6 +4491,66 @@ static void do_array_cmd(int is_math)
                   want == 2 ? "mmg_vnorm" : "mmg_vcross", args));
         return;
     }
+    if (strcmp(op, "WINDOW") == 0) {
+        /* MATH WINDOW in(), outmin, outmax, out() [, minvar, maxvar]
+         *
+         * Any rank, and any mix of float and integer between in and
+         * out - which is the point of the statement rather than an
+         * accident, so all four combinations are here where ARRAY ADD
+         * refuses them.  The last two are both or neither, and receive
+         * the INPUT's own range. */
+        struct sym *src, *dst;
+        struct flat sf, df;
+        struct wvar lo, hi;
+        const char *omin, *omax, *fn;
+        int have = 0;
+
+        if (!is_math)
+            cv_err("WINDOW is a MATH sub-command, not an ARRAY one");
+        src = arrayref(1);
+        expect_op(",");
+        omin = as_flt(expr());
+        expect_op(",");
+        omax = as_flt(expr());
+        expect_op(",");
+        dst = arrayref(1);
+        if (src->ty == TY_S || dst->ty == TY_S)
+            cv_err("MATH WINDOW needs numeric arrays");
+        if (accept_op(",")) {
+            lo = window_var();
+            expect_op(",");
+            hi = window_var();
+            have = 1;
+        }
+        sf = array_flat(src);
+        df = array_flat(dst);
+        fn = sfmt("mmg_window_%s%s", src->ty == TY_I ? "i" : "f",
+                  dst->ty == TY_I ? "i" : "f");
+        cv.uses_math = 1;
+        if (!have) {
+            emit(sfmt("%s(%s, %s, %s, %s, %s, %s, NULL, NULL);",
+                      fn, sf.ptr, sf.cnt, omin, omax, df.ptr, df.cnt));
+            return;
+        }
+        {
+            const char *a = newtmp("wlo");
+            const char *b = newtmp("whi");
+
+            cv.tmp_used = 1;
+            emit(sfmt("{ MMFLOAT %s, %s;", a, b));
+            emit(sfmt("  %s(%s, %s, %s, %s, %s, %s, &%s, &%s);",
+                      fn, sf.ptr, sf.cnt, omin, omax, df.ptr, df.cnt,
+                      a, b));
+            /* An INTEGER target truncates, as the reference's
+               (long long int) cast does - not mm_toint, which rounds. */
+            emit(sfmt("  %s = %s%s;", lo.acc,
+                      lo.ty == TY_F ? "" : "(MMINTEGER)", a));
+            emit(sfmt("  %s = %s%s;", hi.acc,
+                      hi.ty == TY_F ? "" : "(MMINTEGER)", b));
+            emit("}");
+        }
+        return;
+    }
     if (strcmp(op, "Q_INVERT") == 0 || strcmp(op, "Q_MULT") == 0
         || strcmp(op, "Q_ROTATE") == 0) {
         /* MATH Q_INVERT q(), n()

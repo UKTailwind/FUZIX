@@ -264,6 +264,42 @@ What is left of MATH is the statistics (`CORREL`, `CHI`, `CHI_P`,
 (`PID`, `SENSORFUSION`, `RAND` — the last still tied to the open
 `MATH RANDOMIZE` decision below).
 
+**2026-08-24: `MATH(CROSSING)` and `MATH WINDOW`.** 52 of 67 members to
+**54**.
+
+Both were run on the interpreter BEFORE either was written, and both had
+something in them that reading `MATHS.c` would have got wrong:
+
+* **`MATH WINDOW` into an INTEGER array TRUNCATES.** The reference casts
+  with `(long long int)`, toward zero, where everything else in MMBasic
+  that lands a float in an integer rounds. 1..5 windowed onto 0..10
+  gives `0 2 5 7 10`, not `0 3 5 8 10`. `mm_toint` is the obvious thing
+  to reach for and would have been wrong. The same truncation applies to
+  an integer range variable.
+* **`MATH(CROSSING)` returns an OFFSET, not a subscript** — it counts
+  from the first element whatever `OPTION BASE` says, so under BASE 1 a
+  program wants `a(found + 1)`.
+* **A crossing too near the end to confirm ENDS the search** rather than
+  being skipped: the reference `break`s there, so a late spike hides a
+  real crossing after it. `cross cf4` in the test is that case.
+
+`WINDOW` takes any mix of float and integer between in and out, all four
+combinations, where `ARRAY ADD` refuses them — mixing is the point of
+the statement rather than an accident. The optional range variables are
+both or neither.
+
+`tests/mathw.bas` is byte-identical to the interpreter, 18 lines. Two
+refusals are deliberately NOT in it, because they are not run-time ones
+here: a string where `WINDOW` wants a range variable, and a 2-D array
+where `CROSSING` wants a one-dimensional one. MMBasic raises "Invalid
+variable" and "Argument 1 must be a 1D numerical array" when the
+statement runs; the types are known before the program runs here, so
+both are refused at translation, naming the line. A test cannot hold
+both behaviours and refusing earlier is the better one.
+
+What is left of MATH: `CORREL`, `CHI`, `CHI_P`; the transforms (`FFT`,
+`SINC`, `INTERPOLATE`); `AES128`; and `PID`, `SENSORFUSION` and `RAND`.
+
 ### 1. Nothing else may swallow a statement
 
 Two shipped features were computing wrong answers in silence, and the

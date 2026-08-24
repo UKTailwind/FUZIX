@@ -84,6 +84,8 @@ struct flat array_line(struct sym *s);
 struct plane { const char *ptr; const char *nc; const char *nr;
                const char *stride; };
 struct plane array_plane(struct sym *s);
+struct wvar { const char *acc; int ty; };
+struct wvar window_var(void);
 struct vec array_vector(struct sym *s, const char **parts, int nparts,
                         int blank);
 struct flat lsref(void);

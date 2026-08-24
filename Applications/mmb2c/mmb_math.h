@@ -1005,4 +1005,251 @@ MMG_FN void mmg_q_rotate(const MMFLOAT *q1, int n1, const MMFLOAT *v1,
 	mmg_q_inv(q1, qtemp);
 	mmg_q_mul(temp, qtemp, n);
 }
+
+/*
+ *	MATH(CROSSING ...) and MATH WINDOW
+ *
+ *	Both were checked against a real MMBasic 6.03.02 before a line
+ *	was written, and both had something in them that reading MATHS.c
+ *	would have got wrong - see the notes on each.
+ */
+
+/*	"N is invalid (valid is LO to HI)", MMBasic's getint() wording.
+ *	Returns 1 when it raised, because MM_RAISE returns from the
+ *	function it is written in and this is not that function. */
+MMG_FN int mmg_range(MMINTEGER v, MMINTEGER lo, MMINTEGER hi)
+{
+	char m[80];
+	char *p = m;
+
+	if (v >= lo && v <= hi)
+		return 0;
+	mm_int_to_str(p, (long long)v, 10);
+	while (*p)
+		p++;
+	p = mmg_mcpy(p, " is invalid (valid is ");
+	mm_int_to_str(p, (long long)lo, 10);
+	while (*p)
+		p++;
+	p = mmg_mcpy(p, " to ");
+	mm_int_to_str(p, (long long)hi, 10);
+	while (*p)
+		p++;
+	mmg_mcpy(p, ")");
+	mm_error(m);
+	return 1;
+}
+
+/*	MATH(CROSSING a() [, level] [, direction] [, confirm])
+ *
+ *	The index of the first sample that crosses `level` in `direction`
+ *	AND stays on the far side for `confirm` samples, or -1.  The
+ *	confirm window rejects a single-sample spike: an excursion that
+ *	falls back before `confirm` samples have passed is not reported,
+ *	and a crossing too near the end to confirm ENDS the search rather
+ *	than being skipped - the reference breaks there, it does not
+ *	continue, so a late spike hides a real crossing after it.  Copied.
+ *
+ *	WHAT IS RETURNED IS AN OFFSET, not a subscript.  It counts from
+ *	the first element whatever OPTION BASE says, so under BASE 1 a
+ *	program wants a(found + 1).  That is the reference's behaviour and
+ *	is worth knowing before using it.
+ *
+ *	The two refusals are ordered as cmd_math orders them: direction is
+ *	read and ranged before the array is looked at, and `confirm` is
+ *	ranged against the array's length, so its message names that
+ *	length.
+ */
+MMG_FN int mmg_cross_args(MMINTEGER dir, MMINTEGER confirm, int n)
+{
+	if (mmg_range(dir, -1, 1))
+		return 1;
+	if (dir == 0) {
+		mm_error("Valid are -1 and 1");
+		return 1;
+	}
+	if (mmg_range(confirm, 1, n))
+		return 1;
+	return 0;
+}
+
+MMG_FN MMINTEGER mmg_crossing_f(const MMFLOAT *a, int n, MMFLOAT lvl,
+                                MMINTEGER dir, MMINTEGER confirm)
+{
+	int i, k;
+
+	if (mmg_cross_args(dir, confirm, n))
+		return 0;
+	for (i = 1; i < n; i++) {
+		int crossed = (dir == 1) ? (a[i - 1] < lvl && a[i] >= lvl)
+		                         : (a[i - 1] > lvl && a[i] <= lvl);
+		int held = 1;
+
+		if (!crossed)
+			continue;
+		if (i + confirm > n)
+			break;
+		for (k = i; k < i + confirm; k++) {
+			if ((dir == 1 && a[k] < lvl) || (dir == -1 && a[k] > lvl)) {
+				held = 0;
+				break;
+			}
+		}
+		if (held)
+			return i;
+	}
+	return -1;
+}
+
+MMG_FN MMINTEGER mmg_crossing_i(const MMINTEGER *a, int n, MMFLOAT lvl,
+                                MMINTEGER dir, MMINTEGER confirm)
+{
+	int i, k;
+
+	if (mmg_cross_args(dir, confirm, n))
+		return 0;
+	for (i = 1; i < n; i++) {
+		int crossed = (dir == 1) ? (a[i - 1] < lvl && a[i] >= lvl)
+		                         : (a[i - 1] > lvl && a[i] <= lvl);
+		int held = 1;
+
+		if (!crossed)
+			continue;
+		if (i + confirm > n)
+			break;
+		for (k = i; k < i + confirm; k++) {
+			MMFLOAT v = (MMFLOAT)a[k];
+
+			if ((dir == 1 && v < lvl) || (dir == -1 && v > lvl)) {
+				held = 0;
+				break;
+			}
+		}
+		if (held)
+			return i;
+	}
+	return -1;
+}
+
+/*	MATH WINDOW in(), outmin, outmax, out() [, minvar, maxvar]
+ *
+ *	Rescales in() linearly onto [outmin, outmax], and hands back the
+ *	input's own range when the last two are given.  Any rank, and any
+ *	mix of float and integer between in and out - which is the point
+ *	of the statement rather than an accident, so all four
+ *	combinations are here where ARRAY ADD refuses them.
+ *
+ *	AN INTEGER DESTINATION TRUNCATES.  The reference casts with
+ *	(long long int), toward zero, where everything else in MMBasic
+ *	that lands a float in an integer rounds - MATH WINDOW wi(), 0, 10
+ *	over 1..5 gives 0 2 5 7 10, not 0 3 5 8 10.  Checked on the
+ *	board; the source alone would have got this wrong, mm_toint being
+ *	the obvious thing to reach for.
+ *
+ *	NO ZERO CHECK on the input range, as there is none there: an
+ *	array whose elements are all equal divides by zero and gives IEEE
+ *	infinities on both machines.
+ *
+ *	The initial min and max are the reference's own 1.5e308 sentinels
+ *	rather than the first element, which matters only for an empty
+ *	array - and an array cannot be empty.
+ */
+MMG_FN void mmg_win_rng_f(const MMFLOAT *a, int n, MMFLOAT *lo, MMFLOAT *hi)
+{
+	MMFLOAT mn = 1.5e+308, mx = -1.5e308;
+	int i;
+
+	for (i = 0; i < n; i++) {
+		if (a[i] < mn)
+			mn = a[i];
+		if (a[i] > mx)
+			mx = a[i];
+	}
+	*lo = mn;
+	*hi = mx;
+}
+
+MMG_FN void mmg_win_rng_i(const MMINTEGER *a, int n, MMFLOAT *lo, MMFLOAT *hi)
+{
+	MMFLOAT mn = 1.5e+308, mx = -1.5e308;
+	int i;
+
+	for (i = 0; i < n; i++) {
+		MMFLOAT v = (MMFLOAT)a[i];
+
+		if (v < mn)
+			mn = v;
+		if (v > mx)
+			mx = v;
+	}
+	*lo = mn;
+	*hi = mx;
+}
+
+#define MMG_WINSCALE(v) \
+	(((v) - lo) / (hi - lo) * (omax - omin) + omin)
+
+MMG_FN void mmg_window_ff(const MMFLOAT *a, int na, MMFLOAT omin,
+                          MMFLOAT omax, MMFLOAT *b, int nb,
+                          MMFLOAT *plo, MMFLOAT *phi)
+{
+	MMFLOAT lo, hi;
+	int i;
+
+	if (na != nb)
+		MM_RAISE("Size mismatch");
+	mmg_win_rng_f(a, na, &lo, &hi);
+	if (plo) *plo = lo;
+	if (phi) *phi = hi;
+	for (i = 0; i < na; i++)
+		b[i] = MMG_WINSCALE(a[i]);
+}
+
+MMG_FN void mmg_window_fi(const MMFLOAT *a, int na, MMFLOAT omin,
+                          MMFLOAT omax, MMINTEGER *b, int nb,
+                          MMFLOAT *plo, MMFLOAT *phi)
+{
+	MMFLOAT lo, hi;
+	int i;
+
+	if (na != nb)
+		MM_RAISE("Size mismatch");
+	mmg_win_rng_f(a, na, &lo, &hi);
+	if (plo) *plo = lo;
+	if (phi) *phi = hi;
+	for (i = 0; i < na; i++)
+		b[i] = (MMINTEGER)MMG_WINSCALE(a[i]);
+}
+
+MMG_FN void mmg_window_if(const MMINTEGER *a, int na, MMFLOAT omin,
+                          MMFLOAT omax, MMFLOAT *b, int nb,
+                          MMFLOAT *plo, MMFLOAT *phi)
+{
+	MMFLOAT lo, hi;
+	int i;
+
+	if (na != nb)
+		MM_RAISE("Size mismatch");
+	mmg_win_rng_i(a, na, &lo, &hi);
+	if (plo) *plo = lo;
+	if (phi) *phi = hi;
+	for (i = 0; i < na; i++)
+		b[i] = MMG_WINSCALE((MMFLOAT)a[i]);
+}
+
+MMG_FN void mmg_window_ii(const MMINTEGER *a, int na, MMFLOAT omin,
+                          MMFLOAT omax, MMINTEGER *b, int nb,
+                          MMFLOAT *plo, MMFLOAT *phi)
+{
+	MMFLOAT lo, hi;
+	int i;
+
+	if (na != nb)
+		MM_RAISE("Size mismatch");
+	mmg_win_rng_i(a, na, &lo, &hi);
+	if (plo) *plo = lo;
+	if (phi) *phi = hi;
+	for (i = 0; i < na; i++)
+		b[i] = (MMINTEGER)MMG_WINSCALE((MMFLOAT)a[i]);
+}
 #endif /* MMB_MATH_H */

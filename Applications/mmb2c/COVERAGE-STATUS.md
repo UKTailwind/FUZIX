@@ -154,19 +154,19 @@ category 2, instead of a language inside the language.
 translated and says nothing about the 67 members. Read from MMBasic's `core/MATHS.c` and mmb2c's
 `MATHFUNCS`, `MATHARRAY` and `do_array_cmd`.
 
-**52 of 67 members translated.**
+**54 of 67 members translated.**
 
-### `MATH <subcommand>` - in-place, on arrays - 31 of 38
+### `MATH <subcommand>` - in-place, on arrays - 32 of 38
 
-**Translated:** `ADD`, `C_ADD`, `C_AND`, `C_DIV`, `C_MUL`, `C_MULT`, `C_OR`, `C_SUB`, `C_XOR`, `INSERT`, `M_INVERSE`, `M_MULT`, `M_PRINT`, `M_TRANSPOSE`, `POWER`, `Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`, `RANDOMIZE`, `SCALE`, `SET`, `SHIFT`, `SLICE`, `V_CROSS`, `V_MULT`, `V_NORMALISE`, `V_PRINT`, `V_ROTATE`
+**Translated:** `ADD`, `C_ADD`, `C_AND`, `C_DIV`, `C_MUL`, `C_MULT`, `C_OR`, `C_SUB`, `C_XOR`, `INSERT`, `M_INVERSE`, `M_MULT`, `M_PRINT`, `M_TRANSPOSE`, `POWER`, `Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`, `RANDOMIZE`, `SCALE`, `SET`, `SHIFT`, `SLICE`, `V_CROSS`, `V_MULT`, `V_NORMALISE`, `V_PRINT`, `V_ROTATE`, `WINDOW`
 
-**Not translated:** `AES128`, `FFT`, `INTERPOLATE`, `PID`, `SENSORFUSION`, `SINC`, `WINDOW`
+**Not translated:** `AES128`, `FFT`, `INTERPOLATE`, `PID`, `SENSORFUSION`, `SINC`
 
-### `MATH(<subfunction> ...)` - returns a value - 21 of 29
+### `MATH(<subfunction> ...)` - returns a value - 22 of 29
 
-**Translated:** `ATAN3`, `BASE64`, `COSH`, `CRC12`, `CRC16`, `CRC32`, `CRC8`, `DECODE`, `DOTPRODUCT`, `ENCODE`, `LOG10`, `MAGNITUDE`, `MAX`, `MEAN`, `MEDIAN`, `MIN`, `M_DETERMINANT`, `SD`, `SINH`, `SUM`, `TANH`
+**Translated:** `ATAN3`, `BASE64`, `COSH`, `CRC12`, `CRC16`, `CRC32`, `CRC8`, `CROSSING`, `DECODE`, `DOTPRODUCT`, `ENCODE`, `LOG10`, `MAGNITUDE`, `MAX`, `MEAN`, `MEDIAN`, `MIN`, `M_DETERMINANT`, `SD`, `SINH`, `SUM`, `TANH`
 
-**Not translated:** `CHI`, `CHI_P`, `CORREL`, `CROSSING`, `INVERSE`, `PHASE`, `PID`, `RAND`
+**Not translated:** `CHI`, `CHI_P`, `CORREL`, `INVERSE`, `PHASE`, `PID`, `RAND`
 
 The split is not arbitrary. What is in is what a BASIC program
 actually reaches for - the whole-array reductions, the hyperbolic and
@@ -177,8 +177,10 @@ MMBasic's own write-to-the-second-argument shape), and as of
 `V_NORMALISE`, `V_CROSS`, `V_PRINT`, `M_PRINT`, `MAGNITUDE`,
 `DOTPRODUCT`, then `M_TRANSPOSE`, `M_MULT`, `M_INVERSE`, `V_MULT`,
 `V_ROTATE` and `M_DETERMINANT`, and then the quaternions - `Q_CREATE`,
-`Q_EULER`, `Q_VECTOR`, `Q_INVERT`, `Q_MULT` and `Q_ROTATE`.
-`tests/matha.bas`, `tests/mathm.bas` and `tests/mathq.bas` cover them,
+`Q_EULER`, `Q_VECTOR`, `Q_INVERT`, `Q_MULT` and `Q_ROTATE`, and then `MATH(CROSSING)` and
+`MATH WINDOW`.
+`tests/matha.bas`, `tests/mathm.bas`, `tests/mathq.bas` and
+`tests/mathw.bas` cover them,
 blessed line by line against a real MMBasic - the inverse is the
 reference's cofactor expansion rather than an LU factorisation
 precisely so that it can be.
@@ -200,10 +202,10 @@ vector lands in one. A program that wants the NUMBER should still say
 What is out divides into three kinds:
 
 * **pure arithmetic, no platform dependency, each independently
-  testable against the interpreter** - the statistics, and only the
-  statistics now: `CORREL`, `CHI`, `CHI_P` and `CROSSING`. Category 2,
-  to add on demand. `CHI_P` wants an incomplete gamma function, so
-  check what the Fuzix libc actually has before promising it.
+  testable against the interpreter** - `CORREL`, `CHI` and `CHI_P`,
+  which is all that is left of the statistics. Category 2, to add on
+  demand. `CHI_P` wants an incomplete gamma function, so check what
+  the Fuzix libc actually has before promising it.
 * **codecs and transforms** - `FFT`, `AES128`, `WINDOW`, `SINC`,
   `INTERPOLATE`. Bigger pieces, still pure arithmetic. `BASE64` and
   all four `CRC`s have shipped; of the rest `WINDOW` and `INTERPOLATE`

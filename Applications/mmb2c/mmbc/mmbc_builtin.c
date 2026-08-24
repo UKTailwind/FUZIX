@@ -1267,6 +1267,41 @@ struct val builtin_raw(const char *up)
         }
         if (t->kind == T_ID && crc_width(t->up) != 0)
             return do_math_crc(t->up);
+        if (t->kind == T_ID && strcmp(t->up, "CROSSING") == 0) {
+            /* MATH(CROSSING a() [, level] [, direction] [, confirm])
+             *
+             * A one-dimensional number array; the three tails are
+             * optional and may be written empty, as the CRC family's
+             * are.  What comes back is an OFFSET from the first
+             * element, not a subscript - under OPTION BASE 1 a program
+             * wants a(found + 1).  That is the reference's behaviour. */
+            struct sym *a = arrayref(1);
+            struct flat fl;
+            const char *args[3];
+            int k;
+
+            if (a->ty == TY_S)
+                cv_err("Argument 1 must be a 1D numerical array");
+            args[0] = "0.0";
+            args[1] = "1";
+            args[2] = "1";
+            for (k = 0; k < 3; k++) {
+                struct val v;
+
+                if (!accept_op(","))
+                    break;
+                if (is_op(",", 0) || is_op(")", 0))
+                    continue;       /* an empty slot keeps the default */
+                v = expr();
+                args[k] = (k == 0) ? as_flt(v) : as_int(v);
+            }
+            expect_op(")");
+            fl = array_line(a);
+            cv.uses_math = 1;
+            return mkval(sfmt("mmg_crossing_%s(%s, %s, %s, %s, %s)",
+                              a->ty == TY_I ? "i" : "f", fl.ptr, fl.cnt,
+                              args[0], args[1], args[2]), TY_I);
+        }
         if (t->kind == T_ID && strcmp(t->up, "M_DETERMINANT") == 0) {
             /* MATH(M_DETERMINANT a())  - a square 2-D float array */
             struct sym *a = arrayref(1);
@@ -1359,9 +1394,9 @@ struct val builtin_raw(const char *up)
             cv_err("MATH(%s ...) is not supported; translated are %s",
                    t->text,
                    "ATAN3, BASE64 DECODE, BASE64 ENCODE, COSH, CRC12, "
-                   "CRC16, CRC32, CRC8, DOTPRODUCT, LOG10, "
-                   "M_DETERMINANT, MAGNITUDE, MAX, MEAN, MEDIAN, MIN, "
-                   "SD, SINH, SUM, TANH");
+                   "CRC16, CRC32, CRC8, CROSSING, DOTPRODUCT, "
+                   "LOG10, M_DETERMINANT, MAGNITUDE, MAX, MEAN, MEDIAN, "
+                   "MIN, SD, SINH, SUM, TANH");
         {
             const char *name = t->up;
             struct val a = expr();
