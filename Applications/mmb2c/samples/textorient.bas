@@ -111,7 +111,9 @@ End Sub
 ' --- the reference transcript --------------------------------------
 '
 ' Taken from a real PicoMite running MMBasic 6.03.02, MODE 2, on
-' 2026-08-24.  A PC3 must print these same numbers.
+' 2026-08-24, and reproduced LINE FOR LINE by a PC3 the same day -
+' translated and compiled by the card's own mmbc and cc.  A PC3 must go
+' on printing these same numbers.
 '
 '  TEXT orientations, font 1 scale 1, relative to the anchor
 '

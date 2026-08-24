@@ -83,10 +83,14 @@ def run(args):
 
 
 def send(local, remote):
-    # 5 ms per line, not 0: full-rate transfers overran the rx FIFO
-    # three times on 2026-08-07 (the ri=0470 wedge) and a paced one
-    # has not wedged yet.  ~9 s extra on the biggest binary.
-    run(["uusend.py", local, remote, "5"])
+    # NO gap_ms ARGUMENT.  This used to pass 5, reasoning that 0 had
+    # overrun the rx FIFO and a little pacing had not wedged a board
+    # yet.  It did, on 2026-08-18, on a run of four transfers - and 6
+    # went down the same way.  The gap is not a knob to trade against
+    # transfer time: a slow send costs minutes, a wedged board costs an
+    # fsck and an afternoon.  uusend.py's own default is 25 ms and its
+    # comment says why (the tty queue is 132 bytes).  Take it.
+    run(["uusend.py", local, remote])
 
 
 def shell(*cmds):
