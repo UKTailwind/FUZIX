@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.22 — August 2026"
+date: "Release v0.23 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -59,65 +59,69 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## New in v0.22
+## New in v0.23
 
-**The arrays are laid out the way MMBasic lays them out.** They were
-not, and it mattered more than it sounds: a two-dimensional array was
-stored transposed, so `PEEK(VARADDR a(i,j))` answered the wrong
-address, `READ a()` filled the elements in the wrong order, and
-`REDIM PRESERVE` on a multi-dimensional array **corrupted** it. Under
-`OPTION BASE 1` an unreachable element 0 sat in every dimension and
-every whole-array walk read it, so `MATH(MAX)` over an all-negative
-array answered 0 and `MATH(MEAN)` divided by one too many.
+**`TEXT` draws all five of its orientations.** The third letter of the
+alignment string turns the characters: `N` normal, `V` a column, and
+now `I` upside down, `U` a quarter turn anticlockwise and `D` a quarter
+turn clockwise. Those three used to be accepted and then drawn the
+right way up, which was worse than refusing them - a program asking for
+inverted text has already moved its `x, y` to suit inverted text, so
+the character came out both upright AND a whole cell away from where it
+belonged. The Game*Mite conversion of *Picovaders* is what showed it:
+the upside-down Y of PLAY on its title screen sat one character right
+and most of a line low.
 
-All of that is gone. `DIM a(3)` is three elements under `OPTION BASE 1`
-and four under `OPTION BASE 0`, exactly as it is on a PicoMite, and the
-storage is dense and in the same order either way. A program can read
-its own arrays with `VARADDR` and find what the interpreter would have
-put there.
+Turning a character moves its cell, so read this before placing one.
+The `x, y` you give is the pixel the character would have turned
+**about**. It is the cell's top-left corner only for `N` and `V`; for
+`I` it is the bottom-right, for `D` the top-right, and for `U` the left
+edge just below the cell. Putting a turned character where an upright
+one would have gone therefore means ADDING the cell, not subtracting
+it:
 
-**If you use `PEEK(VARADDR)` on a multi-dimensional array, or
-`REDIM PRESERVE`, read that paragraph again.** Those two change answers
-in this release. Everything that only ever indexes by name is
-unaffected, and produces byte-identical output before and after.
+```basic
+Text 168, 30, "Y"                              ' upright, in that cell
+Text 168 + MM.Info(FontWidth) - 1, _
+     30 + MM.Info(FontHeight) - 1, "Y", "I"    ' upside down, same cell
+```
 
-**MATH, most of the way.** The `MATH` statement and `MATH()` function
-went from 32 of their 67 members to **54**:
+`samples/textorient.bas` measures all five with `PIXEL()` and prints
+the numbers, and carries the transcript a real PicoMite gives for the
+same program. They agree line for line, one deliberate asymmetry in the
+`U` row included - see the sample.
 
-* the vector and matrix family - `V_NORMALISE`, `V_CROSS`, `V_MULT`,
-  `V_ROTATE`, `V_PRINT`, `M_TRANSPOSE`, `M_MULT`, `M_INVERSE`,
-  `M_PRINT`, and `MATH(MAGNITUDE`, `DOTPRODUCT`, `M_DETERMINANT)`;
-* the quaternions - `Q_CREATE`, `Q_EULER`, `Q_VECTOR`, `Q_INVERT`,
-  `Q_MULT`, `Q_ROTATE`;
-* `SHIFT`, `POWER` and `WINDOW` on whole arrays, and
-  `MATH(CROSSING)` for finding where a signal crosses a level.
+**Pixels reach the screen before the program stops or waits.** `PIXEL`
+is batched, which is what makes plotting fast, and the batch was
+emptied whenever anything else drew - but not when the program simply
+ended, and not when it waited. So a program whose last act was a run of
+`PIXEL`s **lost up to 127 of them, permanently**, and
+`PIXEL … : PAUSE 500` left them invisible for the whole half second,
+which is the shape of most game loops.
 
-Appendix C lists all of them and the handful of places where a member
-does something the name does not suggest - `SHIFT`'s bare `U`,
-`POWER`'s rounded exponent, `WINDOW`'s truncation into an integer
-array, and what `CROSSING` returns. Every one of those was found by
-running the statement on a real PicoMite and comparing, which is also
-how their error messages come to be the same strings.
+Both are fixed. `PAUSE`, `INKEY$`, `INPUT`, `KEYDOWN` and the end of
+the program - including a `Ctrl-C` - all put the queue on the screen
+first. Nothing about how a program is written needs to change; drawings
+that used to appear late, or not at all, now appear when they were
+asked for. `samples/pixexit.bas` and `samples/pixseen.bas` are the pair
+that demonstrates it, and they need two processes, because anything the
+same program did afterwards would flush the queue and hide it.
 
-**`ARRAY ADD` and `MATH SCALE` now check the two arrays are the same
-length.** They did not, so a destination shorter than its source was
-written past the end in silence. And `ARRAY SCALE` is refused: it does
-not exist in MMBasic, which answers `Unknown command`.
+**A note for anyone running `retic`.** The OpenWeatherMap key that
+shipped in `retic.bas` has been removed and replaced with a
+placeholder. Open a free account at <https://openweathermap.org/>,
+generate a key and put it in the `OWMKey` line. Left as it stands, the
+three weather calls are refused and logged, and the rest of the
+controller runs normally - a schedule simply never skips for forecast
+rain.
 
-**`SPRITE LOADARRAY` takes a two-dimensional array** as well as the
-one-dimensional one the interpreter requires. `DIM s(w-1, h-1)` walked
-flat is the raster row by row, so `s(x, y)` is the pixel at x, y.
-
-**The usual rule after upgrading: recompile.** That is worth more than
-usual this time, because the array layout is part of the code a program
-was translated into. An old `.bc` is self-consistent and will still
-run, but it has the old layout inside it - so recompile anything that
-shares arrays with a newer program, or that reads them with `VARADDR`.
-The card ships the matched set.
+**The usual rule after upgrading: recompile.** The runtime is compiled
+into `bcrun` and the layout helpers into the program, so a `.bc` built
+before this release keeps the old behaviour of both of the above. The
+card ships the matched set.
 
 
-
-ewpage
+\newpage
 
 # Installing Fuzix
 
@@ -3760,7 +3764,8 @@ and Z-machine collections are not installed. There is no network, so
 pages, in `/usr/man/man1`.
 
 
-ewpage
+
+\newpage
 
 # The filesystem and included software
 
