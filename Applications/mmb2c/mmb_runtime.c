@@ -1532,6 +1532,8 @@ char *mm_input_str(MMINTEGER nbr, MMINTEGER fnbr)
 {
     char *t = mm_tmp();
     int i, c;
+
+    mm_gflush();                /* a read is a wait - see mm_pause */
     if (nbr < 0) nbr = 0;
     if (nbr > MM_STRLEN) nbr = MM_STRLEN;
     for (i = 1; i <= nbr; i++) {
@@ -1550,6 +1552,7 @@ static int  mm_inpos;
 
 void mm_input_line(MMINTEGER fnbr)
 {
+    mm_gflush();                /* a read is a wait - see mm_pause */
     mm_readline(fnbr, mm_inbuf);
     mm_inpos = 1;
 }
@@ -1974,7 +1977,31 @@ static MMINTEGER mm_us_now(void)
  * VM if it could.  So the slicing lives in generated code instead, in
  * mmb_wait.h, which calls this one slice at a time.  See mm_wait.
  */
+/*
+ * NOTHING WAITS WITH THE QUEUE NON-EMPTY.  The batching rule was "no
+ * graphics ioctl is issued with the queue non-empty", which is what
+ * keeps the picture in order - and it said nothing about waiting.  So
+ * `PIXEL ... : PAUSE 500` left the points invisible for half a second,
+ * which is the shape of every game loop, and a program that plotted and
+ * then waited on a key left them invisible until the key came.
+ *
+ * A wrapper rather than a line at the top of the body because that body
+ * declares in three arms and this file is C89 throughout.
+ *
+ * It costs nothing when there is nothing pending: mm_gflush returns on
+ * its first statement with an empty pixel queue and its second with no
+ * pending text, so the slicing loop in mmb_wait.h pays two loads a
+ * slice.
+ */
+static void mm_pause_raw(MMFLOAT ms);
+
 void mm_pause(MMFLOAT ms)
+{
+    mm_gflush();
+    mm_pause_raw(ms);
+}
+
+static void mm_pause_raw(MMFLOAT ms)
 {
 #if defined(MM_FCC) || defined(MM_HOSTED)
     MMINTEGER end;
@@ -2836,6 +2863,15 @@ static const int mm_raw_sigs[] = { SIGINT, SIGQUIT, SIGTERM, SIGHUP };
  */
 static void mm_raw_onsig(int sig)
 {
+    /* A signal runs no atexit handler, so the drain that mm_gfx_open
+     * registered does not happen here - and Ctrl-C is how a game is
+     * usually stopped, which makes this the commonest way to lose the
+     * last partial frame.  Safe from a handler on this machine: a
+     * signal is dispatched on the way back to user mode, so it cannot
+     * land inside the ioctl, and mm_pix_drain empties the count BEFORE
+     * the crossing, so a handler that interrupts one sees nothing to
+     * do. */
+    mm_gflush();
     mm_raw_release();
     signal(sig, SIG_DFL);
     raise(sig);
@@ -3020,6 +3056,7 @@ MMINTEGER mm_key_peek(void)
     char *s;
     int c;
 
+    mm_gflush();                /* a read is a wait - see mm_pause */
     if (mm_kfn)
         return mm_kfifo[0];
 
@@ -3061,6 +3098,7 @@ char *mm_inkey(void)
 {
     char *t = mm_tmp();
 
+    mm_gflush();                /* a read is a wait - see mm_pause */
     /* Anything the ON KEY poll decoded and did not want comes back
      * first, in order, ahead of the console itself. */
     if (mm_kfn) {
@@ -3835,10 +3873,39 @@ static void mm_pix_drain(void);
 static int mm_gfx_fd = -2;              /* -2 = not tried yet */
 static MMINTEGER mm_gfx_col = -1;       /* last colour pushed */
 
+/*
+ * PUT ON THE SCREEN WHAT THE PROGRAM ASKED FOR, on the way out.
+ *
+ * A translated main() ends with a plain `return 0;` - it does not go
+ * through mm_end - so nothing drained the pixel queue at exit and a
+ * program whose last drawing act was a run of PIXELs lost up to
+ * MM_BATCH-1 of them PERMANENTLY.  Not late: never.  The batch was
+ * bounded in depth and in time and neither bound fires on the last
+ * partial batch of a program that then stops.
+ *
+ * The same shape as mm_raw_release's atexit and for the same reason -
+ * see the note there, which is about the terminal and was written after
+ * a plain return logged the user out.  This is the graphics half of the
+ * same lesson.
+ *
+ * Registered from mm_gfx_open, which is the one door every drawing
+ * primitive goes through, and only when the display actually opens: a
+ * program that draws nothing registers nothing.  atexit runs handlers
+ * last-registered-first and MAXATEXIT is 10, so this drains before the
+ * terminal is put back and there is room for both.
+ */
+static void mm_gfx_atexit(void)
+{
+    mm_gflush();                /* drains the pixel queue too */
+}
+
 static int mm_gfx_open(void)
 {
-    if (mm_gfx_fd == -2)
+    if (mm_gfx_fd == -2) {
         mm_gfx_fd = open("/dev/sys", O_RDWR);
+        if (mm_gfx_fd >= 0)
+            atexit(mm_gfx_atexit);
+    }
     return mm_gfx_fd;
 }
 
@@ -4747,6 +4814,7 @@ MMINTEGER mm_keydown(MMINTEGER n)
 {
     struct mm_kbd_down d;
 
+    mm_gflush();                /* a read is a wait - see mm_pause */
     if (n < 0 || n > 8)
         MM_RAISEV("KEYDOWN takes 0 to 8", 0);
     if (mm_raw_hold())

@@ -331,22 +331,43 @@ Small, and a decision rather than work: match the reference (and leave
 
 ### 3. Pixel batching phase 2: the deferred tail
 
-`MM_PIX_LATENCY_US` is 10 ms but the bound is only tested inside
-`mm_pixel`, so a program that plots and then computes leaves its last
-partial batch unpainted. **It is a PROCESS alarm, not a hardware one** —
-`p_alarm` is decremented in the existing decisecond pass
-(`Kernel/process.c:487-489`), so the full hardware alarm pool is
-irrelevant and 100 ms is the natural granularity. Two things the plan
-did not know: the busy flag is provably necessary because
-`preempt_handler()` dispatches signals at arbitrary user PCs, and there
-is an EINTR hazard — Fuzix's `fread` never retries and permanently
-error-flags the stream, so the alarm must be DISARMED at drain rather
-than left to fire harmlessly.
+**MOSTLY DONE 2026-08-25.** Two of the three holes are closed and the
+third is deliberately left open — do not re-propose it without evidence.
 
-**And a second hole in the same item, unrecorded until now**: a program
-whose `main()` simply returns never flushes at all — only
-`mm_raw_release` is registered with `atexit` — so the last batch is lost
-at exit even with no compute tail.
+*The exit hole is closed.* A translated `main()` ends with a plain
+`return 0;`, so nothing drained and a program whose last drawing act
+was a run of PIXELs lost up to 127 points PERMANENTLY. `mm_gfx_open`
+registers an `atexit` drain now, and `mm_raw_onsig` drains before it
+re-raises. Measured on the board: `samples/pixexit.bas` then
+`samples/pixseen.bas` read **0 of 10** before and **10 of 10** after.
+
+*The waiting hole is closed, and it was not in this list at all.* The
+rule was "no graphics ioctl is issued with the queue non-empty" and it
+said nothing about WAITING, so `PIXEL … : PAUSE 500` left the points
+invisible for half a second — the shape of every game loop — and a
+program that plotted and then waited on a key left them invisible until
+the key came. `mm_pause`, `mm_inkey`, `mm_key_peek`, `mm_keydown`,
+`mm_input_str` and `mm_input_line` all drain first. Proved on the board
+by killing a plot-then-PAUSE program that installs no signal handler
+and runs no atexit handler: the points were on the screen, so only the
+drain inside PAUSE can have put them there.
+
+*The compute tail is still open, and that is a decision.* A program
+that plots and then computes for a long time WITHOUT pausing, printing,
+reading a key or drawing anything else still leaves its last partial
+batch. The fix would be the 100 ms process alarm, and it is feasible:
+`_alarm()` takes DECISECONDS directly (`Kernel/syscall_proc.c:625`,
+decremented in the decisecond pass at `Kernel/process.c:487-489`), so no
+hardware alarm is consumed, and SIGALRM is genuinely free because
+SETTICK is POLLED from generated code (`mmb_wait.h`) rather than
+signal-driven. Against it: it puts a signal handler into every drawing
+program, `preempt_handler()` dispatches signals at arbitrary user PCs so
+a busy flag is required, and there is an EINTR hazard — Fuzix's `fread`
+never retries and permanently error-flags the stream, so the alarm would
+have to be DISARMED at drain rather than left to fire harmlessly. That
+is a real failure mode in exchange for a case nothing has yet
+demonstrated. **Wanted first: a program that actually shows the tail
+now that everything which waits drains.**
 
 ### 4. The cheap coverage wins, in this order
 
