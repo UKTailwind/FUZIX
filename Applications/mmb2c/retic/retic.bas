@@ -64,12 +64,21 @@ Const LowerFtolerance = 50       ' the % decrease in flow rate to trigger a faul
 
 Const RainThreshild = 90         ' % forecast chance of rain required to skip a schedule
 
-' API key for accessing Open Weather Map
-' This key is shared between all users of this program and is limited to 60 queries/minute.
-' This should not be a problem but you can easily get your own key and be inderpendent.
-' To do this goto https://openweathermap.org/ and open a free account, then generate a key
-' and replace the key below with your own key.
-Const OWMKey = "73cd207244614965fc5ca3646bdd10ab"
+' API key for accessing Open Weather Map.
+'
+' YOU MUST PUT YOUR OWN KEY HERE - there is deliberately none in this
+' repository.  Go to https://openweathermap.org/, open a free account and
+' generate a key (the free tier allows 60 queries a minute, which is far
+' more than this program uses), then replace the placeholder below.
+'
+' Leave it as it stands and the three weather calls will be refused by
+' OpenWeatherMap and logged as errors; everything else in the controller
+' runs, and a schedule simply never skips for forecast rain.
+'
+' DO NOT COMMIT A REAL KEY.  One was committed here once and had to be
+' revoked: a key in a public repository is a key anybody has, and taking
+' it out afterwards does not take it back.
+Const OWMKey = "PUT-YOUR-OWN-OPENWEATHERMAP-KEY-HERE"
 
 ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
