@@ -86,10 +86,11 @@ Text 168 + MM.Info(FontWidth) - 1, _
      30 + MM.Info(FontHeight) - 1, "Y", "I"    ' upside down, same cell
 ```
 
-`samples/textorient.bas` measures all five with `PIXEL()` and prints
-the numbers, and carries the transcript a real PicoMite gives for the
-same program. They agree line for line, one deliberate asymmetry in the
-`U` row included - see the sample.
+`textorient.bas` measures all five with `PIXEL()` and prints the
+numbers, and carries the transcript a real PicoMite gives for the same
+program. They agree line for line, one deliberate asymmetry in the `U`
+row included - see the sample. It is in `/root/MMBasic` with the other
+examples.
 
 **Pixels reach the screen before the program stops or waits.** `PIXEL`
 is batched, which is what makes plotting fast, and the batch was
@@ -103,9 +104,11 @@ Both are fixed. `PAUSE`, `INKEY$`, `INPUT`, `KEYDOWN` and the end of
 the program - including a `Ctrl-C` - all put the queue on the screen
 first. Nothing about how a program is written needs to change; drawings
 that used to appear late, or not at all, now appear when they were
-asked for. `samples/pixexit.bas` and `samples/pixseen.bas` are the pair
-that demonstrates it, and they need two processes, because anything the
-same program did afterwards would flush the queue and hide it.
+asked for. `pixexit.bas` and `pixseen.bas` are the pair that demonstrates it -
+run one and then the other - and it takes two processes because
+anything the same program did afterwards would flush the queue and hide
+it. They are in `/root/cc`, which holds the whole BASIC and C corpus;
+`/root/MMBasic` is the smaller, curated set of examples.
 
 **A note for anyone running `retic`.** The OpenWeatherMap key that
 shipped in `retic.bas` has been removed and replaced with a

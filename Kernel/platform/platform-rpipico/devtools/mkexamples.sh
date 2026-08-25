@@ -46,6 +46,7 @@ xorplot:$M/samples/xorplot.bas:the XOR pattern, and what readback says about it
 maptest:$M/samples/maptest.bas:MAP - changing what the sixteen colours mean
 fbtext:$M/samples/fbtext.bas:PRINT @(x,y) - text on a graphics screen
 fbfont:$M/samples/fbfont.bas:TEXT and the nine built-in fonts
+textorient:$M/samples/textorient.bas:TEXT's five orientations, and where a turned character's cell lands
 fontaddr:$M/samples/fontaddr.bas:MM.INFO(FONT ADDRESS) and PEEK - the glyphs themselves
 fbscroll:$M/samples/fbscroll.bas:scrolling a graphics screen
 fbpage:$M/samples/fbpage.bas:an attractor, double buffered through FRAMEBUFFER
