@@ -59,7 +59,10 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## New in v0.25
+## New in v0.25, and in v0.24
+
+v0.24 was published without an announcement, so both releases are
+described here: everything below is new since v0.23.
 
 **`MODE 1` and `MODE 2` differ in size and depth, and in nothing
 else.** 640×480 in one bit against 320×240 in sixteen — and console
@@ -121,6 +124,31 @@ itself. See `chess/README.md`.
 C library function `bcrun` does not provide, so any program containing
 the statement — anywhere, whether it ran or not — died at load with
 `no runtime function "sscanf"`.
+
+### From v0.24
+
+**`F2` in `mmedit` builds the program and runs it.** On a PicoMite `F2`
+is "save, exit and run", and the interpreter took the program straight
+back; the editor here printed the two commands you would have to type
+and left you at the shell. It now hands the file to the compiler, which
+builds it — a `.bas` through `mmbc` first — and runs it if it built.
+`Ctrl-W` does the same, as it does in MMBasic. A compile error stops
+there, with the errors on the screen, rather than putting you back in
+the editor at the offending line. The `mmedit` chapter has the detail.
+
+**`cc -r` builds and runs in one command**, which is what `F2` uses and
+is worth having at the prompt in its own right: `cc -r prog.bas`.
+Nothing runs if any pass failed.
+
+One thing to know before trusting either: a line `mmbc` cannot
+translate is commented out and *reported*, not treated as an error, so
+the program builds without that line and runs. Read the report rather
+than the fact that something ran.
+
+**`cc`'s manual page was describing a different compiler.** It
+documented `-c`, `-S`, `-E`, `-O`, `-D`, `-I`, `-l`, `-M` and `-X`,
+none of which the `cc` on this machine accepts. `man cc` lists the five
+real options now, and names the absent ones.
 
 **The usual rule after upgrading: recompile.** The runtime is compiled
 into `bcrun` and the layout helpers into the program, so a `.bc` built
