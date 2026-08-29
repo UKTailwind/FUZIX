@@ -177,10 +177,13 @@ void display_font_release(struct p_tab *who);
 
 /* The console's SCREEN half (console.c).  This console is mirrored -
  * display and uart - so a program that owns the screen has to ask for
- * the display half to stop, and the kernel puts it back when the
- * process ends. */
+ * the display half to stop, and the kernel puts it back when THAT
+ * process ends.  The claim is owned like the framebuffer layer above:
+ * a child exec'ing or exiting must not hand back a screen it never
+ * had, or the console's cursor lands in the owner's picture. */
 void console_mirror(int on);
-void console_mirror_reset(void);
+void console_mirror_claim(struct p_tab *who, int on);
+void console_mirror_release(struct p_tab *who);
 
 /* A run of text at a PIXEL position.  Draws through the caller's write
  * target like every other primitive, which is what lets PRINT reach the

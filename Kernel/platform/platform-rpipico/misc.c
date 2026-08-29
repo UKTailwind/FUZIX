@@ -130,10 +130,10 @@ int plt_dev_ioctl(uarg_t request, char *data)
     }
     if (request == PICOIOC_CONMIRROR)
     {
-        /* data is the value itself, like GFXIOC_FBOPEN's neighbours. */
-        extern void console_mirror(int on);
-
-        console_mirror((int)(intptr_t)data ? 1 : 0);
+        /* data is the value itself, like GFXIOC_FBOPEN's neighbours.
+         * The asker is recorded, so that only it hands the screen back
+         * (console.c: con_mirror_owner). */
+        console_mirror_claim(udata.u_ptab, (int)(intptr_t)data ? 1 : 0);
         return 0;
     }
     if (request == PICOIOC_NUMLOCK)
@@ -1173,8 +1173,11 @@ void plt_exec_cleanup(void)
     display_font_release(udata.u_ptab);
     /* and the console back onto the display: a program that turned the
        screen half off (OPTION CONSOLE SERIAL) must not leave the next
-       one - or the shell - typing into a display that shows nothing. */
-    console_mirror_reset();
+       one - or the shell - typing into a display that shows nothing.
+       Only if THIS process turned it off: a child exec'ing a decoder
+       would otherwise switch the mirror back on underneath the graphics
+       program that forked it. */
+    console_mirror_release(udata.u_ptab);
 #endif
 #ifdef CONFIG_PC3_PINLOCK
     /* The new image did not claim these pins and does not know what they

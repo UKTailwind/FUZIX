@@ -62,8 +62,28 @@ static volatile uint8_t con_gfx_active;
  * One by default, which is the mirrored console this machine is built
  * around.  A program that owns the screen turns it off for the duration
  * (PICOIOC_CONMIRROR, from OPTION CONSOLE SERIAL), and the kernel turns
- * it back on when that process ends - see console_mirror_reset. */
+ * it back on when that process ends - see console_mirror_release. */
 static volatile uint8_t con_to_display = 1;
+
+/* WHO turned it off.  The flag is one piece of global state but it
+ * BELONGS to a process, exactly as the framebuffer layer does
+ * (display.c's fb_owner), and for the same reason: the kernel has to
+ * give it back when that process ends without giving it back on behalf
+ * of a process that never had it.
+ *
+ * It used to be given back by ANY exec and ANY exit.  A graphics
+ * program that ran a child - LOAD IMAGE, LOAD JPG/PNG, SPRITE LOADPNG
+ * and LOADBMP, BLIT LOAD, all of which decode in a separate binary -
+ * had the mirror switched back on underneath it the moment that child
+ * exec'd, which painted the console CURSOR into the program's picture:
+ * a black 8x12 cell at the text cursor, at (0,0) on a screen the
+ * program had just cleared.  Worse than the mark, and invisible until
+ * something printed: from then on the program's own console output was
+ * mirrored onto the screen it thought it owned, so OPTION CONSOLE
+ * SERIAL had quietly stopped meaning anything.  Found 2026-08-29 while
+ * checking SPRITE LOADBMP's transparency, which is exactly the shape
+ * of thing this looks like from a BASIC program. */
+static struct p_tab *con_mirror_owner;
 
 static void con_cursor_off(void);
 static void con_cursor_on(void);
@@ -94,10 +114,25 @@ void console_mirror(int on)
     }
 }
 
-/* On the way out of any process: a program that died holding the screen
- * must not leave the machine with a console nobody can see. */
-void console_mirror_reset(void)
+/* PICOIOC_CONMIRROR: the ask, and who is asking.  Turning it back on
+ * releases the claim - a program that has handed the screen back does
+ * not still own it. */
+void console_mirror_claim(struct p_tab *who, int on)
 {
+    con_mirror_owner = on ? NULL : who;
+    console_mirror(on);
+}
+
+/* On the way out of a process, and on exec: a program that died holding
+ * the screen must not leave the machine with a console nobody can see -
+ * but only the holder gives it back.  A child, or any unrelated program
+ * that happens to exit while a graphics program is running, leaves the
+ * screen exactly as it found it. */
+void console_mirror_release(struct p_tab *who)
+{
+    if (con_mirror_owner == NULL || con_mirror_owner != who)
+        return;
+    con_mirror_owner = NULL;
     console_mirror(1);
 }
 

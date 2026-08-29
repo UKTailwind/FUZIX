@@ -199,8 +199,10 @@ void pagemap_free(ptptr p)
     display_font_release(p);
     /* and the console back onto the display: a program that turned the
        screen half off (OPTION CONSOLE SERIAL) and then died would leave
-       the machine with a display that shows nothing anyone types */
-    console_mirror_reset();
+       the machine with a display that shows nothing anyone types.  Only
+       the process that turned it off gives it back - a child exiting
+       must not hand back a screen its parent is still drawing on. */
+    console_mirror_release(p);
 #endif
 #ifdef CONFIG_PC3_PINLOCK
     /* and the I/O header, with the PINS THEMSELVES put back to inputs:
