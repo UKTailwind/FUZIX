@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.24 — August 2026"
+date: "Release v0.25 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -59,64 +59,68 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## New in v0.23
+## New in v0.25
 
-**`TEXT` draws all five of its orientations.** The third letter of the
-alignment string turns the characters: `N` normal, `V` a column, and
-now `I` upside down, `U` a quarter turn anticlockwise and `D` a quarter
-turn clockwise. Those three used to be accepted and then drawn the
-right way up, which was worse than refusing them - a program asking for
-inverted text has already moved its `x, y` to suit inverted text, so
-the character came out both upright AND a whole cell away from where it
-belonged. The Game*Mite conversion of *Picovaders* is what showed it:
-the upside-down Y of PLAY on its title screen sat one character right
-and most of a line low.
+**`MODE 1` and `MODE 2` differ in size and depth, and in nothing
+else.** 640×480 in one bit against 320×240 in sixteen — and console
+output, `PRINT` and `TEXT` now behave identically in each, subject to
+`OPTION CONSOLE`, exactly as they do on a PicoMite with `OPTION
+LCDPANEL CONSOLE`.
 
-Turning a character moves its cell, so read this before placing one.
-The `x, y` you give is the pixel the character would have turned
-**about**. It is the cell's top-left corner only for `N` and `V`; for
-`I` it is the bottom-right, for `D` the top-right, and for `U` the left
-edge just below the cell. Putting a turned character where an upright
-one would have gone therefore means ADDING the cell, not subtracting
-it:
+`MODE 1` used to leave text to the kernel console while `MODE 2` drew
+it with the interpreter's own glyph engine. That looked like an
+improvement — the console scrolls, it has a cursor — and it was a
+divergence: there were two text engines with two cursors, so `PRINT`
+and `TEXT` disagreed about where the text went, and `PRINT @` moved
+only one of them. Worse, in `MODE 2` nothing echoed what you typed at
+an `INPUT`, because a program drawing its own text has to silence the
+console (or every `PRINT` appears twice), and the terminal's own echo
+then reaches only the serial port. A program whose first line was
+`MODE 2` printed its prompt and then took input invisibly.
+
+**`INPUT` echoes what you type, and shows a cursor.** The interpreter
+does the editing itself now, as MMBasic always has: characters appear
+as they are typed, `Backspace` and `Del` rub out, `Tab` expands to the
+next multiple of four, and a cursor — MMBasic's own underline beneath
+the character cell, on for two thirds of a second and off for a third —
+sits where the next character will go. The echo follows `OPTION
+CONSOLE` like everything else printed, so it reaches the screen, the
+serial port, or both.
+
+**Sprites load from BMP files.** `SPRITE LOADBMP` and `BLIT LOAD` (also
+spelt `BLIT LOADBMP`) are done, with the reference's window arguments:
 
 ```basic
-Text 168, 30, "Y"                              ' upright, in that cell
-Text 168 + MM.Info(FontWidth) - 1, _
-     30 + MM.Info(FontHeight) - 1, "Y", "I"    ' upside down, same cell
+SPRITE LOADBMP #1, "sheet", 64, 0, 16, 16   ' one 16x16 tile out of a sheet
+BLIT LOAD #2, "picture"                     ' all of it, into a blit buffer
 ```
 
-`textorient.bas` measures all five with `PIXEL()` and prints the
-numbers, and carries the transcript a real PicoMite gives for the same
-program. They agree line for line, one deliberate asymmetry in the `U`
-row included - see the sample. It is in `/root/MMBasic` with the other
-examples.
+The decoding is `loadimage`'s, in another process, so there is no BMP
+reader compiled into your program. A window that runs off the edge of
+the picture is refused rather than quietly clipped, and — as in the
+reference, and unlike a picture drawn on the screen — the colours are
+taken by bit extraction rather than dithered: a sprite is data that
+gets blitted about, and a dithered one changes colour when it moves.
 
-**Pixels reach the screen before the program stops or waits.** `PIXEL`
-is batched, which is what makes plotting fast, and the batch was
-emptied whenever anything else drew - but not when the program simply
-ended, and not when it waited. So a program whose last act was a run of
-`PIXEL`s **lost up to 127 of them, permanently**, and
-`PIXEL … : PAUSE 500` left them invisible for the whole half second,
-which is the shape of most game loops.
+**A file name with no extension gets one.** `LOAD IMAGE "shot"`,
+`SPRITE LOADBMP #1, "sheet"` and the rest now append `.bmp` when the
+name has none, which is what MMBasic does and what programs written for
+a PicoMite expect. A dot inside a directory name does not count as an
+extension.
 
-Both are fixed. `PAUSE`, `INKEY$`, `INPUT`, `KEYDOWN` and the end of
-the program - including a `Ctrl-C` - all put the queue on the screen
-first. Nothing about how a program is written needs to change; drawings
-that used to appear late, or not at all, now appear when they were
-asked for. `pixexit.bas` and `pixseen.bas` are the pair that demonstrates it -
-run one and then the other - and it takes two processes because
-anything the same program did afterwards would flush the queue and hide
-it. They are in `/root/cc`, which holds the whole BASIC and C corpus;
-`/root/MMBasic` is the smaller, curated set of examples.
+**TSCP chess is on the card**, in `/root/MMBasic/chess`: Tom Kerrigan's
+engine in Ceptimus's MMBasic conversion, with its pieces and its
+opening book. Run it from its own directory, as `robots` and `retic`
+are run, and type `help` at the `tscp>` prompt. It is also this port's
+own demonstration of the sprite loaders — the pieces are cut out of one
+240×20 BMP with the window form above — and `chess/mkspr.bas` turns
+that sheet into the `.spr` file `SPRITE LOAD` reads, on the machine
+itself. See `chess/README.md`.
 
-**A note for anyone running `retic`.** The OpenWeatherMap key that
-shipped in `retic.bas` has been removed and replaced with a
-placeholder. Open a free account at <https://openweathermap.org/>,
-generate a key and put it in the `OWMKey` line. Left as it stands, the
-three weather calls are refused and logged, and the rest of the
-controller runs normally - a schedule simply never skips for forecast
-rain.
+**`SPRITE LOAD` works at all.** It parsed its file's header line with a
+C library function `bcrun` does not provide, so any program containing
+the statement — anywhere, whether it ran or not — died at load with
+`no runtime function "sscanf"`.
 
 **The usual rule after upgrading: recompile.** The runtime is compiled
 into `bcrun` and the layout helpers into the program, so a `.bc` built
@@ -943,6 +947,19 @@ the first two HDMI modes:
 | `MODE 1` | 640×480 | monochrome |
 | `MODE 2` | 320×240 | 16, from MMBasic's RGB121 set |
 
+**That table is the whole difference between them.** Everything else
+behaves identically in the two modes — console output, `PRINT`, `PRINT
+@`, `TEXT`, `INPUT` and its echo — and identically to a PicoMite with
+`OPTION LCDPANEL CONSOLE`, subject to `OPTION CONSOLE`.
+
+In both, a `MODE` statement means the program has taken the screen:
+`PRINT` draws glyphs at `MM.INFO(HPOS)`/`VPOS` — MMBasic's `CurrentX`
+and `CurrentY`, the same pen `TEXT` and `PRINT @` move — and the
+kernel's own console stops painting on the display until the program
+ends. It keeps writing to the serial port throughout, which is what
+makes a `PRINT` usable as a trace while a program owns the screen, and
+what `OPTION CONSOLE SERIAL` leaves you with deliberately.
+
 A `PIXEL` outside the screen is **dropped**, which is what the
 interpreter does. Older releases here masked the coordinates instead,
 so `PIXEL 1030, 100` appeared at x=6 — a program written against that
@@ -1476,7 +1493,14 @@ SAVE IMAGE "shot.bmp"                      ' the whole screen
 SAVE IMAGE "part.bmp", 160, 120, 320, 240  ' x, y, w, h
 LOAD IMAGE "shot.bmp"                      ' at 0,0
 LOAD IMAGE "shot.bmp", 160, 120            ' at x,y
+LOAD IMAGE "shot"                          ' .bmp is added for you
 ```
+
+A name with **no extension** gets `.bmp`, as MMBasic's
+`AppendDefaultExtension` does, so a program written for a PicoMite
+needs no edit. A dot inside a directory name does not count — only the
+last part of the path is looked at. The same rule serves `SPRITE
+LOADBMP` and `BLIT LOAD`.
 
 `LOAD IMAGE` takes MMBasic's full syntax including the dither mode and
 the source rectangle:
@@ -3620,6 +3644,7 @@ Each of these has a chapter of its own; this is the summary.
 ```
 # cc prog.c                     -> prog.bc, and run it with ./prog.bc
 # cc prog.bas                   BASIC in one step, via mmbc
+# cc -r prog.bas                ... and run it if it built
 # mmbc prog.bas                 -> prog.c, and stop there
 # bcdump prog.bc                disassemble the bytecode
 # bbcbasic                      BBC BASIC, with its own editor
@@ -4529,7 +4554,10 @@ Of the graphics, `MODE`, `COLOUR`, `PIXEL` (including the array form),
 `FRAMEBUFFER` (including `LAYER` and `MERGE`), `PRINT @`, `TEXT`,
 `FONT`, `CLS [colour]` and `MAP` (statement and function) are done, and
 since v0.15 so are `BLIT` — including the flash slots it reads and
-writes — and the `SPRITE` family with its two-axis `SCROLL`. `TEXT`
+writes — and the `SPRITE` family with its two-axis `SCROLL`. The
+picture loaders are all there: `SPRITE LOADARRAY`, `SPRITE LOADPNG`,
+and `SPRITE LOADBMP` with `BLIT LOAD`/`LOADBMP` and their window
+arguments, which cut one tile out of a sheet. `TEXT`
 draws in any of MMBasic's nine built-in fonts, and in a font the
 program defines for itself with `DefineFont` (numbers 10 to 16), but
 in all five of MMBasic's orientations, the three that turn the

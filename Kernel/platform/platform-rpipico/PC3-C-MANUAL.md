@@ -967,6 +967,22 @@ lands on the picture and scrolls it when the line wraps. Use
 `GFXIOC_TEXT` for text you want positioned, and keep `printf` for the
 serial console.
 
+To have the screen to yourself, turn the console's display half off:
+
+```c
+ioctl(sysfd, PICOIOC_CONMIRROR, (void *)0);   /* 1 puts it back */
+```
+
+The uart half keeps working, so `printf` still reaches a terminal —
+this is what MMBasic's `OPTION CONSOLE SERIAL` does. **The claim
+belongs to the process that made it.** The kernel gives the display
+back when *that* process ends, and a child running meanwhile — a
+decoder like `loadimage`, or anything else you `fork` and `exec` —
+leaves the screen alone. It did not always: any exec used to hand the
+mirror back on the owner's behalf, which painted the console's cursor
+into the owner's picture as an 8×12 cell and quietly re-enabled the
+console over the top of it.
+
 **Timing is contended.** core1 DMAs scanlines out of SRAM continuously,
 so RAM bandwidth is shared. This cuts both ways: it is why the kernel
 now executes from flash at no measurable cost, and why a benchmark that

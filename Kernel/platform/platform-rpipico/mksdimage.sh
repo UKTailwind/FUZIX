@@ -132,6 +132,20 @@ sh "$P/devtools/mkexamples.sh" "$EX/mmbasic" > "$FS.ex.log" 2>&1 || {
 		done
 		echo "cd .."
 	fi
+	# And chess the same way again: the program, the sprite sheet its
+	# pieces are cut from and the opening book, run from its own
+	# directory because it opens both by relative name.  bget for all
+	# of it - the BMP is binary and the book is a hundred kilobytes of
+	# text, and one rule for the directory cannot get that wrong.
+	if [ -d "$EX/mmbasic/chess" ]; then
+		echo "mkdir chess"
+		echo "cd chess"
+		for f in "$EX"/mmbasic/chess/*; do
+			[ -f "$f" ] || continue
+			echo "bget $f $(basename "$f")"
+		done
+		echo "cd .."
+	fi
 	echo "exit"
 } | "$R/Standalone/ucp" "$FS" > "$FS.ucp.log" 2>&1
 if grep -q "error number" "$FS.ucp.log"; then
@@ -145,6 +159,9 @@ if [ -d "$EX/mmbasic/robots" ]; then
 fi
 if [ -d "$EX/mmbasic/retic" ]; then
 	echo "    $(find "$EX"/mmbasic/retic -type f | wc -l) retic files"
+fi
+if [ -d "$EX/mmbasic/chess" ]; then
+	echo "    $(find "$EX"/mmbasic/chess -type f | wc -l) chess files"
 fi
 rm -rf "$EX" "$FS.ucp.log" "$FS.ex.log"
 

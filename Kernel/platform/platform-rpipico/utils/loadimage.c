@@ -523,6 +523,39 @@ static int sprite_out(int xo, int yo, int sw, int sh, int rlerows)
 	return 0;
 }
 
+/*
+ * MMBasic's AppendDefaultExtension: ".bmp" unless the name already has
+ * an extension on its LAST path component - a dot inside a directory
+ * name is not one (FileIO.c's HasExtension scans back and stops at a
+ * separator).
+ *
+ * Not decoration.  Programs written for a PicoMite name the file
+ * without it, and the chess program on the card is exactly that:
+ *
+ *     Sprite Loadbmp i, "12piececol", x, y, 20, 20
+ *
+ * Without this rule that is "cannot open the file", which reads as a
+ * missing file rather than as a divergence in this port.
+ */
+static const char *defext(const char *name, char *buf, int max)
+{
+	int n = (int)strlen(name);
+	const char *p = name + n;
+
+	while (p > name) {
+		p--;
+		if (*p == '/' || *p == '\\')
+			break;                  /* no extension on this one */
+		if (*p == '.')
+			return name;            /* it has one */
+	}
+	if (n + 5 > max)
+		return name;                    /* no room; let open() report */
+	strcpy(buf, name);
+	strcat(buf, ".bmp");
+	return buf;
+}
+
 /* An argument that was left out is passed as an empty string, because
    MMBasic lets any optional one be blank: LOAD IMAGE f$,,,4 sets the
    mode and nothing else. */
@@ -591,10 +624,15 @@ int main(int argc, char *argv[])
 			die("cannot ask about the screen");
 	}
 
-	fd = open(av[1], O_RDONLY);
-	if (fd < 0) {
-		perror(av[1]);
-		return 1;
+	{
+		static char namebuf[128];
+		const char *name = defext(av[1], namebuf, (int)sizeof(namebuf));
+
+		fd = open(name, O_RDONLY);
+		if (fd < 0) {
+			perror(name);
+			return 1;
+		}
 	}
 	readheader();
 	if (compression == 1 || compression == 2) {

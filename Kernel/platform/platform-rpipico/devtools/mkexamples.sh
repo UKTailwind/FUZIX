@@ -158,6 +158,23 @@ for f in retic.bas index.html config.html setup.html MIGRATION.md; do
 done
 echo "retic: 5 files"
 
+# TSCP chess: Tom Kerrigan's engine in Ceptimus's MMBasic conversion,
+# with the sprite sheet its pieces are cut from and the opening book.
+# Its own directory for the reason robots and retic have one - it opens
+# both by relative name - and FATAL if short, because everything it
+# needs is in the git tree: a chess program that starts with no pieces
+# reads as a broken port rather than a missing file.
+CHESS=$M/chess
+mkdir -p "$OUT/chess"
+for f in chess.bas 12piececol.bmp book.txt mkspr.bas README.md; do
+    if [ ! -f "$CHESS/$f" ]; then
+        echo "mkexamples: $CHESS/$f missing - not building a card with"             "half a chess program" >&2
+        exit 1
+    fi
+    cp "$CHESS/$f" "$OUT/chess/$f"
+done
+echo "chess: 5 files"
+
 # The README, built from the same manifest so the two cannot drift.
 {
     cat <<'HEAD'
@@ -207,6 +224,19 @@ started:
     mmbc robots.bas
     cc robots.c
     ./robots.bc
+
+chess/ is TSCP - Tom Kerrigan's chess engine, converted to MMBasic by
+Ceptimus - with its pieces and its opening book.  Run it from its own
+directory too, and type `help` at the tscp> prompt:
+
+    cd /root/MMBasic/chess
+    cc chess.bas
+    ./chess.bc
+
+It is also the port's own demonstration of the sprite loaders: the
+pieces are cut out of one 240x20 BMP with SPRITE LOADBMP's window form,
+and mkspr.bas there turns that sheet into the .spr file SPRITE LOAD
+reads, on the machine itself.  See chess/README.md.
 
 retic/ is a whole product: Geoff Graham's WebMite reticulation
 (sprinkler) controller, ported - a web server you configure from a
