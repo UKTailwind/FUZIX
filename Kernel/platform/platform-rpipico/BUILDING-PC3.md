@@ -321,6 +321,9 @@ unless you mean to restore the TinyUSB checkout afterwards — see §2.
 
 **3. Build the userland, from the C library up.**
 
+    sh ../../../Applications/mmb2c/libgate.sh   # GATE - the headers
+                                                # call only what bcrun
+                                                # can resolve
     sh relink-userland.sh
     (cd ../../../Applications/netd && make -f Makefile.armm0 \
         FUZIX_ROOT=$PWD/../.. USERCPU=armm0 PLATFORM=armm0)
@@ -335,6 +338,11 @@ it, and the network tools are statically linked like everything else.
     bash ../../../Applications/CC/mkccimage.sh
     sh ../../../Applications/CC/hwtest/verifyimage.sh  # GATE
     sh mancheck.sh                                     # GATE
+
+`libgate.sh` is quick and belongs first: a header that calls a C
+library function bcrun does not bind compiles, links, passes every host
+gate and then kills any program using that statement ON THE BOARD, at
+load, before a line runs. That is what `sscanf` in `SPRITE LOAD` did.
 
 `verifyimage.sh` compares sizes against what was staged. That catches a
 stale file and would NOT catch one of the right length and the wrong
