@@ -9,6 +9,10 @@ saveimage, loadimage \- save and restore the screen as a BMP
 .B loadimage
 .I file
 [\fIx\fR [\fIy\fR [\fImode\fR [\fIximage\fR [\fIyimage\fR]]]]]
+.br
+.B loadimage \-s
+.I file
+[\fIxorigin\fR [\fIyorigin\fR [\fIwidth\fR [\fIheight\fR]]]]
 .SH DESCRIPTION
 .B saveimage
 writes the screen to
@@ -24,6 +28,24 @@ and
 .I yimage
 take the picture from an offset within the file, so a large BMP can be
 used as a sheet to cut from.
+.PP
+With
+.BR \-s ,
+.B loadimage
+writes a SPRITE to standard output instead of drawing anything, which is
+how
+.B SPRITE LOADBMP
+gets its picture.  The four numbers are a window into the image -
+where to start and how much of it to take, all of it from that point by
+default - and a window that runs off the edge is refused rather than
+clipped.  A sprite needs no display, so
+.B \-s
+works with the screen in any mode.
+.PP
+The sprite is written as MMBasic's own conversion of the colours: red's
+top bit, green's top two and blue's top bit, with no dithering.  A
+sprite is data to be moved about rather than a picture being fitted to
+the screen, and a dithered one changes colour when it moves.
 .SH THE MODE ARGUMENT
 .I mode
 is read and then ignored.  It is there so that the arguments after it
@@ -35,6 +57,8 @@ colours are matched the same way whatever you pass.
 # saveimage part.bmp 160 120 320 240
 # loadimage shot.bmp
 # loadimage sheet.bmp 0 0 0 64 0
+# loadimage -s ship.bmp > ship.spr
+# loadimage -s sheet.bmp 64 0 16 16 > tile.spr
 .fi
 .SH SEE ALSO
 .BR loadjpg (1),

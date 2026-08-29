@@ -3533,6 +3533,8 @@ console.
 # loadpng logo.png 40 20                 at x,y
 # loadpng logo.png 0 0 -1                let the screen show through
 # loadpng -s logo.png > logo.spr         decode to a SPRITE, on stdout
+# loadimage -s ship.bmp > ship.spr       the same, from a BMP
+# loadimage -s sheet.bmp 64 0 16 16      one 16x16 tile out of a sheet
 ```
 
 The full argument lists, which are MMBasic's:
@@ -3541,8 +3543,10 @@ The full argument lists, which are MMBasic's:
 |---|---|
 | `saveimage` | `file.bmp [x y w h]` |
 | `loadimage` | `file.bmp [x [y [mode [ximage [yimage]]]]]` |
+| `loadimage -s` | `file.bmp [xorigin [yorigin [width [height]]]]` |
 | `loadjpg` | `file.jpg [x [y [mode [ximage [yimage [scale]]]]]]` |
 | `loadpng` | `file.png [x [y [transparent [cutoff]]]]` |
+| `loadpng -s` | `file.png [transparent [cutoff]]` |
 
 `ximage`/`yimage` are the offset **into the picture**, so a large image
 can be cropped rather than scaled. `saveimage` writes a 24-bit BMP of
@@ -3563,10 +3567,24 @@ the picture. `loadpng` cannot work that way — PNG filters refer to the
 row above and the whole image must be inflated first — so it takes the
 big buffers from the PSRAM arena and costs the process pool nothing.
 
-The `-s` form needs no graphics mode at all: it writes the decoded
-sprite to standard output as two 16-bit sizes followed by one colour
-index per byte. That is how `SPRITE LOADPNG` works, and it is also the
-way to convert artwork from the shell.
+The `-s` form of either loader needs no graphics mode at all: it writes
+the decoded sprite to standard output as two 16-bit sizes followed by
+one colour index per byte. That is how `SPRITE LOADPNG` and `SPRITE
+LOADBMP` work, and it is also the way to convert artwork from the
+shell.
+
+`loadimage -s` takes a **window** rather than a position — `xorigin`,
+`yorigin`, `width`, `height`, all of the picture from that point by
+default — because that is what `SPRITE LOADBMP` takes, and cutting one
+tile out of a sheet is most of what it is for. A window that runs off
+the picture is refused (`Coordinates`, the reference's own word) rather
+than quietly clipped.
+
+**Neither `-s` form dithers**, and that is deliberate: MMBasic's screen
+path quantises with error in mind, its sprite path takes red's top bit,
+green's top two and blue's top bit, and so do these. A sprite is data
+that gets blitted about, and a dithered one changes colour when it
+moves.
 
 ## Sound
 

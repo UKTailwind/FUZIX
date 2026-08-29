@@ -684,14 +684,9 @@ void statement_inner(void)
     }
     if (strcmp(up, "SPRITE") == 0) {
         /* The SPRITE family (graphics/Sprite.c), engine in
-           mmb_sprite.h on the BLIT row workhorses.  Deferred there
-           and refused here by name: SCROLL (Phase 4 of
-           PLAN-games.md - it wants the kernel's SCROLL2) and
-           LOADBMP (wants the BMP decoder).  LOADPNG translates. */
-        static const char *const nospr[] = {
-            "LOADBMP", NULL
-        };
-        int si;
+           mmb_sprite.h on the BLIT row workhorses.  LOADPNG and
+           LOADBMP both translate: the decoding is another program's,
+           and the sprite comes back down a pipe. */
 
         cv.uses_sprite = 1;
         cv.uses_blit = 1;
@@ -724,6 +719,31 @@ void statement_inner(void)
                     c = as_int(expr());
             }
             emit(sfmt("mms_loadpng(%s, %s, %s, %s);", n, f, t, c));
+            return;
+        }
+        if (is_kw("LOADBMP", 1)) {
+            /* SPRITE LOADBMP [#]n, f$ [, x [, y [, w [, h]]]]
+
+               The decoding is /usr/bin/loadimage's, in another process,
+               and the sprite comes back down a pipe - see mms_loadbmp.
+               The four optional arguments are the reference's window
+               into the image: where to start, and how much.  Each may
+               be left blank, as the reference's *argv[4] test allows,
+               and -1 is how the loader is told "all of it from there". */
+            const char *n, *f;
+            const char *opt[4] = { "0LL", "0LL", "-1LL", "-1LL" };
+            int k;
+
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            f = as_str(expr());
+            for (k = 0; k < 4 && accept_op(","); k++)
+                if (!is_op(",", 0) && !stmt_end())
+                    opt[k] = as_int(expr());
+            emit(sfmt("mms_loadbmp(%s, %s, %s, %s, %s, %s);",
+                      n, f, opt[0], opt[1], opt[2], opt[3]));
             return;
         }
         if (is_kw("SHOW", 1)) {
@@ -996,9 +1016,6 @@ void statement_inner(void)
             emit("mmi_st_noint();");
             return;
         }
-        for (si = 0; nospr[si]; si++)
-            if (is_kw(nospr[si], 1))
-                cv_err(sfmt("SPRITE %s is not translated", nospr[si]));
         cv_err("unknown SPRITE form");
     }
     if (strcmp(up, "BLIT") == 0) {
@@ -1022,11 +1039,13 @@ void statement_inner(void)
            transparent colour is -1 (none) to 15, checked at run time
            as the reference's getint does.
 
-           Not translated: LOAD (wants the BMP decoder), RESIZE, and
-           the LCD-only MERGE / RGB332-only MEMORY332, which do not
-           apply to these screen modes at all. */
+           BLIT LOAD / LOADBMP [#]n, f$ [, x [, y [, w [, h]]]]
+                                               a BMP into a buffer
+
+           Not translated: RESIZE, and the LCD-only MERGE / RGB332-only
+           MEMORY332, which do not apply to these screen modes at all. */
         static const char *const noblit[] = {
-            "LOAD", "RESIZE", "MERGE", "MEMORY332", NULL
+            "RESIZE", "MERGE", "MEMORY332", NULL
         };
         int bi;
 
@@ -1046,6 +1065,31 @@ void statement_inner(void)
             h = as_int(expr());
             emit(sfmt("mmb_blit_read(%s, %s, %s, %s, %s);",
                       n, x, y, w, h));
+            return;
+        }
+        if (is_kw("LOADBMP", 1) || is_kw("LOAD", 1)) {
+            /* BLIT LOAD [#]n, f$ [, x [, y [, w [, h]]]]
+
+               The reference takes both spellings for the one command
+               (cmd_blit tries LOADBMP, then LOAD).  It is SPRITE
+               LOADBMP filling a blit buffer instead of a sprite - the
+               same loadimage -s down a pipe, see mmb_blit_loadbmp -
+               and the four optional arguments are the same window into
+               the image, each of which may be left blank. */
+            const char *n, *f;
+            const char *opt[4] = { "0LL", "0LL", "-1LL", "-1LL" };
+            int k;
+
+            cv.i += 2;
+            accept_op("#");
+            n = as_int(expr());
+            expect_op(",");
+            f = as_str(expr());
+            for (k = 0; k < 4 && accept_op(","); k++)
+                if (!is_op(",", 0) && !stmt_end())
+                    opt[k] = as_int(expr());
+            emit(sfmt("mmb_blit_loadbmp(%s, %s, %s, %s, %s, %s);",
+                      n, f, opt[0], opt[1], opt[2], opt[3]));
             return;
         }
         if (is_kw("WRITE", 1)) {

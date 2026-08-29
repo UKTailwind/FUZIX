@@ -398,10 +398,15 @@ and `snd_stat.underruns == 0` over a 60 s play.
 
 ### Deferred (recorded, not planned)
 
-`BLIT LOAD`/`SPRITE LOADBMP` (needs a shared BMP-reader header — do
-together), `SPRITE LOADPNG`, `BLIT RESIZE`, `TILE/TILEMAP` (leans on
-slots — natural sequel to Phase 2), PLAY SOUND type U, live volume for
-playmp3, `GFXIOC_RECTBLIT` (only on Phase 0 evidence).
+`BLIT RESIZE`, `TILE/TILEMAP` (leans on slots — natural sequel to
+Phase 2), PLAY SOUND type U, live volume for playmp3,
+`GFXIOC_RECTBLIT` (only on Phase 0 evidence).
+
+`SPRITE LOADPNG`, `SPRITE LOADBMP` and `BLIT LOAD`/`LOADBMP` are all
+done. The BMP forms decode in `loadimage -s` and come back down a pipe,
+so there is no BMP reader in the runtime and none in every generated
+program — the same arrangement `SPRITE LOADPNG` uses. `bmptest.sh`
+gates the conversion on the host.
 
 ---
 

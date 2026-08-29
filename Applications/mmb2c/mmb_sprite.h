@@ -1242,6 +1242,49 @@ MMG_FN int mms_getline(FILE *f, char *buf, int n)
 	}
 }
 
+/*
+ * The numbers on the header line: "width, count [, height]".
+ *
+ * BY HAND, AND NOT WITH sscanf.  bcrun resolves a NAMED SUBSET of the C
+ * library at load time (lib_fast[] in bcrun.c) and sscanf is not in it,
+ * so a program with SPRITE LOAD anywhere in it died with
+ *
+ *	bcrun: no runtime function "sscanf"
+ *
+ * before a line of it ran - reported from the board, and invisible to
+ * every host gate, because the gates link glibc and find sscanf there.
+ * A header compiled into every generated program may only call what
+ * bcrun provides.
+ *
+ * Separators are comma AND space, which is what the reference's
+ * getargs(&z, 5, ", ") accepts, so "8,4", "8, 4, 8" and "8 4 8" all
+ * read the same way.  Returns how many numbers were found.
+ */
+MMG_FN int mms_nums(const char *s, int *v, int max)
+{
+	int n = 0, val, neg, any;
+
+	while (n < max) {
+		while (*s == ' ' || *s == '\t' || *s == ',')
+			s++;
+		neg = 0;
+		if (*s == '-' || *s == '+') {
+			neg = (*s == '-');
+			s++;
+		}
+		val = 0;
+		any = 0;
+		while (*s >= '0' && *s <= '9') {
+			val = val * 10 + (*s++ - '0');
+			any = 1;
+		}
+		if (!any)
+			break;
+		v[n++] = neg ? -val : val;
+	}
+	return n;
+}
+
 MMG_FN void mms_load(const char *file, MMINTEGER start, MMINTEGER mode)
 {
 	char line[520], name[300];
@@ -1268,8 +1311,20 @@ MMG_FN void mms_load(const char *file, MMINTEGER start, MMINTEGER mode)
 		fclose(f);
 		MM_RAISE("Invalid sprite file");
 	}
-	if (sscanf(line, "%d , %d , %d", &width, &number, &height) < 2 ||
-	    width < 1 || number < 1) {
+	{
+		int v[3], got = mms_nums(line, v, 3);
+
+		if (got < 2) {
+			fclose(f);
+			MM_RAISE("Invalid sprite file");
+		}
+		width = v[0];
+		number = v[1];
+		/* The third is optional, and the reference's own default
+		   for a missing or zero one is a SQUARE sprite. */
+		height = (got >= 3) ? v[2] : 0;
+	}
+	if (width < 1 || number < 1) {
 		fclose(f);
 		MM_RAISE("Invalid sprite file");
 	}
@@ -1408,6 +1463,89 @@ MMG_FN void mms_loadpng(MMINTEGER bn, const char *file, MMINTEGER targ,
 		return;			/* a failed decoder is an error */
 	if (got < w * h)
 		MM_RAISE("The PNG could not be decoded");
+}
+
+/* ---- SPRITE LOADBMP #n, f$ [, x [, y [, w [, h]]]] ------------------
+ *
+ *	The same shape as LOADPNG above, and for a different reason: the
+ *	BMP decoder is not big, but it is /usr/bin/loadimage's already -
+ *	six bit depths, BI_BITFIELDS, RLE4 and RLE8, bottom-up and
+ *	top-down - and a second copy compiled into every BASIC program
+ *	that loads a sprite would be a second thing to keep right.
+ *	`loadimage -s` writes the sprite down a pipe instead.
+ *
+ *	The four optional arguments are the reference's window into the
+ *	image, and the loader applies them: a window that runs off the
+ *	picture is an error there, not a clipped sprite.
+ *
+ *	NO DEFAULT EXTENSION.  The reference appends ".bmp" to a name
+ *	with none; this port passes file names through untouched, as
+ *	LOAD IMAGE, LOAD PNG and LOAD JPG already do, so a program
+ *	written for a PicoMite may need the extension spelling out.
+ */
+MMG_FN void mms_loadbmp(MMINTEGER bn, const char *file, MMINTEGER xo,
+			MMINTEGER yo, MMINTEGER wi, MMINTEGER hi)
+{
+	struct mmb_sprite *sb = mms_get(bn);
+	unsigned char hdr[4];
+	int fd, w, h, got, n;
+
+	if (sb == NULL)
+		return;
+	if (sb->img != NULL)
+		MM_RAISE("Buffer already in use");
+	if (xo < 0 || yo < 0)
+		MM_RAISE("Coordinates");
+
+	mm_run_begin();
+	mm_run_arg("\011loadimage");
+	mm_run_arg("\002-s");
+	mm_run_arg(file);
+	mm_run_arg_i(xo);
+	mm_run_arg_i(yo);
+	mm_run_arg_i(wi);
+	mm_run_arg_i(hi);
+	fd = mm_run_pipe();
+	if (fd < 0)
+		return;			/* mm_run_pipe raised it */
+
+	got = 0;
+	while (got < 4) {
+		n = (int)mm_run_pipe_read(fd, hdr + got, 4 - got);
+		if (n <= 0)
+			break;
+		got += n;
+	}
+	if (got < 4) {
+		/*	Close FIRST, as LOADPNG does: a decoder that
+		 *	exited non-zero has already said why, and that
+		 *	message is the useful one. */
+		if (mm_run_pipe_close(fd) < 0)
+			return;
+		MM_RAISE("The BMP could not be decoded");
+	}
+	w = hdr[0] | (hdr[1] << 8);
+	h = hdr[2] | (hdr[3] << 8);
+	if (w < 1 || h < 1 || w > (int)mm_hres() || h > (int)mm_vres()) {
+		mm_run_pipe_close(fd);
+		MM_RAISE("Invalid sprite size");
+	}
+	mms_alloc((int)bn, w, h);
+	if (sb->img == NULL) {
+		mm_run_pipe_close(fd);
+		return;
+	}
+	got = 0;
+	while (got < w * h) {
+		n = (int)mm_run_pipe_read(fd, sb->img + got, w * h - got);
+		if (n <= 0)
+			break;
+		got += n;
+	}
+	if (mm_run_pipe_close(fd) < 0)
+		return;			/* a failed decoder is an error */
+	if (got < w * h)
+		MM_RAISE("The BMP could not be decoded");
 }
 
 MMG_FN void mms_loadarray(MMINTEGER bn, MMINTEGER wi, MMINTEGER hi,

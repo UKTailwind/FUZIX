@@ -5357,10 +5357,9 @@ class Conv(object):
             return
         if up == 'SPRITE':
             # The SPRITE family (graphics/Sprite.c), engine in
-            # mmb_sprite.h on the BLIT row workhorses.  Deferred there
-            # and refused here by name: SCROLL (Phase 4 of
-            # PLAN-games.md - it wants the kernel's SCROLL2) and
-            # LOADBMP (wants the BMP decoder).  LOADPNG translates.
+            # mmb_sprite.h on the BLIT row workhorses.  LOADPNG and
+            # LOADBMP both translate: the decoding is another
+            # program's, and the sprite comes back down a pipe.
             self.uses_sprite = True
             self.uses_blit = True
             if self.is_kw('MEMORY', 1) or self.is_kw('COMPRESSED', 1):
@@ -5618,7 +5617,29 @@ class Conv(object):
                           % (n, f, t, c))
                 return
             if self.is_kw('LOADBMP', 1):
-                self.err('SPRITE LOADBMP is not translated')
+                # SPRITE LOADBMP [#]n, f$ [, x [, y [, w [, h]]]]
+                #
+                # The decoding is /usr/bin/loadimage's, in another
+                # process, and the sprite comes back down a pipe - see
+                # mms_loadbmp.  The four optional arguments are the
+                # reference's window into the image: where to start,
+                # and how much.  Each may be left blank, as the
+                # reference's *argv[4] test allows, and -1 is how the
+                # loader is told "all of it from there".
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                f = self.as_str(self.expr())
+                opt = ['0LL', '0LL', '-1LL', '-1LL']
+                k = 0
+                while k < 4 and self.accept_op(','):
+                    if not self.is_op(',', 0) and not self.stmt_end():
+                        opt[k] = self.as_int(self.expr())
+                    k += 1
+                self.emit('mms_loadbmp(%s, %s, %s, %s, %s, %s);'
+                          % (n, f, opt[0], opt[1], opt[2], opt[3]))
+                return
             self.err('unknown SPRITE form')
         if up == 'BLIT':
             # BLIT READ [#]n, x, y, w, h        screen -> buffer 1-64
@@ -5641,9 +5662,12 @@ class Conv(object):
             # BLIT FLASH n, d, x1, y1, x2, y2, w, h [, t]
             #                                   image out of a slot
             #
-            # Not translated: LOAD (wants the BMP decoder), RESIZE, and
-            # the LCD-only MERGE / RGB332-only MEMORY332, which do not
-            # apply to these screen modes at all.
+            # BLIT LOAD / LOADBMP [#]n, f$ [, x [, y [, w [, h]]]]
+            #                                   a BMP into a buffer
+            #
+            # Not translated: RESIZE, and the LCD-only MERGE /
+            # RGB332-only MEMORY332, which do not apply to these screen
+            # modes at all.
             self.uses_blit = True
             if self.is_kw('READ', 1):
                 self.i += 2
@@ -5659,6 +5683,30 @@ class Conv(object):
                 h = self.as_int(self.expr())
                 self.emit('mmb_blit_read(%s, %s, %s, %s, %s);'
                           % (n, x, y, w, h))
+                return
+            if self.is_kw('LOADBMP', 1) or self.is_kw('LOAD', 1):
+                # BLIT LOAD [#]n, f$ [, x [, y [, w [, h]]]]
+                #
+                # The reference takes both spellings for the one
+                # command (cmd_blit tries LOADBMP, then LOAD).  It is
+                # SPRITE LOADBMP filling a blit buffer instead of a
+                # sprite - the same loadimage -s down a pipe, see
+                # mmb_blit_loadbmp - and the four optional arguments
+                # are the same window into the image, each of which may
+                # be left blank.
+                self.i += 2
+                self.accept_op('#')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                f = self.as_str(self.expr())
+                opt = ['0LL', '0LL', '-1LL', '-1LL']
+                k = 0
+                while k < 4 and self.accept_op(','):
+                    if not self.is_op(',', 0) and not self.stmt_end():
+                        opt[k] = self.as_int(self.expr())
+                    k += 1
+                self.emit('mmb_blit_loadbmp(%s, %s, %s, %s, %s, %s);'
+                          % (n, f, opt[0], opt[1], opt[2], opt[3]))
                 return
             if self.is_kw('WRITE', 1):
                 self.i += 2
@@ -5707,7 +5755,7 @@ class Conv(object):
                              args[0], args[1], args[2], args[3], args[4],
                              args[5], blank))
                 return
-            for kw in ('LOAD', 'RESIZE', 'MERGE', 'MEMORY332'):
+            for kw in ('RESIZE', 'MERGE', 'MEMORY332'):
                 if self.is_kw(kw, 1):
                     self.err('BLIT %s is not translated' % kw)
             self.i += 1

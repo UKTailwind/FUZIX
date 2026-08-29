@@ -356,6 +356,108 @@ MMG_FN void mmb_blit_read(MMINTEGER bn, MMINTEGER xi, MMINTEGER yi,
 			    mmb_bb[bn - 1].px + (size_t)i * w);
 }
 
+/* ---- BLIT LOAD / BLIT LOADBMP ---------------------------------------
+ *
+ *	BLIT LOAD [#]n, f$ [, x [, y [, w [, h]]]]
+ *
+ *	The reference takes both spellings for the one command, and this
+ *	is SPRITE LOADBMP filling a blit buffer instead of a sprite: the
+ *	decoding is /usr/bin/loadimage's, in another process, and the
+ *	picture comes back down a pipe.  See mms_loadbmp in mmb_sprite.h
+ *	for the protocol; the two are deliberately the same shape.
+ *
+ *	ONE INDEX PER BYTE, as every blit buffer here is.  The reference's
+ *	blit form on an LCD PicoMite keeps RGB888 - three bytes a pixel -
+ *	because that display's buffers are colour; ours are the screen's
+ *	own RGB121 indices, so this stores what BLIT WRITE will draw.
+ *
+ *	The buffer records the CURRENT screen depth, exactly as BLIT READ
+ *	does, because BLIT WRITE refuses a buffer from another mode.  A
+ *	picture loaded in MODE 2 and written in MODE 1 is not a silent
+ *	half-drawing; it is "Invalid blit buffer for this mode".
+ *
+ *	Unlike a sprite it is NOT bounded by the screen: a blit buffer is
+ *	a rectangle of memory, the reference does not bound it either, and
+ *	malloc says when it is too big.
+ */
+MMG_FN void mmb_blit_loadbmp(MMINTEGER bn, const char *file, MMINTEGER xo,
+			     MMINTEGER yo, MMINTEGER wi, MMINTEGER hi)
+{
+	int stride = 0, bpp = 0, hres, vres, headless;
+	unsigned char hdr[4];
+	int fd, w, h, got, n;
+
+	if (bn < 1 || bn > MMB_NBLIT)
+		MM_RAISE("Invalid blit buffer number");
+	if (mmb_bb[bn - 1].px != NULL)
+		MM_RAISE("Buffer in use");
+	if (xo < 0 || yo < 0)
+		MM_RAISE("Coordinates");
+	headless = mmb_geom(&stride, &bpp, &hres, &vres);
+
+	mm_run_begin();
+	mm_run_arg("\011loadimage");
+	mm_run_arg("\002-s");
+	mm_run_arg(file);
+	mm_run_arg_i(xo);
+	mm_run_arg_i(yo);
+	mm_run_arg_i(wi);
+	mm_run_arg_i(hi);
+	fd = mm_run_pipe();
+	if (fd < 0)
+		return;			/* mm_run_pipe raised it */
+
+	got = 0;
+	while (got < 4) {
+		n = (int)mm_run_pipe_read(fd, hdr + got, 4 - got);
+		if (n <= 0)
+			break;
+		got += n;
+	}
+	if (got < 4) {
+		if (mm_run_pipe_close(fd) < 0)
+			return;
+		MM_RAISE("The BMP could not be decoded");
+	}
+	w = hdr[0] | (hdr[1] << 8);
+	h = hdr[2] | (hdr[3] << 8);
+	if (w < 1 || h < 1) {
+		mm_run_pipe_close(fd);
+		MM_RAISE("Coordinates");
+	}
+	mmb_bb[bn - 1].px = (unsigned char *)malloc((size_t)w * h);
+	if (mmb_bb[bn - 1].px == NULL) {
+		mm_run_pipe_close(fd);
+		MM_RAISE("Not enough memory");	/* GetMemory's own error */
+	}
+	got = 0;
+	while (got < w * h) {
+		n = (int)mm_run_pipe_read(fd, mmb_bb[bn - 1].px + got,
+					  w * h - got);
+		if (n <= 0)
+			break;
+		got += n;
+	}
+	if (got < w * h) {
+		/*	A half-filled buffer must not be left looking like
+		 *	a good one - and the decoder's own message is the
+		 *	useful one, so close first. */
+		free(mmb_bb[bn - 1].px);
+		mmb_bb[bn - 1].px = NULL;
+		if (mm_run_pipe_close(fd) < 0)
+			return;
+		MM_RAISE("The BMP could not be decoded");
+	}
+	mmb_bb[bn - 1].w = (short)w;
+	mmb_bb[bn - 1].h = (short)h;
+	mmb_bb[bn - 1].bpp = (signed char)(headless ? 0 : bpp);
+	if (mm_run_pipe_close(fd) < 0) {
+		free(mmb_bb[bn - 1].px);
+		mmb_bb[bn - 1].px = NULL;
+		return;			/* a failed decoder is an error */
+	}
+}
+
 /* ---- BLIT WRITE -----------------------------------------------------
  * One unified path for modes 0-7: the reference's mode-0 branch is an
  * optimisation of the same result, and its expand-flip-compact dance

@@ -35,6 +35,30 @@
  * Pixels reach the screen through GFXIOC_PIXELS a batch at a time,
  * with a colour for each, so a row is a handful of ioctls rather than
  * one per pixel.
+ *
+ * ---- SPRITE MODE -----------------------------------------------------
+ *
+ *   loadimage -s file.bmp [xorigin [yorigin [width [height]]]]
+ *
+ * is MMBasic's SPRITE LOADBMP (graphics/Sprite.c), and writes the
+ * decoded sprite to STDOUT rather than to the screen, because the
+ * sprite belongs to the BASIC program and this is a different process.
+ * The runtime reads it down a pipe straight into the sprite's buffer
+ * (mms_loadbmp in mmb_sprite.h).  Same protocol as loadpng -s:
+ *
+ *	uint16 w, uint16 h, little endian
+ *	then w*h bytes, ONE COLOUR INDEX PER BYTE, row major
+ *
+ * The four optional arguments are the reference's: a window into the
+ * image, defaulting to all of it from the origin given.
+ *
+ * IT DOES NOT DITHER, and that is not an omission.  The reference's
+ * screen path quantises through rgb888_to_rgb121_dither; its SPRITE
+ * LOADBMP does plain bit extraction - red's top bit, green's top two,
+ * blue's top bit - and so does this.  A sprite is data that will be
+ * blitted about, not a picture being fitted to the screen, and the two
+ * must not be conflated: a dithered sprite moved by one pixel changes
+ * colour.
  */
 
 #include <stdio.h>
@@ -452,6 +476,53 @@ static void ditherrow(int screeny, int x0, int w)
 	flush();
 }
 
+/* ---- sprite mode ----------------------------------------------------- */
+
+/*
+ * The 4-bit index for a colour, the reference's own expression from
+ * SPRITE LOADBMP: red's top bit, green's top two, blue's top bit.
+ * loadpng's sprite mode and mms_loadarray derive it the same way, and
+ * quantise() above deliberately does not - see the note at the top.
+ */
+static unsigned char index4(unsigned long p)
+{
+	int r = (int)((p >> 16) & 0xFF);
+	int g = (int)((p >> 8) & 0xFF);
+	int b = (int)(p & 0xFF);
+
+	return (unsigned char)(((r & 0x80) >> 4) | ((g & 0xC0) >> 5)
+			       | ((b & 0x80) >> 7));
+}
+
+/*
+ * The window, one row at a time, down stdout.  Rows are SEEKED to
+ * rather than walked past: fetchrow seeks in both paths - the RLE one
+ * through the line table buildlinetable() has already filled - so the
+ * rows above the window cost nothing.
+ */
+static int sprite_out(int xo, int yo, int sw, int sh, int rlerows)
+{
+	unsigned char hdr[4];
+	static unsigned char row[MAXW];
+	int x, y;
+
+	hdr[0] = (unsigned char)(sw & 0xFF);
+	hdr[1] = (unsigned char)((sw >> 8) & 0xFF);
+	hdr[2] = (unsigned char)(sh & 0xFF);
+	hdr[3] = (unsigned char)((sh >> 8) & 0xFF);
+	if (write(1, hdr, 4) != 4)
+		die("cannot write the sprite");
+
+	for (y = yo; y < yo + sh; y++) {
+		fetchrow(topdown ? y : (height - 1 - y), rlerows);
+		for (x = 0; x < sw; x++)
+			row[x] = index4(rgbrow[xo + x]);
+		if (write(1, row, (unsigned)sw) != sw)
+			die("cannot write the sprite");
+	}
+	return 0;
+}
+
 /* An argument that was left out is passed as an empty string, because
    MMBasic lets any optional one be blank: LOAD IMAGE f$,,,4 sets the
    mode and nothing else. */
@@ -465,32 +536,64 @@ static int arg(int argc, char *argv[], int n, int dflt)
 int main(int argc, char *argv[])
 {
 	int x0, y0, ximg, yimg, y, rlerows = 0;
+	int sprite = 0, xo = 0, yo = 0, sw = -1, sh = -1;
+	char **av = argv;
+	int ac = argc;
 
-	if (argc < 2 || argc > 7) {
+	/* -s: the sprite form.  Its arguments are the reference's for
+	   SPRITE LOADBMP - a window into the image - and not the screen
+	   form's, which are where to put the picture. */
+	if (argc > 1 && argv[1][0] == '-' && argv[1][1] == 's'
+	    && argv[1][2] == 0) {
+		sprite = 1;
+		av = argv + 1;
+		ac = argc - 1;
+	}
+
+	if (ac < 2 || ac > 7) {
 		fprintf(stderr,
-			"usage: %s file.bmp [x [y [mode [ximage [yimage]]]]]\n",
-			argv[0]);
+			"usage: %s file.bmp [x [y [mode [ximage [yimage]]]]]\n"
+			"       %s -s file.bmp [xorigin [yorigin "
+			"[width [height]]]]   (sprite, to stdout)\n",
+			argv[0], argv[0]);
 		return 1;
 	}
-	x0    = arg(argc, argv, 2, 0);
-	y0    = arg(argc, argv, 3, 0);
-	(void)arg(argc, argv, 4, -1);	/* the mode: read, not used */
-	ximg  = arg(argc, argv, 5, 0);
-	yimg  = arg(argc, argv, 6, 0);
-	/* Where in the IMAGE to start, which moves the picture the other
-	   way on the screen. */
-	x0 -= ximg;
-	y0 -= yimg;
+	if (sprite) {
+		xo = arg(ac, av, 2, 0);
+		yo = arg(ac, av, 3, 0);
+		sw = arg(ac, av, 4, -1);
+		sh = arg(ac, av, 5, -1);
+		/* StandardError(34) in the reference, which is the word
+		   "Coordinates" - its message for an origin outside the
+		   picture. */
+		if (xo < 0 || yo < 0)
+			die("Coordinates");
+	} else {
+		x0    = arg(ac, av, 2, 0);
+		y0    = arg(ac, av, 3, 0);
+		(void)arg(ac, av, 4, -1);	/* the mode: read, not used */
+		ximg  = arg(ac, av, 5, 0);
+		yimg  = arg(ac, av, 6, 0);
+		/* Where in the IMAGE to start, which moves the picture the
+		   other way on the screen. */
+		x0 -= ximg;
+		y0 -= yimg;
+	}
 
-	sysfd = open("/dev/sys", O_RDWR);
-	if (sysfd < 0)
-		die("no /dev/sys");
-	if (ioctl(sysfd, GFXIOC_INFO, &gi) < 0)
-		die("cannot ask about the screen");
+	/* A sprite needs no display: it is data, and the program asking
+	   for it may not have set a mode yet - the same rule loadpng's
+	   sprite mode follows. */
+	if (!sprite) {
+		sysfd = open("/dev/sys", O_RDWR);
+		if (sysfd < 0)
+			die("no /dev/sys");
+		if (ioctl(sysfd, GFXIOC_INFO, &gi) < 0)
+			die("cannot ask about the screen");
+	}
 
-	fd = open(argv[1], O_RDONLY);
+	fd = open(av[1], O_RDONLY);
 	if (fd < 0) {
-		perror(argv[1]);
+		perror(av[1]);
 		return 1;
 	}
 	readheader();
@@ -498,6 +601,22 @@ int main(int argc, char *argv[])
 		if (bpp != 8 && bpp != 4)
 			die("RLE needs 4 or 8 bits");
 		rlerows = buildlinetable();
+	}
+
+	if (sprite) {
+		/* The reference's defaults: the rest of the image from the
+		   origin given, and its bound - a window that runs off the
+		   picture is "Coordinates", not a clipped sprite. */
+		if (sw < 0)
+			sw = width - xo;
+		if (sh < 0)
+			sh = height - yo;
+		if (sw < 1 || sh < 1
+		    || xo + sw > width || yo + sh > height)
+			die("Coordinates");
+		y = sprite_out(xo, yo, sw, sh, rlerows);
+		close(fd);
+		return y;
 	}
 
 	/* Top down on the screen whichever way the file is stored.  Nothing
