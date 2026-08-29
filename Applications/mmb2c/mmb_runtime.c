@@ -409,6 +409,10 @@ static int mm_charpos = 1;
  * the character. */
 static int mm_gputc(int c);
 static void mm_gflush(void);
+/* INPUT's cursor, drawn where the glyphs are going - see mm_curs_show
+ * with the graphics-text block.  Nothing at all where there is no
+ * display, like the rest of that block. */
+static void mm_curs_show(int on);
 /* The console's screen half - see mm_console.  Platform-specific: an
  * ioctl on the board, nothing at all where there is no display. */
 static void mm_con_mirror(int on);
@@ -567,6 +571,7 @@ void mm_putc(int c)
     }
     if (c == '\r' || c == '\n') mm_charpos = 1;
     else if (c == '\t')         mm_charpos = (((mm_charpos - 1) / 14) + 1) * 14 + 1;
+    else if (c == '\b')       { if (mm_charpos > 1) mm_charpos--; }
     else                        mm_charpos++;
 }
 
@@ -1488,10 +1493,86 @@ static int mm_getc(MMINTEGER fnbr)
 #if !defined(_WIN32)
 void mm_raw_release(void);
 static void mm_raw_resume(void);
+static int  mm_raw_line(void);
+static int  mm_getkey_wait(void);
 #else
 #define mm_raw_release() do { } while (0)
 #define mm_raw_resume()  do { } while (0)
+#define mm_raw_line()    0
+#define mm_getkey_wait() (-1)
 #endif
+
+/*
+ * INPUT's own line editor, which is MMBasic's MMgetline (PicoMite.c).
+ *
+ * WHY THE INTERPRETER AND NOT THE TERMINAL.  On a screen this program
+ * owns, the kernel console is not painting - it cannot be, or every
+ * PRINT would appear twice - so there is nothing left to echo what is
+ * typed except us.  Handing the line to the tty's canonical editor
+ * worked only while the console was mirrored, which is to say only in
+ * the mode that had not claimed the screen: the characters went to the
+ * uart and the display showed nothing.  MMBasic has always echoed its
+ * own input for the same reason, through MMputchar, which is why the
+ * echo follows OPTION CONSOLE like everything else printed.
+ *
+ * The rules are the reference's, including the ones that look odd:
+ * TAB expands to spaces up to a multiple of four, a backspace past the
+ * start of the line does nothing, control codes other than those are
+ * dropped rather than stored, and either terminator ends the line.
+ */
+static void mm_readline_echo(char *dst)
+{
+    int n = 0, c;
+
+    for (;;) {
+        /* Both halves of the echo reach their sink before we wait: the
+         * glyphs are queued for one text ioctl and stdout is buffered,
+         * so without this a character appears only when something else
+         * forces a flush - which for a program waiting on a key is
+         * never.  This is also the drain a read owes the display, the
+         * same rule mm_pause follows. */
+        mm_gflush();
+        fflush(stdout);
+        /* A DECODED key, and a WAIT for it - the queues INKEY$ drains,
+         * the escape sequences it understands.  Reading bytes here
+         * instead would put "[A" in the line when someone pressed an
+         * arrow key, and would take them through stdio, whose buffer
+         * INKEY$'s read(2) cannot see. */
+        c = mm_getkey_wait();
+        if (c < 0)
+            break;
+        if (c == '\t') {
+            do {
+                if (n >= MM_STRLEN) { mm_error("Line is too long"); return; }
+                dst[++n] = ' ';
+                mm_putc(' ');
+            } while (n % 4);
+            continue;
+        }
+        if (c == '\b' || c == 0x7F) {
+            if (n) {
+                mm_putc('\b');
+                mm_putc(' ');
+                mm_putc('\b');
+                n--;
+            }
+            continue;
+        }
+        if (c == '\r' || c == '\n') {
+            mm_putc('\r');
+            mm_putc('\n');
+            break;
+        }
+        if (c < 0x20 || c > 0x7E)
+            continue;           /* stray control codes are not input */
+        if (n >= MM_STRLEN) { mm_error("Line is too long"); return; }
+        dst[++n] = (char)c;
+        mm_putc((unsigned char)c);
+    }
+    dst[0] = (char)(unsigned char)n;
+    dst[n + 1] = 0;
+    mm_gflush();                /* the answer is on screen before we go on */
+}
 
 static void mm_readline(MMINTEGER fnbr, char *dst)
 {
@@ -1502,9 +1583,19 @@ static void mm_readline(MMINTEGER fnbr, char *dst)
      * to be on screen BEFORE the program stops for an answer. */
     if (fnbr == 0) {
         fflush(stdout);
-        /* Give the console back for the duration.  A line being typed
-         * wants the editor, the echo and the backspace handling that
-         * INKEY$ has to keep out of the way of - see mm_raw_hold. */
+        mm_gflush();
+        /* On a screen we own, we do the editing and the echo - see
+         * mm_readline_echo.  The terminal has to be raw for that, and
+         * BLOCKING: INKEY$'s hold returns instantly with nothing, which
+         * here would be a spin. */
+        if (mm_gon && mm_raw_line()) {
+            mm_readline_echo(dst);
+            mm_raw_resume();    /* back to INKEY$'s hold, or cooked */
+            return;
+        }
+        /* Otherwise the console is still the console: give it back for
+         * the duration and let its editor do the work, which is what a
+         * program that never claimed the screen wants. */
         mm_raw_release();
     }
     for (;;) {
@@ -2845,6 +2936,7 @@ static struct termios mm_tty_raw;       /* as we want it */
 static int mm_tty_held;                 /* we have it raw now */
 static int mm_tty_have;                 /* mm_tty_cooked is valid */
 static int mm_tty_want;                 /* a key reader asked for it */
+static int mm_tty_safe;                 /* the exit and signal guards are on */
 
 /* The signals that end a program while it is holding the console.  Only
  * the "stop now" ones: a crash leaves the terminal raw too, but a fault
@@ -2907,7 +2999,8 @@ static int mm_raw_hold(void)
             fprintf(stderr, "[rawhold: held, lflag 0x%lx VMIN %d]\r\n",
                     (unsigned long)back.c_lflag, (int)back.c_cc[VMIN]);
     }
-    if (!mm_tty_want) {
+    if (!mm_tty_safe) {
+        mm_tty_safe = 1;
         /*
          * ON EVERY EXIT, not just the tidy ones.  A translated program's
          * main() ends with a plain return - it does not go through
@@ -2950,12 +3043,50 @@ void mm_raw_release(void)
     }
 }
 
-/* Take it again after an INPUT, but only if a key reader had it: a
+/*
+ * INPUT's terminal: raw as INKEY$ has it - no echo, no line editor -
+ * but a read that WAITS.  INKEY$ sets VMIN 0 so that a poll returns
+ * instantly with nothing, which for a line reader would be a spin on a
+ * machine with one core to spare.
+ *
+ * Taking it for a line does NOT make this a key reader, so mm_tty_want
+ * is put back: a program whose only input is INPUT must be left with
+ * the terminal exactly as it was found.
+ */
+static int mm_raw_line(void)
+{
+    struct termios t;
+    int want = mm_tty_want;
+
+    if (!mm_raw_hold()) {
+        mm_tty_want = want;
+        return 0;
+    }
+    mm_tty_want = want;
+    t = mm_tty_raw;
+    /* A TENTH OF A SECOND at a time rather than a plain wait: the
+     * cursor has to blink while nobody is typing, and a read that
+     * returns on a timer is how it gets a tick.  VMIN 0 with VTIME 1
+     * still delivers a keystroke the instant it arrives. */
+    t.c_cc[VMIN] = 0;
+    t.c_cc[VTIME] = 1;
+    return tcsetattr(0, TCSANOW, &t) == 0;
+}
+
+/* Put back whatever the terminal was in before the INPUT: INKEY$'s
+   non-blocking raw if a key reader had it - the flavour matters, or the
+   next INKEY$ would block - and otherwise the console, because a
    program that only ever uses INPUT must be left exactly as it was. */
 static void mm_raw_resume(void)
 {
-    if (mm_tty_want && !mm_tty_held)
-        mm_raw_hold();
+    if (mm_tty_want) {
+        if (mm_tty_held)
+            tcsetattr(0, TCSANOW, &mm_tty_raw);
+        else
+            mm_raw_hold();
+        return;
+    }
+    mm_raw_release();
 }
 
 static int mm_esc_decode(void)
@@ -3155,6 +3286,78 @@ char *mm_inkey(void)
 #endif
     return t;
 }
+
+#if !defined(_WIN32)
+/*
+ * One key, DECODED, waiting for it - INPUT's reader (mm_readline_echo).
+ *
+ * INKEY$ above is the same machinery asking "is there one?"; this asks
+ * for the next one and waits.  It is here rather than up beside INPUT
+ * because everything it needs is here: the two pushback queues, the
+ * escape decoder, and the raw terminal itself.
+ *
+ * The terminal is already raw and blocking (mm_raw_line).  The decoder
+ * is the exception: a bare Escape is indistinguishable from the start
+ * of a sequence until the line has been quiet for a moment, so it runs
+ * with the same short VTIME that INKEY$ gives it, and the blocking
+ * flavour goes back afterwards.
+ */
+static int mm_getkey_wait(void)
+{
+    int c, i;
+
+    /* Anything the ON KEY poll decoded and did not want, then any bytes
+     * the decoder pushed back, then the console - INKEY$'s order. */
+    if (mm_kfn) {
+        c = mm_kfifo[0];
+        for (i = 1; i < mm_kfn; i++)
+            mm_kfifo[i - 1] = mm_kfifo[i];
+        mm_kfn--;
+        return c;
+    }
+    if (mm_kqn) {
+        c = mm_kq[0];
+        for (i = 1; i < mm_kqn; i++)
+            mm_kq[i - 1] = mm_kq[i];
+        mm_kqn--;
+        return c;
+    }
+    /*
+     * Wait, blinking.  The terminal is in mm_raw_line's flavour - VMIN
+     * 0, VTIME 1 - so a read comes back after a tenth of a second with
+     * nothing, which is the tick the cursor needs and a granularity the
+     * eye cannot see against a blink measured in hundreds.
+     *
+     * A read of 0 is that timeout, NOT the end of input: on this
+     * machine a console that goes away arrives as SIGHUP, which
+     * mm_raw_onsig already handles, so waiting forever for someone to
+     * type is exactly right.  A read that ERRORS is different and ends
+     * the line.
+     */
+    for (;;) {
+        unsigned char b;
+        int n = (int)read(0, &b, 1);
+
+        if (n == 1) {
+            c = (int)b;
+            break;
+        }
+        if (n < 0 && errno != EINTR)
+            return -1;                  /* the terminal, not a timeout */
+        /* MMBasic's ShowCursor: on for CURSOR_ON, off for CURSOR_OFF,
+         * a one second cycle (GUI.h). */
+        mm_curs_show((int)((mm_us_now() / 1000) % 1000) <= 650);
+    }
+    mm_curs_show(0);                    /* before the echo moves the pen */
+    /* The decoder wants exactly the flavour we are already in - a short
+     * VTIME, so a bare Escape is told from the start of a sequence by
+     * the line going quiet - so unlike INKEY$ there is nothing to set
+     * up and nothing to put back. */
+    if (c == 0x1b)
+        c = mm_esc_decode();
+    return c;
+}
+#endif
 
 /* Both defined with the FRAMEBUFFER block at the end of the file.
  *
@@ -4376,6 +4579,45 @@ void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
         mm_gx = r;
 }
 
+/*
+ * INPUT's cursor - MMBasic's ShowCursor (Draw.c), which is what a
+ * PicoMite with OPTION LCDPANEL CONSOLE puts under the character being
+ * typed.
+ *
+ * AN UNDERLINE, NOT A BLOCK, and that is the reference's choice, not a
+ * simplification: DrawLine along the bottom of the cell at CurrentX,
+ * CurrentY, one pixel thick for a cell 12 high or less and two for a
+ * taller one, in the foreground colour.  It is erased by drawing the
+ * same line in the background - except in a one-bit mode, where the
+ * reference uses black rather than the background colour, because
+ * there "background" is ink or paper and the cursor must not paint.
+ *
+ * The cell under it is always empty: the cursor sits where the next
+ * character will go, and a rubout has already erased what was there.
+ * So erase-to-background loses nothing, and there is no need for the
+ * XOR the kernel console's own cursor uses.
+ */
+static int mm_curs_shown;
+
+static void mm_curs_show(int on)
+{
+    int cw = mm_gcw * mm_gscale, ch = mm_gch * mm_gscale;
+    int thick = (ch <= 12) ? 1 : 2;
+    int y1 = mm_gy + ch - thick, i;
+    MMINTEGER col;
+
+    if (!mm_gon || on == mm_curs_shown)
+        return;
+    mm_curs_shown = on;
+    /* Asked for rather than remembered: FONT, COLOUR and MODE can all
+     * move under a program between one INPUT and the next, and a
+     * remembered erase colour would rub out with the wrong one. */
+    col = on ? mm_fg()
+             : (((mm_fb_geom() & 0xFF) == 1) ? 0 : mm_bg());
+    for (i = 0; i < thick; i++)
+        mm_line(mm_gx, y1 + i, mm_gx + cw - 1, y1 + i, col);
+}
+
 static int mm_gputc(int c)
 {
     if (!mm_gon)
@@ -4414,6 +4656,24 @@ static int mm_gputc(int c)
         int to = ((col / 14) + 1) * 14;
         mm_gflush();
         mm_gx = to * mm_gcw * mm_gscale;
+        return 1;
+    }
+    /*
+     * Backspace moves the pen back a cell and draws nothing, which is
+     * what makes MMBasic's "\b \b" erase: back, a space over the
+     * character, back again.  Without it the byte reached the glyph
+     * engine as a CHARACTER and INPUT's rubout painted whatever the
+     * font holds at 8.  The line is the pen's, so it stops at the left
+     * edge rather than walking onto the row above.
+     */
+    if (c == '\b') {
+        int cell = mm_gcw * mm_gscale;
+
+        mm_gflush();
+        if (mm_gx >= cell)
+            mm_gx -= cell;
+        else
+            mm_gx = 0;
         return 1;
     }
     mm_gbuf[mm_gn++] = (char)c;
@@ -4507,11 +4767,26 @@ void mm_mode(MMINTEGER n)
      * meaningless: force the next draw to push again. */
     mm_gfx_col = -1;
     mm_fb_forget();
-    /* In a graphics mode PRINT draws glyphs, as MMBasic does; MODE 1
-     * IS the console, which does it better - scrolling, a cursor, the
-     * colour tiles - so there it stays the console's job. */
+    /*
+     * PRINT draws glyphs in BOTH modes, as MMBasic does.
+     *
+     * THE TWO MODES DIFFER IN SIZE AND DEPTH AND IN NOTHING ELSE -
+     * 640x480 in one bit against 320x240 in sixteen.  Console output,
+     * PRINT and TEXT behave identically in each, and identically to
+     * MMBasic with OPTION LCDPANEL CONSOLE, subject to OPTION CONSOLE.
+     *
+     * MODE 1 used to leave text to the kernel console, on the argument
+     * that the console does it better - it scrolls, it has a cursor,
+     * it knows about colour tiles.  That was a divergence dressed as an
+     * improvement, and it showed: with the console doing the drawing
+     * there is ONE text cursor in the kernel and another (mm_gx, mm_gy
+     * - MMBasic's CurrentX and CurrentY) in here, so PRINT and TEXT
+     * disagreed about where the text goes, PRINT @ moved one of them,
+     * and INPUT's echo came from the kernel's line editor in one mode
+     * and from nowhere at all in the other.  One engine, both modes.
+     */
     mm_gn = 0;
-    mm_gon = (n == 2);
+    mm_gon = 1;
     mm_gx = mm_gy = 0;
     mm_gpmode = 0;
     /* The same rule mm_console applies: in a graphics mode the tty is
@@ -5417,6 +5692,7 @@ MMINTEGER mm_pobuf(void)
  * something. */
 static void mm_gflush(void) {}
 static int mm_gputc(int c) { (void)c; return 0; }
+static void mm_curs_show(int on) { (void)on; }
 
 char *mm_at(MMINTEGER x, MMINTEGER y, MMINTEGER mode)
 {
