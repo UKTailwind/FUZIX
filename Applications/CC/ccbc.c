@@ -5,6 +5,7 @@
  *	    cc -o name prog.c
  *	    cc -v prog.c         show each pass as it runs
  *	    cc -k prog.c         keep the .tok and .ir intermediates
+ *	    cc -r prog.bas       build it and, if it built, run it
  *
  *	ccfuzix.c is the driver for the ordinary FCC pipeline, which ends
  *	in an assembler and a linker. This target has neither: cc2 writes
@@ -54,6 +55,7 @@ static const char *mmbccmd = CMD_MMBC;
 static char incpath[80];
 static int verbose;
 static int keep;
+static int runit;		/* -r: exec the result when it builds */
 static int pp_is_src;		/* no cpp: cc0 reads the source itself */
 
 /* The intermediates, so the signal handler and the exit path can find
@@ -306,6 +308,9 @@ int main(int argc, char *argv[])
 			case 'k':
 				keep = 1;
 				break;
+			case 'r':
+				runit = 1;
+				break;
 			case 'L':
 				libpath = argv[i] + 2;
 				break;
@@ -324,7 +329,7 @@ int main(int argc, char *argv[])
 
 	if (src == NULL) {
 		fprintf(stderr,
-			"usage: cc [-o out] [-v] [-k] [-Ldir] file.c|file.bas\n");
+			"usage: cc [-o out] [-v] [-k] [-r] [-Ldir] file.c|file.bas\n");
 		return 1;
 	}
 
@@ -439,5 +444,43 @@ int main(int argc, char *argv[])
 	chmod(out, 0755);
 
 	cleanup();
+
+	/*
+	 * -r: run what we just built.  Getting here IS "no errors" -
+	 * every pass that failed went through fatal(), which exits - so
+	 * there is nothing further to test.
+	 *
+	 * execv rather than fork and wait: the compile is over and the
+	 * driver has nothing left to do, so the program gets the whole
+	 * machine rather than sharing the 340K pool with a process left
+	 * sitting in waitpid().  cleanup() has already run, so the
+	 * intermediates and the lock are gone before the program starts -
+	 * a program that itself runs cc would otherwise meet a lock whose
+	 * holder had turned into something else.
+	 *
+	 * The object's own #! line hands it to bcrun, the same way ./x.bc
+	 * works from the shell, so the name is all that is needed - but it
+	 * has to be a PATH: exec does no searching, and prog.bc on its own
+	 * is not one.
+	 */
+	if (runit) {
+		char path[80];
+		char *rv[2];
+
+		if (strchr(out, '/'))
+			strcpy(path, out);
+		else {
+			strcpy(path, "./");
+			strcat(path, out);
+		}
+		if (verbose)
+			fprintf(stderr, "+ %s\n", path);
+		rv[0] = path;
+		rv[1] = NULL;
+		fflush(stdout);
+		execv(path, rv);
+		perror(path);
+		return 1;
+	}
 	return 0;
 }

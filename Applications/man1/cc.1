@@ -3,7 +3,18 @@
 cc \- the C compiler
 .SH SYNOPSIS
 .B cc
-[\fB\-c\fR|\fB\-S\fR|\fB\-E\fR] [\fB\-o\fI out\fR] [\fB\-O\fIn\fR] [\fB\-D\fIname\fR[\fB=\fIvalue\fR]] [\fB\-I\fIdir\fR] [\fB\-L\fIdir\fR] [\fB\-l\fIlib\fR] [\fB\-M\fR] [\fB\-X\fR] \fIfile\fR ...
+[
+.B \-v
+] [
+.B \-k
+] [
+.B \-r
+] [
+.BI \-o " out"
+] [
+.BI \-L dir
+]
+.IR file.c " | " file.bas
 .SH DESCRIPTION
 .B cc
 compiles C on the machine itself.  From
@@ -22,40 +33,47 @@ in one step.
 .SH OPTIONS
 .TP
 .BI \-o " out"
-Name the output.  May be given only once.
+Name the output.  The default is the source name with
+.B .bc
+in place of its extension, in the current directory.
 .TP
-.B \-c
-Compile to an object file and stop.
+.B \-v
+Show each pass as it runs.
 .TP
-.B \-S
-Stop after code generation.
+.B \-k
+Keep the intermediates - the preprocessed source, the tokens, the IR,
+and the C that
+.B mmbc
+generated from a BASIC file.
 .TP
-.B \-E
-Run the preprocessor only, and write to standard output.  One input file
-only.
-.TP
-.BI \-O n
-Optimisation level, 0 to 3.
-.TP
-.BI \-D name
-.TP
-.BI \-D name = value
-Define a macro.
-.TP
-.BI \-I dir
-Another directory to look in for headers.
+.B \-r
+Run it.  When every pass has succeeded,
+.B cc
+execs the program it just built; if any pass failed, nothing runs.  This
+is what
+.BR mmedit (1)
+uses for F2.
 .TP
 .BI \-L dir
-Another directory to look in for libraries.
-.TP
-.BI \-l lib
-Link against a library.
-.TP
+Where the passes and their headers live.  The default is
+.BR /usr/lib/cc/ .
+.SH WHAT IT DOES NOT TAKE
+There is no
+.BR \-c ,
+.B \-S
+or
+.BR \-E :
+one source file makes one program, and this target has neither an
+assembler nor a linker.  There is no
+.BR \-D ,
+.BR \-I ,
+.BR \-l ,
 .B \-M
-Write a map file.
-.TP
+or
 .B \-X
-Keep the temporary files.
+either.  To see preprocessed source, run
+.BR cpp (1)
+by hand.
 .SH WHAT IT PRODUCES
 Bytecode with spans of native ARM Thumb in it, run by
 .BR bcrun (1).
@@ -84,11 +102,12 @@ Expect C89 with some of C99: 160 of 175 conformance tests pass here.
 # cc hello.c
 # ./hello.bc
 # cc -o prog.bc prog.c
-# cc -E prog.c
 # cc prog.bas
+# cc -r prog.bas          build it and run it
 .fi
 .SH SEE ALSO
 .BR bcrun (1),
 .BR bcdump (1),
 .BR mmbc (1),
+.BR mmedit (1),
 .BR cpp (1)

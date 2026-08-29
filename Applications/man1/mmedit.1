@@ -11,6 +11,36 @@ full-screen editor with the function keys along the bottom, for people
 who already know it.
 .PP
 It is meant for BASIC but will edit any text file.
+.SH THE F2 KEY
+On a PicoMite
+.B F2
+is "save, exit and run", and the interpreter took the program straight
+back.  Here it is
+.BR "cc \-r" :
+.B mmedit
+saves, leaves the editor and hands the file to the compiler, which runs
+the program if it built.  A BASIC file goes through
+.BR mmbc (1)
+on the way, so one keystroke is the whole build:
+.sp
+.nf
+     # mmedit prog.bas          F2
+     cc -r prog.bas
+     wrote prog.mb.c
+     ..........................
+     hello from prog
+.fi
+.sp
+A compile error stops it there, with the errors on the screen and the
+editor gone - unlike the interpreter, which put you back at the offending
+line.
+.PP
+Only the four source extensions are offered to the compiler: .bas,
+\&.BAS, .c and .C.  With any other name
+.B mmedit
+says there is nothing to compile and exits.  Ctrl-W does the same as
+.BR F2 ,
+as it does in MMBasic.
 .SH NOTES
 The function keys are the ones MMBasic uses.  A terminal that sends a
 different escape sequence for F1 to F4 than the console does is the
@@ -20,4 +50,5 @@ accepts both of the common spellings.
 .SH SEE ALSO
 .BR vi (1),
 .BR ed (1),
+.BR cc (1),
 .BR mmbc (1)

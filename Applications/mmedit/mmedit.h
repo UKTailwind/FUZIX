@@ -87,9 +87,10 @@ unsigned char *buf_line(int n);     /* start of line n, or NULL */
 
 /* --- the editor ----------------------------------------------------------- */
 /* MMBasic's own entry point.  x,y is where the cursor starts.  The key
- * that ended the session is left in editor_exit_key: F2 means "save,
- * exit and run", which on a PicoMite handed the program to the
- * interpreter and here is the caller's business. */
+ * that ended the session is left in editor_exit_key: F2 (or its Ctrl-W
+ * alias) means "save, exit and run", which on a PicoMite handed the
+ * program to the interpreter and here makes main() exec cc on a .bas
+ * or .c file. */
 void FullScreenEditor(int x, int y, char *fname, int edit_buff_size,
                       int cmdfile);
 extern int editor_exit_key;

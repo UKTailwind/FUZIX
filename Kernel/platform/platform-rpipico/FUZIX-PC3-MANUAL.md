@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.23 — August 2026"
+date: "Release v0.24 — August 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -565,7 +565,9 @@ hello from Fuzix
 runs it directly — the object starts with `#!/usr/bin/bcrun`, and the
 kernel does the rest. `bcrun prog.bc` still works and is the way to run
 an object that has lost its execute bit. Options are `-o name`, `-v` to
-show each pass as it runs, and `-k` to keep the intermediates.
+show each pass as it runs, `-k` to keep the intermediates, and `-r` to
+run the program if it built — `cc -r prog.bas` is a build and a run in
+one, and is what `mmedit`'s `F2` uses.
 `bcdump prog.bc` disassembles.
 
 `cc` is a driver: it runs `cpp`, then the three compiler passes from
@@ -3044,13 +3046,42 @@ It is the editor from the firmware, with the same keys:
 |-----|-----|
 | `ESC` | leave the editor |
 | `F1` | save |
-| `F2` | save and exit (so a wrapper can run the program) |
+| `F2` | save, exit, compile and run — see below |
 | `F3` / `F6` | find / find again |
 | `F4` | mark — then the cursor keys extend the selection |
 | `F5` | paste |
 | `F7` / `F8` | replace / replace again |
 | `F9` / `F10` | read a file in / write the selection out |
 | `F12` or `Ctrl-A` | beautify: re-indent and case the keywords |
+
+**`F2` is "save and run", the way a compiled machine can be.** On a
+PicoMite `F2` handed the program straight back to the interpreter; here
+the editor saves, exits and runs `cc -r` on the file, which builds it —
+a `.bas` through `mmbc` first — and runs it if it built:
+
+```
+# mmedit prog.bas          F2
+cc -r prog.bas
+wrote prog.mb.c
+..........................
+hello from prog
+#
+```
+
+A compile error stops there, with the errors on the screen; nothing
+runs. That is the one place this parts company with the interpreter,
+which put you back in the editor at the offending line — here you are
+at the shell, and `mmedit prog.bas` again is the way back.
+
+It happens only for `.bas`, `.BAS`, `.c` and `.C`; edit anything else
+and `F2` says there is nothing to compile. `Ctrl-W` is `F2`'s alias, as
+in MMBasic.
+
+One thing worth knowing before trusting the run: a line `mmbc` cannot
+translate is **commented out and reported**, not treated as an error, so
+the program builds without it and `F2` will run it. The report is on the
+screen above the output — read it rather than the fact that something
+ran.
 
 In mark mode the legend changes: `DEL` deletes, `F4` cuts, `F5`
 copies, `F10` exports the selection to a file. The status line shows

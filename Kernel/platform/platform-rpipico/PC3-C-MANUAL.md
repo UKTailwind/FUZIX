@@ -33,6 +33,7 @@ There are two, and they are genuinely different environments.
 ```
 $ cc -o prog.bc prog.c
 $ ./prog.bc
+$ cc -r prog.c          build it and, if it built, run it
 ```
 
 The Fuzix C compiler runs on the machine itself and produces bytecode
