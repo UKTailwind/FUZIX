@@ -47,6 +47,40 @@ through fixed PIO1 programs, `OPTION ANGLE`, `MATH CRC8/12/16/32`,
 `PLAY MP3/WAV/FLAC` completion interrupts — and the two silent
 divergences below, which is the part worth remembering.
 
+**2026-08-31: `TILEMAP`, the command and the function, complete**, plus
+`FLASH LOAD IMAGE` — the whole of graphics/TileMap.c in
+`mmb_tilemap.h`, both translators byte-identical, `tests/tilemap.bas`
+for the data surface and every error string, `t_tilemap` in
+`blitharness.c` for the pixels against an independent model of the
+reference's tile loop, `samples/tilepix.bas` for the board's pixels,
+and `samples/breakout.bas` — the PicoMite's Breakout, unedited. The
+one design departure is recorded in PLAN-games.md's ledger: the
+destination is composed a row at a time through the blit window
+instead of a blit121 per tile, because a tile blit here is a syscall
+pair per tile row. **Board-verified the same day**: `samples/tilepix.bas`
+reads back five zeros on the PC3 (plain, transparent, sub-tile offset,
+screen clip, sprites), and Breakout itself runs from the console to
+"Thanks for playing!". One trap worth recording from that run: the
+first tilepix compared `PIXEL()` readback against `MAP(n)` and failed
+everywhere - `MAP(n)` is MMBasic's fixed formula (`MAP(1)` = &H000080
+on a PicoMite too, `fun_map`) and the screen's palette reads back
+&H0000FF. Compare readback with readback, as flashpix does.
+
+**2026-08-31: a bare name as a DATA item is evaluated, as MMBasic's
+READ evaluates it.** `cmd_read` hands a numeric target the item's text
+through `getinteger()` (core/Commands.c:7922), so `DATA SOLID` reads
+the CONST - and the TILEMAP manual writes its attribute tables that
+way. Here it was a TEXT item and read as 0, silently; and a CONST
+declared BELOW its DATA line became an implied variable inside a
+static initializer, which the C compiler refused. Both translators
+now COUNT a DATA statement's items in the declaration pass (so every
+label's index is still right) and EVALUATE them once the pass is over,
+when every CONST is known (`collect_data` / `data_collect_pending`).
+A string CONST stays text, because MMBasic's READ into a string copies
+the item's text unquoted; an item that is not a constant expression
+(a variable, a call, a run-time CONST) is now a translation error
+instead of a C one. `tests/dataconst.bas` pins all of it.
+
 **2026-08-24: multi-dimensional array storage order.** Our C arrays were
 declared in source order, so the LAST BASIC subscript was the adjacent
 one — the transpose of MMBasic, which stores the FIRST adjacent
@@ -317,6 +351,11 @@ class:
   asked otherwise, or every gate passes `--strict` and carries a small
   allowlist. The second is a morning's work; the first is a policy
   change worth making deliberately.
+* ~~A bare name in DATA is text, and reads as 0 into a number~~ -
+  closed 2026-08-31, see "Done since the last review". What remains of
+  the class is a plain VARIABLE as a DATA item, which MMBasic reads at
+  run time and a static table cannot: it is a translation error now,
+  not a silent 0.
 
 ### 2. `MATH RANDOMIZE` seeds the wrong generator
 
@@ -517,7 +556,8 @@ thing to fix.
   as decisions rather than gaps, so no future review proposes them
   again. Do not resurrect them from an old plan document.
 
-  `TILE` and `Tilemap` stay in category 2 and are unaffected.
+  `TILE` stays in category 2 and is unaffected. `Tilemap` and
+  `Tilemap(` shipped 2026-08-31 (see "Done since the last review").
 
 ## Open in the FUZIX tree, not here
 

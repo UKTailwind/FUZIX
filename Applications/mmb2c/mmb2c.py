@@ -117,7 +117,7 @@ BUILTINS = {
     'MM.HPOS': (0, 0), 'MM.VPOS': (0, 0),
     'MM.INFO': (1, 1), 'MM.INFO$': (1, 1),
     'KEYDOWN': (1, 1),
-    'PEEK': (1, 1), 'SPRITE': (1, 3),
+    'PEEK': (1, 1), 'SPRITE': (1, 3), 'TILEMAP': (1, 6),
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
     'LINSTR': (2, 3), 'LCOMPARE': (2, 2), 'LINPUT': (3, 3),
@@ -127,7 +127,7 @@ BUILTINS = {
 # built-ins whose arguments cannot be parsed as plain expressions
 RAWARG = ('CHOICE', 'BOUND', 'TRIM$', 'DATETIME$', 'DAY$', 'EPOCH',
           'BIN2STR$', 'STR2BIN', 'RGB', 'MATH',
-          'MM.INFO', 'MM.INFO$', 'PEEK', 'SPRITE',
+          'MM.INFO', 'MM.INFO$', 'PEEK', 'SPRITE', 'TILEMAP',
           'EOF', 'LOC', 'LOF', 'INPUT$', 'DIR$',
           'LLEN', 'LGETSTR$', 'LGETBYTE', 'LINSTR', 'LCOMPARE', 'LINPUT',
           'JSON$')
@@ -856,6 +856,10 @@ class Conv(object):
         self.implied = []             # (name, ty, line, routine)
         self.data = []                # DATA items, in program order
         self.data_at = {}             # label -> index of the next DATA item
+        # DATA statements the declaration pass has counted but not yet
+        # evaluated - see collect_data: (first item index, item count,
+        # the line's tokens, index of the first item token, line, routine)
+        self.data_pending = []
         self.lenient = True           # comment out what cannot be translated
         self.fcc = False              # C89 output for the Fuzix C compiler:
                                       # no compound literals - hoisted bounds
@@ -945,6 +949,7 @@ class Conv(object):
         self.uses_blit = False      # BLIT family: mmb_blit.h
         self.uses_flash = False     # pseudo flash slots: mmb_flash.h
         self.uses_sprite = False    # SPRITE family: mmb_sprite.h
+        self.uses_tilemap = False   # TILEMAP family: mmb_tilemap.h
         self.uses_playd = False     # SOUND/TONE/MOD daemons: mmb_play.h
         # FRAMEBUFFER LAYER with a transparent colour: the colour is
         # run-time state (the firmware's transparentlow/high), kept in
@@ -2971,6 +2976,63 @@ class Conv(object):
                 return ('mms_fun(%d, %s, %s, 2)' % (sel, n, i3), TY_I)
             self.expect_op(')')
             return ('mms_fun(%d, %s, 0, 1)' % (sel, n), TY_I)
+
+        if up == 'TILEMAP':
+            # TILEMAP(selector ...) - TileMap.c fun_tilemap, engine in
+            # mmb_tilemap.h.  The selector is a bare word and the
+            # arguments follow it WITHOUT a comma, as the reference
+            # parses them (checkstring, then getcsargs on the rest):
+            # TILEMAP(TILE 1, x, y), TILEMAP(SPRITE X 1).  Every answer
+            # is an integer.
+            self.uses_tilemap = True
+            self.uses_blit = True
+            self.uses_flash = True
+            self.uses_data = True
+            self.expect_op('(')
+            if self.is_kw('TILE'):
+                self.i += 1
+                a = self.int_args(3)
+                self.expect_op(')')
+                return ('mmt_fn_tile(%s, %s, %s)' % (a[0], a[1], a[2]),
+                        TY_I)
+            if self.is_kw('COLLISION'):
+                self.i += 1
+                a = self.int_args(5)
+                mask = '0LL'
+                if self.accept_op(','):
+                    mask = self.as_int(self.expr())
+                self.expect_op(')')
+                return ('mmt_fn_coll(%s, %s, %s, %s, %s, %s)'
+                        % (a[0], a[1], a[2], a[3], a[4], mask), TY_I)
+            if self.is_kw('ATTR'):
+                self.i += 1
+                a = self.int_args(2)
+                self.expect_op(')')
+                return ('mmt_fn_attr(%s, %s)' % (a[0], a[1]), TY_I)
+            for nm, code in (('VIEWX', 1), ('VIEWY', 2), ('COLS', 3),
+                             ('ROWS', 4)):
+                if self.is_kw(nm):
+                    self.i += 1
+                    n = self.as_int(self.expr())
+                    self.expect_op(')')
+                    return ('mmt_fn(%d, %s)' % (code, n), TY_I)
+            if self.is_kw('SPRITE'):
+                self.i += 1
+                if self.is_kw('HIT'):
+                    self.i += 1
+                    a = self.int_args(2)
+                    self.expect_op(')')
+                    return ('mmt_fn_hit(%s, %s)' % (a[0], a[1]), TY_I)
+                for nm, code in (('X', 1), ('Y', 2), ('TILE', 3), ('W', 4),
+                                 ('H', 5)):
+                    if self.is_kw(nm):
+                        self.i += 1
+                        n = self.as_int(self.expr())
+                        self.expect_op(')')
+                        return ('mmt_fn_sprite(%d, %s)' % (code, n), TY_I)
+                self.err('TILEMAP(SPRITE ...) wants X, Y, TILE, W, H or HIT')
+            self.err('TILEMAP() wants TILE, COLLISION, ATTR, VIEWX, VIEWY, '
+                     'COLS, ROWS or SPRITE')
         if up in ('MM.INFO', 'MM.INFO$'):
             # MMBasic overlays the two spellings onto ONE function
             # (fun_info), which decides the type from the sub-keyword
@@ -3712,6 +3774,8 @@ class Conv(object):
                     self.decl_statement()
                 except MMError:
                     self.skip_statement()
+        # every CONST is declared now: the DATA tables can be evaluated
+        self.data_collect_pending()
         self.cur = None
 
     def place_label(self, canon):
@@ -3797,36 +3861,107 @@ class Conv(object):
         self.skip_statement()
 
     def collect_data(self):
-        """DATA items are gathered once, in the declaration pass, so that
+        """DATA items are gathered in the declaration pass, so that
         RESTORE <label> can be resolved to an index and the whole table
         emitted as static C.  MMBasic keeps the raw text and converts on
-        READ, so each entry carries both forms."""
-        while True:
-            start = self.i
+        READ, so each entry carries both forms.
+
+        The items are COUNTED here and EVALUATED once the pass is over
+        (data_collect_pending).  MMBasic evaluates a numeric item when
+        the READ runs - cmd_read hands the item's text to getinteger()
+        - so `DATA SOLID` reads the CONST's value wherever in the
+        program the CONST is declared, and the value of a name is only
+        known here once every declaration has been seen.  Counting
+        first keeps every label's index right; it costs a walk over
+        the tokens, with commas inside brackets not counted."""
+        start = self.i
+        n, depth = 1, 0
+        while not self.at_end():
             t = self.peek()
-            nxt1 = self.peek(1)
-            ends = (nxt1 is None
-                    or (nxt1[0] == T_OP and nxt1[1] in (',', ':')))
-            if t is not None and t[0] == T_STR and ends:
-                self.i += 1
-                self.data.append((1, '0.0', '0LL', c_string_literal(t[1])))
-            elif t is not None and t[0] == T_ID and ends \
-                    and t[2] not in KEYWORDS:
-                self.i += 1
-                self.data.append((1, '0.0', '0LL', c_string_literal(t[1])))
-            else:
-                v = self.expr()
-                text = self.source_text(start, self.i)
-                if v[1] == TY_S:
-                    self.data.append((1, '0.0', '0LL', v[0]))
-                elif v[1] == TY_I:
-                    self.data.append((0, '0.0', v[0],
-                                      c_string_literal(text)))
-                else:
-                    self.data.append((2, v[0], '0LL',
-                                      c_string_literal(text)))
-            if not self.accept_op(','):
-                break
+            if t[0] == T_OP:
+                if t[1] == '(':
+                    depth += 1
+                elif t[1] == ')':
+                    depth -= 1
+                elif t[1] == ':':
+                    break
+                elif t[1] == ',' and depth == 0:
+                    n += 1
+            self.i += 1
+        self.data_pending.append((len(self.data), n, self.toks, start,
+                                  self.lineno, self.cur))
+        self.data.extend([None] * n)
+
+    def data_const(self, word):
+        """Is this bare DATA item the name of a numeric CONST?  Then it
+        is evaluated, as MMBasic's READ evaluates it.  A string CONST
+        is not: MMBasic's READ into a string copies the item's TEXT,
+        quoted or not, so `DATA NAME$` reads as "NAME$" there."""
+        s = self.lookup(split_suffix(word)[0])
+        return s is not None and s.is_const and s.ty != TY_S
+
+    def data_item(self):
+        """One DATA item as (kind, float text, int text, C string).  A
+        numeric item carries its source text too, for a READ into a
+        string."""
+        start = self.i
+        t = self.peek()
+        nxt1 = self.peek(1)
+        ends = (nxt1 is None
+                or (nxt1[0] == T_OP and nxt1[1] in (',', ':')))
+        if t is not None and t[0] == T_STR and ends:
+            self.i += 1
+            return (1, '0.0', '0LL', c_string_literal(t[1]))
+        if t is not None and t[0] == T_ID and ends \
+                and t[2] not in KEYWORDS and not self.data_const(t[1]):
+            # a bare name that is not a numeric CONST: the text, which
+            # is what a READ into a string gets and what a READ into a
+            # number makes 0 of - MMBasic's own result for a name that
+            # is not declared
+            self.i += 1
+            return (1, '0.0', '0LL', c_string_literal(t[1]))
+        v = self.expr()
+        text = self.source_text(start, self.i)
+        if v[1] == TY_S:
+            return (1, '0.0', '0LL', v[0])
+        if not const_or_literal_expr(v[0].replace('(MMFLOAT)', '')
+                                         .replace('(MMINTEGER)', '')):
+            # a variable, a call, or a CONST evaluated at run time: the
+            # table is static, and MMBasic's own answer - the value when
+            # the READ runs - cannot be had at translation.  Before this
+            # check the item became an implied variable inside a static
+            # initializer, which the C compiler refused.  The casts
+            # as_flt writes are letters to const_c_expr and constants
+            # to C, so they are taken out before asking.
+            self.err("DATA item '%s' is not a constant" % text)
+        if v[1] == TY_I:
+            return (0, '0.0', v[0], c_string_literal(text))
+        return (2, v[0], '0LL', c_string_literal(text))
+
+    def data_collect_pending(self):
+        """Evaluate the DATA statements the declaration pass counted -
+        see collect_data.  An item that will not evaluate is reported,
+        and the rest of its statement left as empty strings, so the
+        table keeps its shape and every label still lands where it was
+        counted to."""
+        for base, n, toks, start, lineno, cur in self.data_pending:
+            self.toks = toks
+            self.i = start
+            self.lineno = lineno
+            self.cur = cur
+            k = 0
+            try:
+                while True:
+                    self.data[base + k] = self.data_item()
+                    k += 1
+                    if not self.accept_op(','):
+                        break
+            except MMError as e:
+                self.errors.append(str(e))
+            while k < n:
+                self.data[base + k] = (1, '0.0', '0LL', c_string_literal(''))
+                k += 1
+        self.data_pending = []
 
     # Does any DATA item actually need the float column?  The int one?
     # A column no item uses is eight bytes an item of nothing, and it
@@ -5641,6 +5776,12 @@ class Conv(object):
                           % (n, f, opt[0], opt[1], opt[2], opt[3]))
                 return
             self.err('unknown SPRITE form')
+        if up == 'TILEMAP':
+            # The TILEMAP family (graphics/TileMap.c), engine in
+            # mmb_tilemap.h: a tileset in a flash slot, a map out of
+            # DATA, and its own sprites.  See do_tilemap.
+            self.do_tilemap()
+            return
         if up == 'BLIT':
             # BLIT READ [#]n, x, y, w, h        screen -> buffer 1-64
             # BLIT WRITE [#]n, x, y [, mode]    buffer -> screen, mode 0-7
@@ -5804,7 +5945,30 @@ class Conv(object):
                 n = self.as_int(self.expr())
                 self.emit('mmf_erase(%s);' % n)
                 return
-            self.err('only FLASH DISK LOAD and FLASH ERASE are translated')
+            if self.is_kw('LOAD', 1) and self.is_kw('IMAGE', 2):
+                # FLASH LOAD IMAGE n, file$ [, O[VERWRITE]]
+                #
+                # A BMP decoded into the slot in the PicoMite's own
+                # layout (FileIO.c:1030), which is what TILEMAP CREATE
+                # and BLIT FLASH read.  The decoding is loadimage's,
+                # in another process, and the pixels come back down a
+                # pipe - see mmf_load_image.
+                self.i += 3
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                v = self.expr()
+                if v[1] != TY_S:
+                    self.err('FLASH LOAD IMAGE wants a file name')
+                ovr = '0LL'
+                if self.accept_op(','):
+                    if self.accept_kw('O') or self.accept_kw('OVERWRITE'):
+                        ovr = '1LL'
+                    else:
+                        self.err('FLASH LOAD IMAGE takes only O here')
+                self.emit('mmf_load_image(%s, %s, %s);' % (v[0], n, ovr))
+                return
+            self.err('only FLASH DISK LOAD, FLASH LOAD IMAGE and FLASH '
+                     'ERASE are translated')
         if up == 'PLAY':
             # PLAY MP3 f$          play a file, in the BACKGROUND
             # PLAY VOLUME n        0-100, remembered for later PLAYs
@@ -7226,6 +7390,143 @@ class Conv(object):
                               % (tgt, 'i' if ty == TY_I else 'f'))
             if not self.accept_op(','):
                 break
+
+    # -- TILEMAP ------------------------------------------------------------
+    def data_label(self, what):
+        """A label naming DATA, as TILEMAP CREATE and ATTR take one: the
+        index of the item after it, which is what RESTORE resolves a
+        label to.  The reference wants a name (isnamestart, "Expected
+        label"), so a line number is not one here either."""
+        t = self.nxt()
+        if t is None or t[0] != T_ID:
+            self.err("%s: expected label" % what)
+        canon = split_suffix(t[1])[0]
+        if canon not in self.data_at:
+            self.err("unknown label '%s' in %s" % (t[1], what))
+        return self.data_at[canon]
+
+    def int_args(self, n):
+        """n comma-separated integer arguments, as C texts."""
+        out = [self.as_int(self.expr())]
+        while len(out) < n:
+            self.expect_op(',')
+            out.append(self.as_int(self.expr()))
+        return out
+
+    def do_tilemap(self):
+        # TILEMAP CREATE label, id, slot, tw, th, tpr, cols, rows
+        # TILEMAP ATTR label, id, n
+        # TILEMAP DESTROY id
+        # TILEMAP SET id, col, row, tile
+        # TILEMAP DRAW id, dest, vx, vy, sx, sy, vw, vh [, t]
+        # TILEMAP SCROLL id, dx, dy
+        # TILEMAP VIEW id, x, y
+        # TILEMAP CLOSE
+        # TILEMAP SPRITE CREATE id, map, tile, x, y
+        # TILEMAP SPRITE MOVE id, x, y
+        # TILEMAP SPRITE SET id, tile
+        # TILEMAP SPRITE DRAW dest, t
+        # TILEMAP SPRITE DESTROY id
+        # TILEMAP SPRITE CLOSE
+        #
+        # cmd_tilemap (graphics/TileMap.c), engine in mmb_tilemap.h.
+        # The label comes FIRST in CREATE and ATTR - the reference
+        # parses it before getcsargs sees the rest - and it resolves
+        # here to the DATA index RESTORE would use, so the run time
+        # reads the same table the program's own READ does.  Every
+        # range is checked at run time as the reference's getint does;
+        # the destination letter is fb_buf's N, F or L.
+        self.uses_tilemap = True
+        self.uses_blit = True
+        self.uses_flash = True
+        self.uses_data = True
+        if self.is_kw('CREATE', 1):
+            self.i += 2
+            at = self.data_label('TILEMAP CREATE')
+            self.expect_op(',')
+            a = self.int_args(7)
+            self.emit('mmt_create(%d, %s, %s, %s, %s, %s, %s, %s);'
+                      % (at, a[0], a[1], a[2], a[3], a[4], a[5], a[6]))
+            return
+        if self.is_kw('ATTR', 1):
+            self.i += 2
+            at = self.data_label('TILEMAP ATTR')
+            self.expect_op(',')
+            a = self.int_args(2)
+            self.emit('mmt_attr(%d, %s, %s);' % (at, a[0], a[1]))
+            return
+        if self.is_kw('DESTROY', 1):
+            self.i += 2
+            n = self.as_int(self.expr())
+            self.emit('mmt_destroy(%s);' % n)
+            return
+        if self.is_kw('SET', 1):
+            self.i += 2
+            a = self.int_args(4)
+            self.emit('mmt_set(%s, %s, %s, %s);' % (a[0], a[1], a[2], a[3]))
+            return
+        if self.is_kw('DRAW', 1):
+            self.i += 2
+            n = self.as_int(self.expr())
+            self.expect_op(',')
+            dst = self.fb_buf()
+            self.expect_op(',')
+            a = self.int_args(6)
+            blank = '-1LL'
+            if self.accept_op(','):
+                blank = self.as_int(self.expr())
+            self.emit('mmt_draw(%s, %s, %s, %s, %s, %s, %s, %s, %s);'
+                      % (n, dst, a[0], a[1], a[2], a[3], a[4], a[5], blank))
+            return
+        if self.is_kw('SCROLL', 1):
+            self.i += 2
+            a = self.int_args(3)
+            self.emit('mmt_scroll(%s, %s, %s);' % (a[0], a[1], a[2]))
+            return
+        if self.is_kw('VIEW', 1):
+            self.i += 2
+            a = self.int_args(3)
+            self.emit('mmt_view(%s, %s, %s);' % (a[0], a[1], a[2]))
+            return
+        if self.is_kw('CLOSE', 1):
+            self.i += 2
+            self.emit('mmt_close();')
+            return
+        if self.is_kw('SPRITE', 1):
+            if self.is_kw('CREATE', 2):
+                self.i += 3
+                a = self.int_args(5)
+                self.emit('mmts_create(%s, %s, %s, %s, %s);'
+                          % (a[0], a[1], a[2], a[3], a[4]))
+                return
+            if self.is_kw('MOVE', 2):
+                self.i += 3
+                a = self.int_args(3)
+                self.emit('mmts_move(%s, %s, %s);' % (a[0], a[1], a[2]))
+                return
+            if self.is_kw('SET', 2):
+                self.i += 3
+                a = self.int_args(2)
+                self.emit('mmts_set(%s, %s);' % (a[0], a[1]))
+                return
+            if self.is_kw('DRAW', 2):
+                self.i += 3
+                dst = self.fb_buf()
+                self.expect_op(',')
+                blank = self.as_int(self.expr())
+                self.emit('mmts_draw(%s, %s);' % (dst, blank))
+                return
+            if self.is_kw('DESTROY', 2):
+                self.i += 3
+                n = self.as_int(self.expr())
+                self.emit('mmts_destroy(%s);' % n)
+                return
+            if self.is_kw('CLOSE', 2):
+                self.i += 3
+                self.emit('mmts_close();')
+                return
+            self.err('unknown TILEMAP SPRITE form')
+        self.err('unknown TILEMAP form')
 
     def do_restore(self):
         self.uses_data = True
@@ -10005,6 +10306,11 @@ class Conv(object):
             self.uses_data = True
         if self.uses_data:
             wr('#include "mmb_data.h"\n')
+        # TILEMAP: after mmb_data.h (its map is read out of the DATA
+        # table), mmb_blit.h (the row workhorses) and mmb_flash.h (the
+        # slot the tileset lives in); the header checks all three.
+        if self.uses_tilemap:
+            wr('#include "mmb_tilemap.h"\n')
         # The small pure families: GOSUB, BIT/BYTE/FLAG, BIN2STR$,
         # TRIM$/FIELD$ and the MAP() arithmetic.
         if self.uses_misc:

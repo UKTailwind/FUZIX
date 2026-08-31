@@ -88,7 +88,7 @@ so the intended shape is in the corpus already.
 | 9 | `EXECUTE` | 4 | Only ever used two ways here: `On Key <n>, <name>()` and `SetTick <n>, <name>, <slot>`. Both are the *indirect-call* problem again, not general `EVAL` — worth solving as a special case rather than declining. |
 | 10 | `DefineFont` into slots 1–9 | 3 | Circle, GNR_6, Pico-Frog replace a built-in. Refusing is right for the shared console fonts; a per-program override table is not. |
 | 11 | `BLIT LOAD` | 1 | Snake. A BMP region straight into a blit buffer. |
-| 12 | `TILEMAP` | 1 | Breakout. A whole subsystem for one game. |
+| 12 | `TILEMAP` | 1 | Breakout. A whole subsystem for one game. **Shipped 2026-08-31**: `mmb_tilemap.h`, the command and the function complete, plus `FLASH LOAD IMAGE`; the game itself is `samples/breakout.bas`, unedited. |
 | 13 | `GUI BITMAP` | 1 | Pico-Vaders. One call, easily rewritten in the port. |
 | 14 | `CSUB` | 1 | Flappy Bird has 273 lines of Thumb hex. Not ours — a compiler links objects. GNR_6's is small enough to rewrite in BASIC. |
 

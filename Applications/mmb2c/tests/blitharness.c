@@ -112,9 +112,23 @@ static MMINTEGER cur_target;
 MMINTEGER mm_fb_cur(void) { return cur_target; }
 void mm_fb_write(MMINTEGER which) { cur_target = which; }
 
+/* What mmb_tilemap.h reaches for in the runtime: the DATA reader's
+ * conversions (never taken here - the table is integers) and the
+ * number-to-text the error messages splice with (never taken either -
+ * a raise is a failure above). */
+MMFLOAT mm_val(const char *s) { (void)s; return 0; }
+MMINTEGER mm_toint(MMFLOAT v) { return (MMINTEGER)v; }
+void mm_int_to_str(char *p, long long int nbr, int base)
+{
+    (void)base;
+    sprintf(p, "%lld", nbr);
+}
+
 #include "mmb_flash.h"
 #include "mmb_blit.h"
 #include "mmb_sprite.h"
+#include "mmb_data.h"
+#include "mmb_tilemap.h"
 
 /* ---- the independent pixel model ------------------------------------ */
 
@@ -627,6 +641,223 @@ static void t_sprite(void)
     mms_close(1);
 }
 
+/* ---- TILEMAP ---------------------------------------------------------- */
+
+/* The tileset in a slot: 12x4, three 4x4 tiles across (or two 5-wide
+ * ones), pixel (x,y) = x + 3y + 1, PicoMite-packed - low nibble the
+ * even pixel - written here from the spec, not by the engine. */
+static int tspx(int x, int y)
+{
+    return (x + 3 * y + 1) & 15;
+}
+
+static void tileset_slot(int slot, int w, int h)
+{
+    unsigned char *s = mmf_addr(slot);
+    int x, y, stride = (w + 1) >> 1;
+
+    s[0] = (unsigned char)w; s[1] = 0; s[2] = 0; s[3] = 0;
+    s[4] = (unsigned char)h; s[5] = 0; s[6] = 0; s[7] = 0;
+    for (y = 0; y < h; y++)
+        for (x = 0; x < w; x++) {
+            unsigned char *p = s + 8 + y * stride + (x >> 1);
+
+            if (x & 1)
+                *p = (unsigned char)((*p & 0x0F) | (tspx(x, y) << 4));
+            else
+                *p = (unsigned char)((*p & 0xF0) | tspx(x, y));
+        }
+}
+
+/* One tile of the tileset at (x, y) on the model, clipped to the
+ * screen, the transparent index left alone - what blit121 does. */
+static void model_tile(int tw, int th, int tpr, int tile, int x, int y,
+                       int blank)
+{
+    int sx = ((tile - 1) % tpr) * tw, sy = ((tile - 1) / tpr) * th, i, j;
+
+    for (j = 0; j < th; j++)
+        for (i = 0; i < tw; i++) {
+            int X = x + i, Y = y + j, px;
+
+            if (X < 0 || X >= cur_hres || Y < 0 || Y >= cur_vres)
+                continue;
+            px = tspx(sx + i, sy + j);
+            if (blank >= 0 && px == blank)
+                continue;
+            mset(X, Y, px);
+        }
+}
+
+/* The reference's tilemap_cmd_draw, tile by tile: the visible range
+ * and the sub-tile offset in the same C arithmetic, every tile drawn
+ * whole and clipped to the screen alone. */
+static void model_tiles(int cols, int rows, int tw, int th, int tpr,
+                        const MMINTEGER *map, int vx, int vy, int sx,
+                        int sy, int vw, int vh, int blank)
+{
+    int c0 = vx / tw, r0 = vy / th;
+    int c1 = (vx + vw - 1) / tw, r1 = (vy + vh - 1) / th;
+    int ox = vx % tw, oy = vy % th, r, c;
+
+    for (r = r0; r <= r1; r++)
+        for (c = c0; c <= c1; c++) {
+            int tile;
+
+            if (c < 0 || c >= cols || r < 0 || r >= rows)
+                continue;
+            tile = (int)map[c + r * cols];
+            if (tile == 0)
+                continue;
+            model_tile(tw, th, tpr, tile, sx + (c - c0) * tw - ox,
+                       sy + (r - r0) * th - oy, blank);
+        }
+}
+
+/* the whole screen against the model, so a stray pixel anywhere shows */
+static void compare_all(const char *what)
+{
+    int x, y;
+
+    for (y = 0; y < cur_vres; y++)
+        for (x = 0; x < cur_hres; x++)
+            expect(what, x, y, mget(x, y), fbget(x, y));
+}
+
+static void t_tilemap(void)
+{
+    /* the DATA table: a 4x3 map for 4-wide tiles, a 3x2 map for 5-wide
+     * ones, then three attributes */
+    static const MMINTEGER tbl[] = {
+        1, 2, 3, 0,  0, 3, 1, 2,  2, 0, 0, 1,
+        1, 2, 0,  2, 1, 1,
+        1, 2, 4
+    };
+    const MMINTEGER *map4 = tbl, *map5 = tbl + 12;
+    static const int cases[][7] = {
+        /* vx, vy, sx, sy, vw, vh, blank */
+        {0, 0, 40, 40, 16, 12, -1},      /* plain, aligned */
+        {0, 0, 40, 40, 16, 12, 5},       /* transparent */
+        {5, 3, 1, 1, 14, 10, -1},        /* offset: odd start, left clip */
+        {-3, -2, 10, 10, 16, 12, -1},    /* negative viewport */
+        {0, 0, 312, 234, 16, 12, -1},    /* bottom-right clip */
+        {0, 0, 400, 400, 16, 12, -1},    /* wholly off screen */
+        {0, 0, 100, 100, 100, 100, -1},  /* viewport past the map */
+        {3, 0, 0, 0, 16, 12, 7},         /* offset and transparent */
+    };
+    static const int odd[][7] = {
+        {0, 0, 7, 9, 15, 8, -1},         /* odd width at odd x */
+        {1, 0, 8, 9, 15, 8, 6},          /* misaligned, transparent */
+        {0, 0, 8, 9, 15, 8, -1},         /* odd width at even x */
+    };
+    int k;
+
+    if (cur_bpp != 4)
+        return;
+    tileset_slot(2, 12, 4);
+    mm_data_init5(NULL, MM_D_INT, NULL, tbl, NULL, 21);
+    mmt_create(0, 1, 2, 4, 4, 3, 4, 3);
+    mmt_attr(18, 1, 3);
+    mmt_create(12, 2, 2, 5, 4, 2, 3, 2);
+
+    /* the queries, against the table by eye */
+    expect("fn tile", 0, 0, 2, (int)mmt_fn_tile(1, 5, 1));
+    expect("fn tile", 0, 1, 1, (int)mmt_fn_tile(1, 15, 11));
+    expect("fn tile off", 0, 2, 0, (int)mmt_fn_tile(1, 16, 0));
+    expect("fn coll", 0, 3, 1, (int)mmt_fn_coll(1, 0, 0, 16, 12, 0));
+    expect("fn coll mask", 0, 4, 2, (int)mmt_fn_coll(1, 0, 0, 16, 12, 2));
+    expect("fn coll mask", 0, 5, 3, (int)mmt_fn_coll(1, 0, 0, 16, 12, 4));
+    expect("fn coll clear", 0, 6, 0, (int)mmt_fn_coll(1, 12, 0, 4, 4, 0));
+    expect("fn attr", 0, 7, 4, (int)mmt_fn_attr(1, 3));
+    expect("fn attr none", 0, 8, 0, (int)mmt_fn_attr(1, 4));
+    expect("fn cols", 0, 9, 4, (int)mmt_fn(3, 1));
+    expect("fn rows", 0, 10, 3, (int)mmt_fn(4, 1));
+    mmt_set(1, 3, 0, 2);
+    expect("set", 0, 11, 2, (int)mmt_fn_tile(1, 12, 0));
+    mmt_set(1, 3, 0, 0);
+
+    for (k = 0; k < (int)(sizeof cases / sizeof cases[0]); k++) {
+        const int *c = cases[k];
+
+        card();
+        memcpy(model, fb, sizeof(model));
+        model_tiles(4, 3, 4, 4, 3, map4, c[0], c[1], c[2], c[3], c[4],
+                    c[5], c[6]);
+        mmt_draw(1, 0, c[0], c[1], c[2], c[3], c[4], c[5], c[6]);
+        compare_all("tilemap");
+        expect("viewx", k, 0, c[0], (int)mmt_fn(1, 1));
+        expect("viewy", k, 0, c[1], (int)mmt_fn(2, 1));
+    }
+    for (k = 0; k < (int)(sizeof odd / sizeof odd[0]); k++) {
+        const int *c = odd[k];
+
+        card();
+        memcpy(model, fb, sizeof(model));
+        model_tiles(3, 2, 5, 4, 2, map5, c[0], c[1], c[2], c[3], c[4],
+                    c[5], c[6]);
+        mmt_draw(2, 0, c[0], c[1], c[2], c[3], c[4], c[5], c[6]);
+        compare_all("tilemap odd");
+    }
+
+    /* the map edited under a viewport wider than it, tile 0 skipping */
+    card();
+    memcpy(model, fb, sizeof(model));
+    mmt_set(1, 1, 1, 0);
+    mmt_set(1, 3, 2, 3);
+    {
+        static const MMINTEGER edited[] = {1, 2, 3, 0,  0, 0, 1, 2,
+                                           2, 0, 0, 3};
+
+        model_tiles(4, 3, 4, 4, 3, edited, 0, 0, 200, 60, 40, 30, -1);
+    }
+    mmt_draw(1, 0, 0, 0, 200, 60, 40, 30, -1);
+    compare_all("tilemap edited");
+
+    /* sprites: slot order, both maps, clipped at three edges, one that
+     * is not drawn because its tile is 0 is impossible (1-65535), so an
+     * inactive slot in the middle stands for the gap */
+    card();
+    memcpy(model, fb, sizeof(model));
+    mmts_create(1, 1, 2, 100, 50);
+    mmts_create(2, 2, 2, -3, 100);
+    mmts_create(3, 1, 3, 318, 238);
+    mmts_create(4, 1, 1, 100, 52);
+    mmts_create(5, 2, 1, 200, -2);
+    mmts_destroy(4);
+    mmts_create(6, 1, 1, 100, 52);
+    model_tile(4, 4, 3, 2, 100, 50, 5);
+    model_tile(5, 4, 2, 2, -3, 100, 5);
+    model_tile(4, 4, 3, 3, 318, 238, 5);
+    model_tile(5, 4, 2, 1, 200, -2, 5);
+    model_tile(4, 4, 3, 1, 100, 52, 5);
+    mmts_draw(0, 5);
+    compare_all("tsprite");
+    expect("sprite x", 0, 0, 100, (int)mmt_fn_sprite(1, 1));
+    expect("sprite y", 0, 0, 100, (int)mmt_fn_sprite(2, 2));
+    expect("sprite tile", 0, 0, 3, (int)mmt_fn_sprite(3, 3));
+    expect("sprite w", 0, 0, 5, (int)mmt_fn_sprite(4, 2));
+    expect("sprite h", 0, 0, 4, (int)mmt_fn_sprite(5, 2));
+    expect("hit", 0, 0, 1, (int)mmt_fn_hit(1, 6));
+    expect("miss", 0, 0, 0, (int)mmt_fn_hit(1, 3));
+    mmts_move(3, 103, 53);
+    expect("hit moved", 0, 0, 1, (int)mmt_fn_hit(1, 3));
+    mmts_move(3, 104, 53);
+    expect("miss edge", 0, 0, 0, (int)mmt_fn_hit(1, 3));
+    mmts_set(1, 3);
+    expect("sprite set", 0, 0, 3, (int)mmt_fn_sprite(3, 1));
+
+    /* opaque sprites, then the lot closed */
+    card();
+    memcpy(model, fb, sizeof(model));
+    mmts_close();
+    mmts_create(1, 2, 1, 7, 7);
+    model_tile(5, 4, 2, 1, 7, 7, -1);
+    mmts_draw(0, -1);
+    compare_all("tsprite opaque");
+    mmt_close();
+    mmf_erase(2);
+}
+
 int main(void)
 {
     int m;
@@ -643,6 +874,7 @@ int main(void)
         t_flash();
         t_fbform();
         t_sprite();
+        t_tilemap();
     }
     if (failures) {
         fprintf(stderr, "blitharness: %d failures\n", failures);

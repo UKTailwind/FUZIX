@@ -1500,6 +1500,111 @@ down, `&H7F` delete, and `&H91`–`&H9C` for F1 to F12. A sequence it
 does not recognise comes back byte by byte behind its escape, so
 nothing is lost — and a bare `ESC` is still `CHR$(27)`.
 
+## Tiles and their sprites: `TILEMAP`
+
+A tile game draws its world from a grid of small pictures — the
+tileset — and a map that says which tile goes where. MMBasic's
+`TILEMAP` does that drawing in one statement, keeps the map in two
+bytes a cell, and carries its own sprites for the things that move over
+it. It is here complete: the command, the function, and `FLASH LOAD
+IMAGE` to put the tileset where it looks for it. The PicoMite's own
+Breakout runs unedited (`samples/breakout.bas`).
+
+The tileset is a BMP in a flash slot, and the map is `DATA`:
+
+```basic
+MODE 2
+FLASH LOAD IMAGE 1, "tiles.bmp", O          ' the tileset, into slot 1
+TILEMAP CREATE mapdata, 1, 1, 16, 16, 8, 20, 15
+TILEMAP ATTR tileattrs, 1, 8
+TILEMAP SPRITE CREATE 1, 1, 7, 160, 120     ' the player is tile 7
+FRAMEBUFFER CREATE
+DO
+  FRAMEBUFFER WRITE F
+  CLS
+  TILEMAP DRAW 1, F, camx, camy, 0, 0, 320, 240
+  TILEMAP SPRITE DRAW F, 0
+  FRAMEBUFFER COPY F, N
+LOOP UNTIL INKEY$ = "q"
+TILEMAP CLOSE
+END
+
+mapdata:
+DATA 5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5
+DATA 5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5
+' ... 20 columns by 15 rows
+tileattrs:
+DATA 1, 1, 1, 1, 2, 0, 0, 0
+```
+
+| | |
+|---|---|
+| `TILEMAP CREATE label, id, slot, tw, th, tpr, cols, rows` | map `id` (1–4) from the `DATA` at `label`: `cols`×`rows` tile numbers, row by row; tiles `tw`×`th` pixels, `tpr` of them across the image in `slot` |
+| `TILEMAP ATTR label, id, n` | `n` attribute words from the `DATA` at `label`, one per tile TYPE — tile 1 first |
+| `TILEMAP SET id, col, row, tile` | change one cell (0-based column and row) |
+| `TILEMAP DRAW id, dest, vx, vy, sx, sy, vw, vh [, t]` | draw the tiles under the `vw`×`vh` window at world pixel `vx, vy`, with its corner at `sx, sy` on `N`, `F` or `L`; `t` is a colour index (0–15) to see through, -1 for none |
+| `TILEMAP SCROLL id, dx, dy` | move the remembered viewport, clamped to the world |
+| `TILEMAP VIEW id, x, y` | set it outright |
+| `TILEMAP DESTROY id` | free one map; `TILEMAP CLOSE` frees them all, sprites too |
+| `TILEMAP SPRITE CREATE id, map, tile, x, y` | sprite `id` (1–64) showing `tile` from `map`'s tileset at pixel `x, y` |
+| `TILEMAP SPRITE MOVE id, x, y` | move it |
+| `TILEMAP SPRITE SET id, tile` | change its picture — animation |
+| `TILEMAP SPRITE DRAW dest, t` | draw every sprite, in slot order, so a higher number lands on top |
+| `TILEMAP SPRITE DESTROY id` | free one; `TILEMAP SPRITE CLOSE` frees them all |
+
+The function answers questions about the same things:
+
+| | |
+|---|---|
+| `TILEMAP(TILE id, x, y)` | the tile number under world pixel `x, y`; 0 off the map |
+| `TILEMAP(COLLISION id, x, y, w, h [, mask])` | the first non-empty tile under the box, or 0; with `mask`, only a tile whose attribute has one of those bits |
+| `TILEMAP(ATTR id, tile)` | the attribute word of a tile type; 0 if none was given |
+| `TILEMAP(VIEWX id)`, `TILEMAP(VIEWY id)` | where the viewport is |
+| `TILEMAP(COLS id)`, `TILEMAP(ROWS id)` | how big the map is |
+| `TILEMAP(SPRITE X id)`, `(SPRITE Y id)`, `(SPRITE TILE id)` | a sprite's position and picture |
+| `TILEMAP(SPRITE W id)`, `(SPRITE H id)` | its size — the tile size of its map |
+| `TILEMAP(SPRITE HIT a, b)` | 1 if the two sprites' boxes overlap |
+
+The rules are MMBasic's, and three of them are worth knowing before
+they surprise you:
+
+* **Tile numbers count from 1, and 0 is empty.** Tile 1 is the
+  top-left of the tileset, 2 the next to its right, wrapping after
+  `tpr`. A 0 in the map draws nothing and leaves what was underneath.
+* **The viewport chooses tiles, it does not clip them.** Every tile
+  the `vw`×`vh` window touches is drawn whole, clipped only at the edge
+  of the screen — a 100-pixel window over 16-pixel tiles paints seven
+  tiles across. A game draws a whole screen and never notices; if you
+  want a hard-edged window, draw into `F` and `BLIT FRAMEBUFFER` the
+  rectangle you want.
+* **The `label` comes first.** `TILEMAP CREATE mapdata, 1, ...` — the
+  label names the `DATA` lines the map is read from, and the values
+  run on from there through whatever `DATA` follows, so a map short of
+  values takes them from the next table rather than failing. Your own
+  `READ` position is not moved, and a `DATA` item that names a
+  `CONST` (`DATA SOLID`, the way MMBasic's own TILEMAP examples write
+  their attribute tables) reads as its value, as MMBasic's `READ`
+  does — wherever in the program the `CONST` is declared.
+
+Every `TILEMAP` statement wants an RGB121 screen (`MODE 2`); in `MODE
+1` it says so, as MMBasic does. The map lives in memory as long as
+the program runs, and `TILEMAP CLOSE` at the end is manners rather
+than a necessity.
+
+### `FLASH LOAD IMAGE`
+
+    FLASH LOAD IMAGE n, file$ [, O]
+
+decodes a BMP into flash slot `n` (1–3) in the layout `TILEMAP` and
+`BLIT FLASH` read. Without `O` a slot that already holds something is
+"Already programmed", as on a PicoMite; `FLASH ERASE n` clears it. The
+colours are reduced the way the sprite loaders reduce them — red's top
+bit, green's top two, blue's top bit — so a tileset drawn in saturated
+colours arrives as you drew it, and one made on the machine with `SAVE
+IMAGE` (which is how Breakout makes its bricks) round-trips exactly.
+The decoding is `loadimage`'s, in another process, so a program that
+never loads a picture carries none of it.
+
 ## Running another program: `SYSTEM`, `SAVE IMAGE`, `LOAD IMAGE`, `LOAD JPG`, `LOAD PNG`
 
 `SYSTEM` runs a program and waits for it:
@@ -4042,9 +4147,9 @@ translate time, not at run time.
 | `SERVO` | `SETPIN` | `SETTICK` | `SORT` |
 | `SPI` | `SPRITE` | `STATIC` | `STRUCT` |
 | `SUB` | `SYSTEM` | `TEMPR` | `TEXT` |
-| `TIME$` | `TIMER` | `TRIANGLE` | `TYPE` |
-| `WATCHDOG` | `WEB` | `WEND` | `WHILE` |
-| `WS2812` |  |  |  |
+| `TILEMAP` | `TIME$` | `TIMER` | `TRIANGLE` |
+| `TYPE` | `WATCHDOG` | `WEB` | `WEND` |
+| `WHILE` | `WS2812` |  |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
 line numbers and labels, `REM` and `'` comments all work as expected.
@@ -4077,8 +4182,8 @@ line numbers and labels, `REM` and `'` comments all work as expected.
 | `RTRIM$` | `SGN` | `SIN` | `SPACE$` |
 | `SPI` | `SPRITE` | `SQR` | `STR$` |
 | `STR2BIN` | `STRING$` | `STRUCT` | `TAB` |
-| `TAN` | `TEMPR` | `TIME$` | `TIMER` |
-| `TRIM$` | `UCASE$` | `VAL` |  |
+| `TAN` | `TEMPR` | `TILEMAP` | `TIME$` |
+| `TIMER` | `TRIM$` | `UCASE$` | `VAL` |
 
 ## MATH() sub-functions
 

@@ -1063,6 +1063,83 @@ struct val builtin_raw(const char *up)
         expect_op(")");
         return mkval(sfmt("mms_fun(%d, %s, 0, 1)", sel, n), TY_I);
     }
+    if (strcmp(up, "TILEMAP") == 0) {
+        /* TILEMAP(selector ...) - TileMap.c fun_tilemap, engine in
+           mmb_tilemap.h.  The selector is a bare word and the
+           arguments follow it WITHOUT a comma, as the reference parses
+           them (checkstring, then getcsargs on the rest):
+           TILEMAP(TILE 1, x, y), TILEMAP(SPRITE X 1).  Every answer is
+           an integer. */
+        static const struct { const char *nm; int code; } sels[] = {
+            { "VIEWX", 1 }, { "VIEWY", 2 }, { "COLS", 3 }, { "ROWS", 4 },
+            { NULL, 0 }
+        };
+        static const struct { const char *nm; int code; } ssels[] = {
+            { "X", 1 }, { "Y", 2 }, { "TILE", 3 }, { "W", 4 }, { "H", 5 },
+            { NULL, 0 }
+        };
+        const char *a[5];
+        const char *n;
+        int si;
+
+        cv.uses_tilemap = 1;
+        cv.uses_blit = 1;
+        cv.uses_flash = 1;
+        cv.uses_data = 1;
+        expect_op("(");
+        if (is_kw("TILE", 0)) {
+            cv.i += 1;
+            int_args(a, 3);
+            expect_op(")");
+            return mkval(sfmt("mmt_fn_tile(%s, %s, %s)", a[0], a[1], a[2]),
+                         TY_I);
+        }
+        if (is_kw("COLLISION", 0)) {
+            const char *mask = "0LL";
+
+            cv.i += 1;
+            int_args(a, 5);
+            if (accept_op(","))
+                mask = as_int(expr());
+            expect_op(")");
+            return mkval(sfmt("mmt_fn_coll(%s, %s, %s, %s, %s, %s)",
+                              a[0], a[1], a[2], a[3], a[4], mask), TY_I);
+        }
+        if (is_kw("ATTR", 0)) {
+            cv.i += 1;
+            int_args(a, 2);
+            expect_op(")");
+            return mkval(sfmt("mmt_fn_attr(%s, %s)", a[0], a[1]), TY_I);
+        }
+        for (si = 0; sels[si].nm; si++)
+            if (is_kw(sels[si].nm, 0)) {
+                cv.i += 1;
+                n = as_int(expr());
+                expect_op(")");
+                return mkval(sfmt("mmt_fn(%d, %s)", sels[si].code, n),
+                             TY_I);
+            }
+        if (is_kw("SPRITE", 0)) {
+            cv.i += 1;
+            if (is_kw("HIT", 0)) {
+                cv.i += 1;
+                int_args(a, 2);
+                expect_op(")");
+                return mkval(sfmt("mmt_fn_hit(%s, %s)", a[0], a[1]), TY_I);
+            }
+            for (si = 0; ssels[si].nm; si++)
+                if (is_kw(ssels[si].nm, 0)) {
+                    cv.i += 1;
+                    n = as_int(expr());
+                    expect_op(")");
+                    return mkval(sfmt("mmt_fn_sprite(%d, %s)",
+                                      ssels[si].code, n), TY_I);
+                }
+            cv_err("TILEMAP(SPRITE ...) wants X, Y, TILE, W, H or HIT");
+        }
+        cv_err("TILEMAP() wants TILE, COLLISION, ATTR, VIEWX, VIEWY, "
+               "COLS, ROWS or SPRITE");
+    }
     /* MMBasic overlays MM.INFO and MM.INFO$ onto ONE function
        (fun_info), which decides the type from the sub-keyword rather
        than from the '$'.  So both spellings land here and the tables

@@ -220,7 +220,7 @@ const struct mmb_keyword commandtbl[] = {
     { "LMid(", 1 },
     { "ReDim", 1 },
     { "Bezier", 1 },
-    { "Tilemap", 0 },
+    { "Tilemap", 1 },
     { "Star", 0 },
     { "Astro", 0 },
     { "Location", 0 },
@@ -370,7 +370,7 @@ const struct mmb_keyword tokentbl[] = {
     { "Struct(", 1 },
     { "Frame(", 0 },
     { "Ray(", 0 },
-    { "Tilemap(", 0 },
+    { "Tilemap(", 1 },
     { NULL, 0 }
 };
 

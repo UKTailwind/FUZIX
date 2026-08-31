@@ -128,4 +128,116 @@ MMG_FN void mmf_disk_load(const char *file, MMINTEGER n, MMINTEGER ovr)
 	fclose(f);
 }
 
+/*
+ *	FLASH LOAD IMAGE n, file$ [, O[VERWRITE]]   (FileIO.c:1030)
+ *
+ *	A BMP into a slot in the PicoMite's own layout - two little-endian
+ *	uint32 for width and height, then packed 4bpp with the LOW nibble
+ *	the left pixel - which is what BLIT FLASH and TILEMAP CREATE read.
+ *	The reference decodes the file itself, a row at a time into flash;
+ *	here the decoding is loadimage's, in another process, and the
+ *	pixels come back down a pipe one index per byte (the -s form, the
+ *	same protocol SPRITE LOADBMP uses) to be packed on the way in.
+ *	A sprite needs no display, so neither does this.
+ *
+ *	The colour of a pixel is the reference's own SPRITE LOADBMP
+ *	reduction - red's top bit, green's top two, blue's top bit - which
+ *	is also what its FLASH LOAD IMAGE writes: both go through the same
+ *	RGB121 packing of a decoded BMP.
+ *
+ *	"Already programmed" tests the first word against erased unless O
+ *	is given, as the reference does.  A file whose rows would not fit
+ *	the slot is refused whole rather than truncated; the reference
+ *	writes on into the next slot.
+ */
+static unsigned char mmf_row[256];	/* unpacked pixels, a chunk at a time */
+
+MMG_FN void mmf_load_image(const char *file, MMINTEGER n, MMINTEGER ovr)
+{
+	unsigned char *s = mmf_addr(n);
+	unsigned char hdr[4];
+	int fd, w, h, got, k, x, y, take;
+	long stride;
+
+	if (s == NULL)
+		return;
+	if (!ovr && (s[0] & s[1] & s[2] & s[3]) != 0xFF)
+		MM_RAISE("Already programmed");
+	mm_run_begin();
+	mm_run_arg("\011loadimage");
+	mm_run_arg("\002-s");
+	mm_run_arg(file);
+	fd = mm_run_pipe();
+	if (fd < 0)
+		return;			/* mm_run_pipe raised it */
+	got = 0;
+	while (got < 4) {
+		k = (int)mm_run_pipe_read(fd, hdr + got, 4 - got);
+		if (k <= 0)
+			break;
+		got += k;
+	}
+	if (got < 4) {
+		if (mm_run_pipe_close(fd) < 0)
+			return;		/* the decoder's own message */
+		MM_RAISE("The BMP could not be decoded");
+	}
+	w = hdr[0] | (hdr[1] << 8);
+	h = hdr[2] | (hdr[3] << 8);
+	stride = (w + 1) >> 1;
+	if (w < 1 || h < 1 || 8L + stride * h > mmf_size[n - 1]) {
+		mm_run_pipe_close(fd);
+		MM_RAISE("File too big for a flash slot");
+	}
+	/* the erase the reference does, then the header */
+	memset(s, 0xFF, (size_t)mmf_size[n - 1]);
+	s[0] = (unsigned char)w;
+	s[1] = (unsigned char)(w >> 8);
+	s[2] = 0;
+	s[3] = 0;
+	s[4] = (unsigned char)h;
+	s[5] = (unsigned char)(h >> 8);
+	s[6] = 0;
+	s[7] = 0;
+	for (y = 0; y < h; y++) {
+		unsigned char *d = s + 8 + y * stride;
+
+		/* a row in chunks of an even count, so a chunk boundary is
+		 * a byte boundary in the slot; only the last may be odd */
+		for (x = 0; x < w; x += take) {
+			take = w - x;
+			if (take > (int)sizeof(mmf_row))
+				take = (int)sizeof(mmf_row);
+			got = 0;
+			while (got < take) {
+				k = (int)mm_run_pipe_read(fd, mmf_row + got,
+							  take - got);
+				if (k <= 0)
+					break;
+				got += k;
+			}
+			if (got < take) {
+				/* a half-written slot must not look like a
+				 * good one, and the decoder's own message
+				 * is the useful one, so close first */
+				memset(s, 0xFF, (size_t)mmf_size[n - 1]);
+				if (mm_run_pipe_close(fd) < 0)
+					return;
+				MM_RAISE("The BMP could not be decoded");
+			}
+			for (k = 0; k + 1 < take; k += 2)
+				d[(x + k) >> 1] = (unsigned char)
+					((mmf_row[k] & 15)
+					 | ((mmf_row[k + 1] & 15) << 4));
+			if (k < take)
+				d[(x + k) >> 1] = (unsigned char)
+					(0xF0 | (mmf_row[k] & 15));
+		}
+	}
+	if (mm_run_pipe_close(fd) < 0) {
+		memset(s, 0xFF, (size_t)mmf_size[n - 1]);
+		return;			/* a failed decoder is an error */
+	}
+}
+
 #endif /* MMB_FLASH_H */

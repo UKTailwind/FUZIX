@@ -62,7 +62,7 @@ static const struct builtin builtins[] = {
     { "MM.HPOS", 0, 0 }, { "MM.VPOS", 0, 0 },
     { "MM.INFO", 1, 1 }, { "MM.INFO$", 1, 1 },
     { "KEYDOWN", 1, 1 },
-    { "PEEK", 1, 1 }, { "SPRITE", 1, 3 },
+    { "PEEK", 1, 1 }, { "SPRITE", 1, 3 }, { "TILEMAP", 1, 6 },
     { "DIR$", 0, 2 },
     { "LLEN", 1, 1 }, { "LGETSTR$", 3, 3 }, { "LGETBYTE", 2, 2 },
     { "LINSTR", 2, 3 }, { "LCOMPARE", 2, 2 }, { "LINPUT", 3, 3 },
@@ -74,7 +74,7 @@ static const struct builtin builtins[] = {
 static const char *rawarg[] = {
     "CHOICE", "BOUND", "TRIM$", "DATETIME$", "DAY$", "EPOCH",
     "BIN2STR$", "STR2BIN", "RGB", "MATH",
-    "MM.INFO", "MM.INFO$", "PEEK", "SPRITE",
+    "MM.INFO", "MM.INFO$", "PEEK", "SPRITE", "TILEMAP",
     "EOF", "LOC", "LOF", "INPUT$", "DIR$",
     "LLEN", "LGETSTR$", "LGETBYTE", "LINSTR", "LCOMPARE", "LINPUT",
     "JSON$",

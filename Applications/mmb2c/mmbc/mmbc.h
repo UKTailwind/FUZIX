@@ -345,6 +345,15 @@ struct conv {
     const char **warnings; int nwarnings, cwarnings;
     struct implied_rec *implied; int nimplied, cimplied;
     struct data_item *data; int ndata, cdata;
+    /* DATA statements the declaration pass has counted but not yet
+     * evaluated - see collect_data: where the items go, how many, the
+     * line's tokens (persistent copies), where the first item starts,
+     * and the line and routine to evaluate them in.  data_pending[] */
+    struct data_pend {
+        int base, n, start, lineno, ntoks;
+        struct tok *toks;
+        struct routine *cur;
+    } *data_pend; int ndata_pend, cdata_pend;
     /* DefineFont blocks, collected by pass_fonts before anything else
      * runs.  Kept in font-number order (there are at most seven), so
      * the emitter walks the array as the Python walks sorted(). */
@@ -436,6 +445,7 @@ struct conv {
     int uses_blit;              /* BLIT family: mmb_blit.h */
     int uses_flash;             /* pseudo flash slots: mmb_flash.h */
     int uses_sprite;            /* SPRITE family: mmb_sprite.h */
+    int uses_tilemap;           /* TILEMAP family: mmb_tilemap.h */
     int uses_playd;             /* SOUND/TONE/MOD daemons: mmb_play.h */
     /* FRAMEBUFFER LAYER with a transparent colour: the colour is
        run-time state (the firmware's transparentlow/high), kept in an
@@ -515,6 +525,11 @@ char *newtmp(const char *pfx);
 void out_append(struct outbuf *o, const char *persistent_line);
 void out_insert(struct outbuf *o, int where, const char *persistent_line);
 struct label *label_rec(const char *canon);  /* find-or-create */
+/* TILEMAP (mmbc_stmt.c): a label's DATA index, n integer arguments, and
+   the statement itself - self.data_label, self.int_args, self.do_tilemap */
+int data_label(const char *what);
+void int_args(const char **out, int n);
+void do_tilemap(void);
 struct sym *sym_lookup(const char *canon);   /* self.lookup */
 struct sym *sym_new(const char *canon, int ty, const char *acc);
 struct sym *declare(const char *canon, int ty, const char *scope,
@@ -549,6 +564,7 @@ void strip_line_number(void);
 void skip_statement(void);
 void decl_statement(void);
 void collect_data(void);
+void data_collect_pending(void);            /* self.data_collect_pending */
 char *source_text(int a, int b);
 void decl_routine(int is_func);
 void decl_param(struct routine *r);

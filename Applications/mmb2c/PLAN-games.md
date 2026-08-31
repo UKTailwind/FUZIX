@@ -441,6 +441,10 @@ gates the conversion on the host.
 | PLAY SOUND/TONE | first use pays a daemon spawn (~100 ms); effect latency ~50 ms vs near-zero in-interpreter |
 | MODSAMPLE | trigger latency ~90 ms (reference MicroPython: ~140 ms; PicoMite: near-zero) |
 | BLIT FLASH source | arena, not XIP flash — same bytes, same commands |
+| TILEMAP DRAW | the destination is composed a whole row at a time through the blit window, not blit121'd a tile at a time — same pixels, same overwrite order; a tile blit here would be a syscall pair per tile row |
+| TILEMAP tileset reads | bounded by the slot: a tile index past the image reads the slot's erased 0xFF (what the reference's flash gives) but never past the allocation |
+| TILEMAP mode check | "Requires RGB121 mode" is raised only when there is a screen to be in the wrong mode on; headless the statements run and the drawing is silent |
+| FLASH LOAD IMAGE | decoded by loadimage in another process, packed on the way in; a file whose rows do not fit the slot is refused whole where the reference writes on into the next slot |
 | deferred list above | honest errors, never silent wrong behaviour |
 
 ## 8. Open questions

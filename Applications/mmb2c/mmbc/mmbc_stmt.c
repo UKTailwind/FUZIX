@@ -1018,6 +1018,13 @@ void statement_inner(void)
         }
         cv_err("unknown SPRITE form");
     }
+    if (strcmp(up, "TILEMAP") == 0) {
+        /* The TILEMAP family (graphics/TileMap.c), engine in
+           mmb_tilemap.h: a tileset in a flash slot, a map out of
+           DATA, and its own sprites.  See do_tilemap. */
+        do_tilemap();
+        return;
+    }
     if (strcmp(up, "BLIT") == 0) {
         /* BLIT READ [#]n, x, y, w, h        screen -> buffer 1-64
            BLIT WRITE [#]n, x, y [, mode]    buffer -> screen, mode 0-7
@@ -1209,7 +1216,35 @@ void statement_inner(void)
             emit(sfmt("mmf_erase(%s);", n));
             return;
         }
-        cv_err("only FLASH DISK LOAD and FLASH ERASE are translated");
+        if (is_kw("LOAD", 1) && is_kw("IMAGE", 2)) {
+            /* FLASH LOAD IMAGE n, file$ [, O[VERWRITE]]
+
+               A BMP decoded into the slot in the PicoMite's own
+               layout (FileIO.c:1030), which is what TILEMAP CREATE
+               and BLIT FLASH read.  The decoding is loadimage's, in
+               another process, and the pixels come back down a
+               pipe - see mmf_load_image. */
+            const char *n;
+            const char *ovr = "0LL";
+            struct val v;
+
+            cv.i += 3;
+            n = as_int(expr());
+            expect_op(",");
+            v = expr();
+            if (v.ty != TY_S)
+                cv_err("FLASH LOAD IMAGE wants a file name");
+            if (accept_op(",")) {
+                if (accept_kw("O") || accept_kw("OVERWRITE"))
+                    ovr = "1LL";
+                else
+                    cv_err("FLASH LOAD IMAGE takes only O here");
+            }
+            emit(sfmt("mmf_load_image(%s, %s, %s);", v.code, n, ovr));
+            return;
+        }
+        cv_err("only FLASH DISK LOAD, FLASH LOAD IMAGE and FLASH "
+               "ERASE are translated");
     }
     if (strcmp(up, "PLAY") == 0) {
         /* PLAY MP3 f$          play a file, in the BACKGROUND
@@ -3931,6 +3966,176 @@ static void do_read(void)
         if (!accept_op(","))
             break;
     }
+}
+
+/* -- TILEMAP --------------------------------------------------------- */
+
+/* A label naming DATA, as TILEMAP CREATE and ATTR take one: the index
+   of the item after it, which is what RESTORE resolves a label to.  The
+   reference wants a name (isnamestart, "Expected label"), so a line
+   number is not one here either. */
+int data_label(const char *what)
+{
+    struct tok *t = nxt();
+    const char *canon;
+    struct label *l;
+    int sfx;
+
+    if (t->kind != T_ID)
+        cv_err("%s: expected label", what);
+    canon = split_suffix(t->text, &sfx);
+    l = label_rec(canon);
+    if (!l->has_data_at)
+        cv_err("unknown label '%s' in %s", t->text, what);
+    return l->data_at;
+}
+
+/* n comma-separated integer arguments, as C texts. */
+void int_args(const char **out, int n)
+{
+    int k;
+
+    out[0] = as_int(expr());
+    for (k = 1; k < n; k++) {
+        expect_op(",");
+        out[k] = as_int(expr());
+    }
+}
+
+void do_tilemap(void)
+{
+    /* TILEMAP CREATE label, id, slot, tw, th, tpr, cols, rows
+       TILEMAP ATTR label, id, n
+       TILEMAP DESTROY id
+       TILEMAP SET id, col, row, tile
+       TILEMAP DRAW id, dest, vx, vy, sx, sy, vw, vh [, t]
+       TILEMAP SCROLL id, dx, dy
+       TILEMAP VIEW id, x, y
+       TILEMAP CLOSE
+       TILEMAP SPRITE CREATE id, map, tile, x, y
+       TILEMAP SPRITE MOVE id, x, y
+       TILEMAP SPRITE SET id, tile
+       TILEMAP SPRITE DRAW dest, t
+       TILEMAP SPRITE DESTROY id
+       TILEMAP SPRITE CLOSE
+
+       cmd_tilemap (graphics/TileMap.c), engine in mmb_tilemap.h.  The
+       label comes FIRST in CREATE and ATTR - the reference parses it
+       before getcsargs sees the rest - and it resolves here to the
+       DATA index RESTORE would use, so the run time reads the same
+       table the program's own READ does.  Every range is checked at
+       run time as the reference's getint does; the destination letter
+       is fb_buf's N, F or L. */
+    const char *a[7];
+    const char *n, *dst, *blank;
+    int at;
+
+    cv.uses_tilemap = 1;
+    cv.uses_blit = 1;
+    cv.uses_flash = 1;
+    cv.uses_data = 1;
+    if (is_kw("CREATE", 1)) {
+        cv.i += 2;
+        at = data_label("TILEMAP CREATE");
+        expect_op(",");
+        int_args(a, 7);
+        emit(sfmt("mmt_create(%d, %s, %s, %s, %s, %s, %s, %s);",
+                  at, a[0], a[1], a[2], a[3], a[4], a[5], a[6]));
+        return;
+    }
+    if (is_kw("ATTR", 1)) {
+        cv.i += 2;
+        at = data_label("TILEMAP ATTR");
+        expect_op(",");
+        int_args(a, 2);
+        emit(sfmt("mmt_attr(%d, %s, %s);", at, a[0], a[1]));
+        return;
+    }
+    if (is_kw("DESTROY", 1)) {
+        cv.i += 2;
+        n = as_int(expr());
+        emit(sfmt("mmt_destroy(%s);", n));
+        return;
+    }
+    if (is_kw("SET", 1)) {
+        cv.i += 2;
+        int_args(a, 4);
+        emit(sfmt("mmt_set(%s, %s, %s, %s);", a[0], a[1], a[2], a[3]));
+        return;
+    }
+    if (is_kw("DRAW", 1)) {
+        cv.i += 2;
+        n = as_int(expr());
+        expect_op(",");
+        dst = fb_buf();
+        expect_op(",");
+        int_args(a, 6);
+        blank = "-1LL";
+        if (accept_op(","))
+            blank = as_int(expr());
+        emit(sfmt("mmt_draw(%s, %s, %s, %s, %s, %s, %s, %s, %s);",
+                  n, dst, a[0], a[1], a[2], a[3], a[4], a[5], blank));
+        return;
+    }
+    if (is_kw("SCROLL", 1)) {
+        cv.i += 2;
+        int_args(a, 3);
+        emit(sfmt("mmt_scroll(%s, %s, %s);", a[0], a[1], a[2]));
+        return;
+    }
+    if (is_kw("VIEW", 1)) {
+        cv.i += 2;
+        int_args(a, 3);
+        emit(sfmt("mmt_view(%s, %s, %s);", a[0], a[1], a[2]));
+        return;
+    }
+    if (is_kw("CLOSE", 1)) {
+        cv.i += 2;
+        emit("mmt_close();");
+        return;
+    }
+    if (is_kw("SPRITE", 1)) {
+        if (is_kw("CREATE", 2)) {
+            cv.i += 3;
+            int_args(a, 5);
+            emit(sfmt("mmts_create(%s, %s, %s, %s, %s);",
+                      a[0], a[1], a[2], a[3], a[4]));
+            return;
+        }
+        if (is_kw("MOVE", 2)) {
+            cv.i += 3;
+            int_args(a, 3);
+            emit(sfmt("mmts_move(%s, %s, %s);", a[0], a[1], a[2]));
+            return;
+        }
+        if (is_kw("SET", 2)) {
+            cv.i += 3;
+            int_args(a, 2);
+            emit(sfmt("mmts_set(%s, %s);", a[0], a[1]));
+            return;
+        }
+        if (is_kw("DRAW", 2)) {
+            cv.i += 3;
+            dst = fb_buf();
+            expect_op(",");
+            blank = as_int(expr());
+            emit(sfmt("mmts_draw(%s, %s);", dst, blank));
+            return;
+        }
+        if (is_kw("DESTROY", 2)) {
+            cv.i += 3;
+            n = as_int(expr());
+            emit(sfmt("mmts_destroy(%s);", n));
+            return;
+        }
+        if (is_kw("CLOSE", 2)) {
+            cv.i += 3;
+            emit("mmts_close();");
+            return;
+        }
+        cv_err("unknown TILEMAP SPRITE form");
+    }
+    cv_err("unknown TILEMAP form");
 }
 
 static void do_restore(void)

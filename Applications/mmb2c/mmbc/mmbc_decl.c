@@ -173,6 +173,8 @@ void pass_declarations(void)
             }
         }
     }
+    /* every CONST is declared now: the DATA tables can be evaluated */
+    data_collect_pending();
     cv.cur = NULL;
 }
 
@@ -315,36 +317,196 @@ static void data_add(int kind, const char *f, const char *i,
  * <label> can be resolved to an index and the whole table emitted as
  * static C.  MMBasic keeps the raw text and converts on READ, so each
  * entry carries both forms. */
+/* The items are COUNTED here and EVALUATED once the pass is over
+ * (data_collect_pending).  MMBasic evaluates a numeric item when the
+ * READ runs - cmd_read hands the item's text to getinteger() - so
+ * `DATA SOLID` reads the CONST's value wherever in the program the
+ * CONST is declared, and the value of a name is only known here once
+ * every declaration has been seen.  Counting first keeps every label's
+ * index right; it costs a walk over the tokens, with commas inside
+ * brackets not counted. */
 void collect_data(void)
 {
-    for (;;) {
-        int start = cv.i;
+    int start = cv.i, n = 1, depth = 0, k;
+    struct data_pend *p;
+
+    while (!at_end()) {
         struct tok *t = peek(0);
-        struct tok *nxt1 = peek(1);
-        int ends = (nxt1 == NULL
-                    || (nxt1->kind == T_OP
-                        && (strcmp(nxt1->text, ",") == 0
-                            || strcmp(nxt1->text, ":") == 0)));
-        if (t != NULL && t->kind == T_STR && ends) {
-            cv.i++;
-            data_add(1, "0.0", "0LL", c_string_literal(t->text));
-        } else if (t != NULL && t->kind == T_ID && ends
-                   && !kw_in(t->up)) {
-            cv.i++;
-            data_add(1, "0.0", "0LL", c_string_literal(t->text));
-        } else {
-            struct val v = expr();
-            char *text = source_text(start, cv.i);
-            if (v.ty == TY_S)
-                data_add(1, "0.0", "0LL", v.code);
-            else if (v.ty == TY_I)
-                data_add(0, "0.0", v.code, c_string_literal(text));
-            else
-                data_add(2, v.code, "0LL", c_string_literal(text));
+
+        if (t->kind == T_OP) {
+            if (strcmp(t->text, "(") == 0)
+                depth++;
+            else if (strcmp(t->text, ")") == 0)
+                depth--;
+            else if (strcmp(t->text, ":") == 0)
+                break;
+            else if (strcmp(t->text, ",") == 0 && depth == 0)
+                n++;
         }
-        if (!accept_op(","))
-            break;
+        cv.i++;
     }
+    GROW(cv.data_pend, cv.ndata_pend, cv.cdata_pend);
+    p = &cv.data_pend[cv.ndata_pend++];
+    p->base = cv.ndata;
+    p->n = n;
+    p->start = start;
+    p->lineno = cv.lineno;
+    p->cur = cv.cur;
+    p->ntoks = cv.ntoks;
+    /* the tokens' texts are scratch: copy them out to live until the
+     * pass is over */
+    p->toks = palloc(sizeof(struct tok) * (size_t)(cv.ntoks ? cv.ntoks : 1));
+    for (k = 0; k < cv.ntoks; k++) {
+        p->toks[k] = cv.toks[k];
+        p->toks[k].text = pstr(cv.toks[k].text);
+        p->toks[k].up = cv.toks[k].up ? pstr(cv.toks[k].up) : NULL;
+    }
+    for (k = 0; k < n; k++)
+        data_add(-1, "0.0", "0LL", "");     /* filled in later */
+}
+
+/* Is this bare DATA item the name of a numeric CONST?  Then it is
+ * evaluated, as MMBasic's READ evaluates it.  A string CONST is not:
+ * MMBasic's READ into a string copies the item's TEXT, quoted or not,
+ * so `DATA NAME$` reads as "NAME$" there. */
+static int data_const(const char *word)
+{
+    int sfx;
+    struct sym *s = sym_lookup(split_suffix(word, &sfx));
+
+    return s != NULL && s->is_const && s->ty != TY_S;
+}
+
+/* `text' with every "(MMFLOAT)" and "(MMINTEGER)" taken out - the
+ * Python's two str.replace calls. */
+static const char *strip_casts(const char *text)
+{
+    static const char *casts[] = { "(MMFLOAT)", "(MMINTEGER)", NULL };
+    char *out = salloc(strlen(text) + 1);
+    int i = 0, j = 0, k;
+
+    while (text[i]) {
+        for (k = 0; casts[k]; k++) {
+            size_t n = strlen(casts[k]);
+
+            if (strncmp(text + i, casts[k], n) == 0) {
+                i += (int)n;
+                break;
+            }
+        }
+        if (casts[k])
+            continue;
+        out[j++] = text[i++];
+    }
+    out[j] = 0;
+    return out;
+}
+
+/* One DATA item as (kind, float text, int text, C string).  A numeric
+ * item carries its source text too, for a READ into a string. */
+static struct data_item data_item(void)
+{
+    struct data_item d;
+    int start = cv.i;
+    struct tok *t = peek(0);
+    struct tok *nxt1 = peek(1);
+    int ends = (nxt1 == NULL
+                || (nxt1->kind == T_OP
+                    && (strcmp(nxt1->text, ",") == 0
+                        || strcmp(nxt1->text, ":") == 0)));
+    struct val v;
+    char *text;
+
+    d.kind = 1;
+    d.f = pstr("0.0");
+    d.i = pstr("0LL");
+    if (t != NULL && t->kind == T_STR && ends) {
+        cv.i++;
+        d.sv = pstr(c_string_literal(t->text));
+        return d;
+    }
+    if (t != NULL && t->kind == T_ID && ends && !kw_in(t->up)
+        && !data_const(t->text)) {
+        /* a bare name that is not a numeric CONST: the text, which is
+           what a READ into a string gets and what a READ into a number
+           makes 0 of - MMBasic's own result for a name that is not
+           declared */
+        cv.i++;
+        d.sv = pstr(c_string_literal(t->text));
+        return d;
+    }
+    v = expr();
+    text = source_text(start, cv.i);
+    if (v.ty == TY_S) {
+        d.sv = pstr(v.code);
+        return d;
+    }
+    if (!const_or_literal_expr(strip_casts(v.code)))
+        /* a variable, a call, or a CONST evaluated at run time: the
+           table is static, and MMBasic's own answer - the value when
+           the READ runs - cannot be had at translation.  Before this
+           check the item became an implied variable inside a static
+           initializer, which the C compiler refused.  The casts as_flt
+           writes are letters to const_c_expr and constants to C, so
+           they are taken out before asking. */
+        cv_err("DATA item '%s' is not a constant", text);
+    d.sv = pstr(c_string_literal(text));
+    if (v.ty == TY_I) {
+        d.kind = 0;
+        d.i = pstr(v.code);
+    } else {
+        d.kind = 2;
+        d.f = pstr(v.code);
+    }
+    return d;
+}
+
+/* Evaluate the DATA statements the declaration pass counted - see
+ * collect_data.  An item that will not evaluate is reported, and the
+ * rest of its statement left as empty strings, so the table keeps its
+ * shape and every label still lands where it was counted to. */
+void data_collect_pending(void)
+{
+    volatile int k;
+
+    for (k = 0; k < cv.ndata_pend; k++) {
+        struct data_pend *p = &cv.data_pend[k];
+        jmp_buf jb, *saved = err_jmp;
+        volatile int j = 0;
+
+        /* one statement's worth of scratch each, as the pass gave it
+           when it walked the line - the items keep only what they
+           pstr(); picoman's maze tables overflowed the pool without it */
+        scratch_reset();
+        memcpy(cv.toks, p->toks, sizeof(struct tok) * (size_t)p->ntoks);
+        cv.ntoks = p->ntoks;
+        cv.i = p->start;
+        cv.lineno = p->lineno;
+        cv.cur = p->cur;
+        err_jmp = &jb;
+        if (setjmp(jb) == 0) {
+            for (;;) {
+                cv.data[p->base + j] = data_item();
+                j++;
+                if (!accept_op(","))
+                    break;
+            }
+            err_jmp = saved;
+        } else {
+            err_jmp = saved;
+            errors_add(err_msg);
+        }
+        while (j < p->n) {
+            struct data_item *d = &cv.data[p->base + j];
+
+            d->kind = 1;
+            d->f = pstr("0.0");
+            d->i = pstr("0LL");
+            d->sv = pstr(c_string_literal(""));
+            j++;
+        }
+    }
+    cv.ndata_pend = 0;
 }
 
 /* Rebuild the source of tokens [a, b) - the text form of a numeric

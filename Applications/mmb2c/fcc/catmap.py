@@ -83,7 +83,7 @@ CAT = {
     # delivered all three (v0.20); their entries are gone because an
     # entry for a translated name is dead weight that goes stale.
     # Graphics primitives and toys, each self-contained
-    "TILE": 2, "Tilemap": 2, "Tilemap(": 2,
+    "TILE": 2,
 
     # ---- PIO: the steer was given, 2026-08-22 ----------------------
     # The decision: a SEPARATE ASSEMBLER, built from MMBasic's own PIO

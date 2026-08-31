@@ -475,6 +475,11 @@ void conv_write(FILE *f)
         cv.uses_data = 1;
     if (cv.uses_data)
         fprintf(f, "#include \"mmb_data.h\"\n");
+    /* TILEMAP: after mmb_data.h (its map is read out of the DATA
+       table), mmb_blit.h (the row workhorses) and mmb_flash.h (the
+       slot the tileset lives in); the header checks all three. */
+    if (cv.uses_tilemap)
+        fprintf(f, "#include \"mmb_tilemap.h\"\n");
     /* The small pure families: GOSUB, BIT/BYTE/FLAG, BIN2STR$,
        TRIM$/FIELD$ and the MAP() arithmetic. */
     if (cv.uses_misc)
