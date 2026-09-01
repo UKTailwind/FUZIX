@@ -274,31 +274,60 @@ target_link_libraries(fuzix
 if(NOT PICO_TINYUSB_PATH)
 	set(PICO_TINYUSB_PATH ${PICO_SDK_PATH}/lib/tinyusb)
 endif()
-set(PC3_HCD_SRC ${PICO_TINYUSB_PATH}/src/portable/raspberrypi/rp2040/hcd_rp2040.c)
-set(PC3_HCD_OUT ${CMAKE_BINARY_DIR}/hcd_rp2040_pc3.c)
-set(PC3_HCD_PATCH ${CMAKE_CURRENT_LIST_DIR}/usb/hcd_rp2040.patch)
+# Three files of the driver are patched (all proven on the PC3 MicroPython
+# port, which runs the same TinyUSB 0.21 and shares the hub and devices):
+#   hcd_rp2040.c  - clear the EPX buffer when an RX timeout fails a transfer
+#   rp2040_usb.c  - single-buffer host CONTROL transfers (long HID report
+#                   descriptors panicked "buf_ctrl already available")
+#   usbh.c        - 100 ms reset recovery before the first SETUP (devices
+#                   behind the hub are not ready at the spec-minimum 10 ms
+#                   and a failed enumeration is never retried)
 get_target_property(PC3_HOST_SRCS tinyusb_host_base INTERFACE_SOURCES)
-list(LENGTH PC3_HOST_SRCS PC3_HOST_N)
-list(FILTER PC3_HOST_SRCS EXCLUDE REGEX "/hcd_rp2040\\.c$")
-list(LENGTH PC3_HOST_SRCS PC3_HOST_M)
-if(NOT PC3_HOST_M EQUAL PC3_HOST_N)
-	set_target_properties(tinyusb_host_base PROPERTIES
-		INTERFACE_SOURCES "${PC3_HOST_SRCS}")
-else()
-	message(FATAL_ERROR "hcd_rp2040.c is not where tinyusb_host_base used to keep it; "
-		"the build-time patch (usb/hcd_rp2040.patch) needs looking at")
+foreach(PC3_REL IN ITEMS portable/raspberrypi/rp2040/hcd_rp2040 portable/raspberrypi/rp2040/rp2040_usb host/usbh)
+	get_filename_component(PC3_F ${PC3_REL} NAME)
+	set(PC3_SRC ${PICO_TINYUSB_PATH}/src/${PC3_REL}.c)
+	set(PC3_OUT ${CMAKE_BINARY_DIR}/${PC3_F}_pc3.c)
+	set(PC3_PATCH ${CMAKE_CURRENT_LIST_DIR}/usb/${PC3_F}.patch)
+	list(LENGTH PC3_HOST_SRCS PC3_HOST_N)
+	list(FILTER PC3_HOST_SRCS EXCLUDE REGEX "/${PC3_F}\\.c$")
+	list(LENGTH PC3_HOST_SRCS PC3_HOST_M)
+	if(PC3_HOST_M EQUAL PC3_HOST_N)
+		message(FATAL_ERROR "${PC3_F}.c is not where tinyusb_host_base used to keep it; "
+			"the build-time patch (usb/${PC3_F}.patch) needs looking at")
+	endif()
+	add_custom_command(OUTPUT ${PC3_OUT}
+		COMMAND patch -s -o ${PC3_OUT} ${PC3_SRC} ${PC3_PATCH}
+		DEPENDS ${PC3_SRC} ${PC3_PATCH}
+		COMMENT "TinyUSB ${PC3_F}.c with usb/${PC3_F}.patch applied"
+		VERBATIM)
+	target_sources(fuzix PRIVATE ${PC3_OUT})
+endforeach()
+set_target_properties(tinyusb_host_base PROPERTIES
+	INTERFACE_SOURCES "${PC3_HOST_SRCS}")
+# rp2040_usb.c is shared with the DEVICE stack, which this kernel also links
+# (tinyusb_device below); remove it there too or the unpatched original links
+# in beside the copy - "multiple definition of rp2usb_xfer_continue".
+get_target_property(PC3_DEV_SRCS tinyusb_device_base INTERFACE_SOURCES)
+list(LENGTH PC3_DEV_SRCS PC3_DEV_N)
+list(FILTER PC3_DEV_SRCS EXCLUDE REGEX "/rp2040_usb\\.c$")
+list(LENGTH PC3_DEV_SRCS PC3_DEV_M)
+if(PC3_DEV_M EQUAL PC3_DEV_N)
+	message(FATAL_ERROR "rp2040_usb.c is not where tinyusb_device_base used to keep it; "
+		"the build-time patch (usb/rp2040_usb.patch) needs looking at")
 endif()
-add_custom_command(OUTPUT ${PC3_HCD_OUT}
-	COMMAND patch -s -o ${PC3_HCD_OUT} ${PC3_HCD_SRC} ${PC3_HCD_PATCH}
-	DEPENDS ${PC3_HCD_SRC} ${PC3_HCD_PATCH}
-	COMMENT "TinyUSB hcd_rp2040.c with usb/hcd_rp2040.patch applied"
-	VERBATIM)
-target_sources(fuzix PRIVATE ${PC3_HCD_OUT})
-# the hcd includes "rp2040_usb.h" relative to its own directory; the SDK
-# compiles it with -Wno-conversion and so does this
+set_target_properties(tinyusb_device_base PROPERTIES
+	INTERFACE_SOURCES "${PC3_DEV_SRCS}")
+# the drivers include "rp2040_usb.h" and usbh's private headers relative to
+# their own directories; the SDK compiles rp2040_usb.c with the stringop
+# suppressions and so does this
 target_include_directories(fuzix PRIVATE
-	${PICO_TINYUSB_PATH}/src/portable/raspberrypi/rp2040)
-set_source_files_properties(${PC3_HCD_OUT} PROPERTIES
+	${PICO_TINYUSB_PATH}/src/portable/raspberrypi/rp2040
+	${PICO_TINYUSB_PATH}/src/host)
+set_source_files_properties(${CMAKE_BINARY_DIR}/hcd_rp2040_pc3.c PROPERTIES
+	COMPILE_FLAGS "-Wno-conversion")
+set_source_files_properties(${CMAKE_BINARY_DIR}/rp2040_usb_pc3.c PROPERTIES
+	COMPILE_FLAGS "-Wno-conversion -Wno-stringop-overflow -Wno-array-bounds")
+set_source_files_properties(${CMAKE_BINARY_DIR}/usbh_pc3.c PROPERTIES
 	COMPILE_FLAGS "-Wno-conversion")
 
 # The poll flavour of the arch layer: no async_context worker threads

@@ -33,6 +33,12 @@ void pc3_usb_panic(const char *fmt, ...);
 #define CFG_TUH_HID_EPIN_BUFSIZE    (64)
 #define CFG_TUH_HID_EPOUT_BUFSIZE   (64)
 
+/* Host event queue (TinyUSB default 16 entries of 12 bytes).  A completion
+ * the ISR cannot queue is dropped silently in a release build, and the stack
+ * waits forever for it - seen on the PC3 MicroPython port in the burst of a
+ * multi-device power-up.  64 entries is 768 bytes. */
+#define CFG_TUH_TASK_QUEUE_SZ       (64)
+
 /* PC3_USB_TRACE: the stack's own enumeration trace, through the small
  * printf in usbtrace.c.  A hardware debugging kernel only - verbose,
  * and it slows the pump - but it is what says where enumeration stops.

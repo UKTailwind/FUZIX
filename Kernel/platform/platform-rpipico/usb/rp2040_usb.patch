@@ -1,0 +1,20 @@
+--- rp2040_usb.c	(TinyUSB 0.21.0, pico-sdk lib/tinyusb)
++++ rp2040_usb.c	(Pico Computer 3 kernel, usb/rp2040_usb.patch)
+@@ -196,7 +196,16 @@
+   if (ep_reg != NULL) {
+     uint32_t ep_ctrl = *ep_reg;
+   #if CFG_TUH_ENABLED
+-    const bool force_single = (rp2usb_is_host_mode() && ep->interrupt_num > 0);
++    /* PC3: single-buffer host CONTROL transfers as well as interrupt ones.
++     * A 525-byte GET_DESCRIPTOR(report) IN from a touch panel - nine
++     * full-speed packets, double-buffered on EPX - was completed by this
++     * driver after the first 64 bytes with the other buffer still armed;
++     * the status stage then hit "buf_ctrl already available" (a panic).
++     * Two-packet control INs and 64 KB double-buffered BULK reads work,
++     * so only control is narrowed here.  Found and proven on the PC3
++     * MicroPython port, 2026-09-01; the same driver runs here. */
++    const bool force_single = rp2usb_is_host_mode() &&
++                              (ep->interrupt_num > 0 || tu_edpt_number(ep->ep_addr) == 0);
+   #else
+     const bool force_single = false;
+   #endif
