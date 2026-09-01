@@ -50,8 +50,35 @@ static const char badreq[] =
     "\r\n"
     "bad request\r\n";
 
+/*  Write all of it.  A socket write() on this platform returns what the
+    send window had room for - a partial count is the normal case once
+    the file is longer than the window (about 5.6 KB), not an error -
+    and sleeps only when the window is completely full.  The first
+    version took anything short of the full count as a failure and
+    closed the connection, so breakout.bas (14 KB) arrived as 5,802
+    bytes: eleven full writes and the 170 bytes the window had left.
+    Returns 0 when every byte is out, -1 on a real error (EPIPE when
+    the client has gone; SIGPIPE is ignored in main). */
+static int writeall( int fd, const char *p, int n ){
+    int r;
+
+    while( n > 0 ){
+	r = write( fd, p, n );
+	if( r < 0 ){
+	    if( errno == EINTR )
+		continue;
+	    return -1;
+	}
+	if( r == 0 )		/* not expected of a stream; do not spin */
+	    return -1;
+	p += r;
+	n -= r;
+    }
+    return 0;
+}
+
 static void saydone( int fd, const char *s ){
-    write( fd, s, strlen(s) );
+    writeall( fd, s, strlen(s) );
 }
 
 /*  Pull the path out of "GET /what/ever HTTP/1.0".  Returns NULL if
@@ -102,7 +129,7 @@ static void serve( int fd ){
 	     "Connection: close\r\n"
 	     "\r\n" );
     while( (n = read( in, buf, BUFSIZE )) > 0 )
-	if( write( fd, buf, n ) != n )
+	if( writeall( fd, buf, n ) < 0 )
 	    break;
     close( in );
 }

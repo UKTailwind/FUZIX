@@ -110,6 +110,12 @@ switched on. A power-on boot may now print `USB keyboard attached`,
 `detached`, `attached` in a row before the login prompt: that is the
 same drop, handled. The story is in `PC3-IRQ-REVIEW.md`.
 
+**`httpd` serves the whole file.** A socket `write()` here returns
+what the send window had room for, and `httpd` took anything short of
+the full count as an error and closed the connection — so a file
+longer than the window, about 5.6 KB, arrived cut off. Found while
+checking this release; it now writes until the file is out.
+
 ## New in v0.25, and in v0.24
 
 v0.24 was published without an announcement, so both releases are
