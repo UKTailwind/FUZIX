@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.25 — August 2026"
+date: "Release v0.26 — September 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -58,6 +58,57 @@ Headline specification as configured here:
   MMBasic translator in front of it — both run on the machine itself
 * MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
+
+## New in v0.26
+
+**`TILEMAP`, MMBasic's tile engine — the command, the function, and
+everything in them.** Four maps, each a grid of two-byte cells drawn
+from a tileset in a flash slot; 64 sprites that move over them;
+`TILEMAP DRAW` for the window of the world you want, on `N`, `F` or
+`L`, with a see-through colour; `TILEMAP(COLLISION ...)` and
+`TILEMAP(SPRITE HIT ...)` for the game's logic; the map and attribute
+tables read from a `DATA` label with your own `READ` position left
+alone; every argument range and every error string the reference has.
+The rules are MMBasic's — tiles count from 1 and 0 is empty, the
+viewport chooses tiles rather than clipping them — and the PicoMite's
+own Breakout runs unedited, from "Generating tileset..." to "Thanks for
+playing!" (`samples/breakout.bas`). The chapter "Tiles and their
+sprites" has the tables. One recorded departure: `DRAW` composes a row
+of tiles at a time through the blit window rather than blitting each
+tile, which here would be a pair of system calls per tile row.
+
+**`FLASH LOAD IMAGE n, file$ [, O]`** decodes a BMP into flash slot
+`n` (1–3), in the layout `TILEMAP` and `BLIT FLASH` read. Without `O`
+an occupied slot is "Already programmed", as on a PicoMite, and
+`FLASH ERASE n` clears it. The colours reduce the way the sprite
+loaders reduce them, so a tileset made on the machine with `SAVE
+IMAGE` — which is how Breakout makes its bricks — round-trips exactly.
+The decoding is `loadimage`'s, in another process, so a program that
+never loads a picture carries none of it.
+
+**A `DATA` item that names a `CONST` reads as its value.** MMBasic's
+own TILEMAP examples write their attribute tables as `DATA SOLID,
+BRICK, ...` and `READ` evaluates the names. Here they are folded when
+the program is translated, wherever in the program the `CONST` is
+declared. A string `CONST` stays text, since `READ` into a string
+variable copies the item's text; an item that is not a constant is a
+translation error naming the item, rather than a C compiler's.
+
+**Booting with a USB keyboard attached no longer ends in `panic:
+Invalid speed`.** Reported against v0.25 on both boards: now and then
+the boot stopped with that line on the console, a blank HDMI and an
+`fsck` on the next boot, while a keyboard plugged in after login was
+always fine. The text was TinyUSB's host driver, which asked the root
+port its speed at the start of every transfer and panicked if the
+answer was "disconnected" — and a hub and keyboard powering up
+together do drop the link for a moment while enumerating. The kernel
+now runs TinyUSB 0.21, whose RP2350 host driver was rewritten, with
+two fixes of this port's own: the driver as shipped panicked at host
+start on a timed-out control transfer it had failed without clearing
+its buffer, and the RP2350's hub turnaround fix (`MULTI_HUB_FIX`) is
+switched on. A power-on boot may now print `USB keyboard attached`,
+`detached`, `attached` in a row before the login prompt: that is the
+same drop, handled. The story is in `PC3-IRQ-REVIEW.md`.
 
 ## New in v0.25, and in v0.24
 

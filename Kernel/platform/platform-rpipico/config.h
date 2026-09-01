@@ -111,7 +111,11 @@
 #define CONFIG_PC3_SOUND
 #endif
 
+/* For the CFG_ values.  The marker keeps tusb_config.h's panic hook out
+ * of kernel files - see the comment there. */
+#define PC3_CONFIG_H_INCLUDES_TUSB
 #include "tusb_config.h"
+#undef PC3_CONFIG_H_INCLUDES_TUSB
 
 /* We have a GPIO interface */
 #define CONFIG_DEV_GPIO
@@ -402,7 +406,7 @@ extern uint8_t progbase[USERMEM];
  * answers, and it sat three releases behind this one without anything
  * noticing.  `sh relcheck.sh` now compares the two and the manual.
  */
-#define PC3_RELEASE "0.25"
+#define PC3_RELEASE "0.26"
 
 /*
  * The port's own copyright line.  It goes here rather than in start.c's
