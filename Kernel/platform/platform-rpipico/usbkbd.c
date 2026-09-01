@@ -467,6 +467,38 @@ static void usb_rescue(void)
     }
 }
 
+/* --- TinyUSB panic hook (tusb_config.h routes panic() here) ---------------- */
+
+#include <stdarg.h>
+
+void pc3_usb_panic(const char *fmt, ...)
+{
+    va_list ap;
+    unsigned long a0;
+    void *val = 0;
+
+    va_start(ap, fmt);
+    a0 = va_arg(ap, unsigned long);
+    va_end(ap);
+    if (a0 >= 0x50100000UL && a0 < 0x50101000UL)
+        val = (void *)*(volatile uint32_t *)a0;
+    kputs("\r\nUSB panic: ");
+    kputs(fmt);
+    kprintf("\n  arg=%p *arg=%p caller=%p\n", (void *)a0, val,
+            __builtin_return_address(0));
+    kprintf("  SIE=%p BUF_STATUS=%p INT_EP_CTRL=%p SIE_CTRL=%p NAK_POLL=%p\n",
+            (void *)usb_hw->sie_status, (void *)usb_hw->buf_status,
+            (void *)usb_hw->int_ep_ctrl, (void *)usb_hw->sie_ctrl,
+            (void *)usb_hw->nak_poll);
+    kprintf("  EPX_CTRL=%p EPX_BUF=%p EP_TX_ERR=%p EP_RX_ERR=%p LSTUNE=%p\n",
+            (void *)*(volatile uint32_t *)0x50100100UL,
+            (void *)*(volatile uint32_t *)0x50100080UL,
+            (void *)*(volatile uint32_t *)(USBCTRL_REGS_BASE + USB_EP_TX_ERROR_OFFSET),
+            (void *)*(volatile uint32_t *)(USBCTRL_REGS_BASE + USB_EP_RX_ERROR_OFFSET),
+            (void *)*(volatile uint32_t *)(USBCTRL_REGS_BASE + USB_LINESTATE_TUNING_OFFSET));
+    fpanic("TinyUSB");
+}
+
 /* --- task pump ----------------------------------------------------------- */
 
 /* The pump body: only ever entered via usb_pump_stacked (tricks.S),
@@ -635,26 +667,56 @@ void usbkbd_init(void)
     for (i = 0; i < HID_NSLOTS; i++)
         memset((void *)&hid_slots[i], 0, sizeof(hid_slots[i]));
 
-    tuh_init(0); /* native controller, root-hub port 0 */
+    {
+        /* the native controller, root-hub port 0, as a host: 0.21 wants
+           the role and speed spelled out (tuh_init is deprecated) */
+        tusb_rhport_init_t init = { .role = TUSB_ROLE_HOST, .speed = TUSB_SPEED_AUTO };
+        tuh_rhport_init(0, &init);
+    }
 
-    /* A kernel must not HardFault on bus noise.  TinyUSB's rp2040 hcd
-     * panic()s - a BKPT, i.e. a hard lockup - on a data-toggle mismatch
-     * (ERROR_DATA_SEQ), and on any enabled-but-unhandled interrupt, of
-     * which HOST_RESUME is one it enables and never handles.  Both
+    /* RP2350 only, and off by default: "Host - increase inter-packet and
+     * turnaround timeouts to accommodate worst-case hub delays".  Every
+     * device here is behind a hub, and a status-stage IN through the
+     * CH334 was timing out at boot - which 0.20 rode over by letting
+     * the SIE retry, and 0.21 turns into a failed transfer.  Neither
+     * MMBasic nor TinyUSB sets it. */
+    hw_set_bits((io_rw_32 *)(USBCTRL_REGS_BASE + USB_LINESTATE_TUNING_OFFSET),
+                USB_LINESTATE_TUNING_MULTI_HUB_FIX_BITS);
+
+    /* A kernel must not die on bus noise.  TinyUSB's rp2 hcd panic()s
+     * on a data-toggle mismatch (ERROR_DATA_SEQ) - and panic here is
+     * Fuzix's own, through mangle.h: "panic: ...", core1 reset, halt -
+     * and it enables HOST_RESUME without ever handling it, so that one
+     * would sit pending for ever (0.20 panicked on any such interrupt;
+     * 0.21 no longer does, but still never acknowledges it).  Both
      * arrive from ordinary electrical noise on this board (378 MHz,
      * PSRAM and HSTX beside the connector, every device behind a hub):
      * the field signature was constant lockups with the CRC/bit-stuff
-     * latches set (PC3-IRQ-REVIEW.md).  MMBasic ships the same hcd
-     * unpatched, but a BASIC interpreter rebooting is an annoyance
-     * where a kernel rebooting is a disk check.  Mask both at the
-     * controller: the hardware poll of the endpoint simply continues,
-     * and usb_rescue() clears the latches they leave behind. */
+     * latches set (PC3-IRQ-REVIEW.md).  Mask both at the controller:
+     * the hardware poll of the endpoint simply continues, and
+     * usb_rescue() clears the latches they leave behind.  The third
+     * panic the field found - "Invalid speed", a disconnected root port
+     * read at a transfer start - is gone in 0.21, together with the
+     * 16us NAK hammering that made keyboards drop in the first place
+     * (PC3-IRQ-REVIEW.md, 2026-09-01). */
     hw_clear_bits(&usb_hw->inte,
         USB_INTE_ERROR_DATA_SEQ_BITS | USB_INTE_HOST_RESUME_BITS);
 
 #ifndef PC3_NO_USB_BUS_RESET
+    /* The controller has already seen the hub (an attach is queued from
+     * the interrupt the moment the pull-downs went on), and the SE0 we
+     * are about to drive would queue a remove and a second attach behind
+     * it - a remove-during-enumeration of our own making, processed in
+     * order by TinyUSB.  With the interrupt masked here the edges
+     * coalesce: one pending CONN_DIS, read AFTER the hub has
+     * re-attached, becomes one attach on a stable bus.  (This was tried
+     * first for the 0.21 "buf_ctrl already available" panic and was not
+     * its cause - that was the hcd's RX-timeout path, usb/hcd_rp2040.patch
+     * - but it stays: fewer spurious events is the right shape.) */
+    irq_set_enabled(USBCTRL_IRQ, false);
     usb_bus_reset();    /* force any attached hub back to Default state */
     busy_wait_us(50000); /* let the hub re-detect its downstream ports */
+    irq_set_enabled(USBCTRL_IRQ, true);
 #endif
 
     usbh_inited = true;

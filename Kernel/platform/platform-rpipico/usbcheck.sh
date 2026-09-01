@@ -25,11 +25,17 @@
 # FetchContent path that does not exist with a local SDK.  Every gate
 # was green.  The published v0.17 kernel is an 0.18 build.
 #
-# 0.20 matters for USB HOST: it is what the PC3's MMBasic firmware uses,
-# and the host stack is where this machine's keyboard and hub live.
+# 0.21 matters for USB HOST: its RP2040/RP2350 host controller driver
+# was rewritten (EPX switching on the RP2350's STOP_EPX_ON_NAK, a 300us
+# NAK poll while a transfer is pending, no panic on a disconnected root
+# port), and that is what keeps this machine's keyboard on the bus.
+# 0.20 - which MMBasic still uses - retried a NAKing device every 16us
+# and lost keyboards at boot, saying "panic: Invalid speed" for it
+# (PC3-IRQ-REVIEW.md, 2026-09-01).  The kernel and MMBasic no longer
+# share a host-stack version, deliberately.
 
 WANT_MAJOR=0
-WANT_MINOR=20
+WANT_MINOR=21
 
 SDK=$1
 [ -n "$SDK" ] || { echo "usage: usbcheck.sh <pico-sdk-path>" >&2; exit 1; }

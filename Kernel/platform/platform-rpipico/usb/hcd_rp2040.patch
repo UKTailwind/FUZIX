@@ -1,0 +1,17 @@
+--- hcd_rp2040.c	(TinyUSB 0.21.0, pico-sdk lib/tinyusb)
++++ hcd_rp2040.c	(Pico Computer 3 kernel, usb/hcd_rp2040.patch)
+@@ -334,6 +334,14 @@
+     // Even if STOP_TRANS bit is clear, controller maybe in middle of retrying and may re-raise timeout once extra time
+     // Only handle if epx is active, don't carry more epx transfer since STOP_TRANS is raced and not safe.
+     if (epx->state == EPSTATE_ACTIVE) {
++      /* PC3: the stopped transfer's buffer is still armed (AVAIL set) -
++       * the controller never completed it.  Left there, the next EPX
++       * transfer - usbh's retry of this very request - is refused by
++       * bufctrl_write32 with "buf_ctrl already available", which is a
++       * panic.  epx_save_context() clears it for the switch case; do
++       * the same for the failure case.  Seen at every boot on an
++       * RP2350 host behind a hub (a status-stage IN timing out). */
++      usbh_dpram->epx_buf_ctrl = 0;
+       xfer_complete_isr(epx, XFER_RESULT_FAILED, false);
+     }
+   }
