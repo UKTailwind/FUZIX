@@ -116,6 +116,21 @@ the full count as an error and closed the connection — so a file
 longer than the window, about 5.6 KB, arrived cut off. Found while
 checking this release; it now writes until the file is out.
 
+**Updated kernel (2 September).** The `fuzix.uf2` on the release page was
+replaced the day after release with three fixes to the USB host driver,
+found by putting a flash drive and a touch panel on the hub beside the
+keyboard on this port's MicroPython sibling. They matter here too: a
+keyboard whose report descriptor runs past 128 bytes — some gaming
+keyboards — panicked the original kernel at boot (`buf_ctrl already
+available`); and a device slow to wake after its port reset was abandoned
+by the stack, which could cost you the keyboard when other devices share
+the hub. Long control transfers are now single-buffered, every freshly
+reset device gets 100 ms to collect itself before it must answer, and the
+host's event queue is four times deeper. Booting with a keyboard, a flash
+drive and a touch panel all attached is proven on the board; the issues
+are filed upstream (TinyUSB #3874–#3876). If your keyboard worked, nothing
+changes; if boot sometimes lost it, fetch the kernel again.
+
 ## New in v0.25, and in v0.24
 
 v0.24 was published without an announcement, so both releases are
