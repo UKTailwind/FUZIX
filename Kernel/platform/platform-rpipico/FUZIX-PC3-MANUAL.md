@@ -131,6 +131,20 @@ drive and a touch panel all attached is proven on the board; the issues
 are filed upstream (TinyUSB #3874–#3876). If your keyboard worked, nothing
 changes; if boot sometimes lost it, fetch the kernel again.
 
+**Updated kernel (3 September).** The `fuzix.uf2` was replaced once more
+with a set of USB host-driver hardening changes, validated against the
+PicoMite's own TinyUSB 0.21 work on this hardware. The failures they
+address trace to a documented silicon race — the RP2 chip keeps one
+handshake-result latch shared between the control endpoint and the
+keyboard's interrupt-endpoint poller, so a poll can make a control transfer
+look timed out — and the fix tolerates it above the driver: a short grace
+window on control-endpoint timeouts, keeping the control path exclusive to
+the device being brought up during enumeration, and disabling a hub port
+whose device failed to enumerate so it cannot disturb the next one. Proven
+booting with a keyboard, a flash drive and a touch panel on the hub, the
+console responsive throughout. If the keyboard already came up reliably,
+nothing changes.
+
 ## New in v0.25, and in v0.24
 
 v0.24 was published without an announcement, so both releases are
