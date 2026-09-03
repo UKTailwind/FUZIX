@@ -39,6 +39,11 @@ void pc3_usb_panic(const char *fmt, ...);
  * multi-device power-up.  64 entries is 768 bytes. */
 #define CFG_TUH_TASK_QUEUE_SZ       (64)
 
+/* Pending-control FIFO (default 4 with hubs).  Enumeration-exclusive dispatch
+ * (usb/usbh.patch) parks application control traffic here while a device
+ * enumerates.  8 entries is ~200 bytes. */
+#define CFG_TUH_CONTROL_PENDING_QUEUE_SZ (8)
+
 /* PC3_USB_TRACE: the stack's own enumeration trace, through the small
  * printf in usbtrace.c.  A hardware debugging kernel only - verbose,
  * and it slows the pump - but it is what says where enumeration stops.

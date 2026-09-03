@@ -189,3 +189,50 @@ before the root mounts - the keyboard or hub genuinely drops and
 re-appears while enumerating, and the stack now re-enumerates it; on a
 warm `reboot` the devices are stable and it attaches once. That drop is
 the field report's trigger, and it is benign now.
+
+## Addendum, 2026-09-03: the host hardening from the MicroPython port
+
+The PC3 MicroPython port carried the same TinyUSB 0.21 further, applying
+the hardening set the PicoMite validated on this hardware (its writeup is
+`PicoMite/docs/usb-host-hardening.html`; the MicroPython story is
+`ports/rp2/boards/PICO_COMPUTER_3/DEVELOPMENT_NOTES.md` §75). The
+root cause it names sits under the panics above: the RP2 SIE keeps **one**
+handshake-result latch shared between the control endpoint and the
+interrupt-endpoint poller (TinyUSB #3533), so an interrupt poll can
+overwrite a control transfer's ACK before the IRQ handler reads it — the
+transfer is misread as `RX_TIMEOUT`. The 100 ms recovery delay was partly
+outrunning that race, not just device wake-up.
+
+Three portable pieces are now in this kernel's build-time patches:
+
+- `usb/hcd_rp2040.patch` — an **EP0 RX-timeout grace window** (1 s, closed
+  by any EP0 completion). A timeout on endpoint 0 leaves the transfer
+  armed and outlasts the clobbered latch; expiry takes the original fail
+  path (with the buffer clear from the first addendum). Bulk and interrupt
+  keep the fast-fail — their flow control is NAK, never `RX_TIMEOUT`.
+- `usb/usbh.patch` — **enumeration-exclusive control dispatch**: while a
+  device enumerates, only address 0, the enumerating address and the hub
+  in use may claim the control slot; other control traffic waits in the
+  pending FIFO, with blocked entries rotated to the tail (gating the head
+  deadlocks — the enumeration's own transfers can queue behind a blocked
+  one). And a **failed enumeration disables its hub port**
+  (`CLEAR_FEATURE(PORT_ENABLE)`, async non-NULL callback), so an abandoned
+  device at address 0 cannot answer in parallel with the next bring-up.
+- `tusb_config.h` — `CFG_TUH_CONTROL_PENDING_QUEUE_SZ` 4 → 8.
+
+The MicroPython "keep the mount callbacks light" fix (a deferred-print
+ring) is **not** ported: it addressed `mp_printf` re-entering the VM
+through dupterm, which a kernel has no equivalent of, and this kernel's
+callbacks are already light — `tuh_mount_cb`/`tuh_umount_cb` are no-ops,
+only one keyboard is ever claimed, and the single `kputs` was proven on
+the v0.26 cold boot. Not adopted, by the doc's own measurement: the #3533
+reference driver rewrite (it enumerated *fewer* devices on the marginal
+rig).
+
+Board-proven on the PC3 (COM11, 2026-09-03): a clean boot with keyboard,
+stick and touch on the hub (no panic), the console fully responsive under
+load — the MicroPython port's first cut of this set wedged the console
+here, so a live shell is the datapoint that matters — and the keyboard
+typing. `SIE_STATUS=0x50800205`, `INT_EP_CTRL=0x06` (the one Corsair
+keyboard's two HID interfaces; Fuzix claims a single keyboard and ignores
+the rest by design, so that is a complete enumeration).
