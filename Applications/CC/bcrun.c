@@ -4006,6 +4006,12 @@ int main(int argc, char *argv[])
 {
 	int i = 1;
 
+#ifdef PC3_HOST
+	/* saveimage, loadjpg and the rest are found beside this program,
+	   wherever it was installed, as /usr/bin is one place on the board;
+	   the runtime spawns them by bare name through the PATH. */
+	pc3_path_prepend();
+#endif
 	while (i < argc && argv[i][0] == '-') {
 		if (!strcmp(argv[i], "-t"))
 			trace = 1;

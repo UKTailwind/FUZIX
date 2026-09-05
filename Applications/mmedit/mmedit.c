@@ -18,6 +18,9 @@
 #include <unistd.h>
 #include <errno.h>
 #include "mmedit.h"
+#ifdef PC3_HOST
+#include "pc3client.h"
+#endif
 
 #define CC_CMD  "/usr/bin/cc"
 
@@ -96,6 +99,29 @@ int main(int argc, char *argv[])
                    "nothing to compile\n", argv[1]);
             return 0;
         }
+#ifdef PC3_HOST
+        /* The cc beside this program, wherever that is: /usr/bin/cc on
+           a PC is the system's compiler. */
+        {
+            static char hcc[4200];
+            char dir[4096];
+            const char *cc = CC_CMD;
+
+            if (pc3_exe_dir(dir, sizeof dir) == 0) {
+                snprintf(hcc, sizeof hcc, "%s/cc", dir);
+                cc = hcc;
+            }
+            printf("cc -r %s\n", argv[1]);
+            fflush(stdout);
+            av[0] = (char *) cc;
+            av[1] = "-r";
+            av[2] = argv[1];
+            av[3] = NULL;
+            execv(cc, av);
+            perror(cc);
+            return 1;
+        }
+#else
         printf("cc -r %s\n", argv[1]);
         fflush(stdout);                 /* exec does not flush for us */
         av[0] = (char *) CC_CMD;
@@ -105,6 +131,7 @@ int main(int argc, char *argv[])
         execv(CC_CMD, av);
         perror(CC_CMD);
         return 1;
+#endif
     }
     return 0;
 }

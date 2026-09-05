@@ -35,6 +35,9 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#ifdef PC3_HOST
+#include "pc3client.h"
+#endif
 
 #define LIBPATH		"/usr/lib/cc/"
 #define CMD_CPP		"/usr/bin/cpp"
@@ -52,7 +55,11 @@
 static const char *libpath = LIBPATH;
 static const char *cppcmd = CMD_CPP;
 static const char *mmbccmd = CMD_MMBC;
+#ifdef PC3_HOST
+static char incpath[4200];	/* -I plus an install path of any length */
+#else
 static char incpath[80];
+#endif
 static int verbose;
 static int keep;
 static int runit;		/* -r: exec the result when it builds */
@@ -177,7 +184,11 @@ static void onsig(int sig)
  */
 /* Written at the front of the final object before cc2 runs, so the
    kernel's #! support execs the result directly: cc prog.c; ./prog.bc */
+#ifdef PC3_HOST
+static const char shebang[] = "#!/usr/bin/env bcrun\n";  /* wherever it is */
+#else
 static const char shebang[] = "#!/usr/bin/bcrun\n";
+#endif
 static int put_shebang;
 
 static void run(char **argv, const char *in, const char *out)
@@ -292,6 +303,26 @@ int main(int argc, char *argv[])
 
 	*out = 0;
 
+#ifdef PC3_HOST
+	/* Installed anywhere, or run from a build tree: the passes and the
+	   headers are in ../lib/cc/ beside this program's directory, and
+	   cpp, mmbc and bcrun are beside it.  /usr/lib/cc and /usr/bin are
+	   the board's places, and on a PC /usr/bin/cc is somebody else's. */
+	{
+		static char hlib[4200], hcpp[4200], hmmbc[4200];
+		char dir[4096];
+
+		if (pc3_exe_dir(dir, sizeof dir) == 0) {
+			snprintf(hlib, sizeof hlib, "%s/../lib/cc/", dir);
+			snprintf(hcpp, sizeof hcpp, "%s/cpp", dir);
+			snprintf(hmmbc, sizeof hmmbc, "%s/mmbc", dir);
+			libpath = hlib;
+			cppcmd = hcpp;
+			mmbccmd = hmmbc;
+		}
+		pc3_path_prepend();
+	}
+#endif
 	for (i = 1; i < argc; i++) {
 		if (argv[i][0] == '-' && argv[i][1]) {
 			switch (argv[i][1]) {
@@ -467,6 +498,29 @@ int main(int argc, char *argv[])
 		char path[80];
 		char *rv[2];
 
+#ifdef PC3_HOST
+		/* bcrun by its own path, beside this program: the object's #!
+		   line needs bcrun on the PATH, and a build tree has no such
+		   thing on it. */
+		{
+			static char hbc[4200];
+			char dir[4096];
+			char *hv[3];
+
+			if (pc3_exe_dir(dir, sizeof dir) == 0) {
+				snprintf(hbc, sizeof hbc, "%s/bcrun", dir);
+				hv[0] = hbc;
+				hv[1] = out;
+				hv[2] = NULL;
+				if (verbose)
+					fprintf(stderr, "+ %s %s\n", hbc, out);
+				fflush(stdout);
+				execv(hbc, hv);
+				perror(hbc);
+				return 1;
+			}
+		}
+#endif
 		if (strchr(out, '/'))
 			strcpy(path, out);
 		else {

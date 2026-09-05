@@ -52,6 +52,8 @@
 #ifdef PC3_HOST
 int pc3_sys_open(void);
 int pc3_sys_ioctl(int fd, unsigned long code, void *arg);
+int pc3_rd1(void);              /* one byte from the terminal OR the window */
+int pc3_key_ready(void);        /* the window's keyboard, when there is no tty */
 #define mm_sys_open()              pc3_sys_open()
 #define mm_sys_ioctl(fd, code, a)  pc3_sys_ioctl((fd), (code), (void *)(a))
 #else
@@ -2917,9 +2919,17 @@ static void mm_kpush(int a, int b, int c, int d)
    decides whether this waits for the rest of a sequence. */
 static int mm_rd1(void)
 {
+#ifdef PC3_HOST
+    /* The terminal and the window's keyboard, merged: on the board one
+       keyboard feeds one tty; on a PC the program has a terminal and a
+       window, and a key from either is a key.  pc3_rd1 honours the
+       VMIN/VTIME this file sets on the terminal (pc3client.c). */
+    return pc3_rd1();
+#else
     unsigned char c;
 
     return (int)read(0, &c, 1) == 1 ? (int)c : -1;
+#endif
 }
 
 /*
@@ -3004,7 +3014,15 @@ static int mm_raw_hold(void)
         if (!isatty(0) || tcgetattr(0, &mm_tty_cooked) != 0) {
             if (MM_RAWDBG)
                 fprintf(stderr, "[rawhold: no tty, errno %d]\r\n", errno);
+#ifdef PC3_HOST
+            /* No terminal, but a window may be a keyboard: INKEY$ and
+               KEYDOWN work for a program started from a desktop, or a
+               test, with no tty at all.  There is nothing to hold or
+               give back, so this is a yes or a no, asked each time. */
+            return pc3_key_ready();
+#else
             return 0;
+#endif
         }
         mm_tty_raw = mm_tty_cooked;
         mm_tty_raw.c_lflag &= ~(unsigned)(ICANON | ECHO);
@@ -3302,6 +3320,13 @@ char *mm_inkey(void)
                 c = mm_esc_decode();
                 tcsetattr(0, TCSANOW, &mm_tty_raw);
             }
+#ifdef PC3_HOST
+            /* No terminal to set the wait on, so the sequence came from
+               the window - and the server delivers one whole, so the
+               rest is already there to be read without waiting. */
+            else
+                c = mm_esc_decode();
+#endif
         }
         if (c >= 0) {
             t[0] = 1;
