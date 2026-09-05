@@ -67,6 +67,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include "pc3sys.h"
 
 #define GFXIOC_INFO	0x000E
 #define GFXIOC_PIXELS	0x0014
@@ -390,7 +391,7 @@ static void flush(void)
 	   caller is a BASIC program, which takes a non-zero exit as an
 	   error, so stopping here is what MMBasic does when a command
 	   cannot do what it was asked. */
-	if (ioctl(sysfd, GFXIOC_PIXELS, &b) < 0)
+	if (pc3_ioctl(sysfd, GFXIOC_PIXELS, &b) < 0)
 		die("cannot draw to the screen");
 	npts = 0;
 }
@@ -617,10 +618,10 @@ int main(int argc, char *argv[])
 	   for it may not have set a mode yet - the same rule loadpng's
 	   sprite mode follows. */
 	if (!sprite) {
-		sysfd = open("/dev/sys", O_RDWR);
+		sysfd = pc3_open_sys();
 		if (sysfd < 0)
 			die("no /dev/sys");
-		if (ioctl(sysfd, GFXIOC_INFO, &gi) < 0)
+		if (pc3_ioctl(sysfd, GFXIOC_INFO, &gi) < 0)
 			die("cannot ask about the screen");
 	}
 

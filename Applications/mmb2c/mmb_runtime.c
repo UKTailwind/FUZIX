@@ -34,6 +34,31 @@
 #include <signal.h>     /* the console must be given back on a signal too */
 #endif
 
+/*
+ * THE ONE DOOR TO /dev/sys.
+ *
+ * Every hardware request the runtime makes - drawing, sound, the RTC,
+ * I2C, SPI, the pin claims - is an open of /dev/sys and an ioctl on
+ * it, and on the board and under the host gates that is exactly what
+ * the two macros below are.  Built with PC3_HOST (the pc3host tree,
+ * where bcrun runs on a PC) the same calls go to the PC3 device server
+ * through libpc3client, which answers the same codes with the same
+ * structures over a socket.  This is the whole of the runtime's
+ * knowledge that it might not be on a PC3.
+ *
+ * /dev/gpio is not routed: the pin path stores to registers, and a PC
+ * has none.  It stays a real open and fails politely there.
+ */
+#ifdef PC3_HOST
+int pc3_sys_open(void);
+int pc3_sys_ioctl(int fd, unsigned long code, void *arg);
+#define mm_sys_open()              pc3_sys_open()
+#define mm_sys_ioctl(fd, code, a)  pc3_sys_ioctl((fd), (code), (void *)(a))
+#else
+#define mm_sys_open()              open("/dev/sys", O_RDWR)
+#define mm_sys_ioctl(fd, code, a)  ioctl((fd), (code), (a))
+#endif
+
 /* ================= error state ===================================== *
  *
  * Declared here because the output and store paths below test it: with
@@ -2357,7 +2382,7 @@ MMINTEGER mm_rtcreg(int reg, int val, int write)
     rq.val = (unsigned char)val;
     rq.write = (unsigned char)(write ? 1 : 0);
     rq.pad = 0;
-    if (ioctl(fd, MM_PICOIOC_RTCREG, &rq) < 0)
+    if (mm_sys_ioctl(fd, MM_PICOIOC_RTCREG, &rq) < 0)
         return -1;
     return rq.val;
 }
@@ -2380,7 +2405,7 @@ MMINTEGER mm_i2c_open(int sda, int scl, int khz, int timeout_ms)
 {
     struct {
         unsigned char bus, sda, scl, pad;
-        unsigned long khz;
+        unsigned int khz;
         unsigned short timeout_ms, pad2;
     } rq;
     int fd = mm_gfx_open();
@@ -2400,7 +2425,7 @@ MMINTEGER mm_i2c_open(int sda, int scl, int khz, int timeout_ms)
     /* WHY it failed, not just that it did: busy, bad pins and bad speed
        are three different things for the program to say. */
     errno = 0;
-    if (ioctl(fd, MM_PICOIOC_I2COPEN, &rq) < 0)
+    if (mm_sys_ioctl(fd, MM_PICOIOC_I2COPEN, &rq) < 0)
         return errno ? -errno : -1;
     return 0;
 }
@@ -2410,7 +2435,7 @@ void mm_i2c_close(void)
     int fd = mm_gfx_open();
 
     if (fd >= 0)
-        (void)ioctl(fd, MM_PICOIOC_I2CCLOSE, (void *)1);
+        (void)mm_sys_ioctl(fd, MM_PICOIOC_I2CCLOSE, (void *)1);
 }
 
 /*
@@ -2433,7 +2458,7 @@ MMINTEGER mm_spi_open(int sck, int tx, int rx, int hz, int mode, int bits)
 {
     struct {
         unsigned char bus, sck, tx, rx;
-        unsigned long hz;
+        unsigned int hz;
         unsigned char mode, bits;
         unsigned short pad;
     } rq;
@@ -2451,7 +2476,7 @@ MMINTEGER mm_spi_open(int sck, int tx, int rx, int hz, int mode, int bits)
     rq.pad = 0;
     errno = 0;
     {
-        int r = ioctl(fd, MM_PICOIOC_SPIOPEN, &rq);
+        int r = mm_sys_ioctl(fd, MM_PICOIOC_SPIOPEN, &rq);
 
         if (r < 0)
             return errno ? -errno : -1;
@@ -2475,7 +2500,7 @@ MMINTEGER mm_spi_xfer(unsigned char *tx, unsigned char *rx, int len)
 {
     struct {
         unsigned char bus, pad0, pad1, pad2;
-        unsigned long len;
+        unsigned int len;
         unsigned char *tx;
         unsigned char *rx;
     } m;
@@ -2490,7 +2515,7 @@ MMINTEGER mm_spi_xfer(unsigned char *tx, unsigned char *rx, int len)
     m.tx = tx;
     m.rx = rx;
     errno = 0;
-    r = ioctl(fd, MM_PICOIOC_SPIXFER, &m);
+    r = mm_sys_ioctl(fd, MM_PICOIOC_SPIXFER, &m);
     if (r < 0)
         return errno ? -errno : -1;
     return r;
@@ -2501,7 +2526,7 @@ void mm_spi_close(void)
     int fd = mm_gfx_open();
 
     if (fd >= 0)
-        (void)ioctl(fd, MM_PICOIOC_SPICLOSE, (void *)0);   /* bus 0 */
+        (void)mm_sys_ioctl(fd, MM_PICOIOC_SPICLOSE, (void *)0);   /* bus 0 */
 }
 
 MMINTEGER mm_i2c_msg(int bus, int addr, int read, int n,
@@ -2518,7 +2543,7 @@ MMINTEGER mm_i2c_msg(int bus, int addr, int read, int n,
     m.flags = (unsigned char)(hold ? MM_I2CF_HOLD : 0);
     m.data = buf;
     errno = 0;
-    if (ioctl(fd, MM_PICOIOC_I2CXFER, &m) < 0)
+    if (mm_sys_ioctl(fd, MM_PICOIOC_I2CXFER, &m) < 0)
         return mm_i2c_setstat(errno ? -errno : -1);
     return mm_i2c_setstat(0);
 }
@@ -3780,10 +3805,10 @@ MMINTEGER mm_play_owner(void)
     int who;
 
     if (mm_snd_fd == -2)
-        mm_snd_fd = open("/dev/sys", O_RDWR);
+        mm_snd_fd = mm_sys_open();
     if (mm_snd_fd < 0)
         return 0;
-    who = ioctl(mm_snd_fd, MM_SNDIOC_PCMOWNER, 0);
+    who = mm_sys_ioctl(mm_snd_fd, MM_SNDIOC_PCMOWNER, 0);
     return who > 0 ? who : 0;
 }
 
@@ -3814,7 +3839,7 @@ MMINTEGER mm_snd_cmd(MMINTEGER op, MMINTEGER a, MMINTEGER b,
     struct mm_sndmmcmd m;
 
     if (mm_snd_fd == -2)
-        mm_snd_fd = open("/dev/sys", O_RDWR);
+        mm_snd_fd = mm_sys_open();
     if (mm_snd_fd < 0)
         return -1;
     m.op = (unsigned char)op;
@@ -3824,7 +3849,7 @@ MMINTEGER mm_snd_cmd(MMINTEGER op, MMINTEGER a, MMINTEGER b,
     m.p1 = (int)p1;
     m.p2 = (int)p2;
     m.p3 = (int)p3;
-    if (ioctl(mm_snd_fd, MM_SNDIOC_MMCMD, &m) < 0)
+    if (mm_sys_ioctl(mm_snd_fd, MM_SNDIOC_MMCMD, &m) < 0)
         return (errno == EBUSY) ? -2 : -1;
     return 0;
 }
@@ -3832,10 +3857,10 @@ MMINTEGER mm_snd_cmd(MMINTEGER op, MMINTEGER a, MMINTEGER b,
 MMINTEGER mm_snd_stop(void)
 {
     if (mm_snd_fd == -2)
-        mm_snd_fd = open("/dev/sys", O_RDWR);
+        mm_snd_fd = mm_sys_open();
     if (mm_snd_fd < 0)
         return -1;
-    ioctl(mm_snd_fd, MM_SNDIOC_MMSTOP, 0);
+    mm_sys_ioctl(mm_snd_fd, MM_SNDIOC_MMSTOP, 0);
     return 0;
 }
 
@@ -4105,7 +4130,7 @@ static void mm_gfx_atexit(void)
 static int mm_gfx_open(void)
 {
     if (mm_gfx_fd == -2) {
-        mm_gfx_fd = open("/dev/sys", O_RDWR);
+        mm_gfx_fd = mm_sys_open();
         if (mm_gfx_fd >= 0)
             atexit(mm_gfx_atexit);
     }
@@ -4119,7 +4144,7 @@ static void mm_gfx_setcol(MMINTEGER rgb)
     if (rgb == MM_CUR)
         rgb = mm_gfx_fg;
     if (rgb != mm_gfx_col) {
-        ioctl(mm_gfx_fd, MM_GFXIOC_COLOUR, (void *)(long)(rgb & 0xFFFFFF));
+        mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_COLOUR, (void *)(long)(rgb & 0xFFFFFF));
         mm_gfx_col = rgb;
     }
 }
@@ -4168,16 +4193,22 @@ static int mm_gcw = 8, mm_gch = 12;     /* font 1, until FONT says else */
 static void mm_con_mirror(int on)
 {
     if (mm_gfx_open() >= 0)
-        ioctl(mm_gfx_fd, MM_PICO_CONMIRROR, (void *)(long)(on ? 1 : 0));
+        mm_sys_ioctl(mm_gfx_fd, MM_PICO_CONMIRROR, (void *)(long)(on ? 1 : 0));
 }
 #define MM_GFX_SCROLL   0x001B
 #define MM_GFX_MAP      0x001E
 #define MM_GFX_MAPCTL   0x001F
 
+/* THE FIELDS ARE THE KERNEL'S WIDTHS.  These mirrors of pico_ioctl.h are
+ * written in int, never long: long is 32 bits on the board and 64 on a
+ * PC, and a mirror that widened would put every field after it in the
+ * wrong place - which is how, hosted, a colour array read at the wrong
+ * stride made every second pixel black.  The same holds for every
+ * structure in this file that crosses into the kernel. */
 struct mm_gfx_text {
     short x, y;
     unsigned char scale, font;
-    long fg, bg;
+    int fg, bg;
     unsigned short len;
     void *str;
 };
@@ -4273,7 +4304,7 @@ MMINTEGER mm_fontinfo(MMINTEGER font, MMINTEGER *w, MMINTEGER *h)
         mm_iodrain();
     }
     mm_tb("[o");
-    if (ioctl(mm_gfx_fd, MM_GFX_FONTINFO, &fi) < 0)
+    if (mm_sys_ioctl(mm_gfx_fd, MM_GFX_FONTINFO, &fi) < 0)
         return -1;                      /* a kernel without the call */
     mm_tb("[p");
     if (fi.width == 0)
@@ -4328,7 +4359,7 @@ MMINTEGER mm_fontdef(MMINTEGER font, MMINTEGER addr, MMINTEGER bytes)
     fd.pad[0] = fd.pad[1] = fd.pad[2] = 0;
     fd.addr = (unsigned int)addr;
     fd.bytes = (unsigned int)bytes;
-    if (ioctl(mm_gfx_fd, MM_GFX_FONTDEF, &fd) < 0)
+    if (mm_sys_ioctl(mm_gfx_fd, MM_GFX_FONTDEF, &fd) < 0)
         return -1;
     return 0;
 }
@@ -4342,7 +4373,7 @@ MMINTEGER mm_fontaddr(MMINTEGER font)
     fa.font = (unsigned char)font;
     fa.pad[0] = fa.pad[1] = fa.pad[2] = 0;
     fa.addr = fa.bytes = 0;
-    if (ioctl(mm_gfx_fd, MM_GFX_FONTADDR, &fa) < 0)
+    if (mm_sys_ioctl(mm_gfx_fd, MM_GFX_FONTADDR, &fa) < 0)
         return 0;               /* a kernel without the call */
     return (MMINTEGER)fa.addr;
 }
@@ -4375,7 +4406,7 @@ static void mm_gflush(void)
     gt.len = (unsigned short)mm_gn;
     gt.str = mm_gbuf;
     if (mm_gfx_open() >= 0)
-        ioctl(mm_gfx_fd, MM_GFX_TEXT, &gt);
+        mm_sys_ioctl(mm_gfx_fd, MM_GFX_TEXT, &gt);
     mm_gx += mm_gn * mm_gcw * mm_gscale;
     mm_gn = 0;
 }
@@ -4396,7 +4427,7 @@ void mm_map(MMINTEGER index, MMINTEGER rgb)
         sprintf(msg, "MAP index must be 0 to 15, not %ld", (long)index);
         mm_error(msg);
     }
-    else if (ioctl(mm_gfx_fd, MM_GFX_MAP,
+    else if (mm_sys_ioctl(mm_gfx_fd, MM_GFX_MAP,
                    (void *)(long)(((index & 0xFF) << 24)
                                   | (rgb & 0xFFFFFF))) < 0)
         mm_error("MAP needs a 16-colour mode");
@@ -4406,7 +4437,7 @@ void mm_map_set(void)
 {
     mm_pix_drain();             /* palette applied after the pixels it recolours */
     if (mm_gfx_open() >= 0 &&
-        ioctl(mm_gfx_fd, MM_GFX_MAPCTL, (void *)0L) < 0)
+        mm_sys_ioctl(mm_gfx_fd, MM_GFX_MAPCTL, (void *)0L) < 0)
         mm_error("MAP needs a 16-colour mode");
 }
 
@@ -4414,7 +4445,7 @@ void mm_map_reset(void)
 {
     mm_pix_drain();             /* as mm_map_set */
     if (mm_gfx_open() >= 0 &&
-        ioctl(mm_gfx_fd, MM_GFX_MAPCTL, (void *)1L) < 0)
+        mm_sys_ioctl(mm_gfx_fd, MM_GFX_MAPCTL, (void *)1L) < 0)
         mm_error("MAP needs a 16-colour mode");
 }
 
@@ -4573,7 +4604,7 @@ void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
      * for either. */
     mm_tb("[x");
     mm_tb_hex((unsigned long)gt.str);
-    r = ioctl(mm_gfx_fd, MM_GFX_TEXT, &gt);
+    r = mm_sys_ioctl(mm_gfx_fd, MM_GFX_TEXT, &gt);
     mm_tb("[k");
     if (r >= 0)
         mm_gx = r;
@@ -4646,7 +4677,7 @@ static int mm_gputc(int c)
         if (mm_gy + cell > (int)mm_vres()) {
             mm_gy -= cell;
             if (mm_gfx_open() >= 0)
-                ioctl(mm_gfx_fd, MM_GFX_SCROLL,
+                mm_sys_ioctl(mm_gfx_fd, MM_GFX_SCROLL,
                       (void *)(long)((cell << 24) | (mm_gfx_bg & 0xFFFFFF)));
         }
         return 1;
@@ -4761,7 +4792,7 @@ void mm_mode(MMINTEGER n)
     }
     if (mm_gfx_open() < 0)
         return;
-    ioctl(mm_gfx_fd, MM_GFXIOC_MODE, &k);
+    mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_MODE, &k);
     /* The kernel holds its current colour already reduced to the mode
      * that was live when it was set, so the cached value is now
      * meaningless: force the next draw to push again. */
@@ -4810,7 +4841,7 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
      * two implementations of that is a silent divergence waiting to
      * happen. */
     mm_pix_drain();
-    r = ioctl(mm_gfx_fd, MM_GFXIOC_GETPIXEL,
+    r = mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_GETPIXEL,
               (void *)(long)MM_GFX_PACK((int)x, (int)y));
     return (r < 0) ? 0 : (MMINTEGER)r;  /* off-screen reads black */
 }
@@ -4828,7 +4859,7 @@ struct mm_gfx_blit {
 /* The rectangle form: rows of len bytes, stride apart in the target and
  * contiguous here.  Must match struct gfx_blitr in pico_ioctl.h. */
 struct mm_gfx_blitr {
-    unsigned long offset;
+    unsigned int offset;
     unsigned short len;
     unsigned short rows;
     unsigned short stride;
@@ -4861,7 +4892,7 @@ MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf)
     b.offset = (unsigned short)offset;
     b.len = (unsigned short)len;
     b.buf = buf;
-    return ioctl(mm_gfx_fd, MM_GFXIOC_BLITRD, &b) < 0 ? -1 : 0;
+    return mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_BLITRD, &b) < 0 ? -1 : 0;
 }
 
 /*
@@ -4884,7 +4915,7 @@ MMINTEGER mm_fb_readr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
     b.stride = (unsigned short)stride;
     b.pad = 0;
     b.buf = buf;
-    return ioctl(mm_gfx_fd, MM_GFXIOC_BLITRDR, &b) < 0 ? -1 : 0;
+    return mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_BLITRDR, &b) < 0 ? -1 : 0;
 }
 
 MMINTEGER mm_fb_putr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
@@ -4901,7 +4932,7 @@ MMINTEGER mm_fb_putr(MMINTEGER offset, MMINTEGER len, MMINTEGER rows,
     b.stride = (unsigned short)stride;
     b.pad = 0;
     b.buf = (void *)buf;
-    return ioctl(mm_gfx_fd, MM_GFXIOC_BLITR, &b) < 0 ? -1 : 0;
+    return mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_BLITR, &b) < 0 ? -1 : 0;
 }
 
 #define MM_GFXIOC_BLIT 0x0005
@@ -4929,7 +4960,7 @@ MMINTEGER mm_fb_scroll2(MMINTEGER dx, MMINTEGER dy, MMINTEGER fill)
     s.dx = (short)dx;
     s.dy = (short)dy;
     s.fill = (int)fill;
-    return ioctl(mm_gfx_fd, MM_GFXIOC_SCROLL2, &s) < 0 ? -1 : 0;
+    return mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_SCROLL2, &s) < 0 ? -1 : 0;
 }
 
 /*
@@ -4950,7 +4981,7 @@ MMINTEGER mm_fb_put(MMINTEGER offset, MMINTEGER len, const void *buf)
     b.offset = (unsigned short)offset;
     b.len = (unsigned short)len;
     b.buf = (void *)buf;
-    return ioctl(mm_gfx_fd, MM_GFXIOC_BLIT, &b) < 0 ? -1 : 0;
+    return mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_BLIT, &b) < 0 ? -1 : 0;
 }
 
 /*
@@ -4968,7 +4999,7 @@ MMINTEGER mm_colour_index(MMINTEGER rgb)
 
     if (mm_gfx_open() < 0)
         return -1;
-    r = ioctl(mm_gfx_fd, MM_GFXIOC_COLOUR, (void *)(long)(rgb & 0xFFFFFF));
+    r = mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_COLOUR, (void *)(long)(rgb & 0xFFFFFF));
     mm_gfx_col = -1;            /* we moved it: make the cache re-push */
     return (r < 0) ? -1 : (MMINTEGER)r;
 }
@@ -4998,7 +5029,7 @@ static MMINTEGER mm_gfx_dim(int want_h)
 
     if (mm_gfx_open() < 0)
         return 0;
-    if (ioctl(mm_gfx_fd, MM_GFXIOC_INFO, &gi) < 0)
+    if (mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_INFO, &gi) < 0)
         return 0;
     return want_h ? (MMINTEGER)gi.height : (MMINTEGER)gi.width;
 }
@@ -5016,7 +5047,7 @@ MMINTEGER mm_fb_geom(void)
 
     if (mm_gfx_open() < 0)
         return -1;
-    if (ioctl(mm_gfx_fd, MM_GFXIOC_INFO, &gi) < 0)
+    if (mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_INFO, &gi) < 0)
         return -1;
     return ((MMINTEGER)gi.stride << 8) | (MMINTEGER)gi.bpp;
 }
@@ -5033,7 +5064,7 @@ int mm_board_no(void)
     int n = 3;
 
     if (mm_gfx_open() >= 0)
-        (void)ioctl(mm_gfx_fd, MM_PICOIOC_BOARD, &n);
+        (void)mm_sys_ioctl(mm_gfx_fd, MM_PICOIOC_BOARD, &n);
     return n;
 }
 
@@ -5051,7 +5082,7 @@ MMINTEGER mm_rand32(void)
     unsigned long r = 0;
 
     if (mm_gfx_open() >= 0)
-        (void)ioctl(mm_gfx_fd, MM_PICOIOC_RANDOM, &r);
+        (void)mm_sys_ioctl(mm_gfx_fd, MM_PICOIOC_RANDOM, &r);
     return (MMINTEGER)r;
 }
 
@@ -5098,7 +5129,7 @@ MMINTEGER mm_keydown(MMINTEGER n)
     d.count = d.mods = d.locks = 0;
     d.key[0] = d.key[1] = d.key[2] = 0;
     d.key[3] = d.key[4] = d.key[5] = 0;
-    if (mm_gfx_open() < 0 || ioctl(mm_gfx_fd, MM_PICOIOC_KEYDOWN, &d) < 0)
+    if (mm_gfx_open() < 0 || mm_sys_ioctl(mm_gfx_fd, MM_PICOIOC_KEYDOWN, &d) < 0)
         return 0;               /* no keyboard is "nothing held", not an error */
     if (n == 0)
         return d.count;
@@ -5171,7 +5202,7 @@ static void mm_gfx_flush_pts(int n)
     b.flags = 0;
     b.items = mm_ptbuf;
     b.colours = 0;
-    ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
+    mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
 }
 
 static void mm_gfx_rect(int x1, int y1, int x2, int y2)
@@ -5180,7 +5211,7 @@ static void mm_gfx_rect(int x1, int y1, int x2, int y2)
 
     r.x1 = (short)x1; r.y1 = (short)y1;
     r.x2 = (short)x2; r.y2 = (short)y2;
-    ioctl(mm_gfx_fd, MM_GFXIOC_RECT, &r);
+    mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_RECT, &r);
 }
 
 /*
@@ -5216,10 +5247,22 @@ static void mm_gfx_rect(int x1, int y1, int x2, int y2)
 
 static unsigned long mm_us_fast(void)
 {
+#ifdef PC3_HOST
+    /* No TIMER0 on a PC.  This clock bounds how long a queued pixel may
+       wait, so any monotonic microsecond count serves; the register
+       read above it is the one thing in this file that names a board
+       address, and it is the one thing a host build must not do. */
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned long)ts.tv_sec * 1000000UL +
+           (unsigned long)ts.tv_nsec / 1000UL;
+#else
     return *(volatile unsigned long *)MM_TIMERAWL;
+#endif
 }
 
-static unsigned long mm_colq[MM_BATCH]; /* RGB888 per queued point */
+static unsigned int mm_colq[MM_BATCH];  /* RGB888 per queued point, 32-bit on the wire */
 static int mm_pixn;                     /* how many are queued */
 static unsigned long mm_pixt0;          /* fast-clock us at the first */
 static int mm_fastclk = -1;             /* -1 = not asked yet */
@@ -5243,7 +5286,7 @@ static int mm_have_fastclk(void)
 
         mm_fastclk = 0;
         if (mm_gfx_fd >= 0 &&
-            ioctl(mm_gfx_fd, MM_PICOIOC_BOARD, &n) >= 0 &&
+            mm_sys_ioctl(mm_gfx_fd, MM_PICOIOC_BOARD, &n) >= 0 &&
             (n == 2 || n == 3))
             mm_fastclk = 1;
     }
@@ -5262,7 +5305,7 @@ static void mm_pix_drain(void)
     b.colours = mm_colq;
     mm_pixn = 0;                        /* before the call: a failed
                                            ioctl must not re-queue */
-    ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
+    mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
 }
 
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb)
@@ -5322,7 +5365,7 @@ void mm_plot(const short *xy, MMINTEGER n, MMINTEGER rgb)
             k = MM_BATCH;
         b.count = (unsigned short)k;
         b.items = (void *)(xy + done * 2);
-        ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
+        mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
         done += k;
     }
 }
@@ -5344,7 +5387,7 @@ void mm_fill(const short *xyxy, MMINTEGER n, MMINTEGER rgb)
             k = MM_BATCH;
         b.count = (unsigned short)k;
         b.items = (void *)(xyxy + done * 4);
-        ioctl(mm_gfx_fd, MM_GFXIOC_RECTS, &b);
+        mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_RECTS, &b);
         done += k;
     }
 }
@@ -5418,7 +5461,7 @@ void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
                MMINTEGER rgb, MMINTEGER count)
 {
     mm_pix_drain();             /* draw order, and this reuses mm_ptbuf */
-    static unsigned long colbuf[MM_BATCH];
+    static unsigned int colbuf[MM_BATCH];
     struct mm_gfx_batch b;
     MMINTEGER i;
     int n = 0;
@@ -5440,7 +5483,7 @@ void mm_pixels(const MMFLOAT *xf, const MMINTEGER *xi,
             b.flags = 0;
             b.items = mm_ptbuf;
             b.colours = (cf || ci) ? (void *)colbuf : 0;
-            ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
+            mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
             n = 0;
         }
     }
@@ -5481,14 +5524,14 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
         static int sysfd = -2;
 
         if (sysfd == -2)
-            sysfd = open("/dev/sys", O_RDWR);
+            sysfd = mm_sys_open();
         if (sysfd < 0)
             return -1;
         rq.cls = (unsigned char)val;    /* PLK_PIN / PLK_ADC */
         rq.idx = (unsigned char)pin;
         rq.flags = 0;
         rq.pad = 0;
-        return ioctl(sysfd, MM_PLKIOC_CLAIM, &rq) ? -1 : 0;
+        return mm_sys_ioctl(sysfd, MM_PLKIOC_CLAIM, &rq) ? -1 : 0;
     }
     gr.pin = (unsigned char)pin;
     gr.val = (unsigned char)val;
@@ -5554,9 +5597,9 @@ MMINTEGER mm_pinct(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
 static struct mm_capreq {
     unsigned char pin, arg;
     unsigned short pad;
-    unsigned long seq, lvl;
-    unsigned long us[MM_CAP_RING];
-    unsigned long ev[MM_CAP_RING];      /* the interrupt's event bits */
+    unsigned int seq, lvl;
+    unsigned int us[MM_CAP_RING];
+    unsigned int ev[MM_CAP_RING];      /* the interrupt's event bits */
 } mm_cap;
 
 MMINTEGER mm_pincap(MMINTEGER op, MMINTEGER pin, MMINTEGER arg)
@@ -5588,7 +5631,7 @@ MMINTEGER mm_pincap(MMINTEGER op, MMINTEGER pin, MMINTEGER arg)
 /* Where the kernel's PIO-output word buffer is (see mmb_runtime.h). */
 MMINTEGER mm_pobuf(void)
 {
-    struct { unsigned long addr, words; } pb;
+    struct { unsigned int addr, words; } pb;
 
     if (mm_gpio_fd == -2)
         mm_gpio_fd = open("/dev/gpio", O_RDWR);
@@ -5989,20 +6032,20 @@ static int mm_fb_open_hw(int claim, int which)
 {
     if (mm_gfx_open() < 0)
         return -1;
-    return ioctl(mm_gfx_fd, MM_GFXIOC_FBOPEN,
+    return mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_FBOPEN,
                  (void *)(long)((which << 8) | claim));
 }
 
 static void mm_fb_sel_hw(int which)
 {
     if (mm_gfx_open() >= 0)
-        ioctl(mm_gfx_fd, MM_GFXIOC_FBSEL, (void *)(long)which);
+        mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_FBSEL, (void *)(long)which);
 }
 
 static void mm_fb_copy_hw(int src, int dst)
 {
     if (mm_gfx_open() >= 0)
-        ioctl(mm_gfx_fd, MM_GFXIOC_FBCOPY2,
+        mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_FBCOPY2,
               (void *)(long)((src << 4) | dst));
 }
 
@@ -6031,7 +6074,7 @@ static void mm_fb_vsync_wait(void)
     if (mm_gfx_open() < 0)
         return;
     for (i = 0; i < 32; i++)
-        if (ioctl(mm_gfx_fd, MM_GFXIOC_VSYNCTRY, (void *)2000L) != 0)
+        if (mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_VSYNCTRY, (void *)2000L) != 0)
             return;
 }
 
@@ -6042,7 +6085,7 @@ static int mm_fb_merge_hw(int colour)
     /* The kernel merge no longer waits: the wait is here, where the
        program can be taken off the processor while it happens. */
     mm_fb_vsync_wait();
-    return ioctl(mm_gfx_fd, MM_GFXIOC_MERGE, (void *)(long)colour);
+    return mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_MERGE, (void *)(long)colour);
 }
 
 static void mm_fb_wait_hw(void)
@@ -6057,7 +6100,7 @@ static void mm_fb_paint_hw(MMINTEGER rgb)
 {
     struct mm_gfx_info gi;
 
-    if (mm_gfx_open() < 0 || ioctl(mm_gfx_fd, MM_GFXIOC_INFO, &gi) < 0)
+    if (mm_gfx_open() < 0 || mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_INFO, &gi) < 0)
         return;
     mm_gfx_setcol(rgb);
     mm_gfx_rect(0, 0, (int)gi.width - 1, (int)gi.height - 1);

@@ -30,6 +30,14 @@
 #include <errno.h>		/* the neterr libcall */
 #ifdef __linux__
 #include <sys/mman.h>		/* executable code buffer for native fns */
+#ifdef PC3_HOST
+/* On a PC, /dev/sys is the PC3 device server: a program's open of
+   it, and every ioctl on the descriptor it gets, go through
+   libpc3client.  The runtime inside bcrun does the same through
+   mm_sys_open/mm_sys_ioctl (mmb_runtime.c).  Nothing else changes. */
+#include "pc3client.h"
+#include "pico_ioctl.h"
+#endif
 #endif
 #include "bytecode.h"
 
@@ -1651,9 +1659,12 @@ static int64_t bc_strtoll(const char *s, char **end, int base, int uns)
  *	executes faster.  Left null, nothing references them and they are
  *	dropped.
  *
- *	Off the board there is no kernel to ask, so the local ones stay.
+ *	Off the board there is no kernel to ask, so the local ones stay -
+ *	and MM_HOSTED_ONLY is that case with the PC3 runtime shape: bcrun
+ *	on a PC talking to the device server (pc3host).  It skips the
+ *	kernel table below, so the table here has to be full.
  */
-#ifdef MM_PC3
+#if defined(MM_PC3) && !defined(MM_HOSTED_ONLY)
 #define MFN(f)	NULL
 #else
 #define MFN(f)	f
@@ -2042,6 +2053,12 @@ static void lc_time(void)
 
 static void lc_open(void)
 {
+#ifdef PC3_HOST
+	if (!strcmp(getstr((unsigned long)arg(0)), "/dev/sys")) {
+		A = pc3_sys_open();
+		return;
+	}
+#endif
 	A = open(getstr((unsigned long)arg(0)), (int)arg(1), 0666);
 }
 
@@ -2052,6 +2069,12 @@ static void lc_creat(void)
 
 static void lc_close(void)
 {
+#ifdef PC3_HOST
+	if (pc3_sys_isfd((int)arg(0))) {
+		A = pc3_sys_close((int)arg(0));
+		return;
+	}
+#endif
 	A = close((int)arg(0));
 }
 
@@ -2239,6 +2262,103 @@ static void lc_recvfrom(void)
 	A = r;
 }
 
+#ifdef PC3_HOST
+/*
+ *	A bytecode program's ioctl structures are the BOARD's - 32-bit
+ *	pointers - and libpc3client reads the host's, with 64-bit ones.
+ *	Everything else in pico_ioctl.h is fixed-width and lays out the
+ *	same both ways.  So the pointer-bearing few are rebuilt here from
+ *	their ILP32 image; a program address is a machine address on this
+ *	host too (mem_init maps the VM below 4G), so vptr() is the whole
+ *	conversion.  Bounds are checked as they are for every other
+ *	libcall argument.
+ */
+static void *host_vp(unsigned long a, unsigned long n)
+{
+	if (!a)
+		return NULL;
+	if (VM_OOBN(a, n ? n : 1)) fault("bad address");
+	return vptr(a);
+}
+
+static long host_sys_ioctl(int fd, int rq, unsigned long p)
+{
+	const unsigned char *u = p ? vptr(p) : NULL;
+	unsigned long v;
+
+	switch (rq) {
+	case GFXIOC_PIXELS:
+	case GFXIOC_RECTS: {
+		/* u16 count, u16 flags, p32 items, p32 colours */
+		struct gfx_batch b;
+		unsigned isz = (rq == GFXIOC_PIXELS) ? sizeof(struct gfx_pt)
+						       : sizeof(struct gfx_rc);
+		if (!u) break;
+		b.count = u[0] | (u[1] << 8);
+		b.flags = u[2] | (u[3] << 8);
+		v = u[4] | (u[5] << 8) | ((unsigned long)u[6] << 16) | ((unsigned long)u[7] << 24);
+		b.items = host_vp(v, (unsigned long)b.count * isz);
+		v = u[8] | (u[9] << 8) | ((unsigned long)u[10] << 16) | ((unsigned long)u[11] << 24);
+		b.colours = host_vp(v, (unsigned long)b.count * 4);
+		return pc3_sys_ioctl(fd, rq, &b);
+	}
+	case GFXIOC_BITMAP: {
+		/* i16 x, i16 y, u8 w, u8 h, u8 scale, u8 pad, i32 fg, i32 bg, p32 bits */
+		struct gfx_bitmap gb;
+		if (!u) break;
+		memcpy(&gb, u, 16);		/* everything up to the pointer */
+		v = u[16] | (u[17] << 8) | ((unsigned long)u[18] << 16) | ((unsigned long)u[19] << 24);
+		gb.bits = host_vp(v, ((unsigned long)gb.width * gb.height + 7) / 8);
+		return pc3_sys_ioctl(fd, rq, &gb);
+	}
+	case GFXIOC_TEXT: {
+		/* i16 x, i16 y, u8 scale, u8 font, pad2, i32 fg, i32 bg, u16 len,
+		   pad2, p32 str: fg is aligned to 4, so the pointer is at 20 */
+		struct gfx_text gt;
+		if (!u) break;
+		memcpy(&gt, u, 20);		/* through len and its padding */
+		v = u[20] | (u[21] << 8) | ((unsigned long)u[22] << 16) | ((unsigned long)u[23] << 24);
+		gt.str = host_vp(v, gt.len);
+		return pc3_sys_ioctl(fd, rq, &gt);
+	}
+	case GFXIOC_BLIT:
+	case GFXIOC_BLITRD: {
+		/* u16 offset, u16 len, p32 buf */
+		struct gfx_blit gb;
+		if (!u) break;
+		gb.offset = u[0] | (u[1] << 8);
+		gb.len = u[2] | (u[3] << 8);
+		v = u[4] | (u[5] << 8) | ((unsigned long)u[6] << 16) | ((unsigned long)u[7] << 24);
+		gb.buf = host_vp(v, gb.len);
+		return pc3_sys_ioctl(fd, rq, &gb);
+	}
+	case GFXIOC_BLITR:
+	case GFXIOC_BLITRDR: {
+		/* u32 offset, u16 len, u16 rows, u16 stride, u16 pad, p32 buf */
+		struct gfx_blitr gr;
+		if (!u) break;
+		memcpy(&gr, u, 12);
+		v = u[12] | (u[13] << 8) | ((unsigned long)u[14] << 16) | ((unsigned long)u[15] << 24);
+		gr.buf = host_vp(v, (unsigned long)gr.rows * gr.len);
+		return pc3_sys_ioctl(fd, rq, &gr);
+	}
+	case SNDIOC_PCMWRITE: {
+		/* p32 base, u32 len */
+		struct snd_buf sb;
+		if (!u) break;
+		v = u[0] | (u[1] << 8) | ((unsigned long)u[2] << 16) | ((unsigned long)u[3] << 24);
+		sb.len = u[4] | (u[5] << 8) | ((unsigned long)u[6] << 16) | ((unsigned long)u[7] << 24);
+		sb.base = host_vp(v, sb.len);
+		return pc3_sys_ioctl(fd, rq, &sb);
+	}
+	default:
+		break;
+	}
+	/* fixed-width structures, or the value itself: the same bytes */
+	return pc3_sys_ioctl(fd, rq, p ? vptr(p) : NULL);
+}
+#endif
+
 static void lc_ioctl(void)
 {
 	int rq = (int)arg(1);
@@ -2254,6 +2374,12 @@ static void lc_ioctl(void)
 	}
 #endif
 	if (p && VM_OOBN(p, 1)) fault("bad address");
+#ifdef PC3_HOST
+	if (pc3_sys_isfd((int)arg(0))) {
+		A = host_sys_ioctl((int)arg(0), rq, p);
+		return;
+	}
+#endif
 	A = ioctl((int)arg(0), rq, p ? vptr(p) : NULL);
 }
 

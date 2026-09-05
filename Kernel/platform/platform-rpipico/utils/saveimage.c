@@ -29,6 +29,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include "pc3sys.h"
 
 #define GFXIOC_INFO	0x000E
 #define GFXIOC_GETPIXEL	0x0011
@@ -71,12 +72,12 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	sysfd = open("/dev/sys", O_RDWR);
+	sysfd = pc3_open_sys();
 	if (sysfd < 0) {
 		perror("/dev/sys");
 		return 1;
 	}
-	if (ioctl(sysfd, GFXIOC_INFO, &gi) < 0) {
+	if (pc3_ioctl(sysfd, GFXIOC_INFO, &gi) < 0) {
 		perror("GFXIOC_INFO");
 		return 1;
 	}
@@ -134,7 +135,7 @@ int main(int argc, char *argv[])
 		unsigned char *p = row;
 		memset(row, 0, rowbytes);
 		for (x = x0; x < x0 + w; x++) {
-			int c = ioctl(sysfd, GFXIOC_GETPIXEL,
+			int c = pc3_ioctl(sysfd, GFXIOC_GETPIXEL,
 				      (void *)(long)GFX_PACK(x, y));
 			if (c < 0)
 				c = 0;		/* off-screen reads black */

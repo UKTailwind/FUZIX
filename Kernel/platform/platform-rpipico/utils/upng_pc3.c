@@ -31,6 +31,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include "pc3sys.h"
 
 #include "upng_pc3.h"
 
@@ -55,9 +56,9 @@ static void upa_init(void)
 
 	if (upa_cur != NULL)
 		return;
-	fd = open("/dev/sys", O_RDWR);
+	fd = pc3_open_sys();
 	rq.len = UPNG_ARENA_LEN;
-	if (fd < 0 || ioctl(fd, PSRAMIOC_ALLOC, &rq) < 0) {
+	if (fd < 0 || pc3_ioctl(fd, PSRAMIOC_ALLOC, &rq) < 0) {
 		fprintf(stderr, "loadpng: no PSRAM arena (kernel without "
 				"PSRAMIOC_ALLOC?)\n");
 		exit(1);
