@@ -402,7 +402,17 @@ int main(int argc, char *argv[])
 			av[1] = src;
 			av[2] = "-o";
 			av[3] = basfile;
+#ifdef PC3_HOST
+			/* The board's mmbc translates for this compiler by
+			   default (MMBC_ARENA); a PC's is the gates' build and
+			   defaults to the gcc dialect, whose compound literals
+			   cc1 does not compile - brownian.bas showed it.  Say
+			   which. */
+			av[4] = "--fcc";
+			av[5] = NULL;
+#else
 			av[4] = NULL;
+#endif
 			run(av, NULL, NULL);
 			src = basfile;
 		}
