@@ -101,17 +101,24 @@ int main(int argc, char *argv[])
         }
 #ifdef PC3_HOST
         /* The cc beside this program, wherever that is: /usr/bin/cc on
-           a PC is the system's compiler. */
+           a PC is the system's compiler.  MMEDIT_CC names another -
+           a wrapper, a different build, a script that records what it
+           was asked - and is run the same way, with -r and the file. */
         {
             static char hcc[4200];
             char dir[4096];
             const char *cc = CC_CMD;
+            const char *env = getenv("MMEDIT_CC");
+            const char *slash;
 
-            if (pc3_exe_dir(dir, sizeof dir) == 0) {
+            if (env && *env)
+                cc = env;
+            else if (pc3_exe_dir(dir, sizeof dir) == 0) {
                 snprintf(hcc, sizeof hcc, "%s/cc", dir);
                 cc = hcc;
             }
-            printf("cc -r %s\n", argv[1]);
+            slash = strrchr(cc, '/');
+            printf("%s -r %s\n", slash ? slash + 1 : cc, argv[1]);
             fflush(stdout);
             av[0] = (char *) cc;
             av[1] = "-r";

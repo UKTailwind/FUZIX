@@ -9,14 +9,21 @@
  * It costs a BASIC program nothing at all - not a byte of the 48K that
  * program has to live in - and it works from the shell on its own.
  *
- * The screen is read through GFXIOC_GETPIXEL, one pixel at a time.
- * That is slow - a full 320x240 screen is 76,800 ioctls, about a tenth
- * of a second - but it is the only reader the kernel has today, it
- * needs no buffer anywhere, and it returns RGB888 in every mode
- * including the text console, where it resolves each cell's own
- * foreground and background.  A rectangle reader would make this
- * roughly a hundred times faster and let the file be 4-bit with a
- * palette; the file format below is the only thing that would change.
+ * The screen is read a band of rows at a time through GFXIOC_BLITRDR,
+ * the rows-out reader: the bytes of the framebuffer as they lie, 4-bit
+ * or 1-bit indices, which is what a 320x240 screen costs eight ioctls
+ * rather than the 76,800 GETPIXELs this used to make - a tenth of a
+ * second on the board, and on a PC, where every ioctl is a round trip
+ * to the device server, several seconds.  The indices become colours
+ * through GFXIOC_GETPIXEL, once per DISTINCT index at the first pixel
+ * that carries it: the kernel resolves the live palette exactly as it
+ * did for every pixel before, so the file is the same file, byte for
+ * byte, for at most sixteen extra calls.
+ *
+ * The text console (mode 0xFF) has no rows-out reader - its colours are
+ * per cell, not per index - and a kernel older than BLITRDR refuses the
+ * first read.  Both fall back to GETPIXEL for every pixel, which is
+ * what this always did.
  *
  * BMP is written by hand rather than through a struct: the header is
  * defined in terms of little-endian byte offsets, and a struct would
@@ -26,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -33,6 +41,7 @@
 
 #define GFXIOC_INFO	0x000E
 #define GFXIOC_GETPIXEL	0x0011
+#define GFXIOC_BLITRDR	0x003A
 #define GFX_PACK(x, y)	(((x) & 0x3FF) | (((y) & 0x1FF) << 10))
 
 struct gfx_info {
@@ -40,11 +49,25 @@ struct gfx_info {
 	unsigned char bpp, mode;
 };
 
+/* pico_ioctl.h's gfx_blitr: rows OUT of the target, rows * len bytes
+ * contiguous in buf, each row stride bytes after the last. */
+struct gfx_blitr {
+	uint32_t offset;
+	uint16_t len, rows, stride, pad;
+	void *buf;
+};
+
 /* The widest the hardware can be, so one row always fits: 640 pixels
    of three bytes, and BMP rows round up to a multiple of four. */
 #define MAXROW	((640 * 3 + 3) & ~3)
 
+/* Rows per BLITRDR: 32 rows of a 320-byte stride is 10K, a fraction of
+   what the file's own rows cost, and eight calls for a 240-line mode. */
+#define BAND	32
+
 static unsigned char row[MAXROW];
+static int sysfd;
+static struct gfx_info gi;
 
 static void put16(unsigned char *p, unsigned v)
 {
@@ -60,12 +83,40 @@ static void put32(unsigned char *p, unsigned long v)
 	p[3] = (unsigned char)(v >> 24);
 }
 
+static int getpixel(int x, int y)
+{
+	int c = pc3_ioctl(sysfd, GFXIOC_GETPIXEL, (void *)(long)GFX_PACK(x, y));
+
+	return c < 0 ? 0 : c;		/* off-screen reads black */
+}
+
+static void emit(unsigned char *p, int c)
+{
+	p[0] = (unsigned char)c;		/* blue  */
+	p[1] = (unsigned char)(c >> 8);		/* green */
+	p[2] = (unsigned char)(c >> 16);	/* red   */
+}
+
+/* One BMP row from GETPIXEL, the slow way and the only way for the
+ * console. */
+static void row_by_pixel(int x0, int w, int y)
+{
+	unsigned char *p = row;
+	int x;
+
+	for (x = x0; x < x0 + w; x++, p += 3)
+		emit(p, getpixel(x, y));
+}
+
 int main(int argc, char *argv[])
 {
-	struct gfx_info gi;
 	unsigned char hdr[54];
+	unsigned char *band = NULL;
 	unsigned long rowbytes, datasize;
-	int sysfd, fd, x, y, x0, y0, w, h;
+	int fd, x, y, x0, y0, w, h;
+	int bpp, bx0 = 0, blen = 0, rowsout = 0;
+	long rgb[16];
+	unsigned char have[16];
 
 	if (argc != 2 && argc != 6) {
 		fprintf(stderr, "usage: %s file.bmp [x y w h]\n", argv[0]);
@@ -104,6 +155,22 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	/* The rows-out reader, for the graphics modes: the bytes that hold
+	 * pixels x0..x0+w-1 of a row, in the mode's packing - high nibble
+	 * the left pixel at 4bpp, bit 7 the left pixel at 1bpp, as
+	 * display.c lays them. */
+	bpp = gi.bpp;
+	if (gi.mode != 0xFF && (bpp == 4 || bpp == 1) && gi.stride) {
+		int shift = (bpp == 4) ? 1 : 3;
+
+		bx0 = x0 >> shift;
+		blen = ((x0 + w - 1) >> shift) - bx0 + 1;
+		band = malloc((size_t)BAND * gi.stride);
+		if (band)
+			rowsout = 1;
+	}
+	memset(have, 0, sizeof have);
+
 	rowbytes = ((unsigned long)w * 3 + 3) & ~3UL;
 	datasize = rowbytes * h;
 
@@ -130,23 +197,57 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	/* BMP rows run bottom to top, and each pixel is blue, green, red. */
-	for (y = y0 + h - 1; y >= y0; y--) {
-		unsigned char *p = row;
-		memset(row, 0, rowbytes);
-		for (x = x0; x < x0 + w; x++) {
-			int c = pc3_ioctl(sysfd, GFXIOC_GETPIXEL,
-				      (void *)(long)GFX_PACK(x, y));
-			if (c < 0)
-				c = 0;		/* off-screen reads black */
-			*p++ = (unsigned char)c;		/* blue  */
-			*p++ = (unsigned char)(c >> 8);		/* green */
-			*p++ = (unsigned char)(c >> 16);	/* red   */
+	/* BMP rows run bottom to top, and each pixel is blue, green, red.
+	 * A band is read top-down from the framebuffer and written out
+	 * from its last row to its first. */
+	for (y = y0 + h - 1; y >= y0; ) {
+		int top = y - BAND + 1, r;
+
+		if (top < y0)
+			top = y0;
+		if (rowsout) {
+			struct gfx_blitr gr;
+
+			gr.offset = (uint32_t)top * gi.stride + (uint32_t)bx0;
+			gr.len = (uint16_t)blen;
+			gr.rows = (uint16_t)(y - top + 1);
+			gr.stride = gi.stride;
+			gr.pad = 0;
+			gr.buf = band;
+			if (pc3_ioctl(sysfd, GFXIOC_BLITRDR, &gr) < 0)
+				rowsout = 0;	/* an older kernel: the slow way */
 		}
-		if (write(fd, row, (int)rowbytes) != (int)rowbytes) {
-			perror(argv[1]);
-			return 1;
+		for (r = y; r >= top; r--) {
+			memset(row, 0, rowbytes);
+			if (!rowsout) {
+				row_by_pixel(x0, w, r);
+			} else {
+				const unsigned char *src = band + (r - top) * blen;
+				unsigned char *p = row;
+
+				for (x = x0; x < x0 + w; x++, p += 3) {
+					int idx;
+
+					if (bpp == 4) {
+						unsigned char v = src[(x >> 1) - bx0];
+						idx = (x & 1) ? (v & 15) : (v >> 4);
+					} else {
+						unsigned char v = src[(x >> 3) - bx0];
+						idx = (v >> (7 - (x & 7))) & 1;
+					}
+					if (!have[idx]) {
+						rgb[idx] = getpixel(x, r);
+						have[idx] = 1;
+					}
+					emit(p, (int)rgb[idx]);
+				}
+			}
+			if (write(fd, row, (int)rowbytes) != (int)rowbytes) {
+				perror(argv[1]);
+				return 1;
+			}
 		}
+		y = top - 1;
 	}
 
 	if (close(fd) < 0) {
