@@ -198,6 +198,7 @@ add_executable(fuzix
 	arena.c
 	devpsram.c
 	display.c
+	display_hstx.c
 	fonts.c
 	libm_table.c
 	ds3231.c
