@@ -14,13 +14,17 @@
 #ifdef PC3_HOST
 int pc3_sys_open(void);
 int pc3_sys_ioctl(int fd, unsigned long code, void *arg);
+int pc3_sys_close(int fd);
 #define pc3_open_sys()          pc3_sys_open()
 #define pc3_ioctl(fd, code, a)  pc3_sys_ioctl((fd), (code), (void *)(a))
+#define pc3_close_sys(fd)       pc3_sys_close(fd)
 #else
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <unistd.h>
 #define pc3_open_sys()          open("/dev/sys", O_RDWR)
 #define pc3_ioctl(fd, code, a)  ioctl((fd), (code), (a))
+#define pc3_close_sys(fd)       close((fd))
 #endif
 
 #endif /* PC3SYS_H */

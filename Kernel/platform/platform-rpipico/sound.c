@@ -1,6 +1,6 @@
 /*
- * Pico Computer 3 sound for Fuzix: the BBC Micro sound system on the
- * PCM5102 I2S DAC (BCLK GP10, LRCLK GP11, DATA GP22).
+ * Pico Computer 3 sound for Fuzix: the BBC Micro sound system, PCM
+ * streaming and the MMBasic synthesiser - the portable half.
  *
  * The classic model, kernel-side: channels 1-3 are square-wave tones,
  * channel 0 is an LFSR noise source; each channel has a note queue and
@@ -9,61 +9,28 @@
  * stepped at 100 Hz.  Pitch is the BBC scale: 4 units per semitone,
  * 89 = A4 = 440 Hz.
  *
- * Output: PIO1 runs the standard 16-bit stereo I2S program (2 clocks
- * per bit; SM clock = 64 x sample rate); two chained DMA channels
- * ping-pong 256-sample buffers and the completion IRQ (DMA_IRQ_0,
- * core0) remixes the freed half.  Mixing costs well under 0.1% of a
- * core.  Everything lives in RAM.
+ * Everything here works on blocks of SND_NBUF stereo 16-bit frames and
+ * knows nothing about where they go.  On the PC3 that is sound_hw.c:
+ * PIO I2S to the PCM5102, two chained DMA channels ping-ponging the
+ * blocks, and a completion IRQ that calls sound_fill_block() for the
+ * half just freed.  On a PC the device server calls the same function
+ * from a sound card's callback.  sound_priv.h is the contract.
  *
- * The same DMA chain has a second mode - see "PCM streaming" below -
- * where the IRQ copies a process's decoded PCM out of a PSRAM ring
- * instead of synthesising.  That is what plays MP3s and WAVs, and it
- * is the reason the output stage was worth building this way rather
- * than MMBasic's: the DMA does not care which of the two filled the
- * buffer, so nothing in the chain changes.  See PC3-MP3-PLAN.md.
+ * Three sources fill a block, and the DMA does not care which: the
+ * BBC synth, a PCM ring a process's decoded samples pass through (what
+ * plays MP3s and WAVs - see PC3-MP3-PLAN.md), and the MMBasic PLAY
+ * SOUND synthesiser.  That is the reason the output stage was worth
+ * building this way rather than MMBasic's: nothing in the chain changes
+ * with the source.
  */
 
-#include <kernel.h>
-#include <kdata.h>
-#include <printf.h>
+#include <stdint.h>
+#include <string.h>
 #include <stdlib.h>
-#include "picosdk.h"
-#include "config.h"
 #include "sound.h"
+#include "sound_priv.h"
 
-#include <hardware/pio.h>
-#include <hardware/dma.h>
-#include <hardware/clocks.h>
-
-#define SND_BCLK  10            /* LRCLK is BCLK+1 = GP11 */
-#define SND_DATA  22
-#define SND_RATE  22050
-/*
- * Frames per half-buffer, and it is a BUS decision as much as a memory
- * one.  This was 256 - a 1K half - which is fine for the synth, because
- * that computes its samples one at a time with phase and envelope
- * arithmetic in between and its writes trickle out over the whole
- * interval.  PCM streaming does the identical byte count as a flat-out
- * memcpy, and a saturated 1K burst every 5.8 ms was enough to put
- * flecks on the display: core1 builds every scanline in software and
- * DMAs it out of disp_fb continuously, so RAM bandwidth is contended
- * (default_text_excludes.incl says so in as many words).
- *
- * MicroPython's machine_i2s.c runs a 256 byte DMA buffer - 128 bytes a
- * half - and says the size was "empirically determined... a tradeoff
- * between memory use and interrupt frequency".  64 frames is 256 bytes
- * a half: a quarter of the old burst, while keeping 1.45 ms of slack at
- * 44100 against interrupt latency, where MicroPython's 128 bytes would
- * leave only 0.73 ms and this kernel does disable interrupts in places.
- */
-#define SND_NBUF  64            /* stereo frames per half-buffer */
 #define SND_QLEN  8             /* notes per channel queue */
-
-/* MicroPython machine_i2s 16-bit stereo write program (2 side-set
- * bits: bit0 BCLK, bit1 LRCLK; MSB first, autopull 32). */
-static uint16_t i2s_prog[8] = {
-    59438, 24577, 2113, 28673, 63534, 28673, 6213, 24577
-};
 
 /* BBC pitch: phase increments for pitches 240-287 at 22050 Hz;
  * inc(p) = table[p % 48] >> (5 - p / 48). */
@@ -108,11 +75,6 @@ static struct schan ch[4];
 static uint8_t envs[17][13];    /* T,PI1-3,PN1-3,AA,AD,AS,AR,ALA,ALD */
 static uint32_t noise_lfsr = 0x1FFFF;
 static uint8_t noise_ctr;
-
-static int16_t sndbuf[2][SND_NBUF * 2];
-static int dmach_a = -1, dmach_b = -1;
-static PIO snd_pio;
-static uint snd_sm;
 static uint16_t cs_acc;         /* 100 Hz tick accumulator */
 
 /* --- note/envelope engine (IRQ context) ---------------------------------- */
@@ -259,7 +221,7 @@ static void tick_100hz(void)
 
 /* --- mixer ---------------------------------------------------------------- */
 
-static void __not_in_flash_func(snd_fill)(int16_t *buf)
+static void SND_FAST(snd_fill)(int16_t *buf)
 {
     int s, i;
     for (s = 0; s < SND_NBUF; s++) {
@@ -376,22 +338,8 @@ static volatile uint8_t pcm_active, pcm_started;
 static uint8_t pcm_channels = 2;
 static uint16_t pcm_owner;              /* the pid holding the stream */
 
-/* Set the state machine clock for a sample rate.  Two samples a frame,
- * sixteen bits each, two PIO instructions a bit = 64 clocks a frame.
- * Integer only: the kernel is built with float trapped
- * (pico_set_float_implementation none), so the SDK's float clkdiv call
- * would not link, let alone run. */
-static void pcm_set_rate(uint32_t rate)
-{
-    uint32_t sys = clock_get_hz(clk_sys);
-    uint32_t div256 = (uint32_t)(((uint64_t)sys * 256) / (rate * 64));
-
-    pio_sm_set_clkdiv_int_frac(snd_pio, snd_sm, div256 >> 8, div256 & 0xFF);
-    pio_sm_clkdiv_restart(snd_pio, snd_sm);
-}
-
 /* n bytes out of the ring, in at most two spans. */
-static void __not_in_flash_func(pcm_take)(void *dst, uint32_t n)
+static void SND_FAST(pcm_take)(void *dst, uint32_t n)
 {
     uint32_t off = pcm_tail % PCM_RING_BYTES;
     uint32_t first = PCM_RING_BYTES - off;
@@ -404,7 +352,7 @@ static void __not_in_flash_func(pcm_take)(void *dst, uint32_t n)
     pcm_tail += n;
 }
 
-static void __not_in_flash_func(pcm_fill)(int16_t *buf)
+static void SND_FAST(pcm_fill)(int16_t *buf)
 {
     uint32_t used = pcm_head - pcm_tail;
     uint32_t framesz = (pcm_channels == 2) ? 4 : 2;
@@ -475,7 +423,7 @@ static void pcm_release(void)
     pcm_active = 0;
     pcm_owner = 0;
     pcm_head = pcm_tail = 0;
-    pcm_set_rate(SND_RATE);
+    snd_hw_rate(SND_RATE);
 }
 
 /*
@@ -499,8 +447,6 @@ static void pcm_release(void)
 #include "utils/sound_tables.h"
 
 static void pcm_reap(void);             /* defined below with the ring */
-
-#define MMS_RATE 44100
 
 /* mmb_playctl.h's values, pinned in pico_ioctl.h's comment */
 #define MMS_OP_SOUND  1
@@ -562,7 +508,7 @@ static void mms_make_noise(void)
 }
 
 /* polyBLEP residual, q*q in 0..65536 - playsnd's blep_q verbatim */
-static long __not_in_flash_func(mms_blep_q)(long d, long inc)
+static long SND_FAST(mms_blep_q)(long d, long inc)
 {
     long t;
 
@@ -575,7 +521,7 @@ static long __not_in_flash_func(mms_blep_q)(long d, long inc)
     return t * t;
 }
 
-static int __not_in_flash_func(mms_sample)(struct mmvoice *v)
+static int SND_FAST(mms_sample)(struct mmvoice *v)
 {
     int j, ph = (int)(v->phase >> 12);
 
@@ -672,7 +618,7 @@ static void mms_release(void)
 }
 
 /* playsnd's render(), one 64-frame buffer, straight into the DMA half */
-static void __not_in_flash_func(mmsnd_fill)(int16_t *buf)
+static void SND_FAST(mmsnd_fill)(int16_t *buf)
 {
     static int ramp;
     int n, i, s;
@@ -730,14 +676,10 @@ static void __not_in_flash_func(mmsnd_fill)(int16_t *buf)
 /* The owner is gone: hand the output back. */
 static void mms_reap(void)
 {
-    ptptr p;
-
     if (!mms_active)
         return;
-    for (p = ptab; p < ptab_end; ++p)
-        if (p->p_pid == mms_owner && p->p_status != P_EMPTY &&
-            p->p_status != P_ZOMBIE)
-            return;
+    if (snd_hw_pid_alive(mms_owner))
+        return;
     mms_release();
 }
 
@@ -754,7 +696,7 @@ int sound_mm_cmd(uint8_t op, uint8_t a, uint8_t b,
         return -2;
     if (!mms_active) {
         sound_quiet();                  /* the BBC channels stop */
-        pcm_set_rate(MMS_RATE);
+        snd_hw_rate(MMS_RATE);
         mms_owner = pid;
         mms_quiet_frames = 0;
         mms_active = 1;                 /* last: the IRQ reads this */
@@ -823,7 +765,7 @@ void sound_mm_stop(void)
 {
     if (mms_active) {
         mms_release();
-        pcm_set_rate(SND_RATE);         /* process context: safe */
+        snd_hw_rate(SND_RATE);          /* process context: safe */
     }
 }
 
@@ -836,25 +778,20 @@ void sound_mm_owner_gone(uint16_t pid)
 {
     if (mms_active && mms_owner == pid) {
         mms_release();
-        pcm_set_rate(SND_RATE);
+        snd_hw_rate(SND_RATE);
     }
 }
 
-/* Release a stream whose owner is gone.  A ZOMBIE counts as gone: it
- * has exited, it is only waiting to be reaped, and it will not be
- * writing any more samples.  Without this a player killed with SIGKILL
- * - or one that faulted - would lock the audio device out for everyone
- * until the machine was rebooted, and lock out SOUND with it. */
+/* Release a stream whose owner is gone - snd_hw_pid_alive says what
+ * "gone" means.  Without this a player killed with SIGKILL - or one
+ * that faulted - would lock the audio device out for everyone until
+ * the machine was rebooted, and lock out SOUND with it. */
 static void pcm_reap(void)
 {
-    ptptr p;
-
     if (!pcm_active)
         return;
-    for (p = ptab; p < ptab_end; ++p)
-        if (p->p_pid == pcm_owner && p->p_status != P_EMPTY &&
-            p->p_status != P_ZOMBIE)
-            return;
+    if (snd_hw_pid_alive(pcm_owner))
+        return;
     pcm_release();
 }
 
@@ -887,7 +824,7 @@ int sound_pcm_open(uint32_t rate, int channels, uint16_t owner)
     pcm_underruns = 0;
     pcm_started = 0;
     pcm_channels = (uint8_t)channels;
-    pcm_set_rate(rate);
+    snd_hw_rate(rate);
     pcm_owner = owner;
     pcm_active = 1;             /* last: the IRQ reads this */
     return 0;
@@ -930,68 +867,22 @@ int sound_pcm_write(const uint8_t *ubuf, uint32_t len, uint16_t owner)
     first = PCM_RING_BYTES - off;
     if (first > len)
         first = len;
-    if (uget((void *)ubuf, pcm_ring + off, first))
+    if (snd_hw_copyin(pcm_ring + off, ubuf, first))
         return -1;
-    if (len > first && uget((void *)(ubuf + first), pcm_ring, len - first))
+    if (len > first && snd_hw_copyin(pcm_ring, ubuf + first, len - first))
         return -1;
     pcm_head += len;
     return (int)len;
 }
 
-/*
- * Waiting for room, without a player having to guess how long.
- *
- * The DMA IRQ is where the ring actually drains, but it is a raw SDK
- * handler and not inside the kernel's interrupt discipline - waking
- * the scheduler from there could catch the process table mid-update.
- * The TICK is the proper context and is 5ms (TICKSPERSEC 200), which
- * is twenty times finer than the decisecond floor usleep() imposes on
- * userland, and that is the whole point: the queue no longer has to be
- * deep enough to cover a 100ms sleep, so it stops being latency.
- *
- * One waiter, because there is one PCM stream and one owner.
- */
-static volatile uint32_t pcm_waitmark;
-static volatile uint8_t pcm_waiting;
-
-void sound_pcm_tick(void)
+/* The level, for whoever does the waiting - sound_hw.c's sleep on the
+ * board, the server's deferred reply on a PC.  owner 0 asks about
+ * whatever stream is open. */
+int sound_pcm_queued(uint16_t owner, uint32_t *queued)
 {
-    if (!pcm_waiting)
-        return;
-    if (!pcm_active || (pcm_head - pcm_tail) <= pcm_waitmark) {
-        pcm_waiting = 0;
-        wakeup((char *)&pcm_waiting);
-        /*
-         * AND LET IT RUN.  Waking it is not enough: MAXTICKS is
-         * TICKSPERSEC/2, so a timeslice here is 100 ticks - HALF A
-         * SECOND - and a compute-bound program holds the processor for
-         * all of it.  The player would be ready and not running while
-         * its queue emptied, which is why 557ms of audio papered over
-         * this and 186ms did not: 557 outlasts a 500ms timeslice.
-         *
-         * Winding runticks up to the current process's own limit makes
-         * the next preempt check reschedule, so the player runs within
-         * a tick or two of the ring needing it.  Only an audio wakeup
-         * does this - it is the one thing here with a deadline - and
-         * it costs the interrupted program one early context switch.
-         */
-        if (udata.u_ptab != NULL && runticks < udata.u_ptab->p_priority)
-            runticks = udata.u_ptab->p_priority;
-    }
-}
-
-int sound_pcm_wait(uint32_t mark, uint16_t owner)
-{
-    if (!pcm_active || pcm_owner != owner)
+    if (!pcm_active || (owner && pcm_owner != owner))
         return -1;
-    if ((pcm_head - pcm_tail) <= mark)
-        return 0;               /* already room: do not sleep at all */
-    pcm_waitmark = mark;
-    pcm_waiting = 1;
-    /* psleep, not psleep_nosig: PLAY STOP is a SIGINT and must not be
-       held off until the ring happens to drain. */
-    psleep((char *)&pcm_waiting);
-    pcm_waiting = 0;
+    *queued = pcm_head - pcm_tail;
     return 0;
 }
 
@@ -1018,32 +909,18 @@ void sound_pcm_close(uint16_t owner)
     pcm_release();
 }
 
-/* --- DMA plumbing --------------------------------------------------------- */
+/* --- the block ------------------------------------------------------------ */
 
-static void __not_in_flash_func(snd_dma_irq)(void)
+/* One block for the output stage, from whichever source holds it.  The
+ * DMA IRQ on the board; the sound card's callback on a PC. */
+void SND_FAST(sound_fill_block)(int16_t *buf)
 {
-    if (dma_hw->ints0 & (1u << dmach_a)) {
-        dma_hw->ints0 = 1u << dmach_a;
-        dma_channel_set_read_addr(dmach_a, sndbuf[0], false);
-        dma_channel_set_trans_count(dmach_a, SND_NBUF, false);
-        if (pcm_active)
-            pcm_fill(sndbuf[0]);
-        else if (mms_active)
-            mmsnd_fill(sndbuf[0]);
-        else
-            snd_fill(sndbuf[0]);
-    }
-    if (dma_hw->ints0 & (1u << dmach_b)) {
-        dma_hw->ints0 = 1u << dmach_b;
-        dma_channel_set_read_addr(dmach_b, sndbuf[1], false);
-        dma_channel_set_trans_count(dmach_b, SND_NBUF, false);
-        if (pcm_active)
-            pcm_fill(sndbuf[1]);
-        else if (mms_active)
-            mmsnd_fill(sndbuf[1]);
-        else
-            snd_fill(sndbuf[1]);
-    }
+    if (pcm_active)
+        pcm_fill(buf);
+    else if (mms_active)
+        mmsnd_fill(buf);
+    else
+        snd_fill(buf);
 }
 
 /* --- public API ----------------------------------------------------------- */
@@ -1053,7 +930,7 @@ int sound_cmd(uint16_t chan, int16_t amp, uint16_t pitch, uint16_t dur)
     int cn = chan & 3;
     struct schan *c = &ch[cn];
     struct note n;
-    irqflags_t irq;
+    snd_lock_t irq;
 
     /* A player that died without closing would otherwise leave the
      * synth muted for good - the IRQ would go on filling from an empty
@@ -1063,10 +940,10 @@ int sound_cmd(uint16_t chan, int16_t amp, uint16_t pitch, uint16_t dur)
     pcm_reap();
 
     if (chan & 0x10) {                  /* flush */
-        irq = di();
+        irq = snd_hw_lock();
         c->qr = c->qw;
         c->active = 0;
-        irqrestore(irq);
+        snd_hw_unlock(irq);
     }
 
     if (amp > 0)
@@ -1077,15 +954,15 @@ int sound_cmd(uint16_t chan, int16_t amp, uint16_t pitch, uint16_t dur)
     n.dur = dur > 255 ? 255 : dur;
     n.sync = (chan >> 8) & 3;
 
-    irq = di();
+    irq = snd_hw_lock();
     if ((uint8_t)(c->qw - c->qr) >= SND_QLEN) {
-        irqrestore(irq);
+        snd_hw_unlock(irq);
         return -1;                      /* queue full: EAGAIN */
     }
     c->q[c->qw % SND_QLEN] = n;
     c->qw++;
     try_dequeue();
-    irqrestore(irq);
+    snd_hw_unlock(irq);
     return 0;
 }
 
@@ -1106,78 +983,11 @@ int sound_qfree(int cn)
 void sound_quiet(void)
 {
     int i;
-    irqflags_t irq = di();
+    snd_lock_t irq = snd_hw_lock();
     for (i = 0; i < 4; i++) {
         ch[i].qr = ch[i].qw;
         ch[i].active = 0;
         ch[i].level = 0;
     }
-    irqrestore(irq);
-}
-
-void sound_init(void)
-{
-    pio_program_t prog;
-    uint off;
-
-    memset(&prog, 0, sizeof(prog));
-    prog.instructions = i2s_prog;
-    prog.length = 8;
-    prog.origin = -1;
-
-    snd_pio = pio1;
-    snd_sm = pio_claim_unused_sm(snd_pio, true);
-    off = pio_add_program(snd_pio, &prog);
-
-    pio_gpio_init(snd_pio, SND_BCLK);
-    pio_gpio_init(snd_pio, SND_BCLK + 1);
-    pio_gpio_init(snd_pio, SND_DATA);
-
-    pio_sm_config c = pio_get_default_sm_config();
-    sm_config_set_out_pins(&c, SND_DATA, 1);
-    sm_config_set_sideset(&c, 2, false, false);
-    sm_config_set_sideset_pins(&c, SND_BCLK);
-    sm_config_set_out_shift(&c, false, true, 32);   /* MSB first, autopull */
-    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
-    sm_config_set_wrap(&c, off, off + 7);
-    {
-        /* SM clock = 64 x sample rate */
-        uint32_t sys = clock_get_hz(clk_sys);
-        uint32_t target = SND_RATE * 64;
-        uint32_t div256 = ((uint64_t)sys * 256) / target;
-        sm_config_set_clkdiv_int_frac(&c, div256 >> 8, div256 & 0xFF);
-    }
-    pio_sm_set_consecutive_pindirs(snd_pio, snd_sm, SND_BCLK, 2, true);
-    pio_sm_set_consecutive_pindirs(snd_pio, snd_sm, SND_DATA, 1, true);
-    pio_sm_init(snd_pio, snd_sm, off, &c);
-
-    /* silence in both buffers to start */
-    memset(sndbuf, 0, sizeof(sndbuf));
-
-    dmach_a = dma_claim_unused_channel(true);
-    dmach_b = dma_claim_unused_channel(true);
-
-    dma_channel_config dc = dma_channel_get_default_config(dmach_a);
-    channel_config_set_transfer_data_size(&dc, DMA_SIZE_32);
-    channel_config_set_dreq(&dc, pio_get_dreq(snd_pio, snd_sm, true));
-    channel_config_set_chain_to(&dc, dmach_b);
-    dma_channel_configure(dmach_a, &dc, &snd_pio->txf[snd_sm],
-        sndbuf[0], SND_NBUF, false);
-
-    dc = dma_channel_get_default_config(dmach_b);
-    channel_config_set_transfer_data_size(&dc, DMA_SIZE_32);
-    channel_config_set_dreq(&dc, pio_get_dreq(snd_pio, snd_sm, true));
-    channel_config_set_chain_to(&dc, dmach_a);
-    dma_channel_configure(dmach_b, &dc, &snd_pio->txf[snd_sm],
-        sndbuf[1], SND_NBUF, false);
-
-    dma_hw->ints0 = (1u << dmach_a) | (1u << dmach_b);
-    dma_hw->inte0 |= (1u << dmach_a) | (1u << dmach_b);
-    irq_set_exclusive_handler(DMA_IRQ_0, snd_dma_irq);
-    irq_set_enabled(DMA_IRQ_0, true);   /* core0 */
-
-    dma_channel_start(dmach_a);
-    pio_sm_set_enabled(snd_pio, snd_sm, true);
-
-    kputs("sound: BBC 4-channel synth on I2S (PCM5102)\n");
+    snd_hw_unlock(irq);
 }

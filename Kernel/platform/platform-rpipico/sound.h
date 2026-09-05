@@ -41,4 +41,15 @@ void sound_pcm_tick(void);
 void sound_pcm_close(uint16_t owner);
 uint16_t sound_pcm_owner(void);
 
+/* BBC ADVAL: free slots in a channel's note queue. */
+int sound_qfree(int cn);
+
+/* MMBasic PLAY SOUND / TONE / VOLUME, synthesised here (SNDIOC_MMCMD):
+ * 0, or -2 when an MP3/MOD player holds the output.  stop silences and
+ * releases; owner_gone is pagemap_free's call for a dying process. */
+int sound_mm_cmd(uint8_t op, uint8_t a, uint8_t b,
+                 int32_t p1, int32_t p2, int32_t p3, uint16_t pid);
+void sound_mm_stop(void);
+void sound_mm_owner_gone(uint16_t pid);
+
 #endif

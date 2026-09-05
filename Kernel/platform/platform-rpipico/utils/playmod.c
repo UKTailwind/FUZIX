@@ -32,6 +32,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include "../pico_ioctl.h"
+#include "pc3sys.h"
 #include "hxcmod.h"
 #include "mmb_playctl.h"
 
@@ -154,13 +155,13 @@ int main(int argc, char *argv[])
 	size = ftell(f);
 	fseek(f, 0L, SEEK_SET);
 
-	sfd = open("/dev/sys", O_RDWR);
+	sfd = pc3_open_sys();
 	if (sfd < 0) {
 		perror("/dev/sys");
 		return 1;
 	}
 	rq.len = (unsigned long)size;
-	if (ioctl(sfd, PSRAMIOC_ALLOC, &rq) < 0) {
+	if (pc3_ioctl(sfd, PSRAMIOC_ALLOC, &rq) < 0) {
 		fprintf(stderr, "playmod: no room for %ld bytes\n", size);
 		return 1;
 	}
@@ -189,7 +190,7 @@ int main(int argc, char *argv[])
 	cfg.rate = RATE;
 	cfg.channels = 2;
 	cfg.bits = 16;
-	if (ioctl(sfd, SNDIOC_PCMOPEN, &cfg) < 0) {
+	if (pc3_ioctl(sfd, SNDIOC_PCMOPEN, &cfg) < 0) {
 		fprintf(stderr, "playmod: sound output in use\n");
 		unlink(MM_PLAYCTL_FIFO);
 		return 1;
@@ -229,7 +230,7 @@ int main(int argc, char *argv[])
 					gain = vol_gain[v];
 				}
 			}
-		if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0)
+		if (pc3_ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0)
 			break;
 		while (st.queued < TARGET_BYTES && !stopping && !ended) {
 			int off = 0, w;
@@ -246,18 +247,18 @@ int main(int argc, char *argv[])
 			while (off < (int)sizeof(pcm) && !stopping) {
 				sb.base = (char *)pcm + off;
 				sb.len = (unsigned long)(sizeof(pcm) - off);
-				w = ioctl(sfd, SNDIOC_PCMWRITE, &sb);
+				w = pc3_ioctl(sfd, SNDIOC_PCMWRITE, &sb);
 				if (w < 0) {
 					stopping = 1;
 					break;
 				}
 				if (w == 0 &&
-				    ioctl(sfd, SNDIOC_PCMWAIT,
+				    pc3_ioctl(sfd, SNDIOC_PCMWAIT,
 					  (void *)LOW_BYTES) < 0)
 					usleep(1);
 				off += w;
 			}
-			if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0) {
+			if (pc3_ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0) {
 				stopping = 1;
 				break;
 			}
@@ -268,7 +269,7 @@ int main(int argc, char *argv[])
 		   the kernel tick.  This is the whole reason the queue above
 		   can be 93ms instead of 557ms: no guess at how long to wait,
 		   so no need to keep half a second of latency in hand. */
-		if (ioctl(sfd, SNDIOC_PCMWAIT, (void *)LOW_BYTES) < 0) {
+		if (pc3_ioctl(sfd, SNDIOC_PCMWAIT, (void *)LOW_BYTES) < 0) {
 			static int moaned;
 			if (!moaned) {
 				moaned = 1;
@@ -280,7 +281,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	ioctl(sfd, SNDIOC_PCMCLOSE, 0);
+	pc3_ioctl(sfd, SNDIOC_PCMCLOSE, 0);
 	unlink(MM_PLAYCTL_FIFO);
 	unlink(MM_PLAY_KINDFILE);
 	return 0;

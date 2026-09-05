@@ -84,6 +84,7 @@
 *start.c.o(.text*)
 *devices.c.o(.text*)
 *sound.c.o(.text*)
+*sound_hw.c.o(.text*)
 *board.c.o(.text*)
 *ds3231.c.o(.text*)
 *devgpio.c.o(.text*)
@@ -327,7 +328,7 @@
 *sound.c.o(.text.mms_reap)
 
 /* Once per boot and once per open respectively. */
-*sound.c.o(.text.sound_init)
+*sound_hw.c.o(.text.sound_init)
 *sound.c.o(.text.sound_pcm_open)
 
 /* The whole pico ioctl dispatcher: 3.9K of if-chain, syscall context

@@ -34,6 +34,7 @@
 #include <sys/ioctl.h>
 
 #include "../pico_ioctl.h"
+#include "pc3sys.h"
 
 /* ---- memory: the PROCESS HEAP, deliberately not the PSRAM arena --------
  *
@@ -161,7 +162,7 @@ static int pcm_open(const char *who, unsigned long rate, int chans)
 			who, chans);
 		return -1;
 	}
-	sfd = open("/dev/sys", O_RDWR);
+	sfd = pc3_open_sys();
 	if (sfd < 0) {
 		perror("/dev/sys");
 		return -1;
@@ -169,17 +170,17 @@ static int pcm_open(const char *who, unsigned long rate, int chans)
 	cfg.rate = rate;
 	cfg.channels = (unsigned short)chans;
 	cfg.bits = 16;
-	if (ioctl(sfd, SNDIOC_PCMOPEN, &cfg) < 0) {
+	if (pc3_ioctl(sfd, SNDIOC_PCMOPEN, &cfg) < 0) {
 		/* There is one I2S engine and one owner of it.  Say which of
 		 * the two things went wrong: "busy" sent people looking at
 		 * the sample rate for a fault that was a second player. */
 		if (errno == EBUSY)
 			fprintf(stderr, "%s: sound output in use by pid %d\n",
-				who, ioctl(sfd, SNDIOC_PCMOWNER, 0));
+				who, pc3_ioctl(sfd, SNDIOC_PCMOWNER, 0));
 		else
 			fprintf(stderr, "%s: cannot start audio at %lu Hz\n",
 				who, rate);
-		close(sfd);
+		pc3_close_sys(sfd);
 		return -1;
 	}
 	signal(SIGINT, pcm_on_intr);
@@ -199,7 +200,7 @@ static int pcm_write(int sfd, const short *s, int samples)
 	for (i = 0; i < bytes && !pcm_stopping; ) {
 		sb.base = (char *)s + i;
 		sb.len = (unsigned long)(bytes - i);
-		n = ioctl(sfd, SNDIOC_PCMWRITE, &sb);
+		n = pc3_ioctl(sfd, SNDIOC_PCMWRITE, &sb);
 		if (n < 0) {
 			perror("SNDIOC_PCMWRITE");
 			pcm_stopping = 1;
@@ -222,18 +223,18 @@ static void pcm_close(const char *who, int sfd)
 
 	if (!pcm_stopping) {
 		for (i = 0; i < 200; i++) {
-			if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0)
+			if (pc3_ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0)
 				break;
 			if (st.queued == 0)
 				break;
 			usleep(20000);
 		}
 	}
-	if (ioctl(sfd, SNDIOC_PCMSTAT, &st) == 0 && st.underruns)
+	if (pc3_ioctl(sfd, SNDIOC_PCMSTAT, &st) == 0 && st.underruns)
 		fprintf(stderr, "%s: %lu underruns\n", who,
 			(unsigned long)st.underruns);
-	ioctl(sfd, SNDIOC_PCMCLOSE, 0);
-	close(sfd);
+	pc3_ioctl(sfd, SNDIOC_PCMCLOSE, 0);
+	pc3_close_sys(sfd);
 }
 
 #endif /* PCMPLAY_H */

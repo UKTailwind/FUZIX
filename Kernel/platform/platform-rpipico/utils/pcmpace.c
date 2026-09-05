@@ -18,6 +18,7 @@
 #include <sys/ioctl.h>
 
 #include "../pico_ioctl.h"
+#include "pc3sys.h"
 
 static const short sine[64] = {
 	     0,    784,   1561,   2322,   3061,   3771,   4445,   5075,
@@ -57,7 +58,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	fd = open("/dev/sys", O_RDWR);
+	fd = pc3_open_sys();
 	if (fd < 0) {
 		perror("/dev/sys");
 		return 1;
@@ -65,7 +66,7 @@ int main(int argc, char *argv[])
 	cfg.rate = 44100;
 	cfg.channels = 2;
 	cfg.bits = 16;
-	if (ioctl(fd, SNDIOC_PCMOPEN, &cfg) < 0) {
+	if (pc3_ioctl(fd, SNDIOC_PCMOPEN, &cfg) < 0) {
 		perror("SNDIOC_PCMOPEN");
 		return 1;
 	}
@@ -77,7 +78,7 @@ int main(int argc, char *argv[])
 	total = 44100UL * (unsigned long)seconds;
 
 	while (done < total) {
-		if (ioctl(fd, SNDIOC_PCMSTAT, &st) < 0)
+		if (pc3_ioctl(fd, SNDIOC_PCMSTAT, &st) < 0)
 			break;
 		while ((long)st.queued < target && done < total) {
 			int i, off = 0, w, bytes = chunk * 4;
@@ -92,7 +93,7 @@ int main(int argc, char *argv[])
 			while (off < bytes) {
 				sb.base = (char *)buf + off;
 				sb.len = (unsigned long)(bytes - off);
-				w = ioctl(fd, SNDIOC_PCMWRITE, &sb);
+				w = pc3_ioctl(fd, SNDIOC_PCMWRITE, &sb);
 				if (w < 0) {
 					perror("write");
 					goto out;
@@ -102,13 +103,13 @@ int main(int argc, char *argv[])
 				off += w;
 			}
 			done += (unsigned long)chunk;
-			if (ioctl(fd, SNDIOC_PCMSTAT, &st) < 0)
+			if (pc3_ioctl(fd, SNDIOC_PCMSTAT, &st) < 0)
 				goto out;
 		}
 		usleep((unsigned long)slp);
 	}
 out:
-	if (ioctl(fd, SNDIOC_PCMSTAT, &st) == 0)
+	if (pc3_ioctl(fd, SNDIOC_PCMSTAT, &st) == 0)
 		printf("underruns while feeding: %lu (queued %lu)\n",
 		       (unsigned long)st.underruns,
 		       (unsigned long)st.queued);
@@ -116,7 +117,7 @@ out:
 	 * bytes / drain time should be rate*4 = 176400 B/s.  Poll on a
 	 * 20 ms cadence and print the trajectory. */
 	for (n = 0; n < 120; n++) {
-		if (ioctl(fd, SNDIOC_PCMSTAT, &st) < 0 || st.queued == 0)
+		if (pc3_ioctl(fd, SNDIOC_PCMSTAT, &st) < 0 || st.queued == 0)
 			break;
 		if ((n % 5) == 0)
 			printf("drain %d: %lu\n", n, (unsigned long)st.queued);
@@ -124,6 +125,6 @@ out:
 	}
 	printf("drained after %d polls (~%d ms)\n", n, n * 20);
 	printf("final underruns: %lu\n", (unsigned long)st.underruns);
-	ioctl(fd, SNDIOC_PCMCLOSE, 0);
+	pc3_ioctl(fd, SNDIOC_PCMCLOSE, 0);
 	return 0;
 }

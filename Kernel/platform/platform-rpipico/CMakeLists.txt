@@ -210,6 +210,7 @@ add_executable(fuzix
 	board.c
 	lineedit.c
 	sound.c
+	sound_hw.c
 	swapper.c
 	tricks.S
 	core1.c

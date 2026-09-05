@@ -34,6 +34,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include "../pico_ioctl.h"
+#include "pc3sys.h"
 #include "sound_tables.h"
 #include "mmb_playctl.h"
 
@@ -358,7 +359,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	sfd = open("/dev/sys", O_RDWR);
+	sfd = pc3_open_sys();
 	if (sfd < 0) {
 		perror("/dev/sys");
 		return 1;
@@ -366,7 +367,7 @@ int main(int argc, char *argv[])
 	cfg.rate = RATE;
 	cfg.channels = 2;
 	cfg.bits = 16;
-	if (ioctl(sfd, SNDIOC_PCMOPEN, &cfg) < 0) {
+	if (pc3_ioctl(sfd, SNDIOC_PCMOPEN, &cfg) < 0) {
 		/* a lost spawn race, usually: someone else owns audio */
 		fprintf(stderr, "playsnd: sound output in use\n");
 		unlink(MM_PLAYCTL_FIFO);
@@ -404,7 +405,7 @@ int main(int argc, char *argv[])
 			do_msg(&m);
 			idle = 0;
 		}
-		if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0)
+		if (pc3_ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0)
 			break;
 		if (dbg) {
 			if (st.underruns != last_under) {
@@ -431,7 +432,7 @@ int main(int argc, char *argv[])
 			while (off < (int)sizeof(pcm) && !stopping) {
 				sb.base = (char *)pcm + off;
 				sb.len = (unsigned long)(sizeof(pcm) - off);
-				w = ioctl(sfd, SNDIOC_PCMWRITE, &sb);
+				w = pc3_ioctl(sfd, SNDIOC_PCMWRITE, &sb);
 				if (w < 0) {
 					stopping = 1;
 					break;
@@ -440,7 +441,7 @@ int main(int argc, char *argv[])
 					usleep(20000);
 				off += w;
 			}
-			if (ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0) {
+			if (pc3_ioctl(sfd, SNDIOC_PCMSTAT, &st) < 0) {
 				stopping = 1;
 				break;
 			}
@@ -457,7 +458,7 @@ int main(int argc, char *argv[])
 		usleep(10000);
 	}
 
-	ioctl(sfd, SNDIOC_PCMCLOSE, 0);
+	pc3_ioctl(sfd, SNDIOC_PCMCLOSE, 0);
 	unlink(MM_PLAYCTL_FIFO);
 	unlink(MM_PLAY_KINDFILE);
 	return 0;
