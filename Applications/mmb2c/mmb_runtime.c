@@ -5141,6 +5141,58 @@ struct mm_kbd_down {
     unsigned char pad2[2];
 };
 
+#ifdef PC3_HOST
+/*
+ * ONE SNAPSHOT SERVES A BURST OF CALLS.
+ *
+ * A program reads KEYDOWN(0) and then (1), (2)... together, and every
+ * call drains the console queue first, as MMBasic's does.  On the board
+ * a call is a few microseconds, so the drains between the calls of one
+ * burst see nothing.  On a PC each call is a round trip to the display
+ * server, which answers when its frame is done - the same moment it
+ * hands over the keyboard's bytes - so a byte typed during one call was
+ * drained by the next, and a tap never reached INKEY$: eight taps into
+ * keydemo.bas showed one.  The kernel already answers the whole table
+ * in one ioctl so that a caller "cannot see two different instants";
+ * keeping that answer for two milliseconds gives a burst one drain and
+ * one crossing, which is what it costs on the board.  The board's
+ * function is below, unchanged.
+ */
+MMINTEGER mm_keydown(MMINTEGER n)
+{
+    static struct mm_kbd_down cached;
+    static MMINTEGER cached_us = -1;
+    struct mm_kbd_down d;
+    MMINTEGER now;
+
+    mm_gflush();                /* a read is a wait - see mm_pause */
+    if (n < 0 || n > 8)
+        MM_RAISEV("KEYDOWN takes 0 to 8", 0);
+    now = mm_us_now();
+    if (cached_us >= 0 && now - cached_us < 2000) {
+        d = cached;
+    } else {
+        if (mm_raw_hold())
+            while (mm_rd1() >= 0)
+                ;
+        d.count = d.mods = d.locks = 0;
+        d.key[0] = d.key[1] = d.key[2] = 0;
+        d.key[3] = d.key[4] = d.key[5] = 0;
+        if (mm_gfx_open() < 0 ||
+            mm_sys_ioctl(mm_gfx_fd, MM_PICOIOC_KEYDOWN, &d) < 0)
+            return 0;           /* no keyboard is "nothing held", not an error */
+        cached = d;
+        cached_us = now;
+    }
+    if (n == 0)
+        return d.count;
+    if (n == 7)
+        return d.mods;
+    if (n == 8)
+        return d.locks;
+    return d.key[n - 1];
+}
+#else
 MMINTEGER mm_keydown(MMINTEGER n)
 {
     struct mm_kbd_down d;
@@ -5164,6 +5216,7 @@ MMINTEGER mm_keydown(MMINTEGER n)
         return d.locks;
     return d.key[n - 1];
 }
+#endif
 
 /*
  * Batched drawing.
