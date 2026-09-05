@@ -11,7 +11,12 @@ M=$(cd "$(dirname "$0")/.." && pwd)
 W=${W:-/tmp/mmbcgate}
 mkdir -p "$W"
 
-make -s -C "$M/mmbc" || exit 1
+# MMBC overrides the translator under test (a build tree elsewhere);
+# without it the gate builds and uses this tree's own.
+if [ -z "$MMBC" ]; then
+	make -s -C "$M/mmbc" || exit 1
+	MMBC=$M/mmbc/mmbc
+fi
 
 total=0
 # samples/ as well as tests/: the samples are the only programs in the
@@ -29,7 +34,7 @@ for src in "$M"/tests/*.bas "$M"/samples/*.bas; do
 		if [ $mode = fcc ]; then flag=--fcc; else flag=; fi
 		python3 "$M/mmb2c.py" $flag "$src" -o "$W/$b.$mode.py.c" \
 			> "$W/$b.$mode.py.out" 2>&1
-		"$M/mmbc/mmbc" $flag "$src" -o "$W/$b.$mode.c.c" \
+		"$MMBC" $flag "$src" -o "$W/$b.$mode.c.c" \
 			> "$W/$b.$mode.c.out" 2>&1
 		d=$(diff "$W/$b.$mode.py.c" "$W/$b.$mode.c.c" 2>/dev/null \
 			| grep -c '^[<>]')

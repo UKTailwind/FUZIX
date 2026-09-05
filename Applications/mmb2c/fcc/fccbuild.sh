@@ -19,7 +19,7 @@
 
 M=$(cd "$(dirname "$0")/.." && pwd)
 FCC=${FCC:-$(cd "$(dirname "$0")/../../CC" && pwd)}
-BIN=$FCC/host-armm0
+BIN=${BIN:-$FCC/host-armm0}
 INC=$M/fcc/include
 CINC=$FCC/hosttest/ctest-include
 W=${W:-/tmp/fccbuild}

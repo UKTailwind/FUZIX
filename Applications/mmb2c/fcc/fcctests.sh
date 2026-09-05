@@ -7,7 +7,7 @@
 
 M=$(cd "$(dirname "$0")/.." && pwd)
 FCC=${FCC:-$(cd "$(dirname "$0")/../../CC" && pwd)}
-BIN=$FCC/host-armm0
+BIN=${BIN:-$FCC/host-armm0}
 W=${W:-/tmp/fccbuild}
 mkdir -p "$W"
 
