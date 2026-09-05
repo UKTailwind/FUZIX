@@ -544,15 +544,43 @@ static int mm_arming(void)
     return mm_est != NULL && mm_est[1] != 0;
 }
 
+/*
+ * OPTION CONSOLE.  putConsole is "if (OptionConsole & 2)
+ * DisplayPutC; if (OptionConsole & 1) SerialConsolePutC"
+ * (PicoMite.c:1174) - two independent sinks, so BOTH really does
+ * write the character twice, to two different places.
+ *
+ * In a TEXT mode there is no second sink: the console is the tty,
+ * mm_gputc has nothing to draw on, and both bits mean the same
+ * thing.  Only NONE is different there.
+ *
+ * ONE routine for both the direct path and the armed-ON ERROR line
+ * buffer's commit.  The commit used to write "mm_gputc or else
+ * putchar", which in a graphics mode painted the line and never
+ * reached the tty - so a PRINT of MM.ERRMSG$ after a trapped error
+ * vanished from the console while the same PRINT unarmed appeared on
+ * both.  Found by the hosted build, where the tty is the whole
+ * console; true on the board with OPTION CONSOLE BOTH as well.
+ */
+static void mm_sink(int c)
+{
+    if (mm_gon) {
+        if (mm_console_opt & 2)
+            mm_gputc(c);
+        if (mm_console_opt & 1)
+            putchar(c);
+    } else if (mm_console_opt) {
+        putchar(c);
+    }
+}
+
 void mm_pr_commit(void)
 {
     int i;
 
     if (!mm_poisoned()) {
-        for (i = 0; i < mm_prn; i++) {
-            if (!mm_gputc((unsigned char)mm_prbuf[i]))
-                putchar(mm_prbuf[i]);
-        }
+        for (i = 0; i < mm_prn; i++)
+            mm_sink((unsigned char)mm_prbuf[i]);
     }
     mm_prn = 0;
     mm_prover = 0;
@@ -578,24 +606,7 @@ void mm_putc(int c)
         mm_prover = 1;
         mm_pr_commit();
     }
-    /*
-     * OPTION CONSOLE.  putConsole is "if (OptionConsole & 2)
-     * DisplayPutC; if (OptionConsole & 1) SerialConsolePutC"
-     * (PicoMite.c:1174) - two independent sinks, so BOTH really does
-     * write the character twice, to two different places.
-     *
-     * In a TEXT mode there is no second sink: the console is the tty,
-     * mm_gputc has nothing to draw on, and both bits mean the same
-     * thing.  Only NONE is different there.
-     */
-    if (mm_gon) {
-        if (mm_console_opt & 2)
-            mm_gputc(c);
-        if (mm_console_opt & 1)
-            putchar(c);
-    } else if (mm_console_opt) {
-        putchar(c);
-    }
+    mm_sink(c);
     if (c == '\r' || c == '\n') mm_charpos = 1;
     else if (c == '\t')         mm_charpos = (((mm_charpos - 1) / 14) + 1) * 14 + 1;
     else if (c == '\b')       { if (mm_charpos > 1) mm_charpos--; }

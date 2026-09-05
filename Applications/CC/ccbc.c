@@ -443,8 +443,22 @@ int main(int argc, char *argv[])
 		 * defined neither.  A generated program then compiled, ran,
 		 * and drove no pins at all, which is the worst way for this
 		 * to be wrong.
+		 *
+		 * On a PC the machine is NOT a PC3.  A program address is
+		 * still a machine address, so the headers that reach the
+		 * hardware directly under MM_PC3 - mmb_int.h and mmb_wait.h
+		 * reading TIMER0 for the tick clock, mmb_gpio.h the pin
+		 * registers - would read unmapped memory: every SETTICK
+		 * program died at 0x400b0025, TIMER0's register block.
+		 * MM_FCC is the gates' define, under which those headers
+		 * call the runtime's natives instead, and the host bcrun is
+		 * exactly that runtime.
 		 */
+#ifdef PC3_HOST
+		av[3] = "-DMM_FCC";
+#else
 		av[3] = "-DMM_PC3";
+#endif
 		av[4] = src;
 		av[5] = NULL;
 		run(av, NULL, ppfile);
