@@ -258,43 +258,81 @@ MMG_FN int mmn_aton_span(const char *p, int len, unsigned char *ip4)
 	return mmn_aton(m, ip4);
 }
 
+/*	One line of resolv.conf: [ws] nameserver [ws] a.b.c.d.  1 if it
+ *	named the server and mmn_ns holds it. */
+MMG_FN int mmn_ns_line(const char *buf, int i, int j)
+{
+	int k;
+
+	while (i < j && (buf[i] == ' ' || buf[i] == '\t'))
+		i++;
+	if (j - i > 11 && memcmp(buf + i, "nameserver", 10) == 0 &&
+	    (buf[i + 10] == ' ' || buf[i + 10] == '\t')) {
+		i += 10;
+		while (i < j && (buf[i] == ' ' || buf[i] == '\t'))
+			i++;
+		k = i;
+		while (k < j && buf[k] > ' ')
+			k++;
+		return mmn_aton_span(buf + i, k - i, mmn_ns);
+	}
+	return 0;
+}
+
+/*	The file is read in 256-byte pieces with the unfinished last line
+ *	carried into the next, so the nameserver is found wherever it
+ *	sits.  The first version read one piece and stopped: on a PC
+ *	whose /etc/resolv.conf is systemd-resolved's stub file, the line
+ *	sits under 700 bytes of comment and was never seen, and every
+ *	name failed to resolve - "Failed to find TCP address".  The
+ *	board's file is a line or two and never noticed. */
 MMG_FN int mmn_nameserver(unsigned char *ip4)
 {
 	char buf[257];
-	int fd, n, i, j, k;
+	int fd, n, i, j, have;
 
 	if (mmn_ns_state == 0) {
 		mmn_ns_state = -1;
 		fd = mmn_open_ro("/etc/resolv.conf");
 		if (fd >= 0) {
-			n = mmn_read(fd, buf, 256);
-			mmn_close(fd);
-			if (n < 0)
-				n = 0;
-			buf[n] = 0;
-			for (i = 0; i < n; ) {
-				/* one line: [ws] nameserver [ws] a.b.c.d */
-				j = i;
-				while (j < n && buf[j] != '\n')
-					j++;
-				while (i < j && (buf[i] == ' ' || buf[i] == '\t'))
-					i++;
-				if (j - i > 11 &&
-				    memcmp(buf + i, "nameserver", 10) == 0 &&
-				    (buf[i + 10] == ' ' || buf[i + 10] == '\t')) {
-					i += 10;
-					while (i < j && (buf[i] == ' ' || buf[i] == '\t'))
-						i++;
-					k = i;
-					while (k < j && buf[k] > ' ')
-						k++;
-					if (mmn_aton_span(buf + i, k - i, mmn_ns)) {
+			have = 0;
+			for (;;) {
+				n = mmn_read(fd, buf + have, 256 - have);
+				if (n <= 0) {
+					/* the last line, if it has no newline */
+					if (have > 0 && mmn_ns_line(buf, 0, have))
+						mmn_ns_state = 1;
+					break;
+				}
+				have += n;
+				for (i = 0; i < have; ) {
+					j = i;
+					while (j < have && buf[j] != '\n')
+						j++;
+					if (j == have) {
+						/* unfinished: carry it, unless it
+						   already fills the buffer, when it
+						   is not a nameserver line anyway */
+						if (i == 0 && have == 256)
+							have = 0;
+						else {
+							memmove(buf, buf + i, have - i);
+							have -= i;
+						}
+						break;
+					}
+					if (mmn_ns_line(buf, i, j)) {
 						mmn_ns_state = 1;
 						break;
 					}
+					i = j + 1;
+					if (i >= have)
+						have = 0;
 				}
-				i = j + 1;
+				if (mmn_ns_state == 1)
+					break;
 			}
+			mmn_close(fd);
 		}
 	}
 	if (mmn_ns_state != 1)

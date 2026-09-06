@@ -36,6 +36,7 @@
    libpc3client.  The runtime inside bcrun does the same through
    mm_sys_open/mm_sys_ioctl (mmb_runtime.c).  Nothing else changes. */
 #include "pc3client.h"
+#include "pc3tls.h"		/* the board's IPPROTO_TLS socket, hosted */
 #include "pico_ioctl.h"
 #endif
 #endif
@@ -2054,9 +2055,26 @@ static void lc_time(void)
 static void lc_open(void)
 {
 #ifdef PC3_HOST
-	if (!strcmp(getstr((unsigned long)arg(0)), "/dev/sys")) {
+	const char *path = getstr((unsigned long)arg(0));
+
+	if (!strcmp(path, "/dev/sys")) {
 		A = pc3_sys_open();
 		return;
+	}
+	/* The board's CA bundle is /etc/ca.pem, and its programs name it
+	   so (WEB TLS CA "/etc/ca.pem").  A PC has no such file; the
+	   package carries the board's, beside the programs, and a program
+	   asking for the one gets the other - the same ten roots it would
+	   have had on the board.  A real /etc/ca.pem wins. */
+	if (!strcmp(path, "/etc/ca.pem") && access(path, R_OK) != 0) {
+		static char shipped[4200];
+		char dir[4096];
+
+		if (pc3_exe_dir(dir, sizeof dir) == 0) {
+			snprintf(shipped, sizeof shipped, "%s/../share/pc3host/ca.pem", dir);
+			A = open(shipped, (int)arg(1), 0666);
+			return;
+		}
 	}
 #endif
 	A = open(getstr((unsigned long)arg(0)), (int)arg(1), 0666);
@@ -2074,6 +2092,10 @@ static void lc_close(void)
 		A = pc3_sys_close((int)arg(0));
 		return;
 	}
+	if (pc3_tls_isfd((int)arg(0))) {
+		A = pc3_tls_close((int)arg(0));
+		return;
+	}
 #endif
 	A = close((int)arg(0));
 }
@@ -2082,6 +2104,12 @@ static void lc_read(void)
 {
 	unsigned long b = arg(1), n = arg(2);
 	if (VM_OOBN(b, n)) fault("bad address");
+#ifdef PC3_HOST
+	if (pc3_tls_isfd((int)arg(0))) {
+		A = pc3_tls_read((int)arg(0), vptr(b), n);
+		return;
+	}
+#endif
 	A = read((int)arg(0), vptr(b), n);
 }
 
@@ -2089,6 +2117,12 @@ static void lc_write(void)
 {
 	unsigned long b = arg(1), n = arg(2);
 	if (VM_OOBN(b, n)) fault("bad address");
+#ifdef PC3_HOST
+	if (pc3_tls_isfd((int)arg(0))) {
+		A = pc3_tls_write((int)arg(0), vptr(b), n);
+		return;
+	}
+#endif
 	A = write((int)arg(0), vptr(b), n);
 }
 
@@ -2144,6 +2178,15 @@ static void lc_socket(void)
 {
 	int d = (int)arg(0), t = (int)arg(1), p = (int)arg(2);
 
+#ifdef PC3_HOST
+	/* The board's TLS socket, kept real on a PC: a TCP socket that
+	   pc3tls.c handshakes and encrypts (the gates' bcrun below maps
+	   it to plain TCP, which is fine where nothing connects). */
+	if (p == 254 && nx_type(t) == SOCK_STREAM) {
+		A = pc3_tls_socket();
+		return;
+	}
+#endif
 #ifdef __linux__
 	A = socket(d == 1 ? AF_INET : d, nx_type(t), p == 254 ? 0 : p);
 #else
@@ -2160,7 +2203,20 @@ static void lc_connect(void)
 	{
 		struct sockaddr_in a;
 		nx_sa_in(&a, sa);
+#ifdef PC3_HOST
+		if (pc3_tls_isfd((int)arg(0))) {
+			A = pc3_tls_connect((int)arg(0), (struct sockaddr *)&a, sizeof(a));
+			return;
+		}
+#endif
 		A = connect((int)arg(0), (struct sockaddr *)&a, sizeof(a));
+		/* A program's connect loop calls again until it answers 0.
+		   Fuzix answers 0 once a non-blocking connect has completed;
+		   Linux answers EISCONN, which the program would take for a
+		   refusal - and did, for every connection that took longer
+		   than the first call. */
+		if (A < 0 && errno == EISCONN)
+			A = 0;
 	}
 #else
 	A = connect((int)arg(0), (struct sockaddr *)vptr(sa), (int)arg(2));
@@ -2175,7 +2231,13 @@ static void lc_bind(void)
 #ifdef __linux__
 	{
 		struct sockaddr_in a;
+		int one = 1;
 		nx_sa_in(&a, sa);
+		/* A server program run again within a minute of the last
+		   one found its port in TIME_WAIT and "failed to bind to
+		   port"; the board's stack does not hold a closed port
+		   against the next listener, and nor should this. */
+		setsockopt((int)arg(0), SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
 		A = bind((int)arg(0), (struct sockaddr *)&a, sizeof(a));
 	}
 #else
@@ -2364,7 +2426,27 @@ static void lc_ioctl(void)
 	int rq = (int)arg(1);
 	unsigned long p = arg(2);
 
-#ifdef __linux__
+#ifdef PC3_HOST
+	/* The TLS requests are the hosted TLS layer's: the host name on
+	   a TLS socket, and the CA bundle - a program-memory pointer and
+	   a length in the kernel's struct net_ca, read here as the
+	   32-bit words they are.  NETIOC_UP/STATUS/DOWN on /dev/sys go to
+	   the server below, which knows the machine's network. */
+	if (rq == 0x0420) {
+		if (p && VM_OOBN(p, 1)) fault("bad address");
+		A = pc3_tls_sethost((int)arg(0), p ? getstr(p) : "");
+		return;
+	}
+	if (rq == 0x0043) {
+		unsigned long buf, len;
+		if (!p || VM_OOBN(p, 8)) fault("bad address");
+		buf = rd32(p);
+		len = rd32(p + 4);
+		if (len && VM_OOBN(buf, len)) fault("bad address");
+		A = pc3_tls_ca(len ? vptr(buf) : NULL, (uint32_t)len);
+		return;
+	}
+#elif defined(__linux__)
 	/* The board-only requests (SIOCTLSHOST 0x0420, NETIOC_*
 	   0x0040..0x0043) succeed silently, so the same .bc
 	   structure-tests under the host gates. */

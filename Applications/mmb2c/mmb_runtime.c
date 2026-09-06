@@ -3730,6 +3730,19 @@ MMINTEGER mm_run_exec(void)
         mm_error("no such program");
         return -1;
     }
+#ifdef PC3_HOST
+    /* WEB PING is ping(8) run to completion, and mmb_net.h says why an
+     * unanswered ping is not an error: the board's ping prints its
+     * loss and exits 0.  Linux's exits 1 for "no replies" (2 for a
+     * real fault), so a host with nobody at the address raised where
+     * the board printed 100% loss.  Same program, same outcome. */
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 1) {
+        const char *p = mm_run_argv[0], *s = strrchr(p, '/');
+
+        if (strcmp(s ? s + 1 : p, "ping") == 0)
+            return 0;
+    }
+#endif
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         mm_error("the program reported a failure");
         return -1;
