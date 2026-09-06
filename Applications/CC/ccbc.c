@@ -298,7 +298,11 @@ int main(int argc, char *argv[])
 {
 	char *src = NULL;
 	char out[64];
+#ifdef PC3_HOST
+	char *av[7];		/* one more: the row-window define */
+#else
 	char *av[6];
+#endif
 	int i;
 
 	*out = 0;
@@ -456,11 +460,19 @@ int main(int argc, char *argv[])
 		 */
 #ifdef PC3_HOST
 		av[3] = "-DMM_FCC";
+		/* The program-side row window (mmb_blit.h): 1K on the board,
+		   where a program has 48K and an ioctl costs a microsecond,
+		   so six rows a transfer is the right trade.  On a PC every
+		   transfer is a round trip to the display server, and a
+		   program has 96K, so a full 320x240 screen goes in three. */
+		av[4] = "-DMMB_WINB=16384";
+		av[5] = src;
+		av[6] = NULL;
 #else
 		av[3] = "-DMM_PC3";
-#endif
 		av[4] = src;
 		av[5] = NULL;
+#endif
 		run(av, NULL, ppfile);
 	} else {
 		fprintf(stderr, "cc: no %s - compiling without the "
