@@ -48,16 +48,41 @@ fi
 [ -x "$FCC/qemu-armm0/bcrun" ] || { echo "no qemu-armm0/bcrun"; exit 1; }
 
 # run $1=bc $2=input-or-empty $3=logfile ; env prefix in $RUNENV
+#
+# Each run gets its OWN PROCESS GROUP, and the group is killed once the
+# program has exited.  PLAY SOUND on the board goes straight into the
+# kernel synthesiser through SNDIOC_MMCMD; there is no such ioctl here,
+# so the runtime falls back to spawning utils/playsnd - and a player
+# still holding the output when the NEXT of the three runs starts makes
+# it print "playsnd: sound output in use" and fail a test that computed
+# every answer correctly.  It looked mode-specific and was not: native
+# passed because it ran first, bcode and rec failed behind it, and
+# strargs failed all three because it follows play.  Nothing here is
+# about code generation, which is what this gate exists to test.
 run_one() {
 	if [ -n "$2" ] && [ -f "$2" ]; then
-		env $RUNENV timeout 600 $QBC "$1" < "$2" > "$3" 2>&1
+		setsid env $RUNENV timeout 600 $QBC "$1" < "$2" > "$3" 2>&1 &
 	else
-		env $RUNENV timeout 600 $QBC "$1" > "$3" 2>&1
+		setsid env $RUNENV timeout 600 $QBC "$1" > "$3" 2>&1 &
 	fi
+	_rp=$!
+	wait "$_rp"
+	_rc=$?
+	# setsid leaves the child a group leader: its pgid is its pid
+	kill -TERM -"$_rp" 2>/dev/null
+	return $_rc
 }
 
 # $1 = raw output, $2 = filtered copy (never beside the source tree)
-filt() { grep -v -e 'Time taken' -e ' ms ' "$1" > "$2"; }
+#
+# "playsnd: ..." is the spawned player's own stderr, not the
+# program's output.  strargs DELIBERATELY provokes sound errors and
+# traps them - "Sound output did not start" is line 2 of its
+# .expected - and on a host with no audio the helper announces
+# itself on the way past, which is environment, not behaviour.  The
+# board never spawns it at all: PLAY SOUND there goes into the
+# kernel synthesiser through SNDIOC_MMCMD.
+filt() { grep -v -e 'Time taken' -e ' ms ' -e '^playsnd: ' "$1" > "$2"; }
 
 pass=0; fail=0
 for src in "$M"/tests/*.bas; do
