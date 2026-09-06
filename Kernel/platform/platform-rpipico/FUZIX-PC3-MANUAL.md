@@ -3270,6 +3270,75 @@ and that function will run interpreted. A program that is still too
 big to load can be built `BCODE_ONLY=1 cc prog.c`: about 2.7× slower,
 but roughly a third the code.
 
+## When a program will not start: `THUMB_BUDGET` {#thumb-budget}
+
+The message to recognise is this one, and it is the kernel's, not the
+compiler's:
+
+```
+# ./robots.bc
+exec: pid 27 needs 76 blocks, 74 free beside a 10-block neighbour (pool 84)
+./robots.bc: out of memory (847 symbols)
+```
+
+**It is not a report of free memory.** A program has to be able to sit
+in the pool *beside the biggest other process*, so that the swapper can
+always bring it back in; the number it is measured against is
+`84 minus the biggest neighbour`, and the neighbour is usually the shell you
+typed the command into. So a program can fail to start on a machine
+with plenty free, and the same program starts on a machine whose shell
+happens to be smaller.
+
+`THUMB_BUDGET` is the lever. It caps the **total native bytes** the
+compiler may add to the object; functions compiled before the cap is
+reached run native, and everything after it stays bytecode and runs
+interpreted. It is unset by default, which means uncapped — the
+compiler takes all the native code it can get, which is what you want
+right up until the program stops fitting.
+
+```
+# THUMB_BUDGET=140000 cc prog.bas
+```
+
+PETSCII Robots is the worked example, measured on the machine:
+
+| build | `robots.bc` | blocks | |
+|-------|-------------|--------|--|
+| uncapped | 209,022 | 76 | refused |
+| `THUMB_BUDGET=140000` | 196,782 | under 74 | runs |
+| `BCODE_ONLY=1` | ~107,000 | far fewer | runs, 2.7× slower |
+
+Robots needs more headroom than its own size: `Load image` and
+`Play modsample` each start a helper *while the game is running*, and
+that helper wants about eleven blocks. A program that spawns nothing
+can use the pool right up to the line.
+
+**How to choose a number.** Start high and come down. The budget is
+spent **first-come, in the order the functions appear in the file** —
+not in order of how hot they are — so the code that loses its native
+translation is whatever happens to be at the end of your program. If
+the program fits but has become slow, either raise the budget until it
+only just fits, or move the routines that matter to the top of the
+file. `THUMB_VERBOSE=1` shows which functions stayed bytecode.
+
+Prefer a budget to `BCODE_ONLY`: the budget keeps most of the program
+native and costs speed only at the tail, while `BCODE_ONLY` gives up
+all of it.
+
+**One trick for a program that is only just too big.** `exec` it from
+the shell:
+
+```
+# exec ./prog.bc
+```
+
+`exec` replaces the shell rather than forking, so the shell stops being
+a neighbour and its ten blocks join the room available. It is worth
+knowing because it diagnoses as well as fixes: if a program starts this
+way and not the ordinary way, the problem is the pair and not the
+program. The cost is that when the program exits there is no shell to
+return to and you are back at `login:`.
+
 
 \newpage
 
@@ -3889,6 +3958,12 @@ it out and carrying on.
 
 `bcrun` executes a `.bc` file, and is what the `#!`-less `./prog.bc`
 actually invokes.
+
+Three environment variables change what `cc` builds, all described
+in [When a program will not start](#thumb-budget): `THUMB_BUDGET`
+caps the native code so a large program still fits its process,
+`THUMB_VERBOSE` reports what translated and what did not, and
+`BCODE_ONLY` gives up native code altogether.
 
 ## The manual pages
 
