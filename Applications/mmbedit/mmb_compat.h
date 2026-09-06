@@ -19,7 +19,7 @@
 #include <ctype.h>
 #include <string.h>
 #include <stdio.h>
-#include "mmedit.h"
+#include "mmbedit.h"
 
 /* --- key codes, under MMBasic's own names -------------------------------- */
 #define ESC         K_ESC

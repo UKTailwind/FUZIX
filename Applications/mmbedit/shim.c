@@ -1,4 +1,4 @@
-/* mmedit shim: terminal, keyboard and file I/O between MMBasic's
+/* mmbedit shim: terminal, keyboard and file I/O between MMBasic's
  * editor and Fuzix.
  *
  * The keyboard is the interesting half.  MMBasic's editor expects
@@ -17,7 +17,7 @@
 #include <signal.h>
 #include <termios.h>
 #include <sys/ioctl.h>
-#include "mmedit.h"
+#include "mmbedit.h"
 
 #ifdef _WIN32
 /* The console on Windows: pc3w_read honours the VMIN/VTIME set below,
@@ -332,7 +332,7 @@ static int decode_csi(void)
             /* F1-F4 have two spellings and we only knew one.  Our own
              * console sends the DEC form, ESC O P..S, handled below -
              * but TeraTerm and every VT220-style terminal send these,
-             * and mmedit swallowed them as unknown, so on a serial
+             * and mmbedit swallowed them as unknown, so on a serial
              * terminal none of the function keys the editor is driven
              * by did anything at all.  The whole table below is
              * MMBasic's MMInkey (PicoMite.c), which is the authority

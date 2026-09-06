@@ -581,7 +581,7 @@ ARC PIXEL TEXT CLS` — and these are the gaps in them:
 * **The immediate-mode environment:** `EDIT EDIT FILE LIST NEW RUN
   AUTOSAVE CHAIN LIBRARY EXECUTE HELP CMM2 LOAD CMM2 RUN
   UPDATE FIRMWARE CONFIGURE CPU`. A translated program is compiled and
-  run, not typed at a prompt; `mmedit` is the editor.
+  run, not typed at a prompt; `mmbedit` is the editor.
 * **Firmware demos and accelerators:** `MANDELBROT ASTRO STAR RAY CALC
   DRAW3D`(the demo entry points) — a BASIC program can compute these,
   and they exist in the firmware because an interpreter cannot.

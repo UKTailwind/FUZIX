@@ -1,10 +1,10 @@
-/* mmedit - MMBasic's full screen editor as a Fuzix file editor.
+/* mmbedit - MMBasic's full screen editor as a Fuzix file editor.
  *
  * This file is only the wrapper: load the file, set up the terminal,
  * hand over to FullScreenEditor, and put the terminal back afterwards
  * whatever happens.  The editor itself is in editor.c.
  *
- *   mmedit <file>      F1 save and exit, F2 save, compile and run,
+ *   mmbedit <file>      F1 save and exit, F2 save, compile and run,
  *                      ESC abandon, F3 find, F9 import, F10 export
  *
  * A .bas file is colour coded three ways: cyan for a keyword mmbc can
@@ -17,7 +17,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include "mmedit.h"
+#include "mmbedit.h"
 #ifdef PC3_HOST
 #include "pc3client.h"
 #endif
@@ -69,14 +69,14 @@ int main(int argc, char *argv[])
     int n;
 
     if (argc != 2) {
-        fprintf(stderr, "usage: mmedit <file>\n");
+        fprintf(stderr, "usage: mmbedit <file>\n");
         return 1;
     }
 
     n = file_load(argv[1]);
     if (n < 0) {
         if (errno == EFBIG)
-            fprintf(stderr, "mmedit: %s is larger than %d bytes\n",
+            fprintf(stderr, "mmbedit: %s is larger than %d bytes\n",
                     argv[1], EDBUF_SIZE - 1);
         else
             perror(argv[1]);
@@ -84,7 +84,7 @@ int main(int argc, char *argv[])
     }
 
     if (term_open() < 0) {
-        fprintf(stderr, "mmedit: not a terminal\n");
+        fprintf(stderr, "mmbedit: not a terminal\n");
         return 1;
     }
 
@@ -124,20 +124,20 @@ int main(int argc, char *argv[])
         char *av[4];
 
         if (!is_source(argv[1])) {
-            printf("mmedit: saved.  %s is not .bas or .c, so there is "
+            printf("mmbedit: saved.  %s is not .bas or .c, so there is "
                    "nothing to compile\n", argv[1]);
             return 0;
         }
 #ifdef PC3_HOST
         /* The cc beside this program, wherever that is: /usr/bin/cc on
-           a PC is the system's compiler.  MMEDIT_CC names another -
+           a PC is the system's compiler.  MMBEDIT_CC names another -
            a wrapper, a different build, a script that records what it
            was asked - and is run the same way, with -r and the file. */
         {
             static char hcc[4200];
             char dir[4096];
             const char *cc = CC_CMD;
-            const char *env = getenv("MMEDIT_CC");
+            const char *env = getenv("MMBEDIT_CC");
             const char *slash;
 
             if (env && *env)

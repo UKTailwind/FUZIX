@@ -151,7 +151,7 @@ reaches them only by rebuilding them:
 
 It rebuilds **the C library itself first, from clean**, and then
 `Applications/util`, `V7`, `MWC`, the games, `levee`, `bbcbasic`,
-`mmedit`, `cpp`, `CC`, and this platform's own `utils`. Objects are
+`mmbedit`, `cpp`, `CC`, and this platform's own `utils`. Objects are
 deleted before each — a stale `.o` links against the old library and
 looks like a successful build. The libc step is not optional and was
 not always there: without it the script relinked everything against a
@@ -303,7 +303,7 @@ rather than pasting blind.
 statement handled in a *pre-pass* is invisible to it and must be named
 by hand — `TYPE` always was, and `DEFINEFONT` was missing from this
 appendix for the whole of the release that introduced it. The same
-blind spot is in `mmedit`'s `genkw.py`, which reads the same tables:
+blind spot is in `mmbedit`'s `genkw.py`, which reads the same tables:
 both were fixed at v0.15, and both will need it again for the next
 statement that is lifted out before the dispatch runs.
 

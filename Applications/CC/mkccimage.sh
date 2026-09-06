@@ -39,7 +39,7 @@ set -e
 p2geom "$SRC"
 START=$P2_START
 COUNT=$P2_COUNT
-for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc saveimage loadimage loadjpg loadpng mmedit \
+for f in cc0 cc1 cc2 ccbc bcrun bcdump cpp mmbc saveimage loadimage loadjpg loadpng mmbedit \
 		playmp3 playmod; do
 	[ -r "$CC/hwtest/$f.s" ] || {
 		echo "missing $CC/hwtest/$f.s - cross build and strip first" >&2
@@ -119,7 +119,7 @@ echo "--- installing"
 	# saveimage and loadimage are what SAVE IMAGE and LOAD IMAGE run:
 	# whole operations, so they are programs rather than runtime, and
 	# they cost a BASIC program nothing.  Useful from the shell too.
-	# mmedit is the MMBasic editor ported to Fuzix (Applications/mmedit):
+	# mmbedit is the MMBasic editor ported to Fuzix (Applications/mmbedit):
 	# the machine edits its own BASIC as well as translating it.
 	# playmp3 is what PLAY MP3 runs, on the same bargain as the image
 	# pair - and it was left OUT of this list for a whole release: the

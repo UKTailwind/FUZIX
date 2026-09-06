@@ -56,7 +56,7 @@ Headline specification as configured here:
   from the keyboard
 * A self-hosted C89 compiler generating native ARM code, and an
   MMBasic translator in front of it — both run on the machine itself
-* MMBasic's own full-screen editor, `mmedit`, so BASIC is written,
+* MMBasic's own full-screen editor, `mmbedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
 ## New in v0.26
@@ -213,14 +213,14 @@ the statement — anywhere, whether it ran or not — died at load with
 
 ### From v0.24
 
-**`F2` in `mmedit` builds the program and runs it.** On a PicoMite `F2`
+**`F2` in `mmbedit` builds the program and runs it.** On a PicoMite `F2`
 is "save, exit and run", and the interpreter took the program straight
 back; the editor here printed the two commands you would have to type
 and left you at the shell. It now hands the file to the compiler, which
 builds it — a `.bas` through `mmbc` first — and runs it if it built.
 `Ctrl-W` does the same, as it does in MMBasic. A compile error stops
 there, with the errors on the screen, rather than putting you back in
-the editor at the offending line. The `mmedit` chapter has the detail.
+the editor at the offending line. The `mmbedit` chapter has the detail.
 
 **`cc -r` builds and runs in one command**, which is what `F2` uses and
 is worth having at the prompt in its own right: `cc -r prog.bas`.
@@ -685,7 +685,7 @@ kernel does the rest. `bcrun prog.bc` still works and is the way to run
 an object that has lost its execute bit. Options are `-o name`, `-v` to
 show each pass as it runs, `-k` to keep the intermediates, and `-r` to
 run the program if it built — `cc -r prog.bas` is a build and a run in
-one, and is what `mmedit`'s `F2` uses.
+one, and is what `mmbedit`'s `F2` uses.
 `bcdump prog.bc` disassembles.
 
 `cc` is a driver: it runs `cpp`, then the three compiler passes from
@@ -3273,14 +3273,14 @@ but roughly a third the code.
 
 \newpage
 
-# `mmedit`: MMBasic's editor
+# `mmbedit`: MMBasic's editor
 
 MMBasic's full-screen editor is ported and runs as an ordinary Fuzix
 program, so BASIC is written, translated, compiled and run without
 leaving the machine:
 
 ```
-# mmedit prog.bas
+# mmbedit prog.bas
 ```
 
 It is the editor from the firmware, with the same keys:
@@ -3303,7 +3303,7 @@ the editor saves, exits and runs `cc -r` on the file, which builds it —
 a `.bas` through `mmbc` first — and runs it if it built:
 
 ```
-# mmedit prog.bas          F2
+# mmbedit prog.bas          F2
 cc -r prog.bas
 wrote prog.mb.c
 ..........................
@@ -3314,7 +3314,7 @@ hello from prog
 A compile error stops there, with the errors on the screen; nothing
 runs. That is the one place this parts company with the interpreter,
 which put you back in the editor at the offending line — here you are
-at the shell, and `mmedit prog.bas` again is the way back.
+at the shell, and `mmbedit prog.bas` again is the way back.
 
 It happens only for `.bas`, `.BAS`, `.c` and `.C`; edit anything else
 and `F2` says there is nothing to compile. `Ctrl-W` is `F2`'s alias, as
@@ -3347,14 +3347,14 @@ load, which matters because most files arrive from a PC.
 The editor draws on the text console, which is what `MODE 1` selects. A
 program that finished in `MODE 2` leaves the screen 320×240 in sixteen
 colours, and the console is then not what the monitor is showing — so
-the editor would be painting where nothing can be seen. `mmedit`
+the editor would be painting where nothing can be seen. `mmbedit`
 switches to `MODE 1` on the way in and puts the old mode back on the way
 out, including when it is killed, so a program's screen survives a trip
 through the editor and comes back as it was.
 
 ## The other editor: `vi`
 
-`mmedit` is for BASIC. For small text files — a shell script,
+`mmbedit` is for BASIC. For small text files — a shell script,
 `/etc/motd`, a short C file — there is a `vi`:
 
 ```
@@ -3925,12 +3925,12 @@ on the machine: `man 2 open`, `man 2 read`, `man 2 fork`.
 ## Editors
 
 ```
-# mmedit prog.bas         MMBasic's own, with its function keys
+# mmbedit prog.bas         MMBasic's own, with its function keys
 # vi hello.c              levee, a compact vi
 # ed                      the V7 line editor, still here
 ```
 
-`mmedit` is described in its own chapter. `vi` and `levee` are two
+`mmbedit` is described in its own chapter. `vi` and `levee` are two
 names for one program.
 
 ## Getting files on and off
@@ -4038,7 +4038,7 @@ because they are what makes shell work on the machine bearable.
   and simply never installed. They are installed.
 * **`grep -q`, `ls -t` and `ls -1`** — small additions, and the ones a
   script reaches for first.
-* **`mmedit`** is not a Unix tool at all: it is MMBasic's own
+* **`mmbedit`** is not a Unix tool at all: it is MMBasic's own
   full-screen editor, keyword colouring and function keys included.
 
 **What is still period-correct**, so that a script does not surprise
@@ -4763,7 +4763,7 @@ correctly; if a transfer matters, check the CRC the device gives you.
 
 The editor, `RUN`, `LIST`, `EDIT` and the rest of the immediate-mode
 environment, which will never apply: a translated program is compiled
-and run rather than typed at a prompt. (`mmedit` provides the editing
+and run rather than typed at a prompt. (`mmbedit` provides the editing
 they existed for.) The remaining hardware statements are the subject
 of current work.
 

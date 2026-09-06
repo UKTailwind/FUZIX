@@ -29,7 +29,7 @@ stmts = []
 # 0-9 in the class, for the same reason the dot matters in the BUILTINS
 # pattern below: without it a keyword with a digit never matched its own
 # dispatch line, so I2C2 was counted as untranslatable and left out of
-# the manual's appendix for as long as it had been translating.  mmedit's
+# the manual's appendix for as long as it had been translating.  mmbedit's
 # genkw.py, which reads this file's tables the same way, had it too.
 for m in re.finditer(r"up == '([A-Z0-9$?]+)'", body):
     stmts.append(m.group(1))

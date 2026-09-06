@@ -39,7 +39,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include "mmedit.h"
+#include "mmbedit.h"
 #include "mmb_compat.h"
 
 /* --- the globals Editor.c works through ---------------------------------- */
@@ -2190,7 +2190,7 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
     SCursor(xx, yy);
     drawstatusline = true;
 #ifdef PC3_HOST
-    /* mmedit.c found the file, or its directory, not writable: say so
+    /* mmbedit.c found the file, or its directory, not writable: say so
        now, on the status line, rather than at F1 with the work done. */
     if (edit_readonly)
         editDisplayMsg((unsigned char *)" READ ONLY: copy the file to a directory of yours to save ");

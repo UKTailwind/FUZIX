@@ -12,7 +12,7 @@ these things on the board are involved:
                                         Applications/mmb2c
     /usr/bin/bcrun                      the runtime is compiled INTO it
     /usr/bin/mmbc                       the translator
-    /usr/bin/mmedit                     its keyword colouring
+    /usr/bin/mmbedit                     its keyword colouring
 
 Miss one and it fails at RUN time, not build time, because the on-board
 cc allows implicit declarations: a call to a function a stale header no
@@ -23,7 +23,7 @@ WIDTHS.  That cost an afternoon once - mm_map's index arrived as
 Build first, from the FUZIX tree:
 
     make -f Makefile.armm0 FUZIX_ROOT=... USERCPU=armm0 bcrun mmbc
-    (cd ../../../Applications/mmedit && make -f Makefile.armm0 ...)
+    (cd ../../../Applications/mmbedit && make -f Makefile.armm0 ...)
 
 then run this.  Everything is stripped on the way.
 """
@@ -36,7 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FUZIX = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 CC = os.path.join(FUZIX, "Applications", "CC")
 MMB = os.path.join(FUZIX, "Applications", "mmb2c")
-MMEDIT = os.path.join(FUZIX, "Applications", "mmedit")
+MMEDIT = os.path.join(FUZIX, "Applications", "mmbedit")
 STRIP = "arm-none-eabi-strip"
 TMP = os.environ.get("TEMP", "/tmp")
 
@@ -62,7 +62,7 @@ if not HEADERS:
 BINARIES = [
     (os.path.join(CC, "hwtest", "bcrun.s"), "bcrun", "/usr/bin/bcrun"),
     (os.path.join(CC, "hwtest", "mmbc.s"), "mmbc", "/usr/bin/mmbc"),
-    (os.path.join(CC, "hwtest", "mmedit.s"), "mmedit", "/usr/bin/mmedit"),
+    (os.path.join(CC, "hwtest", "mmbedit.s"), "mmbedit", "/usr/bin/mmbedit"),
 ]
 # The compiler passes.  Not part of the BASIC set above - a board can
 # run a program built on the host without them being current - but a

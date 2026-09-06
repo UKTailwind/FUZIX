@@ -261,7 +261,7 @@ implementation was self-consistent and wrong (see
 | 4 | entering a SUB costs skip count, so `SKIP 2` protects less than it looks |
 
 **On the card now** (each with a `.prev` rollback): bcrun 85,900, mmbc
-93,748, mmedit 33,840, current cc0/cc1/cc2, all mmb headers, the
+93,748, mmbedit 33,840, current cc0/cc1/cc2, all mmb headers, the
 updated `/usr/lib/cc/include/mmb_runtime.h`, and the test set
 box/tri/type/structtest/checks/onerror/solar + mmv.  Both manuals and
 their PDFs are current; the PicoMite structures-manual errata are fixed
@@ -273,7 +273,7 @@ self-hosted): 2.3527s baseline → **2.2511s** after the literal-divisor
 fix, which is at or ahead of the v0.9 figure of 2.27s.  The regression
 was Phase A's own doing and is written up under Section 4.
 
-Two incidental fixes: mmedit's prompts ignored Enter from the USB
+Two incidental fixes: mmbedit's prompts ignored Enter from the USB
 keyboard (a serial terminal sends CR, the keyboard map sends LF, and
 `GetInputString` took only CR - so `F3` Find looked broken while every
 other key worked), and `PICOIOC_BOARD` was added to the kernel because

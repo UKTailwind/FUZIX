@@ -1,11 +1,11 @@
-.TH mmedit 1 "FUZIX System Utilities" "FUZIX"
+.TH mmbedit 1 "FUZIX System Utilities" "FUZIX"
 .SH NAME
-mmedit \- the MMBasic full-screen editor
+mmbedit \- the MMBasic full-screen editor
 .SH SYNOPSIS
-.B mmedit
+.B mmbedit
 .I file
 .SH DESCRIPTION
-.B mmedit
+.B mmbedit
 is MMBasic's own editor, working the way it does on a PicoMite: a
 full-screen editor with the function keys along the bottom, for people
 who already know it.
@@ -17,14 +17,14 @@ On a PicoMite
 is "save, exit and run", and the interpreter took the program straight
 back.  Here it is
 .BR "cc \-r" :
-.B mmedit
+.B mmbedit
 saves, leaves the editor and hands the file to the compiler, which runs
 the program if it built.  A BASIC file goes through
 .BR mmbc (1)
 on the way, so one keystroke is the whole build:
 .sp
 .nf
-     # mmedit prog.bas          F2
+     # mmbedit prog.bas          F2
      cc -r prog.bas
      wrote prog.mb.c
      ..........................
@@ -37,7 +37,7 @@ line.
 .PP
 Only the four source extensions are offered to the compiler: .bas,
 \&.BAS, .c and .C.  With any other name
-.B mmedit
+.B mmbedit
 says there is nothing to compile and exits.  Ctrl-W does the same as
 .BR F2 ,
 as it does in MMBasic.
@@ -45,7 +45,7 @@ as it does in MMBasic.
 The function keys are the ones MMBasic uses.  A terminal that sends a
 different escape sequence for F1 to F4 than the console does is the
 usual reason a key seems dead;
-.B mmedit
+.B mmbedit
 accepts both of the common spellings.
 .SH SEE ALSO
 .BR vi (1),

@@ -1,7 +1,7 @@
 """Fetch a TEXT file off the board, over the console.
 
 uusend.py goes one way only, and everything written on the board - a
-program typed in mmedit, a test someone wrote there - was stranded: the
+program typed in mmbedit, a test someone wrote there - was stranded: the
 card is the only copy, and re-imaging the card destroys it.
 
   python fzget.py /root/cc/brownian.bas [local]

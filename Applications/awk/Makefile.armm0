@@ -19,7 +19,7 @@ OBJS = awkgram.tab.o b.o main.o parse.o proctab.o tran.o lib.o run.o lex.o \
 
 # awk recurses through its parse tree per record and keeps its own
 # frames for user-defined functions, so the 8K default is not enough -
-# the loader honours PT_GNU_STACK, as with mmedit.
+# the loader honours PT_GNU_STACK, as with mmbedit.
 awk: LINKER_OPT += --defsym __stack_size=32768
 
 all: awk

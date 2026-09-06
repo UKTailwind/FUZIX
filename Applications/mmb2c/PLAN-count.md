@@ -261,7 +261,7 @@ range at run time via getint; ours validates in the runtime the same
 way — SETPIN's pin and gate can both be expressions).  The refusal
 message at mmb2c.py:6024 gains the two words.  cgate must stay at 0
 diff lines including a source using both forms.  genkw/keywords.c
-regenerated if FIN/CIN are not already in the mmedit table.
+regenerated if FIN/CIN are not already in the mmbedit table.
 
 ### 3.5 What is refused, and how
 
@@ -408,7 +408,7 @@ implementation, where it refines the sections above:
   pipeline 75/0; qemu native sweep 76/0; ctest 165 passed with the 10
   known failures; kernel builds clean with the relocation verified;
   utils/cnttest builds warning-free; board bcrun rebuilt and carries
-  mm_pinct; mmedit keywords need nothing (mode words are not in its
+  mm_pinct; mmbedit keywords need nothing (mode words are not in its
   table).
 
 **Next: stage 3 on COM14** — flash build/fuzix.uf2, push bcrun +

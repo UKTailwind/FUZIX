@@ -6,7 +6,7 @@ groups, waiting between them, and prints the output with the escape
 sequences made visible - so an editor session can be checked from here
 without anyone looking at the monitor.
 
-  python fzkeys.py "mmedit /root/t.bas" "\\x1bOP" "\\x1b"
+  python fzkeys.py "mmbedit /root/t.bas" "\\x1bOP" "\\x1b"
 
 Keys use Python escapes: \\x1b for ESC, \\r for Return, \\x1bOP for F1.
 """

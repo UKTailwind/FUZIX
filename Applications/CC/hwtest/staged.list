@@ -6,7 +6,7 @@ bcrun
 bcdump
 mmbc
 cpp
-mmedit
+mmbedit
 saveimage
 loadimage
 loadjpg

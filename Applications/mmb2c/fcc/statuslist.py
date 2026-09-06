@@ -1,7 +1,7 @@
 """Every MMBasic command and function, with mmb2c's status, as TSV.
 
 The names come from MMBasic's own AllCommands.h and the status from
-mmb2c.py's dispatch, by the same reader mmedit/genkw.py uses - so this
+mmb2c.py's dispatch, by the same reader mmbedit/genkw.py uses - so this
 cannot flatter us. Category assignment is a separate hand-kept table
 (catmap.py), because which of the five a gap belongs in is a judgement
 and not something a scan can decide.

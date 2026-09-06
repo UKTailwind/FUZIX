@@ -1,4 +1,4 @@
-/* mmedit - the MMBasic full-screen editor as a Fuzix file editor.
+/* mmbedit - the MMBasic full-screen editor as a Fuzix file editor.
  *
  * This header is the seam between MMBasic's editor code and Fuzix.
  * The key codes are MMBasic's own (Hardware_Includes.h) so the ported
@@ -14,7 +14,7 @@
 #define K_DEL       0x7F
 
 #ifdef PC3_HOST
-extern int edit_readonly;   /* mmedit.c: the file cannot be saved where it is */
+extern int edit_readonly;   /* mmbedit.c: the file cannot be saved where it is */
 #endif
 
 #define K_UP        0x80

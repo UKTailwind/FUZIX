@@ -69,14 +69,14 @@ RUN = 3.0             # a program that prints and exits
 
 # How long to sit on a typed command before pressing Return.  The
 # default in type_line is the beat a person leaves anyway; SCENE is for
-# the commands that replace the whole screen - mmedit, bbcbasic,
+# the commands that replace the whole screen - mmbedit, bbcbasic,
 # fforth, a graphics program, a clear.  Without it the command and the
 # screen it summons arrive in the same frame, and the viewer never sees
 # what caused the change.
 SCENE = 2.0
 
 CLS = r"echo -e '\033[2J\033[H'"    # no clear(1) on this machine; this works
-F1 = b"\x1b[11~"                    # mmedit: save and exit (VT220 spelling)
+F1 = b"\x1b[11~"                    # mmbedit: save and exit (VT220 spelling)
 DOWN = b"\x1b[B"
 END = b"\x1b[F"                     # what this console's own End key sends
 CTRL_D = b"\x04"
@@ -270,12 +270,12 @@ def sc_edit(ser):
         "Next i",
     ])
     beat(2)
-    # mmedit is the firmware's editor, ported.  Keywords mmbc can
+    # mmbedit is the firmware's editor, ported.  Keywords mmbc can
     # translate are cyan and interpreter-only ones blue, which is the
     # thing worth seeing on camera - so add a line rather than just
     # opening the file, and watch it colour itself as it is typed.
     # Down to the end first: typing at line 1 would go INTO the For.
-    type_line(ser, "mmedit demo.bas", settle=3, hold=SCENE)
+    type_line(ser, "mmbedit demo.bas", settle=3, hold=SCENE)
     beat(5)
     send_raw(ser, DOWN * 3 + END, settle=1)
     send_raw(ser, b"\r", settle=1)

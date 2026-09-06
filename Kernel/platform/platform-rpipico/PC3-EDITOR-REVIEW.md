@@ -86,7 +86,7 @@ this port is a few weeks rather than a rewrite.
 ## THE EDITOR RUNS (commit bb34b41fd) - what is left
 
 Everything on the previous ordered list is done and verified on the
-board.  `mmedit <file>` opens, colours, edits, saves with a `.bak` and
+board.  `mmbedit <file>` opens, colours, edits, saves with a `.bak` and
 exits; `mmbc`/`cc`/run on the file it just saved works, so the machine
 now edits, translates, compiles and runs its own BASIC.
 
@@ -98,7 +98,7 @@ the numbered list after it.
 
 Fast loop worth reusing for any further editor work: the editor builds
 and runs on Linux unchanged, so an ASan build of
-`mmedit.c shim.c editor.c keywords.c` driven through a pty finds a
+`mmbedit.c shim.c editor.c keywords.c` driven through a pty finds a
 fault in seconds without touching the board.
 
 Mark mode was also the first code to exercise

@@ -36,7 +36,7 @@ echo "=== Library/libs (clean)"
 for d in Applications/util Applications/V7/cmd Applications/V7/games \
          Applications/MWC/cmd Applications/cave Applications/cursesgames \
          Applications/games Applications/levee Applications/bbcbasic \
-         Applications/mmedit Applications/cpp Applications/CC
+         Applications/mmbedit Applications/cpp Applications/CC
 do
 	[ -d "$R/$d" ] || continue
 	[ -r "$R/$d/Makefile.armm0" ] || continue

@@ -4,7 +4,7 @@
 #
 # stripall.sh does the compiler passes only, and writes .stripped names;
 # mkccimage.sh wants .s and wants the whole set, including the pieces
-# that live outside this directory (cpp, mmedit, and the two image
+# that live outside this directory (cpp, mmbedit, and the two image
 # programs from the platform's utils).  Missing one of those is not a
 # build error - mkccimage refuses up front - but getting a STALE one is
 # worse, so this restages the lot every time.
@@ -30,7 +30,7 @@ S=$CC/hwtest
 make -f Makefile.armm0 -C "$CC" FUZIX_ROOT="$R" USERCPU=armm0 >/dev/null
 make -f Makefile.armm0 -C "$R/Applications/cpp" FUZIX_ROOT="$R" \
 	USERCPU=armm0 >/dev/null
-make -f Makefile.armm0 -C "$R/Applications/mmedit" FUZIX_ROOT="$R" \
+make -f Makefile.armm0 -C "$R/Applications/mmbedit" FUZIX_ROOT="$R" \
 	USERCPU=armm0 >/dev/null
 make -C "$R/Kernel/platform/platform-rpipico/utils" FUZIX_ROOT="$R" \
 	>/dev/null
@@ -56,7 +56,7 @@ for f in cc0 cc1 cc2 ccbc bcrun bcdump mmbc; do
 	stage "$f" "$CC/$f"
 done
 stage cpp       "$R/Applications/cpp/cpp"
-stage mmedit    "$R/Applications/mmedit/mmedit"
+stage mmbedit    "$R/Applications/mmbedit/mmbedit"
 stage saveimage "$R/Kernel/platform/platform-rpipico/utils/saveimage"
 stage loadimage "$R/Kernel/platform/platform-rpipico/utils/loadimage"
 # loadjpg is what LOAD JPG runs - MMBasic's own picojpeg, as a
@@ -83,5 +83,5 @@ stage playwav   "$R/Kernel/platform/platform-rpipico/utils/playwav"
 stage playflac  "$R/Kernel/platform/platform-rpipico/utils/playflac"
 
 ls -l "$S"/cc0.s "$S"/cc1.s "$S"/cc2.s "$S"/ccbc.s "$S"/bcrun.s \
-      "$S"/bcdump.s "$S"/mmbc.s "$S"/cpp.s "$S"/mmedit.s \
+      "$S"/bcdump.s "$S"/mmbc.s "$S"/cpp.s "$S"/mmbedit.s \
       "$S"/saveimage.s "$S"/loadimage.s "$S"/loadjpg.s "$S"/loadpng.s "$S"/playmp3.s "$S"/playsnd.s "$S"/playmod.s

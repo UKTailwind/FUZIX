@@ -1,4 +1,4 @@
-"""Generate mmedit's keyword tables.
+"""Generate mmbedit's keyword tables.
 
 Two sources, neither of them hand-maintained:
 
@@ -9,7 +9,7 @@ Two sources, neither of them hand-maintained:
     the editor calls translatable is what the translator actually does.
 
 Regenerate after either changes:
-    python3 genkw.py > .../mmedit/keywords.c
+    python3 genkw.py > .../mmbedit/keywords.c
 """
 import re
 import os
