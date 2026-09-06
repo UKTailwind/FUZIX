@@ -133,6 +133,27 @@ extern struct mmb_option Option;
 #define GUI_C_STATUS    7
 extern int gui_fcolour, gui_bcolour;
 
+/*
+ * MMBasic's own sequences, SGR 30-37.  What they LOOK like is the
+ * terminal's business: TeraTerm, which a PicoMite is edited through,
+ * paints them bright, and so the editor was designed to be seen in
+ * bright yellow, cyan and magenta on black.  A PC's terminal emulators
+ * paint 30-37 as their dim set - yellow comes out brown, everything
+ * else dull - and keep the bright set for 90-97 (the aixterm codes
+ * every one of them has taken for twenty years).  So the hosted editor
+ * asks for 90-97 and looks as it looks on a PicoMite; the board's
+ * console keeps 30-37, whose rendering is its own palette's.
+ */
+#ifdef PC3_HOST
+#define VT100_C_NORMAL  "\033[97m"
+#define VT100_C_COMMENT "\033[93m"
+#define VT100_C_KEYWORD "\033[96m"
+#define VT100_C_QUOTE   "\033[95m"
+#define VT100_C_NUMBER  "\033[92m"
+#define VT100_C_LINE    "\033[95m"
+#define VT100_C_STATUS  "\033[97m"
+#define VT100_C_ERROR   "\033[91m"
+#else
 #define VT100_C_NORMAL  "\033[37m"
 #define VT100_C_COMMENT "\033[33m"
 #define VT100_C_KEYWORD "\033[36m"
@@ -141,12 +162,17 @@ extern int gui_fcolour, gui_bcolour;
 #define VT100_C_LINE    "\033[35m"
 #define VT100_C_STATUS  "\033[37m"
 #define VT100_C_ERROR   "\033[31m"
+#endif
 
 /* Three colours for keywords, which was the open question in the review:
  * everything MMBasic knows is a keyword, but what mmbc can actually
  * translate is cyan and what it cannot is blue.  A program that is all
  * cyan will compile. */
+#ifdef PC3_HOST
+#define VT100_C_KEYWORD_UNSUP "\033[94m"
+#else
 #define VT100_C_KEYWORD_UNSUP "\033[34m"
+#endif
 #define GUI_C_KEYWORD_UNSUP   4
 
 /* --- output --------------------------------------------------------------- */
