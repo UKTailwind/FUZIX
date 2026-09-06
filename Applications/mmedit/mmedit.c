@@ -24,6 +24,32 @@
 
 #define CC_CMD  "/usr/bin/cc"
 
+#ifdef PC3_HOST
+/* Set before the editor starts when the file, or the directory the
+   .bak goes in, cannot be written; editor.c puts it on the status line.
+   On a PC that is the installed examples under /opt/pc3, which belong
+   to root; on the board every file is the user's. */
+int edit_readonly;
+
+static int cannot_write(const char *name)
+{
+    char dir[4096];
+    const char *slash;
+
+    if (access(name, F_OK) == 0)
+        return access(name, W_OK) != 0;
+    /* a new file: the directory decides */
+    slash = strrchr(name, '/');
+    if (!slash)
+        return access(".", W_OK) != 0;
+    if ((size_t)(slash - name) >= sizeof dir)
+        return 0;
+    memcpy(dir, name, (size_t)(slash - name));
+    dir[slash - name] = 0;
+    return access(dir[0] ? dir : "/", W_OK) != 0;
+}
+#endif
+
 /* The extensions cc can be handed: .bas goes through mmbc first, .c
  * straight into the pipeline, and both are spelt either way because a
  * file that came off a PC is as likely to be .BAS as .bas. */
@@ -73,6 +99,9 @@ int main(int argc, char *argv[])
     scr_flush();
 
     txtp = EdBuff;
+#ifdef PC3_HOST
+    edit_readonly = cannot_write(argv[1]);
+#endif
     FullScreenEditor(0, 0, argv[1], EDBUF_SIZE, 0);
 
     scr_flush();

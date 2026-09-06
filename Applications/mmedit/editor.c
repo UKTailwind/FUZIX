@@ -2189,6 +2189,12 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
     printScreen(); // draw the screen
     SCursor(xx, yy);
     drawstatusline = true;
+#ifdef PC3_HOST
+    /* mmedit.c found the file, or its directory, not writable: say so
+       now, on the status line, rather than at F1 with the work done. */
+    if (edit_readonly)
+        editDisplayMsg((unsigned char *)" READ ONLY: copy the file to a directory of yours to save ");
+#endif
     unsigned char lastkey = 0;
     int y, statuscount;
     clipboard[0] = 0;
@@ -2724,7 +2730,16 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
                 {
                     if (file_backup(fname) < 0 || file_save(fname) < 0)
                     {
+#ifdef PC3_HOST
+                        /* On a PC the reason is usually a directory that
+                           is not the user's - the installed examples -
+                           and the reason is worth a line. */
+                        char why[80];
+                        snprintf(why, sizeof why, " CANNOT SAVE: %s ", strerror(errno));
+                        editDisplayMsg((unsigned char *)why);
+#else
                         editDisplayMsg((unsigned char *)" CANNOT SAVE ");
+#endif
                         break;
                     }
                 }

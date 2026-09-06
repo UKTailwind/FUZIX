@@ -13,6 +13,10 @@
 #define K_ESC       0x1B
 #define K_DEL       0x7F
 
+#ifdef PC3_HOST
+extern int edit_readonly;   /* mmedit.c: the file cannot be saved where it is */
+#endif
+
 #define K_UP        0x80
 #define K_DOWN      0x81
 #define K_LEFT      0x82
