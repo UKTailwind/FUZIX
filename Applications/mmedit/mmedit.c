@@ -153,7 +153,14 @@ int main(int argc, char *argv[])
             av[1] = "-r";
             av[2] = argv[1];
             av[3] = NULL;
+#ifdef _WIN32
+            {
+                int pc3w_exec(const char *file, char *const argv[]);
+                pc3w_exec(cc, av);      /* runs it, waits, exits with its status */
+            }
+#else
             execv(cc, av);
+#endif
             perror(cc);
             return 1;
         }

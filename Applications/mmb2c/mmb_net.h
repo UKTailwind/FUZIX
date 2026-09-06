@@ -335,6 +335,37 @@ MMG_FN int mmn_nameserver(unsigned char *ip4)
 			mmn_close(fd);
 		}
 	}
+	/*	No file, or a file with no nameserver in it: ask the
+	 *	machine.  NETIOC_STATUS carries the DNS servers of the
+	 *	lease - the kernel's on the board, the operating system's
+	 *	own on a PC - and a Windows machine has no
+	 *	/etc/resolv.conf at all, so without this every name there
+	 *	failed with "Failed to find TCP address".  Tried second,
+	 *	so a file that names a server still wins, and asked once:
+	 *	the state above caches whichever answered.
+	 *
+	 *	dns[0] is at offset 24 of struct net_status, in host
+	 *	order, so its bytes run a.b.c.d from 27 down - the way
+	 *	mmn_ipaddr reads the address at 12.
+	 */
+	if (mmn_ns_state != 1) {
+		unsigned char st[48];
+		int sys;
+
+		memset(st, 0, sizeof(st));
+		sys = mmn_open_rw("/dev/sys");
+		if (sys >= 0) {
+			mmn_ioctl(sys, MMN_NETIOC_STATUS, st);
+			mmn_close(sys);
+		}
+		if (st[24] | st[25] | st[26] | st[27]) {
+			mmn_ns[0] = st[27];
+			mmn_ns[1] = st[26];
+			mmn_ns[2] = st[25];
+			mmn_ns[3] = st[24];
+			mmn_ns_state = 1;
+		}
+	}
 	if (mmn_ns_state != 1)
 		return 0;
 	memcpy(ip4, mmn_ns, 4);

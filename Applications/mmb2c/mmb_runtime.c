@@ -26,7 +26,7 @@
 /* INKEY$ has to read the console without waiting, which means the line
  * discipline - see mm_inkey.  Windows has no termios and answers the
  * same question with _kbhit/_getch. */
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(PC3_HOST)
 #include <conio.h>
 #else
 #include <termios.h>
@@ -49,6 +49,24 @@
  * /dev/gpio is not routed: the pin path stores to registers, and a PC
  * has none.  It stays a real open and fails politely there.
  */
+#ifdef _WIN32
+/* On Windows the POSIX branches below still apply - the shim in the
+   pc3host tree gives them termios, poll and the rest - except where a
+   program is started, since there is no fork: those calls, and the
+   player control FIFO, which is a named pipe there.  Declared here
+   rather than in a header because this file is compiled by fcc for the
+   board as well, and the board must see nothing of it. */
+int pc3w_spawn(const char *file, char *const argv[], int fd_in, int fd_out,
+               int detached, const char *logpath);
+int pc3w_wait(int pid, int *status, int nohang);
+int pc3w_exec(const char *file, char *const argv[]);
+int pc3w_read(int fd, void *buf, size_t n);
+int pc3w_exe_dir(char *buf, size_t n);
+int pc3w_fifo_client(const char *path);
+int pc3w_fifo_write(int fd, const void *buf, size_t n);
+int pc3w_fifo_close(int fd);
+#endif
+
 #ifdef PC3_HOST
 int pc3_sys_open(void);
 int pc3_sys_ioctl(int fd, unsigned long code, void *arg);
@@ -1528,7 +1546,7 @@ static int mm_getc(MMINTEGER fnbr)
    here because INPUT has to give the console back for the duration, and
    because leaving it raw at exit would hand the shell a terminal with
    no echo and no line editing. */
-#if !defined(_WIN32)
+#if !defined(_WIN32) || defined(PC3_HOST)
 void mm_raw_release(void);
 static void mm_raw_resume(void);
 static int  mm_raw_line(void);
@@ -1752,6 +1770,7 @@ void mm_copy(const char *from, const char *to)
 #ifdef _WIN32
   #include <direct.h>          /* _mkdir _rmdir _chdir _getcwd */
   #include <io.h>              /* _findfirst _findnext _findclose */
+  #include <sys/stat.h>        /* _stat */
 #else
   #include <sys/stat.h>
   #include <dirent.h>
@@ -2900,7 +2919,7 @@ MMFLOAT mm_timer(void)
 #define MMK_F9     0x99
 #define MMK_F11    0x9B
 
-#if !defined(_WIN32)
+#if !defined(_WIN32) || defined(PC3_HOST)
 /*
  * A terminal sends an arrow or a function key as an escape sequence;
  * MMBasic's INKEY$ hands back ONE code for it, because MMInkey()
@@ -3296,7 +3315,7 @@ char *mm_inkey(void)
         return t;
     }
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(PC3_HOST)
     if (_kbhit()) {
         t[0] = 1;
         t[1] = (char)_getch();
@@ -3348,7 +3367,7 @@ char *mm_inkey(void)
     return t;
 }
 
-#if !defined(_WIN32)
+#if !defined(_WIN32) || defined(PC3_HOST)
 /*
  * One key, DECODED, waiting for it - INPUT's reader (mm_readline_echo).
  *
@@ -3397,7 +3416,11 @@ static int mm_getkey_wait(void)
      */
     for (;;) {
         unsigned char b;
+#ifdef _WIN32
+        int n = pc3w_read(0, &b, 1);    /* the console, VMIN/VTIME honoured */
+#else
         int n = (int)read(0, &b, 1);
+#endif
 
         if (n == 1) {
             c = (int)b;
@@ -3559,6 +3582,7 @@ MMINTEGER mm_play_stop(void)
  */
 static pid_t mm_pipe_pid = -1;
 
+#ifndef _WIN32
 int mm_run_pipe(void)
 {
     int fds[2];
@@ -3600,6 +3624,35 @@ int mm_run_pipe(void)
     mm_pipe_pid = pid;
     return fds[0];
 }
+#else
+int mm_run_pipe(void)
+{
+    int fds[2];
+    int pid;
+
+    if (mm_run_nargs == 0) {
+        mm_error("no program named");
+        return -1;
+    }
+    mm_run_argv[mm_run_nargs] = NULL;
+    fflush(stdout);
+    mm_gflush();                /* the child shares the screen */
+    if (pipe(fds) < 0) {
+        mm_error("cannot make a pipe");
+        return -1;
+    }
+    /* the write end becomes the program's stdout; the read end is ours */
+    pid = pc3w_spawn(mm_run_argv[0], mm_run_argv, -1, fds[1], 0, NULL);
+    close(fds[1]);
+    if (pid < 0) {
+        close(fds[0]);
+        mm_error("no such program");
+        return -1;
+    }
+    mm_pipe_pid = pid;
+    return fds[0];
+}
+#endif
 
 /*
  * CPU RESTART - the WebMite reboots the processor; a process on this
@@ -3611,6 +3664,7 @@ int mm_run_pipe(void)
  * the real prog_argv regardless).  A relative argv[0] needs the cwd
  * unchanged, which is a program that never CHDIRs - retic's shape.
  */
+#ifndef _WIN32
 void mm_restart(void)
 {
     char *av[2];
@@ -3629,6 +3683,40 @@ void mm_restart(void)
     execv(mm_argv0, av);
     mm_error("CPU RESTART could not re-execute the program");
 }
+#else
+void mm_restart(void)
+{
+    char *av[3];
+    size_t n;
+
+    if (!mm_argv0[0]) {
+        mm_error("CPU RESTART does not know the program's own name");
+        return;
+    }
+    fflush(stdout);
+    mm_gflush();
+    n = strlen(mm_argv0);
+    if (n > 3 && strcmp(mm_argv0 + n - 3, ".bc") == 0) {
+        /* a bytecode program is not a program Windows can start: the
+           bcrun beside this one runs it, as the #! line does elsewhere */
+        static char bc[4200];
+        char dir[4096];
+
+        if (pc3w_exe_dir(dir, sizeof dir) == 0) {
+            snprintf(bc, sizeof bc, "%s/bcrun", dir);
+            av[0] = bc;
+            av[1] = mm_argv0;
+            av[2] = NULL;
+            pc3w_exec(bc, av);
+        }
+    } else {
+        av[0] = mm_argv0;
+        av[1] = NULL;
+        pc3w_exec(mm_argv0, av);
+    }
+    mm_error("CPU RESTART could not re-execute the program");
+}
+#endif
 
 /* One read from the pipe.  Here rather than in mmb_sprite.h because
    that header is compiled by fcc against the board's include path,
@@ -3660,6 +3748,7 @@ MMINTEGER mm_run_pipe_close(int fd)
     return 0;
 }
 
+#ifndef _WIN32
 MMINTEGER mm_run_exec(void)
 {
     int status = 0;
@@ -3749,6 +3838,43 @@ MMINTEGER mm_run_exec(void)
     }
     return 0;
 }
+#else
+MMINTEGER mm_run_exec(void)
+{
+    int status = 0;
+    int pid;
+
+    if (mm_run_nargs == 0) {
+        mm_error("no program named");
+        return -1;
+    }
+    mm_run_argv[mm_run_nargs] = NULL;
+    fflush(stdout);             /* the child shares the console */
+    mm_gflush();                /* and the screen: nothing may be queued */
+    pid = pc3w_spawn(mm_run_argv[0], mm_run_argv, -1, -1, 0, NULL);
+    if (pid < 0) {
+        mm_error("no such program");
+        return -1;
+    }
+    while (pc3w_wait(pid, &status, 0) < 0)
+        ;
+#ifdef PC3_HOST
+    /* WEB PING: the POSIX mm_run_exec says why an unanswered ping is
+       not an error; Windows's ping exits 1 for that too */
+    if (WEXITSTATUS(status) == 1) {
+        const char *p = mm_run_argv[0], *s = strrchr(p, '/');
+
+        if (strcmp(s ? s + 1 : p, "ping") == 0)
+            return 0;
+    }
+#endif
+    if (WEXITSTATUS(status) != 0) {
+        mm_error("the program reported a failure");
+        return -1;
+    }
+    return 0;
+}
+#endif
 
 /*
  * The same argv, started and NOT waited for: PLAY MP3 returns at once
@@ -3763,6 +3889,7 @@ MMINTEGER mm_run_exec(void)
  *
  * Returns the pid so a future PLAY STOP has something to signal.
  */
+#ifndef _WIN32
 MMINTEGER mm_run_bg(void)
 {
     pid_t pid;
@@ -3788,6 +3915,35 @@ MMINTEGER mm_run_bg(void)
     }
     return (MMINTEGER)pid;
 }
+#else
+MMINTEGER mm_run_bg(void)
+{
+    int pid;
+
+    if (mm_run_nargs == 0) {
+        mm_error("no program named");
+        return -1;
+    }
+    mm_run_argv[mm_run_nargs] = NULL;
+    fflush(stdout);
+    pid = pc3w_spawn(mm_run_argv[0], mm_run_argv, -1, -1, 0, NULL);
+    if (pid < 0) {
+        /* A program that is not there is NOT an error here, because it
+           is not one on the machines this runtime came from: fork
+           succeeds and the exec fails in the child, where nothing can
+           report it, so the statement finds out for itself - PLAY asks
+           who owns the sound and says "Sound output did not start".
+           Windows learns the same fact one call earlier, and saying so
+           would make the same program print something different here.
+           Anything worse than a missing program still raises. */
+        if (errno == ENOENT)
+            return 0;
+        mm_error("cannot start a program");
+        return -1;
+    }
+    return (MMINTEGER)pid;
+}
+#endif
 
 /* ---- PLAY ------------------------------------------------------------
  *
@@ -3838,6 +3994,17 @@ MMINTEGER mm_play_send(MMINTEGER op, MMINTEGER a, MMINTEGER b,
     m.p1 = (int)p1;
     m.p2 = (int)p2;
     m.p3 = (int)p3;
+#ifdef _WIN32
+    fd = pc3w_fifo_client(MM_PLAYCTL_FIFO);
+    if (fd < 0)
+        return -1;
+    if (pc3w_fifo_write(fd, &m, sizeof(m)) != (int)sizeof(m)) {
+        pc3w_fifo_close(fd);
+        return -1;
+    }
+    pc3w_fifo_close(fd);
+    return 0;
+#else
     fd = open(MM_PLAYCTL_FIFO, O_WRONLY | O_NDELAY);
     if (fd < 0)
         return -1;
@@ -3847,6 +4014,7 @@ MMINTEGER mm_play_send(MMINTEGER op, MMINTEGER a, MMINTEGER b,
     }
     close(fd);
     return 0;
+#endif
 }
 
 MMINTEGER mm_play_owner(void)

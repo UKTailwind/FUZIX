@@ -28,7 +28,7 @@
 #include <sys/ioctl.h>
 #include <signal.h>		/* SIGPIPE ignored: socket writes error */
 #include <errno.h>		/* the neterr libcall */
-#ifdef __linux__
+#if defined(__linux__) || defined(_WIN32)
 #include <sys/mman.h>		/* executable code buffer for native fns */
 #ifdef PC3_HOST
 /* On a PC, /dev/sys is the PC3 device server: a program's open of
@@ -41,6 +41,22 @@
 #endif
 #endif
 #include "bytecode.h"
+
+/*	A Linux or a Windows host translates the Fuzix socket constants a
+ *	program bakes in (the block below says which); on Windows a socket
+ *	is also a pseudo-descriptor of the shim's rather than one read()
+ *	and write() know, so those two and close() look first. */
+#if defined(__linux__) || defined(_WIN32)
+#define BCRUN_HOSTNET 1
+#endif
+/*	And "/tmp/x", where a program from the board keeps a temporary
+ *	file, is the temporary directory on Windows (pc3w_hostpath). */
+#ifdef _WIN32
+const char *pc3w_hostpath(const char *path);
+#define HOSTPATH(p) pc3w_hostpath(p)
+#else
+#define HOSTPATH(p) (p)
+#endif
 
 /* The machine is 32bit. On a 64bit host every value that enters A or
    the stack must be sign extended from 32 bits, or negative numbers
@@ -1073,7 +1089,7 @@ static void lib_fopen(void)
 		A = 0;
 		return;
 	}
-	fd = open(path, flags, 0666);
+	fd = open(HOSTPATH(path), flags, 0666);
 	if (fd < 0 || fd >= MAXFD) {
 		if (fd >= 0)
 			close(fd);
@@ -1930,7 +1946,7 @@ static void lc_fflush(void)
 
 static void lc_remove(void)
 {
-	A = unlink(getstr((unsigned long)arg(0)));
+	A = unlink(HOSTPATH(getstr((unsigned long)arg(0))));
 }
 
 static void lc_rename(void)
@@ -2077,12 +2093,12 @@ static void lc_open(void)
 		}
 	}
 #endif
-	A = open(getstr((unsigned long)arg(0)), (int)arg(1), 0666);
+	A = open(HOSTPATH(getstr((unsigned long)arg(0))), (int)arg(1), 0666);
 }
 
 static void lc_creat(void)
 {
-	A = creat(getstr((unsigned long)arg(0)), 0666);
+	A = creat(HOSTPATH(getstr((unsigned long)arg(0))), 0666);
 }
 
 static void lc_close(void)
@@ -2094,6 +2110,12 @@ static void lc_close(void)
 	}
 	if (pc3_tls_isfd((int)arg(0))) {
 		A = pc3_tls_close((int)arg(0));
+		return;
+	}
+#endif
+#ifdef _WIN32
+	if (pc3w_is_sock((int)arg(0))) {
+		A = pc3w_sock_close((int)arg(0));
 		return;
 	}
 #endif
@@ -2110,6 +2132,12 @@ static void lc_read(void)
 		return;
 	}
 #endif
+#ifdef _WIN32
+	if (pc3w_is_sock((int)arg(0))) {
+		A = pc3w_recv((int)arg(0), vptr(b), n, 0);
+		return;
+	}
+#endif
 	A = read((int)arg(0), vptr(b), n);
 }
 
@@ -2123,6 +2151,12 @@ static void lc_write(void)
 		return;
 	}
 #endif
+#ifdef _WIN32
+	if (pc3w_is_sock((int)arg(0))) {
+		A = pc3w_send((int)arg(0), vptr(b), n, 0);
+		return;
+	}
+#endif
 	A = write((int)arg(0), vptr(b), n);
 }
 
@@ -2133,7 +2167,7 @@ static void lc_lseek(void)
 
 static void lc_unlink(void)
 {
-	A = unlink(getstr((unsigned long)arg(0)));
+	A = unlink(HOSTPATH(getstr((unsigned long)arg(0))));
 }
 
 /* ---- sockets ---------------------------------------------------------
@@ -2154,7 +2188,7 @@ static void lc_unlink(void)
  *	only the family value is patched, never the shape.
  */
 
-#ifdef __linux__
+#ifdef BCRUN_HOSTNET
 static int nx_type(int t)
 {
 	if (t == 3)
@@ -2187,7 +2221,7 @@ static void lc_socket(void)
 		return;
 	}
 #endif
-#ifdef __linux__
+#ifdef BCRUN_HOSTNET
 	A = socket(d == 1 ? AF_INET : d, nx_type(t), p == 254 ? 0 : p);
 #else
 	A = socket(d, t, p);
@@ -2199,7 +2233,7 @@ static void lc_connect(void)
 	unsigned long sa = arg(1);
 
 	if (VM_OOBN(sa, 16)) fault("bad address");
-#ifdef __linux__
+#ifdef BCRUN_HOSTNET
 	{
 		struct sockaddr_in a;
 		nx_sa_in(&a, sa);
@@ -2228,7 +2262,7 @@ static void lc_bind(void)
 	unsigned long sa = arg(1);
 
 	if (VM_OOBN(sa, 16)) fault("bad address");
-#ifdef __linux__
+#ifdef BCRUN_HOSTNET
 	{
 		struct sockaddr_in a;
 		int one = 1;
@@ -2257,7 +2291,7 @@ static void lc_accept(void)
 	socklen_t al = sizeof(a);
 	int r = accept((int)arg(0), (struct sockaddr *)&a, &al);
 
-#ifdef __linux__
+#ifdef BCRUN_HOSTNET
 	if (r >= 0)
 		a.sin_family = 1;	/* back to the Fuzix value */
 #endif
@@ -2281,11 +2315,15 @@ static void lc_sendto(void)
 	if (sa == 0) {
 		/* connected-socket form; write(), because Fuzix libc has
 		   no send() and flags have nothing to say here */
+#ifdef _WIN32
+		A = pc3w_send((int)arg(0), vptr(b), n, 0);
+#else
 		A = write((int)arg(0), vptr(b), n);
+#endif
 		return;
 	}
 	if (VM_OOBN(sa, 16)) fault("bad address");
-#ifdef __linux__
+#ifdef BCRUN_HOSTNET
 	{
 		struct sockaddr_in a;
 		nx_sa_in(&a, sa);
@@ -2308,7 +2346,7 @@ static void lc_recvfrom(void)
 	if (VM_OOBN(b, n)) fault("bad address");
 	r = recvfrom((int)arg(0), vptr(b), n, (int)arg(3),
 		     sa ? (struct sockaddr *)&a : NULL, sa ? &al : NULL);
-#ifdef __linux__
+#ifdef BCRUN_HOSTNET
 	if (r >= 0 && sa)
 		a.sin_family = 1;	/* back to the Fuzix value */
 #endif
@@ -2475,7 +2513,7 @@ static void lc_neterr(void)
 {
 	int e = errno;
 
-#ifdef __linux__
+#ifdef BCRUN_HOSTNET
 	if (e == EALREADY)
 		e = 39;
 	else if (e == EINPROGRESS)
@@ -2491,7 +2529,7 @@ static void lc_fcntl(void)
 	int c = (int)arg(1);
 	long v = arg(2);
 
-#ifdef __linux__
+#ifdef BCRUN_HOSTNET
 	if (c == 0) {			/* F_GETFL */
 		long r = fcntl((int)arg(0), F_GETFL, 0);
 		A = (r < 0) ? r : ((r & O_NONBLOCK) ? 16 : 0);

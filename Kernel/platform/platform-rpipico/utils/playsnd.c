@@ -347,6 +347,13 @@ int main(int argc, char *argv[])
 	if (nofifo)
 		ffd = -1;
 	else {
+#ifdef _WIN32
+		ffd = pc3w_fifo_server(MM_PLAYCTL_FIFO);
+		if (ffd < 0) {
+			perror("playsnd: fifo");
+			return 1;
+		}
+#else
 		unlink(MM_PLAYCTL_FIFO);
 		if (mkfifo(MM_PLAYCTL_FIFO, 0666) < 0) {
 			perror("playsnd: mkfifo");
@@ -357,6 +364,7 @@ int main(int argc, char *argv[])
 			perror("playsnd: fifo");
 			return 1;
 		}
+#endif
 	}
 
 	sfd = pc3_open_sys();
@@ -378,7 +386,7 @@ int main(int argc, char *argv[])
 	 * this daemon has mm_play_kind = NONE and needs to adopt rather
 	 * than raise "Sound output in use" at a synth it could use. */
 	{
-		FILE *kf = fopen(MM_PLAY_KINDFILE, "w");
+		FILE *kf = fopen(pc3_hostpath(MM_PLAY_KINDFILE), "w");
 
 		if (kf != NULL) {
 			fputc('S', kf);
@@ -390,7 +398,7 @@ int main(int argc, char *argv[])
 
 	while (!stopping) {
 		for (; ffd >= 0;) {
-			n = read(ffd, &m, sizeof(m));
+			n = pc3_fifo_read(ffd, &m, sizeof(m));
 			if (n != (int)sizeof(m)) {
 				if (dbg && n > 0)
 					fprintf(stderr,
@@ -460,6 +468,6 @@ int main(int argc, char *argv[])
 
 	pc3_ioctl(sfd, SNDIOC_PCMCLOSE, 0);
 	unlink(MM_PLAYCTL_FIFO);
-	unlink(MM_PLAY_KINDFILE);
+	unlink(pc3_hostpath(MM_PLAY_KINDFILE));
 	return 0;
 }

@@ -38,6 +38,15 @@
 #ifdef PC3_HOST
 #include "pc3client.h"
 #endif
+#ifdef _WIN32
+/* No fork on Windows: the passes are started with their files as
+   standard input and output (hostshim/win32 in the pc3host tree). */
+int pc3w_spawn(const char *file, char *const argv[], int fd_in, int fd_out,
+	       int detached, const char *logpath);
+int pc3w_wait(int pid, int *status, int nohang);
+int pc3w_exec(const char *file, char *const argv[]);
+const char *pc3w_tmpdir(void);
+#endif
 
 #define LIBPATH		"/usr/lib/cc/"
 #define CMD_CPP		"/usr/bin/cpp"
@@ -92,7 +101,20 @@ static char basfile[64];
  *	build anything at all, with no clue why.  So the file carries the
  *	holder's pid and a lock whose holder is gone is taken over.
  */
+#ifdef _WIN32
+/* the temporary directory is wherever Windows keeps one */
+static const char *lockfile(void)
+{
+	static char p[4200];
+
+	if (!p[0])
+		snprintf(p, sizeof p, "%s/cc.lock", pc3w_tmpdir());
+	return p;
+}
+#define LOCKFILE	lockfile()
+#else
 #define LOCKFILE	"/tmp/cc.lock"
+#endif
 
 static int held;		/* we own LOCKFILE and must remove it */
 
@@ -232,6 +254,24 @@ static void run(char **argv, const char *in, const char *out)
 		put_shebang = 0;
 	}
 
+#ifdef _WIN32
+	/* the pass inherits the two files as its standard input and
+	   output; the shared file offset carries the shebang above */
+	pid = pc3w_spawn(argv[0], argv, fdin, fdout, 0, NULL);
+	if (pid == -1) {
+		perror(argv[0]);
+		fatal();
+	}
+	if (fdin != -1)
+		close(fdin);
+	if (fdout != -1)
+		close(fdout);
+	p = pc3w_wait(pid, &status, 0);
+	if (p != pid) {
+		perror("wait");
+		fatal();
+	}
+#else
 	pid = fork();
 	if (pid == -1) {
 		perror("fork");
@@ -261,6 +301,7 @@ static void run(char **argv, const char *in, const char *out)
 			fatal();
 		}
 	}
+#endif
 	if (WIFSIGNALED(status)) {
 		fprintf(stderr, "cc: %s died on signal %d\n", argv[0],
 			WTERMSIG(status));
@@ -285,6 +326,20 @@ static void basename_to(char *dst, const char *src, const char *ext)
 	const char *slash = strrchr(src, '/');
 	const char *dot;
 
+#ifdef _WIN32
+	/* A path is as likely to be written with backslashes, and the
+	   name buffers here hold a BASENAME - 64 bytes of it.  Without
+	   this the whole path went in, truncated, and cc then said
+	   "...\gfx1.ir: No such file or directory" for a source it had
+	   just preprocessed: the first thing anyone hits, since a
+	   command prompt completes paths that way. */
+	{
+		const char *back = strrchr(src, '\\');
+
+		if (back > slash)
+			slash = back;
+	}
+#endif
 	if (slash)
 		src = slash + 1;
 	strcpy(dst, src);
@@ -318,8 +373,14 @@ int main(int argc, char *argv[])
 
 		if (pc3_exe_dir(dir, sizeof dir) == 0) {
 			snprintf(hlib, sizeof hlib, "%s/../lib/cc/", dir);
+#ifdef _WIN32
+			/* by their Windows names: these two are looked for */
+			snprintf(hcpp, sizeof hcpp, "%s/cpp.exe", dir);
+			snprintf(hmmbc, sizeof hmmbc, "%s/mmbc.exe", dir);
+#else
 			snprintf(hcpp, sizeof hcpp, "%s/cpp", dir);
 			snprintf(hmmbc, sizeof hmmbc, "%s/mmbc", dir);
+#endif
 			libpath = hlib;
 			cppcmd = hcpp;
 			mmbccmd = hmmbc;
@@ -551,7 +612,11 @@ int main(int argc, char *argv[])
 				if (verbose)
 					fprintf(stderr, "+ %s %s\n", hbc, out);
 				fflush(stdout);
+#ifdef _WIN32
+				pc3w_exec(hbc, hv);
+#else
 				execv(hbc, hv);
+#endif
 				perror(hbc);
 				return 1;
 			}

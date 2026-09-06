@@ -27,4 +27,19 @@ int pc3_sys_close(int fd);
 #define pc3_close_sys(fd)       close((fd))
 #endif
 
+/* The player control FIFO (mmb_playctl.h) and the kind file beside it:
+   on Windows the FIFO is a named pipe and /tmp is the temporary
+   directory, both in the pc3host tree (hostshim/win32). */
+#if defined(PC3_HOST) && defined(_WIN32)
+#include <stddef.h>
+int pc3w_fifo_server(const char *path);
+int pc3w_fifo_read(int fd, void *buf, size_t n);
+const char *pc3w_hostpath(const char *path);
+#define pc3_fifo_read(fd, b, n) pc3w_fifo_read((fd), (b), (n))
+#define pc3_hostpath(p)         pc3w_hostpath(p)
+#else
+#define pc3_fifo_read(fd, b, n) read((fd), (b), (n))
+#define pc3_hostpath(p)         (p)
+#endif
+
 #endif /* PC3SYS_H */

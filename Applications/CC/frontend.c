@@ -18,7 +18,10 @@
 #include "token.h"
 #include "target.h"
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(_WIN32)
+#ifdef _WIN32
+#define _itoa fcc_itoa		/* the Windows C runtime has a three-argument _itoa */
+#endif
 /* _itoa */
 static char buf[7];
 

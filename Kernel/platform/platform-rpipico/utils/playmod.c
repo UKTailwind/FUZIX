@@ -181,11 +181,15 @@ int main(int argc, char *argv[])
 
 	/* FIFO before the stream, as playsnd: the client's owner poll
 	 * is the ready signal, so everything must exist first */
+#ifdef _WIN32
+	ffd = pc3w_fifo_server(MM_PLAYCTL_FIFO);
+#else
 	unlink(MM_PLAYCTL_FIFO);
 	if (mkfifo(MM_PLAYCTL_FIFO, 0666) == 0)
 		ffd = open(MM_PLAYCTL_FIFO, O_RDWR | O_NDELAY);
 	else
 		ffd = -1;
+#endif
 
 	cfg.rate = RATE;
 	cfg.channels = 2;
@@ -198,7 +202,7 @@ int main(int argc, char *argv[])
 
 	/* kind for a later program's adoption, as playsnd */
 	{
-		FILE *kf = fopen(MM_PLAY_KINDFILE, "w");
+		FILE *kf = fopen(pc3_hostpath(MM_PLAY_KINDFILE), "w");
 
 		if (kf != NULL) {
 			fputc('M', kf);
@@ -210,7 +214,7 @@ int main(int argc, char *argv[])
 
 	while (!stopping) {
 		if (ffd >= 0)
-			while ((n = read(ffd, &m, sizeof(m))) ==
+			while ((n = pc3_fifo_read(ffd, &m, sizeof(m))) ==
 			       (int)sizeof(m)) {
 				if (m.ver != MM_PLAYCTL_VER)
 					continue;
@@ -283,6 +287,6 @@ int main(int argc, char *argv[])
 
 	pc3_ioctl(sfd, SNDIOC_PCMCLOSE, 0);
 	unlink(MM_PLAYCTL_FIFO);
-	unlink(MM_PLAY_KINDFILE);
+	unlink(pc3_hostpath(MM_PLAY_KINDFILE));
 	return 0;
 }

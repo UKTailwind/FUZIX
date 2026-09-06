@@ -19,6 +19,15 @@
 #include <sys/ioctl.h>
 #include "mmedit.h"
 
+#ifdef _WIN32
+/* The console on Windows: pc3w_read honours the VMIN/VTIME set below,
+   where the C runtime's read would wait for a whole line. */
+int pc3w_read(int fd, void *buf, size_t n);
+#define read_console(p) pc3w_read(0, (p), 1)
+#else
+#define read_console(p) read(0, (p), 1)
+#endif
+
 int scr_rows = 40, scr_cols = 80;
 
 static struct termios saved;
@@ -246,7 +255,7 @@ static int readb(void)
         return r;
     }
     scr_flush();                    /* never wait on input with output pending */
-    if (read(0, &c, 1) != 1)
+    if (read_console(&c) != 1)
         return -1;                  /* 100ms passed with nothing */
     return c;
 }
@@ -452,7 +461,7 @@ int getConsole(void)
         return -1;
     if (fcntl(0, F_SETFL, fl | O_NONBLOCK) < 0)
         return -1;
-    r = read(0, &c, 1);
+    r = read_console(&c);
     fcntl(0, F_SETFL, fl);
     return (r == 1) ? c : -1;
 }
