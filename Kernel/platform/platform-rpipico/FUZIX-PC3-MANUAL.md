@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.26 — September 2026"
+date: "Release v0.27 — September 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -59,190 +59,49 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmbedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## New in v0.26
+## New in v0.27
 
-**`TILEMAP`, MMBasic's tile engine — the command, the function, and
-everything in them.** Four maps, each a grid of two-byte cells drawn
-from a tileset in a flash slot; 64 sprites that move over them;
-`TILEMAP DRAW` for the window of the world you want, on `N`, `F` or
-`L`, with a see-through colour; `TILEMAP(COLLISION ...)` and
-`TILEMAP(SPRITE HIT ...)` for the game's logic; the map and attribute
-tables read from a `DATA` label with your own `READ` position left
-alone; every argument range and every error string the reference has.
-The rules are MMBasic's — tiles count from 1 and 0 is empty, the
-viewport chooses tiles rather than clipping them — and the PicoMite's
-own Breakout runs unedited, from "Generating tileset..." to "Thanks for
-playing!" (`samples/breakout.bas`). The chapter "Tiles and their
-sprites" has the tables. One recorded departure: `DRAW` composes a row
-of tiles at a time through the blit window rather than blitting each
-tile, which here would be a pair of system calls per tile row.
+**A program that would not start, and the knob that starts it.** A
+compiled program has to fit the process pool *beside the biggest other
+process* — usually the shell you typed the command into — so that the
+swapper can always bring it back in. When it does not, the kernel says
+so and names what it could not fit beside:
 
-**`FLASH LOAD IMAGE n, file$ [, O]`** decodes a BMP into flash slot
-`n` (1–3), in the layout `TILEMAP` and `BLIT FLASH` read. Without `O`
-an occupied slot is "Already programmed", as on a PicoMite, and
-`FLASH ERASE n` clears it. The colours reduce the way the sprite
-loaders reduce them, so a tileset made on the machine with `SAVE
-IMAGE` — which is how Breakout makes its bricks — round-trips exactly.
-The decoding is `loadimage`'s, in another process, so a program that
-never loads a picture carries none of it.
-
-**A `DATA` item that names a `CONST` reads as its value.** MMBasic's
-own TILEMAP examples write their attribute tables as `DATA SOLID,
-BRICK, ...` and `READ` evaluates the names. Here they are folded when
-the program is translated, wherever in the program the `CONST` is
-declared. A string `CONST` stays text, since `READ` into a string
-variable copies the item's text; an item that is not a constant is a
-translation error naming the item, rather than a C compiler's.
-
-**Booting with a USB keyboard attached no longer ends in `panic:
-Invalid speed`.** Reported against v0.25 on both boards: now and then
-the boot stopped with that line on the console, a blank HDMI and an
-`fsck` on the next boot, while a keyboard plugged in after login was
-always fine. The text was TinyUSB's host driver, which asked the root
-port its speed at the start of every transfer and panicked if the
-answer was "disconnected" — and a hub and keyboard powering up
-together do drop the link for a moment while enumerating. The kernel
-now runs TinyUSB 0.21, whose RP2350 host driver was rewritten, with
-two fixes of this port's own: the driver as shipped panicked at host
-start on a timed-out control transfer it had failed without clearing
-its buffer, and the RP2350's hub turnaround fix (`MULTI_HUB_FIX`) is
-switched on. A power-on boot may now print `USB keyboard attached`,
-`detached`, `attached` in a row before the login prompt: that is the
-same drop, handled. The story is in `PC3-IRQ-REVIEW.md`.
-
-**`httpd` serves the whole file.** A socket `write()` here returns
-what the send window had room for, and `httpd` took anything short of
-the full count as an error and closed the connection — so a file
-longer than the window, about 5.6 KB, arrived cut off. Found while
-checking this release; it now writes until the file is out.
-
-**Updated kernel (2 September).** The `fuzix.uf2` on the release page was
-replaced the day after release with three fixes to the USB host driver,
-found by putting a flash drive and a touch panel on the hub beside the
-keyboard on this port's MicroPython sibling. They matter here too: a
-keyboard whose report descriptor runs past 128 bytes — some gaming
-keyboards — panicked the original kernel at boot (`buf_ctrl already
-available`); and a device slow to wake after its port reset was abandoned
-by the stack, which could cost you the keyboard when other devices share
-the hub. Long control transfers are now single-buffered, every freshly
-reset device gets 100 ms to collect itself before it must answer, and the
-host's event queue is four times deeper. Booting with a keyboard, a flash
-drive and a touch panel all attached is proven on the board; the issues
-are filed upstream (TinyUSB #3874–#3876). If your keyboard worked, nothing
-changes; if boot sometimes lost it, fetch the kernel again.
-
-**Updated kernel (3 September).** The `fuzix.uf2` was replaced once more
-with a set of USB host-driver hardening changes, validated against the
-PicoMite's own TinyUSB 0.21 work on this hardware. The failures they
-address trace to a documented silicon race — the RP2 chip keeps one
-handshake-result latch shared between the control endpoint and the
-keyboard's interrupt-endpoint poller, so a poll can make a control transfer
-look timed out — and the fix tolerates it above the driver: a short grace
-window on control-endpoint timeouts, keeping the control path exclusive to
-the device being brought up during enumeration, and disabling a hub port
-whose device failed to enumerate so it cannot disturb the next one. Proven
-booting with a keyboard, a flash drive and a touch panel on the hub, the
-console responsive throughout. If the keyboard already came up reliably,
-nothing changes.
-
-## New in v0.25, and in v0.24
-
-v0.24 was published without an announcement, so both releases are
-described here: everything below is new since v0.23.
-
-**`MODE 1` and `MODE 2` differ in size and depth, and in nothing
-else.** 640×480 in one bit against 320×240 in sixteen — and console
-output, `PRINT` and `TEXT` now behave identically in each, subject to
-`OPTION CONSOLE`, exactly as they do on a PicoMite with `OPTION
-LCDPANEL CONSOLE`.
-
-`MODE 1` used to leave text to the kernel console while `MODE 2` drew
-it with the interpreter's own glyph engine. That looked like an
-improvement — the console scrolls, it has a cursor — and it was a
-divergence: there were two text engines with two cursors, so `PRINT`
-and `TEXT` disagreed about where the text went, and `PRINT @` moved
-only one of them. Worse, in `MODE 2` nothing echoed what you typed at
-an `INPUT`, because a program drawing its own text has to silence the
-console (or every `PRINT` appears twice), and the terminal's own echo
-then reaches only the serial port. A program whose first line was
-`MODE 2` printed its prompt and then took input invisibly.
-
-**`INPUT` echoes what you type, and shows a cursor.** The interpreter
-does the editing itself now, as MMBasic always has: characters appear
-as they are typed, `Backspace` and `Del` rub out, `Tab` expands to the
-next multiple of four, and a cursor — MMBasic's own underline beneath
-the character cell, on for two thirds of a second and off for a third —
-sits where the next character will go. The echo follows `OPTION
-CONSOLE` like everything else printed, so it reaches the screen, the
-serial port, or both.
-
-**Sprites load from BMP files.** `SPRITE LOADBMP` and `BLIT LOAD` (also
-spelt `BLIT LOADBMP`) are done, with the reference's window arguments:
-
-```basic
-SPRITE LOADBMP #1, "sheet", 64, 0, 16, 16   ' one 16x16 tile out of a sheet
-BLIT LOAD #2, "picture"                     ' all of it, into a blit buffer
+```
+exec: pid 27 needs 76 blocks, 74 free beside a 10-block neighbour (pool 84)
 ```
 
-The decoding is `loadimage`'s, in another process, so there is no BMP
-reader compiled into your program. A window that runs off the edge of
-the picture is refused rather than quietly clipped, and — as in the
-reference, and unlike a picture drawn on the screen — the colours are
-taken by bit extraction rather than dithered: a sprite is data that
-gets blitted about, and a dithered one changes colour when it moves.
+That is not a report of free memory, and reading it as one sends you
+looking at the wrong number. `THUMB_BUDGET` is the answer: it caps the
+native code the compiler adds, so a large program keeps most of its
+speed and still loads. PETSCII Robots grew past the line and comes back
+under it with `THUMB_BUDGET=140000 cc robots.bas` — 209,022 bytes and
+76 blocks uncapped, 196,782 and under 74 with the cap. The knob is not
+new; having it written down is. See
+[When a program will not start](#thumb-budget), which also covers
+`THUMB_VERBOSE`, `BCODE_ONLY`, and what `exec ./prog.bc` is good for.
 
-**A file name with no extension gets one.** `LOAD IMAGE "shot"`,
-`SPRITE LOADBMP #1, "sheet"` and the rest now append `.bmp` when the
-name has none, which is what MMBasic does and what programs written for
-a PicoMite expect. A dot inside a directory name does not count as an
-extension.
+**Every compiled program is smaller, because `main` now gives back its
+dead bytecode.** A function translated to native ARM has kept its
+original bytecode since the translator learned to reclaim it — except
+the main line, excluded by a comment that had outlived the code it
+described. `bcrun` has entered `main` natively for some time and
+handles a marker with no bytecode to fall back to, so the exclusion was
+costing every program its main line twice over: 5,428 bytes of code and
+two thirds of its relocations on Robots, and far more for a program
+whose work sits in one long main line rather than in `Sub`s.
 
-**TSCP chess is on the card**, in `/root/MMBasic/chess`: Tom Kerrigan's
-engine in Ceptimus's MMBasic conversion, with its pieces and its
-opening book. Run it from its own directory, as `robots` and `retic`
-are run, and type `help` at the `tscp>` prompt. It is also this port's
-own demonstration of the sprite loaders — the pieces are cut out of one
-240×20 BMP with the window form above — and `chess/mkspr.bas` turns
-that sheet into the `.spr` file `SPRITE LOAD` reads, on the machine
-itself. See `chess/README.md`.
+**The translator lives in the tree.** `Applications/mmb2c` now holds
+the MMBasic-to-C translator, the Python reference implementation it is
+checked against byte for byte, the runtime headers and the BASIC
+corpus, and `Applications/CC` compiles `mmbc` and `bcrun` straight out
+of it. It used to be a separate repository whose files were copied
+across by two sync scripts, and a copy that went stale was invisible:
+everything built, every host gate passed, and the board ran code the
+source no longer described. There is one of each file now and nothing
+to re-run. Nothing about the machine changes; the binaries it produces
+are byte-identical.
 
-**`SPRITE LOAD` works at all.** It parsed its file's header line with a
-C library function `bcrun` does not provide, so any program containing
-the statement — anywhere, whether it ran or not — died at load with
-`no runtime function "sscanf"`.
-
-### From v0.24
-
-**`F2` in `mmbedit` builds the program and runs it.** On a PicoMite `F2`
-is "save, exit and run", and the interpreter took the program straight
-back; the editor here printed the two commands you would have to type
-and left you at the shell. It now hands the file to the compiler, which
-builds it — a `.bas` through `mmbc` first — and runs it if it built.
-`Ctrl-W` does the same, as it does in MMBasic. A compile error stops
-there, with the errors on the screen, rather than putting you back in
-the editor at the offending line. The `mmbedit` chapter has the detail.
-
-**`cc -r` builds and runs in one command**, which is what `F2` uses and
-is worth having at the prompt in its own right: `cc -r prog.bas`.
-Nothing runs if any pass failed.
-
-One thing to know before trusting either: a line `mmbc` cannot
-translate is commented out and *reported*, not treated as an error, so
-the program builds without that line and runs. Read the report rather
-than the fact that something ran.
-
-**`cc`'s manual page was describing a different compiler.** It
-documented `-c`, `-S`, `-E`, `-O`, `-D`, `-I`, `-l`, `-M` and `-X`,
-none of which the `cc` on this machine accepts. `man cc` lists the five
-real options now, and names the absent ones.
-
-**The usual rule after upgrading: recompile.** The runtime is compiled
-into `bcrun` and the layout helpers into the program, so a `.bc` built
-before this release keeps the old behaviour of both of the above. The
-card ships the matched set.
-
-
-\newpage
 
 # Installing Fuzix
 
