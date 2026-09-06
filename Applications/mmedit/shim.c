@@ -368,6 +368,15 @@ int inkey(void)
 
     if (c < 0)
         return 0;                   /* nothing waiting */
+#ifdef PC3_HOST
+    /* A PC terminal's Backspace key sends 0x7F, which MMBasic's editor
+     * takes as its DEL - forward delete - so both keys deleted forward.
+     * The board's keyboard and TeraTerm send 0x08 for Backspace and
+     * ESC [ 3 ~ for Delete (decode_csi above), and so does a PC's
+     * Delete key, so a bare 0x7F here can only be Backspace. */
+    if (c == K_DEL)
+        return '\b';
+#endif
     if (c != K_ESC)
         return c;
 
