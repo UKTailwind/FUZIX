@@ -199,7 +199,6 @@ static unsigned long fn_start;
 static unsigned fn_sym;
 static unsigned fn_patch_lo;
 static unsigned fn_fix_lo;
-static int fn_is_main;
 static int t_dry;
 /* the first of the three walks: builds the target bitmap, so every
    rewrite that would skip ops stands down while it runs */
@@ -231,8 +230,17 @@ static int thumb_enabled(void)
  *	bcrun always executes native, and a large program that keeps
  *	its dead bytecode does not fit its own process - the eclipse
  *	compiled on the machine and then would not load.  THUMB_RECLAIM=0
- *	turns it off either side.  main keeps its bytecode alias
- *	regardless: h_entry is entered through the interpreter.
+ *	turns it off either side.
+ *
+ *	main reclaims like any other function.  It was excluded here
+ *	until 2026-09-06 because "h_entry is entered through the
+ *	interpreter" - which stopped being true when bcrun's run() was
+ *	taught to dispatch at main's BC_NATIVE marker exactly like a call
+ *	site (bcrun.c, "a BASIC program lives in its main line").  That
+ *	path already handles an absent alias, so the exclusion was
+ *	costing every program its main-line bytecode for nothing: 5,428
+ *	bytes on PETSCII Robots, and far more on a program whose work is
+ *	in one monolithic main.
  */
 static int thumb_reclaim(void)
 {
@@ -3703,7 +3711,6 @@ static void thumb_fn_begin(const char *name)
 	fn_start = codelen;
 	fn_patch_lo = npatch;
 	fn_fix_lo = nfix;
-	fn_is_main = (strcmp(name, "main") == 0);
 }
 
 static void thumb_commit(void)
@@ -3725,7 +3732,7 @@ static void thumb_commit(void)
 		t_bail = "skip";
 		goto bailed;
 	}
-	reclaim = thumb_reclaim() && !fn_is_main;
+	reclaim = thumb_reclaim();
 	/* Where this function will land if it commits - reclaiming, on
 	   top of its own bytecode; otherwise appended.  codelen is not
 	   moved by translation, so both passes see the truth.  Direct
