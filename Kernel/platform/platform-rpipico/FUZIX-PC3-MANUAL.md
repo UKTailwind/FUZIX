@@ -1366,6 +1366,20 @@ lays the layer over `F` and shows the result, treating `colour` as
 transparent — wherever the layer holds it, `F` shows through. Left out,
 it is 0.
 
+**A merge composites the layer over `F`, and nothing else.** The two
+things it reads are `L` and `F`; the one thing it writes is the screen.
+So a background drawn on `N` takes no part in the merge and is
+*destroyed* by the first one — the screen becomes the layer over
+whatever `F` holds, which for a program that never wrote to `F` is
+blank. The symptom is not the missing background, which is the obvious
+half; it is that the layer looks **opaque**. Where the transparent
+colour keys through, what shows is blank `F`, and blank is black, so a
+banner over an empty `F` looks exactly like a banner with no
+transparency at all — and no value of `colour` from 0 to 15 changes
+that, because the colour was never the problem. If a merge appears to
+ignore transparency, check where the background went before checking
+the colour.
+
 **Neither source is changed by a merge.** That is the whole point of
 having one: the background goes into `F` once, the thing that moves
 goes into the layer, and a frame is one `CLS` of the layer, one shape,
