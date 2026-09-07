@@ -75,12 +75,38 @@ HARNESSES = $(patsubst tests/%.c,$(BUILD)/%,$(HARNESS_SRC))
 $(BUILD)/%harness: tests/%harness.c mmb_runtime.h | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ $< $(LDLIBS)
 
-check: all $(HARNESSES)
+# THE GATE MUST NOT FIND THE MACHINE'S OWN PC3 TOOLS.
+#
+# A translated program runs its helpers by bare name through the PATH -
+# PLAY spawns playsnd, SAVE IMAGE spawns saveimage - and this gate's
+# expected output was written on a machine that had none of them: PLAY
+# says "Sound output did not start" and that IS the answer being
+# checked.  Install the pc3host package on the development machine and
+# /usr/bin/playsnd appears, so the gate silently starts testing the
+# INSTALLED tools against a display server instead: three spare
+# "playsnd: sound output in use" lines and a failure that is the
+# machine, not the code.
+#
+# So the helpers are shadowed by stubs that exit 127, which is exactly
+# what execvp does when it finds nothing.  The gate then measures the
+# reference runtime, wherever it is run.
+SHADOW := $(BUILD)/notools
+SHADOWED := playsnd playmod playmp3 playwav playflac \
+            saveimage loadimage loadjpg loadpng bcrun
+
+$(SHADOW):
+	@mkdir -p $@
+	@for p in $(SHADOWED); do \
+	  printf '#!/bin/sh\nexit 127\n' > $@/$$p; chmod 755 $@/$$p; \
+	done
+
+check: all $(HARNESSES) $(SHADOW)
 	@for h in $(HARNESSES); do \
 	  $$h || { echo "  FAIL $$h"; exit 1; }; \
 	done
 	@mkdir -p $(BUILD)/work
 	@fail=0; \
+	PATH=$(CURDIR)/$(SHADOW):$$PATH; export PATH; \
 	for t in $(TESTS); do \
 	  ( cd $(BUILD)/work && rm -rf * && \
 	    if [ -f ../../tests/$$t.in ]; then ../$$t < ../../tests/$$t.in; \

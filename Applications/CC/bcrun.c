@@ -2060,9 +2060,58 @@ static void lc_srand(void)
 	A = 0;
 }
 
+/*
+ *	THE CLOCK A PC3 PROGRAM READS IS THE WALL CLOCK.
+ *
+ *	On the board there is no timezone anywhere: the DS3231 holds the
+ *	time the user set, setdate turns it into an epoch through a libc
+ *	whose localtime IS gmtime, and DATE$ and TIME$ format that epoch
+ *	directly (mmb_datetime.h does the calendar itself so the answers
+ *	are identical on every platform).  So the board's epoch counts
+ *	seconds of LOCAL time, and everything above it - DATE$, TIME$,
+ *	EPOCH, DATETIME$, DAY$, and the DATE$= / TIME$= writers - agrees.
+ *
+ *	A PC's time() is genuinely UTC, so that same code printed UTC
+ *	and a user in any other zone saw the wrong hour.  The clock is
+ *	shifted here, at the one door it comes through, rather than in
+ *	the header: the header is compiled INTO the program by cc, where
+ *	the only OS fact available is this libcall, and libgate keeps it
+ *	that way.  One place, and DATE$ and EPOCH() cannot disagree.
+ *
+ *	Not on the board: there the offset is zero by construction, and
+ *	asking for it would cost a program the timezone machinery.
+ */
+#if defined(__linux__) || defined(_WIN32)
+static long tz_offset(time_t t)
+{
+	struct tm g, l;
+	long d;
+	int dd;
+
+	g = *gmtime(&t);
+	l = *localtime(&t);
+	d = (l.tm_hour - g.tm_hour) * 3600L + (l.tm_min - g.tm_min) * 60L
+	    + (l.tm_sec - g.tm_sec);
+	/* the two may fall on either side of midnight, or of new year */
+	dd = l.tm_yday - g.tm_yday;
+	if (l.tm_year != g.tm_year)
+		dd = (l.tm_year > g.tm_year) ? 1 : -1;
+	else if (dd > 1)
+		dd = -1;
+	else if (dd < -1)
+		dd = 1;
+	return d + dd * 86400L;
+}
+#endif
+
 static void lc_time(void)
 {
-	long t = (long)time(NULL);
+	time_t now = time(NULL);
+	long t = (long)now;
+
+#if defined(__linux__) || defined(_WIN32)
+	t += tz_offset(now);		/* the machine's own wall clock */
+#endif
 	if (arg(0))
 		wr32((unsigned long)arg(0), (unsigned long)t);
 	A = t;
