@@ -343,6 +343,9 @@ re-fetches the SDK now — the TinyUSB submodule is outside `build/` — see §2
     sh relink-userland.sh
     (cd ../../../Applications/netd && make -f Makefile.armm0 \
         FUZIX_ROOT=$PWD/../.. USERCPU=armm0 PLATFORM=armm0)
+    sh tftpcheck.sh                             # GATE - tftpd still
+                                                # speaks TFTP (host
+                                                # build; protocol only)
     sh ../../../Applications/CC/hwtest/stageall.sh
 
 The netd line is easy to forget: `relink-userland.sh` does not cover

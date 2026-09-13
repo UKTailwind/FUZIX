@@ -644,15 +644,15 @@ fi
 # board while networking was being written, which meant the card had
 # programs no recipe could reproduce - and a card that cannot be
 # rebuilt is a card that is one fsck away from being wrong.  ping,
-# htget, dig, ntpdate and httpd are the whole visible network userland;
-# tlsget is the TLS one and lives with the platform utils.
+# htget, dig, ntpdate, httpd and tftpd are the whole visible network
+# userland; tlsget is the TLS one and lives with the platform utils.
 	if [ ! -f utils/wifi.stripped ]; then
 		echo "update-flash.sh: the card needs utils/wifi.stripped" >&2
 		echo "  (cd utils && make wifi && arm-none-eabi-strip wifi -o wifi.stripped)" >&2
 		exit 1
 	fi
 	NETD=../../../Applications/netd
-	for f in ping htget dig ntpdate httpd; do
+	for f in ping htget dig ntpdate httpd tftpd; do
 		if [ ! -f "$NETD/$f" ]; then
 			echo "update-flash.sh: the card needs $NETD/$f" >&2
 			echo "  (cd Applications/netd && make -f Makefile.armm0 \\" >&2
@@ -699,6 +699,8 @@ bget $NETD/ntpdate ntpdate
 chmod 0755 ntpdate
 bget $NETD/httpd httpd
 chmod 0755 httpd
+bget $NETD/tftpd tftpd
+chmod 0755 tftpd
 bget utils/tlsget.stripped tlsget
 chmod 0755 tlsget
 bget utils/tlsca.stripped tlsca

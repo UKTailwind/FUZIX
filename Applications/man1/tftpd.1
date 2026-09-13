@@ -1,0 +1,89 @@
+.TH tftpd 1 "FUZIX System Utilities" "FUZIX"
+.SH NAME
+tftpd \- a trivial file transfer protocol server
+.SH SYNOPSIS
+.B tftpd
+[\fB\-q\fR]
+[\fB\-r\fR]
+[\fB\-p\fR \fIport\fR]
+[\fIdirectory\fR]
+.SH DESCRIPTION
+.B tftpd
+serves files over TFTP (RFC 1350) from
+.I directory
+if one is given, or from the directory it was started in, one transfer
+at a time.
+.PP
+TFTP is the protocol every router, workstation and build script already
+has a client for, so this is the shortest way to move a file on or off
+the machine without a card reader.  Both directions work: a read takes
+a copy away, a write creates the file here, replacing one of the same
+name.
+.PP
+A file is opened relative to the serving directory.  A leading
+.B /
+is dropped and a path containing
+.B ..
+is refused: there is no chroot here and the whole disc is one
+namespace.
+.TP
+.B \-p
+Serve on
+.I port
+instead of 69.  Port 69 is privileged and needs root.
+.TP
+.B \-q
+Say nothing.  Without it each request and each completion is reported.
+.TP
+.B \-r
+Refuse writes.  Reads still work.
+.SH EXAMPLES
+Take a copy of something on the board, from another machine:
+.nf
+
+# mkdir /tmp/pub
+# cp hello.bas /tmp/pub
+# tftpd /tmp/pub &
+1234
+
+  (elsewhere)
+  curl -o hello.bas tftp://192.168.1.245/hello.bas
+  curl -T new.bas tftp://192.168.1.245/new.bas
+.fi
+.SH STOPPING IT
+Note the process id the shell prints when you background it, and
+.B kill
+that.  The shell has no job control, so
+.B kill %1
+does not work here; if you have lost the number,
+.B ps
+will find it.
+.PP
+Stop it before flashing or rebooting.  A running server holds the
+filesystem open, so
+.B remount \-n / ro
+refuses and the card goes down dirty.
+.SH NOTES
+Transfers are 512 bytes a block, acknowledged one at a time, so TFTP is
+never fast.  The options of RFC 2347 \- blksize, tsize, timeout \- are
+ignored, which is what that RFC asks of a server that does not
+implement them: the client sees no reply to them and falls back.
+.PP
+netascii is not converted.  Both modes move the bytes through
+unchanged, and the mode is only reported, so use octet \- which is what
+every client uses by default for anything that is not text.
+.PP
+A block that is not acknowledged is sent again after ten seconds, five
+times, and the transfer is then abandoned.
+.PP
+There is no authentication in TFTP at all, and a write replaces any
+file of that name in the serving directory.  Serve a directory you are
+willing to have written to, or use
+.BR \-r .
+.SH SEE ALSO
+.BR httpd (1),
+.BR htget (1),
+.BR wifi (1),
+.BR remount (1),
+.BR kill (1),
+.BR ps (1)

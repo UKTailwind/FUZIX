@@ -3615,7 +3615,26 @@ connection at a time. `httpd 80` to choose the port. `/` is
 `index.html`, a missing file is a 404, and a path containing `..` is
 refused.
 
-**Stop it before you flash or reboot.** A running server holds the
+There is also a TFTP server, which is the quicker way to move a file
+when the other machine is not a browser:
+
+    # mkdir /tmp/pub
+    # cp hello.bas /tmp/pub
+    # tftpd /tmp/pub &
+
+and from anywhere else, in either direction:
+
+    curl -o hello.bas tftp://192.168.1.245/hello.bas
+    curl -T new.bas   tftp://192.168.1.245/new.bas
+
+Every router and workstation already has a TFTP client, which is the
+point of it. `tftpd -r` refuses writes; `tftpd -q` says nothing. It
+serves the directory it was started in unless given another, a path
+containing `..` is refused, and a write replaces any file of that
+name — so serve a directory you are willing to have written to.
+There is no authentication anywhere in TFTP.
+
+**Stop them before you flash or reboot.** A running server holds the
 filesystem open, so `remount -n / ro` will refuse, and the disc goes
 down dirty:
 
@@ -3922,6 +3941,8 @@ tell you there is no radio.
 # tlsca -n                     ... and stop checking
 # httpd &                      serve this directory on port 8080
 # httpd 80 &                   ... on a port of your choosing
+# tftpd &                      serve this directory over TFTP
+# tftpd -r /tmp/pub &          ... a chosen directory, reads only
 ```
 
 ## The clock, and housekeeping
