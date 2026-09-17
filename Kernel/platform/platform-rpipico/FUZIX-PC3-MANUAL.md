@@ -3530,7 +3530,7 @@ runs in the background while you carry on.
 
 To have it join at boot, add `wifi -f` to `/etc/rc`.
 
-## Setting the clock
+## Setting the clock {#ntp-clock}
 
 Do this before anything involving TLS:
 
@@ -3706,6 +3706,16 @@ not go out if one is missing. The list used to be maintained by hand
 and had drifted badly: it offered a games collection of some thirty
 titles, an editor called `ue`, and an assembler, none of which were
 ever installed.
+
+**One thing you know that does not work here: options come before
+operands.** `getopt` is the System V one and stops at the first
+argument that is not an option, so `ping 8.8.8.8 -c 3` reads `-c 3` as
+two more operands and ignores them. GNU's `getopt` shuffles the
+arguments before the program sees them, so the habit is invisible
+until it crosses to this machine — and what you get is not an error
+but a plausible wrong answer. `ntpdate` and `tftpd` refuse a misplaced
+option; the rest of the suite still ignores one quietly. See
+[Setting the clock](#ntp-clock) for the case that found it.
 
 ## The machine itself: `picoctl`
 
