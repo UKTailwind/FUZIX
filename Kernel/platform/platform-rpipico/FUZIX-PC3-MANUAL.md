@@ -3534,15 +3534,33 @@ To have it join at boot, add `wifi -f` to `/etc/rc`.
 
 Do this before anything involving TLS:
 
-    # ntpdate time.cloudflare.com
-    Thu Aug 20 18:19:37 2026
+    # ntpdate -s time.cloudflare.com
     # setdate -w
 
-`ntpdate` sets the system clock from the internet; `setdate -w` writes
-it to the battery-backed DS3231 so it survives a power cut. **A
-certificate is only valid between two dates**, so a machine that thinks
-it is 1970 will reject every certificate on the internet and the error
-will not mention the clock.
+**`-s` is what sets the clock.** Without it `ntpdate` prints the time
+and changes nothing, which is a query and not a mistake — but following
+it with `setdate -w` then writes the *old* time to the DS3231. `-d`
+prints the time as well as setting it.
+
+`setdate -w` writes the clock to the battery-backed DS3231 so it
+survives a power cut. **A certificate is only valid between two
+dates**, so a machine that thinks it is 1970 will reject every
+certificate on the internet and the error will not mention the clock.
+
+NTP speaks UTC and nothing in the reply says where you are, so that
+sets the machine to UTC. `-o` adds whole hours and `-O` adds seconds
+on top, for the half-hour zones:
+
+    # ntpdate -s -o 1 time.cloudflare.com       British summer time
+    # ntpdate -s -o 5 -O 1800 time.cloudflare.com     India
+
+**Every option must come before the server name.** `getopt` here is the
+System V one and stops at the first argument that is not an option, so
+`ntpdate host -o 5` used to print UTC and ignore the `-o` — an answer
+that looks right and is five hours out. It is refused now. The same
+rule applies to every command on this machine; GNU's `getopt` shuffles
+the arguments, which is why the habit does not survive the trip from a
+Linux box.
 
 ## Looking around
 
@@ -3932,7 +3950,7 @@ tell you there is no radio.
 # wifi -f                      join the network in /etc/wifi.conf
 # wifi MYSSID MYKEY            join without using the file
 # wifi -d                      disconnect
-# ntpdate time.cloudflare.com  set the clock from the internet
+# ntpdate -s time.cloudflare.com   set the clock (-s, or it only prints)
 # ping -c 4 8.8.8.8            ICMP, with round-trip times
 # dig example.com              look up a name
 # htget http://host/page f     fetch a page over HTTP into f

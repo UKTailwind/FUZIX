@@ -1,27 +1,103 @@
 .TH ntpdate 1 "FUZIX System Utilities" "FUZIX"
 .SH NAME
-ntpdate \- set the clock from a time server
+ntpdate \- get the time from a time server
 .SH SYNOPSIS
 .B ntpdate
+[\fB\-s\fR]
+[\fB\-d\fR]
+[\fB\-p\fR \fIport\fR]
+[\fB\-o\fR \fIhours\fR]
+[\fB\-O\fR \fIseconds\fR]
 .I server
 .SH DESCRIPTION
 .B ntpdate
 asks
 .I server
-for the time, sets the kernel clock to it, and prints the result.
+for the time and prints it.
 .PP
-It sets the kernel clock only.  Follow it with
-.B setdate \-w
-to write the time to the DS3231, so that it survives a power cut.
+It does
+.B not
+set the clock unless you say
+.BR \-s .
+On its own it is a query and nothing more.
+.TP
+.B \-s
+Set the kernel clock to the time that comes back.  Nothing is printed
+unless you also give
+.BR \-d .
+.TP
+.B \-d
+Print the time even when
+.B \-s
+is setting it.
+.TP
+.B \-p
+Ask on
+.I port
+instead of 123.
+.TP
+.B \-o
+Add
+.I hours
+to the answer, between \-12 and 12.  NTP speaks UTC and nothing in the
+reply says where you are, so without this the clock is set to UTC.
+.TP
+.B \-O
+Add
+.I seconds
+as well, for the half-hour and quarter-hour zones that
+.B \-o
+cannot express.
+.SH OPTIONS COME FIRST
+.B Every option must appear before the server name.
+.PP
+.B getopt
+here is the System V one: it stops at the first argument that is not an
+option, so everything after the server is an operand and is ignored.
+.B "ntpdate host \-o 5"
+is not an error \- it prints UTC, which looks like a perfectly good
+answer and is five hours out.  GNU's
+.B getopt
+shuffles the arguments, so the same line works on a Linux box, which is
+how this is usually discovered.  From this release it is refused rather
+than ignored.
 .SH EXAMPLES
+Set the clock to UK winter time and keep it over a power cut:
 .nf
+
+# ntpdate \-s time.cloudflare.com
+# setdate \-w
+
+.fi
+British summer time, one hour on:
+.nf
+
+# ntpdate \-s \-o 1 time.cloudflare.com
+
+.fi
+India, five and a half hours on:
+.nf
+
+# ntpdate \-s \-o 5 \-O 1800 time.cloudflare.com
+
+.fi
+Just ask, and change nothing:
+.nf
+
 # ntpdate time.cloudflare.com
-# setdate -w
+Thu Sep 17 09:36:22 2026
+
 .fi
 .SH NOTES
 Do this before anything involving TLS.  A certificate is only valid
 between two dates, so a machine that thinks it is 1970 rejects every
 certificate on the internet \- and the error will not mention the clock.
+.PP
+The kernel clock is lost at power off.  Follow
+.B \-s
+with
+.B setdate \-w
+to write the time to the DS3231.
 .SH SEE ALSO
 .BR setdate (1),
 .BR date (1),

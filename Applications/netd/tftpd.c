@@ -501,6 +501,21 @@ int main(int argc, char *argv[])
 	    usage();
 	}
     }
+    /*
+     *	getopt here is the System V one: it stops at the first argument
+     *	that is not an option and does NOT permute, so anything after
+     *	the directory is an operand.  "tftpd /tmp/pub -r" would then
+     *	serve that directory WRITABLE having been asked not to, and say
+     *	nothing about it.  GNU's getopt permutes, so the same line does
+     *	the right thing on the machine you tried it on.
+     */
+    for (n = optind + 1; n < argc; n++) {
+	if (argv[n][0] == '-' && argv[n][1]) {
+	    fprintf(stderr, "%s: options must come before the directory\n",
+		    argv[0]);
+	    usage();
+	}
+    }
     if (argv[optind] && chdir(argv[optind])) {
 	perror(argv[optind]);
 	exit(1);

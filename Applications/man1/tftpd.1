@@ -37,6 +37,16 @@ Say nothing.  Without it each request and each completion is reported.
 .TP
 .B \-r
 Refuse writes.  Reads still work.
+.PP
+.B Options must come before the directory.
+.B getopt
+here is the System V one and stops at the first argument that is not an
+option, so
+.B "tftpd /tmp/pub \-r"
+would once have served that directory writable having been asked not
+to.  It is refused now.  See
+.BR ntpdate (1),
+which is where this was found.
 .SH EXAMPLES
 Take a copy of something on the board, from another machine:
 .nf

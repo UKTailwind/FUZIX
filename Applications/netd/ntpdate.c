@@ -53,7 +53,11 @@ void alarm_handler( int signum ){
 }
 
 void pusage( void ){
-    fprintf(stderr, "ntpdate -sd [-o tz] [-O seconds] server\n");
+    fprintf(stderr, "usage: ntpdate [-s] [-d] [-p port] [-o hours]"
+		    " [-O seconds] server\n");
+    fprintf(stderr, "  options must come BEFORE the server name\n");
+    fprintf(stderr, "  -s sets the clock; without it the time is only"
+		    " printed\n");
     exit(1);
 }
 
@@ -135,6 +139,24 @@ int main( int argc, char *argv[] ){
     }
     if( ! argv[optind] )
 	pusage();
+
+    /*
+     * getopt here is the System V one: it stops at the first argument
+     * that is not an option and does NOT permute, so everything after
+     * the server name is an operand.  "ntpdate host -o 5" therefore
+     * ignored -o and printed UTC - an answer that looks perfectly
+     * right and is an hour or five out.  GNU's getopt permutes, so the
+     * same line works on the machine you tested it on, which is what
+     * makes it worth an error rather than a footnote.
+     */
+    for( rv = optind + 1; rv < argc; rv++ ){
+	if( argv[rv][0] == '-' && argv[rv][1] ){
+	    fprintf(stderr,
+		    "%s: options must come before the server name\n",
+		    argv[0]);
+	    pusage();
+	}
+    }
 
     my_open( argc, argv );
 
