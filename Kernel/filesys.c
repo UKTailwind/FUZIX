@@ -1186,6 +1186,27 @@ void i_deref(register inoptr ino)
             if (mode == MODE_R(F_REG) || mode == MODE_R(F_DIR) ||
                 mode == MODE_R(F_PIPE))
                 f_trunc(ino);
+            else
+                /*
+                 * Everything else reaches the disk with whatever its
+                 * block list holds, and f_trunc_blocks() - which
+                 * zeroes each pointer as it frees the block - is the
+                 * only thing that ever clears it.  So the invariant
+                 * every other path depends on, that a FREE inode has
+                 * a zero block list, held only for the three modes
+                 * above.  i_open() accepts an inode as fresh on
+                 * "i_mode == 0 && i_nlink == 0" alone and hands the
+                 * caller i_addr[] unexamined, so a stale pointer
+                 * becomes one of the new file's data blocks and
+                 * blk_free() panics on it when that file dies.
+                 *
+                 * A device inode keeps its device number in
+                 * i_addr[0], so unlinking one has always been able to
+                 * do this; sockets kept the socket number there and
+                 * did it every time one was closed.
+                 */
+                memset(ino->c_node.i_addr, 0,
+                       sizeof(ino->c_node.i_addr));
             ino->c_node.i_mode = 0;
             /* Zeroing the mode has to reach the disk, or i_alloc's
                scan will not see the inode as free either */

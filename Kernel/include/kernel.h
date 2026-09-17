@@ -335,6 +335,18 @@ typedef struct cinode {
 #define CFLEX		0x0F	/* locked exclusive */
 #define CFMAX		0x0E	/* highest shared lock count permitted */
    uint8_t     c_super;		/* Superblock index */
+   /* Which socket this inode is, for F_SOCK.  In-core only, and it
+    * has to be: it used to live in c_node.i_addr[0], which is the
+    * first data block pointer of a REAL on-disk inode, and i_deref()
+    * writes a dying inode back to disk without truncating a socket -
+    * so the inode landed on the free list still carrying the socket
+    * number as a block pointer, and the next file or pipe to be given
+    * that inode number inherited it.  Truncating that file handed the
+    * number to blk_free() and the kernel stopped with "validblk:
+    * invalid blk".  Slot 0 was invisible (blk_free ignores block 0),
+    * so it took a resident server - the first thing to hold slot 0
+    * while anything else opened a socket - to make it reachable. */
+   uint8_t     c_sock;
    /* A pipe's stream positions belong to the PIPE, not to any one
     * fd: each open() starts its fd at offset 0, so a FIFO whose
     * writers come and go per message wrote every record over the

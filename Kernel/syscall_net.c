@@ -38,7 +38,10 @@ static uint8_t ncall_tab[NUM_NETCALL] = {
 	N_SOCKFD | N_ADDR_OUT	/* getpeername */
 };
 
-#define IN2SOCK(ino)		((ino)->c_node.i_addr[0])
+/* In-core only.  This was c_node.i_addr[0] - a disk block pointer -
+   and writing a socket number into one corrupted the filesystem; see
+   struct cinode in kernel.h for the whole story. */
+#define IN2SOCK(ino)		((ino)->c_sock)
 
 uint_fast8_t issocket(inoptr ino)
 {
