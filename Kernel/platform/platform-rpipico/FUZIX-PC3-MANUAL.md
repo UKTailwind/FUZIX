@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.27 — September 2026"
+date: "Release v0.28 — September 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
