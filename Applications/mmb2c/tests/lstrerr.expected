@@ -1,0 +1,14 @@
+load -1: -1 is invalid (valid is 0 to 2147483647)
+left -2: -2 is invalid (valid is 0 to 2147483647)
+right -3: -3 is invalid (valid is 0 to 2147483647)
+mid 0: 0 is invalid (valid is 1 to 5)
+mid 6: 6 is invalid (valid is 1 to 5)
+mid 2,3: ell
+replace 2: hELlo len 5
+replace 5: 5 is invalid (valid is 1 to 4), still hELlo
+linstr 0:  0  linstr 1:  3
+resize 40: 40 is invalid (valid is 0 to 32)
+setbyte 256: 256 is invalid (valid is 0 to 255)
+lmid 0: 0 is invalid (valid is 1 to 5)
+append: Integer array too small
+copy 11 into 8: Destination array too small

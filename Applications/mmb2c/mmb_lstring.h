@@ -37,10 +37,21 @@
 
 MMG_FN MMINTEGER mm_ls_len(const MMINTEGER *a) { return a[0] < 0 ? 0 : a[0]; }
 
-MMG_FN void mm_ls_fit(int cells, MMINTEGER want)
+/* The capacity check, with the message the reference gives for that
+ * operation (MM_Misc.c): APPEND and LOAD "Integer array too small"; LEFT,
+ * RIGHT, MID, COPY and CONCAT StandardError(23); LMID "String too long".
+ * Returns 1 when it raised and the caller returns - under ON ERROR SKIP
+ * carrying on would have copied past the end of the array. */
+#define MM_LS_SMALL_INT  "Integer array too small"
+#define MM_LS_SMALL_DEST "Destination array too small"
+
+MMG_FN int mm_ls_fit(int cells, MMINTEGER want, const char *msg)
 {
-    if (want < 0 || want > MM_LS_CAP(cells))
-        mm_error("Long string is too small for this operation");
+    if (want < 0 || want > MM_LS_CAP(cells)) {
+        mm_error(msg);
+        return 1;
+    }
+    return 0;
 }
 
 MMG_FN void mm_ls_clear(MMINTEGER *a, int cells) { (void)cells; a[0] = 0; }
@@ -48,17 +59,19 @@ MMG_FN void mm_ls_clear(MMINTEGER *a, int cells) { (void)cells; a[0] = 0; }
 MMG_FN void mm_ls_append(MMINTEGER *a, int cells, const char *s)
 {
     MMINTEGER n = mm_ls_len(a), k = mm_slen(s);
-    mm_ls_fit(cells, n + k);
+    if (mm_ls_fit(cells, n + k, MM_LS_SMALL_INT)) return;
     memcpy(MM_LS_DATA(a) + n, s + 1, (size_t)k);
     a[0] = n + k;
 }
 
+/* The counts are the reference's getint(…, 0, 0x7FFFFFFF): a negative one
+   is its range error (8d44510, issue #72), where it used to be taken as 0. */
 MMG_FN void mm_ls_load(MMINTEGER *a, int cells, MMINTEGER n, const char *s)
 {
     MMINTEGER k = mm_slen(s);
-    if (n < 0) n = 0;
+    if (mm_range(n, 0, 0x7FFFFFFF)) return;
     if (n > k) n = k;
-    mm_ls_fit(cells, n);
+    if (mm_ls_fit(cells, n, MM_LS_SMALL_INT)) return;
     memcpy(MM_LS_DATA(a), s + 1, (size_t)n);
     a[0] = n;
 }
@@ -66,7 +79,7 @@ MMG_FN void mm_ls_load(MMINTEGER *a, int cells, MMINTEGER n, const char *s)
 MMG_FN void mm_ls_copy(MMINTEGER *d, int dcells, const MMINTEGER *s)
 {
     MMINTEGER n = mm_ls_len(s);
-    mm_ls_fit(dcells, n);
+    if (mm_ls_fit(dcells, n, MM_LS_SMALL_DEST)) return;
     memmove(MM_LS_DATA(d), MM_LS_DATA((MMINTEGER *)s), (size_t)n);
     d[0] = n;
 }
@@ -74,7 +87,7 @@ MMG_FN void mm_ls_copy(MMINTEGER *d, int dcells, const MMINTEGER *s)
 MMG_FN void mm_ls_concat(MMINTEGER *d, int dcells, const MMINTEGER *s)
 {
     MMINTEGER n = mm_ls_len(d), k = mm_ls_len(s);
-    mm_ls_fit(dcells, n + k);
+    if (mm_ls_fit(dcells, n + k, MM_LS_SMALL_DEST)) return;
     memmove(MM_LS_DATA(d) + n, MM_LS_DATA((MMINTEGER *)s), (size_t)k);
     d[0] = n + k;
 }
@@ -83,9 +96,9 @@ MMG_FN void mm_ls_left(MMINTEGER *d, int dcells, const MMINTEGER *s,
                        MMINTEGER n)
 {
     MMINTEGER k = mm_ls_len(s);
-    if (n < 0) n = 0;
+    if (mm_range(n, 0, 0x7FFFFFFF)) return;
     if (n > k) n = k;
-    mm_ls_fit(dcells, n);
+    if (mm_ls_fit(dcells, n, MM_LS_SMALL_DEST)) return;
     memmove(MM_LS_DATA(d), MM_LS_DATA((MMINTEGER *)s), (size_t)n);
     d[0] = n;
 }
@@ -94,35 +107,40 @@ MMG_FN void mm_ls_right(MMINTEGER *d, int dcells, const MMINTEGER *s,
                         MMINTEGER n)
 {
     MMINTEGER k = mm_ls_len(s);
-    if (n < 0) n = 0;
+    if (mm_range(n, 0, 0x7FFFFFFF)) return;
     if (n > k) n = k;
-    mm_ls_fit(dcells, n);
+    if (mm_ls_fit(dcells, n, MM_LS_SMALL_DEST)) return;
     memmove(MM_LS_DATA(d), MM_LS_DATA((MMINTEGER *)s) + (k - n), (size_t)n);
     d[0] = n;
 }
 
+/* MID's start is the reference's getint(…, 1, length) - outside it is an
+   error, not a clamp.  n < 0 is "count omitted", the translator's -1, so
+   an explicit negative count is not yet told from a missing one. */
 MMG_FN void mm_ls_mid(MMINTEGER *d, int dcells, const MMINTEGER *s,
                       MMINTEGER start, MMINTEGER n)
 {
     MMINTEGER k = mm_ls_len(s), avail;
-    if (start < 1) start = 1;
-    if (start > k) { d[0] = 0; return; }
+    if (mm_range(start, 1, k)) return;
+    if (n >= 0 && mm_range(n, 0, 0x7FFFFFFF)) return;
     avail = k - start + 1;
     if (n < 0 || n > avail) n = avail;
-    mm_ls_fit(dcells, n);
+    if (mm_ls_fit(dcells, n, MM_LS_SMALL_DEST)) return;
     memmove(MM_LS_DATA(d), MM_LS_DATA((MMINTEGER *)s) + (start - 1),
             (size_t)n);
     d[0] = n;
 }
 
+/* REPLACE writes over what is there and never grows the string: its
+   position is getint(…, 1, length - len(s$) + 1).  It used to clamp a
+   position below 1 and extend the string past its end. */
 MMG_FN void mm_ls_replace(MMINTEGER *a, int cells, const char *s,
                           MMINTEGER start)
 {
     MMINTEGER k = mm_slen(s);
-    if (start < 1) start = 1;
-    mm_ls_fit(cells, start - 1 + k);
+    (void)cells;
+    if (mm_range(start, 1, mm_ls_len(a) - k + 1)) return;
     memcpy(MM_LS_DATA(a) + (start - 1), s + 1, (size_t)k);
-    if (start - 1 + k > mm_ls_len(a)) a[0] = start - 1 + k;
 }
 
 /*
@@ -141,16 +159,13 @@ MMG_FN void mm_ls_lmid(MMINTEGER *a, int cells, MMINTEGER start,
     MMINTEGER rl = mm_slen(s);
     MMINTEGER change;
 
-    if (start < 1 || start > cur) {
-        mm_error("Start position is out of bounds");
+    /* the reference's getints (cmd_lmid): start 1..length, num 0..length */
+    if (mm_range(start, 1, cur))
         return;
-    }
     if (num < 0)
         num = rl;               /* omitted: as long as the replacement */
-    if (num > cur) {
-        mm_error("Selection exceeds length of string");
+    else if (mm_range(num, 0, cur))
         return;
-    }
     if (start + num - 1 > cur) {
         mm_error("Selection exceeds length of string");
         return;
@@ -161,7 +176,8 @@ MMG_FN void mm_ls_lmid(MMINTEGER *a, int cells, MMINTEGER start,
         memcpy(MM_LS_DATA(a) + start, s + 1, (size_t)rl);
         return;
     }
-    mm_ls_fit(cells, cur + change);
+    if (mm_ls_fit(cells, cur + change, "String too long"))
+        return;
     /*	Move the tail before writing, and move it with memmove: the two
      *	regions overlap whenever the replacement is shorter. */
     memmove(MM_LS_DATA(a) + start + rl, MM_LS_DATA(a) + start + num,
@@ -170,18 +186,23 @@ MMG_FN void mm_ls_lmid(MMINTEGER *a, int cells, MMINTEGER start,
     a[0] = cur + change;
 }
 
+/* RESIZE: the reference's getint(…, 0, capacity) */
 MMG_FN void mm_ls_resize(MMINTEGER *a, int cells, MMINTEGER n)
 {
-    mm_ls_fit(cells, n);
+    if (mm_range(n, 0, MM_LS_CAP(cells)))
+        return;
     a[0] = n;
 }
 
 MMG_FN void mm_ls_setbyte(MMINTEGER *a, int cells, MMINTEGER n, MMINTEGER v)
 {
     /* SETBYTE and LGETBYTE respect OPTION BASE; the caller has already
-       folded the base in, so n is 0 based here */
-    mm_ls_fit(cells, n + 1);
-    MM_LS_DATA(a)[n] = (char)(unsigned char)(v & 0xFF);
+       folded the base in, so n is 0 based here.  The value is the
+       reference's getint(…, 0, 255), not masked. */
+    if (mm_ls_fit(cells, n + 1, "Long string is too small for this operation")
+        || mm_range(v, 0, 255))
+        return;
+    MM_LS_DATA(a)[n] = (char)(unsigned char)v;
     if (n + 1 > mm_ls_len(a)) a[0] = n + 1;
 }
 
@@ -241,8 +262,8 @@ MMG_FN MMINTEGER mm_ls_instr(const MMINTEGER *a, const char *pat,
     MMINTEGER n = mm_ls_len(a), i;
     int lp = mm_slen(pat);
     const char *p = MM_LS_DATA((MMINTEGER *)a);
-    if (start < 1) start = 1;
-    if (lp == 0 || start > n - lp + 1) return 0;
+    /* fun_LInstr: a start below 1 finds nothing - it used to search from 1 */
+    if (start < 1 || lp == 0 || start > n - lp + 1) return 0;
     for (i = start; i + lp - 1 <= n; i++)
         if (memcmp(p + i - 1, pat + 1, (size_t)lp) == 0) return i;
     return 0;
