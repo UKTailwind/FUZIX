@@ -80,6 +80,21 @@ int main(int argc, char *argv[])
 		note(1, -7, 137, 30);
 		sleep(4);
 	}
+	if (which == 6) {
+		/* Only when asked for: on a kernel without the fix it never
+		 * comes back.  An amplitude-only envelope - PN1-3 all 0 and
+		 * auto-repeat on - restarted its empty pitch sections for
+		 * ever inside the audio interrupt.  "done" is the proof. */
+		static unsigned char env[14] = {
+			1, 1, 0, 0, 0, 0, 0, 0,
+			63, 0xFF, 0, 0xFB, 126, 100
+		};
+		printf("6 amplitude-only envelope: 1s\n");
+		if (ioctl(fd, SNDIOC_ENV, env) < 0)
+			perror("ENV");
+		note(1, 1, 100, 20);
+		sleep(3);
+	}
 	printf("done\n");
 	return 0;
 }

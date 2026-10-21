@@ -118,8 +118,10 @@ static void env_step(struct schan *c)
             c->esec++;
             if (c->esec < 3)
                 c->ecount = e[4 + c->esec];
-            else if (!(e[0] & 0x80)) {
-                /* auto-repeat the pitch envelope */
+            else if (!(e[0] & 0x80) && (e[4] | e[5] | e[6])) {
+                /* auto-repeat the pitch envelope - unless it has no
+                   steps at all (PN1-3 all 0), which would restart it
+                   for ever inside the audio interrupt */
                 c->esec = 0;
                 c->ecount = e[4];
                 c->poff = 0;
