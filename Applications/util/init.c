@@ -811,7 +811,7 @@ static pid_t getty(const char **argv, const char *id)
 				putstr("getty: can not reset owner of tty\n");
 
 			/* here we are inside child's context of execution */
-			envset("PATH", "/bin:/usr/bin");
+			envset("PATH", "/bin:/usr/bin:/usr/games");
 			envset("CTTY", argv[0]);
 
 			/* retrieve default size from VT if available */

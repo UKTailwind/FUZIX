@@ -134,7 +134,7 @@ const char *locations[] = {
 
 const char *locstr = "123456";	/* Can't select Hospital */
 
-const char *goodstr = "aclphwmp";
+const char *goodstr = "aclphwms";
 
 #define NO_ROOM		"You don't have room in your trenchcoat."
 #define NOT_ENOUGH_CASH	"You don't have that much cash"
@@ -196,6 +196,9 @@ int random_range(int low, int high)
 char getch(void)
 {
 	char buf[32];
+	/* The prompts end without a newline, and this libc does not flush
+	   stdout when stdin is read: the prompt appeared after the answer */
+	fflush(stdout);
 	if (fgets(buf, 32, stdin) == NULL)
 		exit(1);
 	return *buf;
@@ -216,10 +219,11 @@ unsigned yesno(char *p)
 char *price(money n)
 {
 	static char buf[32];
-	if (n < 100 && n > -100)
-		snprintf(buf, 32, "%ldc", n);
+	/* Whole dollars, as cash, debt and the drug prices all are */
+	if (n < 0)
+		snprintf(buf, 32, "-$%ld", -n);
 	else
-		snprintf(buf, 32, "$%ld.%02ld", n / 100, n % 100);
+		snprintf(buf, 32, "$%ld", n);
 	return buf;
 }
 
@@ -227,6 +231,7 @@ unsigned quantity(unsigned *n, const char *op)
 {
 	char buf[32];
 	printf("How much do you want to %s ? ", op);
+	fflush(stdout);
 	if (fgets(buf, 32, stdin) == NULL)
 		exit(1);
 	if (*buf == '\n')
@@ -241,6 +246,7 @@ unsigned quantity_cash(money *n, const char *op)
 	char *bufp = buf;
 	money sum = 0;
 	printf("How much do you want to %s ? ", op);
+	fflush(stdout);
 	if (fgets(buf, 32, stdin) == NULL)
 		exit(1);
 	while(*bufp && isspace(*bufp))
@@ -254,21 +260,6 @@ unsigned quantity_cash(money *n, const char *op)
 		sum += *bufp - '0';
 		bufp++;
 	}
-	if (*bufp != 'c') {
-		unsigned cents = 0;
-		sum *= 100;
-		if (*bufp == '.') {
-			bufp++;
-			if (isdigit(*bufp)) {
-				cents = *bufp++ - '0';
-				if (isdigit(*bufp)) {
-					cents *= 10;
-					cents += *bufp - '0';
-				}
-			}
-		}
-		sum += cents;
-	}	
 	*n = sum;
 	return 1;
 }
@@ -427,7 +418,7 @@ void police(void)
 		else if (cops == 3)
 			printf("and his two deputies ");
 		printf("are on your tail.\n");
-		printf("r)un for it, or f)ight > ");
+		printf("r run for it, f fight > ");
 		c = getch();
 		if (c == 'f') {
 			if (!gun) {
@@ -495,13 +486,13 @@ void police(void)
 void coat(void)
 {
 	printf("You are offered a trenchcoat wiht bigger pockets for $200.\n");
-	if (cash < 20000) {
+	if (cash < 200) {
 		printf("You can't afford it.\n");
 		return;
 	}
 	if (!yesno("Buy it ? "))
 		return;
-	cash -= 20000;
+	cash -= 200;
 	coatsize += 40;
 	space += 40;
 }
@@ -512,15 +503,14 @@ void gunsale(void)
 		return;
 
 	printf("You are offered a gun for $400");
-	/* Q: 400 dollars or 4.00 ? */
-	if (cash < 40000L) {
+	if (cash < 400) {
 		printf(" but can't afford it.\n");
 		return;
 	}
 	if (!yesno(". Buy it ? "))
 		return;
 	gun = 1;
-	cash -= 40000;
+	cash -= 400;
 }
 
 money borrow_limit(void)
@@ -528,8 +518,8 @@ money borrow_limit(void)
 	money maxb = cash / 100 * SHARK_LEVERAGE;
 	if (maxb < 5500)
 		maxb = 5500;
-	if (maxb > 20000000L)
-		maxb = 20000000L;
+	if (maxb > 200000L)
+		maxb = 200000L;
 	return maxb;
 }
 
@@ -545,7 +535,7 @@ void loanshark(void)
 		if (maxb)
 			printf("You can borrow up to %s.\n", price(maxb));
 
-		printf("[%s] b)orrow, p)ay back, / to return: ", price(cash));
+		printf("[%s] b borrow, p pay back, / return: ", price(cash));
 		c = getch();
 		if (c == '/' || c == '\n')
 			return;
@@ -595,7 +585,7 @@ void banker(void)
 
 	while(1) {
 		printf("You have %s on deposit.\n", price(bank));
-		printf("[%s] d)eposit, w)ithdraw, / to return: ", price(cash));
+		printf("[%s] d deposit, w withdraw, / return: ", price(cash));
 		c = getch();
 		if (c == '/' || c == '\n')
 			return;
@@ -712,8 +702,8 @@ int game_run(void)
 			continue;
 		}
 		if (location == 0)
-			printf("l)oan shark b(a)nk ");
-		printf("b)uy s)ell i)nventory m)ove d)one Q)uit > ");
+			printf("l loan shark, a bank, ");
+		printf("b buy, s sell, i inventory, m move, d done, Q quit > ");
 		c = getch();
 		switch (c) {
 		case 'b':
@@ -764,9 +754,9 @@ int main(int argc, char *argv[])
 		printf("\nYou ended the game with %s\n", price(score));
 		if (score < 0)
 			printf("The loan shark's thugs broke your legs.\n");
-		else if (score >= 100000000)
+		else if (score >= 1000000L)
 			printf("You retired a millionaire in the Carribbean.\n");
-		else if (score >= 200000)
+		else if (score >= 2000)
 			printf("Congratulations! You didn't do half bad.\n");
 		else
 			printf("You didn't make much money. Better luck next time.\n");

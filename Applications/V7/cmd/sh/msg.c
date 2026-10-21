@@ -56,7 +56,7 @@ const char ps2name[] = "PS2";
 /* string constants */
 const char nullstr[] = "";
 const char sptbnl[] = " \t\n";
-const char defpath[] = ":/bin:/usr/bin";
+const char defpath[] = ":/bin:/usr/bin:/usr/games";
 const char colon[] = ": ";
 const char minus[] = "-";
 const char endoffile[] = "end of file";
