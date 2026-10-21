@@ -1,0 +1,46 @@
+.TH zork1 1 "FUZIX Games" "FUZIX"
+.SH NAME
+zork1 \- Zork I: The Great Underground Empire
+.SH SYNOPSIS
+.B zork1
+.RB [ \-t ]
+.RB [ \-p ]
+.SH DESCRIPTION
+Infocom's Zork I, by Marc Blank, Dave Lebling, Bruce Daniels and Tim
+Anderson, in its final release of 1988.  You start west of a white house
+with a boarded front door, and the treasures of the Great Underground
+Empire are somewhere below it.
+.PP
+Unlike the older adventures, Zork understands whole sentences:
+.BR "open the mailbox" ,
+.BR "put the egg in the case" ,
+.BR "take all but the lamp" .
+.B look
+describes where you are,
+.B inventory
+or
+.B i
+lists what you carry, and
+.B score
+says how you are doing, out of 350.
+.B save
+and
+.B restore
+keep a game in a file, asking for its name, and
+.B quit
+ends it.
+.PP
+The options are
+.BR z3 's,
+which plays the game.
+.SH FILES
+.TP
+.B /usr/games/lib/zork1.z3
+The story file, release 119, serial 880429.
+.TP
+.B /usr/games/lib/zork1.LICENSE
+Microsoft released Zork I under the MIT licence in 2025; this is the
+licence, which comes with the game.
+.SH SEE ALSO
+.BR z3 (1),
+.BR advent (1)

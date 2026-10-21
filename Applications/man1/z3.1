@@ -1,0 +1,59 @@
+.TH z3 1 "FUZIX Games" "FUZIX"
+.SH NAME
+z3 \- play a version 3 Infocom story file
+.SH SYNOPSIS
+.B z3
+.RB [ \-t ]
+.RB [ \-p ]
+.RB [ \-q ]
+.I storyfile
+.SH DESCRIPTION
+.B z3
+is fweeplet, a cut-down fweep, built for version 3 of the Z-machine:
+the format of most of Infocom's games from 1982 to 1987, and of many
+written since with Inform.  It plays any version 3 story file and
+refuses any other version with "Unsupported Z-machine version".  It
+cannot read a Blorb file; the plain story has to be taken out of one
+first.
+.PP
+The story is read from its file a page at a time rather than held in
+memory, and the parts of it the game changes are kept in a temporary
+file in
+.BR /tmp ,
+which goes when the game ends.
+.PP
+.BR zork1 (1)
+plays Zork I with it.
+.SH OPTIONS
+.TP
+.B \-t
+Tell the game it is running on a Tandy computer.  A few of Infocom's
+games change some words for Tandy.
+.TP
+.B \-p
+Answer no when a game asks whether it is running from its original
+disc.
+.TP
+.B \-q
+Accepted, and does nothing.
+.SH PLAYING
+There is no status line: type
+.B look
+or
+.B score
+instead.  Text is wrapped at 80 columns, and after 25 lines the game
+waits at
+.B [MORE]
+for Return.
+.PP
+.B save
+asks "*** Save?" for a file name, and
+.B restore
+asks "*** Restore?" for one.  Saved games are in this program's own
+format and do not load into other interpreters.
+.PP
+Every game says it is release 2: the interpreter writes over the release
+number in the story's header.
+.SH SEE ALSO
+.BR zork1 (1),
+.BR advent (1)

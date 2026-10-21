@@ -35,7 +35,7 @@ echo "=== Library/libs (clean)"
 
 for d in Applications/util Applications/V7/cmd Applications/V7/games \
          Applications/MWC/cmd Applications/cave Applications/cursesgames \
-         Applications/games Applications/games/2048 \
+         Applications/games Applications/games/2048 Applications/games/zork1 \
          Applications/levee Applications/bbcbasic \
          Applications/mmbedit Applications/cpp Applications/CC
 do

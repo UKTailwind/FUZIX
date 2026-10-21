@@ -468,6 +468,9 @@ cd /usr/games
 # qrun (Quill), l9x (Level 9), taylormade and advint (AdvSys) - are
 # built but stay off: each needs a game file that is not free to give
 # away, and a player with nothing to play only prints an error.
+# The exception is z3, because it has something to play: Microsoft
+# released Zork I under the MIT licence in 2025, and the story file
+# and that licence are installed with it (Applications/games/zork1).
 #
 # adv01-adv14b are Scott Adams' adventures and myst01-myst11 Brian
 # Howarth's Mysterious Adventures, one program each with the game
@@ -510,6 +513,8 @@ bget ../../../Applications/V7/games/wump
 bget ../../../Applications/V7/games/backgammon
 bget ../../../Applications/V7/games/fish
 bget ../../../Applications/V7/games/arithmetic
+bget ../../../Applications/games/z3
+bget ../../../Applications/games/zork1/zork1
 
 chmod 0755 adv01
 chmod 0755 adv02
@@ -548,6 +553,8 @@ chmod 0755 wump
 chmod 0755 backgammon
 chmod 0755 fish
 chmod 0755 arithmetic
+chmod 0755 z3
+chmod 0755 zork1
 chmod 0644 fortune.dat
 
 bget ../../../Applications/cave/advent
@@ -558,6 +565,10 @@ mkdir lib
 cd lib
 bget ../../../Applications/cave/advent.db
 chmod 0644 advent.db
+bget ../../../Applications/games/zork1/zork1.z3
+bget ../../../Applications/games/zork1/LICENSE zork1.LICENSE
+chmod 0644 zork1.z3
+chmod 0644 zork1.LICENSE
 
 # startrek reads its instructions and pictures from here, by name.
 cd /usr/lib

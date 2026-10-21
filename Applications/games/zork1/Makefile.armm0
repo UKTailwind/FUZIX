@@ -1,0 +1,12 @@
+ROOT = ../../..
+FUZIX_ROOT ?= $(ROOT)
+include $(FUZIX_ROOT)/Target/rules.armm0
+
+all: zork1
+
+zork1: zork1.o $(CRT0)
+	$(LINKER) $^ -o $@.debug $(LINKER_OPT)
+	$(STRIP) $(STRIP_OPT) -o $@ $@.debug
+
+clean:
+	rm -f zork1 zork1.debug zork1.o

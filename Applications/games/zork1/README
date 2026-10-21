@@ -1,0 +1,19 @@
+Zork I: The Great Underground Empire, for z3
+
+zork1.z3 is Infocom's final release of Zork I (release 119, serial
+880429, 86838 bytes), a version 3 Z-machine story file.  It is
+COMPILED/zork1.z3 from Microsoft's https://github.com/historicalsource/zork1
+at commit 97b7b3d (2025-11-21), which Microsoft released under the MIT
+licence in LICENSE beside it.  The licence travels with the game: the
+card installs both, as /usr/games/lib/zork1.z3 and
+/usr/games/lib/zork1.LICENSE.
+
+zork1.c is the command that plays it: it runs /usr/games/z3 on the
+story, passing z3's options through.  It is a program because a shell
+script cannot be run by name on this machine (exec hands it to bcrun,
+"not a bytecode object"), and because V7 sh turns an empty "$@" into
+one empty argument, which z3 took for the story file.
+
+The game reports itself as "Release 2" under z3: fweep writes 0x0802
+over the release number in the header (version_init), which every game
+it plays shows.  The story file itself is unchanged.

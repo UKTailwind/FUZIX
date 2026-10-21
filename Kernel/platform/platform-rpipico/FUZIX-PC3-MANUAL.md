@@ -4051,9 +4051,11 @@ have wastes more of your time than one that stays quiet.
 
 There is no `less`, `make`, `m4`, `factor`, `units` or `mail`, and no
 assembler. The games in `/usr/games` are listed under
-[Games](#games); the players for Infocom (Z-machine), Quill, Level 9,
-Taylormade and AdvSys games are not installed, because the games they
-play are not free to give away. There is no network, so
+[Games](#games). Of the Infocom (Z-machine) players only `z3` is
+installed, because Zork I is free to give away and comes with it; the
+players for the other Z-machine versions, and for Quill, Level 9,
+Taylormade and AdvSys games, are not, because the games they play are
+not. There is no network, so
 `ssh` cannot do anything useful. `man` is present and so are its
 pages, in `/usr/man/man1`.
 
@@ -4113,13 +4115,15 @@ dc expr test uname cron at write wall` — and more, so `ls /bin
 
 ### Games {#games}
 
-`/usr/games` holds 38 programs, and every one plays as it stands. Each
+`/usr/games` holds 40 programs, and every one plays as it stands. Each
 has a manual page: `man invaders`, or `man adv01` for all fifteen Scott
 Adams adventures at once.
 
 | Program            | Game                                               |
 |--------------------|----------------------------------------------------|
 | `advent`           | Colossal Cave, the original adventure              |
+| `zork1`            | Infocom's Zork I, released free by Microsoft in 2025 |
+| `z3`               | the Z-machine player Zork I runs on, for any version 3 story file |
 | `adv01`–`adv14b`   | Scott Adams' adventures, Adventureland to Buckaroo Banzai |
 | `myst01`–`myst11`  | Brian Howarth's eleven Mysterious Adventures       |
 | `startrek`         | Super Star Trek                                    |
@@ -4134,9 +4138,10 @@ Adams adventures at once.
 | `fortune`          | a random saying                                    |
 | `cowsay`           | a cow says it                                      |
 
-The adventures keep the room you are in at the top of the screen and
-take one- and two-word commands; `SAVE GAME` keeps a game, and each one
-offers to restore it as it starts.
+The Scott Adams and Howarth adventures keep the room you are in at the
+top of the screen and take one- and two-word commands; `SAVE GAME` keeps
+a game, and each one offers to restore it as it starts. Zork takes whole
+sentences, and `save` and `restore` ask for a file name.
 
 ## Text processing {#text-processing}
 
