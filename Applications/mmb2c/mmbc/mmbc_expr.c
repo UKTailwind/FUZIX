@@ -875,6 +875,11 @@ void arg_item(struct arg *out)
                 if (s == NULL)
                     s = reference(t->text, 0);
                 if (!s->is_const && !s->is_array) {
+                    /* a known name skips reference(), so record the
+                       touch here: a global reached ONLY as a by-ref
+                       argument (c=in_check(side)) was otherwise left
+                       out of gtouch, and mmb2csub emitted a bare v_side */
+                    note_touch(canon, s);
                     cv.i += 1;
                     out->kind = ARG_VAR;
                     out->s = s;
@@ -928,6 +933,7 @@ void arg_item(struct arg *out)
                                 && (strcmp(after->text, ",") == 0
                                     || strcmp(after->text, ")") == 0
                                     || strcmp(after->text, ":") == 0)))) {
+                        note_touch(canon, s);   /* as for a scalar */
                         cv.i += 1;
                         out->kind = ARG_ELEM;
                         out->s = s;
