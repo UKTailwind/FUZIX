@@ -2437,17 +2437,19 @@ static void run_actions(const uint8_t *p, uint8_t n)
     uint8_t tmp;
     uint16_t tmp16;
 
-    if (a < 50) {
+    /* 1-51 and 102 up are messages, as ScottFree has them.  This
+       was a < 50 and a > 102: 50 and 102 stopped the game with
+       BADACT and 51 printed nothing - Wizard of Akyrz died on its
+       first turn. */
+    if (a <= 51) {
       strout_lower_spc(msgptr[a]);
       continue;
     }
-    if (a > 102 ) {
+    if (a >= 102) {
       strout_lower_spc(msgptr[a - 50]);
       continue;
     }
     switch(a) {
-      case 51:	/* nop - check */
-        break;
       case 52:	/* Get */
         if (game.carried >= maxcar)
           strout_lower(toomuch);

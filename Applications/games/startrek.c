@@ -356,7 +356,8 @@ static void new_game(void)
 			phaser_control();
 		else if (!strncmp(cmd, "tor", 3))
 			photon_torpedoes();
-		else if (!strncmp(cmd, "shi", 3))
+		/* she is what startrek.doc and the BASIC original say */
+		else if (!strncmp(cmd, "shi", 3) || !strncmp(cmd, "she", 3))
 			shield_control();
 		else if (!strncmp(cmd, "dam", 3))
 			damage_control();
