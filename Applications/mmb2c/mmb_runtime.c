@@ -1175,7 +1175,10 @@ char *mm_format(MMFLOAT val, const char *fmtstr)
     const char *fmt = mm_cstr(fmtstr);
     const char *pct = strchr(fmt, '%');
     const char *q;
-    char flagbuf[8], num[96], body[104], out[MM_STRLEN + 64];
+    /* out: literal text (up to 254) + the field (up to 250) + the rest,
+       as PicoMite's fun_format (02120e4, issue #71); over 255 is then
+       refused below */
+    char flagbuf[8], num[96], body[104], out[2 * (MM_STRLEN + 1)];
     char *o = out;
     int nf = 0, width = 0, prec = 4, type, upper, bl, pad;
     size_t pre;
@@ -1257,6 +1260,7 @@ char *mm_format(MMFLOAT val, const char *fmtstr)
         o += bl;
     }
     strcpy(o, q);
+    if (strlen(out) > MM_STRLEN) MM_RAISEV("String too long", mm_ssink());
     t = mm_tmp();
     mm_ssetc(t, out);
     return t;
