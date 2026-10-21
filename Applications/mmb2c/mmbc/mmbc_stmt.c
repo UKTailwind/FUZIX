@@ -6186,6 +6186,8 @@ static void open_routine(int is_func)
             continue;
         emit_local_decl(s);
     }
+    for (k = 0; k < r->mx_pairs; k++)
+        emit(sfmt("MMFLOAT __mxa%d, __mxb%d;   /* MAX/MIN */", k, k));
     if (r->is_func) {
         if (r->ty == TY_S)
             emit("__ret[0] = 0; __ret[1] = 0;");

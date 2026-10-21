@@ -133,6 +133,99 @@ struct val call_builtin(const char *up)
     return emit_builtin(up, args, nargs);
 }
 
+/* True when emitted C calls something: a name followed by '('.  A cast's
+ * ')(' is not a call and an index is '['.  A '(' inside a string literal
+ * counts too, which only errs on the safe side. */
+static int has_call(const char *text)
+{
+    int i;
+
+    if (text[0] == 0)
+        return 0;
+    for (i = 1; text[i] != 0; i++)
+        if (text[i] == '(') {
+            int c = (unsigned char)text[i - 1];
+
+            if (c == '_' || is_digit_c(c) || (c >= 'a' && c <= 'z')
+                || (c >= 'A' && c <= 'Z'))
+                return 1;
+        }
+    return 0;
+}
+
+/* 1 + the highest MAX/MIN temporary pair the text uses; 0 for none. */
+static int mx_height(const char *text)
+{
+    int h = 0;
+    const char *p = strstr(text, "__mxa");
+
+    while (p != NULL) {
+        int n = 0;
+
+        p += 5;
+        while (is_digit_c((unsigned char)*p)) {
+            n = n * 10 + (*p - '0');
+            p++;
+        }
+        if (n + 1 > h)
+            h = n + 1;
+        p = strstr(p, "__mxa");
+    }
+    return h;
+}
+
+/* MAX()/MIN() of the float texts fs, as fun_max_min: from the first
+ * value, each one replaces it only when strictly greater (smaller), so a
+ * tie keeps the earlier; the result is a float.
+ *
+ * Each argument is evaluated once and in order.  Repeating the text in
+ * nested ?: evaluated an argument up to 2^(n-1) times, so MAX(RND, 0.5)
+ * could be below 0.5.  Text that calls nothing cannot tell how often it
+ * is evaluated, so a short list of such arguments keeps the ?: chain - it
+ * is a C constant when they are, as a CONST needs - and anything else
+ * goes through two temporaries of the enclosing routine, declared by its
+ * scan.  One pair per nesting level: a MAX inside an argument takes the
+ * pair above the ones its own arguments use. */
+static struct val max_min(int is_max, const char **fs, int n)
+{
+    const char *cop = is_max ? ">" : "<";
+    const char *a;
+    const char *b;
+    const char *cur;
+    int k, j;
+
+    for (j = 0; j < n; j++)
+        if (has_call(fs[j]))
+            break;
+    if (n <= 4 && j == n) {
+        cur = fs[0];
+        for (j = 1; j < n; j++)
+            cur = sfmt("((%s) %s (%s) ? (%s) : (%s))",
+                       fs[j], cop, cur, fs[j], cur);
+        return mkval(cur, TY_F);
+    }
+    k = 0;
+    for (j = 0; j < n; j++)
+        if (mx_height(fs[j]) > k)
+            k = mx_height(fs[j]);
+    if (cv.mode == M_SCAN) {
+        if (cv.cur == NULL) {
+            if (k + 1 > cv.mx_main)
+                cv.mx_main = k + 1;
+        } else if (k + 1 > cv.cur->mx_pairs) {
+            cv.cur->mx_pairs = k + 1;
+        }
+    }
+    a = sfmt("__mxa%d", k);
+    b = sfmt("__mxb%d", k);
+    cur = sfmt("(%s = %s", a, fs[0]);
+    for (j = 1; j < n; j++) {
+        cur = sfmt("%s, %s = %s", cur, b, fs[j]);
+        cur = sfmt("%s, %s = %s %s %s ? %s : %s", cur, a, b, cop, a, b, a);
+    }
+    return mkval(sfmt("%s, %s)", cur, a), TY_F);
+}
+
 /* The Python's f(k)/n(k)/s(k) closures over (up, args). */
 
 static const char *bi_f(struct val *args, int k)
@@ -239,23 +332,12 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
     if (strcmp(up, "PI") == 0)
         return mkval("3.14159265358979323846", TY_F);
     if (strcmp(up, "MAX") == 0 || strcmp(up, "MIN") == 0) {
-        const char *cop = strcmp(up, "MAX") == 0 ? ">" : "<";
-        int allint = 1;
-        int ty;
-        const char *cur;
+        const char *fs[MAXARGS];
         int k;
 
         for (k = 0; k < nargs; k++)
-            if (args[k].ty != TY_I)
-                allint = 0;
-        ty = allint ? TY_I : TY_F;
-        cur = allint ? args[0].code : as_flt(args[0]);
-        for (k = 1; k < nargs; k++) {
-            const char *o = allint ? args[k].code : as_flt(args[k]);
-
-            cur = sfmt("((%s) %s (%s) ? (%s) : (%s))", cur, cop, o, cur, o);
-        }
-        return mkval(cur, ty);
+            fs[k] = as_flt(args[k]);
+        return max_min(strcmp(up, "MAX") == 0, fs, nargs);
     }
     if (strcmp(up, "BIT") == 0) {
         const char *a0 = n(0);

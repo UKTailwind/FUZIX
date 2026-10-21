@@ -90,7 +90,7 @@ BUILTINS = {
     'TAN': (1, 1), 'ATN': (1, 1), 'ASIN': (1, 1), 'ACOS': (1, 1),
     'ATAN2': (2, 2), 'DEG': (1, 1), 'RAD': (1, 1),
     'LOG': (1, 1), 'EXP': (1, 1),
-    'RND': (0, 1), 'PI': (0, 0), 'MAX': (2, 8), 'MIN': (2, 8),
+    'RND': (0, 1), 'PI': (0, 0), 'MAX': (2, 64), 'MIN': (2, 64),
     'LEN': (1, 1), 'ASC': (1, 1), 'VAL': (1, 1), 'INSTR': (2, 3),
     'TAB': (1, 1), 'TIMER': (0, 0), 'BIT': (2, 2), 'BYTE': (2, 2),
     'CHR$': (1, 1), 'LEFT$': (2, 2), 'RIGHT$': (2, 2), 'MID$': (2, 3),
@@ -704,7 +704,7 @@ class TypeDef(object):
 class Routine(object):
     __slots__ = ('name', 'cname', 'is_func', 'ty', 'params', 'locals',
                  'statics', 'line', 'gtouch', 'disp', 'local_order',
-                 'heap_locals')
+                 'heap_locals', 'mx_pairs')
 
     def __init__(self, name, is_func):
         self.name = name
@@ -719,6 +719,7 @@ class Routine(object):
         self.statics = []         # list of Sym (subset of locals)
         self.heap_locals = False  # has LOCAL arrays or strings, so its
                                   # invocations carry a heap block
+        self.mx_pairs = 0         # MAX/MIN temporary pairs (max_min)
         self.line = 0
         self.gtouch = {}          # global name -> first line touched here
 
@@ -787,6 +788,35 @@ def cconst(name):
 
 def clabel(name):
     return 'L_' + name.replace('.', '__')
+
+
+def has_call(text):
+    """True when emitted C calls something: a name followed by '('.  A
+    cast's ')(' is not a call and an index is '['.  A '(' inside a string
+    literal counts too, which only errs on the safe side."""
+    for i in range(1, len(text)):
+        if text[i] == '(':
+            c = text[i - 1]
+            if c == '_' or is_digit(c) or ('a' <= c <= 'z') \
+                    or ('A' <= c <= 'Z'):
+                return True
+    return False
+
+
+def mx_height(text):
+    """1 + the highest MAX/MIN temporary pair the text uses; 0 for none."""
+    h = 0
+    i = text.find('__mxa')
+    while i >= 0:
+        j = i + 5
+        n = 0
+        while j < len(text) and is_digit(text[j]):
+            n = n * 10 + ord(text[j]) - 48
+            j += 1
+        if n + 1 > h:
+            h = n + 1
+        i = text.find('__mxa', j)
+    return h
 
 
 def const_or_literal_expr(text):
@@ -886,6 +916,7 @@ class Conv(object):
         # per pass state
         self.mode = 'scan'
         self.cur = None               # current Routine or None
+        self.mx_main = 0              # MAX/MIN temporary pairs in main
         self.out_main = []
         self.out_body = []
         self.out = None
@@ -1480,6 +1511,45 @@ class Conv(object):
         if v[1] == TY_S:
             self.err("string used where a number is required")
         return v
+
+    def max_min(self, is_max, fs):
+        """MAX()/MIN() of the float texts fs, as fun_max_min: from the first
+        value, each one replaces it only when strictly greater (smaller),
+        so a tie keeps the earlier; the result is a float.
+
+        Each argument is evaluated once and in order.  Repeating the text
+        in nested ?: evaluated an argument up to 2^(n-1) times, so
+        MAX(RND, 0.5) could be below 0.5.  Text that calls nothing cannot
+        tell how often it is evaluated, so a short list of such arguments
+        keeps the ?: chain - it is a C constant when they are, as a CONST
+        needs - and anything else goes through two temporaries of the
+        enclosing routine, declared by its scan.  One pair per nesting
+        level: a MAX inside an argument takes the pair above the ones its
+        own arguments use."""
+        cop = '>' if is_max else '<'
+        if len(fs) <= 4 and not [f for f in fs if has_call(f)]:
+            cur = fs[0]
+            for o in fs[1:]:
+                cur = '((%s) %s (%s) ? (%s) : (%s))' % (o, cop, cur, o, cur)
+            return (cur, TY_F)
+        k = 0
+        for f in fs:
+            if mx_height(f) > k:
+                k = mx_height(f)
+        if self.mode == 'scan':
+            if self.cur is None:
+                if k + 1 > self.mx_main:
+                    self.mx_main = k + 1
+            elif k + 1 > self.cur.mx_pairs:
+                self.cur.mx_pairs = k + 1
+        a = '__mxa%d' % k
+        b = '__mxb%d' % k
+        parts = ['%s = %s' % (a, fs[0])]
+        for o in fs[1:]:
+            parts.append('%s = %s' % (b, o))
+            parts.append('%s = %s %s %s ? %s : %s' % (a, b, cop, a, b, a))
+        parts.append(a)
+        return ('(' + ', '.join(parts) + ')', TY_F)
 
     def expr(self):
         return self.e_logical()
@@ -2454,17 +2524,7 @@ class Conv(object):
         if up == 'PI':
             return ('3.14159265358979323846', TY_F)
         if up in ('MAX', 'MIN'):
-            cop = '>' if up == 'MAX' else '<'
-            allint = True
-            for a in args:
-                if a[1] != TY_I:
-                    allint = False
-            ty = TY_I if allint else TY_F
-            cur = args[0][0] if allint else self.as_flt(args[0])
-            for k in range(1, len(args)):
-                o = args[k][0] if allint else self.as_flt(args[k])
-                cur = '((%s) %s (%s) ? (%s) : (%s))' % (cur, cop, o, cur, o)
-            return (cur, ty)
+            return self.max_min(up == 'MAX', [self.as_flt(a) for a in args])
         if up == 'BIT':
             return ('(((%s) >> (%s)) & 1LL)' % (n(0), n(1)), TY_I)
         if up == 'TEMPR':
@@ -9968,6 +10028,8 @@ class Conv(object):
             if s.is_param:
                 continue
             self.emit_local_decl(s)
+        for k in range(r.mx_pairs):
+            self.emit('MMFLOAT __mxa%d, __mxb%d;   /* MAX/MIN */' % (k, k))
         if r.is_func:
             if r.ty == TY_S:
                 self.emit('__ret[0] = 0; __ret[1] = 0;')
@@ -10713,6 +10775,8 @@ class Conv(object):
         else:
             wr('int main(void)\n{\n')
         wr('    unsigned __mark = mm_mark(); (void)__mark;\n')
+        for k in range(self.mx_main):
+            wr('    MMFLOAT __mxa%d, __mxb%d;   /* MAX/MIN */\n' % (k, k))
         # Fonts first, and here rather than where the block sits: the
         # interpreter binds them at LOAD, so a program may select font
         # 10 a thousand lines above its DefineFont.

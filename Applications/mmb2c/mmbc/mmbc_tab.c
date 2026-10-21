@@ -26,7 +26,7 @@ static const struct builtin builtins[] = {
     { "TAN", 1, 1 }, { "ATN", 1, 1 }, { "ASIN", 1, 1 }, { "ACOS", 1, 1 },
     { "ATAN2", 2, 2 }, { "DEG", 1, 1 }, { "RAD", 1, 1 },
     { "LOG", 1, 1 }, { "EXP", 1, 1 },
-    { "RND", 0, 1 }, { "PI", 0, 0 }, { "MAX", 2, 8 }, { "MIN", 2, 8 },
+    { "RND", 0, 1 }, { "PI", 0, 0 }, { "MAX", 2, 64 }, { "MIN", 2, 64 },
     { "LEN", 1, 1 }, { "ASC", 1, 1 }, { "VAL", 1, 1 }, { "INSTR", 2, 3 },
     { "TAB", 1, 1 }, { "TIMER", 0, 0 }, { "BIT", 2, 2 }, { "BYTE", 2, 2 },
     { "CHR$", 1, 1 }, { "LEFT$", 2, 2 }, { "RIGHT$", 2, 2 }, { "MID$", 2, 3 },
