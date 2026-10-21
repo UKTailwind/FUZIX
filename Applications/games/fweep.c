@@ -509,8 +509,11 @@ void paging_init(void)
 			perror("create pagefile");
 			exit(1);
 		}
+		/* Only the open descriptor is needed: without this every game
+		   played left its page file behind in /tmp */
+		unlink(tmpstr);
 	}
-	
+
 	membreak = static_start >> ZBUF_SHIFT;
 
 	lseek(story, 0, SEEK_SET);
@@ -2276,7 +2279,10 @@ int main(int argc, char **argv)
 	stream3ptr = stream3addr - 1;
 
 	while(*++argv && *argv[0] == '-') {
-		switch(*argv[1]) {
+		/* argv[0][1], the letter after the dash: this was *argv[1],
+		   the next argument's first character, so every option
+		   printed the usage */
+		switch(argv[0][1]) {
 			case 't':
 				tandy = 1;
 				break;
