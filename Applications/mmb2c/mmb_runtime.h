@@ -746,6 +746,8 @@ MMINTEGER mm_pobuf(void);
  *   state[1]  the OptionErrorSkip counter: 0 abort, -1 ignore, n>0 count
  */
 void mm_error(const char *msg);
+/* getint()'s "N is invalid (valid is LO to HI)"; 1 when it raised */
+int  mm_range(MMINTEGER v, MMINTEGER lo, MMINTEGER hi);
 void mm_fatal(const char *msg);     /* never skippable: out of memory  */
 void mm_err_bind(int *state);       /* generated code hands us its pair */
 /* Save-and-clear / restore the whole error state round an interrupt

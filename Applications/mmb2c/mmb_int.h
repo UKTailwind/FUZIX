@@ -388,11 +388,12 @@ MMG_FN void mmi_settick(MMINTEGER ms, mm_int_fn fn, MMINTEGER id)
 {
 	int i = (int)id - 1;
 
-	if (i < 0 || i >= MM_INT_NTICK) {
-		mm_error("Invalid tick number");
+	/* the reference's getints, in its order: the tick number, then the
+	   period (MM_Misc.c cmd_settick; ed4ddbc).  A negative period was
+	   taken as "off" here, silently. */
+	if (mm_range(id, 1, MM_INT_NTICK) || mm_range(ms, 0, 2147483647))
 		return;
-	}
-	if (ms <= 0) {			/* SETTICK 0, 0 - off */
+	if (ms == 0) {			/* SETTICK 0, 0 - off */
 		if (mm_tick[i].armed) {
 			__mm_int_armed--;
 			mm_ntick_armed--;
@@ -421,10 +422,8 @@ MMG_FN void mmi_settick_pause(MMINTEGER id, MMINTEGER on)
 {
 	int i = (int)id - 1;
 
-	if (i < 0 || i >= MM_INT_NTICK) {
-		mm_error("Invalid tick number");
+	if (mm_range(id, 1, MM_INT_NTICK))
 		return;
-	}
 	if (!mm_tick[i].armed)
 		return;
 	if (!on) {			/* PAUSE */

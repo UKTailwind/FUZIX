@@ -2891,6 +2891,32 @@ void mm_error(const char *msg)
     exit(1);
 }
 
+/* "N is invalid (valid is LO to HI)", MMBasic's getint() wording, raised
+ * when v is outside lo..hi.  Returns 1 when it raised, so a caller writes
+ * `if (mm_range(v, lo, hi)) return;` - MM_RAISE returns only from the
+ * function it is written in.  One implementation for every header that
+ * mirrors a getint (mmg_range in mmb_math.h is this). */
+int mm_range(MMINTEGER v, MMINTEGER lo, MMINTEGER hi)
+{
+    static char m[80];
+    char *p = m;
+
+    if (v >= lo && v <= hi)
+        return 0;
+    mm_int_to_str(p, (long long)v, 10);
+    p += strlen(p);
+    strcpy(p, " is invalid (valid is ");
+    p += strlen(p);
+    mm_int_to_str(p, (long long)lo, 10);
+    p += strlen(p);
+    strcpy(p, " to ");
+    p += strlen(p);
+    mm_int_to_str(p, (long long)hi, 10);
+    strcat(p, ")");
+    mm_error(m);
+    return 1;
+}
+
 /* Sinks: a raise site returns one of these, so a caller that keeps
    running to the end of its statement writes somewhere harmless.
 

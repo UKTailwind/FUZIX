@@ -1015,29 +1015,11 @@ MMG_FN void mmg_q_rotate(const MMFLOAT *q1, int n1, const MMFLOAT *v1,
  */
 
 /*	"N is invalid (valid is LO to HI)", MMBasic's getint() wording.
- *	Returns 1 when it raised, because MM_RAISE returns from the
- *	function it is written in and this is not that function. */
+ *	Returns 1 when it raised.  The runtime's mm_range, so that every
+ *	header that mirrors a getint says it the same way. */
 MMG_FN int mmg_range(MMINTEGER v, MMINTEGER lo, MMINTEGER hi)
 {
-	char m[80];
-	char *p = m;
-
-	if (v >= lo && v <= hi)
-		return 0;
-	mm_int_to_str(p, (long long)v, 10);
-	while (*p)
-		p++;
-	p = mmg_mcpy(p, " is invalid (valid is ");
-	mm_int_to_str(p, (long long)lo, 10);
-	while (*p)
-		p++;
-	p = mmg_mcpy(p, " to ");
-	mm_int_to_str(p, (long long)hi, 10);
-	while (*p)
-		p++;
-	mmg_mcpy(p, ")");
-	mm_error(m);
-	return 1;
+	return mm_range(v, lo, hi);
 }
 
 /*	MATH(CROSSING a() [, level] [, direction] [, confirm])
