@@ -163,6 +163,19 @@ MMG_FN void mmg_webs_poll(void)
 	}
 }
 
+/*	Nothing on a connection works before WEB TCP SERVER PORT: the
+ *	reference's "Server not open" (MMtcpserver.c:831, 894), asked
+ *	before the slot number is.  It also guards the slot table, which
+ *	is all zeros until mmg_webs_port fills it with -1 - and fd 0 is
+ *	stdin, which CLOSE used to close and SEND to write to. */
+MMG_FN int mmg_webs_open(void)
+{
+	if (mm_webs_lfd >= 0)
+		return 1;
+	mm_error("Server not open");
+	return 0;
+}
+
 MMG_FN int mmg_webs_slot(MMINTEGER n)
 {
 	if (n < 1 || n > MMW_NSLOT) {
@@ -222,10 +235,10 @@ MMG_FN int mmg_webs_put(int i, const char *p, long len)
 
 MMG_FN void mmg_webs_send(MMINTEGER n, const MMINTEGER *a)
 {
-	int i = mmg_webs_slot(n);
+	int i;
 	long len;
 
-	if (i < 0)
+	if (!mmg_webs_open() || (i = mmg_webs_slot(n)) < 0)
 		return;
 	if (mm_webs_fd[i] < 0) {
 		mm_error("No connection");
@@ -238,9 +251,9 @@ MMG_FN void mmg_webs_send(MMINTEGER n, const MMINTEGER *a)
 
 MMG_FN void mmg_webs_close(MMINTEGER n)
 {
-	int i = mmg_webs_slot(n);
+	int i;
 
-	if (i >= 0)
+	if (mmg_webs_open() && (i = mmg_webs_slot(n)) >= 0)
 		mmg_webs_slotclose(i);
 }
 
@@ -248,9 +261,9 @@ MMG_FN void mmg_webs_code(MMINTEGER n, MMINTEGER code)
 {
 	/* the reference's literal trick: the digits over "404" */
 	char h[20];
-	int i = mmg_webs_slot(n);
+	int i;
 
-	if (i < 0)
+	if (!mmg_webs_open() || (i = mmg_webs_slot(n)) < 0)
 		return;
 	if (code < 100 || code > 999) {
 		mm_error("Number out of bounds");
@@ -273,9 +286,9 @@ MMG_FN void mmg_webs_file(MMINTEGER n, const char *fname, const char *mime)
 	char hdr[256], path[256];
 	char buf[512];
 	long size, done;
-	int i = mmg_webs_slot(n), fd, fl, hl, rd;
+	int i, fd, fl, hl, rd;
 
-	if (i < 0)
+	if (!mmg_webs_open() || (i = mmg_webs_slot(n)) < 0)
 		return;
 	if (mm_webs_fd[i] < 0) {
 		mm_error("No connection");
@@ -420,12 +433,12 @@ MMG_FN void mm_webpg_start(struct mm_webpg *pg, MMINTEGER n,
 {
 	char path[256];
 	long size, got;
-	int i = mmg_webs_slot(n), fd, fl, rd;
+	int i, fd, fl, rd;
 
 	pg->slot = -1;
 	pg->src = pg->body = 0;
 	pg->slen = pg->spos = pg->blen = 0;
-	if (i < 0)
+	if (!mmg_webs_open() || (i = mmg_webs_slot(n)) < 0)
 		return;			/* the raise was made */
 	if (mm_webs_fd[i] < 0) {
 		mm_error("No connection");
