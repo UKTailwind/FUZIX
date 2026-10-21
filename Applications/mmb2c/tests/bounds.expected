@@ -1,0 +1,13 @@
+a(3) ok  7
+a(4): Index out of bounds
+a(-1): Index out of bounds
+b(2,4) ok  2
+b(1,5): Index out of bounds
+b(3,0): Index out of bounds
+d(5) ok  3
+d(6): Index out of bounds
+p.v(2) ok  4
+p.v(3): Index out of bounds
+a(2^32+1): Index out of bounds, a(1) is still  0
+q(0) ok  5
+q(4): Index out of bounds

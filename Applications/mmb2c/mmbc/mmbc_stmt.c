@@ -5101,7 +5101,10 @@ static void do_array_cmd(int is_math)
                 blank = nparts;
                 parts[nparts++] = NULL;
             } else {
-                parts[nparts++] = sfmt("(int)(%s)", as_int(expr()));
+                const char *ix = as_int(expr());
+
+                parts[nparts] = ix_check(arr, nparts, ix);
+                nparts++;
             }
             if (!accept_op(","))
                 cv_err("ARRAY %s wants the one-dimensional array last, "

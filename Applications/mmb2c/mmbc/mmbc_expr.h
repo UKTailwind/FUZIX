@@ -74,6 +74,7 @@ struct flat array_flat(struct sym *s);
    elements are, and how many there are (ARRAY SLICE / ARRAY INSERT) */
 struct vec { const char *ptr; const char *step; const char *cnt; };
 const char *subscript_of(struct sym *s, const char **parts, int nparts);
+const char *ix_check(struct sym *s, int k, const char *part);
 const char *bnd_acc(struct sym *s);
 const char *usable(const char *txt);
 const char *count_of(const char *bound);

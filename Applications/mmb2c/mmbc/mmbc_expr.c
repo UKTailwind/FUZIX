@@ -486,12 +486,39 @@ const char *index_of(struct sym *s)
 
         if (nparts >= MAXARGS)
             mm_error("line %d: too many subscripts", cv.lineno);
-        parts[nparts++] = sfmt("(int)(%s)", as_int(v));
+        parts[nparts] = ix_check(s, nparts, as_int(v));
+        nparts++;
         if (!accept_op(","))
             break;
     }
     expect_op(")");
     return subscript_of(s, parts, nparts);
+}
+
+/* Subscript k of an access to array s, checked at run time by mm_ix -
+ * the reference's "Index out of bounds" - against its own dimension's
+ * last index counted from OPTION BASE.  An array parameter or a
+ * run-time DIM carries that in its bounds table; a declared array's is
+ * its C size less one.  Only the subscripts a program writes come
+ * through here: subscript_of's other callers build &a(base) and need no
+ * check.
+ *
+ * Gated like the arithmetic checks (checks_on): on every access it cost
+ * ~55 bytes a subscript and stopped robots fitting the board, and
+ * without ON ERROR there is nothing to trap the error with. */
+const char *ix_check(struct sym *s, int k, const char *part)
+{
+    const char *lim;
+
+    if (!checks_on())
+        return sfmt("(int)(%s)", part);
+    if (s->is_param || s->dynamic)
+        lim = sfmt("(int)(%s)[%d]", bnd_acc(s), k + 1);
+    else if (k < s->ndims)
+        lim = sfmt("(%s) - 1", s->dims[k]);
+    else
+        return sfmt("(int)(%s)", part);     /* subscript_of reports it */
+    return sfmt("mm_ix(%s, %d, %s)", part, cv.opt_base, lim);
 }
 
 /* The C for one element, given one index text per dimension.

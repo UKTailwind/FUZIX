@@ -138,6 +138,13 @@ static const char *member_index(struct typemember *m)
     if (n != m->ndims)
         cv_err("member '%s' has %d dimension(s), %d given",
                m->name, m->ndims, n);
+    /* A member array keeps slots 0..bound whatever OPTION BASE says, so
+     * the index stays raw - but below the base is still the reference's
+     * "Index out of bounds" (MMBasic.c:5015).  Gated as ix_check is. */
+    if (checks_on())
+        for (k = 0; k < n; k++)
+            idx[k] = sfmt("mm_ix(%s, %d, %ld)", idx[k], cv.opt_base,
+                          (long)(m->dims[k] - cv.opt_base));
     lin = sfmt("(%s)", idx[0]);
     mult = 1;
     for (k = 1; k < n; k++) {
@@ -654,8 +661,8 @@ static struct sopnd struct_operand(void)
     note_touch(canon, s);
     if (s->is_array) {
         const char *parts[MAXARGS];
-        int np = 0, k;
-        const char *code;
+        const char *ix;
+        int np = 0;
 
         expect_op("(");
         if (accept_op(")")) {
@@ -664,20 +671,25 @@ static struct sopnd struct_operand(void)
             r.s = s;
             return r;
         }
-        parts[np++] = sfmt("(int)(%s)", as_int(expr()));
+        ix = as_int(expr());
+        parts[np] = ix_check(s, np, ix);
+        np++;
         while (accept_op(",")) {
             if (np >= MAXARGS)
                 mm_error("line %d: too many subscripts", cv.lineno);
-            parts[np++] = sfmt("(int)(%s)", as_int(expr()));
+            ix = as_int(expr());
+            parts[np] = ix_check(s, np, ix);
+            np++;
         }
         expect_op(")");
         if (np != s->ndims)
             cv_err("'%s' has %d dimension(s)", canon, s->ndims);
-        code = s->acc;
-        for (k = 0; k < np; k++)
-            code = sfmt("%s[%s]", code, parts[k]);
+        /* The same accessor as every other element access, checked,
+         * reversed and rebased.  This path used to index the C array
+         * raw: under OPTION BASE 1 a(1) was the second element, and a
+         * 2-D element was found with its subscripts backwards. */
         r.all = 0;
-        r.code = code;
+        r.code = subscript_of(s, parts, np);
         r.s = s;
         return r;
     }

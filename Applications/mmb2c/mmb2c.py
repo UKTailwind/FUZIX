@@ -1419,6 +1419,14 @@ class Conv(object):
         if len(idx) != len(m.dims):
             self.err("member '%s' has %d dimension(s), %d given"
                      % (m.name, len(m.dims), len(idx)))
+        # A member array keeps slots 0..bound whatever OPTION BASE says,
+        # so the index stays raw - but below the base is still the
+        # reference's "Index out of bounds" (MMBasic.c:5015).  Gated as
+        # ix_check is.
+        if self.checks_on():
+            idx = ['mm_ix(%s, %d, %d)' % (i, self.opt_base,
+                                          d - self.opt_base)
+                   for i, d in zip(idx, m.dims)]
         lin = '(%s)' % idx[0]
         mult = 1
         for k in range(1, len(idx)):
@@ -1765,11 +1773,33 @@ class Conv(object):
         parts = []
         while True:
             v = self.expr()
-            parts.append('(int)(%s)' % self.as_int(v))
+            parts.append(self.ix_check(s, len(parts), self.as_int(v)))
             if not self.accept_op(','):
                 break
         self.expect_op(')')
         return self.subscript(s, parts)
+
+    def ix_check(self, s, k, part):
+        """Subscript k of an access to array s, checked at run time by
+        mm_ix - the reference's "Index out of bounds" - against its own
+        dimension's last index counted from OPTION BASE.  An array
+        parameter or a run-time DIM carries that in its bounds table; a
+        declared array's is its C size less one.  Only the subscripts a
+        program writes come through here: subscript()'s other callers
+        build &a(base) and need no check.
+
+        Gated like the arithmetic checks (checks_on): on every access it
+        cost ~55 bytes a subscript and stopped robots fitting the board,
+        and without ON ERROR there is nothing to trap the error with."""
+        if not self.checks_on():
+            return '(int)(%s)' % part
+        if s.is_param or s.dynamic:
+            lim = '(int)(%s)[%d]' % (self.bnd_acc(s), k + 1)
+        elif k < len(s.dims):
+            lim = '(%s) - 1' % s.dims[k]
+        else:
+            return '(int)(%s)' % part     # subscript() reports the rank
+        return 'mm_ix(%s, %d, %s)' % (part, self.opt_base, lim)
 
     def subscript(self, s, parts):
         """The C for one element, given one index text per dimension.
@@ -8260,7 +8290,8 @@ class Conv(object):
                     blank = len(parts)
                     parts.append(None)
                 else:
-                    parts.append('(int)(%s)' % self.as_int(self.expr()))
+                    parts.append(self.ix_check(arr, len(parts),
+                                               self.as_int(self.expr())))
                 if not self.accept_op(','):
                     self.err("ARRAY %s wants the one-dimensional array "
                              "last, written b()" % op)
@@ -8681,15 +8712,19 @@ class Conv(object):
             if self.accept_op(')'):
                 return ('all', s.acc, s)
             first = self.as_int(self.expr())
-            parts = ['(int)(%s)' % first]
+            parts = [self.ix_check(s, 0, first)]
             while self.accept_op(','):
-                parts.append('(int)(%s)' % self.as_int(self.expr()))
+                parts.append(self.ix_check(s, len(parts),
+                                           self.as_int(self.expr())))
             self.expect_op(')')
             if len(parts) != len(s.dims):
                 self.err("'%s' has %d dimension(s)" % (canon,
                                                        len(s.dims)))
-            return ('one',
-                    s.acc + ''.join('[' + p + ']' for p in parts), s)
+            # The same accessor as every other element access, checked,
+            # reversed and rebased.  This path used to index the C array
+            # raw: under OPTION BASE 1 a(1) was the second element, and a
+            # 2-D element was found with its subscripts backwards.
+            return ('one', self.subscript(s, parts), s)
         return ('one', s.acc, s)
 
     def do_struct(self):

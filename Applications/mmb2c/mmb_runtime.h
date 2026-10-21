@@ -751,6 +751,35 @@ void mm_err_bind(int *state);       /* generated code hands us its pair */
  * interrupts never nest.  Used by mmb_int.h. */
 void mm_int_err_push(void);
 void mm_int_err_pop(void);
+
+/* An array subscript, checked as the reference checks it (MMBasic.c:5003,
+ * 5638): i is the BASIC subscript, base the OPTION BASE, lim the last
+ * index counted from base (count - 1, or a bounds-table entry; an int,
+ * which keeps all three arguments in registers - a 64-bit one went on
+ * the stack and cost 15% of the check's size).  i is tested as the 64-bit
+ * value it is, so 2^32 + 1 cannot wrap round to 1.
+ * It hands back i itself - the caller rebases and folds as it always did
+ * - and after a raise it hands back base, so an ON ERROR SKIP that
+ * carries on lands on an element that exists.  The translators emit it
+ * only where the ON ERROR checked forms are live (checks_on): in every
+ * access it cost ~55 bytes a subscript.  It lives in the program, not the
+ * runtime, so that a checked access is a call inside the program rather
+ * than a crossing into bcrun. */
+/* Not __GNUC__ alone: the host gates preprocess with gcc -E for cc1,
+   which cannot parse the attribute - the MMG_FN rule in mmb_array.h. */
+#if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)
+static __inline__ __attribute__((unused))
+#else
+static
+#endif
+int mm_ix(MMINTEGER i, int base, int lim)
+{
+    if (i < base || i - base > lim) {
+        mm_error("Index out of bounds");
+        return base;
+    }
+    return (int)i;
+}
 /* Microseconds since start - SETTICK's clock off the board, where
  * mmb_int.h reads TIMER0 itself. */
 MMINTEGER mm_us(void);

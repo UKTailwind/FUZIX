@@ -4612,6 +4612,16 @@ checks (concatenation past 255 characters, `ASC` of an empty string)
 are part of string calls that happen anyway and stay on in every
 program; they cost a comparison, not a call.
 
+Array subscripts are checked the same way. Where the checks are live,
+every subscript the program writes is tested against its own dimension,
+and one outside it is the PicoMite's `Index out of bounds`, including a
+subscript too large for 32 bits, which would otherwise wrap to a small
+one. Where they are not, a subscript is used as it stands, and one
+outside the array reads or writes past it, a bug to find, as a divide by
+zero is. Checking every access was measured and set aside: it made the
+eclipse predictor 6% larger and 5% slower, and grew *PETSCII Robots* by
+9%, beyond what fits beside the shell.
+
 `ON ERROR` earns its keep trapping things that genuinely can fail at
 run time — an I2C transfer that may not be acknowledged, a file that
 may not exist — not arithmetic. If a program traps errors out of
