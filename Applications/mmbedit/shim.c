@@ -242,22 +242,49 @@ void scr_colour(int fg, int bg)
 }
 
 /* --- keyboard ------------------------------------------------------------- */
-/* One byte of pushback is enough: the only time we over-read is an ESC
- * followed by something that turns out not to be a sequence. */
-static int pushed = -1;
+/* Bytes read and handed back, pq[0] next: an ESC followed by something that
+ * turns out not to be a sequence (one byte), and the keys a redraw found
+ * waiting that were not all repeats of the key being handled - a paste,
+ * which used to be thrown away (ed_unread; Editor.c's EdDropHeldRepeats). */
+static unsigned char pq[512];
+static int pq_n;
+
+int getConsole(void);               /* below: the non-blocking read */
 
 static int readb(void)
 {
     unsigned char c;
-    if (pushed >= 0) {
-        int r = pushed;
-        pushed = -1;
+    if (pq_n > 0) {
+        int r = pq[0];
+        memmove(pq, pq + 1, (size_t)--pq_n);
         return r;
     }
     scr_flush();                    /* never wait on input with output pending */
     if (read_console(&c) != 1)
         return -1;                  /* 100ms passed with nothing */
     return c;
+}
+
+/* Every byte that has already arrived, the handed-back ones first, without
+ * waiting: what the redraw looks at before deciding to drop it. */
+int ed_take_pending(unsigned char *buf, int max)
+{
+    int n = 0, c;
+    while (n < max && pq_n > 0)
+        buf[n++] = (unsigned char)readb();
+    while (n < max && (c = getConsole()) != -1)
+        buf[n++] = (unsigned char)c;
+    return n;
+}
+
+/* Hand bytes back, in order, ahead of anything still waiting. */
+void ed_unread(const unsigned char *buf, int n)
+{
+    if (n > (int)sizeof pq - pq_n)
+        n = (int)sizeof pq - pq_n;
+    memmove(pq + n, pq, (size_t)pq_n);
+    memcpy(pq, buf, (size_t)n);
+    pq_n += n;
 }
 
 /* CSI parameter forms we care about:
@@ -411,7 +438,10 @@ int inkey(void)
     }
     /* ESC followed by something else: hand back the ESC and keep the
      * byte for next time (Alt-<key> on some terminals). */
-    pushed = c;
+    {
+        unsigned char b = (unsigned char)c;
+        ed_unread(&b, 1);
+    }
     return K_ESC;
 }
 
@@ -549,6 +579,11 @@ int file_load(const char *name)
         *w = 0;
         used = (int)(w - EdBuff);
     }
+    /* The last line's ending is the file's, not the text's: kept, it was an
+     * empty line below the program, and what was typed on it was saved with
+     * no ending (Editor.c, c5528a6, issue #52).  file_save puts it back. */
+    if (used > 0 && EdBuff[used - 1] == '\n')
+        EdBuff[--used] = 0;
     nbrlines = buf_count_lines();
     return used;
 }
@@ -603,6 +638,11 @@ int file_save(const char *name)
             return -1;
         }
         off += w;
+    }
+    /* and the last line's ending, which file_load took off (issue #52) */
+    if (n > 0 && write(fd, "\n", 1) != 1) {
+        close(fd);
+        return -1;
     }
     return close(fd);
 }

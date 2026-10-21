@@ -87,6 +87,9 @@ int  file_load(const char *name);   /* -1 = error, sets errno */
 int  file_save(const char *name);
 int  file_backup(const char *name); /* <name>.bak, as MMBasic does */
 int  buf_count_lines(void);
+/* the keys a redraw finds waiting: taken without waiting, and handed back */
+int  ed_take_pending(unsigned char *buf, int max);
+void ed_unread(const unsigned char *buf, int n);
 unsigned char *buf_line(int n);     /* start of line n, or NULL */
 
 /* --- the editor ----------------------------------------------------------- */

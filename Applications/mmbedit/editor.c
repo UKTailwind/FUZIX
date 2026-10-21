@@ -39,6 +39,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/stat.h>
 #include "mmbedit.h"
 #include "mmb_compat.h"
 
@@ -597,6 +598,80 @@ void printLine(int ln)
     curx = VWidth - 1;
 }
 
+/* The key being handled, -1 until the first: what a redraw compares the
+ * waiting keys with (Editor.c's EdKeyNow). */
+static int ed_key_now = -1;
+
+/* Mark mode's F10 export shows its result, and F4's return then redraws
+ * the screen over it; the message is kept and shown again after that
+ * redraw (Editor.c's EdMsgAfterMark, dfffe2a, issue #56). */
+static char ed_mark_msg[48];
+static int ed_mark_msg_due;
+
+static void ed_mark_message(const char *msg)
+{
+    editDisplayMsg((unsigned char *)msg);
+    strncpy(ed_mark_msg, msg, sizeof ed_mark_msg - 1);
+    ed_mark_msg[sizeof ed_mark_msg - 1] = 0;
+    ed_mark_msg_due = 1;
+}
+
+/* The key at q[*pos], decoded as Editor.c's EdPeekKey decodes it; *pos
+ * moves past it.  -2 for a sequence this does not decode. */
+static int ed_peek_key(const unsigned char *q, int n, int *pos)
+{
+    int c = (*pos < n) ? q[(*pos)++] : -2;
+#ifdef PC3_HOST
+    if (c == 0x7F)
+        return '\b';                /* a PC's Backspace, as inkey() makes it */
+#endif
+    if (c != ESC)
+        return c;
+    c = (*pos < n) ? q[(*pos)++] : -2;
+    if (c == 'O')
+    {
+        static const int fkeys[] = {F1, F2, F3, F4, F5};
+        c = (*pos < n) ? q[(*pos)++] : -2;
+        return (c >= 'P' && c <= 'T') ? fkeys[c - 'P'] : -2;
+    }
+    if (c != '[')
+        return -2;
+    c = (*pos < n) ? q[(*pos)++] : -2;
+    if (c >= 'A' && c <= 'D')
+    {
+        static const int arrows[] = {UP, DOWN, RIGHT, LEFT};
+        return arrows[c - 'A'];
+    }
+    if (c >= '1' && c <= '6' && *pos < n && q[(*pos)++] == '~')
+    {
+        static const int keys[] = {HOME, INSERT, DEL, END, PUP, PDOWN};
+        return keys[c - '1'];
+    }
+    return -2;
+}
+
+/* After a redraw: the keys that arrived meanwhile are dropped only when
+ * every one of them is the key that caused it - a held key repeating,
+ * which would otherwise run on after it is let go.  Anything else, typing
+ * or a paste, is handed back: they were all dropped, so a paste lost
+ * everything after its first line (Editor.c's EdDropHeldRepeats, c5528a6,
+ * issue #51).  Before the first key everything waiting was typed for the
+ * command line, and is dropped. */
+static void ed_drop_held_repeats(void)
+{
+    unsigned char q[256];
+    int n = ed_take_pending(q, (int)sizeof q), pos = 0;
+
+    if (n <= 0 || ed_key_now == -1)
+        return;
+    while (pos < n)
+        if (ed_peek_key(q, n, &pos) != ed_key_now)
+        {
+            ed_unread(q, n);
+            return;
+        }
+}
+
 // print a full screen starting with the top left corner specified by edx, edy
 // this draws the full screen including blank areas so there is no need to clear the screen first
 // it then returns the cursor to its original position
@@ -613,8 +688,7 @@ void printScreen(void)
         curx = 0;
         cury = i + 1;
     }
-    while (getConsole() != -1)
-        ; // consume any keystrokes accumulated while redrawing the screen
+    ed_drop_held_repeats(); // a held key's repeats queued while redrawing
 }
 
 // position the cursor on the screen
@@ -858,11 +932,12 @@ void GetInputString(unsigned char *prompt)
         if (ch == '\r' || ch == '\n')
             break;
         if (ch == 0xb3 || ch == F3 || ch == ESC)
-        {
-            if (len < maxlen)
-                inpbuf[len++] = ch;
+        { // return if it is SHIFT-F3, F3 or ESC - alone: the callers test the
+          // first character, so after typed text Esc did not cancel (issue #57)
+            len = 0;
+            inpbuf[len++] = ch;
             break;
-        } // return if it is SHIFT-F3, F3 or ESC
+        }
         if (ch == '\b')
         {
             if (len > 0)
@@ -902,8 +977,7 @@ void Scroll(void)
     PrintFunctKeys(EDIT);
     printLine(VHeight - 1 + edy);
     PositionCursor(txtp);
-    while (getConsole() != -1)
-        ; // consume any keystrokes accumulated while redrawing the screen
+    ed_drop_held_repeats(); // a held key's repeats queued while redrawing
 }
 
 // scroll down the video screen
@@ -918,10 +992,7 @@ void ScrollDown(void)
     printLine(edy);
     PrintFunctKeys(EDIT);
     PositionCursor(txtp);
-
-    while (getConsole() != -1)
-        routinechecks();
-    ; // consume any keystrokes accumulated while redrawing the screen
+    ed_drop_held_repeats(); // a held key's repeats queued while redrawing
 }
 
 // the longest line in the buffer, and which line it was - the .bas save
@@ -961,10 +1032,12 @@ int find_longest_line_length(const char *text, int *linein)
         ptr++;
     }
 
-    // Final check in case the last line was the longest
+    // Final check in case the last line was the longest (it has no '\n' to
+    // count, so its number is line + 1: it was left unset, issue #53)
     if (current_length > max_length)
     {
         max_length = current_length;
+        *linein = line + 1;
     }
 
     return max_length;
@@ -999,6 +1072,8 @@ void MarkMode(unsigned char *cb, unsigned char *buf)
     while (1)
     {
         c = MMInkey();
+        if (c != -1)
+            ed_key_now = c;         /* what a redraw's waiting keys are compared with */
         if (c != -1 && errmsg)
         {
             PrintFunctKeys(MARK);
@@ -1302,7 +1377,7 @@ void MarkMode(unsigned char *cb, unsigned char *buf)
                         int fd = open((char *)inpbuf,
                                       O_WRONLY | O_CREAT | O_TRUNC, 0644);
                         if (fd < 0)
-                            editDisplayMsg((unsigned char *)" CANNOT CREATE FILE ");
+                            ed_mark_message(" CANNOT CREATE FILE ");
                         else
                         {
                             /* The marked span, low to high.  cb has been
@@ -1315,11 +1390,11 @@ void MarkMode(unsigned char *cb, unsigned char *buf)
                             char msg[40];
 
                             if (len > 0 && write(fd, cp, len) != len)
-                                editDisplayMsg((unsigned char *)" WRITE FAILED ");
+                                ed_mark_message(" WRITE FAILED ");
                             else
                             {
                                 sprintf(msg, " EXPORTED %d CHARS ", len);
-                                editDisplayMsg((unsigned char *)msg);
+                                ed_mark_message(msg);
                             }
                             close(fd);
                         }
@@ -2186,6 +2261,7 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
 
     edit_is_bas = (fname != NULL && strstr(fname, ".bas") != NULL);
     (void)cmdfile;
+    ed_key_now = -1;    // keys typed before the editor were for the command line
     printScreen(); // draw the screen
     SCursor(xx, yy);
     drawstatusline = true;
@@ -2240,6 +2316,7 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
             if (statuscount++ == 50)
                 PrintStatus();
         } while (c == -1);
+        ed_key_now = c;             /* what a redraw's waiting keys are compared with */
         ShowCursor(false);
 
         /* The key has arrived, so the message has had its moment: put
@@ -2719,10 +2796,12 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
                 int longest = find_longest_line_length((char *)EdBuff, &line);
                 int quit = buf[0];
 
-                if (edit_is_bas && longest > MAXSTRLEN)
+                /* Esc discards the changes: a long line is no reason to
+                   refuse that (Editor.c, c5528a6, issue #50). */
+                if (quit != ESC && edit_is_bas && longest > MAXSTRLEN)
                 {
                     char buff[32];
-                    sprintf(buff, " LINE %d TOO LONG ", line);
+                    sprintf(buff, " LINE %d TOO LONG", line);
                     editDisplayMsg((unsigned char *)buff);
                     break;
                 }
@@ -2799,7 +2878,26 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
                 edy = y - VHeight / 2; // edy is the line displayed at the top
                 if (edy < 0)
                     edy = 0; // compensate if we are near the start
-                printScreen();
+                {
+                    /* A match past the right edge is scrolled into view,
+                       whole: the screen is drawn left-justified and the
+                       match's line alone scrolled, as F4's return does.  It
+                       stayed off the screen (Editor.c, 7191fbd, issue #57). */
+                    int abs_col = 0;
+                    unsigned char *q;
+                    for (q = txtp; q > EdBuff && q[-1] != '\n'; q--)
+                        abs_col++;
+                    edx = 0;
+                    printScreen();
+                    if (abs_col + i > VWidth - 1 - SCROLLCHARS)
+                    {
+                        edx = abs_col + i - (VWidth - 1 - SCROLLCHARS);
+                        if (edx > abs_col)
+                            edx = abs_col; // a match wider than the screen: its start
+                        SCursor(0, y - edy);
+                        printLine(y);
+                    }
+                }
                 PositionCursor(txtp);
                 foundit = true;
                 // SCursor(x, y);
@@ -2836,6 +2934,11 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
                     curx = abs_col - edx;
                 }
                 PositionCursor(txtp);
+                if (ed_mark_msg_due)
+                { // mark mode's F10 export: its message, which the redraw covered
+                    ed_mark_msg_due = 0;
+                    editDisplayMsg((unsigned char *)ed_mark_msg);
+                }
                 break;
             case SHIFT_F4:
             case F7:
@@ -2881,18 +2984,41 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
             case CTRLKEY('O'):
             case F9:
             {
-                int fd, n, inserted = 0;
+                /* As Editor.c's EdImportFile (dfffe2a, issue #56): a name
+                   with no such file is tried with .bas; a file that would
+                   not fit is refused whole; a buffer that fills part way
+                   says so, with what went in; and the text is changed
+                   only if something did. */
+                int fd, n, inserted = 0, full = 0;
                 unsigned char *saved_txtp;
                 unsigned char ch;
-                char msg[40];
+                char name[STRINGSIZE + 8], msg[48];
+                struct stat st;
 
                 GetInputString((unsigned char *)"Import file: ");
                 if (*inpbuf == 0 || *inpbuf == ESC)
                     break;
-                fd = open((char *)inpbuf, O_RDONLY);
+                strcpy(name, (char *)inpbuf);
+                if (stat(name, &st) < 0)
+                {
+                    char *base = strrchr(name, '/');
+                    if (strchr(base ? base : name, '.') == NULL)
+                        strcat(name, ".bas");   // no extension, and no such file
+                }
+                if (stat(name, &st) < 0)
+                {
+                    editDisplayMsg((unsigned char *)" FILE NOT FOUND ");
+                    break;
+                }
+                if ((long)strlen((char *)EdBuff) + (long)st.st_size >= edit_buff_size - 10)
+                {
+                    editDisplayMsg((unsigned char *)" FILE TOO LARGE ");
+                    break;
+                }
+                fd = open(name, O_RDONLY);
                 if (fd < 0)
                 {
-                    editDisplayMsg((unsigned char *)" CANNOT OPEN FILE ");
+                    editDisplayMsg((unsigned char *)" FILE NOT FOUND ");
                     break;
                 }
                 saved_txtp = txtp;
@@ -2900,19 +3026,24 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
                 {
                     if (ch == '\r')
                         continue;               // a DOS file arriving
-                    if (ch == '\n')
-                        nbrlines++;
                     if (!editInsertChar(ch, &multi, edit_buff_size))
-                        break;                  // editInsertChar said why
+                    {
+                        full = 1;
+                        break;
+                    }
+                    if (ch == '\n')
+                        nbrlines++;             // counted once it is in
                     inserted++;
                 }
                 close(fd);
                 txtp = saved_txtp;              // before the inserted text
-                TextChanged = true;
+                if (inserted)
+                    TextChanged = true;
                 edx = 0;
                 printScreen();
                 PositionCursor(txtp);
-                sprintf(msg, " IMPORTED %d CHARS ", inserted);
+                sprintf(msg, full ? " OUT OF MEMORY: %d CHARS IMPORTED " : " IMPORTED %d CHARS ",
+                        inserted);
                 editDisplayMsg((unsigned char *)msg);
             }
             break;
