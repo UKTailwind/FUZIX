@@ -444,8 +444,9 @@ void mm_float_to_str(char *p, MMFLOAT f, int m, int n, unsigned char ch)
 
 /* ================= console output ================================== */
 
-/* MMBasic's MMCharPos: 1 based, and a tab advances to the next
- * multiple of 14 columns. */
+/* MMBasic's MMCharPos: 1 based, and a tab advances it to the next
+ * 8-column stop, where a terminal or a file viewer shows it (753ace5,
+ * issue #37; it was counted to 14-column zones). */
 static int mm_charpos = 1;
 
 /* Defined with the graphics-text block further down: in a graphics mode
@@ -613,7 +614,7 @@ void mm_putc(int c)
             /* the column still has to track what WILL be written */
             if (c == '\r' || c == '\n') mm_charpos = 1;
             else if (c == '\t')
-                mm_charpos = (((mm_charpos - 1) / 14) + 1) * 14 + 1;
+                mm_charpos = (((mm_charpos - 1) / 8) + 1) * 8 + 1;
             else                        mm_charpos++;
             return;
         }
@@ -626,7 +627,7 @@ void mm_putc(int c)
     }
     mm_sink(c);
     if (c == '\r' || c == '\n') mm_charpos = 1;
-    else if (c == '\t')         mm_charpos = (((mm_charpos - 1) / 14) + 1) * 14 + 1;
+    else if (c == '\t')         mm_charpos = (((mm_charpos - 1) / 8) + 1) * 8 + 1;
     else if (c == '\b')       { if (mm_charpos > 1) mm_charpos--; }
     else                        mm_charpos++;
 }
@@ -727,21 +728,30 @@ void mm_pr_ie(MMINTEGER v)    { mm_pr_i(v);  mm_pr_end(); }
 void mm_pr_fe(MMFLOAT v)      { mm_pr_f(v);  mm_pr_end(); }
 void mm_pr_tabe(void)         { mm_pr_tab(); mm_pr_end(); }
 
-/* TAB() is a string valued function in MMBasic, not a side effect */
-char *mm_tab(MMINTEGER col)
+/* TAB() is a string valued function in MMBasic, not a side effect.  cur
+ * is the column it counts from: the console's, or a file's inside PRINT
+ * #n (mm_ftab).  The reference takes the column with getint(ep, 1, 255),
+ * so anything else is its range error rather than a clamp; the clamp
+ * left is only so that CR LF and the spaces fit one string. */
+static char *mm_tab_from(int cur, MMINTEGER col)
 {
     char *t = mm_tmp();
     int i, n;
-    if (col < 1) col = 1;
+    if (col < 1 || col > 255) {
+        static char msg[64];
+        mm_int_to_str(msg, (long long)col, 10);
+        strcat(msg, " is invalid (valid is 1 to 255)");
+        MM_RAISEV(msg, mm_ssink());
+    }
     if (col > MM_STRLEN - 2) col = MM_STRLEN - 2;
-    if (mm_charpos > col) {
+    if (cur > col) {
         i = (int)col - 1;
         t[1] = '\r';
         t[2] = '\n';
         memset(t + 3, ' ', (size_t)i);
         n = i + 2;
     } else {
-        i = (int)col - mm_charpos;
+        i = (int)col - cur;
         memset(t + 1, ' ', (size_t)i);
         n = i;
     }
@@ -749,6 +759,8 @@ char *mm_tab(MMINTEGER col)
     t[n + 1] = 0;
     return t;
 }
+
+char *mm_tab(MMINTEGER col) { return mm_tab_from(mm_charpos, col); }
 
 /* ================= numeric helpers ================================= */
 
@@ -1287,7 +1299,9 @@ char *mm_format(MMFLOAT val, const char *fmtstr)
  * is the console, so a single set of PRINT/INPUT routines serves both.
  * ================================================================== */
 
-typedef struct { FILE *f; int mode; } MMChan;
+/* col is PRINT's column in that file, for TAB() and POS: a file has a
+   column of its own, 1 when it is opened (FileCharPos, 753ace5). */
+typedef struct { FILE *f; int mode; int col; } MMChan;
 static MMChan mm_chan[MM_MAXFILES + 1];
 FILE *mm_ls_file(MMINTEGER fnbr);
 
@@ -1388,6 +1402,7 @@ void mm_open(const char *fname, int mode, MMINTEGER fnbr)
                                                        end of the file" */
     mm_chan[fnbr].f = f;
     mm_chan[fnbr].mode = mode;
+    mm_chan[fnbr].col = 1;
 }
 
 void mm_close(MMINTEGER fnbr)
@@ -1444,7 +1459,12 @@ static void mm_outc(MMINTEGER fnbr, int c)
     if (mm_poisoned()) return;
     if (fnbr == 0) { mm_putc(c); return; }
     ch = mm_ch(fnbr, 1);
-    if (ch) fputc(c, ch->f);
+    if (!ch) return;
+    fputc(c, ch->f);
+    /* the file's own column, counted as the console's is */
+    if (c == '\r' || c == '\n') ch->col = 1;
+    else if (c == '\t')         ch->col = (((ch->col - 1) / 8) + 1) * 8 + 1;
+    else                        ch->col++;
 }
 
 void mm_fpr_s(MMINTEGER fnbr, const char *s)
@@ -1475,6 +1495,20 @@ void mm_fpr_f(MMINTEGER fnbr, MMFLOAT v)
 
 void mm_fpr_nl(MMINTEGER fnbr)  { mm_outc(fnbr, '\r'); mm_outc(fnbr, '\n'); }
 void mm_fpr_tab(MMINTEGER fnbr) { mm_outc(fnbr, '\t'); }
+
+/* TAB() and POS inside PRINT #n count from that file's column, not the
+ * console's (753ace5, issue #38: they used the console's, which could
+ * break a file line with CR LF).  Any other channel number is the
+ * console's, as the reference only swaps in a column for 1..MAXOPENFILES. */
+static int mm_fcol(MMINTEGER fnbr)
+{
+    if (fnbr >= 1 && fnbr <= MM_MAXFILES && mm_chan[fnbr].mode)
+        return mm_chan[fnbr].col;
+    return mm_charpos;
+}
+
+char *mm_ftab(MMINTEGER fnbr, MMINTEGER col) { return mm_tab_from(mm_fcol(fnbr), col); }
+int mm_fpos(MMINTEGER fnbr) { return mm_fcol(fnbr); }
 
 /* ---- position and length -------------------------------------------- */
 
@@ -2858,14 +2892,53 @@ void mm_error(const char *msg)
 }
 
 /* Sinks: a raise site returns one of these, so a caller that keeps
-   running to the end of its statement writes somewhere harmless. */
+   running to the end of its statement writes somewhere harmless.
+
+   Under bcrun the program can only reach memory inside the VM, and on a
+   64-bit host bcrun's own statics are not in it: a static sink handed back
+   to a program that carries on (ON ERROR SKIP) was a truncated pointer,
+   and PRINT FORMAT$(1, "x") under SKIP was a segfault.  So when bcrun has
+   bound the pools, a sink is a free slot of the pool the value would have
+   come from - released at the end of the statement like any other - and
+   the static is only the last resort.  On the board everything is one
+   address space and either works. */
 static char      mm_sink_s[MM_STRSZ];
 static MMFLOAT   mm_sink_f;
 static MMINTEGER mm_sink_i;
 
-char *mm_ssink(void) { mm_sink_s[0] = 0; mm_sink_s[1] = 0; return mm_sink_s; }
-MMFLOAT   *mm_fsink(void) { mm_sink_f = 0.0; return &mm_sink_f; }
-MMINTEGER *mm_isink(void) { mm_sink_i = 0; return &mm_sink_i; }
+char *mm_ssink(void)
+{
+    char *p = mm_sink_s;
+#ifdef MM_HOSTED
+    if (mm_pool && mm_pool_top < MM_TMPN)
+        p = mm_pool[mm_pool_top++];
+#endif
+    p[0] = 0;
+    p[1] = 0;
+    return p;
+}
+
+MMFLOAT *mm_fsink(void)
+{
+    MMFLOAT *p = &mm_sink_f;
+#ifdef MM_HOSTED
+    if (mm_byref_pool && mm_byref_top < MM_BYREFN)
+        p = &mm_byref_pool[mm_byref_top++].f;
+#endif
+    *p = 0.0;
+    return p;
+}
+
+MMINTEGER *mm_isink(void)
+{
+    MMINTEGER *p = &mm_sink_i;
+#ifdef MM_HOSTED
+    if (mm_byref_pool && mm_byref_top < MM_BYREFN)
+        p = &mm_byref_pool[mm_byref_top++].i;
+#endif
+    *p = 0;
+    return p;
+}
 
 void mm_end(void)
 {
@@ -4912,11 +4985,17 @@ static int mm_gputc(int c)
         }
         return 1;
     }
+    /* The screen pads a tab with spaces to the next OPTION TAB stop, which
+     * is 2 when no OPTION TAB is given - and this has no OPTION TAB - so
+     * at least one space, then on until the column is even (Draw.c's
+     * DisplayPutC).  It used to jump the pen to a 14-column zone and
+     * paint nothing, so the gap kept whatever was under it. */
     if (c == '\t') {
-        int col = mm_gx / (mm_gcw * mm_gscale);
-        int to = ((col / 14) + 1) * 14;
-        mm_gflush();
-        mm_gx = to * mm_gcw * mm_gscale;
+        int cell = mm_gcw * mm_gscale;
+
+        do {
+            mm_gputc(' ');
+        } while ((mm_gx / cell) % 2);
         return 1;
     }
     /*

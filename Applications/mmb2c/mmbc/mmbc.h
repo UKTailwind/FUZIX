@@ -465,6 +465,9 @@ struct conv {
     int onerror_global;
     int err_window;
     int err_window_pending;     /* -1 = none */
+    /* the channel of the PRINT #n whose items are being translated:
+       TAB() and POS count from that file's column there (753ace5) */
+    const char *pr_chan;
     /* likewise: an interrupt armed at line 100 has to be polled by the
        statements before it, so the poll sites are emitted for the whole
        program or none of it */

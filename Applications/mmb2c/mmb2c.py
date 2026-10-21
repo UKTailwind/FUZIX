@@ -979,6 +979,9 @@ class Conv(object):
         self.onerror_global = False
         self.err_window = 0
         self.err_window_pending = None
+        # the channel of the PRINT #n whose items are being translated:
+        # TAB() and POS count from that file's column there (753ace5)
+        self.pr_chan = None
         # likewise: an interrupt armed at line 100 has to be polled by
         # the statements before it, so the poll sites are emitted for
         # the whole program or none of it
@@ -2491,6 +2494,8 @@ class Conv(object):
                 return ('mm_instr(1, %s, %s)' % (s(0), s(1)), TY_I)
             return ('mm_instr(%s, %s, %s)' % (n(0), s(1), s(2)), TY_I)
         if up == 'TAB':
+            if self.pr_chan is not None:
+                return ('mm_ftab(%s, %s)' % (self.pr_chan, n(0)), TY_S)
             return ('mm_tab(%s)' % n(0), TY_S)
         if up == 'TIMER':
             return ('mm_timer()', TY_F)
@@ -2572,7 +2577,10 @@ class Conv(object):
             # POS - the column the next character will go in, 1
             # for the start of a line.  MMBasic's fun_pos returns
             # MMCharPos, which the runtime has been tracking all
-            # along for TAB; this only gives it a name.
+            # along for TAB; this only gives it a name.  Inside PRINT #n
+            # it is that file's column (753ace5).
+            if self.pr_chan is not None:
+                return ('(MMINTEGER)mm_fpos(%s)' % self.pr_chan, TY_I)
             return ('(MMINTEGER)mm_col()', TY_I)
         if up == 'MM.HRES':
             return ('mm_hres()', TY_I)
@@ -5131,6 +5139,9 @@ class Conv(object):
         return c, used
 
     def statement_inner(self):
+        # a PRINT #n abandoned part way by a translate error must not
+        # leave its channel to the next statement's TAB()
+        self.pr_chan = None
         t = self.peek()
         if t is None:
             return
@@ -7172,6 +7183,7 @@ class Conv(object):
         if self.is_op('#'):
             chan = self.channel()
             self.accept_op(',')          # the comma after #n is not a tab
+        self.pr_chan = chan
         suppress_nl = False
         last = None                  # where the last item was emitted
         while not self.stmt_end():
@@ -7222,6 +7234,7 @@ class Conv(object):
             else:
                 self.emit(self.prcall(chan, 'f', v[0]))
             last = self.last_line()
+        self.pr_chan = None
         if not suppress_nl:
             self.emit(self.prcall(chan, 'nl', None))
         elif chan is None and last is not None:

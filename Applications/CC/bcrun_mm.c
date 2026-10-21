@@ -197,6 +197,8 @@ static void w_pr_tabe(void)  { mm_pr_tabe(); A = 0; }
 static void w_pr_tab(void)   { mm_pr_tab(); A = 0; }
 static void w_col(void)      { A = mm_col(); }
 static void w_tab(void)      { A = mm_off(mm_tab(LL(0))); }
+static void w_ftab(void)     { A = mm_off(mm_ftab(LL(0), LL(2))); }
+static void w_fpos(void)     { A = mm_fpos(LL(0)); }
 
 /* number -> string */
 static void w_int_to_str(void)     { mm_int_to_str(Pa(0), argll(1), I(3)); A = 0; }
@@ -586,6 +588,8 @@ static const struct mmwrap {
 	{ "mm_pr_tab",		w_pr_tab },
 	{ "mm_col",		w_col },
 	{ "mm_tab",		w_tab },
+	{ "mm_ftab",		w_ftab },
+	{ "mm_fpos",		w_fpos },
 	{ "mm_int_to_str",	w_int_to_str },
 	{ "mm_int_to_str_pad",	w_int_to_str_pad },
 	{ "mm_float_to_str",	w_float_to_str },

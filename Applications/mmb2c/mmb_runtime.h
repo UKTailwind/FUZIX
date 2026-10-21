@@ -150,6 +150,8 @@ void mm_pr_tabe(void);
 void mm_pr_tab(void);               /* the ',' separator = a tab       */
 int  mm_col   (void);               /* current console column, 0 based */
 char *mm_tab(MMINTEGER col);        /* TAB() - returns padding spaces  */
+char *mm_ftab(MMINTEGER fnbr, MMINTEGER col);  /* TAB() in PRINT #n     */
+int  mm_fpos(MMINTEGER fnbr);       /* POS in PRINT #n: that file's column */
 
 /* ---- number -> string (the interpreter's own algorithms) ----------- */
 #define MM_AUTO_PRECISION  999   /* work out the precision automatically */

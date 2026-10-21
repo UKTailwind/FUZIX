@@ -297,8 +297,11 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
             return mkval(sfmt("mm_instr(%s, %s, %s)", a0, a1, a2), TY_I);
         }
     }
-    if (strcmp(up, "TAB") == 0)
+    if (strcmp(up, "TAB") == 0) {
+        if (cv.pr_chan != NULL)
+            return mkval(sfmt("mm_ftab(%s, %s)", cv.pr_chan, n(0)), TY_S);
         return mkval(sfmt("mm_tab(%s)", n(0)), TY_S);
+    }
     if (strcmp(up, "TIMER") == 0)
         return mkval("mm_timer()", TY_F);
     if (strcmp(up, "DATE$") == 0) {
@@ -457,12 +460,16 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         cv.uses_onewire = 1;
         return mkval("mmow_last()", TY_I);
     }
-    if (strcmp(up, "POS") == 0)
+    if (strcmp(up, "POS") == 0) {
         /* POS - the column the next character will go in, 1 for the
            start of a line.  MMBasic's fun_pos returns MMCharPos, which
            the runtime has been tracking all along for TAB; this only
-           gives it a name. */
+           gives it a name.  Inside PRINT #n it is that file's column
+           (753ace5). */
+        if (cv.pr_chan != NULL)
+            return mkval(sfmt("(MMINTEGER)mm_fpos(%s)", cv.pr_chan), TY_I);
         return mkval("(MMINTEGER)mm_col()", TY_I);
+    }
     if (strcmp(up, "MM.HRES") == 0)
         return mkval("mm_hres()", TY_I);
     if (strcmp(up, "MM.VRES") == 0)

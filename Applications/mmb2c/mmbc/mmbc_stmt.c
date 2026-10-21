@@ -204,6 +204,9 @@ void statement_inner(void)
     struct tok *t = peek(0);
     const char *up;
 
+    /* a PRINT #n abandoned part way by a translate error must not leave
+       its channel to the next statement's TAB() */
+    cv.pr_chan = NULL;
     if (t == NULL)
         return;
     up = (t->kind == T_ID) ? t->up : t->text;
@@ -2663,6 +2666,7 @@ static void do_print(void)
         chan = channel();
         accept_op(",");          /* the comma after #n is not a tab */
     }
+    cv.pr_chan = chan;
     while (!stmt_end()) {
         struct val v;
         if (accept_op(";")) {
@@ -2714,6 +2718,7 @@ static void do_print(void)
             emit(prcall(chan, "f", v.code));
         last = last_line();
     }
+    cv.pr_chan = NULL;
     if (!suppress_nl)
         emit(prcall(chan, "nl", NULL));
     else if (chan == NULL && last >= 0) {
