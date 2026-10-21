@@ -213,7 +213,7 @@ static void huffman_tree_init(huffman_tree *tree, unsigned *buffer, unsigned num
 static void huffman_tree_create_lengths(upng_t *upng, huffman_tree *tree, const unsigned *bitlen)
 {
 	unsigned tree1d[MAX_SYMBOLS];
-	unsigned blcount[MAX_BIT_LENGTH];
+	unsigned blcount[MAX_BIT_LENGTH + 1]; /* code lengths run 0 to 15 */
 	unsigned nextcode[MAX_BIT_LENGTH + 1];
 	unsigned bits, n, i;
 	unsigned nodefilled = 0; /*up to which node it is filled */
@@ -620,6 +620,11 @@ static void inflate_huffman(upng_t *upng, unsigned char *out, unsigned long outs
 
 			/*part 5: fill in all the out[n] values based on the length and dist */
 			start = (*pos);
+			if (distance > start)
+			{ /* back before the start of the data */
+				SET_ERROR(upng, UPNG_EMALFORMED);
+				return;
+			}
 			backward = start - distance;
 
 			if ((*pos) + length >= outsize)
