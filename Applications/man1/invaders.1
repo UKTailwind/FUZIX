@@ -1,0 +1,37 @@
+.TH invaders 1 "FUZIX Games" "FUZIX"
+.SH NAME
+invaders \- Space Invaders drawn in text characters
+.SH SYNOPSIS
+.B invaders
+.SH DESCRIPTION
+Thomas Munro's ascii invaders: rows of aliens built out of letters and
+punctuation march across the screen and down towards you, dropping
+bombs, while you shoot back from behind a row of shelters.  A mothership
+crosses the top now and then for a mystery score.
+.PP
+The screen must be at least 80 columns by 20 lines; the console is 80 by
+40.  It is drawn with
+.BR curses ,
+so
+.B TERM
+has to name an entry in
+.BR /etc/termcap .
+.SH KEYS
+.TP
+.B space
+Start a game from the title screen, and fire.
+.TP
+.BR j " or left arrow"
+Move left.
+.TP
+.BR k " or right arrow"
+Move right.
+.TP
+.B q
+Quit.
+.PP
+The aliens are worth 10, 20 and 30 points by row.  You start with three
+lives in reserve.
+.SH SEE ALSO
+.BR startrek (1),
+.BR 2048 (1)

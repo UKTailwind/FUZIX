@@ -1,0 +1,50 @@
+.TH 2048 1 "FUZIX Games" "FUZIX"
+.SH NAME
+2048 \- slide the tiles and join them
+.SH SYNOPSIS
+.B 2048
+.RB [ \-m ]
+.RB [ \-s ]
+.RB [ \-h ]
+.SH DESCRIPTION
+Frost-Phoenix's terminal version of Gabriele Cirulli's game, adapted for
+FUZIX by Ciaran Anscomb.  Every move slides all the tiles on a 4 by 4
+board as far as they will go; two equal tiles that meet join into one of
+twice the value, and a new tile appears.  Make a 2048 to win.  The game
+is over when nothing can move.
+.PP
+Colour is only drawn for a terminal type of
+.B vt52
+or
+.BR xterm ;
+on the console, whose type is
+.BR pc3 ,
+the board is plain.
+.SH OPTIONS
+.TP
+.B \-m
+Monochrome, even on a terminal that has colour.
+.TP
+.B \-s
+Small tiles, to fit a 32 by 16 screen.
+.TP
+.B \-h
+Print a short help and exit.
+.SH KEYS
+.TP
+.RB "arrows, " w " " a " " s " " d ", or " k " " h " " j " " l
+Slide up, left, down or right.
+.TP
+.B b
+Take back the last move.
+.TP
+.B r
+Start again.
+.TP
+.B Ctrl-L
+Redraw the screen.
+.TP
+.B q
+Quit.
+.SH SEE ALSO
+.BR invaders (1)

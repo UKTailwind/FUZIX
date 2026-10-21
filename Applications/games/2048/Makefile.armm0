@@ -1,1 +1,13 @@
 include Makefile.common
+
+# The card installs 2048.stripped, as it does every other game stripped.
+# Here rather than in Makefile.common because only the ARM rules define
+# STRIP.
+all: 2048.stripped
+
+2048.stripped: 2048
+	$(STRIP) $(STRIP_OPT) -o $@ $<
+
+clean: clean-stripped
+clean-stripped:
+	rm -f 2048.stripped

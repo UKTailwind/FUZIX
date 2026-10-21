@@ -4050,9 +4050,10 @@ A short list, because a manual that names a command the card does not
 have wastes more of your time than one that stays quiet.
 
 There is no `less`, `make`, `m4`, `factor`, `units` or `mail`, and no
-assembler. `/usr/games` holds `advent` — the original Colossal Cave —
-and `cowsay`, and that is all: the Scott Adams, Mysterious Adventures
-and Z-machine collections are not installed. There is no network, so
+assembler. The games in `/usr/games` are listed under
+[Games](#games); the players for Infocom (Z-machine), Quill, Level 9,
+Taylormade and AdvSys games are not installed, because the games they
+play are not free to give away. There is no network, so
 `ssh` cannot do anything useful. `man` is present and so are its
 pages, in `/usr/man/man1`.
 
@@ -4067,7 +4068,7 @@ pages, in `/usr/man/man1`.
 ```
 /bin          core utilities, and picoctl, fat, uue/uud, setdate
 /usr/bin      the toolchain, BBC BASIC, the editors, the media tools
-/usr/games    advent and cowsay
+/usr/games    the games - see Games below
 /usr/lib/cc   the C compiler passes, and its headers in include/
 /usr/man      manual pages (man <name>)
 /dev          devices - see below
@@ -4110,8 +4111,32 @@ passwd stty mount umount sync fsck mkfs fdisk chmod chown chgrp od seq
 dc expr test uname cron at write wall` — and more, so `ls /bin
 /usr/bin` is the authority rather than this paragraph.
 
-**Games** (`/usr/games`): `advent`, the original Colossal Cave, and
-`cowsay`.
+### Games {#games}
+
+`/usr/games` holds 38 programs, and every one plays as it stands. Each
+has a manual page: `man invaders`, or `man adv01` for all fifteen Scott
+Adams adventures at once.
+
+| Program            | Game                                               |
+|--------------------|----------------------------------------------------|
+| `advent`           | Colossal Cave, the original adventure              |
+| `adv01`–`adv14b`   | Scott Adams' adventures, Adventureland to Buckaroo Banzai |
+| `myst01`–`myst11`  | Brian Howarth's eleven Mysterious Adventures       |
+| `startrek`         | Super Star Trek                                    |
+| `invaders`         | Space Invaders, drawn in text characters           |
+| `2048`             | the sliding-tile game                              |
+| `hamurabi`         | govern ancient Sumeria for ten years               |
+| `dopewars`         | thirty-one days of buying low and selling high     |
+| `wump`             | Hunt the Wumpus, from Unix V7                      |
+| `backgammon`       | backgammon against the computer, from Unix V7      |
+| `fish`             | Go Fish, from Unix V7                              |
+| `arithmetic`       | a drill in sums, from Unix V7                      |
+| `fortune`          | a random saying                                    |
+| `cowsay`           | a cow says it                                      |
+
+The adventures keep the room you are in at the top of the screen and
+take one- and two-word commands; `SAVE GAME` keeps a game, and each one
+offers to restore it as it starts.
 
 ## Text processing {#text-processing}
 

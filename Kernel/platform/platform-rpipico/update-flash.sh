@@ -459,87 +459,96 @@ chmod 0755 tchelp
 cd /usr
 mkdir games
 cd /usr/games
-#bget ../../../Applications/games/adv01
-#bget ../../../Applications/games/adv02
-#bget ../../../Applications/games/adv03
-#bget ../../../Applications/games/adv04
-#bget ../../../Applications/games/adv05
-#bget ../../../Applications/games/adv06
-#bget ../../../Applications/games/adv07
-#bget ../../../Applications/games/adv08
-#bget ../../../Applications/games/adv09
-#bget ../../../Applications/games/adv10
-#bget ../../../Applications/games/adv11
-#bget ../../../Applications/games/adv12
-#bget ../../../Applications/games/adv13
-#bget ../../../Applications/games/adv14a
-#bget ../../../Applications/games/adv14b
-#bget ../../../Applications/games/advint
+# The games.  Upstream's rpipico recipe has all but cowsay commented
+# out, because a plain Pico keeps its root in on-chip flash; this
+# card's root is 800M.  The PC3 manual offered them for months while
+# the card carried two (mancheck.sh found it).
+#
+# Only games complete in themselves.  The players - z1-z8 (Infocom),
+# qrun (Quill), l9x (Level 9), taylormade and advint (AdvSys) - are
+# built but stay off: each needs a game file that is not free to give
+# away, and a player with nothing to play only prints an error.
+#
+# adv01-adv14b are Scott Adams' adventures and myst01-myst11 Brian
+# Howarth's Mysterious Adventures, one program each with the game
+# compiled in.  2048 is installed stripped, like everything else.
+bget ../../../Applications/games/adv01
+bget ../../../Applications/games/adv02
+bget ../../../Applications/games/adv03
+bget ../../../Applications/games/adv04
+bget ../../../Applications/games/adv05
+bget ../../../Applications/games/adv06
+bget ../../../Applications/games/adv07
+bget ../../../Applications/games/adv08
+bget ../../../Applications/games/adv09
+bget ../../../Applications/games/adv10
+bget ../../../Applications/games/adv11
+bget ../../../Applications/games/adv12
+bget ../../../Applications/games/adv13
+bget ../../../Applications/games/adv14a
+bget ../../../Applications/games/adv14b
+bget ../../../Applications/games/myst01
+bget ../../../Applications/games/myst02
+bget ../../../Applications/games/myst03
+bget ../../../Applications/games/myst04
+bget ../../../Applications/games/myst05
+bget ../../../Applications/games/myst06
+bget ../../../Applications/games/myst07
+bget ../../../Applications/games/myst08
+bget ../../../Applications/games/myst09
+bget ../../../Applications/games/myst10
+bget ../../../Applications/games/myst11
+bget ../../../Applications/games/startrek
+bget ../../../Applications/games/hamurabi
+bget ../../../Applications/games/dopewars
+bget ../../../Applications/games/fortune
 bget ../../../Applications/games/cowsay
-#bget ../../../Applications/games/fortune
-#bget ../../../Applications/games/fortune.dat
-#bget ../../../Applications/games/hamurabi
-#bget ../../../Applications/games/myst01
-#bget ../../../Applications/games/myst02
-#bget ../../../Applications/games/myst03
-#bget ../../../Applications/games/myst04
-#bget ../../../Applications/games/myst05
-#bget ../../../Applications/games/myst06
-#bget ../../../Applications/games/myst07
-#bget ../../../Applications/games/myst08
-#bget ../../../Applications/games/myst09
-#bget ../../../Applications/games/myst10
-#bget ../../../Applications/games/myst11
-#bget ../../../Applications/games/qrun
-#bget ../../../Applications/games/startrek
-#bget ../../../Applications/games/z1
-#bget ../../../Applications/games/z2
-#bget ../../../Applications/games/z3
-#bget ../../../Applications/games/z4
-#bget ../../../Applications/games/z5
-#bget ../../../Applications/games/z8
-#bget ../../../Applications/cursesgames/invaders
+bget ../../../Applications/games/fortune.dat
+bget ../../../Applications/games/2048/2048.stripped 2048
+bget ../../../Applications/cursesgames/invaders
+bget ../../../Applications/V7/games/wump
+bget ../../../Applications/V7/games/backgammon
+bget ../../../Applications/V7/games/fish
+bget ../../../Applications/V7/games/arithmetic
 
-#chmod 0755 adv01
-#chmod 0755 adv02
-#chmod 0755 adv03
-#chmod 0755 adv04
-#chmod 0755 adv05
-#chmod 0755 adv06
-#chmod 0755 adv07
-#chmod 0755 adv08
-#chmod 0755 adv09
-#chmod 0755 adv10
-#chmod 0755 adv11
-#chmod 0755 adv12
-#chmod 0755 adv13
-#chmod 0755 adv14a
-#chmod 0755 adv14b
-#chmod 0755 advint
+chmod 0755 adv01
+chmod 0755 adv02
+chmod 0755 adv03
+chmod 0755 adv04
+chmod 0755 adv05
+chmod 0755 adv06
+chmod 0755 adv07
+chmod 0755 adv08
+chmod 0755 adv09
+chmod 0755 adv10
+chmod 0755 adv11
+chmod 0755 adv12
+chmod 0755 adv13
+chmod 0755 adv14a
+chmod 0755 adv14b
+chmod 0755 myst01
+chmod 0755 myst02
+chmod 0755 myst03
+chmod 0755 myst04
+chmod 0755 myst05
+chmod 0755 myst06
+chmod 0755 myst07
+chmod 0755 myst08
+chmod 0755 myst09
+chmod 0755 myst10
+chmod 0755 myst11
+chmod 0755 startrek
+chmod 0755 hamurabi
+chmod 0755 dopewars
+chmod 0755 fortune
 chmod 0755 cowsay
-#chmod 0755 fortune
-#chmod 0644 fortune.dat
-#chmod 0755 hamurabi
-#chmod 0755 myst01
-#chmod 0755 myst02
-#chmod 0755 myst03
-#chmod 0755 myst04
-#chmod 0755 myst05
-#chmod 0755 myst06
-#chmod 0755 myst07
-#chmod 0755 myst08
-#chmod 0755 myst09
-#chmod 0755 myst10
-#chmod 0755 myst11
-#chmod 0755 qrun
-#chmod 0755 startrek
-#chmod 0755 z1
-#chmod 0755 z2
-#chmod 0755 z3
-#chmod 0755 z4
-#chmod 0755 z5
-#chmod 0755 z8
-#chmod 0755 invaders
+chmod 0755 2048
+chmod 0755 invaders
+chmod 0755 wump
+chmod 0755 backgammon
+chmod 0755 fish
+chmod 0755 arithmetic
+chmod 0644 fortune.dat
 
 bget ../../../Applications/cave/advent
 chmod 0755 advent
@@ -550,19 +559,19 @@ cd lib
 bget ../../../Applications/cave/advent.db
 chmod 0644 advent.db
 
-#cd /usr/lib
-#mkdir trek
-#chmod 0711 trek
-#cd /usr/lib/trek
-#
-#bget ../../../Applications/games/startrek.doc
-#bget ../../../Applications/games/startrek.fatal
-#bget ../../../Applications/games/startrek.intro
-#bget ../../../Applications/games/startrek.logo
-#chmod 0755 startrek.doc
-#chmod 0755 startrek.fatal
-#chmod 0755 startrek.intro
-#chmod 0755 startrek.logo
+# startrek reads its instructions and pictures from here, by name.
+cd /usr/lib
+mkdir trek
+chmod 0711 trek
+cd /usr/lib/trek
+bget ../../../Applications/games/startrek.doc
+bget ../../../Applications/games/startrek.fatal
+bget ../../../Applications/games/startrek.intro
+bget ../../../Applications/games/startrek.logo
+chmod 0644 startrek.doc
+chmod 0644 startrek.fatal
+chmod 0644 startrek.intro
+chmod 0644 startrek.logo
 
 EOF
 
@@ -765,6 +774,19 @@ ALIAS="cp.1:mv.1 cp.1:ln.1 reboot.1:halt.1 reboot.1:shutdown.1
 levee.1:vi.1 test.1:[.1 fsck.1:fsck-fuzix.1 uue.1:uud.1 rx.1:sx.1
 saveimage.1:loadimage.1 playmp3.1:playwav.1 playmp3.1:playflac.1
 bcrun.1:bcdump.1 true.1:false.1"
+# The adventures: one page for each collection, since every game in it
+# plays the same way.
+for g in 02 03 04 05 06 07 08 09 10 11 12 13 14a 14b; do
+	ALIAS="$ALIAS adv01.1:adv$g.1"
+done
+for g in 02 03 04 05 06 07 08 09 10 11; do
+	ALIAS="$ALIAS myst01.1:myst$g.1"
+done
+
+# The V7 games keep their own pages, which are section 6.  They go in
+# under .1 names: /usr/man/man1 is where manpages.sh, and every other
+# game's page, has them.
+V7GAMES="wump backgammon arithmetic"
 
 {
 	echo "cd /usr/man"
@@ -775,6 +797,10 @@ bcrun.1:bcdump.1 true.1:false.1"
 		b=`basename $p`
 		echo "bget $p $b"
 		echo "chmod 0644 $b"
+	done
+	for g in $V7GAMES; do
+		echo "bget ../../../Applications/V7/games/$g.6 $g.1"
+		echo "chmod 0644 $g.1"
 	done
 	for a in $ALIAS; do
 		echo "ln /usr/man/man1/`echo $a | cut -d: -f1` /usr/man/man1/`echo $a | cut -d: -f2`"

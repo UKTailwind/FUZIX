@@ -49,7 +49,14 @@ ls_dir() {
 		awk '{ print $NF }' | grep -v '^$' | grep -v '/$'
 }
 
-for d in /bin /usr/bin /usr/games; do ls_dir $d; done | sort -u > "$W/cmds"
+# Executables only, as check 1 says: /usr/games holds fortune.dat beside
+# fortune, and a data file is not a command wanting a page.
+ls_exec() {
+	printf 'cd %s\nls\nexit\n' "$1" | "$UCP" "$W/p2.img" 2>/dev/null |
+		awk '$1 ~ /^-..x/ { print $NF }'
+}
+
+for d in /bin /usr/bin /usr/games; do ls_exec $d; done | sort -u > "$W/cmds"
 ls_dir /usr/man/man1 | sed 's/\.1$//' | sort -u > "$W/pages"
 
 fail=0

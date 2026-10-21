@@ -1,0 +1,57 @@
+.TH startrek 1 "FUZIX Games" "FUZIX"
+.SH NAME
+startrek \- Super Star Trek
+.SH SYNOPSIS
+.B startrek
+.SH DESCRIPTION
+The classic Super Star Trek from David Ahl's
+.IR "101 BASIC Computer Games" ,
+in Chris Nystrom's C, reworked by Alan Cox to run without floating
+point.  You command the
+.I Enterprise
+in a galaxy of 8 by 8 quadrants, each of 8 by 8 sectors, and must
+destroy the Klingon fleet before time runs out.
+.PP
+It offers instructions as it starts; they are long, and pause every
+screenful for Return.
+.SH COMMANDS
+At
+.B Command?
+type one of:
+.TP
+.B nav
+Set course and warp factor.  Course 1 is right, 3 up, 5 left and 7
+down, with fractions between.
+.TP
+.B srs
+Short range sensor scan of this quadrant.
+.TP
+.B lrs
+Long range scan of the quadrants around you.
+.TP
+.B pha
+Fire phasers, spending energy.
+.TP
+.B tor
+Fire a photon torpedo.
+.TP
+.BR she " or " shi
+Raise or lower the shields.
+.TP
+.B dam
+Damage report.
+.TP
+.B com
+The library computer, which asks for an option number.
+.TP
+.B xxx
+Resign your command.
+.PP
+Anything else lists the commands.
+.SH FILES
+.TP
+.B /usr/lib/trek
+The instructions, the title and the pictures, read by name.
+.SH SEE ALSO
+.BR hamurabi (1),
+.BR invaders (1)

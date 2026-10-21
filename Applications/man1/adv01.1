@@ -1,0 +1,107 @@
+.TH adv01 1 "FUZIX Games" "FUZIX"
+.SH NAME
+adv01, adv02, adv03, adv04, adv05, adv06, adv07, adv08, adv09, adv10,
+adv11, adv12, adv13, adv14a, adv14b \- Scott Adams' adventures
+.SH SYNOPSIS
+.BR adv01 " ... " adv14b
+.SH DESCRIPTION
+The text adventures Scott Adams wrote from 1978, each a program of its
+own with the game built in.  Each one announces itself as it starts.
+.TP
+.B adv01
+Adventureland
+.TP
+.B adv02
+Pirate Adventure
+.TP
+.B adv03
+Mission Impossible, which is what it calls itself; it was sold later as
+Secret Mission
+.TP
+.B adv04
+Voodoo Castle
+.TP
+.B adv05
+The Count
+.TP
+.B adv06
+Strange Odyssey
+.TP
+.B adv07
+Mystery Fun House
+.TP
+.B adv08
+Pyramid of Doom
+.TP
+.B adv09
+Ghost Town
+.TP
+.B adv10
+Savage Island, Part I
+.TP
+.B adv11
+Savage Island, Part II
+.TP
+.B adv12
+The Golden Voyage
+.TP
+.B adv13
+The Sorcerer of Claymorgue Castle
+.TP
+.B adv14a
+Return to Pirate's Isle
+.TP
+.B adv14b
+Buckaroo Banzai
+.SH PLAYING
+Type a verb, or a verb and a noun:
+.BR "GET LAMP" ,
+.BR "GO NORTH" ,
+.BR "DROP RUM" .
+Only the first three, four or five letters of a word count, depending on
+the game.  A single
+.BR N ,
+.BR S ,
+.BR E ,
+.BR W ,
+.B U
+or
+.B D
+moves that way, and
+.B I
+lists what you carry.
+.PP
+Most of the games are about finding treasures and storing them in one
+place;
+.B SCORE
+says how many you have stored, and once they are all there it ends the
+game.
+The opening message says which words a game wants you to know about.
+.PP
+.B SAVE GAME
+writes the game to a file, asking for its name.  Each game asks as it
+starts whether to restore a saved game: answer
+.B y
+and give that name.  A file saved by one game will not load into
+another.
+.B QUIT
+ends the game and asks whether to play again.
+.SH THE SCREEN
+Where you are stays at the top of the screen, above a line of dashes,
+and what you type and the replies scroll beneath it.  That needs a
+terminal that can place the cursor, which the console can: the games
+read
+.B TERM
+and its entry in
+.BR /etc/termcap ,
+and stop with "Insufficient terminal features" for a terminal that
+cannot.
+.SH FILES
+.TP
+.B /usr/lib/tchelp
+Looks up the terminal's capabilities for the split screen.
+.SH NOTES
+Scott Adams keeps the copyright, and lets anyone play them freely.
+.SH SEE ALSO
+.BR myst01 (1),
+.BR advent (1)

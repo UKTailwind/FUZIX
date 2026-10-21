@@ -1,0 +1,32 @@
+.TH fish 1 "FUZIX Games" "FUZIX"
+.SH NAME
+fish \- play Go Fish against the computer
+.SH SYNOPSIS
+.B fish
+.SH DESCRIPTION
+The Unix V7 card game.  The object is to collect books of four cards of
+the same face value.  On your turn you ask for a value you hold; if the
+computer has any it hands them all over and you ask again, and if not
+it says GO FISH and you draw from the pool.  Draw the card you asked for
+and you go again.
+.PP
+It asks first whether you want instructions; answer with Return alone,
+or
+.BR n ,
+to skip them.
+.SH PLAYING
+Ask by typing
+.BR a ,
+.BR 2 " to " 10 ,
+.BR j ,
+.B q
+or
+.BR k .
+Return on its own shows the size of the computer's hand and of the pool,
+and the books it has made.
+.B p
+as your first guess of the game puts it on its professional level; the
+default is easy to beat.
+.SH SEE ALSO
+.BR backgammon (1),
+.BR wump (1)
