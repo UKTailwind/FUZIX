@@ -2378,11 +2378,14 @@ class Conv(object):
         if up == 'INT':
             if args[0][1] == TY_I:
                 return (args[0][0], TY_I)
-            return ('(MMINTEGER)mm_int(%s)' % f(0), TY_I)
+            # FnInt is FloatToInt64(floor(x)), range-checked (a40112b):
+            # a bare cast of NaN or 1e30 is undefined.  floor's answer is
+            # whole, so mm_toint's rounding leaves it alone.
+            return ('mm_toint(mm_int(%s))' % f(0), TY_I)
         if up == 'FIX':
             if args[0][1] == TY_I:
                 return (args[0][0], TY_I)
-            return ('(MMINTEGER)mm_fix(%s)' % f(0), TY_I)
+            return ('mm_toint(mm_fix(%s))' % f(0), TY_I)   # FnFix, likewise
         if up == 'CINT':
             return ('mm_toint(%s)' % f(0), TY_I)
         if up == 'SGN':

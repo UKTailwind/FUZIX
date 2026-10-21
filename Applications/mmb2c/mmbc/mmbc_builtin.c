@@ -167,12 +167,15 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
     if (strcmp(up, "INT") == 0) {
         if (args[0].ty == TY_I)
             return mkval(args[0].code, TY_I);
-        return mkval(sfmt("(MMINTEGER)mm_int(%s)", f(0)), TY_I);
+        /* FnInt is FloatToInt64(floor(x)), range-checked (a40112b): a
+           bare cast of NaN or 1e30 is undefined.  floor's answer is
+           whole, so mm_toint's rounding leaves it alone. */
+        return mkval(sfmt("mm_toint(mm_int(%s))", f(0)), TY_I);
     }
     if (strcmp(up, "FIX") == 0) {
         if (args[0].ty == TY_I)
             return mkval(args[0].code, TY_I);
-        return mkval(sfmt("(MMINTEGER)mm_fix(%s)", f(0)), TY_I);
+        return mkval(sfmt("mm_toint(mm_fix(%s))", f(0)), TY_I);   /* FnFix */
     }
     if (strcmp(up, "CINT") == 0)
         return mkval(sfmt("mm_toint(%s)", f(0)), TY_I);

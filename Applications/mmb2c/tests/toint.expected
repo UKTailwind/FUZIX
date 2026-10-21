@@ -1,0 +1,9 @@
+ 3-3-3-2 2 2
+2^52+1:  4503599627370497
+-(2^52+1): -4503599627370497
+CINT(2^63): Number too large
+INT(1e30): Number too large
+FIX(-1e300): Number too large
+i% = 1e19: Number too large
+i% = INF: Number too large
+2^62 fits:  4611686018427387904

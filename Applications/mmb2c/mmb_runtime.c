@@ -752,8 +752,17 @@ char *mm_tab(MMINTEGER col)
 
 /* ================= numeric helpers ================================= */
 
+/* The reference's FloatToInt64, exactly (MMBasic.c; a40112b).  NaN and
+ * anything outside the 64-bit range is "Number too large": a C cast of
+ * those is undefined, and the board and a PC gave different numbers.
+ * Above 2^52 a double has no fraction left, so the value is taken as it
+ * stands - adding 0.5 there rounded 2^52 + 1 up to 2^52 + 2. */
 MMINTEGER mm_toint(MMFLOAT v)
 {
+    if (v != v || v < -9223372036854775808.0 || v >= 9223372036854775808.0)
+        MM_RAISEV("Number too large", 0);
+    if (v < -4503599627370495.0 || v > 4503599627370495.0)
+        return (MMINTEGER)v;
     if (v < 0.0) return (MMINTEGER)(v - 0.5);
     return (MMINTEGER)(v + 0.5);
 }
