@@ -146,57 +146,63 @@ struct val e_logical(void)
     }
 }
 
+/* The levels are the reference's operator table (AllCommands.h),
+ * highest first: ^ 0; * / \ MOD 1; + - 2; << >> 4; <> < > <= >= 5;
+ * = 6; AND OR XOR 7.  doexpr applies an operator as soon as the next
+ * one's precedence is no higher, so equal precedence runs left to
+ * right - 2^3^2 is 64 - and = is a level of its own, below the other
+ * comparisons: a = b < c is a = (b < c). */
 struct val e_compare(void)
 {
-    struct val v = e_unary_not();
+    struct val v = e_relation();
+
+    while (is_op("=", 0)) {
+        struct val r;
+
+        cv.i += 1;
+        r = e_relation();
+        v = compare_op("=", v, r);
+    }
+    return v;
+}
+
+struct val e_relation(void)
+{
+    struct val v = e_shift();
 
     for (;;) {
         struct tok *t = peek(0);
         const char *op;
-        const char *cop;
         struct val r;
 
         if (t == NULL || t->kind != T_OP)
             return v;
         op = t->text;
-        if (strcmp(op, "=") != 0 && strcmp(op, "<>") != 0
+        if (strcmp(op, "<>") != 0
             && strcmp(op, "<") != 0 && strcmp(op, ">") != 0
             && strcmp(op, "<=") != 0 && strcmp(op, ">=") != 0)
             return v;
         cv.i += 1;
-        r = e_unary_not();
-        cop = strcmp(op, "=") == 0 ? "=="
-            : strcmp(op, "<>") == 0 ? "!=" : op;
-        if (v.ty == TY_S || r.ty == TY_S) {
-            if (v.ty != TY_S || r.ty != TY_S)
-                cv_err("cannot compare a string with a number");
-            v = mkval(sfmt("(mm_scmp(%s, %s) %s 0)", v.code, r.code, cop),
-                      TY_I);
-        } else {
-            /* a C comparison is already the 1 or 0 MMBasic defines;
-               the old "? 1 : 0" was a branch diamond the compiler
-               never folded, paid on every comparison */
-            v = mkval(sfmt("((%s) %s (%s))", v.code, cop, r.code),
-                      TY_I);
-        }
+        r = e_shift();
+        v = compare_op(op, v, r);
     }
 }
 
-struct val e_unary_not(void)
+struct val compare_op(const char *op, struct val v, struct val r)
 {
-    struct tok *t = peek(0);
+    const char *cop = strcmp(op, "=") == 0 ? "=="
+        : strcmp(op, "<>") == 0 ? "!=" : op;
 
-    if (t != NULL && t->kind == T_ID
-        && (strcmp(t->up, "NOT") == 0 || strcmp(t->up, "INV") == 0)) {
-        struct val v;
-
-        cv.i += 1;
-        v = e_unary_not();
-        if (strcmp(t->up, "NOT") == 0)
-            return mkval(sfmt("((%s) == 0)", as_flt(v)), TY_I);
-        return mkval(sfmt("(~(%s))", as_int(v)), TY_I);
+    if (v.ty == TY_S || r.ty == TY_S) {
+        if (v.ty != TY_S || r.ty != TY_S)
+            cv_err("cannot compare a string with a number");
+        return mkval(sfmt("(mm_scmp(%s, %s) %s 0)", v.code, r.code, cop),
+                     TY_I);
     }
-    return e_shift();
+    /* a C comparison is already the 1 or 0 MMBasic defines; the old
+       "? 1 : 0" was a branch diamond the compiler never folded, paid on
+       every comparison */
+    return mkval(sfmt("((%s) %s (%s))", v.code, cop, r.code), TY_I);
 }
 
 struct val e_shift(void)
@@ -236,7 +242,7 @@ struct val e_add(void)
 
 struct val e_mul(void)
 {
-    struct val v = e_unary();
+    struct val v = e_pow();
 
     for (;;) {
         struct tok *t = peek(0);
@@ -247,7 +253,7 @@ struct val e_mul(void)
                                 || strcmp(t->text, "/") == 0
                                 || strcmp(t->text, "\\") == 0)) {
             const char *op = nxt()->text;
-            struct val r = e_unary();
+            struct val r = e_pow();
 
             if (strcmp(op, "/") == 0) {
                 /* op_div checks the divisor first where a bare C '/'
@@ -279,7 +285,7 @@ struct val e_mul(void)
             struct val r;
 
             cv.i += 1;
-            r = e_unary();
+            r = e_pow();
             v = mkval(sfmt("mm_mod(%s, %s)", as_int(v), as_int(r)), TY_I);
         } else {
             return v;
@@ -287,13 +293,58 @@ struct val e_mul(void)
     }
 }
 
+struct val e_pow(void)
+{
+    struct val v = e_unary();
+
+    while (is_op("^", 0)) {
+        struct val r;
+
+        cv.i += 1;
+        r = e_unary();
+        v = pow_op(v, r);
+    }
+    return v;
+}
+
+struct val pow_op(struct val v, struct val r)
+{
+    return mkval(sfmt("mm_pow(%s, %s)", as_flt(v), as_flt(r)), TY_F);
+}
+
+/* A prefix applies to the next value alone, as getvalue applies it:
+ * NOT 0 + 1 is (NOT 0) + 1, and INV a + 1 is (INV a) + 1.  A minus
+ * takes the powers that follow first (NegPowers, issue #96): -2^2 is
+ * -(2^2), and -2^3^2 is -((2^3)^2).  NOT of a float is a float 0 or 1
+ * there and an integer here: the same value, and it shows only once it
+ * meets an integer past float precision.  As a float every IF NOT flag
+ * would pay a conversion and a second compare. */
 struct val e_unary(void)
 {
+    struct tok *t = peek(0);
+
+    if (t != NULL && t->kind == T_ID
+        && (strcmp(t->up, "NOT") == 0 || strcmp(t->up, "INV") == 0)) {
+        struct val v;
+
+        cv.i += 1;
+        v = e_unary();
+        if (strcmp(t->up, "NOT") == 0)
+            return mkval(sfmt("((%s) == 0)", as_flt(v)), TY_I);
+        return mkval(sfmt("(~(%s))", as_int(v)), TY_I);
+    }
     if (is_op("-", 0)) {
         struct val v;
 
         cv.i += 1;
         v = need_num(e_unary());
+        while (is_op("^", 0)) {
+            struct val r;
+
+            cv.i += 1;
+            r = e_unary();
+            v = pow_op(v, r);
+        }
         /* the Python passes v's type through whole (it can be the
          * struct tuple), so mutate the code and keep the rest */
         v.code = sfmt("(-(%s))", v.code);
@@ -303,21 +354,7 @@ struct val e_unary(void)
         cv.i += 1;
         return e_unary();
     }
-    return e_pow();
-}
-
-struct val e_pow(void)
-{
-    struct val v = e_primary();
-
-    if (is_op("^", 0)) {
-        struct val r;
-
-        cv.i += 1;
-        r = e_unary();
-        return mkval(sfmt("mm_pow(%s, %s)", as_flt(v), as_flt(r)), TY_F);
-    }
-    return v;
+    return e_primary();
 }
 
 struct val e_primary(void)

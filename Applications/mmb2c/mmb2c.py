@@ -1498,37 +1498,41 @@ class Conv(object):
             cop = {'AND': '&', 'OR': '|', 'XOR': '^'}[op]
             v = ('(' + a + ' ' + cop + ' ' + b + ')', TY_I)
 
+    # The levels are the reference's operator table (AllCommands.h),
+    # highest first: ^ 0; * / \ MOD 1; + - 2; << >> 4; <> < > <= >= 5;
+    # = 6; AND OR XOR 7.  doexpr applies an operator as soon as the next
+    # one's precedence is no higher, so equal precedence runs left to
+    # right - 2^3^2 is 64 - and = is a level of its own, below the other
+    # comparisons: a = b < c is a = (b < c).
     def e_compare(self):
-        v = self.e_unary_not()
+        v = self.e_relation()
+        while self.is_op('='):
+            self.i += 1
+            v = self.compare_op('=', v, self.e_relation())
+        return v
+
+    def e_relation(self):
+        v = self.e_shift()
         while True:
             t = self.peek()
             if t is None or t[0] != T_OP:
                 return v
             op = t[1]
-            if op not in ('=', '<>', '<', '>', '<=', '>='):
+            if op not in ('<>', '<', '>', '<=', '>='):
                 return v
             self.i += 1
-            r = self.e_unary_not()
-            cop = '==' if op == '=' else ('!=' if op == '<>' else op)
-            if v[1] == TY_S or r[1] == TY_S:
-                if v[1] != TY_S or r[1] != TY_S:
-                    self.err("cannot compare a string with a number")
-                v = ('(mm_scmp(%s, %s) %s 0)' % (v[0], r[0], cop), TY_I)
-            else:
-                # a C comparison is already the 1 or 0 MMBasic defines;
-                # the old '? 1 : 0' was a branch diamond the compiler
-                # never folded, paid on every comparison
-                v = ('((%s) %s (%s))' % (v[0], cop, r[0]), TY_I)
+            v = self.compare_op(op, v, self.e_shift())
 
-    def e_unary_not(self):
-        t = self.peek()
-        if t is not None and t[0] == T_ID and t[2] in ('NOT', 'INV'):
-            self.i += 1
-            v = self.e_unary_not()
-            if t[2] == 'NOT':
-                return ('((%s) == 0)' % self.as_flt(v), TY_I)
-            return ('(~(%s))' % self.as_int(v), TY_I)
-        return self.e_shift()
+    def compare_op(self, op, v, r):
+        cop = '==' if op == '=' else ('!=' if op == '<>' else op)
+        if v[1] == TY_S or r[1] == TY_S:
+            if v[1] != TY_S or r[1] != TY_S:
+                self.err("cannot compare a string with a number")
+            return ('(mm_scmp(%s, %s) %s 0)' % (v[0], r[0], cop), TY_I)
+        # a C comparison is already the 1 or 0 MMBasic defines; the old
+        # '? 1 : 0' was a branch diamond the compiler never folded, paid
+        # on every comparison
+        return ('((%s) %s (%s))' % (v[0], cop, r[0]), TY_I)
 
     def e_shift(self):
         v = self.e_add()
@@ -1556,14 +1560,14 @@ class Conv(object):
         return v
 
     def e_mul(self):
-        v = self.e_unary()
+        v = self.e_pow()
         while True:
             t = self.peek()
             if t is None:
                 return v
             if t[0] == T_OP and t[1] in ('*', '/', '\\'):
                 op = self.nxt()[1]
-                r = self.e_unary()
+                r = self.e_pow()
                 if op == '/':
                     # op_div checks the divisor first where a bare C '/'
                     # answers inf.  The check exists so ON ERROR can trap
@@ -1589,29 +1593,48 @@ class Conv(object):
                          % (self.as_flt(v), self.as_flt(r)), TY_F)
             elif t[0] == T_ID and t[2] == 'MOD':
                 self.i += 1
-                r = self.e_unary()
+                r = self.e_pow()
                 v = ('mm_mod(%s, %s)'
                      % (self.as_int(v), self.as_int(r)), TY_I)
             else:
                 return v
 
+    def e_pow(self):
+        v = self.e_unary()
+        while self.is_op('^'):
+            self.i += 1
+            v = self.pow_op(v, self.e_unary())
+        return v
+
+    def pow_op(self, v, r):
+        return ('mm_pow(%s, %s)' % (self.as_flt(v), self.as_flt(r)), TY_F)
+
+    # A prefix applies to the next value alone, as getvalue applies it:
+    # NOT 0 + 1 is (NOT 0) + 1, and INV a + 1 is (INV a) + 1.  A minus
+    # takes the powers that follow first (NegPowers, issue #96): -2^2 is
+    # -(2^2), and -2^3^2 is -((2^3)^2).  NOT of a float is a float 0 or 1
+    # there and an integer here: the same value, and it shows only once
+    # it meets an integer past float precision.  As a float every IF NOT
+    # flag would pay a conversion and a second compare.
     def e_unary(self):
+        t = self.peek()
+        if t is not None and t[0] == T_ID and t[2] in ('NOT', 'INV'):
+            self.i += 1
+            v = self.e_unary()
+            if t[2] == 'NOT':
+                return ('((%s) == 0)' % self.as_flt(v), TY_I)
+            return ('(~(%s))' % self.as_int(v), TY_I)
         if self.is_op('-'):
             self.i += 1
             v = self.need_num(self.e_unary())
+            while self.is_op('^'):
+                self.i += 1
+                v = self.pow_op(v, self.e_unary())
             return ('(-(%s))' % v[0], v[1])
         if self.is_op('+'):
             self.i += 1
             return self.e_unary()
-        return self.e_pow()
-
-    def e_pow(self):
-        v = self.e_primary()
-        if self.is_op('^'):
-            self.i += 1
-            r = self.e_unary()
-            return ('mm_pow(%s, %s)' % (self.as_flt(v), self.as_flt(r)), TY_F)
-        return v
+        return self.e_primary()
 
     def e_primary(self):
         t = self.peek()

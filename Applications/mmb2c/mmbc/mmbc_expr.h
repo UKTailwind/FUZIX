@@ -49,12 +49,14 @@ struct flat { const char *ptr; const char *cnt; };
 
 struct val e_logical(void);
 struct val e_compare(void);
-struct val e_unary_not(void);
+struct val e_relation(void);
+struct val compare_op(const char *op, struct val v, struct val r);
 struct val e_shift(void);
 struct val e_add(void);
 struct val e_mul(void);
-struct val e_unary(void);
 struct val e_pow(void);
+struct val pow_op(struct val v, struct val r);
+struct val e_unary(void);
 struct val e_primary(void);
 struct val e_name(void);
 
