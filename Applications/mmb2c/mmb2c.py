@@ -3913,6 +3913,23 @@ class Conv(object):
             self.lineno = i + 1
             txt = self.lines[i].strip()
             up = txt.upper()
+            if up.startswith('CSUB') and up[4:5] in ('', ' ', '\t'):
+                # A CSUB is machine code for the PicoMite's interpreter,
+                # read to its End CSub (MM_Misc.c:9804): nothing here can
+                # run it.  Said once, and the hex blanked like a font's,
+                # or a word such as 1C0569DB reads as line number 1.
+                self.errors.append("line %d: CSUB is not translated: it "
+                                   "is PicoMite machine code" % self.lineno)
+                self.lines[i] = ''
+                i += 1
+                while i < len(self.lines):
+                    u = self.lines[i].strip().upper()
+                    self.lines[i] = ''
+                    i += 1
+                    if u.replace(' ', '').replace('\t', '') \
+                            .startswith('ENDCSUB'):
+                        break
+                continue
             if not (up.startswith('DEFINEFONT') or
                     up.startswith('DEFINE FONT')):
                 i += 1

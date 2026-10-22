@@ -145,7 +145,7 @@ void pass_fonts(void)
     int i = 0;
 
     while (i < src_nlines) {
-        char *line, *up, *p, *num;
+        char *line, *up, *p, *num, *u_csub;
         int start, ended = 0, bad = 0, fno, skip;
 
         /* the scratch pool is per line here, as it is in tokenize:
@@ -155,6 +155,33 @@ void pass_fonts(void)
         cv.lineno = i + 1;
         line = fstrip(src_lines[i]);
         up = upper(line);
+        if (strncmp(up, "CSUB", 4) == 0
+            && (up[4] == 0 || up[4] == ' ' || up[4] == '\t')) {
+            /* A CSUB is machine code for the PicoMite's interpreter, read
+             * to its End CSub (MM_Misc.c:9804): nothing here can run it.
+             * Said once, and the hex blanked like a font's, or a word
+             * such as 1C0569DB reads as line number 1. */
+            errors_add(sfmt("line %d: CSUB is not translated: it is "
+                            "PicoMite machine code", i + 1));
+            src_lines[i] = pstr("");
+            i++;
+            while (i < src_nlines) {
+                char packed[16];
+                int j = 0, m;
+
+                scratch_reset();        /* a CSUB runs to hundreds of lines */
+                u_csub = upper(fstrip(src_lines[i]));
+                for (m = 0; u_csub[m] && j < 15; m++)
+                    if (u_csub[m] != ' ' && u_csub[m] != '\t')
+                        packed[j++] = u_csub[m];
+                packed[j] = 0;
+                src_lines[i] = pstr("");
+                i++;
+                if (strncmp(packed, "ENDCSUB", 7) == 0)
+                    break;
+            }
+            continue;
+        }
         if (strncmp(up, "DEFINEFONT", 10) == 0)
             skip = 10;
         else if (strncmp(up, "DEFINE FONT", 11) == 0)
