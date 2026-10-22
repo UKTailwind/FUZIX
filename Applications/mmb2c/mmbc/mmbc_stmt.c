@@ -3645,11 +3645,33 @@ static const char *settick_id(void)
     return "1";
 }
 
+/* mmb2c.py's settick_pause.  SETTICK PAUSE|RESUME, target [, n].
+   cmd_settick takes three arguments or five, reads n only from five, and
+   never evaluates the target: PAUSE, 2 is timer 1, the 2 being the
+   target.  With no target at all it is "Argument count". */
+static void settick_pause(int resume)
+{
+    int depth = 0;
+
+    if (!accept_op(",")) {
+        emit("mm_error(\"Argument count\");");
+        return;
+    }
+    while (!stmt_end() && !(depth == 0 && is_op(",", 0))) {
+        if (is_op("(", 0))
+            depth++;
+        else if (is_op(")", 0))
+            depth--;
+        cv.i++;
+    }
+    emit(sfmt("mmi_settick_pause(%s, %d);", settick_id(), resume));
+}
+
 /* mmb2c.py's do_settick.
 
      SETTICK period, handler [, n]
      SETTICK 0, 0 [, n]          off
-     SETTICK PAUSE|RESUME [, n]
+     SETTICK PAUSE|RESUME, target [, n]
 
    MMBasic counts milliseconds in an interrupt and fires when the count
    passes the period; this keeps a microsecond deadline and asks at the
@@ -3663,11 +3685,11 @@ static void do_settick(void)
     cv.i++;
     cv.uses_interrupts = 1;
     if (accept_kw("PAUSE")) {
-        emit(sfmt("mmi_settick_pause(%s, 0);", settick_id()));
+        settick_pause(0);
         return;
     }
     if (accept_kw("RESUME")) {
-        emit(sfmt("mmi_settick_pause(%s, 1);", settick_id()));
+        settick_pause(1);
         return;
     }
     ms = as_int(expr());

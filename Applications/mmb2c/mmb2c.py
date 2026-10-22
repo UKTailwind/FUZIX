@@ -10213,10 +10213,27 @@ class Conv(object):
             return self.as_int(self.expr())
         return '1'
 
+    def settick_pause(self, resume):
+        """SETTICK PAUSE|RESUME, target [, n].  cmd_settick takes three
+        arguments or five, reads n only from five, and never evaluates
+        the target: PAUSE, 2 is timer 1, the 2 being the target.  With
+        no target at all it is "Argument count"."""
+        if not self.accept_op(','):
+            self.emit('mm_error("Argument count");')
+            return
+        depth = 0
+        while not self.stmt_end() and not (depth == 0 and self.is_op(',')):
+            if self.is_op('('):
+                depth += 1
+            elif self.is_op(')'):
+                depth -= 1
+            self.i += 1
+        self.emit('mmi_settick_pause(%s, %d);' % (self.settick_id(), resume))
+
     def do_settick(self):
         """SETTICK period, handler [, n]
            SETTICK 0, 0 [, n]          off
-           SETTICK PAUSE|RESUME [, n]
+           SETTICK PAUSE|RESUME, target [, n]
 
         MMBasic counts milliseconds in an interrupt and fires when the
         count passes the period; this keeps a microsecond deadline and
@@ -10227,10 +10244,10 @@ class Conv(object):
         self.i += 1
         self.uses_interrupts = True
         if self.accept_kw('PAUSE'):
-            self.emit('mmi_settick_pause(%s, 0);' % self.settick_id())
+            self.settick_pause(0)
             return
         if self.accept_kw('RESUME'):
-            self.emit('mmi_settick_pause(%s, 1);' % self.settick_id())
+            self.settick_pause(1)
             return
         ms = self.as_int(self.expr())
         self.expect_op(',')
