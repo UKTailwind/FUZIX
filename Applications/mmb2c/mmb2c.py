@@ -2914,7 +2914,11 @@ class Conv(object):
             if (a[1] == TY_S) != (b[1] == TY_S):
                 self.err("CHOICE() branches must be the same kind")
             if a[1] == TY_S:
-                return ('((%s) != 0 ? (char *)(%s) : (char *)(%s))'
+                # a COPY, as fun_ternary makes (a121e4e, issue #84): the
+                # bare ?: handed out the variable's own storage, and a SUB
+                # given CHOICE(1, b$, c$) changed b$ through it
+                self.tmp_used = True
+                return ('mm_scopy((%s) != 0 ? (char *)(%s) : (char *)(%s))'
                         % (c[0], a[0], b[0]), TY_S)
             if a[1] == TY_I and b[1] == TY_I:
                 return ('((%s) != 0 ? (%s) : (%s))' % (c[0], a[0], b[0]), TY_I)

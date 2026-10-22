@@ -768,9 +768,14 @@ struct val builtin_raw(const char *up)
         expect_op(")");
         if ((a.ty == TY_S) != (b.ty == TY_S))
             cv_err("CHOICE() branches must be the same kind");
-        if (a.ty == TY_S)
-            return mkval(sfmt("((%s) != 0 ? (char *)(%s) : (char *)(%s))",
-                              c.code, a.code, b.code), TY_S);
+        if (a.ty == TY_S) {
+            /* a COPY, as fun_ternary makes (a121e4e, issue #84): the bare
+               ?: handed out the variable's own storage, and a SUB given
+               CHOICE(1, b$, c$) changed b$ through it */
+            cv.tmp_used = 1;
+            return mkval(sfmt("mm_scopy((%s) != 0 ? (char *)(%s) : "
+                              "(char *)(%s))", c.code, a.code, b.code), TY_S);
+        }
         if (a.ty == TY_I && b.ty == TY_I)
             return mkval(sfmt("((%s) != 0 ? (%s) : (%s))",
                               c.code, a.code, b.code), TY_I);
