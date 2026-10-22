@@ -106,8 +106,9 @@ static const struct { const char *name; long val; } rgbnames[] = {
     { "GREEN", 0x00FF00 }, { "CERULEAN", 0x0080FF }, { "MIDGREEN", 0x008000 },
     { "COBALT", 0x0040FF }, { "MYRTLE", 0x004000 }, { "BLUE", 0x0000FF },
     { "BLACK", 0x000000 }, { "GRAY", 0x808080 }, { "GREY", 0x808080 },
-    { "LITEGRAY", 0xD2D2D2 }, { "LIGHTGRAY", 0xD2D2D2 },
-    { "LIGHTGREY", 0xD2D2D2 },
+    /* LITEGRAY is the value's name in Draw.h, not a word RGB() takes:
+       fun_rgb answers "Invalid colour" to it */
+    { "LIGHTGRAY", 0xD2D2D2 }, { "LIGHTGREY", 0xD2D2D2 },
     { "ORANGE", 0xFFA500 }, { "PINK", 0xFFA0AB }, { "GOLD", 0xFFD700 },
     { "SALMON", 0xFA8072 }, { "BEIGE", 0xF5F5DC },
     { NULL, 0 }

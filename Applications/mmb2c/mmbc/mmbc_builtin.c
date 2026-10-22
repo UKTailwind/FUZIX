@@ -133,6 +133,46 @@ struct val call_builtin(const char *up)
     return emit_builtin(up, args, nargs);
 }
 
+/* Just inside a call's '(': is the list ONE argument - no comma at its
+ * own depth before its ')'?  0 if the ')' never comes. */
+static int one_arg(void)
+{
+    int k, depth = 0;
+
+    for (k = 0;; k++) {
+        struct tok *t = peek(k);
+
+        if (t == NULL)
+            return 0;
+        if (t->kind != T_OP)
+            continue;
+        if (strcmp(t->text, "(") == 0)
+            depth++;
+        else if (strcmp(t->text, ")") == 0) {
+            if (depth == 0)
+                return 1;
+            depth--;
+        } else if (strcmp(t->text, ",") == 0 && depth == 0)
+            return 0;
+    }
+}
+
+/* s with \ and " escaped, for a C string literal - the Python's two
+ * replace() calls, in the same order. */
+static const char *c_escape(const char *s)
+{
+    size_t n = strlen(s), i, j = 0;
+    char *o = palloc(2 * n + 1);
+
+    for (i = 0; i < n; i++) {
+        if (s[i] == '\\' || s[i] == '"')
+            o[j++] = '\\';
+        o[j++] = s[i];
+    }
+    o[j] = 0;
+    return o;
+}
+
 /* True when emitted C calls something: a name followed by '('.  A cast's
  * ')(' is not a call and an index is '['.  A '(' inside a string literal
  * counts too, which only errs on the safe side. */
@@ -941,6 +981,27 @@ struct val builtin_raw(const char *up)
             cv.i += 2;
             return mkval(sfmt("0x%06lXLL", (unsigned long)val), TY_I);
         }
+        if (one_arg()) {
+            /* One argument is only ever a colour name to fun_rgb;
+               anything else is "Invalid colour: <the argument as
+               written>" - raised when it runs, as there. */
+            const char *msg = "Invalid colour: ";
+            int depth = 0;
+
+            while (depth || !is_op(")", 0)) {
+                struct tok *u = nxt();
+
+                if (u->kind == T_OP && strcmp(u->text, "(") == 0)
+                    depth++;
+                else if (u->kind == T_OP && strcmp(u->text, ")") == 0)
+                    depth--;
+                msg = u->kind == T_STR ? sfmt("%s\"%s\"", msg, u->text)
+                                       : sfmt("%s%s", msg, u->text);
+            }
+            expect_op(")");
+            return mkval(sfmt("(mm_error(\"%s\"), 0LL)", c_escape(msg)),
+                         TY_I);
+        }
         r = expr();
         expect_op(",");
         g = expr();
@@ -950,8 +1011,20 @@ struct val builtin_raw(const char *up)
         ri = as_int(r);
         gi = as_int(g);
         bi = as_int(b);
-        return mkval(sfmt("((((%s) & 0xFF) << 16) | (((%s) & 0xFF) << 8) "
-                          "| ((%s) & 0xFF))", ri, gi, bi), TY_I);
+        {
+            /* each is getint(..., 0, 255): literals in range fold, the
+               rest are checked as they run */
+            long long lr, lg, lb;
+
+            if (int_literal(ri, &lr) && int_literal(gi, &lg)
+                && int_literal(bi, &lb) && lr >= 0 && lr <= 255
+                && lg >= 0 && lg <= 255 && lb >= 0 && lb <= 255)
+                return mkval(sfmt("0x%06lXLL",
+                                  (unsigned long)(lr << 16 | lg << 8 | lb)),
+                             TY_I);
+        }
+        cv.uses_misc = 1;
+        return mkval(sfmt("mm_rgb(%s, %s, %s)", ri, gi, bi), TY_I);
     }
 
     if (strcmp(up, "JSON$") == 0) {

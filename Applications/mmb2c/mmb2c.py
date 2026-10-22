@@ -151,7 +151,9 @@ RGBNAMES = {
     'GREEN': 0x00FF00, 'CERULEAN': 0x0080FF, 'MIDGREEN': 0x008000,
     'COBALT': 0x0040FF, 'MYRTLE': 0x004000, 'BLUE': 0x0000FF,
     'BLACK': 0x000000, 'GRAY': 0x808080, 'GREY': 0x808080,
-    'LITEGRAY': 0xD2D2D2, 'LIGHTGRAY': 0xD2D2D2, 'LIGHTGREY': 0xD2D2D2,
+    # LITEGRAY is the value's name in Draw.h, not a word RGB() takes:
+    # fun_rgb answers "Invalid colour" to it
+    'LIGHTGRAY': 0xD2D2D2, 'LIGHTGREY': 0xD2D2D2,
     'ORANGE': 0xFFA500, 'PINK': 0xFFA0AB, 'GOLD': 0xFFD700,
     'SALMON': 0xFA8072, 'BEIGE': 0xF5F5DC,
 }
@@ -1136,6 +1138,25 @@ class Conv(object):
     def is_op(self, s, k=0):
         t = self.peek(k)
         return t is not None and t[0] == T_OP and t[1] == s
+
+    def one_arg(self):
+        """Just inside a call's '(': is the list ONE argument - no comma
+        at its own depth before its ')'?  False if the ')' never comes."""
+        k = 0
+        depth = 0
+        while True:
+            t = self.peek(k)
+            if t is None:
+                return False
+            if t[0] == T_OP and t[1] == '(':
+                depth += 1
+            elif t[0] == T_OP and t[1] == ')':
+                if depth == 0:
+                    return True
+                depth -= 1
+            elif t[0] == T_OP and t[1] == ',' and depth == 0:
+                return False
+            k += 1
 
     def checks_on(self):
         """Are the ON ERROR checked forms live for the statement being
@@ -3029,14 +3050,38 @@ class Conv(object):
                     and self.is_op(')', 1):
                 self.i += 2
                 return ('0x%06XLL' % RGBNAMES[t[2]], TY_I)
+            if self.one_arg():
+                # One argument is only ever a colour name to fun_rgb;
+                # anything else is "Invalid colour: <the argument as
+                # written>" - raised when it runs, as there.
+                parts = []
+                depth = 0
+                while depth or not self.is_op(')'):
+                    t = self.nxt()
+                    if t[0] == T_OP and t[1] == '(':
+                        depth += 1
+                    elif t[0] == T_OP and t[1] == ')':
+                        depth -= 1
+                    parts.append('"%s"' % t[1] if t[0] == T_STR else t[1])
+                self.expect_op(')')
+                msg = 'Invalid colour: ' + ''.join(parts)
+                return ('(mm_error("%s"), 0LL)'
+                        % msg.replace('\\', '\\\\').replace('"', '\\"'),
+                        TY_I)
             r = self.expr()
             self.expect_op(',')
             g = self.expr()
             self.expect_op(',')
             b = self.expr()
             self.expect_op(')')
-            return ('((((%s) & 0xFF) << 16) | (((%s) & 0xFF) << 8) '
-                    '| ((%s) & 0xFF))'
+            # each is getint(..., 0, 255): literals in range fold, the
+            # rest are checked as they run
+            lit = [int_literal(self.as_int(v)) for v in (r, g, b)]
+            if not [n for n in lit if n is None or n < 0 or n > 255]:
+                return ('0x%06XLL' % (lit[0] << 16 | lit[1] << 8 | lit[2]),
+                        TY_I)
+            self.uses_misc = True
+            return ('mm_rgb(%s, %s, %s)'
                     % (self.as_int(r), self.as_int(g), self.as_int(b)), TY_I)
 
         if up == 'JSON$':

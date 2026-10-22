@@ -208,6 +208,22 @@ MMG_FN MMINTEGER mm_str2bin_i(int type, const char *s, int big)
     }
 }
 
+/* ---- RGB(r, g, b) ---------------------------------------------------- */
+
+/* Each component is fun_rgb's getint(..., 0, 255): out of range is the
+ * range error, where it used to be masked with & 0xFF.  Checked inline,
+ * so a colour in range costs no crossing into the runtime - RGB in a
+ * pixel loop stays arithmetic. */
+MMG_FN MMINTEGER mm_rgb(MMINTEGER r, MMINTEGER g, MMINTEGER b)
+{
+    if ((r | g | b) & ~(MMINTEGER)0xFF) {
+        if (!mm_range(r, 0, 255) && !mm_range(g, 0, 255))
+            mm_range(b, 0, 255);
+        return 0;
+    }
+    return (r << 16) | (g << 8) | b;
+}
+
 /* ---- TRIM$ / FIELD$ ------------------------------------------------- */
 
 MMG_FN int mm_in_mask(char c, const char *mask)
