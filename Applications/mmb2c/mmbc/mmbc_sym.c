@@ -386,6 +386,13 @@ struct sym *declare(const char *canon, int ty, const char *scope,
             cv_err("'%s' is a built-in function and cannot be used as "
                    "a variable name", canon);
     }
+    /* at most 31 characters without the suffix, and a STATIC's hidden
+       global - the SUB's name, a separator and the variable's - must fit
+       the same 32 (MMBasic.c findvar, 2c747af) */
+    if (strlen(canon) > 31
+        || (is_static && local && cv.cur
+            && strlen(cv.cur->name) + strlen(canon) > 31))
+        cv_note("Variable name too long");
     old = local ? table_get(cv.cur->locals, cv.cur->nlocals, canon)
                 : table_get(cv.globals, cv.nglobals, canon);
     if (old != NULL) {
@@ -458,6 +465,8 @@ struct sym *reference(const char *word, int as_array)
         cv_err("OPTION EXPLICIT: '%s' has not been declared", canon);
     if (cv.mode != M_EMIT) {
         struct implied_rec *r;
+        if (strlen(canon) > 31)
+            cv_note("Variable name too long");
         s = sym_new(canon, ty, cvar(canon));
         s->disp = pstr(word);
         s->where = cv.lineno;

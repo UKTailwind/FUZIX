@@ -217,6 +217,8 @@ void place_label(const char *canon)
            (825ade6); it used to replace the first, silently */
         if (l->placed)
             cv_note("Duplicate label");
+        if (strlen(canon) > 31)         /* findlabel's limit (2c747af) */
+            cv_note("Label too long");
         l->placed = 1;
         l->lineno = cv.lineno;
         l->has_data_at = 1;
@@ -593,6 +595,8 @@ void decl_routine(int is_func)
     canon = split_suffix(t->text, &sfx);
     if (routine_get(canon) != NULL)
         cv_err("'%s' defined twice", canon);
+    if (strlen(canon) > 31)     /* PrepareProgram's limit, SUB and FUNCTION */
+        cv_note("Function name too long");
     r = routine_new(canon, is_func);
     r->disp = pstr(t->text);
     r->line = cv.lineno;

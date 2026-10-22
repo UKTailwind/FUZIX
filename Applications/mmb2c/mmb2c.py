@@ -1381,6 +1381,12 @@ class Conv(object):
             if nm in BUILTINS and BUILTINS[nm][0] == 0:
                 self.err("'%s' is a built-in function and cannot be used as "
                          "a variable name" % canon)
+        # at most 31 characters without the suffix, and a STATIC's hidden
+        # global - the SUB's name, a separator and the variable's - must
+        # fit the same 32 (MMBasic.c findvar, 2c747af)
+        if len(canon) > 31 or (static and scope == 'local' and self.cur
+                               and len(self.cur.name) + len(canon) > 31):
+            self.note("Variable name too long")
         old = table.get(canon)
         if old is not None:
             if old.ty != ty:
@@ -1433,6 +1439,8 @@ class Conv(object):
         if self.opt_explicit:
             self.err("OPTION EXPLICIT: '%s' has not been declared" % canon)
         if self.mode != 'emit':
+            if len(canon) > 31:
+                self.note("Variable name too long")
             s = Sym(canon, ty, cvar(canon))
             s.disp = word
             s.where = self.lineno
@@ -4133,6 +4141,8 @@ class Conv(object):
             # (825ade6); it used to replace the first, silently
             if canon in self.labels:
                 self.note("Duplicate label")
+            if len(canon) > 31:          # findlabel's limit (2c747af)
+                self.note("Label too long")
             self.labels[canon] = self.lineno
             self.data_at[canon] = len(self.data)
             self.label_routine[canon] = self.cur.name if self.cur else ''
@@ -4367,6 +4377,8 @@ class Conv(object):
         canon, sfx = split_suffix(t[1])
         if canon in self.routines:
             self.err("'%s' defined twice" % canon)
+        if len(canon) > 31:     # PrepareProgram's limit, for SUB and FUNCTION
+            self.note("Function name too long")
         r = Routine(canon, is_func)
         r.disp = t[1]
         r.line = self.lineno
