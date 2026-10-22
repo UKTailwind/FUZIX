@@ -3911,14 +3911,30 @@ static void do_gosub(void)
     emit_gosub(canon, t->text);
 }
 
+/* A jump to a label or line the program does not have.  The reference
+ * finds out when the statement runs - findlabel's "Cannot find label",
+ * findline's "Line number" - so that is when it is raised here too. */
+static void missing_target(const char *canon, const char *what,
+                           const char *disp)
+{
+    const char *msg = canon[0] >= '0' && canon[0] <= '9'
+                      ? "Line number" : "Cannot find label";
+
+    cv_warn("%s %s: no such label or line - \"%s\" when the line runs",
+            what, disp, msg);
+    emit(sfmt("mm_error(\"%s\");", msg));
+}
+
 static void emit_gosub(const char *canon, const char *disp)
 {
     struct label *l = label_rec(canon);
     const char *here, *there;
     int site;
 
-    if (!l->placed)
-        cv_err("unknown label '%s'", disp);
+    if (!l->placed) {
+        missing_target(canon, "GOSUB", disp);
+        return;
+    }
     here = gosub_key();
     there = l->routine ? l->routine : "";
     if (strcmp(here, there) != 0)
@@ -4193,8 +4209,14 @@ static void do_restore(void)
     else
         cv_err("RESTORE needs a label or line number");
     l = label_rec(canon);
-    if (!l->has_data_at)
-        cv_err("unknown label '%s' in RESTORE", t->text);
+    if (!l->has_data_at) {
+        /* a bare name that is a variable is evaluated for the label
+         * (cmd_restore, issue #103), which is not translated */
+        if (t->kind == T_ID && sym_lookup(canon) != NULL)
+            cv_err("unknown label '%s' in RESTORE", t->text);
+        missing_target(canon, "RESTORE", t->text);
+        return;
+    }
     emit(sfmt("mm_restore(%d);", l->data_at));
 }
 
@@ -6220,8 +6242,10 @@ static void do_goto(void)
     else
         canon = split_suffix(t->text, &sfx);
     l = label_rec(canon);
-    if (!l->placed)
-        cv_err("unknown label '%s'", t->text);
+    if (!l->placed) {
+        missing_target(canon, "GOTO", t->text);
+        return;
+    }
     l->used = 1;
     note_goto(canon);
     emit(sfmt("goto %s;", clabel(canon)));

@@ -256,10 +256,39 @@ void place_label(const char *canon)
     raw(sfmt("%s: ;", clabel(canon)));
 }
 
+/* Is this line's first name followed straight by a ':'?  The line
+ * number, if any, and blanks come first. */
+static int colon_adjacent(const char *name)
+{
+    const char *s = src_lines[cv.lineno - 1];
+    int j = 0;
+
+    while (*s == ' ' || *s == '\t')
+        s++;
+    while (s[j] >= '0' && s[j] <= '9')
+        j++;
+    if (j) {
+        s += j;
+        while (*s == ' ' || *s == '\t')
+            s++;
+    }
+    for (; *name; name++, s++) {
+        char a = *s, b = *name;
+        if (a >= 'A' && a <= 'Z')
+            a += 32;
+        if (b >= 'A' && b <= 'Z')
+            b += 32;
+        if (a != b)
+            return 0;
+    }
+    return *s == ':';
+}
+
 /* A leading integer is a line number and a leading 'name:' is a label;
- * both are GOTO targets.  A bare subroutine call followed by a colon
- * (Counter : Counter) must not be mistaken for a label, which is why
- * the routine names are collected first. */
+ * both are GOTO targets.  The tokeniser decides a label on the ':' alone
+ * (MMBasic.c:2292-2306): a name with its ':' straight after it is one,
+ * whatever else has the name - Here: beside SUB Here (2d5307e) - and
+ * with a blank between, Counter : Counter, it is a statement. */
 void strip_line_number(void)
 {
     struct tok *t;
@@ -280,7 +309,7 @@ void strip_line_number(void)
         && !kw_in(t->up) && builtin_get(t->up) == NULL
         && strcmp(t->up, "CLS") != 0) {
         char *canon = split_suffix(t->text, &sfx);
-        if (routine_get(canon) == NULL && !routine_name_known(canon)) {
+        if (sfx == TY_NONE && colon_adjacent(t->text)) {
             cv.i += 2;
             place_label(canon);
         }

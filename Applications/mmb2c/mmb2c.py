@@ -4238,11 +4238,25 @@ class Conv(object):
                     break
         self.raw(clabel(canon) + ': ;')
 
+    def colon_adjacent(self, name):
+        """Is this line's first name followed straight by a ':'?  The
+        line number, if any, and blanks come first."""
+        s = self.lines[self.lineno - 1].lstrip(' \t')
+        j = 0
+        while j < len(s) and s[j].isdigit():
+            j += 1
+        if j:
+            s = s[j:].lstrip(' \t')
+        n = len(name)
+        return s[:n].lower() == name.lower() and s[n:n + 1] == ':'
+
     def strip_line_number(self):
         """A leading integer is a line number and a leading 'name:' is a
-        label; both are GOTO targets.  A bare subroutine call followed by
-        a colon (Counter : Counter) must not be mistaken for a label,
-        which is why the routine names are collected first."""
+        label; both are GOTO targets.  The tokeniser decides a label on
+        the ':' alone (MMBasic.c:2292-2306): a name with its ':' straight
+        after it is one, whatever else has the name - Here: beside SUB
+        Here (2d5307e) - and with a blank between, Counter : Counter, it
+        is a statement."""
         t = self.peek()
         if t is not None and t[0] == T_NUM and t[2] == 'I':
             self.i += 1
@@ -4251,9 +4265,8 @@ class Conv(object):
         if t is not None and t[0] == T_ID and self.is_op(':', 1) \
                 and t[2] not in KEYWORDS and t[2] not in BUILTINS \
                 and t[2] not in BARE_STATEMENTS:
-            canon = split_suffix(t[1])[0]
-            if canon not in self.routines \
-                    and canon not in self.routine_names:
+            canon, sfx = split_suffix(t[1])
+            if sfx is None and self.colon_adjacent(t[1]):
                 self.i += 2
                 self.place_label(canon)
 
@@ -7772,7 +7785,8 @@ class Conv(object):
 
     def emit_gosub(self, canon, disp):
         if canon not in self.labels:
-            self.err("unknown label '%s'" % disp)
+            self.missing_target(canon, 'GOSUB', disp)
+            return
         here = self.gosub_key()
         there = self.label_routine.get(canon, '')
         if here != there:
@@ -7988,7 +8002,12 @@ class Conv(object):
         else:
             self.err("RESTORE needs a label or line number")
         if canon not in self.data_at:
-            self.err("unknown label '%s' in RESTORE" % t[1])
+            # a bare name that is a variable is evaluated for the label
+            # (cmd_restore, issue #103), which is not translated
+            if t[0] == T_ID and self.lookup(canon) is not None:
+                self.err("unknown label '%s' in RESTORE" % t[1])
+            self.missing_target(canon, 'RESTORE', t[1])
+            return
         self.emit('mm_restore(%d);' % self.data_at[canon])
 
     # -- SORT ---------------------------------------------------------------
@@ -10308,6 +10327,16 @@ class Conv(object):
         if old is None or depth < old:
             self.goto_depth[canon] = depth
 
+    def missing_target(self, canon, what, disp):
+        """A jump to a label or line the program does not have.  The
+        reference finds out when the statement runs - findlabel's "Cannot
+        find label", findline's "Line number" - so that is when it is
+        raised here too."""
+        msg = 'Line number' if canon[:1].isdigit() else 'Cannot find label'
+        self.warn("%s %s: no such label or line - \"%s\" when the line "
+                  "runs" % (what, disp, msg))
+        self.emit('mm_error("%s");' % msg)
+
     def do_goto(self):
         t = self.nxt()
         if t[0] == T_NUM and t[2] == 'I':
@@ -10317,7 +10346,8 @@ class Conv(object):
         else:
             canon = split_suffix(t[1])[0]
         if canon not in self.labels:
-            self.err("unknown label '%s'" % t[1])
+            self.missing_target(canon, 'GOTO', t[1])
+            return
         self.labels_used[canon] = 1
         self.note_goto(canon)
         self.emit('goto %s;' % clabel(canon))

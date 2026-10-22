@@ -1,0 +1,10 @@
+at label
+after
+in SUB
+read 42
+ping
+ping
+goto a SUB: Cannot find label
+gosub nowhere: Cannot find label
+restore nowhere: Cannot find label
+goto 9999: Line number
