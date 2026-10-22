@@ -2958,8 +2958,6 @@ class Conv(object):
             if self.accept_op(','):
                 dim = self.expr()
             self.expect_op(')')
-            if not sym.is_array:
-                self.err("'%s' is not an array" % sym.name)
             return (self.bound_of(sym, dim), TY_I)
 
         if up == 'TRIM$':
@@ -3704,18 +3702,29 @@ class Conv(object):
         else:
             k = None
             kexpr = self.as_int(dim)
+        # fun_bound's order: the dimension is getint(..., 0, MAXDIM)
+        # first; 0 is OPTION BASE whatever the variable; a scalar is
+        # "Expected an array" and a dimension it does not have is
+        # "Dimensions" - raised as the line runs, as there.  It used to
+        # be a translate-time refusal for a scalar and 0 for a missing
+        # dimension, and an array parameter read past its bounds table.
+        if k is not None and (k < 0 or k > 5):
+            return '(mm_error("%d is invalid (valid is 0 to 5)"), 0LL)' % k
+        if k == 0:
+            return str(self.opt_base)
+        if not sym.is_array:
+            return '(mm_error("Expected an array"), 0LL)'
         if sym.is_param or sym.dynamic:
             nm = (sym.bacc if sym.dynamic
                   else '__b_' + sym.name.replace('.', '__'))
-            if k == 0:
-                return str(self.opt_base)
-            return self.unbase('(%s)[%s]' % (nm, kexpr))
+            if k is None:
+                return self.unbase('mm_bnd(%s, %s)' % (nm, kexpr))
+            return ('((%s)[0] < %d ? (mm_error("Dimensions"), 0LL) : %s)'
+                    % (nm, k, self.unbase('(%s)[%s]' % (nm, kexpr))))
         if k is None:
             self.err("BOUND() on a DIMmed array needs a constant dimension")
-        if k == 0:
-            return str(self.opt_base)
         if k > len(sym.dims):
-            return '0'
+            return '(mm_error("Dimensions"), 0LL)'
         return self.unbase('((%s) - 1)' % sym.dims[k - 1])
 
     def unbase(self, txt):

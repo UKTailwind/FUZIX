@@ -1608,27 +1608,30 @@ const char *bound_of(struct sym *sym, struct val dim, int has_dim)
         has_k = 0;
         kexpr = as_int(dim);
     }
+    /* fun_bound's order: the dimension is getint(..., 0, MAXDIM) first;
+       0 is OPTION BASE whatever the variable; a scalar is "Expected an
+       array" and a dimension it does not have is "Dimensions" - raised as
+       the line runs, as there.  It used to be a translate-time refusal
+       for a scalar and 0 for a missing dimension, and an array parameter
+       read past its bounds table. */
+    if (has_k && (k < 0 || k > 5))
+        return sfmt("(mm_error(\"%ld is invalid (valid is 0 to 5)\"), 0LL)",
+                    k);
+    if (has_k && k == 0)
+        return sfmt("%d", cv.opt_base);
+    if (!sym->is_array)
+        return "(mm_error(\"Expected an array\"), 0LL)";
     if (sym->is_param || sym->dynamic) {
         const char *nm = sym->dynamic ? sym->bacc : bname(sym->name);
 
-        if (has_k && k == 0)
-            return sfmt("%d", cv.opt_base);
-        return unbase(sfmt("(%s)[%s]", nm, kexpr));
+        if (!has_k)
+            return unbase(sfmt("mm_bnd(%s, %s)", nm, kexpr));
+        return sfmt("((%s)[0] < %ld ? (mm_error(\"Dimensions\"), 0LL) : %s)",
+                    nm, k, unbase(sfmt("(%s)[%s]", nm, kexpr)));
     }
     if (!has_k)
         cv_err("BOUND() on a DIMmed array needs a constant dimension");
-    if (k == 0)
-        return sfmt("%d", cv.opt_base);
     if (k > sym->ndims)
-        return "0";
-    {
-        /* Python sym.dims[k - 1]: mirror negative indexing too */
-        long idx = k - 1;
-
-        if (idx < 0)
-            idx += sym->ndims;
-        if (idx < 0)
-            mm_error("line %d: BOUND() dimension out of range", cv.lineno);
-        return unbase(sfmt("((%s) - 1)", sym->dims[idx]));
-    }
+        return "(mm_error(\"Dimensions\"), 0LL)";
+    return unbase(sfmt("((%s) - 1)", sym->dims[k - 1]));
 }

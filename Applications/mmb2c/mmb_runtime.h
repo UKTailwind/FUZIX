@@ -790,6 +790,26 @@ int mm_ix(MMINTEGER i, int base, int lim)
     }
     return (int)i;
 }
+/* BOUND(a(), k) of an array parameter or a run-time DIM, k known only as
+ * the program runs: fun_bound's getint(k, 0, MAXDIM), then "Dimensions"
+ * past the rank in the bounds table { rank, ub1, ... }.  The count less
+ * one comes back (0 for k = 0) and the translator adds the base.  In the
+ * program for the reason mm_ix is; a literal k is checked inline. */
+#if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)
+static __inline__ __attribute__((unused))
+#else
+static
+#endif
+MMINTEGER mm_bnd(const MMINTEGER *tab, MMINTEGER k)
+{
+    if (mm_range(k, 0, MM_MAXDIM) || k == 0)
+        return 0;
+    if (k > tab[0]) {
+        mm_error("Dimensions");
+        return 0;
+    }
+    return tab[k];
+}
 /* Microseconds since start - SETTICK's clock off the board, where
  * mmb_int.h reads TIMER0 itself. */
 MMINTEGER mm_us(void);

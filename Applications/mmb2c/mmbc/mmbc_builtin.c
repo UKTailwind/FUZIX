@@ -846,8 +846,6 @@ struct val builtin_raw(const char *up)
             has_dim = 1;
         }
         expect_op(")");
-        if (!sym->is_array)
-            cv_err("'%s' is not an array", sym->name);
         return mkval(bound_of(sym, dim, has_dim), TY_I);
     }
 
