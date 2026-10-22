@@ -1161,6 +1161,45 @@ class Conv(object):
         t = self.peek(k)
         return t is not None and t[0] == T_OP and t[1] == s
 
+    def eq_in_brackets(self):
+        """At a '(': is there an '=' anywhere before its matching ')'?"""
+        k = 0
+        depth = 0
+        while True:
+            t = self.peek(k)
+            if t is None:
+                return False
+            if t[0] == T_OP:
+                if t[1] == '(':
+                    depth += 1
+                elif t[1] == ')':
+                    depth -= 1
+                    if depth == 0:
+                        return False
+                elif t[1] == '=':
+                    return True
+            k += 1
+
+    def eq_at_top(self):
+        """From here to the end of the statement: an '=' outside every
+        bracket?"""
+        k = 0
+        depth = 0
+        while True:
+            t = self.peek(k)
+            if t is None:
+                return False
+            if t[0] == T_OP:
+                if t[1] == '(':
+                    depth += 1
+                elif t[1] == ')':
+                    depth -= 1
+                elif t[1] == ':' and depth == 0:
+                    return False
+                elif t[1] == '=' and depth == 0:
+                    return True
+            k += 1
+
     def one_arg(self):
         """Just inside a call's '(': is the list ONE argument - no comma
         at its own depth before its ')'?  False if the ')' never comes."""
@@ -8929,6 +8968,11 @@ class Conv(object):
         if t[0] != T_ID:
             self.err("assignment target expected")
         canon, sfx = split_suffix(t[1])
+        # cmd_let takes the statement's FIRST = as the assignment, so one
+        # inside the target's subscript - a(i = 1) = 5 - is its "Invalid
+        # syntax" (22cd802), where we read it as a comparison
+        if self.is_op('(') and self.eq_in_brackets():
+            self.note("Invalid syntax")
 
         # assignment to the enclosing function's name = set return value
         if self.cur is not None and self.cur.is_func and canon == self.cur.name:
@@ -9278,6 +9322,11 @@ class Conv(object):
         if s.is_array:
             self.err("FOR counter cannot be an array")
         self.expect_op('=')
+        # cmd_for splits the rest on =, TO and STEP outside brackets, so a
+        # second = there - FOR i = k = 2 TO 3 - is its "FOR with misplaced
+        # = or TO" (112ce55); inside brackets it is a comparison
+        if self.eq_at_top():
+            self.note("FOR with misplaced = or TO")
         start = self.expr()
         if not self.accept_kw('TO'):
             self.err("FOR without TO")

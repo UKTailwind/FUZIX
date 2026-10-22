@@ -5494,6 +5494,51 @@ static const char *lvalue_from_here(void)
     return s->acc;
 }
 
+/* At a '(': is there an '=' anywhere before its matching ')'? */
+static int eq_in_brackets(void)
+{
+    int k, depth = 0;
+
+    for (k = 0;; k++) {
+        struct tok *t = peek(k);
+
+        if (t == NULL)
+            return 0;
+        if (t->kind != T_OP)
+            continue;
+        if (strcmp(t->text, "(") == 0)
+            depth++;
+        else if (strcmp(t->text, ")") == 0) {
+            if (--depth == 0)
+                return 0;
+        } else if (strcmp(t->text, "=") == 0)
+            return 1;
+    }
+}
+
+/* From here to the end of the statement: an '=' outside every bracket? */
+static int eq_at_top(void)
+{
+    int k, depth = 0;
+
+    for (k = 0;; k++) {
+        struct tok *t = peek(k);
+
+        if (t == NULL)
+            return 0;
+        if (t->kind != T_OP)
+            continue;
+        if (strcmp(t->text, "(") == 0)
+            depth++;
+        else if (strcmp(t->text, ")") == 0)
+            depth--;
+        else if (strcmp(t->text, ":") == 0 && depth == 0)
+            return 0;
+        else if (strcmp(t->text, "=") == 0 && depth == 0)
+            return 1;
+    }
+}
+
 static void do_assign(void)
 {
     struct tok *t = nxt();
@@ -5508,6 +5553,11 @@ static void do_assign(void)
     if (t->kind != T_ID)
         cv_err("assignment target expected");
     canon = split_suffix(t->text, &sfx);
+    /* cmd_let takes the statement's FIRST = as the assignment, so one
+       inside the target's subscript - a(i = 1) = 5 - is its "Invalid
+       syntax" (22cd802), where we read it as a comparison */
+    if (is_op("(", 0) && eq_in_brackets())
+        cv_note("Invalid syntax");
 
     /* assignment to the enclosing function's name = set return value */
     if (cv.cur != NULL && cv.cur->is_func
@@ -5765,6 +5815,11 @@ static void do_for(void)
     if (s->is_array)
         cv_err("FOR counter cannot be an array");
     expect_op("=");
+    /* cmd_for splits the rest on =, TO and STEP outside brackets, so a
+       second = there - FOR i = k = 2 TO 3 - is its "FOR with misplaced =
+       or TO" (112ce55); inside brackets it is a comparison */
+    if (eq_at_top())
+        cv_note("FOR with misplaced = or TO");
     start = expr();
     if (!accept_kw("TO"))
         cv_err("FOR without TO");
