@@ -4104,6 +4104,11 @@ class Conv(object):
 
     def place_label(self, canon):
         if self.mode == 'decl':
+            # one name space for every label in the program, and the
+            # reference refuses a second one before running a line
+            # (825ade6); it used to replace the first, silently
+            if canon in self.labels:
+                self.note("Duplicate label")
             self.labels[canon] = self.lineno
             self.data_at[canon] = len(self.data)
             self.label_routine[canon] = self.cur.name if self.cur else ''

@@ -185,6 +185,11 @@ void place_label(const char *canon)
 
     if (cv.mode == M_DECL) {
         l = label_rec(canon);
+        /* one name space for every label in the program, and the
+           reference refuses a second one before running a line
+           (825ade6); it used to replace the first, silently */
+        if (l->placed)
+            cv_note("Duplicate label");
         l->placed = 1;
         l->lineno = cv.lineno;
         l->has_data_at = 1;
