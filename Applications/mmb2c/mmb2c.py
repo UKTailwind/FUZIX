@@ -1200,6 +1200,18 @@ class Conv(object):
                     return True
             k += 1
 
+    def eq_ahead(self):
+        """From here to the end of the statement: an '=' at any depth?
+        cmd_let's own scan for one, which counts no brackets."""
+        k = 0
+        while True:
+            t = self.peek(k)
+            if t is None or (t[0] == T_OP and t[1] == ':'):
+                return False
+            if t[0] == T_OP and t[1] == '=':
+                return True
+            k += 1
+
     def one_arg(self):
         """Just inside a call's '(': is the list ONE argument - no comma
         at its own depth before its ')'?  False if the ')' never comes."""
@@ -8873,9 +8885,21 @@ class Conv(object):
         if canon in self.routines and not self.looks_like_assignment():
             self.i += 1
             r = self.routines[canon]
+            if r.is_func:
+                # A FUNCTION is not a command (edc7999): the line falls to
+                # the implied LET, which stops at it before any argument
+                # is evaluated - "Unknown command" with no '=' in the
+                # statement, "Invalid syntax" with one.
+                msg = 'Invalid syntax' if self.eq_ahead() else \
+                    'Unknown command'
+                self.warn("'%s' is a FUNCTION, not a command: \"%s\" when "
+                          "the line runs" % (r.name, msg))
+                self.skip_statement()
+                self.emit('mm_error("%s");' % msg)
+                return
             args = self.call_args(False)
             code, ty = self.emit_call(r, args)
-            self.emit('(void)(%s);' % code if r.is_func else '%s;' % code)
+            self.emit('%s;' % code)
             return
         if t[2] == 'MID$':
             self.do_mid_assign()
@@ -8905,8 +8929,14 @@ class Conv(object):
             self.i += 1
             canon = split_suffix(t[1].lower())[0]
             r = self.routines.get(canon)
-            if r is None:
-                self.err("CALL to unknown subroutine '%s'" % canon)
+            if r is None or r.is_func:
+                # cmd_call looks for a SUB only, and raises before the
+                # arguments are touched
+                self.warn("CALL \"%s\": no SUB of that name - \"Unknown "
+                          "user subroutine\" when the line runs" % t[1])
+                self.skip_statement()
+                self.emit('mm_error("Unknown user subroutine");')
+                return
             self.accept_op(',')
             args = self.call_args(False)
             code, ty = self.emit_call(r, args)
@@ -11039,7 +11069,9 @@ class Conv(object):
                         wr('    if (%s) return %s;\n' % (cond, callx))
                     else:
                         wr('    if (%s) { %s; return; }\n' % (cond, callx))
-                wr('    mm_error("CALL: no such SUB or FUNCTION");\n')
+                # cmd_call's and fun_call's own words
+                wr('    mm_error("Unknown user %s");\n'
+                   % ('function' if d['is_func'] else 'subroutine'))
                 if d['is_func'] and rep.ty == TY_S:
                     wr('    return __ret;\n')
                 elif d['is_func']:

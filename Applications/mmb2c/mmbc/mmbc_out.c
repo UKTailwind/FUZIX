@@ -857,7 +857,9 @@ void conv_write(FILE *f)
                     fprintf(f, "    if (%s) { %s; return; }\n",
                             cond, callx);
             }
-            fprintf(f, "    mm_error(\"CALL: no such SUB or FUNCTION\");\n");
+            /* cmd_call's and fun_call's own words */
+            fprintf(f, "    mm_error(\"Unknown user %s\");\n",
+                    d->is_func ? "function" : "subroutine");
             if (d->is_func && rep->ty == TY_S)
                 fprintf(f, "    return __ret;\n");
             else if (d->is_func)

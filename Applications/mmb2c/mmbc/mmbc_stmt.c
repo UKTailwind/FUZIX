@@ -5376,6 +5376,22 @@ static int looks_like_assignment(void)
         && strcmp(cv.toks[j].text, "=") == 0;
 }
 
+/* From here to the end of the statement: an '=' at any depth?  cmd_let's
+ * own scan for one, which counts no brackets. */
+static int eq_ahead(void)
+{
+    int k;
+
+    for (k = 0;; k++) {
+        struct tok *t = peek(k);
+
+        if (t == NULL || (t->kind == T_OP && strcmp(t->text, ":") == 0))
+            return 0;
+        if (t->kind == T_OP && strcmp(t->text, "=") == 0)
+            return 1;
+    }
+}
+
 static void do_assign_or_call(void)
 {
     struct tok *t = peek(0);
@@ -5392,10 +5408,22 @@ static void do_assign_or_call(void)
         struct val v;
         cv.i++;
         r = routine_get(canon);
+        if (r->is_func) {
+            /* A FUNCTION is not a command (edc7999): the line falls to
+             * the implied LET, which stops at it before any argument is
+             * evaluated - "Unknown command" with no '=' in the
+             * statement, "Invalid syntax" with one. */
+            const char *msg = eq_ahead() ? "Invalid syntax"
+                                         : "Unknown command";
+            cv_warn("'%s' is a FUNCTION, not a command: \"%s\" when "
+                    "the line runs", r->name, msg);
+            skip_statement();
+            emit(sfmt("mm_error(\"%s\");", msg));
+            return;
+        }
         call_args(0, &args);
         v = emit_call(r, &args);
-        emit(r->is_func ? sfmt("(void)(%s);", v.code)
-                        : sfmt("%s;", v.code));
+        emit(sfmt("%s;", v.code));
         return;
     }
     if (strcmp(t->up, "MID$") == 0) {
@@ -5420,8 +5448,15 @@ static void do_callstmt(void)
         cv.i++;
         canon = split_suffix(lower(t->text), &sfx);
         r = routine_get(canon);
-        if (r == NULL)
-            cv_err("CALL to unknown subroutine '%s'", canon);
+        if (r == NULL || r->is_func) {
+            /* cmd_call looks for a SUB only, and raises before the
+             * arguments are touched */
+            cv_warn("CALL \"%s\": no SUB of that name - \"Unknown "
+                    "user subroutine\" when the line runs", t->text);
+            skip_statement();
+            emit("mm_error(\"Unknown user subroutine\");");
+            return;
+        }
         accept_op(",");
         call_args(0, &args);
         v = emit_call(r, &args);
