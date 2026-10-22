@@ -805,6 +805,28 @@ def has_call(text):
     return False
 
 
+def line_too_long(s):
+    """The reference's loader (FileIO.c, b3c8155): a line's printable
+    characters are copied, a TAB is padded with spaces to the next even
+    column, and a line that reaches MAXSTRLEN (255) is refused with
+    "Line is too long" before anything runs."""
+    n = 0
+    for c in s:
+        if c == '\t':
+            n += 1
+            if n >= 255:
+                return True
+            while n % 2:
+                n += 1
+                if n >= 255:
+                    return True
+        elif ' ' <= c <= '~':
+            n += 1
+            if n >= 255:
+                return True
+    return False
+
+
 def whole_call(code, name):
     """The argument text when code is exactly name(...) - the call is the
     whole expression - else None.  Quoted C text is skipped."""
@@ -4084,6 +4106,8 @@ class Conv(object):
         self.cur = None
         for idx in range(len(self.lines)):
             self.lineno = idx + 1
+            if line_too_long(self.lines[idx]):
+                self.note("Line is too long")
             try:
                 self.toks = tokenize(self.lines[idx], self.lineno)
             except MMError as e:

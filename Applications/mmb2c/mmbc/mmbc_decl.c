@@ -138,6 +138,31 @@ void pass_routine_names(void)
     }
 }
 
+/* The reference's loader (FileIO.c, b3c8155): a line's printable
+ * characters are copied, a TAB is padded with spaces to the next even
+ * column, and a line that reaches MAXSTRLEN (255) is refused with "Line
+ * is too long" before anything runs. */
+static int line_too_long(const char *s)
+{
+    int n = 0;
+
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+
+        if (c == '\t') {
+            if (++n >= 255)
+                return 1;
+            while (n % 2)
+                if (++n >= 255)
+                    return 1;
+        } else if (c >= ' ' && c <= '~') {
+            if (++n >= 255)
+                return 1;
+        }
+    }
+    return 0;
+}
+
 void pass_declarations(void)
 {
     volatile int idx;
@@ -148,6 +173,8 @@ void pass_declarations(void)
     for (idx = 0; idx < src_nlines; idx++) {
         jmp_buf jb, *saved = err_jmp;
         cv.lineno = idx + 1;
+        if (line_too_long(src_lines[idx]))
+            cv_note("Line is too long");
         err_jmp = &jb;
         if (setjmp(jb) != 0) {
             err_jmp = saved;
