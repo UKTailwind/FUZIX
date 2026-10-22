@@ -71,6 +71,9 @@
 MMG_FN void mm_wait(MMFLOAT ms)
 {
 	long long end, togo, left, slice, t;
+#ifdef MMB_INT_H
+	unsigned n;
+#endif
 
 	if (ms < 0)
 		return;
@@ -83,8 +86,18 @@ MMG_FN void mm_wait(MMFLOAT ms)
 		mmg_pulse_service();
 #endif
 #ifdef MMB_INT_H
+		/*	Every interrupt that is due, not just the first.  One
+		 *	poll runs one handler, as check_interrupt does, but
+		 *	cmd_pause spins on check_interrupt and looks again as
+		 *	soon as a handler returns.  One poll a slice let the
+		 *	first due tick win every slice: with two 10 ms ticks
+		 *	the second ran once in a 1 s PAUSE (the reference's
+		 *	ticktest.bas, P3). */
 		if (__mm_int_armed)
-			mm_int_poll();
+			do {
+				n = mm_int_fired;
+				mm_int_poll();
+			} while (mm_int_fired != n && MMW_US() < end);
 #endif
 		left = end - MMW_US();
 		if (left > togo)

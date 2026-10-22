@@ -311,10 +311,16 @@ MMG_FN void mmi_st_noint(void)
  *	and C locals replace the g_LocalIndex bookkeeping.  What does have
  *	to be copied is the error-state save-clear-restore around it.
  */
+/*	How many handlers have run.  mmb_wait.h polls again for as long as
+ *	the last poll ran one, which is what cmd_pause's spin on
+ *	check_interrupt amounts to. */
+static unsigned mm_int_fired;
+
 MMG_FN void mm_int_fire(mm_int_fn fn)
 {
 	mm_int_err_push();
 	__mm_in_int = 1;
+	mm_int_fired++;
 	fn();
 	__mm_in_int = 0;
 	mm_int_err_pop();

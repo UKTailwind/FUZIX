@@ -49,6 +49,15 @@ DO
 LOOP UNTIL na > mark
 PRINT "resumed yes"
 
+' Every due tick runs during a PAUSE, not just the first: two ticks of
+' the same period both keep firing (the reference's ticktest.bas, P3).
+' One poll a slice let timer 1 win every slice, and b ran once.
+SETTICK 10, TickB, 2
+na = 0 : nb = 0
+PAUSE 500
+PRINT "both in pause ";
+IF na >= 20 AND nb >= 20 THEN PRINT "yes" ELSE PRINT "no " na nb
+
 ' Off is off.
 SETTICK 0, 0, 1
 SETTICK 0, 0, 2
