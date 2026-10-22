@@ -1438,6 +1438,7 @@ class Conv(object):
         if len(canon) > 31 or (static and scope == 'local' and self.cur
                                and len(self.cur.name) + len(canon) > 31):
             self.note("Variable name too long")
+        self.sub_fun_named(canon)
         old = table.get(canon)
         if old is not None:
             if old.ty != ty:
@@ -1492,6 +1493,7 @@ class Conv(object):
         if self.mode != 'emit':
             if len(canon) > 31:
                 self.note("Variable name too long")
+            self.sub_fun_named(canon)
             s = Sym(canon, ty, cvar(canon))
             s.disp = word
             s.where = self.lineno
@@ -1502,6 +1504,14 @@ class Conv(object):
             self.note_touch(canon, s)
             return s
         self.err("internal: '%s' unresolved in emit pass" % canon)
+
+    def sub_fun_named(self, canon):
+        """findvar will not make a variable with a SUB or FUNCTION's name,
+        whatever either's suffix (48b4680): DIM, LOCAL, STATIC, CONST, a
+        parameter and an implied variable alike.  Only a FUNCTION's own
+        result is exempt (V_FUNCT), and that never comes here."""
+        if canon in self.routine_names:
+            self.note("A sub/fun has the same name: %s" % canon.upper())
 
     def note_touch(self, canon, s):
         """Remember that this SUB/FUNCTION reached out to a global."""
@@ -1982,6 +1992,14 @@ class Conv(object):
         # program written before a built-in existed must keep working
         r = self.routines.get(canon)
         if r is not None:
+            if not self.is_op('('):
+                # getvalue calls a FUNCTION only with a '(' after its name
+                # (MMBasic.c:4259); without one the name is a variable,
+                # which findvar will not make
+                self.note("A sub/fun has the same name: %s" % canon.upper())
+                if r.is_func and r.ty == TY_S:
+                    return ('""', TY_S)
+                return ('0', r.ty if r.is_func else TY_F)
             if not r.is_func:
                 self.err("'%s' is a SUB, not a FUNCTION" % canon)
             if up in BUILTINS:
@@ -4502,6 +4520,7 @@ class Conv(object):
                 ty = ty2
         if ty is None:
             ty = self.opt_default
+        self.sub_fun_named(canon)
         s = Sym(canon, ty, '')
         s.stype = stype
         s.is_param = True
@@ -5295,6 +5314,7 @@ class Conv(object):
                     else:
                         self.emit('%s = %s;' % (s.acc, v[0]))
             elif self.mode == 'decl':
+                self.sub_fun_named(canon)
                 s = Sym(canon, ty, '(' + v[0] + ')')
                 s.is_const = True
                 # An expression that is not compile-time constant must
@@ -8942,17 +8962,9 @@ class Conv(object):
             code, ty = self.emit_call(r, args)
             self.emit('%s;' % code)
             return
-        if t is not None and t[0] == T_ID \
-                and split_suffix(t[1])[0] in self.routines:
-            # the classic form: CALL subname [, args]
-            self.i += 1
-            r = self.routines[split_suffix(t[1])[0]]
-            self.accept_op(',')
-            args = self.call_args(False)
-            code, ty = self.emit_call(r, args)
-            self.emit('%s;' % code)
-            return
-        # the name is a run-time string: dispatch by name
+        # the name is a run-time string: dispatch by name.  A bare SUB
+        # name is not one - getCstring reads it as a variable, which
+        # cannot share the SUB's name; expr() says so.
         v = self.expr()
         if v[1] != TY_S:
             self.err("CALL needs a SUB name or a string")

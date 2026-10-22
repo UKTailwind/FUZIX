@@ -459,6 +459,15 @@ struct val e_name(void)
     if (r != NULL) {
         struct arglist args;
 
+        if (!is_op("(", 0)) {
+            /* getvalue calls a FUNCTION only with a '(' after its name
+             * (MMBasic.c:4259); without one the name is a variable,
+             * which findvar will not make */
+            cv_note("A sub/fun has the same name: %s", upper(canon));
+            if (r->is_func && r->ty == TY_S)
+                return mkval("\"\"", TY_S);
+            return mkval("0", r->is_func ? r->ty : TY_F);
+        }
         if (!r->is_func)
             cv_err("'%s' is a SUB, not a FUNCTION", canon);
         if (builtin_get(up) != NULL)

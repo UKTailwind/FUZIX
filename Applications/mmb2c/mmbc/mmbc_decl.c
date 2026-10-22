@@ -693,6 +693,7 @@ void decl_param(struct routine *r)
     }
     if (ty == TY_NONE)
         ty = cv.opt_default;
+    sub_fun_named(canon);
     s = palloc(sizeof(*s));
     memset(s, 0, sizeof(*s));
     s->name = pstr(canon);
@@ -1477,6 +1478,7 @@ void do_const(void)
         } else if (cv.mode == M_DECL) {
             struct sym *s;
             struct sym *dup = globals_get(canon);
+            sub_fun_named(canon);
             if (dup != NULL) {
                 /* A WARNING, and it has to be: MMBasic runs only one
                    arm of an If, so the same global CONST declared in

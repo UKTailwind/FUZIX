@@ -367,6 +367,16 @@ struct sym *sym_new(const char *canon, int ty, const char *acc)
     return s;
 }
 
+/* findvar will not make a variable with a SUB or FUNCTION's name,
+   whatever either's suffix (48b4680): DIM, LOCAL, STATIC, CONST, a
+   parameter and an implied variable alike.  Only a FUNCTION's own result
+   is exempt (V_FUNCT), and that never comes here. */
+void sub_fun_named(const char *canon)
+{
+    if (routine_name_known(canon))
+        cv_note("A sub/fun has the same name: %s", upper(canon));
+}
+
 /* Explicit DIM / LOCAL / STATIC / CONST / parameter. */
 struct sym *declare(const char *canon, int ty, const char *scope,
                     const char **arr_dims, int ndims, int is_static)
@@ -393,6 +403,7 @@ struct sym *declare(const char *canon, int ty, const char *scope,
         || (is_static && local && cv.cur
             && strlen(cv.cur->name) + strlen(canon) > 31))
         cv_note("Variable name too long");
+    sub_fun_named(canon);
     old = local ? table_get(cv.cur->locals, cv.cur->nlocals, canon)
                 : table_get(cv.globals, cv.nglobals, canon);
     if (old != NULL) {
@@ -467,6 +478,7 @@ struct sym *reference(const char *word, int as_array)
         struct implied_rec *r;
         if (strlen(canon) > 31)
             cv_note("Variable name too long");
+        sub_fun_named(canon);
         s = sym_new(canon, ty, cvar(canon));
         s->disp = pstr(word);
         s->where = cv.lineno;

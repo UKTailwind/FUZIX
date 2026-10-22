@@ -5463,18 +5463,9 @@ static void do_callstmt(void)
         emit(sfmt("%s;", v.code));
         return;
     }
-    if (t != NULL && t->kind == T_ID
-        && routine_get(split_suffix(t->text, &sfx)) != NULL) {
-        /* the classic form: CALL subname [, args] */
-        cv.i++;
-        r = routine_get(split_suffix(t->text, &sfx));
-        accept_op(",");
-        call_args(0, &args);
-        v = emit_call(r, &args);
-        emit(sfmt("%s;", v.code));
-        return;
-    }
-    /* the name is a run-time string: dispatch by name */
+    /* the name is a run-time string: dispatch by name.  A bare SUB name
+     * is not one - getCstring reads it as a variable, which cannot share
+     * the SUB's name; expr() says so. */
     v = expr();
     if (v.ty != TY_S)
         cv_err("CALL needs a SUB name or a string");

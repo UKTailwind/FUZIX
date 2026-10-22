@@ -540,6 +540,7 @@ struct sym *sym_new(const char *canon, int ty, const char *acc);
 struct sym *declare(const char *canon, int ty, const char *scope,
                     const char **arr_dims, int ndims, int is_static);
 struct sym *reference(const char *word, int as_array);
+void sub_fun_named(const char *canon);        /* "A sub/fun has the same name" */
 void note_touch(const char *canon, struct sym *s);
 const char *as_int(struct val v);
 /* the argument text when code is exactly name(...), else NULL */
