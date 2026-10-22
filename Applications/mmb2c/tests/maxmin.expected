@@ -1,9 +1,11 @@
 rnd outside  0
 once  3 3 132
 nested  4 4 1542
+integer  8 4 4982
+mixed nest  6 3 156
 sub  7 2 76
 recursive  3
 ten  10-4
-float  9007199254740992
+exact  9007199254740993 float  9007199254740992
 const  4
 mixed  2 1.5

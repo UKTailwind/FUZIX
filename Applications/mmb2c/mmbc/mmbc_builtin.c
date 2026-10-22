@@ -153,30 +153,82 @@ static int has_call(const char *text)
     return 0;
 }
 
-/* 1 + the highest MAX/MIN temporary pair the text uses; 0 for none. */
+/* The value of an integer literal's text - 5LL, (5LL), (-(5LL)) - in
+ * *out; 0 for anything else. */
+static int int_literal(const char *code, long long *out)
+{
+    const char *s = code;
+    const char *e = code + strlen(code);
+    int neg = 0;
+    long long v = 0;
+    const char *p;
+
+    for (;;) {
+        while (e - s >= 2 && *s == '(' && e[-1] == ')') {
+            int depth = 0;
+
+            for (p = s + 1; p < e - 1; p++) {
+                if (*p == '(')
+                    depth++;
+                else if (*p == ')' && --depth < 0)
+                    break;
+            }
+            if (depth != 0)
+                break;
+            s++;
+            e--;
+        }
+        if (s == e || *s != '-')
+            break;
+        neg = !neg;
+        s++;
+    }
+    if (e - s < 3 || e[-2] != 'L' || e[-1] != 'L' || e - s - 2 > 18)
+        return 0;
+    for (p = s; p < e - 2; p++) {
+        if (!is_digit_c((unsigned char)*p))
+            return 0;
+        v = v * 10 + (*p - '0');
+    }
+    *out = neg ? -v : v;
+    return 1;
+}
+
+/* 1 + the highest MAX/MIN temporary pair the text uses, float (__mxaN)
+ * or integer (__mxiaN); 0 for none. */
 static int mx_height(const char *text)
 {
     int h = 0;
-    const char *p = strstr(text, "__mxa");
+    const char *p = strstr(text, "__mx");
 
     while (p != NULL) {
-        int n = 0;
-
-        p += 5;
-        while (is_digit_c((unsigned char)*p)) {
-            n = n * 10 + (*p - '0');
+        p += 4;
+        if (*p == 'i')
             p++;
+        if (*p == 'a' && is_digit_c((unsigned char)p[1])) {
+            int n = 0;
+
+            p++;
+            while (is_digit_c((unsigned char)*p)) {
+                n = n * 10 + (*p - '0');
+                p++;
+            }
+            if (n + 1 > h)
+                h = n + 1;
         }
-        if (n + 1 > h)
-            h = n + 1;
-        p = strstr(p, "__mxa");
+        p = strstr(p, "__mx");
     }
     return h;
 }
 
-/* MAX()/MIN() of the float texts fs, as fun_max_min: from the first
- * value, each one replaces it only when strictly greater (smaller), so a
- * tie keeps the earlier; the result is a float.
+/* MAX()/MIN() as fun_max_min: from the first value, each one replaces it
+ * only when strictly greater (smaller), so a tie keeps the earlier.
+ *
+ * The reference's result is always a float.  Here it is an integer when
+ * every argument is one, as NOT is: the same value, which shows only past
+ * float precision, and as a float every integer clamp - MAX(UH(0)-1, 0)
+ * in a game - paid two conversions; robots grew by a block and no longer
+ * fitted beside its music player.
  *
  * Each argument is evaluated once and in order.  Repeating the text in
  * nested ?: evaluated an argument up to 2^(n-1) times, so MAX(RND, 0.5)
@@ -186,14 +238,43 @@ static int mx_height(const char *text)
  * goes through two temporaries of the enclosing routine, declared by its
  * scan.  One pair per nesting level: a MAX inside an argument takes the
  * pair above the ones its own arguments use. */
-static struct val max_min(int is_max, const char **fs, int n)
+static struct val max_min(int is_max, struct val *args, int n)
 {
     const char *cop = is_max ? ">" : "<";
+    const char *fs[MAXARGS];
     const char *a;
     const char *b;
     const char *cur;
+    int isint = 1;
+    int ty;
     int k, j;
 
+    for (j = 0; j < n; j++)
+        if (args[j].ty != TY_I)
+            isint = 0;
+    ty = isint ? TY_I : TY_F;
+    if (isint) {
+        long long best, v;
+
+        for (j = 0; j < n; j++)
+            if (!int_literal(args[j].code, &v))
+                break;
+        if (j == n) {
+            /* all literals: the answer, so a CONST of it is a C constant
+               cc1 can size an array with - it does not fold ?: there */
+            int_literal(args[0].code, &best);
+            for (j = 1; j < n; j++) {
+                int_literal(args[j].code, &v);
+                if (is_max ? v > best : v < best)
+                    best = v;
+            }
+            if (best >= 0)
+                return mkval(sfmt("%lldLL", best), TY_I);
+            return mkval(sfmt("(-(%lldLL))", -best), TY_I);
+        }
+    }
+    for (j = 0; j < n; j++)
+        fs[j] = isint ? args[j].code : as_flt(args[j]);
     for (j = 0; j < n; j++)
         if (has_call(fs[j]))
             break;
@@ -202,28 +283,26 @@ static struct val max_min(int is_max, const char **fs, int n)
         for (j = 1; j < n; j++)
             cur = sfmt("((%s) %s (%s) ? (%s) : (%s))",
                        fs[j], cop, cur, fs[j], cur);
-        return mkval(cur, TY_F);
+        return mkval(cur, ty);
     }
     k = 0;
     for (j = 0; j < n; j++)
         if (mx_height(fs[j]) > k)
             k = mx_height(fs[j]);
     if (cv.mode == M_SCAN) {
-        if (cv.cur == NULL) {
-            if (k + 1 > cv.mx_main)
-                cv.mx_main = k + 1;
-        } else if (k + 1 > cv.cur->mx_pairs) {
-            cv.cur->mx_pairs = k + 1;
-        }
+        int *own = cv.cur == NULL ? cv.mx_main : cv.cur->mx_pairs;
+
+        if (k + 1 > own[isint])
+            own[isint] = k + 1;
     }
-    a = sfmt("__mxa%d", k);
-    b = sfmt("__mxb%d", k);
+    a = sfmt(isint ? "__mxia%d" : "__mxa%d", k);
+    b = sfmt(isint ? "__mxib%d" : "__mxb%d", k);
     cur = sfmt("(%s = %s", a, fs[0]);
     for (j = 1; j < n; j++) {
         cur = sfmt("%s, %s = %s", cur, b, fs[j]);
         cur = sfmt("%s, %s = %s %s %s ? %s : %s", cur, a, b, cop, a, b, a);
     }
-    return mkval(sfmt("%s, %s)", cur, a), TY_F);
+    return mkval(sfmt("%s, %s)", cur, a), ty);
 }
 
 /* The Python's f(k)/n(k)/s(k) closures over (up, args). */
@@ -331,14 +410,8 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         return mkval("mm_rnd()", TY_F);
     if (strcmp(up, "PI") == 0)
         return mkval("3.14159265358979323846", TY_F);
-    if (strcmp(up, "MAX") == 0 || strcmp(up, "MIN") == 0) {
-        const char *fs[MAXARGS];
-        int k;
-
-        for (k = 0; k < nargs; k++)
-            fs[k] = as_flt(args[k]);
-        return max_min(strcmp(up, "MAX") == 0, fs, nargs);
-    }
+    if (strcmp(up, "MAX") == 0 || strcmp(up, "MIN") == 0)
+        return max_min(strcmp(up, "MAX") == 0, args, nargs);
     if (strcmp(up, "BIT") == 0) {
         const char *a0 = n(0);
         const char *a1 = n(1);

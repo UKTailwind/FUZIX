@@ -883,8 +883,10 @@ void conv_write(FILE *f)
     else
         fprintf(f, "int main(void)\n{\n");
     fprintf(f, "    unsigned __mark = mm_mark(); (void)__mark;\n");
-    for (k = 0; k < cv.mx_main; k++)
+    for (k = 0; k < cv.mx_main[0]; k++)
         fprintf(f, "    MMFLOAT __mxa%d, __mxb%d;   /* MAX/MIN */\n", k, k);
+    for (k = 0; k < cv.mx_main[1]; k++)
+        fprintf(f, "    MMINTEGER __mxia%d, __mxib%d;   /* MAX/MIN */\n", k, k);
     /* Fonts first, and here rather than where the block sits: the
        interpreter binds them at LOAD, so a program may select font 10
        a thousand lines above its DefineFont. */

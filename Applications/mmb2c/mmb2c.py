@@ -719,7 +719,7 @@ class Routine(object):
         self.statics = []         # list of Sym (subset of locals)
         self.heap_locals = False  # has LOCAL arrays or strings, so its
                                   # invocations carry a heap block
-        self.mx_pairs = 0         # MAX/MIN temporary pairs (max_min)
+        self.mx_pairs = [0, 0]    # MAX/MIN temporary pairs, float/integer
         self.line = 0
         self.gtouch = {}          # global name -> first line touched here
 
@@ -803,19 +803,53 @@ def has_call(text):
     return False
 
 
+def int_literal(code):
+    """The value of an integer literal's text - 5LL, (5LL), (-(5LL)) -
+    or None for anything else."""
+    neg = False
+    while True:
+        while len(code) >= 2 and code[0] == '(' and code[-1] == ')':
+            depth = 0
+            for c in code[1:-1]:
+                if c == '(':
+                    depth += 1
+                elif c == ')':
+                    depth -= 1
+                    if depth < 0:
+                        break
+            if depth != 0:
+                break
+            code = code[1:-1]
+        if code[:1] != '-':
+            break
+        neg = not neg
+        code = code[1:]
+    digits = code[:-2]
+    if code[-2:] != 'LL' or not digits or len(digits) > 18 \
+            or [c for c in digits if not is_digit(c)]:
+        return None
+    v = int(digits)
+    return -v if neg else v
+
+
 def mx_height(text):
-    """1 + the highest MAX/MIN temporary pair the text uses; 0 for none."""
+    """1 + the highest MAX/MIN temporary pair the text uses, float
+    (__mxaN) or integer (__mxiaN); 0 for none."""
     h = 0
-    i = text.find('__mxa')
+    i = text.find('__mx')
     while i >= 0:
-        j = i + 5
-        n = 0
-        while j < len(text) and is_digit(text[j]):
-            n = n * 10 + ord(text[j]) - 48
+        j = i + 4
+        if text[j:j + 1] == 'i':
             j += 1
-        if n + 1 > h:
-            h = n + 1
-        i = text.find('__mxa', j)
+        if text[j:j + 1] == 'a' and is_digit(text[j + 1:j + 2]):
+            j += 1
+            n = 0
+            while j < len(text) and is_digit(text[j]):
+                n = n * 10 + ord(text[j]) - 48
+                j += 1
+            if n + 1 > h:
+                h = n + 1
+        i = text.find('__mx', j)
     return h
 
 
@@ -916,7 +950,7 @@ class Conv(object):
         # per pass state
         self.mode = 'scan'
         self.cur = None               # current Routine or None
-        self.mx_main = 0              # MAX/MIN temporary pairs in main
+        self.mx_main = [0, 0]         # MAX/MIN temporary pairs in main
         self.out_main = []
         self.out_body = []
         self.out = None
@@ -1512,10 +1546,16 @@ class Conv(object):
             self.err("string used where a number is required")
         return v
 
-    def max_min(self, is_max, fs):
-        """MAX()/MIN() of the float texts fs, as fun_max_min: from the first
-        value, each one replaces it only when strictly greater (smaller),
-        so a tie keeps the earlier; the result is a float.
+    def max_min(self, is_max, args):
+        """MAX()/MIN() as fun_max_min: from the first value, each one
+        replaces it only when strictly greater (smaller), so a tie keeps
+        the earlier.
+
+        The reference's result is always a float.  Here it is an integer
+        when every argument is one, as NOT is: the same value, which shows
+        only past float precision, and as a float every integer clamp -
+        MAX(UH(0)-1, 0) in a game - paid two conversions; robots grew by
+        a block and no longer fitted beside its music player.
 
         Each argument is evaluated once and in order.  Repeating the text
         in nested ?: evaluated an argument up to 2^(n-1) times, so
@@ -1527,29 +1567,50 @@ class Conv(object):
         level: a MAX inside an argument takes the pair above the ones its
         own arguments use."""
         cop = '>' if is_max else '<'
+        isint = not [v for v in args if v[1] != TY_I]
+        ty = TY_I if isint else TY_F
+        if isint and not [v for v in args if int_literal(v[0]) is None]:
+            # all literals: the answer, so a CONST of it is a C constant
+            # cc1 can size an array with - it does not fold ?: there
+            best = int_literal(args[0][0])
+            for v in args[1:]:
+                n = int_literal(v[0])
+                if (n > best) if is_max else (n < best):
+                    best = n
+            return ('%dLL' % best if best >= 0 else '(-(%dLL))' % -best, TY_I)
+        fs = [v[0] if isint else self.as_flt(v) for v in args]
         if len(fs) <= 4 and not [f for f in fs if has_call(f)]:
             cur = fs[0]
             for o in fs[1:]:
                 cur = '((%s) %s (%s) ? (%s) : (%s))' % (o, cop, cur, o, cur)
-            return (cur, TY_F)
+            return (cur, ty)
         k = 0
         for f in fs:
             if mx_height(f) > k:
                 k = mx_height(f)
         if self.mode == 'scan':
-            if self.cur is None:
-                if k + 1 > self.mx_main:
-                    self.mx_main = k + 1
-            elif k + 1 > self.cur.mx_pairs:
-                self.cur.mx_pairs = k + 1
-        a = '__mxa%d' % k
-        b = '__mxb%d' % k
+            own = self.mx_main if self.cur is None else self.cur.mx_pairs
+            ix = 1 if isint else 0
+            if k + 1 > own[ix]:
+                own[ix] = k + 1
+        a = ('__mxia%d' if isint else '__mxa%d') % k
+        b = ('__mxib%d' if isint else '__mxb%d') % k
         parts = ['%s = %s' % (a, fs[0])]
         for o in fs[1:]:
             parts.append('%s = %s' % (b, o))
             parts.append('%s = %s %s %s ? %s : %s' % (a, b, cop, a, b, a))
         parts.append(a)
-        return ('(' + ', '.join(parts) + ')', TY_F)
+        return ('(' + ', '.join(parts) + ')', ty)
+
+    def mx_decls(self, pairs):
+        """The declarations of a routine's MAX/MIN temporaries."""
+        out = []
+        for k in range(pairs[0]):
+            out.append('MMFLOAT __mxa%d, __mxb%d;   /* MAX/MIN */' % (k, k))
+        for k in range(pairs[1]):
+            out.append('MMINTEGER __mxia%d, __mxib%d;   /* MAX/MIN */'
+                       % (k, k))
+        return out
 
     def expr(self):
         return self.e_logical()
@@ -2524,7 +2585,7 @@ class Conv(object):
         if up == 'PI':
             return ('3.14159265358979323846', TY_F)
         if up in ('MAX', 'MIN'):
-            return self.max_min(up == 'MAX', [self.as_flt(a) for a in args])
+            return self.max_min(up == 'MAX', args)
         if up == 'BIT':
             return ('(((%s) >> (%s)) & 1LL)' % (n(0), n(1)), TY_I)
         if up == 'TEMPR':
@@ -10028,8 +10089,8 @@ class Conv(object):
             if s.is_param:
                 continue
             self.emit_local_decl(s)
-        for k in range(r.mx_pairs):
-            self.emit('MMFLOAT __mxa%d, __mxb%d;   /* MAX/MIN */' % (k, k))
+        for ln in self.mx_decls(r.mx_pairs):
+            self.emit(ln)
         if r.is_func:
             if r.ty == TY_S:
                 self.emit('__ret[0] = 0; __ret[1] = 0;')
@@ -10775,8 +10836,8 @@ class Conv(object):
         else:
             wr('int main(void)\n{\n')
         wr('    unsigned __mark = mm_mark(); (void)__mark;\n')
-        for k in range(self.mx_main):
-            wr('    MMFLOAT __mxa%d, __mxb%d;   /* MAX/MIN */\n' % (k, k))
+        for ln in self.mx_decls(self.mx_main):
+            wr('    ' + ln + '\n')
         # Fonts first, and here rather than where the block sits: the
         # interpreter binds them at LOAD, so a program may select font
         # 10 a thousand lines above its DefineFont.

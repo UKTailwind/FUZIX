@@ -284,7 +284,7 @@ struct routine {
     struct gtouch *gtouch; int ngtouch, cgtouch; /* global -> first line */
     int heap_locals;            /* has LOCAL arrays or strings, so its
                                  * invocations carry a heap block */
-    int mx_pairs;               /* MAX/MIN temporary pairs (max_min) */
+    int mx_pairs[2];            /* MAX/MIN temporary pairs, float/integer */
 };
 
 /* One record per label name; the Python keeps six dicts keyed the same
@@ -376,7 +376,7 @@ struct conv {
     int opt_angle_seen, opt_angle_line;
     int mode;
     struct routine *cur;        /* NULL = main line */
-    int mx_main;                /* MAX/MIN temporary pairs in main */
+    int mx_main[2];             /* MAX/MIN temporary pairs in main */
     struct outbuf out_main, out_body;
     struct outbuf *out;
     int indent;

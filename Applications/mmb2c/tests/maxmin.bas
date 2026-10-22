@@ -1,8 +1,13 @@
-' MAX and MIN as fun_max_min: each argument evaluated once, in order,
-' as a float; the result is a float; a tie keeps the earlier value.
+' MAX and MIN as fun_max_min: each argument evaluated once, in order;
+' a tie keeps the earlier value.  The result is a float, as there, except
+' that integer arguments give an integer here (as NOT does) - the same
+' value, which shows only past float precision.
 Dim n%, order$
 Function F(x)
   n% = n% + 1 : order$ = order$ + Str$(x) : F = x
+End Function
+Function G%(x%)
+  n% = n% + 1 : order$ = order$ + Str$(x%) : G% = x%
 End Function
 Function R(d)
   ' frame-local temporaries: shared ones would come back 2, not 3
@@ -24,12 +29,19 @@ Print "once "; m; n%; " "; order$
 n% = 0 : order$ = ""
 m = Max(F(1), Min(F(5), F(4)), F(2))
 Print "nested "; m; n%; " "; order$
+n% = 0 : order$ = ""
+k% = Max(G%(4), Min(G%(9), G%(8)), G%(2))
+Print "integer "; k%; n%; " "; order$
+n% = 0 : order$ = ""
+m = Max(F(1), Max(G%(5), G%(6)))
+Print "mixed nest "; m; n%; " "; order$
 S
 Print "recursive "; R(3)
 Print "ten "; Max(1, 2, 3, 4, 5, 6, 7, 8, 9, 10); Min(5, 4, 3, 2, 1, 0, -1, -2, -3, -4)
 a% = 9007199254740993
 b% = Max(a%, 1)
-Print "float "; b%
+d% = Max(a%, 1.5)
+Print "exact "; b%; " float "; d%
 Const C = Max(3, 4)
 Dim z(C)
 Print "const "; Bound(z(), 1)
