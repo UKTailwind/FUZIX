@@ -155,7 +155,7 @@ static int has_call(const char *text)
 
 /* The value of an integer literal's text - 5LL, (5LL), (-(5LL)) - in
  * *out; 0 for anything else. */
-static int int_literal(const char *code, long long *out)
+int int_literal(const char *code, long long *out)
 {
     const char *s = code;
     const char *e = code + strlen(code);

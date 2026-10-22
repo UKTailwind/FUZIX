@@ -214,6 +214,9 @@ static void w_idiv(void)     { A = mm_idiv(LL(0), LL(2)); }
 static void w_mod(void)      { A = mm_mod(LL(0), LL(2)); }
 static void w_fdiv(void)     { A = dput(mm_fdiv(D(0), D(2))); }
 static void w_pow(void)      { A = dput(mm_pow(D(0), D(2))); }
+static void w_ipow(void)     { A = mm_ipow(LL(0), LL(2)); }
+static void w_ipowf(void)    { A = dput(mm_ipowf(LL(0), LL(2))); }
+static void w_ipows(void)    { A = mm_off(mm_ipows(LL(0), LL(2))); }
 static void w_sqr(void)      { A = dput(mm_sqr(D(0))); }
 static void w_log(void)      { A = dput(mm_log(D(0))); }
 static void w_asin(void)     { A = dput(mm_asin(D(0))); }
@@ -601,6 +604,9 @@ static const struct mmwrap {
 	{ "mm_mod",		w_mod },
 	{ "mm_fdiv",		w_fdiv },
 	{ "mm_pow",		w_pow },
+	{ "mm_ipow",		w_ipow },
+	{ "mm_ipowf",		w_ipowf },
+	{ "mm_ipows",		w_ipows },
 	{ "mm_sqr",		w_sqr },
 	{ "mm_log",		w_log },
 	{ "mm_asin",		w_asin },

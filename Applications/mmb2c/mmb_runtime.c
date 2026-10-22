@@ -830,6 +830,57 @@ MMFLOAT mm_fdiv(MMFLOAT a, MMFLOAT b)
 
 MMFLOAT mm_pow(MMFLOAT a, MMFLOAT b) { return pow(a, b); }
 
+/* ^ between two integers, as op_exp (Operators.c, c04dc39): a
+ * non-negative exponent by squaring in unsigned arithmetic, so overflow
+ * wraps exactly as the reference's does.  A negative one is pow()'s
+ * FLOAT there; the translator types this call as an integer, so here it
+ * is that float made an integer, as an integer assignment would make it -
+ * and the translator turns a whole mm_ipow taken as a float into
+ * mm_ipowf, and one PRINTed into mm_ipows, which give the float itself. */
+MMINTEGER mm_ipow(MMINTEGER a, MMINTEGER b)
+{
+    unsigned long long r = 1, x = (unsigned long long)a;
+    unsigned long long e = (unsigned long long)b;
+
+    if (b < 0)
+        return mm_toint(pow((MMFLOAT)a, (MMFLOAT)b));
+    while (e) {
+        if (e & 1)
+            r *= x;
+        x *= x;
+        e >>= 1;
+    }
+    return (MMINTEGER)r;
+}
+
+/* op_exp's answer where a float is wanted: the integer, or pow()'s float
+ * for a negative exponent - 10^e% is 0.001 for e% = -3, not 0. */
+MMFLOAT mm_ipowf(MMINTEGER a, MMINTEGER b)
+{
+    if (b < 0)
+        return pow((MMFLOAT)a, (MMFLOAT)b);
+    return (MMFLOAT)mm_ipow(a, b);
+}
+
+/* What PRINT shows of op_exp's answer: the integer, or for a negative
+ * exponent the float, each in PRINT's own format (mm_pr_i, mm_pr_f). */
+char *mm_ipows(MMINTEGER a, MMINTEGER b)
+{
+    char bf[MM_INTBUF + 48];
+    char *t = mm_tmp();
+
+    bf[0] = ' ';
+    if (b < 0) {
+        MMFLOAT v = pow((MMFLOAT)a, (MMFLOAT)b);
+        mm_float_to_str(bf + ((v >= 0) ? 1 : 0), v, 0, MM_AUTO_PRECISION, ' ');
+    } else {
+        MMINTEGER v = mm_ipow(a, b);
+        mm_int_to_str(bf + ((v >= 0) ? 1 : 0), (long long)v, 10);
+    }
+    mm_ssetc(t, bf);
+    return t;
+}
+
 /* Domain checks, all of them the firmware's own (Functions.c).  Without
    these SQR(-1) and LOG(0) quietly returned nan/-inf here and errored on
    a PicoMite - the divergence class that outranks a missing feature. */

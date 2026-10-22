@@ -501,7 +501,7 @@ void note_touch(const char *canon, struct sym *s)
 
 /* The argument text when code is exactly name(...) - the call is the
  * whole expression - else NULL.  Quoted C text is skipped. */
-static const char *whole_call(const char *code, const char *name)
+const char *whole_call(const char *code, const char *name)
 {
     size_t ln = strlen(name);
     size_t n = strlen(code);
@@ -564,7 +564,14 @@ const char *as_flt(struct val v)
     if (v.ty == TY_F)
         return v.code;
     if (v.ty == TY_I) {
-        const char *f = float_form_of_int_literal(v.code);
+        /* integer ^ integer where a float is wanted: op_exp's float for
+           a negative exponent, which the integer form cannot hold */
+        const char *a = whole_call(v.code, "mm_ipow");
+        const char *f;
+
+        if (a != NULL)
+            return sfmt("mm_ipowf(%s)", a);
+        f = float_form_of_int_literal(v.code);
         return f != NULL ? f : sfmt("(MMFLOAT)(%s)", v.code);
     }
     if (v.ty == TY_T)

@@ -856,6 +856,25 @@ def int_literal(code):
     return -v if neg else v
 
 
+def ipow_fold(b, e):
+    """b^e as op_exp computes it for integers - by squaring, wrapping at
+    64 bits - for a non-negative literal exponent; None when the answer
+    has no literal form (-2^63)."""
+    m = (1 << 64) - 1
+    r = 1
+    x = b & m
+    while e:
+        if e & 1:
+            r = (r * x) & m
+        x = (x * x) & m
+        e >>= 1
+    if r >= 1 << 63:
+        r -= 1 << 64
+    if r == -(1 << 63):
+        return None
+    return r
+
+
 def mx_height(text):
     """1 + the highest MAX/MIN temporary pair the text uses, float
     (__mxaN) or integer (__mxiaN); 0 for none."""
@@ -1420,6 +1439,11 @@ class Conv(object):
         if ty == TY_F:
             return code
         if ty == TY_I:
+            # integer ^ integer where a float is wanted: op_exp's float
+            # for a negative exponent, which the integer form cannot hold
+            a = whole_call(code, 'mm_ipow')
+            if a is not None:
+                return 'mm_ipowf(%s)' % a
             f = float_form_of_int_literal(code)
             return f if f is not None else '(MMFLOAT)(' + code + ')'
         if isinstance(ty, tuple):
@@ -1770,6 +1794,22 @@ class Conv(object):
         return v
 
     def pow_op(self, v, r):
+        # Integer ^ integer is an INTEGER in op_exp, by squaring and
+        # wrapping - unless the exponent is negative, when it is pow()'s
+        # float.  A negative literal exponent is known here, so that is
+        # a float; literals fold; anything else is mm_ipow, typed as an
+        # integer, and as_flt and PRINT turn it into the float when the
+        # exponent turns out negative at run time.
+        if v[1] == TY_I and r[1] == TY_I:
+            e = int_literal(r[0])
+            if e is None or e >= 0:
+                b = int_literal(v[0])
+                if b is not None and e is not None:
+                    n = ipow_fold(b, e)
+                    if n is not None:
+                        return ('%dLL' % n if n >= 0 else '(-(%dLL))' % -n,
+                                TY_I)
+                return ('mm_ipow(%s, %s)' % (v[0], r[0]), TY_I)
         return ('mm_pow(%s, %s)' % (self.as_flt(v), self.as_flt(r)), TY_F)
 
     # A prefix applies to the next value alone, as getvalue applies it:
@@ -7403,8 +7443,14 @@ class Conv(object):
                 continue
             v = self.expr()
             suppress_nl = False
+            pw = whole_call(v[0], 'mm_ipow') if v[1] == TY_I else None
             if v[1] == TY_S:
                 self.emit(self.prcall(chan, 's', v[0]))
+            elif pw is not None:
+                # integer ^ integer: PRINT shows op_exp's float when the
+                # exponent turns out negative, so the text is chosen then
+                self.tmp_used = True
+                self.emit(self.prcall(chan, 's', 'mm_ipows(%s)' % pw))
             elif v[1] == TY_I:
                 self.emit(self.prcall(chan, 'i', v[0]))
             else:

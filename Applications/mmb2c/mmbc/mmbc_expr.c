@@ -307,8 +307,47 @@ struct val e_pow(void)
     return v;
 }
 
+/* b^e as op_exp computes it for integers - by squaring, wrapping at 64
+ * bits - for a non-negative literal exponent; 0 when the answer has no
+ * literal form (-2^63). */
+static int ipow_fold(long long b, long long e, long long *out)
+{
+    unsigned long long r = 1, x = (unsigned long long)b;
+    unsigned long long n = (unsigned long long)e;
+
+    while (n) {
+        if (n & 1)
+            r *= x;
+        x *= x;
+        n >>= 1;
+    }
+    if (r == 0x8000000000000000ULL)
+        return 0;
+    *out = (long long)r;
+    return 1;
+}
+
+/* Integer ^ integer is an INTEGER in op_exp, by squaring and wrapping -
+ * unless the exponent is negative, when it is pow()'s float.  A negative
+ * literal exponent is known here, so that is a float; literals fold;
+ * anything else is mm_ipow, typed as an integer, and as_flt and PRINT
+ * turn it into the float when the exponent turns out negative at run
+ * time. */
 struct val pow_op(struct val v, struct val r)
 {
+    if (v.ty == TY_I && r.ty == TY_I) {
+        long long e, b, n;
+        int elit = int_literal(r.code, &e);
+
+        if (!elit || e >= 0) {
+            if (elit && int_literal(v.code, &b) && ipow_fold(b, e, &n)) {
+                if (n >= 0)
+                    return mkval(sfmt("%lldLL", n), TY_I);
+                return mkval(sfmt("(-(%lldLL))", -n), TY_I);
+            }
+            return mkval(sfmt("mm_ipow(%s, %s)", v.code, r.code), TY_I);
+        }
+    }
     return mkval(sfmt("mm_pow(%s, %s)", as_flt(v), as_flt(r)), TY_F);
 }
 

@@ -2669,6 +2669,7 @@ static void do_print(void)
     cv.pr_chan = chan;
     while (!stmt_end()) {
         struct val v;
+        const char *pw;
         if (accept_op(";")) {
             suppress_nl = 1;
             continue;
@@ -2710,12 +2711,19 @@ static void do_print(void)
         }
         v = expr();
         suppress_nl = 0;
-        if (v.ty == TY_S)
+        pw = v.ty == TY_I ? whole_call(v.code, "mm_ipow") : NULL;
+        if (v.ty == TY_S) {
             emit(prcall(chan, "s", v.code));
-        else if (v.ty == TY_I)
+        } else if (pw != NULL) {
+            /* integer ^ integer: PRINT shows op_exp's float when the
+               exponent turns out negative, so the text is chosen then */
+            cv.tmp_used = 1;
+            emit(prcall(chan, "s", sfmt("mm_ipows(%s)", pw)));
+        } else if (v.ty == TY_I) {
             emit(prcall(chan, "i", v.code));
-        else
+        } else {
             emit(prcall(chan, "f", v.code));
+        }
         last = last_line();
     }
     cv.pr_chan = NULL;

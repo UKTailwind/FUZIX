@@ -16,7 +16,9 @@ f = -(2^52 + 1)
 i = Int(f)
 Print "-(2^52+1): "; i
 
-big = 2^63
+' 2.0^63, a FLOAT: 2^63 of two integers is op_exp's integer power,
+' which wraps to -2^63 and fits
+big = 2.0^63
 ON ERROR SKIP 1
 i = CInt(big)
 Print "CINT(2^63): " MM.ERRMSG$

@@ -170,6 +170,11 @@ MMINTEGER mm_idiv (MMINTEGER a, MMINTEGER b);   /*  \   */
 MMINTEGER mm_mod  (MMINTEGER a, MMINTEGER b);   /* MOD  */
 MMFLOAT   mm_fdiv (MMFLOAT a, MMFLOAT b);       /*  /   */
 MMFLOAT   mm_pow  (MMFLOAT a, MMFLOAT b);       /*  ^   */
+/* integer ^ integer, op_exp: by squaring, wrapping; mm_ipowf where a
+   float is wanted and mm_ipows for PRINT give a negative exponent's float */
+MMINTEGER mm_ipow (MMINTEGER a, MMINTEGER b);
+MMFLOAT   mm_ipowf(MMINTEGER a, MMINTEGER b);
+char     *mm_ipows(MMINTEGER a, MMINTEGER b);
 /* the firmware's domain checks, not the C library's silent nan */
 MMFLOAT   mm_sqr  (MMFLOAT v);
 MMFLOAT   mm_log  (MMFLOAT v);

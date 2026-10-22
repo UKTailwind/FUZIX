@@ -542,6 +542,10 @@ struct sym *declare(const char *canon, int ty, const char *scope,
 struct sym *reference(const char *word, int as_array);
 void note_touch(const char *canon, struct sym *s);
 const char *as_int(struct val v);
+/* the argument text when code is exactly name(...), else NULL */
+const char *whole_call(const char *code, const char *name);
+/* the value of an integer literal's text (5LL, (-(5LL))) in *out; 0 if not */
+int int_literal(const char *code, long long *out);
 const char *as_flt(struct val v);
 const char *as_str(struct val v);
 struct val need_num(struct val v);
