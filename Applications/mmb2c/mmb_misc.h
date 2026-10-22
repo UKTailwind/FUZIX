@@ -217,10 +217,24 @@ MMG_FN int mm_in_mask(char c, const char *mask)
     return 0;
 }
 
-MMG_FN char *mm_trim(const char *src, const char *mask, int where)
+/* where$ is fun_trim's: its first character upper-cased, and only L, R or
+ * B, anything else "Invalid syntax" (1ee2feb, issue #76).  Lower case
+ * used to be ignored and any other letter trimmed nothing.  Taken as the
+ * string so a where$ that is an expression is evaluated once. */
+MMG_FN char *mm_trim(const char *src, const char *mask, const char *wh)
 {
     int len = mm_slen(src), start = 1, end = len;
+    int where = mm_slen(wh) ? (unsigned char)wh[1] : 0;
     char *t = mm_tmp();
+
+    if (where >= 'a' && where <= 'z')
+        where -= 32;
+    /* the temp in hand, not mm_ssink(): see the note at the top */
+    if (where != 'L' && where != 'R' && where != 'B') {
+        t[0] = 0;
+        t[1] = 0;
+        MM_RAISEV("Invalid syntax", t);
+    }
     if (where == 'L' || where == 'B')
         while (start <= end && mm_in_mask(src[start], mask)) start++;
     if (where == 'R' || where == 'B')

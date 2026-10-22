@@ -809,33 +809,36 @@ struct val builtin_raw(const char *up)
     if (strcmp(up, "TRIM$") == 0) {
         struct val src;
         const char *mask = "\"\\001\" \" \"";
-        const char *where = "'L'";
+        const char *where = "\"\\001\" \"L\"";
 
         expect_op("(");
         src = expr();
         if (src.ty != TY_S)
             cv_err("TRIM$() needs a string");
         if (accept_op(",")) {
-            struct val m = expr();
+            /* an empty slot keeps the default mask, as fun_trim's
+               `*argv[2]` test does: TRIM$(s$, , "R") */
+            if (!is_op(",", 0)) {
+                struct val m = expr();
 
-            if (m.ty != TY_S)
-                cv_err("TRIM$() mask must be a string");
-            mask = m.code;
+                if (m.ty != TY_S)
+                    cv_err("TRIM$() mask must be a string");
+                mask = m.code;
+            }
             if (accept_op(",")) {
                 struct tok *t = peek(0);
 
                 if (t != NULL && t->kind == T_ID
                     && (strcmp(t->up, "L") == 0 || strcmp(t->up, "R") == 0
                         || strcmp(t->up, "B") == 0)) {
-                    where = sfmt("'%s'", t->up);
+                    where = sfmt("\"\\001\" \"%s\"", t->up);
                     cv.i += 1;
                 } else {
                     struct val w = expr();
 
                     if (w.ty != TY_S)
                         cv_err("TRIM$() 'where' must be L, R or B");
-                    where = sfmt("(mm_slen(%s) ? %s[1] : 0)",
-                                 w.code, w.code);
+                    where = w.code;
                 }
             }
         }

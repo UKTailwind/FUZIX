@@ -2943,23 +2943,26 @@ class Conv(object):
             if src[1] != TY_S:
                 self.err("TRIM$() needs a string")
             mask = '"\\001" " "'
-            where = "'L'"
+            where = '"\\001" "L"'
             if self.accept_op(','):
-                m = self.expr()
-                if m[1] != TY_S:
-                    self.err("TRIM$() mask must be a string")
-                mask = m[0]
+                # an empty slot keeps the default mask, as fun_trim's
+                # `*argv[2]` test does: TRIM$(s$, , "R")
+                if not self.is_op(','):
+                    m = self.expr()
+                    if m[1] != TY_S:
+                        self.err("TRIM$() mask must be a string")
+                    mask = m[0]
                 if self.accept_op(','):
                     t = self.peek()
                     if t is not None and t[0] == T_ID \
                             and t[2] in ('L', 'R', 'B'):
-                        where = "'%s'" % t[2]
+                        where = '"\\001" "%s"' % t[2]
                         self.i += 1
                     else:
                         w = self.expr()
                         if w[1] != TY_S:
                             self.err("TRIM$() 'where' must be L, R or B")
-                        where = '(mm_slen(%s) ? %s[1] : 0)' % (w[0], w[0])
+                        where = w[0]
             self.expect_op(')')
             self.uses_misc = True
             return ('mm_trim(%s, %s, %s)' % (src[0], mask, where), TY_S)
