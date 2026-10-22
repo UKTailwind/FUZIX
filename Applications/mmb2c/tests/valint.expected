@@ -1,0 +1,12 @@
+exact  9007199254740993
+hex 7FFFFFFFFFFFFFFF
+round  2-3
+and  15
+big  1
+clamp -9223372036854775808
+space  0 16 42
+wrap -1
+bases  15 5 0 0
+float  1000 12 0 1 0.5
+sum  123.5
+cint  9007199254740992

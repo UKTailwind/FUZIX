@@ -972,26 +972,93 @@ MMINTEGER mm_instr(MMINTEGER start, const char *s, const char *pat)
     return 0;
 }
 
+/* The decimal half of StrVal's integer: C strtoll's rules written out -
+ * leading white space, a sign, digits, the answer pinned at the 64-bit
+ * limits on overflow, and *end left at the start when there are no
+ * digits.  Written here because the board's strtoll (bcrun's) skips only
+ * spaces and tabs and wraps, where the reference's newlib one clamps. */
+static MMINTEGER mm_strtoll10(const char *s, const char **end)
+{
+    const char *p = s;
+    unsigned long long v = 0, lim;
+    int neg = 0, over = 0;
+
+    while (*p == ' ' || (*p >= '\t' && *p <= '\r'))
+        p++;
+    if (*p == '+' || *p == '-')
+        neg = (*p++ == '-');
+    lim = neg ? 9223372036854775808ULL : 9223372036854775807ULL;
+    if (*p < '0' || *p > '9') {
+        *end = s;
+        return 0;
+    }
+    for (; *p >= '0' && *p <= '9'; p++) {
+        unsigned d = (unsigned)(*p - '0');
+        if (over || v > (lim - d) / 10)
+            over = 1;
+        else
+            v = v * 10 + d;
+    }
+    *end = p;
+    if (over)
+        v = lim;
+    return neg ? (MMINTEGER)(0 - v) : (MMINTEGER)v;
+}
+
+/* StrVal (Functions.c), exactly: &H, &O or &B as the very first character
+ * shifts its digits in - wrapping, as the reference's shifts do - and is
+ * an integer; anything else is read both by strtod and as a decimal
+ * integer, and is a float only when strtod read further.  Returns 1 for a
+ * float (in *f), 0 for an integer (in *i). */
+static int mm_strval(const char *p, MMFLOAT *f, MMINTEGER *i)
+{
+    unsigned long long u = 0;
+    char *t1;
+    const char *t2;
+
+    *f = 0;
+    *i = 0;
+    if (*p == '&') {
+        p++;
+        switch (toupper((unsigned char)*p++)) {
+        case 'H':
+            while (isxdigit((unsigned char)*p)) {
+                int c = toupper((unsigned char)*p++);
+                u = (u << 4) | (unsigned)(c >= 'A' ? c - 'A' + 10 : c - '0');
+            }
+            break;
+        case 'O':
+            while (*p >= '0' && *p <= '7')
+                u = (u << 3) | (unsigned)(*p++ - '0');
+            break;
+        case 'B':
+            while (*p == '0' || *p == '1')
+                u = (u << 1) | (unsigned)(*p++ - '0');
+            break;
+        }
+        *i = (MMINTEGER)u;
+        return 0;
+    }
+    *f = (MMFLOAT)strtod(p, &t1);
+    *i = mm_strtoll10(p, &t2);
+    return t1 > t2;
+}
+
 MMFLOAT mm_val(const char *s)
 {
-    const char *p = mm_cstr(s);
-    char *end;
-    double d;
-    while (*p == ' ' || *p == '\t') p++;
-    if (p[0] == '&') {
-        int base = 0;
-        char c = (char)toupper((unsigned char)p[1]);
-        if (c == 'H') base = 16;
-        else if (c == 'O') base = 8;
-        else if (c == 'B') base = 2;
-        if (base) {
-            unsigned long long u = strtoull(p + 2, &end, base);
-            return (MMFLOAT)(MMINTEGER)u;
-        }
-    }
-    d = strtod(p, &end);
-    if (end == p) return 0.0;
-    return (MMFLOAT)d;
+    MMFLOAT f;
+    MMINTEGER i;
+    return mm_strval(mm_cstr(s), &f, &i) ? f : (MMFLOAT)i;
+}
+
+/* VAL where an integer is wanted: an integer string exactly, as fun_val's
+ * T_INT reaches an integer there; a float one as an integer assignment
+ * makes it.  The translator calls this for VAL(...) taken as an integer. */
+MMINTEGER mm_vali(const char *s)
+{
+    MMFLOAT f;
+    MMINTEGER i;
+    return mm_strval(mm_cstr(s), &f, &i) ? mm_toint(f) : i;
 }
 
 char *mm_chr(MMINTEGER c)

@@ -803,6 +803,30 @@ def has_call(text):
     return False
 
 
+def whole_call(code, name):
+    """The argument text when code is exactly name(...) - the call is the
+    whole expression - else None.  Quoted C text is skipped."""
+    if not code.startswith(name + '(') or not code.endswith(')'):
+        return None
+    depth = 0
+    i = len(name)
+    n = len(code)
+    while i < n:
+        c = code[i]
+        if c == '"' or c == "'":
+            i += 1
+            while i < n and code[i] != c:
+                i += 2 if code[i] == '\\' else 1
+        elif c == '(':
+            depth += 1
+        elif c == ')':
+            depth -= 1
+            if depth == 0:
+                return code[len(name) + 1:i] if i == n - 1 else None
+        i += 1
+    return None
+
+
 def int_literal(code):
     """The value of an integer literal's text - 5LL, (5LL), (-(5LL)) -
     or None for anything else."""
@@ -1378,6 +1402,14 @@ class Conv(object):
         if ty == TY_I:
             return code
         if ty == TY_F:
+            # VAL taken as an integer.  fun_val's answer is an INTEGER for
+            # an integer string, so an integer target, an integer argument
+            # or an integer operator gets it exactly - through a float
+            # VAL("9007199254740993") lost its last digit and
+            # HEX$(VAL("&H7FFFFFFFFFFFFFFF")) was "Number too large".
+            a = whole_call(code, 'mm_val')
+            if a is not None:
+                return 'mm_vali(%s)' % a
             return 'mm_toint(' + code + ')'
         if isinstance(ty, tuple):
             self.err("a whole structure cannot be used in an expression")

@@ -499,12 +499,60 @@ void note_touch(const char *canon, struct sym *s)
 
 /* ---- value coercions ---- */
 
+/* The argument text when code is exactly name(...) - the call is the
+ * whole expression - else NULL.  Quoted C text is skipped. */
+static const char *whole_call(const char *code, const char *name)
+{
+    size_t ln = strlen(name);
+    size_t n = strlen(code);
+    size_t i;
+    int depth = 0;
+
+    if (strncmp(code, name, ln) != 0 || code[ln] != '(' || n < ln + 2
+        || code[n - 1] != ')')
+        return NULL;
+    for (i = ln; i < n; i++) {
+        char c = code[i];
+
+        if (c == '"' || c == '\'') {
+            i++;
+            while (i < n && code[i] != c)
+                i += code[i] == '\\' ? 2 : 1;
+        } else if (c == '(') {
+            depth++;
+        } else if (c == ')') {
+            depth--;
+            if (depth == 0) {
+                char *a;
+
+                if (i != n - 1)
+                    return NULL;
+                a = palloc(i - ln);
+                memcpy(a, code + ln + 1, i - ln - 1);
+                a[i - ln - 1] = 0;
+                return a;
+            }
+        }
+    }
+    return NULL;
+}
+
 const char *as_int(struct val v)
 {
     if (v.ty == TY_I)
         return v.code;
-    if (v.ty == TY_F)
+    if (v.ty == TY_F) {
+        /* VAL taken as an integer.  fun_val's answer is an INTEGER for an
+           integer string, so an integer target, an integer argument or an
+           integer operator gets it exactly - through a float
+           VAL("9007199254740993") lost its last digit and
+           HEX$(VAL("&H7FFFFFFFFFFFFFFF")) was "Number too large". */
+        const char *a = whole_call(v.code, "mm_val");
+
+        if (a != NULL)
+            return sfmt("mm_vali(%s)", a);
         return sfmt("mm_toint(%s)", v.code);
+    }
     if (v.ty == TY_T)
         cv_err("a whole structure cannot be used in an expression");
     cv_err("string used where a number is required");
