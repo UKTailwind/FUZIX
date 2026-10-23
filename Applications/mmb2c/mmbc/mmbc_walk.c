@@ -168,9 +168,8 @@ static int late_out(int where, struct outbuf *out_at_entry, int ind,
      * the failing name, as findvar does one name at a time: their
      * allocation and initialiser stay (FUZIX #23).  Cutting the whole
      * statement left them declared and never allocated. */
-    if (cv.late_cut >= 0 && cv.late_cut > where)
-        where = cv.late_cut;
-    out_at_entry->n = where;
+    out_at_entry->n = (cv.late_cut >= 0 && cv.late_cut > where)
+        ? cv.late_cut : where;
     cv.indent = ind;
     while (!stmt_end())
         cv.i++;
