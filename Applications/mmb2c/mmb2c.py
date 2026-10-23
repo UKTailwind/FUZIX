@@ -6576,6 +6576,26 @@ class Conv(object):
             self.err("only FRAMEBUFFER CREATE, LAYER, CLOSE, WRITE, COPY, "
                      "MERGE and WAIT are translated")
         _loadprog = None
+        if up in ('LOAD', 'SAVE') and self.is_kw('DATA', 1):
+            # LOAD DATA f$, addr      every byte of the file into memory
+            # SAVE DATA f$, addr, n   n bytes of memory out to the file
+            #
+            # FileIO.c's cmd_load and cmd_save.  The address is a machine
+            # address, as POKE's is: PEEK(VARADDR a()) names an array's
+            # storage, so a table of weights goes in in one statement.
+            self.i += 2
+            f = self.expr()
+            if f[1] != TY_S:
+                self.err("%s DATA needs a file name string" % up)
+            self.expect_op(',')
+            a = self.as_int(self.expr())
+            if up == 'LOAD':
+                self.emit('mm_load_data(%s, %s);' % (f[0], a))
+            else:
+                self.expect_op(',')
+                n = self.as_int(self.expr())
+                self.emit('mm_save_data(%s, %s, %s);' % (f[0], a, n))
+            return
         if up == 'LOAD':
             for _kw, _p in (('IMAGE', 'loadimage'), ('BMP', 'loadimage'),
                             ('JPG', 'loadjpg'), ('PNG', 'loadpng')):

@@ -648,6 +648,32 @@ void statement_inner(void)
         cv_err("only FRAMEBUFFER CREATE, LAYER, CLOSE, WRITE, COPY, "
                "MERGE and WAIT are translated");
     }
+    if ((strcmp(up, "LOAD") == 0 || strcmp(up, "SAVE") == 0)
+        && is_kw("DATA", 1)) {
+        /* LOAD DATA f$, addr      every byte of the file into memory
+           SAVE DATA f$, addr, n   n bytes of memory out to the file
+
+           FileIO.c's cmd_load and cmd_save.  The address is a machine
+           address, as POKE's is: PEEK(VARADDR a()) names an array's
+           storage, so a table of weights goes in in one statement. */
+        struct val f;
+        const char *a;
+        cv.i += 2;
+        f = expr();
+        if (f.ty != TY_S)
+            cv_err("%s DATA needs a file name string", up);
+        expect_op(",");
+        a = as_int(expr());
+        if (strcmp(up, "LOAD") == 0) {
+            emit(sfmt("mm_load_data(%s, %s);", f.code, a));
+        } else {
+            const char *n;
+            expect_op(",");
+            n = as_int(expr());
+            emit(sfmt("mm_save_data(%s, %s, %s);", f.code, a, n));
+        }
+        return;
+    }
     if (strcmp(up, "SYSTEM") == 0 || load_prog(up) != NULL
         || (strcmp(up, "SAVE") == 0 && is_kw("IMAGE", 1))) {
         /* SYSTEM prog$ [, arg ...]        run a program and wait

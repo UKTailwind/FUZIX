@@ -282,6 +282,8 @@ static void w_atof(void)     { A = dput(mm_atof(Ps(0))); }
 /* file management */
 static void w_kill(void)     { mm_kill(Ps(0)); A = 0; }
 static void w_rename(void)   { mm_rename(Ps(0), Ps(1)); A = 0; }
+static void w_load_data(void) { mm_load_data(Ps(0), LL(1)); A = 0; }
+static void w_save_data(void) { mm_save_data(Ps(0), LL(1), LL(3)); A = 0; }
 static void w_fcopy(void)    { mm_copy(Ps(0), Ps(1)); A = 0; }
 static void w_mkdir(void)    { mm_mkdir(Ps(0)); A = 0; }
 static void w_rmdir(void)    { mm_rmdir(Ps(0)); A = 0; }
@@ -664,6 +666,8 @@ static const struct mmwrap {
 	{ "mm_atof",		w_atof },
 	{ "mm_kill",		w_kill },
 	{ "mm_rename",		w_rename },
+	{ "mm_load_data",	w_load_data },
+	{ "mm_save_data",	w_save_data },
 	{ "mm_copy",		w_fcopy },
 	{ "mm_mkdir",		w_mkdir },
 	{ "mm_rmdir",		w_rmdir },

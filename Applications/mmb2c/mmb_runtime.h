@@ -269,6 +269,8 @@ MMFLOAT   mm_atof(const char *s);
 
 /* file management */
 void mm_kill  (const char *fname);
+void mm_load_data(const char *fname, MMINTEGER addr);   /* LOAD DATA */
+void mm_save_data(const char *fname, MMINTEGER addr, MMINTEGER len);
 void mm_rename(const char *from, const char *to);
 void mm_copy  (const char *from, const char *to);
 void mm_mkdir (const char *path);

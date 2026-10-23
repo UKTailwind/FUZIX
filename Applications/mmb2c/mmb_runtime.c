@@ -1963,6 +1963,45 @@ void mm_copy(const char *from, const char *to)
     fclose(b);
 }
 
+/* LOAD DATA f$, addr and SAVE DATA f$, addr, n - FileIO.c's cmd_load
+ * and cmd_save: every byte of the file into memory at addr, and n bytes
+ * of memory at addr out to the file.  The address is a machine address,
+ * as POKE's is (mmb_peek.h), and as there nothing checks it: it is how
+ * a program loads a table straight into PEEK(VARADDR a())'s array. */
+void mm_load_data(const char *fname, MMINTEGER addr)
+{
+    unsigned char *p = (unsigned char *)(uintptr_t)(uint64_t)addr;
+    FILE *f = fopen(mm_fname(fname), "rb");
+    size_t n;
+    if (!f) {
+        static char msg[MM_STRLEN + 32];
+        strcpy(msg, "Cannot open ");
+        strcat(msg, mm_cstr(fname));
+        MM_RAISE(msg);
+    }
+    while ((n = fread(p, 1, 4096, f)) > 0) p += n;
+    fclose(f);
+}
+
+void mm_save_data(const char *fname, MMINTEGER addr, MMINTEGER len)
+{
+    const unsigned char *p = (const unsigned char *)(uintptr_t)(uint64_t)addr;
+    FILE *f;
+    if (mm_range(len, 1, 0x7FFFFFFF)) return;
+    f = fopen(mm_fname(fname), "wb");
+    if (!f) {
+        static char msg[MM_STRLEN + 32];
+        strcpy(msg, "Cannot open ");
+        strcat(msg, mm_cstr(fname));
+        MM_RAISE(msg);
+    }
+    if (fwrite(p, 1, (size_t)len, f) != (size_t)len) {
+        fclose(f);
+        MM_RAISE("Cannot write to the file");
+    }
+    fclose(f);
+}
+
 /* Directories need more than ISO C.  Build with -DMM_NO_DIRS on a target
  * that has no filesystem layer and these become clean runtime errors. */
 #ifndef MM_NO_DIRS
