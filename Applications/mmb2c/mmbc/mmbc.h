@@ -190,6 +190,15 @@ struct sym {
        PEEK(VARADDR a$()) is entitled to that spacing.  0 = the default
        MM_STRSZ element, which carries a trailing NUL. */
     int alen;
+    /* A structure member standing in as an argument (arg_item): a
+       string one has alen, and no room for what a by-reference
+       parameter may write into it */
+    int member;
+    /* A parameter its routine writes - marked by the scan, so the emit
+       pass knows (see wrote) - and the by-reference parameters it is
+       passed on to, which may write it in their turn */
+    int written;
+    struct sym **passes; int npasses, cpasses;
     int where;                  /* source line first seen */
     int implied;
     int has_init;
@@ -541,6 +550,8 @@ struct sym *declare(const char *canon, int ty, const char *scope,
                     const char **arr_dims, int ndims, int is_static);
 struct sym *reference(const char *word, int as_array);
 void sub_fun_named(const char *canon);        /* "A sub/fun has the same name" */
+void wrote(struct sym *s);                    /* a parameter is written */
+int writes(struct sym *p, int depth);         /* ... or passed to one that is */
 void note_touch(const char *canon, struct sym *s);
 const char *as_int(struct val v);
 /* the argument text when code is exactly name(...), else NULL */
@@ -591,6 +602,9 @@ struct mpres member_path(const char *base, const char *tyname,
                          const char **parts, int nparts, int sfx);
 int struct_head(const char *word, struct shead *out); /* 1 = struct */
 const char *struct_base(struct sym *s);
+int struct_named(const char *word);
+int member_target(struct tok *t, struct mpres *out);  /* 1 = a struct's */
+int bare_member_arg(void);
 struct val member_value(struct mpres res);
 struct val struct_fn(void);
 void do_struct(void);

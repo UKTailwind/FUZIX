@@ -377,6 +377,32 @@ void sub_fun_named(const char *canon)
         cv_note("A sub/fun has the same name: %s", upper(canon));
 }
 
+/* s is written here.  For a parameter that decides how a string member
+   is passed to it: a copy is the member exactly while the routine only
+   reads it (pass_arg). */
+void wrote(struct sym *s)
+{
+    if (s != NULL && s->is_param)
+        s->written = 1;
+}
+
+/* Is parameter p written - by its routine, or by a by-reference
+   parameter it is passed on to?  The depth bound ends a cycle of
+   routines passing it round. */
+int writes(struct sym *p, int depth)
+{
+    int k;
+
+    if (p->written)
+        return 1;
+    if (depth >= 64 || p->npasses == 0)
+        return 0;
+    for (k = 0; k < p->npasses; k++)
+        if (writes(p->passes[k], depth + 1))
+            return 1;
+    return 0;
+}
+
 /* Explicit DIM / LOCAL / STATIC / CONST / parameter. */
 struct sym *declare(const char *canon, int ty, const char *scope,
                     const char **arr_dims, int ndims, int is_static)
@@ -467,6 +493,11 @@ struct sym *reference(const char *word, int as_array)
      * path above. */
     if (strncmp(canon, "mm.", 3) == 0)
         cv_err("%s is not translated", word);
+    /* A structure's member reached from a place that takes only plain
+     * variables: made implied, it was a FLOAT of its own called "p.x"
+     * and the member never changed */
+    if (strchr(canon, '.') != NULL && struct_named(canon))
+        cv_note("structure member %s is not translated here", word);
     if (as_array)
         cv_err("array '%s' used but never DIMensioned", canon);
     ty = (sfx != TY_NONE) ? sfx : cv.opt_default;

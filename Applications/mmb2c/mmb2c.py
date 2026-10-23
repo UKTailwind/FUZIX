@@ -601,7 +601,8 @@ class Sym(object):
     __slots__ = ('name', 'ty', 'acc', 'dims', 'is_const', 'is_array',
                  'is_param', 'byref', 'is_static', 'where', 'implied',
                  'declared_in', 'disp', 'has_init', 'stype', 'dynamic',
-                 'bacc', 'const_runtime', 'slen')
+                 'bacc', 'const_runtime', 'slen', 'member', 'written',
+                 'passes')
 
     def __init__(self, name, ty, acc):
         self.name = name          # canonical: lower case, no suffix
@@ -636,6 +637,15 @@ class Sym(object):
         # PEEK(VARADDR a$()) is entitled to that spacing.  None = the
         # default MM_STRSZ element, which carries a trailing NUL.
         self.slen = None
+        # A structure member standing in as an argument (arg_item): a
+        # string one has slen, and no room for what a by-reference
+        # parameter may write into it
+        self.member = False
+        # A parameter its routine writes - marked by the scan, so the
+        # emit pass knows (see wrote) - and the by-reference parameters
+        # it is passed on to, which may write it in their turn
+        self.written = False
+        self.passes = None
 
 
 class TypeMember(object):
@@ -1482,6 +1492,11 @@ class Conv(object):
         # they are matched in the builtin path above.
         if canon.startswith('mm.'):
             self.err("%s is not translated" % word)
+        # A structure's member reached from a place that takes only
+        # plain variables: made implied, it was a FLOAT of its own called
+        # "p.x" and the member never changed
+        if '.' in canon and self.struct_named(canon):
+            self.note("structure member %s is not translated here" % word)
         # not known -> implied global
         if as_array:
             self.err("array '%s' used but never DIMensioned" % canon)
@@ -1686,6 +1701,96 @@ class Conv(object):
                      "firmware would make it unreachable" % (canon, head))
         self.note_touch(head, s)
         return (s, canon.split('.')[1:], sfx)
+
+    def wrote(self, s):
+        """s is written here.  For a parameter that decides how a string
+        member is passed to it: a copy is the member exactly while the
+        routine only reads it (pass_arg)."""
+        if s is not None and s.is_param:
+            s.written = True
+
+    def writes(self, p, depth=0):
+        """Is parameter p written - by its routine, or by a by-reference
+        parameter it is passed on to?  The depth bound ends a cycle of
+        routines passing it round."""
+        if p.written:
+            return True
+        if depth >= 64 or not p.passes:
+            return False
+        for q in p.passes:
+            if self.writes(q, depth + 1):
+                return True
+        return False
+
+    def struct_named(self, word):
+        """Does this name start at a structure variable - s.x, or s itself
+        (s(i).x)?  Asked before anything is taken."""
+        s = self.lookup(split_suffix(word)[0].split('.', 1)[0])
+        return s is not None and s.stype is not None
+
+    def member_target(self, t):
+        """A structure member to be written - by READ, INPUT, a bus READ
+        list, a by-reference argument - as member_path's result, or None
+        when the name t (just taken) is no structure's.  do_assign's two
+        spellings: s.x as one token, s(i).x as an element then a '.'.
+        These places took "p.x" for a variable of its own, an implied
+        FLOAT, so the member never changed (85a90a6, 9749c83)."""
+        sh = self.struct_head(t[1])
+        if sh is not None:
+            s, parts, sfx = sh
+            return self.member_path(self.struct_base(s), s.stype, parts, sfx)
+        canon = split_suffix(t[1])[0]
+        s = self.lookup(canon)
+        if s is None or s.stype is None:
+            return None
+        self.note_touch(canon, s)
+        if self.is_op('('):
+            if not s.is_array:
+                self.err("'%s' is not an array" % canon)
+            base = self.index(s)
+        elif s.is_array:
+            return ('struct', s.acc, s.stype, False)
+        else:
+            base = s.acc
+        if not self.is_op('.'):
+            return ('struct', base, s.stype, False)
+        return self.member_path(base, s.stype, [], None)
+
+    def bare_member_arg(self):
+        """From here: a structure member and then the end of the argument
+        - s.x, s.a(i), s(i).x, s(i).in.y - scanned, not parsed, so
+        nothing is taken unless it is one."""
+        t = self.peek()
+        if t is None or t[0] != T_ID or not self.struct_named(t[1]):
+            return False
+        dotted = '.' in t[1]
+        k = 1
+        while True:
+            tk = self.peek(k)
+            if tk is not None and tk[0] == T_OP and tk[1] == '(':
+                depth = 0
+                while True:
+                    tk = self.peek(k)
+                    if tk is None:
+                        return False
+                    if tk[0] == T_OP and tk[1] == '(':
+                        depth += 1
+                    elif tk[0] == T_OP and tk[1] == ')':
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    k += 1
+                k += 1
+                tk = self.peek(k)
+            if tk is not None and tk[0] == T_OP and tk[1] == '.':
+                nx = self.peek(k + 1)
+                if nx is None or nx[0] != T_ID:
+                    return False
+                dotted = True
+                k += 2
+                continue
+            return dotted and (tk is None or (tk[0] == T_OP
+                                              and tk[1] in (',', ')', ':')))
 
     def struct_base(self, s):
         """The C lvalue for a struct variable, consuming an element
@@ -2341,6 +2446,22 @@ class Conv(object):
                     s = Sym(canon, self.cur.ty, self.retacc())
                     self.i += 1
                     return ('var', s, None)
+            # A structure member is a variable too, and findvar hands the
+            # callee a pointer to it with the member's own type
+            # (MMBasic.c:3390-3412).  It went down the scalar path below
+            # as an implied FLOAT called "p.x", so the callee wrote into
+            # that and the member never changed.
+            if self.bare_member_arg():
+                res = self.member_target(self.nxt())
+                if res[0] == 'struct':
+                    s = Sym(canon, TY_I, res[1])
+                    s.stype = res[2]
+                    return ('elem', s, (res[1], TY_I))
+                s = Sym(canon, TY_S if res[0] == 'str' else res[2], res[1])
+                s.member = True
+                if res[0] == 'str':
+                    s.slen = res[2]
+                return ('elem', s, (res[1], s.ty))
             if canon not in self.routines:
                 nxt1 = self.peek(1)
                 # whole array:  a()
@@ -2572,7 +2693,8 @@ class Conv(object):
                              % r.name)
                 return '&' + code
             self.err("'%s' expects a structure here" % r.name)
-        if a is not None and a[0] == 'var' and a[1].stype is not None:
+        if a is not None and a[0] in ('var', 'elem') \
+                and a[1].stype is not None:
             self.err("a structure cannot be passed to a plain "
                      "parameter of '%s'" % r.name)
         if p.is_array:
@@ -2620,6 +2742,12 @@ class Conv(object):
                 if a[1].ty != TY_S:
                     self.err("type mismatch in call to '%s'" % r.name)
                 if p.byref:
+                    # passed on by reference: written if p is (writes)
+                    if a[1].is_param:
+                        if a[1].passes is None:
+                            a[1].passes = []
+                        if p not in a[1].passes:
+                            a[1].passes.append(p)
                     return a[1].acc
                 self.tmp_used = True
                 return 'mm_scopy(%s)' % a[1].acc
@@ -2631,6 +2759,20 @@ class Conv(object):
                 if a[1].ty != TY_S:
                     self.err("type mismatch in call to '%s'" % r.name)
                 if p.byref:
+                    # A string member is its LENGTH and no more, and the
+                    # parameter may be given up to 255 characters.  A
+                    # copy is the member exactly while the routine only
+                    # reads it - the scan has seen every write by the
+                    # time the emit pass asks - and a routine that
+                    # writes it is refused, not let loose on a copy or
+                    # past the member's end.
+                    if a[1].member:
+                        if self.mode == 'emit' and self.writes(p):
+                            self.note("a string member cannot be passed "
+                                      "by reference to '%s' of '%s', "
+                                      "which writes it" % (p.name, r.name))
+                        self.tmp_used = True
+                        return 'mm_scopy(%s)' % a[2][0]
                     return a[2][0]
                 self.tmp_used = True
                 return 'mm_scopy(%s)' % a[2][0]
@@ -7258,6 +7400,7 @@ class Conv(object):
             if t2[0] != T_ID:
                 self.err("%s() assignment needs a variable" % up)
             s = self.reference(t2[1], self.is_op('('))
+            self.wrote(s)
             tgt = self.index(s) if s.is_array else s.acc
             ty = s.ty
             if up == 'BIT' and ty != TY_I:
@@ -8850,8 +8993,18 @@ class Conv(object):
                 self.err("'%s' is %s but used as %s"
                          % (canon, TYNAME[self.cur.ty], TYNAME[sfx]))
             return (self.retacc(), self.cur.ty, None)
+        # a structure member: a string one is LENGTH bytes with no NUL,
+        # the capacity a LENGTH array element has
+        res = self.member_target(t)
+        if res is not None:
+            if res[0] == 'num':
+                return (res[1], res[2], None)
+            if res[0] == 'str':
+                return (res[1], TY_S, res[2])
+            self.err("a whole structure cannot be written here")
         is_arr = self.is_op('(')
         sym = self.reference(t[1], False)
+        self.wrote(sym)
         if sym.is_const:
             self.err("'%s' is a CONST" % sym.name)
         if is_arr:
@@ -9017,7 +9170,7 @@ class Conv(object):
     def do_mid_assign(self):
         self.i += 1
         self.expect_op('(')
-        tgt = self.lvalue_from_here()
+        tgt = self.lvalue_from_here(True)
         self.expect_op(',')
         start = self.expr()
         num = None
@@ -9032,11 +9185,21 @@ class Conv(object):
                   % (tgt, self.as_int(start),
                      self.as_int(num) if num else '-1LL', v[0]))
 
-    def lvalue_from_here(self):
+    def lvalue_from_here(self, strings=False):
+        """A variable to write.  A string member only where it is written
+        in place within its own length - MID$()= (strings) - since the
+        LENGTH is not carried any further."""
         t = self.nxt()
         if t[0] != T_ID:
             self.err("variable expected")
+        res = self.member_target(t)
+        if res is not None:
+            if res[0] != 'num' and not (strings and res[0] == 'str'):
+                self.note("only a numeric structure member can be "
+                          "written here")
+            return res[1]
         s = self.reference(t[1], self.is_op('('))
+        self.wrote(s)
         if s.is_array:
             return self.index(s)
         return s.acc
@@ -9077,6 +9240,7 @@ class Conv(object):
 
         is_arr = self.is_op('(')
         s = self.reference(t[1], False)
+        self.wrote(s)
         if s.stype is not None:
             if is_arr:
                 if not s.is_array:
@@ -10172,8 +10336,13 @@ class Conv(object):
             self.emit('}')
             return
         t = self.peek()
-        if t is not None and t[0] == T_ID and not self.is_op(',', 1):
+        # a structure member goes to the list below, which takes a
+        # numeric one; a string member as the one destination is not
+        # translated (the reference bounds it by its own LENGTH)
+        if t is not None and t[0] == T_ID and not self.is_op(',', 1) \
+                and not self.struct_named(t[1]):
             s = self.reference(t[1], self.is_op('(', 1))
+            self.wrote(s)
             if s.ty == TY_S and not s.is_array:
                 self.i += 1
                 self.emit('{ unsigned int *__b = mmc_buf_for(%s);' % n)

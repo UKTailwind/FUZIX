@@ -56,7 +56,7 @@ static int looks_like_assignment(void);
 static void do_assign_or_call(void);
 static void do_callstmt(void);
 static void do_mid_assign(void);
-static const char *lvalue_from_here(void);
+static const char *lvalue_from_here(int strings);
 static void comms_tx(const char *what, const char *n,
                      const char *callfmt, const char *bytesfmt);
 static void comms_rx(const char *what, const char *n,
@@ -1827,7 +1827,7 @@ void statement_inner(void)
         reg = as_int(expr());
         expect_op(",");
         if (get) {
-            const char *tgt = lvalue_from_here();
+            const char *tgt = lvalue_from_here(0);
             emit(sfmt("%s = mm_rtcreg(%s, 0, 0);", tgt, reg));
         } else {
             emit(sfmt("mm_rtcreg(%s, %s, 1);", reg, as_int(expr())));
@@ -2224,6 +2224,7 @@ void statement_inner(void)
         if (t2->kind != T_ID)
             cv_err("%s() assignment needs a variable", up);
         s = reference(t2->text, is_op("(", 0));
+        wrote(s);
         tgt = s->is_array ? index_of(s) : s->acc;
         if (isbit && s->ty != TY_I)
             cv_err("BIT() assignment needs an integer variable");
@@ -3491,9 +3492,14 @@ static void comms_rx(const char *what, const char *n, const char *callfmt,
         return;
     }
     t = peek(0);
-    if (t != NULL && t->kind == T_ID && !is_op(",", 1)) {
+    /* a structure member goes to the list below, which takes a numeric
+       one; a string member as the one destination is not translated
+       (the reference bounds it by its own LENGTH) */
+    if (t != NULL && t->kind == T_ID && !is_op(",", 1)
+        && !struct_named(t->text)) {
         struct sym *s = reference(t->text, is_op("(", 1));
 
+        wrote(s);
         if (s->ty == TY_S && !s->is_array) {
             cv.i++;
             emit(sfmt("{ unsigned int *__b = mmc_buf_for(%s);", n));
@@ -3508,9 +3514,9 @@ static void comms_rx(const char *what, const char *n, const char *callfmt,
        COMMS_RXD_LIST, which was missing here entirely.  A single scalar
        is the same form with one element, which is also MMBasic's rule
        that the count must then be 1. */
-    tg[nt++] = lvalue_from_here();
+    tg[nt++] = lvalue_from_here(0);
     while (accept_op(",") && nt < 64)
-        tg[nt++] = lvalue_from_here();
+        tg[nt++] = lvalue_from_here(0);
     emit("{ unsigned int *__b;");
     emit(sfmt("  mmc_count(%s, %d);", n, nt));
     emit(sfmt("  __b = mmc_buf_for(%s);", n));
@@ -5309,8 +5315,29 @@ struct val input_target(int *cap)
         r.ty = cv.cur->ty;
         return r;
     }
+    /* a structure member: a string one is LENGTH bytes with no NUL, the
+       capacity a LENGTH array element has */
+    {
+        struct mpres res;
+
+        if (member_target(t, &res)) {
+            if (res.kind == MP_NUM) {
+                r.code = res.code;
+                r.ty = res.ty;
+                return r;
+            }
+            if (res.kind == MP_STR) {
+                r.code = res.code;
+                r.ty = TY_S;
+                *cap = (int)res.slen;
+                return r;
+            }
+            cv_err("a whole structure cannot be written here");
+        }
+    }
     is_arr = is_op("(", 0);
     sym = reference(t->text, 0);
+    wrote(sym);
     if (sym->is_const)
         cv_err("'%s' is a CONST", sym->name);
     if (is_arr) {
@@ -5534,7 +5561,7 @@ static void do_mid_assign(void)
 
     cv.i++;
     expect_op("(");
-    tgt = lvalue_from_here();
+    tgt = lvalue_from_here(1);
     expect_op(",");
     start = expr();
     if (accept_op(",")) {
@@ -5551,14 +5578,24 @@ static void do_mid_assign(void)
               v.code));
 }
 
-static const char *lvalue_from_here(void)
+/* A variable to write.  A string member only where it is written in
+   place within its own length - MID$()= (strings) - since the LENGTH is
+   not carried any further. */
+static const char *lvalue_from_here(int strings)
 {
     struct tok *t = nxt();
     struct sym *s;
+    struct mpres res;
 
     if (t->kind != T_ID)
         cv_err("variable expected");
+    if (member_target(t, &res)) {
+        if (res.kind != MP_NUM && !(strings && res.kind == MP_STR))
+            cv_note("only a numeric structure member can be written here");
+        return res.code;
+    }
     s = reference(t->text, is_op("(", 0));
+    wrote(s);
     if (s->is_array)
         return index_of(s);
     return s->acc;
@@ -5657,6 +5694,7 @@ static void do_assign(void)
 
     is_arr = is_op("(", 0);
     s = reference(t->text, 0);
+    wrote(s);
     if (s->stype != NULL) {
         if (is_arr) {
             if (!s->is_array)

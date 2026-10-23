@@ -936,6 +936,34 @@ void arg_item(struct arg *out)
             }
         }
         (void)sfx;
+        /* A structure member is a variable too, and findvar hands the
+           callee a pointer to it with the member's own type
+           (MMBasic.c:3390-3412).  It went down the scalar path below as
+           an implied FLOAT called "p.x", so the callee wrote into that
+           and the member never changed. */
+        if (bare_member_arg()) {
+            struct mpres res;
+            struct sym *s;
+
+            member_target(nxt(), &res);
+            if (res.kind == MP_STRUCT) {
+                s = sym_new(canon, TY_I, res.code);
+                s->stype = res.tyname;
+                out->kind = ARG_ELEM;
+                out->s = s;
+                out->v = mkval(res.code, TY_I);
+                return;
+            }
+            s = sym_new(canon, res.kind == MP_STR ? TY_S : res.ty,
+                        res.code);
+            s->member = 1;
+            if (res.kind == MP_STR)
+                s->alen = (int)res.slen;
+            out->kind = ARG_ELEM;
+            out->s = s;
+            out->v = mkval(res.code, s->ty);
+            return;
+        }
         if (routine_get(canon) == NULL) {
             struct tok *nxt1 = peek(1);
             int after_is_end;
@@ -1331,7 +1359,8 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r)
         }
         cv_err("'%s' expects a structure here", r->name);
     }
-    if (a != NULL && a->kind == ARG_VAR && a->s->stype != NULL)
+    if (a != NULL && (a->kind == ARG_VAR || a->kind == ARG_ELEM)
+        && a->s->stype != NULL)
         cv_err("a structure cannot be passed to a plain "
                "parameter of '%s'", r->name);
     if (p->is_array) {
@@ -1398,8 +1427,21 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r)
         if (a->kind == ARG_VAR) {
             if (a->s->ty != TY_S)
                 cv_err("type mismatch in call to '%s'", r->name);
-            if (p->byref)
+            if (p->byref) {
+                /* passed on by reference: written if p is (writes) */
+                if (a->s->is_param) {
+                    int k;
+
+                    for (k = 0; k < a->s->npasses; k++)
+                        if (a->s->passes[k] == p)
+                            break;
+                    if (k == a->s->npasses) {
+                        GROW(a->s->passes, a->s->npasses, a->s->cpasses);
+                        a->s->passes[a->s->npasses++] = p;
+                    }
+                }
                 return a->s->acc;
+            }
             cv.tmp_used = 1;
             return sfmt("mm_scopy(%s)", a->s->acc);
         }
@@ -1410,8 +1452,23 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r)
                it IS the element, by value a scratch copy. */
             if (a->s->ty != TY_S)
                 cv_err("type mismatch in call to '%s'", r->name);
-            if (p->byref)
+            if (p->byref) {
+                /* A string member is its LENGTH and no more, and the
+                   parameter may be given up to 255 characters.  A copy
+                   is the member exactly while the routine only reads it
+                   - the scan has seen every write by the time the emit
+                   pass asks - and a routine that writes it is refused,
+                   not let loose on a copy or past the member's end. */
+                if (a->s->member) {
+                    if (cv.mode == M_EMIT && writes(p, 0))
+                        cv_note("a string member cannot be passed by "
+                                "reference to '%s' of '%s', which "
+                                "writes it", p->name, r->name);
+                    cv.tmp_used = 1;
+                    return sfmt("mm_scopy(%s)", a->v.code);
+                }
                 return a->v.code;
+            }
             cv.tmp_used = 1;
             return sfmt("mm_scopy(%s)", a->v.code);
         }

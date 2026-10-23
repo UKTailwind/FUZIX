@@ -1,0 +1,9 @@
+ 5 2.5 abc
+ 7 xyz
+ 15 3.5 abc!
+ 16 8 1.75
+show abc!
+shout ABC!
+mid aXY!
+shout AXY!
+cat: String too long aXY!

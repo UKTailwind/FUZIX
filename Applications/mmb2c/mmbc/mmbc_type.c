@@ -291,6 +291,113 @@ const char *struct_base(struct sym *s)
     return s->acc;
 }
 
+/* Does this name start at a structure variable - s.x, or s itself
+ * (s(i).x)?  Asked before anything is taken. */
+int struct_named(const char *word)
+{
+    int sfx;
+    char *canon = split_suffix(word, &sfx);
+    char *dot = strchr(canon, '.');
+    struct sym *s;
+
+    if (dot != NULL)
+        *dot = 0;
+    s = sym_lookup(canon);
+    return s != NULL && s->stype != NULL;
+}
+
+/* A structure member to be written - by READ, INPUT, a bus READ list, a
+ * by-reference argument - as member_path's result; 0 when the name t
+ * (just taken) is no structure's.  do_assign's two spellings: s.x as one
+ * token, s(i).x as an element then a '.'.  These places took "p.x" for a
+ * variable of its own, an implied FLOAT, so the member never changed
+ * (85a90a6, 9749c83). */
+int member_target(struct tok *t, struct mpres *out)
+{
+    struct shead sh;
+    int sfx;
+    char *canon;
+    struct sym *s;
+    const char *base;
+
+    if (struct_head(t->text, &sh)) {
+        *out = member_path(struct_base(sh.s), sh.s->stype, sh.parts,
+                           sh.nparts, sh.sfx);
+        return 1;
+    }
+    canon = split_suffix(t->text, &sfx);
+    s = sym_lookup(canon);
+    if (s == NULL || s->stype == NULL)
+        return 0;
+    note_touch(canon, s);
+    memset(out, 0, sizeof(*out));
+    out->kind = MP_STRUCT;
+    out->tyname = s->stype;
+    if (is_op("(", 0)) {
+        if (!s->is_array)
+            cv_err("'%s' is not an array", canon);
+        base = index_of(s);
+    } else if (s->is_array) {
+        out->code = s->acc;
+        return 1;
+    } else {
+        base = s->acc;
+    }
+    if (!is_op(".", 0)) {
+        out->code = base;
+        return 1;
+    }
+    *out = member_path(base, s->stype, NULL, 0, TY_NONE);
+    return 1;
+}
+
+/* From here: a structure member and then the end of the argument - s.x,
+ * s.a(i), s(i).x, s(i).in.y - scanned, not parsed, so nothing is taken
+ * unless it is one. */
+int bare_member_arg(void)
+{
+    struct tok *t = peek(0), *tk, *nx;
+    int dotted, k, depth;
+
+    if (t == NULL || t->kind != T_ID || !struct_named(t->text))
+        return 0;
+    dotted = strchr(t->text, '.') != NULL;
+    k = 1;
+    for (;;) {
+        tk = peek(k);
+        if (tk != NULL && tk->kind == T_OP && strcmp(tk->text, "(") == 0) {
+            depth = 0;
+            for (;;) {
+                tk = peek(k);
+                if (tk == NULL)
+                    return 0;
+                if (tk->kind == T_OP && strcmp(tk->text, "(") == 0)
+                    depth++;
+                else if (tk->kind == T_OP && strcmp(tk->text, ")") == 0) {
+                    if (--depth == 0)
+                        break;
+                }
+                k++;
+            }
+            k++;
+            tk = peek(k);
+        }
+        if (tk != NULL && tk->kind == T_OP && strcmp(tk->text, ".") == 0) {
+            nx = peek(k + 1);
+            if (nx == NULL || nx->kind != T_ID)
+                return 0;
+            dotted = 1;
+            k += 2;
+            continue;
+        }
+        return dotted && (tk == NULL
+                          || (tk->kind == T_OP
+                              && (strcmp(tk->text, ",") == 0
+                                  || strcmp(tk->text, ")") == 0
+                                  || strcmp(tk->text, ":") == 0)));
+    }
+}
+
 /* member_path result -> an expression (code, ty).  A string member is
  * copied to a scratch temp: member strings have no trailing NUL (the
  * firmware's layout has no room for one), and the copy restores the
