@@ -876,22 +876,32 @@ any other command.
 `mmbc` reports what it could not translate, by line, and carries on:
 
 ```
-# mmbc gpio.bas
+# mmbc gui.bas
 2 line(s) could not be translated and were commented out:
-  line 2: expected '='
-  line 3: 'pin' is not an array
-wrote gpio.c
+  line 2: syntax error (expected '=')
+      GUI BUTTON 1 , "OK" , 10 , 10 , 60 , 30
+  line 3: syntax error (expected '=')
+      Turtle Forward 10
+wrote gui.c
 ```
 
-The reasons are the translator's own — it reads `SetPin GP1, DOUT` as
+The reasons are the translator's own — it reads `GUI BUTTON 1, ...` as
 far as it can and then says what it wanted to see — so they name the
 symptom rather than the statement. The lines themselves appear in the
 C as comments, with the original text, which is the quickest way to
 see what was dropped:
 
 ```
-    /*     SetPin GP1 , DOUT */
+    /* MMBASIC line 2 not translated: syntax error (expected '=') */
+    /*     GUI BUTTON 1 , "OK" , 10 , 10 , 60 , 30 */
 ```
+
+What is reported here is only what the translator cannot express.  An
+error the interpreter raises when a line *runs* - a `GOTO` to a label
+the program does not have, a variable name over 31 characters, a
+`FUNCTION` used as a command - is raised when the translated line runs,
+with the interpreter's message, so a program that never reaches the
+line never sees it, as on a PicoMite.
 
 The translation still happens and everything else works. `--strict`
 stops on the first such line instead, and `--report` lists them again
@@ -2293,8 +2303,8 @@ END SUB
 
 SETTICK 100, Every100          ' every 100 ms
 SETTICK 100, Every100, 2       ' timer 2 of 4
-SETTICK PAUSE, 2               ' freeze it where it stands
-SETTICK RESUME, 2
+SETTICK PAUSE, Every100, 2     ' freeze it where it stands
+SETTICK RESUME, Every100, 2
 SETTICK 0, 0, 2                ' off
 ```
 
@@ -2492,9 +2502,13 @@ namespace can become a variable now.
 
 ## `OPTION` {#option}
 
-Seven `OPTION` statements are translated, and they mean what they mean
+Eight `OPTION` statements are translated, and they mean what they mean
 in MMBasic: `BASE`, `DEFAULT`, `EXPLICIT`, `ANGLE`, `CONSOLE`, `ESCAPE`,
-and `UDP`/`TCP SERVER PORT`.
+`UDP`/`TCP SERVER PORT`, and `SYMBOLS OFF`.  `OPTION SYMBOLS OFF` is a
+V7 interpreter's switch for its symbol table and means nothing to a
+translated program, so at the top of a program it is accepted and does
+nothing; anywhere else it is the interpreter's "Must be at the top of
+the program" when the line runs.
 
 **`OPTION ANGLE DEGREES` makes `SIN`, `COS` and `TAN` take degrees and
 `ATN`, `ATAN2`, `ASIN` and `ACOS` return them**, exactly as the
@@ -3100,9 +3114,10 @@ with a literal count, tightly around the fallible statement, and keep
 than one `IGNORE`. One care with `SKIP` in a compiled program: the
 interpreter's count follows execution into a called SUB, statement by
 statement, while the compiled window covers the statements *written*
-after the `ON ERROR SKIP` (plus one for each routine entered) — a
-skip that relies on being consumed deep inside a callee's arithmetic
-behaves like the interpreter only under `IGNORE`. Runtime command
+after the `ON ERROR SKIP` (plus one for each SUB entered; a
+`FUNCTION`'s statements, a level deeper, are not counted by either) — a
+skip that relies on being consumed deep inside a callee behaves like the
+interpreter only under `IGNORE`. Runtime command
 errors — a `Blit Close` on nothing, a missing file, an I2C device
 that does not answer — are trapped anywhere the count is armed, in
 either world.
@@ -4228,7 +4243,10 @@ MMBasic is a large language whose statements reach deep into one
 particular firmware, and a translator that emits portable C cannot
 follow all of it. Anything not listed here is reported by name, with
 its line number, and the translation continues - so you find out at
-translate time, not at run time.
+translate time, not at run time.  (The errors of the language itself -
+a label that is not there, a name too long, a `FUNCTION` used as a
+command - are the other way round: they happen when the line runs, as
+they do on a PicoMite.)
 
 ## Statements
 
@@ -4265,7 +4283,13 @@ translate time, not at run time.
 | `WHILE` | `WS2812` |  |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
-line numbers and labels, `REM` and `'` comments all work as expected.
+line numbers and labels, `REM` and `'` comments all work as expected,
+and so do `/* ... */` blocks, which open where a statement starts and
+end at a line that starts with `*/`, as the interpreter's tokeniser has
+them.  Lines starting with `#` are taken as CMM2 RUN's loader takes
+them: `#COMMENT START` to `#COMMENT END` is comment, `MMDEBUG`
+statements are dropped under the default `#MMDEBUG OFF`, and `#DEFINE`,
+`#INCLUDE` and `#MMDEBUG ON` are refused by name.
 
 ## Functions
 
@@ -4317,11 +4341,12 @@ Vector, matrix and signal:
 downward) and a confirm window of 1. The window is what rejects a
 single-sample spike: the crossing is only reported if the signal stays
 on the far side for that many samples. Two things about it are worth
-knowing before you use it. **What comes back is an offset from the
-first element, not a subscript** - under `OPTION BASE 1` you want
-`a(found + 1)`. And a crossing too near the end of the array to confirm
-**ends** the search rather than being skipped, so a late spike hides a
-real crossing after it. Both are the interpreter's behaviour.
+knowing before you use it. What comes back is a subscript, `OPTION
+BASE` included, so `a(found)` is the sample - as the V7 interpreter has
+it; earlier ones gave an offset from the first element. And a crossing
+too near the end of the array to confirm **ends** the search rather
+than being skipped, so a late spike hides a real crossing after it.
+That is the interpreter's behaviour too.
 
 Codecs: `MATH(BASE64 ENCODE|DECODE in$, out$)`, which returns the length
 and writes its answer into the second argument, and the four CRCs.
@@ -4409,18 +4434,19 @@ same two functions. **It is not a spelling of the rest**: `ARRAY SCALE`
 answers `Unknown command` on a real PicoMite, because `SCALE` and
 everything below it live only in `cmd_math`.
 
-Three of these have a detail that will bite a program written from the
-name alone, and all three are the interpreter's own:
+One of these has a detail that will bite a program written from the
+name alone, and it is the interpreter's own:
 
 * `MATH SHIFT`'s fourth argument is a **bare** `U`, not `"U"`. Quoted,
   a real PicoMite ignores it and gives you the arithmetic shift; we
   refuse the quoted form rather than do that quietly.
-* `MATH POWER` into an **integer** array rounds the exponent to a whole
-  number first, so `POWER a%(), 2.7, b%()` cubes. Into a float array it
-  does not.
-* `MATH WINDOW` into an **integer** array truncates toward zero, where
-  everything else that lands a float in an integer rounds: 1 to 5
-  windowed onto 0..10 gives `0 2 5 7 10`, not `0 3 5 8 10`.
+
+`MATH POWER` and `MATH WINDOW` into an **integer** array round the
+float answer once, as everything else that lands a float in an integer
+does: `POWER a%(), 2.7, b%()` raises to 2.7 and rounds, and 1 to 5
+windowed onto 0..10 gives `0 3 5 8 10`.  (Earlier interpreters rounded
+POWER's exponent and truncated WINDOW; V7 does not, and nor does this.)
+`MATH SCALE` by 1 copies an integer array exactly.
 
 ### Vectors, matrices and quaternions
 
@@ -4499,18 +4525,11 @@ arrays here, and this does not — both arrays must be the same type, the
 same rule `ARRAY ADD` already follows.
 
 The rest are not translated, and each says so by name rather than being
-mistaken for something else: the matrix operations (`M_MULT`,
-`M_INVERSE`, `M_TRANSPOSE`, `M_PRINT`), the vector ones (`V_MULT`,
-`V_CROSS`, `V_NORMALISE`, `V_ROTATE`, `V_PRINT`), the quaternions
-(`Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`),
-the complex arithmetic (`C_ADD`, `C_SUB`, `C_MUL`, `C_DIV`, `C_AND`,
-`C_OR`, `C_XOR`), `FFT`, `WINDOW`, `SINC`, `INTERPOLATE`, `POWER`,
-`SHIFT`, `PID`, `SENSORFUSION` and `AES128`.
-
-They are a coherent block of work rather than a scattering of gaps —
-most are pure arithmetic over arrays with no hardware in them, so they
-would go in as a header of static functions and cost nothing to a
-program that does not use them.
+mistaken for something else: of the statements, `AES128`, `CLAMP`,
+`FFT`, `INTERPOLATE`, `PID`, `SENSORFUSION` and `SINC`, and of the
+functions `MATH(CHI`, `CHI_P`, `CORREL`, `INVERSE`, `PHASE` and `PID`.
+`COVERAGE-STATUS.md` beside the translator counts them member by
+member, from the interpreter's own tables.
 
 ## Types and structure
 
@@ -4548,7 +4567,9 @@ are literal strings.
 Not translated (each says so rather than mistranslating):
 `STRUCT SORT/SAVE/LOAD/PRINT/EXTRACT/INSERT`, `STRUCT(FIND)`, a
 `FUNCTION` returning a structure, whole structure arrays as
-parameters, and initialisers on structure arrays. Assigning a whole
+parameters, initialisers on structure arrays, and a string member
+passed by reference to a routine that writes it (one that only reads
+it gets a copy). Assigning a whole
 structure into or out of a *nested* member is refused deliberately:
 the interpreter copies the outer type's size there and overruns
 memory, and a clean error beats reproducing that.
@@ -4579,17 +4600,25 @@ error is being skipped is abandoned where it failed: the assignment does
 not happen, the rest of the `PRINT` does not print, and execution
 resumes at the next statement — in the `SUB` it happened in, if that is
 where it was. The count works as it does there too, `SKIP n` covering
-the next n statements.
+the next n statements, and it is used up only at the level the `ON
+ERROR SKIP` ran at: a `FUNCTION` called in the protected statement
+runs a level deeper and does not spend it, and a count a `FUNCTION`
+sets for itself carries on in its caller when it returns.
 
 Two details that surprise people, both matching the interpreter. A
 `PRINT` that fails part way through prints **nothing at all** — not even
 the items before the failure — because the line is built whole and the
 error discards it. And calling a `SUB` spends skip count: the `SUB` line
 and any `LOCAL` are statements too, so `ON ERROR SKIP 2` before a call
-does not reach the third statement inside it.
+does not reach the third statement inside it.  A `FUNCTION`'s do not,
+for the reason above.
 
-Two limits worth knowing. A statement that jumps away (`GOTO`, `EXIT`)
-does not count against `SKIP n`, so a count that spans one runs one
+An assignment whose own subscript is out of range is abandoned too: the
+element is never written - nor is any other.  Below `OPTION BASE` the
+error is `Dimensions`, above the top `Index out of bounds`, as there.
+
+Two limits worth knowing. A statement that jumps away (`GOTO`, `EXIT
+FOR`, `EXIT DO`) does not count against `SKIP n`, so a count that spans one runs one
 statement further than it would on a PicoMite. And running out of memory
 ends the program whatever `ON ERROR` says — there is nothing sensible to
 carry on with, and a program limping along on a failed allocation would
@@ -4602,7 +4631,9 @@ has no equivalent, so `mmbc` refuses it by name rather than guessing.
 
 The checks are real work in real loops. With `ON ERROR` present, every
 float division whose divisor is not a nonzero literal becomes a runtime
-call that tests the divisor first, and `SQR`, `LOG`, `ASIN` and `ACOS`
+call that tests the divisor first, a float `+`, `-`, `*`, `/` or `^`
+that reaches infinity is the interpreter's `Overflow` (a division by a
+literal included), and `SQR`, `LOG`, `ASIN` and `ACOS`
 go through checked wrappers instead of straight to libm — that is what
 makes their errors trappable statements. Measured on the machine from a
 fresh boot: the grains benchmark, whose inner loop divides by a
@@ -4614,9 +4645,11 @@ program; they cost a comparison, not a call.
 
 Array subscripts are checked the same way. Where the checks are live,
 every subscript the program writes is tested against its own dimension,
-and one outside it is the PicoMite's `Index out of bounds`, including a
-subscript too large for 32 bits, which would otherwise wrap to a small
-one. Where they are not, a subscript is used as it stands, and one
+and one outside it is the PicoMite's error - `Dimensions` below `OPTION
+BASE`, `Index out of bounds` above the top, and for a structure's
+member array `Index out of bounds` either way - including a subscript
+too large for 32 bits, which would otherwise wrap to a small one. Where
+they are not, a subscript is used as it stands, and one
 outside the array reads or writes past it, a bug to find, as a divide by
 zero is. Checking every access was measured and set aside: it made the
 eclipse predictor 6% larger and 5% slower, and grew *PETSCII Robots* by
@@ -4851,8 +4884,7 @@ statements above assume.
 
 Also `PWM slice, freq, duty [, duty2]`
 with `PWM slice, OFF`, and `SERVO slice, position [, position2]` with
-`SERVO slice, OFF`; the frequency and counting modes of `SETPIN`, and
-`PWM SYNC`, are not. Interrupt handlers must be SUBs — MMBasic's label and
+`SERVO slice, OFF`; `PWM SYNC` is not. Interrupt handlers must be SUBs — MMBasic's label and
 line-number targets are refused, and with them `IRETURN`, which a SUB
 handler never needs.
 
@@ -4867,11 +4899,10 @@ with the poll between them, and the slice is sized from the shortest
 armed period: a slow tick still sleeps and costs nothing, a fast one
 spins as MMBasic does, and only while the program is pausing.
 
-Three divergences, all named where they are
+Two divergences, both named where they are
 described: `SETTICK` fires at the period asked for rather than MMBasic's
-period-plus-a-millisecond; the console is checked at most every 5 ms;
-and keys reach a program only when a line is complete, which is the tty
-driver's doing and limits `ON KEY` to command-at-a-time input.
+period-plus-a-millisecond, and the console is checked at most every
+5 ms.
 `ON PS2`, `INTERRUPT`, `PID` and `SENSORFUSION` have nothing to notify
 on this machine. The analogue pair need an ADC pin (GP40–GP46 here), and `AIN` uses
 MMBasic's own ten-sample sort-and-discard filter. `PIN()` returns a

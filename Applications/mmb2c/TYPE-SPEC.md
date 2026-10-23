@@ -93,6 +93,11 @@ Multi-dim member indices linearise exactly like ordinary arrays.
   BYVAL is ignored for structs; type indices must match.
 * FUNCTION f(...) AS T returns a struct via a caller-level temp —
   deferred in mmb2c slice A (refused with a message).
+* A whole struct array as a parameter is refused in mmb2c too.
+* A string member passed to a routine's by-reference parameter: the
+  routine gets a copy when it only reads the parameter, and is refused
+  when it writes it - the member is a bounded field the routine would
+  write past (mmb2c).
 
 ## STRUCT verbs (cmd_struct, Commands.c:8808-9881) — slice A scope
 

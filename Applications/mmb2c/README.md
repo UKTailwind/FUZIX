@@ -129,15 +129,17 @@ compares them over 4896 combinations of value, width, precision and pad
 character — currently zero mismatches.
 
 `PRINT`'s column tracking is the interpreter's too: 1-based, with a comma
-advancing to the next 14-column tab stop, which is what `TAB()` needs to
-land in the right place. `TAB()` is a string-valued function here exactly
-as it is in MMBasic, not a side effect of `PRINT`.
+advancing to the next 8-column stop, which is what `TAB()` needs to land in
+the right place, and each file number keeping its own column for `PRINT #n`.
+`TAB()` is a string-valued function here exactly as it is in MMBasic, not a
+side effect of `PRINT`.
 
 ---
 
 ## Currently translated
 
-`OPTION DEFAULT|EXPLICIT|BASE` · `DIM` / `LOCAL` / `STATIC` / `CONST`
+`OPTION DEFAULT|EXPLICIT|BASE`, and `OPTION SYMBOLS OFF` at the top of a
+program · `DIM` / `LOCAL` / `STATIC` / `CONST`
 (type prefix, `AS type`, suffixes, initialisers, arrays, 1-D initialiser
 lists) · assignment with or without `LET` · `MID$(...)=` ·
 `PRINT` with `;` `,` and `TAB()` · `IF/THEN/ELSEIF/ELSE/ENDIF`, block and
@@ -289,9 +291,14 @@ jumps to the test, which is exactly "skip to the end, then test".
 this translator's storage is static, so there is nothing to hand back.
 You get a warning saying so rather than a silent difference.
 
-**`ON ERROR`** accepts `ABORT` and `CLEAR` (the default behaviour) and
-rejects `IGNORE`, `SKIP` and `RESTART` with a clear message, because soft
-error recovery needs a `setjmp` pass that is not in yet.
+**`ON ERROR`** takes `ABORT`, `CLEAR`, `IGNORE` and `SKIP [n]`, with
+`MM.ERRNO` and `MM.ERRMSG$`; `RESTART` reboots the machine and is refused.
+`SKIP n` counts statements as the interpreter does, including where the
+count is used up: at the call depth the `ON ERROR SKIP` ran at, so the
+statements of a `SUB` it calls count and a `FUNCTION`'s do not.  An error
+the interpreter raises only when a line runs - a `GOTO` to no label, a name
+over 31 characters, a `FUNCTION` used as a command - is raised when the
+translated line runs, so a program that never reaches it never sees it.
 
 A label is only emitted into the C when something actually jumps to it,
 and the "label inside a block" warning only fires when a `GOTO` from
@@ -317,10 +324,10 @@ Two details from the manual that are easy to get backwards, and which
 according to `OPTION BASE`, while `LINSTR` and `LGETSTR$` are always
 1-based whatever the base is.
 
-One deliberate improvement: the manual says overflowing a long string is
-"undefined". Here it is a clean runtime error naming the operation, since
-silently scribbling past an array is the worst possible outcome on a
-microcontroller.
+The manual says overflowing a long string is "undefined"; the firmware
+checks, and so does this - with the firmware's own messages, `SETBYTE`'s
+position included - since silently scribbling past an array is the worst
+possible outcome on a microcontroller.
 
 **`GOSUB` / `RETURN`** — legacy, and the generated C is not pretty, but
 it is correct. Each `GOSUB` becomes `mm_gosub_push(id); goto L_target;`
@@ -366,9 +373,13 @@ start of a line followed by a colon (`Ping : Ping`) is *not* mistaken
 for a label: routine names are collected in a pre-scan before labels are
 resolved.
 
-Two constructs are rejected rather than mistranslated: a single-line
-`IF` that tries to open a multi-line block, and a numeric `GOTO` target
-that does not exist. A label placed *inside* a block gets a warning,
+A single-line `IF` that tries to open a multi-line block is rejected
+rather than mistranslated.  A `GOTO`, `GOSUB` or `RESTORE` to a label or
+line the program does not have is the interpreter's own error when the line
+runs - "Cannot find label", "Line number", or "Label too long" for a name of
+32 characters or more, which the tokeniser never takes for a label.  A line
+number that comes twice is allowed, and names the first.  A label placed
+*inside* a block gets a warning,
 since jumping to it from outside skips the block's set-up (`FOR` limits
 and the like) — the interpreter tolerates this, C does not.
 
@@ -397,24 +408,23 @@ reproduces the August 2017 eclipse to the second.
 
 ## Not yet
 
-Statements: `REDIM`, `OPTION ESCAPE` backslash
-escapes, multi-dimensional array parameters, `ON ERROR IGNORE|SKIP`, and
-the `LONGSTRING AES128` / `BASE64` members.  Of the structures feature,
-`STRUCT SORT/SAVE/LOAD/PRINT/EXTRACT/INSERT`, `STRUCT(FIND)`,
-struct-returning functions and struct-array parameters/initialisers
-are refused with messages; everything else in `TYPE-SPEC.md` is in.
+What is and is not translated, keyword by keyword, is `COVERAGE-STATUS.md`,
+which `fcc/mkstatus.py` generates from the translator's own tables - so it
+cannot flatter it - and `COVERAGE.md` triages every keyword in the manual.
+The lists that used to be here went stale as each item landed.
 
-Functions that need the Pico itself or the interpreter's own machinery,
-and which a plain C translation cannot honestly provide: `PORT
-PULSIN DISTANCE TEMPR SPI PIO DEVICE TOUCH CLICK SPRITE GETSCANLINE
-KEYDOWN GPS DRAW3D` (hardware), `JSON$` and the wildcard/bulk forms
-of `KILL` and `COPY`, `EVAL CALL PEEK STRUCT` (interpreter internals), and the array, matrix, complex-number, CRC and PID members of `MATH(...)`.
-(`PIN`, `PIXEL`, `MAP` and `INKEY$` used to be in this list; on the PC3
-they are translated — see "Currently translated" above.)
+Of the statements, the `LONGSTRING AES128` and `BASE64` members are not
+in.  Of the structures feature, `STRUCT SORT/SAVE/LOAD/PRINT/EXTRACT/INSERT`,
+`STRUCT(FIND)`, struct-returning functions, struct-array parameters and
+initialisers, and a string member passed by reference to a routine that
+writes it are refused with messages; everything else in `TYPE-SPEC.md` is
+in.
 
-`COVERAGE.md` triages every remaining keyword in the manual. Anything not
-recognised produces an error naming the line and the construct, rather
-than silently wrong C.
+Anything not recognised produces an error naming the line and the
+construct, rather than silently wrong C.  `#DEFINE` and `#INCLUDE` are
+refused the same way; the other `#` lines (`#COMMENT START/END`, `#MMDEBUG
+OFF`) and `/* ... */` blocks are handled as CMM2 RUN's loader and the
+tokeniser handle them.
 
 ---
 

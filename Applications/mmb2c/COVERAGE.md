@@ -12,11 +12,17 @@ the remainder is peripheral drivers this machine has no path to.
 A full re-review against the firmware's own keyword tables — including
 which build category every remaining keyword belongs in — is in
 `REVIEW-COVERAGE-2026-08-07.md`, which supersedes the triage below where
-they disagree.
+they disagree.  The current count, keyword by keyword, is
+`COVERAGE-STATUS.md`, generated from the translator's own tables by
+`fcc/mkstatus.py`; this file is the reasoning, and some of its "not yet"
+items have since landed (marked where they are known).
 
 `CHOICE` is already in, as of the built-ins round — `CHOICE(a=b, 4, 5)`
 compiles to a C ternary with the branch types checked, and the string form
-picks between two `char*`. So are `BIT`, `BYTE`, `BOUND`, `TRIM$`, `FIELD$`,
+is a copy of the chosen string, as `fun_ternary` makes it.  A CHOICE of an
+integer and a float keeps the chosen branch's own type where it shows -
+`PRINT`, `STR$` and an integer target - as the interpreter decides it when
+it runs.  So are `BIT`, `BYTE`, `BOUND`, `TRIM$`, `FIELD$`,
 `FORMAT$`, `RGB` and the date/time family.
 
 ---
@@ -51,12 +57,12 @@ ordinary BASIC program that currently fails outright.
 | feature | the catch |
 |---|---|
 | ~~**The `LONGSTRING` family**~~ **DONE** — `APPEND CLEAR CONCAT COPY LEFT MID RIGHT LOAD PRINT REPLACE RESIZE SETBYTE TRIM UCASE LCASE`, plus `LLEN LGETSTR$ LGETBYTE LINSTR LCOMPARE LINPUT` | Conceptually easy: a long string is just a byte buffer living inside an `INTEGER` array, which in C is a `MMINTEGER[]` we can alias to `char*`. About 20 small commands. This is what unlocks text longer than 255 characters, and `LONGSTRING PRINT #n` pairs with the file handling just added. ~250 lines. |
-| ~~**`TYPE` / structures**~~ **DONE** (2026-08-07) | The feared tokenizer change never happened: a dotted name is already one token, so the firmware's own rule — split at the first dot at *lookup* time, the prefix wins if it names a struct variable — needed no lexer change beyond `.` as an operator for `arr(i).member`.  The firmware's byte layout is reproduced exactly (TYPE-SPEC.md), member strings are bounded Pascal fields (`mm_ssetm`), structs live in the heap block, parameters pass by reference.  `STRUCT COPY/CLEAR/SWAP` and compile-time `STRUCT(SIZEOF/OFFSET/TYPE)` included; `SORT/SAVE/LOAD/PRINT/EXTRACT/INSERT/FIND`, struct-returning functions and struct-array parameters/initialisers are refused with messages, as are the interpreter's two nested-member-copy overrun defects. |
+| ~~**`TYPE` / structures**~~ **DONE** (2026-08-07) | The feared tokenizer change never happened: a dotted name is already one token, so the firmware's own rule — split at the first dot at *lookup* time, the prefix wins if it names a struct variable — needed no lexer change beyond `.` as an operator for `arr(i).member`.  The firmware's byte layout is reproduced exactly (TYPE-SPEC.md), member strings are bounded Pascal fields (`mm_ssetm`), structs live in the heap block, parameters pass by reference.  `STRUCT COPY/CLEAR/SWAP` and compile-time `STRUCT(SIZEOF/OFFSET/TYPE)` included; `SORT/SAVE/LOAD/PRINT/EXTRACT/INSERT/FIND`, struct-returning functions, struct-array parameters/initialisers and a string member passed by reference to a routine that writes it are refused with messages, as are the interpreter's two nested-member-copy overrun defects. |
 | ~~**`GOSUB` / `RETURN`, `ON nbr GOSUB`**~~ **DONE** (cross-function GOSUB refused) | Needs a return-address stack: push an id, `goto` the label, and at `RETURN` a `switch` on the top of stack jumps back. Mechanical but ugly generated C. The manual itself calls `GOSUB` legacy and recommends `SUB`, so this is for old programs only. |
-| **`REDIM [PRESERVE]`** | Requires heap-allocated arrays instead of the current static ones — a genuine change to the array model, and it would put `malloc` into generated code that currently has none. Worth doing only if you actually use it. |
-| **`MATH` matrix and vector** — `M_MULT M_INVERSE M_TRANSPOSE M_DETERMINANT V_CROSS V_NORMALISE MAGNITUDE DOTPRODUCT CORREL CHI CROSSING`, plus `MATH CRC` and `BASE64` | Pure arithmetic, no platform dependency. Each is small; the set is large. Good candidates to add on demand rather than all at once. |
-| **`ARRAY SLICE` / `ARRAY INSERT`, `MATH C_*`** | Index arithmetic over known dimensions. Mechanical. |
-| ~~**`INKEY$`**~~ **DONE** (`mm_inkey()`, termios-guarded, returns MMBasic's key codes) · **`KEYDOWN`** | `KEYDOWN` needs a key-state table from the kernel, which INKEY$'s one-byte read does not provide — a small kernel ioctl plus a wrapper when wanted. |
+| ~~**`REDIM [PRESERVE]`**~~ **DONE** | Requires heap-allocated arrays instead of the current static ones — a genuine change to the array model, and it would put `malloc` into generated code that currently has none. Worth doing only if you actually use it. |
+| ~~**`MATH` matrix and vector**~~ **mostly DONE** (the members still out are in `COVERAGE-STATUS.md`'s MATH section) — `M_MULT M_INVERSE M_TRANSPOSE M_DETERMINANT V_CROSS V_NORMALISE MAGNITUDE DOTPRODUCT CORREL CHI CROSSING`, plus `MATH CRC` and `BASE64` | Pure arithmetic, no platform dependency. Each is small; the set is large. Good candidates to add on demand rather than all at once. |
+| ~~**`ARRAY SLICE` / `ARRAY INSERT`, `MATH C_*`**~~ **DONE** | Index arithmetic over known dimensions. Mechanical. |
+| ~~**`INKEY$`**~~ **DONE** (`mm_inkey()`, termios-guarded, returns MMBasic's key codes) · ~~**`KEYDOWN`**~~ **DONE** (`mm_keydown()`) | `KEYDOWN` needs a key-state table from the kernel, which INKEY$'s one-byte read does not provide — a small kernel ioctl plus a wrapper when wanted. |
 | ~~**`ON ERROR SKIP/IGNORE`, `MM.ERRNO`, `MM.ERRMSG$`**~~ **DONE** | It did get its own pass, and it did touch everything. The checked-flag route rather than `setjmp`: generated code binds a two-int state (`mm_err_bind`), and the translator emits arithmetic checks *only* into programs that actually trap, so a program that never says `ON ERROR` pays nothing — that gating was worth 11.9% on the benchmark. `tests/onerror.bas` covers it. |
 
 ---
@@ -278,6 +284,9 @@ would be worse than the current clear error:
   for rather than assumed: the shortest armed tick period, or the time
   left on a running pulse.  A slow tick still sleeps and costs nothing;
   a fast one spins, exactly as MMBasic does, and only while pausing.
+  And a poll that ran a handler is followed by another, until none is
+  due, so every tick that came due during the wait is serviced, as
+  `cmd_pause`'s loop does (af131d3c5).
 
   Two things about this differ from MMBasic and are deliberate.
   **`PIN()` is a float in every mode** where MMBasic returns an integer
@@ -521,18 +530,14 @@ ARC PIXEL TEXT CLS` — and these are the gaps in them:
 * **`BLIT`, `BLIT MEMORY`** — DONE (PLAN-games.md Phase 1): the core
   six forms ship in `mmb_blit.h` over per-row `GFXIOC_BLIT`/`BLITRD`,
   board-verified; the file/flash-slot forms are Phase 2 of that plan.
-* **`SPRITE` family** and **`TILE`/`TILEMAP`** — large, and they lean on
-  BLIT, which now exists. PLAN-games.md Phase 3; `TILE`/`TILEMAP` stay
-  deferred there.
-* **`REDIM [PRESERVE]`** — needs heap-allocated arrays instead of the
-  current static ones, which puts `malloc` into generated code that has
-  none.
-* **The rest of `MATH`** — `M_MULT M_INVERSE M_TRANSPOSE M_DETERMINANT
-  V_CROSS V_NORMALISE MAGNITUDE DOTPRODUCT CORREL CHI CROSSING`, plus
-  `MATH CRC` and `BASE64`. Pure arithmetic, each small.
-* **`ARRAY SLICE`/`ARRAY INSERT`, `MATH C_*`** — index arithmetic.
-* **`KEYDOWN`** — needs a key-state table from the kernel; `INKEY$`'s
-  one-byte read cannot give it.
+* ~~**`SPRITE` family** and **`TILEMAP`**~~ **DONE** (PLAN-games.md
+  Phase 3); `TILE` stays deferred there.
+* ~~**`REDIM [PRESERVE]`**~~ **DONE**.
+* ~~**The rest of `MATH`**~~ **mostly DONE** — matrix, vector, `CROSSING`,
+  `MATH CRC` and `BASE64` are in; the members still out are in
+  `COVERAGE-STATUS.md`'s MATH section.
+* ~~**`ARRAY SLICE`/`ARRAY INSERT`, `MATH C_*`**~~ **DONE**.
+* ~~**`KEYDOWN`**~~ **DONE** — the kernel's key-state table, `mm_keydown()`.
 * **`GETSCANLINE`** — the kernel knows; a small ioctl.
 * **`DRAW3D`** and **`TURTLE`** — whole subsystems in MMBasic. Real
   work, no platform obstacle.

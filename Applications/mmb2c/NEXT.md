@@ -146,6 +146,8 @@ the source:
   instead of copying the silence.
 * **`MATH POWER` into an integer array rounds the exponent first**, so
   `POWER a%(), 2.7, b%()` cubes. Into a float array it does not.
+  *Superseded by V7 (35f9ff714): the exponent is used as written and
+  the result rounded once.*
 * The error wordings, which are not uniform: `SHIFT` raises
   `Size mismatch` and everything else `Array size mismatch`, because
   `cmd_math` uses `error()` for one and `StandardError(16)` for the
@@ -309,10 +311,12 @@ something in them that reading `MATHS.c` would have got wrong:
   that lands a float in an integer rounds. 1..5 windowed onto 0..10
   gives `0 2 5 7 10`, not `0 3 5 8 10`. `mm_toint` is the obvious thing
   to reach for and would have been wrong. The same truncation applies to
-  an integer range variable.
+  an integer range variable.  *Superseded by V7 (35f9ff714): WINDOW now
+  rounds, through `mm_toint`, and gives `0 3 5 8 10`.*
 * **`MATH(CROSSING)` returns an OFFSET, not a subscript** — it counts
   from the first element whatever `OPTION BASE` says, so under BASE 1 a
-  program wants `a(found + 1)`.
+  program wants `a(found + 1)`.  *Superseded by V7 (35f9ff714): it
+  returns a subscript, OPTION BASE included.*
 * **A crossing too near the end to confirm ENDS the search** rather than
   being skipped: the reference `break`s there, so a late spike hides a
   real crossing after it. `cross cf4` in the test is that case.

@@ -118,6 +118,10 @@ CAT = {
     # in category 2 so that "moderate work, real value" keeps meaning
     # "somebody could pick this up tomorrow".
     "Turtle": 3,
+    # V7's radio statement: the PC3's radio carries the WEB family, so
+    # this is possible, but btstack, its flash and its RAM are a large
+    # piece of work - wanted only on a steer.
+    "Bluetooth": 3,
     "Draw3D": 3, "DRAW3D(": 3,
     # WS2812 and Bitstream sat here as the interrupts-off pair until
     # they SHIPPED on 2026-08-22 through PLAN-pioout's fixed PIO1
@@ -144,7 +148,7 @@ CAT = {
     "Ray": 4, "Ray(": 4,
     "Frame": 4, "Frame(": 4,
     "Chain": 4, "Configure": 4, "Help": 4, "Ram": 4,
-    "XModem": 4, "YModem": 4,
+    "XModem": 4, "YModem": 4, "ZModem": 4,
     "CMM2 Load": 4, "CMM2 Run": 4,
     "Update Firmware": 4,
     "Eval(": 4,                     # wants an interpreter at run time
