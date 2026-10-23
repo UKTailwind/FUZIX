@@ -15,7 +15,21 @@
  * because the runtime consults the armed count wherever it is raised. */
 int checks_on(void)
 {
-    return cv.onerror_global || cv.err_window > 0;
+    /* A routine a literal window can run is checked throughout, as the
+       window is (find_window_routines); asked often, so the answer for
+       the routine is kept. */
+    static const struct routine *last;
+    static int last_win;
+
+    if (cv.onerror_global || cv.err_window > 0)
+        return 1;
+    if (cv.cur == NULL)
+        return 0;
+    if (cv.cur != last) {
+        last = cv.cur;
+        last_win = window_routine(cv.cur->name);
+    }
+    return last_win;
 }
 
 /* Python str.strip() - scratch copy with surrounding whitespace gone. */

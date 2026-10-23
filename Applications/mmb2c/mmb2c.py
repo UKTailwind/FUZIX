@@ -1413,6 +1413,7 @@ class Conv(object):
         self.undecl_test = False      # ... in an ELSEIF's or a CASE's test
         self.uses_undecl = []         # the stand-ins' statics, in order
         self.uses_ixp = False         # a checked access of 2+ subscripts
+        self.window_routines = set()  # run by a literal SKIP window
         # ON ERROR IGNORE arms trapping for an unbounded stretch of the
         # program, so every statement pays the checked forms - set in
         # the scan pass, statements BEFORE the line included, because
@@ -1552,8 +1553,11 @@ class Conv(object):
         callee than the routine-entry decrements reach is not trapped
         where the interpreter would have counted its way to it; a
         runtime command error is trapped anywhere, because the runtime
-        consults the armed count wherever it is raised."""
-        return self.onerror_global or self.err_window > 0
+        consults the armed count wherever it is raised.  A routine a
+        literal window can run is checked throughout, as the window is
+        (find_window_routines)."""
+        return self.onerror_global or self.err_window > 0 \
+            or (self.cur is not None and self.cur.name in self.window_routines)
 
     def is_kw(self, s, k=0):
         t = self.peek(k)
@@ -4600,6 +4604,86 @@ class Conv(object):
                         else:
                             break
                     break
+        self.find_window_routines()
+
+    def find_window_routines(self):
+        """The SUBs and FUNCTIONs a literal ON ERROR SKIP window can run,
+        directly or through others.  Their statements are guarded as the
+        window's are (checks_on): a PRINT in one is all or nothing, a
+        statement that fails ends there and the next goes on, and a SUB's
+        count against the window as the interpreter counts them (FUZIX
+        #30).  Without guards a FUNCTION's PRINT left its first part on
+        the line, and after the error nothing in it ran.
+
+        Read off the tokens before anything else: the window is the rest
+        of the ON ERROR line and the next n lines, and a call is any
+        routine's name a body or the window mentions - as a word, or as
+        the string a CALL takes.  Too many, never too few: a guard where
+        none is needed only does what a statement's end does anyway."""
+        names = self.routine_names
+        edges = {}
+        seeds = set()
+        cur = None
+        window = 0
+        for idx in range(len(self.lines)):
+            try:
+                toks = tokenize(self.lines[idx], idx + 1)
+            except MMError:
+                continue
+            in_win = window > 0
+            if in_win:
+                window -= 1
+            k = 0
+            if k < len(toks) and toks[k][0] == T_NUM:
+                k += 1
+            if k + 1 < len(toks) and toks[k][0] == T_ID \
+                    and toks[k + 1] == (T_OP, ':', ':'):
+                k += 2
+            if k + 1 < len(toks) and toks[k][0] == T_ID \
+                    and toks[k][2] in ('SUB', 'FUNCTION') \
+                    and toks[k + 1][0] == T_ID:
+                cur = split_suffix(toks[k + 1][1])[0]
+            on_err = None
+            end = False
+            here = []
+            for j in range(len(toks)):
+                t = toks[j]
+                if t[0] == T_STR and t[1].lower() in names:
+                    here.append(t[1].lower())
+                if t[0] != T_ID:
+                    continue
+                nx = toks[j + 1] if j + 1 < len(toks) else None
+                if t[2] == 'END' and nx is not None and nx[0] == T_ID \
+                        and nx[2] in ('SUB', 'FUNCTION'):
+                    end = True
+                if t[2] == 'ON' and nx is not None and nx[0] == T_ID \
+                        and nx[2] == 'ERROR' and j + 2 < len(toks) \
+                        and toks[j + 2][0] == T_ID \
+                        and toks[j + 2][2] == 'SKIP':
+                    on_err = 1
+                    c = toks[j + 3] if j + 3 < len(toks) else None
+                    if c is not None and c[0] == T_NUM and c[2] == 'I' \
+                            and c[1].isdigit():
+                        on_err = int(c[1])
+                c = split_suffix(t[1])[0]
+                if c in names:
+                    here.append(c)
+            for c in here:
+                if cur is not None:
+                    edges.setdefault(cur, set()).add(c)
+                if in_win or on_err is not None:
+                    seeds.add(c)
+            if on_err is not None and on_err > window:
+                window = on_err
+            if end:
+                cur = None
+        todo = sorted(seeds)
+        while todo:
+            c = todo.pop()
+            if c in self.window_routines:
+                continue
+            self.window_routines.add(c)
+            todo.extend(sorted(edges.get(c, ())))
 
     def pass_fonts(self):
         """Collect every DefineFont ... End DefineFont before anything
