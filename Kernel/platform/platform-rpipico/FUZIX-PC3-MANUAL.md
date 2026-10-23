@@ -59,48 +59,75 @@ Headline specification as configured here:
 * MMBasic's own full-screen editor, `mmbedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
 
-## New in v0.27
+## New in v0.29
 
-**A program that would not start, and the knob that starts it.** A
-compiled program has to fit the process pool *beside the biggest other
-process* — usually the shell you typed the command into — so that the
-swapper can always bring it back in. When it does not, the kernel says
-so and names what it could not fit beside:
+Both halves have changed: flash the new `fuzix.uf2` and write the new
+card image.
 
-```
-exec: pid 27 needs 76 blocks, 74 free beside a 10-block neighbour (pool 84)
-```
+**Forty games on the card.** Upstream's recipe left all but one game
+off, because a plain Pico keeps its root filesystem in on-chip flash;
+the card has room for them. `/usr/games` now holds the Scott Adams and
+Brian Howarth adventures, Super Star Trek, Space Invaders, 2048,
+dopewars, Hamurabi and four games from Unix V7, and it is on `PATH`.
+**Zork I** comes with them: Microsoft released it under the MIT licence
+in 2025, so `zork1` plays Infocom's final release on the `z3` Z-machine
+player. See [Games](#games). Three were broken and are fixed: Wizard of
+Akyrz stopped on its first turn, Star Trek did not accept the `she` its
+own instructions give, and dopewars showed every price at a hundredth
+of its value and could never buy or sell Speed.
 
-That is not a report of free memory, and reading it as one sends you
-looking at the wrong number. `THUMB_BUDGET` is the answer: it caps the
-native code the compiler adds, so a large program keeps most of its
-speed and still loads. PETSCII Robots grew past the line and comes back
-under it with `THUMB_BUDGET=140000 cc robots.bas` — 209,022 bytes and
-76 blocks uncapped, 196,782 and under 74 with the cap. The knob is not
-new; having it written down is. See
-[When a program will not start](#thumb-budget), which also covers
-`THUMB_VERBOSE`, `BCODE_ONLY`, and what `exec ./prog.bc` is good for.
+**A BBC envelope with no pitch steps no longer hangs the machine.** An
+`ENVELOPE` with PN1–PN3 all zero — the usual amplitude-only shape — and
+auto-repeat on restarted its three empty pitch sections for ever,
+inside the audio interrupt, so the machine locked solid on the first
+note. PicoMite found it in its copy of this synthesiser; it is the one
+change to the kernel.
 
-**Every compiled program is smaller, because `main` now gives back its
-dead bytecode.** A function translated to native ARM has kept its
-original bytecode since the translator learned to reclaim it — except
-the main line, excluded by a comment that had outlived the code it
-described. `bcrun` has entered `main` natively for some time and
-handles a marker with no bytecode to fall back to, so the exclusion was
-costing every program its main line twice over: 5,428 bytes of code and
-two thirds of its relocations on Robots, and far more for a program
-whose work sits in one long main line rather than in `Sub`s.
+**`LOAD PNG` stays inside its buffers.** Two faults in the decoder,
+also found by PicoMite in its copy: a 15-bit code length, which is legal
+and which zlib writes for some images, wrote past an array on the
+stack; and a back-reference further back than the data decoded so far
+read from before the output buffer. The first kind of file now decodes
+correctly, and the second is refused with "the PNG could not be
+decoded" instead of drawing whatever memory it pointed at.
 
-**The translator lives in the tree.** `Applications/mmb2c` now holds
-the MMBasic-to-C translator, the Python reference implementation it is
-checked against byte for byte, the runtime headers and the BASIC
-corpus, and `Applications/CC` compiles `mmbc` and `bcrun` straight out
-of it. It used to be a separate repository whose files were copied
-across by two sync scripts, and a copy that went stale was invisible:
-everything built, every host gate passed, and the board ran code the
-source no longer described. There is one of each file now and nothing
-to re-run. Nothing about the machine changes; the binaries it produces
-are byte-identical.
+**`mmbc` follows PicoMite V7.** The translator has been brought up to
+date with the PicoMite firmware's changes through V7.00, and a review
+of it against the firmware closed twenty more differences. The ones a
+program can see:
+
+* operators take the firmware's precedence, left to right, so `2^3^2`
+  is 64; `NOT` and `INV` bind to the value after them; integer `^`
+  integer is an integer
+* `MAX` and `MIN` return a float; `VAL` is an integer wherever one is
+  wanted, and `PRINT` shows `VAL` and a `CHOICE` of mixed types in the
+  type they have when they run
+* `PRINT`'s comma counts to 8-column stops; a float result that reaches
+  infinity is "Overflow"; `TAB` in a graphics mode could loop for ever,
+  and ends now
+* `FORMAT$` with a long text around its specifier wrote past its buffer
+  on the stack; it builds the result with room and says "String too
+  long" when it is
+* `ON ERROR SKIP` counts statements as the firmware does, a `FUNCTION`'s
+  included; `SUB MM.END` runs at `END` and when a program runs off its
+  end; `SETTICK PAUSE` and `RESUME` take their target; `/* */` blocks
+  are comments; the `MATH` family is the one the firmware has now
+* an error the firmware raises only when a line runs — a `GOTO` to a
+  label that is not there, a name longer than 31 characters, a
+  `FUNCTION` used as a command, `OPTION EXPLICIT`'s "is not declared" —
+  is raised when the translated line runs, with the firmware's message,
+  so a program that never reaches the line never sees it
+
+**`mmbedit` keeps a paste.** Everything after the first line or so of a
+paste was lost, because each redraw threw away the keys that had
+arrived meanwhile. It arrives whole now, with the PicoMite editor's
+other fixes: the file's last line keeps its ending, `Esc` leaves even
+when a line is too long to save, and `F9` says why a file did not load.
+
+**A latent crash in `cc`'s native code.** When a program's bytecode
+ended on an odd byte, every call from native code into the runtime
+landed one byte early and executed garbage — a HardFault before the
+program printed anything. The call table is aligned now.
 
 
 # Installing Fuzix
