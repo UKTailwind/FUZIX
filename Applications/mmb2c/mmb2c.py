@@ -795,7 +795,8 @@ class TypeDef(object):
 class Routine(object):
     __slots__ = ('name', 'cname', 'is_func', 'ty', 'params', 'locals',
                  'statics', 'line', 'gtouch', 'disp', 'local_order',
-                 'heap_locals', 'mx_pairs', 'mwrites', 'swrites')
+                 'heap_locals', 'mx_pairs', 'mwrites', 'swrites', 'calls',
+                 'mwrites_all', 'swrites_all')
 
     def __init__(self, name, is_func):
         self.name = name
@@ -814,37 +815,103 @@ class Routine(object):
         self.line = 0
         self.gtouch = {}          # global name -> first line touched here
         # string members written here, and structures written whole, as
-        # their C lvalues with the subscripts blanked (norm_lvalue): a
-        # member passed in by reference must not be one of them
+        # their C lvalues (norm_lvalue): a member passed in by reference
+        # must not be one of them
         self.mwrites = []
         self.swrites = []
+        # the routines this one calls with a structure argument, and
+        # which (callee name, [(parameter, argument)]); and with the
+        # writes those make through them, the closure (close_writes)
+        self.calls = []
+        self.mwrites_all = []
+        self.swrites_all = []
 
 
 # ----------------------------------------------------------------- helpers
 
 def norm_lvalue(code):
-    """A C lvalue with every subscript blanked - H->v_a[(int)(i)].m_s
-    becomes v_a[].m_s - so a write and an argument compare by what they
-    can reach, not by which element: an index is not known here.  The
-    globals' H-> goes too: _heap_fixup adds it between the scan, which
-    records the writes, and the emit, which asks.  (A routine's local
-    structure of a global's name then reads as that global: a refusal
-    too many, never a wrong translation.)"""
+    """A C lvalue as a write and an argument are compared: a subscript
+    that is an integer literal becomes its value and any other is blank
+    - H->v_a[(int)(1LL)].m_s is v_a[1].m_s, and v_a[(int)(i)].m_s is
+    v_a[].m_s - and lv_match lets a blank one match any: an index not
+    known here may be any, but two literals that differ are two elements
+    (FUZIX #38).  The globals' H-> goes too: _heap_fixup adds it between
+    the scan, which records the writes, and the emit, which asks.  (A
+    routine's local structure of a global's name then reads as that
+    global: a refusal too many, never a wrong translation.)"""
     code = code.replace('H->', '')
     out = []
+    sub = []
     depth = 0
     for c in code:
         if c == '[':
-            if depth == 0:
-                out.append('[')
             depth += 1
+            if depth == 1:
+                sub = []
+                continue
         elif c == ']':
             depth -= 1
             if depth == 0:
-                out.append(']')
-        elif depth == 0:
+                out.append('[%s]' % lv_index(''.join(sub)))
+                continue
+        if depth == 0:
             out.append(c)
+        else:
+            sub.append(c)
     return ''.join(out)
+
+
+def lv_index(text):
+    """A subscript's value when it is an integer literal - 1LL, or
+    (int)(1LL) as an element's index is written - else ''."""
+    if text.startswith('(int)(') and text.endswith(')') \
+            and whole_call(text[5:], '') is not None:
+        text = text[6:-1]
+    n = int_literal(text)
+    return '' if n is None else str(n)
+
+
+def lv_through(w, qa, sa):
+    """A write w made through the structure parameter qa, as a write to
+    the structure sa the call gave it; None when w is not through qa."""
+    if w == qa or w.startswith(qa + '.') or w.startswith(qa + '['):
+        return sa + w[len(qa):]
+    return None
+
+
+def lv_reach(w, binds):
+    """A callee's write as it reaches the caller (close_writes): through
+    a structure parameter the call gave a structure, a write to that; a
+    write through another parameter, none; any other, itself."""
+    for qa, sa in binds:
+        t = lv_through(w, qa, sa)
+        if t is not None:
+            return t
+    if w.startswith('(*p_'):
+        return None
+    return w
+
+
+def lv_match(a, b, prefix=False):
+    """Do the normalised lvalues a and b reach the same thing - or, with
+    prefix, b something inside a?  A blank subscript matches any."""
+    i = j = 0
+    while i < len(a) and j < len(b):
+        if a[i] == '[' and b[j] == '[':
+            ia = a.index(']', i)
+            jb = b.index(']', j)
+            if a[i + 1:ia] and b[j + 1:jb] and a[i + 1:ia] != b[j + 1:jb]:
+                return False
+            i = ia + 1
+            j = jb + 1
+            continue
+        if a[i] != b[j]:
+            return False
+        i += 1
+        j += 1
+    if i < len(a):
+        return False
+    return j == len(b) or (prefix and b[j] in '.[')
 
 def split_suffix(word):
     """'nbr%' -> ('nbr', TY_I).  Returns (canonical_lower, ty_or_None)."""
@@ -2115,12 +2182,13 @@ class Conv(object):
     def changes_member(self, r, code):
         """Does routine r write this string member under its own name -
         the member itself, or the structure (or array of them) it is
-        in?"""
+        in - itself or in a routine it calls (close_writes)?"""
         k = norm_lvalue(code)
-        if k in r.mwrites:
-            return True
-        for w in r.swrites:
-            if k == w or k.startswith(w + '.') or k.startswith(w + '['):
+        for w in r.mwrites_all:
+            if lv_match(w, k):
+                return True
+        for w in r.swrites_all:
+            if lv_match(w, k, True):
                 return True
         return False
 
@@ -2132,20 +2200,60 @@ class Conv(object):
         k = norm_lvalue(code)
         qa = norm_lvalue(qacc)
         sa = norm_lvalue(scode)
-
-        def mapped(w):
-            if w == qa or w.startswith(qa + '.') or w.startswith(qa + '['):
-                return sa + w[len(qa):]
-            return None
-        for w in r.mwrites:
-            if mapped(w) == k:
+        for w in r.mwrites_all:
+            t = lv_through(w, qa, sa)
+            if t is not None and lv_match(t, k):
                 return True
-        for w in r.swrites:
-            t = mapped(w)
-            if t is not None and (k == t or k.startswith(t + '.')
-                                  or k.startswith(t + '[')):
+        for w in r.swrites_all:
+            t = lv_through(w, qa, sa)
+            if t is not None and lv_match(t, k, True):
                 return True
         return False
+
+    def record_call(self, r, args):
+        """A call made in the routine being scanned, with the structure
+        arguments it gives r's structure parameters: close_writes follows
+        r's writes through them back into this routine (FUZIX #38)."""
+        if self.mode != 'scan' or self.cur is None:
+            return
+        binds = []
+        for p, a in zip(r.params, args):
+            if p.stype is not None and a is not None:
+                binds.append((norm_lvalue(p.acc),
+                              norm_lvalue(a[1].acc if a[0] == 'var'
+                                          else a[2][0])))
+        self.cur.calls.append((r.name, binds))
+
+    def close_writes(self):
+        """Each routine's member and structure writes with those of the
+        routines it calls, as they reach it: a callee's writes through a
+        structure parameter as writes to the argument it was given, and
+        its writes under a global's name as they are.  Its other writes -
+        through a parameter not given a structure here - are its own.
+        Before, a write made by a routine the routine called was not
+        followed, and ShowP g.s, g calling Inner p, which set q.s, printed
+        a where PicoMite prints b (FUZIX #38).  Struct types do not nest
+        in themselves, so the lvalues stay finite; the bound is a guard."""
+        rs = list(self.routines.values())
+        for r in rs:
+            r.mwrites_all = list(r.mwrites)
+            r.swrites_all = list(r.swrites)
+        for _ in range(64):
+            changed = False
+            for r in rs:
+                for cn, binds in r.calls:
+                    s = self.routines.get(cn)
+                    if s is None:
+                        continue
+                    for src, dst in ((s.mwrites_all, r.mwrites_all),
+                                     (s.swrites_all, r.swrites_all)):
+                        for w in list(src):
+                            t = lv_reach(w, binds)
+                            if t is not None and t not in dst:
+                                dst.append(t)
+                                changed = True
+            if not changed:
+                break
 
     def member_through_param(self, r, args):
         """A string member passed by reference to r, which changes it
@@ -3165,6 +3273,7 @@ class Conv(object):
         out.append(nmexpr)
         for k in range(d['nargs']):
             out.append(self.pass_arg(rep.params[k], args[k], rep))
+        self.record_call(rep, args)
         self.member_through_param(rep, args)
         return ('%s(%s)' % (d['name'], ', '.join(out)),
                 rep.ty if d['is_func'] else None)
@@ -3182,6 +3291,7 @@ class Conv(object):
             a = args[k] if k < len(args) else None
             k += 1
             out.append(self.pass_arg(p, a, r))
+        self.record_call(r, args)
         self.member_through_param(r, args)
         text = r.cname + '(' + ', '.join(out) + ')'
         return (text, r.ty if r.is_func else None)
@@ -11943,6 +12053,7 @@ class Conv(object):
         self.pass_routine_names()
         self.pass_declarations()
         self.walk('scan')
+        self.close_writes()
         self.tmpn = 0
         self.out_main = []
         self.out_body = []
@@ -12707,6 +12818,8 @@ def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
     conv.pass_types()
     conv.pass_declarations()
     conv.walk('scan')
+    # the writes routines make, with those of the routines they call
+    conv.close_writes()
     # constants become #define, so fix their access text before emitting
     consts = {}
     for nm in conv.globals:

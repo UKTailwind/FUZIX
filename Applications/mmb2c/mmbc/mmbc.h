@@ -283,6 +283,11 @@ struct sopnd { int all; const char *code; struct sym *s; };
 
 struct gtouch { const char *name; int line; };
 
+/* A call made in a routine, with the structure arguments it gives the
+ * callee's structure parameters: qa[k] the parameter's lvalue, sa[k] the
+ * argument's, both normalised (close_writes, FUZIX #38). */
+struct callrec { const char *name; const char **qa, **sa; int nb; };
+
 struct routine {
     const char *name;           /* canonical */
     const char *disp;
@@ -299,10 +304,15 @@ struct routine {
                                  * invocations carry a heap block */
     int mx_pairs[2];            /* MAX/MIN temporary pairs, float/integer */
     /* string members written here, and structures written whole, as
-     * their C lvalues with the subscripts blanked (norm_lvalue): a member
-     * passed in by reference must not be one of them */
+     * their C lvalues (norm_lvalue): a member passed in by reference must
+     * not be one of them */
     const char **mwrites; int nmwrites, cmwrites;
     const char **swrites; int nswrites, cswrites;
+    /* the calls it makes with a structure argument, and with the writes
+     * the callees make through them, the closure (close_writes) */
+    struct callrec *calls; int ncalls, ccalls;
+    const char **mwrites_all; int nmwrites_all, cmwrites_all;
+    const char **swrites_all; int nswrites_all, cswrites_all;
 };
 
 /* One record per label name; the Python keeps six dicts keyed the same
@@ -580,6 +590,10 @@ void numwrite(const char *target, const char *val, int ty, const char *op);
 /* string-member writes by lvalue, and the by-reference check (mmbc_sym.c) */
 void member_written(const char *code, int whole);
 int changes_member(const struct routine *r, const char *code);
+/* the call recorded during the scan, and the closure after it */
+struct arglist;
+void record_call(struct routine *r, struct arglist *args);
+void close_writes(void);
 /* ... or through its structure parameter qacc, given the structure scode */
 int changes_through(const struct routine *r, const char *code,
                     const char *qacc, const char *scode);

@@ -148,6 +148,7 @@ static const char *convert(const char *inpath, const char *outpath,
     pass_types();
     pass_declarations();
     walk(M_SCAN);
+    close_writes();     /* the writes routines make, with their callees' */
     /* constants become #define, so fix their access text before
      * emitting, and put it back for the #define bodies afterwards */
     const_accs = palloc(sizeof(char *)

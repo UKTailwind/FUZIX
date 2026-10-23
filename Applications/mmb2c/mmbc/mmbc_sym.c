@@ -6,6 +6,7 @@
  * the generated C's header comment) - keep every string exact. */
 
 #include "mmbc.h"
+#include "mmbc_expr.h"          /* struct arglist, for record_call */
 
 struct conv cv;
 
@@ -418,17 +419,35 @@ void wrote(struct sym *s)
 /* Is parameter p written - by its routine, or by a by-reference
    parameter it is passed on to?  The depth bound ends a cycle of
    routines passing it round. */
-/* A C lvalue with every subscript blanked - H->v_a[(int)(i)].m_s becomes
- * v_a[].m_s - so a write and an argument compare by what they can reach,
- * not by which element: an index is not known here.  The globals' H->
- * goes too: the heap fixup adds it between the scan, which records the
- * writes, and the emit, which asks.  (A routine's local structure of a
- * global's name then reads as that global: a refusal too many, never a
- * wrong translation.) */
+/* A subscript's value when it is an integer literal - 1LL, or (int)(1LL)
+ * as an element's index is written - else "". */
+static const char *lv_index(const char *text)
+{
+    size_t len = strlen(text);
+    long long n;
+
+    if (strncmp(text, "(int)(", 6) == 0 && len >= 7 && text[len - 1] == ')'
+        && whole_call(text + 5, "") != NULL)
+        text = sfmt("%.*s", (int)(len - 7), text + 6);
+    if (int_literal(text, &n))
+        return sfmt("%lld", n);
+    return "";
+}
+
+/* A C lvalue as a write and an argument are compared: a subscript that is
+ * an integer literal becomes its value and any other is blank -
+ * H->v_a[(int)(1LL)].m_s is v_a[1].m_s, and v_a[(int)(i)].m_s is
+ * v_a[].m_s - and lv_match lets a blank one match any: an index not
+ * known here may be any, but two literals that differ are two elements
+ * (FUZIX #38).  The globals' H-> goes too: the heap fixup adds it between
+ * the scan, which records the writes, and the emit, which asks.  (A
+ * routine's local structure of a global's name then reads as that
+ * global: a refusal too many, never a wrong translation.) */
 static char *norm_lvalue(const char *code)
 {
-    char *out = salloc(strlen(code) + 1), *o = out;
-    int depth = 0;
+    char *out = salloc(strlen(code) + 32), *o = out;
+    char *sub = salloc(strlen(code) + 1);
+    int depth = 0, ns = 0;
 
     for (; *code; code++) {
         if (strncmp(code, "H->", 3) == 0) {
@@ -436,18 +455,192 @@ static char *norm_lvalue(const char *code)
             continue;
         }
         if (*code == '[') {
-            if (depth == 0)
-                *o++ = '[';
             depth++;
+            if (depth == 1) {
+                ns = 0;
+                continue;
+            }
         } else if (*code == ']') {
             depth--;
-            if (depth == 0)
-                *o++ = ']';
-        } else if (depth == 0)
+            if (depth == 0) {
+                sub[ns] = 0;
+                o += sprintf(o, "[%s]", lv_index(sub));
+                continue;
+            }
+        }
+        if (depth == 0)
             *o++ = *code;
+        else
+            sub[ns++] = *code;
     }
     *o = 0;
     return out;
+}
+
+/* Do the normalised lvalues a and b reach the same thing - or, with
+ * prefix, b something inside a?  A blank subscript matches any. */
+static int lv_match(const char *a, const char *b, int prefix)
+{
+    while (*a && *b) {
+        if (*a == '[' && *b == '[') {
+            const char *ea = strchr(a, ']'), *eb = strchr(b, ']');
+            size_t la = (size_t)(ea - a - 1), lb = (size_t)(eb - b - 1);
+
+            if (la && lb && (la != lb || strncmp(a + 1, b + 1, la) != 0))
+                return 0;
+            a = ea + 1;
+            b = eb + 1;
+            continue;
+        }
+        if (*a != *b)
+            return 0;
+        a++;
+        b++;
+    }
+    if (*a)
+        return 0;
+    return *b == 0 || (prefix && (*b == '.' || *b == '['));
+}
+
+/* A write w made through the structure parameter qa, as a write to the
+ * structure sa the call gave it; NULL when w is not through qa. */
+static const char *lv_through(const char *w, const char *qa, const char *sa)
+{
+    size_t n = strlen(qa);
+
+    if (strncmp(w, qa, n) != 0
+        || (w[n] != 0 && w[n] != '.' && w[n] != '['))
+        return NULL;
+    return sfmt("%s%s", sa, w + n);
+}
+
+/* A callee's write as it reaches the caller (close_writes): through a
+ * structure parameter the call gave a structure, a write to that; a write
+ * through another parameter, none; any other, itself. */
+static const char *lv_reach(const char *w, const struct callrec *c)
+{
+    int k;
+
+    for (k = 0; k < c->nb; k++) {
+        const char *t = lv_through(w, c->qa[k], c->sa[k]);
+
+        if (t != NULL)
+            return t;
+    }
+    if (strncmp(w, "(*p_", 4) == 0)
+        return NULL;
+    return w;
+}
+
+/* A call made in the routine being scanned, with the structure arguments
+ * it gives r's structure parameters: close_writes follows r's writes
+ * through them back into this routine (FUZIX #38). */
+void record_call(struct routine *r, struct arglist *args)
+{
+    int n = args->n < r->nparams ? args->n : r->nparams;
+    struct callrec *c;
+    int k;
+
+    if (cv.mode != M_SCAN || cv.cur == NULL)
+        return;
+    GROW(cv.cur->calls, cv.cur->ncalls, cv.cur->ccalls);
+    c = &cv.cur->calls[cv.cur->ncalls++];
+    c->name = pstr(r->name);
+    c->qa = palloc(sizeof(char *) * (size_t)(n ? n : 1));
+    c->sa = palloc(sizeof(char *) * (size_t)(n ? n : 1));
+    c->nb = 0;
+    for (k = 0; k < n; k++) {
+        struct sym *p = r->params[k];
+        struct arg *a = &args->a[k];
+
+        if (p->stype == NULL || a->kind == ARG_NONE)
+            continue;
+        c->qa[c->nb] = pstr(norm_lvalue(p->acc));
+        c->sa[c->nb] = pstr(norm_lvalue(a->kind == ARG_VAR ? a->s->acc
+                                                           : a->v.code));
+        c->nb++;
+    }
+}
+
+static int list_has(const char **l, int n, const char *s)
+{
+    int k;
+
+    for (k = 0; k < n; k++)
+        if (strcmp(l[k], s) == 0)
+            return 1;
+    return 0;
+}
+
+/* Each routine's member and structure writes with those of the routines
+ * it calls, as they reach it: a callee's writes through a structure
+ * parameter as writes to the argument it was given, and its writes under
+ * a global's name as they are.  Its other writes - through a parameter
+ * not given a structure here - are its own.  Before, a write made by a
+ * routine the routine called was not followed, and ShowP g.s, g calling
+ * Inner p, which set q.s, printed a where PicoMite prints b (FUZIX #38).
+ * Struct types do not nest in themselves, so the lvalues stay finite;
+ * the bound is a guard. */
+void close_writes(void)
+{
+    int k, j, b, pass, w;
+
+    for (k = 0; k < cv.nroutines; k++) {
+        struct routine *r = cv.routines[k];
+
+        for (j = 0; j < r->nmwrites; j++) {
+            GROW(r->mwrites_all, r->nmwrites_all, r->cmwrites_all);
+            r->mwrites_all[r->nmwrites_all++] = r->mwrites[j];
+        }
+        for (j = 0; j < r->nswrites; j++) {
+            GROW(r->swrites_all, r->nswrites_all, r->cswrites_all);
+            r->swrites_all[r->nswrites_all++] = r->swrites[j];
+        }
+    }
+    for (pass = 0; pass < 64; pass++) {
+        int changed = 0;
+
+        for (k = 0; k < cv.nroutines; k++) {
+            struct routine *r = cv.routines[k];
+
+            for (j = 0; j < r->ncalls; j++) {
+                const struct callrec *c = &r->calls[j];
+                struct routine *s = NULL;
+
+                for (b = 0; b < cv.nroutines; b++)
+                    if (strcmp(cv.routines[b]->name, c->name) == 0) {
+                        s = cv.routines[b];
+                        break;
+                    }
+                if (s == NULL)
+                    continue;
+                for (w = 0; w < s->nmwrites_all; w++) {
+                    const char *t = lv_reach(s->mwrites_all[w], c);
+
+                    if (t != NULL
+                        && !list_has(r->mwrites_all, r->nmwrites_all, t)) {
+                        GROW(r->mwrites_all, r->nmwrites_all,
+                             r->cmwrites_all);
+                        r->mwrites_all[r->nmwrites_all++] = pstr(t);
+                        changed = 1;
+                    }
+                }
+                for (w = 0; w < s->nswrites_all; w++) {
+                    const char *t = lv_reach(s->swrites_all[w], c);
+
+                    if (t != NULL
+                        && !list_has(r->swrites_all, r->nswrites_all, t)) {
+                        GROW(r->swrites_all, r->nswrites_all,
+                             r->cswrites_all);
+                        r->swrites_all[r->nswrites_all++] = pstr(t);
+                        changed = 1;
+                    }
+                }
+            }
+        }
+        if (!changed)
+            break;
+    }
 }
 
 /* A string member (or, whole, a structure) written in the routine being
@@ -477,37 +670,20 @@ void member_written(const char *code, int whole)
 }
 
 /* Does routine r write this string member under its own name - the
- * member itself, or the structure (or array of them) it is in? */
+ * member itself, or the structure (or array of them) it is in - itself
+ * or in a routine it calls (close_writes)? */
 int changes_member(const struct routine *r, const char *code)
 {
     const char *k = norm_lvalue(code);
     int j;
 
-    for (j = 0; j < r->nmwrites; j++)
-        if (strcmp(r->mwrites[j], k) == 0)
+    for (j = 0; j < r->nmwrites_all; j++)
+        if (lv_match(r->mwrites_all[j], k, 0))
             return 1;
-    for (j = 0; j < r->nswrites; j++) {
-        const char *w = r->swrites[j];
-        size_t n = strlen(w);
-
-        if (strcmp(k, w) == 0
-            || (strncmp(k, w, n) == 0 && (k[n] == '.' || k[n] == '[')))
+    for (j = 0; j < r->nswrites_all; j++)
+        if (lv_match(r->swrites_all[j], k, 1))
             return 1;
-    }
     return 0;
-}
-
-/* w, a write in the routine, as the structure scode's own when it is
- * made through the structure parameter qa (both normalised); NULL when
- * it is not made through qa. */
-static const char *through(const char *w, const char *qa, const char *sa)
-{
-    size_t n = strlen(qa);
-
-    if (strncmp(w, qa, n) != 0
-        || (w[n] != 0 && w[n] != '.' && w[n] != '['))
-        return NULL;
-    return sfmt("%s%s", sa, w + n);
 }
 
 /* Does routine r write this string member through its structure
@@ -522,21 +698,16 @@ int changes_through(const struct routine *r, const char *code,
     const char *sa = norm_lvalue(scode);
     int j;
 
-    for (j = 0; j < r->nmwrites; j++) {
-        const char *t = through(r->mwrites[j], qa, sa);
+    for (j = 0; j < r->nmwrites_all; j++) {
+        const char *t = lv_through(r->mwrites_all[j], qa, sa);
 
-        if (t != NULL && strcmp(t, k) == 0)
+        if (t != NULL && lv_match(t, k, 0))
             return 1;
     }
-    for (j = 0; j < r->nswrites; j++) {
-        const char *t = through(r->swrites[j], qa, sa);
-        size_t n;
+    for (j = 0; j < r->nswrites_all; j++) {
+        const char *t = lv_through(r->swrites_all[j], qa, sa);
 
-        if (t == NULL)
-            continue;
-        n = strlen(t);
-        if (strcmp(k, t) == 0
-            || (strncmp(k, t, n) == 0 && (k[n] == '.' || k[n] == '[')))
+        if (t != NULL && lv_match(t, k, 1))
             return 1;
     }
     return 0;

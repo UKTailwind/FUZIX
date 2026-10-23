@@ -1363,6 +1363,7 @@ struct val emit_call_byname(struct calldisp *d, const char *nmexpr,
 
         joined = sfmt("%s, %s", joined, piece);
     }
+    record_call(rep, args);
     member_through_param(rep, args);
     return mkval(sfmt("%s(%s)", d->name, joined),
                  d->is_func ? rep->ty : TY_NONE);
@@ -1431,6 +1432,7 @@ struct val emit_call(struct routine *r, struct arglist *args)
 
         joined = joined ? sfmt("%s, %s", joined, piece) : piece;
     }
+    record_call(r, args);
     member_through_param(r, args);
     return mkval(sfmt("%s(%s)", r->cname, joined ? joined : ""),
                  r->is_func ? r->ty : TY_NONE);
