@@ -400,8 +400,10 @@ struct sym *sym_new(const char *canon, int ty, const char *acc)
    is exempt (V_FUNCT), and that never comes here. */
 void sub_fun_named(const char *canon)
 {
+    /* when the line runs, as there; a parameter's is raised in the
+       declaration pass, so it stays a refusal */
     if (routine_name_known(canon))
-        cv_note("A sub/fun has the same name: %s", upper(canon));
+        cv_late("A sub/fun has the same name: %s", upper(canon));
 }
 
 /* s is written here.  For a parameter that decides how a string member
@@ -524,16 +526,18 @@ struct sym *reference(const char *word, int as_array)
      * and the member never changed */
     if (strchr(canon, '.') != NULL && struct_named(canon))
         cv_note("structure member %s is not translated here", word);
-    if (as_array)
-        cv_err("array '%s' used but never DIMensioned", canon);
+    /* not known -> implied global.  findvar's order, and when the line
+     * runs as there: an array that was never made, or anything under
+     * OPTION EXPLICIT, is "NAME is not declared"; only then is a SUB or
+     * FUNCTION of the name "A sub/fun has the same name". */
+    if (as_array || cv.opt_explicit)
+        cv_late("%s is not declared", upper(canon));
     ty = (sfx != TY_NONE) ? sfx : cv.opt_default;
     if (ty == TY_NONE)
         cv_err("OPTION DEFAULT NONE: '%s' has no type", canon);
-    if (cv.opt_explicit)
-        cv_err("OPTION EXPLICIT: '%s' has not been declared", canon);
+    sub_fun_named(canon);
     if (cv.mode != M_EMIT) {
         struct implied_rec *r;
-        sub_fun_named(canon);
         s = sym_new(canon, ty, cvar(canon));
         s->disp = pstr(word);
         s->where = cv.lineno;

@@ -479,11 +479,12 @@ struct val e_name(void)
         if (!is_op("(", 0)) {
             /* getvalue calls a FUNCTION only with a '(' after its name
              * (MMBasic.c:4259); without one the name is a variable,
-             * which findvar will not make */
-            cv_note("A sub/fun has the same name: %s", upper(canon));
-            if (r->is_func && r->ty == TY_S)
-                return mkval("\"\"", TY_S);
-            return mkval("0", r->is_func ? r->ty : TY_F);
+             * which findvar will not make - "not declared" first under
+             * OPTION EXPLICIT, as findvar checks it first */
+            if (cv.opt_explicit)
+                cv_late("%s is not declared", upper(canon));
+            cv_late("A sub/fun has the same name: %s", upper(canon));
+            return mkval("0", TY_F);        /* not reached */
         }
         if (!r->is_func)
             cv_err("'%s' is a SUB, not a FUNCTION", canon);

@@ -1,0 +1,10 @@
+start
+bare: A sub/fun has the same name: NEXTVAL
+call: A sub/fun has the same name: GREET
+dim: A sub/fun has the same name: SHOW
+implied: A sub/fun has the same name: DING
+local: A sub/fun has the same name: TOTAL
+static: A sub/fun has the same name: COUNT
+const: A sub/fun has the same name: LIMIT
+show
+ 4 7

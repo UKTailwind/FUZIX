@@ -1658,16 +1658,17 @@ class Conv(object):
         # "p.x" and the member never changed
         if '.' in canon and self.struct_named(canon):
             self.note("structure member %s is not translated here" % word)
-        # not known -> implied global
-        if as_array:
-            self.err("array '%s' used but never DIMensioned" % canon)
+        # not known -> implied global.  findvar's order, and when the line
+        # runs as there: an array that was never made, or anything under
+        # OPTION EXPLICIT, is "NAME is not declared"; only then is a
+        # SUB or FUNCTION of the name "A sub/fun has the same name".
+        if as_array or self.opt_explicit:
+            self.late("%s is not declared" % canon.upper())
         ty = sfx if sfx is not None else self.opt_default
         if ty is None:
             self.err("OPTION DEFAULT NONE: '%s' has no type" % canon)
-        if self.opt_explicit:
-            self.err("OPTION EXPLICIT: '%s' has not been declared" % canon)
+        self.sub_fun_named(canon)
         if self.mode != 'emit':
-            self.sub_fun_named(canon)
             s = Sym(canon, ty, cvar(canon))
             s.disp = word
             s.where = self.lineno
@@ -1693,9 +1694,11 @@ class Conv(object):
         """findvar will not make a variable with a SUB or FUNCTION's name,
         whatever either's suffix (48b4680): DIM, LOCAL, STATIC, CONST, a
         parameter and an implied variable alike.  Only a FUNCTION's own
-        result is exempt (V_FUNCT), and that never comes here."""
+        result is exempt (V_FUNCT), and that never comes here.  When the
+        line runs, as there; a parameter's is raised in the declaration
+        pass, so it stays a refusal."""
         if canon in self.routine_names:
-            self.note("A sub/fun has the same name: %s" % canon.upper())
+            self.late("A sub/fun has the same name: %s" % canon.upper())
 
     def note_touch(self, canon, s):
         """Remember that this SUB/FUNCTION reached out to a global."""
@@ -2300,11 +2303,11 @@ class Conv(object):
             if not self.is_op('('):
                 # getvalue calls a FUNCTION only with a '(' after its name
                 # (MMBasic.c:4259); without one the name is a variable,
-                # which findvar will not make
-                self.note("A sub/fun has the same name: %s" % canon.upper())
-                if r.is_func and r.ty == TY_S:
-                    return ('""', TY_S)
-                return ('0', r.ty if r.is_func else TY_F)
+                # which findvar will not make - "not declared" first under
+                # OPTION EXPLICIT, as findvar checks it first
+                if self.opt_explicit:
+                    self.late("%s is not declared" % canon.upper())
+                self.late("A sub/fun has the same name: %s" % canon.upper())
             if not r.is_func:
                 self.err("'%s' is a SUB, not a FUNCTION" % canon)
             if up in BUILTINS:
@@ -5590,6 +5593,7 @@ class Conv(object):
                 s = self.lookup(canon)
                 if s is None:
                     self.long_name(canon, static, scope)
+                    self.sub_fun_named(canon)
 
             # A run-time bound is allocated where the DIM stands, not
             # hoisted: the expression may name variables that are only
@@ -5822,6 +5826,7 @@ class Conv(object):
                 self.err("CONST needs a name")
             canon, sfx = split_suffix(t[1])
             self.long_name(canon)
+            self.sub_fun_named(canon)
             self.expect_op('=')
             v = self.expr()
             ty = v[1]

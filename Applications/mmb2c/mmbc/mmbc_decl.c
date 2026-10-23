@@ -1418,8 +1418,10 @@ void do_declare(const char *kw)
             }
         } else {
             s = sym_lookup(canon);
-            if (s == NULL)
+            if (s == NULL) {
                 long_name(canon, is_static, strcmp(scope, "local") == 0);
+                sub_fun_named(canon);
+            }
         }
 
         /* A run-time bound is allocated where the DIM stands, not
@@ -1554,6 +1556,7 @@ void do_const(void)
             cv_err("CONST needs a name");
         canon = split_suffix(t->text, &sfx);
         long_name(canon, 0, 0);
+        sub_fun_named(canon);
         expect_op("=");
         v = expr();
         ty = v.ty;
