@@ -192,6 +192,8 @@ MMINTEGER mm_asc   (const char *s);
 MMINTEGER mm_instr (MMINTEGER start, const char *s, const char *pat);
 MMFLOAT   mm_val   (const char *s);
 MMINTEGER mm_vali  (const char *s);  /* VAL taken as an integer: exact */
+char     *mm_vals  (const char *s);  /* PRINT VAL(s) by StrVal's type     */
+char     *mm_vstr  (const char *s);  /* STR$(VAL(s)) by StrVal's type     */
 char *mm_chr   (MMINTEGER c);
 char *mm_left  (const char *s, MMINTEGER n);
 char *mm_right (const char *s, MMINTEGER n);

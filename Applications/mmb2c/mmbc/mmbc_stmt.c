@@ -19,6 +19,7 @@ static const char *load_prog(const char *up);
 
 static void do_print(void);
 static char *prcall(const char *chan, const char *what, const char *arg);
+static char *str_repl(const char *s, const char *from, const char *to);
 static const char *int_handler(void);
 static const char *setpin_pull(void);
 static void do_settick(void);
@@ -2683,7 +2684,8 @@ static void do_print(void)
     cv.pr_chan = chan;
     while (!stmt_end()) {
         struct val v;
-        const char *pw;
+        const char *pw, *vl;
+        const struct mixed *mc;
         if (accept_op(";")) {
             suppress_nl = 1;
             continue;
@@ -2726,6 +2728,8 @@ static void do_print(void)
         v = expr();
         suppress_nl = 0;
         pw = v.ty == TY_I ? whole_call(v.code, "mm_ipow") : NULL;
+        vl = v.ty == TY_F ? whole_call(v.code, "mm_val") : NULL;
+        mc = v.ty == TY_F ? mixed_choice_get(v.code) : NULL;
         if (v.ty == TY_S) {
             emit(prcall(chan, "s", v.code));
         } else if (pw != NULL) {
@@ -2733,6 +2737,19 @@ static void do_print(void)
                exponent turns out negative, so the text is chosen then */
             cv.tmp_used = 1;
             emit(prcall(chan, "s", sfmt("mm_ipows(%s)", pw)));
+        } else if (vl != NULL) {
+            /* VAL is an integer for an integer string, and PRINT shows it
+               as one: 2000000, not 2e+06 */
+            cv.tmp_used = 1;
+            emit(prcall(chan, "s", sfmt("mm_vals(%s)", vl)));
+        } else if (mc != NULL) {
+            /* a CHOICE of an integer and a float: the chosen one, in its
+               own type - one statement, both calls flushable */
+            struct val va = mixed_a(mc), vb = mixed_b(mc);
+
+            emit(sfmt("if ((%s) != 0) %s else %s", mixed_cond(mc),
+                      prcall(chan, va.ty == TY_I ? "i" : "f", va.code),
+                      prcall(chan, vb.ty == TY_I ? "i" : "f", vb.code)));
         } else if (v.ty == TY_I) {
             emit(prcall(chan, "i", v.code));
         } else {
@@ -2759,7 +2776,16 @@ static void do_print(void)
            so no gate would have caught it. */
         const char *ln = cv.out->lines[last];
         const char *p = strchr(ln, '(');
-        if (p != NULL) {
+        const char *b = ln;
+
+        while (*b == ' ')
+            b++;
+        if (strncmp(b, "if (", 4) == 0) {
+            /* a mixed CHOICE's item is two calls, and both get it */
+            cv.out->lines[last] = pstr(str_repl(str_repl(ln, " mm_pr_i(",
+                                                         " mm_pr_ie("),
+                                                " mm_pr_f(", " mm_pr_fe("));
+        } else if (p != NULL) {
             char *nu = palloc(strlen(ln) + 2);
             size_t pre = (size_t)(p - ln);
             memcpy(nu, ln, pre);
@@ -2768,6 +2794,27 @@ static void do_print(void)
             cv.out->lines[last] = nu;
         }
     }
+}
+
+/* s with every from replaced by to, as Python's str.replace */
+static char *str_repl(const char *s, const char *from, const char *to)
+{
+    size_t lf = strlen(from), lt = strlen(to), n = 0;
+    const char *p;
+    char *out, *o;
+
+    for (p = s; (p = strstr(p, from)) != NULL; p += lf)
+        n++;
+    out = o = salloc(strlen(s) + n * (lt > lf ? lt - lf : 0) + 1);
+    while ((p = strstr(s, from)) != NULL) {
+        memcpy(o, s, (size_t)(p - s));
+        o += p - s;
+        memcpy(o, to, lt);
+        o += lt;
+        s = p + lf;
+    }
+    strcpy(o, s);
+    return out;
 }
 
 static char *prcall(const char *chan, const char *what, const char *arg)

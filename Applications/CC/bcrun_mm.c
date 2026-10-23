@@ -233,6 +233,8 @@ static void w_asc(void)      { A = mm_asc(Ps(0)); }
 static void w_instr(void)    { A = mm_instr(LL(0), Ps(2), Ps(3)); }
 static void w_val(void)      { A = dput(mm_val(Ps(0))); }
 static void w_vali(void)     { A = mm_vali(Ps(0)); }
+static void w_vals(void)     { A = mm_off(mm_vals(Ps(0))); }
+static void w_vstr(void)     { A = mm_off(mm_vstr(Ps(0))); }
 static void w_chr(void)      { A = mm_off(mm_chr(LL(0))); }
 static void w_left(void)     { A = mm_off(mm_left(Ps(0), LL(1))); }
 static void w_right(void)    { A = mm_off(mm_right(Ps(0), LL(1))); }
@@ -622,6 +624,8 @@ static const struct mmwrap {
 	{ "mm_instr",		w_instr },
 	{ "mm_val",		w_val },
 	{ "mm_vali",		w_vali },
+	{ "mm_vals",		w_vals },
+	{ "mm_vstr",		w_vstr },
 	{ "mm_chr",		w_chr },
 	{ "mm_left",		w_left },
 	{ "mm_right",		w_right },

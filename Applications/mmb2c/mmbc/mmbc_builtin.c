@@ -588,6 +588,27 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
         const char *nn = (nargs > 2) ? n(2) : "MM_AUTO_PRECISION";
         const char *pad = (nargs > 3) ? s(3) : "\"\\001\" \" \"";
 
+        if (args[0].ty == TY_F) {
+            /* VAL and a mixed CHOICE carry the type they have when they
+               run, and STR$ shows it (see the PRINT items) */
+            const char *vl = whole_call(args[0].code, "mm_val");
+            const struct mixed *mc;
+
+            if (vl != NULL && nargs == 1)
+                return mkval(sfmt("mm_vstr(%s)", vl), TY_S);
+            mc = mixed_choice_get(args[0].code);
+            if (mc != NULL) {
+                struct val va = mixed_a(mc), vb = mixed_b(mc);
+
+                return mkval(sfmt("((%s) != 0 ? mm_str_%s(%s, %s, %s, %s)"
+                                  " : mm_str_%s(%s, %s, %s, %s))",
+                                  mixed_cond(mc),
+                                  va.ty == TY_I ? "i" : "f", va.code,
+                                  m2, nn, pad,
+                                  vb.ty == TY_I ? "i" : "f", vb.code,
+                                  m2, nn, pad), TY_S);
+            }
+        }
         if (args[0].ty == TY_I)
             return mkval(sfmt("mm_str_i(%s, %s, %s, %s)",
                               args[0].code, m2, nn, pad), TY_S);
@@ -859,9 +880,19 @@ struct val builtin_raw(const char *up)
         {
             const char *fa = as_flt(a);
             const char *fb = as_flt(b);
+            char *code;
 
-            return mkval(sfmt("((%s) != 0 ? (%s) : (%s))", c.code, fa, fb),
-                         TY_F);
+            if (a.ty == b.ty)
+                return mkval(sfmt("((%s) != 0 ? (%s) : (%s))",
+                                  c.code, fa, fb), TY_F);
+            /* fun_ternary returns the chosen argument with its OWN type,
+               decided as it runs.  A float covers both here; PRINT, STR$
+               and an integer target look the parts up (mixed_choice) and
+               take each branch in its type.  Its own shape of text, so a
+               CHOICE of two floats can never be taken for one. */
+            code = sfmt("(((%s) != 0) ? (%s) : (%s))", c.code, fa, fb);
+            mixed_choice_put(code, c.code, a, b);
+            return mkval(code, TY_F);
         }
     }
 

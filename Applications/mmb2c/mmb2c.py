@@ -197,6 +197,11 @@ def is_line_number(name):
     return name != '' and not [c for c in name if not is_digit(c)]
 
 
+def pr_kind(v):
+    """The PRINT call's letter for a number: mm_pr_i or mm_pr_f."""
+    return 'i' if v[1] == TY_I else 'f'
+
+
 def is_idchar(c):
     return is_alpha(c) or is_digit(c) or c == '.'
 
@@ -1152,6 +1157,8 @@ class Conv(object):
         self.cur = None               # current Routine or None
         self.mx_main = [0, 0]         # MAX/MIN temporary pairs in main
         self.mx_n = [0, 0]            # pairs the statement has used so far
+        # a CHOICE of an integer and a float, by its code: (cond, a, b)
+        self.mixed_choice = {}
         self.out_main = []
         self.out_body = []
         self.out = None
@@ -1691,6 +1698,18 @@ class Conv(object):
             a = whole_call(code, 'mm_val')
             if a is not None:
                 return 'mm_vali(%s)' % a
+            # -VAL(...): the integer negated, as op_neg leaves an integer
+            if code[:3] == '(-(' and code[-1:] == ')':
+                inner = whole_call(code[1:-1], '-')
+                a = whole_call(inner, 'mm_val') if inner is not None \
+                    else None
+                if a is not None:
+                    return '(-(mm_vali(%s)))' % a
+            # a CHOICE of an integer and a float: each branch in its type
+            mc = self.mixed_choice.get(code)
+            if mc is not None:
+                return ('((%s) != 0 ? (%s) : (%s))'
+                        % (mc[0], self.as_int(mc[1]), self.as_int(mc[2])))
             return 'mm_toint(' + code + ')'
         if isinstance(ty, tuple):
             self.err("a whole structure cannot be used in an expression")
@@ -3161,6 +3180,19 @@ class Conv(object):
             m = n(1) if len(args) > 1 else '0'
             nn = n(2) if len(args) > 2 else 'MM_AUTO_PRECISION'
             pad = s(3) if len(args) > 3 else '"\\001" " "'
+            if args[0][1] == TY_F:
+                # VAL and a mixed CHOICE carry the type they have when
+                # they run, and STR$ shows it (see the PRINT items)
+                vl = whole_call(args[0][0], 'mm_val')
+                if vl is not None and len(args) == 1:
+                    return ('mm_vstr(%s)' % vl, TY_S)
+                mc = self.mixed_choice.get(args[0][0])
+                if mc is not None:
+                    br = ['mm_str_%s(%s, %s, %s, %s)'
+                          % (pr_kind(v), v[0], m, nn, pad)
+                          for v in (mc[1], mc[2])]
+                    return ('((%s) != 0 ? %s : %s)' % (mc[0], br[0], br[1]),
+                            TY_S)
             if args[0][1] == TY_I:
                 return ('mm_str_i(%s, %s, %s, %s)'
                         % (args[0][0], m, nn, pad), TY_S)
@@ -3338,8 +3370,19 @@ class Conv(object):
                         % (c[0], a[0], b[0]), TY_S)
             if a[1] == TY_I and b[1] == TY_I:
                 return ('((%s) != 0 ? (%s) : (%s))' % (c[0], a[0], b[0]), TY_I)
-            return ('((%s) != 0 ? (%s) : (%s))'
-                    % (c[0], self.as_flt(a), self.as_flt(b)), TY_F)
+            if a[1] == b[1]:
+                return ('((%s) != 0 ? (%s) : (%s))'
+                        % (c[0], self.as_flt(a), self.as_flt(b)), TY_F)
+            # fun_ternary returns the chosen argument with its OWN type,
+            # decided as it runs.  A float covers both here; PRINT, STR$
+            # and an integer target look the parts up (mixed_choice) and
+            # take each branch in its type.  Its own shape of text, so a
+            # CHOICE of two floats can never be taken for one.
+            code = ('(((%s) != 0) ? (%s) : (%s))'
+                    % (c[0], self.as_flt(a), self.as_flt(b)))
+            if code not in self.mixed_choice:
+                self.mixed_choice[code] = (c[0], a, b)
+            return (code, TY_F)
 
         if up == 'BOUND':
             self.expect_op('(')
@@ -8113,6 +8156,8 @@ class Conv(object):
             v = self.expr()
             suppress_nl = False
             pw = whole_call(v[0], 'mm_ipow') if v[1] == TY_I else None
+            vl = whole_call(v[0], 'mm_val') if v[1] == TY_F else None
+            mc = self.mixed_choice.get(v[0]) if v[1] == TY_F else None
             if v[1] == TY_S:
                 self.emit(self.prcall(chan, 's', v[0]))
             elif pw is not None:
@@ -8120,6 +8165,18 @@ class Conv(object):
                 # exponent turns out negative, so the text is chosen then
                 self.tmp_used = True
                 self.emit(self.prcall(chan, 's', 'mm_ipows(%s)' % pw))
+            elif vl is not None:
+                # VAL is an integer for an integer string, and PRINT
+                # shows it as one: 2000000, not 2e+06
+                self.tmp_used = True
+                self.emit(self.prcall(chan, 's', 'mm_vals(%s)' % vl))
+            elif mc is not None:
+                # a CHOICE of an integer and a float: the chosen one, in
+                # its own type - one statement, both calls flushable
+                self.emit('if ((%s) != 0) %s else %s'
+                          % (mc[0], self.prcall(chan, pr_kind(mc[1]),
+                                                mc[1][0]),
+                             self.prcall(chan, pr_kind(mc[2]), mc[2][0])))
             elif v[1] == TY_I:
                 self.emit(self.prcall(chan, 'i', v[0]))
             else:
@@ -8141,8 +8198,14 @@ class Conv(object):
             # extra statement in main cost the KnivD benchmark 32,400
             # grains against 12,150, because on the board's compiler it
             # tips the function out of native code; the host build does
-            # not do it, so no gate would have caught it.
-            self.out[last] = self.out[last].replace('(', 'e(', 1)
+            # not do it, so no gate would have caught it.  A mixed
+            # CHOICE's item is two calls, and both get it.
+            if self.out[last].lstrip().startswith('if ('):
+                self.out[last] = self.out[last] \
+                    .replace(' mm_pr_i(', ' mm_pr_ie(') \
+                    .replace(' mm_pr_f(', ' mm_pr_fe(')
+            else:
+                self.out[last] = self.out[last].replace('(', 'e(', 1)
 
     def prcall(self, chan, what, arg):
         if chan is None:

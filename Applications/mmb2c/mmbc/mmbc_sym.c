@@ -589,6 +589,48 @@ const char *whole_call(const char *code, const char *name)
     return NULL;
 }
 
+/* A CHOICE of an integer and a float, by its code: the Python's
+ * mixed_choice dict, looked up linearly.  fun_ternary returns the chosen
+ * argument with its own type, decided as it runs; PRINT, STR$ and an
+ * integer target take each branch in its type. */
+struct mixed { const char *code, *cond; struct val a, b; };
+static struct mixed *mixed_tab;
+static int nmixed, cmixed;
+
+void mixed_choice_put(const char *code, const char *cond, struct val a,
+                      struct val b)
+{
+    struct mixed *m;
+
+    if (mixed_choice_get(code) != NULL)
+        return;                     /* the dict keeps the first: same parts */
+    if (nmixed == cmixed) {
+        cmixed = cmixed ? cmixed * 2 : 16;
+        mixed_tab = xrealloc(mixed_tab, sizeof *mixed_tab * (size_t)cmixed);
+    }
+    m = &mixed_tab[nmixed++];
+    m->code = pstr(code);
+    m->cond = pstr(cond);
+    m->a = a;
+    m->a.code = pstr(a.code);
+    m->b = b;
+    m->b.code = pstr(b.code);
+}
+
+const struct mixed *mixed_choice_get(const char *code)
+{
+    int k;
+
+    for (k = 0; k < nmixed; k++)
+        if (strcmp(mixed_tab[k].code, code) == 0)
+            return &mixed_tab[k];
+    return NULL;
+}
+
+const char *mixed_cond(const struct mixed *m) { return m->cond; }
+struct val mixed_a(const struct mixed *m) { return m->a; }
+struct val mixed_b(const struct mixed *m) { return m->b; }
+
 const char *as_int(struct val v)
 {
     if (v.ty == TY_I)
@@ -600,9 +642,26 @@ const char *as_int(struct val v)
            VAL("9007199254740993") lost its last digit and
            HEX$(VAL("&H7FFFFFFFFFFFFFFF")) was "Number too large". */
         const char *a = whole_call(v.code, "mm_val");
+        const struct mixed *mc;
+        size_t n = strlen(v.code);
 
         if (a != NULL)
             return sfmt("mm_vali(%s)", a);
+        /* -VAL(...): the integer negated, as op_neg leaves an integer */
+        if (n >= 4 && strncmp(v.code, "(-(", 3) == 0
+            && v.code[n - 1] == ')') {
+            char *mid = sfmt("%.*s", (int)(n - 2), v.code + 1);
+            const char *inner = whole_call(mid, "-");
+
+            a = inner != NULL ? whole_call(inner, "mm_val") : NULL;
+            if (a != NULL)
+                return sfmt("(-(mm_vali(%s)))", a);
+        }
+        /* a CHOICE of an integer and a float: each branch in its type */
+        mc = mixed_choice_get(v.code);
+        if (mc != NULL)
+            return sfmt("((%s) != 0 ? (%s) : (%s))", mc->cond,
+                        as_int(mc->a), as_int(mc->b));
         return sfmt("mm_toint(%s)", v.code);
     }
     if (v.ty == TY_T)

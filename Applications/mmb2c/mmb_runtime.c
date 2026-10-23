@@ -1121,6 +1121,32 @@ MMINTEGER mm_vali(const char *s)
     return mm_strval(mm_cstr(s), &f, &i) ? mm_toint(f) : i;
 }
 
+/* VAL's answer has the type StrVal gives it - an integer for an integer
+ * string - and that type decides how PRINT and STR$ show it: 2000000 or
+ * 2e+06.  The translator uses these where a whole VAL(...) is PRINTed
+ * (mm_vals, PRINT's text, the sign's blank and all) or is STR$'s only
+ * argument (mm_vstr); anywhere else VAL is a float, or an integer where
+ * one is wanted (mm_vali). */
+static char *mm_val_text(const char *s, int lead)
+{
+    char bf[MM_INTBUF + 48];
+    char *t = mm_tmp();
+    MMFLOAT f;
+    MMINTEGER i;
+
+    bf[0] = ' ';
+    if (mm_strval(mm_cstr(s), &f, &i))
+        mm_float_to_str(bf + ((lead && f >= 0) ? 1 : 0), f, 0,
+                        MM_AUTO_PRECISION, ' ');
+    else
+        mm_int_to_str(bf + ((lead && i >= 0) ? 1 : 0), (long long)i, 10);
+    mm_ssetc(t, bf);
+    return t;
+}
+
+char *mm_vals(const char *s) { return mm_val_text(s, 1); }
+char *mm_vstr(const char *s) { return mm_val_text(s, 0); }
+
 char *mm_chr(MMINTEGER c)
 {
     char *t = mm_tmp();

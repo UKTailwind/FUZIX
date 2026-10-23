@@ -553,6 +553,14 @@ struct sym *reference(const char *word, int as_array);
 void sub_fun_named(const char *canon);        /* "A sub/fun has the same name" */
 /* a numeric write, guarded under the ON ERROR checks (mmbc_stmt.c) */
 void numwrite(const char *target, const char *val, int ty, const char *op);
+/* a CHOICE of an integer and a float, by its code (mmbc_sym.c) */
+struct mixed;
+void mixed_choice_put(const char *code, const char *cond, struct val a,
+                      struct val b);
+const struct mixed *mixed_choice_get(const char *code);
+const char *mixed_cond(const struct mixed *m);
+struct val mixed_a(const struct mixed *m);
+struct val mixed_b(const struct mixed *m);
 void wrote(struct sym *s);                    /* a parameter is written */
 const char *mm_end_call(void);                /* SUB MM.END's call, or "" */
 int writes(struct sym *p, int depth);         /* ... or passed to one that is */
