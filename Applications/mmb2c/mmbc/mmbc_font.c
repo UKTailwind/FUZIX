@@ -174,14 +174,32 @@ static char ascii_upper(char c)
     return (c >= 'a' && c <= 'z') ? c - 32 : c;
 }
 
-/* Where a slash-star ... star-slash comment block opens on this line, or
- * -1.
+/* Where a line's text starts: past its blanks and a line number, and the
+ * blanks after that - the tokeniser takes the number off first and the
+ * rest of the line is what it reads (MMBasic.c tokenise). */
+static int line_start(const char *s)
+{
+    int i = 0;
+
+    while (s[i] == ' ' || s[i] == '\t')
+        i++;
+    while (s[i] >= '0' && s[i] <= '9')
+        i++;
+    while (s[i] == ' ' || s[i] == '\t')
+        i++;
+    return i;
+}
+
+/* The first slash-star or star-slash on this line where a statement
+ * starts - the line's start, after a line number, after a ':', or after
+ * THEN or ELSE, where the tokeniser looks for a command - its position,
+ * with *mark set to it; -1 if there is none.  Nothing in quotes, after a
+ * ' or after REM is looked at.
  *
- * Slash-star is a command to the tokeniser, so it opens a block only
- * where a statement starts - the line's start, after a line number, or
- * after a ':' - and the rest of its line is raw text (tokenise's multi).
- * Nothing in quotes, after a ' or after REM is looked at. */
-static int block_open_at(const char *s)
+ * The manual's rule for them (FUZIX #33): they must be the first
+ * non-space characters of the line and have a space or the end of the
+ * line after them; pass_fonts refuses one that breaks it. */
+static int block_mark_at(const char *s, const char **mark)
 {
     int i = 0, start = 1, q = 0;
 
@@ -197,11 +215,9 @@ static int block_open_at(const char *s)
                 q = 0;
         } else if (c == ' ' || c == '\t') {
             /* blanks change nothing */
-        } else if (start && c == '/' && s[i + 1] == '*'
-                   && !loader_namechar(ascii_upper(s[i + 2]
-                                                   ? s[i + 2] : ' '))) {
-            /* a command only if no name character follows: slash-star
-               then a name is no match for the tokeniser's (FUZIX #24) */
+        } else if (start && ((c == '/' && s[i + 1] == '*')
+                             || (c == '*' && s[i + 1] == '/'))) {
+            *mark = c == '/' ? "/*" : "*/";
             return i;
         } else if (start && ascii_upper(c) == 'R'
                    && ascii_upper(s[i + 1]) == 'E'
@@ -212,7 +228,7 @@ static int block_open_at(const char *s)
         } else if (loader_namechar(ascii_upper(c))
                    && !(c >= '0' && c <= '9')) {
             /* a word: after THEN or ELSE a statement starts, as after a
-               ':', so IF 1 THEN slash-star opens a block as it does there */
+               ':', so IF 1 THEN slash-star is the tokeniser's there */
             char w[5];
             int j = i, k;
 
@@ -236,39 +252,39 @@ static int block_open_at(const char *s)
 }
 
 /* A line inside a comment block: NULL while the block goes on.  The
- * tokeniser ends it only at a line whose first characters are star-slash
- * - that is the star-slash command, and the rest of its statement is its
- * argument, ignored - so the BASIC after the statement's ':' comes back,
- * "" if there is none. */
+ * tokeniser ends it only at a line whose first characters are star-slash,
+ * and the manual makes everything after the star-slash comment, so what
+ * comes back is the line's number, for a GOTO to it - a numbered
+ * star-slash ends the block and keeps its number (FUZIX #24) - or "" for
+ * an unnumbered line.  (RC5 still runs a statement after a star-slash and
+ * a ':', which the manual does not allow, FUZIX #33.) */
 static const char *block_close_rest(const char *s)
 {
-    int j = 0, n, q = 0;
-    const char *num = "";
+    int j = 0, n, k = line_start(s);
 
     while (s[j] == ' ' || s[j] == '\t')
         j++;
-    /* A line number goes first, as on any line (FUZIX #24): a numbered
-       star-slash ends the block, and keeps its number for a GOTO. */
     n = j;
     while (s[n] >= '0' && s[n] <= '9')
         n++;
-    if (n > j) {
-        num = sfmt("%.*s ", n - j, s + j);
-        j = n;
-        while (s[j] == ' ' || s[j] == '\t')
-            j++;
-    }
-    if (s[j] != '*' || s[j + 1] != '/')
+    if (s[k] != '*' || s[k + 1] != '/')
         return NULL;
-    for (j += 2; s[j]; j++) {
-        if (s[j] == '"')
-            q = !q;
-        else if (!q && s[j] == ':')
-            return sfmt("%s%s", num, s + j + 1);
-        else if (!q && s[j] == '\'')
-            return num;
-    }
-    return num;
+    return n > j ? sfmt("%.*s ", n - j, s + j) : "";
+}
+
+/* What is wrong with the mark block_mark_at found at k, by the manual's
+ * rule, or NULL: it must be the first thing on the line, and a space or
+ * the end of the line must follow it. */
+static const char *block_mark_breaks(const char *s, int k, const char *mark)
+{
+    char c = s[k + 2];
+
+    if (k != line_start(s))
+        return sfmt("%s must be the first thing on its line", mark);
+    if (c != 0 && c != ' ' && c != '\t' && c != '\r' && c != '\n')
+        return sfmt("%s must have a space or the end of the line after it",
+                    mark);
+    return NULL;
 }
 
 void pass_fonts(void)
@@ -276,6 +292,7 @@ void pass_fonts(void)
     int ignore = 0;             /* inside #COMMENT START ... #COMMENT END */
     int debugoff = 1;           /* #MMDEBUG OFF, the loader's default */
     int inblock = 0;            /* inside a slash-star comment block */
+    int insub = 0;              /* inside a SUB or FUNCTION */
     unsigned long *words = NULL;
     int nwords = 0, cwords = 0;
     int i = 0;
@@ -344,25 +361,71 @@ void pass_fonts(void)
          * BASIC again, and goes round once more as a line of its own. */
         if (inblock) {
             const char *rest = block_close_rest(src_lines[i]);
+            const char *bad;
 
             if (rest == NULL) {
                 src_lines[i] = pstr("");
                 i++;
                 continue;
             }
+            bad = block_mark_breaks(src_lines[i], line_start(src_lines[i]),
+                                    "*/");
+            if (bad != NULL)
+                errors_add(sfmt("line %d: %s", i + 1, bad));
             inblock = 0;
             src_lines[i] = pstr(rest);
+            i++;
             continue;
         }
+        /* where the routines are, for the manual's other rule */
         {
-            int k = block_open_at(src_lines[i]);
+            const char *w = loader_squash(src_lines[i]
+                                          + line_start(src_lines[i]));
+
+            if (strncmp(w, "SUB ", 4) == 0 || strncmp(w, "FUNCTION ", 9) == 0)
+                insub = 1;
+            else if ((strncmp(w, "END SUB", 7) == 0 && !loader_namechar(w[7]))
+                     || (strncmp(w, "END FUNCTION", 12) == 0
+                         && !loader_namechar(w[12])))
+                insub = 0;
+        }
+        /* Slash-star and star-slash by the manual's rule (FUZIX #33): the
+         * first thing on the line, a space or the end of the line after,
+         * and no block inside a SUB or FUNCTION.  RC5 takes the other
+         * forms in ways the manual does not promise - slash-star and a
+         * word is "Invalid character" when it runs, IF 0 THEN slash-star
+         * hides nothing - and the firmware is to refuse them when the
+         * program is loaded, so they are refused here. */
+        {
+            const char *mark = NULL;
+            int k = block_mark_at(src_lines[i], &mark);
 
             if (k >= 0) {
                 int j, closed = 0;
                 char *head = salloc((size_t)k + 40);
+                const char *bad = block_mark_breaks(src_lines[i], k, mark);
+                char nx = src_lines[i][k + 2];
 
+                if (bad == NULL && mark[0] == '/' && insub)
+                    bad = "multi-line comments cannot be used inside "
+                          "subroutines and functions";
+                if (bad != NULL)
+                    errors_add(sfmt("line %d: %s", i + 1, bad));
                 memcpy(head, src_lines[i], (size_t)k);
                 head[k] = 0;
+                if (mark[0] == '*' || loader_namechar(ascii_upper(nx ? nx
+                                                                  : ' '))) {
+                    /* a star-slash with no block open does nothing, and
+                       the rest of its line is comment; slash-star and a
+                       word is no command */
+                    if (mark[0] == '*')
+                        strcat(head, "/*");
+                    else
+                        head[0] = 0;
+                    src_lines[i] = pstr(head);
+                    i++;
+                    continue;
+                }
                 for (j = i + 1; j < src_nlines && !closed; j++)
                     if (block_close_rest(src_lines[j]) != NULL)
                         closed = 1;

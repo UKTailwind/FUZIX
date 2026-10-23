@@ -4346,10 +4346,13 @@ they do on a PicoMite.)
 | `WHILE` | `WS2812` |  |  |
 
 Assignment needs no keyword (`LET` is accepted). Statement separators,
-line numbers and labels, `REM` and `'` comments all work as expected,
-and so do `/* ... */` blocks, which open where a statement starts and
-end at a line that starts with `*/`, as the interpreter's tokeniser has
-them.  Lines starting with `#` are taken as CMM2 RUN's loader takes
+line numbers and labels, `REM` and `'` comments all work as expected.
+So do `/* ... */` blocks, by the PicoMite manual's rule: `/*` and `*/`
+must be the first thing on their lines (a line number may come first),
+with a space or the end of the line after them, and cannot be used
+inside a `SUB` or `FUNCTION`. Anything after `*/` on its line is comment
+too. A `/*` or `*/` that breaks the rule stops the translation with a
+message naming the line. Lines starting with `#` are taken as CMM2 RUN's loader takes
 them: `#COMMENT START` to `#COMMENT END` is comment, `MMDEBUG`
 statements are dropped under the default `#MMDEBUG OFF`, and `#DEFINE`,
 `#INCLUDE` and `#MMDEBUG ON` are refused by name.

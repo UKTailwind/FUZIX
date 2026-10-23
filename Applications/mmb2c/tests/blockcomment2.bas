@@ -1,15 +1,13 @@
-10 ' /* */ blocks, the second review (FUZIX issue #24): a numbered */ ends
-20 ' the block, and after THEN a statement starts, so IF 1 THEN /* opens
-30 ' one, even when the IF is false - the tokeniser decides, not the run.
+10 ' /* */ blocks with line numbers (FUZIX issues #24 and #33): the
+20 ' tokeniser takes the number off first, so a numbered /* or */ is still
+30 ' the first thing on its line, and a GOTO to a */ line lands after it.
 40 Print "a"
 50 /*
 60 Print "b"
 70 */
 80 Print "c"
-90 If 1 Then /* the IF's statement, and a block
-100 Print "d"
-110 */ : Print "e"
-120 If 0 Then /* never runs, but the block is a block all the same
-130 Print "f"
-140 */
-150 Print "g"
+90 GoTo 120
+100 /* the GOTO steps over this block
+110 Print "d"
+120 */ the end of the block
+130 Print "e"

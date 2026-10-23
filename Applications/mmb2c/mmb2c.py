@@ -968,13 +968,30 @@ def ascii_upper(c):
     return chr(ord(c) - 32) if 'a' <= c <= 'z' else c
 
 
-def block_open_at(s):
-    """Where a /* ... */ comment block opens on this line, or -1.
+def line_start(s):
+    """Where a line's text starts: past its blanks and a line number,
+    and the blanks after that - the tokeniser takes the number off first
+    and the rest of the line is what it reads (MMBasic.c tokenise)."""
+    i = 0
+    n = len(s)
+    while i < n and s[i] in ' \t':
+        i += 1
+    while i < n and is_digit(s[i]):
+        i += 1
+    while i < n and s[i] in ' \t':
+        i += 1
+    return i
 
-    /* is a command to the tokeniser, so it opens a block only where a
-    statement starts - the line's start, after a line number, or after
-    a ':' - and the rest of its line is raw text (tokenise's multi).
-    Nothing in quotes, after a ' or after REM is looked at."""
+
+def block_mark_at(s):
+    """The first /* or */ on this line where a statement starts - the
+    line's start, after a line number, after a ':', or after THEN or
+    ELSE, where the tokeniser looks for a command - as (position, mark),
+    or None.  Nothing in quotes, after a ' or after REM is looked at.
+
+    The manual's rule for them (FUZIX #33): they must be the first
+    non-space characters of the line and have a space or the end of the
+    line after them; pass_fonts refuses one that breaks it."""
     i = 0
     n = len(s)
     while i < n and s[i] in ' \t':
@@ -990,17 +1007,14 @@ def block_open_at(s):
                 q = False
         elif c in ' \t':
             pass
-        elif start and s[i:i + 2] == '/*' \
-                and not loader_namechar(ascii_upper(s[i + 2:i + 3] or ' ')):
-            # a command only if no name character follows: "/*comment"
-            # is no match for the tokeniser's /* (FUZIX #24)
-            return i
+        elif start and s[i:i + 2] in ('/*', '*/'):
+            return (i, s[i:i + 2])
         elif start and ''.join(ascii_upper(x) for x in s[i:i + 3]) == 'REM' \
                 and not loader_namechar(ascii_upper(s[i + 3:i + 4] or ' ')):
-            return -1
+            return None
         elif loader_namechar(ascii_upper(c)) and not is_digit(c):
             # a word: after THEN or ELSE a statement starts, as after a
-            # ':', so IF 1 THEN /* opens a block as it does there
+            # ':', so IF 1 THEN /* is the tokeniser's /* there
             j = i
             while j < n and loader_namechar(ascii_upper(s[j])):
                 j += 1
@@ -1012,46 +1026,41 @@ def block_open_at(s):
             if c == '"':
                 q = True
             elif c == "'":
-                return -1
+                return None
             start = c == ':'
         i += 1
-    return -1
+    return None
 
 
 def block_close_rest(s):
     """A line inside a /* ... */ block: None while the block goes on.
-    The tokeniser ends it only at a line whose first characters are */
-    - that is the */ command, and the rest of its statement is its
-    argument, ignored - so the BASIC after the statement's ':' comes
-    back, '' if there is none."""
+    The tokeniser ends it only at a line whose first characters are */,
+    and the manual makes everything after the */ comment, so what comes
+    back is the line's number, for a GOTO to it - "40 */" ends the block
+    and keeps its 40 (FUZIX #24) - or '' for an unnumbered line.  (RC5
+    still runs a statement after "*/ :", which the manual does not
+    allow, FUZIX #33.)"""
     j = 0
     while j < len(s) and s[j] in ' \t':
         j += 1
-    # A line number goes first, as on any line (FUZIX #24): "40 */" ends
-    # the block, and keeps its number for a GOTO 40.
     n = j
     while n < len(s) and is_digit(s[n]):
         n += 1
     num = s[j:n]
-    if num:
-        j = n
-        while j < len(s) and s[j] in ' \t':
-            j += 1
-    if s[j:j + 2] != '*/':
+    if s[line_start(s):line_start(s) + 2] != '*/':
         return None
-    num = num + ' ' if num else ''
-    q = False
-    k = j + 2
-    while k < len(s):
-        c = s[k]
-        if c == '"':
-            q = not q
-        elif not q and c == ':':
-            return num + s[k + 1:]
-        elif not q and c == "'":
-            return num
-        k += 1
-    return num
+    return num + ' ' if num else ''
+
+
+def block_mark_breaks(s, k, mark):
+    """What is wrong with the /* or */ that block_mark_at found at k, by
+    the manual's rule, or None: it must be the first thing on the line,
+    and a space or the end of the line must follow it."""
+    if k != line_start(s):
+        return "%s must be the first thing on its line" % mark
+    if s[k + 2:k + 3] not in ('', ' ', '\t', '\r', '\n'):
+        return "%s must have a space or the end of the line after it" % mark
+    return None
 
 
 def whole_call(code, name):
@@ -4585,6 +4594,7 @@ class Conv(object):
         ignore = False          # inside #COMMENT START ... #COMMENT END
         debugoff = True         # #MMDEBUG OFF, the loader's default
         inblock = False         # inside /* ... */
+        insub = False           # inside a SUB or FUNCTION
         i = 0
         while i < len(self.lines):
             self.lineno = i + 1
@@ -4644,12 +4654,46 @@ class Conv(object):
                     self.lines[i] = ''
                     i += 1
                     continue
+                k = line_start(self.lines[i])
+                bad = block_mark_breaks(self.lines[i], k, '*/')
+                if bad:
+                    self.errors.append("line %d: %s" % (self.lineno, bad))
                 inblock = False
                 self.lines[i] = rest
+                i += 1
                 continue
-            k = block_open_at(self.lines[i])
-            if k >= 0:
+            # where the routines are, for the manual's other rule
+            w = loader_squash(self.lines[i][line_start(self.lines[i]):])
+            if w.startswith('SUB ') or w.startswith('FUNCTION '):
+                insub = True
+            elif (w.startswith('END SUB') and not loader_namechar(w[7:8])) \
+                    or (w.startswith('END FUNCTION')
+                        and not loader_namechar(w[12:13])):
+                insub = False
+            # /* and */ by the manual's rule (FUZIX #33): the first thing
+            # on the line, a space or the end of the line after, and no
+            # block inside a SUB or FUNCTION.  RC5 takes the other forms
+            # in ways the manual does not promise - /*comment is "Invalid
+            # character" when it runs, IF 0 THEN /* hides nothing - and
+            # the firmware is to refuse them when the program is loaded,
+            # so they are refused here.
+            mk = block_mark_at(self.lines[i])
+            if mk is not None:
+                k, mark = mk
+                bad = block_mark_breaks(self.lines[i], k, mark)
+                if bad is None and mark == '/*' and insub:
+                    bad = ("multi-line comments cannot be used inside "
+                           "subroutines and functions")
+                if bad:
+                    self.errors.append("line %d: %s" % (self.lineno, bad))
                 head = self.lines[i][:k]
+                if mark == '*/' or loader_namechar(
+                        ascii_upper(self.lines[i][k + 2:k + 3] or ' ')):
+                    # a */ with no block open does nothing, and the rest
+                    # of its line is comment; /*comment is no command
+                    self.lines[i] = head + '/*' if mark == '*/' else ''
+                    i += 1
+                    continue
                 closed = [j for j in range(i + 1, len(self.lines))
                           if block_close_rest(self.lines[j]) is not None]
                 # with no */ to come, every line after is comment, and

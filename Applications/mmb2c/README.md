@@ -424,8 +424,11 @@ messages; everything else in `TYPE-SPEC.md` is in.
 Anything not recognised produces an error naming the line and the
 construct, rather than silently wrong C.  `#DEFINE` and `#INCLUDE` are
 refused the same way; the other `#` lines (`#COMMENT START/END`, `#MMDEBUG
-OFF`) and `/* ... */` blocks are handled as CMM2 RUN's loader and the
-tokeniser handle them.
+OFF`) are handled as CMM2 RUN's loader handles them.  `/* ... */` blocks
+follow the manual's rule: `/*` and `*/` are the first thing on their
+lines with a space or the end of the line after them, never inside a SUB
+or FUNCTION, and everything after a `*/` is comment.  A `/*` or `*/` that
+breaks the rule is refused.
 
 ---
 
