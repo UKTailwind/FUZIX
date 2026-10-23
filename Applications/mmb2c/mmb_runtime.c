@@ -85,7 +85,8 @@ int pc3_key_ready(void);        /* the window's keyboard, when there is no tty *
  * ON ERROR SKIP armed, mm_error RETURNS, and everything the rest of the
  * failed statement would have done has to not happen.  See mm_error.
  */
-static int *mm_est;                     /* [0] poison, [1] skip count   */
+static int *mm_est;     /* [0] poison, [1] skip count, [2] FUNCTION depth,
+                           [3] the depth the count is used up at        */
 
 /* "an error has been recorded and this statement is being abandoned" */
 static int mm_poisoned(void)
@@ -2504,7 +2505,7 @@ static char mm_errmsg_v[MM_ERRMSG + 2];    /* Pascal, MAXERRMSG as there */
 void mm_err_bind(int *state)
 {
     mm_est = state;
-    if (state) { state[0] = 0; state[1] = 0; }
+    if (state) { state[0] = 0; state[1] = 0; state[2] = 0; state[3] = 0; }
     mm_errno_v = 0;
     mm_errmsg_v[0] = 0;
     mm_errmsg_v[1] = 0;
@@ -2530,7 +2531,7 @@ void mm_err_bind(int *state)
  */
 static int  mm_int_serrno;
 static char mm_int_serrmsg[MM_ERRMSG + 2];
-static int  mm_int_sskip[2];
+static int  mm_int_sskip[3];
 
 void mm_int_err_push(void)
 {
@@ -2540,6 +2541,7 @@ void mm_int_err_push(void)
     if (mm_est) {
         mm_int_sskip[0] = mm_est[0];
         mm_int_sskip[1] = mm_est[1];
+        mm_int_sskip[2] = mm_est[3];    /* SaveErrorSkipDepth */
         mm_est[0] = 0;
         mm_est[1] = 0;
     }
@@ -2808,6 +2810,7 @@ void mm_int_err_pop(void)
     if (mm_est) {
         mm_est[0] = mm_int_sskip[0];
         mm_est[1] = mm_int_sskip[1];
+        mm_est[3] = mm_int_sskip[2];
     }
     mm_tb("[e");                /* the handler dispatch completed */
 }
@@ -2831,7 +2834,33 @@ void mm_on_error(int mode, MMINTEGER n)
     case 2: mm_est[1] = -1; break;              /* IGNORE                */
     /* SKIP n is n+1: the ON ERROR statement decrements it itself, so
        the count reaches the next statement intact (Commands.c:8325). */
-    default: mm_est[1] = (int)n + 1; break;
+    default:
+        mm_est[1] = (int)n + 1;
+        mm_est[3] = mm_est[2];                  /* ErrorSkipDepth        */
+        break;
+    }
+}
+
+/*
+ * The end of a statement while ON ERROR is armed - the guard the
+ * translators emit after every statement calls this.  The PRINT line
+ * held back is written or dropped, the poison is cleared, and a SKIP
+ * count goes down - but only at the depth ON ERROR SKIP recorded, or a
+ * shallower one (MMBasic.c ExecuteProgram, PicoMite issue 34).  A
+ * FUNCTION's body runs in an ExecuteProgram of its own there, one
+ * deeper, so its statements do not use up the count of the statement
+ * that called it; a SUB's run in its caller's loop and still count.
+ * The generated program keeps that depth in [2], bumping it round each
+ * FUNCTION body.  Counting at a shallower depth moves the recorded one
+ * up to it: a count a FUNCTION set and left goes on in its caller.
+ */
+void mm_err_stmt(void)
+{
+    mm_pr_commit();
+    mm_est[0] = 0;
+    if (mm_est[1] > 0 && mm_est[2] <= mm_est[3]) {
+        mm_est[1]--;
+        mm_est[3] = mm_est[2];
     }
 }
 

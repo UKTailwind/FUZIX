@@ -5749,9 +5749,7 @@ class Conv(object):
             self.err_window_pending = None
             if self.mode == 'emit' and self.checks_on() \
                     and self.out is out_at_entry and failed is None:
-                guard = ('    ' * ind
-                         + 'if (__mm_e[1]) { mm_pr_commit(); __mm_e[0] = 0;'
-                           ' if (__mm_e[1] > 0) __mm_e[1]--; }')
+                guard = '    ' * ind + 'if (__mm_e[1]) mm_err_stmt();'
                 if self.blocks == blocks_at_entry and len(self.out) > where:
                     out_at_entry.append(guard)
                 else:
@@ -5796,7 +5794,7 @@ class Conv(object):
                       % (self.lineno, cblock_safe(reason)))
             self.emit('/*     %s */' % cblock_safe(text))
 
-    def routine_exit(self):
+    def routine_exit(self, entry=False):
         """What has to run on every path OUT of a routine.
 
         Not the same thing as the release emitted after a statement or
@@ -5805,10 +5803,20 @@ class Conv(object):
         them.  Only leaving the routine gives the block back, so every
         path out has to say so - and mm_error exits the process rather
         than unwinding, so those are all of them.
+
+        A FUNCTION's way out is also its END/EXIT FUNCTION statement,
+        counted one deeper than its caller, and the end of that depth.
+        Not on the way back from the prologue's check (entry): that
+        leaves with an argument's error still pending, before the depth
+        was taken.
         """
+        pre = ''
+        if not entry and self.uses_onerror and self.cur is not None \
+                and self.cur.is_func:
+            pre = 'if (__mm_e[1]) mm_err_stmt(); __mm_e[2]--; '
         if self.cur is not None and self.cur.heap_locals:
-            return 'mm_lfree(__L); mm_release(__mark);'
-        return 'mm_release(__mark);'
+            return pre + 'mm_lfree(__L); mm_release(__mark);'
+        return pre + 'mm_release(__mark);'
 
     def loop_cond(self, c):
         """A loop test is re-evaluated every time round, so it needs its
@@ -10758,14 +10766,24 @@ class Conv(object):
             self.err_window = 0
             self.err_window_pending = None
             self.emit('if (__mm_e[0]) { %s%s }'
-                      % (self.routine_exit(), ret))
-            # The SUB/FUNCTION line is itself a statement the interpreter
-            # executes and counts on every call, so entering costs one of
-            # the skip count.  Without this our count ran one statement
-            # further into a called routine than a real PicoMite's did -
-            # which is exactly where the side-by-side disagreed.
-            self.emit('if (__mm_e[1]) { mm_pr_commit(); __mm_e[0] = 0;'
-                      ' if (__mm_e[1] > 0) __mm_e[1]--; }')
+                      % (self.routine_exit(True), ret))
+            if r.is_func:
+                # A FUNCTION's body runs one ExecuteProgram deeper, and
+                # the skip count is used up only at the depth ON ERROR
+                # SKIP recorded (PicoMite issue 34): [2] is that depth,
+                # and every way out takes it back (routine_exit).  Its
+                # END FUNCTION is counted there too, as a statement of
+                # the body.
+                self.emit('__mm_e[2]++;')
+            else:
+                # The SUB line is itself a statement the interpreter
+                # executes and counts on every call, so entering costs
+                # one of the skip count.  Without this our count ran one
+                # statement further into a called SUB than a real
+                # PicoMite's did - which is exactly where the
+                # side-by-side disagreed.  (The caller's own guard,
+                # after the call, stands for END SUB.)
+                self.emit('if (__mm_e[1]) mm_err_stmt();')
         self.blocks.append(['routine', self.lineno])
 
     def emit_local_decl(self, s):
@@ -11340,9 +11358,11 @@ class Conv(object):
             wr(' * [0] is the poison: an error has been recorded and the\n')
             wr(' * rest of this statement is skipped.  [1] is the skip\n')
             wr(' * count, MMBasic\'s OptionErrorSkip: 0 abort, -1 ignore.\n')
+            wr(' * [2] is the FUNCTION depth, MMBasic\'s ExecDepth, and\n')
+            wr(' * [3] the depth the count is used up at, ErrorSkipDepth.\n')
             wr(' * It lives here rather than in the runtime so a guard is\n')
             wr(' * a load and a branch instead of a library call. */\n')
-            wr('static int __mm_e[2];\n')
+            wr('static int __mm_e[4];\n')
         if self.uses_i2c:
             # SETPIN puts the pins here and OPEN reads them: MMBasic
             # allows the two to be far apart in a program.

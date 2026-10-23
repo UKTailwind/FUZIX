@@ -207,9 +207,7 @@ void statement(void)
     if (cv.mode == M_EMIT && checks_on() && cv.out == out_at_entry
         && !failed) {
         const char *guard =
-            pstr(sfmt("%*sif (__mm_e[1]) { mm_pr_commit();"
-                      " __mm_e[0] = 0;"
-                      " if (__mm_e[1] > 0) __mm_e[1]--; }", ind * 4, ""));
+            pstr(sfmt("%*sif (__mm_e[1]) mm_err_stmt();", ind * 4, ""));
         if (cv.nblocks == nblocks_snap && cv.out->n > where)
             out_append(out_at_entry, guard);
         else

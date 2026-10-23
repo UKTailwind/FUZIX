@@ -755,7 +755,7 @@ void mm_error(const char *msg);
 /* getint()'s "N is invalid (valid is LO to HI)"; 1 when it raised */
 int  mm_range(MMINTEGER v, MMINTEGER lo, MMINTEGER hi);
 void mm_fatal(const char *msg);     /* never skippable: out of memory  */
-void mm_err_bind(int *state);       /* generated code hands us its pair */
+void mm_err_bind(int *state);       /* generated code hands us its __mm_e */
 /* Save-and-clear / restore the whole error state round an interrupt
  * handler - MMBasic's GotAnInterrupt and cmd_ireturn.  One slot, because
  * interrupts never nest.  Used by mmb_int.h. */
@@ -906,6 +906,8 @@ MMINTEGER mm_spi_xfer(unsigned char *tx, unsigned char *rx, int len);
 void mm_spi_close(void);
 void mm_i2c_close(void);
 void mm_on_error(int mode, MMINTEGER n);   /* 0 abort 1 clear 2 ignore 3 skip */
+/* The statement guard's work, once ON ERROR has armed: see mm_on_error. */
+void mm_err_stmt(void);
 /* Write or discard the PRINT line held while armed - the statement
  * guard calls it at the end of every statement.  See mm_putc. */
 void mm_pr_commit(void);

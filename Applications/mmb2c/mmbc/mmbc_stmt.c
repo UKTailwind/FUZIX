@@ -93,12 +93,25 @@ static void emit_local_decl(struct sym *s);
  * leaving the routine gives the block back, so every path out has to
  * say so - and mm_error exits the process rather than unwinding, so
  * those are all of them.
+ *
+ * A FUNCTION's way out is also its END/EXIT FUNCTION statement, counted
+ * one deeper than its caller, and the end of that depth.  Not on the
+ * way back from the prologue's check (entry): that leaves with an
+ * argument's error still pending, before the depth was taken.
  */
+static const char *routine_exit_at(int entry)
+{
+    const char *pre = "";
+
+    if (!entry && cv.uses_onerror && cv.cur != NULL && cv.cur->is_func)
+        pre = "if (__mm_e[1]) mm_err_stmt(); __mm_e[2]--; ";
+    if (cv.cur != NULL && cv.cur->heap_locals)
+        return sfmt("%smm_lfree(__L); mm_release(__mark);", pre);
+    return sfmt("%smm_release(__mark);", pre);
+}
 static const char *routine_exit(void)
 {
-    if (cv.cur != NULL && cv.cur->heap_locals)
-        return "mm_lfree(__L); mm_release(__mark);";
-    return "mm_release(__mark);";
+    return routine_exit_at(0);
 }
 static void close_routine(int is_func);
 
@@ -6409,16 +6422,25 @@ static void open_routine(int is_func)
            interpreter never gets here at all: it jumps away before the
            call.  Returning at once is the same thing observably, and it
            spends none of the skip count on statements in here. */
-        emit(sfmt("if (__mm_e[0]) { %s%s }", routine_exit(),
+        emit(sfmt("if (__mm_e[0]) { %s%s }", routine_exit_at(1),
                   r->is_func ? " return __ret;" : " return;"));
+        if (r->is_func)
+            /* A FUNCTION's body runs one ExecuteProgram deeper, and the
+               skip count is used up only at the depth ON ERROR SKIP
+               recorded (PicoMite issue 34): [2] is that depth, and
+               every way out takes it back (routine_exit).  Its END
+               FUNCTION is counted there too, as a statement of the
+               body. */
+            emit("__mm_e[2]++;");
+        else
+            /* The SUB line is itself a statement the interpreter
+               executes and counts on every call, so entering costs one
+               of the skip count.  Without this our count ran one
+               statement further into a called SUB than a real
+               PicoMite's did.  (The caller's own guard, after the call,
+               stands for END SUB.) */
+            emit("if (__mm_e[1]) mm_err_stmt();");
     }
-    if (cv.uses_onerror)
-        /* The SUB/FUNCTION line is itself a statement the interpreter
-           executes and counts on every call, so entering costs one of
-           the skip count.  Without this our count ran one statement
-           further into a called routine than a real PicoMite's did. */
-        emit("if (__mm_e[1]) { mm_pr_commit(); __mm_e[0] = 0;"
-             " if (__mm_e[1] > 0) __mm_e[1]--; }");
     push_block("routine", NULL, 0);
 }
 
