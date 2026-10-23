@@ -192,6 +192,11 @@ def is_digit(c):
     return '0' <= c <= '9'
 
 
+def is_line_number(name):
+    """A label that is a line number: digits only."""
+    return name != '' and not [c for c in name if not is_digit(c)]
+
+
 def is_idchar(c):
     return is_alpha(c) or is_digit(c) or c == '.'
 
@@ -4497,8 +4502,13 @@ class Conv(object):
         if self.mode == 'decl':
             # one name space for every label in the program, and the
             # reference refuses a second one before running a line
-            # (825ade6); it used to replace the first, silently
+            # (825ade6); it used to replace the first, silently.  Only a
+            # label: NameLabels checks nothing else, and a line number
+            # that comes again is found where it comes first (findline
+            # searches from the top), so the later ones are no target.
             if canon in self.labels:
+                if is_line_number(canon):
+                    return
                 self.note("Duplicate label")
             if len(canon) > 31:          # findlabel's limit (2c747af)
                 self.note("Label too long")
@@ -4506,6 +4516,8 @@ class Conv(object):
             self.data_at[canon] = len(self.data)
             self.label_routine[canon] = self.cur.name if self.cur else ''
             return
+        if canon in self.labels and self.labels[canon] != self.lineno:
+            return              # a line number again: the first is the one
         depth = 0
         for blk in self.blocks:
             if blk[0] != 'routine':

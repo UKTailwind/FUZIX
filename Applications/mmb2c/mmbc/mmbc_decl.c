@@ -205,6 +205,17 @@ void pass_declarations(void)
     cv.cur = NULL;
 }
 
+/* A label that is a line number: digits only. */
+static int is_line_number(const char *name)
+{
+    if (*name == 0)
+        return 0;
+    for (; *name; name++)
+        if (!is_digit_c((unsigned char)*name))
+            return 0;
+    return 1;
+}
+
 void place_label(const char *canon)
 {
     struct label *l;
@@ -214,9 +225,15 @@ void place_label(const char *canon)
         l = label_rec(canon);
         /* one name space for every label in the program, and the
            reference refuses a second one before running a line
-           (825ade6); it used to replace the first, silently */
-        if (l->placed)
+           (825ade6); it used to replace the first, silently.  Only a
+           label: NameLabels checks nothing else, and a line number that
+           comes again is found where it comes first (findline searches
+           from the top), so the later ones are no target. */
+        if (l->placed) {
+            if (is_line_number(canon))
+                return;
             cv_note("Duplicate label");
+        }
         if (strlen(canon) > 31)         /* findlabel's limit (2c747af) */
             cv_note("Label too long");
         l->placed = 1;
@@ -226,6 +243,9 @@ void place_label(const char *canon)
         l->routine = cv.cur ? cv.cur->name : "";
         return;
     }
+    l = label_rec(canon);
+    if (l->placed && l->lineno != cv.lineno)
+        return;             /* a line number again: the first is the one */
     depth = 0;
     for (k = 0; k < cv.nblocks; k++)
         if (strcmp(cv.blocks[k].kind, "routine") != 0)
