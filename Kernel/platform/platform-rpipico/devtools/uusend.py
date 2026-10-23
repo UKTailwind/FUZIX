@@ -102,7 +102,17 @@ def send(ser, local, remote, gap, verbose=True):
     ser.write(("rm -f %s.uu %s\r" % (remote, remote)).encode()); ser.flush()
     time.sleep(0.4); drain(ser, 0.4, 3)
     ser.write(("cat > %s.uu\r" % remote).encode()); ser.flush()
-    time.sleep(0.5); drain(ser, 0.4, 3)
+    time.sleep(0.5)
+    started = drain(ser, 0.4, 3)
+    # A cat that is reading prints nothing after its own echo.  One that
+    # could not open the file says so and the shell prompts again - and
+    # then every line below is a COMMAND, its `>`s make files in the
+    # current directory, and the Ctrl-D at the end logs the shell out.
+    # That is what a Git Bash path rewrite did (/tmp/snd arrived as
+    # C:/Users/.../Temp/snd) on 2026-10-23.
+    if "cannot" in started or started.rstrip().endswith(PROMPT.strip()):
+        raise RuntimeError("cat > %s.uu did not start; nothing sent:\n%s"
+                           % (remote, started.strip()))
 
     t0 = time.time()
     for n, line in enumerate(lines, 1):
@@ -160,6 +170,15 @@ def main():
 
     local, remote = argv[0], argv[1]
 
+    # Git Bash rewrites an argument that starts with / into a Windows
+    # path before python sees it: /tmp/x arrives as C:/Users/.../Temp/x.
+    # No board path looks like that, so refuse rather than type it.
+    if ":" in remote or "\\" in remote:
+        sys.stderr.write(
+            "uusend: remote name %r is not a board path - from Git Bash "
+            "set MSYS_NO_PATHCONV=1.\n" % remote)
+        return 1
+
     # The gap floor is not negotiable - see the note at the top.  A
     # bigger gap is fine; a smaller one is ignored, loudly, because
     # silently doing something other than what was asked is its own
@@ -191,7 +210,11 @@ def main():
             "anyway.\n" % PROMPT.strip())
         return 1
 
-    send(ser, local, remote, gap)
+    try:
+        send(ser, local, remote, gap)
+    except RuntimeError as e:
+        sys.stderr.write("uusend: %s\n" % e)
+        return 1
     decode(ser, remote)
     ser.write(("ls -l %s\r" % remote).encode()); ser.flush()
     time.sleep(0.5)

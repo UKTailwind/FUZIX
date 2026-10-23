@@ -1,9 +1,10 @@
 """Flash a kernel to a running PC3, the whole sequence, checked.
 
-  python reflash.py [path/to/fuzix.uf2]
+  python reflash.py [--present] [path/to/fuzix.uf2]
 
 Defaults to ../build/fuzix.uf2.  FZPORT names the console port as
-everywhere else in this directory.
+everywhere else in this directory.  A BOOTSEL volume that is already
+there is refused unless --present says it is this board's.
 
 WHY THIS EXISTS.  The steps were folk knowledge and got improvised, and
 improvising board commands over a serial console is how a machine ends
@@ -136,18 +137,27 @@ def rejected(out):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if a != "--dirty-ok"]
+    args = [a for a in sys.argv[1:] if a not in ("--dirty-ok", "--present")]
     dirty_ok = "--dirty-ok" in sys.argv[1:]
+    present = "--present" in sys.argv[1:]
     uf2 = args[0] if args else UF2_DEFAULT
     if not os.path.exists(uf2):
         sys.exit("no such file: %s" % uf2)
     size = os.path.getsize(uf2)
 
+    # A BOOTSEL volume that is here BEFORE we have asked for one need not
+    # be this board's.  Writing to whatever was there flashed the PC3
+    # kernel into another session's board, which was sitting in BOOTSEL
+    # for a flash of its own, while the PC3 on the console never left
+    # its shell (2026-10-23).  Use one only when told it is this board.
     already = drives_with_uf2()
+    if already and not present:
+        sys.exit("a BOOTSEL volume is already present at %s and nothing "
+                 "here put it there - it may be another board.  Nothing "
+                 "was flashed.  If it IS this board, run again with "
+                 "--present." % ", ".join(already))
     if already:
-        # The board is already sitting in BOOTSEL - halted, or the
-        # operator put it there.  Nothing to prepare; just write.
-        print("BOOTSEL volume already present at %s" % already[0])
+        print("BOOTSEL volume already present at %s (--present)" % already[0])
         return copy_and_wait(uf2, size, already[0])
 
     port = fzport.port_name()
@@ -245,7 +255,20 @@ def copy_and_wait(uf2, size, drive):
     except Exception as e:
         sys.exit("the console did not come back on %s: %s" % (port, e))
 
-    read_until(ser, ["login:", "# "], 60)
+    # A freshly booted board is at login:.  A shell prompt instead means
+    # this board never rebooted, and the copy went to some other one.
+    # The boot can finish before the port is open again, leaving nothing
+    # to read, so ask with a return when nothing has arrived.
+    buf = read_until(ser, ["login:", "# "], 60)
+    if not buf.strip():
+        ser.write(b"\r")
+        ser.flush()
+        buf = read_until(ser, ["login:", "# "], 4.0)
+    if "login:" not in buf:
+        print("\n*** no boot was seen on %s - the .uf2 may have gone to "
+              "another board." % port)
+        ser.close()
+        sys.exit(1)
     if not login(ser):
         print("\n*** the board is up but did not reach a shell prompt.")
         print("*** It is probably at login: or Password: - clear it with")
