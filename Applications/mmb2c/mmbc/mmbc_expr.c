@@ -763,8 +763,12 @@ struct wvar window_var(void)
     if (t->kind != T_ID)
         cv_err("MATH WINDOW's range targets must be variables");
     sym = reference(t->text, 0);
+    wrote(sym);
     if (sym->is_array || sym->ty == TY_S)
-        cv_err("Invalid variable");
+        cv_note("Invalid variable");
+    else if (sym->is_const)
+        /* findvar's T_CONST test (d4deef9, MATHS.c:2679) */
+        cv_note("Cannot change a constant");
     r.acc = sym->acc;
     r.ty = sym->ty;
     return r;

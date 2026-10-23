@@ -5,12 +5,12 @@ Option Base 0
 ' and both had something in them that reading MATHS.c would have got
 ' wrong:
 '
-'   - MATH WINDOW into an INTEGER array TRUNCATES.  The reference casts
-'     with (long long int), toward zero, where everything else in
-'     MMBasic that lands a float in an integer rounds.  1..5 windowed
-'     onto 0..10 gives 0 2 5 7 10, not 0 3 5 8 10.
-'   - MATH(CROSSING) returns an OFFSET from the first element, not a
-'     subscript, so under OPTION BASE 1 a program wants a(found + 1).
+'   - MATH WINDOW into an INTEGER array truncated in 6.03.02, casting
+'     with (long long int): 1..5 windowed onto 0..10 gave 0 2 5 7 10.
+'     9749c83 rounds it, as every other float landing in an integer
+'     does: 0 3 5 8 10, re-blessed from the reference's source.
+'   - MATH(CROSSING) returned an OFFSET from the first element; since
+'     ec27921 it adds OPTION BASE (tests/mathbase.bas has BASE 1).
 '   - a crossing too near the end to confirm ENDS the search rather
 '     than being skipped: the reference breaks there, so a late spike
 '     hides a real crossing after it.  "cross cf4" is that case.

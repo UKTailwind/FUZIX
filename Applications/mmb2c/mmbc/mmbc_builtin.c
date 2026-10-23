@@ -1601,9 +1601,8 @@ struct val builtin_raw(const char *up)
              *
              * A one-dimensional number array; the three tails are
              * optional and may be written empty, as the CRC family's
-             * are.  What comes back is an OFFSET from the first
-             * element, not a subscript - under OPTION BASE 1 a program
-             * wants a(found + 1).  That is the reference's behaviour. */
+             * are.  What comes back is a subscript, the offset plus
+             * OPTION BASE (ec27921). */
             struct sym *a = arrayref(1);
             struct flat fl;
             const char *args[3];
@@ -1627,9 +1626,10 @@ struct val builtin_raw(const char *up)
             expect_op(")");
             fl = array_line(a);
             cv.uses_math = 1;
-            return mkval(sfmt("mmg_crossing_%s(%s, %s, %s, %s, %s)",
+            return mkval(sfmt("mmg_crossing_%s(%s, %s, %s, %s, %s, %d)",
                               a->ty == TY_I ? "i" : "f", fl.ptr, fl.cnt,
-                              args[0], args[1], args[2]), TY_I);
+                              args[0], args[1], args[2], cv.opt_base),
+                         TY_I);
         }
         if (t->kind == T_ID && strcmp(t->up, "M_DETERMINANT") == 0) {
             /* MATH(M_DETERMINANT a())  - a square 2-D float array */
@@ -1712,8 +1712,9 @@ struct val builtin_raw(const char *up)
                 : strcmp(name, "MIN") == 0 ? "min" : "med";
             cv.uses_array = 1;
             if (strcmp(name, "MAX") == 0 || strcmp(name, "MIN") == 0)
-                return mkval(sfmt("mm_st_%s_%s(%s, %s, %s)",
-                                  fn, sfx, fl.ptr, fl.cnt, idx), TY_F);
+                return mkval(sfmt("mm_st_%s_%s(%s, %s, %s, %d)",
+                                  fn, sfx, fl.ptr, fl.cnt, idx,
+                                  cv.opt_base), TY_F);
             return mkval(sfmt("mm_st_%s_%s(%s, %s)",
                               fn, sfx, fl.ptr, fl.cnt), TY_F);
         }

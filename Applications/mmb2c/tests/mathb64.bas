@@ -36,6 +36,15 @@ Print n%; ":"; out$
 ' a trailing partial group is silently ignored, as the reference does
 n% = Math(BASE64 DECODE "Zm9vY", out$)
 Print n%; ":"; out$
+
+' into a LENGTH 4 string: the input against 255 first, then the result
+' against the string's own LENGTH (51a1a57)
+Dim s$(1) Length 4
+On Error Skip 1
+n% = Math(BASE64 ENCODE "foob", s$(0))
+Print "short: "; MM.ErrMsg$
+n% = Math(BASE64 ENCODE "foo", s$(0))
+Print n%; ":"; s$(0)
 End
 
 Function b64$(si As String)

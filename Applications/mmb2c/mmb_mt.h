@@ -27,21 +27,14 @@
  *	could not live there without charging every one of them for it.
  *	Same bargain as mmb_crc.h and mmb_sort.h.
  *
- *	THE SEEDER USES 69069, AND THE REFERENCE CURRENTLY USES 6069.
- *	That is the one place this deliberately does not copy what the
- *	interpreter does today.  69069 is the published constant - Knuth
- *	TAOCP Vol 2 (2nd ed) p.102, Table 1 line 25, which the reference
- *	cites by name - and 6069 is a typo in it; the author's ruling is
- *	to use the correct value here and correct MMBasic to match.
- *
- *	So MATH RANDOMIZE n followed by MATH(RAND) gives different
- *	numbers here than on an unfixed PicoMite, and the same numbers
- *	once it is fixed.  Everything else about the pair - the state
- *	size, the tempering, the 0xffffffff divisor, the unseeded
- *	first-call behaviour - is transcribed exactly.  This is the only
- *	knowing divergence, and it is here rather than hidden in a
- *	commit message because a reader comparing two machines will meet
- *	it first.
+ *	THE SEEDER USES 69069, Knuth's constant (TAOCP Vol 2, 2nd ed,
+ *	p.102, Table 1 line 25).  This used it while the reference still
+ *	had the typo 6069, on the author's ruling that MMBasic would be
+ *	corrected; 4861a1a corrected it, so the two now agree.  The same
+ *	commit made seed 0 seed as 4357 (an all-zero state stays zero, so
+ *	RAND was 0 for ever), divided by 2^32 so RAND is below 1.0 as the
+ *	manual says, ranged MATH RANDOMIZE's seed to 0..4294967295, and made
+ *	it reseed from the clock when given none.  All copied.
  */
 
 #ifndef MMG_FN
@@ -66,11 +59,9 @@ MMG_FN void mmg_mt_seed(unsigned long seed)
 {
 	int i;
 
-	/* Knuth, TAOCP Vol 2 (2nd ed) p.102, Table 1 line 25 - which the
-	   reference cites and then multiplies by 6069.  69069 is the
-	   number in Knuth and in every published MT19937; see the note
-	   at the top of this file. */
-	mmg_mt[0] = seed & 0xffffffffUL;
+	/* Knuth, TAOCP Vol 2 (2nd ed) p.102, Table 1 line 25; an all-zero
+	   state stays zero, so 0 seeds as the generator's default 4357 */
+	mmg_mt[0] = (seed & 0xffffffffUL) ? (seed & 0xffffffffUL) : 4357;
 	for (i = 1; i < MMG_MT_N; i++)
 		mmg_mt[i] = (69069UL * mmg_mt[i - 1]) & 0xffffffffUL;
 	mmg_mt_index = i;
@@ -111,14 +102,25 @@ MMG_FN unsigned long mmg_mt_long(void)
 	return y & 0xffffffffUL;
 }
 
+/*	MATH RANDOMIZE [seed]: a seed is 0..4294967295 (getint's wording);
+ *	none takes the microseconds since boot, kept positive as the
+ *	reference keeps time_us_32() (MATHS.c:2741). */
+MMG_FN void mmg_mt_randomize(MMINTEGER seed, int given)
+{
+	if (given) {
+		if (mm_range(seed, 0, 0xFFFFFFFFLL))
+			return;
+	} else
+		seed = (MMINTEGER)(mm_us() & 0x7FFFFFFFUL);
+	mmg_mt_seed((unsigned long)seed);
+}
+
 /*	MATH(RAND)
  *
  *	Unseeded, the first call takes the microseconds since boot, which
- *	is what the reference does.  The divisor is 0xffffffff and NOT
- *	2^32, so the result reaches 1.0 exactly when the draw is all
- *	ones - the manual says 0.0 <= n < 1.0 and the code says
- *	otherwise.  The code is what a program will see, on both
- *	machines, so the code is what is copied.
+ *	is what the reference does.  The divisor is 2^32, so 0.0 <= n < 1.0
+ *	as the manual says (4861a1a: 0xffffffff gave 1.0 for an all-ones
+ *	draw).
  */
 MMG_FN MMFLOAT mmg_mt_rand(void)
 {
@@ -132,7 +134,7 @@ MMG_FN MMFLOAT mmg_mt_rand(void)
 
 		mmg_mt_seed((unsigned long)(e ? e : mm_us()));
 	}
-	return (MMFLOAT)mmg_mt_long() / (MMFLOAT)0xffffffffUL;
+	return (MMFLOAT)mmg_mt_long() / 4294967296.0;
 }
 
 #endif /* MMB_MT_H */

@@ -33,3 +33,11 @@ Math C_XOR af(), bf(), cf()
 Print "fxor "; cf(0); " "; cf(4)
 Math C_MULT af(), bf(), cf()
 Print "fmult "; cf(0); " "; cf(4)
+
+' integer C_DIV by zero is "Divide by zero", element by element: the ones
+' before the zero are written (MATHS.c:1891)
+bi(0) = 1 : bi(1) = 1 : bi(2) = 0
+ci(2) = 99
+On Error Skip 1
+Math C_DIV ai(), bi(), ci()
+Print "div0: "; MM.ErrMsg$; ci(0); ci(1); ci(2)

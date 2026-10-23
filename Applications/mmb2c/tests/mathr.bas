@@ -15,15 +15,11 @@ Option Base 0
 ' reproducible here and hardware-random there, and RANDOMIZE was not a
 ' no-op.
 '
-' THE MATH(RAND) VALUES ARE NOT BLESSED AGAINST THE INTERPRETER, and
-' that is deliberate.  The reference's Mersenne seeder multiplies by
-' 6069 where the published algorithm - Knuth TAOCP Vol 2 p.102 Table 1
-' line 25, which the reference cites by name - uses 69069.  On the
-' author's ruling this uses the correct constant and MMBasic is to be
-' corrected to match, so these numbers differ from an unfixed PicoMite
-' and will agree with a fixed one.  They were checked against an
-' independent implementation of the same algorithm rather than against
-' nothing: see the note in mmb_mt.h.
+' The MATH(RAND) values agree with the reference since 4861a1a, which
+' corrected its seeder to Knuth's 69069 (it had the typo 6069, and these
+' were checked against an independent implementation until then) and
+' divides by 2^32, so a draw is below 1.0.  Seed 0 seeds as 4357, and a
+' seed is 0 to 4294967295.
 
 ' MATH RANDOMIZE and MATH(RAND) are a pair on a Mersenne Twister, and
 ' a seeded sequence is reproducible - so it can be compared.
@@ -35,6 +31,11 @@ Math Randomize 1
 Print "seed1 "; Math(RAND); Math(RAND); Math(RAND)
 Math Randomize 4357
 Print "s4357 "; Math(RAND); Math(RAND)
+Math Randomize 0
+Print "seed0 "; Math(RAND); Math(RAND)
+On Error Skip 1
+Math Randomize -1
+Print "neg   : "; MM.ErrMsg$
 
 ' RND is NOT that generator, and RANDOMIZE does not touch it.  Its
 ' values cannot be compared - they are hardware-random on a PicoMite -

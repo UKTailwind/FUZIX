@@ -4692,8 +4692,16 @@ static void do_array_cmd(int is_math)
         {
             const char *fn = sfmt("mm_arr_%s_%s", lower(op),
                                   src->ty == TY_I ? "i" : "f");
-            const char *cval = src->ty == TY_I ? as_int(val)
-                                               : as_flt(val);
+            const char *cval;
+
+            if (strcmp(op, "SCALE") == 0 && src->ty == TY_I
+                && val.ty == TY_F) {
+                /* a float scale on integers rounds each product, not
+                   the scale (MATHS.c:1599) */
+                fn = "mm_arr_scalef_i";
+                cval = as_flt(val);
+            } else
+                cval = src->ty == TY_I ? as_int(val) : as_flt(val);
             emit(sfmt("%s(%s, %s, %s, %s, %s);",
                       fn, sf.ptr, sf.cnt, cval, df.ptr, df.cnt));
         }
@@ -4859,12 +4867,13 @@ static void do_array_cmd(int is_math)
             emit(sfmt("  %s(%s, %s, %s, %s, %s, %s, &%s, &%s);",
                       fn, sf.ptr, sf.cnt, omin, omax, df.ptr, df.cnt,
                       a, b));
-            /* An INTEGER target truncates, as the reference's
-               (long long int) cast does - not mm_toint, which rounds. */
-            emit(sfmt("  %s = %s%s;", lo.acc,
-                      lo.ty == TY_F ? "" : "(MMINTEGER)", a));
-            emit(sfmt("  %s = %s%s;", hi.acc,
-                      hi.ty == TY_F ? "" : "(MMINTEGER)", b));
+            /* An INTEGER target rounds, as an assignment to an integer
+               does (FloatToInt64, 9749c83); it was the truncating cast
+               6.03.02 had. */
+            emit(sfmt("  %s = %s;", lo.acc,
+                      lo.ty == TY_F ? a : sfmt("mm_toint(%s)", a)));
+            emit(sfmt("  %s = %s;", hi.acc,
+                      hi.ty == TY_F ? b : sfmt("mm_toint(%s)", b)));
             emit("}");
         }
         return;
@@ -5200,20 +5209,17 @@ static void do_array_cmd(int is_math)
            seeded program reproducible here and hardware-random on a
            PicoMite.
 
-           With no argument the reference leaves the generator
-           unseeded, so the first MATH(RAND) takes the microseconds
-           since boot; that is what the header does, so emit nothing
-           rather than seeding from the clock here. */
+           With no argument the reference seeds from the clock
+           (4861a1a); it used to leave the generator alone. */
         if (!is_math)
             cv_err("RANDOMIZE is a MATH sub-command here; the bare "
                    "RANDOMIZE statement is a no-op, as it is on an "
                    "RP2350");
         cv.uses_mt = 1;
         if (stmt_end())
-            emit("/* MATH RANDOMIZE with no seed: the first "
-                 "MATH(RAND) seeds from the clock */");
+            emit("mmg_mt_randomize(0, 0);");
         else
-            emit(sfmt("mmg_mt_seed((unsigned long)%s);", as_int(expr())));
+            emit(sfmt("mmg_mt_randomize(%s, 1);", as_int(expr())));
         return;
     }
     cv_err("MATH/ARRAY %s is not supported", t->text);

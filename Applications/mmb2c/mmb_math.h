@@ -59,7 +59,15 @@ MMG_FN void mmg_carr_i(const MMINTEGER *a, int na, const MMINTEGER *b,
 	case '+': for (i = 0; i < na; i++) c[i] = a[i] + b[i]; break;
 	case '-': for (i = 0; i < na; i++) c[i] = a[i] - b[i]; break;
 	case '*': for (i = 0; i < na; i++) c[i] = a[i] * b[i]; break;
-	case '/': for (i = 0; i < na; i++) c[i] = a[i] / b[i]; break;
+	case '/':
+		/* each element as it comes, as MATHS.c:1891 does - the ones
+		   before a zero divisor are written (9749c83) */
+		for (i = 0; i < na; i++) {
+			if (b[i] == 0)
+				MM_RAISE("Divide by zero");
+			c[i] = a[i] / b[i];
+		}
+		break;
 	case '&': for (i = 0; i < na; i++) c[i] = a[i] & b[i]; break;
 	case '|': for (i = 0; i < na; i++) c[i] = a[i] | b[i]; break;
 	default:  for (i = 0; i < na; i++) c[i] = a[i] ^ b[i]; break;
@@ -108,9 +116,12 @@ MMG_FN void mmg_carr_f(const MMFLOAT *a, int na, const MMFLOAT *b,
  *	unknown input character to 0 rather than erroring (b64_int's
  *	final return), '=' is value 64 and shortens the group, and a
  *	trailing partial group of fewer than 4 characters is silently
- *	ignored.  The size gate is the reference's too: computed from the
- *	input length BEFORE the loop runs ("Output exceeds string size"),
- *	so DECODE of a padded group can deliver less than it reserved.
+ *	ignored.  The size gates are the reference's too (51a1a57): the
+ *	input length against 255 BEFORE the loop runs ("Output exceeds
+ *	string size"), so DECODE of a padded group can deliver less than it
+ *	reserved, and then the result against the target's own LENGTH
+ *	("Too many elements for string output") - the LENGTH used to be the
+ *	first test, with the first message.
  *
  *	A scratch buffer, not in-place: MATH(BASE64 ENCODE a$, a$) is
  *	legal, and the reference also encodes into temp memory first.
@@ -131,7 +142,7 @@ MMG_FN MMINTEGER mmg_b64_enc(const char *in, char *out, int cap)
 	int i, j = 0, k = 0;
 	unsigned int s[3];
 
-	if (4 * ((n + 2) / 3) > cap)
+	if (4 * ((n + 2) / 3) > 255)
 		MM_RAISEV("Output exceeds string size", 0);
 	for (i = 0; i < n; i++) {
 		s[j++] = p[i];
@@ -158,6 +169,8 @@ MMG_FN MMINTEGER mmg_b64_enc(const char *in, char *out, int cap)
 		buf[k + 3] = '=';
 		k += 4;
 	}
+	if (k > cap)
+		MM_RAISEV("Too many elements for string output", 0);
 	out[0] = (char)(unsigned char)k;
 	for (i = 0; i < k; i++)	/* not memcpy: this header includes no */
 		out[i + 1] = (char)buf[i];	/* libc headers of its own */
@@ -192,7 +205,7 @@ MMG_FN MMINTEGER mmg_b64_dec(const char *in, char *out, int cap)
 	int i, j = 0, k = 0;
 	unsigned int s[4];
 
-	if ((3 * n) / 4 > cap)
+	if ((3 * n) / 4 > 255)
 		MM_RAISEV("Output exceeds string size", 0);
 	for (i = 0; i < n; i++) {
 		s[j++] = (unsigned int)mmg_b64_int(p[i]);
@@ -216,6 +229,8 @@ MMG_FN MMINTEGER mmg_b64_dec(const char *in, char *out, int cap)
 			j = 0;
 		}
 	}
+	if (k > cap)
+		MM_RAISEV("Too many elements for string output", 0);
 	out[0] = (char)(unsigned char)k;
 	for (i = 0; i < k; i++)
 		out[i + 1] = (char)buf[i];
@@ -316,10 +331,9 @@ MMG_FN void mmg_shift(const MMINTEGER *a, int na, MMINTEGER sh,
  *
  *	  - n == 1.0 is a COPY, not pow(x, 1).  The reference branches on
  *	    it, and pow() is not required to return x exactly.
- *	  - into an INTEGER array the exponent is rounded to a whole
- *	    number FIRST, so POWER a%(), 2.7, b%() cubes rather than
- *	    raising to 2.7 and rounding the result.  Into a float array
- *	    the exponent is used as written.
+ *	  - into an INTEGER array the exponent is used as written and the
+ *	    RESULT rounded (FloatToInt64, MATHS.c:2610).  6.03.02 rounded
+ *	    the exponent first, so 16 ^ 0.5 gave 16; it gives 4.
  *
  *	Both arrays must be the same type, which is ARRAY ADD's rule here
  *	rather than MMBasic's - the reference converts between them.
@@ -342,7 +356,6 @@ MMG_FN void mmg_pow_f(const MMFLOAT *a, int na, MMFLOAT p,
 MMG_FN void mmg_pow_i(const MMINTEGER *a, int na, MMFLOAT p,
                       MMINTEGER *b, int nb)
 {
-	MMFLOAT e;
 	int i;
 
 	if (na != nb)
@@ -352,9 +365,8 @@ MMG_FN void mmg_pow_i(const MMINTEGER *a, int na, MMFLOAT p,
 			b[i] = a[i];
 		return;
 	}
-	e = (MMFLOAT)mm_toint(p);
 	for (i = 0; i < na; i++)
-		b[i] = mm_toint(pow((MMFLOAT)a[i], e));
+		b[i] = mm_toint(pow((MMFLOAT)a[i], p));
 }
 
 /*	MATH(MAGNITUDE a())         sqrt of the sum of the squares
@@ -911,7 +923,8 @@ MMG_FN void mmg_q_create(MMFLOAT halftheta, MMFLOAT x, MMFLOAT y, MMFLOAT z,
 {
 	MMFLOAT sineterm, mag;
 
-	if (mmg_q_bad(nq, 4))
+	/* q() is the FIFTH argument (3ae5b9d): theta, x, y, z, q() */
+	if (mmg_q_bad(nq, 5))
 		return;
 	sineterm = sin(halftheta);
 	q[0] = cos(halftheta);
@@ -1032,10 +1045,9 @@ MMG_FN int mmg_range(MMINTEGER v, MMINTEGER lo, MMINTEGER hi)
  *	than being skipped - the reference breaks there, it does not
  *	continue, so a late spike hides a real crossing after it.  Copied.
  *
- *	WHAT IS RETURNED IS AN OFFSET, not a subscript.  It counts from
- *	the first element whatever OPTION BASE says, so under BASE 1 a
- *	program wants a(found + 1).  That is the reference's behaviour and
- *	is worth knowing before using it.
+ *	What is returned is a subscript: the offset from the first element
+ *	plus OPTION BASE (ec27921), so under BASE 1 the first element is 1.
+ *	It used to be the bare offset whatever the base.  -1 is still none.
  *
  *	The two refusals are ordered as cmd_math orders them: direction is
  *	read and ranged before the array is looked at, and `confirm` is
@@ -1056,7 +1068,7 @@ MMG_FN int mmg_cross_args(MMINTEGER dir, MMINTEGER confirm, int n)
 }
 
 MMG_FN MMINTEGER mmg_crossing_f(const MMFLOAT *a, int n, MMFLOAT lvl,
-                                MMINTEGER dir, MMINTEGER confirm)
+                                MMINTEGER dir, MMINTEGER confirm, int base)
 {
 	int i, k;
 
@@ -1078,13 +1090,13 @@ MMG_FN MMINTEGER mmg_crossing_f(const MMFLOAT *a, int n, MMFLOAT lvl,
 			}
 		}
 		if (held)
-			return i;
+			return i + base;
 	}
 	return -1;
 }
 
 MMG_FN MMINTEGER mmg_crossing_i(const MMINTEGER *a, int n, MMFLOAT lvl,
-                                MMINTEGER dir, MMINTEGER confirm)
+                                MMINTEGER dir, MMINTEGER confirm, int base)
 {
 	int i, k;
 
@@ -1108,7 +1120,7 @@ MMG_FN MMINTEGER mmg_crossing_i(const MMINTEGER *a, int n, MMFLOAT lvl,
 			}
 		}
 		if (held)
-			return i;
+			return i + base;
 	}
 	return -1;
 }
@@ -1121,16 +1133,14 @@ MMG_FN MMINTEGER mmg_crossing_i(const MMINTEGER *a, int n, MMFLOAT lvl,
  *	of the statement rather than an accident, so all four
  *	combinations are here where ARRAY ADD refuses them.
  *
- *	AN INTEGER DESTINATION TRUNCATES.  The reference casts with
- *	(long long int), toward zero, where everything else in MMBasic
- *	that lands a float in an integer rounds - MATH WINDOW wi(), 0, 10
- *	over 1..5 gives 0 2 5 7 10, not 0 3 5 8 10.  Checked on the
- *	board; the source alone would have got this wrong, mm_toint being
- *	the obvious thing to reach for.
+ *	AN INTEGER DESTINATION ROUNDS (FloatToInt64, 9749c83), as every
+ *	other float landing in an integer does - MATH WINDOW wi(), 0, 10
+ *	over 1..5 gives 0 3 5 8 10.  6.03.02 truncated, casting with
+ *	(long long int), and gave 0 2 5 7 10; that was checked on the board
+ *	and is what this did until the reference changed.
  *
- *	NO ZERO CHECK on the input range, as there is none there: an
- *	array whose elements are all equal divides by zero and gives IEEE
- *	infinities on both machines.
+ *	A CONSTANT INPUT - every element equal - maps to outmin (d4deef9);
+ *	it divided by zero and gave NaN.
  *
  *	The initial min and max are the reference's own 1.5e308 sentinels
  *	rather than the first element, which matters only for an empty
@@ -1169,7 +1179,7 @@ MMG_FN void mmg_win_rng_i(const MMINTEGER *a, int n, MMFLOAT *lo, MMFLOAT *hi)
 }
 
 #define MMG_WINSCALE(v) \
-	(((v) - lo) / (hi - lo) * (omax - omin) + omin)
+	(hi == lo ? omin : ((v) - lo) / (hi - lo) * (omax - omin) + omin)
 
 MMG_FN void mmg_window_ff(const MMFLOAT *a, int na, MMFLOAT omin,
                           MMFLOAT omax, MMFLOAT *b, int nb,
@@ -1200,7 +1210,7 @@ MMG_FN void mmg_window_fi(const MMFLOAT *a, int na, MMFLOAT omin,
 	if (plo) *plo = lo;
 	if (phi) *phi = hi;
 	for (i = 0; i < na; i++)
-		b[i] = (MMINTEGER)MMG_WINSCALE(a[i]);
+		b[i] = mm_toint(MMG_WINSCALE(a[i]));
 }
 
 MMG_FN void mmg_window_if(const MMINTEGER *a, int na, MMFLOAT omin,
@@ -1232,6 +1242,6 @@ MMG_FN void mmg_window_ii(const MMINTEGER *a, int na, MMFLOAT omin,
 	if (plo) *plo = lo;
 	if (phi) *phi = hi;
 	for (i = 0; i < na; i++)
-		b[i] = (MMINTEGER)MMG_WINSCALE((MMFLOAT)a[i]);
+		b[i] = mm_toint(MMG_WINSCALE((MMFLOAT)a[i]));
 }
 #endif /* MMB_MATH_H */

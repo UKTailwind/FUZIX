@@ -11,8 +11,9 @@
 '   shr    the fourth argument is a BARE U.  A real MMBasic silently
 '          ignores "U" and shifts arithmetically instead; we refuse the
 '          quoted form rather than copy the silence.
-'   pow*   POWER into an INTEGER array rounds the exponent to a whole
-'          number first, so 2.7 cubes.  Into a float array it does not.
+'   pow*   POWER into an INTEGER array raises to 2.7 as written and
+'          rounds the result (MATHS.c:2610).  6.03.02 rounded the
+'          exponent first, so 2.7 cubed: 8 27 64 125, re-blessed.
 '   pow1   an exponent of exactly 1 is a copy, not pow(x, 1).
 '   mag2   MAGNITUDE takes any rank and reads the array flat.
 '   self   V_NORMALISE and V_CROSS may write back over a source, which

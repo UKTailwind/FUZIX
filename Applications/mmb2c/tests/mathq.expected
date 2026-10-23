@@ -10,7 +10,7 @@ e inv2:Argument 2 must be a 5 element floating point array
 e mul1:Argument 1 must be a 5 element floating point array
 e mul2:Argument 2 must be a 5 element floating point array
 e mul3:Argument 3 must be a 5 element floating point array
-e cre :Argument 4 must be a 5 element floating point array
+e cre :Argument 5 must be a 5 element floating point array
 e vec :Argument 4 must be a 5 element floating point array
 e eul :Argument 4 must be a 5 element floating point array
 e rot3:Argument 3 must be a 5 element floating point array

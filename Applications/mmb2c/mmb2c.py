@@ -3665,10 +3665,8 @@ class Conv(object):
                 #
                 # A one-dimensional number array; the three tails are
                 # optional and may be written empty, as the CRC family's
-                # are.  What comes back is an OFFSET from the first
-                # element, not a subscript - under OPTION BASE 1 a
-                # program wants a(found + 1).  That is the reference's
-                # behaviour.
+                # are.  What comes back is a subscript, the offset plus
+                # OPTION BASE (ec27921).
                 a = self.arrayref()
                 if a.ty == TY_S:
                     self.err("Argument 1 must be a 1D numerical array")
@@ -3683,9 +3681,9 @@ class Conv(object):
                 self.expect_op(')')
                 ptr, cnt = self.array_line(a)
                 self.uses_math = True
-                return ('mmg_crossing_%s(%s, %s, %s)'
+                return ('mmg_crossing_%s(%s, %s, %s, %d)'
                         % ('i' if a.ty == TY_I else 'f', ptr, cnt,
-                           ', '.join(args)), TY_I)
+                           ', '.join(args), self.opt_base), TY_I)
             if t[0] == T_ID and t[2] == 'M_DETERMINANT':
                 # MATH(M_DETERMINANT a())  - a square 2-D float array
                 a = self.arrayref()
@@ -3744,8 +3742,8 @@ class Conv(object):
                       'MAX': 'max', 'MIN': 'min', 'MEDIAN': 'med'}[name]
                 self.uses_array = True
                 if name in ('MAX', 'MIN'):
-                    return ('mm_st_%s_%s(%s, %s, %s)'
-                            % (fn, sfx, ptr, cnt, idx), TY_F)
+                    return ('mm_st_%s_%s(%s, %s, %s, %d)'
+                            % (fn, sfx, ptr, cnt, idx, self.opt_base), TY_F)
                 return ('mm_st_%s_%s(%s, %s)' % (fn, sfx, ptr, cnt), TY_F)
             if t[0] != T_ID or t[2] not in MATHFUNCS:
                 known = sorted(list(MATHFUNCS) + list(MATHARRAY)
@@ -3884,8 +3882,12 @@ class Conv(object):
         if t[0] != T_ID:
             self.err("MATH WINDOW's range targets must be variables")
         sym = self.reference(t[1], False)
+        self.wrote(sym)
         if sym.is_array or sym.ty == TY_S:
-            self.err("Invalid variable")
+            self.note("Invalid variable")
+        elif sym.is_const:
+            # findvar's T_CONST test (d4deef9, MATHS.c:2679)
+            self.note("Cannot change a constant")
         return (sym.acc, sym.ty)
 
     def array_plane(self, s):
@@ -8587,6 +8589,11 @@ class Conv(object):
             fn = 'mm_arr_%s_%s' % (op.lower(),
                                    'i' if src.ty == TY_I else 'f')
             conv = self.as_int if src.ty == TY_I else self.as_flt
+            if op == 'SCALE' and src.ty == TY_I and val[1] == TY_F:
+                # a float scale on integers rounds each product, not the
+                # scale (MATHS.c:1599)
+                fn = 'mm_arr_scalef_i'
+                conv = self.as_flt
             self.emit('%s(%s, %s, %s, %s, %s);'
                       % (fn, sptr, scnt, conv(val), dptr, dcnt))
             return
@@ -8722,13 +8729,14 @@ class Conv(object):
             self.emit('{ MMFLOAT %s, %s;' % (a, b))
             self.emit('  %s(%s, %s, %s, %s, %s, %s, &%s, &%s);'
                       % (fn, sptr, scnt, omin, omax, dptr, dcnt, a, b))
-            # An INTEGER target truncates, as the reference's
-            # (long long int) cast does - not mm_toint, which rounds.
+            # An INTEGER target rounds, as an assignment to an integer
+            # does (FloatToInt64, 9749c83); it was the truncating cast
+            # 6.03.02 had.
             for tgt, tmp in ((lo, a), (hi, b)):
                 acc, ty = tgt
                 self.emit('  %s = %s;'
                           % (acc, tmp if ty == TY_F
-                             else '(MMINTEGER)%s' % tmp))
+                             else 'mm_toint(%s)' % tmp))
             self.emit('}')
             return
         if op in ('Q_INVERT', 'Q_MULT', 'Q_ROTATE'):
@@ -8992,20 +9000,17 @@ class Conv(object):
             # a seeded program reproducible here and hardware-random on
             # a PicoMite.
             #
-            # With no argument the reference leaves the generator
-            # unseeded, so the first MATH(RAND) takes the microseconds
-            # since boot; that is what the header does, so emit
-            # nothing rather than seeding from the clock here.
+            # With no argument the reference seeds from the clock
+            # (4861a1a); it used to leave the generator alone.
             if not is_math:
                 self.err("RANDOMIZE is a MATH sub-command here; the "
                          "bare RANDOMIZE statement is a no-op, as it "
                          "is on an RP2350")
             self.uses_mt = True
             if self.stmt_end():
-                self.emit('/* MATH RANDOMIZE with no seed: the first '
-                          'MATH(RAND) seeds from the clock */')
+                self.emit('mmg_mt_randomize(0, 0);')
             else:
-                self.emit('mmg_mt_seed((unsigned long)%s);'
+                self.emit('mmg_mt_randomize(%s, 1);'
                           % self.as_int(self.expr()))
             return
         self.err("MATH/ARRAY %s is not supported" % t[1])

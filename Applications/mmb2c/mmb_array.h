@@ -160,6 +160,18 @@ MMG_FN void mm_arr_scale_i(const MMINTEGER *in, int n, MMINTEGER v,
     for (i = 0; i < n; i++) out[i] = in[i] * v;
 }
 
+/* An integer array by a FLOAT scale: each product rounded, as cmd_math's
+   FloatToInt64(f * in) (MATHS.c:1599) - the scale was rounded first, so
+   5 * 0.3 gave 0 where the reference gives 2.  An integer scale keeps
+   the exact integer multiply above, as the reference's T_INT path. */
+MMG_FN void mm_arr_scalef_i(const MMINTEGER *in, int n, MMFLOAT v,
+                            MMINTEGER *out, int no)
+{
+    int i;
+    if (n != no) MM_RAISE("Size mismatch");
+    for (i = 0; i < n; i++) out[i] = mm_toint((MMFLOAT)in[i] * v);
+}
+
 MMG_FN void mm_arr_scale_f(const MMFLOAT *in, int n, MMFLOAT v, MMFLOAT *out,
                            int no)
 {
@@ -234,39 +246,41 @@ MMG_FN MMFLOAT mm_st_sd_f(const MMFLOAT *a, int n)
     return sqrt(var / (n - 1));
 }
 
-MMG_FN MMFLOAT mm_st_max_i(const MMINTEGER *a, int n, MMINTEGER *idx)
+/* MATH(MAX/MIN a() [, idx%]): idx% is a subscript, the offset plus
+   OPTION BASE (MATHS.c:3636), where it was the offset under BASE 1 too */
+MMG_FN MMFLOAT mm_st_max_i(const MMINTEGER *a, int n, MMINTEGER *idx, int base)
 {
     int i, k = 0;
     if (n <= 0) return 0;
     for (i = 1; i < n; i++) if (a[i] > a[k]) k = i;
-    if (idx) *idx = k;
+    if (idx) *idx = k + base;
     return (MMFLOAT)a[k];
 }
 
-MMG_FN MMFLOAT mm_st_max_f(const MMFLOAT *a, int n, MMINTEGER *idx)
+MMG_FN MMFLOAT mm_st_max_f(const MMFLOAT *a, int n, MMINTEGER *idx, int base)
 {
     int i, k = 0;
     if (n <= 0) return 0;
     for (i = 1; i < n; i++) if (a[i] > a[k]) k = i;
-    if (idx) *idx = k;
+    if (idx) *idx = k + base;
     return (MMFLOAT)a[k];
 }
 
-MMG_FN MMFLOAT mm_st_min_i(const MMINTEGER *a, int n, MMINTEGER *idx)
+MMG_FN MMFLOAT mm_st_min_i(const MMINTEGER *a, int n, MMINTEGER *idx, int base)
 {
     int i, k = 0;
     if (n <= 0) return 0;
     for (i = 1; i < n; i++) if (a[i] < a[k]) k = i;
-    if (idx) *idx = k;
+    if (idx) *idx = k + base;
     return (MMFLOAT)a[k];
 }
 
-MMG_FN MMFLOAT mm_st_min_f(const MMFLOAT *a, int n, MMINTEGER *idx)
+MMG_FN MMFLOAT mm_st_min_f(const MMFLOAT *a, int n, MMINTEGER *idx, int base)
 {
     int i, k = 0;
     if (n <= 0) return 0;
     for (i = 1; i < n; i++) if (a[i] < a[k]) k = i;
-    if (idx) *idx = k;
+    if (idx) *idx = k + base;
     return (MMFLOAT)a[k];
 }
 

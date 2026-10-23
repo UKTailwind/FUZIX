@@ -9,3 +9,4 @@ fadd  3  7
 fdiv  0.5  2.5
 fxor  3  7
 fmult  2  10
+div0: Divide by zero 1 2 99
