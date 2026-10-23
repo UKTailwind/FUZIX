@@ -3372,15 +3372,20 @@ class Conv(object):
 
         if up == 'RGB':
             self.expect_op('(')
+            if self.is_op(')'):
+                # getcsargs finds no argument at all: SyntaxError
+                self.i += 1
+                return ('(mm_error("Invalid syntax"), 0LL)', TY_I)
             t = self.peek()
-            if t is not None and t[0] == T_ID and t[2] in RGBNAMES \
-                    and self.is_op(')', 1):
-                self.i += 2
-                return ('0x%06XLL' % RGBNAMES[t[2]], TY_I)
             if self.one_arg():
-                # One argument is only ever a colour name to fun_rgb;
-                # anything else is "Invalid colour: <the argument as
-                # written>" - raised when it runs, as there.
+                # One argument is only ever a colour name to fun_rgb,
+                # matched by checkstring: the word, then anything that
+                # cannot go on with a name - RGB(RED + 0) and RGB(Red%)
+                # are red, and the rest is never evaluated.  Anything else
+                # is "Invalid colour: <the argument as written>" - raised
+                # when it runs, as there.
+                name = split_suffix(t[1])[0].upper() if t[0] == T_ID \
+                    else None
                 parts = []
                 depth = 0
                 while depth or not self.is_op(')'):
@@ -3391,6 +3396,8 @@ class Conv(object):
                         depth -= 1
                     parts.append('"%s"' % t[1] if t[0] == T_STR else t[1])
                 self.expect_op(')')
+                if name in RGBNAMES:
+                    return ('0x%06XLL' % RGBNAMES[name], TY_I)
                 msg = 'Invalid colour: ' + ''.join(parts)
                 return ('(mm_error("%s"), 0LL)'
                         % msg.replace('\\', '\\\\').replace('"', '\\"'),

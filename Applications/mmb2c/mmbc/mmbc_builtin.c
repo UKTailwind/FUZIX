@@ -1008,20 +1008,24 @@ struct val builtin_raw(const char *up)
         const char *bi;
 
         expect_op("(");
-        t = peek(0);
-        if (t != NULL && t->kind == T_ID && rgbname_get(t->up) >= 0
-            && is_op(")", 1)) {
-            long val = rgbname_get(t->up);
-
-            cv.i += 2;
-            return mkval(sfmt("0x%06lXLL", (unsigned long)val), TY_I);
+        if (is_op(")", 0)) {
+            /* getcsargs finds no argument at all: SyntaxError */
+            cv.i++;
+            return mkval("(mm_error(\"Invalid syntax\"), 0LL)", TY_I);
         }
+        t = peek(0);
         if (one_arg()) {
-            /* One argument is only ever a colour name to fun_rgb;
-               anything else is "Invalid colour: <the argument as
-               written>" - raised when it runs, as there. */
+            /* One argument is only ever a colour name to fun_rgb, matched
+               by checkstring: the word, then anything that cannot go on
+               with a name - RGB(RED + 0) and RGB(Red%) are red, and the
+               rest is never evaluated.  Anything else is "Invalid colour:
+               <the argument as written>" - raised when it runs, as
+               there. */
             const char *msg = "Invalid colour: ";
             int depth = 0;
+            int sfx;
+            long val = t->kind == T_ID
+                ? rgbname_get(upper(split_suffix(t->text, &sfx))) : -1;
 
             while (depth || !is_op(")", 0)) {
                 struct tok *u = nxt();
@@ -1034,6 +1038,8 @@ struct val builtin_raw(const char *up)
                                        : sfmt("%s%s", msg, u->text);
             }
             expect_op(")");
+            if (val >= 0)
+                return mkval(sfmt("0x%06lXLL", (unsigned long)val), TY_I);
             return mkval(sfmt("(mm_error(\"%s\"), 0LL)", c_escape(msg)),
                          TY_I);
         }
