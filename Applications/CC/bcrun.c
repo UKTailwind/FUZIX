@@ -1322,9 +1322,44 @@ static unsigned long heap_base, heap_top;
  *	gap is not an error: it is what the development host and any
  *	board without PSRAM get, and small programs never notice.
  */
+#ifdef PC3_HOST
+/* The PC build (pc3host): a PC has memory to spare, so a program gets
+   64 MB of heap where the board gives 512K of its 8 MB of PSRAM.
+   MMbg's arrays and strings alone are 788K. */
+#define VM_HEAP_KB	65536
+#else
+/* The board: 512K of PSRAM unless BCRUN_HEAP asks for more. */
 #define VM_HEAP_KB	512
+#endif
 
-#ifdef MM_PC3
+#ifdef PC3_HOST
+/*
+ *	On a PC the heap is mapped here, below 4G as mem_init maps mem[]
+ *	(a program address is 32 bits).  It used to go to /dev/sys as on
+ *	the board, but this is bcrun's own request, which lc_open's routing
+ *	to pc3host never sees: the open failed, and the heap was silently
+ *	whatever was left of mem[] - too small for MMbg's 788K.  Not
+ *	pc3_sys_open() either, which would start a display server, and a
+ *	window, for every program just to give it a heap.
+ */
+static unsigned long psram_heap(unsigned long want)
+{
+	int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+	void *p;
+#ifdef MAP_32BIT
+	flags |= MAP_32BIT;
+#endif
+	p = mmap((void *)0x40000000UL, want, PROT_READ | PROT_WRITE,
+		 flags, -1, 0);
+	if (p == MAP_FAILED)
+		return 0;
+	if ((uintptr_t)p > 0xFFFFFFFFUL - want) {
+		munmap(p, want);
+		return 0;
+	}
+	return (unsigned long)(uintptr_t)p;
+}
+#elif defined(MM_PC3)
 #define PSRAMIOC_ALLOC	0x000A
 struct vm_psram_req {
 	unsigned long len;
