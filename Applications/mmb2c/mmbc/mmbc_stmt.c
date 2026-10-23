@@ -5615,49 +5615,50 @@ static const char *lvalue_from_here(int strings)
     return s->acc;
 }
 
-/* At a '(': is there an '=' anywhere before its matching ')'? */
-static int eq_in_brackets(void)
+/* cmd_for's getargs on =, TO and STEP, from just after the counter's
+ * name: the statement's top-level pieces, checked as it checks them.
+ * makeargs refuses an eighth piece ("Invalid syntax"); then = and TO must
+ * be the first two separators ("FOR with misplaced = or TO"), and a third
+ * must be STEP ("Invalid syntax").  NULL when the shape is right. */
+static const char *for_shape(void)
 {
-    int k, depth = 0;
+    int pieces = 1;                     /* the counter */
+    const char *seps[8];
+    int nseps = 0, last_sep = 0, k, depth = 0;
 
     for (k = 0;; k++) {
         struct tok *t = peek(k);
+        const char *sep = NULL;
 
-        if (t == NULL)
-            return 0;
-        if (t->kind != T_OP)
-            continue;
-        if (strcmp(t->text, "(") == 0)
-            depth++;
-        else if (strcmp(t->text, ")") == 0) {
-            if (--depth == 0)
-                return 0;
-        } else if (strcmp(t->text, "=") == 0)
-            return 1;
+        if (t == NULL
+            || (depth == 0 && (is_op(":", k) || is_kw("ELSE", k))))
+            break;
+        if (t->kind == T_OP) {
+            if (strcmp(t->text, "(") == 0)
+                depth++;
+            else if (strcmp(t->text, ")") == 0)
+                depth--;
+            else if (strcmp(t->text, "=") == 0 && depth == 0)
+                sep = "=";
+        } else if (depth == 0 && (is_kw("TO", k) || is_kw("STEP", k)))
+            sep = t->up;
+        if (sep != NULL) {
+            seps[nseps++] = sep;
+            pieces++;
+            last_sep = 1;
+        } else if (last_sep) {
+            pieces++;
+            last_sep = 0;
+        }
+        if (pieces > 7)
+            return "Invalid syntax";
     }
-}
-
-/* From here to the end of the statement: an '=' outside every bracket? */
-static int eq_at_top(void)
-{
-    int k, depth = 0;
-
-    for (k = 0;; k++) {
-        struct tok *t = peek(k);
-
-        if (t == NULL)
-            return 0;
-        if (t->kind != T_OP)
-            continue;
-        if (strcmp(t->text, "(") == 0)
-            depth++;
-        else if (strcmp(t->text, ")") == 0)
-            depth--;
-        else if (strcmp(t->text, ":") == 0 && depth == 0)
-            return 0;
-        else if (strcmp(t->text, "=") == 0 && depth == 0)
-            return 1;
-    }
+    if (pieces < 5 || pieces == 6 || strcmp(seps[0], "=") != 0
+        || strcmp(seps[1], "TO") != 0)
+        return "FOR with misplaced = or TO";
+    if (pieces == 7 && strcmp(seps[2], "STEP") != 0)
+        return "Invalid syntax";
+    return NULL;
 }
 
 static void do_assign(void)
@@ -5674,11 +5675,9 @@ static void do_assign(void)
     if (t->kind != T_ID)
         cv_err("assignment target expected");
     canon = split_suffix(t->text, &sfx);
-    /* cmd_let takes the statement's FIRST = as the assignment, so one
-       inside the target's subscript - a(i = 1) = 5 - is its "Invalid
-       syntax" (22cd802), where we read it as a comparison */
-    if (is_op("(", 0) && eq_in_brackets())
-        cv_note("Invalid syntax");
+    /* An = inside the target's subscript - a(i = 1) = 5 - is a
+       comparison: cmd_let finds the assignment's = after skipvar has
+       stepped over the indices (ad5caaf, PicoMite issue 101). */
 
     /* assignment to the enclosing function's name = set return value */
     if (cv.cur != NULL && cv.cur->is_func
@@ -5957,12 +5956,17 @@ static void do_for(void)
         cv_err("FOR counter cannot be a string");
     if (s->is_array)
         cv_err("FOR counter cannot be an array");
-    expect_op("=");
     /* cmd_for splits the rest on =, TO and STEP outside brackets, so a
        second = there - FOR i = k = 2 TO 3 - is its "FOR with misplaced =
-       or TO" (112ce55); inside brackets it is a comparison */
-    if (eq_at_top())
-        cv_note("FOR with misplaced = or TO");
+       or TO" (112ce55), and FOR i = 1 TO n = 3 its "Invalid syntax";
+       inside brackets an = is a comparison */
+    {
+        const char *shape = for_shape();
+
+        if (shape != NULL)
+            cv_note("%s", shape);
+    }
+    expect_op("=");
     start = expr();
     if (!accept_kw("TO"))
         cv_err("FOR without TO");

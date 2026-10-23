@@ -1229,44 +1229,49 @@ class Conv(object):
         t = self.peek(k)
         return t is not None and t[0] == T_OP and t[1] == s
 
-    def eq_in_brackets(self):
-        """At a '(': is there an '=' anywhere before its matching ')'?"""
+    def for_shape(self):
+        """cmd_for's getargs on =, TO and STEP, from just after the
+        counter's name: the statement's top-level pieces, checked as it
+        checks them.  makeargs refuses an eighth piece ("Invalid
+        syntax"); then = and TO must be the first two separators ("FOR
+        with misplaced = or TO"), and a third must be STEP ("Invalid
+        syntax").  None when the shape is right."""
+        pieces = 1                       # the counter
+        seps = []
+        last_sep = False
         k = 0
         depth = 0
         while True:
             t = self.peek(k)
-            if t is None:
-                return False
+            if t is None or (depth == 0 and (self.is_op(':', k)
+                                             or self.is_kw('ELSE', k))):
+                break
+            sep = None
             if t[0] == T_OP:
                 if t[1] == '(':
                     depth += 1
                 elif t[1] == ')':
                     depth -= 1
-                    if depth == 0:
-                        return False
-                elif t[1] == '=':
-                    return True
-            k += 1
-
-    def eq_at_top(self):
-        """From here to the end of the statement: an '=' outside every
-        bracket?"""
-        k = 0
-        depth = 0
-        while True:
-            t = self.peek(k)
-            if t is None:
-                return False
-            if t[0] == T_OP:
-                if t[1] == '(':
-                    depth += 1
-                elif t[1] == ')':
-                    depth -= 1
-                elif t[1] == ':' and depth == 0:
-                    return False
                 elif t[1] == '=' and depth == 0:
-                    return True
+                    sep = '='
+            elif depth == 0 and (self.is_kw('TO', k)
+                                 or self.is_kw('STEP', k)):
+                sep = t[2]
+            if sep is not None:
+                seps.append(sep)
+                pieces += 1
+                last_sep = True
+            elif last_sep:
+                pieces += 1
+                last_sep = False
+            if pieces > 7:
+                return 'Invalid syntax'
             k += 1
+        if pieces < 5 or pieces == 6 or seps[0] != '=' or seps[1] != 'TO':
+            return 'FOR with misplaced = or TO'
+        if pieces == 7 and seps[2] != 'STEP':
+            return 'Invalid syntax'
+        return None
 
     def one_arg(self):
         """Just inside a call's '(': is the list ONE argument - no comma
@@ -9410,11 +9415,9 @@ class Conv(object):
         if t[0] != T_ID:
             self.err("assignment target expected")
         canon, sfx = split_suffix(t[1])
-        # cmd_let takes the statement's FIRST = as the assignment, so one
-        # inside the target's subscript - a(i = 1) = 5 - is its "Invalid
-        # syntax" (22cd802), where we read it as a comparison
-        if self.is_op('(') and self.eq_in_brackets():
-            self.note("Invalid syntax")
+        # An = inside the target's subscript - a(i = 1) = 5 - is a
+        # comparison: cmd_let finds the assignment's = after skipvar has
+        # stepped over the indices (ad5caaf, PicoMite issue 101).
 
         # assignment to the enclosing function's name = set return value
         if self.cur is not None and self.cur.is_func and canon == self.cur.name:
@@ -9764,12 +9767,14 @@ class Conv(object):
             self.err("FOR counter cannot be a string")
         if s.is_array:
             self.err("FOR counter cannot be an array")
-        self.expect_op('=')
         # cmd_for splits the rest on =, TO and STEP outside brackets, so a
         # second = there - FOR i = k = 2 TO 3 - is its "FOR with misplaced
-        # = or TO" (112ce55); inside brackets it is a comparison
-        if self.eq_at_top():
-            self.note("FOR with misplaced = or TO")
+        # = or TO" (112ce55), and FOR i = 1 TO n = 3 its "Invalid syntax";
+        # inside brackets an = is a comparison
+        shape = self.for_shape()
+        if shape is not None:
+            self.note(shape)
+        self.expect_op('=')
         start = self.expr()
         if not self.accept_kw('TO'):
             self.err("FOR without TO")
