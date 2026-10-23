@@ -6626,7 +6626,14 @@ class Conv(object):
                     out_at_entry.append(guard)
                 else:
                     out_at_entry.insert(where, guard)
-            if self.err_window > 0 and failed is None:
+            # A statement inside a single-line IF's THEN or ELSE does not
+            # use up the window: the IF is the statement the count is spent
+            # on, and when its THEN statement had taken the window the IF
+            # had no guard - with the test false nothing spent the count,
+            # and the SKIP stayed armed for whatever came next, where an
+            # error poisoned everything after it.  A guard where the count
+            # has run out does nothing.
+            if self.err_window > 0 and failed is None and not self.inline:
                 self.err_window -= 1
             # The interrupt poll goes AFTER the error bookkeeping, which
             # is the interpreter's own order: statement, error
