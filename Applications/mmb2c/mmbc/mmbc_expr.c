@@ -1327,6 +1327,8 @@ struct calldisp *call_dispatch(int is_func, struct arglist *args)
     return d;
 }
 
+static void member_through_param(struct routine *r, struct arglist *args);
+
 struct val emit_call_byname(struct calldisp *d, const char *nmexpr,
                             struct arglist *args)
 {
@@ -1344,8 +1346,54 @@ struct val emit_call_byname(struct calldisp *d, const char *nmexpr,
 
         joined = sfmt("%s, %s", joined, piece);
     }
+    member_through_param(rep, args);
     return mkval(sfmt("%s(%s)", d->name, joined),
                  d->is_func ? rep->ty : TY_NONE);
+}
+
+/* A string member passed by reference to r, which changes it through one
+ * of r's own structure parameters, the call having given that parameter
+ * the member's structure: on the board p.s = "b" changes the x$ the
+ * routine holds, and the copy here would not see it (FUZIX #29).  Asked
+ * once every argument is in, as the structure may come after the
+ * member. */
+static void member_through_param(struct routine *r, struct arglist *args)
+{
+    int n = args->n < r->nparams ? args->n : r->nparams;
+    int k, j;
+
+    if (cv.mode != M_EMIT)
+        return;
+    for (j = 0; j < n; j++)
+        if (r->params[j]->stype != NULL && args->a[j].kind != ARG_NONE)
+            break;
+    if (j == n)
+        return;
+    for (k = 0; k < n; k++) {
+        struct sym *p = r->params[k];
+        struct arg *a = &args->a[k];
+
+        if (a->kind != ARG_ELEM || p->stype != NULL || p->is_array
+            || p->ty != TY_S || !p->byref || !a->s->member)
+            continue;
+        if (writes(p, 0) || changes_member(r, a->v.code))
+            continue;               /* pass_arg refused it already */
+        for (j = 0; j < n; j++) {
+            struct sym *q = r->params[j];
+            struct arg *b = &args->a[j];
+
+            if (q->stype == NULL || b->kind == ARG_NONE)
+                continue;
+            if (changes_through(r, a->v.code, q->acc,
+                                b->kind == ARG_VAR ? b->s->acc
+                                                   : b->v.code)) {
+                cv_note("a string member cannot be passed by reference "
+                        "to '%s' of '%s', which changes it through '%s'",
+                        p->name, r->name, q->name);
+                break;
+            }
+        }
+    }
 }
 
 /* Build the C call text for a user SUB or FUNCTION. */
@@ -1366,6 +1414,7 @@ struct val emit_call(struct routine *r, struct arglist *args)
 
         joined = joined ? sfmt("%s, %s", joined, piece) : piece;
     }
+    member_through_param(r, args);
     return mkval(sfmt("%s(%s)", r->cname, joined ? joined : ""),
                  r->is_func ? r->ty : TY_NONE);
 }

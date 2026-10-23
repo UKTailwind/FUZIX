@@ -497,6 +497,51 @@ int changes_member(const struct routine *r, const char *code)
     return 0;
 }
 
+/* w, a write in the routine, as the structure scode's own when it is
+ * made through the structure parameter qa (both normalised); NULL when
+ * it is not made through qa. */
+static const char *through(const char *w, const char *qa, const char *sa)
+{
+    size_t n = strlen(qa);
+
+    if (strncmp(w, qa, n) != 0
+        || (w[n] != 0 && w[n] != '.' && w[n] != '['))
+        return NULL;
+    return sfmt("%s%s", sa, w + n);
+}
+
+/* Does routine r write this string member through its structure
+ * parameter qacc, given the structure scode - (*p_p).m_s written where
+ * the call passed &g for p, and the member is g.s?  The write is read
+ * as the structure's own, by its lvalue. */
+int changes_through(const struct routine *r, const char *code,
+                    const char *qacc, const char *scode)
+{
+    const char *k = norm_lvalue(code);
+    const char *qa = norm_lvalue(qacc);
+    const char *sa = norm_lvalue(scode);
+    int j;
+
+    for (j = 0; j < r->nmwrites; j++) {
+        const char *t = through(r->mwrites[j], qa, sa);
+
+        if (t != NULL && strcmp(t, k) == 0)
+            return 1;
+    }
+    for (j = 0; j < r->nswrites; j++) {
+        const char *t = through(r->swrites[j], qa, sa);
+        size_t n;
+
+        if (t == NULL)
+            continue;
+        n = strlen(t);
+        if (strcmp(k, t) == 0
+            || (strncmp(k, t, n) == 0 && (k[n] == '.' || k[n] == '[')))
+            return 1;
+    }
+    return 0;
+}
+
 int writes(struct sym *p, int depth)
 {
     int k;

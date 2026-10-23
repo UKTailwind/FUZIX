@@ -570,6 +570,9 @@ void numwrite(const char *target, const char *val, int ty, const char *op);
 /* string-member writes by lvalue, and the by-reference check (mmbc_sym.c) */
 void member_written(const char *code, int whole);
 int changes_member(const struct routine *r, const char *code);
+/* ... or through its structure parameter qacc, given the structure scode */
+int changes_through(const struct routine *r, const char *code,
+                    const char *qacc, const char *scode);
 /* a CHOICE of an integer and a float, by its code (mmbc_sym.c) */
 struct mixed;
 void mixed_choice_put(const char *code, const char *cond, struct val a,

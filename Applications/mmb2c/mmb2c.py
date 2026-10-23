@@ -2095,6 +2095,58 @@ class Conv(object):
                 return True
         return False
 
+    def changes_through(self, r, code, qacc, scode):
+        """Does routine r write this string member through its structure
+        parameter qacc, given the structure scode - (*p_p).m_s written
+        where the call passed &g for p, and the member is g.s?  The
+        write is read as the structure's own, by its lvalue."""
+        k = norm_lvalue(code)
+        qa = norm_lvalue(qacc)
+        sa = norm_lvalue(scode)
+
+        def mapped(w):
+            if w == qa or w.startswith(qa + '.') or w.startswith(qa + '['):
+                return sa + w[len(qa):]
+            return None
+        for w in r.mwrites:
+            if mapped(w) == k:
+                return True
+        for w in r.swrites:
+            t = mapped(w)
+            if t is not None and (k == t or k.startswith(t + '.')
+                                  or k.startswith(t + '[')):
+                return True
+        return False
+
+    def member_through_param(self, r, args):
+        """A string member passed by reference to r, which changes it
+        through one of r's own structure parameters, the call having
+        given that parameter the member's structure: on the board
+        p.s = "b" changes the x$ the routine holds, and the copy here
+        would not see it (FUZIX #29).  Asked once every argument is in,
+        as the structure may come after the member."""
+        if self.mode != 'emit':
+            return
+        sp = []
+        for p, a in zip(r.params, args):
+            if p.stype is not None and a is not None:
+                sp.append((p, a[1].acc if a[0] == 'var' else a[2][0]))
+        if not sp:
+            return
+        for p, a in zip(r.params, args):
+            if a is None or a[0] != 'elem' or p.stype is not None \
+                    or p.is_array or p.ty != TY_S or not p.byref \
+                    or not a[1].member:
+                continue
+            if self.writes(p) or self.changes_member(r, a[2][0]):
+                continue            # pass_arg refused it already
+            for q, scode in sp:
+                if self.changes_through(r, a[2][0], q.acc, scode):
+                    self.note("a string member cannot be passed by "
+                              "reference to '%s' of '%s', which changes "
+                              "it through '%s'" % (p.name, r.name, q.name))
+                    break
+
     def writes(self, p, depth=0):
         """Is parameter p written - by its routine, or by a by-reference
         parameter it is passed on to?  The depth bound ends a cycle of
@@ -3072,6 +3124,7 @@ class Conv(object):
         out.append(nmexpr)
         for k in range(d['nargs']):
             out.append(self.pass_arg(rep.params[k], args[k], rep))
+        self.member_through_param(rep, args)
         return ('%s(%s)' % (d['name'], ', '.join(out)),
                 rep.ty if d['is_func'] else None)
 
@@ -3088,6 +3141,7 @@ class Conv(object):
             a = args[k] if k < len(args) else None
             k += 1
             out.append(self.pass_arg(p, a, r))
+        self.member_through_param(r, args)
         text = r.cname + '(' + ', '.join(out) + ')'
         return (text, r.ty if r.is_func else None)
 

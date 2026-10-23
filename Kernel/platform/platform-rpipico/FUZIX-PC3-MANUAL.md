@@ -4632,7 +4632,8 @@ Not translated (each says so rather than mistranslating):
 `FUNCTION` returning a structure, whole structure arrays as
 parameters, initialisers on structure arrays, and a string member
 passed by reference to a routine that writes it, or that changes the
-member itself under its own name while it has it (one that does neither
+member itself while it has it - under its own name, or through a
+structure parameter given the member's structure (one that does neither
 gets a copy, which is then exactly the member). Assigning a whole
 structure into or out of a *nested* member is refused deliberately:
 the interpreter copies the outer type's size there and overruns

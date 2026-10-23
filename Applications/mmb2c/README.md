@@ -417,8 +417,9 @@ Of the statements, the `LONGSTRING AES128` and `BASE64` members are not
 in.  Of the structures feature, `STRUCT SORT/SAVE/LOAD/PRINT/EXTRACT/INSERT`,
 `STRUCT(FIND)`, struct-returning functions, struct-array parameters and
 initialisers, and a string member passed by reference to a routine that
-writes it, or changes the member itself under its own name, are refused
-with messages; everything else in `TYPE-SPEC.md` is in.
+writes it, or changes the member itself under its own name or through a
+structure parameter given the member's structure, are refused with
+messages; everything else in `TYPE-SPEC.md` is in.
 
 Anything not recognised produces an error naming the line and the
 construct, rather than silently wrong C.  `#DEFINE` and `#INCLUDE` are

@@ -98,8 +98,9 @@ Multi-dim member indices linearise exactly like ordinary arrays.
   routine gets a copy when it only reads the parameter, and is refused
   when it writes it - the member is a bounded field the routine would
   write past - or when it changes the member itself under its own name,
-  where the firmware's pointer would see the change and a copy would
-  not (mmb2c).  A full member has no NUL, so the runtime's string reads
+  or through a structure parameter the call gave the member's
+  structure, where the firmware's pointer would see the change and a
+  copy would not (mmb2c).  A full member has no NUL, so the runtime's string reads
   cannot be given the member itself.
 
 ## STRUCT verbs (cmd_struct, Commands.c:8808-9881) — slice A scope
