@@ -169,6 +169,12 @@ MMG_FN void mm_arr_scalef_i(const MMINTEGER *in, int n, MMFLOAT v,
 {
     int i;
     if (n != no) MM_RAISE("Size mismatch");
+    /* a scale of 1 is a plain copy there (MATHS.c, the scale != 1.0
+       test), so a value past 2^53 keeps every digit */
+    if (v == 1.0) {
+        for (i = 0; i < n; i++) out[i] = in[i];
+        return;
+    }
     for (i = 0; i < n; i++) out[i] = mm_toint((MMFLOAT)in[i] * v);
 }
 
