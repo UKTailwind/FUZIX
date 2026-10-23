@@ -44,6 +44,7 @@ void walk(int mode)
 
     cv.mode = mode;
     cv.in_type = 0;
+    cv.mx_n[0] = cv.mx_n[1] = 0;
     cv.gosub_n = 0;
     cv.cur = NULL;
     cv.indent = 1;
@@ -146,6 +147,7 @@ void statement(void)
     volatile int failed = 0;
     char *volatile failmsg = NULL;
     jmp_buf jb, *saved;
+    int mx_outer[2];
 
     blocks_snap = salloc(sizeof(struct block) * (size_t)(nblocks_snap
                                                          ? nblocks_snap
@@ -153,13 +155,23 @@ void statement(void)
     memcpy(blocks_snap, cv.blocks,
            sizeof(struct block) * (size_t)nblocks_snap);
     cv.tmp_used = 0;
+    /* MAX/MIN pairs are per statement: one statement's C is sequenced
+     * against the next, so the numbering starts again.  The outer one's
+     * is put back after a statement inside it (IF ... THEN). */
+    mx_outer[0] = cv.mx_n[0];
+    mx_outer[1] = cv.mx_n[1];
+    cv.mx_n[0] = cv.mx_n[1] = 0;
     saved = err_jmp;
     err_jmp = &jb;
     if (setjmp(jb) == 0) {
         statement_inner();
         err_jmp = saved;
+        cv.mx_n[0] = mx_outer[0];
+        cv.mx_n[1] = mx_outer[1];
     } else {
         err_jmp = saved;
+        cv.mx_n[0] = mx_outer[0];
+        cv.mx_n[1] = mx_outer[1];
         if (!cv.lenient) {
             /* the finally clause still runs before the re-raise -
              * failed is None on this path, exactly like the Python */

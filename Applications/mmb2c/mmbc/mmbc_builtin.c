@@ -234,50 +234,96 @@ int int_literal(const char *code, long long *out)
     return 1;
 }
 
-/* 1 + the highest MAX/MIN temporary pair the text uses, float (__mxaN)
- * or integer (__mxiaN); 0 for none. */
-static int mx_height(const char *text)
+/* A numeric literal's value as the float getnumber makes of it: an
+ * integer as int_literal reads it, or a float's digits, point and
+ * exponent inside the parentheses and negations written round them.  0
+ * for anything else. */
+static int literal_value(const char *code, double *out)
 {
-    int h = 0;
-    const char *p = strstr(text, "__mx");
+    const char *s = code;
+    const char *e = code + strlen(code);
+    const char *p;
+    int neg = 0, mant = 0;
+    long long iv;
+    char buf[64];
+    double v;
 
-    while (p != NULL) {
-        p += 4;
-        if (*p == 'i')
-            p++;
-        if (*p == 'a' && is_digit_c((unsigned char)p[1])) {
-            int n = 0;
-
-            p++;
-            while (is_digit_c((unsigned char)*p)) {
-                n = n * 10 + (*p - '0');
-                p++;
-            }
-            if (n + 1 > h)
-                h = n + 1;
-        }
-        p = strstr(p, "__mx");
+    if (int_literal(code, &iv)) {
+        *out = (double)iv;
+        return 1;
     }
-    return h;
+    for (;;) {
+        while (e - s >= 2 && *s == '(' && e[-1] == ')') {
+            int depth = 0;
+
+            for (p = s + 1; p < e - 1; p++) {
+                if (*p == '(')
+                    depth++;
+                else if (*p == ')' && --depth < 0)
+                    break;
+            }
+            if (depth != 0)
+                break;
+            s++;
+            e--;
+        }
+        if (s == e || *s != '-')
+            break;
+        neg = !neg;
+        s++;
+    }
+    /* digits [. digits] [e [+-] digits], at least one mantissa digit */
+    p = s;
+    while (p < e && is_digit_c((unsigned char)*p)) {
+        p++;
+        mant++;
+    }
+    if (p < e && *p == '.') {
+        p++;
+        while (p < e && is_digit_c((unsigned char)*p)) {
+            p++;
+            mant++;
+        }
+    }
+    if (mant == 0)
+        return 0;
+    if (p < e && (*p == 'e' || *p == 'E')) {
+        p++;
+        if (p < e && (*p == '+' || *p == '-'))
+            p++;
+        if (p >= e || !is_digit_c((unsigned char)*p))
+            return 0;
+        while (p < e && is_digit_c((unsigned char)*p))
+            p++;
+    }
+    if (p != e || e - s >= (long)sizeof buf)
+        return 0;
+    memcpy(buf, s, (size_t)(e - s));
+    buf[e - s] = 0;
+    v = strtod(buf, NULL);
+    *out = neg ? -v : v;
+    return 1;
 }
 
 /* MAX()/MIN() as fun_max_min: from the first value, each one replaces it
- * only when strictly greater (smaller), so a tie keeps the earlier.
+ * only when strictly greater (smaller), so a tie keeps the earlier, and
+ * the result is always a float.
  *
- * The reference's result is always a float.  Here it is an integer when
- * every argument is one, as NOT is: the same value, which shows only past
- * float precision, and as a float every integer clamp - MAX(UH(0)-1, 0)
- * in a game - paid two conversions; robots grew by a block and no longer
- * fitted beside its music player.
+ * Integer arguments are compared as integers and the answer made a float
+ * once: the conversion never reorders two values, so that is the value
+ * converting each and comparing floats gives, at one conversion instead
+ * of one an argument.  A list of literals folds to the winning one,
+ * integers compared as the floats getnumber makes of them, so a CONST or
+ * a DATA item of it stays a constant.
  *
  * Each argument is evaluated once and in order.  Repeating the text in
  * nested ?: evaluated an argument up to 2^(n-1) times, so MAX(RND, 0.5)
  * could be below 0.5.  Text that calls nothing cannot tell how often it
- * is evaluated, so a short list of such arguments keeps the ?: chain - it
- * is a C constant when they are, as a CONST needs - and anything else
- * goes through two temporaries of the enclosing routine, declared by its
- * scan.  One pair per nesting level: a MAX inside an argument takes the
- * pair above the ones its own arguments use. */
+ * is evaluated, so a short list of such arguments keeps the ?: chain, and
+ * anything else goes through two temporaries of the enclosing routine,
+ * declared by its scan.  Each MAX or MIN in a statement has a pair of its
+ * own (mx_n): two sharing one in a single expression wrote it
+ * unsequenced, which C leaves undefined. */
 static struct val max_min(int is_max, struct val *args, int n)
 {
     const char *cop = is_max ? ">" : "<";
@@ -285,33 +331,23 @@ static struct val max_min(int is_max, struct val *args, int n)
     const char *a;
     const char *b;
     const char *cur;
+    double vals[MAXARGS];
     int isint = 1;
-    int ty;
     int k, j;
 
     for (j = 0; j < n; j++)
         if (args[j].ty != TY_I)
             isint = 0;
-    ty = isint ? TY_I : TY_F;
-    if (isint) {
-        long long best, v;
+    for (j = 0; j < n; j++)
+        if (!literal_value(args[j].code, &vals[j]))
+            break;
+    if (j == n) {
+        int best = 0;
 
-        for (j = 0; j < n; j++)
-            if (!int_literal(args[j].code, &v))
-                break;
-        if (j == n) {
-            /* all literals: the answer, so a CONST of it is a C constant
-               cc1 can size an array with - it does not fold ?: there */
-            int_literal(args[0].code, &best);
-            for (j = 1; j < n; j++) {
-                int_literal(args[j].code, &v);
-                if (is_max ? v > best : v < best)
-                    best = v;
-            }
-            if (best >= 0)
-                return mkval(sfmt("%lldLL", best), TY_I);
-            return mkval(sfmt("(-(%lldLL))", -best), TY_I);
-        }
+        for (j = 1; j < n; j++)
+            if (is_max ? vals[j] > vals[best] : vals[j] < vals[best])
+                best = j;
+        return mkval(as_flt(args[best]), TY_F);
     }
     for (j = 0; j < n; j++)
         fs[j] = isint ? args[j].code : as_flt(args[j]);
@@ -323,26 +359,27 @@ static struct val max_min(int is_max, struct val *args, int n)
         for (j = 1; j < n; j++)
             cur = sfmt("((%s) %s (%s) ? (%s) : (%s))",
                        fs[j], cop, cur, fs[j], cur);
-        return mkval(cur, ty);
-    }
-    k = 0;
-    for (j = 0; j < n; j++)
-        if (mx_height(fs[j]) > k)
-            k = mx_height(fs[j]);
-    if (cv.mode == M_SCAN) {
-        int *own = cv.cur == NULL ? cv.mx_main : cv.cur->mx_pairs;
+    } else {
+        k = cv.mx_n[isint]++;
+        if (cv.mode == M_SCAN) {
+            int *own = cv.cur == NULL ? cv.mx_main : cv.cur->mx_pairs;
 
-        if (k + 1 > own[isint])
-            own[isint] = k + 1;
+            if (k + 1 > own[isint])
+                own[isint] = k + 1;
+        }
+        a = sfmt(isint ? "__mxia%d" : "__mxa%d", k);
+        b = sfmt(isint ? "__mxib%d" : "__mxb%d", k);
+        cur = sfmt("(%s = %s", a, fs[0]);
+        for (j = 1; j < n; j++) {
+            cur = sfmt("%s, %s = %s", cur, b, fs[j]);
+            cur = sfmt("%s, %s = %s %s %s ? %s : %s",
+                       cur, a, b, cop, a, b, a);
+        }
+        cur = sfmt("%s, %s)", cur, a);
     }
-    a = sfmt(isint ? "__mxia%d" : "__mxa%d", k);
-    b = sfmt(isint ? "__mxib%d" : "__mxb%d", k);
-    cur = sfmt("(%s = %s", a, fs[0]);
-    for (j = 1; j < n; j++) {
-        cur = sfmt("%s, %s = %s", cur, b, fs[j]);
-        cur = sfmt("%s, %s = %s %s %s ? %s : %s", cur, a, b, cop, a, b, a);
-    }
-    return mkval(sfmt("%s, %s)", cur, a), ty);
+    if (isint)
+        return mkval(sfmt("(MMFLOAT)(%s)", cur), TY_F);
+    return mkval(cur, TY_F);
 }
 
 /* The Python's f(k)/n(k)/s(k) closures over (up, args). */

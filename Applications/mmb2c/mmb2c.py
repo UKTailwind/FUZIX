@@ -933,25 +933,58 @@ def ipow_fold(b, e):
     return r
 
 
-def mx_height(text):
-    """1 + the highest MAX/MIN temporary pair the text uses, float
-    (__mxaN) or integer (__mxiaN); 0 for none."""
-    h = 0
-    i = text.find('__mx')
-    while i >= 0:
-        j = i + 4
-        if text[j:j + 1] == 'i':
-            j += 1
-        if text[j:j + 1] == 'a' and is_digit(text[j + 1:j + 2]):
-            j += 1
-            n = 0
-            while j < len(text) and is_digit(text[j]):
-                n = n * 10 + ord(text[j]) - 48
-                j += 1
-            if n + 1 > h:
-                h = n + 1
-        i = text.find('__mx', j)
-    return h
+def literal_value(code):
+    """A numeric literal's value as the float getnumber makes of it: an
+    integer as int_literal reads it, or a float's digits, point and
+    exponent inside the parentheses and negations written round them.
+    None for anything else."""
+    n = int_literal(code)
+    if n is not None:
+        return float(n)
+    neg = False
+    while True:
+        while len(code) >= 2 and code[0] == '(' and code[-1] == ')':
+            depth = 0
+            for c in code[1:-1]:
+                if c == '(':
+                    depth += 1
+                elif c == ')':
+                    depth -= 1
+                    if depth < 0:
+                        break
+            if depth != 0:
+                break
+            code = code[1:-1]
+        if code[:1] != '-':
+            break
+        neg = not neg
+        code = code[1:]
+    # digits [. digits] [e [+-] digits], at least one mantissa digit
+    i = 0
+    n = len(code)
+    mant = 0
+    while i < n and is_digit(code[i]):
+        i += 1
+        mant += 1
+    if i < n and code[i] == '.':
+        i += 1
+        while i < n and is_digit(code[i]):
+            i += 1
+            mant += 1
+    if mant == 0:
+        return None
+    if i < n and code[i] in 'eE':
+        i += 1
+        if i < n and code[i] in '+-':
+            i += 1
+        if i >= n or not is_digit(code[i]):
+            return None
+        while i < n and is_digit(code[i]):
+            i += 1
+    if i != n:
+        return None
+    v = float(code)
+    return -v if neg else v
 
 
 def const_or_literal_expr(text):
@@ -1052,6 +1085,7 @@ class Conv(object):
         self.mode = 'scan'
         self.cur = None               # current Routine or None
         self.mx_main = [0, 0]         # MAX/MIN temporary pairs in main
+        self.mx_n = [0, 0]            # pairs the statement has used so far
         self.out_main = []
         self.out_body = []
         self.out = None
@@ -1864,58 +1898,59 @@ class Conv(object):
     def max_min(self, is_max, args):
         """MAX()/MIN() as fun_max_min: from the first value, each one
         replaces it only when strictly greater (smaller), so a tie keeps
-        the earlier.
+        the earlier, and the result is always a float.
 
-        The reference's result is always a float.  Here it is an integer
-        when every argument is one, as NOT is: the same value, which shows
-        only past float precision, and as a float every integer clamp -
-        MAX(UH(0)-1, 0) in a game - paid two conversions; robots grew by
-        a block and no longer fitted beside its music player.
+        Integer arguments are compared as integers and the answer made a
+        float once: the conversion never reorders two values, so that is
+        the value converting each and comparing floats gives, at one
+        conversion instead of one an argument.  A list of literals folds
+        to the winning one, integers compared as the floats getnumber
+        makes of them, so a CONST or a DATA item of it stays a constant.
 
         Each argument is evaluated once and in order.  Repeating the text
         in nested ?: evaluated an argument up to 2^(n-1) times, so
         MAX(RND, 0.5) could be below 0.5.  Text that calls nothing cannot
         tell how often it is evaluated, so a short list of such arguments
-        keeps the ?: chain - it is a C constant when they are, as a CONST
-        needs - and anything else goes through two temporaries of the
-        enclosing routine, declared by its scan.  One pair per nesting
-        level: a MAX inside an argument takes the pair above the ones its
-        own arguments use."""
+        keeps the ?: chain, and anything else goes through two
+        temporaries of the enclosing routine, declared by its scan.  Each
+        MAX or MIN in a statement has a pair of its own (mx_n): two
+        sharing one in a single expression wrote it unsequenced, which C
+        leaves undefined."""
         cop = '>' if is_max else '<'
         isint = not [v for v in args if v[1] != TY_I]
-        ty = TY_I if isint else TY_F
-        if isint and not [v for v in args if int_literal(v[0]) is None]:
-            # all literals: the answer, so a CONST of it is a C constant
-            # cc1 can size an array with - it does not fold ?: there
-            best = int_literal(args[0][0])
-            for v in args[1:]:
-                n = int_literal(v[0])
-                if (n > best) if is_max else (n < best):
-                    best = n
-            return ('%dLL' % best if best >= 0 else '(-(%dLL))' % -best, TY_I)
+        vals = [literal_value(v[0]) for v in args]
+        if None not in vals:
+            best = 0
+            for j in range(1, len(vals)):
+                if (vals[j] > vals[best]) if is_max \
+                        else (vals[j] < vals[best]):
+                    best = j
+            return (self.as_flt(args[best]), TY_F)
         fs = [v[0] if isint else self.as_flt(v) for v in args]
         if len(fs) <= 4 and not [f for f in fs if has_call(f)]:
             cur = fs[0]
             for o in fs[1:]:
                 cur = '((%s) %s (%s) ? (%s) : (%s))' % (o, cop, cur, o, cur)
-            return (cur, ty)
-        k = 0
-        for f in fs:
-            if mx_height(f) > k:
-                k = mx_height(f)
-        if self.mode == 'scan':
-            own = self.mx_main if self.cur is None else self.cur.mx_pairs
+        else:
             ix = 1 if isint else 0
-            if k + 1 > own[ix]:
-                own[ix] = k + 1
-        a = ('__mxia%d' if isint else '__mxa%d') % k
-        b = ('__mxib%d' if isint else '__mxb%d') % k
-        parts = ['%s = %s' % (a, fs[0])]
-        for o in fs[1:]:
-            parts.append('%s = %s' % (b, o))
-            parts.append('%s = %s %s %s ? %s : %s' % (a, b, cop, a, b, a))
-        parts.append(a)
-        return ('(' + ', '.join(parts) + ')', ty)
+            k = self.mx_n[ix]
+            self.mx_n[ix] += 1
+            if self.mode == 'scan':
+                own = self.mx_main if self.cur is None else self.cur.mx_pairs
+                if k + 1 > own[ix]:
+                    own[ix] = k + 1
+            a = ('__mxia%d' if isint else '__mxa%d') % k
+            b = ('__mxib%d' if isint else '__mxb%d') % k
+            parts = ['%s = %s' % (a, fs[0])]
+            for o in fs[1:]:
+                parts.append('%s = %s' % (b, o))
+                parts.append('%s = %s %s %s ? %s : %s'
+                             % (a, b, cop, a, b, a))
+            parts.append(a)
+            cur = '(' + ', '.join(parts) + ')'
+        if isint:
+            return ('(MMFLOAT)(%s)' % cur, TY_F)
+        return (cur, TY_F)
 
     def mx_decls(self, pairs):
         """The declarations of a routine's MAX/MIN temporaries."""
@@ -5684,6 +5719,7 @@ class Conv(object):
     def walk(self, mode):
         self.mode = mode
         self.in_type = False
+        self.mx_n = [0, 0]
         self.gosub_n = 0
         self.cur = None
         self.indent = 1
@@ -5732,6 +5768,11 @@ class Conv(object):
         tok_at_entry = self.i
         outer = self.tmp_used
         self.tmp_used = False
+        # MAX/MIN pairs are per statement: one statement's C is sequenced
+        # against the next, so the numbering starts again.  The outer
+        # one's is put back after a statement inside it (IF ... THEN).
+        mx_outer = self.mx_n
+        self.mx_n = [0, 0]
         failed = None
         try:
             self.statement_inner()
@@ -5740,6 +5781,7 @@ class Conv(object):
                 raise
             failed = str(e)
         finally:
+            self.mx_n = mx_outer
             if self.mode == 'emit' and self.tmp_used \
                     and self.out is out_at_entry and failed is None:
                 out_at_entry.insert(where,

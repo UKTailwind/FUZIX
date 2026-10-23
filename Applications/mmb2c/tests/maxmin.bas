@@ -1,7 +1,6 @@
 ' MAX and MIN as fun_max_min: each argument evaluated once, in order;
-' a tie keeps the earlier value.  The result is a float, as there, except
-' that integer arguments give an integer here (as NOT does) - the same
-' value, which shows only past float precision.
+' a tie keeps the earlier value; the result is always a float (FUZIX
+' issue #1), and two in one expression keep their own temporaries (#12).
 Dim n%, order$
 Function F(x)
   n% = n% + 1 : order$ = order$ + Str$(x) : F = x
@@ -46,3 +45,12 @@ Const C = Max(3, 4)
 Dim z(C)
 Print "const "; Bound(z(), 1)
 Print "mixed "; Max(2, 1.5); Min(2, 1.5)
+Print "big "; Max(2000000, 5); Min(-2000000, 5)
+x% = 2000000
+Print "power "; Max(x%, 3) ^ 40
+n% = 0 : order$ = ""
+m = Max(F(1), F(3), F(2)) + Min(F(5), F(4), F(6))
+Print "two "; m; n%; " "; order$
+Read d1, d2
+Print "data "; d1; d2
+Data Max(1.5, 2, 3, 4, 5), Min(2.5, 1E3, -7, 4, 0.25)
