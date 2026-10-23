@@ -861,6 +861,72 @@ def loader_namechar(c):
     return c != '' and ('A' <= c <= 'Z' or '0' <= c <= '9' or c in '_.')
 
 
+def ascii_upper(c):
+    return chr(ord(c) - 32) if 'a' <= c <= 'z' else c
+
+
+def block_open_at(s):
+    """Where a /* ... */ comment block opens on this line, or -1.
+
+    /* is a command to the tokeniser, so it opens a block only where a
+    statement starts - the line's start, after a line number, or after
+    a ':' - and the rest of its line is raw text (tokenise's multi).
+    Nothing in quotes, after a ' or after REM is looked at."""
+    i = 0
+    n = len(s)
+    while i < n and s[i] in ' \t':
+        i += 1
+    while i < n and is_digit(s[i]):
+        i += 1
+    start = True
+    q = False
+    while i < n:
+        c = s[i]
+        if q:
+            if c == '"':
+                q = False
+        elif c in ' \t':
+            pass
+        elif start and s[i:i + 2] == '/*':
+            return i
+        elif start and ''.join(ascii_upper(x) for x in s[i:i + 3]) == 'REM' \
+                and not loader_namechar(ascii_upper(s[i + 3:i + 4] or ' ')):
+            return -1
+        else:
+            if c == '"':
+                q = True
+            elif c == "'":
+                return -1
+            start = c == ':'
+        i += 1
+    return -1
+
+
+def block_close_rest(s):
+    """A line inside a /* ... */ block: None while the block goes on.
+    The tokeniser ends it only at a line whose first characters are */
+    - that is the */ command, and the rest of its statement is its
+    argument, ignored - so the BASIC after the statement's ':' comes
+    back, '' if there is none."""
+    j = 0
+    while j < len(s) and s[j] in ' \t':
+        j += 1
+    if s[j:j + 2] != '*/':
+        return None
+    q = False
+    k = j + 2
+    while k < len(s):
+        c = s[k]
+        if c == '"':
+            q = not q
+        elif not q and c == ':':
+            return s[k + 1:]
+        elif not q and c == "'":
+            return ''
+        k += 1
+    return ''
+
+
 def whole_call(code, name):
     """The argument text when code is exactly name(...) - the call is the
     whole expression - else None.  Quoted C text is skipped."""
@@ -4155,19 +4221,23 @@ class Conv(object):
         """
         ignore = False          # inside #COMMENT START ... #COMMENT END
         debugoff = True         # #MMDEBUG OFF, the loader's default
+        inblock = False         # inside /* ... */
         i = 0
         while i < len(self.lines):
             self.lineno = i + 1
             txt = self.lines[i].strip()
             up = txt.upper()
-            # The reference's loader takes every line that starts with
-            # '#' for itself (FileIO.c LoadFile), so none of them is
-            # BASIC.  #COMMENT START to #COMMENT END makes the lines
-            # between comments, an MMDEBUG statement is one unless
-            # #MMDEBUG ON, and a '#' line it does not know is dropped.
-            # #DEFINE, #INCLUDE and #MMDEBUG ON are refused: commented
-            # out as statements, their substitutions and files vanished
-            # and the code inside a #COMMENT was compiled, with rc 0.
+            # CMM2 LOAD and CMM2 RUN's loader (FileIO.c
+            # FileLoadCMM2Program) takes every line that starts with '#'
+            # for itself, so none of them is BASIC.  #COMMENT START to
+            # #COMMENT END makes the lines between comments, an MMDEBUG
+            # statement is one unless #MMDEBUG ON, and a '#' line it does
+            # not know is dropped.  #DEFINE, #INCLUDE and #MMDEBUG ON are
+            # refused: commented out as statements, their substitutions
+            # and files vanished and the code inside a #COMMENT was
+            # compiled, with rc 0.  (Plain LOAD and RUN have no '#' lines
+            # at all - "Invalid character" - so a program with them is
+            # one for that loader.)
             sq = loader_squash(self.lines[i])
             if ignore and not sq.startswith('#COMMENT END'):
                 self.lines[i] = ''
@@ -4175,7 +4245,9 @@ class Conv(object):
                 continue
             if sq.startswith('#'):
                 w = sq[1:]
-                if w.startswith('DEFINE') and not loader_namechar(w[6:7]):
+                # only DEFINE is a checkstring, which steps over a blank
+                wd = w[1:] if w[:1] == ' ' else w
+                if wd.startswith('DEFINE') and not loader_namechar(wd[6:7]):
                     self.errors.append("line %d: #DEFINE is not translated"
                                        % self.lineno)
                 elif w.startswith('COMMENT END'):
@@ -4197,6 +4269,32 @@ class Conv(object):
             if debugoff and sq.startswith('MMDEBUG') \
                     and not loader_namechar(sq[7:8]):
                 self.lines[i] = ''
+                i += 1
+                continue
+            # /* ... */ blocks, which the tokeniser keeps as raw text, so
+            # a SUB, a CSUB or a font in one is not there at all (FUZIX
+            # issue #19).  The rest of a line after its */ statement is
+            # BASIC again, and goes round once more as a line of its own.
+            if inblock:
+                rest = block_close_rest(self.lines[i])
+                if rest is None:
+                    self.lines[i] = ''
+                    i += 1
+                    continue
+                inblock = False
+                self.lines[i] = rest
+                continue
+            k = block_open_at(self.lines[i])
+            if k >= 0:
+                head = self.lines[i][:k]
+                closed = [j for j in range(i + 1, len(self.lines))
+                          if block_close_rest(self.lines[j]) is not None]
+                # with no */ to come, every line after is comment, and
+                # the /* itself is cmd_comment's error when it runs
+                if not closed:
+                    head += 'Error "No matching END declaration"'
+                self.lines[i] = head
+                inblock = True
                 i += 1
                 continue
             if up.startswith('CSUB') and up[4:5] in ('', ' ', '\t'):
@@ -4828,6 +4926,11 @@ class Conv(object):
             byref = False
         elif self.accept_kw('BYREF'):
             byref = True
+        elif self.is_kw('BY') and (self.is_kw('VAL', 1)
+                                   or self.is_kw('REF', 1)):
+            # CheckByKeyword takes it as two words too
+            byref = self.is_kw('REF', 1)
+            self.i += 2
         t = self.nxt()
         if t[0] != T_ID:
             self.err("bad parameter")

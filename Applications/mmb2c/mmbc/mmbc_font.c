@@ -169,10 +169,82 @@ static int loader_namechar(char c)
            || c == '_' || c == '.';
 }
 
+static char ascii_upper(char c)
+{
+    return (c >= 'a' && c <= 'z') ? c - 32 : c;
+}
+
+/* Where a slash-star ... star-slash comment block opens on this line, or
+ * -1.
+ *
+ * Slash-star is a command to the tokeniser, so it opens a block only
+ * where a statement starts - the line's start, after a line number, or
+ * after a ':' - and the rest of its line is raw text (tokenise's multi).
+ * Nothing in quotes, after a ' or after REM is looked at. */
+static int block_open_at(const char *s)
+{
+    int i = 0, start = 1, q = 0;
+
+    while (s[i] == ' ' || s[i] == '\t')
+        i++;
+    while (s[i] >= '0' && s[i] <= '9')
+        i++;
+    for (; s[i]; i++) {
+        char c = s[i];
+
+        if (q) {
+            if (c == '"')
+                q = 0;
+        } else if (c == ' ' || c == '\t') {
+            /* blanks change nothing */
+        } else if (start && c == '/' && s[i + 1] == '*') {
+            return i;
+        } else if (start && ascii_upper(c) == 'R'
+                   && ascii_upper(s[i + 1]) == 'E'
+                   && ascii_upper(s[i + 2]) == 'M'
+                   && !loader_namechar(ascii_upper(s[i + 3]
+                                                   ? s[i + 3] : ' '))) {
+            return -1;
+        } else {
+            if (c == '"')
+                q = 1;
+            else if (c == '\'')
+                return -1;
+            start = c == ':';
+        }
+    }
+    return -1;
+}
+
+/* A line inside a comment block: NULL while the block goes on.  The
+ * tokeniser ends it only at a line whose first characters are star-slash
+ * - that is the star-slash command, and the rest of its statement is its
+ * argument, ignored - so the BASIC after the statement's ':' comes back,
+ * "" if there is none. */
+static const char *block_close_rest(const char *s)
+{
+    int j = 0, q = 0;
+
+    while (s[j] == ' ' || s[j] == '\t')
+        j++;
+    if (s[j] != '*' || s[j + 1] != '/')
+        return NULL;
+    for (j += 2; s[j]; j++) {
+        if (s[j] == '"')
+            q = !q;
+        else if (!q && s[j] == ':')
+            return s + j + 1;
+        else if (!q && s[j] == '\'')
+            return "";
+    }
+    return "";
+}
+
 void pass_fonts(void)
 {
     int ignore = 0;             /* inside #COMMENT START ... #COMMENT END */
     int debugoff = 1;           /* #MMDEBUG OFF, the loader's default */
+    int inblock = 0;            /* inside a slash-star comment block */
     unsigned long *words = NULL;
     int nwords = 0, cwords = 0;
     int i = 0;
@@ -188,14 +260,16 @@ void pass_fonts(void)
         cv.lineno = i + 1;
         line = fstrip(src_lines[i]);
         up = upper(line);
-        /* The reference's loader takes every line that starts with '#'
-         * for itself (FileIO.c LoadFile), so none of them is BASIC.
-         * #COMMENT START to #COMMENT END makes the lines between
-         * comments, an MMDEBUG statement is one unless #MMDEBUG ON, and
-         * a '#' line it does not know is dropped.  #DEFINE, #INCLUDE
-         * and #MMDEBUG ON are refused: commented out as statements,
-         * their substitutions and files vanished and the code inside a
-         * #COMMENT was compiled, with rc 0. */
+        /* CMM2 LOAD and CMM2 RUN's loader (FileIO.c FileLoadCMM2Program)
+         * takes every line that starts with '#' for itself, so none of
+         * them is BASIC.  #COMMENT START to #COMMENT END makes the lines
+         * between comments, an MMDEBUG statement is one unless #MMDEBUG
+         * ON, and a '#' line it does not know is dropped.  #DEFINE,
+         * #INCLUDE and #MMDEBUG ON are refused: commented out as
+         * statements, their substitutions and files vanished and the
+         * code inside a #COMMENT was compiled, with rc 0.  (Plain LOAD
+         * and RUN have no '#' lines at all - "Invalid character" - so a
+         * program with them is one for that loader.) */
         sq = loader_squash(src_lines[i]);
         if (ignore && strncmp(sq, "#COMMENT END", 12) != 0) {
             src_lines[i] = pstr("");
@@ -204,8 +278,10 @@ void pass_fonts(void)
         }
         if (sq[0] == '#') {
             const char *w = sq + 1;
+            /* only DEFINE is a checkstring, which steps over a blank */
+            const char *wd = w[0] == ' ' ? w + 1 : w;
 
-            if (strncmp(w, "DEFINE", 6) == 0 && !loader_namechar(w[6]))
+            if (strncmp(wd, "DEFINE", 6) == 0 && !loader_namechar(wd[6]))
                 errors_add(sfmt("line %d: #DEFINE is not translated",
                                 i + 1));
             else if (strncmp(w, "COMMENT END", 11) == 0)
@@ -230,6 +306,45 @@ void pass_fonts(void)
             src_lines[i] = pstr("");
             i++;
             continue;
+        }
+        /* Comment blocks, which the tokeniser keeps as raw text, so a
+         * SUB, a CSUB or a font in one is not there at all (FUZIX issue
+         * #19).  The rest of a line after its star-slash statement is
+         * BASIC again, and goes round once more as a line of its own. */
+        if (inblock) {
+            const char *rest = block_close_rest(src_lines[i]);
+
+            if (rest == NULL) {
+                src_lines[i] = pstr("");
+                i++;
+                continue;
+            }
+            inblock = 0;
+            src_lines[i] = pstr(rest);
+            continue;
+        }
+        {
+            int k = block_open_at(src_lines[i]);
+
+            if (k >= 0) {
+                int j, closed = 0;
+                char *head = salloc((size_t)k + 40);
+
+                memcpy(head, src_lines[i], (size_t)k);
+                head[k] = 0;
+                for (j = i + 1; j < src_nlines && !closed; j++)
+                    if (block_close_rest(src_lines[j]) != NULL)
+                        closed = 1;
+                /* with no star-slash to come, every line after is
+                   comment, and the slash-star itself is cmd_comment's
+                   error when it runs */
+                if (!closed)
+                    strcat(head, "Error \"No matching END declaration\"");
+                src_lines[i] = pstr(head);
+                inblock = 1;
+                i++;
+                continue;
+            }
         }
         if (strncmp(up, "CSUB", 4) == 0
             && (up[4] == 0 || up[4] == ' ' || up[4] == '\t')) {

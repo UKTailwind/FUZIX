@@ -714,6 +714,11 @@ void decl_param(struct routine *r)
         byref = 0;
     else if (accept_kw("BYREF"))
         byref = 1;
+    else if (is_kw("BY", 0) && (is_kw("VAL", 1) || is_kw("REF", 1))) {
+        /* CheckByKeyword takes it as two words too */
+        byref = is_kw("REF", 1);
+        cv.i += 2;
+    }
     t = nxt();
     if (t->kind != T_ID)
         cv_err("bad parameter");
