@@ -427,11 +427,19 @@ static uint8_t rgb121_rgb332[16] = {
     0xE0, 0xE3, 0xE8, 0xEB, 0xF4, 0xF7, 0xFC, 0xFF
 };
 
+/* The MMBasic modes - MODE 7, and on a PC MODE 8 - take MMBasic's RGB121
+ * colours; the BBC modes take theirs. */
+#ifdef PC3_HOST
+#define IS_RGB121(ex)	((ex) == EXP_4BPP_X2 || (ex) == EXP_4BPP_X1)
+#else
+#define IS_RGB121(ex)	((ex) == EXP_4BPP_X2)
+#endif
+
 /* Mask applied to a physical colour number in this expander: MODE 7
  * reaches all 16, every BBC mode only the authentic 8. */
 static uint8_t gfx_physmask(enum gexp ex)
 {
-    return (ex == EXP_4BPP_X2) ? 15 : 7;
+    return IS_RGB121(ex) ? 15 : 7;
 }
 
 static int gfx_bpp(enum gexp ex)
@@ -496,6 +504,12 @@ int display_gfx_mode(int mode)
         exp = EXP_4BPP_X2;   stride = 160; rows = 240;
         raster = DISP_RASTER_VGA; pal = 3;
         break;
+#ifdef PC3_HOST
+    case 8:     /* MMBasic's MODE 3: MODE 7's colours at twice the size */
+        exp = EXP_4BPP_X1;   stride = 320; rows = 480;
+        raster = DISP_RASTER_VGA; pal = 3;
+        break;
+#endif
     case 0xFF:
         exp = EXP_CONSOLE;   stride = 0;   rows = 0;
         raster = DISP_RASTER_VGA; pal = -1;
@@ -529,7 +543,7 @@ int display_gfx_mode(int mode)
         console_gfx(0);         /* clears and repaints the console */
     } else {
         for (i = 0; i < 16; i++)
-            gfx_pal[i] = gfx_pal_pending[i] = (exp == EXP_4BPP_X2)
+            gfx_pal[i] = gfx_pal_pending[i] = IS_RGB121(exp)
                 ? rgb121_rgb332[defpal[pal][i] & 15]
                 : bbc_rgb332[defpal[pal][i] & gfx_physmask(exp)];
         /* Palette, table and framebuffer all ready BEFORE core1 is
@@ -560,7 +574,7 @@ void display_gfx_pal(uint8_t logical, uint8_t physical)
     enum gexp ex = gfx_exp;
 
     gfx_pal[logical & 15] = gfx_pal_pending[logical & 15] =
-        (ex == EXP_4BPP_X2)
+        IS_RGB121(ex)
         ? rgb121_rgb332[physical & 15]
         : bbc_rgb332[physical & gfx_physmask(ex)];
     disp_hw_palette_changed(ex);
@@ -623,7 +637,7 @@ int display_gfx_remap_reset(void)
         return -1;
     display_wait_vblank();
     for (i = 0; i < 16; i++)
-        gfx_pal[i] = gfx_pal_pending[i] = (ex == EXP_4BPP_X2)
+        gfx_pal[i] = gfx_pal_pending[i] = IS_RGB121(ex)
             ? rgb121_rgb332[i]
             : bbc_rgb332[i & gfx_physmask(ex)];
     disp_hw_palette_changed(ex);
@@ -659,6 +673,9 @@ static int gfx_width(enum gexp ex)
     case EXP_4BPP_X3:    return 320;
     case EXP_4BPP_X6:    return 160;
     case EXP_1BPP_5TO8:  return 640;
+#ifdef PC3_HOST
+    case EXP_4BPP_X1:    return 640;
+#endif
     }
     return 0;
 }
@@ -717,7 +734,7 @@ uint8_t display_gfx_map(uint32_t rgb888)
      * default RGB121 cube, so this costs nothing until MAP is used -
      * and then it is the difference between working and not.
      */
-    if (ex == EXP_4BPP_X2)
+    if (IS_RGB121(ex))
         return (uint8_t)(((rgb888 & 0x800000) >> 20) |
                          ((rgb888 & 0x00C000) >> 13) |
                          ((rgb888 & 0x000080) >> 7));

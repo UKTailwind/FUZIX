@@ -17,8 +17,14 @@
 
 /* The framebuffer pool serves the console (38400 bytes) and the
  * graphics modes (up to 40960: 320x256 at 4bpp; MODE 7 uses 38400,
- * 320x240 at 4bpp) - never both. */
+ * 320x240 at 4bpp) - never both.  pc3host (PC3_HOST) also has MODE 8,
+ * 640x480 at 4bpp, which a PC has the memory for and this board does
+ * not. */
+#ifdef PC3_HOST
+#define DISP_FB_POOL 153600
+#else
 #define DISP_FB_POOL 40960
+#endif
 
 extern uint8_t disp_fb[DISP_FB_POOL];
 

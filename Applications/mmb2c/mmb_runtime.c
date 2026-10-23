@@ -5343,13 +5343,23 @@ void mm_mode(MMINTEGER n)
         k = 0xFF;                       /* the console: 640x480, 1bpp */
     else if (n == 2)
         k = 7;                          /* 320x240, 16 colours */
+    else if (n == 3)
+        k = 8;                          /* 640x480, 16 colours: a PC's */
     else {
-        mm_error("MODE must be 1 or 2");
+        mm_error("MODE must be 1, 2 or 3");
         return;
     }
     if (mm_gfx_open() < 0)
         return;
-    mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_MODE, &k);
+    /* MODE 3 is the PicoMitePC3's 640x480 in sixteen colours.  Its
+     * 150K framebuffer is more SRAM than this board's kernel has, so
+     * only pc3host's display has the mode - the kernel refuses it, and
+     * a program that asks must hear so rather than carry on drawing at
+     * 640x480 into whatever mode it was in. */
+    if (mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_MODE, &k) < 0 && n == 3) {
+        mm_error("MODE 3 is not available on this machine");
+        return;
+    }
     /* The kernel holds its current colour already reduced to the mode
      * that was live when it was set, so the cached value is now
      * meaningless: force the next draw to push again. */
@@ -6473,8 +6483,8 @@ static MMINTEGER mm_host_mode = 1;
 
 void mm_mode(MMINTEGER n)
 {
-    if (n != 1 && n != 2) {
-        mm_error("MODE must be 1 or 2");
+    if (n != 1 && n != 2 && n != 3) {
+        mm_error("MODE must be 1, 2 or 3");
         return;
     }
     mm_host_mode = n;

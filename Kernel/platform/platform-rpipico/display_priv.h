@@ -27,6 +27,10 @@ enum gexp {
     EXP_4BPP_X3,        /* modes 1/4: 320 wide, 160 bytes/line */
     EXP_4BPP_X6,        /* modes 2/5: 160 wide, 80 bytes/line  */
     EXP_1BPP_5TO8,      /* modes 0/3: 640 wide -> 1024 (5:8), x3 lines */
+#ifdef PC3_HOST
+    EXP_4BPP_X1,        /* mode 8:   640 wide, 320 bytes/line, 480 lines -
+                           MMBasic's MODE 3, on a PC only (display.h) */
+#endif
 };
 
 extern volatile enum gexp gfx_exp;
