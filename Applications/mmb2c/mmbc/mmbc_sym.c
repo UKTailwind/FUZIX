@@ -775,6 +775,22 @@ const char *as_int(struct val v)
         if (mc != NULL)
             return sfmt("((%s) != 0 ? (%s) : (%s))", mc->cond,
                         as_int(mc->a), as_int(mc->b));
+        /* A float the program text fixes - a literal, or a CONST of one,
+           MIN and MAX of literals among them - converted now, as mm_toint
+           would convert it: a STATIC array's bound has to be a C constant
+           (FUZIX #22).  Rounded half away from zero below 2^52 as the
+           runtime does; beyond that, or a NaN, the runtime answers. */
+        {
+            double lv;
+
+            if (literal_value(v.code, &lv) && lv == lv
+                && lv <= 4503599627370495.0 && lv >= -4503599627370495.0) {
+                long long k = lv < 0.0 ? (long long)(lv - 0.5)
+                                       : (long long)(lv + 0.5);
+
+                return k >= 0 ? sfmt("%lldLL", k) : sfmt("(-(%lldLL))", -k);
+            }
+        }
         return sfmt("mm_toint(%s)", v.code);
     }
     if (v.ty == TY_T)

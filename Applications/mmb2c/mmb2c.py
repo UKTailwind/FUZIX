@@ -1157,6 +1157,17 @@ def const_or_literal_expr(text):
     return const_c_expr(''.join(out))
 
 
+def fold_toint(v):
+    """mm_toint at translate time: the C text of the integer a float
+    becomes, rounded half away from zero below 2^52 as the runtime does.
+    None where the runtime has to answer - beyond that it truncates and
+    range-checks, and a NaN is "Number too large"."""
+    if v != v or v > 4503599627370495.0 or v < -4503599627370495.0:
+        return None
+    n = int(v - 0.5) if v < 0.0 else int(v + 0.5)
+    return '%dLL' % n if n >= 0 else '(-(%dLL))' % -n
+
+
 def const_c_expr(text):
     """True when an emitted expression is a C constant expression.
 
@@ -1804,6 +1815,15 @@ class Conv(object):
             if mc is not None:
                 return ('((%s) != 0 ? (%s) : (%s))'
                         % (mc[0], self.as_int(mc[1]), self.as_int(mc[2])))
+            # A float the program text fixes - a literal, or a CONST of
+            # one, MIN and MAX of literals among them - converted now, as
+            # mm_toint would convert it: a STATIC array's bound has to be
+            # a C constant (FUZIX #22).
+            lv = literal_value(code)
+            if lv is not None:
+                k = fold_toint(lv)
+                if k is not None:
+                    return k
             return 'mm_toint(' + code + ')'
         if isinstance(ty, tuple):
             self.err("a whole structure cannot be used in an expression")

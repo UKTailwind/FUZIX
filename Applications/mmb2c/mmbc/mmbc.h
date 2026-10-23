@@ -582,6 +582,8 @@ const char *as_int(struct val v);
 const char *whole_call(const char *code, const char *name);
 /* the value of an integer literal's text (5LL, (-(5LL))) in *out; 0 if not */
 int int_literal(const char *code, long long *out);
+/* a numeric literal's value as getnumber makes it, in *out; 0 if not */
+int literal_value(const char *code, double *out);
 const char *as_flt(struct val v);
 const char *as_str(struct val v);
 struct val need_num(struct val v);

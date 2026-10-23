@@ -238,7 +238,7 @@ int int_literal(const char *code, long long *out)
  * integer as int_literal reads it, or a float's digits, point and
  * exponent inside the parentheses and negations written round them.  0
  * for anything else. */
-static int literal_value(const char *code, double *out)
+int literal_value(const char *code, double *out)
 {
     const char *s = code;
     const char *e = code + strlen(code);
