@@ -732,8 +732,9 @@ void mm_pr_tabe(void)         { mm_pr_tab(); mm_pr_end(); }
 /* TAB() is a string valued function in MMBasic, not a side effect.  cur
  * is the column it counts from: the console's, or a file's inside PRINT
  * #n (mm_ftab).  The reference takes the column with getint(ep, 1, 255),
- * so anything else is its range error rather than a clamp; the clamp
- * left is only so that CR LF and the spaces fit one string. */
+ * so anything else is its range error rather than a clamp.  Past the
+ * column already, it is CR LF and col - 1 spaces, which for 255 is one
+ * character more than a string holds: CtoM's "String too long" there. */
 static char *mm_tab_from(int cur, MMINTEGER col)
 {
     char *t = mm_tmp();
@@ -744,9 +745,10 @@ static char *mm_tab_from(int cur, MMINTEGER col)
         strcat(msg, " is invalid (valid is 1 to 255)");
         MM_RAISEV(msg, mm_ssink());
     }
-    if (col > MM_STRLEN - 2) col = MM_STRLEN - 2;
     if (cur > col) {
         i = (int)col - 1;
+        if (i + 2 > MM_STRLEN)
+            MM_RAISEV("String too long", mm_ssink());
         t[1] = '\r';
         t[2] = '\n';
         memset(t + 3, ' ', (size_t)i);
@@ -5168,13 +5170,15 @@ static int mm_gputc(int c)
      * is 2 when no OPTION TAB is given - and this has no OPTION TAB - so
      * at least one space, then on until the column is even (Draw.c's
      * DisplayPutC).  It used to jump the pen to a 14-column zone and
-     * paint nothing, so the gap kept whatever was under it. */
+     * paint nothing, so the gap kept whatever was under it.  The column
+     * counts the run not yet drawn: mm_gx moves only when it is flushed,
+     * and testing mm_gx alone from an odd column never ended. */
     if (c == '\t') {
         int cell = mm_gcw * mm_gscale;
 
         do {
             mm_gputc(' ');
-        } while ((mm_gx / cell) % 2);
+        } while ((mm_gx / cell + mm_gn) % 2);
         return 1;
     }
     /*
