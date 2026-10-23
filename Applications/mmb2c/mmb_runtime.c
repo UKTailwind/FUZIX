@@ -5552,6 +5552,11 @@ MMINTEGER mm_fb_read(MMINTEGER offset, MMINTEGER len, void *buf)
 {
     struct mm_gfx_blit b;
 
+    /* struct gfx_blit's offset is 16 bits; the PC's 640x480 4bpp mode
+     * is 153,600 bytes, so its lower half goes as a one-row rectangle,
+     * whose offset is 32. */
+    if (offset > 0xFFFF)
+        return mm_fb_readr(offset, len, 1, len, buf);
     if (mm_gfx_open() < 0)
         return -1;
     mm_pix_drain();             /* queued pixels must be down first */
@@ -5641,6 +5646,8 @@ MMINTEGER mm_fb_put(MMINTEGER offset, MMINTEGER len, const void *buf)
 {
     struct mm_gfx_blit b;
 
+    if (offset > 0xFFFF)        /* see mm_fb_read */
+        return mm_fb_putr(offset, len, 1, len, buf);
     if (mm_gfx_open() < 0)
         return -1;
     mm_pix_drain();             /* queued pixels must be down first */
