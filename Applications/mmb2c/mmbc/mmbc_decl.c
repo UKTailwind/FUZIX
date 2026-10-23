@@ -138,27 +138,20 @@ void pass_routine_names(void)
     }
 }
 
-/* The reference's loader (FileIO.c, b3c8155): a line's printable
- * characters are copied, a TAB is padded with spaces to the next even
- * column, and a line that reaches MAXSTRLEN (255) is refused with "Line
- * is too long" before anything runs. */
+/* LOAD's FileLoadProgram (FileIO.c): each byte is masked with &H7F, a
+ * TAB becomes one space, and only what is then printable is kept; saving
+ * the program refuses a line that reaches MAXSTRLEN (255) with "Line is
+ * too long" before anything runs.  (The TAB padding to an even column is
+ * the save's, and LOAD has made every TAB a space by then.) */
 static int line_too_long(const char *s)
 {
     int n = 0;
 
     for (; *s; s++) {
-        unsigned char c = (unsigned char)*s;
+        unsigned char c = (unsigned char)*s & 0x7f;
 
-        if (c == '\t') {
-            if (++n >= 255)
-                return 1;
-            while (n % 2)
-                if (++n >= 255)
-                    return 1;
-        } else if (c >= ' ' && c <= '~') {
-            if (++n >= 255)
-                return 1;
-        }
+        if ((c == '\t' || (c >= ' ' && c <= '~')) && ++n >= 255)
+            return 1;
     }
     return 0;
 }
