@@ -29,3 +29,15 @@ ON ERROR SKIP 1
 Call n$, 1
 Print "by name: " MM.ERRMSG$
 Call "S", 6
+' a statement that stops at the line still ends at ELSE (FUZIX #13)
+x = 0
+If x Then F 4 Else Print "else ran"
+If x Then Call "Nowhere", 4 Else Print "call else ran"
+ON ERROR SKIP 1
+If 1 Then F 4 Else Print "not this"
+Print "then: " MM.ERRMSG$
+' a name worked out by an expression is looked up when the line runs
+Call "Do" + "It"
+Sub DoIt
+  Print "DoIt ran"
+End Sub

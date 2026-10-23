@@ -1268,18 +1268,6 @@ class Conv(object):
                     return True
             k += 1
 
-    def eq_ahead(self):
-        """From here to the end of the statement: an '=' at any depth?
-        cmd_let's own scan for one, which counts no brackets."""
-        k = 0
-        while True:
-            t = self.peek(k)
-            if t is None or (t[0] == T_OP and t[1] == ':'):
-                return False
-            if t[0] == T_OP and t[1] == '=':
-                return True
-            k += 1
-
     def one_arg(self):
         """Just inside a call's '(': is the list ONE argument - no comma
         at its own depth before its ')'?  False if the ')' never comes."""
@@ -4564,6 +4552,12 @@ class Conv(object):
 
     def skip_statement(self):
         while not self.at_end() and not self.is_op(':'):
+            self.i += 1
+
+    def skip_to_stmt_end(self):
+        """Past the rest of a statement being translated, stopping where
+        stmt_end() does - at an ELSE too, which belongs to the IF."""
+        while not self.stmt_end():
             self.i += 1
 
     def decl_statement(self):
@@ -9294,16 +9288,15 @@ class Conv(object):
             self.i += 1
             r = self.routines[canon]
             if r.is_func:
-                # A FUNCTION is not a command (edc7999): the line falls to
-                # the implied LET, which stops at it before any argument
-                # is evaluated - "Unknown command" with no '=' in the
-                # statement, "Invalid syntax" with one.
-                msg = 'Invalid syntax' if self.eq_ahead() else \
-                    'Unknown command'
-                self.warn("'%s' is a FUNCTION, not a command: \"%s\" when "
-                          "the line runs" % (r.name, msg))
-                self.skip_statement()
-                self.emit('mm_error("%s");' % msg)
+                # A FUNCTION is not a command (edc7999).  No '=' follows
+                # the name, so the tokeniser put no LET in front, and
+                # ExecuteProgram's FindSubFun for a SUB finds nothing:
+                # StandardError(36), before any argument is evaluated.
+                # The statement ends at an ELSE too, which must survive.
+                self.warn("'%s' is a FUNCTION, not a command: \"Unknown "
+                          "command\" when the line runs" % r.name)
+                self.skip_to_stmt_end()
+                self.emit('mm_error("Unknown command");')
                 return
             args = self.call_args(False)
             code, ty = self.emit_call(r, args)
@@ -9332,8 +9325,12 @@ class Conv(object):
 
     def do_callstmt(self):
         t = self.peek()
-        if t is not None and t[0] == T_STR:
-            # a literal name resolves here and now: a direct call
+        t1 = self.peek(1)
+        if t is not None and t[0] == T_STR \
+                and (t1 is None or (t1[0] == T_OP and t1[1] in (',', ':'))
+                     or (t1[0] == T_ID and t1[2] == 'ELSE')):
+            # a literal name - the whole of the name's expression - resolves
+            # here and now: a direct call.  "Do" + "It" is not one.
             self.i += 1
             canon = split_suffix(t[1].lower())[0]
             r = self.routines.get(canon)
@@ -9342,7 +9339,7 @@ class Conv(object):
                 # arguments are touched
                 self.warn("CALL \"%s\": no SUB of that name - \"Unknown "
                           "user subroutine\" when the line runs" % t[1])
-                self.skip_statement()
+                self.skip_to_stmt_end()
                 self.emit('mm_error("Unknown user subroutine");')
                 return
             self.accept_op(',')

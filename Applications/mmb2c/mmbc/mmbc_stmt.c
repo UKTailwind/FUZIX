@@ -5467,20 +5467,12 @@ static int looks_like_assignment(void)
         && strcmp(cv.toks[j].text, "=") == 0;
 }
 
-/* From here to the end of the statement: an '=' at any depth?  cmd_let's
- * own scan for one, which counts no brackets. */
-static int eq_ahead(void)
+/* Past the rest of a statement being translated, stopping where
+ * stmt_end() does - at an ELSE too, which belongs to the IF. */
+static void skip_to_stmt_end(void)
 {
-    int k;
-
-    for (k = 0;; k++) {
-        struct tok *t = peek(k);
-
-        if (t == NULL || (t->kind == T_OP && strcmp(t->text, ":") == 0))
-            return 0;
-        if (t->kind == T_OP && strcmp(t->text, "=") == 0)
-            return 1;
-    }
+    while (!stmt_end())
+        cv.i++;
 }
 
 static void do_assign_or_call(void)
@@ -5500,16 +5492,15 @@ static void do_assign_or_call(void)
         cv.i++;
         r = routine_get(canon);
         if (r->is_func) {
-            /* A FUNCTION is not a command (edc7999): the line falls to
-             * the implied LET, which stops at it before any argument is
-             * evaluated - "Unknown command" with no '=' in the
-             * statement, "Invalid syntax" with one. */
-            const char *msg = eq_ahead() ? "Invalid syntax"
-                                         : "Unknown command";
-            cv_warn("'%s' is a FUNCTION, not a command: \"%s\" when "
-                    "the line runs", r->name, msg);
-            skip_statement();
-            emit(sfmt("mm_error(\"%s\");", msg));
+            /* A FUNCTION is not a command (edc7999).  No '=' follows the
+             * name, so the tokeniser put no LET in front, and
+             * ExecuteProgram's FindSubFun for a SUB finds nothing:
+             * StandardError(36), before any argument is evaluated.  The
+             * statement ends at an ELSE too, which must survive. */
+            cv_warn("'%s' is a FUNCTION, not a command: \"Unknown "
+                    "command\" when the line runs", r->name);
+            skip_to_stmt_end();
+            emit("mm_error(\"Unknown command\");");
             return;
         }
         call_args(0, &args);
@@ -5534,8 +5525,11 @@ static void do_callstmt(void)
     struct calldisp *d;
     int sfx;
 
-    if (t != NULL && t->kind == T_STR) {
-        /* a literal name resolves here and now: a direct call */
+    if (t != NULL && t->kind == T_STR
+        && (peek(1) == NULL || is_op(",", 1) || is_op(":", 1)
+            || is_kw("ELSE", 1))) {
+        /* a literal name - the whole of the name's expression - resolves
+         * here and now: a direct call.  "Do" + "It" is not one. */
         cv.i++;
         canon = split_suffix(lower(t->text), &sfx);
         r = routine_get(canon);
@@ -5544,7 +5538,7 @@ static void do_callstmt(void)
              * arguments are touched */
             cv_warn("CALL \"%s\": no SUB of that name - \"Unknown "
                     "user subroutine\" when the line runs", t->text);
-            skip_statement();
+            skip_to_stmt_end();
             emit("mm_error(\"Unknown user subroutine\");");
             return;
         }
