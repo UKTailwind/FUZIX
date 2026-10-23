@@ -621,7 +621,7 @@ static void ed_mark_message(const char *msg)
 static int ed_peek_key(const unsigned char *q, int n, int *pos)
 {
     int c = (*pos < n) ? q[(*pos)++] : -2;
-#ifdef PC3_HOST
+#ifdef PC_HOST
     if (c == 0x7F)
         return '\b';                /* a PC's Backspace, as inkey() makes it */
 #endif
@@ -2265,7 +2265,7 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
     printScreen(); // draw the screen
     SCursor(xx, yy);
     drawstatusline = true;
-#ifdef PC3_HOST
+#ifdef PC_HOST
     /* mmbedit.c found the file, or its directory, not writable: say so
        now, on the status line, rather than at F1 with the work done. */
     if (edit_readonly)
@@ -2809,7 +2809,7 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
                 {
                     if (file_backup(fname) < 0 || file_save(fname) < 0)
                     {
-#ifdef PC3_HOST
+#ifdef PC_HOST
                         /* On a PC the reason is usually a directory that
                            is not the user's - the installed examples -
                            and the reason is worth a line. */

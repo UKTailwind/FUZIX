@@ -429,7 +429,7 @@ static uint8_t rgb121_rgb332[16] = {
 
 /* The MMBasic modes - MODE 7, and on a PC MODE 8 - take MMBasic's RGB121
  * colours; the BBC modes take theirs. */
-#ifdef PC3_HOST
+#ifdef PC_HOST
 #define IS_RGB121(ex)	((ex) == EXP_4BPP_X2 || (ex) == EXP_4BPP_X1)
 #else
 #define IS_RGB121(ex)	((ex) == EXP_4BPP_X2)
@@ -504,7 +504,7 @@ int display_gfx_mode(int mode)
         exp = EXP_4BPP_X2;   stride = 160; rows = 240;
         raster = DISP_RASTER_VGA; pal = 3;
         break;
-#ifdef PC3_HOST
+#ifdef PC_HOST
     case 8:     /* MMBasic's MODE 3: MODE 7's colours at twice the size */
         exp = EXP_4BPP_X1;   stride = 320; rows = 480;
         raster = DISP_RASTER_VGA; pal = 3;
@@ -673,7 +673,7 @@ static int gfx_width(enum gexp ex)
     case EXP_4BPP_X3:    return 320;
     case EXP_4BPP_X6:    return 160;
     case EXP_1BPP_5TO8:  return 640;
-#ifdef PC3_HOST
+#ifdef PC_HOST
     case EXP_4BPP_X1:    return 640;
 #endif
     }

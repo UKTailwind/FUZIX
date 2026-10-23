@@ -18,13 +18,13 @@
 #include <unistd.h>
 #include <errno.h>
 #include "mmbedit.h"
-#ifdef PC3_HOST
+#ifdef PC_HOST
 #include "pc3client.h"
 #endif
 
 #define CC_CMD  "/usr/bin/cc"
 
-#ifdef PC3_HOST
+#ifdef PC_HOST
 /* Set before the editor starts when the file, or the directory the
    .bak goes in, cannot be written; editor.c puts it on the status line.
    On a PC that is the installed examples under /opt/pc3, which belong
@@ -99,7 +99,7 @@ int main(int argc, char *argv[])
     scr_flush();
 
     txtp = EdBuff;
-#ifdef PC3_HOST
+#ifdef PC_HOST
     edit_readonly = cannot_write(argv[1]);
 #endif
     FullScreenEditor(0, 0, argv[1], EDBUF_SIZE, 0);
@@ -128,7 +128,7 @@ int main(int argc, char *argv[])
                    "nothing to compile\n", argv[1]);
             return 0;
         }
-#ifdef PC3_HOST
+#ifdef PC_HOST
         /* The cc beside this program, wherever that is: /usr/bin/cc on
            a PC is the system's compiler.  MMBEDIT_CC names another -
            a wrapper, a different build, a script that records what it

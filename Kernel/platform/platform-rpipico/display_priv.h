@@ -9,7 +9,7 @@
  * memory map.  This header is everything the two need to say to each
  * other, and it is deliberately small - the PC3 device server on a PC
  * compiles display.c against its own implementation of what is
- * declared here (build it with -DPC3_HOST), so anything added below is
+ * declared here (build it with -DPC_HOST), so anything added below is
  * a promise to two machines.
  *
  * Nothing outside the two files includes this.  display.h remains the
@@ -27,7 +27,7 @@ enum gexp {
     EXP_4BPP_X3,        /* modes 1/4: 320 wide, 160 bytes/line */
     EXP_4BPP_X6,        /* modes 2/5: 160 wide, 80 bytes/line  */
     EXP_1BPP_5TO8,      /* modes 0/3: 640 wide -> 1024 (5:8), x3 lines */
-#ifdef PC3_HOST
+#ifdef PC_HOST
     EXP_4BPP_X1,        /* mode 8:   640 wide, 320 bytes/line, 480 lines -
                            MMBasic's MODE 3, on a PC only (display.h) */
 #endif
@@ -66,7 +66,7 @@ void disp_hw_palette_changed(enum gexp ex);
  * display_fb_enter).  The kernel reads the process table for that; a
  * host build supplies a function, since struct p_tab is its own.
  */
-#ifdef PC3_HOST
+#ifdef PC_HOST
 struct p_tab *disp_who_parent(struct p_tab *who);
 #else
 #include <kernel.h>

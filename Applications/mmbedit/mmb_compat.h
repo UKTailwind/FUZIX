@@ -144,7 +144,7 @@ extern int gui_fcolour, gui_bcolour;
  * asks for 90-97 and looks as it looks on a PicoMite; the board's
  * console keeps 30-37, whose rendering is its own palette's.
  */
-#ifdef PC3_HOST
+#ifdef PC_HOST
 #define VT100_C_NORMAL  "\033[97m"
 #define VT100_C_COMMENT "\033[93m"
 #define VT100_C_KEYWORD "\033[96m"
@@ -168,7 +168,7 @@ extern int gui_fcolour, gui_bcolour;
  * everything MMBasic knows is a keyword, but what mmbc can actually
  * translate is cyan and what it cannot is blue.  A program that is all
  * cyan will compile. */
-#ifdef PC3_HOST
+#ifdef PC_HOST
 #define VT100_C_KEYWORD_UNSUP "\033[94m"
 #else
 #define VT100_C_KEYWORD_UNSUP "\033[34m"

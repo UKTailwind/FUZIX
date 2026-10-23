@@ -26,7 +26,7 @@
 /* INKEY$ has to read the console without waiting, which means the line
  * discipline - see mm_inkey.  Windows has no termios and answers the
  * same question with _kbhit/_getch. */
-#if defined(_WIN32) && !defined(PC3_HOST)
+#if defined(_WIN32) && !defined(PC_HOST)
 #include <conio.h>
 #else
 #include <termios.h>
@@ -40,7 +40,7 @@
  * Every hardware request the runtime makes - drawing, sound, the RTC,
  * I2C, SPI, the pin claims - is an open of /dev/sys and an ioctl on
  * it, and on the board and under the host gates that is exactly what
- * the two macros below are.  Built with PC3_HOST (the pc3host tree,
+ * the two macros below are.  Built with PC_HOST (the pc3host tree,
  * where bcrun runs on a PC) the same calls go to the PC3 device server
  * through libpc3client, which answers the same codes with the same
  * structures over a socket.  This is the whole of the runtime's
@@ -67,7 +67,7 @@ int pc3w_fifo_write(int fd, const void *buf, size_t n);
 int pc3w_fifo_close(int fd);
 #endif
 
-#ifdef PC3_HOST
+#ifdef PC_HOST
 int pc3_sys_open(void);
 int pc3_sys_ioctl(int fd, unsigned long code, void *arg);
 int pc3_rd1(void);              /* one byte from the terminal OR the window */
@@ -1754,7 +1754,7 @@ static int mm_getc(MMINTEGER fnbr)
    here because INPUT has to give the console back for the duration, and
    because leaving it raw at exit would hand the shell a terminal with
    no echo and no line editing. */
-#if !defined(_WIN32) || defined(PC3_HOST)
+#if !defined(_WIN32) || defined(PC_HOST)
 void mm_raw_release(void);
 static void mm_raw_resume(void);
 static int  mm_raw_line(void);
@@ -3260,7 +3260,7 @@ MMFLOAT mm_timer(void)
 #define MMK_F9     0x99
 #define MMK_F11    0x9B
 
-#if !defined(_WIN32) || defined(PC3_HOST)
+#if !defined(_WIN32) || defined(PC_HOST)
 /*
  * A terminal sends an arrow or a function key as an escape sequence;
  * MMBasic's INKEY$ hands back ONE code for it, because MMInkey()
@@ -3290,7 +3290,7 @@ static void mm_kpush(int a, int b, int c, int d)
    decides whether this waits for the rest of a sequence. */
 static int mm_rd1(void)
 {
-#ifdef PC3_HOST
+#ifdef PC_HOST
     /* The terminal and the window's keyboard, merged: on the board one
        keyboard feeds one tty; on a PC the program has a terminal and a
        window, and a key from either is a key.  pc3_rd1 honours the
@@ -3385,7 +3385,7 @@ static int mm_raw_hold(void)
         if (!isatty(0) || tcgetattr(0, &mm_tty_cooked) != 0) {
             if (MM_RAWDBG)
                 fprintf(stderr, "[rawhold: no tty, errno %d]\r\n", errno);
-#ifdef PC3_HOST
+#ifdef PC_HOST
             /* No terminal, but a window may be a keyboard: INKEY$ and
                KEYDOWN work for a program started from a desktop, or a
                test, with no tty at all.  There is nothing to hold or
@@ -3656,7 +3656,7 @@ char *mm_inkey(void)
         return t;
     }
 
-#if defined(_WIN32) && !defined(PC3_HOST)
+#if defined(_WIN32) && !defined(PC_HOST)
     if (_kbhit()) {
         t[0] = 1;
         t[1] = (char)_getch();
@@ -3691,7 +3691,7 @@ char *mm_inkey(void)
                 c = mm_esc_decode();
                 tcsetattr(0, TCSANOW, &mm_tty_raw);
             }
-#ifdef PC3_HOST
+#ifdef PC_HOST
             /* No terminal to set the wait on, so the sequence came from
                the window - and the server delivers one whole, so the
                rest is already there to be read without waiting. */
@@ -3708,7 +3708,7 @@ char *mm_inkey(void)
     return t;
 }
 
-#if !defined(_WIN32) || defined(PC3_HOST)
+#if !defined(_WIN32) || defined(PC_HOST)
 /*
  * One key, DECODED, waiting for it - INPUT's reader (mm_readline_echo).
  *
@@ -4160,7 +4160,7 @@ MMINTEGER mm_run_exec(void)
         mm_error("no such program");
         return -1;
     }
-#ifdef PC3_HOST
+#ifdef PC_HOST
     /* WEB PING is ping(8) run to completion, and mmb_net.h says why an
      * unanswered ping is not an error: the board's ping prints its
      * loss and exits 0.  Linux's exits 1 for "no replies" (2 for a
@@ -4199,7 +4199,7 @@ MMINTEGER mm_run_exec(void)
     }
     while (pc3w_wait(pid, &status, 0) < 0)
         ;
-#ifdef PC3_HOST
+#ifdef PC_HOST
     /* WEB PING: the POSIX mm_run_exec says why an unanswered ping is
        not an error; Windows's ping exits 1 for that too */
     if (WEXITSTATUS(status) == 1) {
@@ -5692,7 +5692,7 @@ struct mm_kbd_down {
     unsigned char pad2[2];
 };
 
-#ifdef PC3_HOST
+#ifdef PC_HOST
 /*
  * ONE SNAPSHOT SERVES A BURST OF CALLS.
  *
@@ -5876,7 +5876,7 @@ static void mm_gfx_rect(int x1, int y1, int x2, int y2)
 
 static unsigned long mm_us_fast(void)
 {
-#ifdef PC3_HOST
+#ifdef PC_HOST
     /* No TIMER0 on a PC.  This clock bounds how long a queued pixel may
        wait, so any monotonic microsecond count serves; the register
        read above it is the one thing in this file that names a board

@@ -14,7 +14,7 @@ test -f "$S/bbdata_x86_64.nas" || {
     echo "BBCSDL sources not found at $S (set BBCSDL=)" >&2
     exit 1
 }
-FLAGS="-Wall -I $B -DFUZIX -U__linux__ -DPC3_HOST_TEST -fsigned-char"
+FLAGS="-Wall -I $B -DFUZIX -U__linux__ -DPC_HOST_TEST -fsigned-char"
 gcc $FLAGS -c -O2 -ffast-math -fno-finite-math-only \
     "$B/bbmain.c" "$B/bbexec.c" "$B/bbeval.c"
 gcc $FLAGS -c -Os "$S/bbasmb_x86_64.c" -o bbasmb.o

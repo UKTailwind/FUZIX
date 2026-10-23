@@ -35,7 +35,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#ifdef PC3_HOST
+#ifdef PC_HOST
 #include "pc3client.h"
 #endif
 #ifdef _WIN32
@@ -64,7 +64,7 @@ const char *pc3w_tmpdir(void);
 static const char *libpath = LIBPATH;
 static const char *cppcmd = CMD_CPP;
 static const char *mmbccmd = CMD_MMBC;
-#ifdef PC3_HOST
+#ifdef PC_HOST
 static char incpath[4200];	/* -I plus an install path of any length */
 #else
 static char incpath[80];
@@ -206,7 +206,7 @@ static void onsig(int sig)
  */
 /* Written at the front of the final object before cc2 runs, so the
    kernel's #! support execs the result directly: cc prog.c; ./prog.bc */
-#ifdef PC3_HOST
+#ifdef PC_HOST
 static const char shebang[] = "#!/usr/bin/env bcrun\n";  /* wherever it is */
 #else
 static const char shebang[] = "#!/usr/bin/bcrun\n";
@@ -353,7 +353,7 @@ int main(int argc, char *argv[])
 {
 	char *src = NULL;
 	char out[64];
-#ifdef PC3_HOST
+#ifdef PC_HOST
 	char *av[7];		/* one more: the row-window define */
 #else
 	char *av[6];
@@ -362,7 +362,7 @@ int main(int argc, char *argv[])
 
 	*out = 0;
 
-#ifdef PC3_HOST
+#ifdef PC_HOST
 	/* Installed anywhere, or run from a build tree: the passes and the
 	   headers are in ../lib/cc/ beside this program's directory, and
 	   cpp, mmbc and bcrun are beside it.  /usr/lib/cc and /usr/bin are
@@ -467,7 +467,7 @@ int main(int argc, char *argv[])
 			av[1] = src;
 			av[2] = "-o";
 			av[3] = basfile;
-#ifdef PC3_HOST
+#ifdef PC_HOST
 			/* The board's mmbc translates for this compiler by
 			   default (MMBC_ARENA); a PC's is the gates' build and
 			   defaults to the gcc dialect, whose compound literals
@@ -519,7 +519,7 @@ int main(int argc, char *argv[])
 		 * call the runtime's natives instead, and the host bcrun is
 		 * exactly that runtime.
 		 */
-#ifdef PC3_HOST
+#ifdef PC_HOST
 		av[3] = "-DMM_FCC";
 		/* The program-side row window (mmb_blit.h): 1K on the board,
 		   where a program has 48K and an ioctl costs a microsecond,
@@ -595,7 +595,7 @@ int main(int argc, char *argv[])
 		char path[80];
 		char *rv[2];
 
-#ifdef PC3_HOST
+#ifdef PC_HOST
 		/* bcrun by its own path, beside this program: the object's #!
 		   line needs bcrun on the PATH, and a build tree has no such
 		   thing on it. */

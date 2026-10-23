@@ -13,7 +13,7 @@
  * this header is everything the two halves say to each other, and it is
  * deliberately small: the PC3 device server on a PC compiles sound.c
  * against its own implementation of what is declared here (build it with
- * -DPC3_HOST), so anything added below is a promise to two machines.
+ * -DPC_HOST), so anything added below is a promise to two machines.
  *
  * Nothing outside the two files includes this.  sound.h remains the
  * public interface.
@@ -69,7 +69,7 @@ int snd_hw_pid_alive(uint16_t pid);
  * default_text_excludes.incl leaves .time_critical sections out of
  * flash), nothing on the host.
  */
-#ifdef PC3_HOST
+#ifdef PC_HOST
 typedef int snd_lock_t;
 snd_lock_t snd_hw_lock(void);
 void snd_hw_unlock(snd_lock_t l);

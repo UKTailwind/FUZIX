@@ -13,7 +13,7 @@
 #define K_ESC       0x1B
 #define K_DEL       0x7F
 
-#ifdef PC3_HOST
+#ifdef PC_HOST
 extern int edit_readonly;   /* mmbedit.c: the file cannot be saved where it is */
 #endif
 

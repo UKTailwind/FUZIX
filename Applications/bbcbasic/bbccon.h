@@ -32,7 +32,7 @@
 #endif
 
 #if (PAGE_OFFSET < 0x10000) && (defined(__x86_64__) || defined(__aarch64__)) \
-	&& !defined(PC3_HOST_TEST)
+	&& !defined(PC_HOST_TEST)
 #error "PAGE must be at least 64K above memory base on 64-bit platforms"
 #endif
 

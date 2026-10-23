@@ -30,7 +30,7 @@
 #include <errno.h>		/* the neterr libcall */
 #if defined(__linux__) || defined(_WIN32)
 #include <sys/mman.h>		/* executable code buffer for native fns */
-#ifdef PC3_HOST
+#ifdef PC_HOST
 /* On a PC, /dev/sys is the PC3 device server: a program's open of
    it, and every ioctl on the descriptor it gets, go through
    libpc3client.  The runtime inside bcrun does the same through
@@ -1322,7 +1322,7 @@ static unsigned long heap_base, heap_top;
  *	gap is not an error: it is what the development host and any
  *	board without PSRAM get, and small programs never notice.
  */
-#ifdef PC3_HOST
+#ifdef PC_HOST
 /* The PC build (pc3host): a PC has memory to spare, so a program gets
    64 MB of heap where the board gives 512K of its 8 MB of PSRAM.
    MMbg's arrays and strings alone are 788K. */
@@ -1332,7 +1332,7 @@ static unsigned long heap_base, heap_top;
 #define VM_HEAP_KB	512
 #endif
 
-#ifdef PC3_HOST
+#ifdef PC_HOST
 /*
  *	On a PC the heap is mapped here, below 4G as mem_init maps mem[]
  *	(a program address is 32 bits).  It used to go to /dev/sys as on
@@ -2154,7 +2154,7 @@ static void lc_time(void)
 
 static void lc_open(void)
 {
-#ifdef PC3_HOST
+#ifdef PC_HOST
 	const char *path = getstr((unsigned long)arg(0));
 
 	if (!strcmp(path, "/dev/sys")) {
@@ -2187,7 +2187,7 @@ static void lc_creat(void)
 
 static void lc_close(void)
 {
-#ifdef PC3_HOST
+#ifdef PC_HOST
 	if (pc3_sys_isfd((int)arg(0))) {
 		A = pc3_sys_close((int)arg(0));
 		return;
@@ -2210,7 +2210,7 @@ static void lc_read(void)
 {
 	unsigned long b = arg(1), n = arg(2);
 	if (VM_OOBN(b, n)) fault("bad address");
-#ifdef PC3_HOST
+#ifdef PC_HOST
 	if (pc3_tls_isfd((int)arg(0))) {
 		A = pc3_tls_read((int)arg(0), vptr(b), n);
 		return;
@@ -2229,7 +2229,7 @@ static void lc_write(void)
 {
 	unsigned long b = arg(1), n = arg(2);
 	if (VM_OOBN(b, n)) fault("bad address");
-#ifdef PC3_HOST
+#ifdef PC_HOST
 	if (pc3_tls_isfd((int)arg(0))) {
 		A = pc3_tls_write((int)arg(0), vptr(b), n);
 		return;
@@ -2296,7 +2296,7 @@ static void lc_socket(void)
 {
 	int d = (int)arg(0), t = (int)arg(1), p = (int)arg(2);
 
-#ifdef PC3_HOST
+#ifdef PC_HOST
 	/* The board's TLS socket, kept real on a PC: a TCP socket that
 	   pc3tls.c handshakes and encrypts (the gates' bcrun below maps
 	   it to plain TCP, which is fine where nothing connects). */
@@ -2321,7 +2321,7 @@ static void lc_connect(void)
 	{
 		struct sockaddr_in a;
 		nx_sa_in(&a, sa);
-#ifdef PC3_HOST
+#ifdef PC_HOST
 		if (pc3_tls_isfd((int)arg(0))) {
 			A = pc3_tls_connect((int)arg(0), (struct sockaddr *)&a, sizeof(a));
 			return;
@@ -2446,7 +2446,7 @@ static void lc_recvfrom(void)
 	A = r;
 }
 
-#ifdef PC3_HOST
+#ifdef PC_HOST
 /*
  *	A bytecode program's ioctl structures are the BOARD's - 32-bit
  *	pointers - and libpc3client reads the host's, with 64-bit ones.
@@ -2548,7 +2548,7 @@ static void lc_ioctl(void)
 	int rq = (int)arg(1);
 	unsigned long p = arg(2);
 
-#ifdef PC3_HOST
+#ifdef PC_HOST
 	/* The TLS requests are the hosted TLS layer's: the host name on
 	   a TLS socket, and the CA bundle - a program-memory pointer and
 	   a length in the kernel's struct net_ca, read here as the
@@ -2578,7 +2578,7 @@ static void lc_ioctl(void)
 	}
 #endif
 	if (p && VM_OOBN(p, 1)) fault("bad address");
-#ifdef PC3_HOST
+#ifdef PC_HOST
 	if (pc3_sys_isfd((int)arg(0))) {
 		A = host_sys_ioctl((int)arg(0), rq, p);
 		return;
@@ -4210,7 +4210,7 @@ int main(int argc, char *argv[])
 {
 	int i = 1;
 
-#ifdef PC3_HOST
+#ifdef PC_HOST
 	/* saveimage, loadjpg and the rest are found beside this program,
 	   wherever it was installed, as /usr/bin is one place on the board;
 	   the runtime spawns them by bare name through the PATH. */

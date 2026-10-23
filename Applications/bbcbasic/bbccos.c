@@ -24,7 +24,7 @@ extern int dirlen;
 #include <sys/stat.h>
 #ifdef FUZIX
 #include <termios.h>
-#ifdef PC3_HOST_TEST
+#ifdef PC_HOST_TEST
 #include <sys/ioctl.h>
 #else
 extern int ioctl (int, int, ...) ;
