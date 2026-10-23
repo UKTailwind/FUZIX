@@ -806,38 +806,68 @@ int mm_ix(MMINTEGER i, int base, int lim)
     }
     return (int)i;
 }
-/*
- * The subscripts of a multi-dimensional array, which findvar checks in
- * two rounds: each as it is evaluated, left to right, against 32 bits
- * and the base ("Index out of bounds", "Dimensions"), and only after all
- * of them against their upper bounds.  C evaluates a[i][j]'s subscripts
- * in no order it promises, so m%(-1, 9) said whichever it reached first
- * (FUZIX #26).  mm_ixp makes the first round's checks and only NOTES an
- * index over the top; mm_ixend, round the whole element after every
- * subscript is in, raises it - so "Dimensions" always wins.
- *
- * The note is kept per nesting depth d, which the translator knows: an
- * access inside another's subscript - a(b(1, 2), 9) - must not clear or
- * raise the outer one's.  -1 is an access that has already raised, so
- * that a later note in it cannot put a second message over the first.
- */
-static int mm_ix_over[8];
+/* A float subscript is FloatToInt32's, rounded, and "Number too large"
+ * outside 32 bits - where an integer one is "Index out of bounds"
+ * (MMBasic.c findvar, FUZIX #35). */
 #if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)
 static __inline__ __attribute__((unused))
 #else
 static
 #endif
-int mm_ixp(MMINTEGER i, int base, int lim, int d)
+int mm_ixf(MMFLOAT f, int base, int lim)
+{
+    if (f != f || f < -2147483648.5 || f > 2147483647.5) {
+        mm_error("Number too large");
+        return base;
+    }
+    return mm_ix(f >= 0 ? (MMINTEGER)(f + 0.5) : (MMINTEGER)(f - 0.5),
+                 base, lim);
+}
+/*
+ * The subscripts of a multi-dimensional array, which findvar checks in
+ * two rounds: each as it is evaluated, left to right - a float through
+ * FloatToInt32 ("Number too large"), an integer against 32 bits ("Index
+ * out of bounds"), then the base ("Dimensions") - raising at the first
+ * that fails, and only after all of them against their upper bounds.  C
+ * evaluates a[i][j]'s subscripts in no order it promises, so the checks
+ * NOTE what they find and mm_ixend, round the whole element after every
+ * subscript is in, raises it: the leftmost first-round failure - its
+ * position k is in the note - and otherwise an index over the top (FUZIX
+ * #26, #35).  r%(-1, -5000000000) is "Dimensions", as there.
+ *
+ * The note is kept per nesting depth d, which the translator knows: an
+ * access inside another's subscript - a(b(1, 2), 9) - must not clear or
+ * raise the outer one's.  0 is nothing to say, 1 over the top, and
+ * otherwise (k + 1) << 2 | the message's number below.  A FUNCTION called
+ * in a subscript keeps the caller's notes aside while it runs.
+ */
+static int mm_ix_st[8];
+#if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)
+static __inline__ __attribute__((unused))
+#else
+static
+#endif
+void mm_ix_note(int d, int k, int m)
+{
+    int c = ((k + 1) << 2) | m;
+
+    if (mm_ix_st[d] <= 1 || c < mm_ix_st[d])
+        mm_ix_st[d] = c;
+}
+#if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)
+static __inline__ __attribute__((unused))
+#else
+static
+#endif
+int mm_ixp(MMINTEGER i, int base, int lim, int d, int k)
 {
     if (i != (MMINTEGER)(int)i || i < base) {
-        mm_ix_over[d] = -1;
-        mm_error(i < base && i == (MMINTEGER)(int)i ? "Dimensions"
-                                                     : "Index out of bounds");
+        mm_ix_note(d, k, i != (MMINTEGER)(int)i ? 1 : 2);
         return base;
     }
     if (i - base > lim) {
-        if (mm_ix_over[d] == 0)
-            mm_ix_over[d] = 1;
+        if (mm_ix_st[d] == 0)
+            mm_ix_st[d] = 1;
         return base;
     }
     return (int)i;
@@ -847,13 +877,31 @@ static __inline__ __attribute__((unused))
 #else
 static
 #endif
+int mm_ixpf(MMFLOAT f, int base, int lim, int d, int k)
+{
+    if (f != f || f < -2147483648.5 || f > 2147483647.5) {
+        mm_ix_note(d, k, 3);
+        return base;
+    }
+    return mm_ixp(f >= 0 ? (MMINTEGER)(f + 0.5) : (MMINTEGER)(f - 0.5),
+                  base, lim, d, k);
+}
+#if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)
+static __inline__ __attribute__((unused))
+#else
+static
+#endif
 void *mm_ixend(void *p, int d)
 {
-    int over = mm_ix_over[d];
+    int st = mm_ix_st[d];
 
-    mm_ix_over[d] = 0;
-    if (over > 0)
+    mm_ix_st[d] = 0;
+    if (st == 1 || (st & 3) == 1)
         mm_error("Index out of bounds");
+    else if ((st & 3) == 2)
+        mm_error("Dimensions");
+    else if ((st & 3) == 3)
+        mm_error("Number too large");
     return p;
 }
 /* A name OPTION EXPLICIT has not declared, in the test of an ELSEIF or a

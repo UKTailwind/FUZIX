@@ -581,6 +581,7 @@ struct val e_name(void)
 const char *index_of(struct sym *s)
 {
     const char *vals[MAXARGS], *parts[MAXARGS];
+    int isf[MAXARGS];
     int nparts = 0, k, multi;
     int d = cv.ix_depth;
     const char *elem;
@@ -592,7 +593,10 @@ const char *index_of(struct sym *s)
 
         if (nparts >= MAXARGS)
             mm_error("line %d: too many subscripts", cv.lineno);
-        vals[nparts] = as_int(v);
+        /* a float subscript is FloatToInt32's when it is checked:
+           "Number too large" outside 32 bits (FUZIX #35) */
+        isf[nparts] = v.ty == TY_F && checks_on();
+        vals[nparts] = isf[nparts] ? as_flt(v) : as_int(v);
         nparts++;
         if (!accept_op(","))
             break;
@@ -604,8 +608,10 @@ const char *index_of(struct sym *s)
        member path keeps its one test. */
     multi = nparts > 1 && checks_on() && s->stype == NULL
             && (s->is_param || s->dynamic || nparts == s->ndims);
+    if (multi)
+        cv.uses_ixp = 1;
     for (k = 0; k < nparts; k++)
-        parts[k] = ix_check_d(s, k, vals[k], multi ? d : -1);
+        parts[k] = ix_check_f(s, k, vals[k], multi ? d : -1, isf[k]);
     elem = subscript_of(s, parts, nparts);
     if (!multi)
         return elem;
@@ -626,8 +632,11 @@ const char *index_of(struct sym *s)
  *
  * Gated like the arithmetic checks (checks_on): on every access it cost
  * ~55 bytes a subscript and stopped robots fitting the board, and
- * without ON ERROR there is nothing to trap the error with. */
-const char *ix_check_d(struct sym *s, int k, const char *part, int multi)
+ * without ON ERROR there is nothing to trap the error with.  isf is a
+ * float subscript, part its float text: mm_ixf and mm_ixpf are
+ * FloatToInt32's check before the rest. */
+const char *ix_check_f(struct sym *s, int k, const char *part, int multi,
+                       int isf)
 {
     const char *lim;
 
@@ -637,12 +646,20 @@ const char *ix_check_d(struct sym *s, int k, const char *part, int multi)
         lim = sfmt("(int)(%s)[%d]", bnd_acc(s), k + 1);
     else if (k < s->ndims)
         lim = sfmt("(%s) - 1", s->dims[k]);
+    else if (isf)
+        return sfmt("(int)(mm_toint(%s))", part);  /* subscript_of says */
     else
         return sfmt("(int)(%s)", part);     /* subscript_of reports it */
     if (multi >= 0)
-        return sfmt("mm_ixp(%s, %d, %s, %d)", part, cv.opt_base, lim,
-                    multi < 7 ? multi : 7);
-    return sfmt("mm_ix(%s, %d, %s)", part, cv.opt_base, lim);
+        return sfmt("%s(%s, %d, %s, %d, %d)", isf ? "mm_ixpf" : "mm_ixp",
+                    part, cv.opt_base, lim, multi < 7 ? multi : 7, k);
+    return sfmt("%s(%s, %d, %s)", isf ? "mm_ixf" : "mm_ix", part,
+                cv.opt_base, lim);
+}
+
+const char *ix_check_d(struct sym *s, int k, const char *part, int multi)
+{
+    return ix_check_f(s, k, part, multi, 0);
 }
 
 const char *ix_check(struct sym *s, int k, const char *part)

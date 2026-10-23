@@ -1412,6 +1412,7 @@ class Conv(object):
         self.undecl_standin = False
         self.undecl_test = False      # ... in an ELSEIF's or a CASE's test
         self.uses_undecl = []         # the stand-ins' statics, in order
+        self.uses_ixp = False         # a checked access of 2+ subscripts
         # ON ERROR IGNORE arms trapping for an unbounded stretch of the
         # program, so every statement pays the checked forms - set in
         # the scan pass, statements BEFORE the line included, because
@@ -2710,7 +2711,11 @@ class Conv(object):
         vals = []
         try:
             while True:
-                vals.append(self.as_int(self.expr()))
+                v = self.expr()
+                # a float subscript is FloatToInt32's when it is checked:
+                # "Number too large" outside 32 bits (FUZIX #35)
+                isf = v[1] == TY_F and self.checks_on()
+                vals.append((self.as_flt(v) if isf else self.as_int(v), isf))
                 if not self.accept_op(','):
                     break
         finally:
@@ -2721,7 +2726,9 @@ class Conv(object):
         # array, whose member path keeps its one test.
         multi = len(vals) > 1 and self.checks_on() and s.stype is None \
             and (s.is_param or s.dynamic or len(vals) == len(s.dims))
-        parts = [self.ix_check(s, k, v, d if multi else None)
+        if multi:
+            self.uses_ixp = True
+        parts = [self.ix_check(s, k, v[0], d if multi else None, v[1])
                  for k, v in enumerate(vals)]
         elem = self.subscript(s, parts)
         if not multi:
@@ -2731,7 +2738,7 @@ class Conv(object):
                     % (self.strsz(s), elem, min(d, 7)))
         return '(*(%s *)mm_ixend(&(%s), %d))' % (CTYPE[s.ty], elem, min(d, 7))
 
-    def ix_check(self, s, k, part, multi=None):
+    def ix_check(self, s, k, part, multi=None, isf=False):
         """Subscript k of an access to array s, checked at run time by
         mm_ix - the reference's "Index out of bounds" - against its own
         dimension's last index counted from OPTION BASE.  An array
@@ -2742,19 +2749,25 @@ class Conv(object):
 
         Gated like the arithmetic checks (checks_on): on every access it
         cost ~55 bytes a subscript and stopped robots fitting the board,
-        and without ON ERROR there is nothing to trap the error with."""
+        and without ON ERROR there is nothing to trap the error with.
+        isf is a float subscript, part its float text: mm_ixf and mm_ixpf
+        are FloatToInt32's check before the rest."""
         if not self.checks_on():
             return '(int)(%s)' % part
         if s.is_param or s.dynamic:
             lim = '(int)(%s)[%d]' % (self.bnd_acc(s), k + 1)
         elif k < len(s.dims):
             lim = '(%s) - 1' % s.dims[k]
+        elif isf:
+            return '(int)(mm_toint(%s))' % part   # subscript() reports it
         else:
             return '(int)(%s)' % part     # subscript() reports the rank
         if multi is not None:
-            return 'mm_ixp(%s, %d, %s, %d)' % (part, self.opt_base, lim,
-                                              min(multi, 7))
-        return 'mm_ix(%s, %d, %s)' % (part, self.opt_base, lim)
+            return '%s(%s, %d, %s, %d, %d)' % ('mm_ixpf' if isf else 'mm_ixp',
+                                              part, self.opt_base, lim,
+                                              min(multi, 7), k)
+        return '%s(%s, %d, %s)' % ('mm_ixf' if isf else 'mm_ix', part,
+                                   self.opt_base, lim)
 
     def subscript(self, s, parts):
         """The C for one element, given one index text per dimension.
@@ -6551,6 +6564,8 @@ class Conv(object):
         if not entry and self.uses_onerror and self.cur is not None \
                 and self.cur.is_func:
             pre = 'if (__mm_e[1]) { mm_err_stmt(); } __mm_e[2]--; '
+            if self.uses_ixp:
+                pre += 'memcpy(mm_ix_st, __ixsv, sizeof __ixsv); '
         if self.cur is not None and self.cur.heap_locals:
             return pre + 'mm_lfree(__L); mm_release(__mark);'
         return pre + 'mm_release(__mark);'
@@ -10065,7 +10080,16 @@ class Conv(object):
         tgt, ty, cap = self.input_target()
         if ty != TY_S:
             self.err("LINE INPUT needs a string variable")
-        self.emit(self.swrite_cap(cap, tgt, 'mm_getline(%s)' % chan))
+        if self.checks_on() and 'mm_ix' in tgt:
+            # cmd_lineinput finds the variable before it reads the line,
+            # so under ON ERROR SKIP a subscript out of range reads
+            # nothing, and the line is there for the next (FUZIX #35)
+            lv = self.newtmp('lv')
+            self.emit('{ char *%s = %s;' % (lv, tgt))
+            self.emit('  if (!__mm_e[0]) %s }'
+                      % self.swrite_cap(cap, lv, 'mm_getline(%s)' % chan))
+        else:
+            self.emit(self.swrite_cap(cap, tgt, 'mm_getline(%s)' % chan))
         self.tmp_used = True
 
     # -- assignment / sub call -------------------------------------------
@@ -11671,6 +11695,11 @@ class Conv(object):
             self.emit_local_decl(s)
         for ln in self.mx_decls(r.mx_pairs):
             self.emit(ln)
+        if self.uses_ixp and self.uses_onerror and r.is_func:
+            # A FUNCTION called in a subscript keeps its caller's notes
+            # (mm_ix_st) aside while it runs: its own accesses use the
+            # same depths, and raised or cleared the caller's (FUZIX #35)
+            self.emit('int __ixsv[8];')
         if r.is_func:
             if r.ty == TY_S:
                 self.emit('__ret[0] = 0; __ret[1] = 0;')
@@ -11696,6 +11725,9 @@ class Conv(object):
                 # END FUNCTION is counted there too, as a statement of
                 # the body.
                 self.emit('__mm_e[2]++;')
+                if self.uses_ixp:
+                    self.emit('memcpy(__ixsv, mm_ix_st, sizeof __ixsv); '
+                              'memset(mm_ix_st, 0, sizeof mm_ix_st);')
             else:
                 # The SUB line is itself a statement the interpreter
                 # executes and counts on every call, so entering costs

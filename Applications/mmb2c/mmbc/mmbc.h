@@ -402,6 +402,7 @@ struct conv {
     int undecl_test;            /* ... an ELSEIF's or a CASE's test */
     const char **undecl;        /* the stand-ins' statics, in order made */
     int nundecl, cundecl;
+    int uses_ixp;               /* a checked access of 2+ subscripts */
     struct outbuf out_main, out_body;
     struct outbuf *out;
     int indent;

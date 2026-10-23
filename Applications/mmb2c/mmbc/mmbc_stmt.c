@@ -105,7 +105,10 @@ static const char *routine_exit_at(int entry)
     const char *pre = "";
 
     if (!entry && cv.uses_onerror && cv.cur != NULL && cv.cur->is_func)
-        pre = "if (__mm_e[1]) { mm_err_stmt(); } __mm_e[2]--; ";
+        pre = cv.uses_ixp
+            ? "if (__mm_e[1]) { mm_err_stmt(); } __mm_e[2]--; "
+              "memcpy(mm_ix_st, __ixsv, sizeof __ixsv); "
+            : "if (__mm_e[1]) { mm_err_stmt(); } __mm_e[2]--; ";
     if (cv.cur != NULL && cv.cur->heap_locals)
         return sfmt("%smm_lfree(__L); mm_release(__mark);", pre);
     return sfmt("%smm_release(__mark);", pre);
@@ -5632,7 +5635,17 @@ static void do_line_input(void)
     tgt = input_target(&cap);
     if (tgt.ty != TY_S)
         cv_err("LINE INPUT needs a string variable");
-    emit(swrite_cap(cap, tgt.code, sfmt("mm_getline(%s)", chan)));
+    if (checks_on() && strstr(tgt.code, "mm_ix") != NULL) {
+        /* cmd_lineinput finds the variable before it reads the line, so
+           under ON ERROR SKIP a subscript out of range reads nothing, and
+           the line is there for the next (FUZIX #35) */
+        const char *lv = newtmp("lv");
+
+        emit(sfmt("{ char *%s = %s;", lv, tgt.code));
+        emit(sfmt("  if (!__mm_e[0]) %s }",
+                  swrite_cap(cap, lv, sfmt("mm_getline(%s)", chan))));
+    } else
+        emit(swrite_cap(cap, tgt.code, sfmt("mm_getline(%s)", chan)));
     cv.tmp_used = 1;
 }
 
@@ -6670,6 +6683,11 @@ static void open_routine(int is_func)
         emit(sfmt("MMFLOAT __mxa%d, __mxb%d;   /* MAX/MIN */", k, k));
     for (k = 0; k < r->mx_pairs[1]; k++)
         emit(sfmt("MMINTEGER __mxia%d, __mxib%d;   /* MAX/MIN */", k, k));
+    /* A FUNCTION called in a subscript keeps its caller's notes
+       (mm_ix_st) aside while it runs: its own accesses use the same
+       depths, and raised or cleared the caller's (FUZIX #35) */
+    if (cv.uses_ixp && cv.uses_onerror && r->is_func)
+        emit("int __ixsv[8];");
     if (r->is_func) {
         if (r->ty == TY_S)
             emit("__ret[0] = 0; __ret[1] = 0;");
@@ -6694,7 +6712,12 @@ static void open_routine(int is_func)
                every way out takes it back (routine_exit).  Its END
                FUNCTION is counted there too, as a statement of the
                body. */
+        {
             emit("__mm_e[2]++;");
+            if (cv.uses_ixp)
+                emit("memcpy(__ixsv, mm_ix_st, sizeof __ixsv); "
+                     "memset(mm_ix_st, 0, sizeof mm_ix_st);");
+        }
         else
             /* The SUB line is itself a statement the interpreter
                executes and counts on every call, so entering costs one

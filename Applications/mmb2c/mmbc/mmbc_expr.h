@@ -80,6 +80,8 @@ const char *ix_check(struct sym *s, int k, const char *part);
 /* the same, for subscript k of a multi-subscript access at depth multi
    (mm_ixp); -1 is a one-subscript access's own check (mm_ix) */
 const char *ix_check_d(struct sym *s, int k, const char *part, int multi);
+const char *ix_check_f(struct sym *s, int k, const char *part, int multi,
+                       int isf);
 const char *bnd_acc(struct sym *s);
 const char *usable(const char *txt);
 const char *count_of(const char *bound);
