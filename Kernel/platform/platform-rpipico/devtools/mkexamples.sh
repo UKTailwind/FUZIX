@@ -80,7 +80,7 @@ eclipse:$M/tests/solar_eclipse.bas:a solar eclipse computed from first principle
 picofrog:$M/samples/picofrog.bas:a complete arcade game (keyboard: arrows, space)
 vaders:$M/samples/vaders.bas:Pico-Vaders, ported from the Game*Mite (keyboard)
 picoman:$M/samples/picoman.bas:PicoMan from the Game*Mite - fully native (see the manual's making-it-fit chapter)
-robots:$M/samples/robots.bas:PETSCII Robots - the big one; needs the resource tree in robots/ (keyboard or switches)
+robots:$M/samples/robots.bas:PETSCII Robots - the big one, in robots/; build with THUMB_BUDGET=130000 (keyboard or switches)
 "
 
 # One entry per LINE - the descriptions have spaces in them, so the
@@ -221,9 +221,13 @@ THAT DIRECTORY, because it looks for them relative to wherever it is
 started:
 
     cd /root/MMBasic/robots
-    mmbc robots.bas
-    cc robots.c
+    THUMB_BUDGET=130000 cc robots.bas
     ./robots.bc
+
+The THUMB_BUDGET is not optional.  Without it robots.bc is too big to
+start at all, and at 140000 it starts but leaves no room for the helper
+behind its first picture, so it stops with "not enough memory to start
+it".  The manual's THUMB_BUDGET section has the numbers.
 
 chess/ is TSCP - Tom Kerrigan's chess engine, converted to MMBasic by
 Ceptimus - with its pieces and its opening book.  Run it from its own

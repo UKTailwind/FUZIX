@@ -124,6 +124,18 @@ arrived meanwhile. It arrives whole now, with the PicoMite editor's
 other fixes: the file's last line keeps its ending, `Esc` leaves even
 when a line is too long to save, and `F9` says why a file did not load.
 
+**PETSCII Robots wants `THUMB_BUDGET=130000` now.** The runtime grew by
+a block, and the 140000 of earlier releases leaves Robots one block
+short of the room its picture and music helpers need, so it stops at
+its first picture with "not enough memory to start it". Build it with
+
+```
+# cd /root/MMBasic/robots
+# THUMB_BUDGET=130000 cc robots.bas
+```
+
+and see [When a program will not start](#thumb-budget) for the numbers.
+
 **A latent crash in `cc`'s native code.** When a program's bytecode
 ended on an odd byte, every call from native code into the runtime
 landed one byte early and executed garbage — a HardFault before the
@@ -3192,8 +3204,8 @@ compiler's:
 
 ```
 # ./robots.bc
-exec: pid 27 needs 76 blocks, 74 free beside a 10-block neighbour (pool 84)
-./robots.bc: out of memory (847 symbols)
+exec: pid 700 needs 76 blocks, 74 free beside a 10-block neighbour (pool 84)
+./robots.bc: out of memory (848 symbols)
 ```
 
 **It is not a report of free memory.** A program has to be able to sit
@@ -3212,21 +3224,45 @@ compiler takes all the native code it can get, which is what you want
 right up until the program stops fitting.
 
 ```
-# THUMB_BUDGET=140000 cc prog.bas
+# THUMB_BUDGET=130000 cc prog.bas
 ```
 
-PETSCII Robots is the worked example, measured on the machine:
+PETSCII Robots is the worked example. **To play it:**
+
+```
+# cd /root/MMBasic/robots
+# THUMB_BUDGET=130000 cc robots.bas
+# ./robots.bc
+```
+
+The budget is not optional for Robots. Measured on the machine with
+this release:
 
 | build | `robots.bc` | blocks | |
 |-------|-------------|--------|--|
-| uncapped | 209,022 | 76 | refused |
-| `THUMB_BUDGET=140000` | 196,782 | under 74 | runs |
+| uncapped | 200,783 | 76 | refused |
+| `THUMB_BUDGET=140000` | 197,259 | 74 | starts, then stops |
+| `THUMB_BUDGET=130000` | 195,439 | 73 | runs |
 | `BCODE_ONLY=1` | ~107,000 | far fewer | runs, 2.7× slower |
 
 Robots needs more headroom than its own size: `Load image` and
 `Play modsample` each start a helper *while the game is running*, and
-that helper wants about eleven blocks. A program that spawns nothing
-can use the pool right up to the line.
+that helper wants eleven blocks. So the program has to leave eleven
+free beside itself, and when it does not the message names the
+program as the neighbour:
+
+```
+# ./robots.bc
+exec: pid 677 needs 11 blocks, 10 free beside a 74-block neighbour (pool 84)
+
+Error: not enough memory to start it
+```
+
+That is the 140000 build: it changes mode, finds no room for the helper
+behind its first picture, and is back at the prompt before anything is
+drawn. Up to v0.28, 140000 left room; this release's runtime is 477
+bytes bigger, which is one block. A program that spawns nothing can use
+the pool right up to the line.
 
 **How to choose a number.** Start high and come down. The budget is
 spent **first-come, in the order the functions appear in the file** —
