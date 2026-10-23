@@ -4644,9 +4644,13 @@ class Conv(object):
             w = self.peek()
             if w is not None and w[0] == T_ID \
                     and split_suffix(w[1])[0] in self.types:
+                # noted, not raised: this pass swallows a raise, and the
+                # program then ran with the FUNCTION returning 0
+                self.note("a FUNCTION returning a TYPE is not "
+                          "translated yet")
+                self.i += 1
                 r.ty = TY_F         # keep later passes coherent
-                self.err("a FUNCTION returning a TYPE is not "
-                         "translated yet")
+                return
             ty = self.type_word()
             if sfx is not None and sfx != ty:
                 self.err("return type conflicts with the name suffix")
@@ -4682,8 +4686,10 @@ class Conv(object):
                 if sfx is not None:
                     self.err("parameter type conflict")
                 if dims is not None:
-                    self.err("whole arrays of structures as parameters "
-                             "are not translated yet")
+                    # noted, not raised: this pass swallows a raise, and
+                    # the routine was left without its parameters
+                    self.note("whole arrays of structures as parameters "
+                              "are not translated yet")
                 ty = TY_I
             else:
                 ty2 = self.type_word()

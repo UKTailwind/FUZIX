@@ -113,55 +113,8 @@ Else
   Print "  FAIL: Expected 200,400 got"; arr(1).x; ","; arr(1).y
 EndIf
 
-' ============================================
-' TEST 6: Pass struct array to SUB
-' ============================================
-Print "TEST 6: Pass struct array to SUB"
-
-Sub SumPoints(pts() As Point, count%)
-  Local sum_x% = 0, sum_y% = 0
-  Local j%
-  For j% = 0 To count% - 1
-    sum_x% = sum_x% + pts(j%).x
-    sum_y% = sum_y% + pts(j%).y
-  Next j%
-  Print "    Sum X ="; sum_x%; ", Sum Y ="; sum_y%
-End Sub
-
-Dim testArr(2) As Point
-testArr(0).x = 1 : testArr(0).y = 2
-testArr(1).x = 3 : testArr(1).y = 4
-testArr(2).x = 5 : testArr(2).y = 6
-
-Print "  Calling SumPoints (expect Sum X=9, Sum Y=12):"
-SumPoints testArr(), 3
-Print "  PASS: Array of structs passed to SUB (verify output above)"
-
-' ============================================
-' TEST 7: Modify struct array in SUB
-' ============================================
-Print "TEST 7: Modify struct array elements in SUB"
-
-Sub ZeroPoints(pts() As Point, count%)
-  Local k%
-  For k% = 0 To count% - 1
-    pts(k%).x = 0
-    pts(k%).y = 0
-  Next k%
-End Sub
-
-ZeroPoints testArr(), 3
-
-ok% = 1
-For i% = 0 To 2
-  If testArr(i%).x <> 0 Or testArr(i%).y <> 0 Then ok% = 0
-Next i%
-
-If ok% Then
-  Print "  PASS: SUB modified caller's struct array"
-Else
-  Print "  FAIL: Array not properly zeroed"
-EndIf
+' TESTS 6 and 7 (a structure array as a parameter) are not translated:
+' mmb2c refuses them - tests/refuse/structarrparam.bas.
 
 ' ============================================
 ' TEST 8: STRUCT COPY command
@@ -575,33 +528,8 @@ Else
   Print "  FAIL: Empty strings not at end"
 EndIf
 
-' ============================================
-' TEST 29: Function returning struct
-' ============================================
-Print "TEST 29: Function returning struct"
-
-Dim p29 As Point
-p29 = MakePoint(123, 456)
-
-If p29.x = 123 And p29.y = 456 Then
-  Print "  PASS: Function returning struct"
-Else
-  Print "  FAIL: Expected 123,456 got"; p29.x; ","; p29.y
-EndIf
-
-' ============================================
-' TEST 30: Function returning struct with Person (multiple types)
-' ============================================
-Print "TEST 30: Function returning struct with mixed types"
-
-Dim p30 As Person
-p30 = MakePerson("Bob", 35, 1.75)
-
-If p30.name = "Bob" And p30.age = 35 And Abs(p30.height - 1.75) < 0.01 Then
-  Print "  PASS: Function returning struct with mixed types"
-Else
-  Print "  FAIL: Expected Bob,35,1.75 got"; p30.name; ","; p30.age; ","; p30.height
-EndIf
+' TESTS 29 and 30 (a FUNCTION returning a TYPE) are not translated: mmb2c
+' refuses them - tests/refuse/functype.bas.
 
 ' ============================================
 ' TEST 31: Struct packing - string followed by int/float (non-8 aligned)
@@ -625,24 +553,8 @@ Else
   Print "  FAIL: Got label="; pk.label; " value="; pk.value; " ratio="; pk.ratio
 EndIf
 
-' ============================================
-' TEST 32: Function returning struct with array member
-' ============================================
-Print "TEST 32: Function returning struct with array member"
-
-Type WithArray
-  id As INTEGER
-  values(3) As INTEGER
-End Type
-
-Dim wa As WithArray
-wa = MakeWithArray(99, 10, 20, 30, 40)
-
-If wa.id = 99 And wa.values(0) = 10 And wa.values(1) = 20 And wa.values(2) = 30 And wa.values(3) = 40 Then
-  Print "  PASS: Function returning struct with array member"
-Else
-  Print "  FAIL: Got id="; wa.id; " values="; wa.values(0); ","; wa.values(1); ","; wa.values(2); ","; wa.values(3)
-EndIf
+' TESTS 32 (a FUNCTION returning a TYPE) are not translated: mmb2c
+' refuses them - tests/refuse/functype.bas.
 
 ' ============================================
 ' TEST 33: STRUCT CLEAR - single struct
@@ -1670,19 +1582,8 @@ Else
   Print "  FAIL: Mixed type struct assignment failed"
 EndIf
 
-' ============================================
-' TEST 73: Direct assignment from function return
-' ============================================
-Print "TEST 73: Direct assignment from function return"
-
-Dim funcResult As Point
-funcResult = MakePoint(777, 888)
-
-If funcResult.x = 777 And funcResult.y = 888 Then
-  Print "  PASS: Assignment from function return"
-Else
-  Print "  FAIL: Expected 777,888 got "; funcResult.x; ","; funcResult.y
-EndIf
+' TESTS 73 (a FUNCTION returning a TYPE) are not translated: mmb2c
+' refuses them - tests/refuse/functype.bas.
 
 ' ============================================
 ' TEST 74: Chained assignment (a = b, then c = a)
@@ -2157,25 +2058,6 @@ End
 ' ============================================
 ' Function definitions (must be after END)
 ' ============================================
-
-Function MakePoint(xval%, yval%) As Point
-  MakePoint.x = xval%
-  MakePoint.y = yval%
-End Function
-
-Function MakePerson(n$, a%, h!) As Person
-  MakePerson.age = a%
-  MakePerson.height = h!
-  MakePerson.name = n$
-End Function
-
-Function MakeWithArray(id%, v0%, v1%, v2%, v3%) As WithArray
-  MakeWithArray.id = id%
-  MakeWithArray.values(0) = v0%
-  MakeWithArray.values(1) = v1%
-  MakeWithArray.values(2) = v2%
-  MakeWithArray.values(3) = v3%
-End Function
 
 ' Subroutine with dots in name (Test 56)
 Sub My.Test.Sub(a%, b%)

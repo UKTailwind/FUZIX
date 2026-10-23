@@ -10,11 +10,6 @@ TEST 4: Pass struct to SUB by reference
   PASS: Struct passed by reference modified caller
 TEST 5: Pass array element to SUB
   PASS: Array element passed by reference
-TEST 6: Pass struct array to SUB
-  Calling SumPoints (expect Sum X=9, Sum Y=12):
-  PASS: Array of structs passed to SUB (verify output above)
-TEST 7: Modify struct array elements in SUB
-  FAIL: Array not properly zeroed
 TEST 8: STRUCT COPY command
   PASS: STRUCT COPY works
 TEST 9: STRUCT COPY with mixed types
@@ -60,14 +55,8 @@ TEST 27: STRUCT SORT by float field
   FAIL: Float sort wrong
 TEST 28: STRUCT SORT empty strings at end
   FAIL: Empty strings not at end
-TEST 29: Function returning struct
-  FAIL: Expected 123,456 got 0, 0
-TEST 30: Function returning struct with mixed types
-  FAIL: Expected Bob,35,1.75 got, 0, 0
 TEST 31: Struct packing with short string before int/float
   PASS: Struct packing with short string
-TEST 32: Function returning struct with array member
-  FAIL: Got id= 0 values= 0, 0, 0, 0
 TEST 33: STRUCT CLEAR - single struct
   PASS: STRUCT CLEAR single struct
 TEST 34: STRUCT CLEAR - array of structs
@@ -178,8 +167,6 @@ TEST 71: Direct assignment between different arrays
   PASS: Cross-array element assignment
 TEST 72: Direct assignment with mixed types struct
   PASS: Mixed type struct assignment
-TEST 73: Direct assignment from function return
-  FAIL: Expected 777,888 got  0, 0
 TEST 74: Chained assignment
   PASS: Chained struct assignment
 TEST 74A: Direct assignment from nested struct array member

@@ -657,9 +657,13 @@ void decl_routine(int is_func)
         if (w != NULL && w->kind == T_ID) {
             int wsfx;
             if (types_get(split_suffix(w->text, &wsfx)) != NULL) {
+                /* noted, not raised: this pass swallows a raise, and the
+                   program then ran with the FUNCTION returning 0 */
+                cv_note("a FUNCTION returning a TYPE is not "
+                        "translated yet");
+                cv.i++;
                 r->ty = TY_F;   /* keep later passes coherent */
-                cv_err("a FUNCTION returning a TYPE is not "
-                       "translated yet");
+                return;
             }
         }
         ty = type_word();
@@ -710,8 +714,10 @@ void decl_param(struct routine *r)
             if (sfx != TY_NONE)
                 cv_err("parameter type conflict");
             if (has_dims)
-                cv_err("whole arrays of structures as parameters "
-                       "are not translated yet");
+                /* noted, not raised: this pass swallows a raise, and the
+                   routine was left without its parameters */
+                cv_note("whole arrays of structures as parameters "
+                        "are not translated yet");
             ty = TY_I;
         } else {
             int ty2 = type_word();
