@@ -1983,8 +1983,16 @@ class Conv(object):
             elif v[1] == TY_I and r[1] == TY_I:
                 v = ('((%s) %s (%s))' % (v[0], op, r[0]), TY_I)
             else:
-                v = ('((%s) %s (%s))'
-                     % (self.as_flt(v), op, self.as_flt(r)), TY_F)
+                v = self.fchk(('((%s) %s (%s))'
+                               % (self.as_flt(v), op, self.as_flt(r)), TY_F))
+        return v
+
+    def fchk(self, v):
+        """A float +, -, * or ^ checked for op_add's "Overflow" (+INF)
+        where the ON ERROR checked forms are live - the trade mm_fdiv
+        and mm_ix make: a program that traps nothing pays nothing."""
+        if self.checks_on():
+            return ('mm_fchk(%s)' % v[0], TY_F)
         return v
 
     def e_mul(self):
@@ -2017,8 +2025,8 @@ class Conv(object):
                 elif v[1] == TY_I and r[1] == TY_I:
                     v = ('((%s) * (%s))' % (v[0], r[0]), TY_I)
                 else:
-                    v = ('((%s) * (%s))'
-                         % (self.as_flt(v), self.as_flt(r)), TY_F)
+                    v = self.fchk(('((%s) * (%s))'
+                                   % (self.as_flt(v), self.as_flt(r)), TY_F))
             elif t[0] == T_ID and t[2] == 'MOD':
                 self.i += 1
                 r = self.e_pow()
@@ -2051,7 +2059,12 @@ class Conv(object):
                         return ('%dLL' % n if n >= 0 else '(-(%dLL))' % -n,
                                 TY_I)
                 return ('mm_ipow(%s, %s)' % (v[0], r[0]), TY_I)
-        return ('mm_pow(%s, %s)' % (self.as_flt(v), self.as_flt(r)), TY_F)
+            # an integer to a negative power: pow() unchecked, as op_exp
+            # has it - 0 ^ -1 is +INF there, not "Overflow"
+            return ('mm_pow(%s, %s)' % (self.as_flt(v), self.as_flt(r)),
+                    TY_F)
+        return self.fchk(('mm_pow(%s, %s)'
+                          % (self.as_flt(v), self.as_flt(r)), TY_F))
 
     # A prefix applies to the next value alone, as getvalue applies it:
     # NOT 0 + 1 is (NOT 0) + 1, and INV a + 1 is (INV a) + 1.  A minus

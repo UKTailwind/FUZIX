@@ -217,6 +217,16 @@ struct val e_shift(void)
     return v;
 }
 
+/* A float +, -, * or ^ checked for op_add's "Overflow" (+INF) where the
+ * ON ERROR checked forms are live - the trade mm_fdiv and mm_ix make: a
+ * program that traps nothing pays nothing. */
+static struct val fchk(struct val v)
+{
+    if (checks_on())
+        return mkval(sfmt("mm_fchk(%s)", v.code), TY_F);
+    return v;
+}
+
 struct val e_add(void)
 {
     struct val v = e_mul();
@@ -233,8 +243,8 @@ struct val e_add(void)
         } else if (v.ty == TY_I && r.ty == TY_I) {
             v = mkval(sfmt("((%s) %s (%s))", v.code, op, r.code), TY_I);
         } else {
-            v = mkval(sfmt("((%s) %s (%s))", as_flt(v), op, as_flt(r)),
-                      TY_F);
+            v = fchk(mkval(sfmt("((%s) %s (%s))", as_flt(v), op,
+                                as_flt(r)), TY_F));
         }
     }
     return v;
@@ -278,8 +288,8 @@ struct val e_mul(void)
             } else if (v.ty == TY_I && r.ty == TY_I) {
                 v = mkval(sfmt("((%s) * (%s))", v.code, r.code), TY_I);
             } else {
-                v = mkval(sfmt("((%s) * (%s))", as_flt(v), as_flt(r)),
-                          TY_F);
+                v = fchk(mkval(sfmt("((%s) * (%s))", as_flt(v),
+                                    as_flt(r)), TY_F));
             }
         } else if (t->kind == T_ID && strcmp(t->up, "MOD") == 0) {
             struct val r;
@@ -347,8 +357,11 @@ struct val pow_op(struct val v, struct val r)
             }
             return mkval(sfmt("mm_ipow(%s, %s)", v.code, r.code), TY_I);
         }
+        /* an integer to a negative power: pow() unchecked, as op_exp has
+           it - 0 ^ -1 is +INF there, not "Overflow" */
+        return mkval(sfmt("mm_pow(%s, %s)", as_flt(v), as_flt(r)), TY_F);
     }
-    return mkval(sfmt("mm_pow(%s, %s)", as_flt(v), as_flt(r)), TY_F);
+    return fchk(mkval(sfmt("mm_pow(%s, %s)", as_flt(v), as_flt(r)), TY_F));
 }
 
 /* A prefix applies to the next value alone, as getvalue applies it:

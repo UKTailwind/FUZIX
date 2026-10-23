@@ -822,10 +822,16 @@ MMINTEGER mm_mod(MMINTEGER a, MMINTEGER b)
    (IEEE returns inf, and the M33 does not trap integer divide-by-zero
    unless CCR.DIV_0_TRP is set).  Every MMBasic error is a check that runs
    first; that is also what makes ON ERROR SKIP possible at all. */
+/* op_div: the divisor first, then a +INF quotient is "Overflow" (only
+   +INF - a -INF one passes - as op_add, op_subtract and op_mul) */
 MMFLOAT mm_fdiv(MMFLOAT a, MMFLOAT b)
 {
+    MMFLOAT r;
+
     if (b == 0.0) MM_RAISEV("Divide by zero", 0.0);
-    return a / b;
+    r = a / b;
+    if (r > 1.7976931348623157e308) MM_RAISEV("Overflow", r);
+    return r;
 }
 
 MMFLOAT mm_pow(MMFLOAT a, MMFLOAT b) { return pow(a, b); }

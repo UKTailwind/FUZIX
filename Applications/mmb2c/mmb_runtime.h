@@ -810,6 +810,22 @@ MMINTEGER mm_bnd(const MMINTEGER *tab, MMINTEGER k)
     }
     return tab[k];
 }
+/* A float +, -, * or ^ whose result is +INF: op_add, op_subtract (adb769f),
+ * op_mul and op_exp raise "Overflow" - only +INF, a -INF result passes.
+ * Inline arithmetic carries no check, so the translators wrap it in this
+ * where the ON ERROR checked forms are live (checks_on), as they do mm_ix
+ * and mm_fdiv; in the program for the reason mm_ix is. */
+#if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)
+static __inline__ __attribute__((unused))
+#else
+static
+#endif
+MMFLOAT mm_fchk(MMFLOAT x)
+{
+    if (x > 1.7976931348623157e308)
+        mm_error("Overflow");
+    return x;
+}
 /* Microseconds since start - SETTICK's clock off the board, where
  * mmb_int.h reads TIMER0 itself. */
 MMINTEGER mm_us(void);
