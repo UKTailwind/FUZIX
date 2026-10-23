@@ -1687,11 +1687,17 @@ class Conv(object):
         # "p.x" and the member never changed
         if '.' in canon and self.struct_named(canon):
             self.note("structure member %s is not translated here" % word)
-        # not known -> implied global.  findvar's order, and when the line
-        # runs as there: an array that was never made, or anything under
-        # OPTION EXPLICIT, is "NAME is not declared"; only then is a
-        # SUB or FUNCTION of the name "A sub/fun has the same name".
-        if as_array or self.opt_explicit:
+        # not known -> implied global.  A name with a '(' after it stays a
+        # line we did not translate: it may be an array that was never
+        # made, but it may as well be a firmware function we have not
+        # got - DEVICE(WII RY) in robots - and "not declared" when it runs
+        # would be a wrong answer where this is an honest gap.
+        if as_array:
+            self.err("array '%s' used but never DIMensioned" % canon)
+        # findvar's order, and when the line runs as there: anything under
+        # OPTION EXPLICIT is "NAME is not declared"; only then is a SUB or
+        # FUNCTION of the name "A sub/fun has the same name".
+        if self.opt_explicit:
             self.late("%s is not declared" % canon.upper())
         ty = sfx if sfx is not None else self.opt_default
         if ty is None:
