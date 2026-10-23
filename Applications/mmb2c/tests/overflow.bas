@@ -28,3 +28,10 @@ Print "neg: "; MM.ErrMsg$; (y < -1e308)
 On Error Skip 1
 z = 0 ^ -1
 Print "int: "; MM.ErrMsg$
+' a literal divisor needs no zero test, but it can still overflow (#6)
+On Error Skip 1
+y = 1E308 / 0.5
+Print "literal: "; MM.ErrMsg$
+On Error Skip 1
+y = x / 2
+Print "halved: "; MM.ErrMsg$; (y > 1e307)

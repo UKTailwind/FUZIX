@@ -5,3 +5,5 @@ div: Overflow
 pow: Overflow
 neg:  1
 int: 
+literal: Overflow
+halved:  1

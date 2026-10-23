@@ -272,12 +272,16 @@ struct val e_mul(void)
                    trap it with - a divide by zero there is a bug the
                    program needs fixing either way - so only trapping
                    programs pay the runtime call.  A literal divisor
-                   that is not zero needs no check in either world:
+                   that is not zero needs no zero test in either world:
                    dividing by 180, 86400 or pi is most of the division
-                   a real program does. */
+                   a real program does.  It can still reach +INF -
+                   1E308 / 0.5 - so it is checked for "Overflow" as * is. */
                 const char *rd = as_flt(r);
 
-                if (nonzero_literal(rd) || !checks_on())
+                if (nonzero_literal(rd))
+                    v = fchk(mkval(sfmt("((%s) / (%s))", as_flt(v), rd),
+                                   TY_F));
+                else if (!checks_on())
                     v = mkval(sfmt("((%s) / (%s))", as_flt(v), rd), TY_F);
                 else
                     v = mkval(sfmt("mm_fdiv(%s, %s)", as_flt(v), rd),
