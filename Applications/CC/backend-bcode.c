@@ -37,7 +37,13 @@
  *	board cc2 is a 256K Fuzix process and the previous sizes are what
  *	fits; an on-board compile that overflows them says so cleanly.
  */
-#ifdef BIG_TABLES
+#ifdef PC_TABLES
+/* A PC product build (compiler.h): no board to fit.  Addresses are
+   32-bit operands and the object header's sizes are 32-bit, so only
+   the memory here bounds them. */
+#define CODEMAX		8388608
+#define DATAMAX		8388608
+#elif defined(BIG_TABLES)
 /* Mixed mode keeps a committed function's dead bytecode alongside its
    native span (~2.7x the bytecode), so a big program roughly triples;
    the eclipse with every function native is ~250K of code segment. */
@@ -80,7 +86,12 @@
    DATA-column work in mmb2c - a table that emits only the columns it
    can prove live took PicoMan's DATA from 81,648 bytes to 40,824, and
    without that the data segment overflows before any of these do. */
-#if defined(BIG_TABLES) || defined(ARENA_TABLES)
+#ifdef PC_TABLES
+/* a symbol is a 16-bit index in the object (h_nsym, f_sym) */
+#define MAXSYM		65000
+#define MAXFIX		1048576
+#define MAXLAB		262144
+#elif defined(BIG_TABLES) || defined(ARENA_TABLES)
 #define MAXSYM		8192
 #define MAXFIX		16384
 #define MAXLAB		8192
@@ -126,7 +137,9 @@ ATAB(static unsigned char sym_in_lit[MAXSYM],
 ATAB(static unsigned char fix_in_lit[MAXFIX],
      static unsigned char *fix_in_lit);
 
-#ifdef ARENA_TABLES
+#ifdef PC_TABLES
+#define STRMAX		4194304		/* s_name is a 32-bit offset */
+#elif defined(ARENA_TABLES)
 #define STRMAX		65536
 #else
 #define STRMAX		32768

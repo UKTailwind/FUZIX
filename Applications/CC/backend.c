@@ -107,8 +107,13 @@ struct node *node_table;
    gate for the board cc2, and a gate stricter than its target rejects
    code the board compiles (mmb_sprite.h's collision sweep was the one
    that showed it, at the old 100).  Static here because the host has
-   no arena and no reason to care. */
+   no arena and no reason to care.  A PC product build (PC_TABLES,
+   compiler.h) is no gate, and has no board to fit. */
+#ifdef PC_TABLES
+#define NUM_NODES 16384
+#else
 #define NUM_NODES 512
+#endif
 
 static struct node node_table[NUM_NODES];
 #endif

@@ -9,7 +9,11 @@
  *	Z80-class target keeps the old size.
  */
 #ifndef MAXNAME
-#ifdef BIG_TABLES
+#ifdef PC_TABLES
+/* a PC build (compiler.h): every name a 16-bit token can carry, which
+   starts at T_SYMBOL 0x8000 and stops short of NO_TOKEN 0xFFFF */
+#define MAXNAME		32000
+#elif defined(BIG_TABLES)
 #define MAXNAME		4096
 #elif defined(CPU_armm0)
 #define MAXNAME		2048

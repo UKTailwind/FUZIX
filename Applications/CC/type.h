@@ -23,10 +23,21 @@
 
 #define PTRTO		1			/* Use with care for comparisons */
 
-/* For non simple types the information index */
+/* For non simple types the information index: the symbol that holds the
+   complex type.  Ten bits of a 16-bit type word, so only the first 1024
+   symbols can describe a struct, an array or a function, and a program
+   with more wrapped into the class bits.  A PC build (PC_TABLES) has no
+   board to fit, so its type word is 32 bits with the class at the top
+   and 27 bits of index: the same rules at a different width. */
+#ifdef PC_TABLES
+#define INFO(x)		(((x) >> 3) & 0x7FFFFFF)
+
+#define CLASS(x)	((x) & 0xC0000000)
+#else
 #define INFO(x)		(((x) >> 3) & 0x3FF)
 
 #define CLASS(x)	((x) & 0xC000)
+#endif
 #define IS_SIMPLE(x)	(CLASS(x) == C_SIMPLE)
 #define IS_STRUCT(x)	(CLASS(x) == C_STRUCT)
 #define IS_FUNCTION(x)	(CLASS(x) == C_FUNCTION)
@@ -40,11 +51,19 @@
 #define IS_FLOATING(x)	(IS_ARITH(x) && !IS_INTARITH(x))
 
 #define C_SIMPLE	0x0000
+#ifdef PC_TABLES
+#define C_STRUCT	0x40000000
+#define C_FUNCTION	0x80000000
+#define C_ARRAY		0xC0000000
+
+#define C_ANY		0xFFFFFFFF	/* Special compiler internal */
+#else
 #define C_STRUCT	0x4000
 #define C_FUNCTION	0x8000
 #define C_ARRAY		0xC000		/* and other special later ? */
 
 #define C_ANY		0xFFFF		/* Special compiler internal */
+#endif
 
 extern unsigned type_deref(unsigned t);
 extern unsigned type_ptr(unsigned t);
