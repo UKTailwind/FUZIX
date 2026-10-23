@@ -394,6 +394,7 @@ struct conv {
     struct routine *cur;        /* NULL = main line */
     int mx_main[2];             /* MAX/MIN temporary pairs in main */
     int mx_n[2];                /* pairs the statement has used so far */
+    int late_cut;               /* a late error's cut, if not the start: -1 */
     struct outbuf out_main, out_body;
     struct outbuf *out;
     int indent;

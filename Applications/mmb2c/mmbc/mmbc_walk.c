@@ -45,6 +45,7 @@ void walk(int mode)
     cv.mode = mode;
     cv.in_type = 0;
     cv.mx_n[0] = cv.mx_n[1] = 0;
+    cv.late_cut = -1;
     cv.gosub_n = 0;
     cv.cur = NULL;
     cv.indent = 1;
@@ -127,6 +128,12 @@ static int late_out(int where, struct outbuf *out_at_entry, int ind,
         cv_note("%s", msg);
         return 0;
     }
+    /* A DIM, LOCAL or STATIC with several names makes the ones before
+     * the failing name, as findvar does one name at a time: their
+     * allocation and initialiser stay (FUZIX #23).  Cutting the whole
+     * statement left them declared and never allocated. */
+    if (cv.late_cut >= 0 && cv.late_cut > where)
+        where = cv.late_cut;
     out_at_entry->n = where;
     cv.indent = ind;
     while (!stmt_end())
@@ -190,6 +197,7 @@ void statement(void)
     char *volatile failmsg = NULL;
     jmp_buf jb, *saved;
     int mx_outer[2];
+    int cut_outer;
 
     blocks_snap = salloc(sizeof(struct block) * (size_t)(nblocks_snap
                                                          ? nblocks_snap
@@ -203,6 +211,10 @@ void statement(void)
     mx_outer[0] = cv.mx_n[0];
     mx_outer[1] = cv.mx_n[1];
     cv.mx_n[0] = cv.mx_n[1] = 0;
+    /* Where a late error cuts back to, when not to the statement's
+     * start: a DIM with several names keeps the ones before (late_out) */
+    cut_outer = cv.late_cut;
+    cv.late_cut = -1;
     saved = err_jmp;
     err_jmp = &jb;
     if (setjmp(jb) == 0) {
@@ -210,6 +222,7 @@ void statement(void)
         err_jmp = saved;
         cv.mx_n[0] = mx_outer[0];
         cv.mx_n[1] = mx_outer[1];
+        cv.late_cut = cut_outer;
     } else if (err_late
                && late_out(where, out_at_entry, ind, blocks_snap,
                            nblocks_snap, tok_at_entry)) {
@@ -218,10 +231,12 @@ void statement(void)
         err_jmp = saved;
         cv.mx_n[0] = mx_outer[0];
         cv.mx_n[1] = mx_outer[1];
+        cv.late_cut = cut_outer;
     } else {
         err_jmp = saved;
         cv.mx_n[0] = mx_outer[0];
         cv.mx_n[1] = mx_outer[1];
+        cv.late_cut = cut_outer;
         if (!cv.lenient) {
             /* the finally clause still runs before the re-raise -
              * failed is None on this path, exactly like the Python */

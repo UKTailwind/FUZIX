@@ -1302,6 +1302,8 @@ void do_declare(const char *kw)
         int dyn = 0;
         int alen;
 
+        if (cv.mode == M_EMIT)
+            cv.late_cut = cv.out->n;
         t = nxt();
         if (t->kind != T_ID)
             cv_err("variable name expected in %s", kw);

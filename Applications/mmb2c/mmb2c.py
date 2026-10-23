@@ -1241,6 +1241,7 @@ class Conv(object):
         self.cur = None               # current Routine or None
         self.mx_main = [0, 0]         # MAX/MIN temporary pairs in main
         self.mx_n = [0, 0]            # pairs the statement has used so far
+        self.late_cut = None          # a late error's cut, if not the start
         # a CHOICE of an integer and a float, by its code: (cond, a, b)
         self.mixed_choice = {}
         self.out_main = []
@@ -5597,6 +5598,8 @@ class Conv(object):
             group_ty = self.type_word()
 
         while True:
+            if self.mode == 'emit':
+                self.late_cut = len(self.out)
             t = self.nxt()
             if t[0] != T_ID:
                 self.err("variable name expected in %s" % kw)
@@ -6098,6 +6101,10 @@ class Conv(object):
         # one's is put back after a statement inside it (IF ... THEN).
         mx_outer = self.mx_n
         self.mx_n = [0, 0]
+        # Where a late error cuts back to, when not to the statement's
+        # start: a DIM with several names keeps the ones before (late_out)
+        cut_outer = self.late_cut
+        self.late_cut = None
         failed = None
         try:
             try:
@@ -6111,6 +6118,7 @@ class Conv(object):
             failed = str(e)
         finally:
             self.mx_n = mx_outer
+            self.late_cut = cut_outer
             if self.mode == 'emit' and self.tmp_used \
                     and self.out is out_at_entry and failed is None:
                 out_at_entry.insert(where,
@@ -6176,6 +6184,12 @@ class Conv(object):
                     and t[2] in LATE_BLOCK_WORDS):
             self.note(msg)
             raise MMError(why)
+        # A DIM, LOCAL or STATIC with several names makes the ones before
+        # the failing name, as findvar does one name at a time: their
+        # allocation and initialiser stay (FUZIX #23).  Cutting the whole
+        # statement left them declared and never allocated.
+        if self.late_cut is not None and self.late_cut > where:
+            where = self.late_cut
         del out_at_entry[where:]
         self.indent = ind
         self.skip_to_stmt_end()
