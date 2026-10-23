@@ -45,10 +45,17 @@ typedef int64_t MMINTEGER;
  * calls, whose own peaks stack on the caller's.  16 lasted until
  * PETSCII Robots' config reader: LCase$(Field$(Field$(s$,...,
  * Chr$(34)),..., Chr$(34))) inside a function called from a
- * string-using statement.  The interpreter has no such cap; 32 is
- * 8K of bss, which the board's bcrun can afford. */
+ * string-using statement.  The interpreter holds 64 (MAXTEMPSTRINGS);
+ * 32 is 8K of bss, which the board's bcrun can afford.  A PC's bcrun
+ * (PC_HOST) has room to spare and takes 256: MMbg's settings line -
+ * BgLog of eight STR$s joined, inside a routine its caller entered with
+ * temporaries of its own - needed more than 32. */
 #ifndef MM_TMPN
+#ifdef PC_HOST
+#define MM_TMPN 256
+#else
 #define MM_TMPN 32
+#endif
 #endif
 
 /* Format used when PRINTing a float. */

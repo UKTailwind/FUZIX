@@ -87,7 +87,15 @@ const char *pc3w_hostpath(const char *path);
  *	program touches a fraction.  BIG_TABLES is the existing "built
  *	for a machine with room" switch.
  */
-#ifdef BIG_TABLES
+#if defined(PC_HOST)
+/*
+ * A PC has none of the board's limits: 4M, mapped below 4G at
+ * 0x30000000 with the heap at 0x40000000 (heap_map), so it stays clear
+ * of it.  Pages are only taken as they are touched.  The runtime pool is
+ * 256 temporaries there (MM_TMPN), 64K on its own.
+ */
+#define MEMSIZE		4194304
+#elif defined(BIG_TABLES)
 #define MEMSIZE		131072		/* program address space */
 #else
 /*
