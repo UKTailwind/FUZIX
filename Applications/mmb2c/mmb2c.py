@@ -5926,13 +5926,21 @@ class Conv(object):
                     slen = int(v[1])
 
             if self.mode == 'decl':
+                # DIMmed again, after an ERASE, with other bounds: it is
+                # made again when that line runs, so it cannot be a C
+                # array with the first DIM's bounds in its type - the
+                # second wrote past it (FUZIX #31)
+                prev = (self.cur.locals if scope == 'local'
+                        else self.globals).get(canon)
+                again = prev is not None and prev.is_array \
+                    and dims is not None and prev.dims != dims
                 s = self.declare(canon, ty if stype is None else TY_I,
                                  scope, dims, static)
                 if stype is not None:
                     s.stype = stype
                 if slen is not None:
                     s.slen = slen
-                if dyn or canon in self.redimmed:
+                if dyn or again or canon in self.redimmed:
                     dyn = True
                     if stype is not None:
                         self.err("an array of a TYPE needs constant "
@@ -5954,7 +5962,16 @@ class Conv(object):
             # hoisted: the expression may name variables that are only
             # set by the time the statement runs.
             if s is not None and s.dynamic and self.mode == 'emit':
-                self.emit_dim_alloc(s, dims, False)
+                if s.is_static:
+                    # made once: a STATIC keeps its elements from one
+                    # call to the next
+                    self.emit('if (!%s) {' % s.acc)
+                    self.indent += 1
+                    self.emit_dim_alloc(s, dims, False)
+                    self.indent -= 1
+                    self.emit('}')
+                else:
+                    self.emit_dim_alloc(s, dims, False)
 
             if self.accept_op('='):
                 if s is not None and s.stype is not None:
@@ -11692,6 +11709,16 @@ class Conv(object):
         if s.is_static and s.has_init:
             self.emit('static int __once_%s = 0;'
                       % s.name.replace('.', '__'))
+        if s.is_array and s.dynamic:
+            # A STATIC whose bounds are worked out when it is made - a
+            # CONST from an expression, a variable: a pointer and its
+            # bounds table, allocated the first time its statement runs
+            # (do_declare).  As a C array the size had to be a constant,
+            # and was not: the C did not compile (FUZIX #31).
+            self.emit('static %s;   /* DIM at run time */'
+                      % self.dyn_decl(s, s.acc))
+            self.emit('static MMINTEGER %s[MM_MAXDIM + 1];' % s.bacc)
+            return
         if s.is_array:
             dims = ''.join('[%s]' % d for d in reversed(s.dims))
             if s.ty == TY_S:
@@ -12491,6 +12518,13 @@ def _local_heap_fixup(conv):
     Parameters are the caller's, passed in, and are not ours to move.
     """
     for r in conv.routines.values():
+        # A STATIC whose bounds are worked out when it is made keeps its
+        # pointer and bounds table in the routine's static storage
+        # (emit_local_decl, FUZIX #31).
+        for nm in r.local_order:
+            s = r.locals[nm]
+            if s.is_static and s.is_array and s.dynamic:
+                s.bacc = '__b_' + cvar(nm)
         heap = [nm for nm in r.local_order
                 if not r.locals[nm].is_param
                 and not r.locals[nm].is_static

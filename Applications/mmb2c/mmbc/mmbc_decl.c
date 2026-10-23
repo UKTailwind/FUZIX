@@ -1402,13 +1402,15 @@ void do_declare(const char *kw)
         }
 
         if (cv.mode == M_DECL) {
+            int again = dimmed_again(canon, scope, dims, ndims);
+
             s = declare(canon, stype == NULL ? ty : TY_I,
                         scope, dims, ndims, is_static);
             if (stype != NULL)
                 s->stype = pstr(stype);
             if (alen != 0)
                 s->alen = alen;
-            if (dyn || redimmed_in(canon)) {
+            if (dyn || again || redimmed_in(canon)) {
                 dyn = 1;
                 if (stype != NULL)
                     cv_err("an array of a TYPE needs constant bounds");
@@ -1431,8 +1433,18 @@ void do_declare(const char *kw)
         /* A run-time bound is allocated where the DIM stands, not
            hoisted: the expression may name variables that are only set
            by the time the statement runs. */
-        if (s != NULL && s->dynamic && cv.mode == M_EMIT)
-            emit_dim_alloc(s, dims, ndims, 0);
+        if (s != NULL && s->dynamic && cv.mode == M_EMIT) {
+            if (s->is_static) {
+                /* made once: a STATIC keeps its elements from one call to
+                   the next */
+                emit(sfmt("if (!%s) {", s->acc));
+                cv.indent++;
+                emit_dim_alloc(s, dims, ndims, 0);
+                cv.indent--;
+                emit("}");
+            } else
+                emit_dim_alloc(s, dims, ndims, 0);
+        }
 
         if (accept_op("=")) {
             if (s != NULL && s->stype != NULL) {

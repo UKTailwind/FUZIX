@@ -557,6 +557,27 @@ int writes(struct sym *p, int depth)
 }
 
 /* Explicit DIM / LOCAL / STATIC / CONST / parameter. */
+/* DIMmed again, after an ERASE, with other bounds: it is made again when
+ * that line runs, so it cannot be a C array with the first DIM's bounds
+ * in its type - the second wrote past it (FUZIX #31). */
+int dimmed_again(const char *canon, const char *scope, const char **dims,
+                 int ndims)
+{
+    struct sym *prev = strcmp(scope, "local") == 0
+        ? table_get(cv.cur->locals, cv.cur->nlocals, canon)
+        : table_get(cv.globals, cv.nglobals, canon);
+    int k;
+
+    if (prev == NULL || !prev->is_array || dims == NULL)
+        return 0;
+    if (prev->ndims != ndims)
+        return 1;
+    for (k = 0; k < ndims; k++)
+        if (strcmp(prev->dims[k], dims[k]) != 0)
+            return 1;
+    return 0;
+}
+
 struct sym *declare(const char *canon, int ty, const char *scope,
                     const char **arr_dims, int ndims, int is_static)
 {

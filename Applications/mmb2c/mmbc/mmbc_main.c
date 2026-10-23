@@ -202,6 +202,11 @@ static const char *convert(const char *inpath, const char *outpath,
                     s = r->locals[q];
                     break;
                 }
+            /* A STATIC whose bounds are worked out when it is made keeps
+               its pointer and bounds table in the routine's static storage
+               (emit_local_decl, FUZIX #31). */
+            if (s != NULL && s->is_static && s->is_array && s->dynamic)
+                s->bacc = pstr(sfmt("__b_%s", cvar(s->name)));
             if (s == NULL || s->is_param || s->is_static)
                 continue;
             if (!(s->is_array || s->ty == TY_S || s->stype != NULL))

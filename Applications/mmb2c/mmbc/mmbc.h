@@ -566,6 +566,9 @@ struct sym *sym_lookup(const char *canon);   /* self.lookup */
 struct sym *sym_new(const char *canon, int ty, const char *acc);
 struct sym *declare(const char *canon, int ty, const char *scope,
                     const char **arr_dims, int ndims, int is_static);
+/* an array DIMmed again with other bounds, which must be made at run time */
+int dimmed_again(const char *canon, const char *scope, const char **dims,
+                 int ndims);
 struct sym *reference(const char *word, int as_array);
 void sub_fun_named(const char *canon);        /* "A sub/fun has the same name" */
 /* a numeric write, guarded under the ON ERROR checks (mmbc_stmt.c) */

@@ -6713,6 +6713,17 @@ static void emit_local_decl(struct sym *s)
 
     if (s->is_static && s->has_init)
         emit(sfmt("static int __once_%s = 0;", dunder("", s->name)));
+    if (s->is_array && s->dynamic) {
+        /* A STATIC whose bounds are worked out when it is made - a CONST
+           from an expression, a variable: a pointer and its bounds table,
+           allocated the first time its statement runs (do_declare).  As a
+           C array the size had to be a constant, and was not: the C did
+           not compile (FUZIX #31). */
+        emit(sfmt("static %s;   /* DIM at run time */",
+                  dyn_decl(s, s->acc)));
+        emit(sfmt("static MMINTEGER %s[MM_MAXDIM + 1];", s->bacc));
+        return;
+    }
     if (s->is_array) {
         const char *dims = "";
         int k;
