@@ -3885,7 +3885,7 @@ static void do_longstring(void)
         n = expr();
         expect_op(",");
         v = expr();
-        emit(sfmt("mm_ls_setbyte(%s, %s, (%s) - %d, %s);",
+        emit(sfmt("mm_ls_setbyte(%s, %s, %s, %d, %s);",
                   f.ptr, f.cnt, as_int(n), cv.opt_base, as_int(v)));
         return;
     }

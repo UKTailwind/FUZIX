@@ -1070,8 +1070,8 @@ struct val builtin_raw(const char *up)
         a = expr();
         if (strcmp(up, "LGETBYTE") == 0) {
             expect_op(")");
-            return mkval(sfmt("mm_ls_getbyte(%s, %s, %d)",
-                              ls.ptr, as_int(a), cv.opt_base), TY_I);
+            return mkval(sfmt("mm_ls_getbyte(%s, %s, %s, %d)",
+                              ls.ptr, ls.cnt, as_int(a), cv.opt_base), TY_I);
         }
         if (strcmp(up, "LINSTR") == 0) {
             const char *st = "1";

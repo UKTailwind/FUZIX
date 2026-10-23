@@ -3390,8 +3390,8 @@ class Conv(object):
             a = self.expr()
             if up == 'LGETBYTE':
                 self.expect_op(')')
-                return ('mm_ls_getbyte(%s, %s, %d)'
-                        % (ptr, self.as_int(a), self.opt_base), TY_I)
+                return ('mm_ls_getbyte(%s, %s, %s, %d)'
+                        % (ptr, cells, self.as_int(a), self.opt_base), TY_I)
             if up == 'LINSTR':
                 if a[1] != TY_S:
                     self.err("LINSTR needs a normal string to search for")
@@ -8046,7 +8046,7 @@ class Conv(object):
             n = self.expr()
             self.expect_op(',')
             v = self.expr()
-            self.emit('mm_ls_setbyte(%s, %s, (%s) - %d, %s);'
+            self.emit('mm_ls_setbyte(%s, %s, %s, %d, %s);'
                       % (ptr, cells, self.as_int(n), self.opt_base,
                          self.as_int(v)))
             return

@@ -194,16 +194,18 @@ MMG_FN void mm_ls_resize(MMINTEGER *a, int cells, MMINTEGER n)
     a[0] = n;
 }
 
-MMG_FN void mm_ls_setbyte(MMINTEGER *a, int cells, MMINTEGER n, MMINTEGER v)
+MMG_FN void mm_ls_setbyte(MMINTEGER *a, int cells, MMINTEGER p, int base,
+                          MMINTEGER v)
 {
-    /* SETBYTE and LGETBYTE respect OPTION BASE; the caller has already
-       folded the base in, so n is 0 based here.  The value is the
-       reference's getint(…, 0, 255), not masked. */
-    if (mm_ls_fit(cells, n + 1, "Long string is too small for this operation")
+    /* cmd_longString's SETBYTE (MM_Misc.c): the position is getint(…,
+       base, j - base), j the last byte the data cells hold, so under
+       OPTION BASE 1 the top byte is out of reach there too.  The value
+       is getint(…, 0, 255), not masked.  The byte is written wherever
+       it lies and the length is left alone - SETBYTE never lengthens. */
+    if (mm_range(p, base, (MMINTEGER)MM_LS_CAP(cells) - 1 - base)
         || mm_range(v, 0, 255))
         return;
-    MM_LS_DATA(a)[n] = (char)(unsigned char)v;
-    if (n + 1 > mm_ls_len(a)) a[0] = n + 1;
+    MM_LS_DATA(a)[p - base] = (char)(unsigned char)v;
 }
 
 MMG_FN void mm_ls_trim(MMINTEGER *a, int cells, MMINTEGER n)
@@ -249,10 +251,19 @@ MMG_FN char *mm_ls_getstr(const MMINTEGER *a, MMINTEGER start, MMINTEGER len)
     return t;
 }
 
-MMG_FN MMINTEGER mm_ls_getbyte(const MMINTEGER *a, MMINTEGER n, int base)
+/* fun_LGetByte (MM_Misc.c): getint(…, base, j - base) against the
+   CAPACITY, not the length - a byte past the string's end but inside the
+   array is read as it lies.  j there is the data cells' byte count with
+   no - 1, unlike SETBYTE's, so the top of its range is one byte past the
+   array and reads whatever memory follows; that one position gives 0
+   here instead of reading outside the array. */
+MMG_FN MMINTEGER mm_ls_getbyte(const MMINTEGER *a, int cells, MMINTEGER n,
+                               int base)
 {
     MMINTEGER k = n - base;              /* fold OPTION BASE into 0 based */
-    if (k < 0 || k >= mm_ls_len(a)) mm_error("LGETBYTE index out of range");
+    if (mm_range(n, base, (MMINTEGER)MM_LS_CAP(cells) - base)
+        || k >= MM_LS_CAP(cells))
+        return 0;
     return (MMINTEGER)(unsigned char)MM_LS_DATA((MMINTEGER *)a)[k];
 }
 
