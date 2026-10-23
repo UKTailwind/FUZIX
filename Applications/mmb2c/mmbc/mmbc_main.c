@@ -49,6 +49,25 @@ static int read_lines(const char *path)
         if (z != NULL)
             sz = (long)(z - buf);
     }
+    /* And every byte is LOAD's (FileIO.c): masked to seven bits, and kept
+       only if it is then printable, CR, LF or TAB, which becomes a space.
+       So a Latin-1 e-acute is an i, a UTF-8 one is two other characters
+       and counts as two towards the 255 of a line, and 0x8A and 0x8D end
+       a line where they stand (FUZIX #27). */
+    {
+        long r, w = 0;
+
+        for (r = 0; r < sz; r++) {
+            int c = (unsigned char)buf[r] & 0x7F;
+
+            if (c == 9)
+                buf[w++] = ' ';
+            else if ((c >= 32 && c < 127) || c == 10 || c == 13)
+                buf[w++] = (char)c;
+        }
+        sz = w;
+        buf[sz] = 0;
+    }
 
     src_lines = xrealloc(NULL, sizeof(char *) * (size_t)cap);
     src_nlines = 0;

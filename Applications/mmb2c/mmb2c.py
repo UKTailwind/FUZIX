@@ -12322,33 +12322,47 @@ def _local_heap_fixup(conv):
                 r.locals[nm].bacc = '__L->__b_' + cvar(nm)
 
 
-def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
-    lines = []
-    f = open(inpath, 'r')
+def read_source(inpath):
+    """The program's lines, as LOAD reads the file (FileIO.c).
+
+    XMODEM pads the last block, so a program that arrived that way
+    carries NULs after its last line - brownian.bas came over with 23 of
+    them after "End Sub".  That is how files reach these machines, and
+    MMBasic reads such a file without noticing, its program store being
+    NUL-terminated.  Refusing it meant a program that runs on the
+    reference would not translate here, and said so at a line number past
+    the end of the program.  NUL is where the program stops, which is
+    what it means in a BASIC source - not something to strip out of the
+    middle.
+
+    And every byte is LOAD's: masked to seven bits, and kept only if it
+    is then printable, CR, LF or TAB, which becomes a space.  So a
+    Latin-1 e-acute is an i, a UTF-8 one is two other characters and
+    counts as two towards the 255 of a line, and 0x8A and 0x8D end a
+    line where they stand (FUZIX #27).  The file used to be read as
+    UTF-8, which counted that e-acute once and stopped with a traceback
+    at a Latin-1 one.  Lines split as universal newlines split them."""
+    import io
+    f = open(inpath, 'rb')
     try:
-        while True:
-            ln = f.readline()
-            if not ln:
-                break
-            # XMODEM pads the last block, so a program that arrived that
-            # way carries NULs after its last line - brownian.bas came
-            # over with 23 of them after "End Sub".  That is how files
-            # reach these machines, and MMBasic reads such a file
-            # without noticing, its program store being NUL-terminated.
-            # Refusing it meant a program that runs on the reference
-            # would not translate here, and said so at a line number
-            # past the end of the program.
-            #
-            # NUL is where the program stops, which is what it means in
-            # a BASIC source - not something to strip out of the middle.
-            if '\0' in ln:
-                ln = ln.split('\0', 1)[0]
-                if ln:
-                    lines.append(ln)
-                break
-            lines.append(ln)
+        data = f.read()
     finally:
         f.close()
+    z = data.find(b'\0')
+    if z >= 0:
+        data = data[:z]
+    out = bytearray()
+    for b in bytearray(data):
+        c = b & 0x7F
+        if c == 9:
+            out.append(32)
+        elif 32 <= c < 127 or c == 10 or c == 13:
+            out.append(c)
+    return io.StringIO(out.decode('ascii'), newline=None).readlines()
+
+
+def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
+    lines = read_source(inpath)
 
     conv = Conv(lines, inpath)
     conv.lenient = lenient
@@ -12427,9 +12441,7 @@ def dump_tokens(inpath):
     (cgate says so), which is a gate failing for a reason that is not
     in the product.  Latin-1 is the encoding that maps a codepoint
     0-255 onto the one byte it came from."""
-    f = open(inpath, 'r')
-    lines = f.readlines()
-    f.close()
+    lines = read_source(inpath)
     scan_escape(lines)
     for idx in range(len(lines)):
         lineno = idx + 1
