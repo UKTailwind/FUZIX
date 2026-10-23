@@ -868,8 +868,13 @@ void do_option(void)
         if (!accept_kw("OFF")) {
             cv_note("Invalid syntax");
             skip_statement();
-        } else if (!symbols_off_first())
-            cv_note("Must be at the top of the program");
+        } else if (!symbols_off_first()) {
+            /* when it is executed, as there: IF 0 THEN OPTION SYMBOLS OFF
+               runs on a PicoMite (FUZIX issue #20) */
+            cv_warn("OPTION SYMBOLS OFF below the top: \"Must be at the "
+                    "top of the program\" when the line runs");
+            emit("mm_error(\"Must be at the top of the program\");");
+        }
         return;
     }
     if (strcmp(t->up, "DEFAULT") == 0

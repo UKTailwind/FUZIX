@@ -4614,10 +4614,15 @@ static void do_on_goto(void)
         else
             cv_err("ON ... GOTO needs labels");
         l = label_rec(canon);
-        if (!l->placed)
-            cv_err("unknown label '%s'", t->text);
-        l->used = 1;
-        note_goto(canon);
+        if (l->placed) {
+            l->used = 1;
+            note_goto(canon);
+        } else
+            /* an error only when this arm is chosen, as findlabel's is
+               there (FUZIX issue #20) */
+            cv_warn("ON ... %s %s: no such label or line - \"%s\" when it "
+                    "is chosen", is_gosub ? "GOSUB" : "GOTO", t->text,
+                    missing_msg(canon));
         if (ntargets >= MAXTARGETS)
             mm_error("line %d: too many ON GOTO targets", cv.lineno);
         targets[ntargets++] = canon;
@@ -4633,7 +4638,10 @@ static void do_on_goto(void)
         for (k = 0; k < ntargets; k++) {
             emit(sfmt("if (%s == %d) {", sel, k + 1));
             cv.indent++;
-            emit_gosub(targets[k], targets[k]);
+            if (label_rec(targets[k])->placed)
+                emit_gosub(targets[k], targets[k]);
+            else
+                emit(sfmt("mm_error(\"%s\");", missing_msg(targets[k])));
             cv.indent--;
             emit("}");
         }
@@ -4642,8 +4650,13 @@ static void do_on_goto(void)
         return;
     }
     emit(sfmt("switch ((int)(%s)) {", as_int(v)));
-    for (k = 0; k < ntargets; k++)
-        emit(sfmt("    case %d: goto %s;", k + 1, clabel(targets[k])));
+    for (k = 0; k < ntargets; k++) {
+        if (label_rec(targets[k])->placed)
+            emit(sfmt("    case %d: goto %s;", k + 1, clabel(targets[k])));
+        else
+            emit(sfmt("    case %d: mm_error(\"%s\"); break;", k + 1,
+                      missing_msg(targets[k])));
+    }
     emit("    default: break;");
     emit("}");
 }

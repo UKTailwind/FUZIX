@@ -5312,7 +5312,11 @@ class Conv(object):
                 self.note("Invalid syntax")
                 self.skip_statement()
             elif not self.symbols_off_first():
-                self.note("Must be at the top of the program")
+                # when it is executed, as there: IF 0 THEN OPTION SYMBOLS
+                # OFF runs on a PicoMite (FUZIX issue #20)
+                self.warn('OPTION SYMBOLS OFF below the top: "Must be at '
+                          'the top of the program" when the line runs')
+                self.emit('mm_error("Must be at the top of the program");')
             return
         if t[2] == 'DEFAULT':
             # ... but only the four type words.  OPTION DEFAULT MODE and
@@ -8831,10 +8835,16 @@ class Conv(object):
                 canon = split_suffix(t[1])[0]
             else:
                 self.err("ON ... GOTO needs labels")
-            if canon not in self.labels:
-                self.err("unknown label '%s'" % t[1])
-            self.labels_used[canon] = 1
-            self.note_goto(canon)
+            if canon in self.labels:
+                self.labels_used[canon] = 1
+                self.note_goto(canon)
+            else:
+                # an error only when this arm is chosen, as findlabel's
+                # is there (FUZIX issue #20)
+                self.warn("ON ... %s %s: no such label or line - \"%s\" "
+                          "when it is chosen"
+                          % ('GOSUB' if is_gosub else 'GOTO', t[1],
+                             self.missing_msg(canon)))
             targets.append(canon)
             if not self.accept_op(','):
                 break
@@ -8846,7 +8856,11 @@ class Conv(object):
             for k in range(len(targets)):
                 self.emit('if (%s == %d) {' % (sel, k + 1))
                 self.indent += 1
-                self.emit_gosub(targets[k], targets[k])
+                if targets[k] in self.labels:
+                    self.emit_gosub(targets[k], targets[k])
+                else:
+                    self.emit('mm_error("%s");'
+                              % self.missing_msg(targets[k]))
                 self.indent -= 1
                 self.emit('}')
             self.indent -= 1
@@ -8854,7 +8868,12 @@ class Conv(object):
             return
         self.emit('switch ((int)(%s)) {' % self.as_int(v))
         for k in range(len(targets)):
-            self.emit('    case %d: goto %s;' % (k + 1, clabel(targets[k])))
+            if targets[k] in self.labels:
+                self.emit('    case %d: goto %s;'
+                          % (k + 1, clabel(targets[k])))
+            else:
+                self.emit('    case %d: mm_error("%s"); break;'
+                          % (k + 1, self.missing_msg(targets[k])))
         self.emit('    default: break;')
         self.emit('}')
 
