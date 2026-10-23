@@ -916,5 +916,13 @@ void conv_write(FILE *f)
     }
     for (k = 0; k < cv.out_main.n; k++)
         fprintf(f, "%s\n", cv.out_main.lines[k]);
+    /* running off the end is an END too, and runs SUB MM.END (8a9e3b6);
+       an error exit does not reach here */
+    {
+        const char *call = mm_end_call();
+
+        if (call[0])
+            fprintf(f, "    %s\n", call);
+    }
     fprintf(f, "    return 0;\n}\n");
 }

@@ -10682,8 +10682,24 @@ class Conv(object):
             self.indent -= 1
             self.emit('}')
             return
+        # END runs SUB MM.END first, unless it says END NOEND - and END
+        # "command" runs it too, the command being for the prompt
+        # (Commands.c do_end)
+        noend = self.is_kw('NOEND')
         self.skip_statement()
+        call = self.mm_end_call()
+        if call and not noend:
+            self.emit(call)
         self.emit('mm_end();')
+
+    def mm_end_call(self):
+        """The call to SUB MM.END as a statement, or '' when there is
+        none - or when this IS MM.END, where the reference's END would
+        run it again inside itself, for ever."""
+        r = self.routines.get('mm.end')
+        if r is None or r.is_func or r is self.cur:
+            return ''
+        return self.emit_call(r, [])[0] + ';'
 
     # -- SUB / FUNCTION bodies ----------------------------------------------
     def open_routine(self, is_func):
@@ -11486,6 +11502,11 @@ class Conv(object):
                   len(self.data)))
         for ln in self.out_main:
             wr(ln + '\n')
+        # running off the end is an END too, and runs SUB MM.END
+        # (8a9e3b6); an error exit does not reach here
+        call = self.mm_end_call()
+        if call:
+            wr('    %s\n' % call)
         wr('    return 0;\n}\n')
 
 

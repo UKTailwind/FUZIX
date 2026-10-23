@@ -6329,8 +6329,33 @@ static void do_end(void)
         emit("}");
         return;
     }
-    skip_statement();
+    /* END runs SUB MM.END first, unless it says END NOEND - and END
+       "command" runs it too, the command being for the prompt
+       (Commands.c do_end) */
+    {
+        int noend = is_kw("NOEND", 0);
+        const char *call;
+
+        skip_statement();
+        call = mm_end_call();
+        if (call[0] && !noend)
+            emit(call);
+    }
     emit("mm_end();");
+}
+
+/* The call to SUB MM.END as a statement, or "" when there is none - or
+   when this IS MM.END, where the reference's END would run it again
+   inside itself, for ever. */
+const char *mm_end_call(void)
+{
+    struct routine *r = routine_get("mm.end");
+    struct arglist args;
+
+    if (r == NULL || r->is_func || r == cv.cur)
+        return "";
+    args.n = 0;
+    return sfmt("%s;", emit_call(r, &args).code);
 }
 
 /* -- SUB / FUNCTION bodies ------------------------------------------- */

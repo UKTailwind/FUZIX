@@ -551,6 +551,7 @@ struct sym *declare(const char *canon, int ty, const char *scope,
 struct sym *reference(const char *word, int as_array);
 void sub_fun_named(const char *canon);        /* "A sub/fun has the same name" */
 void wrote(struct sym *s);                    /* a parameter is written */
+const char *mm_end_call(void);                /* SUB MM.END's call, or "" */
 int writes(struct sym *p, int depth);         /* ... or passed to one that is */
 void note_touch(const char *canon, struct sym *s);
 const char *as_int(struct val v);
