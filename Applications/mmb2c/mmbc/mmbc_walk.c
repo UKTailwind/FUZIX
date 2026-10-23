@@ -94,6 +94,48 @@ void walk(int mode)
 /* Undo whatever a failed statement emitted and leave a comment in its
  * place, so one untranslatable line does not lose the rest of the
  * program. */
+/* A statement that hit an error the reference raises only when the line
+ * runs (cv_late): whatever it emitted goes, it becomes that error where
+ * it stands, and the rest of it is skipped - an ELSE kept.  Not one that
+ * opened, closed or turned a block, or moved the output: that is noted,
+ * and 0 sends it down the ordinary failure path, as the Python's
+ * re-raise does. */
+static int late_out(int where, struct outbuf *out_at_entry, int ind,
+                    struct block *blocks_snap, int nblocks_snap,
+                    int tok_at_entry)
+{
+    static const char *const words[] = {
+        "IF", "ELSEIF", "ELSE", "ENDIF", "END", "FOR", "NEXT", "DO", "LOOP",
+        "WHILE", "WEND", "SELECT", "CASE", "SUB", "FUNCTION", NULL
+    };
+    char msg[sizeof err_msg];
+    const char *m = err_msg;
+    int k, blockword = 0;
+
+    err_late = 0;
+    if (strncmp(m, "line ", 5) == 0 && strstr(m, ": ") != NULL)
+        m = strstr(m, ": ") + 2;
+    snprintf(msg, sizeof msg, "%s", m);
+    if (tok_at_entry < cv.ntoks && cv.toks[tok_at_entry].kind == T_ID)
+        for (k = 0; words[k] != NULL; k++)
+            if (strcmp(cv.toks[tok_at_entry].up, words[k]) == 0)
+                blockword = 1;
+    if (cv.nblocks != nblocks_snap
+        || memcmp(cv.blocks, blocks_snap,
+                  sizeof(struct block) * (size_t)nblocks_snap) != 0
+        || cv.out != out_at_entry || blockword) {
+        cv_note("%s", msg);
+        return 0;
+    }
+    out_at_entry->n = where;
+    cv.indent = ind;
+    while (!stmt_end())
+        cv.i++;
+    cv_warn("\"%s\" when the line runs", msg);
+    emit(sfmt("mm_error(\"%s\");", msg));
+    return 1;
+}
+
 static void skip_out(int where, struct outbuf *out_at_entry, int ind,
                      struct block *blocks_snap, int nblocks_snap,
                      int tok_at_entry, const char *why)
@@ -165,6 +207,14 @@ void statement(void)
     err_jmp = &jb;
     if (setjmp(jb) == 0) {
         statement_inner();
+        err_jmp = saved;
+        cv.mx_n[0] = mx_outer[0];
+        cv.mx_n[1] = mx_outer[1];
+    } else if (err_late
+               && late_out(where, out_at_entry, ind, blocks_snap,
+                           nblocks_snap, tok_at_entry)) {
+        /* the statement became the run-time error: carry on as one
+           that was translated */
         err_jmp = saved;
         cv.mx_n[0] = mx_outer[0];
         cv.mx_n[1] = mx_outer[1];

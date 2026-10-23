@@ -3980,11 +3980,21 @@ static void do_gosub(void)
 /* A jump to a label or line the program does not have.  The reference
  * finds out when the statement runs - findlabel's "Cannot find label",
  * findline's "Line number" - so that is when it is raised here too. */
+/* findline's or findlabel's error for a target that is not there.
+ * findlabel refuses a name of 32 characters or more before it looks. */
+static const char *missing_msg(const char *canon)
+{
+    if (canon[0] >= '0' && canon[0] <= '9')
+        return "Line number";
+    if (strlen(canon) > 31)
+        return "Label too long";
+    return "Cannot find label";
+}
+
 static void missing_target(const char *canon, const char *what,
                            const char *disp)
 {
-    const char *msg = canon[0] >= '0' && canon[0] <= '9'
-                      ? "Line number" : "Cannot find label";
+    const char *msg = missing_msg(canon);
 
     cv_warn("%s %s: no such label or line - \"%s\" when the line runs",
             what, disp, msg);
@@ -5557,6 +5567,22 @@ static void do_assign_or_call(void)
     }
     if (strcmp(t->up, "MID$") == 0) {
         do_mid_assign();
+        return;
+    }
+    if (peek(1) == NULL || is_op(":", 1) || is_kw("ELSE", 1)) {
+        /* A name and nothing more is no assignment - the tokeniser puts a
+           LET only before name = - and not a SUB, so it is
+           ExecuteProgram's StandardError(36) when the line runs; one of
+           32 characters or more is "Variable name too long" first (a
+           PicoMitePC3 says so).  A long name with its ':' lands here
+           too: it is no label to the tokeniser. */
+        const char *msg = strlen(canon) > 31 ? "Variable name too long"
+                                             : "Unknown command";
+
+        cv.i++;
+        cv_warn("'%s' is not a command: \"%s\" when the line runs",
+                t->text, msg);
+        emit(sfmt("mm_error(\"%s\");", msg));
         return;
     }
     do_assign();

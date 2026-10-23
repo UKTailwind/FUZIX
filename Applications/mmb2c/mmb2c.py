@@ -214,6 +214,21 @@ class MMError(Exception):
     pass
 
 
+class LateError(MMError):
+    """An error the reference raises only when the line RUNS - a name too
+    long for findvar, say.  statement() makes the statement that error,
+    raised where it stands (late_out)."""
+    pass
+
+
+# A statement that opens, closes or turns a block cannot be cut short
+# into a run-time error: its block would be lost.  A late error there is
+# refused instead.
+LATE_BLOCK_WORDS = ('IF', 'ELSEIF', 'ELSE', 'ENDIF', 'END', 'FOR', 'NEXT',
+                    'DO', 'LOOP', 'WHILE', 'WEND', 'SELECT', 'CASE', 'SUB',
+                    'FUNCTION')
+
+
 def nonzero_literal(code):
     """Is this emitted operand a number that cannot be zero?
 
@@ -1268,6 +1283,10 @@ class Conv(object):
     def err(self, msg):
         raise MMError("line %d: %s" % (self.lineno, msg))
 
+    def late(self, msg):
+        """err() for an error the reference raises when the line runs."""
+        raise LateError("line %d: %s" % (self.lineno, msg))
+
     def note(self, msg):
         """An error that must not stop the parse: recorded exactly as
         err() would record it, but the statement is allowed to finish so
@@ -1584,12 +1603,7 @@ class Conv(object):
             if nm in BUILTINS and BUILTINS[nm][0] == 0:
                 self.err("'%s' is a built-in function and cannot be used as "
                          "a variable name" % canon)
-        # at most 31 characters without the suffix, and a STATIC's hidden
-        # global - the SUB's name, a separator and the variable's - must
-        # fit the same 32 (MMBasic.c findvar, 2c747af)
-        if len(canon) > 31 or (static and scope == 'local' and self.cur
-                               and len(self.cur.name) + len(canon) > 31):
-            self.note("Variable name too long")
+        self.long_name(canon, static, scope)
         self.sub_fun_named(canon)
         old = table.get(canon)
         if old is not None:
@@ -1626,6 +1640,11 @@ class Conv(object):
                          % (canon, TYNAME[s.ty], TYNAME[sfx]))
             self.note_touch(canon, s)
             return s
+        # at most 31 characters without the suffix (findvar, 2c747af),
+        # and only when the line runs: a long name is never made, so
+        # every use of one comes here
+        if len(canon) > 31:
+            self.late("Variable name too long")
         # MM. is MMBasic's own namespace, not the program's: a name in
         # it is a read we have not translated, and turning it into an
         # implied variable makes it answer 0 for ever.  MM.WIDTH did
@@ -1648,8 +1667,6 @@ class Conv(object):
         if self.opt_explicit:
             self.err("OPTION EXPLICIT: '%s' has not been declared" % canon)
         if self.mode != 'emit':
-            if len(canon) > 31:
-                self.note("Variable name too long")
             self.sub_fun_named(canon)
             s = Sym(canon, ty, cvar(canon))
             s.disp = word
@@ -1661,6 +1678,16 @@ class Conv(object):
             self.note_touch(canon, s)
             return s
         self.err("internal: '%s' unresolved in emit pass" % canon)
+
+    def long_name(self, canon, static=False, scope='global'):
+        """At most 31 characters without the suffix, and a STATIC's
+        hidden global - the SUB's name, a separator and the variable's -
+        must fit the same 32 (MMBasic.c findvar, 2c747af).  When the line
+        runs, as there: the declaration pass only swallows it, so a
+        statement that finds no symbol for its name asks again here."""
+        if len(canon) > 31 or (static and scope == 'local' and self.cur
+                               and len(self.cur.name) + len(canon) > 31):
+            self.late("Variable name too long")
 
     def sub_fun_named(self, canon):
         """findvar will not make a variable with a SUB or FUNCTION's name,
@@ -4659,8 +4686,6 @@ class Conv(object):
                 if is_line_number(canon):
                     return
                 self.note("Duplicate label")
-            if len(canon) > 31:          # findlabel's limit (2c747af)
-                self.note("Label too long")
             self.labels[canon] = self.lineno
             self.data_at[canon] = len(self.data)
             self.label_routine[canon] = self.cur.name if self.cur else ''
@@ -4717,7 +4742,10 @@ class Conv(object):
                 and t[2] not in KEYWORDS and t[2] not in BUILTINS \
                 and t[2] not in BARE_STATEMENTS:
             canon, sfx = split_suffix(t[1])
-            if sfx is None and self.colon_adjacent(t[1]):
+            # the tokeniser reads at most 31 characters of a label: a
+            # longer name with its ':' is a statement (MMBasic.c tokenise)
+            if sfx is None and len(canon) <= 31 \
+                    and self.colon_adjacent(t[1]):
                 self.i += 2
                 self.place_label(canon)
 
@@ -5556,6 +5584,8 @@ class Conv(object):
                     s.slen = None
             else:
                 s = self.lookup(canon)
+                if s is None:
+                    self.long_name(canon, static, scope)
 
             # A run-time bound is allocated where the DIM stands, not
             # hoisted: the expression may name variables that are only
@@ -5787,6 +5817,7 @@ class Conv(object):
             if t[0] != T_ID:
                 self.err("CONST needs a name")
             canon, sfx = split_suffix(t[1])
+            self.long_name(canon)
             self.expect_op('=')
             v = self.expr()
             ty = v[1]
@@ -5945,7 +5976,11 @@ class Conv(object):
         self.mx_n = [0, 0]
         failed = None
         try:
-            self.statement_inner()
+            try:
+                self.statement_inner()
+            except LateError as e:
+                self.late_out(where, out_at_entry, ind, blocks_at_entry,
+                              tok_at_entry, str(e))
         except MMError as e:
             if not self.lenient:
                 raise
@@ -6002,6 +6037,26 @@ class Conv(object):
         if failed is not None:
             self.skip_out(where, out_at_entry, ind, blocks_at_entry,
                           tok_at_entry, failed)
+
+    def late_out(self, where, out_at_entry, ind, blocks, tok_at_entry, why):
+        """A statement that hit an error the reference raises only when
+        the line runs (late): whatever it emitted goes, it becomes that
+        error where it stands, and the rest of it is skipped - an ELSE
+        kept.  Not one that opened, closed or turned a block, or moved
+        the output: that is refused and dropped as any other error."""
+        msg = why.split(': ', 1)[-1] if why.startswith('line ') else why
+        t = self.toks[tok_at_entry] if tok_at_entry < len(self.toks) \
+            else None
+        if self.blocks != blocks or self.out is not out_at_entry \
+                or (t is not None and t[0] == T_ID
+                    and t[2] in LATE_BLOCK_WORDS):
+            self.note(msg)
+            raise MMError(why)
+        del out_at_entry[where:]
+        self.indent = ind
+        self.skip_to_stmt_end()
+        self.warn('"%s" when the line runs' % msg)
+        self.emit('mm_error("%s");' % msg)
 
     def skip_out(self, where, out_at_entry, ind, blocks, tok_at_entry, why):
         """Undo whatever a failed statement emitted and leave a comment in
@@ -9501,6 +9556,21 @@ class Conv(object):
         if t[2] == 'MID$':
             self.do_mid_assign()
             return
+        if self.peek(1) is None or self.is_op(':', 1) \
+                or self.is_kw('ELSE', 1):
+            # A name and nothing more is no assignment - the tokeniser
+            # puts a LET only before name = - and not a SUB, so it is
+            # ExecuteProgram's StandardError(36) when the line runs; one
+            # of 32 characters or more is "Variable name too long" first
+            # (a PicoMitePC3 says so).  A long name with its ':' lands
+            # here too: it is no label to the tokeniser.
+            self.i += 1
+            msg = 'Variable name too long' if len(canon) > 31 \
+                else 'Unknown command'
+            self.warn("'%s' is not a command: \"%s\" when the line runs"
+                      % (t[1], msg))
+            self.emit('mm_error("%s");' % msg)
+            return
         self.do_assign()
 
     def do_blit_memform(self):
@@ -10910,10 +10980,20 @@ class Conv(object):
         reference finds out when the statement runs - findlabel's "Cannot
         find label", findline's "Line number" - so that is when it is
         raised here too."""
-        msg = 'Line number' if canon[:1].isdigit() else 'Cannot find label'
+        msg = self.missing_msg(canon)
         self.warn("%s %s: no such label or line - \"%s\" when the line "
                   "runs" % (what, disp, msg))
         self.emit('mm_error("%s");' % msg)
+
+    def missing_msg(self, canon):
+        """findline's or findlabel's error for a target that is not
+        there.  findlabel refuses a name of 32 characters or more before
+        it looks."""
+        if canon[:1].isdigit():
+            return 'Line number'
+        if len(canon) > 31:
+            return 'Label too long'
+        return 'Cannot find label'
 
     def do_goto(self):
         t = self.nxt()

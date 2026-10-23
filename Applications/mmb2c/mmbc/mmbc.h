@@ -131,6 +131,7 @@ char *sfmt(const char *fmt, ...);   /* scratch sprintf - the workhorse
 
 extern jmp_buf *err_jmp;
 extern char err_msg[512];
+extern int err_late, late_next;     /* the Python's LateError: cv_late */
 void mm_error(const char *fmt, ...);
 
 /* ---- source lines (mmbc_main.c) ---- */
@@ -510,6 +511,8 @@ void *xrealloc(void *p, size_t n);
 /* ---- conv plumbing (mmbc_sym.c) ---- */
 
 void cv_err(const char *fmt, ...);          /* self.err - raises */
+void cv_late(const char *fmt, ...);         /* self.late - raises, late */
+void long_name(const char *canon, int is_static, int local);
 void cv_note(const char *fmt, ...);         /* self.note - records, no raise */
 void cv_warn(const char *fmt, ...);         /* self.warn - dedupes */
 struct tok *peek(int k);

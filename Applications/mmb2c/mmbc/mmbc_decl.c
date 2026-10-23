@@ -227,8 +227,6 @@ void place_label(const char *canon)
                 return;
             cv_note("Duplicate label");
         }
-        if (strlen(canon) > 31)         /* findlabel's limit (2c747af) */
-            cv_note("Label too long");
         l->placed = 1;
         l->lineno = cv.lineno;
         l->has_data_at = 1;
@@ -322,7 +320,10 @@ void strip_line_number(void)
         && !kw_in(t->up) && builtin_get(t->up) == NULL
         && strcmp(t->up, "CLS") != 0) {
         char *canon = split_suffix(t->text, &sfx);
-        if (sfx == TY_NONE && colon_adjacent(t->text)) {
+        /* the tokeniser reads at most 31 characters of a label: a longer
+           name with its ':' is a statement (MMBasic.c tokenise) */
+        if (sfx == TY_NONE && strlen(canon) <= 31
+            && colon_adjacent(t->text)) {
             cv.i += 2;
             place_label(canon);
         }
@@ -1412,6 +1413,8 @@ void do_declare(const char *kw)
             }
         } else {
             s = sym_lookup(canon);
+            if (s == NULL)
+                long_name(canon, is_static, strcmp(scope, "local") == 0);
         }
 
         /* A run-time bound is allocated where the DIM stands, not
@@ -1545,6 +1548,7 @@ void do_const(void)
         if (t->kind != T_ID)
             cv_err("CONST needs a name");
         canon = split_suffix(t->text, &sfx);
+        long_name(canon, 0, 0);
         expect_op("=");
         v = expr();
         ty = v.ty;

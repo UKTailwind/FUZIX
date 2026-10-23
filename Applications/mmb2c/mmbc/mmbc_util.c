@@ -251,6 +251,11 @@ void *xrealloc(void *p, size_t n)
 jmp_buf *err_jmp;
 char err_msg[512];
 
+/* The Python's LateError: err_late says the error just raised is one the
+ * reference raises only when the line runs (cv_late).  Tied to that one
+ * raise: every other raise clears it. */
+int err_late, late_next;
+
 void mm_error(const char *fmt, ...)
 {
     va_list ap;
@@ -258,6 +263,8 @@ void mm_error(const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(err_msg, sizeof(err_msg), fmt, ap);
     va_end(ap);
+    err_late = late_next;
+    late_next = 0;
     if (err_jmp == NULL) {
         /* stands in for an uncaught Python traceback */
         fprintf(stderr, "mmbc: MMError: %s\n", err_msg);

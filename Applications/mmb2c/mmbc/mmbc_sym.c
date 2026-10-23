@@ -38,6 +38,33 @@ void cv_err(const char *fmt, ...)
     mm_error("line %d: %s", cv.lineno, buf);
 }
 
+/* At most 31 characters without the suffix, and a STATIC's hidden global
+ * - the SUB's name, a separator and the variable's - must fit the same 32
+ * (MMBasic.c findvar, 2c747af).  When the line runs, as there: the
+ * declaration pass only swallows it, so a statement that finds no symbol
+ * for its name asks again here. */
+void long_name(const char *canon, int is_static, int local)
+{
+    if (strlen(canon) > 31
+        || (is_static && local && cv.cur
+            && strlen(cv.cur->name) + strlen(canon) > 31))
+        cv_late("Variable name too long");
+}
+
+/* self.late: cv_err for an error the reference raises when the line
+ * runs (statement's late_out). */
+void cv_late(const char *fmt, ...)
+{
+    char buf[400];
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    late_next = 1;
+    mm_error("line %d: %s", cv.lineno, buf);
+}
+
 /* self.note: an error that must not stop the parse.  Recorded exactly
  * as cv_err would record it, but the statement is allowed to finish so
  * one bad line does not cascade into twenty. */
@@ -422,13 +449,7 @@ struct sym *declare(const char *canon, int ty, const char *scope,
             cv_err("'%s' is a built-in function and cannot be used as "
                    "a variable name", canon);
     }
-    /* at most 31 characters without the suffix, and a STATIC's hidden
-       global - the SUB's name, a separator and the variable's - must fit
-       the same 32 (MMBasic.c findvar, 2c747af) */
-    if (strlen(canon) > 31
-        || (is_static && local && cv.cur
-            && strlen(cv.cur->name) + strlen(canon) > 31))
-        cv_note("Variable name too long");
+    long_name(canon, is_static, local);
     sub_fun_named(canon);
     old = local ? table_get(cv.cur->locals, cv.cur->nlocals, canon)
                 : table_get(cv.globals, cv.nglobals, canon);
@@ -485,6 +506,11 @@ struct sym *reference(const char *word, int as_array)
         note_touch(canon, s);
         return s;
     }
+    /* at most 31 characters without the suffix (findvar, 2c747af), and
+     * only when the line runs: a long name is never made, so every use of
+     * one comes here */
+    if (strlen(canon) > 31)
+        cv_late("Variable name too long");
     /* MM. is MMBasic's own namespace, not the program's: a name in it
      * is a read we have not translated, and turning it into an implied
      * variable makes it answer 0 for ever.  MM.WIDTH did exactly that -
@@ -507,8 +533,6 @@ struct sym *reference(const char *word, int as_array)
         cv_err("OPTION EXPLICIT: '%s' has not been declared", canon);
     if (cv.mode != M_EMIT) {
         struct implied_rec *r;
-        if (strlen(canon) > 31)
-            cv_note("Variable name too long");
         sub_fun_named(canon);
         s = sym_new(canon, ty, cvar(canon));
         s->disp = pstr(word);
