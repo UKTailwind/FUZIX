@@ -320,6 +320,7 @@ static void w_error_s(void)  { mm_error_s(Ps(0)); A = 0; }
 static void w_err_bind(void) { mm_err_bind((int *)Pa(0)); A = 0; }
 static void w_on_error(void) { mm_on_error(I(0), LL(1)); A = 0; }
 static void w_err_stmt(void) { mm_err_stmt(); A = 0; }
+static void w_error_here(void) { mm_error_here(Pa(0)); A = 0; }
 /* The error state across an interrupt handler - MMBasic's
    GotAnInterrupt/cmd_ireturn pair.  In here rather than in the
    program's own memory because the errno and the message are the
@@ -686,6 +687,7 @@ static const struct mmwrap {
 	{ "mm_err_bind",	w_err_bind },
 	{ "mm_on_error",	w_on_error },
 	{ "mm_err_stmt",	w_err_stmt },
+	{ "mm_error_here",	w_error_here },
 	{ "mm_int_err_push",	w_int_err_push },
 	{ "mm_int_err_pop",	w_int_err_pop },
 	{ "mm_us",		w_us },

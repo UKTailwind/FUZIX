@@ -856,6 +856,21 @@ void *mm_ixend(void *p, int d)
         mm_error("Index out of bounds");
     return p;
 }
+/* A name OPTION EXPLICIT has not declared, in the test of an ELSEIF or a
+ * CASE, is a file static of its own reached through this: findvar's
+ * "NAME is not declared" when the test is made, which is only when the
+ * branches before were not taken (FUZIX #25, #34). */
+void mm_error_here(const char *msg);
+#if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)
+static __inline__ __attribute__((unused))
+#else
+static
+#endif
+void *mm_undecl(void *p, const char *msg)
+{
+    mm_error_here(msg);
+    return p;
+}
 /* A structure's member array: "Index out of bounds" either way, as the
  * member path's one test has it (MMBasic.c, the struct member arm). */
 #if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)

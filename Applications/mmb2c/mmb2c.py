@@ -1410,7 +1410,8 @@ class Conv(object):
         # a block statement OPTION EXPLICIT failed in is translated again
         # round a stand-in for the name (late_out); the stand-ins' types
         self.undecl_standin = False
-        self.uses_undecl = set()
+        self.undecl_test = False      # ... in an ELSEIF's or a CASE's test
+        self.uses_undecl = []         # the stand-ins' statics, in order
         # ON ERROR IGNORE arms trapping for an unbounded stretch of the
         # program, so every statement pays the checked forms - set in
         # the scan pass, statements BEFORE the line included, because
@@ -1864,15 +1865,28 @@ class Conv(object):
 
     def undecl_sym(self, canon, sfx):
         """The stand-in for a name OPTION EXPLICIT has not declared, in a
-        statement that opens or closes a block: the statement is
-        translated round it, behind its mm_error (late_out).  One file
-        static per type, made only by a program that needs it."""
+        statement that opens or closes a block (late_out): a file static
+        for the name and type, made only by a program that needs it.  One
+        per name, so two loops on two such names do not share a counter:
+        nested, they never ended (FUZIX #34).  In the test of an ELSEIF or
+        a CASE it is reached through mm_undecl, which is the error itself
+        - where findvar raises it, when the test is made, which is only
+        when the branches before were not taken.  Elsewhere the error goes
+        in front of the statement (late_out)."""
         ty = sfx if sfx is not None else self.opt_default
         if ty is None:
             self.err("OPTION DEFAULT NONE: '%s' has no type" % canon)
-        self.uses_undecl.add(ty)
-        return Sym(canon, ty,
-                   '__mm_undecl_' + {TY_I: 'i', TY_F: 'f', TY_S: 's'}[ty])
+        nm = '__mm_ud%s_%s' % ({TY_I: 'i', TY_F: 'f', TY_S: 's'}[ty],
+                               cvar(canon))
+        if nm not in self.uses_undecl:
+            self.uses_undecl.append(nm)
+        if not self.undecl_test:
+            return Sym(canon, ty, nm)
+        msg = '"%s is not declared"' % canon.upper()
+        if ty == TY_S:
+            return Sym(canon, ty, '((char *)mm_undecl(%s, %s))' % (nm, msg))
+        return Sym(canon, ty, '(*(%s *)mm_undecl(&%s, %s))'
+                   % (CTYPE[ty], nm, msg))
 
     def sub_fun_named(self, canon):
         """findvar will not make a variable with a SUB or FUNCTION's name,
@@ -6432,12 +6446,27 @@ class Conv(object):
                 self.blocks = list(blocks)
                 self.i = tok_at_entry
                 self.undecl_standin = True
+                # An ELSEIF's or a CASE's test is made only when the
+                # branches before were not taken, and the error is in it;
+                # in front, it was the end of the branch before (FUZIX #34)
+                nx = self.toks[tok_at_entry + 1] \
+                    if tok_at_entry + 1 < len(self.toks) else None
+                self.undecl_test = t is not None and t[0] == T_ID and (
+                    t[2] in ('ELSEIF', 'CASE')
+                    or (t[2] == 'ELSE' and nx is not None
+                        and nx[0] == T_ID and nx[2] == 'IF'))
                 try:
                     self.statement_inner()
                 finally:
                     self.undecl_standin = False
-                out_at_entry.insert(where, '    ' * ind
-                                    + 'mm_error("%s");' % msg)
+                    self.undecl_test = False
+                # The test's stand-in raises the error where the name is
+                # reached; any other statement raises it in front, and so
+                # does a test whose C never reaches the name.
+                if not any('mm_undecl(' in ln
+                           for ln in out_at_entry[where:]):
+                    out_at_entry.insert(where, '    ' * ind
+                                        + 'mm_error("%s");' % msg)
                 self.warn('"%s" when the line runs' % msg)
                 return
             self.note(msg)
@@ -12229,15 +12258,14 @@ class Conv(object):
             wr(' * It lives here rather than in the runtime so a guard is\n')
             wr(' * a load and a branch instead of a library call. */\n')
             wr('static int __mm_e[4];\n')
-        if self.uses_undecl:
-            # stand-ins for names OPTION EXPLICIT has not declared, in a
-            # statement that opens or closes a block (late_out)
-            if TY_I in self.uses_undecl:
-                wr('static MMINTEGER __mm_undecl_i;\n')
-            if TY_F in self.uses_undecl:
-                wr('static MMFLOAT __mm_undecl_f;\n')
-            if TY_S in self.uses_undecl:
-                wr('static char __mm_undecl_s[MM_STRSZ];\n')
+        # stand-ins for names OPTION EXPLICIT has not declared, in a
+        # statement that opens or closes a block (undecl_sym)
+        for nm in self.uses_undecl:
+            if nm[7] == 's':
+                wr('static char %s[MM_STRSZ];\n' % nm)
+            else:
+                wr('static %s %s;\n'
+                   % ('MMINTEGER' if nm[7] == 'i' else 'MMFLOAT', nm))
         if self.uses_i2c:
             # SETPIN puts the pins here and OPEN reads them: MMBasic
             # allows the two to be far apart in a program.

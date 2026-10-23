@@ -3012,6 +3012,17 @@ void mm_err_stmt(void)
     }
 }
 
+/* An error raised in the test of an ELSEIF or a CASE (mm_undecl), whose
+ * end the generated code has no place to mark: raised as mm_error raises
+ * it, and when ON ERROR carries on, the statement ends here, so the
+ * poison does not run on into whatever comes next (FUZIX #34). */
+void mm_error_here(const char *msg)
+{
+    mm_error(msg);
+    if (mm_armed())
+        mm_err_stmt();
+}
+
 /* MM.VER, MM.DEVICE$, MM.CMDLINE$ ------------------------------------ *
  *
  * MMBasic answers MM.VER with its own version as major.mmpp, so the

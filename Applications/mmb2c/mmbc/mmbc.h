@@ -399,7 +399,9 @@ struct conv {
     int late_guard;             /* ... inside a STATIC's once-only guard */
     int ix_depth;               /* array accesses inside subscripts */
     int undecl_standin;         /* retrying a block statement (late_out) */
-    int uses_undecl;            /* stand-ins made: 1 integer, 2 float, 4 string */
+    int undecl_test;            /* ... an ELSEIF's or a CASE's test */
+    const char **undecl;        /* the stand-ins' statics, in order made */
+    int nundecl, cundecl;
     struct outbuf out_main, out_body;
     struct outbuf *out;
     int indent;

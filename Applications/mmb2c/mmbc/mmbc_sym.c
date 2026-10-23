@@ -615,19 +615,40 @@ struct sym *declare(const char *canon, int ty, const char *scope,
 }
 
 /* The stand-in for a name OPTION EXPLICIT has not declared, in a
- * statement that opens or closes a block: the statement is translated
- * round it, behind its mm_error (late_out).  One file static per type,
- * made only by a program that needs it. */
+ * statement that opens or closes a block (late_out): a file static for
+ * the name and type, made only by a program that needs it.  One per name,
+ * so two loops on two such names do not share a counter: nested, they
+ * never ended (FUZIX #34).  In the test of an ELSEIF or a CASE it is
+ * reached through mm_undecl, which is the error itself - where findvar
+ * raises it, when the test is made, which is only when the branches
+ * before were not taken.  Elsewhere the error goes in front of the
+ * statement (late_out). */
 static struct sym *undecl_sym(const char *canon, int sfx)
 {
     int ty = (sfx != TY_NONE) ? sfx : cv.opt_default;
+    const char *nm, *msg;
+    int k;
 
     if (ty == TY_NONE)
         cv_err("OPTION DEFAULT NONE: '%s' has no type", canon);
-    cv.uses_undecl |= ty == TY_I ? 1 : ty == TY_F ? 2 : 4;
-    return sym_new(canon, ty, ty == TY_I ? "__mm_undecl_i"
-                              : ty == TY_F ? "__mm_undecl_f"
-                              : "__mm_undecl_s");
+    nm = sfmt("__mm_ud%c_%s", ty == TY_I ? 'i' : ty == TY_F ? 'f' : 's',
+              cvar(canon));
+    for (k = 0; k < cv.nundecl; k++)
+        if (strcmp(cv.undecl[k], nm) == 0)
+            break;
+    if (k == cv.nundecl) {
+        GROW(cv.undecl, cv.nundecl, cv.cundecl);
+        cv.undecl[cv.nundecl++] = pstr(nm);
+    }
+    if (!cv.undecl_test)
+        return sym_new(canon, ty, nm);
+    msg = sfmt("\"%s is not declared\"", upper(canon));
+    if (ty == TY_S)
+        return sym_new(canon, ty,
+                       sfmt("((char *)mm_undecl(%s, %s))", nm, msg));
+    return sym_new(canon, ty, sfmt("(*(%s *)mm_undecl(&%s, %s))",
+                                   ty == TY_I ? "MMINTEGER" : "MMFLOAT",
+                                   nm, msg));
 }
 
 /* A name used in an expression or as an assignment target.  If it is

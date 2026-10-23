@@ -148,6 +148,17 @@ static int late_out(int where, struct outbuf *out_at_entry, int ind,
             cv.nblocks = nblocks_snap;
             cv.i = tok_at_entry;
             cv.undecl_standin = 1;
+            /* An ELSEIF's or a CASE's test is made only when the branches
+               before were not taken, and the error is in it; in front, it
+               was the end of the branch before (FUZIX #34) */
+            cv.undecl_test = tok_at_entry < cv.ntoks
+                && cv.toks[tok_at_entry].kind == T_ID
+                && (strcmp(cv.toks[tok_at_entry].up, "ELSEIF") == 0
+                    || strcmp(cv.toks[tok_at_entry].up, "CASE") == 0
+                    || (strcmp(cv.toks[tok_at_entry].up, "ELSE") == 0
+                        && tok_at_entry + 1 < cv.ntoks
+                        && cv.toks[tok_at_entry + 1].kind == T_ID
+                        && strcmp(cv.toks[tok_at_entry + 1].up, "IF") == 0));
             err_jmp = &jb2;
             if (setjmp(jb2) == 0) {
                 statement_inner();
@@ -155,10 +166,19 @@ static int late_out(int where, struct outbuf *out_at_entry, int ind,
             }
             err_jmp = saved2;
             cv.undecl_standin = 0;
+            cv.undecl_test = 0;
             if (!ok)
                 return 0;       /* the retry's own error: refused */
-            out_insert(out_at_entry, where,
-                       pstr(sfmt("%*smm_error(\"%s\");", ind * 4, "", msg)));
+            /* The test's stand-in raises the error where the name is
+               reached; any other statement raises it in front, and so does
+               a test whose C never reaches the name. */
+            for (k = where; k < out_at_entry->n; k++)
+                if (strstr(out_at_entry->lines[k], "mm_undecl(") != NULL)
+                    break;
+            if (k == out_at_entry->n)
+                out_insert(out_at_entry, where,
+                           pstr(sfmt("%*smm_error(\"%s\");", ind * 4, "",
+                                     msg)));
             cv_warn("\"%s\" when the line runs", msg);
             return 1;
         }
