@@ -2288,6 +2288,24 @@ void statement_inner(void)
         expect_op("=");
         v = as_int(expr());
         cv.uses_misc = 1;
+        if (checks_on() && strstr(tgt, "mm_ix") != NULL) {
+            /* A checked subscript is findvar's, which comes first and
+               writes nothing when it fails: the element's address, then
+               the rest only if the statement is not poisoned (FUZIX #26,
+               as numwrite does for assignment). */
+            char *lv = newtmp("lv");
+
+            if (isbit) {
+                emit(sfmt("{ MMINTEGER *%s = &(%s);", lv, tgt));
+                emit(sfmt("  if (!__mm_e[0]) mm_bit_assign(%s, %s, %s); }",
+                          lv, n, v));
+            } else {
+                emit(sfmt("{ char *%s = %s;", lv, tgt));
+                emit(sfmt("  if (!__mm_e[0]) mm_byte_assign(%s, %s, %s); }",
+                          lv, n, v));
+            }
+            return;
+        }
         if (isbit)
             emit(sfmt("mm_bit_assign(&(%s), %s, %s);", tgt, n, v));
         else
@@ -4098,39 +4116,98 @@ static void do_read(void)
         emit("mm_read_unsave();");
         return;
     }
+    struct ritem {
+        int arr;
+        struct sym *sym;
+        struct flat f;
+        const char *code;
+        int ty, cap;
+    } *items = NULL;
+    int n = 0, cap_items = 0, k, checked = 0;
+
     while (!stmt_end()) {
         struct tok *t = peek(0);
+
+        GROW(items, n, cap_items);
+        items[n].arr = 0;
         if (t != NULL && t->kind == T_ID && is_op("(", 1)
             && is_op(")", 2)) {
-            struct sym *sym = arrayref(1);
-            struct flat f = array_flat(sym);
-            char *k = newtmp("k");
+            items[n].arr = 1;
+            items[n].sym = arrayref(1);
+            items[n].f = array_flat(items[n].sym);
+        } else {
+            struct val tgt = input_target(&items[n].cap);
+
+            items[n].code = tgt.code;
+            items[n].ty = tgt.ty;
+        }
+        n++;
+        if (!accept_op(","))
+            break;
+    }
+    /* cmd_read finds every variable before it reads a value, so a
+       subscript out of range under ON ERROR SKIP reads nothing at all and
+       the DATA is still there for the next READ (FUZIX #26): the checked
+       elements' addresses first, then the values, all behind one test of
+       the poison. */
+    if (checks_on())
+        for (k = 0; k < n; k++)
+            if (!items[k].arr && strstr(items[k].code, "mm_ix") != NULL)
+                checked = 1;
+    if (checked) {
+        const char *decls = "";
+
+        for (k = 0; k < n; k++) {
+            if (items[k].arr || strstr(items[k].code, "mm_ix") == NULL)
+                continue;
+            {
+                char *lv = newtmp("lv");
+                const char *d;
+
+                if (items[k].ty == TY_S) {
+                    d = sfmt("char *%s = %s;", lv, items[k].code);
+                    items[k].code = lv;
+                } else {
+                    d = sfmt("%s *%s = &(%s);", ctype_of(items[k].ty), lv,
+                             items[k].code);
+                    items[k].code = sfmt("(*%s)", lv);
+                }
+                decls = *decls ? sfmt("%s %s", decls, d) : d;
+            }
+        }
+        emit(sfmt("{ %s", decls));
+        emit("  if (!__mm_e[0]) {");
+        cv.indent++;
+    }
+    for (k = 0; k < n; k++) {
+        if (items[k].arr) {
+            struct sym *sym = items[k].sym;
+            char *kv = newtmp("k");
+
             emit(sfmt("{ int %s; for (%s = 0; %s < %s; %s++)",
-                      k, k, k, f.cnt, k));
+                      kv, kv, kv, items[k].f.cnt, kv));
             if (sym->ty == TY_S) {
                 cv.reads_string = 1;
                 emit(sfmt("    mm_sset((%s)[%s], mm_read_s()); }",
-                          f.ptr, k));
+                          items[k].f.ptr, kv));
             }
             else
                 emit(sfmt("    (%s)[%s] = mm_read_%s(); }",
-                          f.ptr, k, sym->ty == TY_I ? "i" : "f"));
+                          items[k].f.ptr, kv, sym->ty == TY_I ? "i" : "f"));
+            cv.tmp_used = 1;
+        } else if (items[k].ty == TY_S) {
+            cv.reads_string = 1;
+            emit(swrite_cap(items[k].cap, items[k].code, "mm_read_s()"));
             cv.tmp_used = 1;
         } else {
-            int cap;
-            struct val tgt = input_target(&cap);
-            if (tgt.ty == TY_S) {
-                cv.reads_string = 1;
-                emit(swrite_cap(cap, tgt.code, "mm_read_s()"));
-                cv.tmp_used = 1;
-            } else {
-                numwrite(tgt.code, sfmt("mm_read_%s()",
-                                        tgt.ty == TY_I ? "i" : "f"),
-                         tgt.ty, "=");
-            }
+            numwrite(items[k].code, sfmt("mm_read_%s()",
+                                         items[k].ty == TY_I ? "i" : "f"),
+                     items[k].ty, "=");
         }
-        if (!accept_op(","))
-            break;
+    }
+    if (checked) {
+        cv.indent--;
+        emit("} }");
     }
 }
 
@@ -5716,9 +5793,21 @@ static void do_mid_assign(void)
     v = expr();
     if (v.ty != TY_S)
         cv_err("MID$() assignment needs a string");
-    emit(sfmt("mm_mid_assign(%s, %s, %s, %s);",
-              tgt, as_int(start), has_num ? as_int(num) : "-1LL",
-              v.code));
+    {
+        const char *a1 = as_int(start);
+        const char *a2 = has_num ? as_int(num) : "-1LL";
+
+        if (checks_on() && strstr(tgt, "mm_ix") != NULL) {
+            /* findvar first, and nothing written when it fails (#26) */
+            char *lv = newtmp("lv");
+
+            emit(sfmt("{ char *%s = %s;", lv, tgt));
+            emit(sfmt("  if (!__mm_e[0]) mm_mid_assign(%s, %s, %s, %s); }",
+                      lv, a1, a2, v.code));
+            return;
+        }
+        emit(sfmt("mm_mid_assign(%s, %s, %s, %s);", tgt, a1, a2, v.code));
+    }
 }
 
 /* A variable to write.  A string member only where it is written in

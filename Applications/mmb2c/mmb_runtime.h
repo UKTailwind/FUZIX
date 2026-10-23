@@ -788,13 +788,69 @@ static
 #endif
 int mm_ix(MMINTEGER i, int base, int lim)
 {
-    /* findvar's two messages: under the base is "Dimensions", over the
-       top "Index out of bounds" (MMBasic.c). */
+    /* findvar's messages, in its order: one that does not fit 32 bits is
+       "Index out of bounds" before anything else (it must not wrap to a
+       small index), then under the base is "Dimensions", over the top
+       "Index out of bounds" (MMBasic.c, FUZIX #26). */
+    if (i != (MMINTEGER)(int)i) {
+        mm_error("Index out of bounds");
+        return base;
+    }
     if (i < base || i - base > lim) {
         mm_error(i < base ? "Dimensions" : "Index out of bounds");
         return base;
     }
     return (int)i;
+}
+/*
+ * The subscripts of a multi-dimensional array, which findvar checks in
+ * two rounds: each as it is evaluated, left to right, against 32 bits
+ * and the base ("Index out of bounds", "Dimensions"), and only after all
+ * of them against their upper bounds.  C evaluates a[i][j]'s subscripts
+ * in no order it promises, so m%(-1, 9) said whichever it reached first
+ * (FUZIX #26).  mm_ixp makes the first round's checks and only NOTES an
+ * index over the top; mm_ixend, round the whole element after every
+ * subscript is in, raises it - so "Dimensions" always wins.
+ *
+ * The note is kept per nesting depth d, which the translator knows: an
+ * access inside another's subscript - a(b(1, 2), 9) - must not clear or
+ * raise the outer one's.  -1 is an access that has already raised, so
+ * that a later note in it cannot put a second message over the first.
+ */
+static int mm_ix_over[8];
+#if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)
+static __inline__ __attribute__((unused))
+#else
+static
+#endif
+int mm_ixp(MMINTEGER i, int base, int lim, int d)
+{
+    if (i != (MMINTEGER)(int)i || i < base) {
+        mm_ix_over[d] = -1;
+        mm_error(i < base && i == (MMINTEGER)(int)i ? "Dimensions"
+                                                     : "Index out of bounds");
+        return base;
+    }
+    if (i - base > lim) {
+        if (mm_ix_over[d] == 0)
+            mm_ix_over[d] = 1;
+        return base;
+    }
+    return (int)i;
+}
+#if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)
+static __inline__ __attribute__((unused))
+#else
+static
+#endif
+void *mm_ixend(void *p, int d)
+{
+    int over = mm_ix_over[d];
+
+    mm_ix_over[d] = 0;
+    if (over > 0)
+        mm_error("Index out of bounds");
+    return p;
 }
 /* A structure's member array: "Index out of bounds" either way, as the
  * member path's one test has it (MMBasic.c, the struct member arm). */

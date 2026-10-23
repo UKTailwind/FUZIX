@@ -251,6 +251,8 @@ void statement(void)
      * start: a DIM with several names keeps the ones before (late_out) */
     cut_outer = cv.late_cut;
     cv.late_cut = -1;
+    /* an error that longjmp'd out of a subscript left its depth up */
+    cv.ix_depth = 0;
     saved = err_jmp;
     err_jmp = &jb;
     if (setjmp(jb) == 0) {

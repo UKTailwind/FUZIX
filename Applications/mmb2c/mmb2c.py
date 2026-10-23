@@ -1291,6 +1291,7 @@ class Conv(object):
         self.mx_main = [0, 0]         # MAX/MIN temporary pairs in main
         self.mx_n = [0, 0]            # pairs the statement has used so far
         self.late_cut = None          # a late error's cut, if not the start
+        self.ix_depth = 0             # array accesses inside subscripts
         # a CHOICE of an integer and a float, by its code: (cond, a, b)
         self.mixed_choice = {}
         self.out_main = []
@@ -2608,16 +2609,33 @@ class Conv(object):
     def index(self, s):
         """Consume ( i [, j ...] ) and build the C subscript."""
         self.expect_op('(')
-        parts = []
-        while True:
-            v = self.expr()
-            parts.append(self.ix_check(s, len(parts), self.as_int(v)))
-            if not self.accept_op(','):
-                break
+        d = self.ix_depth
+        self.ix_depth += 1
+        vals = []
+        try:
+            while True:
+                vals.append(self.as_int(self.expr()))
+                if not self.accept_op(','):
+                    break
+        finally:
+            self.ix_depth -= 1
         self.expect_op(')')
-        return self.subscript(s, parts)
+        # Two or more subscripts are checked in findvar's two rounds
+        # (mm_ixp, then mm_ixend round the element): not a structure
+        # array, whose member path keeps its one test.
+        multi = len(vals) > 1 and self.checks_on() and s.stype is None \
+            and (s.is_param or s.dynamic or len(vals) == len(s.dims))
+        parts = [self.ix_check(s, k, v, d if multi else None)
+                 for k, v in enumerate(vals)]
+        elem = self.subscript(s, parts)
+        if not multi:
+            return elem
+        if s.ty == TY_S:
+            return ('(*(char (*)[%s])mm_ixend(&(%s), %d))'
+                    % (self.strsz(s), elem, min(d, 7)))
+        return '(*(%s *)mm_ixend(&(%s), %d))' % (CTYPE[s.ty], elem, min(d, 7))
 
-    def ix_check(self, s, k, part):
+    def ix_check(self, s, k, part, multi=None):
         """Subscript k of an access to array s, checked at run time by
         mm_ix - the reference's "Index out of bounds" - against its own
         dimension's last index counted from OPTION BASE.  An array
@@ -2637,6 +2655,9 @@ class Conv(object):
             lim = '(%s) - 1' % s.dims[k]
         else:
             return '(int)(%s)' % part     # subscript() reports the rank
+        if multi is not None:
+            return 'mm_ixp(%s, %d, %s, %d)' % (part, self.opt_base, lim,
+                                              min(multi, 7))
         return 'mm_ix(%s, %d, %s)' % (part, self.opt_base, lim)
 
     def subscript(self, s, parts):
@@ -8102,6 +8123,21 @@ class Conv(object):
             self.expect_op('=')
             v = self.as_int(self.expr())
             self.uses_misc = True
+            if self.checks_on() and 'mm_ix' in tgt:
+                # A checked subscript is findvar's, which comes first and
+                # writes nothing when it fails: the element's address,
+                # then the rest only if the statement is not poisoned
+                # (FUZIX #26, as numwrite does for assignment).
+                lv = self.newtmp('lv')
+                if up == 'BIT':
+                    self.emit('{ MMINTEGER *%s = &(%s);' % (lv, tgt))
+                    self.emit('  if (!__mm_e[0]) mm_bit_assign(%s, %s, %s); }'
+                              % (lv, n, v))
+                else:
+                    self.emit('{ char *%s = %s;' % (lv, tgt))
+                    self.emit('  if (!__mm_e[0]) mm_byte_assign(%s, %s, %s); }'
+                              % (lv, n, v))
+                return
             if up == 'BIT':
                 self.emit('mm_bit_assign(&(%s), %s, %s);' % (tgt, n, v))
             else:
@@ -8692,12 +8728,43 @@ class Conv(object):
         if self.accept_kw('RESTORE'):
             self.emit('mm_read_unsave();')
             return
+        items = []
         while not self.stmt_end():
             t = self.peek()
             if t is not None and t[0] == T_ID and self.is_op('(', 1) \
                     and self.is_op(')', 2):
                 sym = self.arrayref()
                 ptr, cnt = self.array_flat(sym)
+                items.append(('arr', sym, ptr, cnt))
+            else:
+                items.append(('one',) + self.input_target())
+            if not self.accept_op(','):
+                break
+        # cmd_read finds every variable before it reads a value, so a
+        # subscript out of range under ON ERROR SKIP reads nothing at all
+        # and the DATA is still there for the next READ (FUZIX #26): the
+        # checked elements' addresses first, then the values, all behind
+        # one test of the poison.
+        checked = self.checks_on() and any(
+            it[0] == 'one' and 'mm_ix' in it[1] for it in items)
+        if checked:
+            decls = []
+            for n, it in enumerate(items):
+                if it[0] == 'one' and 'mm_ix' in it[1]:
+                    lv = self.newtmp('lv')
+                    if it[2] == TY_S:
+                        decls.append('char *%s = %s;' % (lv, it[1]))
+                        items[n] = ('one', lv, it[2], it[3])
+                    else:
+                        decls.append('%s *%s = &(%s);'
+                                     % (CTYPE[it[2]], lv, it[1]))
+                        items[n] = ('one', '(*%s)' % lv, it[2], it[3])
+            self.emit('{ ' + ' '.join(decls))
+            self.emit('  if (!__mm_e[0]) {')
+            self.indent += 1
+        for it in items:
+            if it[0] == 'arr':
+                sym, ptr, cnt = it[1], it[2], it[3]
                 k = self.newtmp('k')
                 self.emit('{ int %s; for (%s = 0; %s < %s; %s++)'
                           % (k, k, k, cnt, k))
@@ -8710,7 +8777,7 @@ class Conv(object):
                               % (ptr, k, 'i' if sym.ty == TY_I else 'f'))
                 self.tmp_used = True
             else:
-                tgt, ty, cap = self.input_target()
+                tgt, ty, cap = it[1], it[2], it[3]
                 if ty == TY_S:
                     self.reads_string = True
                     self.emit(self.swrite_cap(cap, tgt, 'mm_read_s()'))
@@ -8718,8 +8785,9 @@ class Conv(object):
                 else:
                     self.numwrite(tgt, 'mm_read_%s()'
                                   % ('i' if ty == TY_I else 'f'), ty, '=')
-            if not self.accept_op(','):
-                break
+        if checked:
+            self.indent -= 1
+            self.emit('} }')
 
     # -- TILEMAP ------------------------------------------------------------
     def data_label(self, what):
@@ -9931,9 +9999,16 @@ class Conv(object):
         v = self.expr()
         if v[1] != TY_S:
             self.err("MID$() assignment needs a string")
-        self.emit('mm_mid_assign(%s, %s, %s, %s);'
-                  % (tgt, self.as_int(start),
-                     self.as_int(num) if num else '-1LL', v[0]))
+        args = (self.as_int(start), self.as_int(num) if num else '-1LL',
+                v[0])
+        if self.checks_on() and 'mm_ix' in tgt:
+            # findvar first, and nothing written when it fails (FUZIX #26)
+            lv = self.newtmp('lv')
+            self.emit('{ char *%s = %s;' % (lv, tgt))
+            self.emit('  if (!__mm_e[0]) mm_mid_assign(%s, %s, %s, %s); }'
+                      % ((lv,) + args))
+            return
+        self.emit('mm_mid_assign(%s, %s, %s, %s);' % ((tgt,) + args))
 
     def lvalue_from_here(self, strings=False):
         """A variable to write.  A string member only where it is written

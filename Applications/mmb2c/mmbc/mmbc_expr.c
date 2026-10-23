@@ -580,22 +580,40 @@ struct val e_name(void)
  * Python `index` - renamed: index() clashes with libc's strings.h. */
 const char *index_of(struct sym *s)
 {
-    const char *parts[MAXARGS];
-    int nparts = 0;
+    const char *vals[MAXARGS], *parts[MAXARGS];
+    int nparts = 0, k, multi;
+    int d = cv.ix_depth;
+    const char *elem;
 
     expect_op("(");
+    cv.ix_depth++;
     for (;;) {
         struct val v = expr();
 
         if (nparts >= MAXARGS)
             mm_error("line %d: too many subscripts", cv.lineno);
-        parts[nparts] = ix_check(s, nparts, as_int(v));
+        vals[nparts] = as_int(v);
         nparts++;
         if (!accept_op(","))
             break;
     }
+    cv.ix_depth--;
     expect_op(")");
-    return subscript_of(s, parts, nparts);
+    /* Two or more subscripts are checked in findvar's two rounds (mm_ixp,
+       then mm_ixend round the element): not a structure array, whose
+       member path keeps its one test. */
+    multi = nparts > 1 && checks_on() && s->stype == NULL
+            && (s->is_param || s->dynamic || nparts == s->ndims);
+    for (k = 0; k < nparts; k++)
+        parts[k] = ix_check_d(s, k, vals[k], multi ? d : -1);
+    elem = subscript_of(s, parts, nparts);
+    if (!multi)
+        return elem;
+    if (s->ty == TY_S)
+        return sfmt("(*(char (*)[%s])mm_ixend(&(%s), %d))", strsz_of(s),
+                    elem, d < 7 ? d : 7);
+    return sfmt("(*(%s *)mm_ixend(&(%s), %d))", ctype_of(s->ty), elem,
+                d < 7 ? d : 7);
 }
 
 /* Subscript k of an access to array s, checked at run time by mm_ix -
@@ -609,7 +627,7 @@ const char *index_of(struct sym *s)
  * Gated like the arithmetic checks (checks_on): on every access it cost
  * ~55 bytes a subscript and stopped robots fitting the board, and
  * without ON ERROR there is nothing to trap the error with. */
-const char *ix_check(struct sym *s, int k, const char *part)
+const char *ix_check_d(struct sym *s, int k, const char *part, int multi)
 {
     const char *lim;
 
@@ -621,7 +639,15 @@ const char *ix_check(struct sym *s, int k, const char *part)
         lim = sfmt("(%s) - 1", s->dims[k]);
     else
         return sfmt("(int)(%s)", part);     /* subscript_of reports it */
+    if (multi >= 0)
+        return sfmt("mm_ixp(%s, %d, %s, %d)", part, cv.opt_base, lim,
+                    multi < 7 ? multi : 7);
     return sfmt("mm_ix(%s, %d, %s)", part, cv.opt_base, lim);
+}
+
+const char *ix_check(struct sym *s, int k, const char *part)
+{
+    return ix_check_d(s, k, part, -1);
 }
 
 /* The C for one element, given one index text per dimension.
