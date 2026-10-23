@@ -4076,6 +4076,16 @@ static void thumb_resolve_calls(void)
 					table_full("call thunks", TPOOLMAX);
 					return;
 				}
+				/* A thunk is Thumb, and a BL reaches only an even
+				   address.  The code before it may end on an odd
+				   byte - bytecode has no alignment - and a thunk
+				   placed there was entered one byte early, inside
+				   the previous thunk's bx: the first runtime call
+				   from native code executed garbage.  structtest
+				   found it under qemu once a cut left its last
+				   function an odd length. */
+				if (codelen & 1)
+					cbyte(0);
 				tcalltab[nthunk].sym = s;
 				tcalltab[nthunk].site = (unsigned)codelen;
 				nthunk++;
