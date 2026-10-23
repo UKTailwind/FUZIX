@@ -669,21 +669,28 @@ void statement_inner(void)
            address, as POKE's is: PEEK(VARADDR a()) names an array's
            storage, so a table of weights goes in in one statement. */
         struct val f;
-        const char *a;
+        const char *a, *n = NULL;
         cv.i += 2;
         f = expr();
         if (f.ty != TY_S)
             cv_err("%s DATA needs a file name string", up);
-        expect_op(",");
+        /* getcsargs' count is checked when the line runs: two arguments
+           for LOAD DATA, three for SAVE DATA, and anything else "Invalid
+           syntax" there - not a tail dropped (FUZIX #39) */
+        if (!accept_op(","))
+            cv_late("Invalid syntax");
         a = as_int(expr());
-        if (strcmp(up, "LOAD") == 0) {
-            emit(sfmt("mm_load_data(%s, %s);", f.code, a));
-        } else {
-            const char *n;
-            expect_op(",");
+        if (strcmp(up, "SAVE") == 0) {
+            if (!accept_op(","))
+                cv_late("Invalid syntax");
             n = as_int(expr());
-            emit(sfmt("mm_save_data(%s, %s, %s);", f.code, a, n));
         }
+        if (!stmt_end())
+            cv_late("Invalid syntax");
+        if (strcmp(up, "LOAD") == 0)
+            emit(sfmt("mm_load_data(%s, %s);", f.code, a));
+        else
+            emit(sfmt("mm_save_data(%s, %s, %s);", f.code, a, n));
         return;
     }
     if (strcmp(up, "SYSTEM") == 0 || load_prog(up) != NULL

@@ -2068,13 +2068,19 @@ void mm_save_data(const char *fname, MMINTEGER addr, MMINTEGER len)
 {
     const unsigned char *p = (const unsigned char *)(uintptr_t)(uint64_t)addr;
     FILE *f;
-    if (mm_range(len, 1, 0x7FFFFFFF)) return;
+    /* cmd_save opens the file, which empties it, before it takes the
+       length: SAVE DATA f$, a, 0 truncates and then says "0 is invalid"
+       (FUZIX #39) */
     f = fopen(mm_fname(fname), "wb");
     if (!f) {
         static char msg[MM_STRLEN + 32];
         strcpy(msg, "Cannot open ");
         strcat(msg, mm_cstr(fname));
         MM_RAISE(msg);
+    }
+    if (mm_range(len, 1, 0x7FFFFFFF)) {
+        fclose(f);
+        return;
     }
     if (fwrite(p, 1, (size_t)len, f) != (size_t)len) {
         fclose(f);

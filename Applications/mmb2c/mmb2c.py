@@ -6947,13 +6947,22 @@ class Conv(object):
             f = self.expr()
             if f[1] != TY_S:
                 self.err("%s DATA needs a file name string" % up)
-            self.expect_op(',')
+            # getcsargs' count is checked when the line runs: two
+            # arguments for LOAD DATA, three for SAVE DATA, and anything
+            # else "Invalid syntax" there - not a tail dropped (FUZIX #39)
+            if not self.accept_op(','):
+                self.late("Invalid syntax")
             a = self.as_int(self.expr())
+            n = None
+            if up == 'SAVE':
+                if not self.accept_op(','):
+                    self.late("Invalid syntax")
+                n = self.as_int(self.expr())
+            if not self.stmt_end():
+                self.late("Invalid syntax")
             if up == 'LOAD':
                 self.emit('mm_load_data(%s, %s);' % (f[0], a))
             else:
-                self.expect_op(',')
-                n = self.as_int(self.expr())
                 self.emit('mm_save_data(%s, %s, %s);' % (f[0], a, n))
             return
         if up == 'LOAD':
