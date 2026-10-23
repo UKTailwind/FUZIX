@@ -12542,32 +12542,23 @@ def _local_heap_fixup(conv):
 def read_source(inpath):
     """The program's lines, as LOAD reads the file (FileIO.c).
 
-    XMODEM pads the last block, so a program that arrived that way
-    carries NULs after its last line - brownian.bas came over with 23 of
-    them after "End Sub".  That is how files reach these machines, and
-    MMBasic reads such a file without noticing, its program store being
-    NUL-terminated.  Refusing it meant a program that runs on the
-    reference would not translate here, and said so at a line number past
-    the end of the program.  NUL is where the program stops, which is
-    what it means in a BASIC source - not something to strip out of the
-    middle.
-
-    And every byte is LOAD's: masked to seven bits, and kept only if it
-    is then printable, CR, LF or TAB, which becomes a space.  So a
-    Latin-1 e-acute is an i, a UTF-8 one is two other characters and
-    counts as two towards the 255 of a line, and 0x8A and 0x8D end a
-    line where they stand (FUZIX #27).  The file used to be read as
-    UTF-8, which counted that e-acute once and stopped with a traceback
-    at a Latin-1 one.  Lines split as universal newlines split them."""
+    Every byte is LOAD's: masked to seven bits, and kept only if it is
+    then printable, CR, LF or TAB, which becomes a space.  So a Latin-1
+    e-acute is an i, a UTF-8 one is two other characters and counts as
+    two towards the 255 of a line, and 0x8A and 0x8D end a line where
+    they stand (FUZIX #27).  The file used to be read as UTF-8, which
+    counted that e-acute once and stopped with a traceback at a Latin-1
+    one.  A NUL is dropped like any other and LOAD reads on to the end of
+    the file (FUZIX #36): the NULs XMODEM pads a last block with -
+    brownian.bas came over with 23 after "End Sub" - go, and a NUL in
+    the middle stops nothing.  Lines split as universal newlines split
+    them."""
     import io
     f = open(inpath, 'rb')
     try:
         data = f.read()
     finally:
         f.close()
-    z = data.find(b'\0')
-    if z >= 0:
-        data = data[:z]
     out = bytearray()
     for b in bytearray(data):
         c = b & 0x7F

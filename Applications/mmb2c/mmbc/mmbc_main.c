@@ -33,27 +33,14 @@ static int read_lines(const char *path)
     fclose(f);
     buf[sz] = 0;
 
-    /* XMODEM pads the last block, so a program that arrived that way
-       carries NULs after its last line - brownian.bas came over with 23
-       of them after "End Sub".  That is how files reach these machines,
-       and MMBasic reads such a file without noticing, its program store
-       being NUL-terminated.  Refusing it meant a program that runs on
-       the reference would not translate here, and said so at a line
-       number past the end of the program.
-
-       NUL is where the program stops, which is what it means in a BASIC
-       source - not something to strip out of the middle. */
-    {
-        char *z = memchr(buf, 0, (size_t)sz);
-
-        if (z != NULL)
-            sz = (long)(z - buf);
-    }
-    /* And every byte is LOAD's (FileIO.c): masked to seven bits, and kept
+    /* Every byte is LOAD's (FileIO.c): masked to seven bits, and kept
        only if it is then printable, CR, LF or TAB, which becomes a space.
        So a Latin-1 e-acute is an i, a UTF-8 one is two other characters
        and counts as two towards the 255 of a line, and 0x8A and 0x8D end
-       a line where they stand (FUZIX #27). */
+       a line where they stand (FUZIX #27).  A NUL is dropped like any
+       other and LOAD reads on to the end of the file (FUZIX #36): the
+       NULs XMODEM pads a last block with - brownian.bas came over with 23
+       after "End Sub" - go, and a NUL in the middle stops nothing. */
     {
         long r, w = 0;
 
