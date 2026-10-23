@@ -1486,6 +1486,15 @@ const char *pass_arg(struct sym *p, struct arg *a, struct routine *r)
                         cv_note("a string member cannot be passed by "
                                 "reference to '%s' of '%s', which "
                                 "writes it", p->name, r->name);
+                    /* Nor to one that changes the member under its own
+                       name while it has it: there the parameter sees the
+                       change, and a copy would not. */
+                    else if (cv.mode == M_EMIT
+                             && changes_member(r, a->v.code))
+                        cv_note("a string member cannot be passed by "
+                                "reference to '%s' of '%s', which "
+                                "changes the member itself",
+                                p->name, r->name);
                     cv.tmp_used = 1;
                     return sfmt("mm_scopy(%s)", a->v.code);
                 }

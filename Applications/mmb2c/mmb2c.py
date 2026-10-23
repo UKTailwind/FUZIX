@@ -741,7 +741,7 @@ class TypeDef(object):
 class Routine(object):
     __slots__ = ('name', 'cname', 'is_func', 'ty', 'params', 'locals',
                  'statics', 'line', 'gtouch', 'disp', 'local_order',
-                 'heap_locals', 'mx_pairs')
+                 'heap_locals', 'mx_pairs', 'mwrites', 'swrites')
 
     def __init__(self, name, is_func):
         self.name = name
@@ -759,9 +759,38 @@ class Routine(object):
         self.mx_pairs = [0, 0]    # MAX/MIN temporary pairs, float/integer
         self.line = 0
         self.gtouch = {}          # global name -> first line touched here
+        # string members written here, and structures written whole, as
+        # their C lvalues with the subscripts blanked (norm_lvalue): a
+        # member passed in by reference must not be one of them
+        self.mwrites = []
+        self.swrites = []
 
 
 # ----------------------------------------------------------------- helpers
+
+def norm_lvalue(code):
+    """A C lvalue with every subscript blanked - H->v_a[(int)(i)].m_s
+    becomes v_a[].m_s - so a write and an argument compare by what they
+    can reach, not by which element: an index is not known here.  The
+    globals' H-> goes too: _heap_fixup adds it between the scan, which
+    records the writes, and the emit, which asks.  (A routine's local
+    structure of a global's name then reads as that global: a refusal
+    too many, never a wrong translation.)"""
+    code = code.replace('H->', '')
+    out = []
+    depth = 0
+    for c in code:
+        if c == '[':
+            if depth == 0:
+                out.append('[')
+            depth += 1
+        elif c == ']':
+            depth -= 1
+            if depth == 0:
+                out.append(']')
+        elif depth == 0:
+            out.append(c)
+    return ''.join(out)
 
 def split_suffix(word):
     """'nbr%' -> ('nbr', TY_I).  Returns (canonical_lower, ty_or_None)."""
@@ -1893,6 +1922,28 @@ class Conv(object):
         if s is not None and s.is_param:
             s.written = True
 
+    def member_written(self, code, whole=False):
+        """A string member (or, whole, a structure) written in the
+        routine being scanned, by the lvalue it is written through."""
+        if self.mode != 'scan' or self.cur is None:
+            return
+        lst = self.cur.swrites if whole else self.cur.mwrites
+        k = norm_lvalue(code)
+        if k not in lst:
+            lst.append(k)
+
+    def changes_member(self, r, code):
+        """Does routine r write this string member under its own name -
+        the member itself, or the structure (or array of them) it is
+        in?"""
+        k = norm_lvalue(code)
+        if k in r.mwrites:
+            return True
+        for w in r.swrites:
+            if k == w or k.startswith(w + '.') or k.startswith(w + '['):
+                return True
+        return False
+
     def writes(self, p, depth=0):
         """Is parameter p written - by its routine, or by a by-reference
         parameter it is passed on to?  The depth bound ends a cycle of
@@ -2974,6 +3025,15 @@ class Conv(object):
                             self.note("a string member cannot be passed "
                                       "by reference to '%s' of '%s', "
                                       "which writes it" % (p.name, r.name))
+                        # Nor to one that changes the member under its
+                        # own name while it has it: there the parameter
+                        # sees the change, and a copy would not.
+                        elif self.mode == 'emit' \
+                                and self.changes_member(r, a[2][0]):
+                            self.note("a string member cannot be passed "
+                                      "by reference to '%s' of '%s', "
+                                      "which changes the member itself"
+                                      % (p.name, r.name))
                         self.tmp_used = True
                         return 'mm_scopy(%s)' % a[2][0]
                     return a[2][0]
@@ -9468,6 +9528,7 @@ class Conv(object):
             if res[0] == 'num':
                 return (res[1], res[2], None)
             if res[0] == 'str':
+                self.member_written(res[1])
                 return (res[1], TY_S, res[2])
             self.err("a whole structure cannot be written here")
         is_arr = self.is_op('(')
@@ -9683,6 +9744,8 @@ class Conv(object):
             if res[0] != 'num' and not (strings and res[0] == 'str'):
                 self.note("only a numeric structure member can be "
                           "written here")
+            if res[0] == 'str':
+                self.member_written(res[1])
             return res[1]
         s = self.reference(t[1], self.is_op('('))
         self.wrote(s)
@@ -9780,6 +9843,7 @@ class Conv(object):
             # bounded, and no trailing NUL when full: a member string
             # is LENGTH+1 bytes in the firmware's layout and the byte
             # after it belongs to the next member
+            self.member_written(res[1])
             self.emit('mm_ssetm(%s, %d, %s);' % (res[1], res[2], v[0]))
             return
         # a whole nested structure: the firmware memcpy's the OUTER
@@ -9802,6 +9866,7 @@ class Conv(object):
         if ty[1] != tyname:
             self.err("structure types must match (TYPE '%s' vs '%s')"
                      % (tyname, ty[1]))
+        self.member_written(target, True)
         self.emit('%s = %s;' % (target, v[0]))
 
     def struct_operand(self):
@@ -9853,6 +9918,7 @@ class Conv(object):
             if src[0] != dst[0]:
                 self.err("both operands must be arrays or both single "
                          "structures")
+            self.member_written(dst[1], True)
             if src[0] == 'all':
                 self.emit('memcpy(%s, %s, sizeof %s);'
                           % (dst[1], src[1], src[1]))
@@ -9861,6 +9927,7 @@ class Conv(object):
             return
         if verb == 'CLEAR':
             op = self.struct_operand()
+            self.member_written(op[1], True)
             if op[0] == 'all':
                 self.emit('memset(%s, 0, sizeof %s);' % (op[1], op[1]))
             else:
@@ -9874,6 +9941,8 @@ class Conv(object):
                 self.err("structure types must match")
             if a[0] == 'all' or b[0] == 'all':
                 self.err("STRUCT SWAP takes single structures")
+            self.member_written(a[1], True)
+            self.member_written(b[1], True)
             # no initialised declaration: the fcc front end takes
             # struct assignment but not struct initialisers
             self.emit('{ struct t_%s __ts; __ts = %s; %s = %s; '

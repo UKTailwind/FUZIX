@@ -418,6 +418,85 @@ void wrote(struct sym *s)
 /* Is parameter p written - by its routine, or by a by-reference
    parameter it is passed on to?  The depth bound ends a cycle of
    routines passing it round. */
+/* A C lvalue with every subscript blanked - H->v_a[(int)(i)].m_s becomes
+ * v_a[].m_s - so a write and an argument compare by what they can reach,
+ * not by which element: an index is not known here.  The globals' H->
+ * goes too: the heap fixup adds it between the scan, which records the
+ * writes, and the emit, which asks.  (A routine's local structure of a
+ * global's name then reads as that global: a refusal too many, never a
+ * wrong translation.) */
+static char *norm_lvalue(const char *code)
+{
+    char *out = salloc(strlen(code) + 1), *o = out;
+    int depth = 0;
+
+    for (; *code; code++) {
+        if (strncmp(code, "H->", 3) == 0) {
+            code += 2;
+            continue;
+        }
+        if (*code == '[') {
+            if (depth == 0)
+                *o++ = '[';
+            depth++;
+        } else if (*code == ']') {
+            depth--;
+            if (depth == 0)
+                *o++ = ']';
+        } else if (depth == 0)
+            *o++ = *code;
+    }
+    *o = 0;
+    return out;
+}
+
+/* A string member (or, whole, a structure) written in the routine being
+ * scanned, by the lvalue it is written through. */
+void member_written(const char *code, int whole)
+{
+    struct routine *r = cv.cur;
+    const char *k;
+    int j;
+
+    if (cv.mode != M_SCAN || r == NULL)
+        return;
+    k = norm_lvalue(code);
+    if (whole) {
+        for (j = 0; j < r->nswrites; j++)
+            if (strcmp(r->swrites[j], k) == 0)
+                return;
+        GROW(r->swrites, r->nswrites, r->cswrites);
+        r->swrites[r->nswrites++] = pstr(k);
+    } else {
+        for (j = 0; j < r->nmwrites; j++)
+            if (strcmp(r->mwrites[j], k) == 0)
+                return;
+        GROW(r->mwrites, r->nmwrites, r->cmwrites);
+        r->mwrites[r->nmwrites++] = pstr(k);
+    }
+}
+
+/* Does routine r write this string member under its own name - the
+ * member itself, or the structure (or array of them) it is in? */
+int changes_member(const struct routine *r, const char *code)
+{
+    const char *k = norm_lvalue(code);
+    int j;
+
+    for (j = 0; j < r->nmwrites; j++)
+        if (strcmp(r->mwrites[j], k) == 0)
+            return 1;
+    for (j = 0; j < r->nswrites; j++) {
+        const char *w = r->swrites[j];
+        size_t n = strlen(w);
+
+        if (strcmp(k, w) == 0
+            || (strncmp(k, w, n) == 0 && (k[n] == '.' || k[n] == '[')))
+            return 1;
+    }
+    return 0;
+}
+
 int writes(struct sym *p, int depth)
 {
     int k;

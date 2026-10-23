@@ -719,6 +719,7 @@ void assign_member(struct mpres res)
         /* bounded, and no trailing NUL when full: a member string is
          * LENGTH+1 bytes in the firmware's layout and the byte after
          * it belongs to the next member */
+        member_written(res.code, 0);
         emit(sfmt("mm_ssetm(%s, %ld, %s);", res.code, (long)res.slen,
                   v.code));
         return;
@@ -745,6 +746,7 @@ void assign_struct(const char *target, const char *tyname)
     if (strcmp(v.stype, tyname) != 0)
         cv_err("structure types must match (TYPE '%s' vs '%s')",
                tyname, v.stype);
+    member_written(target, 1);
     emit(sfmt("%s = %s;", target, v.code));
 }
 
@@ -825,6 +827,7 @@ void do_struct(void)
         if (src.all != dst.all)
             cv_err("both operands must be arrays or both single "
                    "structures");
+        member_written(dst.code, 1);
         if (src.all)
             emit(sfmt("memcpy(%s, %s, sizeof %s);",
                       dst.code, src.code, src.code));
@@ -834,6 +837,7 @@ void do_struct(void)
     }
     if (strcmp(verb, "CLEAR") == 0) {
         struct sopnd op = struct_operand();
+        member_written(op.code, 1);
         if (op.all)
             emit(sfmt("memset(%s, 0, sizeof %s);", op.code, op.code));
         else
@@ -849,6 +853,8 @@ void do_struct(void)
             cv_err("structure types must match");
         if (a.all || b.all)
             cv_err("STRUCT SWAP takes single structures");
+        member_written(a.code, 1);
+        member_written(b.code, 1);
         /* no initialised declaration: the fcc front end takes struct
            assignment but not struct initialisers */
         emit(sfmt("{ struct t_%s __ts; __ts = %s; %s = %s; "

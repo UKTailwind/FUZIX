@@ -295,6 +295,11 @@ struct routine {
     int heap_locals;            /* has LOCAL arrays or strings, so its
                                  * invocations carry a heap block */
     int mx_pairs[2];            /* MAX/MIN temporary pairs, float/integer */
+    /* string members written here, and structures written whole, as
+     * their C lvalues with the subscripts blanked (norm_lvalue): a member
+     * passed in by reference must not be one of them */
+    const char **mwrites; int nmwrites, cmwrites;
+    const char **swrites; int nswrites, cswrites;
 };
 
 /* One record per label name; the Python keeps six dicts keyed the same
@@ -556,6 +561,9 @@ struct sym *reference(const char *word, int as_array);
 void sub_fun_named(const char *canon);        /* "A sub/fun has the same name" */
 /* a numeric write, guarded under the ON ERROR checks (mmbc_stmt.c) */
 void numwrite(const char *target, const char *val, int ty, const char *op);
+/* string-member writes by lvalue, and the by-reference check (mmbc_sym.c) */
+void member_written(const char *code, int whole);
+int changes_member(const struct routine *r, const char *code);
 /* a CHOICE of an integer and a float, by its code (mmbc_sym.c) */
 struct mixed;
 void mixed_choice_put(const char *code, const char *cond, struct val a,

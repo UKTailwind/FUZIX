@@ -5417,6 +5417,7 @@ struct val input_target(int *cap)
                 return r;
             }
             if (res.kind == MP_STR) {
+                member_written(res.code, 0);
                 r.code = res.code;
                 r.ty = TY_S;
                 *cap = (int)res.slen;
@@ -5692,6 +5693,8 @@ static const char *lvalue_from_here(int strings)
     if (member_target(t, &res)) {
         if (res.kind != MP_NUM && !(strings && res.kind == MP_STR))
             cv_note("only a numeric structure member can be written here");
+        if (res.kind == MP_STR)
+            member_written(res.code, 0);
         return res.code;
     }
     s = reference(t->text, is_op("(", 0));
