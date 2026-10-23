@@ -10807,6 +10807,13 @@ class Conv(object):
         r = self.routines.get('mm.end')
         if r is None or r.is_func or r is self.cur:
             return ''
+        # MM.END is called with no arguments, and an array or structure
+        # parameter cannot be left empty: DefinedSubFun stops there with
+        # "Incompatible type: " and whatever argument text it is holding
+        # (a PicoMitePC3 said "Incompatible type: 6").  When it runs, as
+        # there; the stray text has no counterpart.
+        if [p for p in r.params if p.is_array or p.stype is not None]:
+            return 'mm_error("Incompatible type: ");'
         return self.emit_call(r, [])[0] + ';'
 
     # -- SUB / FUNCTION bodies ----------------------------------------------

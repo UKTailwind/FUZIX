@@ -6384,9 +6384,18 @@ const char *mm_end_call(void)
 {
     struct routine *r = routine_get("mm.end");
     struct arglist args;
+    int k;
 
     if (r == NULL || r->is_func || r == cv.cur)
         return "";
+    /* MM.END is called with no arguments, and an array or structure
+       parameter cannot be left empty: DefinedSubFun stops there with
+       "Incompatible type: " and whatever argument text it is holding (a
+       PicoMitePC3 said "Incompatible type: 6").  When it runs, as there;
+       the stray text has no counterpart. */
+    for (k = 0; k < r->nparams; k++)
+        if (r->params[k]->is_array || r->params[k]->stype != NULL)
+            return "mm_error(\"Incompatible type: \");";
     args.n = 0;
     return sfmt("%s;", emit_call(r, &args).code);
 }
