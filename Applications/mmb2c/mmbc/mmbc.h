@@ -550,6 +550,8 @@ struct sym *declare(const char *canon, int ty, const char *scope,
                     const char **arr_dims, int ndims, int is_static);
 struct sym *reference(const char *word, int as_array);
 void sub_fun_named(const char *canon);        /* "A sub/fun has the same name" */
+/* a numeric write, guarded under the ON ERROR checks (mmbc_stmt.c) */
+void numwrite(const char *target, const char *val, int ty, const char *op);
 void wrote(struct sym *s);                    /* a parameter is written */
 const char *mm_end_call(void);                /* SUB MM.END's call, or "" */
 int writes(struct sym *p, int depth);         /* ... or passed to one that is */

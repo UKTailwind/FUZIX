@@ -4029,8 +4029,9 @@ static void do_read(void)
                 emit(swrite_cap(cap, tgt.code, "mm_read_s()"));
                 cv.tmp_used = 1;
             } else {
-                emit(sfmt("%s = mm_read_%s();", tgt.code,
-                          tgt.ty == TY_I ? "i" : "f"));
+                numwrite(tgt.code, sfmt("mm_read_%s()",
+                                        tgt.ty == TY_I ? "i" : "f"),
+                         tgt.ty, "=");
             }
         }
         if (!accept_op(","))
@@ -4384,9 +4385,9 @@ static void do_inc(void)
                         sfmt("mm_scat(%s, %s)", tgt.code, v.code)));
         cv.tmp_used = 1;
     } else if (tgt.ty == TY_I) {
-        emit(sfmt("%s += %s;", tgt.code, as_int(v)));
+        numwrite(tgt.code, as_int(v), TY_I, "+=");
     } else {
-        emit(sfmt("%s += %s;", tgt.code, as_flt(v)));
+        numwrite(tgt.code, as_flt(v), TY_F, "+=");
     }
 }
 
@@ -5401,9 +5402,9 @@ static void do_input(void)
         if (tgt.ty == TY_S)
             emit(swrite_cap(cap, tgt.code, "mm_input_next()"));
         else if (tgt.ty == TY_I)
-            emit(sfmt("%s = mm_atoi(mm_input_next());", tgt.code));
+            numwrite(tgt.code, "mm_atoi(mm_input_next())", TY_I, "=");
         else
-            emit(sfmt("%s = mm_atof(mm_input_next());", tgt.code));
+            numwrite(tgt.code, "mm_atof(mm_input_next())", TY_F, "=");
         cv.tmp_used = 1;
         if (!accept_op(","))
             break;
@@ -5770,16 +5771,37 @@ static void do_assign(void)
  * checks for itself. */
 static void store(const char *target, const char *val, int ty)
 {
+    numwrite(target, val, ty, "=");
+}
+
+/* Every numeric write a statement makes - assignment, READ, INPUT, INC -
+ * guarded as store() says.
+ *
+ * An element's subscript is checked by mm_ix, which can raise too, and C
+ * would evaluate it only AFTER the flag had been tested: the write then
+ * landed in element OPTION BASE, the index mm_ix hands back.  So a
+ * checked subscript takes the element's address first, then the value -
+ * findvar before evaluate, the reference's own order - and the write
+ * goes through the pointer. */
+void numwrite(const char *target, const char *val, int ty, const char *op)
+{
     const char *ctype = (ty == TY_I) ? "MMINTEGER" : "MMFLOAT";
-    char *tmp;
+    char *tmp, *lv;
 
     if (!checks_on()) {
-        emit(sfmt("%s = %s;", target, val));
+        emit(sfmt("%s %s %s;", target, op, val));
         return;
     }
     tmp = newtmp("cv");
+    if (strstr(target, "mm_ix") != NULL) {
+        lv = newtmp("lv");
+        emit(sfmt("{ %s *%s = &(%s); %s %s = %s;",
+                  ctype, lv, target, ctype, tmp, val));
+        emit(sfmt("  if (!__mm_e[0]) *%s %s %s; }", lv, op, tmp));
+        return;
+    }
     emit(sfmt("{ %s %s = %s;", ctype, tmp, val));
-    emit(sfmt("  if (!__mm_e[0]) %s = %s; }", target, tmp));
+    emit(sfmt("  if (!__mm_e[0]) %s %s %s; }", target, op, tmp));
 }
 
 /* What a block header does when its own condition raised.

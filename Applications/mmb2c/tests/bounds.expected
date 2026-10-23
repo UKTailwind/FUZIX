@@ -1,6 +1,6 @@
 a(3) ok  7
 a(4): Index out of bounds
-a(-1): Index out of bounds
+a(-1): Dimensions
 b(2,4) ok  2
 b(1,5): Index out of bounds
 b(3,0): Index out of bounds

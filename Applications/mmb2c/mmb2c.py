@@ -1432,13 +1432,31 @@ class Conv(object):
 
         String assignment needs none of this: it goes through mm_sset,
         which checks for itself."""
+        self.numwrite(target, val, ty, '=')
+
+    def numwrite(self, target, val, ty, op):
+        """Every numeric write a statement makes - assignment, READ,
+        INPUT, INC - guarded as store() says.
+
+        An element's subscript is checked by mm_ix, which can raise too,
+        and C would evaluate it only AFTER the flag had been tested: the
+        write then landed in element OPTION BASE, the index mm_ix hands
+        back.  So a checked subscript takes the element's address first,
+        then the value - findvar before evaluate, the reference's own
+        order - and the write goes through the pointer."""
         ctype = 'MMINTEGER' if ty == TY_I else 'MMFLOAT'
         if not self.checks_on():
-            self.emit('%s = %s;' % (target, val))
+            self.emit('%s %s %s;' % (target, op, val))
             return
         tmp = self.newtmp('cv')
+        if 'mm_ix' in target:
+            lv = self.newtmp('lv')
+            self.emit('{ %s *%s = &(%s); %s %s = %s;'
+                      % (ctype, lv, target, ctype, tmp, val))
+            self.emit('  if (!__mm_e[0]) *%s %s %s; }' % (lv, op, tmp))
+            return
         self.emit('{ %s %s = %s;' % (ctype, tmp, val))
-        self.emit('  if (!__mm_e[0]) %s = %s; }' % (target, tmp))
+        self.emit('  if (!__mm_e[0]) %s %s %s; }' % (target, op, tmp))
 
     # ==================================================================
     #  symbol lookup / creation - this is where implied globals appear
@@ -1699,8 +1717,8 @@ class Conv(object):
         # reference's "Index out of bounds" (MMBasic.c:5015).  Gated as
         # ix_check is.
         if self.checks_on():
-            idx = ['mm_ix(%s, %d, %d)' % (i, self.opt_base,
-                                          d - self.opt_base)
+            idx = ['mm_ixm(%s, %d, %d)' % (i, self.opt_base,
+                                           d - self.opt_base)
                    for i, d in zip(idx, m.dims)]
         lin = '(%s)' % idx[0]
         mult = 1
@@ -8143,8 +8161,8 @@ class Conv(object):
                     self.emit(self.swrite_cap(cap, tgt, 'mm_read_s()'))
                     self.tmp_used = True
                 else:
-                    self.emit('%s = mm_read_%s();'
-                              % (tgt, 'i' if ty == TY_I else 'f'))
+                    self.numwrite(tgt, 'mm_read_%s()'
+                                  % ('i' if ty == TY_I else 'f'), ty, '=')
             if not self.accept_op(','):
                 break
 
@@ -8407,9 +8425,9 @@ class Conv(object):
                                       'mm_scat(%s, %s)' % (tgt, v[0])))
             self.tmp_used = True
         elif ty == TY_I:
-            self.emit('%s += %s;' % (tgt, self.as_int(v)))
+            self.numwrite(tgt, self.as_int(v), ty, '+=')
         else:
-            self.emit('%s += %s;' % (tgt, self.as_flt(v)))
+            self.numwrite(tgt, self.as_flt(v), ty, '+=')
 
     def do_cat(self):
         tgt, ty, cap = self.input_target()
@@ -9176,9 +9194,9 @@ class Conv(object):
             if ty == TY_S:
                 self.emit(self.swrite_cap(cap, tgt, 'mm_input_next()'))
             elif ty == TY_I:
-                self.emit('%s = mm_atoi(mm_input_next());' % tgt)
+                self.numwrite(tgt, 'mm_atoi(mm_input_next())', ty, '=')
             else:
-                self.emit('%s = mm_atof(mm_input_next());' % tgt)
+                self.numwrite(tgt, 'mm_atof(mm_input_next())', ty, '=')
             self.tmp_used = True
             if not self.accept_op(','):
                 break
@@ -9424,9 +9442,9 @@ class Conv(object):
         if res[0] == 'num':
             v = self.expr()
             if res[2] == TY_I:
-                self.emit('%s = %s;' % (res[1], self.as_int(v)))
+                self.numwrite(res[1], self.as_int(v), TY_I, '=')
             else:
-                self.emit('%s = %s;' % (res[1], self.as_flt(v)))
+                self.numwrite(res[1], self.as_flt(v), TY_F, '=')
             return
         if res[0] == 'str':
             v = self.expr()

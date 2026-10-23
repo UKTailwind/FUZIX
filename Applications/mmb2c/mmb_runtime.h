@@ -784,6 +784,23 @@ static
 #endif
 int mm_ix(MMINTEGER i, int base, int lim)
 {
+    /* findvar's two messages: under the base is "Dimensions", over the
+       top "Index out of bounds" (MMBasic.c). */
+    if (i < base || i - base > lim) {
+        mm_error(i < base ? "Dimensions" : "Index out of bounds");
+        return base;
+    }
+    return (int)i;
+}
+/* A structure's member array: "Index out of bounds" either way, as the
+ * member path's one test has it (MMBasic.c, the struct member arm). */
+#if defined(__GNUC__) && !defined(MM_FCC) && !defined(MM_PC3)
+static __inline__ __attribute__((unused))
+#else
+static
+#endif
+int mm_ixm(MMINTEGER i, int base, int lim)
+{
     if (i < base || i - base > lim) {
         mm_error("Index out of bounds");
         return base;

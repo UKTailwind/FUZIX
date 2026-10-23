@@ -143,7 +143,7 @@ static const char *member_index(struct typemember *m)
      * "Index out of bounds" (MMBasic.c:5015).  Gated as ix_check is. */
     if (checks_on())
         for (k = 0; k < n; k++)
-            idx[k] = sfmt("mm_ix(%s, %d, %ld)", idx[k], cv.opt_base,
+            idx[k] = sfmt("mm_ixm(%s, %d, %ld)", idx[k], cv.opt_base,
                           (long)(m->dims[k] - cv.opt_base));
     lin = sfmt("(%s)", idx[0]);
     mult = 1;
@@ -707,9 +707,9 @@ void assign_member(struct mpres res)
     if (res.kind == MP_NUM) {
         v = expr();
         if (res.ty == TY_I)
-            emit(sfmt("%s = %s;", res.code, as_int(v)));
+            numwrite(res.code, as_int(v), TY_I, "=");
         else
-            emit(sfmt("%s = %s;", res.code, as_flt(v)));
+            numwrite(res.code, as_flt(v), TY_F, "=");
         return;
     }
     if (res.kind == MP_STR) {
