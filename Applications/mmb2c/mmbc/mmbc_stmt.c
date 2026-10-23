@@ -2741,6 +2741,7 @@ static void do_print(void)
     while (!stmt_end()) {
         struct val v;
         const char *pw, *vl;
+        int vneg = 0;
         const struct mixed *mc;
         if (accept_op(";")) {
             suppress_nl = 1;
@@ -2784,7 +2785,7 @@ static void do_print(void)
         v = expr();
         suppress_nl = 0;
         pw = v.ty == TY_I ? whole_call(v.code, "mm_ipow") : NULL;
-        vl = v.ty == TY_F ? whole_call(v.code, "mm_val") : NULL;
+        vl = v.ty == TY_F ? val_of(v.code, &vneg) : NULL;
         mc = v.ty == TY_F ? mixed_choice_get(v.code) : NULL;
         if (v.ty == TY_S) {
             emit(prcall(chan, "s", v.code));
@@ -2795,9 +2796,15 @@ static void do_print(void)
             emit(prcall(chan, "s", sfmt("mm_ipows(%s)", pw)));
         } else if (vl != NULL) {
             /* VAL is an integer for an integer string, and PRINT shows it
-               as one: 2000000, not 2e+06 */
+               as one: 2000000, not 2e+06 - bracketed or negated too,
+               which keep its type */
             cv.tmp_used = 1;
-            emit(prcall(chan, "s", sfmt("mm_vals(%s)", vl)));
+            if (vneg)
+                emit(prcall(chan, "s",
+                            sfmt("mm_valfmt(%s, 3, 0, MM_AUTO_PRECISION, "
+                                 "\"\\001\" \" \")", vl)));
+            else
+                emit(prcall(chan, "s", sfmt("mm_vals(%s)", vl)));
         } else if (mc != NULL) {
             /* a CHOICE of an integer and a float: the chosen one, in its
                own type - one statement, both calls flushable */

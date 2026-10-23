@@ -727,6 +727,36 @@ const char *whole_call(const char *code, const char *name)
     return NULL;
 }
 
+/* The argument text when code is a VAL(...) - bracketed, or under unary
+ * minuses, as deep as the program has it - with *neg set when there is
+ * an odd number of minuses; else NULL.  Brackets leave a value as it is
+ * and op_neg leaves an integer an integer, so -VAL(a$) and (VAL(a$))
+ * still have StrVal's type, which PRINT and STR$ show (FUZIX #28). */
+const char *val_of(const char *code, int *neg)
+{
+    *neg = 0;
+    for (;;) {
+        const char *a = whole_call(code, "mm_val");
+        size_t n = strlen(code);
+
+        if (a != NULL)
+            return a;
+        if (n >= 4 && strncmp(code, "(-(", 3) == 0 && code[n - 1] == ')') {
+            char *mid = sfmt("%.*s", (int)(n - 2), code + 1);
+            const char *inner = whole_call(mid, "-");
+
+            if (inner != NULL) {
+                code = inner;
+                *neg = !*neg;
+                continue;
+            }
+        }
+        code = whole_call(code, "");
+        if (code == NULL)
+            return NULL;
+    }
+}
+
 /* A CHOICE of an integer and a float, by its code: the Python's
  * mixed_choice dict, looked up linearly.  fun_ternary returns the chosen
  * argument with its own type, decided as it runs; PRINT, STR$ and an
@@ -778,23 +808,15 @@ const char *as_int(struct val v)
            integer string, so an integer target, an integer argument or an
            integer operator gets it exactly - through a float
            VAL("9007199254740993") lost its last digit and
-           HEX$(VAL("&H7FFFFFFFFFFFFFFF")) was "Number too large". */
-        const char *a = whole_call(v.code, "mm_val");
+           HEX$(VAL("&H7FFFFFFFFFFFFFFF")) was "Number too large".
+           -VAL(...) is the integer negated, as op_neg leaves an integer,
+           and brackets change nothing. */
+        int neg;
+        const char *a = val_of(v.code, &neg);
         const struct mixed *mc;
-        size_t n = strlen(v.code);
 
         if (a != NULL)
-            return sfmt("mm_vali(%s)", a);
-        /* -VAL(...): the integer negated, as op_neg leaves an integer */
-        if (n >= 4 && strncmp(v.code, "(-(", 3) == 0
-            && v.code[n - 1] == ')') {
-            char *mid = sfmt("%.*s", (int)(n - 2), v.code + 1);
-            const char *inner = whole_call(mid, "-");
-
-            a = inner != NULL ? whole_call(inner, "mm_val") : NULL;
-            if (a != NULL)
-                return sfmt("(-(mm_vali(%s)))", a);
-        }
+            return sfmt(neg ? "(-(mm_vali(%s)))" : "mm_vali(%s)", a);
         /* a CHOICE of an integer and a float: each branch in its type */
         mc = mixed_choice_get(v.code);
         if (mc != NULL)

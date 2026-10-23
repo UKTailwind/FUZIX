@@ -194,6 +194,10 @@ MMFLOAT   mm_val   (const char *s);
 MMINTEGER mm_vali  (const char *s);  /* VAL taken as an integer: exact */
 char     *mm_vals  (const char *s);  /* PRINT VAL(s) by StrVal's type     */
 char     *mm_vstr  (const char *s);  /* STR$(VAL(s)) by StrVal's type     */
+/* -VAL(s), and STR$(VAL(s), m, n, pad), by StrVal's type: fl 1 negates,
+   fl 2 adds PRINT's blank for the sign */
+char     *mm_valfmt(const char *s, int fl, MMINTEGER m, MMINTEGER n,
+                    const char *pad);
 char *mm_chr   (MMINTEGER c);
 char *mm_left  (const char *s, MMINTEGER n);
 char *mm_right (const char *s, MMINTEGER n);

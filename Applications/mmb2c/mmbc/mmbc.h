@@ -585,6 +585,8 @@ void note_touch(const char *canon, struct sym *s);
 const char *as_int(struct val v);
 /* the argument text when code is exactly name(...), else NULL */
 const char *whole_call(const char *code, const char *name);
+/* VAL(...)'s argument text through brackets and unary minuses (*neg odd) */
+const char *val_of(const char *code, int *neg);
 /* the value of an integer literal's text (5LL, (-(5LL))) in *out; 0 if not */
 int int_literal(const char *code, long long *out);
 /* a numeric literal's value as getnumber makes it, in *out; 0 if not */

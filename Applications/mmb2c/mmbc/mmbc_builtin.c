@@ -590,12 +590,19 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
 
         if (args[0].ty == TY_F) {
             /* VAL and a mixed CHOICE carry the type they have when they
-               run, and STR$ shows it (see the PRINT items) */
-            const char *vl = whole_call(args[0].code, "mm_val");
+               run, and STR$ shows it (see the PRINT items) - with its
+               other arguments too, StrFormat's integer path for an
+               integer: STR$(VAL("2000000"), 10) is "   2000000" */
+            int neg;
+            const char *vl = val_of(args[0].code, &neg);
             const struct mixed *mc;
 
-            if (vl != NULL && nargs == 1)
-                return mkval(sfmt("mm_vstr(%s)", vl), TY_S);
+            if (vl != NULL) {
+                if (nargs == 1 && !neg)
+                    return mkval(sfmt("mm_vstr(%s)", vl), TY_S);
+                return mkval(sfmt("mm_valfmt(%s, %d, %s, %s, %s)", vl,
+                                  neg, m2, nn, pad), TY_S);
+            }
             mc = mixed_choice_get(args[0].code);
             if (mc != NULL) {
                 struct val va = mixed_a(mc), vb = mixed_b(mc);

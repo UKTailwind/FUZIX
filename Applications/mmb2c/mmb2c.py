@@ -1078,6 +1078,29 @@ def whole_call(code, name):
     return None
 
 
+def val_of(code):
+    """(argument text, negated) when code is a VAL(...) - bracketed, or
+    under unary minuses, as deep as the program has it - else None.
+    Brackets leave a value as it is and op_neg leaves an integer an
+    integer, so -VAL(a$) and (VAL(a$)) still have StrVal's type, which
+    PRINT and STR$ show (FUZIX #28)."""
+    neg = False
+    while True:
+        a = whole_call(code, 'mm_val')
+        if a is not None:
+            return (a, neg)
+        if code[:3] == '(-(' and code[-1:] == ')':
+            inner = whole_call(code[1:-1], '-')
+            if inner is not None:
+                code = inner
+                neg = not neg
+                continue
+        inner = whole_call(code, '')
+        if inner is None:
+            return None
+        code = inner
+
+
 def int_literal(code):
     """The value of an integer literal's text - 5LL, (5LL), (-(5LL)) -
     or None for anything else."""
@@ -1876,16 +1899,13 @@ class Conv(object):
             # or an integer operator gets it exactly - through a float
             # VAL("9007199254740993") lost its last digit and
             # HEX$(VAL("&H7FFFFFFFFFFFFFFF")) was "Number too large".
-            a = whole_call(code, 'mm_val')
-            if a is not None:
-                return 'mm_vali(%s)' % a
-            # -VAL(...): the integer negated, as op_neg leaves an integer
-            if code[:3] == '(-(' and code[-1:] == ')':
-                inner = whole_call(code[1:-1], '-')
-                a = whole_call(inner, 'mm_val') if inner is not None \
-                    else None
-                if a is not None:
-                    return '(-(mm_vali(%s)))' % a
+            # -VAL(...) is the integer negated, as op_neg leaves an
+            # integer, and brackets change nothing.
+            vv = val_of(code)
+            if vv is not None:
+                if vv[1]:
+                    return '(-(mm_vali(%s)))' % vv[0]
+                return 'mm_vali(%s)' % vv[0]
             # a CHOICE of an integer and a float: each branch in its type
             mc = self.mixed_choice.get(code)
             if mc is not None:
@@ -3423,10 +3443,15 @@ class Conv(object):
             pad = s(3) if len(args) > 3 else '"\\001" " "'
             if args[0][1] == TY_F:
                 # VAL and a mixed CHOICE carry the type they have when
-                # they run, and STR$ shows it (see the PRINT items)
-                vl = whole_call(args[0][0], 'mm_val')
-                if vl is not None and len(args) == 1:
-                    return ('mm_vstr(%s)' % vl, TY_S)
+                # they run, and STR$ shows it (see the PRINT items) -
+                # with its other arguments too, StrFormat's integer path
+                # for an integer: STR$(VAL("2000000"), 10) is "   2000000"
+                vv = val_of(args[0][0])
+                if vv is not None:
+                    if len(args) == 1 and not vv[1]:
+                        return ('mm_vstr(%s)' % vv[0], TY_S)
+                    return ('mm_valfmt(%s, %d, %s, %s, %s)'
+                            % (vv[0], 1 if vv[1] else 0, m, nn, pad), TY_S)
                 mc = self.mixed_choice.get(args[0][0])
                 if mc is not None:
                     br = ['mm_str_%s(%s, %s, %s, %s)'
@@ -8515,7 +8540,7 @@ class Conv(object):
             v = self.expr()
             suppress_nl = False
             pw = whole_call(v[0], 'mm_ipow') if v[1] == TY_I else None
-            vl = whole_call(v[0], 'mm_val') if v[1] == TY_F else None
+            vl = val_of(v[0]) if v[1] == TY_F else None
             mc = self.mixed_choice.get(v[0]) if v[1] == TY_F else None
             if v[1] == TY_S:
                 self.emit(self.prcall(chan, 's', v[0]))
@@ -8526,9 +8551,15 @@ class Conv(object):
                 self.emit(self.prcall(chan, 's', 'mm_ipows(%s)' % pw))
             elif vl is not None:
                 # VAL is an integer for an integer string, and PRINT
-                # shows it as one: 2000000, not 2e+06
+                # shows it as one: 2000000, not 2e+06 - bracketed or
+                # negated too, which keep its type
                 self.tmp_used = True
-                self.emit(self.prcall(chan, 's', 'mm_vals(%s)' % vl))
+                if vl[1]:
+                    self.emit(self.prcall(
+                        chan, 's', 'mm_valfmt(%s, 3, 0, MM_AUTO_PRECISION, '
+                        '"\\001" " ")' % vl[0]))
+                else:
+                    self.emit(self.prcall(chan, 's', 'mm_vals(%s)' % vl[0]))
             elif mc is not None:
                 # a CHOICE of an integer and a float: the chosen one, in
                 # its own type - one statement, both calls flushable

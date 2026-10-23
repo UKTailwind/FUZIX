@@ -1262,11 +1262,9 @@ char *mm_strrep(MMINTEGER n, MMINTEGER c)
     return t;
 }
 
-char *mm_str_i(MMINTEGER v, MMINTEGER m, MMINTEGER n, const char *pad)
+static void mm_istr(char *b, MMINTEGER v, MMINTEGER m, MMINTEGER n,
+                    unsigned char ch)
 {
-    char b[MM_INTBUF + 64];
-    char *t = mm_tmp();
-    unsigned char ch = (unsigned char)((mm_slen(pad) > 0) ? pad[1] : ' ');
     if (n < 0) {                            /* negative n -> exponential  */
         mm_float_to_str(b, (MMFLOAT)v, (int)m, (int)n, ch);
     } else {
@@ -1277,6 +1275,44 @@ char *mm_str_i(MMINTEGER v, MMINTEGER m, MMINTEGER n, const char *pad)
             while (n--) *e++ = '0';
             *e = 0;
         }
+    }
+}
+
+char *mm_str_i(MMINTEGER v, MMINTEGER m, MMINTEGER n, const char *pad)
+{
+    char b[MM_INTBUF + 64];
+    char *t = mm_tmp();
+    unsigned char ch = (unsigned char)((mm_slen(pad) > 0) ? pad[1] : ' ');
+    mm_istr(b, v, m, n, ch);
+    mm_ssetc(t, b);
+    return t;
+}
+
+/* VAL in its own type where brackets or a unary minus stand round it -
+ * op_neg leaves an integer an integer - and STR$ with its other
+ * arguments, StrFormat's integer path for an integer:
+ * STR$(VAL("2000000"), 10) is "   2000000", not "         2e+06"
+ * (FUZIX #28).  fl 1 negates; fl 2 is PRINT's form, the sign's blank in
+ * front as mm_vals has it. */
+char *mm_valfmt(const char *s, int fl, MMINTEGER m, MMINTEGER n,
+                const char *pad)
+{
+    char b[MM_INTBUF + 64];
+    char *t = mm_tmp();
+    unsigned char ch = (unsigned char)((mm_slen(pad) > 0) ? pad[1] : ' ');
+    MMFLOAT f;
+    MMINTEGER i;
+
+    b[0] = ' ';
+    if (mm_strval(mm_cstr(s), &f, &i)) {
+        if (fl & 1)
+            f = -f;
+        mm_float_to_str(b + (((fl & 2) && f >= 0) ? 1 : 0), f, (int)m,
+                        (int)n, ch);
+    } else {
+        if (fl & 1)
+            i = (MMINTEGER)(0 - (unsigned long long)i);
+        mm_istr(b + (((fl & 2) && i >= 0) ? 1 : 0), i, m, n, ch);
     }
     mm_ssetc(t, b);
     return t;
