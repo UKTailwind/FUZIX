@@ -105,7 +105,7 @@ static const char *routine_exit_at(int entry)
     const char *pre = "";
 
     if (!entry && cv.uses_onerror && cv.cur != NULL && cv.cur->is_func)
-        pre = "if (__mm_e[1]) mm_err_stmt(); __mm_e[2]--; ";
+        pre = "if (__mm_e[1]) { mm_err_stmt(); } __mm_e[2]--; ";
     if (cv.cur != NULL && cv.cur->heap_locals)
         return sfmt("%smm_lfree(__L); mm_release(__mark);", pre);
     return sfmt("%smm_release(__mark);", pre);

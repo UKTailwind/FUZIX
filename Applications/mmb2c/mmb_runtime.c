@@ -559,9 +559,17 @@ static char mm_prbuf[MM_PRBUF];
 static int  mm_prn;
 static int  mm_prover;                  /* the buffer filled: see below */
 
+/* Held only where a statement guard will commit it.  A SKIP count is
+ * spent at the depth that set it (mm_err_stmt), and a FUNCTION called
+ * inside a literal SKIP window has no guards of its own - so its PRINTs
+ * were held to its exit, or lost at an END in it (FUZIX #21), where the
+ * firmware writes each PRINT's line as the PRINT ends.  IGNORE, which
+ * guards every statement, holds everywhere. */
 static int mm_arming(void)
 {
-    return mm_est != NULL && mm_est[1] != 0;
+    if (mm_est == NULL || mm_est[1] == 0)
+        return 0;
+    return mm_est[1] < 0 || mm_est[2] <= mm_est[3];
 }
 
 /*
@@ -3188,6 +3196,7 @@ MMINTEGER *mm_isink(void)
 
 void mm_end(void)
 {
+    mm_pr_commit();             /* a PRINT held for its guard: END is one */
     mm_close_all();
     mm_gflush();                /* which drains the pixel queue too */
     fflush(stdout);

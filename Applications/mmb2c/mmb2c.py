@@ -6202,7 +6202,7 @@ class Conv(object):
         pre = ''
         if not entry and self.uses_onerror and self.cur is not None \
                 and self.cur.is_func:
-            pre = 'if (__mm_e[1]) mm_err_stmt(); __mm_e[2]--; '
+            pre = 'if (__mm_e[1]) { mm_err_stmt(); } __mm_e[2]--; '
         if self.cur is not None and self.cur.heap_locals:
             return pre + 'mm_lfree(__L); mm_release(__mark);'
         return pre + 'mm_release(__mark);'
