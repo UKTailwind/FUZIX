@@ -1302,8 +1302,10 @@ void do_declare(const char *kw)
         int dyn = 0;
         int alen;
 
-        if (cv.mode == M_EMIT)
+        if (cv.mode == M_EMIT) {
             cv.late_cut = cv.out->n;
+            cv.late_guard = 0;
+        }
         t = nxt();
         if (t->kind != T_ID)
             cv_err("variable name expected in %s", kw);
@@ -1447,6 +1449,19 @@ void do_declare(const char *kw)
     }
 }
 
+/* cmd_dim makes the variable and then sets each value in turn (SetValue,
+ * Commands.c), so a late error in one keeps the array and the values
+ * before it: the cut is here, not at the name, which took the allocation
+ * with it and left the array a null pointer (FUZIX #32).  Inside a
+ * STATIC's once-only guard late_out closes the guard again. */
+static void late_value(const char *guard)
+{
+    if (cv.mode == M_EMIT) {
+        cv.late_cut = cv.out->n;
+        cv.late_guard = guard != NULL;
+    }
+}
+
 static void emit_initialiser(struct sym *s, int is_static)
 {
     const char *guard = NULL;
@@ -1460,7 +1475,10 @@ static void emit_initialiser(struct sym *s, int is_static)
         int k = 0;
         expect_op("(");
         for (;;) {
-            struct val v = expr();
+            struct val v;
+
+            late_value(guard);
+            v = expr();
             if (cv.mode == M_EMIT) {
                 char *sub = linear_index(s, k);
                 if (s->ty == TY_S)
@@ -1476,7 +1494,10 @@ static void emit_initialiser(struct sym *s, int is_static)
         }
         expect_op(")");
     } else {
-        struct val v = expr();
+        struct val v;
+
+        late_value(guard);
+        v = expr();
         if (cv.mode == M_EMIT) {
             if (s->ty == TY_S) {
                 if (v.ty != TY_S)

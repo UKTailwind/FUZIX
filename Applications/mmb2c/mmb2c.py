@@ -1323,6 +1323,7 @@ class Conv(object):
         self.mx_main = [0, 0]         # MAX/MIN temporary pairs in main
         self.mx_n = [0, 0]            # pairs the statement has used so far
         self.late_cut = None          # a late error's cut, if not the start
+        self.late_guard = False       # ... inside a STATIC's once-only guard
         self.ix_depth = 0             # array accesses inside subscripts
         # a CHOICE of an integer and a float, by its code: (cond, a, b)
         self.mixed_choice = {}
@@ -5821,6 +5822,7 @@ class Conv(object):
         while True:
             if self.mode == 'emit':
                 self.late_cut = len(self.out)
+                self.late_guard = False
             t = self.nxt()
             if t[0] != T_ID:
                 self.err("variable name expected in %s" % kw)
@@ -6090,6 +6092,7 @@ class Conv(object):
             self.expect_op('(')
             k = 0
             while True:
+                self.late_value(guard)
                 v = self.expr()
                 if self.mode == 'emit':
                     sub = self.linear_index(s, k)
@@ -6104,6 +6107,7 @@ class Conv(object):
                     break
             self.expect_op(')')
         else:
+            self.late_value(guard)
             v = self.expr()
             if self.mode == 'emit':
                 if s.ty == TY_S:
@@ -6117,6 +6121,17 @@ class Conv(object):
         if guard is not None:
             self.indent -= 1
             self.emit('}')
+
+    def late_value(self, guard):
+        """cmd_dim makes the variable and then sets each value in turn
+        (SetValue, Commands.c), so a late error in one keeps the array
+        and the values before it: the cut is here, not at the name, which
+        took the allocation with it and left the array a null pointer
+        (FUZIX #32).  Inside a STATIC's once-only guard late_out closes
+        the guard again."""
+        if self.mode == 'emit':
+            self.late_cut = len(self.out)
+            self.late_guard = guard is not None
 
     def linear_index(self, s, k):
         """Element k of an array in an initialiser list, in MMBasic's
@@ -6324,8 +6339,9 @@ class Conv(object):
         self.mx_n = [0, 0]
         # Where a late error cuts back to, when not to the statement's
         # start: a DIM with several names keeps the ones before (late_out)
-        cut_outer = self.late_cut
+        cut_outer = (self.late_cut, self.late_guard)
         self.late_cut = None
+        self.late_guard = False
         failed = None
         try:
             try:
@@ -6339,7 +6355,7 @@ class Conv(object):
             failed = str(e)
         finally:
             self.mx_n = mx_outer
-            self.late_cut = cut_outer
+            self.late_cut, self.late_guard = cut_outer
             if self.mode == 'emit' and self.tmp_used \
                     and self.out is out_at_entry and failed is None:
                 out_at_entry.insert(where,
@@ -6430,13 +6446,23 @@ class Conv(object):
         # the failing name, as findvar does one name at a time: their
         # allocation and initialiser stay (FUZIX #23).  Cutting the whole
         # statement left them declared and never allocated.
+        guarded = False
         if self.late_cut is not None and self.late_cut > where:
             where = self.late_cut
+            guarded = self.late_guard
         del out_at_entry[where:]
         self.indent = ind
         self.skip_to_stmt_end()
         self.warn('"%s" when the line runs' % msg)
-        self.emit('mm_error("%s");' % msg)
+        if guarded:
+            # the cut is inside a STATIC's once-only guard: the error is
+            # the first run's, as the initialiser is, and the guard closes
+            self.indent = ind + 1
+            self.emit('mm_error("%s");' % msg)
+            self.indent = ind
+            self.emit('}')
+        else:
+            self.emit('mm_error("%s");' % msg)
 
     def skip_out(self, where, out_at_entry, ind, blocks, tok_at_entry, why):
         """Undo whatever a failed statement emitted and leave a comment in

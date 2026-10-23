@@ -46,6 +46,7 @@ void walk(int mode)
     cv.in_type = 0;
     cv.mx_n[0] = cv.mx_n[1] = 0;
     cv.late_cut = -1;
+    cv.late_guard = 0;
     cv.gosub_n = 0;
     cv.cur = NULL;
     cv.indent = 1;
@@ -111,7 +112,7 @@ static int late_out(int where, struct outbuf *out_at_entry, int ind,
     };
     char msg[sizeof err_msg];
     const char *m = err_msg;
-    int k, blockword = 0;
+    int k, blockword = 0, guarded;
 
     err_late = 0;
     if (strncmp(m, "line ", 5) == 0 && strstr(m, ": ") != NULL)
@@ -168,13 +169,22 @@ static int late_out(int where, struct outbuf *out_at_entry, int ind,
      * the failing name, as findvar does one name at a time: their
      * allocation and initialiser stay (FUZIX #23).  Cutting the whole
      * statement left them declared and never allocated. */
+    guarded = cv.late_cut >= 0 && cv.late_cut > where && cv.late_guard;
     out_at_entry->n = (cv.late_cut >= 0 && cv.late_cut > where)
         ? cv.late_cut : where;
     cv.indent = ind;
     while (!stmt_end())
         cv.i++;
     cv_warn("\"%s\" when the line runs", msg);
-    emit(sfmt("mm_error(\"%s\");", msg));
+    if (guarded) {
+        /* the cut is inside a STATIC's once-only guard: the error is the
+           first run's, as the initialiser is, and the guard closes */
+        cv.indent = ind + 1;
+        emit(sfmt("mm_error(\"%s\");", msg));
+        cv.indent = ind;
+        emit("}");
+    } else
+        emit(sfmt("mm_error(\"%s\");", msg));
     return 1;
 }
 
@@ -232,7 +242,7 @@ void statement(void)
     char *volatile failmsg = NULL;
     jmp_buf jb, *saved;
     int mx_outer[2];
-    int cut_outer;
+    int cut_outer, guard_outer;
 
     blocks_snap = salloc(sizeof(struct block) * (size_t)(nblocks_snap
                                                          ? nblocks_snap
@@ -249,7 +259,9 @@ void statement(void)
     /* Where a late error cuts back to, when not to the statement's
      * start: a DIM with several names keeps the ones before (late_out) */
     cut_outer = cv.late_cut;
+    guard_outer = cv.late_guard;
     cv.late_cut = -1;
+    cv.late_guard = 0;
     /* an error that longjmp'd out of a subscript left its depth up */
     cv.ix_depth = 0;
     saved = err_jmp;
@@ -260,6 +272,7 @@ void statement(void)
         cv.mx_n[0] = mx_outer[0];
         cv.mx_n[1] = mx_outer[1];
         cv.late_cut = cut_outer;
+        cv.late_guard = guard_outer;
     } else if (err_late
                && late_out(where, out_at_entry, ind, blocks_snap,
                            nblocks_snap, tok_at_entry)) {
@@ -269,11 +282,13 @@ void statement(void)
         cv.mx_n[0] = mx_outer[0];
         cv.mx_n[1] = mx_outer[1];
         cv.late_cut = cut_outer;
+        cv.late_guard = guard_outer;
     } else {
         err_jmp = saved;
         cv.mx_n[0] = mx_outer[0];
         cv.mx_n[1] = mx_outer[1];
         cv.late_cut = cut_outer;
+        cv.late_guard = guard_outer;
         if (!cv.lenient) {
             /* the finally clause still runs before the re-raise -
              * failed is None on this path, exactly like the Python */
