@@ -141,7 +141,7 @@ static void fonts_sort(void)
 /* A line as the reference's loader compares it (FileIO.c): TABs and runs
  * of blanks as one blank, none at either end, and the letters upper
  * case - ASCII only, as the Python's is. */
-static char *loader_squash(const char *s)
+char *loader_squash(const char *s)
 {
     char *out = salloc(strlen(s) + 1);
     int n = 0, blank = 1;

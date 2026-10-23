@@ -5013,9 +5013,42 @@ class Conv(object):
         'VGA', 'WEB', 'WIFI',
     )
 
+    def symbols_off_first(self):
+        """Is this line's first statement the program's first, after
+        blank and comment lines and LIBRARY LOAD - SymFindOff's test for
+        OPTION SYMBOLS OFF?"""
+        def body(k):
+            s = loader_squash(self.lines[k])
+            j = 0
+            while j < len(s) and '0' <= s[j] <= '9':
+                j += 1
+            return s[j:].lstrip(' ') if j else s
+        for k in range(self.lineno - 1):
+            s = body(k)
+            if s == '' or s.startswith("'") or s == 'REM' \
+                    or s.startswith('REM '):
+                continue
+            if s.startswith('LIBRARY LOAD'):
+                continue
+            return False
+        return body(self.lineno - 1).startswith('OPTION SYMBOLS OFF')
+
     def do_option(self):
         t = self.peek()
         if t is None:
+            return
+        if t[2] == 'SYMBOLS':
+            # OPTION SYMBOLS OFF (50ada44): the reference builds no symbol
+            # bindings for the run, and there are none here to build, so
+            # at the top of the program it is nothing.  Executed anywhere
+            # else it is "Must be at the top of the program", and SYMBOLS
+            # without OFF is a syntax error.
+            self.i += 1
+            if not self.accept_kw('OFF'):
+                self.note("Invalid syntax")
+                self.skip_statement()
+            elif not self.symbols_off_first():
+                self.note("Must be at the top of the program")
             return
         if t[2] == 'DEFAULT':
             # ... but only the four type words.  OPTION DEFAULT MODE and

@@ -580,6 +580,7 @@ void pass_declarations(void);
  * Fonts bind at program LOAD in MMBasic, so a block at the bottom of a
  * file is in force at the top of it. */
 void pass_fonts(void);
+char *loader_squash(const char *s);   /* a line as the loader compares it */
 void place_label(const char *canon);
 void strip_line_number(void);
 void skip_statement(void);

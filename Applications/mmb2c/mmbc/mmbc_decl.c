@@ -798,6 +798,40 @@ int type_word(void)
     return 0;
 }
 
+/* Line k's text as the loader compares it, a leading line number gone */
+static const char *option_body(int k)
+{
+    const char *s = loader_squash(src_lines[k]);
+    int j = 0;
+
+    while (s[j] >= '0' && s[j] <= '9')
+        j++;
+    if (j)
+        for (s += j; *s == ' '; s++)
+            ;
+    return s;
+}
+
+/* Is this line's first statement the program's first, after blank and
+ * comment lines and LIBRARY LOAD - SymFindOff's test for OPTION SYMBOLS
+ * OFF? */
+static int symbols_off_first(void)
+{
+    int k;
+
+    for (k = 0; k < cv.lineno - 1; k++) {
+        const char *s = option_body(k);
+
+        if (s[0] == 0 || s[0] == '\'' || strcmp(s, "REM") == 0
+            || strncmp(s, "REM ", 4) == 0)
+            continue;
+        if (strncmp(s, "LIBRARY LOAD", 12) == 0)
+            continue;
+        return 0;
+    }
+    return strncmp(option_body(cv.lineno - 1), "OPTION SYMBOLS OFF", 18) == 0;
+}
+
 void do_option(void)
 {
     struct tok *t = peek(0);
@@ -805,6 +839,20 @@ void do_option(void)
 
     if (t == NULL)
         return;
+    if (strcmp(t->up, "SYMBOLS") == 0) {
+        /* OPTION SYMBOLS OFF (50ada44): the reference builds no symbol
+         * bindings for the run, and there are none here to build, so at
+         * the top of the program it is nothing.  Executed anywhere else
+         * it is "Must be at the top of the program", and SYMBOLS without
+         * OFF is a syntax error. */
+        cv.i++;
+        if (!accept_kw("OFF")) {
+            cv_note("Invalid syntax");
+            skip_statement();
+        } else if (!symbols_off_first())
+            cv_note("Must be at the top of the program");
+        return;
+    }
     if (strcmp(t->up, "DEFAULT") == 0
         && (is_kw("INTEGER", 1) || is_kw("FLOAT", 1)
             || is_kw("STRING", 1) || is_kw("NONE", 1))) {
