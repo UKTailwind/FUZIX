@@ -339,8 +339,22 @@ void decl_statement(void)
         return;
     }
     if (strcmp(up, "SUB") == 0 || strcmp(up, "FUNCTION") == 0) {
+        /* Only this pass reads a SUB or FUNCTION line, so what goes wrong
+           in it has to be kept: swallowed with the rest of this pass's
+           raises, the routine was left half declared - a parameter
+           short, the wrong type - and the program translated without a
+           word. */
+        jmp_buf jb, *saved = err_jmp;
+
         cv.i++;
-        decl_routine(strcmp(up, "FUNCTION") == 0);
+        err_jmp = &jb;
+        if (setjmp(jb) == 0) {
+            decl_routine(strcmp(up, "FUNCTION") == 0);
+            err_jmp = saved;
+        } else {
+            err_jmp = saved;
+            errors_add_dedup(err_msg);
+        }
         skip_statement();
         return;
     }

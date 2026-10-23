@@ -837,6 +837,30 @@ def line_too_long(s):
     return False
 
 
+def loader_squash(s):
+    """A line as the reference's loader compares it (FileIO.c): TABs
+    and runs of blanks as one blank, none at either end, and the
+    letters upper case - ASCII only, as mmbc's is."""
+    out = []
+    blank = True
+    for c in s:
+        if c in ' \t\r\n':
+            if not blank:
+                out.append(' ')
+            blank = True
+        else:
+            out.append(chr(ord(c) - 32) if 'a' <= c <= 'z' else c)
+            blank = False
+    if out and out[-1] == ' ':
+        out.pop()
+    return ''.join(out)
+
+
+def loader_namechar(c):
+    """isnamechar on an upper-cased character, '' (the end) being none."""
+    return c != '' and ('A' <= c <= 'Z' or '0' <= c <= '9' or c in '_.')
+
+
 def whole_call(code, name):
     """The argument text when code is exactly name(...) - the call is the
     whole expression - else None.  Quoted C text is skipped."""
@@ -4050,11 +4074,52 @@ class Conv(object):
         the glyphs MSB first).  That is the whole trick: no bit
         reordering anywhere, one swap here at translation time.
         """
+        ignore = False          # inside #COMMENT START ... #COMMENT END
+        debugoff = True         # #MMDEBUG OFF, the loader's default
         i = 0
         while i < len(self.lines):
             self.lineno = i + 1
             txt = self.lines[i].strip()
             up = txt.upper()
+            # The reference's loader takes every line that starts with
+            # '#' for itself (FileIO.c LoadFile), so none of them is
+            # BASIC.  #COMMENT START to #COMMENT END makes the lines
+            # between comments, an MMDEBUG statement is one unless
+            # #MMDEBUG ON, and a '#' line it does not know is dropped.
+            # #DEFINE, #INCLUDE and #MMDEBUG ON are refused: commented
+            # out as statements, their substitutions and files vanished
+            # and the code inside a #COMMENT was compiled, with rc 0.
+            sq = loader_squash(self.lines[i])
+            if ignore and not sq.startswith('#COMMENT END'):
+                self.lines[i] = ''
+                i += 1
+                continue
+            if sq.startswith('#'):
+                w = sq[1:]
+                if w.startswith('DEFINE') and not loader_namechar(w[6:7]):
+                    self.errors.append("line %d: #DEFINE is not translated"
+                                       % self.lineno)
+                elif w.startswith('COMMENT END'):
+                    ignore = False
+                elif w.startswith('COMMENT START'):
+                    ignore = True
+                elif w.startswith('MMDEBUG ON'):
+                    debugoff = False
+                    self.errors.append("line %d: #MMDEBUG ON is not "
+                                       "translated" % self.lineno)
+                elif w.startswith('MMDEBUG OFF'):
+                    debugoff = True
+                elif w.startswith('INCLUDE'):
+                    self.errors.append("line %d: #INCLUDE is not "
+                                       "translated" % self.lineno)
+                self.lines[i] = ''
+                i += 1
+                continue
+            if debugoff and sq.startswith('MMDEBUG') \
+                    and not loader_namechar(sq[7:8]):
+                self.lines[i] = ''
+                i += 1
+                continue
             if up.startswith('CSUB') and up[4:5] in ('', ' ', '\t'):
                 # A CSUB is machine code for the PicoMite's interpreter,
                 # read to its End CSub (MM_Misc.c:9804): nothing here can
@@ -4447,7 +4512,16 @@ class Conv(object):
             return
         if up == 'SUB' or up == 'FUNCTION':
             self.i += 1
-            self.decl_routine(up == 'FUNCTION')
+            # Only this pass reads a SUB or FUNCTION line, so what goes
+            # wrong in it has to be kept: swallowed with the rest of this
+            # pass's raises, the routine was left half declared - a
+            # parameter short, the wrong type - and the program
+            # translated without a word.
+            try:
+                self.decl_routine(up == 'FUNCTION')
+            except MMError as e:
+                if str(e) not in self.errors:
+                    self.errors.append(str(e))
             self.skip_statement()
             return
         if up == 'END' and (self.is_kw('SUB', 1) or self.is_kw('FUNCTION', 1)):

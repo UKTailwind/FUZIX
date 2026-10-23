@@ -138,14 +138,47 @@ static void fonts_sort(void)
     }
 }
 
+/* A line as the reference's loader compares it (FileIO.c): TABs and runs
+ * of blanks as one blank, none at either end, and the letters upper
+ * case - ASCII only, as the Python's is. */
+static char *loader_squash(const char *s)
+{
+    char *out = salloc(strlen(s) + 1);
+    int n = 0, blank = 1;
+
+    for (; *s; s++) {
+        if (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') {
+            if (!blank)
+                out[n++] = ' ';
+            blank = 1;
+        } else {
+            out[n++] = (*s >= 'a' && *s <= 'z') ? *s - 32 : *s;
+            blank = 0;
+        }
+    }
+    if (n > 0 && out[n - 1] == ' ')
+        n--;
+    out[n] = 0;
+    return out;
+}
+
+/* isnamechar on an upper-cased character, 0 (the end) being none */
+static int loader_namechar(char c)
+{
+    return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+           || c == '_' || c == '.';
+}
+
 void pass_fonts(void)
 {
+    int ignore = 0;             /* inside #COMMENT START ... #COMMENT END */
+    int debugoff = 1;           /* #MMDEBUG OFF, the loader's default */
     unsigned long *words = NULL;
     int nwords = 0, cwords = 0;
     int i = 0;
 
     while (i < src_nlines) {
-        char *line, *up, *p, *num, *u_csub;
+        char *line, *up, *p, *num, *u_csub, *sq;
         int start, ended = 0, bad = 0, fno, skip;
 
         /* the scratch pool is per line here, as it is in tokenize:
@@ -155,6 +188,49 @@ void pass_fonts(void)
         cv.lineno = i + 1;
         line = fstrip(src_lines[i]);
         up = upper(line);
+        /* The reference's loader takes every line that starts with '#'
+         * for itself (FileIO.c LoadFile), so none of them is BASIC.
+         * #COMMENT START to #COMMENT END makes the lines between
+         * comments, an MMDEBUG statement is one unless #MMDEBUG ON, and
+         * a '#' line it does not know is dropped.  #DEFINE, #INCLUDE
+         * and #MMDEBUG ON are refused: commented out as statements,
+         * their substitutions and files vanished and the code inside a
+         * #COMMENT was compiled, with rc 0. */
+        sq = loader_squash(src_lines[i]);
+        if (ignore && strncmp(sq, "#COMMENT END", 12) != 0) {
+            src_lines[i] = pstr("");
+            i++;
+            continue;
+        }
+        if (sq[0] == '#') {
+            const char *w = sq + 1;
+
+            if (strncmp(w, "DEFINE", 6) == 0 && !loader_namechar(w[6]))
+                errors_add(sfmt("line %d: #DEFINE is not translated",
+                                i + 1));
+            else if (strncmp(w, "COMMENT END", 11) == 0)
+                ignore = 0;
+            else if (strncmp(w, "COMMENT START", 13) == 0)
+                ignore = 1;
+            else if (strncmp(w, "MMDEBUG ON", 10) == 0) {
+                debugoff = 0;
+                errors_add(sfmt("line %d: #MMDEBUG ON is not translated",
+                                i + 1));
+            } else if (strncmp(w, "MMDEBUG OFF", 11) == 0)
+                debugoff = 1;
+            else if (strncmp(w, "INCLUDE", 7) == 0)
+                errors_add(sfmt("line %d: #INCLUDE is not translated",
+                                i + 1));
+            src_lines[i] = pstr("");
+            i++;
+            continue;
+        }
+        if (debugoff && strncmp(sq, "MMDEBUG", 7) == 0
+            && !loader_namechar(sq[7])) {
+            src_lines[i] = pstr("");
+            i++;
+            continue;
+        }
         if (strncmp(up, "CSUB", 4) == 0
             && (up[4] == 0 || up[4] == ' ' || up[4] == '\t')) {
             /* A CSUB is machine code for the PicoMite's interpreter, read
