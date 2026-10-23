@@ -225,6 +225,18 @@ void statement_inner(void)
         return;
     up = (t->kind == T_ID) ? t->up : t->text;
 
+    /* Slash-star is a command, cmd_comment: the block after it is blanked
+       by pass_fonts, and the command itself does nothing.  It stays a
+       statement so that IF 1 THEN slash-star is a one-line IF, as there,
+       and a block comment counts before OPTION SYMBOLS OFF (FUZIX #24). */
+    /* Only a slash-star that ends its statement, as pass_fonts leaves a
+       real one: one with a name after it is no command there. */
+    if (is_op("/", 0) && is_op("*", 1)
+        && (peek(2) == NULL || is_op(":", 2) || is_kw("ELSE", 2))) {
+        cv.i += 2;
+        return;
+    }
+
     if (skip_type_block(up))
         return;
     /* A SUB the program defines WINS over a statement of the same name -

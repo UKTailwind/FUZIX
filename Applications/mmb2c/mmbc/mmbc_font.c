@@ -197,7 +197,11 @@ static int block_open_at(const char *s)
                 q = 0;
         } else if (c == ' ' || c == '\t') {
             /* blanks change nothing */
-        } else if (start && c == '/' && s[i + 1] == '*') {
+        } else if (start && c == '/' && s[i + 1] == '*'
+                   && !loader_namechar(ascii_upper(s[i + 2]
+                                                   ? s[i + 2] : ' '))) {
+            /* a command only if no name character follows: slash-star
+               then a name is no match for the tokeniser's (FUZIX #24) */
             return i;
         } else if (start && ascii_upper(c) == 'R'
                    && ascii_upper(s[i + 1]) == 'E'
@@ -205,6 +209,21 @@ static int block_open_at(const char *s)
                    && !loader_namechar(ascii_upper(s[i + 3]
                                                    ? s[i + 3] : ' '))) {
             return -1;
+        } else if (loader_namechar(ascii_upper(c))
+                   && !(c >= '0' && c <= '9')) {
+            /* a word: after THEN or ELSE a statement starts, as after a
+               ':', so IF 1 THEN slash-star opens a block as it does there */
+            char w[5];
+            int j = i, k;
+
+            while (s[j] && loader_namechar(ascii_upper(s[j])))
+                j++;
+            for (k = 0; k < 4 && i + k < j; k++)
+                w[k] = ascii_upper(s[i + k]);
+            w[k] = 0;
+            start = j - i == 4
+                    && (strcmp(w, "THEN") == 0 || strcmp(w, "ELSE") == 0);
+            i = j - 1;          /* the loop's i++ steps to j */
         } else {
             if (c == '"')
                 q = 1;
@@ -223,21 +242,33 @@ static int block_open_at(const char *s)
  * "" if there is none. */
 static const char *block_close_rest(const char *s)
 {
-    int j = 0, q = 0;
+    int j = 0, n, q = 0;
+    const char *num = "";
 
     while (s[j] == ' ' || s[j] == '\t')
         j++;
+    /* A line number goes first, as on any line (FUZIX #24): a numbered
+       star-slash ends the block, and keeps its number for a GOTO. */
+    n = j;
+    while (s[n] >= '0' && s[n] <= '9')
+        n++;
+    if (n > j) {
+        num = sfmt("%.*s ", n - j, s + j);
+        j = n;
+        while (s[j] == ' ' || s[j] == '\t')
+            j++;
+    }
     if (s[j] != '*' || s[j + 1] != '/')
         return NULL;
     for (j += 2; s[j]; j++) {
         if (s[j] == '"')
             q = !q;
         else if (!q && s[j] == ':')
-            return s + j + 1;
+            return sfmt("%s%s", num, s + j + 1);
         else if (!q && s[j] == '\'')
-            return "";
+            return num;
     }
-    return "";
+    return num;
 }
 
 void pass_fonts(void)
@@ -337,9 +368,12 @@ void pass_fonts(void)
                         closed = 1;
                 /* with no star-slash to come, every line after is
                    comment, and the slash-star itself is cmd_comment's
-                   error when it runs */
+                   error when it runs; otherwise it stays, a statement
+                   that does nothing */
                 if (!closed)
                     strcat(head, "Error \"No matching END declaration\"");
+                else
+                    strcat(head, "/*");
                 src_lines[i] = pstr(head);
                 inblock = 1;
                 i++;

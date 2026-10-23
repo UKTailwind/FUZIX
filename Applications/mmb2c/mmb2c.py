@@ -965,11 +965,24 @@ def block_open_at(s):
                 q = False
         elif c in ' \t':
             pass
-        elif start and s[i:i + 2] == '/*':
+        elif start and s[i:i + 2] == '/*' \
+                and not loader_namechar(ascii_upper(s[i + 2:i + 3] or ' ')):
+            # a command only if no name character follows: "/*comment"
+            # is no match for the tokeniser's /* (FUZIX #24)
             return i
         elif start and ''.join(ascii_upper(x) for x in s[i:i + 3]) == 'REM' \
                 and not loader_namechar(ascii_upper(s[i + 3:i + 4] or ' ')):
             return -1
+        elif loader_namechar(ascii_upper(c)) and not is_digit(c):
+            # a word: after THEN or ELSE a statement starts, as after a
+            # ':', so IF 1 THEN /* opens a block as it does there
+            j = i
+            while j < n and loader_namechar(ascii_upper(s[j])):
+                j += 1
+            start = ''.join(ascii_upper(x) for x in s[i:j]) in ('THEN',
+                                                                'ELSE')
+            i = j
+            continue
         else:
             if c == '"':
                 q = True
@@ -989,8 +1002,19 @@ def block_close_rest(s):
     j = 0
     while j < len(s) and s[j] in ' \t':
         j += 1
+    # A line number goes first, as on any line (FUZIX #24): "40 */" ends
+    # the block, and keeps its number for a GOTO 40.
+    n = j
+    while n < len(s) and is_digit(s[n]):
+        n += 1
+    num = s[j:n]
+    if num:
+        j = n
+        while j < len(s) and s[j] in ' \t':
+            j += 1
     if s[j:j + 2] != '*/':
         return None
+    num = num + ' ' if num else ''
     q = False
     k = j + 2
     while k < len(s):
@@ -998,11 +1022,11 @@ def block_close_rest(s):
         if c == '"':
             q = not q
         elif not q and c == ':':
-            return s[k + 1:]
+            return num + s[k + 1:]
         elif not q and c == "'":
-            return ''
+            return num
         k += 1
-    return ''
+    return num
 
 
 def whole_call(code, name):
@@ -4479,9 +4503,12 @@ class Conv(object):
                 closed = [j for j in range(i + 1, len(self.lines))
                           if block_close_rest(self.lines[j]) is not None]
                 # with no */ to come, every line after is comment, and
-                # the /* itself is cmd_comment's error when it runs
+                # the /* itself is cmd_comment's error when it runs;
+                # otherwise it stays, a statement that does nothing
                 if not closed:
                     head += 'Error "No matching END declaration"'
+                else:
+                    head += '/*'
                 self.lines[i] = head
                 inblock = True
                 i += 1
@@ -6266,6 +6293,18 @@ class Conv(object):
         if t is None:
             return
         up = t[2] if t[0] == T_ID else t[1]
+
+        # /* is a command, cmd_comment: the block after it is blanked by
+        # pass_fonts, and the command itself does nothing.  It stays a
+        # statement so that IF 1 THEN /* is a one-line IF, as there, and
+        # a block comment counts before OPTION SYMBOLS OFF (FUZIX #24).
+        # Only a /* that ends its statement, as pass_fonts leaves a real
+        # one: /*comment is no command there, and fails as it does.
+        if self.is_op('/') and self.is_op('*', 1) \
+                and (self.peek(2) is None or self.is_op(':', 2)
+                     or self.is_kw('ELSE', 2)):
+            self.i += 2
+            return
 
         if self.skip_type_block(up):
             return
