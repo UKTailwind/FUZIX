@@ -4041,17 +4041,23 @@ class Conv(object):
             k = None
             kexpr = self.as_int(dim)
         # fun_bound's order: the dimension is getint(..., 0, MAXDIM)
-        # first; 0 is OPTION BASE whatever the variable; a scalar is
-        # "Expected an array" and a dimension it does not have is
-        # "Dimensions" - raised as the line runs, as there.  It used to
-        # be a translate-time refusal for a scalar and 0 for a missing
-        # dimension, and an array parameter read past its bounds table.
+        # first; then findvar, which says "Array dimensions" for x() when
+        # x is no array; then 0 is OPTION BASE whatever the variable, and
+        # a dimension it does not have is "Dimensions" - raised as the
+        # line runs, as there.  It used to be a translate-time refusal
+        # for a scalar and 0 for a missing dimension, and an array
+        # parameter read past its bounds table.  (fun_bound's own
+        # "Expected an array" is for a bare name, which BOUND here does
+        # not translate.)
         if k is not None and (k < 0 or k > 5):
             return '(mm_error("%d is invalid (valid is 0 to 5)"), 0LL)' % k
+        if not sym.is_array:
+            if k is None:
+                return ('(mm_range(%s, 0, 5), mm_error("Array dimensions"),'
+                        ' 0LL)' % kexpr)
+            return '(mm_error("Array dimensions"), 0LL)'
         if k == 0:
             return str(self.opt_base)
-        if not sym.is_array:
-            return '(mm_error("Expected an array"), 0LL)'
         if sym.is_param or sym.dynamic:
             nm = (sym.bacc if sym.dynamic
                   else '__b_' + sym.name.replace('.', '__'))

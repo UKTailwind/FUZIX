@@ -1,8 +1,10 @@
  3 3 4 0
 dim 3: Dimensions
 dim 6: 6 is invalid (valid is 0 to 5)
-scalar: Expected an array
-scalar 0:  0
+scalar: Array dimensions
+scalar 0: Array dimensions
+scalar d: Array dimensions
+scalar 7: 7 is invalid (valid is 0 to 5)
 param  3 4
 param 3: Dimensions
 param d:  4

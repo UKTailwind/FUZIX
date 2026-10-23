@@ -1696,18 +1696,24 @@ const char *bound_of(struct sym *sym, struct val dim, int has_dim)
         kexpr = as_int(dim);
     }
     /* fun_bound's order: the dimension is getint(..., 0, MAXDIM) first;
-       0 is OPTION BASE whatever the variable; a scalar is "Expected an
-       array" and a dimension it does not have is "Dimensions" - raised as
-       the line runs, as there.  It used to be a translate-time refusal
-       for a scalar and 0 for a missing dimension, and an array parameter
-       read past its bounds table. */
+       then findvar, which says "Array dimensions" for x() when x is no
+       array; then 0 is OPTION BASE whatever the variable, and a dimension
+       it does not have is "Dimensions" - raised as the line runs, as
+       there.  It used to be a translate-time refusal for a scalar and 0
+       for a missing dimension, and an array parameter read past its
+       bounds table.  (fun_bound's own "Expected an array" is for a bare
+       name, which BOUND here does not translate.) */
     if (has_k && (k < 0 || k > 5))
         return sfmt("(mm_error(\"%ld is invalid (valid is 0 to 5)\"), 0LL)",
                     k);
+    if (!sym->is_array) {
+        if (!has_k)
+            return sfmt("(mm_range(%s, 0, 5), mm_error(\"Array "
+                        "dimensions\"), 0LL)", kexpr);
+        return "(mm_error(\"Array dimensions\"), 0LL)";
+    }
     if (has_k && k == 0)
         return sfmt("%d", cv.opt_base);
-    if (!sym->is_array)
-        return "(mm_error(\"Expected an array\"), 0LL)";
     if (sym->is_param || sym->dynamic) {
         const char *nm = sym->dynamic ? sym->bacc : bname(sym->name);
 
