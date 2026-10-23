@@ -1,0 +1,9 @@
+ 149 149
+ 149 153
+HHH5
+200 is invalid (valid is -128 to 128)
+21 is invalid (valid is -20 to 20)
+Zero length argument
+-200 is invalid (valid is -128 to 128)
+-21 is invalid (valid is -20 to 20)
+end

@@ -1278,12 +1278,39 @@ static void mm_istr(char *b, MMINTEGER v, MMINTEGER m, MMINTEGER n,
     }
 }
 
+/* STR$'s other arguments as fun_str takes them, in its order: the digits
+ * before the point getint(m, -128, 128), those after it getint(n, -20,
+ * 20) when the program gave n - MM_AUTO_PRECISION is its absence, so an
+ * explicit 999 is taken as that and not refused - and a padding string
+ * that is not empty, its first character to seven bits.  The widths bound
+ * the text at 160 characters, which MM_STRSZ holds: unchecked,
+ * STR$(5, 200) ran off the end of a 129-byte buffer, and so did widths
+ * fun_str accepts, STR$(5, 128, 20) (FUZIX #37).  The pad character, or
+ * -1 when it raised. */
+static int mm_str_args(MMINTEGER m, MMINTEGER n, const char *pad)
+{
+    if (mm_range(m, -128, 128))
+        return -1;
+    if (n != MM_AUTO_PRECISION && mm_range(n, -20, 20))
+        return -1;
+    if (mm_slen(pad) == 0) {
+        mm_error("Zero length argument");
+        return -1;
+    }
+    return (unsigned char)pad[1] & 0x7F;
+}
+
 char *mm_str_i(MMINTEGER v, MMINTEGER m, MMINTEGER n, const char *pad)
 {
-    char b[MM_INTBUF + 64];
+    char b[MM_STRSZ];
     char *t = mm_tmp();
-    unsigned char ch = (unsigned char)((mm_slen(pad) > 0) ? pad[1] : ' ');
-    mm_istr(b, v, m, n, ch);
+    int ch = mm_str_args(m, n, pad);
+
+    if (ch < 0) {
+        mm_ssetc(t, "");
+        return t;
+    }
+    mm_istr(b, v, m, n, (unsigned char)ch);
     mm_ssetc(t, b);
     return t;
 }
@@ -1297,22 +1324,27 @@ char *mm_str_i(MMINTEGER v, MMINTEGER m, MMINTEGER n, const char *pad)
 char *mm_valfmt(const char *s, int fl, MMINTEGER m, MMINTEGER n,
                 const char *pad)
 {
-    char b[MM_INTBUF + 64];
+    char b[MM_STRSZ];
     char *t = mm_tmp();
-    unsigned char ch = (unsigned char)((mm_slen(pad) > 0) ? pad[1] : ' ');
+    int ch = mm_str_args(m, n, pad);
     MMFLOAT f;
     MMINTEGER i;
 
+    if (ch < 0) {
+        mm_ssetc(t, "");
+        return t;
+    }
     b[0] = ' ';
     if (mm_strval(mm_cstr(s), &f, &i)) {
         if (fl & 1)
             f = -f;
         mm_float_to_str(b + (((fl & 2) && f >= 0) ? 1 : 0), f, (int)m,
-                        (int)n, ch);
+                        (int)n, (unsigned char)ch);
     } else {
         if (fl & 1)
             i = (MMINTEGER)(0 - (unsigned long long)i);
-        mm_istr(b + (((fl & 2) && i >= 0) ? 1 : 0), i, m, n, ch);
+        mm_istr(b + (((fl & 2) && i >= 0) ? 1 : 0), i, m, n,
+                (unsigned char)ch);
     }
     mm_ssetc(t, b);
     return t;
@@ -1320,10 +1352,15 @@ char *mm_valfmt(const char *s, int fl, MMINTEGER m, MMINTEGER n,
 
 char *mm_str_f(MMFLOAT v, MMINTEGER m, MMINTEGER n, const char *pad)
 {
-    char b[MM_INTBUF + 64];
+    char b[MM_STRSZ];
     char *t = mm_tmp();
-    unsigned char ch = (unsigned char)((mm_slen(pad) > 0) ? pad[1] : ' ');
-    mm_float_to_str(b, v, (int)m, (int)n, ch);
+    int ch = mm_str_args(m, n, pad);
+
+    if (ch < 0) {
+        mm_ssetc(t, "");
+        return t;
+    }
+    mm_float_to_str(b, v, (int)m, (int)n, (unsigned char)ch);
     mm_ssetc(t, b);
     return t;
 }
