@@ -2,9 +2,12 @@
 ' translator has may be one of the firmware's - DEVICE here, as robots
 ' uses it for a Wii controller - so the line is one we did not
 ' translate, listed and commented out, not a run-time "not declared".
-' In a SELECT CASE that refused the whole program (2026-10-23).
+' In a SELECT CASE that refused the whole program (2026-10-23).  A
+' firmware command we lack, standing alone, is the same: robots ends
+' with `play stop:run`, and RUN is no "Unknown command" there.
 Print "a"
 If 0 Then bits = Device(Wii b)
+If 0 Then run
 Print "b"
 
 Sub Stick

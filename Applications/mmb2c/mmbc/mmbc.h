@@ -151,6 +151,7 @@ int routine_name_known(const char *canon);   /* a SUB/FUNCTION of that name */
 const struct builtin *builtin_get(const char *up);   /* BUILTINS[up] */
 int rawarg_in(const char *up);
 int strfunc_in(const char *up);
+int fwcommand_in(const char *up);           /* up in FW_COMMANDS */
 int bintype_index(const char *up);          /* BINTYPES.index, -1 absent */
 long rgbname_get(const char *up);           /* RGBNAMES[up], -1 absent */
 int mathfunc_get(const char *up);           /* MATHFUNCS[up] argc, 0 absent */

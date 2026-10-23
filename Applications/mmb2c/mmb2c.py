@@ -158,6 +158,35 @@ RGBNAMES = {
     'SALMON': 0xFA8072, 'BEIGE': 0xF5F5DC,
 }
 
+# The firmware's one-word commands (PicoMite AllCommands.h, its T_CMD
+# entries).  The tokeniser makes each a command wherever it stands, so
+# none of them is ever a variable's name; one that reaches a statement
+# as a bare name is a command we do not translate.
+FW_COMMANDS = frozenset((
+    'ADC', 'ARC', 'ASTRO', 'AUTOSAVE', 'BACKLIGHT', 'BEZIER', 'BITSTREAM',
+    'BLIT', 'BLUETOOTH', 'BOX', 'CALC', 'CALL', 'CAMERA', 'CASE', 'CAT',
+    'CHAIN', 'CHDIR', 'CIRCLE', 'CLEAR', 'CLOSE', 'CLS', 'COLOR', 'COLOUR',
+    'CONFIGURE', 'CONST', 'CONTINUE', 'COPY', 'CPU', 'CSUB', 'DATA',
+    'DEFINEFONT', 'DEVICE', 'DIM', 'DO', 'DRAW3D', 'DRIVE', 'EDIT', 'ELSE',
+    'ELSEIF', 'END', 'ENDIF', 'ERASE', 'ERROR', 'EXECUTE', 'EXIT', 'FILES',
+    'FILL', 'FLAGS', 'FLASH', 'FLUSH', 'FM', 'FONT', 'FOR', 'FRAME',
+    'FRAMEBUFFER', 'FUNCTION', 'GAMEPAD', 'GOSUB', 'GOTO', 'GUI', 'HELP',
+    'HUMID', 'I2C', 'I2C2', 'I2CLCD', 'IF', 'IN', 'INC', 'INPUT',
+    'INTERRUPT', 'IR', 'IRETURN', 'IRQ', 'JMP', 'KEYBOARD', 'KEYPAD',
+    'KILL', 'LCD', 'LET', 'LIBRARY', 'LINE', 'LIST', 'LOAD', 'LOCAL',
+    'LOCATION', 'LONGSTRING', 'LOOP', 'MANDELBROT', 'MAP', 'MATH', 'MEMORY',
+    'MKDIR', 'MODE', 'MOUSE', 'MOV', 'NEW', 'NEXT', 'NOP', 'ON', 'ONESHOT',
+    'ONEWIRE', 'OPEN', 'OPTION', 'OUT', 'PAUSE', 'PIO', 'PIXEL', 'PLAY',
+    'POKE', 'POLYGON', 'PRINT', 'PULL', 'PULSE', 'PUSH', 'PWM', 'RAM',
+    'RANDOMIZE', 'RAY', 'RBOX', 'READ', 'REDIM', 'REFRESH', 'REM', 'RENAME',
+    'RESOLUTION', 'RESTORE', 'RETURN', 'RMDIR', 'RTC', 'RUN', 'SAVE',
+    'SEEK', 'SERVO', 'SET', 'SETPIN', 'SETTICK', 'SLEW', 'SORT', 'SPI',
+    'SPI2', 'SPRITE', 'STAR', 'STATIC', 'STEPPER', 'STRUCT', 'SUB', 'SYNC',
+    'TEXT', 'TILE', 'TILEMAP', 'TIMER', 'TMC22XX', 'TRACE', 'TRIANGLE',
+    'TURTLE', 'TYPE', 'VAR', 'WAIT', 'WATCHDOG', 'WEB', 'WHILE', 'WII',
+    'WS2812', 'XMODEM', 'YMODEM', 'ZMODEM'
+))
+
 # the scalar members of the MATH() family
 MATHFUNCS = {'COSH': 1, 'SINH': 1, 'TANH': 1, 'LOG10': 1, 'ATAN3': 2}
 
@@ -9654,7 +9683,11 @@ class Conv(object):
             # ExecuteProgram's StandardError(36) when the line runs; one
             # of 32 characters or more is "Variable name too long" first
             # (a PicoMitePC3 says so).  A long name with its ':' lands
-            # here too: it is no label to the tokeniser.
+            # here too: it is no label to the tokeniser.  One of the
+            # firmware's own commands is no unknown name there - robots
+            # ends `play stop:run` - so it is a line we did not translate.
+            if t[2] in FW_COMMANDS:
+                self.err("%s is not translated" % t[1])
             self.i += 1
             msg = 'Variable name too long' if len(canon) > 31 \
                 else 'Unknown command'

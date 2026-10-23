@@ -5589,10 +5589,14 @@ static void do_assign_or_call(void)
            ExecuteProgram's StandardError(36) when the line runs; one of
            32 characters or more is "Variable name too long" first (a
            PicoMitePC3 says so).  A long name with its ':' lands here
-           too: it is no label to the tokeniser. */
+           too: it is no label to the tokeniser.  One of the firmware's
+           own commands is no unknown name there - robots ends
+           `play stop:run` - so it is a line we did not translate. */
         const char *msg = strlen(canon) > 31 ? "Variable name too long"
                                              : "Unknown command";
 
+        if (fwcommand_in(t->up))
+            cv_err("%s is not translated", t->text);
         cv.i++;
         cv_warn("'%s' is not a command: \"%s\" when the line runs",
                 t->text, msg);

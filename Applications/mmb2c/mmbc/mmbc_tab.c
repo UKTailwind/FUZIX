@@ -91,6 +91,36 @@ static const char *strfuncs[] = {
     NULL
 };
 
+/* The firmware's one-word commands (PicoMite AllCommands.h, its T_CMD
+ * entries).  The tokeniser makes each a command wherever it stands, so
+ * none of them is ever a variable's name; one that reaches a statement
+ * as a bare name is a command we do not translate. */
+static const char *fwcommands[] = {
+    "ADC", "ARC", "ASTRO", "AUTOSAVE", "BACKLIGHT", "BEZIER", "BITSTREAM",
+    "BLIT", "BLUETOOTH", "BOX", "CALC", "CALL", "CAMERA", "CASE", "CAT",
+    "CHAIN", "CHDIR", "CIRCLE", "CLEAR", "CLOSE", "CLS", "COLOR", "COLOUR",
+    "CONFIGURE", "CONST", "CONTINUE", "COPY", "CPU", "CSUB", "DATA",
+    "DEFINEFONT", "DEVICE", "DIM", "DO", "DRAW3D", "DRIVE", "EDIT", "ELSE",
+    "ELSEIF", "END", "ENDIF", "ERASE", "ERROR", "EXECUTE", "EXIT", "FILES",
+    "FILL", "FLAGS", "FLASH", "FLUSH", "FM", "FONT", "FOR", "FRAME",
+    "FRAMEBUFFER", "FUNCTION", "GAMEPAD", "GOSUB", "GOTO", "GUI", "HELP",
+    "HUMID", "I2C", "I2C2", "I2CLCD", "IF", "IN", "INC", "INPUT",
+    "INTERRUPT", "IR", "IRETURN", "IRQ", "JMP", "KEYBOARD", "KEYPAD",
+    "KILL", "LCD", "LET", "LIBRARY", "LINE", "LIST", "LOAD", "LOCAL",
+    "LOCATION", "LONGSTRING", "LOOP", "MANDELBROT", "MAP", "MATH", "MEMORY",
+    "MKDIR", "MODE", "MOUSE", "MOV", "NEW", "NEXT", "NOP", "ON", "ONESHOT",
+    "ONEWIRE", "OPEN", "OPTION", "OUT", "PAUSE", "PIO", "PIXEL", "PLAY",
+    "POKE", "POLYGON", "PRINT", "PULL", "PULSE", "PUSH", "PWM", "RAM",
+    "RANDOMIZE", "RAY", "RBOX", "READ", "REDIM", "REFRESH", "REM", "RENAME",
+    "RESOLUTION", "RESTORE", "RETURN", "RMDIR", "RTC", "RUN", "SAVE",
+    "SEEK", "SERVO", "SET", "SETPIN", "SETTICK", "SLEW", "SORT", "SPI",
+    "SPI2", "SPRITE", "STAR", "STATIC", "STEPPER", "STRUCT", "SUB", "SYNC",
+    "TEXT", "TILE", "TILEMAP", "TIMER", "TMC22XX", "TRACE", "TRIANGLE",
+    "TURTLE", "TYPE", "VAR", "WAIT", "WATCHDOG", "WEB", "WHILE", "WII",
+    "WS2812", "XMODEM", "YMODEM", "ZMODEM",
+    NULL
+};
+
 /* BIN2STR$ / STR2BIN type names -> the runtime's MM_B_* constants */
 static const char *bintypes[] = {
     "INT64", "UINT64", "INT32", "UINT32", "INT16", "UINT16",
@@ -158,6 +188,11 @@ int rawarg_in(const char *up)
 int strfunc_in(const char *up)
 {
     return in_list(strfuncs, up);
+}
+
+int fwcommand_in(const char *up)
+{
+    return in_list(fwcommands, up);
 }
 
 int bintype_index(const char *up)
