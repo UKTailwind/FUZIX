@@ -187,6 +187,31 @@ FW_COMMANDS = frozenset((
     'WS2812', 'XMODEM', 'YMODEM', 'ZMODEM'
 ))
 
+# The firmware's functions (AllCommands.h, its T_FUN and T_FNA entries).
+# The tokeniser matches most of them with their '(' - "Deg(" - so a name
+# followed by one is never a variable there; the T_FNA few are names on
+# their own, GETSCANLINE and the rest.  One that reaches reference() is
+# a function we do not translate.  A plain deg or pos is a variable.
+FW_FUNCTIONS = frozenset((
+    'ABS', 'ACOS', 'ASC', 'ASIN', 'ATAN2', 'ATN', 'BASE$', 'BIN$',
+    'BIN2STR$', 'BIT', 'BOUND', 'BYTE', 'CALL', 'CHOICE', 'CHR$',
+    'CINT', 'CLICK', 'COS', 'CTRLVAL', 'DATETIME$', 'DAY$', 'DEG',
+    'DEVICE', 'DIR$', 'DISTANCE', 'DRAW3D', 'EOF', 'EPOCH', 'EVAL',
+    'EXP', 'FIELD$', 'FIX', 'FLAG', 'FORMAT$', 'FRAME', 'GPS', 'HEX$',
+    'INPUT$', 'INSTR', 'INT', 'JSON$', 'KEYDOWN', 'LCASE$', 'LCOMPARE',
+    'LEFT$', 'LEN', 'LGETBYTE', 'LGETSTR$', 'LINPUT', 'LINSTR', 'LLEN',
+    'LOC', 'LOF', 'LOG', 'MAP', 'MATH', 'MAX', 'MID$', 'MIN', 'MM.INFO',
+    'MSGBOX', 'PEEK', 'PIN', 'PIO', 'PIXEL', 'PORT', 'PULSIN', 'RAD',
+    'RAY', 'RGB', 'RIGHT$', 'RND', 'SCHANGE$', 'SGN', 'SIN', 'SPACE$',
+    'SPI', 'SPI2', 'SPRITE', 'SQR', 'STR$', 'STR2BIN', 'STRING$',
+    'STRUCT', 'TAB', 'TAN', 'TEMPR', 'TILEMAP', 'TOPBOTTOM', 'TOUCH',
+    'TRIM$', 'UCASE$', 'VAL'
+))
+FW_FUNCTIONS_BARE = frozenset((
+    'CWD$', 'DATE$', 'GETSCANLINE', 'INKEY$', 'PI', 'POS', 'RND',
+    'TIME$', 'TIMER'
+))
+
 # the scalar members of the MATH() family
 MATHFUNCS = {'COSH': 1, 'SINH': 1, 'TANH': 1, 'LOG10': 1, 'ATAN3': 2}
 
@@ -1348,6 +1373,10 @@ class Conv(object):
         # set in the scan pass: any ON ERROR at all pulls in the __mm_e
         # state, the routine prologues and mm_err_bind
         self.uses_onerror = False
+        # a block statement OPTION EXPLICIT failed in is translated again
+        # round a stand-in for the name (late_out); the stand-ins' types
+        self.undecl_standin = False
+        self.uses_undecl = set()
         # ON ERROR IGNORE arms trapping for an unbounded stretch of the
         # program, so every statement pays the checked forms - set in
         # the scan pass, statements BEFORE the line included, because
@@ -1734,6 +1763,13 @@ class Conv(object):
                          % (canon, TYNAME[s.ty], TYNAME[sfx]))
             self.note_touch(canon, s)
             return s
+        # One of the firmware's functions that is not translated -
+        # GETSCANLINE bare, DEVICE(WII ...) with its brackets - is no
+        # variable there, and "not declared" when it runs would be a
+        # wrong answer: an honest gap, listed (FUZIX #25).
+        if word.upper() in (FW_FUNCTIONS if as_array
+                            else FW_FUNCTIONS_BARE):
+            self.err("%s is not translated" % word)
         # at most 31 characters without the suffix (findvar, 2c747af),
         # and only when the line runs: a long name is never made, so
         # every use of one comes here
@@ -1763,6 +1799,8 @@ class Conv(object):
         # OPTION EXPLICIT is "NAME is not declared"; only then is a SUB or
         # FUNCTION of the name "A sub/fun has the same name".
         if self.opt_explicit:
+            if self.undecl_standin:
+                return self.undecl_sym(canon, sfx)
             self.late("%s is not declared" % canon.upper())
         ty = sfx if sfx is not None else self.opt_default
         if ty is None:
@@ -1789,6 +1827,18 @@ class Conv(object):
         if len(canon) > 31 or (static and scope == 'local' and self.cur
                                and len(self.cur.name) + len(canon) > 31):
             self.late("Variable name too long")
+
+    def undecl_sym(self, canon, sfx):
+        """The stand-in for a name OPTION EXPLICIT has not declared, in a
+        statement that opens or closes a block: the statement is
+        translated round it, behind its mm_error (late_out).  One file
+        static per type, made only by a program that needs it."""
+        ty = sfx if sfx is not None else self.opt_default
+        if ty is None:
+            self.err("OPTION DEFAULT NONE: '%s' has no type" % canon)
+        self.uses_undecl.add(ty)
+        return Sym(canon, ty,
+                   '__mm_undecl_' + {TY_I: 'i', TY_F: 'f', TY_S: 's'}[ty])
 
     def sub_fun_named(self, canon):
         """findvar will not make a variable with a SUB or FUNCTION's name,
@@ -6209,6 +6259,27 @@ class Conv(object):
         if self.blocks != blocks or self.out is not out_at_entry \
                 or (t is not None and t[0] == T_ID
                     and t[2] in LATE_BLOCK_WORDS):
+            # OPTION EXPLICIT's "not declared" in a FOR, an IF, a SELECT
+            # - a block that cannot simply be dropped - is translated
+            # again round a stand-in for the name, behind the error:
+            # findvar fails only if the line runs (FUZIX #25).  Other
+            # late errors here, and a retry that fails, are refused.
+            if self.out is out_at_entry and self.mode in ('scan', 'emit') \
+                    and not self.undecl_standin \
+                    and msg.endswith(' is not declared'):
+                del out_at_entry[where:]
+                self.indent = ind
+                self.blocks = list(blocks)
+                self.i = tok_at_entry
+                self.undecl_standin = True
+                try:
+                    self.statement_inner()
+                finally:
+                    self.undecl_standin = False
+                out_at_entry.insert(where, '    ' * ind
+                                    + 'mm_error("%s");' % msg)
+                self.warn('"%s" when the line runs' % msg)
+                return
             self.note(msg)
             raise MMError(why)
         # A DIM, LOCAL or STATIC with several names makes the ones before
@@ -11928,6 +11999,15 @@ class Conv(object):
             wr(' * It lives here rather than in the runtime so a guard is\n')
             wr(' * a load and a branch instead of a library call. */\n')
             wr('static int __mm_e[4];\n')
+        if self.uses_undecl:
+            # stand-ins for names OPTION EXPLICIT has not declared, in a
+            # statement that opens or closes a block (late_out)
+            if TY_I in self.uses_undecl:
+                wr('static MMINTEGER __mm_undecl_i;\n')
+            if TY_F in self.uses_undecl:
+                wr('static MMFLOAT __mm_undecl_f;\n')
+            if TY_S in self.uses_undecl:
+                wr('static char __mm_undecl_s[MM_STRSZ];\n')
         if self.uses_i2c:
             # SETPIN puts the pins here and OPEN reads them: MMBasic
             # allows the two to be far apart in a program.

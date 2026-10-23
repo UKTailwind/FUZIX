@@ -697,6 +697,16 @@ void conv_write(FILE *f)
         fprintf(f, " * a load and a branch instead of a library call. */\n");
         fprintf(f, "static int __mm_e[4];\n");
     }
+    if (cv.uses_undecl) {
+        /* stand-ins for names OPTION EXPLICIT has not declared, in a
+           statement that opens or closes a block (late_out) */
+        if (cv.uses_undecl & 1)
+            fprintf(f, "static MMINTEGER __mm_undecl_i;\n");
+        if (cv.uses_undecl & 2)
+            fprintf(f, "static MMFLOAT __mm_undecl_f;\n");
+        if (cv.uses_undecl & 4)
+            fprintf(f, "static char __mm_undecl_s[MM_STRSZ];\n");
+    }
     /* OUTSIDE the ON ERROR block - it was written inside it, so an I2C2
        program that never mentions ON ERROR got no declaration and the
        generated C would not compile.  Nothing caught it because every

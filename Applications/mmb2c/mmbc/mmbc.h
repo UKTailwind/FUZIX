@@ -152,6 +152,7 @@ const struct builtin *builtin_get(const char *up);   /* BUILTINS[up] */
 int rawarg_in(const char *up);
 int strfunc_in(const char *up);
 int fwcommand_in(const char *up);           /* up in FW_COMMANDS */
+int fwfunction_in(const char *up, int paren);  /* FW_FUNCTIONS(_BARE) */
 int bintype_index(const char *up);          /* BINTYPES.index, -1 absent */
 long rgbname_get(const char *up);           /* RGBNAMES[up], -1 absent */
 int mathfunc_get(const char *up);           /* MATHFUNCS[up] argc, 0 absent */
@@ -395,6 +396,8 @@ struct conv {
     int mx_main[2];             /* MAX/MIN temporary pairs in main */
     int mx_n[2];                /* pairs the statement has used so far */
     int late_cut;               /* a late error's cut, if not the start: -1 */
+    int undecl_standin;         /* retrying a block statement (late_out) */
+    int uses_undecl;            /* stand-ins made: 1 integer, 2 float, 4 string */
     struct outbuf out_main, out_body;
     struct outbuf *out;
     int indent;

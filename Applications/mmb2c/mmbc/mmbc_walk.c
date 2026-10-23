@@ -125,6 +125,42 @@ static int late_out(int where, struct outbuf *out_at_entry, int ind,
         || memcmp(cv.blocks, blocks_snap,
                   sizeof(struct block) * (size_t)nblocks_snap) != 0
         || cv.out != out_at_entry || blockword) {
+        /* OPTION EXPLICIT's "not declared" in a FOR, an IF, a SELECT - a
+         * block that cannot simply be dropped - is translated again round
+         * a stand-in for the name, behind the error: findvar fails only
+         * if the line runs (FUZIX #25).  Other late errors here, and a
+         * retry that fails, are refused. */
+        static const char nd[] = " is not declared";
+        size_t ml = strlen(msg);
+
+        if (cv.out == out_at_entry
+            && (cv.mode == M_SCAN || cv.mode == M_EMIT)
+            && !cv.undecl_standin && ml >= sizeof nd - 1
+            && strcmp(msg + ml - (sizeof nd - 1), nd) == 0) {
+            jmp_buf jb2, *saved2 = err_jmp;
+            volatile int ok = 0;
+
+            out_at_entry->n = where;
+            cv.indent = ind;
+            memcpy(cv.blocks, blocks_snap,
+                   sizeof(struct block) * (size_t)nblocks_snap);
+            cv.nblocks = nblocks_snap;
+            cv.i = tok_at_entry;
+            cv.undecl_standin = 1;
+            err_jmp = &jb2;
+            if (setjmp(jb2) == 0) {
+                statement_inner();
+                ok = 1;
+            }
+            err_jmp = saved2;
+            cv.undecl_standin = 0;
+            if (!ok)
+                return 0;       /* the retry's own error: refused */
+            out_insert(out_at_entry, where,
+                       pstr(sfmt("%*smm_error(\"%s\");", ind * 4, "", msg)));
+            cv_warn("\"%s\" when the line runs", msg);
+            return 1;
+        }
         cv_note("%s", msg);
         return 0;
     }

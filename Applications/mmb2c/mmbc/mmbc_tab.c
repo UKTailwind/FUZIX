@@ -121,6 +121,33 @@ static const char *fwcommands[] = {
     NULL
 };
 
+/* The firmware's functions (AllCommands.h, its T_FUN and T_FNA entries).
+ * The tokeniser matches most of them with their '(' - "Deg(" - so a name
+ * followed by one is never a variable there; the T_FNA few are names on
+ * their own, GETSCANLINE and the rest.  One that reaches reference() is a
+ * function we do not translate.  A plain deg or pos is a variable. */
+static const char *fwfunctions[] = {
+    "ABS", "ACOS", "ASC", "ASIN", "ATAN2", "ATN", "BASE$", "BIN$",
+    "BIN2STR$", "BIT", "BOUND", "BYTE", "CALL", "CHOICE", "CHR$",
+    "CINT", "CLICK", "COS", "CTRLVAL", "DATETIME$", "DAY$", "DEG",
+    "DEVICE", "DIR$", "DISTANCE", "DRAW3D", "EOF", "EPOCH", "EVAL",
+    "EXP", "FIELD$", "FIX", "FLAG", "FORMAT$", "FRAME", "GPS", "HEX$",
+    "INPUT$", "INSTR", "INT", "JSON$", "KEYDOWN", "LCASE$", "LCOMPARE",
+    "LEFT$", "LEN", "LGETBYTE", "LGETSTR$", "LINPUT", "LINSTR", "LLEN",
+    "LOC", "LOF", "LOG", "MAP", "MATH", "MAX", "MID$", "MIN", "MM.INFO",
+    "MSGBOX", "PEEK", "PIN", "PIO", "PIXEL", "PORT", "PULSIN", "RAD",
+    "RAY", "RGB", "RIGHT$", "RND", "SCHANGE$", "SGN", "SIN", "SPACE$",
+    "SPI", "SPI2", "SPRITE", "SQR", "STR$", "STR2BIN", "STRING$",
+    "STRUCT", "TAB", "TAN", "TEMPR", "TILEMAP", "TOPBOTTOM", "TOUCH",
+    "TRIM$", "UCASE$", "VAL",
+    NULL
+};
+static const char *fwfunctions_bare[] = {
+    "CWD$", "DATE$", "GETSCANLINE", "INKEY$", "PI", "POS", "RND",
+    "TIME$", "TIMER",
+    NULL
+};
+
 /* BIN2STR$ / STR2BIN type names -> the runtime's MM_B_* constants */
 static const char *bintypes[] = {
     "INT64", "UINT64", "INT32", "UINT32", "INT16", "UINT16",
@@ -193,6 +220,11 @@ int strfunc_in(const char *up)
 int fwcommand_in(const char *up)
 {
     return in_list(fwcommands, up);
+}
+
+int fwfunction_in(const char *up, int paren)
+{
+    return in_list(paren ? fwfunctions : fwfunctions_bare, up);
 }
 
 int bintype_index(const char *up)

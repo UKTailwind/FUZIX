@@ -569,6 +569,22 @@ struct sym *declare(const char *canon, int ty, const char *scope,
     return s;
 }
 
+/* The stand-in for a name OPTION EXPLICIT has not declared, in a
+ * statement that opens or closes a block: the statement is translated
+ * round it, behind its mm_error (late_out).  One file static per type,
+ * made only by a program that needs it. */
+static struct sym *undecl_sym(const char *canon, int sfx)
+{
+    int ty = (sfx != TY_NONE) ? sfx : cv.opt_default;
+
+    if (ty == TY_NONE)
+        cv_err("OPTION DEFAULT NONE: '%s' has no type", canon);
+    cv.uses_undecl |= ty == TY_I ? 1 : ty == TY_F ? 2 : 4;
+    return sym_new(canon, ty, ty == TY_I ? "__mm_undecl_i"
+                              : ty == TY_F ? "__mm_undecl_f"
+                              : "__mm_undecl_s");
+}
+
 /* A name used in an expression or as an assignment target.  If it is
  * not already known then MMBasic creates it, right here, as a GLOBAL -
  * even inside a subroutine.  The implied-declaration rule; this is the
@@ -587,6 +603,12 @@ struct sym *reference(const char *word, int as_array)
         note_touch(canon, s);
         return s;
     }
+    /* One of the firmware's functions that is not translated -
+     * GETSCANLINE bare, DEVICE(WII ...) with its brackets - is no variable
+     * there, and "not declared" when it runs would be a wrong answer: an
+     * honest gap, listed (FUZIX #25). */
+    if (fwfunction_in(upper(word), as_array))
+        cv_err("%s is not translated", word);
     /* at most 31 characters without the suffix (findvar, 2c747af), and
      * only when the line runs: a long name is never made, so every use of
      * one comes here */
@@ -615,8 +637,11 @@ struct sym *reference(const char *word, int as_array)
     /* findvar's order, and when the line runs as there: anything under
      * OPTION EXPLICIT is "NAME is not declared"; only then is a SUB or
      * FUNCTION of the name "A sub/fun has the same name". */
-    if (cv.opt_explicit)
+    if (cv.opt_explicit) {
+        if (cv.undecl_standin)
+            return undecl_sym(canon, sfx);
         cv_late("%s is not declared", upper(canon));
+    }
     ty = (sfx != TY_NONE) ? sfx : cv.opt_default;
     if (ty == TY_NONE)
         cv_err("OPTION DEFAULT NONE: '%s' has no type", canon);
