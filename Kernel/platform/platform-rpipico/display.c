@@ -801,7 +801,8 @@ int display_gfx_getpixel(int x, int y)
         return -1;
     if (gfx_bpp(ex) == 4) {
         v = gfx_draw[y * stride + (x >> 1)];
-        return (int)rgb332_to_888(gfx_pal[(x & 1) ? (v & 15) : (v >> 4)]);
+        return (int)rgb332_to_888(gfx_pal[(x & 1) ? PX4_ODD_GET(v)
+                                                  : PX4_EVEN_GET(v)]);
     }
     /* 1bpp: the bit chooses ink or paper, and the actual colour lives
      * in the cell's tile attributes - so read those rather than
@@ -809,17 +810,18 @@ int display_gfx_getpixel(int x, int y)
     v = gfx_draw[y * stride + (x >> 3)];
     if (ex == EXP_CONSOLE) {
         int cell = (y / DISP_CELL_H) * DISP_COLS + (x / DISP_CELL_W);
-        uint8_t c = ((v >> (7 - (x & 7))) & 1) ? disp_tile_fg[cell]
-                                               : disp_tile_bg[cell];
+        uint8_t c = PX1_GET(v, x) ? disp_tile_fg[cell]
+                                  : disp_tile_bg[cell];
         return (int)rgb332_to_888(c);
     }
-    return ((v >> (7 - (x & 7))) & 1) ? 0xFFFFFF : 0x000000;
+    return PX1_GET(v, x) ? 0xFFFFFF : 0x000000;
 }
 
 /* One pixel.  Kept tight - no swapping, no clipping loop - because this
  * is the hot path: MMBasic's PIXEL statement costs 5us and a compiled
- * one has to beat it.  4bpp layout is high nibble = LEFT pixel, which
- * is framebuf's GS4_HMSB and the opposite of MMBasic's RGB121. */
+ * one has to beat it.  Where a pixel sits in its byte is display_priv.h's
+ * PX4_* and PX1_*: on the board the high nibble is the LEFT pixel,
+ * framebuf's GS4_HMSB; on a PC it is MMBasic's order. */
 int display_gfx_pixel(int x, int y, int c)
 {
     enum gexp ex = gfx_exp;
@@ -836,15 +838,15 @@ int display_gfx_pixel(int x, int y, int c)
     if (gfx_bpp(ex) == 4) {
         p = &gfx_draw[y * stride + (x >> 1)];
         if (x & 1)
-            *p = (*p & 0xF0) | (c & 15);        /* odd  -> low nibble */
+            *p = (*p & PX4_ODD_KEEP) | PX4_ODD(c);
         else
-            *p = (*p & 0x0F) | ((c & 15) << 4); /* even -> high nibble */
+            *p = (*p & PX4_EVEN_KEEP) | PX4_EVEN(c);
     } else {
         p = &gfx_draw[y * stride + (x >> 3)];
         if (c)
-            *p |= 0x80 >> (x & 7);              /* MSB = leftmost */
+            *p |= PX1_BIT(x);
         else
-            *p &= ~(0x80 >> (x & 7));
+            *p &= ~(PX1_BIT(x));
     }
     return 0;
 }
@@ -877,14 +879,14 @@ int display_gfx_rect(int x1, int y1, int x2, int y2, int c)
         for (y = y1; y <= y2; y++) {
             uint8_t *row = &gfx_draw[y * stride];
             x = x1;
-            if (x & 1) {        /* odd left edge: low nibble only */
-                row[x >> 1] = (row[x >> 1] & 0xF0) | (c & 15);
+            if (x & 1) {        /* odd left edge: its own nibble only */
+                row[x >> 1] = (row[x >> 1] & PX4_ODD_KEEP) | PX4_ODD(c);
                 x++;
             }
             xe = x2;
             if ((x2 & 1) == 0 && x <= x2) {
-                /* even right edge: high nibble only */
-                row[x2 >> 1] = (row[x2 >> 1] & 0x0F) | ((c & 15) << 4);
+                /* even right edge: its own nibble only */
+                row[x2 >> 1] = (row[x2 >> 1] & PX4_EVEN_KEEP) | PX4_EVEN(c);
                 xe = x2 - 1;
             }
             /* What is left starts on a byte and ends on one, so it is
@@ -900,9 +902,9 @@ int display_gfx_rect(int x1, int y1, int x2, int y2, int c)
             uint8_t *row = &gfx_draw[y * stride];
             for (x = x1; x <= x2; x++) {
                 if (c)
-                    row[x >> 3] |= 0x80 >> (x & 7);
+                    row[x >> 3] |= PX1_BIT(x);
                 else
-                    row[x >> 3] &= ~(0x80 >> (x & 7));
+                    row[x >> 3] &= ~(PX1_BIT(x));
             }
         }
     }
@@ -949,15 +951,15 @@ int display_gfx_pixels(const struct gfx_pt *pt, int n, const uint32_t *col)
         if (four) {
             uint8_t *p = &gfx_draw[y * stride + (x >> 1)];
             if (x & 1)
-                *p = (*p & 0xF0) | (c & 15);
+                *p = (*p & PX4_ODD_KEEP) | PX4_ODD(c);
             else
-                *p = (*p & 0x0F) | ((c & 15) << 4);
+                *p = (*p & PX4_EVEN_KEEP) | PX4_EVEN(c);
         } else {
             uint8_t *p = &gfx_draw[y * stride + (x >> 3)];
             if (c)
-                *p |= 0x80 >> (x & 7);
+                *p |= PX1_BIT(x);
             else
-                *p &= ~(0x80 >> (x & 7));
+                *p &= ~(PX1_BIT(x));
         }
     }
     return 0;
@@ -1005,11 +1007,12 @@ int display_gfx_rects(const struct gfx_rc *rc, int n, const uint32_t *col)
  *     BLIT data can be used unchanged.  It looks strange - the shift is
  *     taken from the END of the bitmap - but for any bitmap whose total
  *     bit count is a multiple of 8 (every font) it is plain MSB-first.
- *   - the DESTINATION is ours: 1bpp MSB = leftmost pixel and 4bpp high
- *     nibble = left pixel, where MMBasic uses `1 << (x % 8)` and the
- *     low nibble.  See PC3-GFX-DESIGN.md - the port is unified with
- *     MicroPython's framebuf so assets interchange between the two PC3
- *     environments, and the scanout expander is indifferent.
+ *   - the DESTINATION is ours on the board: 1bpp MSB = leftmost pixel
+ *     and 4bpp high nibble = left pixel, where MMBasic uses `1 << (x % 8)`
+ *     and the low nibble.  See PC3-GFX-DESIGN.md - the port is unified
+ *     with MicroPython's framebuf so assets interchange between the two
+ *     PC3 environments, and the scanout expander is indifferent.  A PC
+ *     stores MMBasic's order (PX4_* and PX1_*, display_priv.h).
  */
 /* The blit above with the glyph turned - see GORIENT_* in pico_ioctl.h
  * for why turning it is the kernel's job.
@@ -1096,15 +1099,15 @@ static int gfx_blit(int x1, int y1, int width, int height, int scale,
                     if (bpp == 4) {
                         p = &gfx_draw[y * stride + (x >> 1)];
                         if (x & 1)
-                            *p = (*p & 0xF0) | (c & 15);
+                            *p = (*p & PX4_ODD_KEEP) | PX4_ODD(c);
                         else
-                            *p = (*p & 0x0F) | ((c & 15) << 4);
+                            *p = (*p & PX4_EVEN_KEEP) | PX4_EVEN(c);
                     } else {
                         p = &gfx_draw[y * stride + (x >> 3)];
                         if (c)
-                            *p |= 0x80 >> (x & 7);
+                            *p |= PX1_BIT(x);
                         else
-                            *p &= ~(0x80 >> (x & 7));
+                            *p &= ~(PX1_BIT(x));
                     }
                 }
             }
@@ -1252,19 +1255,19 @@ static uint8_t sc2_row[DISP_STRIDE > 160 ? DISP_STRIDE : 164];
 static int sc2_get(const uint8_t *r, int x, int bpp)
 {
     if (bpp == 4)
-        return (x & 1) ? (r[x >> 1] & 15) : (r[x >> 1] >> 4);
-    return (r[x >> 3] >> (7 - (x & 7))) & 1;
+        return (x & 1) ? PX4_ODD_GET(r[x >> 1]) : PX4_EVEN_GET(r[x >> 1]);
+    return PX1_GET(r[x >> 3], x);
 }
 
 static void sc2_set(uint8_t *r, int x, int bpp, int v)
 {
     if (bpp == 4) {
         if (x & 1)
-            r[x >> 1] = (uint8_t)((r[x >> 1] & 0xF0) | (v & 15));
+            r[x >> 1] = (uint8_t)((r[x >> 1] & PX4_ODD_KEEP) | PX4_ODD(v));
         else
-            r[x >> 1] = (uint8_t)((r[x >> 1] & 0x0F) | ((v & 15) << 4));
+            r[x >> 1] = (uint8_t)((r[x >> 1] & PX4_EVEN_KEEP) | PX4_EVEN(v));
     } else {
-        uint8_t m = (uint8_t)(0x80 >> (x & 7));
+        uint8_t m = (uint8_t)(PX1_BIT(x));
 
         if (v)
             r[x >> 3] |= m;

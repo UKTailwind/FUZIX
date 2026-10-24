@@ -35,6 +35,41 @@ enum gexp {
 
 extern volatile enum gexp gfx_exp;
 
+/*
+ * Where a pixel sits in its byte.  The board keeps MicroPython's framebuf
+ * order, which its scanout reads: at 4bpp the LEFT pixel of a pair is the
+ * high nibble, at 1bpp the leftmost of eight is the MSB.  A PC keeps the
+ * PicoMite's own - the left pixel in the low nibble, the leftmost in bit 0
+ * (MMBasic's `1 << (x % 8)`) - because there a program can PEEK and POKE
+ * the framebuffer at MM.INFO(WRITEBUFF), and must find its pixels where a
+ * PicoMite puts them.  A byte holds the same pixels either way.
+ *
+ * What a BLIT hands a program is the board's order on both machines:
+ * pc3host's dispatch.c turns each byte as it crosses, so userland is one.
+ *
+ * Every pixel store and load in display.c goes through these.  On the
+ * board they expand to the expressions that were there before.
+ */
+#ifdef PC_HOST
+#define PX4_ODD_KEEP    0x0F                    /* odd x: the HIGH nibble */
+#define PX4_ODD(c)      (((c) & 15) << 4)
+#define PX4_ODD_GET(v)  ((v) >> 4)
+#define PX4_EVEN_KEEP   0xF0                    /* even x: the low nibble */
+#define PX4_EVEN(c)     ((c) & 15)
+#define PX4_EVEN_GET(v) ((v) & 15)
+#define PX1_BIT(x)      (0x01 << ((x) & 7))     /* bit 0 = leftmost */
+#define PX1_GET(v, x)   (((v) >> ((x) & 7)) & 1)
+#else
+#define PX4_ODD_KEEP    0xF0                    /* odd x: the low nibble */
+#define PX4_ODD(c)      ((c) & 15)
+#define PX4_ODD_GET(v)  ((v) & 15)
+#define PX4_EVEN_KEEP   0x0F                    /* even x: the HIGH nibble */
+#define PX4_EVEN(c)     (((c) & 15) << 4)
+#define PX4_EVEN_GET(v) ((v) >> 4)
+#define PX1_BIT(x)      (0x80 >> ((x) & 7))     /* MSB = leftmost */
+#define PX1_GET(v, x)   (((v) >> (7 - ((x) & 7))) & 1)
+#endif
+
 /* The live palette in RGB332 - the byte core1 puts on the wire.  Owned
  * by display.c; the scanout's expansion table is rebuilt from it. */
 extern uint8_t gfx_pal[16];

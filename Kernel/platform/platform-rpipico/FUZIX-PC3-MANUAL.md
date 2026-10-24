@@ -2680,13 +2680,12 @@ the sub-keyword decides the type, not the `$`.
 | `DISK SIZE`, `FREE SPACE` | the current drive's size and its free bytes |
 | `WRITEBUFF` | on a PC, the address of the framebuffer `FRAMEBUFFER WRITE` chose — `N`, `F` or `L` — for `PEEK`, `POKE` and `MEMORY COPY`; a PC3 has no address to give and stops the program saying so |
 
-**The bytes at `WRITEBUFF` are a PicoMite's but for one thing.** In
-`MODE 2` a row is 160 bytes, two pixels a byte, each pixel an RGB121
-colour; `MODE 3` is the same at 320 bytes a row. A PicoMite keeps the
-LEFT pixel of a pair in the low four bits, and this machine keeps it in
-the high four. A program that moves whole rows, as Elite does to save
-and restore its dashboard, cannot tell the difference; one that `POKE`s
-single pixels draws every pair the wrong way round.
+**The bytes at `WRITEBUFF` are a PicoMite's.** In `MODE 2` a row is
+160 bytes, two pixels a byte, each pixel an RGB121 colour, the LEFT
+pixel of a pair in the low four bits; `MODE 3` is the same at 320 bytes
+a row. `MODE 1` is 80 bytes a row, eight pixels a byte, the leftmost in
+bit 0. So a program can `POKE` single pixels, or `PEEK` what `PIXEL`
+and `BOX` drew, exactly as it does on a PicoMite.
 
 **Telling a VGA or HDMI screen from an LCD panel** is
 `INSTR(MM.INFO$(LCDPANEL), "MODE")`, as on a PicoMite: there it gives
