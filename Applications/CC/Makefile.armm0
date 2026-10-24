@@ -37,7 +37,14 @@ vpath %.h ../mmb2c/mmbc ../mmb2c
 # the eclipse, on a 64-bit host with wider frames: cc1 32K, cc2 24K.
 cc1: LINKER_OPT += --defsym __stack_size=32768
 cc2: LINKER_OPT += --defsym __stack_size=32768
-mmbc: LINKER_OPT += --defsym __stack_size=16384
+# mmbc's own recursive descent, over the BASIC: measured in Thumb under
+# qemu-arm with an entry hook, robots needs 27.4K, picoman 20.6K, the
+# eclipse 18.3K and chuckie 17.8K (glibc's jmp_buf, bigger than Fuzix's,
+# is in some of those frames).  16K was too small for all four, and the
+# window has no guard: it grows down into the end of .bss, and robots'
+# build at v0.30 rewrote the atexit table - a HardFault at exit, the
+# machine down (INVSTATE, blx to a stack address).  40K leaves room.
+mmbc: LINKER_OPT += --defsym __stack_size=40960
 
 # The runtime: bcrun executes a bytecode object, bcdump disassembles
 # one. ccbc is the driver that runs the three passes, and goes on the
