@@ -361,14 +361,16 @@ unsigned decode_token(void)
 		   matching code in lex.c. Without this the dumper falls off
 		   the rails on the very first token of any input. */
 		unsigned l = getpair();
+		/* and a third byte, the line number's bits 15 and up */
+		unsigned n = (l & 0x7FFF) | (getbyte() << 15);
 		if (l & 0x8000) {
 			unsigned ch;
-			printf("Line %d file ", l & 0x7FFF);
+			printf("Line %u file ", n);
 			while ((ch = getbyte()) != 0)
 				pchar(ch);
 			printf("\n");
 		} else
-			printf("Line %d\n", l);
+			printf("Line %u\n", n);
 		break;
 	}
 	default:

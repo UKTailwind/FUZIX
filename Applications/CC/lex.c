@@ -195,9 +195,9 @@ unsigned name_unreachable(unsigned id)
  *	Walk the token stream once counting names, then rewind. The shape
  *	of this loop has to match next_token() and copy_string() exactly
  *	or it falls out of step: tokens are two bytes, five of them carry
- *	a four byte value and three carry eight, T_LINE carries a line
- *	number and sometimes a file name, and T_STRING carries a byte
- *	stream in which 255 quotes the byte after it.
+ *	a four byte value and three carry eight, T_LINE carries a three
+ *	byte line number and sometimes a file name, and T_STRING carries
+ *	a byte stream in which 255 quotes the byte after it.
  *
  *	If stdin will not seek - someone has piped into cc1 rather than
  *	giving it the file the driver does - the pass is simply skipped
@@ -328,7 +328,8 @@ static void prescan_pass(int pass)
 		case T_LINE:
 			in_byte();
 			c = in_byte();
-			/* bit 15 of the line number: a file name follows */
+			in_byte();	/* the line number's bits 15 and up */
+			/* bit 15 of the first pair: a file name follows */
 			if (c != EOF && (c & 0x80))
 				for (i = 0; i < 32; i++)
 					if (in_byte() <= 0)
@@ -531,12 +532,16 @@ void next_token(void)
 
 	if (token == T_LINE) {
 		char *p = filename;
+		unsigned named;
 
+		/* bits 0-14, bit 15 the flag for a file name, then a byte of
+		   bits 15 and up (frontend.c write_token) */
 		line_num = tokbyte();
 		line_num |= tokbyte() << 8;
+		named = line_num & 0x8000;
+		line_num = (line_num & 0x7FFF) | (tokbyte() << 15);
 
-		if (line_num & 0x8000) {
-			line_num &= 0x7FFF;
+		if (named) {
 			for (c = 0; c < 32; c++) {
 				*p = tokbyte();
 				if (*p == 0)

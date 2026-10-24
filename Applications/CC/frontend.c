@@ -386,15 +386,20 @@ static void write_token(unsigned c)
 		oldline = line;
 		outbyte(T_LINE & 0xFF);
 		outbyte(T_LINE >> 8);
+		/* Bit 15 of the first pair says a file name follows, so bits
+		   15 and up of the line number are a third byte.  With only
+		   the pair, line 32768 set the flag and the readers took the
+		   tokens after it for a file name - Elite translates to 35000
+		   lines of C. */
 		outbyte(line);
+		outbyte((filechange ? 0x80 : 0) | ((line >> 8) & 0x7F));
+		outbyte(line >> 15);
 		if (filechange) {
-			outbyte(0x80 | (line >> 8));
 			tp = filename;
 			while (*tp && n++ < 32)
 				outbyte(*tp++);
 			outbyte(0);
-		} else
-			outbyte(line >> 8);
+		}
 		filechange = 0;
 	}
 	/* Write the token, then any data for it */
