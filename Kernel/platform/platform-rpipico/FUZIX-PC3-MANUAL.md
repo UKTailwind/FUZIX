@@ -1861,7 +1861,7 @@ has the same constraint and offers `LOAD PNG` only on RP2350 for it.
 ## Music: `PLAY MP3`, `PLAY WAV`, `PLAY FLAC`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE` {#music}
 
 ```basic
-PLAY VOLUME 70
+PLAY VOLUME 70, 70
 PLAY MP3 "/root/mp3/whiter.mp3"
 ' the program carries straight on, and the music plays
 FOR i% = 1 TO 20
@@ -1924,11 +1924,15 @@ same two seconds are what a file that will not open costs: nothing takes
 the hardware, and the handler fires anyway, because by then the sound is
 certainly over.
 
-`PLAY VOLUME n` takes 0 to 100 and is remembered, so every later
-`PLAY MP3`, `PLAY WAV` or `PLAY FLAC` uses it until it is changed
-again. Out-of-range values are clamped rather than refused. The default
-is 80. The scale is logarithmic, so 50 is a comfortable half rather
-than a whisper.
+`PLAY VOLUME left, right` takes 0 to 100 for each channel and is
+remembered, so every later `PLAY` uses it until it is changed again.
+As on a PicoMite, a level left out stays as it was: `PLAY VOLUME 50`
+sets the left channel alone, and `PLAY VOLUME , 50` the right.
+`PLAY SOUND` and `PLAY TONE` play the two levels as given. `PLAY MP3`,
+`PLAY WAV`, `PLAY FLAC` and `PLAY MODFILE` have one level for both
+channels, and take the louder of the two. Out-of-range values are
+clamped rather than refused. The default is 80. The scale is
+logarithmic, so 50 is a comfortable half rather than a whisper.
 
 `PLAY STOP` stops whatever is playing. It asks the kernel which
 process holds the sound output rather than remembering what it started,
@@ -5198,8 +5202,8 @@ always scales by 3.3 V.
 Of the sound, `PLAY MP3`, `PLAY WAV`, `PLAY FLAC`, `PLAY VOLUME`,
 `PLAY STOP`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE` and
 `PLAY MODSAMPLE` are done — `MIDI`, `LOAD SOUND` and the user-defined
-`U` waveform are not. `PLAY VOLUME` takes one level rather than one
-per channel. All of them take the completion
+`U` waveform are not. `PLAY VOLUME`'s two levels reach `SOUND` and
+`TONE` apart, and the file players as the louder. All of them take the completion
 interrupt MMBasic allows on them, though `PLAY STOP` reports about a
 second late where MMBasic reports at once.
 

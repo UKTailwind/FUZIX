@@ -489,6 +489,7 @@ struct conv {
     int uses_tilemap;           /* TILEMAP family: mmb_tilemap.h */
     int uses_draw3d;            /* DRAW3D: mmb_draw3d.h */
     int uses_playd;             /* SOUND/TONE/MOD daemons: mmb_play.h */
+    int uses_playvol;           /* PLAY VOLUME: mm_play_left and _right */
     /* FRAMEBUFFER LAYER with a transparent colour: the colour is
        run-time state (the firmware's transparentlow/high), kept in an
        emitted global that MERGE reads when it names no colour */

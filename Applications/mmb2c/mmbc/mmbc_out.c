@@ -563,8 +563,13 @@ void conv_write(FILE *f)
        what makes the volume stick across statements the way MMBasic's
        does.  Emitted only when the program plays something, so nothing
        else carries it - the same bargain as the two headers above. */
-    if (cv.uses_play && !cv.uses_playd)
-        fprintf(f, "static int mm_play_volume = 80;\n\n");
+    if (cv.uses_play && !cv.uses_playd) {
+        if (cv.uses_playvol)
+            fprintf(f, "static int mm_play_volume = 80, mm_play_left = 80, "
+                       "mm_play_right = 80;\n\n");
+        else
+            fprintf(f, "static int mm_play_volume = 80;\n\n");
+    }
     if (cv.ntypes > 0) {
         int j;
         fprintf(f, "/* ---- TYPE definitions: the firmware layout,"

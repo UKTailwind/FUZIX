@@ -1516,6 +1516,7 @@ class Conv(object):
         self.uses_tilemap = False   # TILEMAP family: mmb_tilemap.h
         self.uses_draw3d = False    # DRAW3D: mmb_draw3d.h
         self.uses_playd = False     # SOUND/TONE/MOD daemons: mmb_play.h
+        self.uses_playvol = False   # PLAY VOLUME: mm_play_left and _right
         # FRAMEBUFFER LAYER with a transparent colour: the colour is
         # run-time state (the firmware's transparentlow/high), kept in
         # an emitted global that MERGE reads when it names no colour
@@ -7831,14 +7832,12 @@ class Conv(object):
                      'ERASE are translated')
         if up == 'PLAY':
             # PLAY MP3 f$          play a file, in the BACKGROUND
-            # PLAY VOLUME n        0-100, remembered for later PLAYs
+            # PLAY VOLUME l [, r]  0-100, remembered for later PLAYs
             # PLAY STOP            stop whatever is playing
             #
-            # MMBasic's PLAY VOLUME takes a level per channel; this
-            # takes one, because the volume reaches playmp3 as an
-            # argument and playmp3 applies it to both.  Left and right
-            # separately would mean a second argument that does nothing
-            # yet, which is worse than not offering it.
+            # PLAY VOLUME keeps left and right apart, as Audio.c does.
+            # The synthesiser plays the two as given; playmp3 and
+            # playmod have one gain, and are given the larger.
             #
             # MP3 does NOT wait.  playmp3 is a separate process feeding
             # the kernel's ring, so the BASIC program carries on while
@@ -7858,15 +7857,38 @@ class Conv(object):
                 return
             self.uses_play = True
             if self.is_kw('VOLUME', 1):
+                # PLAY VOLUME [left] [, right] - cmd_play's VOLUME arm:
+                # a level not given stays as it was, so PLAY VOLUME 50
+                # is the LEFT channel alone, as on a PicoMite, and
+                # PLAY VOLUME , 50 the right.
                 self.i += 2
-                v = self.expr()
-                if v[1] == TY_S:
+                self.uses_playvol = True
+                lv = rv = None
+                if not self.is_op(','):
+                    lv = self.expr()
+                    if lv[1] == TY_S:
+                        self.err('PLAY VOLUME wants a number')
+                if self.accept_op(','):
+                    rv = self.expr()
+                    if rv[1] == TY_S:
+                        self.err('PLAY VOLUME wants a number')
+                if lv is None and rv is None:
                     self.err('PLAY VOLUME wants a number')
                 if self.uses_playd:
                     # a running daemon hears the change at once
-                    self.emit('mmp_volume(%s);' % self.as_int(v))
+                    self.emit('mmp_volume(%s, %s, %d);' % (
+                        self.as_int(lv) if lv is not None else '0',
+                        self.as_int(rv) if rv is not None else '0',
+                        (1 if lv is not None else 0) |
+                        (2 if rv is not None else 0)))
                 else:
-                    self.emit('mm_play_volume = (int)(%s);' % v[0])
+                    if lv is not None:
+                        self.emit('mm_play_left = (int)(%s);' % lv[0])
+                    if rv is not None:
+                        self.emit('mm_play_right = (int)(%s);' % rv[0])
+                    self.emit('mm_play_volume = mm_play_left > '
+                              'mm_play_right ? mm_play_left : '
+                              'mm_play_right;')
                     self.emit('if (mm_play_volume < 0) mm_play_volume = 0;')
                     self.emit('if (mm_play_volume > 100) '
                               'mm_play_volume = 100;')
@@ -12668,7 +12690,11 @@ class Conv(object):
         # the two headers above.  mmb_play.h brings its own copy, so a
         # program with SOUND or TONE must not get a second.
         if self.uses_play and not self.uses_playd:
-            wr('static int mm_play_volume = 80;\n\n')
+            if self.uses_playvol:
+                wr('static int mm_play_volume = 80, mm_play_left = 80, '
+                   'mm_play_right = 80;\n\n')
+            else:
+                wr('static int mm_play_volume = 80;\n\n')
         if self.type_order:
             wr('/* ---- TYPE definitions: the firmware layout, byte for'
                ' byte (TYPE-SPEC.md).\n')

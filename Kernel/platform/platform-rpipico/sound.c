@@ -479,7 +479,9 @@ static struct mmvoice mmv[4][2];
 static uint16_t *mms_noisetable;
 static long mms_tone_ph[2], mms_tone_inc[2];
 static long long mms_tone_left = -2;    /* -2 off, -1 forever */
-static int mms_gain = 205;              /* 8.8: 80% of full */
+/* PLAY VOLUME's two levels, kept apart as Audio.c keeps vol_left and
+ * vol_right.  8.8, 80% of full until a program says. */
+static int mms_gain_l = 205, mms_gain_r = 205;
 static volatile uint8_t mms_active;
 static uint16_t mms_owner;
 static uint32_t mms_quiet_frames;
@@ -661,8 +663,8 @@ static void SND_FAST(mmsnd_fill)(int16_t *buf)
             lv *= 16;
             rv *= 16;
         }
-        buf[n * 2] = (int16_t)((lv * mms_gain) >> 8);
-        buf[n * 2 + 1] = (int16_t)((rv * mms_gain) >> 8);
+        buf[n * 2] = (int16_t)((lv * mms_gain_l) >> 8);
+        buf[n * 2 + 1] = (int16_t)((rv * mms_gain_r) >> 8);
     }
 
     /* The daemon exited after five silent seconds to free the output
@@ -748,13 +750,14 @@ int sound_mm_cmd(uint8_t op, uint8_t a, uint8_t b,
             mms_tone_left = -2;
         break;
     case MMS_OP_VOLUME: {
-        int v = p1 > p2 ? p1 : p2;
+        /* p1 the left, p2 the right: a program's PLAY VOLUME 30, 70 is
+         * a balance, which the one gain this used to keep - the larger
+         * of the two - played as 70 on both sides */
+        int l = p1 < 0 ? 0 : p1 > 100 ? 100 : p1;
+        int r = p2 < 0 ? 0 : p2 > 100 ? 100 : p2;
 
-        if (v < 0)
-            v = 0;
-        if (v > 100)
-            v = 100;
-        mms_gain = (mapping[v] << 8) / mapping[100];
+        mms_gain_l = (mapping[l] << 8) / mapping[100];
+        mms_gain_r = (mapping[r] << 8) / mapping[100];
         break;
     }
     default:

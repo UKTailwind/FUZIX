@@ -1,7 +1,7 @@
 ' playdemo - PLAY SOUND and PLAY TONE on the board's speaker.
 ' A rising four-note scale on the synth, a two-tone chord, a second of
 ' noise, then silence; ends with PLAY STOP so nothing lingers.
-PLAY VOLUME 70
+PLAY VOLUME 70, 70
 PLAY SOUND 1, B, S, 262
 PAUSE 300
 PLAY SOUND 1, B, S, 330

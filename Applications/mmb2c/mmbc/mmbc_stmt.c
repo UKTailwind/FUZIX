@@ -1439,14 +1439,12 @@ void statement_inner(void)
     }
     if (strcmp(up, "PLAY") == 0) {
         /* PLAY MP3 f$          play a file, in the BACKGROUND
-           PLAY VOLUME n        0-100, remembered for later PLAYs
+           PLAY VOLUME l [, r]  0-100, remembered for later PLAYs
            PLAY STOP            stop whatever is playing
 
-           MMBasic's PLAY VOLUME takes a level per channel; this takes
-           one, because the volume reaches playmp3 as an argument and
-           playmp3 applies it to both.  Left and right separately would
-           mean a second argument that does nothing yet, which is worse
-           than not offering it.
+           PLAY VOLUME keeps left and right apart, as Audio.c does.  The
+           synthesiser plays the two as given; playmp3 and playmod have
+           one gain, and are given the larger.
 
            MP3 does NOT wait.  playmp3 is a separate process feeding the
            kernel's ring, so the BASIC program carries on while the
@@ -1465,16 +1463,42 @@ void statement_inner(void)
         }
         cv.uses_play = 1;
         if (is_kw("VOLUME", 1)) {
-            struct val v;
+            /* PLAY VOLUME [left] [, right] - cmd_play's VOLUME arm: a
+               level not given stays as it was, so PLAY VOLUME 50 is the
+               LEFT channel alone, as on a PicoMite, and
+               PLAY VOLUME , 50 the right. */
+            struct val lv, rv;
+            int which = 0;
             cv.i += 2;
-            v = expr();
-            if (v.ty == TY_S)
+            cv.uses_playvol = 1;
+            memset(&lv, 0, sizeof lv);
+            memset(&rv, 0, sizeof rv);
+            if (!is_op(",", 0)) {
+                lv = expr();
+                if (lv.ty == TY_S)
+                    cv_err("PLAY VOLUME wants a number");
+                which |= 1;
+            }
+            if (accept_op(",")) {
+                rv = expr();
+                if (rv.ty == TY_S)
+                    cv_err("PLAY VOLUME wants a number");
+                which |= 2;
+            }
+            if (!which)
                 cv_err("PLAY VOLUME wants a number");
             if (cv.uses_playd) {
                 /* a running daemon hears the change at once */
-                emit(sfmt("mmp_volume(%s);", as_int(v)));
+                emit(sfmt("mmp_volume(%s, %s, %d);",
+                          (which & 1) ? as_int(lv) : "0",
+                          (which & 2) ? as_int(rv) : "0", which));
             } else {
-                emit(sfmt("mm_play_volume = (int)(%s);", v.code));
+                if (which & 1)
+                    emit(sfmt("mm_play_left = (int)(%s);", lv.code));
+                if (which & 2)
+                    emit(sfmt("mm_play_right = (int)(%s);", rv.code));
+                emit("mm_play_volume = mm_play_left > mm_play_right ? "
+                     "mm_play_left : mm_play_right;");
                 emit("if (mm_play_volume < 0) mm_play_volume = 0;");
                 emit("if (mm_play_volume > 100) "
                      "mm_play_volume = 100;");

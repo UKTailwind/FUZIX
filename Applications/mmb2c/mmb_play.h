@@ -34,10 +34,12 @@
 #endif
 #endif
 
-/* the one volume, shared with PLAY MP3's spawn argument.  Defined here
+/* PLAY VOLUME's two levels, kept apart as Audio.c keeps vol_left and
+ * vol_right, and mm_play_volume the larger: what a player with one gain
+ * is started at - playmp3, playmod, a daemon's argument.  Defined here
  * when this header is present; the translator emits its own copy only
  * for programs whose PLAY is MP3-alone. */
-static int mm_play_volume = 80;
+static int mm_play_volume = 80, mm_play_left = 80, mm_play_right = 80;
 
 #define MMP_KIND_NONE 0
 #define MMP_KIND_SND  1
@@ -148,6 +150,17 @@ MMG_FN int mmp_type(const char *s)
 	MM_RAISEV("Invalid type", MM_SND_OFF);
 }
 
+/* The kernel synthesiser keeps its levels from one program to the next,
+ * and a PLAY VOLUME before the first note was only remembered here, so
+ * the first SOUND or TONE tells it this program's.  A refusal is the
+ * note's to report, just after. */
+MMG_FN void mmp_synth_levels(void)
+{
+	if (mm_play_kind != MMP_KIND_SND)
+		mm_snd_cmd(MM_PLAY_VOLUME, 0, 0, mm_play_left,
+			   mm_play_right, 0);
+}
+
 /* PLAY SOUND voice, channel, type [, frequency [, volume]] -
  * cmd_play's own ranges (Audio.c:1946). */
 MMG_FN void mmp_sound(MMINTEGER voice, MMINTEGER sides, MMINTEGER type,
@@ -164,6 +177,7 @@ MMG_FN void mmp_sound(MMINTEGER voice, MMINTEGER sides, MMINTEGER type,
 	 * MP3/MOD player holding the output; -1 is a kernel without the
 	 * ioctl (or the host), and the daemon path below keeps every
 	 * already-shipped arrangement working there. */
+	mmp_synth_levels();
 	{
 		MMINTEGER r = mm_snd_cmd(MM_PLAY_SOUND, voice, sides, type,
 					 (MMINTEGER)(freq * 1000.0 + 0.5),
@@ -215,6 +229,7 @@ MMG_FN void mmp_tone(MMFLOAT fl, MMFLOAT fr, MMFLOAT ms, MMINTEGER has_int)
 	}
 	/* Kernel first, as mmp_sound - the tone-done interrupt needs no
 	 * transport either way, so it is shared below. */
+	mmp_synth_levels();
 	{
 		MMINTEGER r = mm_snd_cmd(MM_PLAY_TONE, 0, 0,
 					 (MMINTEGER)(fl * 1000.0 + 0.5),
@@ -344,23 +359,27 @@ MMG_FN void mmp_bbc_env(MMINTEGER n, MMINTEGER t, MMINTEGER pi1,
 	mm_bbc_env(lo, hi);
 }
 
-/* PLAY VOLUME for a program that also plays SOUND/TONE/MOD: remember
- * it for the next spawn AND tell the daemon that is running now. */
-MMG_FN void mmp_volume(MMINTEGER v)
+/* PLAY VOLUME [left] [, right] for a program that also plays SOUND,
+ * TONE or MOD - cmd_play's VOLUME arm: a level not given stays as it
+ * was, so the one-number form sets the LEFT channel alone, as it does on
+ * a PicoMite.  which says what was given: 1 the left, 2 the right.
+ * Remember them for the next spawn AND tell what is playing now. */
+MMG_FN void mmp_volume(MMINTEGER l, MMINTEGER r, MMINTEGER which)
 {
-	mm_play_volume = (int)v;
-	if (mm_play_volume < 0)
-		mm_play_volume = 0;
-	if (mm_play_volume > 100)
-		mm_play_volume = 100;
+	if (which & 1)
+		mm_play_left = l < 0 ? 0 : l > 100 ? 100 : (int)l;
+	if (which & 2)
+		mm_play_right = r < 0 ? 0 : r > 100 ? 100 : (int)r;
+	mm_play_volume = mm_play_left > mm_play_right ? mm_play_left
+						      : mm_play_right;
 	if (mm_play_kind == MMP_KIND_SND) {
-		mm_snd_cmd(MM_PLAY_VOLUME, 0, 0, mm_play_volume,
-			   mm_play_volume, 0);
+		mm_snd_cmd(MM_PLAY_VOLUME, 0, 0, mm_play_left,
+			   mm_play_right, 0);
 		return;
 	}
 	if (mm_play_owner() != 0)
-		mmp_send(MM_PLAY_VOLUME, 0, 0, mm_play_volume,
-			 mm_play_volume, 0);
+		mmp_send(MM_PLAY_VOLUME, 0, 0, mm_play_left,
+			 mm_play_right, 0);
 }
 
 #endif /* MMB_PLAY_H */
