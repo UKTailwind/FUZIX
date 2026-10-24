@@ -57,7 +57,14 @@
 
 static struct p_tab *fb_owner;          /* NULL = both buffers are free */
 static uint8_t fb_state;
+#ifdef PC_HOST
+/* pc3host makes its framebuffers at start-up, not at link time, so the
+ * first mode change - pc3d sets the console's before anything draws -
+ * points this at them */
+static uint8_t *gfx_draw;
+#else
 static uint8_t *gfx_draw = disp_fb;
+#endif
 
 static int fb_have(int which)
 {

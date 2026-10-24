@@ -137,13 +137,23 @@ static void ob_add(struct outbuf *o, const char *line)
  *
  * The member names come from cvar(), not s->acc: heap_fixup has already
  * rewritten acc to "H->name" for exactly these symbols.
+ *
+ * The members go in five groups, each in name order: the numeric arrays,
+ * the bounds tables, the run-time arrays' pointers, the TYPE variables,
+ * and the strings.  The board's compiler aligns an array, as it does any
+ * aggregate, to 4, and MM_STRSZ is 257, so a string first left every
+ * INTEGER and FLOAT array after it at 4 mod 8 - and PEEK(INTEGER) and
+ * MEMORY COPY INTEGER refuse an address not divisible by 8, where a
+ * PicoMite's arrays never are.  Eight-byte members first keeps them all
+ * 8-aligned.  mmb2c.py's global_decls.
  */
 static void global_decls(struct outbuf *o)
 {
-    int n, k, d;
+    int n, k, d, g;
     const char **names = global_names_sorted(&n);
-    struct outbuf heap;
+    struct outbuf heaps[5], heap;
 
+    memset(heaps, 0, sizeof(heaps));
     memset(&heap, 0, sizeof(heap));
     for (k = 0; k < n; k++) {
         struct sym *s = globals_get(names[k]);
@@ -161,31 +171,35 @@ static void global_decls(struct outbuf *o)
             if (s->is_array)
                 for (d = 0; d < s->ndims; d++)
                     dims = sfmt("%s[%s]", dims, s->dims[s->ndims - 1 - d]);
-            ob_add(&heap, sfmt("struct t_%s %s%s;%s", s->stype, cn,
-                               dims, note));
+            ob_add(&heaps[3], sfmt("struct t_%s %s%s;%s", s->stype, cn,
+                                   dims, note));
         } else if (s->is_array && s->dynamic) {
             /* Bounds known only at run time, so the elements cannot be
                part of the type: a pointer and the bounds table beside
                it, which is the shape an array parameter has. */
-            ob_add(&heap, sfmt("%s;   /* DIM at run time */",
-                               dyn_decl(s, cn)));
-            ob_add(&heap, sfmt("MMINTEGER __b_%s[MM_MAXDIM + 1];", cn));
+            ob_add(&heaps[2], sfmt("%s;   /* DIM at run time */",
+                                   dyn_decl(s, cn)));
+            ob_add(&heaps[1], sfmt("MMINTEGER __b_%s[MM_MAXDIM + 1];",
+                                   cn));
         } else if (s->is_array) {
             dims = sstr("");
             for (d = 0; d < s->ndims; d++)
                 dims = sfmt("%s[%s]", dims, s->dims[s->ndims - 1 - d]);
             if (s->ty == TY_S)
-                ob_add(&heap, sfmt("char %s%s[%s];%s", cn, dims,
-                                   strsz_of(s), note));
+                ob_add(&heaps[4], sfmt("char %s%s[%s];%s", cn, dims,
+                                       strsz_of(s), note));
             else
-                ob_add(&heap, sfmt("%s %s%s;%s", ctype_of(s->ty), cn,
-                                   dims, note));
+                ob_add(&heaps[0], sfmt("%s %s%s;%s", ctype_of(s->ty), cn,
+                                       dims, note));
         } else if (s->ty == TY_S) {
-            ob_add(&heap, sfmt("char %s[MM_STRSZ];%s", cn, note));
+            ob_add(&heaps[4], sfmt("char %s[MM_STRSZ];%s", cn, note));
         } else {
             ob_add(o, sfmt("%s %s;%s", ctype_of(s->ty), cn, note));
         }
     }
+    for (g = 0; g < 5; g++)
+        for (k = 0; k < heaps[g].n; k++)
+            ob_add(&heap, heaps[g].lines[k]);
     cv.heap_used = heap.n > 0;
     if (heap.n > 0) {
         ob_add(o, "");

@@ -33,6 +33,7 @@
  *	PEEK.  Refusing it early names the mistake.
  */
 
+#include <string.h>
 #include "mmb_runtime.h"
 
 /*	The same bargain the other mmb_*.h headers make: keyed on which
@@ -154,6 +155,97 @@ MMG_FN void mmpk_poke_float(MMINTEGER addr, MMFLOAT v)
 	if (!mmpk_aligned(addr, 8, "Address not divisible by 8"))
 		return;
 	*MMPK_WPTR(MMFLOAT, addr) = v;
+}
+
+/*
+ *	MEMORY COPY [INTEGER | FLOAT] src, dst, n [, stepin [, stepout]]
+ *	and MEMORY SET [BYTE | SHORT | WORD | INTEGER | FLOAT] addr, value,
+ *	n [, step] - Memory.c cmd_memory, in its order of checks.  size is
+ *	the element: 1, or 8 for INTEGER and FLOAT, whose bytes copy alike.
+ *	The steps count elements.  A copy goes backwards when the
+ *	destination is above the source, so an overlap copies as memmove
+ *	would; with both steps 1 it is memmove.
+ */
+MMG_FN void mmpk_memcopy(MMINTEGER src, MMINTEGER dst, MMINTEGER n,
+			 int size, MMINTEGER stepin, MMINTEGER stepout)
+{
+	const unsigned char *from;
+	unsigned char *to;
+
+	if (n <= 0)
+		return;
+	if (size == 8 && (!mmpk_aligned(src, 8, "Address not divisible by 8")
+			  || !mmpk_aligned(dst, 8,
+					   "Address not divisible by 8")))
+		return;
+	from = MMPK_PTR(unsigned char, src);
+	to = MMPK_WPTR(unsigned char, dst);
+	if (stepin == 1 && stepout == 1) {
+		memmove(to, from, (size_t)n * (size_t)size);
+		return;
+	}
+	if (from < to) {
+		from += (n - 1) * stepin * size;
+		to += (n - 1) * stepout * size;
+		while (n--) {
+			memcpy(to, from, (size_t)size);
+			to -= stepout * size;
+			from -= stepin * size;
+		}
+	} else {
+		while (n--) {
+			memcpy(to, from, (size_t)size);
+			to += stepout * size;
+			from += stepin * size;
+		}
+	}
+}
+
+/* size 1, 2, 4 or 8; the value is cut to the width, as each form's
+ * store cuts it.  Only INTEGER (and FLOAT, below) take a step. */
+MMG_FN void mmpk_memset(MMINTEGER dst, MMINTEGER v, MMINTEGER n, int size,
+			MMINTEGER step)
+{
+	unsigned char *to;
+
+	if (size == 2 && !mmpk_aligned(dst, 2, "Address not divisible by 2"))
+		return;
+	if (size == 4 && !mmpk_aligned(dst, 4, "Address not divisible by 4"))
+		return;
+	if (size == 8 && !mmpk_aligned(dst, 8, "Address not divisible by 8"))
+		return;
+	if (n <= 0)
+		return;
+	to = MMPK_WPTR(unsigned char, dst);
+	if (size == 1) {
+		memset(to, (int)(v & 255), (size_t)n);
+		return;
+	}
+	while (n--) {
+		if (size == 2)
+			*(short *)to = (short)v;
+		else if (size == 4)
+			*(unsigned int *)to = (unsigned int)v;
+		else
+			*(MMINTEGER *)to = v;
+		to += step * size;
+	}
+}
+
+MMG_FN void mmpk_memsetf(MMINTEGER dst, MMFLOAT v, MMINTEGER n,
+			 MMINTEGER step)
+{
+	MMFLOAT *to;
+
+	if (!mmpk_aligned(dst, 8, "Address not divisible by 8"))
+		return;
+	if (n <= 0)
+		return;
+	to = MMPK_WPTR(MMFLOAT, dst);
+	while (n--) {
+		*to = v;
+		to += step;
+	}
 }
 
 #endif /* MMB_PEEK_H */

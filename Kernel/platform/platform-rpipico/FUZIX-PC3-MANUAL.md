@@ -1415,6 +1415,26 @@ PicoMite machine code. `POKE BYTE`, `SHORT`, `WORD`, `INTEGER` and
 `POKE DISPLAY VRES n` sets the height the firmware draws to; here the
 height is the mode's, so asking for the height it has is accepted and
 does nothing, and any other stops the program saying so.
+
+`MEMORY COPY` and `MEMORY SET` move memory a block at a time, and are
+as sharp as `POKE`:
+
+    MEMORY COPY src, dst, n                    n bytes
+    MEMORY COPY INTEGER src, dst, n [,si [,so]]  n eight-byte integers
+    MEMORY COPY FLOAT src, dst, n [,si [,so]]    n doubles
+    MEMORY SET addr, v, n                      n bytes of v
+    MEMORY SET BYTE addr, v, n [,step]         and SHORT, WORD, INTEGER, FLOAT
+
+`si` and `so` step through the source and the destination, counted in
+items: `MEMORY COPY INTEGER a, b, 4, 2, 1` takes every other integer
+from `a` and packs them at `b`. A copy whose two ends overlap comes out
+as if it went through a buffer, as MMBasic's does, in either direction.
+The `INTEGER` and `FLOAT` forms and the wider `SET`s check alignment as
+`PEEK` does. The other `MEMORY` forms — `MEMORY` on its own, which
+prints the firmware's memory map, and `PACK` and `UNPACK` — are not
+translated: the line is commented out and reported by name, as any
+line the translator cannot take is.
+
 What else `MM.INFO` answers is listed under
 [Asking the machine about itself](#mm-info).
 
@@ -2658,6 +2678,15 @@ the sub-keyword decides the type, not the `$`.
 | `PSRAM SIZE` | 8388608 on a PC3 (8 MB), 0 with no PSRAM |
 | `HEAP` | the bytes arrays and strings have left, counted as the firmware's `FreeSpaceOnHeap` counts its own |
 | `DISK SIZE`, `FREE SPACE` | the current drive's size and its free bytes |
+| `WRITEBUFF` | on a PC, the address of the framebuffer `FRAMEBUFFER WRITE` chose — `N`, `F` or `L` — for `PEEK`, `POKE` and `MEMORY COPY`; a PC3 has no address to give and stops the program saying so |
+
+**The bytes at `WRITEBUFF` are a PicoMite's but for one thing.** In
+`MODE 2` a row is 160 bytes, two pixels a byte, each pixel an RGB121
+colour; `MODE 3` is the same at 320 bytes a row. A PicoMite keeps the
+LEFT pixel of a pair in the low four bits, and this machine keeps it in
+the high four. A program that moves whole rows, as Elite does to save
+and restore its dashboard, cannot tell the difference; one that `POKE`s
+single pixels draws every pair the wrong way round.
 
 **Telling a VGA or HDMI screen from an LCD panel** is
 `INSTR(MM.INFO$(LCDPANEL), "MODE")`, as on a PicoMite: there it gives
@@ -4472,21 +4501,22 @@ they do on a PicoMite.)
 | `CLS` | `COLOR` | `COLOUR` | `CONST` |
 | `CONTINUE` | `COPY` | `CPU` | `DATA` |
 | `DATE$` | `DEFINEFONT` | `DIM` | `DO` |
-| `ELSE` | `ELSEIF` | `END` | `ENDIF` |
-| `ERASE` | `ERROR` | `EXIT` | `FILES` |
-| `FILL` | `FLAG` | `FLAGS` | `FLASH` |
-| `FLUSH` | `FONT` | `FOR` | `FRAMEBUFFER` |
-| `FUNCTION` | `GOSUB` | `GOTO` | `GUI` |
-| `I2C` | `I2C2` | `IF` | `INC` |
-| `INPUT` | `KILL` | `LET` | `LINE` |
-| `LMID` | `LOAD` | `LOCAL` | `LONGSTRING` |
-| `LOOP` | `MAP` | `MATH` | `MKDIR` |
-| `MODE` | `NEXT` | `ON` | `ONEWIRE` |
-| `OPEN` | `OPTION` | `PAUSE` | `PIN` |
-| `PIXEL` | `PLAY` | `POKE` | `POLYGON` |
-| `PORT` | `PRINT` | `PULSE` | `PWM` |
-| `RANDOMIZE` | `RBOX` | `READ` | `REDIM` |
-| `RENAME` | `RESTORE` | `RETURN` | `RMDIR` |
+| `DRAW3D` | `ELSE` | `ELSEIF` | `END` |
+| `ENDIF` | `ERASE` | `ERROR` | `EXIT` |
+| `FILES` | `FILL` | `FLAG` | `FLAGS` |
+| `FLASH` | `FLUSH` | `FONT` | `FOR` |
+| `FRAMEBUFFER` | `FUNCTION` | `GOSUB` | `GOTO` |
+| `GUI` | `I2C` | `I2C2` | `IF` |
+| `INC` | `INPUT` | `KILL` | `LET` |
+| `LIBRARY` | `LINE` | `LMID` | `LOAD` |
+| `LOCAL` | `LONGSTRING` | `LOOP` | `MAP` |
+| `MATH` | `MEMORY` | `MKDIR` | `MODE` |
+| `NEXT` | `ON` | `ONEWIRE` | `OPEN` |
+| `OPTION` | `PAUSE` | `PIN` | `PIXEL` |
+| `PLAY` | `POKE` | `POLYGON` | `PORT` |
+| `PRINT` | `PULSE` | `PWM` | `RANDOMIZE` |
+| `RBOX` | `READ` | `REDIM` | `RENAME` |
+| `RESOLUTION` | `RESTORE` | `RETURN` | `RMDIR` |
 | `RTC` | `SAVE` | `SEEK` | `SELECT` |
 | `SERVO` | `SETPIN` | `SETTICK` | `SORT` |
 | `SPI` | `SPRITE` | `STATIC` | `STRUCT` |
@@ -4538,27 +4568,28 @@ there.
 | `BIT` | `BOUND` | `BYTE` | `CHOICE` |
 | `CHR$` | `CINT` | `COS` | `CWD$` |
 | `DATE$` | `DATETIME$` | `DAY$` | `DEG` |
-| `DIR$` | `DISTANCE` | `EOF` | `EPOCH` |
-| `EXP` | `FIELD$` | `FIX` | `FLAG` |
-| `FORMAT$` | `HEX$` | `INKEY$` | `INPUT$` |
-| `INSTR` | `INT` | `JSON$` | `KEYDOWN` |
-| `LCASE$` | `LCOMPARE` | `LEFT$` | `LEN` |
-| `LGETBYTE` | `LGETSTR$` | `LINPUT` | `LINSTR` |
-| `LLEN` | `LOC` | `LOF` | `LOG` |
-| `LTRIM$` | `MAP` | `MATH` | `MAX` |
-| `MID$` | `MIN` | `MM.ADDRESS$` | `MM.CMDLINE$` |
-| `MM.DEVICE$` | `MM.ERRMSG$` | `MM.ERRNO` | `MM.FONTHEIGHT` |
-| `MM.FONTWIDTH` | `MM.HPOS` | `MM.HRES` | `MM.I2C` |
-| `MM.INFO` | `MM.INFO$` | `MM.MESSAGE$` | `MM.ONEWIRE` |
-| `MM.SPISPEED` | `MM.VER` | `MM.VPOS` | `MM.VRES` |
-| `OCT$` | `PEEK` | `PI` | `PIN` |
-| `PIXEL` | `PORT` | `POS` | `PULSIN` |
-| `RAD` | `RGB` | `RIGHT$` | `RND` |
-| `RTRIM$` | `SGN` | `SIN` | `SPACE$` |
-| `SPI` | `SPRITE` | `SQR` | `STR$` |
-| `STR2BIN` | `STRING$` | `STRUCT` | `TAB` |
-| `TAN` | `TEMPR` | `TILEMAP` | `TIME$` |
-| `TIMER` | `TRIM$` | `UCASE$` | `VAL` |
+| `DIR$` | `DISTANCE` | `DRAW3D` | `EOF` |
+| `EPOCH` | `EXP` | `FIELD$` | `FIX` |
+| `FLAG` | `FORMAT$` | `HEX$` | `INKEY$` |
+| `INPUT$` | `INSTR` | `INT` | `JSON$` |
+| `KEYDOWN` | `LCASE$` | `LCOMPARE` | `LEFT$` |
+| `LEN` | `LGETBYTE` | `LGETSTR$` | `LINPUT` |
+| `LINSTR` | `LLEN` | `LOC` | `LOF` |
+| `LOG` | `LTRIM$` | `MAP` | `MATH` |
+| `MAX` | `MID$` | `MIN` | `MM.ADDRESS$` |
+| `MM.CMDLINE$` | `MM.DEVICE$` | `MM.ERRMSG$` | `MM.ERRNO` |
+| `MM.FONTHEIGHT` | `MM.FONTWIDTH` | `MM.HPOS` | `MM.HRES` |
+| `MM.I2C` | `MM.INFO` | `MM.INFO$` | `MM.MESSAGE$` |
+| `MM.ONEWIRE` | `MM.SPISPEED` | `MM.VER` | `MM.VPOS` |
+| `MM.VRES` | `OCT$` | `PEEK` | `PI` |
+| `PIN` | `PIXEL` | `PORT` | `POS` |
+| `PULSIN` | `RAD` | `RGB` | `RIGHT$` |
+| `RND` | `RTRIM$` | `SGN` | `SIN` |
+| `SPACE$` | `SPI` | `SPRITE` | `SQR` |
+| `STR$` | `STR2BIN` | `STRING$` | `STRUCT` |
+| `TAB` | `TAN` | `TEMPR` | `TILEMAP` |
+| `TIME$` | `TIMER` | `TRIM$` | `UCASE$` |
+| `VAL` |  |  |  |
 
 ## MATH() sub-functions
 

@@ -1303,6 +1303,13 @@ static void lib_sprintf(void)
  *	Every block carries an 8-byte header: size (including header) and
  *	a used flag. Free blocks coalesce forwards on release, which is
  *	enough to stop simple alloc/free loops fragmenting.
+ *
+ *	Blocks are multiples of 8 from an 8-aligned base, so what a block
+ *	hands out is 8-aligned.  At 4 every block landed at 4 mod 8: a BASIC
+ *	program's arrays all sit in one, and MMBasic's PEEK(INTEGER) and
+ *	MEMORY COPY INTEGER refuse an address not divisible by 8, so
+ *	PEEK(INTEGER PEEK(VARADDR a())) was "Address not divisible by 8"
+ *	where a PicoMite's heap pages never are.
  */
 #define HDR	8
 
@@ -1392,7 +1399,7 @@ static unsigned long psram_heap(unsigned long want)
 
 static void heap_init(unsigned long base)
 {
-	heap_base = (base + 3) & ~3UL;
+	heap_base = (base + 7) & ~7UL;
 	heap_top = MEMTOP - STACKROOM;
 #ifdef MM_PC3
 	{
@@ -1400,11 +1407,12 @@ static void heap_init(unsigned long base)
 		unsigned long kb = e ? (unsigned long)atoi(e) : VM_HEAP_KB;
 		unsigned long region = kb ? psram_heap(kb << 10) : 0;
 		if (region) {
-			heap_base = region;
+			heap_base = (region + 7) & ~7UL;
 			heap_top = region + (kb << 10);
 		}
 	}
 #endif
+	heap_top &= ~7UL;		/* 8-byte blocks end to end */
 	if (heap_top <= heap_base + HDR) {
 		heap_base = heap_top = 0;
 		return;
@@ -1420,7 +1428,7 @@ static long lib_malloc(unsigned long want)
 
 	if (!heap_base || want == 0)
 		return 0;
-	want = (want + HDR + 3) & ~3UL;
+	want = (want + HDR + 7) & ~7UL;
 
 	while (p < heap_top) {
 		unsigned long sz = rd32(p);

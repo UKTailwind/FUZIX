@@ -93,6 +93,8 @@ W.append("* `RESOLUTION` is translated for 640x480, the one resolution "
          "there is.")
 W.append("* `Draw3D` is translated but for `DRAW3D DIAGNOSE`, which prints "
          "in the firmware's own number formats.")
+W.append("* `Memory` is one row and only `MEMORY COPY` and `MEMORY SET` "
+         "are translated.")
 W.append("* `Load` is one row covering `IMAGE`, `BMP`, `JPG` and `PNG` "
          "here, and a dozen forms in MMBasic.")
 W.append("* `Option`, `MM.INFO` and `Print` each take a list of "

@@ -5630,6 +5630,9 @@ class Conv(object):
         # arrays and strings have left (Elite sizes its 3D objects by
         # the difference across a Draw3D CREATE)
         'HEAP':       ('mm_heapfree()', TY_I),
+        # the picture being drawn, as an address PEEK, POKE and MEMORY
+        # COPY reach - pc3host only (Elite saves its dashboard so)
+        'WRITEBUFF':  ('mm_writebuff()', TY_I),
         # the mode as a VGA or HDMI PicoMite names it, "MODE1" and
         # on, or "" with no display: INSTR(..., "MODE") tells VGA or
         # HDMI from an LCD panel
@@ -5794,7 +5797,7 @@ class Conv(object):
         self.err("MM.INFO(%s ...) is not supported; translated are "
                  "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                  "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
-                 "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, "
+                 "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, WRITEBUFF, "
                  "LCDPANEL, SYSTEM I2C, IP ADDRESS, "
                  "MAX CONNECTIONS, OPTION BASE, PIN n, PINNO, FILESIZE, "
                  "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "
@@ -7038,6 +7041,55 @@ class Conv(object):
             self.i += 1
             self.do_redim()
             return
+        if up == 'MEMORY':
+            # MEMORY COPY [INTEGER | FLOAT] src, dst, n [, stepin
+            # [, stepout]] and MEMORY SET [BYTE | SHORT | WORD | INTEGER
+            # | FLOAT] addr, value, n [, step] - Memory.c cmd_memory,
+            # in mmb_peek.h beside POKE.  The rest of MEMORY reports on
+            # or reshapes the interpreter's own memory.
+            self.i += 1
+            self.uses_peek = True
+            if self.accept_kw('COPY'):
+                size = 1
+                if self.accept_kw('INTEGER') or self.accept_kw('FLOAT'):
+                    size = 8
+                a = self.int_args(3)
+                steps = ['1LL', '1LL']
+                k = 0
+                while k < 2 and self.accept_op(','):
+                    if not (self.is_op(',') or self.stmt_end()):
+                        steps[k] = self.as_int(self.expr())
+                    k += 1
+                self.emit('mmpk_memcopy(%s, %s, %s, %d, %s, %s);'
+                          % (a[0], a[1], a[2], size, steps[0], steps[1]))
+                return
+            if self.accept_kw('SET'):
+                sizes = {'BYTE': 1, 'SHORT': 2, 'WORD': 4, 'INTEGER': 8,
+                         'FLOAT': 0}
+                size = 1
+                t = self.peek()
+                if t is not None and t[0] == T_ID and t[2] in sizes:
+                    size = sizes[t[2]]
+                    self.i += 1
+                addr = self.as_int(self.expr())
+                self.expect_op(',')
+                v = self.expr()
+                self.expect_op(',')
+                n = self.as_int(self.expr())
+                step = '1LL'
+                if size in (0, 8) and self.accept_op(','):
+                    step = self.as_int(self.expr())
+                if size == 0:
+                    self.emit('mmpk_memsetf(%s, %s, %s, %s);'
+                              % (addr, self.as_flt(v), n, step))
+                else:
+                    self.emit('mmpk_memset(%s, %s, %s, %d, %s);'
+                              % (addr, self.as_int(v), n, size, step))
+                return
+            t = self.peek()
+            self.err("MEMORY %s is not translated; translated are MEMORY "
+                     "COPY and MEMORY SET"
+                     % (t[1] if t is not None else 'on its own'))
         if up == 'POKE':
             # POKE BYTE addr, value   and its wider relatives.
             #
@@ -12275,9 +12327,18 @@ class Conv(object):
         compiles.  When variable bounds do arrive they want a growable
         tail after the fixed members, extended by realloc - which works
         precisely because access goes through H and the block may move.
+
+        The members go in five groups, each in name order: the numeric
+        arrays, the bounds tables, the run-time arrays' pointers, the
+        TYPE variables, and the strings.  The board's compiler aligns
+        an array, as it does any aggregate, to 4, and MM_STRSZ is 257,
+        so a string first left every INTEGER and FLOAT array after it
+        at 4 mod 8 - and PEEK(INTEGER) and MEMORY COPY INTEGER refuse
+        an address not divisible by 8, where a PicoMite's arrays never
+        are.  Eight-byte members first keeps them all 8-aligned.
         """
         out = []
-        heap = []
+        heaps = [[], [], [], [], []]
         names = list(self.globals.keys())
         names.sort()
         for nm in names:
@@ -12291,27 +12352,28 @@ class Conv(object):
             if s.stype is not None:
                 dims = ''.join('[%s]' % d for d in reversed(s.dims)) \
                     if s.is_array else ''
-                heap.append('struct t_%s %s%s;%s'
-                            % (s.stype, cn, dims, note))
+                heaps[3].append('struct t_%s %s%s;%s'
+                                % (s.stype, cn, dims, note))
             elif s.is_array and s.dynamic:
                 # Bounds known only at run time, so the elements cannot
                 # be part of the type: a pointer and the bounds table
                 # beside it, which is the shape an array parameter has.
-                heap.append('%s;   /* DIM at run time */'
-                            % self.dyn_decl(s, cn))
-                heap.append('MMINTEGER __b_%s[MM_MAXDIM + 1];' % cn)
+                heaps[2].append('%s;   /* DIM at run time */'
+                                % self.dyn_decl(s, cn))
+                heaps[1].append('MMINTEGER __b_%s[MM_MAXDIM + 1];' % cn)
             elif s.is_array:
                 dims = ''.join('[%s]' % d for d in reversed(s.dims))
                 if s.ty == TY_S:
-                    heap.append('char %s%s[%s];%s'
-                                % (cn, dims, self.strsz(s), note))
+                    heaps[4].append('char %s%s[%s];%s'
+                                    % (cn, dims, self.strsz(s), note))
                 else:
-                    heap.append('%s %s%s;%s'
-                                % (CTYPE[s.ty], cn, dims, note))
+                    heaps[0].append('%s %s%s;%s'
+                                    % (CTYPE[s.ty], cn, dims, note))
             elif s.ty == TY_S:
-                heap.append('char %s[MM_STRSZ];%s' % (cn, note))
+                heaps[4].append('char %s[MM_STRSZ];%s' % (cn, note))
             else:
                 out.append('%s %s;%s' % (CTYPE[s.ty], cn, note))
+        heap = [h for g in heaps for h in g]
         self.heap_used = bool(heap)
         if heap:
             out.append('')

@@ -567,6 +567,7 @@ static void w_lheap(void)
 }
 
 static void w_heapfree(void) { A = (int64_t)lib_heapfree(); }
+static void w_writebuff(void) { A = mm_writebuff(); }
 
 static void w_lfree(void)
 {
@@ -804,6 +805,7 @@ static const struct mmwrap {
 	{ "mm_heap",		w_heap },
 	{ "mm_lheap",		w_lheap },
 	{ "mm_heapfree",	w_heapfree },
+	{ "mm_writebuff",	w_writebuff },
 	{ "mm_lfree",		w_lfree },
 	{ NULL,			NULL }
 };

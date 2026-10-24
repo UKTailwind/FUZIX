@@ -1544,6 +1544,10 @@ struct val builtin_raw(const char *up)
                what arrays and strings have left (Elite sizes its 3D
                objects by the difference across a Draw3D CREATE) */
             { "HEAP",       "mm_heapfree()", TY_I },
+            /* the picture being drawn, as an address PEEK, POKE and
+               MEMORY COPY reach - pc3host only (Elite saves its
+               dashboard so) */
+            { "WRITEBUFF",  "mm_writebuff()", TY_I },
             /* the mode as a VGA or HDMI PicoMite names it, "MODE1"
                and on, or "" with no display: INSTR(..., "MODE") tells
                VGA or HDMI from an LCD panel */
@@ -1676,7 +1680,7 @@ struct val builtin_raw(const char *up)
             cv_err("MM.INFO(%s ...) is not supported; translated are "
                    "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                    "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
-                   "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, "
+                   "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, WRITEBUFF, "
                    "LCDPANEL, SYSTEM I2C, IP ADDRESS, "
                    "MAX CONNECTIONS, OPTION BASE, PIN n, PINNO, FILESIZE, "
                    "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "

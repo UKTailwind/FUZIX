@@ -513,6 +513,69 @@ void statement_inner(void)
         do_redim();
         return;
     }
+    if (strcmp(up, "MEMORY") == 0) {
+        /* MEMORY COPY [INTEGER | FLOAT] src, dst, n [, stepin
+           [, stepout]] and MEMORY SET [BYTE | SHORT | WORD | INTEGER |
+           FLOAT] addr, value, n [, step] - Memory.c cmd_memory, in
+           mmb_peek.h beside POKE.  The rest of MEMORY reports on or
+           reshapes the interpreter's own memory. */
+        static const struct { const char *nm; int size; } sizes[] = {
+            { "BYTE", 1 }, { "SHORT", 2 }, { "WORD", 4 }, { "INTEGER", 8 },
+            { "FLOAT", 0 }, { NULL, 0 }
+        };
+        const char *a[3], *steps[2], *addr, *n, *step;
+        struct val v;
+        struct tok *t;
+        int size, k;
+
+        cv.i++;
+        cv.uses_peek = 1;
+        if (accept_kw("COPY")) {
+            size = 1;
+            if (accept_kw("INTEGER") || accept_kw("FLOAT"))
+                size = 8;
+            int_args(a, 3);
+            steps[0] = steps[1] = "1LL";
+            k = 0;
+            while (k < 2 && accept_op(",")) {
+                if (!(is_op(",", 0) || stmt_end()))
+                    steps[k] = as_int(expr());
+                k++;
+            }
+            emit(sfmt("mmpk_memcopy(%s, %s, %s, %d, %s, %s);", a[0], a[1],
+                      a[2], size, steps[0], steps[1]));
+            return;
+        }
+        if (accept_kw("SET")) {
+            size = 1;
+            t = peek(0);
+            for (k = 0; sizes[k].nm != NULL; k++)
+                if (t != NULL && t->kind == T_ID
+                    && strcmp(t->up, sizes[k].nm) == 0) {
+                    size = sizes[k].size;
+                    cv.i++;
+                    break;
+                }
+            addr = as_int(expr());
+            expect_op(",");
+            v = expr();
+            expect_op(",");
+            n = as_int(expr());
+            step = "1LL";
+            if ((size == 0 || size == 8) && accept_op(","))
+                step = as_int(expr());
+            if (size == 0)
+                emit(sfmt("mmpk_memsetf(%s, %s, %s, %s);", addr, as_flt(v),
+                          n, step));
+            else
+                emit(sfmt("mmpk_memset(%s, %s, %s, %d, %s);", addr,
+                          as_int(v), n, size, step));
+            return;
+        }
+        t = peek(0);
+        cv_err("MEMORY %s is not translated; translated are MEMORY COPY "
+               "and MEMORY SET", t != NULL ? t->text : "on its own");
+    }
     if (strcmp(up, "POKE") == 0) {
         /* POKE BYTE addr, value   and its wider relatives.
 

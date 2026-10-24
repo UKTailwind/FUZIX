@@ -9,14 +9,14 @@ and it lives in `fcc/catmap.py`.
 
 | | in MMBasic | translated | not translated |
 |---|---|---|---|
-| commands | 228 | **139** | 89 |
+| commands | 228 | **140** | 88 |
 | functions | 127 | **96** | 31 |
-| total | 355 | **235** | 120 |
+| total | 355 | **236** | 119 |
 
-The 120 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
-Draw3D each appear twice, CtrlVal as both a command and a function - so there are **118 distinct
+The 119 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
+Draw3D each appear twice, CtrlVal as both a command and a function - so there are **117 distinct
 names**. Of those, **19 are false negatives** (the thing works and the scanner cannot see it),
-leaving **99 real gaps**, of which 84 are in categories 4 and 5 and are not intended to close.
+leaving **98 real gaps**, of which 84 are in categories 4 and 5 and are not intended to close.
 
 ## What this count cannot tell you
 
@@ -28,6 +28,7 @@ difference.** The unit here is a row in AllCommands.h, and several rows are whol
 * `Library` is one row and only `LIBRARY LOAD`, as the program's first statement, is translated.
 * `RESOLUTION` is translated for 640x480, the one resolution there is.
 * `Draw3D` is translated but for `DRAW3D DIAGNOSE`, which prints in the firmware's own number formats.
+* `Memory` is one row and only `MEMORY COPY` and `MEMORY SET` are translated.
 * `Load` is one row covering `IMAGE`, `BMP`, `JPG` and `PNG` here, and a dozen forms in MMBasic.
 * `Option`, `MM.INFO` and `Print` each take a list of sub-keywords, some in and some not.
 
@@ -48,7 +49,7 @@ four inside its "excluded from the documentation" block.
 
 1. **Finish what is already there** - 0
 2. **Real value, moderate work** - 10
-3. **Possible, wants your steer first** - 5
+3. **Possible, wants your steer first** - 4
 4. **Deliberately out** - 59
 5. **Not applicable to this machine** - 25
 
@@ -93,9 +94,9 @@ BITSTREAM PIO path, and `OneShot` and IR RECEIVE are GPIO edge
 interrupts in the reference too - they want the capture, not a
 loop.
 
-## Category 3 - Possible, wants your steer first (5)
+## Category 3 - Possible, wants your steer first (4)
 
-**Commands:** `Bluetooth`, `Memory`, `Refresh`, `Turtle`
+**Commands:** `Bluetooth`, `Refresh`, `Turtle`
 
 **Functions:** `GetScanLine`
 
@@ -142,9 +143,9 @@ category 2, instead of a language inside the language.
 
 **Functions:** `Click(`, `CtrlVal(`, `DEVICE(`, `GPS(`, `MsgBox(`, `SPI2(`, `Touch(`
 
-## Translated: the 139 commands
+## Translated: the 140 commands
 
-`Arc`, `Array Add`, `Array Insert`, `Array Set`, `Array Slice`, `Bezier`, `Bit(`, `Bitstream`, `Blit`, `Box`, `Byte(`, `CLS`, `CPU`, `Call`, `Case`, `Case Else`, `Cat`, `Chdir`, `Circle`, `Clear`, `Close`, `Color`, `Colour`, `Colour Map`, `Const`, `Continue`, `Copy`, `Data`, `Date$`, `DefineFont`, `Dim`, `Do`, `Draw3D`, `Draw3D`, `Else`, `Else If`, `ElseIf`, `End`, `End DefineFont`, `End Function`, `End If`, `End Select`, `End Sub`, `End Type`, `EndIf`, `Erase`, `Error`, `Exit`, `Exit Do`, `Exit For`, `Exit Function`, `Exit Sub`, `FRAMEBUFFER`, `Files`, `Fill`, `Flag(`, `Flags`, `Flash`, `Flush`, `Font`, `For`, `Function`, `GUI`, `GUI`, `GoSub`, `GoTo`, `I2C`, `I2C2`, `If`, `Inc`, `Input`, `Kill`, `LMid(`, `Let`, `Library`, `Line`, `Line Input`, `Load`, `Local`, `LongString`, `Loop`, `MID$(`, `MODE`, `Map`, `Map`, `Map(`, `Map(`, `Math`, `Mkdir`, `Mode`, `Next`, `On`, `OneWire`, `Open`, `Option`, `PWM`, `Pause`, `Pin(`, `Pixel`, `Play`, `Poke`, `Polygon`, `Port(`, `Print`, `Pulse`, `RBox`, `RESOLUTION`, `RTC`, `Randomize`, `Randomize`, `ReDim`, `Read`, `Rename`, `Restore`, `Return`, `Rmdir`, `SPI`, `Save`, `Seek`, `Select Case`, `Servo`, `SetPin`, `SetTick`, `Sort`, `Sprite`, `Static`, `Struct`, `Sub`, `TEMPR START`, `Text`, `Tilemap`, `Time$`, `Timer`, `Triangle`, `Type`, `WEB`, `WS2812`, `WatchDog`, `While`
+`Arc`, `Array Add`, `Array Insert`, `Array Set`, `Array Slice`, `Bezier`, `Bit(`, `Bitstream`, `Blit`, `Box`, `Byte(`, `CLS`, `CPU`, `Call`, `Case`, `Case Else`, `Cat`, `Chdir`, `Circle`, `Clear`, `Close`, `Color`, `Colour`, `Colour Map`, `Const`, `Continue`, `Copy`, `Data`, `Date$`, `DefineFont`, `Dim`, `Do`, `Draw3D`, `Draw3D`, `Else`, `Else If`, `ElseIf`, `End`, `End DefineFont`, `End Function`, `End If`, `End Select`, `End Sub`, `End Type`, `EndIf`, `Erase`, `Error`, `Exit`, `Exit Do`, `Exit For`, `Exit Function`, `Exit Sub`, `FRAMEBUFFER`, `Files`, `Fill`, `Flag(`, `Flags`, `Flash`, `Flush`, `Font`, `For`, `Function`, `GUI`, `GUI`, `GoSub`, `GoTo`, `I2C`, `I2C2`, `If`, `Inc`, `Input`, `Kill`, `LMid(`, `Let`, `Library`, `Line`, `Line Input`, `Load`, `Local`, `LongString`, `Loop`, `MID$(`, `MODE`, `Map`, `Map`, `Map(`, `Map(`, `Math`, `Memory`, `Mkdir`, `Mode`, `Next`, `On`, `OneWire`, `Open`, `Option`, `PWM`, `Pause`, `Pin(`, `Pixel`, `Play`, `Poke`, `Polygon`, `Port(`, `Print`, `Pulse`, `RBox`, `RESOLUTION`, `RTC`, `Randomize`, `Randomize`, `ReDim`, `Read`, `Rename`, `Restore`, `Return`, `Rmdir`, `SPI`, `Save`, `Seek`, `Select Case`, `Servo`, `SetPin`, `SetTick`, `Sort`, `Sprite`, `Static`, `Struct`, `Sub`, `TEMPR START`, `Text`, `Tilemap`, `Time$`, `Timer`, `Triangle`, `Type`, `WEB`, `WS2812`, `WatchDog`, `While`
 
 ## Translated: the 96 functions
 

@@ -109,7 +109,6 @@ CAT = {
     # ---- 3: possible, wants your steer first -----------------------
     # These want a decision about the machine, not just work.
     "Refresh": 3, "GetScanLine": 3,
-    "Memory": 3,                    # POKE's family; no MMU to disagree
     # DECISION PENDING, and NOT IMMINENT - the user, 2026-08-23.  A
     # real engine rather than a toy, wanted eventually and not queued:
     # ~600 reference lines of pen state over primitives we already

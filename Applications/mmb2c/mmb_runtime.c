@@ -72,6 +72,7 @@ int pc3_sys_open(void);
 int pc3_sys_ioctl(int fd, unsigned long code, void *arg);
 int pc3_rd1(void);              /* one byte from the terminal OR the window */
 int pc3_key_ready(void);        /* the window's keyboard, when there is no tty */
+unsigned long pc3_fb_map(int fd, unsigned long *pool);  /* MM.INFO(WRITEBUFF) */
 #define mm_sys_open()              pc3_sys_open()
 #define mm_sys_ioctl(fd, code, a)  pc3_sys_ioctl((fd), (code), (void *)(a))
 #else
@@ -6235,6 +6236,13 @@ static void mm_pix_drain(void)
     mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_PIXELS, &b);
 }
 
+#ifdef PC_HOST
+/* Set by MM.INFO(WRITEBUFF): the program reads and writes the picture as
+ * memory from now on, so a PIXEL is drawn when it is asked for, not
+ * batched - what a PEEK finds is what was drawn. */
+static int mm_fb_direct;
+#endif
+
 void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb)
 {
     if (mm_gfx_open() < 0)
@@ -6260,6 +6268,10 @@ void mm_pixel(MMINTEGER x, MMINTEGER y, MMINTEGER rgb)
     if (mm_pixn >= MM_BATCH || !mm_have_fastclk() ||
         (unsigned long)(mm_us_fast() - mm_pixt0) > MM_PIX_LATENCY_US)
         mm_pix_drain();
+#ifdef PC_HOST
+    else if (mm_fb_direct)
+        mm_pix_drain();
+#endif
 }
 
 /*
@@ -7098,6 +7110,34 @@ static void mm_fb_clear_hw(int which)   { (void)which; }
 static void mm_fb_paint_hw(MMINTEGER c) { (void)c; }
 
 #endif
+
+/* MM.INFO(WRITEBUFF): where the picture being drawn is, as an address a
+ * program can PEEK, POKE and MEMORY COPY - the firmware's WriteBuf.
+ * pc3host maps pc3d's three buffers into the program (pc3_fb_map), N
+ * then F then L, in this machine's packing, which for 4 bits a pixel
+ * has the HIGH nibble the left pixel where a PicoMite has the low.
+ * Nowhere else is the picture in a program's reach, and it says so. */
+MMINTEGER mm_writebuff(void)
+{
+#ifdef PC_HOST
+    static unsigned long base, pool;
+
+    if (base == 0) {
+        if (mm_gfx_open() < 0)
+            MM_RAISEV("MM.INFO(WRITEBUFF): there is no display", 0);
+        base = pc3_fb_map(mm_gfx_fd, &pool);
+        if (base == 0)
+            MM_RAISEV("MM.INFO(WRITEBUFF): the framebuffers cannot be "
+                      "mapped", 0);
+    }
+    mm_fb_direct = 1;
+    mm_gflush();                        /* what was asked for is there */
+    return (MMINTEGER)(base + (mm_fb_wr == MM_FB_F ? pool
+                               : mm_fb_wr == MM_FB_L ? 2 * pool : 0));
+#else
+    MM_RAISEV("MM.INFO(WRITEBUFF) is not available on this machine", 0);
+#endif
+}
 
 /* CLS while drawing off-screen is a flood of the buffer in the
  * background colour, not the console's clear-screen - which would wipe

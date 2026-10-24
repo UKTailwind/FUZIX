@@ -26,7 +26,17 @@
 #define DISP_FB_POOL 40960
 #endif
 
+#ifdef PC_HOST
+/* pc3host: the three buffers are one shared-memory block, N then F then
+ * L, so that a program can map them where MM.INFO(WRITEBUFF) says and
+ * PEEK, POKE and MEMORY COPY the picture (pc3host server/disphw.c). */
+extern uint8_t *disp_fbs;
+#define disp_fb		(disp_fbs)
+#define disp_fb2	(disp_fbs + DISP_FB_POOL)
+#define disp_fb3	(disp_fbs + 2 * DISP_FB_POOL)
+#else
 extern uint8_t disp_fb[DISP_FB_POOL];
+#endif
 
 /* The off-screen layer, in PSRAM (see display.c). Check display_fb2_ok()
  * before touching it: a board without PSRAM has nowhere to put it.
@@ -48,7 +58,9 @@ extern uint8_t disp_fb[DISP_FB_POOL];
  * struct p_tab is Fuzix's process entry; display.h is included where
  * kernel.h is not, so it stays incomplete here. */
 struct p_tab;
+#ifndef PC_HOST
 extern uint8_t disp_fb2[DISP_FB_POOL];
+#endif
 
 /*
  * And a THIRD buffer, the LAYER - MMBasic's FRAMEBUFFER LAYER.
@@ -71,7 +83,9 @@ extern uint8_t disp_fb2[DISP_FB_POOL];
  * unchanged; only the moment of compositing differs, and MMBasic itself
  * defines both moments.
  */
+#ifndef PC_HOST
 extern uint8_t disp_fb3[DISP_FB_POOL];
+#endif
 int display_fb2_ok(void);
 int display_fb3_ok(void);
 

@@ -95,6 +95,10 @@ void  mm_lfree(void *p);
 /* MM.INFO(HEAP): the free bytes left in that heap - bcrun's, as
  * FreeSpaceOnHeap counts the firmware's.  0 where it is malloc. */
 MMINTEGER mm_heapfree(void);
+/* MM.INFO(WRITEBUFF): the address of the picture being drawn, which a
+ * program may PEEK, POKE and MEMORY COPY.  pc3host only; elsewhere it
+ * raises. */
+MMINTEGER mm_writebuff(void);
 
 /* Park a value and return its address: how a by-reference argument is
  * built from an expression on a compiler with no compound literals
