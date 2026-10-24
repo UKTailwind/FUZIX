@@ -38,10 +38,34 @@ char *stripped(const char *s)
     return out;
 }
 
+/* A ')' left over after a statement, with nothing else before the ':'
+ * or the line's end - picofrog's PIXEL n%-1, 136-p%, COL%(VAL("&H"+
+ * m$))).  The firmware evaluates each argument of most commands and
+ * never looks at what follows it, so the program runs there: here the
+ * brackets are skipped with a warning.  One that starts a statement is
+ * still an error. */
+static int stray_close(void)
+{
+    int j;
+
+    if (!is_op(")", 0))
+        return 0;
+    for (j = cv.i; j < cv.ntoks && !(cv.toks[j].kind == T_OP
+                                     && strcmp(cv.toks[j].text, ":") == 0);
+         j++)
+        if (!(cv.toks[j].kind == T_OP && strcmp(cv.toks[j].text, ")") == 0))
+            return 0;
+    cv_warn("a ')' after the statement is ignored, as the firmware "
+            "ignores what follows an argument");
+    cv.i = j;
+    return 1;
+}
+
 void walk(int mode)
 {
     volatile int pos;
     int idx;
+    volatile int after;         /* a statement just ended, no ':' */
 
     cv.mode = mode;
     cv.in_type = 0;
@@ -73,10 +97,16 @@ void walk(int mode)
             continue;
         cv.i = 0;
         strip_line_number();
+        after = 0;
         while (!at_end()) {
             jmp_buf jb2, *saved2;
-            if (accept_op(":"))
+            if (accept_op(":")) {
+                after = 0;
                 continue;
+            }
+            if (after && stray_close())
+                continue;
+            after = 1;
             saved2 = err_jmp;
             err_jmp = &jb2;
             if (setjmp(jb2) == 0) {

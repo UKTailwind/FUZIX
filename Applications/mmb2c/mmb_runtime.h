@@ -680,6 +680,14 @@ char *mm_inkey(void);
 #define MM_GPIO_CLAIM 3
 MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val);
 
+/* MM.INFO(PIN n), for a pin the program has not set: 0 if it could have
+ * it, 1 if another program holds it, 2 if it is the board's own, 3 if
+ * this machine has no pins to give - a PC, where SETPIN fails too.  Its
+ * own libcall rather than an mm_gpio op for the reason mm_pinct is
+ * below: an old bcrun refuses a name it does not know, where it would
+ * take an op it does not know for a read. */
+MMINTEGER mm_pinowner(MMINTEGER pin);
+
 /* The counting inputs - SETPIN FIN/CIN/PER on GP4-GP7 (kernel:
  * countpin.c; design: PLAN-count.md).  The ONE pin mode that is not a
  * register store: counting needs an interrupt, so the counters live in
@@ -750,6 +758,7 @@ MMINTEGER mm_pobuf(void);
 #define MM_GPIOC_CNT_CAPRD 0x053F
 /* pinlock, from the kernel's pico_ioctl.h - on /dev/sys, not /dev/gpio */
 #define MM_PLKIOC_CLAIM  0x0026
+#define MM_PLKIOC_OWNER  0x0028         /* the holder's pid, 0 for none */
 /* and the classes it names.  PLK_PIN and PLK_ADC are all SETPIN needs;
  * <sys/pc3io.h> has the rest. */
 #define MM_PLK_PIN       0

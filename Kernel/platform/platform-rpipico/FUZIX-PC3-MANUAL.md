@@ -1039,6 +1039,12 @@ the first two HDMI modes:
 | `MODE 1` | 640×480 | monochrome |
 | `MODE 2` | 320×240 | 16, from MMBasic's RGB121 set |
 
+`RESOLUTION 640`, or `640x480`, with or without a speed, is `MODE 1`:
+an HDMI PicoMite rebuilds its picture for the resolution and then sets
+mode 1, and 640×480 is the one resolution here. The speed picks a
+refresh rate, which a program cannot see. Any other resolution is
+refused when the program is translated.
+
 **That table is the whole difference between them.** Everything else
 behaves identically in the two modes — console output, `PRINT`, `PRINT
 @`, `TEXT`, `INPUT` and its echo — and identically to a PicoMite with
@@ -2597,6 +2603,8 @@ the sub-keyword decides the type, not the `$`.
 | `FILESIZE f$` | bytes; -1 nothing there, -2 a directory |
 | `OPTION BASE` | 0 or 1 |
 | `PINNO "GP8"` | the pin a name stands for |
+| `PIN n` | what the pin is doing, in the firmware's words: `"DIN"`, `"DOUT"`, `"PWM2A"` and the rest for a mode this program set; `"OFF"` for a header pin it could have; `"Boot Reserved : PC3"` for the board's own; `"Invalid"` on a PC, which has no pins |
+| `SYSTEM I2C` | `"I2C"`: the bus the clock and the QWIIC socket share |
 | `FONTHEIGHT`, `FONTWIDTH` | the current font's cell **times the current scale** |
 | `HPOS`, `VPOS` | the graphics text cursor |
 | `ERRNO`, `ERRMSG` | as `MM.ERRNO` and `MM.ERRMSG$` |
@@ -4471,6 +4479,11 @@ name must be one the translator can read: a string, or `MM.INFO(PATH)`
 and a string, the program's own directory. `O` and `RAM` are accepted
 and change nothing. A message about a library line gives a line number
 past the program's last.
+
+A `)` left over after a command's last argument, as in
+`PIXEL x, y, c)`, is ignored with a warning. The firmware evaluates
+each argument and never looks at what follows it, so the line runs
+there.
 
 ## Functions
 

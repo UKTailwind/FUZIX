@@ -108,7 +108,7 @@ CAT = {
 
     # ---- 3: possible, wants your steer first -----------------------
     # These want a decision about the machine, not just work.
-    "RESOLUTION": 3, "Refresh": 3, "GetScanLine": 3,
+    "Refresh": 3, "GetScanLine": 3,
     "Memory": 3,                    # POKE's family; no MMU to disagree
     # DECISION PENDING, and NOT IMMINENT - the user, 2026-08-23.  Both
     # are real engines rather than toys and both are wanted eventually;

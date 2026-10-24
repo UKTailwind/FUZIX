@@ -4833,6 +4833,21 @@ void mm_lfree(void *p)
  */
 static void mm_pix_drain(void);
 
+/*
+ * Is a pin the board's?  pinlock.c's claimable() is the authority and
+ * this is its set turned round: a program may have the I/O header -
+ * GP0-GP7, GP26 and GP34-GP46 - and GP32, the DS3231's alarm, on a PC3
+ * only (on a PC2 it is the SD card's MISO).  The rest are the display,
+ * the SD card, the PSRAM, the DAC, the console and the clock's I2C.
+ * Common scope, so a PC answers as the PC3 it stands in for.
+ */
+static int mm_pin_board(MMINTEGER pin)
+{
+    if ((pin >= 0 && pin < 8) || pin == 26 || (pin >= 34 && pin <= 46))
+        return 0;
+    return !(pin == 32 && mm_board_no() == 3);
+}
+
 #if defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
 
 #include <fcntl.h>
@@ -6421,6 +6436,35 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
     return r ? -1 : 0;
 }
 
+/* MM.INFO(PIN n)'s question (mmb_runtime.h): the board's, another
+ * program's, or free.  PLKIOC_OWNER names the holder; this program's
+ * own claim is free to it.  No /dev/gpio is no pins at all, which is
+ * a PC's case: SETPIN fails there for the same reason, and "OFF" must
+ * mean that SETPIN would work. */
+MMINTEGER mm_pinowner(MMINTEGER pin)
+{
+    struct { unsigned char cls, idx, flags, pad; } rq;
+    static int sysfd = -2;
+    int who;
+
+    if (mm_pin_board(pin))
+        return 2;
+    if (mm_gpio_fd == -2)
+        mm_gpio_fd = open("/dev/gpio", O_RDWR);
+    if (mm_gpio_fd < 0)
+        return 3;
+    if (sysfd == -2)
+        sysfd = mm_sys_open();
+    if (sysfd < 0)
+        return 0;
+    rq.cls = MM_PLK_PIN;
+    rq.idx = (unsigned char)pin;
+    rq.flags = 0;
+    rq.pad = 0;
+    who = mm_sys_ioctl(sysfd, MM_PLKIOC_OWNER, &rq);
+    return who > 0 && who != getpid() ? 1 : 0;
+}
+
 /* The counting inputs (see mmb_runtime.h for why this is its own
  * libcall).  The struct is the kernel's cntreq, laid out by hand for
  * the reason mm_gpio's is: the runtime does not carry the FUZIX tree
@@ -6530,6 +6574,9 @@ MMINTEGER mm_gpio(MMINTEGER op, MMINTEGER pin, MMINTEGER val)
     (void)op; (void)pin; (void)val;
     return 0;
 }
+
+/* Nobody else holds a pin here; the board's own are the PC3's. */
+MMINTEGER mm_pinowner(MMINTEGER pin) { return mm_pin_board(pin) ? 2 : 0; }
 
 /* The counting inputs, MODELLED rather than stubbed - the hostlatch
  * philosophy from mmb_gpio.h: nothing counts here, but Pin(n) = v

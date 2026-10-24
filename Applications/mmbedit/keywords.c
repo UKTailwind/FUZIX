@@ -183,7 +183,7 @@ const struct mmb_keyword commandtbl[] = {
     { "Flag(", 1 },
     { "TILE", 0 },
     { "MODE", 1 },
-    { "RESOLUTION", 0 },
+    { "RESOLUTION", 1 },
     { "Camera", 0 },
     { "Map(", 1 },
     { "Map", 1 },

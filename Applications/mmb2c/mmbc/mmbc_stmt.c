@@ -586,6 +586,28 @@ void statement_inner(void)
         emit(sfmt("mm_cls(%s);", col));
         return;
     }
+    if (strcmp(up, "RESOLUTION") == 0) {
+        /* RESOLUTION 640[x480] [, speed] - Draw.c cmd_resolution: the
+           HDMI build rebuilds its scan-out for the resolution, then
+           setmode(1).  640x480 is the one resolution here, so that is
+           MODE 1; the speed (252000, 315000 or 378000) picks a refresh
+           rate, which a program cannot see.  Any other resolution is
+           refused. */
+        struct tok *t;
+
+        cv.i++;
+        t = nxt();
+        if (t == NULL || t->kind != T_NUM || strcmp(t->text, "640") != 0)
+            cv_err("RESOLUTION %s: the one resolution here is 640x480",
+                   t != NULL ? t->text : "");
+        if (peek(0) != NULL && peek(0)->kind == T_ID
+            && strcmp(peek(0)->up, "X480") == 0)
+            cv.i++;
+        if (accept_op(","))
+            as_int(expr());
+        emit("mm_mode(1);");
+        return;
+    }
     if (strcmp(up, "MODE") == 0) {
         /* MODE 1  640x480, one bit    MODE 2  320x240, 16 colours
            The PicoMite VGA numbering, which is also the first two

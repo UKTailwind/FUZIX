@@ -1520,6 +1520,11 @@ struct val builtin_raw(const char *up)
                and on, or "" with no display: INSTR(..., "MODE") tells
                VGA or HDMI from an LCD panel */
             { "LCDPANEL",   "mm_lcdpanel()", TY_S },
+            /* "Not set", "I2C" or "I2C2" on the firmware.  The PC3's
+               clock and QWIIC socket are on I2C, GP20/GP21, which the
+               kernel runs - the firmware's answer for OPTION SYSTEM I2C
+               on those pins */
+            { "SYSTEM I2C", "\"\\003\" \"I2C\"", TY_S },
             { NULL, NULL, 0 }
         };
         static const struct { const char *kw, *call; } witharg[] = {
@@ -1571,6 +1576,14 @@ struct val builtin_raw(const char *up)
             (void)nxt();
             expect_op(")");
             return mkval("8LL", TY_I);
+        }
+        if (strcmp(t->up, "PIN") == 0) {
+            /* MM.INFO(PIN n): the pin's function as the firmware names
+               it - mmg_pininfo, beside SETPIN in mmb_gpio.h */
+            a = expr();
+            expect_op(")");
+            cv.uses_gpio = 1;
+            return mkval(sfmt("mmg_pininfo(%s)", as_int(a)), TY_S);
         }
         for (words = 2; words >= 1; words--) {
             const char *key = (words == 2) ? two : t->up;
@@ -1636,8 +1649,8 @@ struct val builtin_raw(const char *up)
                    "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                    "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
                    "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, "
-                   "LCDPANEL, IP ADDRESS, "
-                   "MAX CONNECTIONS, OPTION BASE, PINNO, FILESIZE, "
+                   "LCDPANEL, SYSTEM I2C, IP ADDRESS, "
+                   "MAX CONNECTIONS, OPTION BASE, PIN n, PINNO, FILESIZE, "
                    "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "
                    "FLASH ADDRESS n", t->text);
         t = nxt();

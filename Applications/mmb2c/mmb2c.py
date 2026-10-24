@@ -5614,6 +5614,10 @@ class Conv(object):
         # on, or "" with no display: INSTR(..., "MODE") tells VGA or
         # HDMI from an LCD panel
         'LCDPANEL':   ('mm_lcdpanel()', TY_S),
+        # "Not set", "I2C" or "I2C2" on the firmware.  The PC3's clock
+        # and QWIIC socket are on I2C, GP20/GP21, which the kernel runs
+        # - the firmware's answer for OPTION SYSTEM I2C on those pins
+        'SYSTEM I2C': (c_string_literal('I2C'), TY_S),
     }
     # ... and the ones that take an expression after the keyword.
     MMINFO_ARG = {
@@ -5699,6 +5703,13 @@ class Conv(object):
             self.i += 1
             self.expect_op(')')
             return ('8LL', TY_I)
+        if one == 'PIN':
+            # MM.INFO(PIN n): the pin's function as the firmware names
+            # it - mmg_pininfo, beside SETPIN in mmb_gpio.h
+            a = self.expr()
+            self.expect_op(')')
+            self.uses_gpio = True
+            return ('mmg_pininfo(%s)' % self.as_int(a), TY_S)
 
         # Two words first, so EXISTS DIR is never read as EXISTS.
         for words, key in ((2, two), (1, one)):
@@ -5764,8 +5775,8 @@ class Conv(object):
                  "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                  "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
                  "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, "
-                 "LCDPANEL, IP ADDRESS, "
-                 "MAX CONNECTIONS, OPTION BASE, PINNO, FILESIZE, "
+                 "LCDPANEL, SYSTEM I2C, IP ADDRESS, "
+                 "MAX CONNECTIONS, OPTION BASE, PIN n, PINNO, FILESIZE, "
                  "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "
                  "FLASH ADDRESS n" % t[1])
 
@@ -6503,9 +6514,14 @@ class Conv(object):
                 continue
             self.i = 0
             self.strip_line_number()
+            after = False               # a statement just ended, no ':'
             while not self.at_end():
                 if self.accept_op(':'):
+                    after = False
                     continue
+                if after and self.stray_close():
+                    continue
+                after = True
                 try:
                     self.statement()
                 except MMError as e:
@@ -6515,6 +6531,26 @@ class Conv(object):
         if self.blocks:
             self.errors.append("unterminated %s block (started line %d)"
                                % (self.blocks[-1][0], self.blocks[-1][-1]))
+
+    def stray_close(self):
+        """A ')' left over after a statement, with nothing else before
+        the ':' or the line's end - picofrog's PIXEL n%-1, 136-p%,
+        COL%(VAL("&H"+m$))).  The firmware evaluates each argument of
+        most commands and never looks at what follows it, so the program
+        runs there: here the brackets are skipped with a warning.  One
+        that starts a statement is still an error."""
+        if not self.is_op(')'):
+            return False
+        j = self.i
+        while j < len(self.toks) and not (self.toks[j][0] == T_OP
+                                          and self.toks[j][1] == ':'):
+            if not (self.toks[j][0] == T_OP and self.toks[j][1] == ')'):
+                return False
+            j += 1
+        self.warn("a ')' after the statement is ignored, as the firmware "
+                  "ignores what follows an argument")
+        self.i = j
+        return True
 
     # -- statement dispatch ---------------------------------------------
     def statement(self):
@@ -7042,6 +7078,25 @@ class Conv(object):
             if not self.stmt_end():
                 col = self.as_int(self.expr())
             self.emit('mm_cls(%s);' % col)
+            return
+        if up == 'RESOLUTION':
+            # RESOLUTION 640[x480] [, speed] - Draw.c cmd_resolution: the
+            # HDMI build rebuilds its scan-out for the resolution, then
+            # setmode(1).  640x480 is the one resolution here, so that is
+            # MODE 1; the speed (252000, 315000 or 378000) picks a
+            # refresh rate, which a program cannot see.  Any other
+            # resolution is refused.
+            self.i += 1
+            t = self.nxt()
+            if t is None or t[0] != T_NUM or t[1] != '640':
+                self.err("RESOLUTION %s: the one resolution here is "
+                         "640x480" % (t[1] if t is not None else ''))
+            if self.peek() is not None and self.peek()[0] == T_ID \
+                    and self.peek()[2] == 'X480':
+                self.i += 1
+            if self.accept_op(','):
+                self.as_int(self.expr())
+            self.emit('mm_mode(1);')
             return
         if up == 'MODE':
             # MODE 1  640x480, one bit    MODE 2  320x240, 16 colours

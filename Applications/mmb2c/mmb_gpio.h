@@ -255,6 +255,61 @@ MMG_FN void mmg_setpin(MMINTEGER pin, MMINTEGER mode, MMINTEGER pull)
 	mmg_mode[pin] = (unsigned char)mode;
 }
 
+/*	MM.INFO(PIN n) - MM_Misc.c: the pin's function as External.c's
+ *	PinFunction[] names it.  A mode this program set is named, a PWM
+ *	pin by its slice and channel ("PWM3A").  One it has not set is
+ *	"OFF" if the program could have it, "Boot Reserved : PC3" if it is
+ *	the board's, and "OFF: Reserved for function" if another program
+ *	holds it - the firmware's words for a pin something else has.
+ *	"Invalid" past the last pin, as there, and on a PC, which has no
+ *	pins: "OFF" means SETPIN would work.  Picofrog asks this of GP1-GP3
+ *	before it looks for a NES pad on them. */
+MMG_FN char *mmg_pininfo(MMINTEGER pin)
+{
+	static const char *const name[12] = {
+		"OFF", "DIN", "DOUT", "AIN", "ADCRAW", "INTH", "INTL",
+		"INTB", "PWM", "FIN", "CIN", "PER"
+	};
+	char *s = mm_tmp();
+	char b[8];
+	int m, k = 0, sl;
+
+	if (pin < 0 || pin >= MM_GPIO_NPINS) {
+		mm_ssetc(s, "Invalid");
+		return s;
+	}
+	m = mmg_mode[pin];
+	if (m == MMG_PIN_PWM) {
+		sl = pc3_pwm_slice((int)pin);
+		b[k++] = 'P';
+		b[k++] = 'W';
+		b[k++] = 'M';
+		if (sl >= 10)
+			b[k++] = '1';
+		b[k++] = (char)('0' + sl % 10);
+		b[k++] = pc3_pwm_chan((int)pin) ? 'B' : 'A';
+		b[k] = 0;
+		mm_ssetc(s, b);
+		return s;
+	}
+	if (m != MMG_PIN_OFF && m < 12) {
+		mm_ssetc(s, name[m]);
+		return s;
+	}
+	switch ((int)mm_pinowner(pin)) {
+	case 2:
+		return mm_scat("\020" "Boot Reserved : ", mm_platform());
+	case 1:
+		mm_ssetc(s, "OFF: Reserved for function");
+		return s;
+	case 3:
+		mm_ssetc(s, "Invalid");
+		return s;
+	}
+	mm_ssetc(s, "OFF");
+	return s;
+}
+
 /*	The counting configurations.  One shared core, three thin names,
  *	so a program using only CIN carries almost nothing of FIN.
  *

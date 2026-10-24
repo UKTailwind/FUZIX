@@ -498,6 +498,7 @@ static void w_gtext(void)    { mm_gtext(LL(0), LL(2), LL(4), LL(6),
    themselves are static functions in mmb_gpio.h, so a program that
    touches no pins carries none of them. */
 static void w_gpio(void)     { A = mm_gpio(LL(0), LL(2), LL(4)); }
+static void w_pinowner(void) { A = mm_pinowner(LL(0)); }
 /* The counting inputs (SETPIN FIN/CIN/PER).  Its own libcall NAME so
    that a .bc using counting is refused by name on an old bcrun instead
    of misbehaving through mm_gpio's default case. */
@@ -774,6 +775,7 @@ static const struct mmwrap {
 	{ "mm_fill",		w_fill },
 	{ "mm_pixels",		w_pixels },
 	{ "mm_gpio",		w_gpio },
+	{ "mm_pinowner",	w_pinowner },
 	{ "mm_pinct",		w_pinct },
 	{ "mm_pincap",		w_pincap },
 	{ "mm_pobuf",		w_pobuf },
