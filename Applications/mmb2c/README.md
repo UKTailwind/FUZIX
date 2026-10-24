@@ -22,6 +22,18 @@ mmb2c.convert("prog.bas", "prog.c", True)   # True = print the scope report
 The source is ~74 KB, so on a Pico compile it with `mpy-cross` first
 (`mpy-cross mmb2c.py`) — otherwise the parse alone will eat most of RAM.
 
+## What it is for
+
+mmb2c translates programs that already run correctly on the interpreter,
+and a program that does should print, draw and compute exactly what it
+does there.  Programs are expected to run without errors, so error
+messages and `ON ERROR` behaviour may differ from the firmware's: which
+message an error gives, which of two bad subscripts is reported, what a
+statement that fails under `ON ERROR SKIP` or `IGNORE` leaves behind, and
+how `SKIP n` counts its statements.  A program that depends on those
+details should be checked on the interpreter.  The translated code does
+not pay for error paths it would never take.
+
 ---
 
 ## Scope model — the implied-global trawl
@@ -293,12 +305,14 @@ You get a warning saying so rather than a silent difference.
 
 **`ON ERROR`** takes `ABORT`, `CLEAR`, `IGNORE` and `SKIP [n]`, with
 `MM.ERRNO` and `MM.ERRMSG$`; `RESTART` reboots the machine and is refused.
-`SKIP n` counts statements as the interpreter does, including where the
-count is used up: at the call depth the `ON ERROR SKIP` ran at, so the
+`SKIP n` counts statements much as the interpreter does, including where
+the count is used up: at the call depth the `ON ERROR SKIP` ran at, so the
 statements of a `SUB` it calls count and a `FUNCTION`'s do not.  An error
 the interpreter raises only when a line runs - a `GOTO` to no label, a name
 over 31 characters, a `FUNCTION` used as a command - is raised when the
 translated line runs, so a program that never reaches it never sees it.
+Beyond that the error paths may differ from the firmware's - see *What it
+is for*.
 
 A label is only emitted into the C when something actually jumps to it,
 and the "label inside a block" warning only fires when a `GOTO` from
