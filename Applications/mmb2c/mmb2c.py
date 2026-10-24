@@ -1099,6 +1099,46 @@ def block_mark_at(s):
     return None
 
 
+def routine_after(s, insub):
+    """Whether the loader is left inside a SUB or FUNCTION after this
+    line.  Every statement on it counts, as the firmware's tokeniser
+    counts them - after a line number, after a ':' and after a label -
+    so `Print "a" : End Sub`, `lbl: End Sub` and a SUB with its END SUB
+    on one line all leave it (FUZIX #33).  Nothing in quotes, after a '
+    or after REM is looked at."""
+    i = line_start(s)
+    n = len(s)
+    q = False
+    while True:
+        # a statement starts here: REM makes the rest a comment
+        st = i
+        while st < n and s[st] in ' \t':
+            st += 1
+        if ''.join(ascii_upper(x) for x in s[st:st + 3]) == 'REM' \
+                and not loader_namechar(ascii_upper(s[st + 3:st + 4] or ' ')):
+            return insub
+        while i < n:
+            c = s[i]
+            if q:
+                if c == '"':
+                    q = False
+            elif c == '"':
+                q = True
+            elif c in ":'":
+                break
+            i += 1
+        w = loader_squash(s[st:i])
+        if w.startswith('SUB ') or w.startswith('FUNCTION '):
+            insub = True
+        elif (w.startswith('END SUB') and not loader_namechar(w[7:8])) \
+                or (w.startswith('END FUNCTION')
+                    and not loader_namechar(w[12:13])):
+            insub = False
+        if i >= n or s[i] != ':':
+            return insub
+        i += 1
+
+
 def block_close_rest(s):
     """A line inside a /* ... */ block: None while the block goes on.
     The tokeniser ends it only at a line whose first characters are */,
@@ -4767,13 +4807,7 @@ class Conv(object):
                 i += 1
                 continue
             # where the routines are, for the manual's other rule
-            w = loader_squash(self.lines[i][line_start(self.lines[i]):])
-            if w.startswith('SUB ') or w.startswith('FUNCTION '):
-                insub = True
-            elif (w.startswith('END SUB') and not loader_namechar(w[7:8])) \
-                    or (w.startswith('END FUNCTION')
-                        and not loader_namechar(w[12:13])):
-                insub = False
+            insub = routine_after(self.lines[i], insub)
             # /* and */ by the manual's rule (FUZIX #33): the first thing
             # on the line, a space or the end of the line after, and no
             # block inside a SUB or FUNCTION.  RC5 takes the other forms
@@ -6036,8 +6070,12 @@ class Conv(object):
                 if dyn or again or canon in self.redimmed:
                     dyn = True
                     if stype is not None:
-                        self.err("an array of a TYPE needs constant "
-                                 "bounds")
+                        # a refusal: raised here, in the declaration
+                        # pass, it was dropped, and the array kept the
+                        # first DIM's size (the PicoMite session's #31
+                        # review)
+                        self.note("an array of a TYPE needs constant "
+                                  "bounds")
                     if len(dims) > 5:
                         self.err("an array has at most 5 dimensions")
                     s.dynamic = True
@@ -6281,6 +6319,11 @@ class Conv(object):
         if len(s.dims) == 1:
             return '%s[%d]' % (s.acc, k)
         if s.dynamic:
+            # refused, not commented out: without its DIM the array is
+            # never made, and the program crashed on it (the PicoMite
+            # session's #32 review)
+            self.note("an initialiser list on a run-time DIM is only "
+                      "supported for 1-D arrays")
             self.err("an initialiser list on a run-time DIM is only "
                      "supported for 1-D arrays")
         subs = []
@@ -6652,6 +6695,16 @@ class Conv(object):
                 and self.cur.is_func:
             pre = 'if (__mm_e[1]) { mm_err_stmt(); } __mm_e[2]--; '
         if self.cur is not None and self.cur.heap_locals:
+            # a LOCAL array with a run-time bound has its elements on
+            # the heap, outside the block: given back first, or a SUB
+            # called often ran out of memory (the PicoMite session's
+            # review); ERASE leaves the pointer 0
+            for nm in self.cur.local_order:
+                s = self.cur.locals[nm]
+                if s.is_array and s.dynamic and not s.is_param \
+                        and not s.is_static:
+                    pre += 'if (__L->%s) mm_lfree(__L->%s); ' \
+                        % (cvar(nm), cvar(nm))
             return pre + 'mm_lfree(__L); mm_release(__mark);'
         return pre + 'mm_release(__mark);'
 

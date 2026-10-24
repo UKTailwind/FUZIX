@@ -251,6 +251,54 @@ static int block_mark_at(const char *s, const char **mark)
     return -1;
 }
 
+/* Whether the loader is left inside a SUB or FUNCTION after this line.
+ * Every statement on it counts, as the firmware's tokeniser counts them -
+ * after a line number, after a ':' and after a label - so a PRINT then END
+ * SUB, a label then END SUB, and a SUB with its END SUB on one line all
+ * leave it (FUZIX #33).  Nothing in quotes, after a ' or after REM is
+ * looked at. */
+static int routine_after(const char *s, int insub)
+{
+    int i = line_start(s), st, q = 0;
+
+    for (;;) {
+        /* a statement starts here: REM makes the rest a comment */
+        st = i;
+        while (s[st] == ' ' || s[st] == '\t')
+            st++;
+        if (ascii_upper(s[st]) == 'R' && ascii_upper(s[st + 1]) == 'E'
+            && ascii_upper(s[st + 2]) == 'M'
+            && !loader_namechar(ascii_upper(s[st + 3] ? s[st + 3] : ' ')))
+            return insub;
+        for (; s[i]; i++) {
+            if (q) {
+                if (s[i] == '"')
+                    q = 0;
+            } else if (s[i] == '"')
+                q = 1;
+            else if (s[i] == ':' || s[i] == '\'')
+                break;
+        }
+        {
+            char *t = salloc(i - st + 1);
+            const char *w;
+
+            memcpy(t, s + st, i - st);
+            t[i - st] = 0;
+            w = loader_squash(t);
+            if (strncmp(w, "SUB ", 4) == 0 || strncmp(w, "FUNCTION ", 9) == 0)
+                insub = 1;
+            else if ((strncmp(w, "END SUB", 7) == 0 && !loader_namechar(w[7]))
+                     || (strncmp(w, "END FUNCTION", 12) == 0
+                         && !loader_namechar(w[12])))
+                insub = 0;
+        }
+        if (s[i] != ':')
+            return insub;
+        i++;
+    }
+}
+
 /* A line inside a comment block: NULL while the block goes on.  The
  * tokeniser ends it only at a line whose first characters are star-slash,
  * and the manual makes everything after the star-slash comment, so what
@@ -378,17 +426,7 @@ void pass_fonts(void)
             continue;
         }
         /* where the routines are, for the manual's other rule */
-        {
-            const char *w = loader_squash(src_lines[i]
-                                          + line_start(src_lines[i]));
-
-            if (strncmp(w, "SUB ", 4) == 0 || strncmp(w, "FUNCTION ", 9) == 0)
-                insub = 1;
-            else if ((strncmp(w, "END SUB", 7) == 0 && !loader_namechar(w[7]))
-                     || (strncmp(w, "END FUNCTION", 12) == 0
-                         && !loader_namechar(w[12])))
-                insub = 0;
-        }
+        insub = routine_after(src_lines[i], insub);
         /* Slash-star and star-slash by the manual's rule (FUZIX #33): the
          * first thing on the line, a space or the end of the line after,
          * and no block inside a SUB or FUNCTION.  RC5 takes the other

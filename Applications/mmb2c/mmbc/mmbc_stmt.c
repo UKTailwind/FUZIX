@@ -106,8 +106,28 @@ static const char *routine_exit_at(int entry)
 
     if (!entry && cv.uses_onerror && cv.cur != NULL && cv.cur->is_func)
         pre = "if (__mm_e[1]) { mm_err_stmt(); } __mm_e[2]--; ";
-    if (cv.cur != NULL && cv.cur->heap_locals)
+    if (cv.cur != NULL && cv.cur->heap_locals) {
+        /* a LOCAL array with a run-time bound has its elements on the
+           heap, outside the block: given back first, or a SUB called
+           often ran out of memory (the PicoMite session's review);
+           ERASE leaves the pointer 0 */
+        struct routine *r = cv.cur;
+        int j, q;
+
+        for (j = 0; j < r->nlocal_order; j++)
+            for (q = 0; q < r->nlocals; q++) {
+                struct sym *s = r->locals[q];
+
+                if (strcmp(s->name, r->local_order[j]) != 0)
+                    continue;
+                if (s->is_array && s->dynamic && !s->is_param
+                    && !s->is_static)
+                    pre = sfmt("%sif (__L->%s) mm_lfree(__L->%s); ", pre,
+                               cvar(s->name), cvar(s->name));
+                break;
+            }
         return sfmt("%smm_lfree(__L); mm_release(__mark);", pre);
+    }
     return sfmt("%smm_release(__mark);", pre);
 }
 static const char *routine_exit(void)

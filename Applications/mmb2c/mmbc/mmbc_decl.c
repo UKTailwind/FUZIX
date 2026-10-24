@@ -1412,8 +1412,11 @@ void do_declare(const char *kw)
                 s->alen = alen;
             if (dyn || again || redimmed_in(canon)) {
                 dyn = 1;
+                /* a refusal: raised here, in the declaration pass, it
+                   was dropped, and the array kept the first DIM's size
+                   (the PicoMite session's #31 review) */
                 if (stype != NULL)
-                    cv_err("an array of a TYPE needs constant bounds");
+                    cv_note("an array of a TYPE needs constant bounds");
                 if (ndims > 5)
                     cv_err("an array has at most 5 dimensions");
                 s->dynamic = 1;
@@ -1555,6 +1558,11 @@ static char *linear_index(struct sym *s, int k)
     if (s->ndims == 1)
         return sfmt("%s[%d]", s->acc, k);
     if (s->dynamic) {
+        /* refused, not commented out: without its DIM the array is
+           never made, and the program crashed on it (the PicoMite
+           session's #32 review) */
+        cv_note("an initialiser list on a run-time DIM is only "
+                "supported for 1-D arrays");
         cv_err("an initialiser list on a run-time DIM is only "
                "supported for 1-D arrays");
         return NULL;
