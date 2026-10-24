@@ -127,6 +127,21 @@ MMG_FN void mm_arr_set_s(char (*a)[MM_STRSZ], int n, const char *v)
  * third question - ARRAY SCALE is "Unknown command" there, because
  * SCALE lives only in cmd_math.
  */
+/*
+ * a() = b() - Commands.c cmd_let_arraycopy.  The translator has checked
+ * the two are the same type; here the element COUNTS must agree (shapes
+ * are not compared, so a 2x3 array fills a 6 element one) and the copy
+ * is one memcpy, which our storage order makes the firmware's.  a() =
+ * a(), or a parameter aliasing its caller's array, copies nothing.
+ */
+MMG_FN void mm_arr_copy(void *dst, int nd, const void *src, int ns,
+                        int esize)
+{
+    if (nd != ns) MM_RAISE("Array size mismatch");
+    if (dst != src)
+        memcpy(dst, src, (size_t)nd * (size_t)esize);
+}
+
 MMG_FN void mm_arr_add_i(const MMINTEGER *in, int n, MMINTEGER v,
                          MMINTEGER *out, int no)
 {

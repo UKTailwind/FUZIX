@@ -133,7 +133,7 @@ CAT = {
     # Immediate-mode and interpreter-only: a translated program is
     # compiled and run, not typed at a prompt.
     "List": 4, "Run": 4, "Trace": 4, "Execute": 4, "New": 4,
-    "Edit": 4, "Edit File": 4, "VAR": 4, "Library": 4, "Autosave": 4,
+    "Edit": 4, "Edit File": 4, "VAR": 4, "Autosave": 4,
     # Calc and FM were at 2 until the 2026-08-23 audit read them: Calc
     # is gated on `console` in MMBasic's own tokeniser (MMBasic.c:1349)
     # and FM is Editor.c's file manager, sitting beside Edit above.

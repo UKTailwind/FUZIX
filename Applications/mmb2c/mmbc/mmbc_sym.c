@@ -754,7 +754,6 @@ struct sym *declare(const char *canon, int ty, const char *scope,
 {
     int local = strcmp(scope, "local") == 0;
     struct sym *old, *s;
-    const struct builtin *b;
     int pass;
 
     for (pass = 0; pass < 2; pass++) {
@@ -762,8 +761,7 @@ struct sym *declare(const char *canon, int ty, const char *scope,
          * reserved; MIN, LEN and friends are told apart from a variable
          * by the '(' that follows them */
         char *nm = upper(pass ? sfmt("%s$", canon) : sstr(canon));
-        b = builtin_get(nm);
-        if (b != NULL && b->minargs == 0)
+        if (bare_builtin(nm))
             cv_err("'%s' is a built-in function and cannot be used as "
                    "a variable name", canon);
     }

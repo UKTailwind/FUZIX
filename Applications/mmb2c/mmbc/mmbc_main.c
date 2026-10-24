@@ -12,9 +12,11 @@ int src_nlines;
 /* Read the whole file and split into lines, trailing \n kept, exactly
  * like Python readline() in text mode: universal newlines, so \r\n
  * and lone \r both become \n. */
-static int read_lines(const char *path)
+static int load_lines(const char *path, char ***out, int *nout)
 {
     FILE *f = fopen(path, "rb");
+    char **lines;
+    int nlines;
     long sz;
     char *buf;
     char *p, *end;
@@ -56,8 +58,8 @@ static int read_lines(const char *path)
         buf[sz] = 0;
     }
 
-    src_lines = xrealloc(NULL, sizeof(char *) * (size_t)cap);
-    src_nlines = 0;
+    lines = xrealloc(NULL, sizeof(char *) * (size_t)cap);
+    nlines = 0;
     p = buf;
     end = buf + sz;
     while (p < end) {
@@ -76,15 +78,184 @@ static int read_lines(const char *path)
             q++;
         }
         ln[len] = 0;
-        if (src_nlines == cap) {
+        if (nlines == cap) {
             cap *= 2;
-            src_lines = xrealloc(src_lines,
-                                 sizeof(char *) * (size_t)cap);
+            lines = xrealloc(lines, sizeof(char *) * (size_t)cap);
         }
-        src_lines[src_nlines++] = ln;
+        lines[nlines++] = ln;
         p = q;
     }
+    *out = lines;
+    *nout = nlines;
     return 0;
+}
+
+static int read_lines(const char *path)
+{
+    return load_lines(path, &src_lines, &src_nlines);
+}
+
+/* The program's lines; a library's (library_splice) follow them. */
+int src_nprog;
+
+/* The line the passes take pos-th: a library's lines first, then the
+ * program's - mmb2c.py's Conv.order. */
+int src_line_at(int pos)
+{
+    int nlib = src_nlines - src_nprog;
+
+    if (nlib <= 0)
+        return pos;
+    return pos < nlib ? src_nprog + pos : pos - nlib;
+}
+
+/*
+ * LIBRARY LOAD file$ [, file$ ...] [, O] [, RAM] - MM_Misc.c's
+ * cmd_library: the files' source becomes the program's library, whose
+ * top level runs at RUN before the program's first line.  It must be
+ * the program's first statement (comments, blank lines and OPTIONs may
+ * come before it).  mmb2c.py's library_splice, line for line.
+ *
+ * The library is translated with the program.  Its lines go AFTER the
+ * program's, so every program line keeps its number in messages, and
+ * src_line_at walks them FIRST, so its CONSTs and DIMs come before the
+ * program's code as on the firmware.  The LIBRARY LOAD line is left
+ * blank.  A file name the translator can read is a string, or
+ * MM.INFO(PATH) + a string - the program's own directory.
+ *
+ * Returns NULL, or the refusal's text.
+ */
+#define LIB_MAXARGS 16
+
+static const char *library_splice(const char *inpath)
+{
+    int i = 0, k, cut, nargs = 0, nnames = 0, q = 0;
+    const char *s, *raw;
+    char *args[LIB_MAXARGS], *names[LIB_MAXARGS], *cur;
+    char **lib = NULL, **all;
+    int nlib = 0;
+
+    src_nprog = src_nlines;
+    while (i < src_nlines) {
+        s = loader_squash(src_lines[i] + line_start(src_lines[i]));
+        if (s[0] == 0 || s[0] == '\''
+            || (strncmp(s, "REM", 3) == 0 && !loader_namechar(s[3]))
+            || (strncmp(s, "OPTION", 6) == 0 && !loader_namechar(s[6]))) {
+            i++;
+            continue;
+        }
+        break;
+    }
+    if (i >= src_nlines)
+        return NULL;
+    s = loader_squash(src_lines[i] + line_start(src_lines[i]));
+    if (!(strncmp(s, "LIBRARY LOAD", 12) == 0 && !loader_namechar(s[12])))
+        return NULL;
+    /* the arguments, as written (a file name keeps its case) */
+    raw = src_lines[i] + line_start(src_lines[i]);
+    while (*raw == ' ' || *raw == '\t')
+        raw++;
+    k = 0;
+    {
+        static const char *const words[2] = { "LIBRARY", "LOAD" };
+        int w;
+
+        for (w = 0; w < 2; w++) {
+            while (raw[k] == ' ' || raw[k] == '\t')
+                k++;
+            k += (int)strlen(words[w]);
+        }
+    }
+    cur = sstr("");
+    for (; raw[k] && raw[k] != '\n' && raw[k] != '\r'; k++) {
+        char c = raw[k];
+
+        if (c == '"')
+            q = !q;
+        if (c == ',' && !q) {
+            if (nargs < LIB_MAXARGS)
+                args[nargs++] = stripped(cur);
+            cur = sstr("");
+        } else
+            cur = sfmt("%s%c", cur, c);
+    }
+    if (nargs < LIB_MAXARGS)
+        args[nargs++] = stripped(cur);
+    cut = -1;
+    for (k = 0; inpath[k]; k++)
+        if (inpath[k] == '/' || inpath[k] == '\\')
+            cut = k;
+    for (k = 0; k < nargs; k++) {
+        const char *a = args[k], *au = loader_squash(a);
+        char *compact, *cu;
+        size_t n = strlen(a), j, m = 0;
+        static const char *const pre[2] = { "MM.INFO(PATH)+\"",
+                                            "MM.INFO$(PATH)+\"" };
+        int pk, found = 0;
+
+        if (strcmp(au, "O") == 0 || strcmp(au, "OVERWRITE") == 0
+            || strcmp(au, "RAM") == 0)
+            continue;
+        compact = salloc(n + 1);
+        cu = salloc(n + 1);
+        for (j = 0; j < n; j++)
+            if (a[j] != ' ' && a[j] != '\t') {
+                compact[m] = a[j];
+                cu[m] = (a[j] >= 'a' && a[j] <= 'z') ? a[j] - 32 : a[j];
+                m++;
+            }
+        compact[m] = cu[m] = 0;
+        if (n >= 2 && a[0] == '"' && a[n - 1] == '"') {
+            if (nnames < LIB_MAXARGS)
+                names[nnames++] = pstr(sfmt("%.*s%.*s", cut + 1, inpath,
+                                            (int)n - 2, a + 1));
+            continue;
+        }
+        for (pk = 0; pk < 2; pk++) {
+            size_t pl = strlen(pre[pk]);
+
+            if (strncmp(cu, pre[pk], pl) == 0 && m > pl
+                && compact[m - 1] == '"') {
+                if (nnames < LIB_MAXARGS)
+                    names[nnames++] = pstr(sfmt("%.*s%.*s", cut + 1, inpath,
+                                                (int)(m - pl - 1),
+                                                compact + pl));
+                found = 1;
+                break;
+            }
+        }
+        if (!found)
+            return pstr(sfmt("line %d: LIBRARY LOAD: a file name the "
+                             "translator can read is a string, or "
+                             "MM.INFO(PATH) + a string", i + 1));
+    }
+    for (k = 0; k < nnames; k++) {
+        char **got;
+        int ng, j;
+
+        if (load_lines(names[k], &got, &ng) != 0)
+            return pstr(sfmt("line %d: LIBRARY LOAD: cannot read %s", i + 1,
+                             names[k]));
+        if (ng > 0) {
+            size_t ln = strlen(got[ng - 1]);
+
+            if (ln == 0 || got[ng - 1][ln - 1] != '\n')
+                got[ng - 1] = pstr(sfmt("%s\n", got[ng - 1]));
+        }
+        lib = xrealloc(lib, sizeof(char *) * (size_t)(nlib + ng + 1));
+        for (j = 0; j < ng; j++)
+            lib[nlib++] = got[j];
+    }
+    all = xrealloc(NULL, sizeof(char *) * (size_t)(src_nlines + nlib + 1));
+    for (k = 0; k < src_nlines; k++)
+        all[k] = src_lines[k];
+    all[i] = pstr("\n");
+    for (k = 0; k < nlib; k++)
+        all[src_nlines + k] = lib[k];
+    src_lines = all;
+    src_nprog = src_nlines;
+    src_nlines += nlib;
+    return NULL;
 }
 
 /* Debug aid: fixed-format token stream, byte-diffed against
@@ -123,6 +294,7 @@ static const char *convert(const char *inpath, const char *outpath,
                            int report, int lenient, int fcc)
 {
     const char **const_accs;
+    const char *liberr;
     int k;
     FILE *of;
     struct outbuf rep;
@@ -131,6 +303,7 @@ static const char *convert(const char *inpath, const char *outpath,
         fprintf(stderr, "mmbc: cannot read %s\n", inpath);
         return NULL;
     }
+    liberr = library_splice(inpath);
     scan_escape();                /* OPTION ESCAPE's positional gate */
     memset(&cv, 0, sizeof(cv));
     cv.srcname = inpath;
@@ -139,6 +312,8 @@ static const char *convert(const char *inpath, const char *outpath,
     cv.opt_default = TY_F;
     cv.mode = M_SCAN;
     cv.indent = 1;
+    if (liberr != NULL)
+        errors_add(liberr);
 
     /* before every other pass: a DefineFont block is hex, not BASIC,
      * and is in force from the top of the program however far down it

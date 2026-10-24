@@ -1402,9 +1402,13 @@ MMBasic does, and say `Address not divisible by 4` if it is not. That
 is a real check and not a formality: an unaligned load faults on this
 processor.
 
-MMBasic's `PEEK(VAR ...)`, `PEEK(VARADDR ...)` and `PEEK(CFUNADDR ...)`
-are not translated — those ask about a *variable* rather than an
-address, which needs the symbol table. Neither is `POKE`, in any form.
+`PEEK(VARADDR v)` is a variable's address and `PEEK(VAR v, n)` the
+byte `n` into it. `PEEK(CFUNADDR ...)` is not translated: a `CSUB` is
+PicoMite machine code. `POKE BYTE`, `SHORT`, `WORD`, `INTEGER` and
+`FLOAT` write to an address, and are as sharp as their `PEEK`s.
+`POKE DISPLAY VRES n` sets the height the firmware draws to; here the
+height is the mode's, so asking for the height it has is accepted and
+does nothing, and any other stops the program saying so.
 What else `MM.INFO` answers is listed under
 [Asking the machine about itself](#mm-info).
 
@@ -2600,6 +2604,7 @@ the sub-keyword decides the type, not the `$`.
 | `FONT ADDRESS n`, `FLASH ADDRESS n` | as before; image slots 1 to 8, the PicoMite's three flash slots and its five RAM slots |
 | `LCDPANEL` | the mode, `"MODE1"` to `"MODE3"`, as a VGA or HDMI PicoMite names it; `""` with no display |
 | `PSRAM SIZE` | 8388608 on a PC3 (8 MB), 0 with no PSRAM |
+| `HEAP` | the bytes arrays and strings have left, counted as the firmware's `FreeSpaceOnHeap` counts its own |
 | `DISK SIZE`, `FREE SPACE` | the current drive's size and its free bytes |
 
 **Telling a VGA or HDMI screen from an LCD panel** is
@@ -4450,6 +4455,23 @@ them: `#COMMENT START` to `#COMMENT END` is comment, `MMDEBUG`
 statements are dropped under the default `#MMDEBUG OFF`, and `#DEFINE`,
 `#INCLUDE` and `#MMDEBUG ON` are refused by name.
 
+`LIBRARY LOAD` is taken as the program's first statement — comments,
+blank lines and `OPTION`s may come before it — which is how PicoMite
+games bring in their libraries:
+
+```basic
+LIBRARY LOAD MM.INFO(PATH) + "elite_lib.bas", RAM
+```
+
+The library is translated with the program. Its top-level lines, the
+`CONST`s and `DIM`s and anything else, run before the program's first
+line, as they do at `RUN` on the firmware, and its `SUB`s and
+`FUNCTION`s are the program's. More than one file may be named. Each
+name must be one the translator can read: a string, or `MM.INFO(PATH)`
+and a string, the program's own directory. `O` and `RAM` are accepted
+and change nothing. A message about a library line gives a line number
+past the program's last.
+
 ## Functions
 
 |   |   |   |   |
@@ -4689,6 +4711,19 @@ mistaken for something else: of the statements, `AES128`, `CLAMP`,
 functions `MATH(CHI`, `CHI_P`, `CORREL`, `INVERSE`, `PHASE` and `PID`.
 `COVERAGE-STATUS.md` beside the translator counts them member by
 member, from the interpreter's own tables.
+
+### Copying a whole array: `a() = b()`
+
+```basic
+DIM FLOAT qa(4), qc(4)
+qc() = qa()
+```
+
+Both arrays must be the same type and hold the same number of elements.
+Their shapes are not compared, so a 2×3 array fills a 6-element one in
+storage order, as in the interpreter. A count that does not match is
+`Array size mismatch`. The interpreter's other form, a `FUNCTION` that
+returns an array on the right, is not translated.
 
 ## Types and structure
 

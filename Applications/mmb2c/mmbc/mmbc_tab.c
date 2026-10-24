@@ -207,6 +207,17 @@ const struct builtin *builtin_get(const char *up)
     return NULL;
 }
 
+/* A built-in that can be written without its brackets - PI, TIMER,
+ * INKEY$ - so a name no variable can have.  DIR$ takes no argument but
+ * is not one: the tokeniser matches "Dir$(" with its bracket, so a bare
+ * dir$, and Elite's dir, are variables there. */
+int bare_builtin(const char *up)
+{
+    const struct builtin *b = builtin_get(up);
+
+    return b != NULL && b->minargs == 0 && strcmp(up, "DIR$") != 0;
+}
+
 int rawarg_in(const char *up)
 {
     return in_list(rawarg, up);

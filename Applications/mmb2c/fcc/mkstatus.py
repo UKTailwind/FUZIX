@@ -87,6 +87,8 @@ W.append("**A name counted as translated may be only PARTLY translated, "
 W.append("* `Math` is one row and **67 members** - the MATH section at "
          "the end counts them honestly.")
 W.append("* `GUI` is one row and only `GUI BITMAP` is translated.")
+W.append("* `Library` is one row and only `LIBRARY LOAD`, as the "
+         "program's first statement, is translated.")
 W.append("* `Load` is one row covering `IMAGE`, `BMP`, `JPG` and `PNG` "
          "here, and a dozen forms in MMBasic.")
 W.append("* `Option`, `MM.INFO` and `Print` each take a list of "

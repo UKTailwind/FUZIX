@@ -519,7 +519,7 @@ void statement_inner(void)
            The width is a bare keyword, exactly as PEEK's is, so it is
            read here rather than as an argument.  MMBasic's other POKE
            forms - VAR, DISPLAY, PROGMEM - address the interpreter's own
-           structures and have no equivalent. */
+           structures and have no equivalent, but for POKE DISPLAY VRES. */
         struct tok *t;
         const char *fn = NULL, *addr;
         struct val v;
@@ -527,6 +527,23 @@ void statement_inner(void)
 
         cv.i++;
         t = nxt();
+        if (t->kind == T_ID && strcmp(t->up, "DISPLAY") == 0) {
+            /* POKE DISPLAY VRES n - MM_Misc.c: VRes = n, the height
+               drawing clips to and MM.VRES reports; the scan-out is
+               unchanged.  Here the height is the kernel's mode's, so
+               the one value that can be honoured is the one it has - a
+               no-op, as there - and any other stops the program saying
+               so.  Elite asks for the height MODE 2 has. */
+            struct tok *k = nxt();
+
+            if (k->kind != T_ID || strcmp(k->up, "VRES") != 0)
+                cv_err("POKE DISPLAY %s is not supported; "
+                       "translated is POKE DISPLAY VRES", k->text);
+            emit(sfmt("if ((%s) != mm_vres()) mm_error(\"POKE DISPLAY "
+                      "VRES can only keep the height the mode has\");",
+                      as_int(expr())));
+            return;
+        }
         if (t->kind == T_ID) {
             if (strcmp(t->up, "BYTE") == 0)         fn = "mmpk_poke_byte";
             else if (strcmp(t->up, "SHORT") == 0)   fn = "mmpk_poke_short";
@@ -539,7 +556,7 @@ void statement_inner(void)
         }
         if (fn == NULL)
             cv_err("POKE %s is not supported; translated are BYTE, "
-                   "SHORT, WORD, INTEGER and FLOAT", t->text);
+                   "SHORT, WORD, INTEGER, FLOAT and DISPLAY VRES", t->text);
         addr = as_int(expr());
         expect_op(",");
         v = expr();
@@ -1638,6 +1655,17 @@ void statement_inner(void)
                       x, y, w, h, lw, col, fill));
         }
         return;
+    }
+    if (strcmp(up, "LIBRARY") == 0) {
+        /* LIBRARY LOAD as the program's first statement is taken before
+           any pass - library_splice, which leaves its line blank - so
+           one that reaches here is somewhere else.  The rest of LIBRARY
+           manages the firmware's flash copy of a library, which is not
+           here. */
+        if (is_kw("LOAD", 1))
+            cv_err("LIBRARY LOAD must be the program's first statement");
+        cv_err("only LIBRARY LOAD is translated, as the program's first "
+               "statement");
     }
     if (strcmp(up, "GUI") == 0 && is_kw("BITMAP", 1)) {
         /* GUI BITMAP x, y, bits [,w] [,h] [,scale] [,c] [,bc]
@@ -5857,6 +5885,43 @@ static const char *for_shape(void)
     return NULL;
 }
 
+/* a() = b() - Commands.c cmd_let_arraycopy.  Both sides are whole
+ * arrays of exactly the same type, with the same number of elements
+ * whatever their shapes (a 2x3 array fills a 6 element one), and the
+ * copy is one memcpy: our storage order is MMBasic's, so the flat copy
+ * puts every element where the firmware's does.  The counts are
+ * compared when the program runs, as there.
+ *
+ * The firmware's other right-hand side, a FUNCTION that returns an
+ * array, is not translated. */
+static void array_assign(struct sym *s, const char *canon)
+{
+    struct tok *t;
+    struct sym *src;
+    struct flat d, f;
+    int sfx;
+
+    if (!s->is_array)
+        cv_err("'%s' is not an array", canon);
+    expect_op("(");
+    expect_op(")");
+    expect_op("=");
+    t = peek(0);
+    if (t == NULL || t->kind != T_ID)
+        cv_err("Expected an array");
+    if (is_op("(", 1) && routine_get(split_suffix(t->text, &sfx)) != NULL)
+        cv_err("a() = an array FUNCTION's result is not translated");
+    src = arrayref(1);
+    if (src->ty != s->ty)
+        cv_err("Incompatible type: '%s' and '%s'", s->disp, src->disp);
+    d = array_flat(s);
+    f = array_flat(src);
+    cv.uses_array = 1;
+    emit(sfmt("mm_arr_copy(%s, %s, %s, %s, %s);", d.ptr, d.cnt, f.ptr,
+              f.cnt, s->ty == TY_S ? "MM_STRSZ"
+                     : sfmt("sizeof(%s)", ctype_of(s->ty))));
+}
+
 static void do_assign(void)
 {
     struct tok *t = nxt();
@@ -5922,6 +5987,10 @@ static void do_assign(void)
         }
         expect_op("=");
         assign_struct(target, s->stype);
+        return;
+    }
+    if (is_arr && is_op(")", 1) && is_op("=", 2)) {
+        array_assign(s, canon);
         return;
     }
     if (is_arr) {

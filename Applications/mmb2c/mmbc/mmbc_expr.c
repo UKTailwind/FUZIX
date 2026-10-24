@@ -459,7 +459,6 @@ struct val e_name(void)
     int sfx;
     char *canon = split_suffix(word, &sfx);
     struct routine *r;
-    const struct builtin *b;
     struct shead sh;
     int as_array;
     struct sym *s;
@@ -538,8 +537,7 @@ struct val e_name(void)
     if (strcmp(up, "STRUCT") == 0 && is_op("(", 0))
         return struct_fn();
 
-    b = builtin_get(up);
-    if (b != NULL && (b->minargs == 0 || is_op("(", 0)))
+    if (bare_builtin(up) || (builtin_get(up) != NULL && is_op("(", 0)))
         return call_builtin(up);
 
     if (struct_head(word, &sh)) {

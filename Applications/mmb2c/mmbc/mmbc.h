@@ -138,6 +138,10 @@ void mm_error(const char *fmt, ...);
 
 extern char **src_lines;        /* with trailing \n kept, like readline() */
 extern int src_nlines;
+/* lines [0, src_nprog) are the program's, the rest a LIBRARY LOAD's;
+ * the passes take line src_line_at(pos) pos-th - the library first */
+extern int src_nprog;
+int src_line_at(int pos);
 extern int escape_line;         /* OPTION ESCAPE's positional gate: */
 extern int escape_col;          /* set once per source by scan_escape() */
 void scan_escape(void);
@@ -149,6 +153,7 @@ struct builtin { const char *name; int minargs, maxargs; };
 int kw_in(const char *up);                  /* up in KEYWORDS */
 int routine_name_known(const char *canon);   /* a SUB/FUNCTION of that name */
 const struct builtin *builtin_get(const char *up);   /* BUILTINS[up] */
+int bare_builtin(const char *up);    /* written without brackets: PI */
 int rawarg_in(const char *up);
 int strfunc_in(const char *up);
 int fwcommand_in(const char *up);           /* up in FW_COMMANDS */
@@ -636,6 +641,9 @@ void pass_declarations(void);
  * file is in force at the top of it. */
 void pass_fonts(void);
 char *loader_squash(const char *s);   /* a line as the loader compares it */
+int loader_namechar(char c);         /* isnamechar, upper-cased */
+int line_start(const char *s);       /* past the blanks and line number */
+char *stripped(const char *s);       /* Python str.strip() */
 void place_label(const char *canon);
 void strip_line_number(void);
 void skip_statement(void);

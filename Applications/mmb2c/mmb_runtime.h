@@ -92,6 +92,9 @@ void     mm_release(unsigned mark); /* pop back down to 'mark'          */
 void *mm_heap(unsigned long n);
 void *mm_lheap(unsigned long n);
 void  mm_lfree(void *p);
+/* MM.INFO(HEAP): the free bytes left in that heap - bcrun's, as
+ * FreeSpaceOnHeap counts the firmware's.  0 where it is malloc. */
+MMINTEGER mm_heapfree(void);
 
 /* Park a value and return its address: how a by-reference argument is
  * built from an expression on a compiler with no compound literals

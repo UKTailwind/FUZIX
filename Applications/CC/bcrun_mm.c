@@ -565,6 +565,8 @@ static void w_lheap(void)
 		mm_error("out of memory for LOCAL arrays and strings");
 }
 
+static void w_heapfree(void) { A = (int64_t)lib_heapfree(); }
+
 static void w_lfree(void)
 {
 	lib_free((unsigned long)(uint32_t)arg(0));
@@ -799,6 +801,7 @@ static const struct mmwrap {
 	{ "mm_timer",		w_timer },
 	{ "mm_heap",		w_heap },
 	{ "mm_lheap",		w_lheap },
+	{ "mm_heapfree",	w_heapfree },
 	{ "mm_lfree",		w_lfree },
 	{ NULL,			NULL }
 };

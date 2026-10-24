@@ -64,11 +64,13 @@ static char *pfx_dunder(const char *pfx, const char *name)
 void pass_routine_names(void)
 {
     static struct tok toks[MAXTOKS];
-    volatile int idx;           /* survives the setjmp per iteration */
+    volatile int pos;           /* survives the setjmp per iteration */
+    int idx;
     int nt, k, sfx;
 
-    for (idx = 0; idx < src_nlines; idx++) {
+    for (pos = 0; pos < src_nlines; pos++) {
         jmp_buf jb, *saved = err_jmp;
+        idx = src_line_at(pos);
         cv.lineno = idx + 1;
         err_jmp = &jb;
         if (setjmp(jb) != 0) {
@@ -158,13 +160,15 @@ static int line_too_long(const char *s)
 
 void pass_declarations(void)
 {
-    volatile int idx;
+    volatile int pos;
+    int idx;
 
     cv.mode = M_DECL;
     cv.in_type = 0;
     cv.cur = NULL;
-    for (idx = 0; idx < src_nlines; idx++) {
+    for (pos = 0; pos < src_nlines; pos++) {
         jmp_buf jb, *saved = err_jmp;
+        idx = src_line_at(pos);
         cv.lineno = idx + 1;
         if (line_too_long(src_lines[idx]))
             cv_note("Line is too long");

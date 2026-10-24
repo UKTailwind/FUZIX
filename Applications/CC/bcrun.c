@@ -1441,6 +1441,23 @@ static long lib_malloc(unsigned long want)
 	return 0;					/* out of memory */
 }
 
+/* MM.INFO(HEAP): the free bytes, as the firmware's FreeSpaceOnHeap
+ * counts them - every free block, less its header. */
+static unsigned long lib_heapfree(void)
+{
+	unsigned long p = heap_base, n = 0;
+
+	while (p && p < heap_top) {
+		unsigned long sz = rd32(p);
+		if (sz < HDR || p + sz > heap_top)
+			break;			/* corrupt */
+		if (!rd32(p + 4))
+			n += sz - HDR;
+		p += sz;
+	}
+	return n;
+}
+
 static void lib_free(unsigned long ptr)
 {
 	unsigned long p, q;

@@ -1512,6 +1512,10 @@ struct val builtin_raw(const char *up)
             { "FREE SPACE", "mm_freespace()", TY_I },
             /* the PicoMite's PSRAM in bytes: 8 MB on a PC3, 0 with none */
             { "PSRAM SIZE", "mm_psram_size()", TY_I },
+            /* the heap's free bytes, as FreeSpaceOnHeap counts them:
+               what arrays and strings have left (Elite sizes its 3D
+               objects by the difference across a Draw3D CREATE) */
+            { "HEAP",       "mm_heapfree()", TY_I },
             /* the mode as a VGA or HDMI PicoMite names it, "MODE1"
                and on, or "" with no display: INSTR(..., "MODE") tells
                VGA or HDMI from an LCD panel */
@@ -1631,7 +1635,7 @@ struct val builtin_raw(const char *up)
             cv_err("MM.INFO(%s ...) is not supported; translated are "
                    "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                    "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
-                   "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, "
+                   "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, "
                    "LCDPANEL, IP ADDRESS, "
                    "MAX CONNECTIONS, OPTION BASE, PINNO, FILESIZE, "
                    "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "

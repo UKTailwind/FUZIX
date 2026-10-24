@@ -124,6 +124,15 @@ BUILTINS = {
     'JSON$': (2, 2),
 }
 
+
+def bare_builtin(up):
+    """A built-in that can be written without its brackets - PI,
+    TIMER, INKEY$ - so a name no variable can have.  DIR$ takes no
+    argument but is not one: the tokeniser matches "Dir$(" with its
+    bracket, so a bare dir$, and Elite's dir, are variables there."""
+    return up in BUILTINS and BUILTINS[up][0] == 0 and up != 'DIR$'
+
+
 # built-ins whose arguments cannot be parsed as plain expressions
 RAWARG = ('CHOICE', 'BOUND', 'TRIM$', 'DATETIME$', 'DAY$', 'EPOCH',
           'BIN2STR$', 'STR2BIN', 'RGB', 'MATH',
@@ -1386,6 +1395,10 @@ class Conv(object):
 
     def __init__(self, lines, srcname='program'):
         self.lines = lines            # list of source lines
+        # the order the passes walk the lines in: a library's, spliced in
+        # after the program's by library_splice, come first
+        self.order = list(range(len(lines)))
+        self.nprog = len(lines)
         scan_escape(lines)            # OPTION ESCAPE's positional gate
         self.srcname = srcname
         self.globals = {}             # canonical -> Sym
@@ -1864,7 +1877,7 @@ class Conv(object):
             # only the built-ins that can appear without brackets are
             # genuinely reserved; MIN, LEN and friends are told apart from
             # a variable by the '(' that follows them
-            if nm in BUILTINS and BUILTINS[nm][0] == 0:
+            if bare_builtin(nm):
                 self.err("'%s' is a built-in function and cannot be used as "
                          "a variable name" % canon)
         self.long_name(canon, static, scope)
@@ -2775,7 +2788,7 @@ class Conv(object):
         if up == 'STRUCT' and self.is_op('('):
             return self.struct_fn()
 
-        if up in BUILTINS and (BUILTINS[up][0] == 0 or self.is_op('(')):
+        if bare_builtin(up) or (up in BUILTINS and self.is_op('(')):
             return self.call_builtin(up)
 
         sh = self.struct_head(word)
@@ -4676,7 +4689,7 @@ class Conv(object):
     def pass_routine_names(self):
         """Cheap pre-scan so that both label detection and forward calls
         know every SUB/FUNCTION name before anything else runs."""
-        for idx in range(len(self.lines)):
+        for idx in self.order:
             self.lineno = idx + 1
             try:
                 toks = tokenize(self.lines[idx], self.lineno)
@@ -4990,7 +5003,7 @@ class Conv(object):
         registers them."""
         self.mode = 'types'
         td = None
-        for idx in range(len(self.lines)):
+        for idx in self.order:
             self.lineno = idx + 1
             try:
                 self.toks = tokenize(self.lines[idx], self.lineno)
@@ -5138,7 +5151,7 @@ class Conv(object):
         self.mode = 'decl'
         self.in_type = False
         self.cur = None
-        for idx in range(len(self.lines)):
+        for idx in self.order:
             self.lineno = idx + 1
             if line_too_long(self.lines[idx]):
                 self.note("Line is too long")
@@ -5593,6 +5606,10 @@ class Conv(object):
         'FREE SPACE': ('mm_freespace()', TY_I),
         # the PicoMite's PSRAM in bytes: 8 MB on a PC3, 0 with none
         'PSRAM SIZE': ('mm_psram_size()', TY_I),
+        # the heap's free bytes, as FreeSpaceOnHeap counts them: what
+        # arrays and strings have left (Elite sizes its 3D objects by
+        # the difference across a Draw3D CREATE)
+        'HEAP':       ('mm_heapfree()', TY_I),
         # the mode as a VGA or HDMI PicoMite names it, "MODE1" and
         # on, or "" with no display: INSTR(..., "MODE") tells VGA or
         # HDMI from an LCD panel
@@ -5746,7 +5763,7 @@ class Conv(object):
         self.err("MM.INFO(%s ...) is not supported; translated are "
                  "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                  "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
-                 "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, "
+                 "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, "
                  "LCDPANEL, IP ADDRESS, "
                  "MAX CONNECTIONS, OPTION BASE, PINNO, FILESIZE, "
                  "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "
@@ -6475,7 +6492,7 @@ class Conv(object):
         self.out = self.out_main
         self.opt_default = TY_F
         self.opt_explicit = False
-        for idx in range(len(self.lines)):
+        for idx in self.order:
             self.lineno = idx + 1
             try:
                 self.toks = tokenize(self.lines[idx], self.lineno)
@@ -6971,9 +6988,25 @@ class Conv(object):
             # The width is a bare keyword, exactly as PEEK's is, so it
             # is read here rather than as an argument.  MMBasic's other
             # POKE forms - VAR, DISPLAY, PROGMEM - address the
-            # interpreter's own structures and have no equivalent.
+            # interpreter's own structures and have no equivalent, but
+            # for POKE DISPLAY VRES.
             self.i += 1
             t = self.nxt()
+            if t[0] == T_ID and t[2] == 'DISPLAY':
+                # POKE DISPLAY VRES n - MM_Misc.c: VRes = n, the height
+                # drawing clips to and MM.VRES reports; the scan-out is
+                # unchanged.  Here the height is the kernel's mode's, so
+                # the one value that can be honoured is the one it has
+                # - a no-op, as there - and any other stops the program
+                # saying so.  Elite asks for the height MODE 2 has.
+                k = self.nxt()
+                if k[0] != T_ID or k[2] != 'VRES':
+                    self.err("POKE DISPLAY %s is not supported; "
+                             "translated is POKE DISPLAY VRES" % k[1])
+                self.emit('if ((%s) != mm_vres()) mm_error("POKE DISPLAY '
+                          'VRES can only keep the height the mode has");'
+                          % self.as_int(self.expr()))
+                return
             widths = {'BYTE': ('mmpk_poke_byte', False),
                       'SHORT': ('mmpk_poke_short', False),
                       'WORD': ('mmpk_poke_word', False),
@@ -6982,7 +7015,8 @@ class Conv(object):
             w = widths.get(t[2]) if t[0] == T_ID else None
             if w is None:
                 self.err("POKE %s is not supported; translated are BYTE, "
-                         "SHORT, WORD, INTEGER and FLOAT" % t[1])
+                         "SHORT, WORD, INTEGER, FLOAT and DISPLAY VRES"
+                         % t[1])
             addr = self.as_int(self.expr())
             self.expect_op(',')
             v = self.expr()
@@ -7909,6 +7943,17 @@ class Conv(object):
                 self.emit('mmg_box(%s, %s, %s, %s, %s, %s, %s);'
                           % (x, y, w, h, lw, col, fill))
             return
+        if up == 'LIBRARY':
+            # LIBRARY LOAD as the program's first statement is taken
+            # before any pass - library_splice, which leaves its line
+            # blank - so one that reaches here is somewhere else.  The
+            # rest of LIBRARY manages the firmware's flash copy of a
+            # library, which is not here.
+            if self.is_kw('LOAD', 1):
+                self.err("LIBRARY LOAD must be the program's first "
+                         "statement")
+            self.err("only LIBRARY LOAD is translated, as the program's "
+                     "first statement")
         if up == 'GUI' and self.is_kw('BITMAP', 1):
             # GUI BITMAP x, y, bits [,w] [,h] [,scale] [,c] [,bc]
             #
@@ -10426,6 +10471,9 @@ class Conv(object):
             self.expect_op('=')
             self.assign_struct(target, s.stype)
             return
+        if is_arr and self.is_op(')', 1) and self.is_op('=', 2):
+            self.array_assign(s, canon)
+            return
         if is_arr:
             if not s.is_array:
                 self.err("'%s' is not an array" % canon)
@@ -10446,6 +10494,37 @@ class Conv(object):
             self.store(target, self.as_int(v), TY_I)
         else:
             self.store(target, self.as_flt(v), TY_F)
+
+    def array_assign(self, s, canon):
+        """a() = b() - Commands.c cmd_let_arraycopy.  Both sides are
+        whole arrays of exactly the same type, with the same number of
+        elements whatever their shapes (a 2x3 array fills a 6 element
+        one), and the copy is one memcpy: our storage order is MMBasic's,
+        so the flat copy puts every element where the firmware's does.
+        The counts are compared when the program runs, as there.
+
+        The firmware's other right-hand side, a FUNCTION that returns an
+        array, is not translated."""
+        if not s.is_array:
+            self.err("'%s' is not an array" % canon)
+        self.expect_op('(')
+        self.expect_op(')')
+        self.expect_op('=')
+        t = self.peek()
+        if t is None or t[0] != T_ID:
+            self.err("Expected an array")
+        if self.is_op('(', 1) and split_suffix(t[1])[0] in self.routines:
+            self.err("a() = an array FUNCTION's result is not translated")
+        src = self.arrayref()
+        if src.ty != s.ty:
+            self.err("Incompatible type: '%s' and '%s'" % (s.disp, src.disp))
+        dptr, dcnt = self.array_flat(s)
+        sptr, scnt = self.array_flat(src)
+        self.uses_array = True
+        self.emit('mm_arr_copy(%s, %s, %s, %s, %s);'
+                  % (dptr, dcnt, sptr, scnt,
+                     'MM_STRSZ' if s.ty == TY_S
+                     else 'sizeof(%s)' % CTYPE[s.ty]))
 
     def assign_member(self, res):
         """... = expr  where the target is a structure member."""
@@ -12712,10 +12791,101 @@ def read_source(inpath):
     return io.StringIO(out.decode('ascii'), newline=None).readlines()
 
 
+def library_splice(lines, inpath):
+    """LIBRARY LOAD file$ [, file$ ...] [, O] [, RAM] - MM_Misc.c's
+    cmd_library: the files' source becomes the program's library, whose
+    top level runs at RUN before the program's first line.  It must be
+    the program's first statement (comments, blank lines and OPTIONs may
+    come before it).
+
+    Here the library is translated with the program.  Its lines go AFTER
+    the program's, so every program line keeps its number in messages,
+    and Conv.order walks them FIRST, so its CONSTs and DIMs come before
+    the program's code as on the firmware.  The LIBRARY LOAD line itself
+    is left blank.  A file name the translator can read is a string, or
+    MM.INFO(PATH) + a string - the program's own directory.
+
+    Returns (lines, nprog, error): nprog is how many lines are the
+    program's; error is None or the refusal's text."""
+    i = 0
+    while i < len(lines):
+        s = loader_squash(lines[i][line_start(lines[i]):])
+        if s == '' or s.startswith("'") or (s.startswith('REM')
+                                            and not loader_namechar(s[3:4])):
+            i += 1
+            continue
+        if s.startswith('OPTION') and not loader_namechar(s[6:7]):
+            i += 1
+            continue
+        break
+    if i >= len(lines):
+        return lines, len(lines), None
+    s = loader_squash(lines[i][line_start(lines[i]):])
+    if not (s.startswith('LIBRARY LOAD') and not loader_namechar(s[12:13])):
+        return lines, len(lines), None
+    # the arguments, as written (a file name keeps its case)
+    raw = lines[i][line_start(lines[i]):].strip()
+    k = 0
+    for word in ('LIBRARY', 'LOAD'):
+        while k < len(raw) and raw[k] in ' \t':
+            k += 1
+        k += len(word)
+    args, cur, q = [], '', False
+    for c in raw[k:]:
+        if c == '"':
+            q = not q
+        if c == ',' and not q:
+            args.append(cur.strip())
+            cur = ''
+        else:
+            cur += c
+    args.append(cur.strip())
+    cut = max(inpath.rfind('/'), inpath.rfind('\\'))
+    here = inpath[:cut + 1]
+    names = []
+    for a in args:
+        au = loader_squash(a)
+        if au in ('O', 'OVERWRITE', 'RAM'):
+            continue
+        compact = a.replace(' ', '').replace('\t', '')
+        cu = ''.join(ascii_upper(x) for x in compact)
+        if len(a) >= 2 and a[0] == '"' and a[-1] == '"':
+            names.append(here + a[1:-1])
+            continue
+        for pre in ('MM.INFO(PATH)+"', 'MM.INFO$(PATH)+"'):
+            if cu.startswith(pre) and compact.endswith('"') \
+                    and len(compact) > len(pre):
+                names.append(here + compact[len(pre):-1])
+                break
+        else:
+            return lines, len(lines), (
+                "line %d: LIBRARY LOAD: a file name the translator can "
+                "read is a string, or MM.INFO(PATH) + a string" % (i + 1))
+    lib = []
+    for nm in names:
+        try:
+            got = read_source(nm)
+        except (OSError, IOError):
+            return lines, len(lines), ("line %d: LIBRARY LOAD: cannot "
+                                       "read %s" % (i + 1, nm))
+        if got and not got[-1].endswith('\n'):
+            got[-1] += '\n'
+        lib.extend(got)
+    prog = list(lines)
+    prog[i] = '\n'
+    return prog + lib, len(prog), None
+
+
 def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
     lines = read_source(inpath)
+    lines, nprog, liberr = library_splice(lines, inpath)
 
     conv = Conv(lines, inpath)
+    # the library's lines, after the program's, are walked first
+    conv.order = list(range(nprog, len(lines))) + list(range(nprog))
+    conv.nprog = nprog
+    if liberr is not None:
+        conv.errors.append(liberr)
     conv.lenient = lenient
     conv.fcc = fcc
     # before every other pass: a DefineFont block is hex, not BASIC, and

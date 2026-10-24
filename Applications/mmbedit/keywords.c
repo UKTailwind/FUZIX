@@ -135,7 +135,7 @@ const struct mmb_keyword commandtbl[] = {
     { "End DefineFont", 1 },
     { "LongString", 1 },
     { "Interrupt", 0 },
-    { "Library", 0 },
+    { "Library", 1 },
     { "OneWire", 1 },
     { "TEMPR START", 1 },
     { "SPI", 1 },

@@ -628,12 +628,14 @@ static struct typedef_rec *type_statement(struct typedef_rec *td)
  * resolve in textual order, exactly as the firmware registers them. */
 void pass_types(void)
 {
-    volatile int idx;
+    volatile int pos;
+    int idx;
     struct typedef_rec *volatile td = NULL;
 
     cv.mode = M_TYPES;
-    for (idx = 0; idx < src_nlines; idx++) {
+    for (pos = 0; pos < src_nlines; pos++) {
         jmp_buf jb, *saved = err_jmp;
+        idx = src_line_at(pos);
         struct tok *t;
         cv.lineno = idx + 1;
         err_jmp = &jb;

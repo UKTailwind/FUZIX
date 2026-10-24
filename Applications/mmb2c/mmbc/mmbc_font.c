@@ -163,7 +163,7 @@ char *loader_squash(const char *s)
 }
 
 /* isnamechar on an upper-cased character, 0 (the end) being none */
-static int loader_namechar(char c)
+int loader_namechar(char c)
 {
     return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
            || c == '_' || c == '.';
@@ -177,7 +177,7 @@ static char ascii_upper(char c)
 /* Where a line's text starts: past its blanks and a line number, and the
  * blanks after that - the tokeniser takes the number off first and the
  * rest of the line is what it reads (MMBasic.c tokenise). */
-static int line_start(const char *s)
+int line_start(const char *s)
 {
     int i = 0;
 

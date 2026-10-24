@@ -3,3 +3,5 @@ lcdpanel 1
 psram 1
 peekvar 2
 bbc ok
+heap 1
+vres ok

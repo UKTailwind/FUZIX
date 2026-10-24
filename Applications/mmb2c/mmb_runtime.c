@@ -4744,6 +4744,9 @@ void *mm_heap(unsigned long n)
     return p;
 }
 
+/* The C library's heap has no free count to give: 0. */
+MMINTEGER mm_heapfree(void) { return 0; }
+
 /*
  * LOCAL frames come out of a bump arena in the image.
  *

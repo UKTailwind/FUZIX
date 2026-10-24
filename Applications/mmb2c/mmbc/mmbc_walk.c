@@ -19,7 +19,7 @@ int checks_on(void)
 }
 
 /* Python str.strip() - scratch copy with surrounding whitespace gone. */
-static char *stripped(const char *s)
+char *stripped(const char *s)
 {
     const char *e;
     char *out;
@@ -40,7 +40,8 @@ static char *stripped(const char *s)
 
 void walk(int mode)
 {
-    volatile int idx;
+    volatile int pos;
+    int idx;
 
     cv.mode = mode;
     cv.in_type = 0;
@@ -56,8 +57,9 @@ void walk(int mode)
     cv.out = &cv.out_main;
     cv.opt_default = TY_F;
     cv.opt_explicit = 0;
-    for (idx = 0; idx < src_nlines; idx++) {
+    for (pos = 0; pos < src_nlines; pos++) {
         jmp_buf jb, *saved = err_jmp;
+        idx = src_line_at(pos);
         cv.lineno = idx + 1;
         err_jmp = &jb;
         if (setjmp(jb) != 0) {

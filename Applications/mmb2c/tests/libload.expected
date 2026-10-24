@@ -1,0 +1,8 @@
+library a runs first
+library b runs next
+program starts
+LIBMAX 99
+count 6
+twice 21 = 42
+hello PicoMite
+DONE!

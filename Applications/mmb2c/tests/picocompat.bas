@@ -18,3 +18,9 @@ Play BBC Envelope 1, 1, 0, 0, 0, 0, 0, 0, 126, -50, 0, 0, 126, 0
 Play BBC Sound 1, 1, 100, 2
 Play Stop
 Print "bbc ok"
+' MM.INFO(HEAP): what arrays and strings have left - bcrun's heap,
+' or 0 in a build whose heap is the C library's
+Print "heap"; MM.Info(HEAP) >= 0
+' POKE DISPLAY VRES to the height the mode already has: a no-op
+Poke Display VRes MM.VRes
+Print "vres ok"
