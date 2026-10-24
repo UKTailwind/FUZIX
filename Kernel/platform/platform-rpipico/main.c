@@ -90,8 +90,91 @@ uint_fast8_t plt_param(char* p)
     return 0;
 }
 
+/*
+ * The fault, written to the SCREEN before anything else.  kprintf mirrors
+ * every byte to the uart, whose ring cannot drain in fault context, so
+ * the kprintf dump below stops when the ring is full - on the screen too.
+ * A robots build that faulted the v0.30 board left 14 characters of it:
+ * "FLAGRANT SYSTE".  console_screen_puts paints core1's framebuffer and
+ * never touches the uart.  Each line fits 80 columns.
+ */
+static char *fault_put(char *o, const char *s)
+{
+    while (*s)
+        *o++ = *s++;
+    return o;
+}
+
+static char *fault_hex(char *o, uint32_t v)
+{
+    static const char d[] = "0123456789ABCDEF";
+    int i;
+
+    for (i = 28; i >= 0; i -= 4)
+        *o++ = d[(v >> i) & 15];
+    return o;
+}
+
+static void fault_screen(struct extended_exception_frame *eh)
+{
+    extern void console_screen_puts(const char *s);
+    char b[128], *o;            /* the longest pair of lines is 106 */
+
+    o = fault_put(b, "\r\nFAULT exc=");
+    o = fault_hex(o, (uint32_t)eh->cause);
+    o = fault_put(o, " CFSR=");
+    o = fault_hex(o, *(volatile uint32_t *)0xE000ED28);
+    o = fault_put(o, " HFSR=");
+    o = fault_hex(o, *(volatile uint32_t *)0xE000ED2C);
+    o = fault_put(o, "\r\nMMFAR=");
+    o = fault_hex(o, *(volatile uint32_t *)0xE000ED34);
+    o = fault_put(o, " BFAR=");
+    o = fault_hex(o, *(volatile uint32_t *)0xE000ED38);
+    o = fault_put(o, " pid=");
+    o = fault_hex(o, udata.u_ptab ? (uint32_t)udata.u_ptab->p_pid
+                                  : 0xFFFFFFFFu);
+    o = fault_put(o, "\r\n");
+    *o = 0;
+    console_screen_puts(b);
+    o = fault_put(b, "pc=");
+    o = fault_hex(o, (uint32_t)eh->pc);
+    o = fault_put(o, " lr=");
+    o = fault_hex(o, (uint32_t)eh->lr);
+    o = fault_put(o, " sp=");
+    o = fault_hex(o, (uint32_t)eh->sp);
+    o = fault_put(o, " PROGLOAD=");
+    o = fault_hex(o, (uint32_t)PROGLOAD);
+    o = fault_put(o, "\r\n r0=");
+    o = fault_hex(o, (uint32_t)eh->r0);
+    o = fault_put(o, " r1=");
+    o = fault_hex(o, (uint32_t)eh->r1);
+    o = fault_put(o, " r2=");
+    o = fault_hex(o, (uint32_t)eh->r2);
+    o = fault_put(o, " r3=");
+    o = fault_hex(o, (uint32_t)eh->r3);
+    o = fault_put(o, "\r\n");
+    *o = 0;
+    console_screen_puts(b);
+    o = fault_put(b, " r4=");
+    o = fault_hex(o, (uint32_t)eh->r4);
+    o = fault_put(o, " r5=");
+    o = fault_hex(o, (uint32_t)eh->r5);
+    o = fault_put(o, " r6=");
+    o = fault_hex(o, (uint32_t)eh->r6);
+    o = fault_put(o, " r7=");
+    o = fault_hex(o, (uint32_t)eh->r7);
+    o = fault_put(o, "\r\nr12=");
+    o = fault_hex(o, (uint32_t)eh->r12);
+    o = fault_put(o, " brk=");
+    o = fault_hex(o, (uint32_t)udata.u_break);
+    o = fault_put(o, "\r\n");
+    *o = 0;
+    console_screen_puts(b);
+}
+
 void fatal_exception_handler(struct extended_exception_frame* eh)
 {
+    fault_screen(eh);
     kprintf("FLAGRANT SYSTEM ERROR! EXCEPTION %d\n", eh->cause);
     /*
      * Order matters more than tidiness here: the console TX can die
