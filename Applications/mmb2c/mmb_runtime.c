@@ -559,17 +559,17 @@ static char mm_prbuf[MM_PRBUF];
 static int  mm_prn;
 static int  mm_prover;                  /* the buffer filled: see below */
 
-/* Held wherever ON ERROR is armed, at any depth: every statement that can
- * run then has a guard to commit it - IGNORE guards every statement, and
- * a routine a literal SKIP window can run is guarded throughout (the
- * translators' window routines, FUZIX #30).  Held only at the depth that
- * set the count, a FUNCTION's PRINT that failed half way left its first
- * part on the line, where cmd_print writes the whole line or nothing; and
- * held there without guards, a SUB's or a FUNCTION's PRINTs waited for
- * the caller's statement to end, or were lost at an END (FUZIX #21). */
+/* Held only where a statement guard will commit it.  A SKIP count is
+ * spent at the depth that set it (mm_err_stmt), and a FUNCTION called
+ * inside a literal SKIP window has no guards of its own - so its PRINTs
+ * were held to its exit, or lost at an END in it (FUZIX #21), where the
+ * firmware writes each PRINT's line as the PRINT ends.  IGNORE, which
+ * guards every statement, holds everywhere. */
 static int mm_arming(void)
 {
-    return mm_est != NULL && mm_est[1] != 0;
+    if (mm_est == NULL || mm_est[1] == 0)
+        return 0;
+    return mm_est[1] < 0 || mm_est[2] <= mm_est[3];
 }
 
 /*

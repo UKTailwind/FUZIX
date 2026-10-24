@@ -88,7 +88,6 @@ char *cconst(const char *name);   /* a global CONST: #define, own prefix */
 struct sym;
 /* run-time arrays (mmbc_decl.c) */
 int redimmed_in(const char *canon);
-int window_routine(const char *canon);   /* run by a literal SKIP window */
 const char *dyn_decl(struct sym *s, const char *cn);
 const char *strsz_of(struct sym *s);
 const char *sread_of(struct sym *s, const char *code);
@@ -408,14 +407,10 @@ struct conv {
     int mx_n[2];                /* pairs the statement has used so far */
     int late_cut;               /* a late error's cut, if not the start: -1 */
     int late_guard;             /* ... inside a STATIC's once-only guard */
-    int ix_depth;               /* array accesses inside subscripts */
     int undecl_standin;         /* retrying a block statement (late_out) */
     int undecl_test;            /* ... an ELSEIF's or a CASE's test */
     const char **undecl;        /* the stand-ins' statics, in order made */
     int nundecl, cundecl;
-    int uses_ixp;               /* a checked access of 2+ subscripts */
-    char *window_rt;            /* per routine name: a literal SKIP window
-                                   can run it (find_window_routines) */
     struct outbuf out_main, out_body;
     struct outbuf *out;
     int indent;

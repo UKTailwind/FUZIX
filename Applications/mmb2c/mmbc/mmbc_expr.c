@@ -580,46 +580,22 @@ struct val e_name(void)
  * Python `index` - renamed: index() clashes with libc's strings.h. */
 const char *index_of(struct sym *s)
 {
-    const char *vals[MAXARGS], *parts[MAXARGS];
-    int isf[MAXARGS];
-    int nparts = 0, k, multi;
-    int d = cv.ix_depth;
-    const char *elem;
+    const char *parts[MAXARGS];
+    int nparts = 0;
 
     expect_op("(");
-    cv.ix_depth++;
     for (;;) {
         struct val v = expr();
 
         if (nparts >= MAXARGS)
             mm_error("line %d: too many subscripts", cv.lineno);
-        /* a float subscript is FloatToInt32's when it is checked:
-           "Number too large" outside 32 bits (FUZIX #35) */
-        isf[nparts] = v.ty == TY_F && checks_on();
-        vals[nparts] = isf[nparts] ? as_flt(v) : as_int(v);
+        parts[nparts] = ix_check(s, nparts, as_int(v));
         nparts++;
         if (!accept_op(","))
             break;
     }
-    cv.ix_depth--;
     expect_op(")");
-    /* Two or more subscripts are checked in findvar's two rounds (mm_ixp,
-       then mm_ixend round the element): not a structure array, whose
-       member path keeps its one test. */
-    multi = nparts > 1 && checks_on() && s->stype == NULL
-            && (s->is_param || s->dynamic || nparts == s->ndims);
-    if (multi)
-        cv.uses_ixp = 1;
-    for (k = 0; k < nparts; k++)
-        parts[k] = ix_check_f(s, k, vals[k], multi ? d : -1, isf[k]);
-    elem = subscript_of(s, parts, nparts);
-    if (!multi)
-        return elem;
-    if (s->ty == TY_S)
-        return sfmt("(*(char (*)[%s])mm_ixend(&(%s), %d))", strsz_of(s),
-                    elem, d < 7 ? d : 7);
-    return sfmt("(*(%s *)mm_ixend(&(%s), %d))", ctype_of(s->ty), elem,
-                d < 7 ? d : 7);
+    return subscript_of(s, parts, nparts);
 }
 
 /* Subscript k of an access to array s, checked at run time by mm_ix -
@@ -632,11 +608,8 @@ const char *index_of(struct sym *s)
  *
  * Gated like the arithmetic checks (checks_on): on every access it cost
  * ~55 bytes a subscript and stopped robots fitting the board, and
- * without ON ERROR there is nothing to trap the error with.  isf is a
- * float subscript, part its float text: mm_ixf and mm_ixpf are
- * FloatToInt32's check before the rest. */
-const char *ix_check_f(struct sym *s, int k, const char *part, int multi,
-                       int isf)
+ * without ON ERROR there is nothing to trap the error with. */
+const char *ix_check(struct sym *s, int k, const char *part)
 {
     const char *lim;
 
@@ -646,25 +619,9 @@ const char *ix_check_f(struct sym *s, int k, const char *part, int multi,
         lim = sfmt("(int)(%s)[%d]", bnd_acc(s), k + 1);
     else if (k < s->ndims)
         lim = sfmt("(%s) - 1", s->dims[k]);
-    else if (isf)
-        return sfmt("(int)(mm_toint(%s))", part);  /* subscript_of says */
     else
         return sfmt("(int)(%s)", part);     /* subscript_of reports it */
-    if (multi >= 0)
-        return sfmt("%s(%s, %d, %s, %d, %d)", isf ? "mm_ixpf" : "mm_ixp",
-                    part, cv.opt_base, lim, multi < 7 ? multi : 7, k);
-    return sfmt("%s(%s, %d, %s)", isf ? "mm_ixf" : "mm_ix", part,
-                cv.opt_base, lim);
-}
-
-const char *ix_check_d(struct sym *s, int k, const char *part, int multi)
-{
-    return ix_check_f(s, k, part, multi, 0);
-}
-
-const char *ix_check(struct sym *s, int k, const char *part)
-{
-    return ix_check_d(s, k, part, -1);
+    return sfmt("mm_ix(%s, %d, %s)", part, cv.opt_base, lim);
 }
 
 /* The C for one element, given one index text per dimension.

@@ -15,21 +15,7 @@
  * because the runtime consults the armed count wherever it is raised. */
 int checks_on(void)
 {
-    /* A routine a literal window can run is checked throughout, as the
-       window is (find_window_routines); asked often, so the answer for
-       the routine is kept. */
-    static const struct routine *last;
-    static int last_win;
-
-    if (cv.onerror_global || cv.err_window > 0)
-        return 1;
-    if (cv.cur == NULL)
-        return 0;
-    if (cv.cur != last) {
-        last = cv.cur;
-        last_win = window_routine(cv.cur->name);
-    }
-    return last_win;
+    return cv.onerror_global || cv.err_window > 0;
 }
 
 /* Python str.strip() - scratch copy with surrounding whitespace gone. */
@@ -296,8 +282,6 @@ void statement(void)
     guard_outer = cv.late_guard;
     cv.late_cut = -1;
     cv.late_guard = 0;
-    /* an error that longjmp'd out of a subscript left its depth up */
-    cv.ix_depth = 0;
     saved = err_jmp;
     err_jmp = &jb;
     if (setjmp(jb) == 0) {
