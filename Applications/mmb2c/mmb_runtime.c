@@ -2165,6 +2165,40 @@ static int mm_wild(const char *pat, const char *str)
 
 static char mm_dirpat[MM_STRSZ];
 static int  mm_dirtype = MM_DIR_FILE;
+/* the directory DIR$ searches, "." when the spec names none */
+static char mm_dirdir[MM_STRSZ];
+
+/* FileIO.c fun_dir: the spec splits at its last '/' into the directory
+ * searched and the pattern, "*" if nothing follows the '/'; only the
+ * name comes back.  DIR$(MM.INFO(PATH) + "title.jpg", FILE) - Elite's -
+ * looked for the whole path among the current directory's names. */
+static void mm_dirsplit(const char *spec)
+{
+    char c[MM_STRSZ];
+    int i, n;
+
+    strncpy(c, mm_cstr(spec), sizeof c - 1);
+    c[sizeof c - 1] = 0;
+    n = (int)strlen(c);
+    for (i = n - 1; i >= 0 && c[i] != '/'
+#ifdef _WIN32
+                    && c[i] != '\\'
+#endif
+         ; i--)
+        ;
+    if (i < 0) {
+        strcpy(mm_dirdir, ".");
+        mm_ssetc(mm_dirpat, n ? c : "*");
+        return;
+    }
+    if (i == 0) {
+        strcpy(mm_dirdir, "/");         /* "/x" searches "/" */
+    } else {
+        memcpy(mm_dirdir, c, (size_t)i);
+        mm_dirdir[i] = 0;
+    }
+    mm_ssetc(mm_dirpat, c[i + 1] ? c + i + 1 : "*");
+}
 
 #ifdef _WIN32
 
@@ -2176,10 +2210,13 @@ char *mm_dir(const char *spec, int type, int restart)
 {
     char *t = mm_tmp();
     if (restart) {
+        char all[MM_STRSZ + 4];
+
         if (mm_dirh != -1) { _findclose(mm_dirh); mm_dirh = -1; }
-        mm_sset(mm_dirpat, spec);
+        mm_dirsplit(spec);
         mm_dirtype = type;
-        mm_dirh = _findfirst("*", &mm_dirent);
+        snprintf(all, sizeof all, "%s/*", mm_dirdir);
+        mm_dirh = _findfirst(all, &mm_dirent);
         if (mm_dirh == -1) return t;
         mm_dirpending = 1;
     }
@@ -2213,17 +2250,19 @@ char *mm_dir(const char *spec, int type, int restart)
     struct stat st;
     if (restart) {
         if (mm_dirp) { closedir(mm_dirp); mm_dirp = NULL; }
-        mm_sset(mm_dirpat, spec);
+        mm_dirsplit(spec);
         mm_dirtype = type;
-        mm_dirp = opendir(".");
+        mm_dirp = opendir(mm_dirdir);
         if (!mm_dirp) return t;
     }
     if (!mm_dirp) return t;
     while ((de = readdir(mm_dirp)) != NULL) {
         int isdir;
+        char full[MM_STRSZ * 2 + 2];
         if (de->d_name[0] == '.') continue;
         if (!mm_wild(mm_cstr(mm_dirpat), de->d_name)) continue;
-        isdir = (stat(de->d_name, &st) == 0) && S_ISDIR(st.st_mode);
+        snprintf(full, sizeof full, "%s/%s", mm_dirdir, de->d_name);
+        isdir = (stat(full, &st) == 0) && S_ISDIR(st.st_mode);
         if (mm_dirtype == MM_DIR_FILE && isdir) continue;
         if (mm_dirtype == MM_DIR_DIR && !isdir) continue;
         mm_ssetc(t, de->d_name);
