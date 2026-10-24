@@ -9,14 +9,14 @@ and it lives in `fcc/catmap.py`.
 
 | | in MMBasic | translated | not translated |
 |---|---|---|---|
-| commands | 228 | **137** | 91 |
-| functions | 127 | **95** | 32 |
-| total | 355 | **232** | 123 |
+| commands | 228 | **139** | 89 |
+| functions | 127 | **96** | 31 |
+| total | 355 | **235** | 120 |
 
-The 123 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
-Draw3D each appear twice, CtrlVal as both a command and a function - so there are **120 distinct
+The 120 not-translated rows include names AllCommands.h lists TWICE - Camera, Backlight and
+Draw3D each appear twice, CtrlVal as both a command and a function - so there are **118 distinct
 names**. Of those, **19 are false negatives** (the thing works and the scanner cannot see it),
-leaving **101 real gaps**, of which 84 are in categories 4 and 5 and are not intended to close.
+leaving **99 real gaps**, of which 84 are in categories 4 and 5 and are not intended to close.
 
 ## What this count cannot tell you
 
@@ -27,6 +27,7 @@ difference.** The unit here is a row in AllCommands.h, and several rows are whol
 * `GUI` is one row and only `GUI BITMAP` is translated.
 * `Library` is one row and only `LIBRARY LOAD`, as the program's first statement, is translated.
 * `RESOLUTION` is translated for 640x480, the one resolution there is.
+* `Draw3D` is translated but for `DRAW3D DIAGNOSE`, which prints in the firmware's own number formats.
 * `Load` is one row covering `IMAGE`, `BMP`, `JPG` and `PNG` here, and a dozen forms in MMBasic.
 * `Option`, `MM.INFO` and `Print` each take a list of sub-keywords, some in and some not.
 
@@ -47,7 +48,7 @@ four inside its "excluded from the documentation" block.
 
 1. **Finish what is already there** - 0
 2. **Real value, moderate work** - 10
-3. **Possible, wants your steer first** - 7
+3. **Possible, wants your steer first** - 5
 4. **Deliberately out** - 59
 5. **Not applicable to this machine** - 25
 
@@ -92,18 +93,18 @@ BITSTREAM PIO path, and `OneShot` and IR RECEIVE are GPIO edge
 interrupts in the reference too - they want the capture, not a
 loop.
 
-## Category 3 - Possible, wants your steer first (7)
+## Category 3 - Possible, wants your steer first (5)
 
-**Commands:** `Bluetooth`, `Draw3D`, `Memory`, `Refresh`, `Turtle`
+**Commands:** `Bluetooth`, `Memory`, `Refresh`, `Turtle`
 
-**Functions:** `DRAW3D(`, `GetScanLine`
+**Functions:** `GetScanLine`
 
-`Turtle` and `Draw3D` are here by decision, 2026-08-23:
-wanted eventually, **not imminent**, and deliberately not in category 2
-so that "moderate work, real value" keeps meaning "somebody could pick
-this up tomorrow".  Both are engines rather than toys - Turtle is pen
-state over primitives that already exist, Draw3D is transform,
-projection and an object table of its own.
+`Turtle` is here by decision, 2026-08-23: wanted eventually,
+**not imminent**, and deliberately not in category 2 so that "moderate
+work, real value" keeps meaning "somebody could pick this up
+tomorrow".  It is an engine rather than a toy - pen state over
+primitives that already exist.  `Draw3D`, which sat here with it,
+SHIPPED 2026-10-24 for Elite: Draw3D.c whole, in mmb_draw3d.h.
 
 (`WS2812` and `Bitstream` used to sit here as MMBasic's two
 genuinely interrupts-off commands, rejected for bit-banging on a
@@ -141,13 +142,13 @@ category 2, instead of a language inside the language.
 
 **Functions:** `Click(`, `CtrlVal(`, `DEVICE(`, `GPS(`, `MsgBox(`, `SPI2(`, `Touch(`
 
-## Translated: the 137 commands
+## Translated: the 139 commands
 
-`Arc`, `Array Add`, `Array Insert`, `Array Set`, `Array Slice`, `Bezier`, `Bit(`, `Bitstream`, `Blit`, `Box`, `Byte(`, `CLS`, `CPU`, `Call`, `Case`, `Case Else`, `Cat`, `Chdir`, `Circle`, `Clear`, `Close`, `Color`, `Colour`, `Colour Map`, `Const`, `Continue`, `Copy`, `Data`, `Date$`, `DefineFont`, `Dim`, `Do`, `Else`, `Else If`, `ElseIf`, `End`, `End DefineFont`, `End Function`, `End If`, `End Select`, `End Sub`, `End Type`, `EndIf`, `Erase`, `Error`, `Exit`, `Exit Do`, `Exit For`, `Exit Function`, `Exit Sub`, `FRAMEBUFFER`, `Files`, `Fill`, `Flag(`, `Flags`, `Flash`, `Flush`, `Font`, `For`, `Function`, `GUI`, `GUI`, `GoSub`, `GoTo`, `I2C`, `I2C2`, `If`, `Inc`, `Input`, `Kill`, `LMid(`, `Let`, `Library`, `Line`, `Line Input`, `Load`, `Local`, `LongString`, `Loop`, `MID$(`, `MODE`, `Map`, `Map`, `Map(`, `Map(`, `Math`, `Mkdir`, `Mode`, `Next`, `On`, `OneWire`, `Open`, `Option`, `PWM`, `Pause`, `Pin(`, `Pixel`, `Play`, `Poke`, `Polygon`, `Port(`, `Print`, `Pulse`, `RBox`, `RESOLUTION`, `RTC`, `Randomize`, `Randomize`, `ReDim`, `Read`, `Rename`, `Restore`, `Return`, `Rmdir`, `SPI`, `Save`, `Seek`, `Select Case`, `Servo`, `SetPin`, `SetTick`, `Sort`, `Sprite`, `Static`, `Struct`, `Sub`, `TEMPR START`, `Text`, `Tilemap`, `Time$`, `Timer`, `Triangle`, `Type`, `WEB`, `WS2812`, `WatchDog`, `While`
+`Arc`, `Array Add`, `Array Insert`, `Array Set`, `Array Slice`, `Bezier`, `Bit(`, `Bitstream`, `Blit`, `Box`, `Byte(`, `CLS`, `CPU`, `Call`, `Case`, `Case Else`, `Cat`, `Chdir`, `Circle`, `Clear`, `Close`, `Color`, `Colour`, `Colour Map`, `Const`, `Continue`, `Copy`, `Data`, `Date$`, `DefineFont`, `Dim`, `Do`, `Draw3D`, `Draw3D`, `Else`, `Else If`, `ElseIf`, `End`, `End DefineFont`, `End Function`, `End If`, `End Select`, `End Sub`, `End Type`, `EndIf`, `Erase`, `Error`, `Exit`, `Exit Do`, `Exit For`, `Exit Function`, `Exit Sub`, `FRAMEBUFFER`, `Files`, `Fill`, `Flag(`, `Flags`, `Flash`, `Flush`, `Font`, `For`, `Function`, `GUI`, `GUI`, `GoSub`, `GoTo`, `I2C`, `I2C2`, `If`, `Inc`, `Input`, `Kill`, `LMid(`, `Let`, `Library`, `Line`, `Line Input`, `Load`, `Local`, `LongString`, `Loop`, `MID$(`, `MODE`, `Map`, `Map`, `Map(`, `Map(`, `Math`, `Mkdir`, `Mode`, `Next`, `On`, `OneWire`, `Open`, `Option`, `PWM`, `Pause`, `Pin(`, `Pixel`, `Play`, `Poke`, `Polygon`, `Port(`, `Print`, `Pulse`, `RBox`, `RESOLUTION`, `RTC`, `Randomize`, `Randomize`, `ReDim`, `Read`, `Rename`, `Restore`, `Return`, `Rmdir`, `SPI`, `Save`, `Seek`, `Select Case`, `Servo`, `SetPin`, `SetTick`, `Sort`, `Sprite`, `Static`, `Struct`, `Sub`, `TEMPR START`, `Text`, `Tilemap`, `Time$`, `Timer`, `Triangle`, `Type`, `WEB`, `WS2812`, `WatchDog`, `While`
 
-## Translated: the 95 functions
+## Translated: the 96 functions
 
-`ACos(`, `ASin(`, `Abs(`, `And`, `As`, `Asc(`, `Atan2(`, `Atn(`, `Bin2str$(`, `Bit(`, `Bound(`, `Byte(`, `Call(`, `Choice(`, `Chr$(`, `Cint(`, `Cos(`, `Cwd$`, `Date$`, `DateTime$(`, `Day$(`, `Deg(`, `Dir$(`, `Distance(`, `Else`, `Eof(`, `Epoch(`, `Exp(`, `Field$(`, `Fix(`, `Flag(`, `For`, `Format$(`, `GoSub`, `GoTo`, `INV`, `Inkey$`, `Input$(`, `Instr(`, `Int(`, `Json$(`, `KeyDown(`, `LCompare(`, `LGetByte(`, `LGetStr$(`, `LInStr(`, `LInput(`, `LLen(`, `Len(`, `Loc(`, `Lof(`, `Log(`, `MM.Info(`, `Map(`, `Map(`, `Math(`, `Mid$(`, `Mod`, `Not`, `Or`, `Peek(`, `Pi`, `Pin(`, `Pixel(`, `Port(`, `Pos`, `Pulsin(`, `RGB(`, `Rad(`, `Rnd`, `Rnd(`, `SPI(`, `Sgn(`, `Sin(`, `Space$(`, `Sqr(`, `Step`, `Str$(`, `Str2bin(`, `String$(`, `Struct(`, `TEMPR(`, `Tab(`, `Tan(`, `Then`, `Tilemap(`, `Time$`, `Timer`, `To`, `Trim$(`, `Until`, `Val(`, `While`, `Xor`, `sprite(`
+`ACos(`, `ASin(`, `Abs(`, `And`, `As`, `Asc(`, `Atan2(`, `Atn(`, `Bin2str$(`, `Bit(`, `Bound(`, `Byte(`, `Call(`, `Choice(`, `Chr$(`, `Cint(`, `Cos(`, `Cwd$`, `DRAW3D(`, `Date$`, `DateTime$(`, `Day$(`, `Deg(`, `Dir$(`, `Distance(`, `Else`, `Eof(`, `Epoch(`, `Exp(`, `Field$(`, `Fix(`, `Flag(`, `For`, `Format$(`, `GoSub`, `GoTo`, `INV`, `Inkey$`, `Input$(`, `Instr(`, `Int(`, `Json$(`, `KeyDown(`, `LCompare(`, `LGetByte(`, `LGetStr$(`, `LInStr(`, `LInput(`, `LLen(`, `Len(`, `Loc(`, `Lof(`, `Log(`, `MM.Info(`, `Map(`, `Map(`, `Math(`, `Mid$(`, `Mod`, `Not`, `Or`, `Peek(`, `Pi`, `Pin(`, `Pixel(`, `Port(`, `Pos`, `Pulsin(`, `RGB(`, `Rad(`, `Rnd`, `Rnd(`, `SPI(`, `Sgn(`, `Sin(`, `Space$(`, `Sqr(`, `Step`, `Str$(`, `Str2bin(`, `String$(`, `Struct(`, `TEMPR(`, `Tab(`, `Tan(`, `Then`, `Tilemap(`, `Time$`, `Timer`, `To`, `Trim$(`, `Until`, `Val(`, `While`, `Xor`, `sprite(`
 
 
 ## The MATH family

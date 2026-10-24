@@ -1,0 +1,11 @@
+box 299 341 218 260
+at 0 0 1000
+distance 1000.832813
+z90 299 341 218 260
+y180 299 341 218 260
+hidden 32767
+written 32767
+restored 299
+create 33: 33 is invalid (valid is 1 to 32)
+show 1: Object 1 does not exist
+no camera: Camera position not defined

@@ -91,6 +91,8 @@ W.append("* `Library` is one row and only `LIBRARY LOAD`, as the "
          "program's first statement, is translated.")
 W.append("* `RESOLUTION` is translated for 640x480, the one resolution "
          "there is.")
+W.append("* `Draw3D` is translated but for `DRAW3D DIAGNOSE`, which prints "
+         "in the firmware's own number formats.")
 W.append("* `Load` is one row covering `IMAGE`, `BMP`, `JPG` and `PNG` "
          "here, and a dozen forms in MMBasic.")
 W.append("* `Option`, `MM.INFO` and `Print` each take a list of "

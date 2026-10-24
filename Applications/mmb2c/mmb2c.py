@@ -117,7 +117,7 @@ BUILTINS = {
     'MM.HPOS': (0, 0), 'MM.VPOS': (0, 0),
     'MM.INFO': (1, 1), 'MM.INFO$': (1, 1),
     'KEYDOWN': (1, 1),
-    'PEEK': (1, 1), 'SPRITE': (1, 3), 'TILEMAP': (1, 6),
+    'PEEK': (1, 1), 'SPRITE': (1, 3), 'TILEMAP': (1, 6), 'DRAW3D': (1, 1),
     'DIR$': (0, 2),
     'LLEN': (1, 1), 'LGETSTR$': (3, 3), 'LGETBYTE': (2, 2),
     'LINSTR': (2, 3), 'LCOMPARE': (2, 2), 'LINPUT': (3, 3),
@@ -133,10 +133,14 @@ def bare_builtin(up):
     return up in BUILTINS and BUILTINS[up][0] == 0 and up != 'DIR$'
 
 
+# DRAW3D()'s words, as mmb_draw3d.h's mmg3d_info numbers them
+D3FUNS = {'XMIN': 1, 'XMAX': 2, 'YMIN': 3, 'YMAX': 4, 'X': 5, 'Y': 6,
+          'DISTANCE': 7, 'Z': 8}
+
 # built-ins whose arguments cannot be parsed as plain expressions
 RAWARG = ('CHOICE', 'BOUND', 'TRIM$', 'DATETIME$', 'DAY$', 'EPOCH',
           'BIN2STR$', 'STR2BIN', 'RGB', 'MATH',
-          'MM.INFO', 'MM.INFO$', 'PEEK', 'SPRITE', 'TILEMAP',
+          'MM.INFO', 'MM.INFO$', 'PEEK', 'SPRITE', 'TILEMAP', 'DRAW3D',
           'EOF', 'LOC', 'LOF', 'INPUT$', 'DIR$',
           'LLEN', 'LGETSTR$', 'LGETBYTE', 'LINSTR', 'LCOMPARE', 'LINPUT',
           'JSON$')
@@ -1510,6 +1514,7 @@ class Conv(object):
         self.uses_flash = False     # pseudo flash slots: mmb_flash.h
         self.uses_sprite = False    # SPRITE family: mmb_sprite.h
         self.uses_tilemap = False   # TILEMAP family: mmb_tilemap.h
+        self.uses_draw3d = False    # DRAW3D: mmb_draw3d.h
         self.uses_playd = False     # SOUND/TONE/MOD daemons: mmb_play.h
         # FRAMEBUFFER LAYER with a transparent colour: the colour is
         # run-time state (the firmware's transparentlow/high), kept in
@@ -4228,6 +4233,21 @@ class Conv(object):
                 return ('mms_fun(%d, %s, %s, 2)' % (sel, n, i3), TY_I)
             self.expect_op(')')
             return ('mms_fun(%d, %s, 0, 1)' % (sel, n), TY_I)
+
+        if up == 'DRAW3D':
+            # DRAW3D(XMIN n) and the rest - Draw3D.c fun_3D: the word,
+            # then the object WITHOUT a comma, as the reference parses
+            # it (checkstring, then getcsargs on the rest).  A float.
+            self.uses_draw3d = True
+            self.expect_op('(')
+            t = self.nxt()
+            if t is None or t[0] != T_ID or t[2] not in D3FUNS:
+                self.err("DRAW3D(%s ...) is not one of XMIN, XMAX, YMIN, "
+                         "YMAX, X, Y, Z and DISTANCE"
+                         % (t[1] if t is not None else ''))
+            n = self.as_int(self.expr())
+            self.expect_op(')')
+            return ('mmg3d_info(%d, %s)' % (D3FUNS[t[2]], n), TY_F)
 
         if up == 'TILEMAP':
             # TILEMAP(selector ...) - TileMap.c fun_tilemap, engine in
@@ -7564,6 +7584,12 @@ class Conv(object):
             # DATA, and its own sprites.  See do_tilemap.
             self.do_tilemap()
             return
+        if up == 'DRAW3D':
+            # The 3D engine (graphics/Draw3D.c), whole, in
+            # mmb_draw3d.h.  See do_draw3d.
+            self.i += 1
+            self.do_draw3d()
+            return
         if up == 'BLIT':
             # BLIT READ [#]n, x, y, w, h        screen -> buffer 1-64
             # BLIT WRITE [#]n, x, y [, mode]    buffer -> screen, mode 0-7
@@ -9260,6 +9286,132 @@ class Conv(object):
             self.expect_op(',')
             out.append(self.as_int(self.expr()))
         return out
+
+    def d3_array(self, ty):
+        """One of DRAW3D CREATE's arrays: (first element, count)."""
+        s = self.arrayref()
+        if s.ty != ty:
+            self.err("DRAW3D: '%s' must be %s array"
+                     % (s.disp, 'a FLOAT' if ty == TY_F else 'an INTEGER'))
+        return self.array_flat(s)
+
+    def d3_each(self, fn, pre):
+        """n [, n ...] as one statement.  Each call answers 1 to end it
+        there, as an error, or HIDE's early return, ends cmd_3D's loop
+        over them."""
+        calls = []
+        while True:
+            calls.append('%s(%s%s)' % (fn, pre, self.as_int(self.expr())))
+            if not self.accept_op(','):
+                break
+        self.emit('(void)(%s);' % ' || '.join(calls))
+
+    def do_draw3d(self):
+        """DRAW3D sub-command ... - Draw3D.c cmd_3D, in its order.  The
+        engine is mmb_draw3d.h, which says what each one does."""
+        self.uses_draw3d = True
+        if self.accept_kw('CREATE'):
+            # n, nv, nf, camera, vertices(), counts(), faces(), colours(),
+            # [edges()] [, fills()] - the edge colours' place must be
+            # there (argc >= 17) but may be empty
+            a = self.int_args(4)
+            arrs = []
+            for k in range(4):
+                self.expect_op(',')
+                arrs.append(self.d3_array(TY_F if k == 0 else TY_I))
+            self.expect_op(',')
+            edge = ('(MMINTEGER *)0', '0')
+            if not (self.is_op(',') or self.stmt_end()):
+                edge = self.d3_array(TY_I)
+            fill = ('(MMINTEGER *)0', '0')
+            if self.accept_op(','):
+                fill = self.d3_array(TY_I)
+            parts = a + [x for p in arrs + [edge, fill] for x in p]
+            self.emit('mmg3d_create(%s, %d);'
+                      % (', '.join(parts), self.opt_base))
+            return
+        if self.is_kw('DIAGNOSE'):
+            self.err("DRAW3D DIAGNOSE is not translated: it prints in the "
+                     "firmware's own number formats, which are not PRINT's")
+        if self.accept_kw('LIGHT'):
+            a = self.int_args(5)
+            self.emit('mmg3d_light(%s);' % ', '.join(a))
+            return
+        for kw, clear in (('SHOW', 1), ('WRITE', 0)):
+            if self.accept_kw(kw):
+                # n, x, y, z [, nonormals [, depthmode]]
+                a = self.int_args(4)
+                nn, dm = '0LL', '0LL'
+                if self.accept_op(','):
+                    if not (self.is_op(',') or self.stmt_end()):
+                        nn = self.as_int(self.expr())
+                    if self.accept_op(','):
+                        dm = self.as_int(self.expr())
+                self.emit('mmg3d_show(%s, %s, %s, %d);'
+                          % (', '.join(a), nn, dm, clear))
+                return
+        if self.accept_kw('SET'):
+            # SET FLAGS n, flag, face, count [, face, count ...]
+            if not self.accept_kw('FLAGS'):
+                self.err("DRAW3D SET FLAGS expected")
+            a = self.int_args(2)
+            calls = []
+            while self.accept_op(','):
+                face = self.as_int(self.expr())
+                self.expect_op(',')
+                nbr = self.as_int(self.expr())
+                calls.append('mmg3d_flags(%s, %s, %s, %s)'
+                             % (a[0], a[1], face, nbr))
+            if not calls:
+                self.err("DRAW3D SET FLAGS needs a face and a count")
+            self.emit('(void)(%s);' % ' || '.join(calls))
+            return
+        if self.accept_kw('ROTATE'):
+            q = self.arrayref()
+            if q.ty != TY_F:
+                self.err("Argument 1 must be a 5 element floating point "
+                         "array")
+            qp, qn = self.array_flat(q)
+            self.expect_op(',')
+            self.d3_each('mmg3d_rotate', '%s, %s, ' % (qp, qn))
+            return
+        if self.accept_kw('HIDE'):
+            if self.accept_kw('ALL'):
+                self.emit('mmg3d_hideall();')
+            else:
+                self.d3_each('mmg3d_hide', '')
+            return
+        if self.accept_kw('RESET'):
+            self.d3_each('mmg3d_reset', '')
+            return
+        if self.accept_kw('RESTORE'):
+            self.d3_each('mmg3d_restore', '')
+            return
+        if self.accept_kw('CLOSE'):
+            if self.accept_kw('ALL'):
+                self.emit('mmg3d_closeall();')
+            else:
+                self.d3_each('mmg3d_close', '')
+            return
+        if self.accept_kw('CAMERA'):
+            # n, viewplane [, x [, y [, panx [, pany]]]], any of the
+            # last four left empty for 0
+            n = self.as_int(self.expr())
+            self.expect_op(',')
+            vp = self.as_flt(self.expr())
+            rest = ['0.0', '0.0', '0LL', '0LL']
+            conv = [self.as_flt, self.as_flt, self.as_int, self.as_int]
+            k = 0
+            while k < 4 and self.accept_op(','):
+                if not (self.is_op(',') or self.stmt_end()):
+                    rest[k] = conv[k](self.expr())
+                k += 1
+            self.emit('mmg3d_camera(%s, %s, %s);'
+                      % (n, vp, ', '.join(rest)))
+            return
+        t = self.peek()
+        self.err("DRAW3D %s is not translated"
+                 % (t[1] if t is not None else ''))
 
     def do_tilemap(self):
         # TILEMAP CREATE label, id, slot, tw, th, tpr, cols, rows
@@ -12307,6 +12459,9 @@ class Conv(object):
             wr('#include "mmb_gfx_triangle.h"\n')
         if self.uses_polygon:
             wr('#include "mmb_gfx_polygon.h"\n')
+        # it brings TRIANGLE's and POLYGON's in itself, guarded
+        if self.uses_draw3d:
+            wr('#include "mmb_draw3d.h"\n')
         if self.uses_bezier:
             wr('#include "mmb_gfx_bezier.h"\n')
         if self.uses_fill:

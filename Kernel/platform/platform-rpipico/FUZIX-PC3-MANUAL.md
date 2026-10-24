@@ -1693,6 +1693,50 @@ IMAGE` (which is how Breakout makes its bricks) round-trips exactly.
 The decoding is `loadimage`'s, in another process, so a program that
 never loads a picture carries none of it.
 
+## Solid shapes in 3D: `DRAW3D`
+
+`DRAW3D` is the PicoMite's 3D engine, ported whole from its
+`Draw3D.c`. An object is a list of vertices and the faces between them.
+The engine turns it with a quaternion, works out which faces point at
+the camera, and draws those, furthest first, as outlines or filled
+faces.
+
+```basic
+DRAW3D CAMERA 1, 400                      ' the viewplane 400 in front
+DRAW3D CREATE 1, 8, 6, 1, v(), fc(), f(), col(), edge(), fill()
+DRAW3D ROTATE q(), 1                      ' q() = w, x, y, z, magnitude
+DRAW3D SHOW 1, 0, 0, 1000                 ' at x, y, z
+```
+
+`v()` is a `FLOAT` array of `x, y, z` for each vertex, `DIM v(2, n)`.
+`fc()` holds how many vertices each face has (3 to 20). `f()` lists
+each face's vertex numbers, counting from 0, in turn. `col()` is a
+palette, and `edge()` and `fill()` index it per face, from `OPTION
+BASE`. Leave `edge()` empty for the current colour; without `fill()`
+the faces are outlines. Faces are listed clockwise as seen from
+outside: a face is shown when its normal points at the camera.
+
+Every form is there:
+
+* `SHOW` and `WRITE`, with an optional `nonormals` and `depthmode`
+  (0 sorts by the face's centre, 1 by its furthest vertex, 2 is the
+  hidden-line z-buffer);
+* `HIDE`, `HIDE ALL`, `RESTORE`, `RESET` and `ROTATE`;
+* `LIGHT` and `SET FLAGS`;
+* `CLOSE` and `CLOSE ALL`;
+* `DRAW3D(XMIN n)`, with `XMAX`, `YMIN`, `YMAX`, `X`, `Y`, `Z` and
+  `DISTANCE`.
+
+`SHOW` wipes the box the object last drew in, and `WRITE` does not,
+which is the one to use on a framebuffer that is cleared each frame.
+
+The arithmetic is the firmware's, line for line, but in double rather
+than single precision. A vertex now and then lands a pixel from where a
+PicoMite puts it. Objects come out of the program's heap, so
+`MM.INFO(HEAP)` falls by what a `CREATE` costs, and up to 32 may exist
+at once. `DRAW3D DIAGNOSE` is not translated: it prints in the
+firmware's own number formats, which are not `PRINT`'s.
+
 ## Running another program: `SYSTEM`, `SAVE IMAGE`, `LOAD IMAGE`, `LOAD JPG`, `LOAD PNG`
 
 `SYSTEM` runs a program and waits for it:

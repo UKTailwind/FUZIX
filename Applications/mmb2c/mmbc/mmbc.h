@@ -487,6 +487,7 @@ struct conv {
     int uses_flash;             /* pseudo flash slots: mmb_flash.h */
     int uses_sprite;            /* SPRITE family: mmb_sprite.h */
     int uses_tilemap;           /* TILEMAP family: mmb_tilemap.h */
+    int uses_draw3d;            /* DRAW3D: mmb_draw3d.h */
     int uses_playd;             /* SOUND/TONE/MOD daemons: mmb_play.h */
     /* FRAMEBUFFER LAYER with a transparent colour: the colour is
        run-time state (the firmware's transparentlow/high), kept in an
@@ -576,6 +577,7 @@ struct label *label_rec(const char *canon);  /* find-or-create */
 int data_label(const char *what);
 void int_args(const char **out, int n);
 void do_tilemap(void);
+void do_draw3d(void);
 struct sym *sym_lookup(const char *canon);   /* self.lookup */
 struct sym *sym_new(const char *canon, int ty, const char *acc);
 struct sym *declare(const char *canon, int ty, const char *scope,

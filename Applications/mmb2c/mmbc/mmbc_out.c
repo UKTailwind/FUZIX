@@ -406,6 +406,9 @@ void conv_write(FILE *f)
         fprintf(f, "#include \"mmb_gfx_triangle.h\"\n");
     if (cv.uses_polygon)
         fprintf(f, "#include \"mmb_gfx_polygon.h\"\n");
+    /* it brings TRIANGLE's and POLYGON's in itself, guarded */
+    if (cv.uses_draw3d)
+        fprintf(f, "#include \"mmb_draw3d.h\"\n");
     if (cv.uses_bezier)
         fprintf(f, "#include \"mmb_gfx_bezier.h\"\n");
     if (cv.uses_fill)

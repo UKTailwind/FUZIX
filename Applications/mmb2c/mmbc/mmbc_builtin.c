@@ -1399,6 +1399,34 @@ struct val builtin_raw(const char *up)
         expect_op(")");
         return mkval(sfmt("mms_fun(%d, %s, 0, 1)", sel, n), TY_I);
     }
+    if (strcmp(up, "DRAW3D") == 0) {
+        /* DRAW3D(XMIN n) and the rest - Draw3D.c fun_3D: the word, then
+           the object WITHOUT a comma, as the reference parses it
+           (checkstring, then getcsargs on the rest).  A float.  The
+           numbers are mmb_draw3d.h's mmg3d_info's. */
+        static const struct { const char *nm; int code; } d3funs[] = {
+            { "XMIN", 1 }, { "XMAX", 2 }, { "YMIN", 3 }, { "YMAX", 4 },
+            { "X", 5 }, { "Y", 6 }, { "DISTANCE", 7 }, { "Z", 8 },
+            { NULL, 0 }
+        };
+        struct tok *t;
+        const char *n;
+        int k;
+
+        cv.uses_draw3d = 1;
+        expect_op("(");
+        t = nxt();
+        for (k = 0; d3funs[k].nm != NULL; k++)
+            if (t != NULL && t->kind == T_ID
+                && strcmp(t->up, d3funs[k].nm) == 0)
+                break;
+        if (d3funs[k].nm == NULL)
+            cv_err("DRAW3D(%s ...) is not one of XMIN, XMAX, YMIN, YMAX, "
+                   "X, Y, Z and DISTANCE", t != NULL ? t->text : "");
+        n = as_int(expr());
+        expect_op(")");
+        return mkval(sfmt("mmg3d_info(%d, %s)", d3funs[k].code, n), TY_F);
+    }
     if (strcmp(up, "TILEMAP") == 0) {
         /* TILEMAP(selector ...) - TileMap.c fun_tilemap, engine in
            mmb_tilemap.h.  The selector is a bare word and the

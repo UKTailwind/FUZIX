@@ -110,19 +110,18 @@ CAT = {
     # These want a decision about the machine, not just work.
     "Refresh": 3, "GetScanLine": 3,
     "Memory": 3,                    # POKE's family; no MMU to disagree
-    # DECISION PENDING, and NOT IMMINENT - the user, 2026-08-23.  Both
-    # are real engines rather than toys and both are wanted eventually;
-    # neither is queued.  Turtle is ~600 reference lines of pen state
-    # over primitives we already have, Draw3D ~1,850 of transform and
-    # projection with its own object table.  They sit here rather than
-    # in category 2 so that "moderate work, real value" keeps meaning
-    # "somebody could pick this up tomorrow".
+    # DECISION PENDING, and NOT IMMINENT - the user, 2026-08-23.  A
+    # real engine rather than a toy, wanted eventually and not queued:
+    # ~600 reference lines of pen state over primitives we already
+    # have.  It sits here rather than in category 2 so that "moderate
+    # work, real value" keeps meaning "somebody could pick this up
+    # tomorrow".  Draw3D, its partner here, SHIPPED 2026-10-24 for
+    # Elite (mmb_draw3d.h), on the user's word.
     "Turtle": 3,
     # V7's radio statement: the PC3's radio carries the WEB family, so
     # this is possible, but btstack, its flash and its RAM are a large
     # piece of work - wanted only on a steer.
     "Bluetooth": 3,
-    "Draw3D": 3, "DRAW3D(": 3,
     # WS2812 and Bitstream sat here as the interrupts-off pair until
     # they SHIPPED on 2026-08-22 through PLAN-pioout's fixed PIO1
     # programs (NOTES[3] tells the story).  Their entries are gone
@@ -262,12 +261,12 @@ shape for what is left: `Humid` survives a busy loop on its checksum,
 BITSTREAM PIO path, and `OneShot` and IR RECEIVE are GPIO edge
 interrupts in the reference too - they want the capture, not a
 loop.""",
-    3: """`Turtle` and `Draw3D` are here by decision, 2026-08-23:
-wanted eventually, **not imminent**, and deliberately not in category 2
-so that "moderate work, real value" keeps meaning "somebody could pick
-this up tomorrow".  Both are engines rather than toys - Turtle is pen
-state over primitives that already exist, Draw3D is transform,
-projection and an object table of its own.
+    3: """`Turtle` is here by decision, 2026-08-23: wanted eventually,
+**not imminent**, and deliberately not in category 2 so that "moderate
+work, real value" keeps meaning "somebody could pick this up
+tomorrow".  It is an engine rather than a toy - pen state over
+primitives that already exist.  `Draw3D`, which sat here with it,
+SHIPPED 2026-10-24 for Elite: Draw3D.c whole, in mmb_draw3d.h.
 
 (`WS2812` and `Bitstream` used to sit here as MMBasic's two
 genuinely interrupts-off commands, rejected for bit-banging on a

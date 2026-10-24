@@ -1146,6 +1146,13 @@ void statement_inner(void)
         do_tilemap();
         return;
     }
+    if (strcmp(up, "DRAW3D") == 0) {
+        /* The 3D engine (graphics/Draw3D.c), whole, in mmb_draw3d.h.
+           See do_draw3d. */
+        cv.i++;
+        do_draw3d();
+        return;
+    }
     if (strcmp(up, "BLIT") == 0) {
         /* BLIT READ [#]n, x, y, w, h        screen -> buffer 1-64
            BLIT WRITE [#]n, x, y [, mode]    buffer -> screen, mode 0-7
@@ -4281,6 +4288,171 @@ void int_args(const char **out, int n)
         expect_op(",");
         out[k] = as_int(expr());
     }
+}
+
+/* One of DRAW3D CREATE's arrays: (first element, count). */
+static struct flat d3_array(int ty)
+{
+    struct sym *s = arrayref(1);
+
+    if (s->ty != ty)
+        cv_err("DRAW3D: '%s' must be %s array", s->disp,
+               ty == TY_F ? "a FLOAT" : "an INTEGER");
+    return array_flat(s);
+}
+
+/* n [, n ...] as one statement.  Each call answers 1 to end it there,
+ * as an error, or HIDE's early return, ends cmd_3D's loop over them. */
+static void d3_each(const char *fn, const char *pre)
+{
+    const char *calls = NULL, *call;
+
+    for (;;) {
+        call = sfmt("%s(%s%s)", fn, pre, as_int(expr()));
+        calls = calls != NULL ? sfmt("%s || %s", calls, call) : call;
+        if (!accept_op(","))
+            break;
+    }
+    emit(sfmt("(void)(%s);", calls));
+}
+
+/* DRAW3D sub-command ... - Draw3D.c cmd_3D, in its order.  The engine
+ * is mmb_draw3d.h, which says what each one does.  mmb2c.py's
+ * do_draw3d. */
+void do_draw3d(void)
+{
+    static const char *const kws[2] = { "SHOW", "WRITE" };
+    const char *a[5];
+    struct flat arr[6];
+    struct tok *t;
+    int k;
+
+    cv.uses_draw3d = 1;
+    if (accept_kw("CREATE")) {
+        /* n, nv, nf, camera, vertices(), counts(), faces(), colours(),
+           [edges()] [, fills()] - the edge colours' place must be there
+           (argc >= 17) but may be empty */
+        int_args(a, 4);
+        for (k = 0; k < 4; k++) {
+            expect_op(",");
+            arr[k] = d3_array(k == 0 ? TY_F : TY_I);
+        }
+        expect_op(",");
+        arr[4].ptr = arr[5].ptr = "(MMINTEGER *)0";
+        arr[4].cnt = arr[5].cnt = "0";
+        if (!(is_op(",", 0) || stmt_end()))
+            arr[4] = d3_array(TY_I);
+        if (accept_op(","))
+            arr[5] = d3_array(TY_I);
+        emit(sfmt("mmg3d_create(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                  "%s, %s, %s, %s, %s, %s, %d);", a[0], a[1], a[2], a[3],
+                  arr[0].ptr, arr[0].cnt, arr[1].ptr, arr[1].cnt,
+                  arr[2].ptr, arr[2].cnt, arr[3].ptr, arr[3].cnt,
+                  arr[4].ptr, arr[4].cnt, arr[5].ptr, arr[5].cnt,
+                  cv.opt_base));
+        return;
+    }
+    if (is_kw("DIAGNOSE", 0))
+        cv_err("DRAW3D DIAGNOSE is not translated: it prints in the "
+               "firmware's own number formats, which are not PRINT's");
+    if (accept_kw("LIGHT")) {
+        int_args(a, 5);
+        emit(sfmt("mmg3d_light(%s, %s, %s, %s, %s);", a[0], a[1], a[2],
+                  a[3], a[4]));
+        return;
+    }
+    for (k = 0; k < 2; k++) {
+        if (accept_kw(kws[k])) {
+            /* n, x, y, z [, nonormals [, depthmode]] */
+            const char *nn = "0LL", *dm = "0LL";
+
+            int_args(a, 4);
+            if (accept_op(",")) {
+                if (!(is_op(",", 0) || stmt_end()))
+                    nn = as_int(expr());
+                if (accept_op(","))
+                    dm = as_int(expr());
+            }
+            emit(sfmt("mmg3d_show(%s, %s, %s, %s, %s, %s, %d);", a[0],
+                      a[1], a[2], a[3], nn, dm, k == 0));
+            return;
+        }
+    }
+    if (accept_kw("SET")) {
+        /* SET FLAGS n, flag, face, count [, face, count ...] */
+        const char *calls = NULL, *face, *nbr, *call;
+
+        if (!accept_kw("FLAGS"))
+            cv_err("DRAW3D SET FLAGS expected");
+        int_args(a, 2);
+        while (accept_op(",")) {
+            face = as_int(expr());
+            expect_op(",");
+            nbr = as_int(expr());
+            call = sfmt("mmg3d_flags(%s, %s, %s, %s)", a[0], a[1], face,
+                        nbr);
+            calls = calls != NULL ? sfmt("%s || %s", calls, call) : call;
+        }
+        if (calls == NULL)
+            cv_err("DRAW3D SET FLAGS needs a face and a count");
+        emit(sfmt("(void)(%s);", calls));
+        return;
+    }
+    if (accept_kw("ROTATE")) {
+        struct sym *q = arrayref(1);
+        struct flat qf;
+
+        if (q->ty != TY_F)
+            cv_err("Argument 1 must be a 5 element floating point array");
+        qf = array_flat(q);
+        expect_op(",");
+        d3_each("mmg3d_rotate", sfmt("%s, %s, ", qf.ptr, qf.cnt));
+        return;
+    }
+    if (accept_kw("HIDE")) {
+        if (accept_kw("ALL"))
+            emit("mmg3d_hideall();");
+        else
+            d3_each("mmg3d_hide", "");
+        return;
+    }
+    if (accept_kw("RESET")) {
+        d3_each("mmg3d_reset", "");
+        return;
+    }
+    if (accept_kw("RESTORE")) {
+        d3_each("mmg3d_restore", "");
+        return;
+    }
+    if (accept_kw("CLOSE")) {
+        if (accept_kw("ALL"))
+            emit("mmg3d_closeall();");
+        else
+            d3_each("mmg3d_close", "");
+        return;
+    }
+    if (accept_kw("CAMERA")) {
+        /* n, viewplane [, x [, y [, panx [, pany]]]], any of the last
+           four left empty for 0 */
+        const char *n, *vp, *rest[4];
+
+        n = as_int(expr());
+        expect_op(",");
+        vp = as_flt(expr());
+        rest[0] = rest[1] = "0.0";
+        rest[2] = rest[3] = "0LL";
+        k = 0;
+        while (k < 4 && accept_op(",")) {
+            if (!(is_op(",", 0) || stmt_end()))
+                rest[k] = k < 2 ? as_flt(expr()) : as_int(expr());
+            k++;
+        }
+        emit(sfmt("mmg3d_camera(%s, %s, %s, %s, %s, %s);", n, vp, rest[0],
+                  rest[1], rest[2], rest[3]));
+        return;
+    }
+    t = peek(0);
+    cv_err("DRAW3D %s is not translated", t != NULL ? t->text : "");
 }
 
 void do_tilemap(void)
