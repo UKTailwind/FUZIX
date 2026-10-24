@@ -5665,6 +5665,8 @@ class Conv(object):
         'UPTIME':     ('((MMFLOAT)mm_us() / 1000000.0)', TY_F),
         # the current drive's capacity in bytes, via statvfs
         'DISK SIZE':  ('mm_disksize()', TY_I),
+        # and its free bytes, the same way
+        'FREE SPACE': ('mm_freespace()', TY_I),
     }
     # ... and the ones that take an expression after the keyword.
     MMINFO_ARG = {
@@ -5814,8 +5816,10 @@ class Conv(object):
         self.err("MM.INFO(%s ...) is not supported; translated are "
                  "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                  "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
-                 "VPOS, OPTION BASE, PINNO, FILESIZE, EXISTS FILE, "
-                 "EXISTS DIR, FONT ADDRESS n and FLASH ADDRESS n" % t[1])
+                 "VPOS, UPTIME, DISK SIZE, FREE SPACE, IP ADDRESS, "
+                 "MAX CONNECTIONS, OPTION BASE, PINNO, FILESIZE, "
+                 "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "
+                 "FLASH ADDRESS n" % t[1])
 
     # OPTION sub-keywords that configure a PicoMite rather than a
     # program.  What they set does not exist on this machine (a panel,

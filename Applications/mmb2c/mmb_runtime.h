@@ -1098,6 +1098,7 @@ MMINTEGER mm_exists_file(const char *path); /* 1 file, -1 dir, 0 none  */
 MMINTEGER mm_exists_dir(const char *path);
 MMINTEGER mm_filesize(const char *path);    /* -1 none, -2 a directory */
 MMINTEGER mm_disksize(void);                /* MM.INFO(DISK SIZE); 0 unknown */
+MMINTEGER mm_freespace(void);               /* MM.INFO(FREE SPACE); 0 unknown */
 MMINTEGER mm_pinno(const char *name);       /* "GP8" -> 8              */
 MMINTEGER mm_fontwidth(void);       /* MM.FONTWIDTH,  cell x scale     */
 MMINTEGER mm_fontheight(void);      /* MM.FONTHEIGHT, cell x scale     */

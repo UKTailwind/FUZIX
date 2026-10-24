@@ -1497,6 +1497,8 @@ struct val builtin_raw(const char *up)
             { "UPTIME",     "((MMFLOAT)mm_us() / 1000000.0)", TY_F },
             /* the current drive's capacity in bytes, via statvfs */
             { "DISK SIZE",  "mm_disksize()", TY_I },
+            /* and its free bytes, the same way */
+            { "FREE SPACE", "mm_freespace()", TY_I },
             { NULL, NULL, 0 }
         };
         static const struct { const char *kw, *call; } witharg[] = {
@@ -1612,9 +1614,10 @@ struct val builtin_raw(const char *up)
             cv_err("MM.INFO(%s ...) is not supported; translated are "
                    "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                    "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
-                   "VPOS, OPTION BASE, PINNO, FILESIZE, EXISTS FILE, "
-                   "EXISTS DIR, FONT ADDRESS n and FLASH ADDRESS n",
-                   t->text);
+                   "VPOS, UPTIME, DISK SIZE, FREE SPACE, IP ADDRESS, "
+                   "MAX CONNECTIONS, OPTION BASE, PINNO, FILESIZE, "
+                   "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "
+                   "FLASH ADDRESS n", t->text);
         t = nxt();
         if (t->kind != T_ID || strcmp(t->up, "ADDRESS") != 0)
             cv_err("MM.INFO(FONT %s ...) is not supported; translated "

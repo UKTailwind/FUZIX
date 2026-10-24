@@ -2323,9 +2323,18 @@ MMINTEGER mm_filesize(const char *path)
    so one call serves the board, bcrun on the host, and the native
    gates alike.  0 when it cannot be asked: the one caller pattern
    (retic's log rotation, size > DISK SIZE/3) then rotates every
-   time rather than never, the safe direction. */
-#if defined(_WIN32)
+   time rather than never, the safe direction.
+
+   MM.INFO(FREE SPACE) is the same drive's free bytes - the space a
+   program can write, f_bavail, which is f_bfree on Fuzix and leaves
+   out a Linux filesystem's root reserve.  MMbg asks before it writes
+   its log and turns the log off below 100,000.
+
+   On Windows pc3host's shim gives statvfs (GetDiskFreeSpaceEx); a
+   Windows build without it answers 0 to both. */
+#if defined(_WIN32) && !defined(PC_HOST)
 MMINTEGER mm_disksize(void) { return 0; }
+MMINTEGER mm_freespace(void) { return 0; }
 #else
 #include <sys/statvfs.h>
 MMINTEGER mm_disksize(void)
@@ -2336,6 +2345,15 @@ MMINTEGER mm_disksize(void)
         return 0;
     return (MMINTEGER)v.f_blocks * (MMINTEGER)v.f_bsize;
 }
+
+MMINTEGER mm_freespace(void)
+{
+    struct statvfs v;
+
+    if (statvfs(".", &v) != 0)
+        return 0;
+    return (MMINTEGER)v.f_bavail * (MMINTEGER)v.f_bsize;
+}
 #endif
 
 #else  /* MM_NO_DIRS */
@@ -2343,6 +2361,7 @@ MMINTEGER mm_exists_file(const char *p) { (void)p; return 0; }
 MMINTEGER mm_exists_dir(const char *p) { (void)p; return 0; }
 MMINTEGER mm_filesize(const char *p) { (void)p; return -1; }
 MMINTEGER mm_disksize(void) { return 0; }
+MMINTEGER mm_freespace(void) { return 0; }
 void mm_mkdir(const char *p) { (void)p; mm_error("MKDIR is not available in this build"); }
 void mm_rmdir(const char *p) { (void)p; mm_error("RMDIR is not available in this build"); }
 void mm_chdir(const char *p) { (void)p; mm_error("CHDIR is not available in this build"); }

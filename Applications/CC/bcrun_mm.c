@@ -400,6 +400,7 @@ static void w_run_exec(void)  { A = mm_run_exec(); }
    path the shell actually used, and bcrun's loader runs it afresh. */
 static void w_restart(void)   { mm_restart(); A = 0; }
 static void w_disksize(void)  { A = mm_disksize(); }
+static void w_freespace(void) { A = mm_freespace(); }
 static void w_run_bg(void)    { A = mm_run_bg(); }
 /* SPRITE LOADPNG: run the decoder and read the sprite back.  The
    buffer is the program's, so it arrives as a VM offset and Pa turns
@@ -731,6 +732,7 @@ static const struct mmwrap {
 	{ "mm_run_exec",	w_run_exec },
 	{ "mm_restart",		w_restart },
 	{ "mm_disksize",	w_disksize },
+	{ "mm_freespace",	w_freespace },
 	{ "mm_run_bg",		w_run_bg },
 	{ "mm_run_pipe",	w_run_pipe },
 	{ "mm_run_pipe_read",	w_run_pipe_read },
