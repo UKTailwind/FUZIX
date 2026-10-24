@@ -62,6 +62,7 @@
  */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
@@ -100,7 +101,11 @@ static unsigned char  raw[MAXW * 4];	/* the same row as it lies in the file */
    the top about dithering. */
 static unsigned long  linestart[MAXH];	/* RLE only */
 static struct gfx_pt  pts[BATCH];
-static unsigned long  cols[BATCH];
+/* uint32 RGB888 a point, as pico_ioctl.h has it: an unsigned long is
+ * 8 bytes on a 64-bit PC, and pc3host sent the first half of the
+ * array as the colours - every other point black (LOAD JPG of
+ * Elite's title came out as a field of dots).  4 on the board. */
+static uint32_t       cols[BATCH];
 static int npts;
 
 static unsigned long pal[256];
