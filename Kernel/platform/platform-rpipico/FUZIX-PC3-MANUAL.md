@@ -1,7 +1,7 @@
 ---
 title: "Fuzix for the Pico Computer"
 subtitle: "Unix and BBC BASIC on the Pico Computer 2 and 3"
-date: "Release v0.29 — October 2026"
+date: "Release v0.30 — October 2026"
 geometry: margin=2.2cm
 toc: true
 numbersections: true
@@ -58,6 +58,76 @@ Headline specification as configured here:
   MMBasic translator in front of it — both run on the machine itself
 * MMBasic's own full-screen editor, `mmbedit`, so BASIC is written,
   translated, compiled and run without leaving the machine
+
+## New in v0.30
+
+Flash the new `fuzix.uf2` and write the new card image. The kernel
+changes nothing but its banner; the rest is in the card's translator
+and runtime.
+
+**What `mmbc` is for.** `mmbc` translates programs that already run
+correctly under MMBasic, and such a program prints, draws and computes
+here what it does there. Programs are expected to run without errors,
+so error messages and `ON ERROR` behaviour may differ from the
+firmware's: which message an error gives, which of two bad subscripts
+is reported, what a statement that fails under `ON ERROR SKIP` leaves
+behind. A program that depends on those should be checked on a
+PicoMite. The translated code does not pay for error paths a correct
+program never takes.
+
+**Two new statements and a new answer.** `LOAD DATA f$, addr` and
+`SAVE DATA f$, addr, n` move a file into or out of memory in one
+statement, as the firmware does, so a table goes straight into an array
+through `PEEK(VARADDR a())`. `MM.INFO(FREE SPACE)` gives the free bytes
+on the current drive, beside `MM.INFO(DISK SIZE)`.
+
+**Fixes a correct program can see:**
+
+* a `LOCAL` array whose bound is worked out when the routine runs was
+  never given back, so a `SUB` called often enough ran out of memory;
+  every way out of the routine frees it now
+* a single-line `IF` inside an `ON ERROR SKIP` window could leave an
+  error pending, and the program stopped later for no visible reason
+* a `STATIC` array may have a bound worked out when it runs, a float
+  `CONST` sizes one again, and a `DIM` works again after `ERASE`
+* `VAL` keeps its type through `STR$`'s arguments, a minus sign and
+  brackets
+* `STR$` with a wide field and many decimals wrote past its buffer; it
+  checks its width and decimals as the firmware does
+* the program is read the way `LOAD` reads it: each byte masked to seven
+  bits, a NUL dropped, a TAB a space
+* `SAVE DATA` empties the file before it writes
+
+**`/*` and `*/` follow the manual.** Each must be the first thing on its
+line, followed by a space or the end of the line, and a `/*` block
+cannot be inside a `SUB` or `FUNCTION`. A line that breaks the rule is
+refused when the program is translated, and everything after `*/` on
+its line is a comment.
+
+**Refused rather than translated wrongly.** A few constructs would come
+out behaving differently from the firmware, and `mmbc` now says so and
+stops instead: a string member passed by reference to a routine that
+changes the structure it belongs to, a two-dimensional `STATIC` with a
+run-time bound and a list of values, and an array of a `TYPE`
+dimensioned again after `ERASE` with other bounds.
+
+**Translating a large program could stop the machine.** `mmbc` ran on a
+16K stack, and a big program's nesting needs more: PETSCII Robots
+27K, PicoMan 20K. The stack had nothing below it to stop it, so it ran
+on into `mmbc`'s own variables, and translating Robots ended in a
+HardFault as `mmbc` exited. It has 40K now.
+
+**PETSCII Robots wants `THUMB_BUDGET=120000` now.** The runtime grew by
+a few bytes across a block boundary, and at 130000 Robots is one block
+short of the room its picture and music helpers need, so it stops at
+its first picture with "not enough memory to start it". Build it with
+
+```
+# cd /root/MMBasic/robots
+# THUMB_BUDGET=120000 cc robots.bas
+```
+
+and see [When a program will not start](#thumb-budget) for the numbers.
 
 ## New in v0.29
 
@@ -3224,25 +3294,25 @@ compiler takes all the native code it can get, which is what you want
 right up until the program stops fitting.
 
 ```
-# THUMB_BUDGET=130000 cc prog.bas
+# THUMB_BUDGET=120000 cc prog.bas
 ```
 
 PETSCII Robots is the worked example. **To play it:**
 
 ```
 # cd /root/MMBasic/robots
-# THUMB_BUDGET=130000 cc robots.bas
+# THUMB_BUDGET=120000 cc robots.bas
 # ./robots.bc
 ```
 
 The budget is not optional for Robots. Measured on the machine with
-this release:
+this release (the uncapped row with v0.29):
 
 | build | `robots.bc` | blocks | |
 |-------|-------------|--------|--|
 | uncapped | 200,783 | 76 | refused |
-| `THUMB_BUDGET=140000` | 197,259 | 74 | starts, then stops |
-| `THUMB_BUDGET=130000` | 195,439 | 73 | runs |
+| `THUMB_BUDGET=130000` | 195,375 | 74 | starts, then stops |
+| `THUMB_BUDGET=120000` | 192,593 | 73 | runs |
 | `BCODE_ONLY=1` | ~107,000 | far fewer | runs, 2.7× slower |
 
 Robots needs more headroom than its own size: `Load image` and
@@ -3258,7 +3328,7 @@ exec: pid 677 needs 11 blocks, 10 free beside a 74-block neighbour (pool 84)
 Error: not enough memory to start it
 ```
 
-That is the 140000 build: it changes mode, finds no room for the helper
+That is the 130000 build (140000 before v0.30): it changes mode, finds no room for the helper
 behind its first picture, and is back at the prompt before anything is
 drawn. Up to v0.28, 140000 left room; this release's runtime is 477
 bytes bigger, which is one block. A program that spawns nothing can use
