@@ -325,9 +325,9 @@ every metric comes out of those four header bytes.
 
 Nothing is copied: the glyphs stay in your image and the kernel reads
 them where they lie, which works here for the same reason `FONTADDR`
-does — no MMU, so an address is an address. Numbers **10 to 16**; 1 to
-9 are the built-in nine and are refused, because the console and every
-other program draw with them.
+does — no MMU, so an address is an address. Numbers **1 to 16**: one of
+the built-in nine's numbers replaces that font for your process alone,
+and the console and every other program still draw with the built-in.
 
 The registration belongs to your process and goes when it exits or
 execs, and it is invisible to everyone else — ask for font 10 in

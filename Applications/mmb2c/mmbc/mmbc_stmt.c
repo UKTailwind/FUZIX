@@ -1529,7 +1529,38 @@ void statement_inner(void)
                 }
             }
         }
-        cv_err("only PLAY MP3, WAV, FLAC, MODFILE, MODSAMPLE, SOUND, TONE, VOLUME and STOP are translated");
+        if (is_kw("BBC", 1)) {
+            /* PLAY BBC SOUND channel, amplitude, pitch, duration and
+               PLAY BBC ENVELOPE n, T, PI1, PI2, PI3, PN1, PN2, PN3, AA,
+               AD, AS, AR, ALA, ALD - the BBC Micro's two, on the
+               kernel's BBC synthesiser (Audio.c:1958-2038).  Every
+               argument is required, as getcsargs' count makes it. */
+            static const struct { const char *kw; int n; const char *fn; }
+                bbc[2] = {
+                    { "SOUND", 4, "mmp_bbc_sound" },
+                    { "ENVELOPE", 14, "mmp_bbc_env" }
+                };
+            int k, j;
+
+            for (k = 0; k < 2; k++) {
+                if (is_kw(bbc[k].kw, 2)) {
+                    char *args;
+
+                    cv.uses_playd = 1;
+                    cv.i += 3;
+                    args = sstr(as_int(expr()));
+                    for (j = 1; j < bbc[k].n; j++) {
+                        expect_op(",");
+                        args = sfmt("%s, %s", args, as_int(expr()));
+                    }
+                    emit(sfmt("%s(%s);", bbc[k].fn, args));
+                    return;
+                }
+            }
+            cv_err("PLAY BBC takes SOUND or ENVELOPE");
+        }
+        cv_err("only PLAY MP3, WAV, FLAC, MODFILE, MODSAMPLE, SOUND, TONE, "
+               "BBC SOUND, BBC ENVELOPE, VOLUME and STOP are translated");
     }
     if (strcmp(up, "CIRCLE") == 0) {
         /* CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]

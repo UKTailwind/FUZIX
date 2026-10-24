@@ -293,6 +293,57 @@ MMG_FN void mmp_modsample(MMINTEGER s, MMINTEGER ch, MMINTEGER vol)
 		MM_RAISE("Samples play over MOD file");
 }
 
+/* PLAY BBC SOUND channel, amplitude, pitch, duration - the BBC Micro's
+ * SOUND (Audio.c:1958), on the kernel's BBC synthesiser.  The
+ * reference's ranges: the channel word &HSFC 0-&HFFFF, amplitude -15 to
+ * 0 or an envelope 1-16, pitch and duration 0-255.  A player holding
+ * the output is its "Sound output in use"; a channel whose queue is
+ * full is waited out, as the BBC waited.  With no sound device (the
+ * host gates) nothing plays. */
+MMG_FN void mmp_bbc_sound(MMINTEGER ch, MMINTEGER amp, MMINTEGER pitch,
+			  MMINTEGER dur)
+{
+	if (mm_range(ch, 0, 0xFFFF) || mm_range(amp, -15, 16)
+	    || mm_range(pitch, 0, 255) || mm_range(dur, 0, 255))
+		return;
+	mmp_adopt();
+	if (mm_play_owner() != 0)
+		MM_RAISE("Sound output in use");
+	while (mm_bbc_sound(ch, amp, pitch, dur) == 1)
+		mm_pause(20);
+}
+
+/* PLAY BBC ENVELOPE n, T, PI1, PI2, PI3, PN1, PN2, PN3, AA, AD, AS, AR,
+ * ALA, ALD (Audio.c:2023), each in the reference's range, as 14 bytes
+ * packed two integers wide for the runtime. */
+MMG_FN void mmp_bbc_env(MMINTEGER n, MMINTEGER t, MMINTEGER pi1,
+			MMINTEGER pi2, MMINTEGER pi3, MMINTEGER pn1,
+			MMINTEGER pn2, MMINTEGER pn3, MMINTEGER aa,
+			MMINTEGER ad, MMINTEGER as, MMINTEGER ar,
+			MMINTEGER ala, MMINTEGER ald)
+{
+	static const short lim[14][2] = {
+		{1, 16}, {0, 255}, {-128, 127}, {-128, 127}, {-128, 127},
+		{0, 255}, {0, 255}, {0, 255}, {-127, 127}, {-127, 127},
+		{-127, 127}, {-127, 127}, {0, 126}, {0, 126}
+	};
+	MMINTEGER v[14];
+	MMINTEGER lo = 0, hi = 0;
+	int i;
+
+	v[0] = n; v[1] = t; v[2] = pi1; v[3] = pi2; v[4] = pi3;
+	v[5] = pn1; v[6] = pn2; v[7] = pn3; v[8] = aa; v[9] = ad;
+	v[10] = as; v[11] = ar; v[12] = ala; v[13] = ald;
+	for (i = 0; i < 14; i++)
+		if (mm_range(v[i], lim[i][0], lim[i][1]))
+			return;
+	for (i = 0; i < 8; i++)
+		lo |= (v[i] & 0xFF) << (8 * i);
+	for (i = 0; i < 6; i++)
+		hi |= (v[8 + i] & 0xFF) << (8 * i);
+	mm_bbc_env(lo, hi);
+}
+
 /* PLAY VOLUME for a program that also plays SOUND/TONE/MOD: remember
  * it for the next spawn AND tell the daemon that is running now. */
 MMG_FN void mmp_volume(MMINTEGER v)

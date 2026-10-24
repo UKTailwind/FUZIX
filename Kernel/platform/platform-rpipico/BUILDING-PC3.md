@@ -242,27 +242,25 @@ downloaded `pc3-v0.6` and booted it saw only `0.5` and concluded the
 wrong file had been published. **Bump `PC3_RELEASE` in `config.h` when
 tagging a release**; nothing checks that the tag and the constant agree.
 
-`PC3_RELEASE` is not the only place the number is written down, and
-that cost three releases:
+`PC3_RELEASE` is not the only place the number is written down:
 
     config.h                PC3_RELEASE "0.14"        the boot banner
-    Applications/CC/        MM_RELEASE 0.14           what MM.VER
-      mmb_runtime.h                                   answers in BASIC
     FUZIX-PC3-MANUAL.md     date: "Release v0.14 ..." the PDF's cover
 
-`MM_RELEASE` was set when `MM.VER` was added at v0.10 and was still
-0.10 at v0.13, so every BASIC program that asked the machine what it
-was running was told something three releases old. The comment on it
-asked to be kept in step with `PC3_RELEASE`; a comment is not a
-mechanism. **Run**
+**Run**
 
     sh relcheck.sh
 
-which reads all three and exits 1 if they disagree. Two things it
-knows that the eye does not: `MM.VER` is MMBasic's `major.mmpp`, so the
-minor part is padded to two digits and `0.9` there is `0.09`; and the
-release number lives in `Applications/mmb2c/mmb_runtime.h`, which is
-where `MM.VER` is compiled from.
+which reads both and exits 1 if they disagree.
+
+There was a third until v0.30: `MM_RELEASE` in
+`Applications/mmb2c/mmb_runtime.h`, what `MM.VER` answered. It was
+once three releases stale, which is what relcheck was written for.
+Since 24 October 2026 `MM.VER` answers the PicoMite version the
+translator follows (`MM_VERSION` there, `7.000055` for 7.00.00RC5),
+because PicoMite programs compare it with a firmware version. So the
+boot banner is the only place the running kernel's release shows, and
+a board check proves the release from the banner, not from `MM.VER`.
 
 **And run**
 
@@ -316,15 +314,15 @@ number and went stale the moment anything above the appendix moved.
 The steps above in the order a release needs them, with the gates. Run
 it top to bottom; each gate exits non-zero and says what is wrong.
 
-**1. Decide the number and put it in all three places.**
+**1. Decide the number and put it in both places.**
 
     $EDITOR config.h                        PC3_RELEASE
-    $EDITOR ../../../Applications/mmb2c/mmb_runtime.h    MM_RELEASE
     $EDITOR FUZIX-PC3-MANUAL.md             the date: line
-    sh relcheck.sh                          # GATE - all three agree
+    sh relcheck.sh                          # GATE - both agree
 
-Remember `MM.VER` is `major.mmpp`, so the minor part is two digits:
-`0.9` in `config.h` is `0.09` in `mmb_runtime.h`. `relcheck.sh` knows.
+`MM.VER` is not the release (see above). Move `MM_VERSION` in
+`Applications/mmb2c/mmb_runtime.h` only when the translator follows a
+newer PicoMite firmware.
 
 **2. Build the kernel.**
 

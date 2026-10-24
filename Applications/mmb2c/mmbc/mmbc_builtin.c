@@ -1255,6 +1255,19 @@ struct val builtin_raw(const char *up)
             expect_op(")");
             return mkval(r, TY_I);
         }
+        if (t->kind == T_ID && strcmp(t->up, "VAR") == 0) {
+            /* PEEK(VAR v, n) - the byte n into a variable's storage,
+               which is PEEK(BYTE (VARADDR v) + n): Exile reads its
+               tables so, Peek(VAR tbl(), at + 1). */
+            const char *r = varaddr();
+            const char *n;
+
+            expect_op(",");
+            n = as_int(expr());
+            expect_op(")");
+            cv.uses_peek = 1;
+            return mkval(sfmt("mmpk_byte((%s) + (%s))", r, n), TY_I);
+        }
         if (t->kind == T_ID) {
             if (strcmp(t->up, "BYTE") == 0)         fn = "mmpk_byte";
             else if (strcmp(t->up, "SHORT") == 0)   fn = "mmpk_short";
@@ -1266,12 +1279,10 @@ struct val builtin_raw(const char *up)
             }
         }
         if (fn == NULL)
-            /* VAR and CFUNADDR are MMBasic's and are not here: VAR
-               is a byte inside a variable rather than an address, and
-               CFUNADDR names an embedded blob a compiler has no
-               equivalent for. */
+            /* CFUNADDR is MMBasic's and is not here: it names an
+               embedded blob a compiler has no equivalent for. */
             cv_err("PEEK(%s ...) is not supported; translated are "
-                   "BYTE, SHORT, WORD, INTEGER, FLOAT and VARADDR",
+                   "BYTE, SHORT, WORD, INTEGER, FLOAT, VAR and VARADDR",
                    t->text);
         a = expr();
         expect_op(")");
@@ -1499,6 +1510,12 @@ struct val builtin_raw(const char *up)
             { "DISK SIZE",  "mm_disksize()", TY_I },
             /* and its free bytes, the same way */
             { "FREE SPACE", "mm_freespace()", TY_I },
+            /* the PicoMite's PSRAM in bytes: 8 MB on a PC3, 0 with none */
+            { "PSRAM SIZE", "mm_psram_size()", TY_I },
+            /* the mode as a VGA or HDMI PicoMite names it, "MODE1"
+               and on, or "" with no display: INSTR(..., "MODE") tells
+               VGA or HDMI from an LCD panel */
+            { "LCDPANEL",   "mm_lcdpanel()", TY_S },
             { NULL, NULL, 0 }
         };
         static const struct { const char *kw, *call; } witharg[] = {
@@ -1614,7 +1631,8 @@ struct val builtin_raw(const char *up)
             cv_err("MM.INFO(%s ...) is not supported; translated are "
                    "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                    "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
-                   "VPOS, UPTIME, DISK SIZE, FREE SPACE, IP ADDRESS, "
+                   "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, "
+                   "LCDPANEL, IP ADDRESS, "
                    "MAX CONNECTIONS, OPTION BASE, PINNO, FILESIZE, "
                    "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "
                    "FLASH ADDRESS n", t->text);

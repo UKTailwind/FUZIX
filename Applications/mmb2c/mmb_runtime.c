@@ -3050,13 +3050,12 @@ void mm_error_here(const char *msg)
 
 /* MM.VER, MM.DEVICE$, MM.CMDLINE$ ------------------------------------ *
  *
- * MMBasic answers MM.VER with its own version as major.mmpp, so the
- * fields compare as one number.  Ours is the PC3 release: 0.10 is 0.10,
- * and 0.9 was 0.09, so a later release always reads higher.  Keep
- * MM_RELEASE in step with PC3_RELEASE in the kernel's config.h - the
- * release recipe in BUILDING-PC3.md says so.
+ * MMBasic answers MM.VER with its own version, and so does this: the
+ * PicoMite version the translator follows (MM_VERSION, mmb_runtime.h),
+ * not the Fuzix release, because programs compare it with a firmware
+ * version.
  */
-MMFLOAT mm_ver(void) { return MM_RELEASE; }
+MMFLOAT mm_ver(void) { return MM_VERSION; }
 
 static char mm_devbuf[MM_STRSZ];
 
@@ -4531,6 +4530,68 @@ MMINTEGER mm_snd_stop(void)
     return 0;
 }
 
+/*
+ * PLAY BBC SOUND and PLAY BBC ENVELOPE: the kernel's BBC synthesiser,
+ * the one BBC BASIC plays (SNDIOC_SOUND, SNDIOC_ENV).  The checks are
+ * mmb_play.h's.
+ *
+ * mm_bbc_sound: 0 = queued, 1 = that channel's queue is full (the
+ * caller waits, as the BBC did), -1 = no device, and nothing played.
+ * mm_bbc_env takes the envelope's 14 bytes packed in two integers, the
+ * first eight in lo, lowest first, so nothing crosses as a pointer.
+ */
+#define MM_SNDIOC_SOUND 0x0006
+#define MM_SNDIOC_ENV   0x0007
+
+struct mm_sndbbc {
+    short chan, amp, pitch, dur;
+};
+
+MMINTEGER mm_bbc_sound(MMINTEGER chan, MMINTEGER amp, MMINTEGER pitch,
+                       MMINTEGER dur)
+{
+    struct mm_sndbbc c;
+
+    if (mm_snd_fd == -2)
+        mm_snd_fd = mm_sys_open();
+    if (mm_snd_fd < 0)
+        return -1;
+    c.chan = (short)chan;
+    c.amp = (short)amp;
+    c.pitch = (short)pitch;
+    c.dur = (short)dur;
+    if (mm_sys_ioctl(mm_snd_fd, MM_SNDIOC_SOUND, &c) < 0)
+        return errno == EAGAIN ? 1 : -1;
+    return 0;
+}
+
+MMINTEGER mm_bbc_env(MMINTEGER lo, MMINTEGER hi)
+{
+    unsigned char e[14];
+    int i;
+
+    if (mm_snd_fd == -2)
+        mm_snd_fd = mm_sys_open();
+    if (mm_snd_fd < 0)
+        return -1;
+    for (i = 0; i < 8; i++)
+        e[i] = (unsigned char)(lo >> (8 * i));
+    for (i = 0; i < 6; i++)
+        e[8 + i] = (unsigned char)(hi >> (8 * i));
+    return mm_sys_ioctl(mm_snd_fd, MM_SNDIOC_ENV, e) < 0 ? -1 : 0;
+}
+
+/* PLAY STOP's part: silence the BBC synthesiser and flush its queues */
+#define MM_SNDIOC_QUIET 0x0008
+
+void mm_bbc_quiet(void)
+{
+    if (mm_snd_fd == -2)
+        mm_snd_fd = mm_sys_open();
+    if (mm_snd_fd >= 0)
+        mm_sys_ioctl(mm_snd_fd, MM_SNDIOC_QUIET, 0);
+}
+
 #else
 
 MMINTEGER mm_play_owner(void) { return 0; }
@@ -4550,6 +4611,21 @@ MMINTEGER mm_snd_cmd(MMINTEGER op, MMINTEGER a, MMINTEGER b,
 }
 
 MMINTEGER mm_snd_stop(void) { return 0; }
+
+MMINTEGER mm_bbc_sound(MMINTEGER chan, MMINTEGER amp, MMINTEGER pitch,
+                       MMINTEGER dur)
+{
+    (void)chan; (void)amp; (void)pitch; (void)dur;
+    return -1;
+}
+
+MMINTEGER mm_bbc_env(MMINTEGER lo, MMINTEGER hi)
+{
+    (void)lo; (void)hi;
+    return -1;
+}
+
+void mm_bbc_quiet(void) { }
 
 #endif
 
@@ -4588,6 +4664,7 @@ MMINTEGER mm_play_stop(void)
      * statement.  MMSTOP silences and releases; any owner left after it
      * is a real daemon and the signalling below is for them. */
     mm_snd_stop();
+    mm_bbc_quiet();                     /* PLAY BBC SOUND's notes too */
     who = mm_play_owner();
 
     if (who) {
@@ -5000,7 +5077,8 @@ struct mm_gfx_fontaddr {
  * it can now read; a C program wanting it asks the ioctl directly.
  */
 /*
- * DefineFont n - a font of the PROGRAM'S OWN, numbers 10-16.
+ * DefineFont n - a font of the PROGRAM'S OWN, numbers 1-16: one with a
+ * built-in's number replaces that built-in for this program alone.
  *
  * The exact mirror of mm_fontaddr above: that asks where a kernel font
  * is, this says where one of ours is.  Nothing is copied - the glyphs
@@ -5758,6 +5836,53 @@ int mm_board_no(void)
     if (mm_gfx_open() >= 0)
         (void)mm_sys_ioctl(mm_gfx_fd, MM_PICOIOC_BOARD, &n);
     return n;
+}
+
+/* MM.INFO(PSRAM SIZE): the firmware's answer is its PSRAM in bytes, and
+   a program uses it to choose the RAM image slots 4-8 over the flash
+   ones (Picanoid, Exile).  The PC3 has 8 MB: said when the kernel has a
+   PSRAM pool (PSRAMIOC_STAT), and always on a PC, which stands in for a
+   PC3.  0 with none, as on a PicoMite without. */
+#define MM_PSRAMIOC_STAT 0x000C
+
+MMINTEGER mm_psram_size(void)
+{
+#ifdef PC_HOST
+    return 8L * 1024L * 1024L;
+#else
+    struct { unsigned int total, freeb, largest; } st;
+
+    if (mm_gfx_open() < 0
+        || mm_sys_ioctl(mm_gfx_fd, MM_PSRAMIOC_STAT, &st) < 0
+        || st.total == 0)
+        return 0;
+    return 8L * 1024L * 1024L;
+#endif
+}
+
+/* MM.INFO$(LCDPANEL): on a VGA or HDMI PicoMite the mode, "MODE1" and
+   on (display_details[] in its SPI-LCD.c), so a program tells a VGA or
+   HDMI screen from an LCD panel with INSTR(MM.INFO$(LCDPANEL), "MODE")
+   (Peter, 24 Oct 2026; there is no MM.INFO(DISPLAY)).  "" with no
+   display, as the firmware answers with no panel.  The kernel's mode
+   number is turned back into BASIC's: the console is MODE 1, 7 MODE 2,
+   8 MODE 3. */
+char *mm_lcdpanel(void)
+{
+    static char buf[MM_STRSZ];
+    struct mm_gfx_info gi;
+    char t[8];
+
+    if (mm_gfx_open() < 0
+        || mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_INFO, &gi) < 0) {
+        mm_ssetc(buf, "");
+        return buf;
+    }
+    t[0] = 'M'; t[1] = 'O'; t[2] = 'D'; t[3] = 'E';
+    t[4] = gi.mode == 7 ? '2' : gi.mode == 8 ? '3' : '1';
+    t[5] = 0;
+    mm_ssetc(buf, t);
+    return buf;
 }
 
 /* 32 bits from the RP2350's hardware entropy source, through
@@ -6625,6 +6750,18 @@ MMINTEGER mm_fb_geom(void) { return -1; }
 /* No kernel to ask on the host, and the gates compare output: say PC3,
    which is what the board build says when the ioctl is missing too. */
 int mm_board_no(void) { return 3; }
+
+/* No PSRAM and no display to name: 0 and "", as the firmware answers
+   with neither. */
+MMINTEGER mm_psram_size(void) { return 0; }
+
+char *mm_lcdpanel(void)
+{
+    static char buf[MM_STRSZ];
+
+    mm_ssetc(buf, "");
+    return buf;
+}
 
 /* No hardware generator either.  0 says so, and the caller seeds from
    the clock instead - which is what the reference does when it has no

@@ -1287,11 +1287,11 @@ The block may sit anywhere in the file — the bottom is the usual place,
 as it is in MMBasic, and the font is in force from the first line of
 the program whatever line it is written on.
 
-**Numbers 10 to 16.** Fonts 1 to 9 are the built-in ones, shared with
-the shell and every other program, so they cannot be replaced;
-`DefineFont 9` is an error naming the range rather than a definition
-that quietly does not happen. Ports of PicoMite programs that define a
-low-numbered font need that one number changed.
+**Numbers 1 to 16,** as on the PicoMite. A number of one of the nine
+built-in fonts replaces that font for your program alone: PETSCII
+Robots and Picofrog define font 9 and draw with it. The shell and every
+other program still see the built-in, and it comes back when your
+program ends.
 
 The first word is the font describing itself and the rest are the
 glyphs, in MMBasic's format, so a `DefineFont` block from a PicoMite
@@ -1882,6 +1882,21 @@ them over with `fat get`, as with any other file.
 `PLAY` and BBC BASIC's `SOUND` share one piece of hardware and are
 mutually exclusive, exactly as they are in MMBasic. Starting a track
 silences the synthesiser; stopping it hands the hardware back.
+
+### The BBC Micro's sound: `PLAY BBC SOUND` and `PLAY BBC ENVELOPE`
+
+```basic
+PLAY BBC ENVELOPE 1, 1, 0, 0, 0, 0, 0, 0, 126, -50, 0, 0, 126, 0
+PLAY BBC SOUND 1, 1, 100, 10    ' channel 1, envelope 1, pitch 100, half a second
+```
+
+The BBC Micro's `SOUND` and `ENVELOPE`, as the PicoMite has them, on
+the same synthesiser BBC BASIC plays here. `SOUND` takes the channel
+word (`&HSFC`: sync, flush, channel), an amplitude of -15 to 0 or an
+envelope 1 to 16, a pitch of 0 to 255 and a duration in twentieths of a
+second (255 is for ever). A channel whose queue is full is waited out,
+as the BBC waited. `ENVELOPE` takes its fourteen numbers in the BBC's
+order. `PLAY STOP` silences it and empties the queues.
 
 ### The synthesiser: `PLAY SOUND` and `PLAY TONE`
 
@@ -2569,7 +2584,7 @@ the sub-keyword decides the type, not the `$`.
 |---|---|
 | `DEVICE` | `"Fuzix"` |
 | `PLATFORM` | `"PC3"` or `"PC2"` |
-| `VERSION` | the release, as `MM.VER` |
+| `VERSION` | as `MM.VER`: the PicoMite version the translator follows, 7.000055 for 7.00.00RC5 (the Fuzix release is in the boot banner) |
 | `PATH` | the directory the running program was started from, ending in `/` |
 | `CURRENT` | the program's own file name |
 | `DRIVE` | always `"A:"` — see below |
@@ -2582,7 +2597,15 @@ the sub-keyword decides the type, not the `$`.
 | `HPOS`, `VPOS` | the graphics text cursor |
 | `ERRNO`, `ERRMSG` | as `MM.ERRNO` and `MM.ERRMSG$` |
 | `FLAGS` | all sixty-four scratch bits |
-| `FONT ADDRESS n`, `FLASH ADDRESS n` | as before |
+| `FONT ADDRESS n`, `FLASH ADDRESS n` | as before; image slots 1 to 8, the PicoMite's three flash slots and its five RAM slots |
+| `LCDPANEL` | the mode, `"MODE1"` to `"MODE3"`, as a VGA or HDMI PicoMite names it; `""` with no display |
+| `PSRAM SIZE` | 8388608 on a PC3 (8 MB), 0 with no PSRAM |
+| `DISK SIZE`, `FREE SPACE` | the current drive's size and its free bytes |
+
+**Telling a VGA or HDMI screen from an LCD panel** is
+`INSTR(MM.INFO$(LCDPANEL), "MODE")`, as on a PicoMite: there it gives
+the panel's name on an LCD build. `MM.DEVICE$` is the firmware, which
+is not the question.
 
 `MM.FONTHEIGHT`, `MM.FONTWIDTH`, `MM.HPOS` and `MM.VPOS` are the flat
 spellings of four of those, and MMBasic has both — a program may write
@@ -4986,7 +5009,7 @@ picture loaders are all there: `SPRITE LOADARRAY`, `SPRITE LOADPNG`,
 and `SPRITE LOADBMP` with `BLIT LOAD`/`LOADBMP` and their window
 arguments, which cut one tile out of a sheet. `TEXT`
 draws in any of MMBasic's nine built-in fonts, and in a font the
-program defines for itself with `DefineFont` (numbers 10 to 16), but
+program defines for itself with `DefineFont` (numbers 1 to 16), but
 in all five of MMBasic's orientations, the three that turn the
 character itself included.
 

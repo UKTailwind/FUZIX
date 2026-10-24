@@ -1,0 +1,5 @@
+ver 1
+lcdpanel 1
+psram 1
+peekvar 2
+bbc ok

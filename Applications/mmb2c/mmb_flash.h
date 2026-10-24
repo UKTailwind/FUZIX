@@ -44,7 +44,11 @@
 #endif
 #endif
 
-#define MMF_SLOTS 3
+/* Eight: the PicoMite with PSRAM (the PC3's build among them) has the
+ * three flash slots and five RAM slots after them, image slots 4 to 8
+ * (configuration.h MAXIMAGESLOTS).  A program that finds PSRAM puts its
+ * art in slot 4 (Picanoid, Exile).  Here all eight are memory alike. */
+#define MMF_SLOTS 8
 /* The reference slot size: MAX_PROG_SIZE, 120K on the rp2040 build.
  * It was 48K here on the theory that a slot only ever held a screen's
  * worth - and then PETSCII Robots loaded its 87,724-byte sprite
@@ -86,9 +90,17 @@ MMG_FN unsigned char *mmf_addr(MMINTEGER n)
 	return mmf_slot[n - 1];
 }
 
+/* FLASH ERASE takes the flash slots only, 1 to 3 (FileIO.c: ERASE's
+ * getint is MAXFLASHSLOTS, where DISK LOAD's is MAXIMAGESLOTS). */
+#define MMF_FLASHSLOTS 3
+
 MMG_FN void mmf_erase(MMINTEGER n)
 {
-	unsigned char *s = mmf_addr(n);
+	unsigned char *s;
+
+	if (n < 1 || n > MMF_FLASHSLOTS)
+		MM_RAISE("Invalid flash slot");
+	s = mmf_addr(n);
 
 	if (s != NULL)
 		memset(s, 0xFF, (size_t)mmf_size[n - 1]);

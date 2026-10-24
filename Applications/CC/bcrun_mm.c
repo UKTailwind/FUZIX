@@ -371,6 +371,8 @@ static void w_device(void)   { A = mm_off(mm_scopy(mm_device())); }
    same reason MM.ERRMSG$ does: they live in bcrun's own memory and a
    program can only be handed a pointer inside the VM's address space. */
 static void w_platform(void) { A = mm_off(mm_scopy(mm_platform())); }
+static void w_psram_size(void) { A = mm_psram_size(); }
+static void w_lcdpanel(void) { A = mm_off(mm_scopy(mm_lcdpanel())); }
 static void w_path(void)     { A = mm_off(mm_scopy(mm_path())); }
 static void w_current(void)  { A = mm_off(mm_scopy(mm_current())); }
 static void w_drive(void)    { A = mm_off(mm_scopy(mm_drive())); }
@@ -422,6 +424,8 @@ static void w_play_send(void) { A = mm_play_send(LL(0), LL(2), LL(4),
 static void w_snd_cmd(void)   { A = mm_snd_cmd(LL(0), LL(2), LL(4),
 					       LL(6), LL(8), LL(10)); }
 static void w_snd_stop(void)  { A = mm_snd_stop(); }
+static void w_bbc_sound(void) { A = mm_bbc_sound(LL(0), LL(2), LL(4), LL(6)); }
+static void w_bbc_env(void)   { A = mm_bbc_env(LL(0), LL(2)); }
 
 /* graphics - every argument and result is RGB888, as in MMBasic */
 static void w_pixel(void)    { mm_pixel(LL(0), LL(2), LL(4)); A = 0; }
@@ -710,6 +714,8 @@ static const struct mmwrap {
 	{ "mm_ver",		w_ver },
 	{ "mm_device",		w_device },
 	{ "mm_platform",	w_platform },
+	{ "mm_psram_size",	w_psram_size },
+	{ "mm_lcdpanel",	w_lcdpanel },
 	{ "mm_path",		w_path },
 	{ "mm_current",		w_current },
 	{ "mm_drive",		w_drive },
@@ -743,6 +749,8 @@ static const struct mmwrap {
 	{ "mm_play_send",	w_play_send },
 	{ "mm_snd_cmd",		w_snd_cmd },
 	{ "mm_snd_stop",	w_snd_stop },
+	{ "mm_bbc_sound",	w_bbc_sound },
+	{ "mm_bbc_env",		w_bbc_env },
 	{ "mm_pixel",		w_pixel },
 	{ "mm_pixel_get",	w_pixel_get },
 	{ "mm_cls",		w_cls },

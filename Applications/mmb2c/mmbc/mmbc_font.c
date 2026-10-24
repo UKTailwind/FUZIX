@@ -65,13 +65,13 @@ static void define_font(int fno, const unsigned long *words, int nwords,
     unsigned char *data;
     int wid, hgt, count, need, k, n;
 
-    /* 1-9 are the built-in nine, shared with the console and every
-     * other program, so they cannot be replaced - and saying so is the
-     * point.  A silently ignored DefineFont would draw in the wrong
-     * glyphs and look like a rendering bug. */
-    if (fno < 10 || fno > 16) {
-        errors_add(sfmt("line %d: DefineFont %d - user fonts are 10 to 16 "
-                        "(1-9 are built in)", where, fno));
+    /* 1-16, as the firmware's FontTable takes them: a number of one of
+     * the built-in nine replaces it for this program alone (the kernel
+     * keeps the slot per process).  PETSCII Robots and Picofrog define
+     * #9.  It was 10-16, which refused them. */
+    if (fno < 1 || fno > 16) {
+        errors_add(sfmt("line %d: DefineFont %d - fonts are 1 to 16",
+                        where, fno));
         return;
     }
     for (k = 0; k < cv.nfonts; k++)

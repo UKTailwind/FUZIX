@@ -401,10 +401,9 @@ extern uint8_t progbase[USERMEM];
  * published.  Both numbers are right; only one of them was on screen.
  *
  * Bump this when tagging a release; BUILDING-PC3.md says so too.
- * It is not the only place the release number is written down -
- * MM_RELEASE in mmb_runtime.h is what a BASIC program's MM.VER
- * answers, and it sat three releases behind this one without anything
- * noticing.  `sh relcheck.sh` now compares the two and the manual.
+ * The manual's date line names it as well, and `sh relcheck.sh`
+ * compares the two.  MM.VER is not the release: it answers the PicoMite
+ * version the translator follows (MM_VERSION in mmb_runtime.h).
  */
 #define PC3_RELEASE "0.30"
 

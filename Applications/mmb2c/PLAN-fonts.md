@@ -145,6 +145,13 @@ address of a program's font.
 
 ### D2. User fonts are 10-16; defining 1-9 is a clean error  *(user decision)*
 
+**Superseded 24 October 2026** (PLAN-picomite.md in pc3host: PicoMite
+programs run unchanged). A `DefineFont` may take any number 1-16, as
+MMBasic's FontTable does; a built-in's number replaces that font for
+the defining process alone - the kernel's slot is per process, so the
+console and every other program keep the built-in. PETSCII Robots and
+Picofrog define #9 and translate unchanged.
+
 MMBasic lets a `DefineFont` land on any index, so picofrog's
 `DefineFont 9` replaces the built-in 8x10.  We do not need that:
 "there is nothing special about 9", so **picofrog's block gets edited

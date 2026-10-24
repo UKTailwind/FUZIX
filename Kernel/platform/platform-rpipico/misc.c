@@ -749,7 +749,7 @@ int plt_dev_ioctl(uarg_t request, char *data)
         if (display_font_set(fd.font,
                              (const unsigned char *)(uintptr_t)fd.addr,
                              udata.u_ptab)) {
-            udata.u_error = EINVAL;     /* not 10-16 */
+            udata.u_error = EINVAL;     /* not 1-16 */
             return -1;
         }
         return 0;

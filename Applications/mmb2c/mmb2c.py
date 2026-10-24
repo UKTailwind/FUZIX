@@ -4108,15 +4108,23 @@ class Conv(object):
                 a = self.varaddr()
                 self.expect_op(')')
                 return (a, TY_I)
+            if t[0] == T_ID and t[2] == 'VAR':
+                # PEEK(VAR v, n) - the byte n into a variable's storage,
+                # which is PEEK(BYTE (VARADDR v) + n): Exile reads its
+                # tables so, Peek(VAR tbl(), at + 1).
+                a = self.varaddr()
+                self.expect_op(',')
+                n = self.as_int(self.expr())
+                self.expect_op(')')
+                self.uses_peek = True
+                return ('mmpk_byte((%s) + (%s))' % (a, n), TY_I)
             fn = widths.get(t[2]) if t[0] == T_ID else None
             if fn is None:
-                # VAR and CFUNADDR are MMBasic's and are not here: VAR
-                # is a byte inside a variable rather than an address,
-                # and CFUNADDR names an embedded blob a compiler has no
-                # equivalent for.
+                # CFUNADDR is MMBasic's and is not here: it names an
+                # embedded blob a compiler has no equivalent for.
                 self.err("PEEK(%s ...) is not supported; translated are "
-                         "BYTE, SHORT, WORD, INTEGER, FLOAT and VARADDR"
-                         % t[1])
+                         "BYTE, SHORT, WORD, INTEGER, FLOAT, VAR and "
+                         "VARADDR" % t[1])
             a = self.expr()
             self.expect_op(')')
             self.uses_peek = True
@@ -4928,13 +4936,13 @@ class Conv(object):
 
     def define_font(self, fno, words, where):
         """One collected block: check it and keep the bytes."""
-        # 1-9 are the built-in nine, shared with the console and every
-        # other program, so they cannot be replaced - and saying so is
-        # the point.  A silently ignored DefineFont would draw in the
-        # wrong glyphs and look like a rendering bug.
-        if fno < 10 or fno > 16:
-            self.errors.append("line %d: DefineFont %d - user fonts are "
-                               "10 to 16 (1-9 are built in)" % (where, fno))
+        # 1-16, as the firmware's FontTable takes them: a number of one
+        # of the built-in nine replaces it for this program alone (the
+        # kernel keeps the slot per process).  PETSCII Robots and
+        # Picofrog define #9.  It was 10-16, which refused them.
+        if fno < 1 or fno > 16:
+            self.errors.append("line %d: DefineFont %d - fonts are 1 to "
+                               "16" % (where, fno))
             return
         if fno in self.fonts:
             self.errors.append("line %d: font %d is defined twice"
@@ -5583,6 +5591,12 @@ class Conv(object):
         'DISK SIZE':  ('mm_disksize()', TY_I),
         # and its free bytes, the same way
         'FREE SPACE': ('mm_freespace()', TY_I),
+        # the PicoMite's PSRAM in bytes: 8 MB on a PC3, 0 with none
+        'PSRAM SIZE': ('mm_psram_size()', TY_I),
+        # the mode as a VGA or HDMI PicoMite names it, "MODE1" and
+        # on, or "" with no display: INSTR(..., "MODE") tells VGA or
+        # HDMI from an LCD panel
+        'LCDPANEL':   ('mm_lcdpanel()', TY_S),
     }
     # ... and the ones that take an expression after the keyword.
     MMINFO_ARG = {
@@ -5732,7 +5746,8 @@ class Conv(object):
         self.err("MM.INFO(%s ...) is not supported; translated are "
                  "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                  "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
-                 "VPOS, UPTIME, DISK SIZE, FREE SPACE, IP ADDRESS, "
+                 "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, "
+                 "LCDPANEL, IP ADDRESS, "
                  "MAX CONNECTIONS, OPTION BASE, PINNO, FILESIZE, "
                  "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "
                  "FLASH ADDRESS n" % t[1])
@@ -7809,8 +7824,27 @@ class Conv(object):
                         # player to wait for
                         self.emit('mmi_play_int(%s);' % fn)
                     return
+            if self.is_kw('BBC', 1):
+                # PLAY BBC SOUND channel, amplitude, pitch, duration and
+                # PLAY BBC ENVELOPE n, T, PI1, PI2, PI3, PN1, PN2, PN3,
+                # AA, AD, AS, AR, ALA, ALD - the BBC Micro's two, on the
+                # kernel's BBC synthesiser (Audio.c:1958-2038).  Every
+                # argument is required, as getcsargs' count makes it.
+                for kw, n, fn in (('SOUND', 4, 'mmp_bbc_sound'),
+                                  ('ENVELOPE', 14, 'mmp_bbc_env')):
+                    if self.is_kw(kw, 2):
+                        self.uses_playd = True
+                        self.i += 3
+                        a = [self.as_int(self.expr())]
+                        for k in range(n - 1):
+                            self.expect_op(',')
+                            a.append(self.as_int(self.expr()))
+                        self.emit('%s(%s);' % (fn, ', '.join(a)))
+                        return
+                self.err('PLAY BBC takes SOUND or ENVELOPE')
             self.err('only PLAY MP3, WAV, FLAC, MODFILE, MODSAMPLE, SOUND, '
-                     'TONE, VOLUME and STOP are translated')
+                     'TONE, BBC SOUND, BBC ENVELOPE, VOLUME and STOP are '
+                     'translated')
         if up == 'CIRCLE':
             # CIRCLE x, y, r [, lw [, aspect [, colour [, fill]]]]
             # The geometry is mmb_gfx_circle.h's, not the runtime's.  MMBasic

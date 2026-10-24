@@ -366,6 +366,14 @@ MMINTEGER mm_play_owner(void);
 MMINTEGER mm_snd_cmd(MMINTEGER op, MMINTEGER a, MMINTEGER b,
                      MMINTEGER p1, MMINTEGER p2, MMINTEGER p3);
 MMINTEGER mm_snd_stop(void);
+/* PLAY BBC SOUND / ENVELOPE into the kernel's BBC synthesiser
+ * (mmb_play.h checks the arguments).  mm_bbc_sound: 0 queued, 1 that
+ * channel's queue is full, -1 no device.  mm_bbc_env: the 14 envelope
+ * bytes, the first eight in lo, lowest first. */
+MMINTEGER mm_bbc_sound(MMINTEGER chan, MMINTEGER amp, MMINTEGER pitch,
+                       MMINTEGER dur);
+MMINTEGER mm_bbc_env(MMINTEGER lo, MMINTEGER hi);
+void mm_bbc_quiet(void);                 /* PLAY STOP: silence and flush */
 MMINTEGER mm_play_send(MMINTEGER op, MMINTEGER a, MMINTEGER b,
                        MMINTEGER p1, MMINTEGER p2, MMINTEGER p3);
 MMINTEGER mm_play_stop(void);
@@ -568,9 +576,10 @@ void mm_console(MMINTEGER mode);
  * case, and an address of 0 is unreadable either way. */
 MMINTEGER mm_fontaddr(MMINTEGER font);
 
-/* DefineFont n - register a font of THIS PROGRAM'S own, numbers 10-16
- * (1-9 are the built-in nine, shared with the console and every other
- * program, and the translator refuses them).
+/* DefineFont n - register a font of THIS PROGRAM'S own, numbers 1-16,
+ * as the firmware's FontTable takes them: one with a built-in's number
+ * replaces it for this program alone; the console and every other
+ * program still see the built-in.
  *
  * The mirror of mm_fontaddr: nothing is copied, the glyphs stay in the
  * program's image and the kernel reads them where they lie.  `addr'
@@ -961,17 +970,16 @@ void mm_pr_commit(void);
 MMINTEGER mm_errno(void);           /* MM.ERRNO                        */
 char *mm_errmsg(void);              /* MM.ERRMSG$                      */
 
-/* The PC3 release, as major.mmpp so the fields compare as one number
- * (0.10 reads higher than 0.09).  BUMP THIS WITH PC3_RELEASE in the
- * kernel's config.h.
- *
- * That instruction was here from the start and was followed exactly
- * once: this said 0.10 for v0.11, v0.12 and v0.13, so every program
- * that asked the machine what it was running got an answer three
- * releases old.  `relcheck.sh` in the platform directory compares this
- * with PC3_RELEASE and the manual's date line, and is in the recipe
- * now - a comment asking to be kept in step is not a mechanism. */
-#define MM_RELEASE 0.30
+/* MM.VER and MM.INFO(VERSION): the PicoMite version the translator
+ * follows, as the firmware's fun_version encodes its VERSION string -
+ * major, then two digits each of minor, patch and pre-release, a
+ * release candidate's being 50 + n - so "7.00.00RC5" is 7.000055 and
+ * the release will be 7.0.  PicoMite programs test it: Exile and
+ * Picanoid stop with "firmware too old for this game" below 6.03.02b11.
+ * It was the Fuzix release (0.30), which read as a very old PicoMite;
+ * the release is in the boot banner (decided 24 Oct 2026).  Move it
+ * when mmb2c follows a newer firmware. */
+#define MM_VERSION 7.000055
 MMFLOAT mm_ver(void);               /* MM.VER                          */
 char *mm_device(void);              /* MM.DEVICE$ - "Fuzix"            */
 char *mm_cmdline(void);             /* MM.CMDLINE$                     */
@@ -987,6 +995,10 @@ void mm_argv_bind(int argc, char **argv);
  */
 int   mm_board_no(void);            /* 2 or 3, for PLATFORM            */
 char *mm_platform(void);            /* MM.INFO(PLATFORM)               */
+MMINTEGER mm_psram_size(void);      /* MM.INFO(PSRAM SIZE): bytes, 0 none */
+/* MM.INFO$(LCDPANEL): "MODE1" to "MODE3", as a VGA/HDMI PicoMite names
+ * its mode; "" with no display. */
+char *mm_lcdpanel(void);
 char *mm_path(void);                /* MM.INFO(PATH)    dir + '/'      */
 char *mm_current(void);             /* MM.INFO(CURRENT) the program    */
 char *mm_drive(void);               /* MM.INFO(DRIVE)   always "A:"    */

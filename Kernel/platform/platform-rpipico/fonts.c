@@ -77,11 +77,13 @@ static const unsigned char *const font_table[] = {
  * address; MMBasic does the same thing with the font in flash beside
  * the program (MMBasic.c:1167, FontTable[] holding pointers).
  *
- * Numbers 10-16 only.  MMBasic's nine built-ins keep 1-9 and a
- * DefineFont onto one of them is refused rather than honoured, so a
- * program cannot change what the console and every other program draws
- * with; the translator turns that into an error the programmer sees.
- * Nine built-in plus seven of these is MMBasic's sixteen.
+ * Any number 1-16, as MMBasic's FontTable takes one (MMBasic.c, the
+ * DefineFont blocks at load: FontTable[n & 15]).  A program's font with
+ * a built-in's number replaces that built-in for that program alone:
+ * PETSCII Robots and Picofrog define #9 and draw with it.  Every other
+ * process, and the console, still sees the built-in - the slot is the
+ * program's, below.  It was 10-16 only, refusing the PicoMite's own
+ * games.
  *
  * OWNERSHIP IS NOT OPTIONAL.  Every process on this machine loads at
  * the same PROGLOAD, so one program's font address is a perfectly
@@ -92,8 +94,8 @@ static const unsigned char *const font_table[] = {
  * invisible to any other process, and display_font_release() empties
  * it on exit and on exec.
  */
-#define UFONT_FIRST  10
-#define UFONT_SLOTS  7                  /* fonts 10-16 */
+#define UFONT_FIRST  1
+#define UFONT_SLOTS  16                 /* fonts 1-16 */
 
 static struct {
     const unsigned char *addr;
@@ -134,20 +136,21 @@ void display_font_release(struct p_tab *who)
 const unsigned char *display_font(int font, int *w, int *h,
                                   int *first, int *count)
 {
-    const unsigned char *fp;
+    const unsigned char *fp = NULL;
 
     if (font >= UFONT_FIRST && font < UFONT_FIRST + UFONT_SLOTS) {
         unsigned i = (unsigned)(font - UFONT_FIRST);
 
-        /* Another process's slot is not ours to draw from */
-        if (ufont[i].addr == NULL || ufont[i].owner != udata.u_ptab)
-            return NULL;
-        fp = ufont[i].addr;
+        /* This process's own font n, if it has one; another process's
+           slot is not ours to draw from */
+        if (ufont[i].addr != NULL && ufont[i].owner == udata.u_ptab)
+            fp = ufont[i].addr;
     }
-    else if (font < 1 || font > NFONTS)
-        return NULL;
-    else
+    if (fp == NULL) {
+        if (font < 1 || font > NFONTS)
+            return NULL;
         fp = font_table[font - 1];
+    }
     if (w)
         *w = fp[0];
     if (h)
