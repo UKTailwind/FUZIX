@@ -117,9 +117,15 @@ char *pstr(const char *s)
 /* ---- scratch pool: one block, reset at each tokenize() ---- */
 
 /* Sized for the biggest single-line churn plus a whole write() phase
- * (no tokenize reset runs during output assembly). */
+ * (no tokenize reset runs during output assembly).  PC_TABLES is
+ * pc3host's translator for Linux and Windows, as it is the compiler
+ * kit's there: no board to fit, and a program with a few thousand
+ * globals passes 512K in its write phase.  The pages it never touches
+ * cost nothing. */
 #ifdef MMBC_ARENA
 #define SBLOCK (128 * 1024)
+#elif defined(PC_TABLES)
+#define SBLOCK (64UL * 1024 * 1024)
 #else
 #define SBLOCK (512 * 1024)
 #endif
