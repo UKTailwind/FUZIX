@@ -31,6 +31,29 @@ static void struct_add_field(struct symbol *sym, unsigned name, unsigned type)
     }
 }
 
+/*
+ *	A struct or union is aligned as its strictest member, and
+ *	struct_declaration pads its size to a multiple of that, so each
+ *	element of an array of them is aligned as the first is (AAPCS,
+ *	and gcc). On a target whose alignments are all 1 this is 1.
+ */
+unsigned struct_alignof(struct symbol *sym)
+{
+    unsigned *p = sym->data.idx;
+    unsigned n = *p;
+    unsigned a = 1;
+    unsigned m;
+
+    p += 2;
+    while(n--) {
+        m = target_alignof(p[1], S_STRUCT);
+        if (m > a)
+            a = m;
+        p += 3;
+    }
+    return a;
+}
+
 static unsigned structdepth;
 
 void struct_declaration(struct symbol *sym)
@@ -41,6 +64,7 @@ void struct_declaration(struct symbol *sym)
     unsigned nfield = 0;
     unsigned err = 0;
     unsigned ut;
+    unsigned a;
 
     if (sym->infonext & INITIALIZED)
         error("struct declared twice");
@@ -79,6 +103,10 @@ void struct_declaration(struct symbol *sym)
         require(T_SEMICOLON);
     }
     require(T_RCURLY);
+
+    /* Pad the end out to the alignment: unions as well as structs */
+    a = struct_alignof(sym);
+    tags[1] = (tags[1] + a - 1) & ~(a - 1);
 
     sym->data.idx = idx_copy(tags, 2 + 3 * *tags);
 

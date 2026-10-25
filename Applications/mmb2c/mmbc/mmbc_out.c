@@ -140,12 +140,15 @@ static void ob_add(struct outbuf *o, const char *line)
  *
  * The members go in five groups, each in name order: the numeric arrays,
  * the bounds tables, the run-time arrays' pointers, the TYPE variables,
- * and the strings.  The board's compiler aligns an array, as it does any
- * aggregate, to 4, and MM_STRSZ is 257, so a string first left every
- * INTEGER and FLOAT array after it at 4 mod 8 - and PEEK(INTEGER) and
- * MEMORY COPY INTEGER refuse an address not divisible by 8, where a
- * PicoMite's arrays never are.  Eight-byte members first keeps them all
- * 8-aligned.  mmb2c.py's global_decls.
+ * and the strings.  The board's compiler aligned an array to 4 until
+ * FUZIX #40, and MM_STRSZ is 257, so a string first left every INTEGER
+ * and FLOAT array after it at 4 mod 8 - and PEEK(INTEGER) and MEMORY
+ * COPY INTEGER refuse an address not divisible by 8, where a PicoMite's
+ * arrays never are.  Now it aligns a member as gcc does, and eight-byte
+ * members first still leaves no gaps.  Strings are packed: a PEEK(WORD)
+ * of a string's address can be refused where a PicoMite, which gives
+ * each string a heap block of its own, would not.  mmb2c.py's
+ * global_decls.
  */
 static void global_decls(struct outbuf *o)
 {

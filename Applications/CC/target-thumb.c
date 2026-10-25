@@ -38,33 +38,56 @@ unsigned target_sizeof(unsigned t)
  *
  *	This is called for aggregates as well as simple types, and
  *	target_sizeof only understands simple ones, so decode the type
- *	rather than going via the size. Aggregates get word alignment,
- *	which is safe but over-aligns a struct of chars compared to gcc.
- *	That only matters once we share structs with gcc-built objects,
- *	which is out of scope at present.
+ *	rather than going via the size. An array is aligned as its
+ *	element and a struct or union as its strictest member, which is
+ *	how gcc lays them out: the userland shares headers with gcc-built
+ *	code, and MMBasic's PEEK(INTEGER) refuses an INTEGER array that
+ *	is not 8-aligned (FUZIX #40, #42).
+ *
+ *	A whole array, struct or union object - not a member - is word
+ *	aligned at the least, as gcc's ARM DATA_ALIGNMENT and
+ *	LOCAL_ALIGNMENT make it at -O2. That changes no layout, and code
+ *	that reads a char buffer a word at a time keeps working.
  */
 unsigned target_alignof(unsigned t, unsigned storage)
 {
+	unsigned a;
+
 	if (storage == S_ARGUMENT)
 		return 4;
-	if (PTR(t))
+	/* Before the PTR test, because an array's PTR counts its
+	   dimensions. Only one with more indirections than that is a
+	   pointer to an array, which is aligned as a pointer. */
+	if (IS_ARRAY(t) && PTR(t) <= array_num_dimensions(t))
+		a = target_alignof(array_type(t), S_STRUCT);
+	else if (PTR(t))
 		return 4;
-	if (!IS_SIMPLE(t))
+	else if (IS_STRUCT(t)) {
+		struct symbol *s = symbol_ref(t);
+		/* Not declared yet, so there are no members to go by */
+		if (!(s->infonext & INITIALIZED))
+			return 4;
+		a = struct_alignof(s);
+	} else if (IS_SIMPLE(t)) {
+		switch (BASE_TYPE(t)) {
+		case CCHAR:
+		case UCHAR:
+			return 1;
+		case CSHORT:
+		case USHORT:
+			return 2;
+		case CLONGLONG:
+		case ULONGLONG:
+		case DOUBLE:
+			return 8;
+		default:
+			return 4;
+		}
+	} else
 		return 4;
-	switch (BASE_TYPE(t)) {
-	case CCHAR:
-	case UCHAR:
-		return 1;
-	case CSHORT:
-	case USHORT:
-		return 2;
-	case CLONGLONG:
-	case ULONGLONG:
-	case DOUBLE:
-		return 8;
-	default:
-		return 4;
-	}
+	if (storage != S_STRUCT && a < 4)
+		a = 4;
+	return a;
 }
 
 /*
