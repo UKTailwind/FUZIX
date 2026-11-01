@@ -1,15 +1,15 @@
 ' What PicoMite programs ask before they start.  MM.VER is the firmware
 ' version the translator follows (7.000055 for 7.00.00RC5), so a check
 ' against 6.03.02b11 passes; MM.INFO$(LCDPANEL) names the mode, "MODE1"
-' and on, or is "" with no display; PSRAM SIZE is 8 MB on a PC3 and 0
-' with none.
+' and on, or is "" with no display; PSRAM SIZE is what the firmware leaves
+' for programs (5.5 MB of a PC3's 8 MB) and 0 with none.
 ' The answers differ between a board, pc3host and the gates, so the
 ' shapes are what is printed.
 Print "ver"; MM.VER > 6.030211
 d$ = MM.Info$(LCDPANEL)
 Print "lcdpanel"; Instr(d$, "MODE") = 1 Or d$ = ""
 p = MM.Info(PSRAM SIZE)
-Print "psram"; p = 0 Or p = 8388608
+Print "psram"; p = 0 Or (p >= 1048576 And p <= 16777216)
 ' PEEK(VAR v, n): the byte n into a variable's storage
 Dim t%(3) = (1, 2, 3, 4)
 Print "peekvar"; Peek(VAR t%(), 8)
