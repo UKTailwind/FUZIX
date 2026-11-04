@@ -231,6 +231,9 @@ static char *strtab;
 static void (**libbind)(void);
 static void (*mm_wrap_lookup(const char *name))(void);
 static unsigned long mmrt_reserve(unsigned long base);
+#ifdef CMM2
+static void (*cmm2_svc_lookup(const char *name))(void);	/* bcrun_svc.c */
+#endif
 
 /*
  * A double is carried in the accumulator as its bit pattern and a float
@@ -2722,6 +2725,19 @@ static void lc_time_us64(void)
 }
 
 /*
+ *	clock(): the microseconds since the program started, so
+ *	CLOCKS_PER_SEC is 1000000.  A clock_t is a long, so it wraps after
+ *	35 minutes, as any 32-bit clock of microseconds does; the
+ *	difference of two readings is right across a wrap all the same.
+ */
+static long long clock_base;
+
+static void lc_clock(void)
+{
+	A = (long)(lib_us64() - clock_base);
+}
+
+/*
  *	First-call binding.  libbind (function), mathbind (mfns index+1)
  *	and eqbind (parsed descriptor) memoise per symbol index, so the
  *	name is examined once per program run, not once per call - the
@@ -2767,7 +2783,7 @@ static const struct {
 	{ "ioctl", lc_ioctl }, { "fcntl", lc_fcntl },
 	{ "neterr", lc_neterr },
 	{ "adval", lc_adval }, { "time_us", lc_time_us },
-	{ "time_us64", lc_time_us64 },
+	{ "time_us64", lc_time_us64 }, { "clock", lc_clock },
 	{ NULL, NULL }
 };
 
@@ -2831,6 +2847,16 @@ static int lib_resolve(unsigned idx)
 			return 1;
 		}
 	}
+#ifdef CMM2
+	{
+		/* the CMM2's services, by their names (cmm2/bcrun_svc.c) */
+		void (*fn)(void) = cmm2_svc_lookup(name);
+		if (fn) {
+			libbind[idx] = fn;
+			return 1;
+		}
+	}
+#endif
 	for (i = 0; lib_fast[i].name; i++) {
 		if (!strcmp(lib_fast[i].name, name)) {
 			libbind[idx] = lib_fast[i].fn;
@@ -4328,6 +4354,7 @@ static int run(void)
 {
 	sp = MEMTOP - 4;
 	main_args();
+	clock_base = lib_us64();
 	/* Dispatch the entry exactly like a call site: h_entry points
 	   at main's BC_NATIVE marker when it was translated, and a
 	   BASIC program lives in its main line - entering through the
@@ -4438,6 +4465,8 @@ static void (*mm_wrap_lookup(const char *name))(void)
 	(void)sys_open;
 	return NULL;
 }
+
+#include "bcrun_svc.c"
 #else
 #include "bcrun_mm.c"
 #endif
