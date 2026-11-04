@@ -43,6 +43,11 @@
    (which has no slot 21) must reject it rather than load a floor from
    whatever follows the table. */
 #define BC_VERSION_NATIVE5 5
+/* 6: version 5 whose native code does double arithmetic and compares
+   with VFP instructions (cc2 built with THUMB_VFP, for the CMM2's
+   Cortex-M7).  A bcrun on an Arm without a double-precision FPU (the
+   PC3's M33) must refuse it rather than fault on the first one. */
+#define BC_VERSION_NATIVE6 6
 
 /*
  *	Machine model

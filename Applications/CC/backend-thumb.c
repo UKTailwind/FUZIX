@@ -1297,6 +1297,58 @@ static unsigned long t_seam(unsigned long o, unsigned long start,
 	return p4 + 1;
 }
 
+/*
+ *	The double operation of helper slot NHS_DADD..NHS_DCMPGT on r0:r1
+ *	(left) and r2:r3 (right), the result in r0:r1, or r0 = 0/1 for a
+ *	compare: a call through the helper vector, or under THUMB_VFP the
+ *	operation itself.  THUMB_VFP is for a target with a double-precision
+ *	FPU (the CMM2's Cortex-M7, cc2 built for it): d0 and d1 are used
+ *	and left as they fall, as a call would leave them.  The compares
+ *	are vcmp's, which say "unordered" for a NaN, and the conditions
+ *	(mi, ls, ge, gt) are the ones false then, as the aeabi routines'
+ *	answers are.  An object with any is version 6 (t_vfp_used, in
+ *	backend-bcode.c).
+ */
+static void t_dop(unsigned slot)
+{
+#ifdef THUMB_VFP
+	static const unsigned short ite[] = {
+		0xBF0C, 0xBF4C, 0xBF94, 0xBFAC, 0xBFCC	/* eq mi ls ge gt */
+	};
+
+	if (slot >= NHS_DADD && slot <= NHS_DCMPGT) {
+		t32(0xEC41, 0x0B10);		/* vmov d0, r0, r1 */
+		t32(0xEC43, 0x2B11);		/* vmov d1, r2, r3 */
+		t_vfp_used = 1;
+		switch (slot) {
+		case NHS_DADD:
+			t32(0xEE30, 0x0B01);	/* vadd.f64 d0, d0, d1 */
+			break;
+		case NHS_DSUB:
+			t32(0xEE30, 0x0B41);	/* vsub.f64 d0, d0, d1 */
+			break;
+		case NHS_DMUL:
+			t32(0xEE20, 0x0B01);	/* vmul.f64 d0, d0, d1 */
+			break;
+		case NHS_DDIV:
+			t32(0xEE80, 0x0B01);	/* vdiv.f64 d0, d0, d1 */
+			break;
+		default:
+			t32(0xEEB4, 0x0B41);	/* vcmp.f64 d0, d1 */
+			t32(0xEEF1, 0xFA10);	/* vmrs APSR_nzcv, fpscr */
+			t16(ite[slot - NHS_DCMPEQ]);	/* ite <cond> */
+			t16(0x2001);		/* mov<cond> r0, #1 */
+			t16(0x2000);		/* mov<!cond> r0, #0 */
+			return;
+		}
+		t32(0xEC51, 0x0B10);		/* vmov r0, r1, d0 */
+		return;
+	}
+#endif
+	t32(0xF8D5, 0xC000 | (slot * 4));	/* ldr.w r12, [r5, #] */
+	t16(0x47E0);		/* blx  r12                       */
+}
+
 /* stacked OP A: stacked operand -> left (r0/r1), A -> right (r2/r3),
    pop 8.  Result (value or 0/1 flag) comes back in r0/r1; compares
    leave r1 as garbage, which the low-32 contract permits. */
@@ -1318,8 +1370,7 @@ static void t_dcpbin(unsigned slot, int fused)
 	   the slot this pop would take back */
 	if (!(fused && t_fusel))
 		t16(0x3408);	/* adds r4, #8  - pop the operand */
-	t32(0xF8D5, 0xC000 | (slot * 4));	/* ldr.w r12, [r5, #] */
-	t16(0x47E0);		/* blx  r12                       */
+	t_dop(slot);
 	t_d = (fused && t_fusel) ? 0 : -8;
 }
 
@@ -1650,8 +1701,7 @@ static int t_eqop(const char *name)
 		t16(0x460B);		/* mov  r3, r1              */
 		t32(0xF8DC, 0x0000);	/* ldr.w r0, [r12] - old lo */
 		t32(0xF8DC, 0x1004);	/* ldr.w r1, [r12, #4]      */
-		t32(0xF8D5, 0xC000 | (slot * 4));
-		t16(0x47E0);		/* blx  r12                 */
+		t_dop(slot);
 		t16(0x6822);		/* ldr  r2, [r4] - again    */
 		t16(0x3404);		/* adds r4, #4 - pop now    */
 		t16(0x1992);		/* adds r2, r2, r6          */
@@ -1875,8 +1925,7 @@ static int t_eqop_r89(const char *name)
 		t16(0x460B);		/* mov r3, r1                  */
 		t16(0x4640);		/* mov r0, r8 - old left       */
 		t16(0x4649);		/* mov r1, r9                  */
-		t32(0xF8D5, 0xC000 | (slot * 4));
-		t16(0x47E0);		/* blx r12                     */
+		t_dop(slot);
 		t16(0x4680);		/* mov r8, r0 - result cached  */
 		t16(0x4689);		/* mov r9, r1                  */
 		return 1;

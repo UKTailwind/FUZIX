@@ -2905,6 +2905,19 @@ static void native_set_floor(unsigned long f);
 #define native_set_floor(f)	do { } while (0)
 #endif
 
+/*
+ *	Version 6 objects carry VFP double instructions in their native code.
+ *	A host never runs native code (it takes the bytecode, or says it
+ *	cannot), so only an Arm without a double-precision FPU must refuse
+ *	them: the PC3, whose M33 has single precision at most.
+ */
+#if (defined(__arm__) || defined(__thumb__)) && \
+    !(defined(__ARM_FP) && (__ARM_FP & 8))
+#define BCRUN_VFP_OK	0
+#else
+#define BCRUN_VFP_OK	1
+#endif
+
 /* Resolve a symbol to whatever the machine needs it to be. */
 static unsigned long symval(unsigned s)
 {
@@ -3011,7 +3024,8 @@ static void load(const char *path)
 	if (h.h_version != BC_VERSION && h.h_version != BC_VERSION_NATIVE
 	    && h.h_version != BC_VERSION_NATIVE3
 	    && h.h_version != BC_VERSION_NATIVE4
-	    && h.h_version != BC_VERSION_NATIVE5) {
+	    && h.h_version != BC_VERSION_NATIVE5
+	    && !(h.h_version == BC_VERSION_NATIVE6 && BCRUN_VFP_OK)) {
 		fprintf(stderr, "%s: version %u, expected %u\n", path,
 			h.h_version, BC_VERSION);
 		exit(1);

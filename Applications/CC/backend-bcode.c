@@ -200,6 +200,7 @@ static unsigned long entry;
    end of this file) shadows every function and commits native code
    when the whole span is covered. */
 static int have_native;
+static int t_vfp_used;		/* VFP doubles in it (THUMB_VFP): version 6 */
 static void thumb_fn_begin(const char *name);
 static void thumb_commit(void);
 
@@ -1028,7 +1029,9 @@ void gen_end(void)
 	   there is no longer a native object that an older bcrun could
 	   safely run.  A pure-bytecode object is still version 1 and
 	   runs anywhere. */
-	h.h_version = have_native ? BC_VERSION_NATIVE5 : BC_VERSION;
+	h.h_version = have_native ? (t_vfp_used ? BC_VERSION_NATIVE6
+					       : BC_VERSION_NATIVE5)
+				  : BC_VERSION;
 	h.h_pad = 0;
 	h.h_nsym = nsym;
 	h.h_code = codelen;
