@@ -38,6 +38,9 @@
 #ifdef PC_HOST
 #include "pc3client.h"
 #endif
+#ifdef CMM2
+#include "ccbc_cmm2.h"	/* the Colour Maximite 2's side */
+#endif
 #ifdef _WIN32
 /* No fork on Windows: the passes are started with their files as
    standard input and output (hostshim/win32 in the pc3host tree). */
@@ -48,9 +51,19 @@ int pc3w_exec(const char *file, char *const argv[]);
 const char *pc3w_tmpdir(void);
 #endif
 
+#ifdef CMM2
+/* The passes are in cc.app itself, found by these names, and libpath,
+   where the headers are, is cc.app's folder (ccbc_cmm2.c). */
+#define LIBPATH		""
+#define CMD_CPP		"cpp"
+#define CMD_MMBC	"mmbc"
+#define HAVE_PASS(p)	cmm2_has_pass(p)
+#else
 #define LIBPATH		"/usr/lib/cc/"
 #define CMD_CPP		"/usr/bin/cpp"
 #define CMD_MMBC	"/usr/bin/mmbc"
+#define HAVE_PASS(p)	(access(p, X_OK) == 0)
+#endif
 /*
  * Headers describing what bcrun actually provides, which is not what
  * /usr/include describes - those are the Fuzix libc's, for native
@@ -271,6 +284,16 @@ static void run(char **argv, const char *in, const char *out)
 		perror("wait");
 		fatal();
 	}
+#elif defined(CMM2)
+	/* No fork: the pass is called, the two files its standard input
+	   and output while it runs (ccbc_cmm2.c). */
+	(void)pid;
+	(void)p;
+	status = cmm2_run_pass(argv, fdin, fdout);
+	if (status == -1) {
+		perror(argv[0]);
+		fatal();
+	}
 #else
 	pid = fork();
 	if (pid == -1) {
@@ -388,6 +411,9 @@ int main(int argc, char *argv[])
 		pc3_path_prepend();
 	}
 #endif
+#ifdef CMM2
+	libpath = cmm2_libpath(argv[0]);
+#endif
 	for (i = 1; i < argc; i++) {
 		if (argv[i][0] == '-' && argv[i][1]) {
 			switch (argv[i][1]) {
@@ -457,7 +483,7 @@ int main(int argc, char *argv[])
 
 		if (dot && (strcmp(dot, ".bas") == 0 ||
 			    strcmp(dot, ".BAS") == 0)) {
-			if (access(mmbccmd, X_OK) != 0) {
+			if (!HAVE_PASS(mmbccmd)) {
 				fprintf(stderr, "cc: no %s - BASIC needs "
 					"the translator\n", mmbccmd);
 				fatal();
@@ -489,7 +515,7 @@ int main(int argc, char *argv[])
 	 * still works, but only on source with no directives and no
 	 * comments, which is a trap worth naming out loud.
 	 */
-	if (access(cppcmd, X_OK) == 0) {
+	if (HAVE_PASS(cppcmd)) {
 		/* -I<libpath>include, so that -L moves the headers with the
 		   passes rather than leaving them behind. */
 		strcpy(incpath, "-I");
@@ -529,6 +555,10 @@ int main(int argc, char *argv[])
 		av[4] = "-DMMB_WINB=16384";
 		av[5] = src;
 		av[6] = NULL;
+#elif defined(CMM2)
+		av[3] = "-DMM_CMM2";
+		av[4] = src;
+		av[5] = NULL;
 #else
 		av[3] = "-DMM_PC3";
 		av[4] = src;
@@ -569,7 +599,9 @@ int main(int argc, char *argv[])
 	av[4] = NULL;
 	put_shebang = 1;
 	run(av, irfile, out);
+#ifndef CMM2
 	chmod(out, 0755);
+#endif
 
 	cleanup();
 
@@ -591,6 +623,14 @@ int main(int argc, char *argv[])
 	 * has to be a PATH: exec does no searching, and prog.bc on its own
 	 * is not one.
 	 */
+#ifdef CMM2
+	/* No exec either: one loadable program cannot start another. */
+	if (runit) {
+		fprintf(stderr, "cc: -r: RUN \"%sbcrun.app\", %s\n", libpath,
+			out);
+		return 1;
+	}
+#endif
 	if (runit) {
 		char path[80];
 		char *rv[2];

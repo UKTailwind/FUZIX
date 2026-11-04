@@ -41,6 +41,9 @@
 #endif
 #endif
 #include "bytecode.h"
+#ifdef CMM2
+#include "bcrun_cmm2.h"		/* the Colour Maximite 2's side */
+#endif
 
 /*	A Linux or a Windows host translates the Fuzix socket constants a
  *	program bakes in (the block below says which); on Windows a socket
@@ -93,6 +96,14 @@ const char *pc3w_hostpath(const char *path);
  * 0x30000000 with the heap at 0x40000000 (heap_map), so it stays clear
  * of it.  Pages are only taken as they are touched.  The runtime pool is
  * 256 temporaries there (MM_TMPN), 64K on its own.
+ */
+#define MEMSIZE		4194304
+#elif defined(CMM2)
+/*
+ * The Colour Maximite 2: bcrun is a loadable program there, with the
+ * G2's 8M (about 7M lent on a G1) for itself, the code and the
+ * program.  As on the PC3, mem[] is sized to the program and the heap
+ * is elsewhere (heap_init), so this is only the cap.
  */
 #define MEMSIZE		4194304
 #elif defined(BIG_TABLES)
@@ -166,7 +177,7 @@ static void mem_init(void)
  *	pagemap_realloc, which is the same path BBC BASIC uses to size
  *	its workspace.  MEMSIZE survives as the CAP.
  */
-#ifdef MM_PC3
+#if defined(MM_PC3) || defined(CMM2)
 static unsigned char *mem;		/* sized in load(), see there */
 #else
 /* Everywhere else the heap is still in here, so it stays the full
@@ -1401,7 +1412,16 @@ static void heap_init(unsigned long base)
 {
 	heap_base = (base + 7) & ~7UL;
 	heap_top = MEMTOP - STACKROOM;
-#ifdef MM_PC3
+#if defined(CMM2)
+	/* All that the loadable program's heap has left (bcrun_cmm2.c). */
+	{
+		unsigned long len, region = cmm2_vm_heap(&len);
+		if (region) {
+			heap_base = (region + 7) & ~7UL;
+			heap_top = region + len;
+		}
+	}
+#elif defined(MM_PC3)
 	{
 		const char *e = getenv("BCRUN_HEAP");
 		unsigned long kb = e ? (unsigned long)atoi(e) : VM_HEAP_KB;
@@ -1540,11 +1560,17 @@ static int sys_open(void)
  * counter on -9. Returns -1 where there is no /dev/sys. */
 static long lib_adval(int sel)
 {
+#ifdef CMM2
+	/* No /dev/sys: the microsecond counter from the firmware, and -1
+	   for the rest, as on a host without one. */
+	return sel == -9 ? (long)(cmm2_us64() & 0x7FFFFFFF) : -1;
+#else
 	int fd = sys_open();
 	int n = sel;
 	if (fd < 0)
 		return -1;
 	return ioctl(fd, PICOIOC_ADVAL, &n);
+#endif
 }
 
 /*
@@ -1559,6 +1585,9 @@ static long lib_adval(int sel)
  */
 static long long lib_us64(void)
 {
+#ifdef CMM2
+	return cmm2_us64();
+#else
 	int fd = sys_open();
 	union { long long v; int sel; } u;	/* low word = the selector */
 
@@ -1573,6 +1602,7 @@ static long long lib_us64(void)
 		gettimeofday(&tv, NULL);
 		return (long long)tv.tv_sec * 1000000LL + tv.tv_usec;
 	}
+#endif
 }
 
 /* ---- string and memory, all working in the program's address space -- */
@@ -2818,6 +2848,11 @@ static void libcall(unsigned idx)
 {
 	if (idx >= nbind)
 		fault("bad library index");
+#ifdef CMM2
+	/* Ctrl-C ends the program, and the USB keyboard is looked
+	   after, only when bcrun asks: on its way to the library. */
+	cmm2_check();
+#endif
 	for (;;) {
 		if (libbind[idx]) {
 			libbind[idx]();
@@ -3041,13 +3076,14 @@ static void load(const char *path)
 	/* Absolute from here down: every program address the fixups
 	   produce comes through symval(), which adds one of these two, so
 	   rebasing them relocates the whole program in one place. */
-#if defined(MM_PC3) && UINTPTR_MAX <= 0xFFFFFFFFu
+#if (defined(MM_PC3) || defined(CMM2)) && UINTPTR_MAX <= 0xFFFFFFFFu
 	/*
 	 * Now that the header is read, ask for exactly what this program
 	 * needs.  The +8 covers the alignment bssbase applies below; the
 	 * slack is the heap that is only used if PSRAM does not answer.
 	 *
-	 * MM_PC3 ONLY, and that is the whole basis of it: there the heap
+	 * MM_PC3 ONLY (and the CMM2, whose heap_init does the same), and
+	 * that is the whole basis of it: there the heap
 	 * is moved out to PSRAM by heap_init, so mem[] holds nothing but
 	 * the guard, data, bss and the stack.  Everywhere else - the
 	 * qemu harness, the development host - the heap is still IN
@@ -3332,6 +3368,11 @@ static void load(const char *path)
 	}
 	fclose(f);
 	symf = NULL;
+#ifdef CMM2
+	/* The M7 fetches instructions past its data cache, where the
+	   fixups above still are. */
+	cmm2_code_ready(code, h.h_code);
+#endif
 }
 
 /* ---- native code ---------------------------------------------------- */
@@ -3407,6 +3448,20 @@ static void *native_helpers[] = {
 	(void *)helper_op,
 	(void *)helper_eqop,
 #if defined(__arm__) || defined(__thumb__)
+#ifdef CMM2
+	/* The CMM2's M7 does these in its FPU (bcrun_cmm2.c), with the
+	   arguments where the aeabi routines take them.  It has no
+	   instructions for the 64-bit integer conversions below. */
+	(void *)cmm2_dadd,	/* 4  */
+	(void *)cmm2_dsub,	/* 5  */
+	(void *)cmm2_dmul,	/* 6  */
+	(void *)cmm2_ddiv,	/* 7  */
+	(void *)cmm2_dcmpeq,	/* 8  */
+	(void *)cmm2_dcmplt,	/* 9  */
+	(void *)cmm2_dcmple,	/* 10 */
+	(void *)cmm2_dcmpge,	/* 11 */
+	(void *)cmm2_dcmpgt,	/* 12 */
+#else
 	(void *)__aeabi_dadd,	/* 4  */
 	(void *)__aeabi_dsub,	/* 5  */
 	(void *)__aeabi_dmul,	/* 6  */
@@ -3416,6 +3471,7 @@ static void *native_helpers[] = {
 	(void *)__aeabi_dcmple,	/* 10 */
 	(void *)__aeabi_dcmpge,	/* 11 */
 	(void *)__aeabi_dcmpgt,	/* 12 */
+#endif
 	(void *)__aeabi_l2d,	/* 13 */
 	(void *)__aeabi_ul2d,	/* 14 */
 	(void *)__aeabi_d2lz,	/* 15 */
@@ -3462,6 +3518,17 @@ static int64_t bc_exec(unsigned long entry);
 static void libcall(unsigned idx);
 
 #if defined(__arm__) || defined(__thumb__)
+/*
+ *	Built for hardware floating point (the CMM2), the C helpers native
+ *	code calls may leave anything in d0-d7, as the AAPCS-VFP lets them.
+ *	The PC3's soft-float build has no such registers to lose.
+ */
+#ifdef __ARM_PCS_VFP
+#define NATIVE_VFP_CLOBBERS , "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7"
+#else
+#define NATIVE_VFP_CLOBBERS
+#endif
+
 static int64_t native_enter(unsigned long off)
 {
 	unsigned long saved_sp = sp;
@@ -3498,7 +3565,7 @@ static int64_t native_enter(unsigned long off)
 		  "+r" (vsp), "+r" (hv), "+r" (mb),
 		  "+m" (sp), "+m" (A), "+m" (pc), "+m" (mem)
 		:
-		: "r2", "r7", "r12", "lr", "cc", "memory");
+		: "r2", "r7", "r12", "lr", "cc", "memory" NATIVE_VFP_CLOBBERS);
 	/* Contract: native_enter preserves the interpreter's sp.  The
 	   callee's own helper calls leave it wherever they please; the
 	   caller's truth is its r4. */
@@ -4323,4 +4390,34 @@ int main(int argc, char *argv[])
  *	interpreter: the wrappers want arg()/dput()/mem and the loader
  *	wants mmrt_reserve(), and none of it needs external linkage.
  */
+#ifdef CMM2
+/*
+ *	Not on the CMM2 yet: the runtime is the PC3's own (its graphics
+ *	through /dev/sys, its RUN and PLAY through fork), and the CMM2's
+ *	has to be its firmware's.  Until then a translated BASIC program
+ *	is refused at load, by the name of the first mm_ call it makes,
+ *	as any program asking for a runtime function bcrun lacks is.
+ */
+static unsigned long mmrt_bytes(void)
+{
+	return 0;
+}
+
+static unsigned long mmrt_reserve(unsigned long base)
+{
+	return base;
+}
+
+static void (*mm_wrap_lookup(const char *name))(void)
+{
+	(void)name;
+	/* what only the runtime, or the PC3, uses */
+	(void)prog_argc;
+	(void)prog_argv;
+	(void)lib_heapfree;
+	(void)sys_open;
+	return NULL;
+}
+#else
 #include "bcrun_mm.c"
+#endif
