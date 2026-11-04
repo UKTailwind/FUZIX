@@ -375,7 +375,7 @@ static void basename_to(char *dst, const char *src, const char *ext)
 int main(int argc, char *argv[])
 {
 	char *src = NULL;
-	char out[64];
+	char out[256];		/* -o's name can be a path */
 #ifdef PC_HOST
 	char *av[7];		/* one more: the row-window define */
 #else
@@ -420,6 +420,11 @@ int main(int argc, char *argv[])
 			case 'o':
 				if (++i == argc) {
 					fprintf(stderr, "cc: -o needs a name\n");
+					return 1;
+				}
+				if (strlen(argv[i]) >= sizeof(out)) {
+					fprintf(stderr, "cc: -o %s: too long\n",
+						argv[i]);
 					return 1;
 				}
 				strcpy(out, argv[i]);
@@ -632,7 +637,7 @@ int main(int argc, char *argv[])
 	}
 #endif
 	if (runit) {
-		char path[80];
+		char path[sizeof(out) + 2];
 		char *rv[2];
 
 #ifdef PC_HOST
