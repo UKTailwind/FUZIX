@@ -128,7 +128,13 @@ const char *pc3w_hostpath(const char *path);
 /* Dead space at the bottom so that no object can live at address 0 and
    a null pointer stays distinguishable from a real one. */
 #define NULLGUARD	16
+#ifdef CMM2
+/* The CMM2 has the memory for deep recursion: 8K is a few hundred
+   levels of an ordinary recursive function. */
+#define STACKROOM	262144
+#else
 #define STACKROOM	8192		/* kept clear at the top for the stack */
+#endif
 
 static unsigned char *code;
 /* Aligned, not by linker luck: the native mm runtime (and native code
