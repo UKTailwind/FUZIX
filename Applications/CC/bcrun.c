@@ -4193,9 +4193,54 @@ static int64_t bc_exec(unsigned long entry)
 	}
 }
 
+/*
+ *	The arguments the PROGRAM was given - everything after the .bc
+ *	name.  A translated program's main() takes no arguments, so
+ *	MM.CMDLINE$ cannot come from its own
+ *	argv the way it does in the hosted build; bcrun holds the real
+ *	command line and hands it over through w_argv_bind.
+ */
+static int prog_argc;
+static char **prog_argv;
+
+/*
+ *	main(argc, argv) as C has it: the object's name and the words after
+ *	it, the strings at the top of the address space and the pointers
+ *	below them, then the two pushed as any caller pushes arguments.
+ *	main used to read whatever lay above the stack instead - zero on a
+ *	host's fresh pages, and on a machine whose memory keeps what the
+ *	last program left there (the CMM2's), anything: c-testsuite's 00200
+ *	took argc > 1 and printed its debugging.
+ */
+static void main_args(void)
+{
+	unsigned long *at = malloc((prog_argc + 1) * sizeof(*at));
+	unsigned long n;
+	int i;
+
+	if (at == NULL)
+		fault("no memory for the arguments");
+	for (i = prog_argc - 1; i >= 0; i--) {
+		n = strlen(prog_argv[i]) + 1;
+		sp = (sp - n) & ~3UL;
+		if (sp < stack_floor + 64)
+			fault("arguments too long");
+		memcpy(vptr(sp), prog_argv[i], n);
+		at[i] = sp;
+	}
+	push(0);			/* argv[argc] */
+	for (i = prog_argc - 1; i >= 0; i--)
+		push((long)at[i]);
+	n = sp;
+	push((long)n);			/* argv */
+	push(prog_argc);		/* argc */
+	free(at);
+}
+
 static int run(void)
 {
 	sp = MEMTOP - 4;
+	main_args();
 	/* Dispatch the entry exactly like a call site: h_entry points
 	   at main's BC_NATIVE marker when it was translated, and a
 	   BASIC program lives in its main line - entering through the
@@ -4228,16 +4273,6 @@ static int run(void)
 	}
 	return (int)bc_exec(h.h_entry);
 }
-
-/*
- *	The arguments the PROGRAM was given - everything after the .bc
- *	name.  A translated program's main() is dispatched with no
- *	arguments (see run()), so MM.CMDLINE$ cannot come from its own
- *	argv the way it does in the hosted build; bcrun holds the real
- *	command line and hands it over through w_argv_bind.
- */
-static int prog_argc;
-static char **prog_argv;
 
 int main(int argc, char *argv[])
 {
