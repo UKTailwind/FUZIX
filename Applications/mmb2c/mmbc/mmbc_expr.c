@@ -356,8 +356,8 @@ struct val pow_op(struct val v, struct val r)
         if (!elit || e >= 0) {
             if (elit && int_literal(v.code, &b) && ipow_fold(b, e, &n)) {
                 if (n >= 0)
-                    return mkval(sfmt("%lldLL", n), TY_I);
-                return mkval(sfmt("(-(%lldLL))", -n), TY_I);
+                    return mkval(sfmt("%sLL", dec64(n)), TY_I);
+                return mkval(sfmt("(-(%sLL))", dec64(-n)), TY_I);
             }
             return mkval(sfmt("mm_ipow(%s, %s)", v.code, r.code), TY_I);
         }

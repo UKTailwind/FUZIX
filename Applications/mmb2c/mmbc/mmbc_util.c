@@ -178,6 +178,30 @@ void scratch_reset(void)
  * measure - the Fuzix libc's vsnprintf returns the TRUNCATED count,
  * not the C99 would-be length, so the two-pass idiom silently breaks
  * there.  The overflow guard fires on both return conventions. */
+/*
+ * A long long in decimal, in the scratch pool.  Neither board's C library
+ * has the conversion: the Fuzix libc's vsnprintf has no long long at all
+ * (hex64, mmbc_lex.c, is the same bargain) and the CMM2's newlib-nano gave
+ * 0 for "%lld", so the translated program had MODE 0 where it said MODE 3.
+ * The PC's libc has it, which is why cgate cannot see this.
+ */
+const char *dec64(long long v)
+{
+    char d[24];
+    int n = sizeof(d) - 1;
+    unsigned long long u = v < 0 ? 0 - (unsigned long long)v
+                                 : (unsigned long long)v;
+
+    d[n] = 0;
+    do {
+        d[--n] = (char)('0' + (int)(u % 10));
+        u /= 10;
+    } while (u);
+    if (v < 0)
+        d[--n] = '-';
+    return sstr(d + n);
+}
+
 char *sfmt(const char *fmt, ...)
 {
     va_list ap;

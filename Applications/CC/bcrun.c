@@ -4437,13 +4437,23 @@ int main(int argc, char *argv[])
  *	interpreter: the wrappers want arg()/dput()/mem and the loader
  *	wants mmrt_reserve(), and none of it needs external linkage.
  */
-#ifdef CMM2
+#if defined(CMM2) && defined(CMM2_MM)
 /*
- *	Not on the CMM2 yet: the runtime is the PC3's own (its graphics
- *	through /dev/sys, its RUN and PLAY through fork), and the CMM2's
- *	has to be its firmware's.  Until then a translated BASIC program
- *	is refused at load, by the name of the first mm_ call it makes,
- *	as any program asking for a runtime function bcrun lacks is.
+ *	The CMM2's bcrun with the BASIC runtime (mmbrun.app, which runs
+ *	what the translator makes): the runtime as the PC3 has it, its
+ *	requests to /dev/sys answered by cmm2/cmm2_sys.c on the firmware's
+ *	services.  MM_PC3 for the runtime alone, not for bcrun above.
+ */
+#define MM_PC3
+#include "bcrun_mm.c"
+#include "bcrun_svc.c"
+#elif defined(CMM2)
+/*
+ *	The CMM2's bcrun in the firmware has no BASIC runtime: there is no
+ *	room for it in flash.  A translated program is run by mmbrun.app
+ *	(CMM2_MM, above); given one, this refuses it at load by the name of
+ *	the first mm_ call it makes, as any program asking for a runtime
+ *	function bcrun lacks is.
  */
 static unsigned long mmrt_bytes(void)
 {

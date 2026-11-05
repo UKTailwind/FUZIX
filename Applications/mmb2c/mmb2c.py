@@ -1419,6 +1419,8 @@ class Conv(object):
         # the line's tokens, index of the first item token, line, routine)
         self.data_pending = []
         self.lenient = True           # comment out what cannot be translated
+        self.cmm2 = False             # for the Colour Maximite 2: cmm2_stmt
+        self.fw_fb = False            # FRAMEBUFFER CREATE x, y: the CMM2's own
         self.fcc = False              # C89 output for the Fuzix C compiler:
                                       # no compound literals - hoisted bounds
                                       # tables and mm_byref instead
@@ -3998,6 +4000,10 @@ class Conv(object):
                     parts.append('"%s"' % t[1] if t[0] == T_STR else t[1])
                 self.expect_op(')')
                 if name in RGBNAMES:
+                    # the firmware's colours are opaque, but for BLACK
+                    if self.cmm2 and name != 'BLACK':
+                        return ('0x%07XLL' % (RGBNAMES[name] | 0xF000000),
+                                TY_I)
                     return ('0x%06XLL' % RGBNAMES[name], TY_I)
                 msg = 'Invalid colour: ' + ''.join(parts)
                 return ('(mm_error("%s"), 0LL)'
@@ -4008,13 +4014,25 @@ class Conv(object):
             g = self.expr()
             self.expect_op(',')
             b = self.expr()
+            # the CMM2's RGB(r, g, b [, transparency]): fun_rgb makes
+            # three opaque, 15 in the bits above the colour
+            trans = None
+            if self.cmm2 and self.accept_op(','):
+                trans = self.as_int(self.expr())
             self.expect_op(')')
             # each is getint(..., 0, 255): literals in range fold, the
             # rest are checked as they run
             lit = [int_literal(self.as_int(v)) for v in (r, g, b)]
             if not [n for n in lit if n is None or n < 0 or n > 255]:
-                return ('0x%06XLL' % (lit[0] << 16 | lit[1] << 8 | lit[2]),
-                        TY_I)
+                n = lit[0] << 16 | lit[1] << 8 | lit[2]
+                if not self.cmm2:
+                    return ('0x%06XLL' % n, TY_I)
+                if trans is None:
+                    return ('0x%07XLL' % (0xF000000 | n), TY_I)
+            if self.cmm2:
+                return ('mm_rgbt(%s, %s, %s, %s)'
+                        % (self.as_int(r), self.as_int(g), self.as_int(b),
+                           trans or '(-1LL)'), TY_I)
             self.uses_misc = True
             return ('mm_rgb(%s, %s, %s)'
                     % (self.as_int(r), self.as_int(g), self.as_int(b)), TY_I)
@@ -4791,10 +4809,11 @@ class Conv(object):
             # for itself, so none of them is BASIC.  #COMMENT START to
             # #COMMENT END makes the lines between comments, an MMDEBUG
             # statement is one unless #MMDEBUG ON, and a '#' line it does
-            # not know is dropped.  #DEFINE, #INCLUDE and #MMDEBUG ON are
-            # refused: commented out as statements, their substitutions
-            # and files vanished and the code inside a #COMMENT was
-            # compiled, with rc 0.  (Plain LOAD and RUN have no '#' lines
+            # not know is dropped.  #DEFINE and #MMDEBUG ON are refused:
+            # commented out as statements, their substitutions vanished
+            # and the code inside a #COMMENT was compiled, with rc 0.
+            # #INCLUDE has gone already (include_splice) but for a file
+            # that could not be read.  (Plain LOAD and RUN have no '#' lines
             # at all - "Invalid character" - so a program with them is
             # one for that loader.)
             sq = loader_squash(self.lines[i])
@@ -4820,8 +4839,8 @@ class Conv(object):
                 elif w.startswith('MMDEBUG OFF'):
                     debugoff = True
                 elif w.startswith('INCLUDE'):
-                    self.errors.append("line %d: #INCLUDE is not "
-                                       "translated" % self.lineno)
+                    self.errors.append("line %d: cannot read the #INCLUDE "
+                                       "file" % self.lineno)
                 self.lines[i] = ''
                 i += 1
                 continue
@@ -5795,6 +5814,19 @@ class Conv(object):
             a = self.expr()
             self.expect_op(')')
             return ('mm_fontaddr(%s)' % self.as_int(a), TY_I)
+        if one == 'SOUND' and self.cmm2:
+            self.expect_op(')')
+            return ('mm_fw_str(%s)' % c_string_literal('MM.INFO(SOUND)'), TY_S)
+        if one == 'MAX' and self.cmm2 and self.accept_kw('PAGES'):
+            self.expect_op(')')
+            return ('mm_vali(mm_fw_str(%s))'
+                    % c_string_literal('MM.INFO(MAX PAGES)'), TY_I)
+        if one == 'SAMPLE' and self.cmm2 and self.accept_kw('PLAYING'):
+            a = self.as_int(self.expr())
+            self.expect_op(')')
+            return ('(mm_fwi(%s), mm_vali(mm_fw_str(%s)))'
+                    % (a, c_string_literal('MM.INFO(SAMPLE PLAYING \001)')),
+                    TY_I)
         self.err("MM.INFO(%s ...) is not supported; translated are "
                  "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                  "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
@@ -6854,6 +6886,8 @@ class Conv(object):
                 and split_suffix(t[1])[0] in self.routine_names:
             self.do_assign_or_call()
             return
+        if self.cmm2 and self.cmm2_stmt(up):
+            return
         if up == 'STRUCT':
             self.i += 1
             self.do_struct()
@@ -7115,6 +7149,16 @@ class Conv(object):
                 self.emit('if ((%s) != mm_vres()) mm_error("POKE DISPLAY '
                           'VRES can only keep the height the mode has");'
                           % self.as_int(self.expr()))
+                return
+            if self.cmm2 and t[0] == T_ID and t[2] == 'VAR':
+                # POKE VAR v, n, byte - PEEK(VAR v, n)'s other half
+                a = self.varaddr()
+                self.expect_op(',')
+                n = self.as_int(self.expr())
+                self.expect_op(',')
+                v = self.as_int(self.expr())
+                self.uses_peek = True
+                self.emit('mmpk_poke_byte((%s) + (%s), %s);' % (a, n, v))
                 return
             widths = {'BYTE': ('mmpk_poke_byte', False),
                       'SHORT': ('mmpk_poke_short', False),
@@ -12040,6 +12084,152 @@ class Conv(object):
                      % t[1])
         return r.cname
 
+    # -- the Colour Maximite 2's own statements -------------------------
+    def stmt_ends(self, k):
+        """Does this statement end k tokens on?"""
+        return (self.peek(k) is None or self.is_op(':', k)
+                or self.is_kw('ELSE', k))
+
+    def fw_sep(self, k):
+        """Does an argument end k tokens on?"""
+        return self.stmt_ends(k) or self.is_op(',', k) or self.is_kw('TO', k)
+
+    def top_comma(self):
+        """How many tokens on is the first comma outside brackets in
+        what is left of this statement, or 0 with none."""
+        k = depth = 0
+        while self.peek(k) is not None \
+                and not (depth == 0 and self.stmt_ends(k)):
+            if self.is_op('(', k):
+                depth += 1
+            elif self.is_op(')', k):
+                depth -= 1
+            elif depth == 0 and self.is_op(',', k):
+                return k
+            k += 1
+        return 0
+
+    def fw_arg(self, words, floats):
+        """One argument of a firmware statement: what goes in its text,
+        \\001 for a value the program works out as it runs."""
+        t = self.peek()
+        if t[0] == T_ID and self.fw_sep(1) \
+                and (t[2] == 'FRAMEBUFFER' or t[2] in words):
+            self.i += 1
+            return t[2]
+        if t[0] == T_STR and self.fw_sep(1):
+            self.i += 1
+            return '"%s"' % t[1]
+        v = self.expr()
+        if v[1] == TY_S:
+            self.emit('mm_fws(%s);' % v[0])
+            return '\001'
+        if floats and v[1] == TY_F:
+            self.emit('mm_fwf(%s);' % v[0])
+            return '\001'
+        c = self.as_int(v)
+        n = int_literal(c)
+        if n is not None:
+            return str(n)
+        self.emit('mm_fwi(%s);' % c)
+        return '\001'
+
+    def fw_stmt(self, nwords, words=(), first=0, floats=False):
+        """A statement run by the firmware: its first nwords tokens are
+        its name, each expression after them is compiled, and the values
+        go into its text as it runs (mm_fw).  From the first'th argument
+        a word in words stands for itself: PAGE COPY's I, not a variable
+        I.  A number is an integer, which is what the firmware's getint
+        makes of it, unless floats says it may not be."""
+        text = []
+        for k in range(nwords):
+            t = self.nxt()
+            text.append(t[2] if t[0] == T_ID else t[1])
+        text = ' '.join(text) + ' '
+        arg = 0
+        while not self.stmt_end():
+            if self.accept_op(','):
+                text += ','
+                arg += 1
+            elif self.accept_op('#'):
+                text += '#'
+            elif self.accept_kw('TO'):
+                text += ' TO '
+                arg += 1
+            else:
+                text += self.fw_arg(words if arg >= first else (), floats)
+        self.emit('mm_fw(%s);' % c_string_literal(text.rstrip()))
+
+    def cmm2_stmt(self, up):
+        """The statements of a program written for the CMM2, which the
+        PicoMite and the PC3 do not have or take fewer arguments of: the
+        firmware has them all, so its code runs them, on what the
+        compiled expressions give it.  True if this was one."""
+        if up == 'PAGE':
+            first = {'COPY': 2, 'DISPLAY': 1}
+            t = self.peek(1)
+            self.fw_stmt(2, ('I', 'B', 'D', 'T'),
+                         first.get(t[2] if t else '', 99))
+            return True
+        if up == 'IMAGE':
+            self.fw_stmt(2, floats=not (self.is_kw('RESIZE', 1)
+                                        or self.is_kw('RESIZE_FAST', 1)))
+            return True
+        if up == 'MODE' and self.top_comma():
+            self.fw_stmt(1)
+            return True
+        if up == 'BLIT' and not [k for k in ('MEMORY', 'COMPRESSED',
+                                             'FRAMEBUFFER', 'FLASH', 'LOAD',
+                                             'LOADBMP')
+                                 if self.is_kw(k, 1)]:
+            sub = [k for k in ('READ', 'WRITE', 'CLOSE') if self.is_kw(k, 1)]
+            self.fw_stmt(2 if sub else 1)
+            return True
+        if up == 'LOAD' and [k for k in ('PNG', 'BMP', 'JPG', 'IMAGE')
+                             if self.is_kw(k, 1)]:
+            self.fw_stmt(2)
+            return True
+        if up == 'FRAMEBUFFER':
+            if self.is_kw('CREATE', 1) and not self.stmt_ends(2):
+                self.fw_fb = True
+            elif not ((self.is_kw('WRITE', 1) and self.stmt_ends(2))
+                      or (self.fw_fb and self.is_kw('CLOSE', 1))):
+                return False
+            self.fw_stmt(2)
+            return True
+        if up == 'PLAY':
+            if self.is_kw('MODSAMPLE', 1):
+                self.fw_stmt(2)
+                return True
+            if self.is_kw('EFFECT', 1):
+                # PLAY EFFECT f$ [, interrupt]: over a MODFILE.  The
+                # interrupt is a compiled SUB, which the firmware cannot
+                # call, so the sound's end is watched as a player's is
+                self.i += 2
+                v = self.expr()
+                if v[1] != TY_S:
+                    self.err('PLAY EFFECT wants a file name')
+                fn = None
+                if self.accept_op(','):
+                    self.uses_interrupts = True
+                    fn = self.int_handler()
+                self.emit('mm_fws(%s);' % v[0])
+                self.emit('mm_fw(%s);' % c_string_literal('PLAY EFFECT \001'))
+                if fn is not None:
+                    self.emit('mmi_play_int(%s);' % fn)
+                return True
+            if self.is_kw('MODFILE', 1):
+                # PLAY MODFILE f$, rate: a number there, not an interrupt
+                k = self.top_comma()
+                if k:
+                    t = self.peek(k + 1)
+                    if t is not None and not (
+                            t[0] == T_ID and self.stmt_ends(k + 2)
+                            and split_suffix(t[1])[0] in self.routine_names):
+                        self.fw_stmt(2)
+                        return True
+        return False
+
     def note_goto(self, canon):
         depth = 0
         for blk in self.blocks:
@@ -13092,6 +13282,34 @@ def read_source(inpath):
     return io.StringIO(out.decode('ascii'), newline=None).readlines()
 
 
+def include_splice(lines, inpath):
+    """#INCLUDE "file": its lines in the #INCLUDE's place, as the
+    firmware's loader puts them (FileIO.c importfile), beside the source;
+    in a #COMMENT block it does not count, and an included file has no
+    #INCLUDEs of its own ("Can't import from an import").  A file that
+    cannot be read keeps its line, for pass_fonts' message.  Message line
+    numbers are then the program's with its files in place."""
+    out = []
+    ignore = False
+    for ln in lines:
+        sq = loader_squash(ln)
+        if sq.startswith('#COMMENT END'):
+            ignore = False
+        elif sq.startswith('#COMMENT START'):
+            ignore = True
+        if ignore or not sq.startswith('#INCLUDE'):
+            out.append(ln)
+            continue
+        q = ln.split('"')
+        cut = max(inpath.rfind('/'), inpath.rfind('\\'))
+        path = inpath[:cut + 1] + q[1] if len(q) > 2 else ''
+        try:
+            out += read_source(path)
+        except (IOError, OSError):
+            out.append(ln)
+    return out
+
+
 def library_splice(lines, inpath):
     """LIBRARY LOAD file$ [, file$ ...] [, O] [, RAM] - MM_Misc.c's
     cmd_library: the files' source becomes the program's library, whose
@@ -13177,8 +13395,9 @@ def library_splice(lines, inpath):
     return prog + lib, len(prog), None
 
 
-def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
-    lines = read_source(inpath)
+def convert(inpath, outpath=None, report=False, lenient=True, fcc=False,
+            cmm2=False):
+    lines = include_splice(read_source(inpath), inpath)
     lines, nprog, liberr = library_splice(lines, inpath)
 
     conv = Conv(lines, inpath)
@@ -13189,6 +13408,7 @@ def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
         conv.errors.append(liberr)
     conv.lenient = lenient
     conv.fcc = fcc
+    conv.cmm2 = cmm2
     # before every other pass: a DefineFont block is hex, not BASIC, and
     # is in force from the top of the program however far down it sits
     conv.pass_fonts()
@@ -13293,6 +13513,7 @@ def main(argv):
     rep = False
     strict = False
     fcc = False
+    cmm2 = False
     tokens = False
     k = 1
     while k < len(argv):
@@ -13306,6 +13527,8 @@ def main(argv):
             strict = True
         elif a == '--fcc':
             fcc = True
+        elif a == '--cmm2':
+            cmm2 = True
         elif a == '--gcc':
             # the default here, and the board build's opposite: mmbc on
             # the PC3 translates for the Fuzix compiler unless asked
@@ -13320,6 +13543,8 @@ def main(argv):
             print("            instead of commenting it out and carrying on")
             print("  --fcc     C89 output for the Fuzix C compiler: no")
             print("            compound literals")
+            print("  --cmm2    for the Colour Maximite 2: its own statements")
+            print("            (PAGE, IMAGE, BLIT and so on) by its firmware")
             return 0
         else:
             src = a
@@ -13330,7 +13555,7 @@ def main(argv):
         return 1
     if tokens:
         return dump_tokens(src)
-    out = convert(src, dst, rep, not strict, fcc)
+    out = convert(src, dst, rep, not strict, fcc, cmm2)
     if out is None:
         return 2
     print("wrote " + out)

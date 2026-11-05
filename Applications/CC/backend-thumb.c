@@ -20,9 +20,8 @@
  *
  *	The dead bytecode of a committed function stays in the object:
  *	space, not correctness - nothing refers to it once the symbol
- *	moves.  h_entry never moves, so main always runs as bytecode;
- *	that costs nothing until calls go native in stage 5.  Reclaim is
- *	a later stage.
+ *	moves.  h_entry points at main's BC_NATIVE marker when it commits,
+ *	and bcrun enters it there as a call site would (thumb_reclaim).
  *
  *	Register file (bytecode.h): r0/r1 = A, r4 = VM stack pointer as
  *	a native pointer, r5 = helper vector, r6 = mem[] base; r2/r3
@@ -241,13 +240,16 @@ static int thumb_enabled(void)
  *	costing every program its main-line bytecode for nothing: 5,428
  *	bytes on PETSCII Robots, and far more on a program whose work is
  *	in one monolithic main.
+ *
+ *	CMM2_TARGET: the Colour Maximite 2's cc2, whose bcrun is native
+ *	as the PC3 board's is.
  */
 static int thumb_reclaim(void)
 {
 	static int cached = -1;
 	if (cached < 0) {
 		const char *e = getenv("THUMB_RECLAIM");
-#ifdef ARENA_TABLES
+#if defined(ARENA_TABLES) || defined(CMM2_TARGET)
 		cached = e ? atoi(e) : 1;
 #else
 		cached = e ? atoi(e) : 0;
@@ -264,13 +266,20 @@ static int thumb_reclaim(void)
  *	256K Fuzix process can load.  Functions whose native span would
  *	exceed the cap stay bytecode; THUMB_MAXFN overrides (0 = no cap)
  *	for qemu experiments where the process ceiling does not apply.
+ *	Nor does it on the CMM2, with megabytes for a program: there a
+ *	BASIC program's main line, all of Wolfenstein 3D's raycaster, stayed
+ *	bytecode at 53K of native span, 43 frames a second against 69.
  */
 static unsigned long t_maxfn(void)
 {
 	static long cached = -1;
 	if (cached < 0) {
 		const char *e = getenv("THUMB_MAXFN");
+#ifdef CMM2_TARGET
+		cached = e ? atol(e) : 0;
+#else
 		cached = e ? atol(e) : 40000;
+#endif
 		if (!cached)
 			cached = TMAX;
 	}
@@ -1098,11 +1107,54 @@ static int t_str_slot(const char *name, unsigned *nargs)
  *	bcrun refuses it at load instead of indexing past its table.
  *	Returns 0 if this symbol is not one of the family.
  */
+/*
+ *	mm_toint, the BASIC runtime's float to integer, inline under
+ *	THUMB_VFP: every float subscript takes one, two to a MAPW(X, Y) at
+ *	each step of Wolfenstein 3D's rays, and helper_call, libcall, its
+ *	wrapper and back was 13% of a frame.  Rounded half away from zero as
+ *	it does; an exponent of 2^30 or more, NaN and infinity with them, is
+ *	left to the runtime, for its range and its "Number too large".  The
+ *	argument stays on the stack: BC_ARGS pops it, as for any call.
+ */
+static int t_toint_emit(unsigned s)
+{
+#ifdef THUMB_VFP
+	if (strcmp(bc_symname[s], "mm_toint") != 0 || ntref >= TPOOLMAX)
+		return 0;
+	t_vfp_used = 1;
+	t32(0xE9D4, 0x0100);		/* ldrd r0, r1, [r4] */
+	t32(0xF3C1, 0x530A);		/* ubfx r3, r1, #20, #11 - exponent */
+	t32(0xF240, 0x421D);		/* movw r2, #0x41D - 2^30's */
+	t16(0x4293);			/* cmp  r3, r2 */
+	t16(0xD20F);			/* bcs  the runtime */
+	t32(0xEC41, 0x0B10);		/* vmov d0, r0, r1 */
+	t32(0xEEB6, 0x1B00);		/* vmov.f64 d1, #0.5 */
+	t16(0x2900);			/* cmp  r1, #0 - the sign */
+	t16(0xBFB4);			/* ite  lt */
+	t32(0xEE30, 0x0B41);		/* vsublt.f64 d0, d0, d1 */
+	t32(0xEE30, 0x0B01);		/* vaddge.f64 d0, d0, d1 */
+	t32(0xEEBD, 0x0BC0);		/* vcvt.s32.f64 s0, d0 */
+	t32(0xEE10, 0x0A10);		/* vmov r0, s0 */
+	t16(0x17C1);			/* asrs r1, r0, #31 */
+	t16(s < 256 ? 0xE003 : 0xE004);	/* b    past it */
+	t_libimm(s);
+	t16(0x4621);			/* mov  r1, r4 */
+	t16(0x686B);			/* ldr  r3, [r5, #4] */
+	t16(0x4798);			/* blx  r3 */
+	return 1;
+#else
+	(void)s;
+	return 0;
+#endif
+}
+
 static int t_strslot_emit(unsigned s)
 {
 	unsigned na;
 	int slot;
 
+	if (t_toint_emit(s))
+		return 1;
 	if (t_nostrslot())
 		return 0;
 	slot = t_str_slot(bc_symname[s], &na);
@@ -1374,9 +1426,38 @@ static void t_dcpbin(unsigned slot, int fused)
 	t_d = (fused && t_fusel) ? 0 : -8;
 }
 
-/* conversion: A is already the argument in r0/r1 */
+/*
+ *	conversion: A is already the argument in r0/r1.  Under THUMB_VFP the
+ *	two that nearly every value takes are the FPU's convert, for what
+ *	fits 32 bits, with the helper for the rest as before (a float array
+ *	index in a BASIC program is one of these at every use): a double
+ *	with an exponent under 2^31, NaN and infinity not, truncated; a
+ *	long long whose high word is its low word's sign.
+ */
 static void t_dcpconv(unsigned slot)
 {
+#ifdef THUMB_VFP
+	if (slot == NHS_D2LZ) {
+		t_vfp_used = 1;
+		t32(0xF3C1, 0x530A);	/* ubfx r3, r1, #20, #11 - exponent */
+		t32(0xF240, 0x421E);	/* movw r2, #0x41E - 2^31's */
+		t16(0x4293);		/* cmp  r3, r2 */
+		t16(0xD207);		/* bcs  the helper */
+		t32(0xEC41, 0x0B10);	/* vmov d0, r0, r1 */
+		t32(0xEEBD, 0x0BC0);	/* vcvt.s32.f64 s0, d0 */
+		t32(0xEE10, 0x0A10);	/* vmov r0, s0 */
+		t16(0x17C1);		/* asrs r1, r0, #31 */
+		t16(0xE002);		/* b    past it */
+	} else if (slot == NHS_L2D) {
+		t_vfp_used = 1;
+		t32(0xEBB1, 0x7FE0);	/* cmp.w r1, r0, asr #31 */
+		t16(0xD106);		/* bne  the helper */
+		t32(0xEE00, 0x0A10);	/* vmov s0, r0 */
+		t32(0xEEB8, 0x0BC0);	/* vcvt.f64.s32 d0, s0 */
+		t32(0xEC51, 0x0B10);	/* vmov r0, r1, d0 */
+		t16(0xE002);		/* b    past it */
+	}
+#endif
 	t32(0xF8D5, 0xC000 | (slot * 4));	/* ldr.w r12, [r5, #] */
 	t16(0x47E0);		/* blx  r12                       */
 	t_d = 0;

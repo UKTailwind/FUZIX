@@ -8,8 +8,9 @@
 #define _CRT_SECURE_NO_WARNINGS 1
 #endif
 
-/* dirent/stat/chdir need POSIX visibility under a strict -std=c99 */
-#if !defined(_WIN32) && !defined(MM_NO_DIRS) && !defined(_POSIX_C_SOURCE)
+/* dirent/stat/chdir need POSIX visibility under a strict -std=c99.  Not
+   on the CMM2, whose newlib would then hide O_NDELAY. */
+#if !defined(_WIN32) && !defined(MM_NO_DIRS) && !defined(_POSIX_C_SOURCE) && !defined(CMM2)
 #define _POSIX_C_SOURCE 200809L
 #endif
 
@@ -75,6 +76,14 @@ int pc3_key_ready(void);        /* the window's keyboard, when there is no tty *
 unsigned long pc3_fb_map(int fd, unsigned long *pool);  /* MM.INFO(WRITEBUFF) */
 #define mm_sys_open()              pc3_sys_open()
 #define mm_sys_ioctl(fd, code, a)  pc3_sys_ioctl((fd), (code), (void *)(a))
+#elif defined(CMM2)
+/* The Colour Maximite 2: bcrun answers the requests itself, on the
+   firmware's services (Applications/CC/cmm2/cmm2_sys.c). */
+int cmm2_sys_open(void);
+int cmm2_sys_ioctl(int fd, unsigned long code, void *arg);
+#define mm_sys_open()              cmm2_sys_open()
+#define mm_sys_ioctl(fd, code, a)  cmm2_sys_ioctl((fd), (code), (void *)(a))
+#define O_NDELAY                   O_NONBLOCK   /* (newlib's is FNDELAY) */
 #else
 #define mm_sys_open()              open("/dev/sys", O_RDWR)
 #define mm_sys_ioctl(fd, code, a)  ioctl((fd), (code), (a))
@@ -783,6 +792,12 @@ char *mm_tab(MMINTEGER col) { return mm_tab_from(mm_charpos, col); }
  * stands - adding 0.5 there rounded 2^52 + 1 up to 2^52 + 2. */
 MMINTEGER mm_toint(MMFLOAT v)
 {
+#if defined(CMM2)
+    /* what nearly every value is, by the FPU's convert: the same answer
+       as below, whose 64-bit conversions are a library routine each */
+    if (v > -2147483000.0 && v < 2147483000.0)
+        return v < 0.0 ? (int)(v - 0.5) : (int)(v + 0.5);
+#endif
     if (v != v || v < -9223372036854775808.0 || v >= 9223372036854775808.0)
         MM_RAISEV("Number too large", 0);
     if (v < -4503599627370495.0 || v > 4503599627370495.0)
@@ -2536,7 +2551,13 @@ void mm_pause(MMFLOAT ms)
 
 static void mm_pause_raw(MMFLOAT ms)
 {
-#if defined(MM_FCC) || defined(MM_HOSTED)
+#if defined(CMM2)
+    /* The CMM2's usleep is the firmware's microsecond delay, and it sees to
+       the firmware as it waits (tools/sdk syscalls.c: poll() each 10 ms), so
+       no spin: one would starve a PLAY's player, whose buffers last 46 ms */
+    if (ms > 0)
+        usleep((useconds_t)(ms * 1000.0));
+#elif defined(MM_FCC) || defined(MM_HOSTED)
     MMINTEGER end;
     MMINTEGER left;
 
@@ -3963,8 +3984,15 @@ static int mm_fb_cls(MMINTEGER rgb);
  * refused.  That case is a program that never entered a graphics mode;
  * MMBasic would not have got this far, its CheckDisplay having stopped
  * a CLS with no display at all. */
+#if defined(CMM2)
+static void mm_cmm2_cls(MMINTEGER rgb);   /* the firmware's CLS (Applications/CC/cmm2/mmb_cmm2.c) */
+#endif
 void mm_cls(MMINTEGER rgb)
 {
+#if defined(CMM2)
+    mm_cmm2_cls(rgb);
+    return;
+#endif
     if (mm_fb_cls(rgb))
         return;
     fputs("\033[2J\033[H", stdout);
@@ -3998,7 +4026,11 @@ void mm_cls(MMINTEGER rgb)
  * path, not the board's, where mm_run_exec is native inside bcrun.
  * It says so rather than pretending to have run something.
  */
-#if defined(MM_FCC) && !defined(MM_HOSTED)
+#if defined(CMM2)
+#define MMB_CMM2_PART 1                 /* the CMM2's helpers and PLAY: Applications/CC/cmm2/mmb_cmm2.c */
+#include "mmb_cmm2.c"
+#undef MMB_CMM2_PART
+#elif defined(MM_FCC) && !defined(MM_HOSTED)
 
 MMINTEGER mm_run_exec(void)
 {
@@ -4740,14 +4772,22 @@ MMINTEGER mm_play_stop(void)
  * because the kernel stores it already reduced to the live mode's own
  * representation, so a MODE change would silently reinterpret it.
  * Every primitive takes an explicit RGB888 or MM_CUR for this one. */
-static MMINTEGER mm_gfx_fg = 0xFFFFFF;
+#if defined(CMM2)
+#define MM_COLBITS 0xFFFFFFF            /* the firmware's: a transparency above the colour, 15 opaque */
+#else
+#define MM_COLBITS 0xFFFFFF
+#endif
+static MMINTEGER mm_gfx_fg = MM_COLBITS;
 static MMINTEGER mm_gfx_bg = 0;
 
 void mm_colour(MMINTEGER fg, MMINTEGER bg)
 {
-    mm_gfx_fg = fg & 0xFFFFFF;
+    mm_gfx_fg = fg & MM_COLBITS;
     if (bg >= 0)                        /* COLOUR fg leaves bg alone */
-        mm_gfx_bg = bg & 0xFFFFFF;
+        mm_gfx_bg = bg & MM_COLBITS;
+#if defined(CMM2)
+    cmm2->gfx_colour((int)mm_gfx_fg, (int)mm_gfx_bg);   /* (PRINT's too: the firmware's console draws it) */
+#endif
 }
 
 MMINTEGER mm_fg(void) { return mm_gfx_fg; }
@@ -4888,7 +4928,11 @@ static int mm_pin_board(MMINTEGER pin)
     return !(pin == 32 && mm_board_no() == 3);
 }
 
-#if defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
+#if defined(CMM2)
+#define MMB_CMM2_PART 2                 /* the CMM2's display: Applications/CC/cmm2/mmb_cmm2.c */
+#include "mmb_cmm2.c"
+#undef MMB_CMM2_PART
+#elif defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -6993,7 +7037,11 @@ static int mm_fb_made;                  /* CREATE done, CLOSE not yet */
 static int mm_fb_made_l;                /* LAYER done, CLOSE L not yet */
 static int mm_fb_wr = MM_FB_N;          /* where drawing goes now */
 
-#if defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
+#if defined(CMM2)
+#define MMB_CMM2_PART 3                 /* the CMM2's FRAMEBUFFER hooks: Applications/CC/cmm2/mmb_cmm2.c */
+#include "mmb_cmm2.c"
+#undef MMB_CMM2_PART
+#elif defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
 
 #define MM_GFXIOC_FBSEL    0x0016
 #define MM_GFXIOC_FBOPEN   0x0018

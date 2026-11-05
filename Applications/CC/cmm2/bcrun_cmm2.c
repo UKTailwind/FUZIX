@@ -39,14 +39,33 @@ long long cmm2_us64(void)
 	return (long long)cmm2->micros();
 }
 
+/*
+ *	Every library call comes through here, so the clock it reads is the
+ *	M7's cycle counter (DWT CYCCNT, a cycle to read) rather than the
+ *	micros service (100ns, a sixth of a call): 10ms is cpu_hz / 100
+ *	cycles, and the counter's wrap every 9 seconds at 480MHz is taken
+ *	care of by the subtraction.
+ */
+#define DWT_CTRL	(*(volatile uint32_t *)0xE0001000)
+#define DWT_CYCCNT	(*(volatile uint32_t *)0xE0001004)
+#define DWT_LAR		(*(volatile uint32_t *)0xE0001FB0)
+#define DEMCR		(*(volatile uint32_t *)0xE000EDFC)
+
 void cmm2_check(void)
 {
-	static uint64_t next;
-	uint64_t t = cmm2->micros();
+	static uint32_t last, period;
+	uint32_t t = DWT_CYCCNT;
 
-	if (t < next)
+	if (t - last < period)
 		return;
-	next = t + 10000;
+	if (period == 0) {	/* the first call: the counter started */
+		DEMCR |= 1u << 24;		/* TRCENA */
+		DWT_LAR = 0xC5ACCE55;		/* (the M7's lock) */
+		DWT_CTRL |= 1;			/* CYCCNTENA */
+		period = cmm2->cpu_hz() / 100;
+		t = DWT_CYCCNT;
+	}
+	last = t;
 	if (cmm2->poll())
 		exit(0);	/* MMBasic says Ctrl-C was pressed */
 }

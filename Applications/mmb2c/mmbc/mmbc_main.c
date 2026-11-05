@@ -95,6 +95,52 @@ static int read_lines(const char *path)
     return load_lines(path, &src_lines, &src_nlines);
 }
 
+/*
+ * #INCLUDE "file": its lines in the #INCLUDE's place, as the firmware's
+ * loader puts them (FileIO.c importfile), beside the source; in a
+ * #COMMENT block it does not count, and an included file has no
+ * #INCLUDEs of its own ("Can't import from an import").  A file that
+ * cannot be read keeps its line, for pass_fonts' message.  Message line
+ * numbers are then the program's with its files in place.  mmb2c.py's
+ * include_splice, line for line.
+ */
+static void include_splice(const char *inpath)
+{
+    char **out = NULL;
+    int nout = 0, i, j, ignore = 0;
+    int cut = (int)strlen(inpath);
+
+    while (cut > 0 && inpath[cut - 1] != '/' && inpath[cut - 1] != '\\')
+        cut--;
+    for (i = 0; i < src_nlines; i++) {
+        char *sq = loader_squash(src_lines[i]);
+        char **got = NULL;
+        int ng = 0, have = 0;
+
+        if (strncmp(sq, "#COMMENT END", 12) == 0)
+            ignore = 0;
+        else if (strncmp(sq, "#COMMENT START", 14) == 0)
+            ignore = 1;
+        if (!ignore && strncmp(sq, "#INCLUDE", 8) == 0) {
+            char *q = strchr(src_lines[i], '"');
+            char *e = q != NULL ? strchr(q + 1, '"') : NULL;
+
+            if (e != NULL)
+                have = load_lines(sfmt("%.*s%.*s", cut, inpath,
+                                       (int)(e - q - 1), q + 1),
+                                  &got, &ng) == 0;
+        }
+        out = xrealloc(out, sizeof(char *) * (size_t)(nout + ng + 2));
+        if (have)
+            for (j = 0; j < ng; j++)
+                out[nout++] = got[j];
+        else
+            out[nout++] = src_lines[i];
+    }
+    src_lines = out;
+    src_nlines = nout;
+}
+
 /* The program's lines; a library's (library_splice) follow them. */
 int src_nprog;
 
@@ -291,7 +337,7 @@ static int dump_tokens(const char *inpath)
 
 /* mmb2c.py convert(): returns the output path, NULL on errors. */
 static const char *convert(const char *inpath, const char *outpath,
-                           int report, int lenient, int fcc)
+                           int report, int lenient, int fcc, int cmm2)
 {
     const char **const_accs;
     const char *liberr;
@@ -303,12 +349,14 @@ static const char *convert(const char *inpath, const char *outpath,
         fprintf(stderr, "mmbc: cannot read %s\n", inpath);
         return NULL;
     }
+    include_splice(inpath);
     liberr = library_splice(inpath);
     scan_escape();                /* OPTION ESCAPE's positional gate */
     memset(&cv, 0, sizeof(cv));
     cv.srcname = inpath;
     cv.lenient = lenient;
     cv.fcc = fcc;
+    cv.cmm2 = cmm2;
     cv.opt_default = TY_F;
     cv.mode = M_SCAN;
     cv.indent = 1;
@@ -465,7 +513,7 @@ int main(int argc, char **argv)
 #else
     int fcc = 0;
 #endif
-    int rep = 0, strict = 0, tokens = 0;
+    int rep = 0, strict = 0, tokens = 0, cmm2 = 0;
     int k;
 
     for (k = 1; k < argc; k++) {
@@ -477,6 +525,8 @@ int main(int argc, char **argv)
             strict = 1;
         } else if (strcmp(argv[k], "--fcc") == 0) {
             fcc = 1;
+        } else if (strcmp(argv[k], "--cmm2") == 0) {
+            cmm2 = 1;
         } else if (strcmp(argv[k], "--gcc") == 0) {
             fcc = 0;
         } else if (strcmp(argv[k], "--tokens") == 0) {
@@ -516,7 +566,7 @@ int main(int argc, char **argv)
     }
     if (tokens)
         return dump_tokens(src);
-    out = convert(src, dst, rep, !strict, fcc);
+    out = convert(src, dst, rep, !strict, fcc, cmm2);
     if (out == NULL)
         return 2;
     printf("wrote %s\n", out);

@@ -247,6 +247,14 @@ static void w_ltrim(void)    { A = mm_off(mm_ltrim(Ps(0))); }
 static void w_rtrim(void)    { A = mm_off(mm_rtrim(Ps(0))); }
 static void w_space(void)    { A = mm_off(mm_space(LL(0))); }
 static void w_strrep(void)   { A = mm_off(mm_strrep(LL(0), LL(2))); }
+#ifdef CMM2
+static void w_fwi(void)      { mm_fwi(LL(0)); A = 0; }
+static void w_fwf(void)      { mm_fwf(D(0)); A = 0; }
+static void w_fws(void)      { mm_fws(Ps(0)); A = 0; }
+static void w_fw(void)       { mm_fw(Ps(0)); A = 0; }
+static void w_fw_str(void)   { A = mm_off(mm_fw_str(Ps(0))); }
+static void w_rgbt(void)     { A = mm_rgbt(LL(0), LL(2), LL(4), LL(6)); }
+#endif
 static void w_str_f(void)    { A = mm_off(mm_str_f(D(0), LL(2), LL(4), Ps(6))); }
 static void w_str_i(void)    { A = mm_off(mm_str_i(LL(0), LL(2), LL(4), Ps(6))); }
 static void w_hex(void)      { A = mm_off(mm_hex(LL(0), LL(2))); }
@@ -807,6 +815,14 @@ static const struct mmwrap {
 	{ "mm_heapfree",	w_heapfree },
 	{ "mm_writebuff",	w_writebuff },
 	{ "mm_lfree",		w_lfree },
+#ifdef CMM2
+	{ "mm_fwi",		w_fwi },
+	{ "mm_fwf",		w_fwf },
+	{ "mm_fws",		w_fws },
+	{ "mm_fw",		w_fw },
+	{ "mm_fw_str",		w_fw_str },
+	{ "mm_rgbt",		w_rgbt },
+#endif
 	{ NULL,			NULL }
 };
 
@@ -857,5 +873,8 @@ static unsigned long mmrt_reserve(unsigned long base)
 		exit(1);
 	}
 	mm_hosted_bind((char *)vptr(base + MMRT_BYREFSZ), vptr(base));
+#ifdef CMM2
+	mm_cmm2_start();
+#endif
 	return base + MMRT_BYREFSZ + MMRT_POOLSZ;
 }

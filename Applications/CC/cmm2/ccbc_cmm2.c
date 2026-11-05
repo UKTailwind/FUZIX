@@ -19,6 +19,7 @@ int cpp_main(int, char **);
 int cc0_main(int, char **);
 int cc1_main(int, char **);
 int cc2_main(int, char **);
+int mmbc_main(int, char **);
 
 static const struct {
 	const char *name;
@@ -28,6 +29,7 @@ static const struct {
 	{ "cc0", cc0_main },
 	{ "cc1", cc1_main },
 	{ "cc2", cc2_main },
+	{ "mmbc", mmbc_main },		/* MMBasic to C, for a .bas */
 	{ NULL, NULL }
 };
 

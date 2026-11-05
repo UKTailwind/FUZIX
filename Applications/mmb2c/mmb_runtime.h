@@ -162,6 +162,15 @@ void mm_pr_ie (MMINTEGER v);
 void mm_pr_fe (MMFLOAT v);
 void mm_pr_tabe(void);
 void mm_pr_tab(void);               /* the ',' separator = a tab       */
+
+/* The Colour Maximite 2's own statements (mmb2c.py --cmm2; CC/cmm2/mmb_cmm2.c):
+   the firmware's, run with the values the program worked out */
+void mm_fwi(MMINTEGER v);            /* a value for the statement next  */
+void mm_fwf(MMFLOAT v);
+void mm_fws(const char *s);
+void mm_fw(const char *text);        /* its text, \001 for each value   */
+char *mm_fw_str(const char *expr);   /* an expression's value, as text  */
+MMINTEGER mm_rgbt(MMINTEGER r, MMINTEGER g, MMINTEGER b, MMINTEGER t);
 int  mm_col   (void);               /* current console column, 0 based */
 char *mm_tab(MMINTEGER col);        /* TAB() - returns padding spaces  */
 char *mm_ftab(MMINTEGER fnbr, MMINTEGER col);  /* TAB() in PRINT #n     */

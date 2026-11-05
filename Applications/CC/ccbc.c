@@ -376,7 +376,9 @@ int main(int argc, char *argv[])
 {
 	char *src = NULL;
 	char out[256];		/* -o's name can be a path */
-#ifdef PC_HOST
+#if defined(CMM2)
+	char *av[8];		/* two more: the row window, and MM_CMM2 */
+#elif defined(PC_HOST)
 	char *av[7];		/* one more: the row-window define */
 #else
 	char *av[6];
@@ -498,14 +500,20 @@ int main(int argc, char *argv[])
 			av[1] = src;
 			av[2] = "-o";
 			av[3] = basfile;
-#ifdef PC_HOST
+#if defined(PC_HOST) || defined(CMM2)
 			/* The board's mmbc translates for this compiler by
 			   default (MMBC_ARENA); a PC's is the gates' build and
 			   defaults to the gcc dialect, whose compound literals
 			   cc1 does not compile - brownian.bas showed it.  Say
-			   which. */
+			   which.  The CMM2's is built as a PC's, its pools on
+			   malloc, and for its own statements. */
 			av[4] = "--fcc";
+#ifdef CMM2
+			av[5] = "--cmm2";
+			av[6] = NULL;
+#else
 			av[5] = NULL;
+#endif
 #else
 			av[4] = NULL;
 #endif
@@ -561,9 +569,15 @@ int main(int argc, char *argv[])
 		av[5] = src;
 		av[6] = NULL;
 #elif defined(CMM2)
-		av[3] = "-DMM_CMM2";
-		av[4] = src;
-		av[5] = NULL;
+		/* As on a PC: the headers call the runtime's natives
+		   (MM_FCC), which mmbrun.app has, never the PC3's
+		   registers; the CMM2 has the memory for a PC's row
+		   window; and MM_CMM2 says which machine it is. */
+		av[3] = "-DMM_FCC";
+		av[4] = "-DMMB_WINB=16384";
+		av[5] = "-DMM_CMM2";
+		av[6] = src;
+		av[7] = NULL;
 #else
 		av[3] = "-DMM_PC3";
 		av[4] = src;

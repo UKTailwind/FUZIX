@@ -43,6 +43,12 @@
    the memory here bounds them. */
 #define CODEMAX		8388608
 #define DATAMAX		8388608
+#elif defined(CMM2_TARGET)
+/* The Colour Maximite 2 has megabytes for a program, and every function
+   is native there: Into the Darkness, a 4,300-line BASIC game, passed
+   the BIG_TABLES limit below. */
+#define CODEMAX		1048576
+#define DATAMAX		65536
 #elif defined(BIG_TABLES)
 /* Mixed mode keeps a committed function's dead bytecode alongside its
    native span (~2.7x the bytecode), so a big program roughly triples;
@@ -139,7 +145,7 @@ ATAB(static unsigned char fix_in_lit[MAXFIX],
 
 #ifdef PC_TABLES
 #define STRMAX		4194304		/* s_name is a 32-bit offset */
-#elif defined(ARENA_TABLES)
+#elif defined(BIG_TABLES) || defined(ARENA_TABLES)
 #define STRMAX		65536
 #else
 #define STRMAX		32768

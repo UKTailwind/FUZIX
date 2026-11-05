@@ -360,12 +360,13 @@ void pass_fonts(void)
          * takes every line that starts with '#' for itself, so none of
          * them is BASIC.  #COMMENT START to #COMMENT END makes the lines
          * between comments, an MMDEBUG statement is one unless #MMDEBUG
-         * ON, and a '#' line it does not know is dropped.  #DEFINE,
-         * #INCLUDE and #MMDEBUG ON are refused: commented out as
-         * statements, their substitutions and files vanished and the
-         * code inside a #COMMENT was compiled, with rc 0.  (Plain LOAD
-         * and RUN have no '#' lines at all - "Invalid character" - so a
-         * program with them is one for that loader.) */
+         * ON, and a '#' line it does not know is dropped.  #DEFINE and
+         * #MMDEBUG ON are refused: commented out as statements, their
+         * substitutions vanished and the code inside a #COMMENT was
+         * compiled, with rc 0.  #INCLUDE has gone already (include_splice)
+         * but for a file that could not be read.  (Plain LOAD and RUN have
+         * no '#' lines at all - "Invalid character" - so a program with
+         * them is one for that loader.) */
         sq = loader_squash(src_lines[i]);
         if (ignore && strncmp(sq, "#COMMENT END", 12) != 0) {
             src_lines[i] = pstr("");
@@ -391,7 +392,7 @@ void pass_fonts(void)
             } else if (strncmp(w, "MMDEBUG OFF", 11) == 0)
                 debugoff = 1;
             else if (strncmp(w, "INCLUDE", 7) == 0)
-                errors_add(sfmt("line %d: #INCLUDE is not translated",
+                errors_add(sfmt("line %d: cannot read the #INCLUDE file",
                                 i + 1));
             src_lines[i] = pstr("");
             i++;

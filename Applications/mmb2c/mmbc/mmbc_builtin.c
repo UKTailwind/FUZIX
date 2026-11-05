@@ -1044,6 +1044,7 @@ struct val builtin_raw(const char *up)
         const char *ri;
         const char *gi;
         const char *bi;
+        const char *trans = NULL;
 
         expect_op("(");
         if (is_op(")", 0)) {
@@ -1076,6 +1077,9 @@ struct val builtin_raw(const char *up)
                                        : sfmt("%s%s", msg, u->text);
             }
             expect_op(")");
+            if (val > 0 && cv.cmm2)     /* opaque, but for BLACK */
+                return mkval(sfmt("0x%07lXLL",
+                                  (unsigned long)val | 0xF000000UL), TY_I);
             if (val >= 0)
                 return mkval(sfmt("0x%06lXLL", (unsigned long)val), TY_I);
             return mkval(sfmt("(mm_error(\"%s\"), 0LL)", c_escape(msg)),
@@ -1086,6 +1090,10 @@ struct val builtin_raw(const char *up)
         g = expr();
         expect_op(",");
         b = expr();
+        /* the CMM2's RGB(r, g, b [, transparency]): fun_rgb makes three
+           opaque, 15 in the bits above the colour */
+        if (cv.cmm2 && accept_op(","))
+            trans = as_int(expr());
         expect_op(")");
         ri = as_int(r);
         gi = as_int(g);
@@ -1097,11 +1105,18 @@ struct val builtin_raw(const char *up)
 
             if (int_literal(ri, &lr) && int_literal(gi, &lg)
                 && int_literal(bi, &lb) && lr >= 0 && lr <= 255
-                && lg >= 0 && lg <= 255 && lb >= 0 && lb <= 255)
-                return mkval(sfmt("0x%06lXLL",
-                                  (unsigned long)(lr << 16 | lg << 8 | lb)),
-                             TY_I);
+                && lg >= 0 && lg <= 255 && lb >= 0 && lb <= 255) {
+                unsigned long n = (unsigned long)(lr << 16 | lg << 8 | lb);
+
+                if (!cv.cmm2)
+                    return mkval(sfmt("0x%06lXLL", n), TY_I);
+                if (trans == NULL)
+                    return mkval(sfmt("0x%07lXLL", 0xF000000UL | n), TY_I);
+            }
         }
+        if (cv.cmm2)
+            return mkval(sfmt("mm_rgbt(%s, %s, %s, %s)", ri, gi, bi,
+                              trans != NULL ? trans : "(-1LL)"), TY_I);
         cv.uses_misc = 1;
         return mkval(sfmt("mm_rgb(%s, %s, %s)", ri, gi, bi), TY_I);
     }
@@ -1674,6 +1689,26 @@ struct val builtin_raw(const char *up)
             expect_op(")");
             cv.uses_flash = 1;
             return mkval(sfmt("(MMINTEGER)(long)mmf_addr(%s)", as_int(a)),
+                         TY_I);
+        }
+        if (cv.cmm2 && t->kind == T_ID && strcmp(t->up, "SOUND") == 0) {
+            expect_op(")");
+            return mkval(sfmt("mm_fw_str(%s)",
+                              c_string_literal("MM.INFO(SOUND)")), TY_S);
+        }
+        if (cv.cmm2 && t->kind == T_ID && strcmp(t->up, "MAX") == 0
+            && accept_kw("PAGES")) {
+            expect_op(")");
+            return mkval(sfmt("mm_vali(mm_fw_str(%s))",
+                              c_string_literal("MM.INFO(MAX PAGES)")), TY_I);
+        }
+        if (cv.cmm2 && t->kind == T_ID && strcmp(t->up, "SAMPLE") == 0
+            && accept_kw("PLAYING")) {
+            const char *n = as_int(expr());
+
+            expect_op(")");
+            return mkval(sfmt("(mm_fwi(%s), mm_vali(mm_fw_str(%s)))", n,
+                              c_string_literal("MM.INFO(SAMPLE PLAYING \001)")),
                          TY_I);
         }
         if (t->kind != T_ID || strcmp(t->up, "FONT") != 0)

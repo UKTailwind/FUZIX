@@ -21,6 +21,7 @@ static void do_print(void);
 static char *prcall(const char *chan, const char *what, const char *arg);
 static char *str_repl(const char *s, const char *from, const char *to);
 static const char *int_handler(void);
+static int cmm2_stmt(const char *up);
 static const char *setpin_pull(void);
 static void do_settick(void);
 static void do_i2c2(void);
@@ -277,6 +278,8 @@ void statement_inner(void)
             return;
         }
     }
+    if (cv.cmm2 && cmm2_stmt(up))
+        return;
     if (strcmp(up, "STRUCT") == 0) {
         cv.i++;
         do_struct();
@@ -590,6 +593,19 @@ void statement_inner(void)
 
         cv.i++;
         t = nxt();
+        if (cv.cmm2 && t->kind == T_ID && strcmp(t->up, "VAR") == 0) {
+            /* POKE VAR v, n, byte - PEEK(VAR v, n)'s other half */
+            const char *a = varaddr();
+            const char *n, *b;
+
+            expect_op(",");
+            n = as_int(expr());
+            expect_op(",");
+            b = as_int(expr());
+            cv.uses_peek = 1;
+            emit(sfmt("mmpk_poke_byte((%s) + (%s), %s);", a, n, b));
+            return;
+        }
         if (t->kind == T_ID && strcmp(t->up, "DISPLAY") == 0) {
             /* POKE DISPLAY VRES n - MM_Misc.c: VRes = n, the height
                drawing clips to and MM.VRES reports; the scan-out is
@@ -7168,4 +7184,206 @@ static void close_routine(int is_func)
     cv.cur = NULL;
     cv.out = &cv.out_main;
     cv.indent = 1;
+}
+
+/* ---- the Colour Maximite 2's own statements ---- */
+
+/* Does this statement end k tokens on? */
+static int stmt_ends(int k)
+{
+    return peek(k) == NULL || is_op(":", k) || is_kw("ELSE", k);
+}
+
+/* Does an argument end k tokens on? */
+static int fw_sep(int k)
+{
+    return stmt_ends(k) || is_op(",", k) || is_kw("TO", k);
+}
+
+/* How many tokens on is the first comma outside brackets in what is left
+   of this statement, or 0 with none. */
+static int top_comma(void)
+{
+    int k = 0, depth = 0;
+
+    while (peek(k) != NULL && !(depth == 0 && stmt_ends(k))) {
+        if (is_op("(", k))
+            depth++;
+        else if (is_op(")", k))
+            depth--;
+        else if (depth == 0 && is_op(",", k))
+            return k;
+        k++;
+    }
+    return 0;
+}
+
+/* One argument of a firmware statement: what goes in its text, \001 for
+   a value the program works out as it runs.  words: single letters that
+   stand for themselves here. */
+static const char *fw_arg(const char *words, int floats)
+{
+    struct tok *t = peek(0);
+    struct val v;
+    const char *c;
+    long long n;
+
+    if (t->kind == T_ID && fw_sep(1)
+        && (strcmp(t->up, "FRAMEBUFFER") == 0
+            || (t->up[0] != 0 && t->up[1] == 0
+                && strchr(words, t->up[0]) != NULL))) {
+        cv.i++;
+        return t->up;
+    }
+    if (t->kind == T_STR && fw_sep(1)) {
+        cv.i++;
+        return sfmt("\"%s\"", t->text);
+    }
+    v = expr();
+    if (v.ty == TY_S) {
+        emit(sfmt("mm_fws(%s);", v.code));
+        return "\001";
+    }
+    if (floats && v.ty == TY_F) {
+        emit(sfmt("mm_fwf(%s);", v.code));
+        return "\001";
+    }
+    c = as_int(v);
+    if (int_literal(c, &n))
+        return dec64(n);
+    emit(sfmt("mm_fwi(%s);", c));
+    return "\001";
+}
+
+/* A statement run by the firmware: its first nwords tokens are its name,
+   each expression after them is compiled, and the values go into its text
+   as it runs (mm_fw).  From the first'th argument a letter in words stands
+   for itself: PAGE COPY's I, not a variable I.  A number is an integer,
+   which is what the firmware's getint makes of it, unless floats says it
+   may not be. */
+static void fw_stmt(int nwords, const char *words, int first, int floats)
+{
+    const char *text = "";
+    int k, arg = 0;
+    size_t n;
+
+    for (k = 0; k < nwords; k++) {
+        struct tok *t = nxt();
+
+        text = sfmt("%s%s%s", text, k ? " " : "",
+                    t->kind == T_ID ? t->up : t->text);
+    }
+    text = sfmt("%s ", text);
+    while (!stmt_end()) {
+        if (accept_op(",")) {
+            text = sfmt("%s,", text);
+            arg++;
+        } else if (accept_op("#")) {
+            text = sfmt("%s#", text);
+        } else if (accept_kw("TO")) {
+            text = sfmt("%s TO ", text);
+            arg++;
+        } else {
+            text = sfmt("%s%s", text,
+                        fw_arg(arg >= first ? words : "", floats));
+        }
+    }
+    n = strlen(text);
+    while (n > 0 && text[n - 1] == ' ')
+        n--;
+    emit(sfmt("mm_fw(%s);", c_string_literal(sfmt("%.*s", (int)n, text))));
+}
+
+/* The statements of a program written for the CMM2, which the PicoMite and
+   the PC3 do not have or take fewer arguments of: the firmware has them
+   all, so its code runs them, on what the compiled expressions give it.
+   1 if this was one. */
+static int cmm2_stmt(const char *up)
+{
+    if (strcmp(up, "PAGE") == 0) {
+        struct tok *t = peek(1);
+        int first = 99;
+
+        if (t != NULL && strcmp(t->up, "COPY") == 0)
+            first = 2;
+        else if (t != NULL && strcmp(t->up, "DISPLAY") == 0)
+            first = 1;
+        fw_stmt(2, "IBDT", first, 0);
+        return 1;
+    }
+    if (strcmp(up, "IMAGE") == 0) {
+        fw_stmt(2, "", 0, !(is_kw("RESIZE", 1) || is_kw("RESIZE_FAST", 1)));
+        return 1;
+    }
+    if (strcmp(up, "MODE") == 0 && top_comma()) {
+        fw_stmt(1, "", 0, 0);
+        return 1;
+    }
+    if (strcmp(up, "BLIT") == 0
+        && !(is_kw("MEMORY", 1) || is_kw("COMPRESSED", 1)
+             || is_kw("FRAMEBUFFER", 1) || is_kw("FLASH", 1)
+             || is_kw("LOAD", 1) || is_kw("LOADBMP", 1))) {
+        fw_stmt(is_kw("READ", 1) || is_kw("WRITE", 1) || is_kw("CLOSE", 1)
+                ? 2 : 1, "", 0, 0);
+        return 1;
+    }
+    if (strcmp(up, "LOAD") == 0
+        && (is_kw("PNG", 1) || is_kw("BMP", 1) || is_kw("JPG", 1)
+            || is_kw("IMAGE", 1))) {
+        fw_stmt(2, "", 0, 0);
+        return 1;
+    }
+    if (strcmp(up, "FRAMEBUFFER") == 0) {
+        if (is_kw("CREATE", 1) && !stmt_ends(2))
+            cv.fw_fb = 1;
+        else if (!((is_kw("WRITE", 1) && stmt_ends(2))
+                   || (cv.fw_fb && is_kw("CLOSE", 1))))
+            return 0;
+        fw_stmt(2, "", 0, 0);
+        return 1;
+    }
+    if (strcmp(up, "PLAY") == 0) {
+        if (is_kw("MODSAMPLE", 1)) {
+            fw_stmt(2, "", 0, 0);
+            return 1;
+        }
+        if (is_kw("EFFECT", 1)) {
+            /* PLAY EFFECT f$ [, interrupt]: over a MODFILE.  The interrupt
+               is a compiled SUB, which the firmware cannot call, so the
+               sound's end is watched as a player's is */
+            struct val v;
+            const char *fn = NULL;
+
+            cv.i += 2;
+            v = expr();
+            if (v.ty != TY_S)
+                cv_err("PLAY EFFECT wants a file name");
+            if (accept_op(",")) {
+                cv.uses_interrupts = 1;
+                fn = int_handler();
+            }
+            emit(sfmt("mm_fws(%s);", v.code));
+            emit(sfmt("mm_fw(%s);", c_string_literal("PLAY EFFECT \001")));
+            if (fn != NULL)
+                emit(sfmt("mmi_play_int(%s);", fn));
+            return 1;
+        }
+        if (is_kw("MODFILE", 1)) {
+            /* PLAY MODFILE f$, rate: a number there, not an interrupt */
+            int k = top_comma();
+
+            if (k) {
+                struct tok *t = peek(k + 1);
+                int sfx;
+
+                if (t != NULL
+                    && !(t->kind == T_ID && stmt_ends(k + 2)
+                         && routine_name_known(split_suffix(t->text, &sfx)))) {
+                    fw_stmt(2, "", 0, 0);
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
 }

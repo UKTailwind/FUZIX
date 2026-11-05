@@ -112,6 +112,7 @@ char *pstr(const char *s);
 void *salloc(size_t n);
 char *sstr(const char *s);
 void scratch_reset(void);
+const char *dec64(long long v);     /* "%lld", which no board's libc has */
 char *sfmt(const char *fmt, ...);   /* scratch sprintf - the workhorse
                                        standing in for Python % */
 
@@ -393,6 +394,8 @@ struct conv {
     struct fontdef { int num; unsigned char *data; int len; }
         *fonts; int nfonts, cfonts;
     int lenient, fcc;
+    int cmm2;                   /* for the Colour Maximite 2: cmm2_stmt */
+    int fw_fb;                  /* FRAMEBUFFER CREATE x, y: the CMM2's own */
     struct bnd *bnds; int nbnds, cbnds;                /* bnd_tables */
     struct skip_rec *skipped; int nskipped, cskipped;
     struct gsub *gsubs; int ngsubs, cgsubs;            /* gosub_sites */

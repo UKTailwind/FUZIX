@@ -392,6 +392,7 @@ struct sym *sym_new(const char *canon, int ty, const char *acc)
     s->ty = ty;
     s->acc = pstr(acc);
     s->declared_in = "";
+    s->bacc = "";               /* (Sym.bacc: a NULL %s stops the CMM2's newlib) */
     return s;
 }
 
@@ -430,7 +431,7 @@ static const char *lv_index(const char *text)
         && whole_call(text + 5, "") != NULL)
         text = sfmt("%.*s", (int)(len - 7), text + 6);
     if (int_literal(text, &n))
-        return sfmt("%lld", n);
+        return sfmt("%s", dec64(n));
     return "";
 }
 
@@ -1091,7 +1092,8 @@ const char *as_int(struct val v)
                 long long k = lv < 0.0 ? (long long)(lv - 0.5)
                                        : (long long)(lv + 0.5);
 
-                return k >= 0 ? sfmt("%lldLL", k) : sfmt("(-(%lldLL))", -k);
+                return k >= 0 ? sfmt("%sLL", dec64(k))
+                              : sfmt("(-(%sLL))", dec64(-k));
             }
         }
         return sfmt("mm_toint(%s)", v.code);
