@@ -534,6 +534,7 @@ extern struct conv cv;
 /* ---- growable arrays ---- */
 
 void *xrealloc(void *p, size_t n);
+void pools_free(void);
 #define GROW(arr, n, cap) do { \
         if ((n) == (cap)) { \
             (cap) = (cap) ? (cap) * 2 : 16; \

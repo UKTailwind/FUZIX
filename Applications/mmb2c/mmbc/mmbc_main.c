@@ -570,5 +570,6 @@ int main(int argc, char **argv)
     if (out == NULL)
         return 2;
     printf("wrote %s\n", out);
+    pools_free();
     return 0;
 }

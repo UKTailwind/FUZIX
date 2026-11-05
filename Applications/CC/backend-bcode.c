@@ -119,6 +119,18 @@
 #define ATAB(decl_array, decl_ptr)	decl_array
 #endif
 
+/*
+ *	What the tables were given.  Under ARENA_MALLOC that can be less
+ *	than the limits above: bc_arena_init() halves the big ones until
+ *	they fit the heap (a Generation 1 has under 5 MB for all of cc.app).
+ */
+#ifdef ARENA_MALLOC
+static unsigned long code_lim = CODEMAX;
+#define CODELIM		code_lim
+#else
+#define CODELIM		CODEMAX
+#endif
+
 ATAB(static unsigned char codebuf[CODEMAX],
      static unsigned char *codebuf);
 static unsigned long codelen;
@@ -227,8 +239,8 @@ static void table_full(const char *what, unsigned long lim)
 
 static void cbyte(unsigned v)
 {
-	if (codelen >= CODEMAX) {
-		table_full("code segment", CODEMAX);
+	if (codelen >= CODELIM) {
+		table_full("code segment", CODELIM);
 		return;
 	}
 	codebuf[codelen++] = v;
@@ -307,6 +319,8 @@ static unsigned symref(const char *name)
 		return 0;
 	}
 	bc_symname[nsym] = strdup(name);
+	if (bc_symname[nsym] == NULL)
+		error("out of memory");
 	symtab[nsym].s_type = BC_SYM_LIB;
 	symtab[nsym].s_value = 0;
 	symtab[nsym].s_name = strtablen;
@@ -942,6 +956,8 @@ static void compact_syms(void)
 	 *	numbering stands - it costs loader memory, nothing else.
 	 */
 	perm = malloc(nsym ? nsym * sizeof(unsigned short) : 1);
+	if (perm == NULL)
+		error("out of memory");
 	if (perm) {
 		unsigned nlib = 0, klib, kother;
 

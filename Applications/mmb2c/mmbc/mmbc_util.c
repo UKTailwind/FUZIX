@@ -5,12 +5,17 @@
  * pools, and xrealloc via size headers with extend-in-place for the
  * most recent block - because a 256K Fuzix process cannot hold the
  * working set (mmbc is the arena's second client after cc2, see
- * PC3-PSRAM-ARENA.md).  The arena is released by the kernel on exit. */
+ * PC3-PSRAM-ARENA.md).  The arena is released by the kernel on exit.
+ * On the CMM2 (MMBC_ARENA_MALLOC too) mmbc is a pass inside cc.app, and
+ * the arena is one block of its heap, given back whole by pools_free():
+ * the many allocations of the plain build left a Generation 1's heap
+ * too broken up for cc2's tables, freed or not. */
 
 #include "mmbc.h"
 
 #ifdef MMBC_ARENA
 
+#ifndef MMBC_ARENA_MALLOC
 #include <fcntl.h>
 #include <sys/ioctl.h>
 
@@ -19,16 +24,37 @@ struct psram_req {
     unsigned long len;
     unsigned long base;
 };
+#endif
 
 /* 768K translated everything up to the eclipse; PicoMan (77K of
  * BASIC, the first Game*Mite-sized program translated ON the board)
  * exhausted it.  The allocator is copy-and-abandon by design, so the
  * bound is generous rather than tight - the PSRAM heap is ~7.8M and
  * the one-compile-at-a-time rule means no concurrent claimant. */
+#ifdef MMBC_ARENA_MALLOC
+#define MMBC_ARENA_LEN (3072UL * 1024)
+#else
 #define MMBC_ARENA_LEN (2048UL * 1024)
+#endif
 
 static unsigned char *ar_cur, *ar_end;
 
+#ifdef MMBC_ARENA_MALLOC
+static unsigned char *ar_base;
+
+static void ar_init(void)
+{
+    if (ar_cur != NULL)
+        return;
+    ar_base = malloc(MMBC_ARENA_LEN);
+    if (ar_base == NULL) {
+        fprintf(stderr, "mmbc: out of memory\n");
+        exit(2);
+    }
+    ar_cur = ar_base;
+    ar_end = ar_cur + MMBC_ARENA_LEN;
+}
+#else
 static void ar_init(void)
 {
     struct psram_req rq;
@@ -47,6 +73,7 @@ static void ar_init(void)
     ar_cur = (unsigned char *)rq.base;
     ar_end = ar_cur + MMBC_ARENA_LEN;
 }
+#endif
 
 static void *ar_carve(size_t n)
 {
@@ -122,7 +149,7 @@ char *pstr(const char *s)
  * kit's there: no board to fit, and a program with a few thousand
  * globals passes 512K in its write phase.  The pages it never touches
  * cost nothing. */
-#ifdef MMBC_ARENA
+#if defined(MMBC_ARENA) && !defined(MMBC_ARENA_MALLOC)
 #define SBLOCK (128 * 1024)
 #elif defined(PC_TABLES)
 #define SBLOCK (64UL * 1024 * 1024)
@@ -145,6 +172,18 @@ static void s_init(void)
         fprintf(stderr, "mmbc: out of memory\n");
         exit(2);
     }
+#endif
+}
+
+/* The arena back to the heap at the end: on the CMM2 mmbc is a pass
+ * inside cc.app, and cc2 will want the room for its tables. */
+void pools_free(void)
+{
+#ifdef MMBC_ARENA_MALLOC
+    free(ar_base);
+    ar_base = ar_cur = ar_end = NULL;
+    phead = NULL;
+    sbase = NULL;
 #endif
 }
 

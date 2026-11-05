@@ -63,6 +63,13 @@
 #define TPOOLMAX 128
 #endif
 
+#ifdef ARENA_MALLOC
+static unsigned long t_lim = TMAX;	/* as code_lim, backend-bcode.c */
+#define TLIM		t_lim
+#else
+#define TLIM		TMAX
+#endif
+
 ATAB(static unsigned char tbuf[TMAX],
      static unsigned char *tbuf);
 static unsigned tlen;
@@ -281,7 +288,7 @@ static unsigned long t_maxfn(void)
 		cached = e ? atol(e) : 40000;
 #endif
 		if (!cached)
-			cached = TMAX;
+			cached = TLIM;
 	}
 	return (unsigned long)cached;
 }
@@ -629,7 +636,7 @@ static int t_skipped(const char *name)
 
 static void t16(unsigned v)
 {
-	if (!t_dry && tlen + 2 <= TMAX) {
+	if (!t_dry && tlen + 2 <= TLIM) {
 		tbuf[tlen] = v & 0xFF;
 		tbuf[tlen + 1] = (v >> 8) & 0xFF;
 	}
@@ -730,7 +737,7 @@ static void t_bcw(unsigned cond, long off);
  */
 static void t_mark_target(unsigned long addr)
 {
-	if (t_dry && addr >= fn_start && addr - fn_start < TMAX)
+	if (t_dry && addr >= fn_start && addr - fn_start < TLIM)
 		t_targets[(addr - fn_start) >> 3] |=
 		    1 << ((addr - fn_start) & 7);
 }
@@ -2383,7 +2390,7 @@ static int t_span(unsigned long start, unsigned long end)
 	while (o < end) {
 		unsigned op = codebuf[o];
 
-		if (o - start >= TMAX || tlen > TMAX - 64)
+		if (o - start >= TLIM || tlen > TLIM - 64)
 			return 0;
 		tmap[o - start] = tlen;
 
@@ -3854,7 +3861,7 @@ static void thumb_commit(void)
 		return;
 	t_bail = NULL;
 	t_bailop = 0;
-	if (end - fn_start > TMAX) {
+	if (end - fn_start > TLIM) {
 		t_bail = "span";
 		goto bailed;
 	}
@@ -3880,7 +3887,7 @@ static void thumb_commit(void)
 	   walk that BUILDS the bitmap is itself deciding what to skip
 	   from an empty bitmap, and anything a skipped op would have
 	   recorded is lost. */
-	memset(t_targets, 0, TMAX / 8);
+	memset(t_targets, 0, TLIM / 8);
 	tlen = 0;
 	ntpool = 0;
 	ntref = 0;
@@ -4088,7 +4095,7 @@ static void thumb_commit(void)
 	base = codelen;
 	for (i = 0; i < tlen; i++)
 		cbyte(tbuf[i]);
-	if (codelen >= CODEMAX)
+	if (codelen >= CODELIM)
 		return;			/* cbyte already said "overflow" */
 
 	/* Address sites are movw/movt pairs carrying their addend in
@@ -4228,7 +4235,7 @@ static void thumb_resolve_calls(void)
 				cbyte(0x21); cbyte(0x1D);	/* adds r1, r4, #4 */
 				cbyte(0x2B); cbyte(0x68);	/* ldr r3, [r5, #0] */
 				cbyte(0x18); cbyte(0x47);	/* bx  r3 */
-				if (codelen >= CODEMAX)
+				if (codelen >= CODELIM)
 					return;
 			}
 			tgt = tcalltab[j].site;
@@ -4251,6 +4258,7 @@ static void thumb_resolve_calls(void)
  */
 #ifdef ARENA_TABLES
 
+#ifndef ARENA_MALLOC
 #include <fcntl.h>
 #include <sys/ioctl.h>
 
@@ -4259,6 +4267,7 @@ struct psram_req {
 	unsigned long len;
 	unsigned long base;
 };
+#endif
 
 static unsigned char *bc_arena_cursor;
 
@@ -4273,19 +4282,41 @@ static unsigned char *bc_arena_cursor;
  */
 static unsigned long bc_arena_need;
 static int bc_arena_measuring;
+#ifdef ARENA_MALLOC
+/* Past the tables cc2 wants the heap for its symbols' names: strdup
+   takes about 150K for a program of 6,000 symbols. */
+#define ARENA_ROOM	(384UL * 1024)
+static int bc_arena_trying, bc_arena_short, bc_arena_ngot;
+static void *bc_arena_got[32];
+#endif
 
 void *bc_arena_carve(unsigned long n)
 {
 	n = (n + 7) & ~7UL;
 #ifdef ARENA_MALLOC
-	/* Development build: board-sized tables, but each one its own
-	   allocation, so a sanitiser reports the exact table that
-	   overflowed instead of the next table quietly absorbing it. */
+	/* Board-sized tables, each one its own allocation: a development
+	   build, so that a sanitiser reports the exact table that
+	   overflowed instead of the next table quietly absorbing it, and
+	   the CMM2's, where cc2 is a pass inside cc.app: as a static
+	   array this set would be there for the other passes too, and a
+	   Generation 1 has under 5 MB for all of it. */
 	if (bc_arena_measuring) {
 		bc_arena_need += n;
 		return NULL;
 	}
-	return calloc(1, n ? n : 1);
+	{
+		void *p = calloc(1, n ? n : 1);
+
+		if (p != NULL && bc_arena_trying)
+			bc_arena_got[bc_arena_ngot++] = p;
+		else if (p == NULL && bc_arena_trying)
+			bc_arena_short = 1;
+		else if (p == NULL) {
+			fprintf(stderr, "cc2: not enough memory for its tables\n");
+			exit(1);
+		}
+		return p;
+	}
 #else
 	if (bc_arena_measuring) {
 		bc_arena_need += n;
@@ -4302,7 +4333,7 @@ void *bc_arena_carve(unsigned long n)
 /* The one list of what cc2 needs; walked to measure and to place. */
 static void bc_arena_carve_all(void)
 {
-	codebuf = bc_arena_carve(CODEMAX);
+	codebuf = bc_arena_carve(CODELIM);
 	databuf = bc_arena_carve(DATAMAX);
 	litbuf = bc_arena_carve(DATAMAX);
 	strtab = bc_arena_carve(STRMAX);
@@ -4314,9 +4345,9 @@ static void bc_arena_carve_all(void)
 	labtab = bc_arena_carve(MAXLAB * sizeof(struct label));
 	patchtab = bc_arena_carve(MAXFIX * sizeof(struct patch));
 	libreftab = bc_arena_carve(MAXFIX * sizeof(struct libref));
-	tbuf = bc_arena_carve(TMAX);
-	tmap = bc_arena_carve(TMAX * sizeof(tmap_t));
-	t_targets = bc_arena_carve(TMAX / 8);
+	tbuf = bc_arena_carve(TLIM);
+	tmap = bc_arena_carve(TLIM * sizeof(tmap_t));
+	t_targets = bc_arena_carve(TLIM / 8);
 	tpooltab = bc_arena_carve(TPOOLMAX * sizeof(struct tpool));
 	treftab = bc_arena_carve(TPOOLMAX * sizeof(struct tref));
 	tcalltab = bc_arena_carve(TPOOLMAX * sizeof(struct tcall));
@@ -4341,7 +4372,31 @@ void bc_arena_init(void)
 			(unsigned long)bc_arena_need);
 
 #ifdef ARENA_MALLOC
-	bc_arena_carve_all();
+	/* All of it, with room left, or the two big tables halved: a
+	   program too big for what is left says so as it would for the
+	   full tables, and a span past t_lim stays bytecode. */
+	for (;;) {
+		void *room;
+		int i;
+
+		bc_arena_trying = 1;
+		bc_arena_short = bc_arena_ngot = 0;
+		bc_arena_carve_all();
+		bc_arena_trying = 0;
+		room = bc_arena_short ? NULL : malloc(ARENA_ROOM);
+		if (room != NULL) {
+			free(room);
+			break;
+		}
+		for (i = 0; i < bc_arena_ngot; i++)
+			free(bc_arena_got[i]);
+		code_lim /= 2;
+		t_lim /= 2;
+		if (t_lim < 16384) {
+			fprintf(stderr, "cc2: not enough memory for its tables\n");
+			exit(1);
+		}
+	}
 #else
 	{
 		struct psram_req rq;
