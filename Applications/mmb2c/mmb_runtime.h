@@ -998,8 +998,8 @@ char *mm_errmsg(void);              /* MM.ERRMSG$                      */
 /* MM.VER and MM.INFO(VERSION): the PicoMite version the translator
  * follows, as the firmware's fun_version encodes its VERSION string -
  * major, then two digits each of minor, patch and pre-release, a
- * release candidate's being 50 + n - so "7.00.00RC5" is 7.000055 and
- * the release will be 7.0.  PicoMite programs test it: Exile and
+ * release candidate's being 50 + n and a release's 99 - so "7.00.00RC5"
+ * is 7.000055 and the release will be 7.000099.  PicoMite programs test it: Exile and
  * Picanoid stop with "firmware too old for this game" below 6.03.02b11.
  * It was the Fuzix release (0.30), which read as a very old PicoMite;
  * the release is in the boot banner (decided 24 Oct 2026).  Move it
