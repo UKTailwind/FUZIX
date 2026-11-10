@@ -6435,19 +6435,38 @@ static void do_if(void)
     emit("}");
 }
 
+/* A block opened and closed on the line - IF x THEN FOR i = 1 TO 3 : ... :
+ * NEXT i, or a DO ... LOOP - is the interpreter's as much as any statement,
+ * so only a block still open at the line's end is refused (a user's Life
+ * program, 10 Nov 2026: refused at its FOR, before the NEXT that closes
+ * it).  A failure inside drops the blocks it opened and the inline depth,
+ * as the Python's finally does: left behind, the FOR's block swallowed the
+ * rest of the program and the last SUB was reported unterminated. */
 static void inline_statements(void)
 {
     int depth = cv.nblocks;
+    jmp_buf jb, *saved = err_jmp;
 
     cv.inline_depth++;
-    while (!at_end() && !is_kw("ELSE", 0)) {
-        if (accept_op(":"))
-            continue;
-        statement();
-        if (cv.nblocks != depth)
-            cv_err("a single line IF cannot open a multi-line block");
+    err_jmp = &jb;
+    if (setjmp(jb) == 0) {
+        while (!at_end() && !is_kw("ELSE", 0)) {
+            if (accept_op(":"))
+                continue;
+            statement();
+        }
+        err_jmp = saved;
+    } else {
+        err_jmp = saved;
+        cv.inline_depth--;
+        cv.nblocks = depth;
+        longjmp(*err_jmp, 1);
     }
     cv.inline_depth--;
+    if (cv.nblocks != depth) {
+        cv.nblocks = depth;
+        cv_err("a single line IF cannot open a multi-line block");
+    }
 }
 
 static void do_elseif(void)

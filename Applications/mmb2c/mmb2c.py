@@ -11085,6 +11085,12 @@ class Conv(object):
         self.emit('}')
 
     def inline_statements(self):
+        # A block opened and closed on the line (IF x THEN FOR i = 1 TO 3 :
+        # ... : NEXT i, or a DO ... LOOP) is the interpreter's as much as any
+        # statement, so only a block still open at the line's end is refused
+        # (a user's Life program, 10 Nov 2026: refused at its FOR, before the
+        # NEXT that closes it).  A failure inside drops the blocks it opened:
+        # left behind, the FOR's block swallowed the rest of the program.
         depth = len(self.blocks)
         self.inline += 1
         try:
@@ -11092,10 +11098,12 @@ class Conv(object):
                 if self.accept_op(':'):
                     continue
                 self.statement()
-                if len(self.blocks) != depth:
-                    self.err("a single line IF cannot open a multi-line block")
         finally:
             self.inline -= 1
+            left_open = len(self.blocks) != depth
+            del self.blocks[depth:]
+        if left_open:
+            self.err("a single line IF cannot open a multi-line block")
 
     def do_elseif(self):
         if not self.blocks or self.blocks[-1][0] != 'if':
