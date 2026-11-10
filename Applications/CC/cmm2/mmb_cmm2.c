@@ -384,16 +384,20 @@ static void mm_cmm2_moded(void)
 	}
 }
 
+/* MODE n, one number (MODE r, bits goes to the firmware as written, by
+   cmm2_stmt): run by the firmware too, as the interpreter runs it - the
+   Colour Maximite 2's mode n, or under OPTION PICOMITE the PicoMite's (the
+   firmware maps 1-3 itself: 8,1, 7,4 and 8,4, the table this had).  It was
+   always the PicoMite's here: MODE 9 was refused and MODE 1 gave 640 x 480
+   in one bit (a Back Shed user's Life program, 10 Nov 2026).  RESOLUTION's
+   mm_mode(1) gets the firmware's MODE 1 the same way. */
 void mm_mode(MMINTEGER n)
 {
-	static const char *const modes[] = { NULL, "MODE 8,1", "MODE 7,4", "MODE 8,4" };
+	char line[24];
 
-	if (n < 1 || n > 3) {
-		mm_error("MODE must be 1, 2 or 3");
-		return;
-	}
+	snprintf(line, sizeof(line), "MODE %d", (int)n);
 	fflush(stdout);
-	if (mm_cmm2_cmd(modes[n]) < 0)
+	if (mm_cmm2_cmd(line) < 0)
 		return;
 	mm_cmm2_moded();
 }
