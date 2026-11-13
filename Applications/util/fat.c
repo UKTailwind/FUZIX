@@ -24,8 +24,16 @@
  * there - either the old one or the new one.  What can be left behind
  * is clusters marked in use that no file claims: wasted space, which
  * any desktop chkdsk reclaims, and which no reader can mistake for
- * data.  Every FAT copy is written, because a chkdsk that finds the
- * copies disagreeing calls the card damaged.
+ * data.  Besides those, a cut can leave FAT32's free-cluster count (a
+ * hint, written last) stale, the FAT copies differing over the one
+ * sector being written, and - when a new long name's entries straddle
+ * two directory sectors - the long-name part without the short entry
+ * that would have followed it, which no reader shows.  chkdsk tidies
+ * all of them.  Every FAT copy is written, because a chkdsk that finds
+ * the copies disagreeing calls the card damaged.  The device is opened
+ * O_SYNC for put, so each write is on the card before the next is
+ * issued and the order here is the order the card sees (#43).
+ * fattest.sh cuts a put after every write and checks each of these.
  */
 
 #include <stdio.h>
@@ -97,8 +105,32 @@ static void read_sec(uint32_t lba, uint8_t *buf)
 		fail("device read error");
 }
 
+#ifdef FAT_CUT_TEST
+/* fattest.sh's power cut, in the host build only: FAT_CUT=n lets n
+   sector writes reach the image and stops the program dead before the
+   next one - no cleanup, no sync, no exit handlers - so the image is
+   what the card would hold had the power gone at that moment. */
+static void cut_point(void)
+{
+	static long left = -2;
+
+	if (left == -2) {
+		const char *s = getenv("FAT_CUT");
+
+		left = s ? atol(s) : -1;
+	}
+	if (left == 0)
+		_exit(99);
+	if (left > 0)
+		left--;
+}
+#endif
+
 static void write_sec(uint32_t lba, uint8_t *buf)
 {
+#ifdef FAT_CUT_TEST
+	cut_point();
+#endif
 	if (lseek(dev, (off_t)lba * SECSZ, 0) < 0 ||
 	    write(dev, buf, SECSZ) != SECSZ)
 		fail("device write error");
@@ -108,7 +140,15 @@ static void fat_mount(int rw)
 {
 	uint32_t rsvd, rootent, totsec, fatsz16;
 
-	dev = open(devname, rw ? O_RDWR : O_RDONLY);
+	/* O_SYNC is what makes the put order (see the top of the file)
+	   the card's order.  Without it a block device write only marks
+	   a kernel cache buffer dirty, and the card gets the blocks when
+	   they are evicted or at the final sync() - in any order at all.
+	   It costs nothing measurable - each sector is written once either
+	   way, since the FAT sector has its own cache here, flushed at the
+	   ordering points; on the PC3 a 200K put takes 3.0 s with it and
+	   without. */
+	dev = open(devname, rw ? O_RDWR | O_SYNC : O_RDONLY);
 	if (dev < 0) {
 		fprintf(stderr, "fat: cannot open %s%s\n", devname,
 			rw ? " for writing" : "");
@@ -1226,7 +1266,9 @@ static int do_put(const char *src, const char *dest)
 	}
 	close(fd);
 
-	/* The chain reaches the card before anything names it. */
+	/* The chain reaches the card before anything names it: the
+	   device is open O_SYNC, so fat_flush's writes are on the card
+	   when it returns, not just in the kernel's cache. */
 	fat_flush();
 
 	if (exists) {

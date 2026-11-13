@@ -379,6 +379,161 @@ fi
 fsck_ok "$TMP/rootfull.img" "after a full root directory" && pass
 readback_ok "$TMP/rootfull.img" "f0.dat" "$TMP/tiny" "first file after root full"
 
+# --- power cuts -----------------------------------------------------------
+#
+# The claim at the top of fat.c: lose power at any point of a put and the
+# directory still describes a file that is entirely there, the old one or
+# the new one.  Everything above judges only the finished image, which
+# comes out the same whatever order the writes went in.  Here a build with
+# FAT_CUT_TEST stops dead after FAT_CUT sector writes, and every prefix of
+# a put's writes is tried: that is what the card holds when the power
+# goes, given that the writes reach it in the order issued - which on the
+# board is what opening the device O_SYNC is for (#43).
+#
+# The leftovers fat.c's header owns up to are allowed and nothing else:
+# clusters in use that no file claims, the FAT copies disagreeing over the
+# sector being written when the power went (fsck says the first is intact
+# and uses it, as every reader does), FAT32's free-cluster hint not yet
+# brought up to date, and the long-name part of a new entry whose short
+# entry, in the next sector, never arrived - which no reader shows.  A
+# line fsck already prints for the untouched image - the
+# FAT32-below-the-threshold warning - is not news.
+
+CUT=$TMP/fatcut
+gcc -D_GNU_SOURCE -DFAT_CUT_TEST -Wall -O2 -o "$CUT" "$SRC" ||
+	die "cut build failed"
+
+# fsck's findings, without its banner and summary lines
+fsck_findings() {
+	fsck.vfat -n "$1" 2>&1 | grep -v -e '^fsck\.fat ' -e '^fsck\.vfat ' \
+		-e "^$1: " -e '^Leaving filesystem unchanged' -e '^ *$'
+}
+
+# What a cut may leave, fsck's way of saying so.  $1 the cut image, $2
+# the pristine one's findings (a file), $3 what to call it.
+cut_fsck_ok() {
+	fsck_findings "$1" | grep -v -x -F -f "$2" |
+		grep -v -e '^FATs differ but appear to be intact\.$' \
+			-e '^ *Using first FAT\.$' \
+			-e '^Reclaimed [0-9]* unused clusters\{0,1\} ([0-9]* bytes)' \
+			-e '^Free cluster summary wrong (' \
+			-e '^Orphaned long file name part "' \
+			-e '^ *Auto-correcting\.$' -e '^ *Auto-deleting\.$' \
+			> "$TMP/cutfsck" || true
+	if [ -s "$TMP/cutfsck" ]; then
+		bad "$3: fsck.vfat found more than a cut may leave"
+		sed 's/^/        /' "$TMP/cutfsck"
+		return 1
+	fi
+	return 0
+}
+
+# The name must be the old file, the new one, or (for a file that did not
+# exist before) nothing - and the two readers must agree on which.
+# $1 image, $2 name, $3 old contents or "" for none, $4 new, $5 label.
+cut_file_ok() {
+	_m=none
+	_g=none
+	if mcopy -i "$1" -n "::$2" "$TMP/m.out" >/dev/null 2>&1; then
+		if [ -n "$3" ] && cmp -s "$3" "$TMP/m.out"; then _m=old
+		elif cmp -s "$4" "$TMP/m.out"; then _m=new
+		else _m=garbage
+		fi
+	fi
+	if "$FAT" -d "$1" get "$2" "$TMP/g.out" >/dev/null 2>&1; then
+		if [ -n "$3" ] && cmp -s "$3" "$TMP/g.out"; then _g=old
+		elif cmp -s "$4" "$TMP/g.out"; then _g=new
+		else _g=garbage
+		fi
+	fi
+	rm -f "$TMP/m.out" "$TMP/g.out"
+	if [ "$_m" != "$_g" ]; then
+		bad "$5: mtools reads '$2' as $_m, fat get as $_g"
+		return 1
+	fi
+	case "$_m" in
+	old|new) return 0 ;;
+	none)	[ -z "$3" ] && return 0
+		bad "$5: '$2' is gone - neither the old file nor the new" ;;
+	*)	bad "$5: '$2' is neither the old file nor the new" ;;
+	esac
+	return 1
+}
+
+# Cut one put at every write.  $1 the pristine image (left untouched), $2
+# the source, $3 the name, $4 its old contents or "", $5 a file that must
+# survive, $6 its name, $7 label.
+cut_all() {
+	fsck_findings "$1" > "$TMP/basefsck"
+	_n=0
+	_bad=0
+	while :; do
+		cp "$1" "$TMP/cut.img"
+		FAT_CUT=$_n "$CUT" -d "$TMP/cut.img" put "$2" "$3" >/dev/null 2>&1
+		_rc=$?
+		if [ $_rc = 0 ]; then
+			# it ran to the end: the ordinary, strict checks
+			fsck_ok "$TMP/cut.img" "$7, uncut" &&
+			readback_ok "$TMP/cut.img" "$3" "$2" "$7, uncut" &&
+			readback_ok "$TMP/cut.img" "$6" "$5" "$7, uncut" && pass
+			break
+		fi
+		if [ $_rc != 99 ]; then
+			bad "$7: put failed outright (status $_rc) at cut $_n"
+			break
+		fi
+		_w="$7, cut after $_n writes"
+		cut_fsck_ok "$TMP/cut.img" "$TMP/basefsck" "$_w" &&
+		cut_file_ok "$TMP/cut.img" "$3" "$4" "$2" "$_w" &&
+		readback_ok "$TMP/cut.img" "$6" "$5" "$_w" ||
+			_bad=$((_bad + 1))
+		_n=$((_n + 1))
+		# stop listing the same fault at every later cut
+		[ $_bad -lt 3 ] || break
+	done
+	[ $_n -gt 0 ] || bad "$7: the put made no writes to cut"
+	[ $_bad = 0 ] && pass
+	rm -f "$TMP/cut.img" "$TMP/basefsck" "$TMP/cutfsck"
+}
+
+cuts() {
+	IMG=$1
+	LABEL=$2
+
+	echo "--- power cuts, $LABEL"
+	mkfile "$TMP/keep" 700
+	mkfile "$TMP/old" 3000
+	mkfile "$TMP/new" 5000
+	mkfile "$TMP/short" 600
+	"$FAT" -d "$IMG" put "$TMP/keep" keep.dat >/dev/null 2>&1 &&
+	"$FAT" -d "$IMG" put "$TMP/old" over.dat >/dev/null 2>&1 &&
+	mmd -i "$IMG" ::grow >/dev/null 2>&1 ||
+		{ bad "$LABEL: cannot set up the cuts"; return; }
+	# four long names fill all but two slots of a 512-byte cluster with
+	# "." and "..", so a fifth makes the directory grow
+	for _i in 1 2 3 4; do
+		"$FAT" -d "$IMG" put "$TMP/short" "grow/Growing Name $_i.txt" \
+			>/dev/null 2>&1 || bad "$LABEL: grow setup $_i failed"
+	done
+	fsck_ok "$IMG" "$LABEL before the cuts" || return
+
+	cut_all "$IMG" "$TMP/new" over.dat "$TMP/old" "$TMP/keep" keep.dat \
+		"$LABEL overwrite, growing"
+	cut_all "$IMG" "$TMP/short" over.dat "$TMP/old" "$TMP/keep" keep.dat \
+		"$LABEL overwrite, shrinking"
+	cut_all "$IMG" "$TMP/new" "A Long Name Made Under Cut.txt" "" \
+		"$TMP/keep" keep.dat "$LABEL new long name"
+	cut_all "$IMG" "$TMP/new" "grow/Growing Name 5.txt" "" \
+		"$TMP/short" "grow/Growing Name 4.txt" "$LABEL directory growth"
+}
+
+mkfs.vfat -F 16 -S 512 -s 1 -C "$TMP/cuta.img" 16384 >/dev/null ||
+	die "mkfs cuta"
+mkfs.vfat -F 32 -S 512 -s 1 -C "$TMP/cutb.img" 8192 >/dev/null 2>&1 ||
+	die "mkfs cutb"
+cuts "$TMP/cuta.img" "FAT16 512B clusters"
+cuts "$TMP/cutb.img" "FAT32 512B clusters"
+
 # --- verdict --------------------------------------------------------------
 
 echo
