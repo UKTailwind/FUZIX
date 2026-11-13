@@ -2699,8 +2699,9 @@ void FullScreenEditor(int xx, int yy, char *fname, int edit_buff_size,
                     buf[3] = 0;
                     break;
                 }
-                else if (edy >= VHeight - 1)
-                { // if we can scroll a full screenfull
+                else if (edy >= VHeight)
+                { // if we can scroll a full screenfull (at VHeight - 1 that went to -1:
+                  // a blank top row, and the next PgUp moved down - PicoMite d059604)
                     i = VHeight + 1;
                     edy -= VHeight;
                 }
