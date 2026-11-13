@@ -19,6 +19,14 @@ void pc3_usb_panic(const char *fmt, ...);
 #define panic pc3_usb_panic
 #endif
 
+/* Faults the host driver used to panic() or assert() on, and now records
+ * and survives (usb/rp2040_usb.patch, usb/hcd_rp2040.patch).  Called from
+ * the USB interrupt; usbkbd.c says each once, from thread context. */
+#define PC3_USB_FAULT_BUFCTRL   0   /* a stale buffer arming, cleared */
+#define PC3_USB_FAULT_EP_FULL   1   /* no endpoint entry or slot left */
+#define PC3_USB_NFAULTS         2
+void pc3_usb_fault(uint8_t code, uint16_t info);
+
 #ifdef CONFIG_PC3_USB_KBD
 
 /* Pico Computer 3: the USB controller faces the on-board 4-port hub and

@@ -8,8 +8,20 @@
  
    #if defined(PICO_RP2350) && PICO_RP2350 == 1
      #define HAS_STOP_EPX_ON_NAK
-@@ -56,6 +57,19 @@
- static hw_endpoint_t  ep_pool[USB_MAX_ENDPOINTS];
+@@ -53,9 +54,30 @@
+ //--------------------------------------------------------------------+
+ 
+ // Host mode uses one shared endpoint register for non-interrupt endpoint
+-static hw_endpoint_t  ep_pool[USB_MAX_ENDPOINTS];
++/* PC3: one entry per open endpoint of every device, EP0s included, so the
++ * pool need not be USB_MAX_ENDPOINTS (16, 15 usable) long - only interrupt
++ * endpoints need one of the controller's 15 slots; control and bulk share
++ * EPX.  This kernel enumerates at most CFG_TUH_DEVICE_MAX (7) devices and
++ * opens no bulk endpoints (HID and hub only), so 7 EP0s and 15 interrupt
++ * endpoints, 22, is the most that can be open: 24.  PicoMite, with CDC and
++ * mass storage, has 32 (f157f93).  20 bytes an entry of kernel RAM. */
++#define PC3_HCD_EP_POOL 24
++static hw_endpoint_t  ep_pool[PC3_HCD_EP_POOL];
  static hw_endpoint_t *epx = &ep_pool[0]; // current active endpoint
  
 +/* PC3: EP0 RX-timeout grace window (usb/hcd_rp2040.patch).  A spurious
@@ -28,7 +40,7 @@
    #ifndef HAS_STOP_EPX_ON_NAK
  static volatile bool epx_switch_request = false;
    #endif
-@@ -235,6 +249,9 @@
+@@ -235,6 +257,9 @@
  static void __tusb_irq_path_func(xfer_complete_isr)(hw_endpoint_t *ep, xfer_result_t xfer_result, bool is_more) {
    // Mark transfer as done before we tell the tinyusb stack
    uint32_t xferred_len = ep->xferred_len;
@@ -38,7 +50,18 @@
    rp2usb_reset_transfer(ep);
    hcd_event_xfer_complete(ep->dev_addr, ep->ep_addr, xferred_len, xfer_result, true);
  
-@@ -327,14 +344,39 @@
+@@ -288,7 +313,9 @@
+     const uint8_t epnum = idx >> 1u;
+     for (size_t e = 0; e < TU_ARRAY_SIZE(ep_pool); e++) {
+       hw_endpoint_t *ep = &ep_pool[e];
+-      if (ep->interrupt_num == epnum) {
++      /* PC3: max_packet_size == 0 is a free entry: never deliver a
++       * completion to one (belt and braces beside the two clears). */
++      if (ep->max_packet_size > 0 && ep->interrupt_num == epnum) {
+         io_rw_32  *ep_reg  = dpram_int_ep_ctrl(ep->interrupt_num);
+         io_rw_32  *buf_reg = dpram_int_ep_buffer_ctrl(ep->interrupt_num);
+         const bool done    = rp2usb_xfer_continue(ep, ep_reg, buf_reg, 0, tu_edpt_dir(ep->ep_addr) == TUSB_DIR_IN);
+@@ -327,14 +354,39 @@
    if (status & USB_INTS_ERROR_RX_TIMEOUT_BITS) {
      usb_hw_clear->sie_status = USB_SIE_STATUS_RX_TIMEOUT_BITS;
  
@@ -86,3 +109,64 @@
      }
    }
  
+@@ -502,6 +554,15 @@
+         *ep_reg           = 0;
+       }
+ 
++      /* PC3: a freed entry must not keep its hardware interrupt-endpoint
++       * number.  handle_buf_status_isr() finds the endpoint a completion
++       * belongs to by searching the pool for interrupt_num == epnum and
++       * taking the first match, so a stale number on a reused entry
++       * silently steals another device's completions: that endpoint never
++       * completes and its driver waits for ever with no error anywhere.
++       * The symptom PicoMite found (bb53afa; upstream #4177 after 0.21):
++       * plugging a mouse in kills a keyboard that was working. */
++      ep->interrupt_num   = 0;
+       ep->max_packet_size = 0; // mark as unused
+     }
+   }
+@@ -537,7 +598,13 @@
+   } else {
+     ep = edpt_alloc();
+   }
+-  TU_ASSERT(ep);
++  if (ep == NULL) {
++    /* PC3: say so - the device's driver gets no endpoint and the device
++     * stays half-mounted (PicoMite f157f93). */
++    pc3_usb_fault(PC3_USB_FAULT_EP_FULL,
++                  (uint16_t)(ep_desc->bEndpointAddress | ((uint16_t)dev_addr << 8)));
++    return false;
++  }
+ 
+   const uint8_t  ep_addr         = ep_desc->bEndpointAddress;
+   const uint16_t max_packet_size = tu_edpt_packet_size(ep_desc);
+@@ -551,6 +618,13 @@
+ 
+   if (ep->transfer_type != TUSB_XFER_INTERRUPT) {
+     ep->dpram_buf = usbh_dpram->epx_data;
++    /* PC3: control and bulk endpoints run on EPX and own no hardware
++     * interrupt endpoint.  The branch below is the only place
++     * interrupt_num is set, so without this an entry recycled from an
++     * interrupt endpoint keeps that number, its transfers go down the
++     * interrupt path, and it shadows the endpoint that now owns the slot
++     * (see hcd_device_close; PicoMite bb53afa, upstream #4177). */
++    ep->interrupt_num = 0;
+   } else {
+     // from 15 interrupt endpoints pool
+     uint8_t int_idx;
+@@ -560,7 +634,14 @@
+         break;
+       }
+     }
+-    assert(int_idx < USB_HOST_INTERRUPT_ENDPOINTS);
++    if (int_idx >= USB_HOST_INTERRUPT_ENDPOINTS) {
++      /* PC3: all 15 hardware slots in use.  Was an assert, live in this
++       * Debug build and reachable once the pool is bigger than the slots:
++       * give the entry back and refuse the endpoint instead. */
++      ep->max_packet_size = 0;
++      pc3_usb_fault(PC3_USB_FAULT_EP_FULL, (uint16_t)(ep_addr | ((uint16_t)dev_addr << 8)));
++      return false;
++    }
+     assert(ep_desc->bInterval > 0);
+ 
+     //------------- dpram buf -------------//

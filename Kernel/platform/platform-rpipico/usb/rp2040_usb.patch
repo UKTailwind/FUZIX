@@ -1,6 +1,40 @@
 --- rp2040_usb.c	(TinyUSB 0.21.0, pico-sdk lib/tinyusb)
 +++ rp2040_usb.c	(Pico Computer 3 kernel, usb/rp2040_usb.patch)
-@@ -196,7 +196,16 @@
+@@ -31,6 +31,7 @@
+ 
+   #include <stdlib.h>
+   #include "rp2040_usb.h"
++  #include "hardware/timer.h" // PC3: busy_wait_us_32 for a low-speed device's control packets
+ 
+   #include "device/dcd.h"
+   #include "host/hcd.h"
+@@ -118,7 +119,13 @@
+   const uint32_t current    = *buf_reg;
+   const uint32_t avail_mask = USB_BUF_CTRL_AVAIL | (USB_BUF_CTRL_AVAIL << 16);
+   if (current & value & avail_mask) {
+-    panic("buf_ctrl @ 0x%lX already available", (uintptr_t)buf_reg);
++    /* PC3: was panic(), which stopped the machine.  A still-armed AVAIL
++     * means the controller never finished the last transfer on this
++     * buffer (a STOP_TRANS that raced, or a buffer abandoned on error).
++     * Dropping the stale arming is what the caller is about to do
++     * anyway: clear it, note it, and re-arm (PicoMite da2c306). */
++    pc3_usb_fault(PC3_USB_FAULT_BUFCTRL, (uint16_t)(uintptr_t)buf_reg);
++    *buf_reg = 0;
+   }
+   *buf_reg = value & ~(USB_BUF_CTRL_AVAIL | (USB_BUF_CTRL_AVAIL << 16)); // write other bits first
+ 
+@@ -136,7 +143,9 @@
+ void __tusb_irq_path_func(bufctrl_write16)(io_rw_16 *buf_reg16, uint16_t value) {
+   const uint16_t current = *buf_reg16;
+   if (current & value & USB_BUF_CTRL_AVAIL) {
+-    panic("buf_ctrl @ 0x%lX already available", (uintptr_t)buf_reg16);
++    /* PC3: was panic() - see bufctrl_write32(). */
++    pc3_usb_fault(PC3_USB_FAULT_BUFCTRL, (uint16_t)(uintptr_t)buf_reg16);
++    *buf_reg16 = 0;
+   }
+   *buf_reg16 = value & (uint16_t)~USB_BUF_CTRL_AVAIL; // write other bits first
+ 
+@@ -196,7 +205,16 @@
    if (ep_reg != NULL) {
      uint32_t ep_ctrl = *ep_reg;
    #if CFG_TUH_ENABLED
@@ -18,3 +52,26 @@
    #else
      const bool force_single = false;
    #endif
+@@ -426,6 +444,22 @@
+   #endif
+     {
+       // ping-pong: arm the completed buffer with new data
++  #if CFG_TUH_ENABLED
++      /* PC3: a low-speed device behind a hub needs time before its next
++       * packet (PicoMite e0eba35).  The buffer-done interrupt comes as soon
++       * as the data packet has arrived; re-armed at once, the controller
++       * sent the next request while the outer hub was still relaying the
++       * low-speed handshake, the reply came back garbled (BIT_STUFF) and
++       * the controller locked up - every USB device dead until a restart.
++       * Seen with a low-speed mouse behind the Raspberry Pi keyboard's hub,
++       * reading a string at enumeration: 10 us still failed, 25-50 us
++       * passed alone, 100 us with a gamepad and a second adapter as well.
++       * Only multi-packet control transfers to a low-speed device come
++       * this way, at enumeration and little else. */
++      if (is_host && ep->need_pre && tu_edpt_number(ep->ep_addr) == 0) {
++        busy_wait_us_32(100);
++      }
++  #endif
+       const uint16_t buf_ctrl16_new = bufctrl_prepare16(ep, dpram_buf, is_rx);
+       bufctrl_write16(buf_reg16 + buf_id, buf_ctrl16_new);
+     }

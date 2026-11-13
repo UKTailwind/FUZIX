@@ -286,11 +286,19 @@ target_link_libraries(fuzix
 # pinned TinyUSB changes under the hunk, patch refuses and the build
 # stops HERE rather than compile the wrong driver.
 # PICO_TINYUSB_PATH was set to the submodule above, before pico_sdk_init().
-# Three files of the driver are patched (all proven on the PC3 MicroPython
-# port, which runs the same TinyUSB 0.21 and shares the hub and devices):
-#   hcd_rp2040.c  - clear the EPX buffer when an RX timeout fails a transfer
+# Three files of the driver are patched (proven on the PC3 MicroPython
+# port, which runs the same TinyUSB 0.21 and shares the hub and devices,
+# and on PicoMite's tinyusb-patches, which are against TinyUSB master):
+#   hcd_rp2040.c  - clear the EPX buffer when an RX timeout fails a transfer;
+#                   a 24-entry endpoint pool, and a full pool or full set of
+#                   interrupt slots refused instead of asserted; a freed
+#                   entry's interrupt_num cleared, so it cannot steal another
+#                   device's completions (PicoMite f157f93, bb53afa)
 #   rp2040_usb.c  - single-buffer host CONTROL transfers (long HID report
-#                   descriptors panicked "buf_ctrl already available")
+#                   descriptors panicked "buf_ctrl already available"); a
+#                   stale arming cleared and recorded instead of panicking;
+#                   100 us before re-arming a low-speed device's control
+#                   packet behind a hub (PicoMite da2c306, e0eba35)
 #   usbh.c        - 100 ms reset recovery before the first SETUP (devices
 #                   behind the hub are not ready at the spec-minimum 10 ms
 #                   and a failed enumeration is never retried)

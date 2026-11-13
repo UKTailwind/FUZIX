@@ -430,6 +430,44 @@ extern void hcd_int_handler(uint8_t rhport, bool in_isr);
     USB_SIE_STATUS_RX_OVERFLOW_BITS | USB_SIE_STATUS_DATA_SEQ_ERROR_BITS | \
     USB_SIE_STATUS_RESUME_BITS)
 
+/* --- faults the host driver survives instead of panicking ----------------- */
+
+/* Counted from the USB interrupt (pc3_usb_fault, declared in tusb_config.h),
+ * said once each by usb_rescue in thread context, where printing is safe.
+ * Before, the first was a panic() and the second an assert(): either one
+ * stopped the machine. */
+static volatile uint16_t usb_fault_n[PC3_USB_NFAULTS];
+static volatile uint16_t usb_fault_info[PC3_USB_NFAULTS];
+static uint8_t usb_fault_said[PC3_USB_NFAULTS];
+
+void __not_in_flash_func(pc3_usb_fault)(uint8_t code, uint16_t info)
+{
+    if (code < PC3_USB_NFAULTS) {
+        if (usb_fault_n[code] != 0xFFFFu)
+            usb_fault_n[code]++;
+        usb_fault_info[code] = info;
+    }
+}
+
+static void usb_fault_report(void)
+{
+    unsigned i;
+
+    for (i = 0; i < PC3_USB_NFAULTS; i++) {
+        uint16_t info = usb_fault_info[i];
+
+        if (!usb_fault_n[i] || usb_fault_said[i])
+            continue;
+        usb_fault_said[i] = 1;
+        if (i == PC3_USB_FAULT_BUFCTRL)
+            kprintf("USB: stale buffer arming at %x cleared (was a panic)\n",
+                    (unsigned)info);
+        else
+            kprintf("USB: no endpoint left for device %d endpoint %x - "
+                    "too many USB devices\n", info >> 8, info & 0xFF);
+    }
+}
+
 static void usb_rescue(void)
 {
     static bool pending_seen;
@@ -437,6 +475,7 @@ static void usb_rescue(void)
     uint32_t errs = usb_hw->sie_status & USB_SIE_ERROR_LATCHES;
     uint32_t primask;
 
+    usb_fault_report();
     if (errs) {
         hw_clear_bits(&usb_hw->sie_status, errs);
     }
