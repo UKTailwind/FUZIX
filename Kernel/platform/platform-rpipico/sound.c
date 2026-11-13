@@ -722,14 +722,19 @@ int sound_mm_cmd(uint8_t op, uint8_t a, uint8_t b,
 
             inc = (long)(t / ((long long)MMS_RATE * 1000));
         }
+        /* White noise: "freq" is how many samples each level holds,
+         * floor(f), the reference's PhaseM = f_in.  It goes in phinc's
+         * integer part, which the renderer reads back as the dwell.  A
+         * dwell under way runs out first, as the reference's static
+         * counter does. */
+        if (p1 == MMS_SND_WNOISE)
+            inc = (long)(p2 / 1000) << 12;
         for (i = 0; i < 2; i++) {
             struct mmvoice *v = &mmv[voice][i];
 
             if (!(b & (1 << i)))
                 continue;
             v->phinc = inc;
-            if (p1 == MMS_SND_WNOISE)
-                v->dwell = 0;
             v->type = (uint8_t)p1;
             v->vol_target = (int)(p3 * 41 / 25);
             if (v->type == MMS_SND_OFF)

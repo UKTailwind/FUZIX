@@ -1,6 +1,6 @@
 /* saveimage - write the screen to a Windows BMP file.
  *
- *   saveimage file.bmp [x y w h]
+ *   saveimage file[.bmp] [x y w h]
  *
  * MMBasic's SAVE IMAGE, as a program rather than as firmware.  Nothing
  * about it needs to be inside bcrun or the kernel: it runs once, it is
@@ -108,6 +108,29 @@ static void row_by_pixel(int x0, int w, int y)
 		emit(p, getpixel(x, y));
 }
 
+/* MMBasic's AppendDefaultExtension, as loadimage.c's: ".bmp" unless the
+ * last path component already has an extension.  Without it
+ * SAVE IMAGE "pic" : LOAD IMAGE "pic" saves one file and looks for
+ * another. */
+static const char *defext(const char *name, char *buf, int max)
+{
+	int n = (int)strlen(name);
+	const char *p = name + n;
+
+	while (p > name) {
+		p--;
+		if (*p == '/' || *p == '\\')
+			break;
+		if (*p == '.')
+			return name;
+	}
+	if (n + 5 > max)
+		return name;
+	strcpy(buf, name);
+	strcat(buf, ".bmp");
+	return buf;
+}
+
 int main(int argc, char *argv[])
 {
 	unsigned char hdr[54];
@@ -117,6 +140,8 @@ int main(int argc, char *argv[])
 	int bpp, bx0 = 0, blen = 0, rowsout = 0;
 	long rgb[16];
 	unsigned char have[16];
+	static char namebuf[128];
+	const char *name;
 
 	if (argc != 2 && argc != 6) {
 		fprintf(stderr, "usage: %s file.bmp [x y w h]\n", argv[0]);
@@ -174,9 +199,10 @@ int main(int argc, char *argv[])
 	rowbytes = ((unsigned long)w * 3 + 3) & ~3UL;
 	datasize = rowbytes * h;
 
-	fd = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0666);
+	name = defext(argv[1], namebuf, (int)sizeof(namebuf));
+	fd = open(name, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 	if (fd < 0) {
-		perror(argv[1]);
+		perror(name);
 		return 1;
 	}
 
@@ -193,7 +219,7 @@ int main(int argc, char *argv[])
 	put32(hdr + 38, 2835);		/* 72 dpi, in pixels per metre */
 	put32(hdr + 42, 2835);
 	if (write(fd, hdr, sizeof(hdr)) != (int)sizeof(hdr)) {
-		perror(argv[1]);
+		perror(name);
 		return 1;
 	}
 
@@ -243,7 +269,7 @@ int main(int argc, char *argv[])
 				}
 			}
 			if (write(fd, row, (int)rowbytes) != (int)rowbytes) {
-				perror(argv[1]);
+				perror(name);
 				return 1;
 			}
 		}
@@ -251,7 +277,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (close(fd) < 0) {
-		perror(argv[1]);
+		perror(name);
 		return 1;
 	}
 	return 0;

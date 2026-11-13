@@ -211,6 +211,12 @@ static void readheader(void)
 	   is 5-5-5 and 32 bit is 8-8-8 with the top byte ignored. */
 	if (compression == 3) {
 		unsigned char m[12];
+		/* At 14 + 40 whichever header it is: after a 40-byte
+		   INFOHEADER, inside a V4 or V5 one (GIMP's RGB565).  The
+		   seek above went past the whole header, which for V4/V5
+		   is past the masks. */
+		if (lseek(fd, 14L + 40L, 0) < 0)
+			die("cannot seek");
 		if (read(fd, m, 12) != 12)
 			die("truncated masks");
 		mask_r = rd32(m);

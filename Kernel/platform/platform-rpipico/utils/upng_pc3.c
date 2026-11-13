@@ -27,6 +27,7 @@
  */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -37,9 +38,14 @@
 
 #define PSRAMIOC_ALLOC	0x000A
 
+/* pico_ioctl.h's layout, two 32-bit words.  It was two unsigned longs,
+ * which is the same thing on the board and 16 bytes on a 64-bit PC:
+ * pc3host wrote the base into the top of len, the arena pointer was
+ * never set, and every LOAD PNG there failed as "truncated file" (the
+ * first read into it, EFAULT).  The same trap as loadpng's colours. */
 struct psram_req {
-	unsigned long len;
-	unsigned long base;
+	uint32_t len;
+	uint32_t base;
 };
 
 /* Generous rather than tight, as mmbc's is: the PSRAM heap is ~7.8M,
@@ -64,7 +70,7 @@ static void upa_init(void)
 		exit(1);
 	}
 	close(fd);
-	upa_cur = (unsigned char *)rq.base;
+	upa_cur = (unsigned char *)(uintptr_t)rq.base;
 	upa_end = upa_cur + UPNG_ARENA_LEN;
 }
 

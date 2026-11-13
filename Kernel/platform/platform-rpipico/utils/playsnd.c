@@ -272,16 +272,19 @@ static void do_msg(struct mm_playmsg *m)
 
 			inc = (long)(t / ((long long)RATE * 1000));
 		}
+		/* White noise: "freq" is how many samples each level
+		 * holds, floor(f), the reference's PhaseM = f_in.  It goes
+		 * in phinc's integer part, which the renderer reads back
+		 * as the dwell.  A dwell under way runs out first, as the
+		 * reference's static counter does.  sound.c the same. */
+		if (m->p1 == MM_SND_WNOISE)
+			inc = (long)(m->p2 / 1000) << 12;
 		for (i = 0; i < 2; i++) {
 			struct voice *v = &vc[voice][i];
 
 			if (!(m->b & (1 << i)))
 				continue;
-			/* WNOISE reuses phinc as the dwell length in
-			 * samples, exactly as the reference does */
 			v->phinc = inc;
-			if (m->p1 == MM_SND_WNOISE)
-				v->dwell = 0;
 			v->type = (unsigned char)m->p1;
 			v->vol_target = (int)(m->p3 * 41 / 25);
 			if (v->type == MM_SND_OFF)

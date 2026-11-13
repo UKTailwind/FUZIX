@@ -194,14 +194,57 @@ static unsigned char index4(int r, int g, int b)
 }
 
 /*
+ * Row y of the decoded picture as RGBA8888.  upng leaves RGBA and
+ * indexed PNGs as RGBA; 8-bit RGB, grey and grey with alpha (colour
+ * types 2, 0 and 4, which PicoMite's SAVE PNG writes) stay as decoded
+ * and are expanded here a row at a time, as PicoMite's emit_row does
+ * (3687a42).  A whole-picture RGBA copy would not fit the arena beside
+ * a 640x480 raster.  A tRNS colour key on RGB or grey is ignored
+ * (opaque), as it is there.
+ */
+static upng_format pxfmt;
+static unsigned char *rgbarow;
+
+static const unsigned char *png_row(const unsigned char *px, int w, int y)
+{
+	const unsigned char *s;
+	unsigned char *d = rgbarow;
+	int x;
+
+	switch (pxfmt) {
+	case UPNG_RGB8:
+		s = px + (unsigned long)y * w * 3;
+		for (x = 0; x < w; x++, s += 3, d += 4) {
+			d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 255;
+		}
+		return rgbarow;
+	case UPNG_LUMINANCE8:
+		s = px + (unsigned long)y * w;
+		for (x = 0; x < w; x++, s++, d += 4) {
+			d[0] = d[1] = d[2] = s[0]; d[3] = 255;
+		}
+		return rgbarow;
+	case UPNG_LUMINANCE_ALPHA8:
+		s = px + (unsigned long)y * w * 2;
+		for (x = 0; x < w; x++, s += 2, d += 4) {
+			d[0] = d[1] = d[2] = s[0]; d[3] = s[1];
+		}
+		return rgbarow;
+	default:
+		return px + (unsigned long)y * w * 4;
+	}
+}
+
+/*
  * Sprite mode: the picture down stdout, for the runtime to read into a
  * sprite buffer.  Nothing is drawn and the display is never opened -
  * this runs happily with no graphics mode set.
  */
-static int sprite_out(const unsigned char *px, int w, int h,
+static int sprite_out(const unsigned char *pic, int w, int h,
 		      int transparent, int remap, int cutoff)
 {
 	unsigned char hdr[4], *row;
+	const unsigned char *px;
 	int x, y;
 
 	hdr[0] = (unsigned char)(w & 0xFF);
@@ -213,6 +256,7 @@ static int sprite_out(const unsigned char *px, int w, int h,
 
 	row = (unsigned char *)GetMemory((unsigned long)w);
 	for (y = 0; y < h; y++) {
+		px = png_row(pic, w, y);
 		for (x = 0; x < w; x++, px += 4) {
 			unsigned char c;
 
@@ -333,19 +377,23 @@ int main(int argc, char **argv)
 		die("Image too large");
 	if (upng_decode(upng) != UPNG_EOK)
 		die("the PNG could not be decoded");
-	if (upng_get_format(upng) != UPNG_RGBA8)
-		die("Invalid format, must be RGBA8888 or indexed PNG");
+	pxfmt = upng_get_format(upng);
+	if (pxfmt != UPNG_RGBA8 && pxfmt != UPNG_RGB8
+	    && pxfmt != UPNG_LUMINANCE8 && pxfmt != UPNG_LUMINANCE_ALPHA8)
+		die("Invalid format, must be 8-bit RGB, RGBA, grey or "
+		    "indexed PNG");
+	if (pxfmt != UPNG_RGBA8)
+		rgbarow = (unsigned char *)GetMemory((unsigned long)w * 4);
 
-	px = upng_get_buffer(upng);
 	if (sprite)
-		return sprite_out(px, w, h, transparent, remap, cutoff);
+		return sprite_out(upng_get_buffer(upng), w, h, transparent,
+				  remap, cutoff);
 	for (y = 0; y < h; y++) {
 		int sy = yorg + y;
 
-		if (sy < 0 || sy >= gi.height) {
-			px += (unsigned long)w * 4;
+		if (sy < 0 || sy >= gi.height)
 			continue;
-		}
+		px = png_row(upng_get_buffer(upng), w, y);
 		for (x = 0; x < w; x++, px += 4) {
 			int sx = xorg + x;
 

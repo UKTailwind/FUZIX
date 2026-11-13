@@ -1784,8 +1784,9 @@ LOAD IMAGE "shot"                          ' .bmp is added for you
 A name with **no extension** gets `.bmp`, as MMBasic's
 `AppendDefaultExtension` does, so a program written for a PicoMite
 needs no edit. A dot inside a directory name does not count — only the
-last part of the path is looked at. The same rule serves `SPRITE
-LOADBMP` and `BLIT LOAD`.
+last part of the path is looked at. The same rule serves `SAVE IMAGE`
+(`SAVE IMAGE "pic"` writes `pic.bmp`, which `LOAD IMAGE "pic"` reads),
+`SPRITE LOADBMP` and `BLIT LOAD`.
 
 `LOAD IMAGE` takes MMBasic's full syntax including the dither mode and
 the source rectangle:
@@ -1795,7 +1796,8 @@ LOAD IMAGE fname$ [,x] [,y] [,mode] [,ximage] [,yimage] [,wimage] [,himage]
 ```
 
 The decoder is MMBasic's, so it reads 1, 4, 8, 16, 24 and 32-bit BMPs,
-`BI_BITFIELDS`, and RLE4/RLE8 compression. Dithering is *optional*, as
+`BI_BITFIELDS` (in the V4 and V5 headers too, which is how GIMP writes
+RGB565), and RLE4/RLE8 compression. Dithering is *optional*, as
 in MMBasic — omit the mode and the image is mapped without it.
 
 `LOAD BMP` is accepted as a synonym for `LOAD IMAGE`, as in the
@@ -1827,7 +1829,12 @@ still resident in memory.
 LOAD PNG fname$ [,x] [,y] [,transparent] [,cutoff]
 ```
 
-MMBasic's own upng, as the `loadpng` program.
+MMBasic's own upng, as the `loadpng` program. It reads 8-bit RGBA,
+RGB, grey and grey with alpha, and indexed PNGs at any depth: what
+PicoMite's `SAVE PNG` writes, and most other things. 16-bit channels,
+1, 2 and 4-bit grey, and interlaced files are refused, as they are on a
+PicoMite. A `tRNS` colour key on an RGB or grey picture is ignored, so
+the picture is opaque.
 
 **`transparent` decides what happens to see-through pixels, and its
 default will surprise you the first time.** As in the reference it
@@ -1992,7 +1999,9 @@ it. Four voices, each with an independent left
 and right side; channels are `L`, `R`, `B` or `M`, and the types are
 `S`ine, `Q` (square), `T`riangle, `W` (sawtooth), `P`eriodic noise,
 `N` (white noise) and `O`ff. Frequency is 1 Hz to 20 kHz, volume 0 to
-25. `PLAY TONE` takes left and right frequencies and an optional
+25. For `N` the "frequency" is how many samples each random level
+holds, as in MMBasic: 100 holds each level for 100 samples at 44.1 kHz,
+so a larger number gives a lower rumble. `PLAY TONE` takes left and right frequencies and an optional
 duration in milliseconds, rounded down to whole cycles as MMBasic
 rounds it; no duration means until further notice. The square and
 sawtooth are band-limited (polyBLEP), so they hold a pure pitch at
@@ -2028,7 +2037,8 @@ tracker, the whole file staged in PSRAM. Like MP3 it runs as its own
 program and does not wait. `PLAY MODSAMPLE n, ch [, vol]` asks the
 *running* player to mix one of the module's own samples over the
 music - MMBasic's game sound-effect trick - with nothing loaded and
-nothing interrupted. With a completion interrupt the module plays
+nothing interrupted. `vol` is 0 to 64, default 64; 0 and 1 are both
+the quietest, as on a PicoMite. With a completion interrupt the module plays
 once; otherwise it loops until `PLAY STOP`.
 
 ## Pins: `SETPIN` and `PIN`
@@ -2662,7 +2672,7 @@ the sub-keyword decides the type, not the `$`.
 |---|---|
 | `DEVICE` | `"Fuzix"` |
 | `PLATFORM` | `"PC3"` or `"PC2"` |
-| `VERSION` | as `MM.VER`: the PicoMite version the translator follows, 7.000055 for 7.00.00RC5 (the Fuzix release is in the boot banner) |
+| `VERSION` | as `MM.VER`: the PicoMite version the translator follows, 7.000059 for 7.00.00RC9 (the Fuzix release is in the boot banner) |
 | `PATH` | the directory the running program was started from, ending in `/` |
 | `CURRENT` | the program's own file name |
 | `DRIVE` | always `"A:"` — see below |

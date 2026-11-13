@@ -212,8 +212,10 @@ void pc3_net_poll_c(void)
  *	default of 2 is tuned for ~125MHz; at 375 it runs the CYW43439
  *	well out of spec, and the symptom is "hdr mismatch" or an ioctl
  *	timeout rather than anything that looks like a clock problem.  This is
- *	MMBasic's algorithm, which the PC3's MicroPython also carries:
- *	aim for at most 100MHz, minimum divider 2.
+ *	MMBasic's algorithm (d81f472): the gSPI clock, clk_sys / (2 * div),
+ *	at most 40MHz - a radio failed init at 50 - so the divider is
+ *	clk_sys over 80MHz rounded up, minimum 2.  At 378MHz that is 5,
+ *	37.8MHz; it was clk_sys over 100MHz, 4, which is 47.25MHz.
  *
  *	It must be set BEFORE cyw43_arch_init, which is where
  *	cyw43_spi_init reads it.  This port never changes clk_sys after
@@ -224,7 +226,7 @@ void pc3_net_poll_c(void)
 static void net_set_pio_clkdiv(void)
 {
     uint32_t khz = clock_get_hz(clk_sys) / 1000;
-    uint32_t div = (khz + 99999) / 100000;
+    uint32_t div = (khz + 79999) / 80000;
 
     if (div < 2)
         div = 2;

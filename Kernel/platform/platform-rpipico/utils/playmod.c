@@ -222,7 +222,10 @@ int main(int argc, char *argv[])
 					hxcmod_playsoundeffect(&modctx,
 					    (unsigned short)(m.a - 1),
 					    (unsigned short)(m.b - 1),
-					    (unsigned char)(m.p1 - 1),
+					    /* 0-64 to hxcmod's 0-63, as
+					       the reference: 0 and 1 are
+					       both 0 */
+					    (unsigned char)(m.p1 ? m.p1 - 1 : 0),
 					    3579545 / 16000);
 				else if (m.op == MM_PLAY_VOLUME) {
 					int v = m.p1 > m.p2 ? m.p1 : m.p2;

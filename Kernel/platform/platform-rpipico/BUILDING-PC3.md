@@ -257,7 +257,7 @@ There was a third until v0.30: `MM_RELEASE` in
 `Applications/mmb2c/mmb_runtime.h`, what `MM.VER` answered. It was
 once three releases stale, which is what relcheck was written for.
 Since 24 October 2026 `MM.VER` answers the PicoMite version the
-translator follows (`MM_VERSION` there, `7.000055` for 7.00.00RC5),
+translator follows (`MM_VERSION` there, `7.000059` for 7.00.00RC9),
 because PicoMite programs compare it with a firmware version. So the
 boot banner is the only place the running kernel's release shows, and
 a board check proves the release from the banner, not from `MM.VER`.
