@@ -24,7 +24,7 @@
  * GP29 (clock).  On a Pico Computer 2 - the same kernel image, see
  * board.c - GP29 is the SD card's chip select and GP25 is the LED, so
  * bringing this up there would clock the card's chip select at MHz
- * while the filesystem is mounted.  Hence board_is_pc2(), checked at
+ * while the filesystem is mounted.  Hence board_has_radio(), checked at
  * NETIOC_UP rather than at boot: device_init() runs board_detect()
  * long after plt_init, so there is no honest answer to give at boot.
  *
@@ -67,7 +67,7 @@
 #include "pico_ioctl.h"
 
 /* The two things this file needs from the kernel side of the line. */
-extern int board_is_pc2(void);
+#include "board.h"
 extern void kprintf(const char *fmt, ...);
 /* Declared here rather than included: net_lwip.h is a kernel header and
    this file cannot have one (the SDK's ssize_t/time_t collide with
@@ -250,9 +250,10 @@ int pc3_net_up(const char *ssid, const char *key, unsigned auth)
 
     if (auth > 3)
         return PC3_NET_EINVAL;
-    if (board_is_pc2()) {
-        /* Not "no radio fitted" pedantry: those pins are the SD card
-           on that machine.  See the header comment. */
+    if (!board_has_radio()) {
+        /* Not "no radio fitted" pedantry: on the PC2 those pins are
+           the SD card, and the Olimex RP2350pc has no CYW43 at all.
+           See the header comment. */
         return PC3_NET_ENODEV;
     }
 
@@ -307,7 +308,7 @@ int pc3_net_status(struct net_status *st)
     struct netif *nif;
 
     memset(st, 0, sizeof(*st));
-    st->present = board_is_pc2() ? 0 : 1;
+    st->present = board_has_radio();
     st->ready = net_ready;
     if (!net_ready)
         return 0;

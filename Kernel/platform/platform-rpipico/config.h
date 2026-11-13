@@ -44,10 +44,13 @@
  * modes run HSTX at clk_sys (full-rate DDR): pixel clock 75 MHz =
  * VESA 1024x768 at 70.07 Hz on the 1328x806 frame.  The text console
  * runs clk_hstx = clk_sys/3: 25 MHz pixel = 640x480 at 59.5 Hz.
- * Flash QMI 62.5 MHz (div 6), PSRAM 125 MHz (div 3), UART/SD divisors
- * all derived at runtime from the actual clk_sys. */
+ * Flash QMI 63 MHz (div 6), PSRAM 94.5 MHz (div 4: the APS6404's
+ * limit is 109 MHz - psram.c's chip table), UART/SD divisors all
+ * derived at runtime from the actual clk_sys. */
 #define PC3_SYS_CLOCK_KHZ 378000
 #define PC3_FLASH_MAX_HZ (63 * 1000 * 1000)
+/* QMI CS1 for the PSRAM: GP47 on the Pico Computer 2 and 3, GP8 on the
+ * Olimex RP2350pc - board_psram_pin(), from board_early_detect(). */
 #define PC3_PSRAM_CS_PIN 47
 
 /* DS3231 RTC on I2C0 (GP20/21): time loads at boot via setdate in rc;

@@ -3122,12 +3122,17 @@ static char *mm_dev_name(int n)
 }
 
 /* MM.INFO(PLATFORM) - "PC2" or "PC3", the number the boot banner prints
-   and the one PICOIOC_BOARD answers with. */
+   and the one PICOIOC_BOARD answers with.  4 is the Olimex RP2350pc, and
+   its name is PicoMite's for it (OPTION RESET RP2350PC). */
 char *mm_platform(void)
 {
-    char t[8];
+    char t[10];
     int n = mm_board_no();
 
+    if (n == 4) {
+        mm_ssetc(mm_devbuf, "RP2350PC");
+        return mm_devbuf;
+    }
     t[0] = 'P'; t[1] = 'C'; t[2] = (char)('0' + (n < 2 || n > 9 ? 3 : n));
     t[3] = 0;
     mm_ssetc(mm_devbuf, t);
@@ -6215,7 +6220,7 @@ static int mm_have_fastclk(void)
         mm_fastclk = 0;
         if (mm_gfx_fd >= 0 &&
             mm_sys_ioctl(mm_gfx_fd, MM_PICOIOC_BOARD, &n) >= 0 &&
-            (n == 2 || n == 3))
+            n >= 2)             /* any board: the PC2, PC3 or Olimex */
             mm_fastclk = 1;
     }
     return mm_fastclk;

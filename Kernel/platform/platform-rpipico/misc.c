@@ -453,9 +453,10 @@ int plt_dev_ioctl(uarg_t request, char *data)
     }
     if (request == PICOIOC_BOARD)
     {
-        /* 2 or 3, the number in the name the banner prints. */
-        extern int board_is_pc2(void);
-        int n = board_is_pc2() ? 2 : 3;
+        /* 2 or 3, the number in the name the banner prints; 4 for the
+           Olimex RP2350pc (board.h). */
+        extern int board_kind(void);
+        int n = board_kind();
 
         if (uput(&n, data, sizeof(n)))
             return -1;

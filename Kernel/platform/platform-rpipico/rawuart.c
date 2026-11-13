@@ -9,6 +9,7 @@
 #include <hardware/uart.h>
 #include <hardware/irq.h>
 #include "rawuart.h"
+#include "board.h"
 
 #if NUM_DEV_TTY_UART > 2
 #error "Only two UARTs are supported"
@@ -36,6 +37,25 @@
 #ifndef DEV_UART_1_INSTANCE
 #define DEV_UART_1_INSTANCE 1
 #endif
+
+/*
+ *	The instance and pins behind each logical uart, as a table rather
+ *	than the constants above, because the board decides.  On the Pico
+ *	Computer 2 and 3 /dev/tty1 is UART1 on GP8/GP9 and /dev/tty2 UART0
+ *	on GP0/GP1, from config.h.  On the Olimex RP2350pc GP8 is the
+ *	PSRAM's chip select and GP9 the SD card's, so its console is UART0
+ *	on GP0/GP1 (UEXT1) - PicoMite's choice - and the second port has
+ *	no pins at all: it exists, and talks to nothing, rather than taking
+ *	two pins the machine is running on.  Settled by rawuart_early_init,
+ *	after board_early_detect and before the first byte goes out.
+ */
+static uint8_t uart_hw[2] = { DEV_UART_0_INSTANCE, DEV_UART_1_INSTANCE };
+static int8_t uart_pins[2][4] = {
+	{ DEV_UART_0_TX_PIN, DEV_UART_0_RX_PIN,
+	  DEV_UART_0_CTS_PIN, DEV_UART_0_RTS_PIN },
+	{ DEV_UART_1_TX_PIN, DEV_UART_1_RX_PIN,
+	  DEV_UART_1_CTS_PIN, DEV_UART_1_RTS_PIN },
+};
 
 static uint clocks[] = {
     0,      /* B0 */
@@ -164,9 +184,7 @@ static void rxring_take(uart_inst_t *uart, unsigned which)
  */
 static void rawuart_rx_irq(unsigned which)
 {
-	uart_inst_t *uart = uart_get_instance(which == 0 ?
-					      DEV_UART_0_INSTANCE :
-					      DEV_UART_1_INSTANCE);
+	uart_inst_t *uart = uart_get_instance(uart_hw[which]);
 
 	while (uart_is_readable(uart))
 		rxring_take(uart, which);
@@ -193,8 +211,8 @@ static void rawuart_rx_irq(unsigned which)
  *	for one vector is a bug waiting to happen; display.c and sound.c
  *	already do it this way.
  */
-#define LOGICAL_OF_HW0	(DEV_UART_0_INSTANCE == 0 ? 0 : 1)
-#define LOGICAL_OF_HW1	(DEV_UART_0_INSTANCE == 1 ? 0 : 1)
+#define LOGICAL_OF_HW0	(uart_hw[0] == 0 ? 0 : 1)
+#define LOGICAL_OF_HW1	(uart_hw[0] == 1 ? 0 : 1)
 
 static void rawuart_irq_hw0(void) { rawuart_rx_irq(LOGICAL_OF_HW0); }
 static void rawuart_irq_hw1(void) { rawuart_rx_irq(LOGICAL_OF_HW1); }
@@ -262,8 +280,11 @@ static uart_inst_t * rawuart_init_one(int num, int tx, int rx, int cts, int rts)
     if (uart_get_hw(uart)->cr & UART_UARTCR_UARTEN_BITS)
         uart_tx_wait_blocking(uart);
     uart_init(uart, PICO_DEFAULT_UART_BAUD_RATE);
-    gpio_set_function(tx, GPIO_FUNC_UART);
-    gpio_set_function(rx, GPIO_FUNC_UART);
+    if (tx >= 0)        /* a pinless port: the Olimex's second uart */
+    {
+        gpio_set_function(tx, GPIO_FUNC_UART);
+        gpio_set_function(rx, GPIO_FUNC_UART);
+    }
     uart_set_translate_crlf(uart, false);
     uart_set_fifo_enabled(uart, true);
     if (cts > 0)
@@ -286,22 +307,9 @@ static uart_inst_t * rawuart_init(uint_fast8_t uart)
 {
     uart_inst_t *u;
 
-    if (uart == 0)
-    {
-        u = rawuart_init_one(DEV_UART_0_INSTANCE,
-                             DEV_UART_0_TX_PIN,
-                             DEV_UART_0_RX_PIN,
-                             DEV_UART_0_CTS_PIN,
-                             DEV_UART_0_RTS_PIN);
-    }
-    else
-    {
-        u = rawuart_init_one(DEV_UART_1_INSTANCE,
-                             DEV_UART_1_TX_PIN,
-                             DEV_UART_1_RX_PIN,
-                             DEV_UART_1_CTS_PIN,
-                             DEV_UART_1_RTS_PIN);
-    }
+    u = rawuart_init_one(uart_hw[uart],
+                         uart_pins[uart][0], uart_pins[uart][1],
+                         uart_pins[uart][2], uart_pins[uart][3]);
     rxring[uart].head = rxring[uart].tail = 0;
     rawuart_inited[uart] = 1;
     /* If the kernel is already up (this is the second port being opened
@@ -355,6 +363,17 @@ static void rawuart_deinit(uart_inst_t * uart){
 
 void rawuart_early_init(void)
 {
+    if (board_is_olimex())
+    {
+        static const int8_t none[4] = { -1, -1, -1, -1 };
+
+        uart_hw[0] = 0;                 /* the console: UART0, GP0/GP1 */
+        uart_pins[0][0] = 0;
+        uart_pins[0][1] = 1;
+        uart_pins[0][2] = uart_pins[0][3] = -1;
+        uart_hw[1] = 1;                 /* and UART1 with nowhere to go */
+        memcpy(uart_pins[1], none, sizeof(none));
+    }
     // init first uart for kprint
     rawuart_init(0);
 }
@@ -362,7 +381,7 @@ void rawuart_early_init(void)
 /* devn is 1-based; map the logical uart to its hardware instance */
 static inline uart_inst_t *rawuart_instance(uint_fast8_t num)
 {
-    return uart_get_instance(num == 0 ? DEV_UART_0_INSTANCE : DEV_UART_1_INSTANCE);
+    return uart_get_instance(uart_hw[num]);
 }
 
 /*

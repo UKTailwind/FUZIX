@@ -118,7 +118,7 @@ static int status(int verbose)
         return 1;
     }
     if (!st.present) {
-        printf("no radio (Pico Computer 2)\n");
+        printf("no radio on this board\n");
         return 1;
     }
     if (!st.ready) {

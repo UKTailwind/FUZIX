@@ -43,6 +43,7 @@
 #include <printf.h>
 #include "picosdk.h"
 #include "config.h"
+#include "board.h"
 #include "display.h"
 #include "display_priv.h"
 #include "psram.h"                      /* PSRAM_BASE, psram_size */
@@ -95,6 +96,23 @@ static struct vtiming *tim = &tim_vga;
 #define PC3_HDMI_D0  3
 #define PC3_HDMI_D1  5
 #define PC3_HDMI_D2  7
+
+/* The Olimex RP2350pc's, which is PicoMite's default order (OPTION HDMI
+ * PINS 2,0,6,4): positive on the given EVEN bit, negative on bit+1. */
+#define OLX_HDMI_CLK 2
+#define OLX_HDMI_D0  0
+#define OLX_HDMI_D1  6
+#define OLX_HDMI_D2  4
+
+/* One pair: the given bit carries sel, its neighbour the inverse - the
+ * lower neighbour for an odd bit, the upper for an even one (PicoMite's
+ * HDMI.c does the same). */
+static void __not_in_flash_func(hstx_pair)(int bit, uint32_t sel)
+{
+    hstx_ctrl_hw->bit[bit] = sel;
+    hstx_ctrl_hw->bit[(bit & 1) ? bit - 1 : bit + 1] =
+        sel | HSTX_CTRL_BIT0_INV_BITS;
+}
 
 /* --- Video memory -------------------------------------------------------- */
 /* The pool serves the console (38400 used) and the BBC modes (up to
@@ -585,6 +603,10 @@ static void __not_in_flash_func(disp_fill_loop)(void)
 }
 
 /* --- core1 entry: clk_hstx, HSTX, DMA, IRQ, then the fill loop ----------- */
+/* Set on core0 before core1 is launched: the lane order is chosen in
+   disp_core1_entry, which runs from RAM and so asks no flash code. */
+static uint8_t disp_olimex;
+
 static void __not_in_flash_func(disp_core1_entry)(void)
 {
     uint32_t hstx_in = clock_get_hz(clk_sys);
@@ -640,17 +662,18 @@ static void __not_in_flash_func(disp_core1_entry)(void)
         2u << HSTX_CTRL_CSR_SHIFT_LSB |
         HSTX_CTRL_CSR_EN_BITS;
 
-    /* Clock lane pair (base bit + inverted neighbour). */
-    hstx_ctrl_hw->bit[PC3_HDMI_CLK] = HSTX_CTRL_BIT0_CLK_BITS;
-    hstx_ctrl_hw->bit[PC3_HDMI_CLK - 1] = HSTX_CTRL_BIT0_CLK_BITS | HSTX_CTRL_BIT0_INV_BITS;
+    /* Clock lane pair (base bit + inverted neighbour), then the data. */
+    static const int pc3_bits[4] = {
+        PC3_HDMI_CLK, PC3_HDMI_D0, PC3_HDMI_D1, PC3_HDMI_D2 };
+    static const int olx_bits[4] = {
+        OLX_HDMI_CLK, OLX_HDMI_D0, OLX_HDMI_D1, OLX_HDMI_D2 };
+    const int *bits = disp_olimex ? olx_bits : pc3_bits;
 
-    static int lane_to_bit[3] = { PC3_HDMI_D0, PC3_HDMI_D1, PC3_HDMI_D2 };
+    hstx_pair(bits[0], HSTX_CTRL_BIT0_CLK_BITS);
     for (uint lane = 0; lane < 3; ++lane) {
-        int bit = lane_to_bit[lane];
         uint32_t sel = (lane * 10) << HSTX_CTRL_BIT0_SEL_P_LSB |
             (lane * 10 + 1) << HSTX_CTRL_BIT0_SEL_N_LSB;
-        hstx_ctrl_hw->bit[bit] = sel;
-        hstx_ctrl_hw->bit[bit - 1] = sel | HSTX_CTRL_BIT0_INV_BITS;
+        hstx_pair(bits[lane + 1], sel);
     }
 
     for (int i = 12; i <= 19; ++i) {
@@ -723,6 +746,7 @@ static void disp_scanout_start(void)
     dma_pong = false;
     vactive_cmdlist_posted = false;
     disp_core1_stack[0] = STACK_SENTINEL;
+    disp_olimex = board_is_olimex();
     multicore_launch_core1_with_stack(disp_core1_entry,
         disp_core1_stack, sizeof(disp_core1_stack));
 }

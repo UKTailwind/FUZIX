@@ -11,6 +11,12 @@
  * the output stage worth building this way rather than MMBasic's, and
  * what lets a PC play the same sound.c through a sound card.
  *
+ * The Olimex RP2350pc has no DAC: its output is PWM on GP26 (left) and
+ * GP27 (right), slice 5, into a PAM8003 that board.c switched on.  The
+ * same two ping-pong buffers feed it; the IRQ turns each filled block
+ * into PWM levels, and a DMA pacing timer, not the PWM, keeps the
+ * sample rate, so the carrier stays at ~185 kHz whatever the rate.
+ *
  * Also here, because they are the kernel's and not the synth's: the
  * copy from a process's memory into the ring, the process table scan
  * that hands a dead owner's stream back, and the sleep behind
@@ -27,7 +33,9 @@
 
 #include <hardware/pio.h>
 #include <hardware/dma.h>
+#include <hardware/pwm.h>
 #include <hardware/clocks.h>
+#include "board.h"
 
 #define SND_BCLK  10            /* LRCLK is BCLK+1 = GP11 */
 #define SND_DATA  22
@@ -38,10 +46,71 @@ static uint16_t i2s_prog[8] = {
     59438, 24577, 2113, 28673, 63534, 28673, 6213, 24577
 };
 
-static int16_t sndbuf[2][SND_NBUF * 2];
+/* A block is SND_NBUF stereo frames: two samples as sound.c fills it,
+   or - on the Olimex, converted in place - one PWM compare word, which
+   is the same four bytes.  The kernel's RAM has no room for a second
+   pair of buffers. */
+union sndblk {
+    int16_t s[SND_NBUF * 2];
+    uint32_t w[SND_NBUF];
+};
+
+static union sndblk sndbuf[2];
 static int dmach_a = -1, dmach_b = -1;
 static PIO snd_pio;
 static uint snd_sm;
+
+/* --- the Olimex's PWM output ---------------------------------------------- */
+
+#define PWM_L     26            /* slice 5 A */
+#define PWM_R     27            /* slice 5 B */
+#define PWM_WRAP  2047          /* 11 bits: 378 MHz / 2048 = 185 kHz carrier */
+
+static uint8_t snd_pwm;         /* nonzero on the Olimex */
+static uint pwm_slice;
+static int pwm_timer = -1;      /* the DMA pacing timer */
+
+/* A block of signed stereo frames as PWM levels, 0..PWM_WRAP+1 with
+   silence at the middle, in place.  The frame is left then right, which
+   is A in the low half of the compare register and B in the high. */
+static void __not_in_flash_func(pwm_convert)(union sndblk *b)
+{
+    for (int i = 0; i < SND_NBUF; i++) {
+        uint32_t l = ((uint32_t)(b->s[2 * i] + 32768) * (PWM_WRAP + 1)) >> 16;
+        uint32_t r = ((uint32_t)(b->s[2 * i + 1] + 32768) * (PWM_WRAP + 1)) >> 16;
+        b->w[i] = r << 16 | l;
+    }
+}
+
+/* The pacing timer runs at clk_sys * X / Y, both 16 bits.  Take the
+   best X/Y for the rate: at 378 MHz 44100 is 7/60000 exactly, 22050 is
+   1/17143 (25 ppm out), 48000 is 8/63000 exactly. */
+static void pwm_rate(uint32_t rate)
+{
+    uint64_t sys = clock_get_hz(clk_sys);
+    uint32_t best_x = 1, best_y = 65535;
+    uint64_t best_err = ~0ull;
+
+    for (uint32_t x = 1; x <= 65535; x++) {
+        uint64_t y = (sys * x + rate / 2) / rate;
+        uint64_t err;
+
+        if (y > 65535)
+            break;
+        if (y == 0)
+            continue;
+        err = (sys * x * 1000) / y;
+        err = err > (uint64_t)rate * 1000 ? err - (uint64_t)rate * 1000
+                                         : (uint64_t)rate * 1000 - err;
+        if (err < best_err) {
+            best_err = err;
+            best_x = x;
+            best_y = (uint32_t)y;
+        }
+    }
+    dma_timer_set_fraction((uint)pwm_timer, (uint16_t)best_x,
+                           (uint16_t)best_y);
+}
 
 /* Set the state machine clock for a sample rate.  Two samples a frame,
  * sixteen bits each, two PIO instructions a bit = 64 clocks a frame.
@@ -50,6 +119,10 @@ static uint snd_sm;
  * would not link, let alone run. */
 void snd_hw_rate(uint32_t rate)
 {
+    if (snd_pwm) {
+        pwm_rate(rate);
+        return;
+    }
     uint32_t sys = clock_get_hz(clk_sys);
     uint32_t div256 = (uint32_t)(((uint64_t)sys * 256) / (rate * 64));
 
@@ -143,26 +216,85 @@ int sound_pcm_wait(uint32_t mark, uint16_t owner)
 
 /* --- DMA plumbing --------------------------------------------------------- */
 
+/* One handler for both outputs: the PWM's blocks are the same buffers,
+   converted in place once sound.c has filled them. */
 static void __not_in_flash_func(snd_dma_irq)(void)
 {
     if (dma_hw->ints0 & (1u << dmach_a)) {
         dma_hw->ints0 = 1u << dmach_a;
-        dma_channel_set_read_addr(dmach_a, sndbuf[0], false);
+        dma_channel_set_read_addr(dmach_a, sndbuf[0].w, false);
         dma_channel_set_trans_count(dmach_a, SND_NBUF, false);
-        sound_fill_block(sndbuf[0]);
+        sound_fill_block(sndbuf[0].s);
+        if (snd_pwm)
+            pwm_convert(&sndbuf[0]);
     }
     if (dma_hw->ints0 & (1u << dmach_b)) {
         dma_hw->ints0 = 1u << dmach_b;
-        dma_channel_set_read_addr(dmach_b, sndbuf[1], false);
+        dma_channel_set_read_addr(dmach_b, sndbuf[1].w, false);
         dma_channel_set_trans_count(dmach_b, SND_NBUF, false);
-        sound_fill_block(sndbuf[1]);
+        sound_fill_block(sndbuf[1].s);
+        if (snd_pwm)
+            pwm_convert(&sndbuf[1]);
     }
+}
+
+static void sound_init_pwm(void)
+{
+    pwm_config c = pwm_get_default_config();
+    volatile void *cc;
+
+    snd_pwm = 1;
+    pwm_slice = pwm_gpio_to_slice_num(PWM_L);
+    pwm_config_set_wrap(&c, PWM_WRAP);
+    pwm_init(pwm_slice, &c, false);
+    pwm_set_both_levels(pwm_slice, (PWM_WRAP + 1) / 2, (PWM_WRAP + 1) / 2);
+    gpio_set_function(PWM_L, GPIO_FUNC_PWM);
+    gpio_set_function(PWM_R, GPIO_FUNC_PWM);
+    pwm_set_enabled(pwm_slice, true);
+
+    /* silence, as levels, in both buffers to start */
+    memset(sndbuf, 0, sizeof(sndbuf));
+    pwm_convert(&sndbuf[0]);
+    pwm_convert(&sndbuf[1]);
+
+    pwm_timer = dma_claim_unused_timer(true);
+    pwm_rate(SND_RATE);
+    cc = &pwm_hw->slice[pwm_slice].cc;
+
+    dmach_a = dma_claim_unused_channel(true);
+    dmach_b = dma_claim_unused_channel(true);
+
+    dma_channel_config dc = dma_channel_get_default_config(dmach_a);
+    channel_config_set_transfer_data_size(&dc, DMA_SIZE_32);
+    channel_config_set_dreq(&dc, dma_get_timer_dreq((uint)pwm_timer));
+    channel_config_set_chain_to(&dc, dmach_b);
+    dma_channel_configure(dmach_a, &dc, cc, sndbuf[0].w, SND_NBUF, false);
+
+    dc = dma_channel_get_default_config(dmach_b);
+    channel_config_set_transfer_data_size(&dc, DMA_SIZE_32);
+    channel_config_set_dreq(&dc, dma_get_timer_dreq((uint)pwm_timer));
+    channel_config_set_chain_to(&dc, dmach_a);
+    dma_channel_configure(dmach_b, &dc, cc, sndbuf[1].w, SND_NBUF, false);
+
+    dma_hw->ints0 = (1u << dmach_a) | (1u << dmach_b);
+    dma_hw->inte0 |= (1u << dmach_a) | (1u << dmach_b);
+    irq_set_exclusive_handler(DMA_IRQ_0, snd_dma_irq);
+    irq_set_enabled(DMA_IRQ_0, true);   /* core0 */
+
+    dma_channel_start(dmach_a);
+
+    kputs("sound: BBC 4-channel synth on PWM (GP26/GP27)\n");
 }
 
 void sound_init(void)
 {
     pio_program_t prog;
     uint off;
+
+    if (board_is_olimex()) {
+        sound_init_pwm();
+        return;
+    }
 
     memset(&prog, 0, sizeof(prog));
     prog.instructions = i2s_prog;
@@ -206,14 +338,14 @@ void sound_init(void)
     channel_config_set_dreq(&dc, pio_get_dreq(snd_pio, snd_sm, true));
     channel_config_set_chain_to(&dc, dmach_b);
     dma_channel_configure(dmach_a, &dc, &snd_pio->txf[snd_sm],
-        sndbuf[0], SND_NBUF, false);
+        sndbuf[0].w, SND_NBUF, false);
 
     dc = dma_channel_get_default_config(dmach_b);
     channel_config_set_transfer_data_size(&dc, DMA_SIZE_32);
     channel_config_set_dreq(&dc, pio_get_dreq(snd_pio, snd_sm, true));
     channel_config_set_chain_to(&dc, dmach_a);
     dma_channel_configure(dmach_b, &dc, &snd_pio->txf[snd_sm],
-        sndbuf[1], SND_NBUF, false);
+        sndbuf[1].w, SND_NBUF, false);
 
     dma_hw->ints0 = (1u << dmach_a) | (1u << dmach_b);
     dma_hw->inte0 |= (1u << dmach_a) | (1u << dmach_b);

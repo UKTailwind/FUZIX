@@ -133,3 +133,7 @@
 *pico_mbedtls*(.rodata*)
 
 *pico_rand*(.rodata*)
+
+/* The PSRAM chip table: read once at boot, by psram_init, before the
+ * QMI goes into direct mode. */
+*(.rodata.psram_chips*)

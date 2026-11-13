@@ -9,6 +9,7 @@
 #include "globals.h"
 #include "printf.h"
 #include "psram.h"
+#include "board.h"
 
 uint32_t psram_size;
 
@@ -324,7 +325,12 @@ int main(void)
      * and fixing the divisor second - which is what this was - hangs
      * the machine dead the moment the PLL relocks.  See pc3_clock_init. */
     pc3_clock_init(PC3_SYS_CLOCK_KHZ, PC3_FLASH_MAX_HZ);
-    psram_size = psram_init(PC3_PSRAM_CS_PIN);
+    /* Which board, as far as the PSRAM's chip select says: GP47 (PC2
+     * and PC3) or GP8 (Olimex RP2350pc).  Before psram_init, which needs
+     * the pin, and before devtty_early_init, whose PC3 console UART is on
+     * GP8/GP9 - the Olimex's PSRAM and SD chip selects.  See board.c. */
+    board_early_detect();
+    psram_size = psram_init(board_psram_pin());
 #endif
 
     // early init to handle boot kernel messages

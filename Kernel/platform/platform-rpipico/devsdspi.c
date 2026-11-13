@@ -60,6 +60,13 @@
 #define PC2_SD_RX   32 // MISO
 #define PC2_SD_CS   29
 
+// The Olimex RP2350pc: the same SPI1 block on SCK 10 / MOSI 11 /
+// MISO 24, chip select 9 - PicoMite's OPTION RESET RP2350PC.
+#define OLX_SD_SCK  10
+#define OLX_SD_TX   11 // MOSI
+#define OLX_SD_RX   24 // MISO
+#define OLX_SD_CS   9
+
 #else
 
 /* Pico SPI GPIO connected to SD SPIO - David Given's Arrangement */
@@ -77,8 +84,14 @@
 #define FAST_SPEED 4000000
 
 #ifdef CONFIG_PICO_COMPUTER_3
+#include "board.h"
+#endif
+
+/* The chip select in use: set by sd_rawinit, from the board. */
+static uint8_t sd_cs = Pico_SD_CS;
+
+#ifdef CONFIG_PICO_COMPUTER_3
 /* --- Pico Computer 2: bit-banged transport ----------------------------- */
-extern int board_is_pc2(void);
 
 static uint8_t sd_bb;           /* nonzero: bit-bang on the PC2 pin set */
 static uint8_t sd_bb_fast;      /* 0 = identification speed */
@@ -150,18 +163,29 @@ void sd_rawinit(void)
         return;
     }
 #endif
+    uint8_t sck = Pico_SD_SCK, tx = Pico_SD_TX, rx = Pico_SD_RX;
+
+#ifdef CONFIG_PICO_COMPUTER_3
+    if (board_is_olimex()) {
+        sck = OLX_SD_SCK;
+        tx = OLX_SD_TX;
+        rx = OLX_SD_RX;
+        sd_cs = OLX_SD_CS;
+    }
+#endif
     //initilase GPIO ports
-    gpio_init(Pico_SD_SCK );
-    gpio_init(Pico_SD_TX);
-    gpio_init(Pico_SD_RX);
-    gpio_init(Pico_SD_CS);
+    gpio_init(sck);
+    gpio_init(tx);
+    gpio_init(rx);
+    gpio_init(sd_cs);
+    gpio_put(sd_cs, true);          /* never glitch CS low at init */
 
     //set GPIO post function
-    gpio_set_function(Pico_SD_SCK, GPIO_FUNC_SPI); // SCK
-    gpio_set_function(Pico_SD_TX, GPIO_FUNC_SPI);  // TX
-    gpio_set_function(Pico_SD_RX, GPIO_FUNC_SPI);  // RX
-    gpio_set_function(Pico_SD_CS, GPIO_FUNC_SIO);  // CS
-    gpio_set_dir(Pico_SD_CS, true);
+    gpio_set_function(sck, GPIO_FUNC_SPI); // SCK
+    gpio_set_function(tx, GPIO_FUNC_SPI);  // TX
+    gpio_set_function(rx, GPIO_FUNC_SPI);  // RX
+    gpio_set_function(sd_cs, GPIO_FUNC_SIO);  // CS
+    gpio_set_dir(sd_cs, true);
 
     //initalise SPI module
 
@@ -189,7 +213,7 @@ void sd_spi_raise_cs(void)
         return;
     }
 #endif
-    gpio_put(Pico_SD_CS, true);
+    gpio_put(sd_cs, true);
 }
 
 void sd_spi_lower_cs(void)
@@ -200,7 +224,7 @@ void sd_spi_lower_cs(void)
         return;
     }
 #endif
-    gpio_put(Pico_SD_CS, false);
+    gpio_put(sd_cs, false);
 }
 
 void sd_spi_transmit_byte(uint_fast8_t b)

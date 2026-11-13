@@ -169,140 +169,188 @@ void __no_inline_not_in_flash_func(pc3_clock_init)(uint32_t target_khz,
     qmi_flash_timing_for(new_hz, max_flash_hz);
 }
 
-static size_t __no_inline_not_in_flash_func(psram_detect)(void)
-{
-    int psram_size = 0;
+/*
+ * The PSRAM's own timing limits, by manufacturer - PicoMite's table
+ * (io/psram.c, 13b081e), from the parts' datasheets: the fastest clock,
+ * tCEM (the longest a select may last, the refresh limit) and tCPM (the
+ * shortest deselect), the last in femtoseconds or, for a part that
+ * gives it in cycles, as a count.
+ *
+ * This used to be MicroPython's arithmetic for a 133 MHz part, which
+ * at this kernel's 378 MHz gave divider 3 - a 126 MHz clock for the
+ * APS6404's 109 - and took half a clock off the 18 ns deselect.  It
+ * ran, which is not the same as being inside the part's limits.
+ */
+#define MFID_APMEMORY   0x0D
+#define MFID_ISSI       0x9D
 
-    /* Try and read the PSRAM ID via direct_csr. */
+struct psram_chip {
+    uint8_t mfid;
+    uint32_t max_clk;
+    uint64_t max_select_fs;
+    uint32_t min_deselect_fs;
+    int8_t min_deselect_cs;     /* >= 0: in cycles, overrides _fs */
+};
+
+static const struct psram_chip psram_chips[] = {
+    { MFID_APMEMORY, 109000000, 8000000000ull, 18000000, -1 },
+    { MFID_ISSI,     104000000, 4000000000ull, 0,         1 },
+    { 0,             109000000, 8000000000ull, 50000000, -1 },  /* unknown */
+};
+
+/*
+ * M1_TIMING for a part at clk_sys = hz, as PicoMite's psram_timing:
+ * the divider brings the clock under the part's maximum, max select is
+ * tCEM in units of 64 system clocks, min deselect is tCPM rounded up
+ * to whole system clocks, and above 150 MHz the read is sampled the
+ * divider's worth of clocks later.  At 378 MHz on an APS6404 that is
+ * divider 4 (94.5 MHz), max select 47, deselect 7, rxdelay 5:
+ * 0x61DE7504.  Worked out here, in flash, before direct mode - a
+ * 64-bit divide is a library call.
+ */
+static uint32_t psram_timing(const struct psram_chip *chip, uint32_t hz)
+{
+    uint32_t fs = (uint32_t)(1000000000000000ull / hz);
+    uint32_t clkdiv = (hz + chip->max_clk - 1) / chip->max_clk;
+    uint32_t max_select = (uint32_t)((chip->max_select_fs >> 6) / fs);
+    uint32_t min_deselect = (chip->min_deselect_fs + fs - 1) / fs;
+    uint32_t rxdelay = 1 + (hz > 150000000 ? clkdiv : 1);
+
+    if (chip->min_deselect_cs >= 0)
+        min_deselect = (uint32_t)chip->min_deselect_cs;
+    return 1 << QMI_M1_TIMING_COOLDOWN_LSB |
+        QMI_M1_TIMING_PAGEBREAK_VALUE_1024 << QMI_M1_TIMING_PAGEBREAK_LSB |
+        0 << QMI_M1_TIMING_SELECT_SETUP_LSB |
+        3 << QMI_M1_TIMING_SELECT_HOLD_LSB |
+        max_select << QMI_M1_TIMING_MAX_SELECT_LSB |
+        min_deselect << QMI_M1_TIMING_MIN_DESELECT_LSB |
+        rxdelay << QMI_M1_TIMING_RXDELAY_LSB |
+        clkdiv << QMI_M1_TIMING_CLKDIV_LSB;
+}
+
+/*
+ * Every wait on the QMI in direct mode is bounded.  The flags are
+ * normally clear within a microsecond; the bound is what keeps a probe
+ * of a pin with nothing on it (board detection asks GP47 and then GP8)
+ * from hanging the boot, as PicoMite found its unbounded waits could.
+ * A loop count, not a timer: XIP is off in direct mode, so nothing in
+ * flash may be called.  2^20 turns is a few milliseconds at 378 MHz.
+ */
+#define QMI_WAIT_TURNS  (1u << 20)
+
+static int __no_inline_not_in_flash_func(qmi_wait_clear)(uint32_t bits)
+{
+    uint32_t n = QMI_WAIT_TURNS;
+
+    while (qmi_hw->direct_csr & bits)
+        if (--n == 0)
+            return -1;
+    return 0;
+}
+
+static int __no_inline_not_in_flash_func(qmi_wait_set)(uint32_t bits)
+{
+    uint32_t n = QMI_WAIT_TURNS;
+
+    while (!(qmi_hw->direct_csr & bits))
+        if (--n == 0)
+            return -1;
+    return 0;
+}
+
+/*
+ * Read the ID of whatever is on chip select 1: manufacturer, known
+ * good die (0x5D when a part answered) and the extended ID that holds
+ * the density.  Interrupts off and the pin already on XIP_CS1.
+ * Returns -1 if the QMI never finished a transfer.
+ */
+static int __no_inline_not_in_flash_func(psram_read_id)(uint8_t *mfid,
+                                                        uint8_t *kgd,
+                                                        uint8_t *eid)
+{
+    int bad = 0;
+
+    *mfid = *kgd = *eid = 0;
     qmi_hw->direct_csr = 30 << QMI_DIRECT_CSR_CLKDIV_LSB | QMI_DIRECT_CSR_EN_BITS;
 
     /* Poll for the cooldown on the last XIP transfer to expire before it
      * is safe to perform the first direct-mode operation */
-    while ((qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS) != 0) {
-    }
+    bad |= qmi_wait_clear(QMI_DIRECT_CSR_BUSY_BITS);
 
-    /* Exit out of QMI in case we've inited already */
+    /* Exit out of QPI in case we've inited already */
     qmi_hw->direct_csr |= QMI_DIRECT_CSR_ASSERT_CS1N_BITS;
 
     /* Transmit as quad. */
     qmi_hw->direct_tx = QMI_DIRECT_TX_OE_BITS |
         QMI_DIRECT_TX_IWIDTH_VALUE_Q << QMI_DIRECT_TX_IWIDTH_LSB | 0xf5;
 
-    while ((qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS) != 0) {
-    }
+    bad |= qmi_wait_clear(QMI_DIRECT_CSR_BUSY_BITS);
 
     (void)qmi_hw->direct_rx;
 
     qmi_hw->direct_csr &= ~(QMI_DIRECT_CSR_ASSERT_CS1N_BITS);
 
-    /* Read the id */
+    /* Read the id: 0x9F, three address bytes, then MFID, KGD, EID */
     qmi_hw->direct_csr |= QMI_DIRECT_CSR_ASSERT_CS1N_BITS;
-    uint8_t kgd = 0;
-    uint8_t eid = 0;
 
-    for (size_t i = 0; i < 7; i++) {
-        if (i == 0) {
-            qmi_hw->direct_tx = 0x9f;
-        } else {
-            qmi_hw->direct_tx = 0xff;
-        }
+    for (size_t i = 0; i < 7 && !bad; i++) {
+        uint8_t rx;
 
-        while ((qmi_hw->direct_csr & QMI_DIRECT_CSR_TXEMPTY_BITS) == 0) {
-        }
-
-        while ((qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS) != 0) {
-        }
-
-        if (i == 5) {
-            kgd = qmi_hw->direct_rx;
-        } else if (i == 6) {
-            eid = qmi_hw->direct_rx;
-        } else {
-            (void)qmi_hw->direct_rx;
-        }
+        qmi_hw->direct_tx = (i == 0) ? 0x9f : 0xff;
+        bad |= qmi_wait_set(QMI_DIRECT_CSR_TXEMPTY_BITS);
+        bad |= qmi_wait_clear(QMI_DIRECT_CSR_BUSY_BITS);
+        rx = qmi_hw->direct_rx;
+        if (i == 4)
+            *mfid = rx;
+        else if (i == 5)
+            *kgd = rx;
+        else if (i == 6)
+            *eid = rx;
     }
 
     /* Disable direct csr. */
     qmi_hw->direct_csr &= ~(QMI_DIRECT_CSR_ASSERT_CS1N_BITS | QMI_DIRECT_CSR_EN_BITS);
-
-    if (kgd == 0x5D) {
-        psram_size = 1024 * 1024; /* 1 MiB */
-        uint8_t size_id = eid >> 5;
-        if (eid == 0x26 || size_id == 2) {
-            psram_size *= 8;
-        } else if (size_id == 0) {
-            psram_size *= 2;
-        } else if (size_id == 1) {
-            psram_size *= 4;
-        }
-    }
-
-    return psram_size;
+    return bad ? -1 : 0;
 }
 
-size_t __no_inline_not_in_flash_func(psram_init)(unsigned int cs_pin)
+/*
+ * Is there a PSRAM with its chip select on GPgp?  Only the read-ID,
+ * and the pin is handed back: board detection (board.c) asks GP47,
+ * where the Pico Computer 2 and 3 have theirs, and then GP8, where the
+ * Olimex RP2350pc has - PicoMite's psram_probe.  Called before the
+ * console UART exists, which matters: on the Olimex GP8 is this chip
+ * select and on the PC3 it is the console's TX.
+ */
+int psram_probe(unsigned int gp)
 {
-    gpio_set_function(cs_pin, GPIO_FUNC_XIP_CS1);
+    uint8_t mfid, kgd, eid;
+    uint32_t ints;
+    int r;
 
-    uint32_t intr_stash = save_and_disable_interrupts();
+    gpio_set_function(gp, GPIO_FUNC_XIP_CS1);
+    ints = save_and_disable_interrupts();
+    r = psram_read_id(&mfid, &kgd, &eid);
+    restore_interrupts(ints);
+    gpio_set_function(gp, GPIO_FUNC_NULL);
+    return r == 0 && kgd == 0x5D;
+}
 
-    size_t psram_size = psram_detect();
-
-    if (!psram_size) {
-        restore_interrupts(intr_stash);
-        return 0;
-    }
-
-    /* Read clock speed before entering direct mode (flash access is
-     * unavailable while QMI direct mode is enabled) */
-    const int max_psram_freq = 133000000;
-    const int clock_hz = clock_get_hz(clk_sys);
-
+/* QPI on, the timing, the read and write formats, writes enabled. */
+static void __no_inline_not_in_flash_func(psram_qmi_setup)(uint32_t timing)
+{
     /* Enable direct mode, PSRAM CS, clkdiv of 10. */
     qmi_hw->direct_csr = 10 << QMI_DIRECT_CSR_CLKDIV_LSB |
         QMI_DIRECT_CSR_EN_BITS |
         QMI_DIRECT_CSR_AUTO_CS1N_BITS;
-    while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS) {
-    }
+    qmi_wait_clear(QMI_DIRECT_CSR_BUSY_BITS);
 
     /* Enable QPI mode on the PSRAM */
     const uint CMD_QPI_EN = 0x35;
     qmi_hw->direct_tx = QMI_DIRECT_TX_NOPUSH_BITS | CMD_QPI_EN;
 
-    while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS) {
-    }
+    qmi_wait_clear(QMI_DIRECT_CSR_BUSY_BITS);
 
-    /* Set PSRAM timing for APS6404
-     *
-     * Using an rxdelay equal to the divisor isn't enough when running the
-     * APS6404 close to 133MHz. So: don't allow running at divisor 1 above
-     * 100MHz (because delay of 2 would be too late), and add an extra 1 to
-     * the rxdelay if the divided clock is > 100MHz (i.e. sys clock >
-     * 200MHz). */
-    int divisor = (clock_hz + max_psram_freq - 1) / max_psram_freq;
-    if (divisor == 1 && clock_hz > 100000000) {
-        divisor = 2;
-    }
-    int rxdelay = divisor;
-    if (clock_hz / divisor > 100000000) {
-        rxdelay += 1;
-    }
-
-    /* - Max select must be <= 8us. The value is given in multiples of 64
-     *   system clocks.
-     * - Min deselect must be >= 18ns. The value is given in system clock
-     *   cycles - ceil(divisor / 2). */
-    const int clock_period_fs = 1000000000000000ll / clock_hz;
-    const int max_select = (125 * 1000000) / clock_period_fs; /* 125 = 8000ns / 64 */
-    const int min_deselect = (18 * 1000000 + (clock_period_fs - 1)) / clock_period_fs
-        - (divisor + 1) / 2;
-
-    qmi_hw->m[1].timing = 1 << QMI_M1_TIMING_COOLDOWN_LSB |
-        QMI_M1_TIMING_PAGEBREAK_VALUE_1024 << QMI_M1_TIMING_PAGEBREAK_LSB |
-        max_select << QMI_M1_TIMING_MAX_SELECT_LSB |
-        min_deselect << QMI_M1_TIMING_MIN_DESELECT_LSB |
-        rxdelay << QMI_M1_TIMING_RXDELAY_LSB |
-        divisor << QMI_M1_TIMING_CLKDIV_LSB;
+    qmi_hw->m[1].timing = timing;
 
     /* Set PSRAM commands and formats */
     qmi_hw->m[1].rfmt =
@@ -331,8 +379,43 @@ size_t __no_inline_not_in_flash_func(psram_init)(unsigned int cs_pin)
 
     /* Enable writes to PSRAM */
     hw_set_bits(&xip_ctrl_hw->ctrl, XIP_CTRL_WRITABLE_M1_BITS);
+}
 
-    restore_interrupts(intr_stash);
+size_t psram_init(unsigned int cs_pin)
+{
+    const struct psram_chip *chip = psram_chips;
+    uint8_t mfid, kgd, eid;
+    size_t psram_size;
+    uint32_t ints, timing;
+    int r;
+
+    gpio_set_function(cs_pin, GPIO_FUNC_XIP_CS1);
+
+    ints = save_and_disable_interrupts();
+    r = psram_read_id(&mfid, &kgd, &eid);
+    restore_interrupts(ints);
+    if (r || kgd != 0x5D)
+        return 0;
+
+    psram_size = 1024 * 1024; /* 1 MiB */
+    {
+        uint8_t size_id = eid >> 5;
+        if (eid == 0x26 || size_id == 2) {
+            psram_size *= 8;
+        } else if (size_id == 0) {
+            psram_size *= 2;
+        } else if (size_id == 1) {
+            psram_size *= 4;
+        }
+    }
+
+    while (chip->mfid && chip->mfid != mfid)
+        chip++;
+    timing = psram_timing(chip, clock_get_hz(clk_sys));
+
+    ints = save_and_disable_interrupts();
+    psram_qmi_setup(timing);
+    restore_interrupts(ints);
 
     return psram_size;
 }

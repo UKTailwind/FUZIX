@@ -47,6 +47,9 @@ void pc3_clock_init(uint32_t target_khz, uint32_t max_flash_hz);
 /* Bring up QSPI PSRAM on cs_pin (QMI CS1). Returns size in bytes, 0 if
  * absent. Timing derives from clk_sys, so raise the clock first. */
 size_t psram_init(unsigned int cs_pin);
+/* A PSRAM answers the read-ID with its chip select on GPgp: board.c's
+   detection.  Only reads the ID, and gives the pin back. */
+int psram_probe(unsigned int gp);
 
 /* Detected size in bytes (set at boot in main.c), 0 if absent */
 extern uint32_t psram_size;

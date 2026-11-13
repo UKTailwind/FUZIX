@@ -17,10 +17,15 @@
 #include <hardware/i2c.h>
 #include "config.h"
 #include "ds3231.h"
+#include "board.h"
 
 #define DS3231_I2C        i2c0
-#define DS3231_SDA        20
-#define DS3231_SCL        21
+/* I2C0's pins: GP20/GP21 on the Pico Computer 2 and 3 (the QWIIC socket
+   and the DS3231).  The Olimex RP2350pc has no RTC and those two are its
+   HDMI CEC and hot plug, so there I2C0 is UEXT2's GP36/GP37 instead -
+   where PicoMite leaves it - and only /dev/i2c's bus 0 uses it. */
+static uint8_t DS3231_SDA = 20;
+static uint8_t DS3231_SCL = 21;
 #define DS3231_ADDR       0x68
 #define DS3231_TIMEOUT_US 20000
 
@@ -270,6 +275,15 @@ int plt_rtc_write(void)
 void ds3231_init(void)
 {
     uint8_t st;
+
+    if (board_is_olimex()) {
+        DS3231_SDA = 36;
+        DS3231_SCL = 37;
+        ds3231_bus_recover();
+        i2c_init(DS3231_I2C, 400 * 1000);
+        kputs("I2C0 on GP36/GP37 (UEXT2); no RTC on this board\n");
+        return;                         /* rtc_present stays 0 */
+    }
 
     ds3231_bus_recover();
     i2c_init(DS3231_I2C, 400 * 1000);

@@ -435,3 +435,13 @@
  * machine itself, which fetches nothing from any bus we share: the
  * whole point of the design (PLAN-pioout.md). */
 *pioout.c.o(.text*)
+
+/* psram.c's setup half: once per boot, with XIP live, before anything
+ * is timed.  Only what runs with the QMI in direct mode has to stay in
+ * RAM - psram_read_id, psram_qmi_setup and the qmi_wait_* they spin in
+ * - and these call those with interrupts off and return to flash only
+ * after direct mode is off again.  psram_timing's 64-bit divide is a
+ * library call, which is why it runs here and before direct mode. */
+*psram.c.o(.text.psram_init)
+*psram.c.o(.text.psram_probe)
+*psram.c.o(.text.psram_timing)

@@ -41,6 +41,7 @@
 #include "config.h"
 #include "pico_ioctl.h"
 #include "pinlock.h"
+#include "board.h"
 #include "countpin.h"
 #include "pioout.h"
 #include <hardware/gpio.h>
@@ -81,6 +82,15 @@ static struct {
 #define HDR_PIN_MASK	(0xFFULL | (1ULL << 26) | (0x1FFFULL << 34))
 
 /*
+ *	The Olimex RP2350pc takes some of those for itself: GP0/GP1 are its
+ *	console UART, GP26 is the left audio channel (PWM slice 5), GP34
+ *	and GP35 the amplifier's volume (slice 9) and shutdown, and GP36/
+ *	GP37 are I2C0 behind /dev/i2c (ds3231.c).  What is left is offered.
+ */
+#define OLX_PIN_MASK	(HDR_PIN_MASK & ~((1ULL << 0) | (1ULL << 1) | \
+				       (1ULL << 26) | (0xFULL << 34)))
+
+/*
  *	GP32 is not on the header and is claimable anyway - it is the
  *	DS3231's ALARM output, and an alarm nothing can read is not an
  *	alarm.  With it, waking on the RTC is one line of BASIC:
@@ -100,16 +110,16 @@ static struct {
 
 static int claimable(uint8_t cls, uint8_t idx)
 {
-	extern int board_is_pc2(void);
-
 	switch (cls) {
 	case PLK_PIN:
 		if (idx >= 48)
 			return 0;
+		if (board_is_olimex())
+			return (OLX_PIN_MASK >> idx) & 1;
 		if ((HDR_PIN_MASK >> idx) & 1)
 			return 1;
 		if (idx == RTC_ALARM_PIN)
-			return !board_is_pc2();
+			return board_kind() == BOARD_PC3;
 		return 0;
 	case PLK_I2C:
 		/* I2C0 is GP20/21: the QWIIC socket and the DS3231 together.
@@ -120,7 +130,11 @@ static int claimable(uint8_t cls, uint8_t idx)
 	case PLK_SPI:
 		return idx == 0;	/* SPI1 is the SD card */
 	case PLK_PWM:
-		return idx < 12;	/* the kernel uses no slices */
+		/* the kernel uses no slices - except on the Olimex, whose
+		   audio is slice 5 and amplifier volume slice 9 */
+		if (board_is_olimex() && (idx == 5 || idx == 9))
+			return 0;
+		return idx < 12;
 	case PLK_ADC:
 		return idx == 0;
 	case PLK_PIO:
