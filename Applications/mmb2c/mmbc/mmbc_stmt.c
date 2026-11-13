@@ -6419,19 +6419,43 @@ static void do_if(void)
     emit("}");
 }
 
+/* A block may open and close on the same line -
+ * `If k Then For n = 1 To 3 : Print n; : Next n` - so the depth is
+ * judged once the line's statements are done, not after each one.
+ * Whatever happens inside, inline_depth comes back down and the blocks
+ * this line opened go with it, as the Python's finally does: left
+ * raised, every later END SUB read as a RETURN and the only error was
+ * the last SUB in the file reported unterminated (#44). */
 static void inline_statements(void)
 {
     int depth = cv.nblocks;
+    jmp_buf jb, *saved = err_jmp;
 
     cv.inline_depth++;
-    while (!at_end() && !is_kw("ELSE", 0)) {
-        if (accept_op(":"))
-            continue;
-        statement();
-        if (cv.nblocks != depth)
-            cv_err("a single line IF cannot open a multi-line block");
+    err_jmp = &jb;
+    if (setjmp(jb) == 0) {
+        while (!at_end() && !is_kw("ELSE", 0)) {
+            if (accept_op(":"))
+                continue;
+            statement();
+        }
+        err_jmp = saved;
+    } else {
+        /* re-raise as it stands: err_msg and err_late untouched */
+        err_jmp = saved;
+        cv.inline_depth--;
+        cv.nblocks = depth;
+        if (err_jmp == NULL) {
+            fprintf(stderr, "mmbc: MMError: %s\n", err_msg);
+            exit(2);
+        }
+        longjmp(*err_jmp, 1);
     }
     cv.inline_depth--;
+    if (cv.nblocks != depth) {
+        cv.nblocks = depth;
+        cv_err("a single line IF cannot open a multi-line block");
+    }
 }
 
 static void do_elseif(void)

@@ -11041,6 +11041,13 @@ class Conv(object):
         self.emit('}')
 
     def inline_statements(self):
+        # A block may open and close on the same line -
+        # `If k Then For n = 1 To 3 : Print n; : Next n` - so the depth
+        # is judged once the line's statements are done, not after each
+        # one.  Whatever happens inside, the blocks this line opened go
+        # with it: left on the stack, the next END SUB closed the FOR
+        # instead of the SUB and the error named the last SUB in the
+        # file (#44).
         depth = len(self.blocks)
         self.inline += 1
         try:
@@ -11048,10 +11055,12 @@ class Conv(object):
                 if self.accept_op(':'):
                     continue
                 self.statement()
-                if len(self.blocks) != depth:
-                    self.err("a single line IF cannot open a multi-line block")
         finally:
             self.inline -= 1
+            left_open = len(self.blocks) != depth
+            del self.blocks[depth:]
+        if left_open:
+            self.err("a single line IF cannot open a multi-line block")
 
     def do_elseif(self):
         if not self.blocks or self.blocks[-1][0] != 'if':
