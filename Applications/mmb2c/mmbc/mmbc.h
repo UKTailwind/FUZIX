@@ -101,6 +101,7 @@ const char *varaddr(void);      /* PEEK(VARADDR v) */
 int gp_pin(const char *word, const struct sym *known);  /* "GP8" -> 8 */
 char *clabel(const char *name);
 int const_c_expr(const char *text);
+int const_int_value(const char *text, long long *val);
 int const_or_literal_expr(const char *text);
 char *upper(const char *s);
 char *lower(const char *s);
@@ -461,6 +462,7 @@ struct conv {
     int uses_array;             /* whole-array ops/REDIM/MATH(): mmb_array.h */
     int uses_lstring;           /* LONGSTRING: pulls in mmb_lstring.h */
     int uses_datetime;          /* DATE$/TIME$/EPOCH etc: mmb_datetime.h */
+    int uses_restore_expr;      /* RESTORE expr: the label table */
     int uses_data;              /* DATA/READ/RESTORE: mmb_data.h */
     int uses_misc;              /* GOSUB/BIT/FLAG/BIN2STR etc: mmb_misc.h */
     int uses_pulse;             /* PULSE: pulls in mmb_pulse.h */

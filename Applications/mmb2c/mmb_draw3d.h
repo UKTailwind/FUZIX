@@ -411,7 +411,6 @@ static void mm3d_display(int n, MMFLOAT x, MMFLOAT y, MMFLOAT z, int clear,
 	MMFLOAT *hpz = NULL;
 	unsigned char *hvis = NULL;
 
-	lighting.x = lighting.y = lighting.z = 0;
 	if (o->xmin != MM3D_FAR && clear)
 		mmg_rect1(0, o->xmin, o->ymin, o->xmax, o->ymax);
 	o->xmin = MM3D_FAR;
@@ -448,10 +447,6 @@ static void mm3d_display(int n, MMFLOAT x, MMFLOAT y, MMFLOAT z, int clear,
 		ray.y = p1.y - cam->y;
 		ray.z = p1.z - cam->z;
 		mm3d_normalise(&ray);
-		lighting.x = p1.x - o->light.x;
-		lighting.y = p1.y - o->light.y;
-		lighting.z = p1.z - o->light.z;
-		mm3d_normalise(&lighting);
 		o->dots[f] = ray.x * o->normals[f].x + ray.y * o->normals[f].y
 			     + ray.z * o->normals[f].z;
 		if (depthmode == 0) {
@@ -663,9 +658,20 @@ static void mm3d_display(int n, MMFLOAT x, MMFLOAT y, MMFLOAT z, int clear,
 				if (o->flags[si] & 2)
 					o->fill[si] = 0xFF0000;
 				if (o->flags[si] & 8) {
-					/* lit by the light's direction to the
-					   last face's first vertex, as the
-					   firmware's loop leaves it */
+					/* lit from the light to this face's
+					   p1, the vertex its normal starts
+					   from (PicoMite #133) */
+					vi = o->face_x_vert[vp + 1];
+					lighting.x = o->r_vertices[vi].x
+						     * o->r_vertices[vi].m + x
+						     - o->light.x;
+					lighting.y = o->r_vertices[vi].y
+						     * o->r_vertices[vi].m + y
+						     - o->light.y;
+					lighting.z = o->r_vertices[vi].z
+						     * o->r_vertices[vi].m + z
+						     - o->light.z;
+					mm3d_normalise(&lighting);
 					ratio = fabs(lighting.x * o->normals[si].x
 						     + lighting.y * o->normals[si].y
 						     + lighting.z * o->normals[si].z);
@@ -943,8 +949,8 @@ static MMG_UNUSED int mmg3d_rotate(const MMFLOAT *q, MMINTEGER nq, MMINTEGER n)
 	return 0;
 }
 
-/* HIDE n: 1 ends the statement - an error, or an object already
- * hidden, where cmd_3D returns from the whole list */
+/* HIDE n: 1 ends the statement on an error.  An object already hidden
+ * is skipped and the list goes on to the next (PicoMite #132). */
 static MMG_UNUSED int mmg3d_hide(MMINTEGER n)
 {
 	struct mm3d_obj *o = mm3d_get(n);
@@ -952,7 +958,7 @@ static MMG_UNUSED int mmg3d_hide(MMINTEGER n)
 	if (o == NULL)
 		return 1;
 	if (o->xmin == MM3D_FAR)
-		return 1;
+		return 0;
 	mmg_rect1(0, o->xmin, o->ymin, o->xmax, o->ymax);
 	o->xmin = o->ymin = MM3D_FAR;
 	o->xmax = o->ymax = -MM3D_FAR;

@@ -479,8 +479,8 @@ MMG_FN void mm_webpg_start(struct mm_webpg *pg, MMINTEGER n,
 MMG_FN int mm_webpg_next(struct mm_webpg *pg,
 			 const char *const *tab, int ntab)
 {
-	char ex[160];
-	static char msg[200];
+	char ex[256];		/* a {expression} is up to 253 (d3e952d) */
+	static char msg[300];
 	int xn, q, k;
 	char c;
 

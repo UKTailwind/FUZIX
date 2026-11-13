@@ -299,7 +299,7 @@ MMG_FN void mmp_modsample(MMINTEGER s, MMINTEGER ch, MMINTEGER vol)
 		MM_RAISE("Invalid sample number");
 	if (ch < 1 || ch > 4)
 		MM_RAISE("Invalid channel");
-	if (vol < 1 || vol > 64)
+	if (vol < 0 || vol > 64)	/* 0 is silent, as 1 (884269c) */
 		MM_RAISE("Invalid volume");
 	mmp_adopt();
 	if (mm_play_owner() == 0 || mm_play_kind != MMP_KIND_MOD)

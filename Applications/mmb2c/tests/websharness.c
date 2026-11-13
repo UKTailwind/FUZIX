@@ -198,9 +198,9 @@ static void client(int port)
     buf[n > 0 ? n : 0] = 0;
     if (!strstr(buf, "HTTP/1.1 200 OK\r\nServer:CPi\r\n"))
         _exit(13);
-    if (!strstr(buf, "Content-type:text/html\r\nContent-Length:15\r\n"))
+    if (!strstr(buf, "Content-type:text/html\r\nContent-Length:21\r\n"))
         _exit(14);
-    if (!strstr(buf, "\r\n\r\nT=42 N={X}}\r\n\r\n"))
+    if (!strstr(buf, "\r\n\r\nT=42 N={X}} L=200\r\n\r\n"))
         _exit(15);
     close(fd);
     _exit(0);
@@ -267,26 +267,40 @@ int main(void)
     }
 
     /* exchange 4: the page engine, driven exactly as the emitted
-       switch drives it */
+       switch drives it.  The second expression is 207 characters
+       normalised: PicoMite takes up to 253 (d3e952d), and a 160-byte
+       buffer cut it short of its table entry. */
     slot = pump_until_trig(3000);
     check("page-connection", slot >= 0);
     if (slot >= 0) {
-        static const char *const ptab[] = { "T" };
+        static char longex[220];
+        const char *ptab[2];
         struct mm_webpg pg;
-        int pi, hits = 0;
+        int pi, hits = 0, lhits = 0;
 
+        memcpy(longex, "LEN(\"", 5);
+        memset(longex + 5, 'x', 200);
+        memcpy(longex + 205, "\")", 3);
+        ptab[0] = "T";
+        ptab[1] = longex;
         f = fopen("websharness.htm", "w");
-        fputs("T={ t } N={{X}}", f);
+        fputs("T={ t } N={{X}} L={ len(\"", f);
+        fputs(longex + 5, f);		/* the x's and the close */
+        fputs(" }", f);
         fclose(f);
         mstr(fname, "websharness.htm");
         mm_webpg_start(&pg, slot + 1, fname, 64);
-        while ((pi = mm_webpg_next(&pg, ptab, 1)) >= 0) {
+        while ((pi = mm_webpg_next(&pg, ptab, 2)) >= 0) {
             if (pi == 0) {
                 mm_webpg_put_i(&pg, 42);
                 hits++;
+            } else if (pi == 1) {
+                mm_webpg_put_i(&pg, 200);
+                lhits++;
             }
         }
         check("page-substituted-once", hits == 1);
+        check("page-long-expression", lhits == 1);
         mm_webpg_send(&pg);
         unlink("websharness.htm");
     }

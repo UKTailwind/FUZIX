@@ -207,4 +207,16 @@ MMG_FN void mm_set_time(const char *t)
     mm_clock_off += (day + h * 3600 + m * 60 + sec) - now;
 }
 
+/* TIME$ = n: the time of day moved by n seconds, the date kept.  PicoMite's
+ * cmd_time adds n to the whole date and time and then keeps only the hours,
+ * minutes and seconds of the result, so it wraps at midnight either way. */
+MMG_FN void mm_move_time(MMINTEGER n)
+{
+    MMINTEGER now = mm_epoch_now();
+    MMINTEGER tod = now % 86400;
+    MMINTEGER moved = (tod + n % 86400 + 86400) % 86400;
+
+    mm_clock_off += moved - tod;
+}
+
 #endif /* MMB_DATETIME_H */

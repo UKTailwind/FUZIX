@@ -382,6 +382,7 @@ static void w_filesize(void) { A = mm_filesize(Ps(0)); }
 static void w_pinno(void)    { A = mm_pinno(Ps(0)); }
 static void w_fontwidth(void)  { A = mm_fontwidth(); }
 static void w_fontheight(void) { A = mm_fontheight(); }
+static void w_font_no(void) { A = mm_font_no(); }
 static void w_hpos(void)     { A = mm_hpos(); }
 static void w_vpos(void)     { A = mm_vpos(); }
 static void w_keydown(void)  { A = mm_keydown(I(0)); }
@@ -729,6 +730,7 @@ static const struct mmwrap {
 	{ "mm_pinno",		w_pinno },
 	{ "mm_fontwidth",	w_fontwidth },
 	{ "mm_fontheight",	w_fontheight },
+	{ "mm_font_no",		w_font_no },
 	{ "mm_hpos",		w_hpos },
 	{ "mm_vpos",		w_vpos },
 	{ "mm_keydown",		w_keydown },

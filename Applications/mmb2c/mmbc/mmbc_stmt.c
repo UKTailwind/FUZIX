@@ -233,6 +233,28 @@ static void push_block(const char *kind, const char *a, int ty)
 
 /* ---- the dispatcher ---- */
 
+/* A command's name as a variable's (PicoMite #149, 07baeff): at the start
+ * of a statement NAME = x is an assignment, so a program that used the
+ * name before the command existed still runs - flash = 1, line = 3.  (A
+ * suffixed NAME$, NAME% or NAME! was never a command here.)  Not where the
+ * name is also a keyword, operator or function, whose variable could not
+ * be read back, nor where NAME = is the command's own syntax; and not an
+ * array element - IF (x) = y is the command.  CMD_NAME_NOT_VAR in the
+ * Python. */
+static int cmd_name_var(const char *up)
+{
+    static const char *const not_var[] = {
+        "TIMER", "DATE$", "TIME$", "FOR", "ELSE", "GOTO", "GOSUB", "WHILE",
+        "FLAGS", "CASE", "REM", "RUN", "DATA"
+    };
+    size_t k;
+
+    for (k = 0; k < sizeof(not_var) / sizeof(not_var[0]); k++)
+        if (strcmp(up, not_var[k]) == 0)
+            return 0;
+    return 1;
+}
+
 void statement_inner(void)
 {
     struct tok *t = peek(0);
@@ -254,6 +276,13 @@ void statement_inner(void)
     if (is_op("/", 0) && is_op("*", 1)
         && (peek(2) == NULL || is_op(":", 2) || is_kw("ELSE", 2))) {
         cv.i += 2;
+        return;
+    }
+
+    /* flash = 1: a variable with a command's name (cmd_name_var) */
+    if (t->kind == T_ID && fwcommand_in(up) && cmd_name_var(up)
+        && is_op("=", 1)) {
+        do_assign();
         return;
     }
 
@@ -815,7 +844,11 @@ void statement_inner(void)
             emit(sfmt("mm_save_data(%s, %s, %s);", f.code, a, n));
         return;
     }
-    if (strcmp(up, "SYSTEM") == 0 || load_prog(up) != NULL
+    /* SAVE COMPRESSED IMAGE is SAVE IMAGE (PicoMite 2abbb53: one command
+       there since SAVE IMAGE compresses when it can) */
+    int save_cimg = strcmp(up, "SAVE") == 0 && is_kw("COMPRESSED", 1)
+                    && is_kw("IMAGE", 2);
+    if (strcmp(up, "SYSTEM") == 0 || load_prog(up) != NULL || save_cimg
         || (strcmp(up, "SAVE") == 0 && is_kw("IMAGE", 1))) {
         /* SYSTEM prog$ [, arg ...]        run a program and wait
            SAVE IMAGE f$ [, x, y, w, h]    both are programs
@@ -845,7 +878,7 @@ void statement_inner(void)
             /* BEFORE the tokens are consumed: load_prog looks ahead
                one token, and cv.i += 2 eats the very keyword it reads. */
             prog = (strcmp(up, "SAVE") == 0) ? "saveimage" : load_prog(up);
-            cv.i += 2;
+            cv.i += save_cimg ? 3 : 2;
         }
         emit("mm_run_begin();");
         if (prog != NULL)
@@ -2853,12 +2886,22 @@ void statement_inner(void)
         v = expr();
         if (strcmp(up, "TIMER") == 0)
             emit(sfmt("mm_timer_set(%s);", as_flt(v)));
-        else if (v.ty != TY_S)
+        else if (strcmp(up, "TIME$") == 0 && v.ty != TY_S) {
+            /* TIME$ = n moves the time of day by n seconds and keeps the
+               date: cmd_time's numeric form, in PicoMite's manual since
+               4a506b0.  TIME$ = 0 syncs to an external pulse. */
+            cv.uses_datetime = 1;
+            emit(sfmt("mm_move_time(%s);", as_int(v)));
+        } else if (v.ty != TY_S)
             cv_err("%s = needs a string", up);
-        else
+        else {
+            /* the setters are in mmb_datetime.h too: a program that set
+               the clock and never read it did not compile */
+            cv.uses_datetime = 1;
             emit(sfmt("mm_set_%s(%s);",
                       strcmp(up, "DATE$") == 0 ? "date" : "time",
                       v.code));
+        }
         return;
     }
     if (strcmp(up, "LONGSTRING") == 0) {
@@ -4389,7 +4432,8 @@ static struct flat d3_array(int ty)
 }
 
 /* n [, n ...] as one statement.  Each call answers 1 to end it there,
- * as an error, or HIDE's early return, ends cmd_3D's loop over them. */
+ * as an error ends cmd_3D's loop over them.  HIDE skips an object
+ * already hidden and goes on (PicoMite #132). */
 static void d3_each(const char *fn, const char *pre)
 {
     const char *calls = NULL, *call;
@@ -4684,29 +4728,49 @@ static void do_restore(void)
     struct tok *t;
     const char *canon = NULL;
     struct label *l;
-    int sfx;
+    struct val v;
+    int sfx, single;
 
     if (stmt_end()) {
         emit("mm_restore(0);");
         return;
     }
-    t = nxt();
-    if (t->kind == T_NUM && strcmp(t->up, "I") == 0)
+    /* One token to the end of the statement: a line number, or a name
+       that is a label first and a variable second (cmd_restore, PicoMite
+       #103) - resolved here, as before. */
+    t = peek(0);
+    cv.i++;
+    single = stmt_end();
+    cv.i--;
+    if (single && t->kind == T_NUM && strcmp(t->up, "I") == 0)
         canon = t->text;
-    else if (t->kind == T_ID)
+    else if (single && t->kind == T_ID) {
         canon = split_suffix(t->text, &sfx);
-    else
-        cv_err("RESTORE needs a label or line number");
-    l = label_rec(canon);
-    if (!l->has_data_at) {
-        /* a bare name that is a variable is evaluated for the label
-         * (cmd_restore, issue #103), which is not translated */
-        if (t->kind == T_ID && sym_lookup(canon) != NULL)
-            cv_err("unknown label '%s' in RESTORE", t->text);
-        missing_target(canon, "RESTORE", t->text);
+        if (!label_rec(canon)->has_data_at && sym_lookup(canon) != NULL)
+            canon = NULL;               /* a variable: the expression below */
+    }
+    if (canon != NULL) {
+        cv.i++;
+        l = label_rec(canon);
+        if (!l->has_data_at) {
+            missing_target(canon, "RESTORE", t->text);
+            return;
+        }
+        emit(sfmt("mm_restore(%d);", l->data_at));
         return;
     }
-    emit(sfmt("mm_restore(%d);", l->data_at));
+    /* Anything else is an expression, evaluated when the statement runs:
+       a string names a label, a number a line - RESTORE l$, RESTORE
+       CHOICE(n = 1, "one", "two"), RESTORE b + 20.  The program carries
+       a table of its labels for it. */
+    v = expr();
+    cv.uses_restore_expr = 1;
+    if (v.ty == TY_S)
+        emit(sfmt("mm_restore_name(%s, __mmb_rtab_k, __mmb_rtab_at);",
+                  v.code));
+    else
+        emit(sfmt("mm_restore_line(%s, __mmb_rtab_k, __mmb_rtab_at);",
+                  as_int(v)));
 }
 
 /* -- SORT ------------------------------------------------------------ */

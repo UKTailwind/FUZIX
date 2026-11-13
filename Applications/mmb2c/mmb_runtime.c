@@ -1595,6 +1595,11 @@ static const char *mm_fname_in(const char *mmstr, int which)
         p += 2;
         if (p[0] == '/' || p[0] == '\\')
             p++;
+        /* "A:/", "B:/" or "A:" alone is the drive's root, which is the
+           directory the program runs from: "." and not "", so EXISTS
+           DIR answers 1 for it, as there (PicoMite 1a7980f) */
+        if (*p == 0)
+            return ".";
     }
     for (q = p; *q; q++)
         if (*q == '\\')
@@ -2178,7 +2183,10 @@ static void mm_dirsplit(const char *spec)
     char c[MM_STRSZ];
     int i, n;
 
-    strncpy(c, mm_cstr(spec), sizeof c - 1);
+    /* through mm_fname, as every other file name is: DIR$ of "A:/" plus
+       a star, and FILES "B:*", found nothing while DIR$("*") listed
+       the files */
+    strncpy(c, mm_fname(spec), sizeof c - 1);
     c[sizeof c - 1] = 0;
     n = (int)strlen(c);
     for (i = n - 1; i >= 0 && c[i] != '/'
@@ -5292,6 +5300,7 @@ void mm_font(MMINTEGER font, MMINTEGER scale)
  */
 MMINTEGER mm_fontwidth(void)  { return (MMINTEGER)mm_gcw * mm_gscale; }
 MMINTEGER mm_fontheight(void) { return (MMINTEGER)mm_gch * mm_gscale; }
+MMINTEGER mm_font_no(void) { return (MMINTEGER)mm_gfont; }
 
 void mm_font_cur(MMINTEGER *font, MMINTEGER *scale)
 {
@@ -6788,6 +6797,7 @@ void mm_font(MMINTEGER font, MMINTEGER scale)
 
 MMINTEGER mm_fontwidth(void)  { return (MMINTEGER)mm_hcw * mm_hscale; }
 MMINTEGER mm_fontheight(void) { return (MMINTEGER)mm_hch * mm_hscale; }
+MMINTEGER mm_font_no(void) { return (MMINTEGER)mm_hfont; }
 
 /* No display to keep off, so nothing to ask the kernel for: stdout is
  * the only console there is here and it is already the serial one. */

@@ -173,8 +173,8 @@ RGBNAMES = {
 
 # The firmware's one-word commands (PicoMite AllCommands.h, its T_CMD
 # entries).  The tokeniser makes each a command wherever it stands, so
-# none of them is ever a variable's name; one that reaches a statement
-# as a bare name is a command we do not translate.
+# one that reaches a statement as a bare name is a command we do not
+# translate - with one exception, CMD_NAME_NOT_VAR below.
 FW_COMMANDS = frozenset((
     'ADC', 'ARC', 'ASTRO', 'AUTOSAVE', 'BACKLIGHT', 'BEZIER', 'BITSTREAM',
     'BLIT', 'BLUETOOTH', 'BOX', 'CALC', 'CALL', 'CAMERA', 'CASE', 'CAT',
@@ -198,6 +198,18 @@ FW_COMMANDS = frozenset((
     'TEXT', 'TILE', 'TILEMAP', 'TIMER', 'TMC22XX', 'TRACE', 'TRIANGLE',
     'TURTLE', 'TYPE', 'VAR', 'WAIT', 'WATCHDOG', 'WEB', 'WHILE', 'WII',
     'WS2812', 'XMODEM', 'YMODEM', 'ZMODEM'
+))
+
+# A command's name as a variable's (PicoMite #149, 07baeff): at the start
+# of a statement NAME = x is an assignment, so a program that used the
+# name before the command existed still runs - flash = 1, line = 3.  (A
+# suffixed NAME$, NAME% or NAME! was never a command here.)  Not where
+# the name is also a keyword, operator or function, whose variable could
+# not be read back, nor where NAME = is the command's own syntax; and
+# not an array element - IF (x) = y is the command.
+CMD_NAME_NOT_VAR = frozenset((
+    'TIMER', 'DATE$', 'TIME$', 'FOR', 'ELSE', 'GOTO', 'GOSUB', 'WHILE',
+    'FLAGS', 'CASE', 'REM', 'RUN', 'DATA'
 ))
 
 # The firmware's functions (AllCommands.h, its T_FUN and T_FNA entries).
@@ -1358,6 +1370,29 @@ def const_or_literal_expr(text):
     return const_c_expr(''.join(out))
 
 
+def const_int_value(text):
+    """The integer an emitted expression is, when it is one integer
+    literal once casts, brackets and a sign are taken off - a CONST
+    arrives as its value's text, so `CONST W = 8: DIM a$(3) LENGTH W` is
+    one.  None for anything else, which only run time can answer."""
+    t = text.replace('(MMINTEGER)', '').replace(' ', '')
+    neg = False
+    while True:
+        if len(t) >= 2 and t[0] == '(' and t[-1] == ')':
+            t = t[1:-1]
+        elif t[:1] == '-' and not neg:
+            neg = True
+            t = t[1:]
+        else:
+            break
+    if t.endswith('LL'):
+        t = t[:-2]
+    if not t or len(t) > 18 or not all('0' <= c <= '9' for c in t):
+        return None             # (18 digits: what mmbc's long long holds)
+    n = int(t)
+    return -n if neg else n
+
+
 def fold_toint(v):
     """mm_toint at translate time: the C text of the integer a float
     becomes, rounded half away from zero below 2^52 as the runtime does.
@@ -1494,6 +1529,7 @@ class Conv(object):
         self.uses_array = False     # whole-array ops/REDIM/MATH(): mmb_array.h
         self.uses_lstring = False   # LONGSTRING: pulls in mmb_lstring.h
         self.uses_datetime = False  # DATE$/TIME$/EPOCH etc: mmb_datetime.h
+        self.uses_restore_expr = False  # RESTORE expr: the label table
         self.uses_data = False      # DATA/READ/RESTORE: mmb_data.h
         self.uses_misc = False      # GOSUB/BIT/FLAG/BIN2STR etc: mmb_misc.h
         self.uses_pulse = False     # PULSE: pulls in mmb_pulse.h
@@ -5642,6 +5678,13 @@ class Conv(object):
         # and QWIIC socket are on I2C, GP20/GP21, which the kernel runs
         # - the firmware's answer for OPTION SYSTEM I2C on those pins
         'SYSTEM I2C': (c_string_literal('I2C'), TY_S),
+        # the firmware's "Ready", "Not present" or "Not Configured" for
+        # B:.  The card here is the root filesystem, so a program that
+        # is running can only be told it is ready.
+        'SDCARD':     (c_string_literal('Ready'), TY_S),
+        # C:, a USB flash drive (PicoMite 147a93d): the kernel has no
+        # USB mass storage, the firmware's answer for a build without it
+        'USBDRIVE':   (c_string_literal('Not Configured'), TY_S),
     }
     # ... and the ones that take an expression after the keyword.
     MMINFO_ARG = {
@@ -5786,6 +5829,10 @@ class Conv(object):
             self.uses_flash = True
             return ('(MMINTEGER)(long)mmf_addr(%s)' % self.as_int(a), TY_I)
         if one == 'FONT':
+            # MM.INFO(FONT): the current font's number, as fun_info's
+            # (gui_font >> 4) + 1 - the same 1..16 FONT takes
+            if self.accept_op(')'):
+                return ('mm_font_no()', TY_I)
             # MM.INFO(FONT ADDRESS n) - where font n's glyphs are, so a
             # program can draw them itself.
             t = self.nxt()
@@ -5799,9 +5846,9 @@ class Conv(object):
                  "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                  "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
                  "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, WRITEBUFF, "
-                 "LCDPANEL, SYSTEM I2C, IP ADDRESS, "
+                 "LCDPANEL, SYSTEM I2C, SDCARD, USBDRIVE, IP ADDRESS, "
                  "MAX CONNECTIONS, OPTION BASE, PIN n, PINNO, FILESIZE, "
-                 "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "
+                 "EXISTS FILE, EXISTS DIR, FONT, FONT ADDRESS n and "
                  "FLASH ADDRESS n" % t[1])
 
     # OPTION sub-keywords that configure a PicoMite rather than a
@@ -5820,8 +5867,8 @@ class Conv(object):
         'DISK', 'DISPLAY', 'F1', 'F5', 'F6', 'F7', 'F8', 'F9', 'FAST',
         'GPS', 'GUI', 'HDMI', 'HEARTBEAT', 'KEYBOARD', 'LCD', 'LCD320',
         'LCDPANEL', 'LIST', 'LOCAL', 'LOGGING', 'MODBUFF', 'MOUSE',
-        'PICO', 'PIN', 'PLATFORM', 'POWER', 'PROFILING', 'PS2',
-        'PSRAM', 'RESET', 'RTC', 'SCREEN', 'SDCARD', 'SERIAL',
+        'PICO', 'PIN', 'PLATFORM', 'POWER', 'PRINTSCREEN', 'PROFILING',
+        'PS2', 'PSRAM', 'RESET', 'RTC', 'SCREEN', 'SDCARD', 'SERIAL',
         'SYSTEM', 'TELNET', 'TFTP', 'TOUCH', 'TRACECACHE', 'VCC',
         'VGA', 'WEB', 'WIFI',
     )
@@ -5987,6 +6034,19 @@ class Conv(object):
             self.emit('mmg_webs_port(%s);' % self.as_int(self.expr()))
             return
         name = t[2] if t[0] == T_ID else str(t[1])
+        # OPTION PICOMITE does nothing, whatever follows it, and says
+        # nothing (PicoMite 1615889): Colour Maximite 2 programs carry
+        # it, and a warning on every one of them would be noise.
+        if name == 'PICOMITE':
+            self.skip_statement()
+            return
+        # OPTION MILLISECONDS adds .mmm to TIME$ there; here the clock
+        # has whole seconds, which is a difference, so it says so.
+        if name == 'MILLISECONDS':
+            self.warn('OPTION MILLISECONDS is ignored: TIME$ keeps whole '
+                      'seconds on this machine')
+            self.skip_statement()
+            return
         if name in self.OPT_CONFIG:
             self.warn('OPTION %s configures a PicoMite; it has no effect '
                       'on a translated program and is ignored' % name)
@@ -6111,13 +6171,26 @@ class Conv(object):
                 if ty != TY_S:
                     self.err("LENGTH is only for strings, and '%s' is not "
                              "one" % canon)
-                v = self.nxt()
-                if v[0] != T_NUM or v[2] != 'I':
-                    self.err("LENGTH takes a literal integer")
-                if int(v[1]) < 1 or int(v[1]) > 255:
-                    self.err("LENGTH must be 1..255")
-                if dims and int(v[1]) < MM_STRLEN:
-                    slen = int(v[1])
+                # An expression, as cmd_dim takes it (PicoMite #104).  On
+                # an array LENGTH sets the elements' spacing, so it has to
+                # be known here: a literal or a CONST.  On a scalar it
+                # changes nothing on this machine (decided 2026-10-21), so
+                # anything goes.  Judged in the declaration pass, which is
+                # where the spacing is recorded and where a CONST still
+                # carries its literal text (the emit pass sees the
+                # #define's name) - so refused with note(), as the
+                # constant-bounds refusal below is.
+                v = self.expr()
+                if self.mode == 'decl':
+                    n = const_int_value(v[0])
+                    if n is None:
+                        if dims:
+                            self.note("LENGTH of an array must be a "
+                                      "constant")
+                    elif n < 1 or n > 255:
+                        self.note("LENGTH must be 1..255")
+                    elif dims and n < MM_STRLEN:
+                        slen = n
 
             if self.mode == 'decl':
                 # DIMmed again, after an ERASE, with other bounds: it is
@@ -6838,6 +6911,12 @@ class Conv(object):
             self.i += 2
             return
 
+        # flash = 1: a variable with a command's name (CMD_NAME_NOT_VAR)
+        if t[0] == T_ID and up in FW_COMMANDS \
+                and up not in CMD_NAME_NOT_VAR and self.is_op('=', 1):
+            self.do_assign()
+            return
+
         if self.skip_type_block(up):
             return
         # A SUB the program defines WINS over a statement of the same
@@ -7301,7 +7380,11 @@ class Conv(object):
                 if self.is_kw(_kw, 1):
                     _loadprog = _p
                     break
-        if (up == 'SYSTEM' or _loadprog is not None
+        # SAVE COMPRESSED IMAGE is SAVE IMAGE (PicoMite 2abbb53: one
+        # command there since SAVE IMAGE compresses when it can)
+        save_cimg = (up == 'SAVE' and self.is_kw('COMPRESSED', 1)
+                     and self.is_kw('IMAGE', 2))
+        if (up == 'SYSTEM' or _loadprog is not None or save_cimg
                 or (up == 'SAVE' and self.is_kw('IMAGE', 1))):
             # SYSTEM prog$ [, arg ...]        run a program and wait
             # SAVE IMAGE f$ [, x, y, w, h]    both are programs
@@ -7326,7 +7409,7 @@ class Conv(object):
                 self.i += 1
                 prog = None
             else:
-                self.i += 2
+                self.i += 3 if save_cimg else 2
                 prog = 'saveimage' if up == 'SAVE' else _loadprog
             self.emit('mm_run_begin();')
             if prog is not None:
@@ -9005,9 +9088,18 @@ class Conv(object):
             v = self.expr()
             if up == 'TIMER':
                 self.emit('mm_timer_set(%s);' % self.as_flt(v))
+            elif up == 'TIME$' and v[1] != TY_S:
+                # TIME$ = n moves the time of day by n seconds and keeps
+                # the date: cmd_time's numeric form, in PicoMite's manual
+                # since 4a506b0.  TIME$ = 0 syncs to an external pulse.
+                self.uses_datetime = True
+                self.emit('mm_move_time(%s);' % self.as_int(v))
             elif v[1] != TY_S:
                 self.err("%s = needs a string" % up)
             else:
+                # the setters are in mmb_datetime.h too: a program that
+                # set the clock and never read it did not compile
+                self.uses_datetime = True
                 self.emit('mm_set_%s(%s);'
                           % ('date' if up == 'DATE$' else 'time', v[0]))
             return
@@ -9371,8 +9463,8 @@ class Conv(object):
 
     def d3_each(self, fn, pre):
         """n [, n ...] as one statement.  Each call answers 1 to end it
-        there, as an error, or HIDE's early return, ends cmd_3D's loop
-        over them."""
+        there, as an error ends cmd_3D's loop over them.  HIDE skips an
+        object already hidden and goes on (PicoMite #132)."""
         calls = []
         while True:
             calls.append('%s(%s%s)' % (fn, pre, self.as_int(self.expr())))
@@ -9607,21 +9699,39 @@ class Conv(object):
         if self.stmt_end():
             self.emit('mm_restore(0);')
             return
-        t = self.nxt()
-        if t[0] == T_NUM and t[2] == 'I':
+        # One token to the end of the statement: a line number, or a
+        # name that is a label first and a variable second (cmd_restore,
+        # PicoMite #103) - resolved here, as before.
+        t = self.peek()
+        self.i += 1
+        single = self.stmt_end()
+        self.i -= 1
+        canon = None
+        if single and t[0] == T_NUM and t[2] == 'I':
             canon = t[1]
-        elif t[0] == T_ID:
+        elif single and t[0] == T_ID:
             canon = split_suffix(t[1])[0]
-        else:
-            self.err("RESTORE needs a label or line number")
-        if canon not in self.data_at:
-            # a bare name that is a variable is evaluated for the label
-            # (cmd_restore, issue #103), which is not translated
-            if t[0] == T_ID and self.lookup(canon) is not None:
-                self.err("unknown label '%s' in RESTORE" % t[1])
-            self.missing_target(canon, 'RESTORE', t[1])
+            if canon not in self.data_at and self.lookup(canon) is not None:
+                canon = None            # a variable: the expression below
+        if canon is not None:
+            self.i += 1
+            if canon not in self.data_at:
+                self.missing_target(canon, 'RESTORE', t[1])
+                return
+            self.emit('mm_restore(%d);' % self.data_at[canon])
             return
-        self.emit('mm_restore(%d);' % self.data_at[canon])
+        # Anything else is an expression, evaluated when the statement
+        # runs: a string names a label, a number a line - RESTORE l$,
+        # RESTORE CHOICE(n = 1, "one", "two"), RESTORE b + 20.  The
+        # program carries a table of its labels for it.
+        v = self.expr()
+        self.uses_restore_expr = True
+        if v[1] == TY_S:
+            self.emit('mm_restore_name(%s, __mmb_rtab_k, __mmb_rtab_at);'
+                      % v[0])
+        else:
+            self.emit('mm_restore_line(%s, __mmb_rtab_k, __mmb_rtab_at);'
+                      % self.as_int(v))
 
     # -- SORT ---------------------------------------------------------------
     def do_sort(self):
@@ -12802,6 +12912,22 @@ class Conv(object):
                 for kind, f, i, sv in self.data:
                     wr('    %s,\n' % sv)
                 wr('};\n')
+        if self.uses_restore_expr:
+            # every label and line number, and the DATA index RESTORE
+            # takes it to: mm_restore_name/_line look a run-time key up
+            # here (PicoMite #103).  In index order, then by name, so
+            # mmbc writes the same table.
+            wr('\n/* ---- RESTORE expr: labels and the DATA index of each'
+               ' ---- */\n')
+            keys = sorted(self.data_at.items(), key=lambda kv: (kv[1], kv[0]))
+            wr('static const char *const __mmb_rtab_k[] = {\n')
+            for name, at in keys:
+                wr('    "%s",\n' % name)
+            wr('    0\n};\n')
+            wr('static const int __mmb_rtab_at[] = {\n')
+            for name, at in keys:
+                wr('    %d,\n' % at)
+            wr('    0\n};\n')
         if self.uses_fbt:
             wr('\n/* FRAMEBUFFER LAYER\'s transparent colour: the merge\n')
             wr(' * default when MERGE names none (transparentlow/high\n')

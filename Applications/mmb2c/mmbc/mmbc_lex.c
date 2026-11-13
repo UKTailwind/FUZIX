@@ -795,6 +795,56 @@ int const_or_literal_expr(const char *text)
     return const_c_expr(out);
 }
 
+/* The integer an emitted expression is, when it is one integer literal
+ * once casts, brackets and a sign are taken off - a CONST arrives as its
+ * value's text, so `CONST W = 8: DIM a$(3) LENGTH W` is one.  1 and *val,
+ * or 0 for anything else, which only run time can answer.  The Python's
+ * const_int_value. */
+int const_int_value(const char *text, long long *val)
+{
+    char t[64];
+    size_t n = 0, a, b;
+    int neg = 0;
+    const char *p;
+    long long v = 0;
+
+    for (p = text; *p; p++) {
+        if (strncmp(p, "(MMINTEGER)", 11) == 0) {
+            p += 10;
+            continue;
+        }
+        if (*p == ' ')
+            continue;
+        if (n + 1 >= sizeof(t))
+            return 0;
+        t[n++] = *p;
+    }
+    t[n] = 0;
+    a = 0;
+    b = n;
+    for (;;) {
+        if (b - a >= 2 && t[a] == '(' && t[b - 1] == ')') {
+            a++;
+            b--;
+        } else if (b > a && t[a] == '-' && !neg) {
+            neg = 1;
+            a++;
+        } else
+            break;
+    }
+    if (b - a >= 2 && t[b - 2] == 'L' && t[b - 1] == 'L')
+        b -= 2;
+    if (b == a || b - a > 18)   /* what a long long holds, as the Python */
+        return 0;
+    for (n = a; n < b; n++) {
+        if (t[n] < '0' || t[n] > '9')
+            return 0;
+        v = v * 10 + (t[n] - '0');
+    }
+    *val = neg ? -v : v;
+    return 1;
+}
+
 int const_c_expr(const char *text)
 {
     int i = 0;

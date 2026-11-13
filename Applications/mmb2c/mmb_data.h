@@ -88,6 +88,54 @@ MMG_FN void mm_restore(int index)
     mm_dptr = index;
 }
 
+/* RESTORE with an expression (PicoMite #103): a string names a label, a
+ * number a line, found when the statement runs.  The translator hands
+ * over every label and line number of the program (k, labels in lower
+ * case as it keeps them, NULL-terminated) with the DATA index each one
+ * restores to (at): parallel arrays, as the DATA table is. */
+MMG_FN void mm_restore_key(const char *key, const char *const *k,
+                           const int *at)
+{
+    int j, i;
+
+    for (j = 0; k[j]; j++) {
+        for (i = 0; key[i] && k[j][i]; i++) {
+            char c = key[i];
+            if (c >= 'A' && c <= 'Z')
+                c = (char)(c - 'A' + 'a');
+            if (c != k[j][i])
+                break;
+        }
+        if (!key[i] && !k[j][i]) {
+            mm_restore(at[j]);
+            return;
+        }
+    }
+    MM_RAISE("Cannot find label");
+}
+
+MMG_FN void mm_restore_name(const char *s, const char *const *k,
+                            const int *at)
+{
+    mm_restore_key(mm_cstr(s), k, at);
+}
+
+MMG_FN void mm_restore_line(MMINTEGER n, const char *const *k,
+                            const int *at)
+{
+    char d[24];
+    int i = 23;
+
+    d[23] = 0;
+    if (n < 0)
+        MM_RAISE("Cannot find label");
+    do {
+        d[--i] = (char)('0' + (int)(n % 10));
+        n /= 10;
+    } while (n && i > 0);
+    mm_restore_key(d + i, k, at);
+}
+
 MMG_FN int mm_next_idx(void)
 {
     if (mm_dptr >= mm_dn) mm_error("No more DATA to READ");

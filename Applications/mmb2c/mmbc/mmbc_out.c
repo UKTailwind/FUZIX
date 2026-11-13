@@ -384,6 +384,18 @@ static int cmpbnd(const void *a, const void *b)
     return strcmp(x->body, y->body);
 }
 
+/* The RESTORE expr table's order: DATA index, then name - the Python's
+   sorted(data_at.items(), key=(index, name)). */
+static int rtab_cmp(const void *a, const void *b)
+{
+    const struct label *x = *(const struct label *const *)a;
+    const struct label *y = *(const struct label *const *)b;
+
+    if (x->data_at != y->data_at)
+        return x->data_at < y->data_at ? -1 : 1;
+    return strcmp(x->name, y->name);
+}
+
 void conv_write(FILE *f)
 {
     int k, n;
@@ -704,6 +716,30 @@ void conv_write(FILE *f)
                 fprintf(f, "    %s,\n", cv.data[k].sv);
             fprintf(f, "};\n");
         }
+    }
+    if (cv.uses_restore_expr) {
+        /* every label and line number, and the DATA index RESTORE takes
+           it to: mm_restore_name/_line look a run-time key up here
+           (PicoMite #103).  In index order, then by name, as the Python
+           sorts its data_at. */
+        struct label **keys = palloc(sizeof(struct label *)
+                                     * (size_t)(cv.nlabels + 1));
+        int nk = 0, j;
+
+        for (k = 0; k < cv.nlabels; k++)
+            if (cv.labels[k].has_data_at)
+                keys[nk++] = &cv.labels[k];
+        qsort(keys, (size_t)nk, sizeof(keys[0]), rtab_cmp);
+        fprintf(f, "\n/* ---- RESTORE expr: labels and the DATA index of each"
+                " ---- */\n");
+        fprintf(f, "static const char *const __mmb_rtab_k[] = {\n");
+        for (j = 0; j < nk; j++)
+            fprintf(f, "    \"%s\",\n", keys[j]->name);
+        fprintf(f, "    0\n};\n");
+        fprintf(f, "static const int __mmb_rtab_at[] = {\n");
+        for (j = 0; j < nk; j++)
+            fprintf(f, "    %d,\n", keys[j]->data_at);
+        fprintf(f, "    0\n};\n");
     }
     if (cv.uses_fbt) {
         fprintf(f, "\n/* FRAMEBUFFER LAYER's transparent colour: the merge\n");

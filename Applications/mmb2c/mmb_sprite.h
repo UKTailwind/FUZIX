@@ -1478,10 +1478,9 @@ MMG_FN void mms_loadpng(MMINTEGER bn, const char *file, MMINTEGER targ,
  *	image, and the loader applies them: a window that runs off the
  *	picture is an error there, not a clipped sprite.
  *
- *	NO DEFAULT EXTENSION.  The reference appends ".bmp" to a name
- *	with none; this port passes file names through untouched, as
- *	LOAD IMAGE, LOAD PNG and LOAD JPG already do, so a program
- *	written for a PicoMite may need the extension spelling out.
+ *	A name with no extension gets ".bmp", as the reference gives it:
+ *	loadimage applies the rule, as it does for LOAD IMAGE, and
+ *	saveimage does the same for SAVE IMAGE.
  */
 MMG_FN void mms_loadbmp(MMINTEGER bn, const char *file, MMINTEGER xo,
 			MMINTEGER yo, MMINTEGER wi, MMINTEGER hi)

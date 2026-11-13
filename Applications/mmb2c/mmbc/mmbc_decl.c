@@ -1039,14 +1039,29 @@ void do_option(void)
             "DISK", "DISPLAY", "F1", "F5", "F6", "F7", "F8", "F9", "FAST",
             "GPS", "GUI", "HDMI", "HEARTBEAT", "KEYBOARD", "LCD", "LCD320",
             "LCDPANEL", "LIST", "LOCAL", "LOGGING", "MODBUFF", "MOUSE",
-            "PICO", "PIN", "PLATFORM", "POWER", "PROFILING", "PS2",
-            "PSRAM", "RESET", "RTC", "SCREEN", "SDCARD", "SERIAL",
+            "PICO", "PIN", "PLATFORM", "POWER", "PRINTSCREEN", "PROFILING",
+            "PS2", "PSRAM", "RESET", "RTC", "SCREEN", "SDCARD", "SERIAL",
             "SYSTEM", "TELNET", "TFTP", "TOUCH", "TRACECACHE", "VCC",
             "VGA", "WEB", "WIFI", NULL
         };
         const char *name = (t->kind == T_ID) ? t->up : t->text;
         int k;
 
+        /* OPTION PICOMITE does nothing, whatever follows it, and says
+           nothing (PicoMite 1615889): Colour Maximite 2 programs carry
+           it, and a warning on every one of them would be noise. */
+        if (strcmp(name, "PICOMITE") == 0) {
+            skip_statement();
+            return;
+        }
+        /* OPTION MILLISECONDS adds .mmm to TIME$ there; here the clock
+           has whole seconds, which is a difference, so it says so. */
+        if (strcmp(name, "MILLISECONDS") == 0) {
+            cv_warn("OPTION MILLISECONDS is ignored: TIME$ keeps whole "
+                    "seconds on this machine");
+            skip_statement();
+            return;
+        }
         for (k = 0; config[k] != NULL; k++) {
             if (strcmp(name, config[k]) == 0) {
                 cv_warn("OPTION %s configures a PicoMite; it has no "
@@ -1391,18 +1406,31 @@ void do_declare(const char *kw)
            read. */
         alen = 0;
         if (accept_kw("LENGTH")) {
-            struct tok *v;
+            struct val v;
+            long long n;
 
             if (ty != TY_S)
                 cv_err("LENGTH is only for strings, and '%s' is not one",
                        canon);
-            v = nxt();
-            if (v->kind != T_NUM || strcmp(v->up, "I") != 0)
-                cv_err("LENGTH takes a literal integer");
-            else if (atoi(v->text) < 1 || atoi(v->text) > 255)
-                cv_err("LENGTH must be 1..255");
-            else if (ndims > 0 && atoi(v->text) < MM_STRLEN)
-                alen = atoi(v->text);
+            /* An expression, as cmd_dim takes it (PicoMite #104).  On an
+               array LENGTH sets the elements' spacing, so it has to be
+               known here: a literal or a CONST.  On a scalar it changes
+               nothing on this machine (decided 2026-10-21), so anything
+               goes.  Judged in the declaration pass, which is where the
+               spacing is recorded and where a CONST still carries its
+               literal text (the emit pass sees the #define's name) - so
+               refused with cv_note, as the constant-bounds refusal
+               below is. */
+            v = expr();
+            if (cv.mode == M_DECL) {
+                if (!const_int_value(v.code, &n)) {
+                    if (ndims > 0)
+                        cv_note("LENGTH of an array must be a constant");
+                } else if (n < 1 || n > 255)
+                    cv_note("LENGTH must be 1..255");
+                else if (ndims > 0 && n < MM_STRLEN)
+                    alen = (int)n;
+            }
         }
 
         if (cv.mode == M_DECL) {

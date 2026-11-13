@@ -989,13 +989,13 @@ char *mm_errmsg(void);              /* MM.ERRMSG$                      */
 /* MM.VER and MM.INFO(VERSION): the PicoMite version the translator
  * follows, as the firmware's fun_version encodes its VERSION string -
  * major, then two digits each of minor, patch and pre-release, a
- * release candidate's being 50 + n - so "7.00.00RC5" is 7.000055 and
- * the release will be 7.0.  PicoMite programs test it: Exile and
+ * release candidate's being 50 + n and a release's 99 (4e078e5) - so
+ * "7.00.00RC9" is 7.000059 and the release will be 7.000099.  PicoMite programs test it: Exile and
  * Picanoid stop with "firmware too old for this game" below 6.03.02b11.
  * It was the Fuzix release (0.30), which read as a very old PicoMite;
  * the release is in the boot banner (decided 24 Oct 2026).  Move it
  * when mmb2c follows a newer firmware. */
-#define MM_VERSION 7.000055
+#define MM_VERSION 7.000059
 MMFLOAT mm_ver(void);               /* MM.VER                          */
 char *mm_device(void);              /* MM.DEVICE$ - "Fuzix"            */
 char *mm_cmdline(void);             /* MM.CMDLINE$                     */
@@ -1026,6 +1026,7 @@ MMINTEGER mm_freespace(void);               /* MM.INFO(FREE SPACE); 0 unknown */
 MMINTEGER mm_pinno(const char *name);       /* "GP8" -> 8              */
 MMINTEGER mm_fontwidth(void);       /* MM.FONTWIDTH,  cell x scale     */
 MMINTEGER mm_fontheight(void);      /* MM.FONTHEIGHT, cell x scale     */
+MMINTEGER mm_font_no(void);         /* MM.INFO(FONT), the font's number */
 MMINTEGER mm_hpos(void);            /* MM.HPOS - the pixel cursor      */
 MMINTEGER mm_vpos(void);            /* MM.VPOS                         */
 

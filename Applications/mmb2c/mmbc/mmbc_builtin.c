@@ -1557,6 +1557,14 @@ struct val builtin_raw(const char *up)
                kernel runs - the firmware's answer for OPTION SYSTEM I2C
                on those pins */
             { "SYSTEM I2C", "\"\\003\" \"I2C\"", TY_S },
+            /* the firmware's "Ready", "Not present" or "Not Configured"
+               for B:.  The card here is the root filesystem, so a
+               program that is running can only be told it is ready. */
+            { "SDCARD", "\"\\005\" \"Ready\"", TY_S },
+            /* C:, a USB flash drive (PicoMite 147a93d): the kernel has
+               no USB mass storage, the firmware's answer for a build
+               without it */
+            { "USBDRIVE", "\"\\016\" \"Not Configured\"", TY_S },
             { NULL, NULL, 0 }
         };
         static const struct { const char *kw, *call; } witharg[] = {
@@ -1681,10 +1689,14 @@ struct val builtin_raw(const char *up)
                    "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                    "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
                    "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, WRITEBUFF, "
-                   "LCDPANEL, SYSTEM I2C, IP ADDRESS, "
+                   "LCDPANEL, SYSTEM I2C, SDCARD, USBDRIVE, IP ADDRESS, "
                    "MAX CONNECTIONS, OPTION BASE, PIN n, PINNO, FILESIZE, "
-                   "EXISTS FILE, EXISTS DIR, FONT ADDRESS n and "
+                   "EXISTS FILE, EXISTS DIR, FONT, FONT ADDRESS n and "
                    "FLASH ADDRESS n", t->text);
+        /* MM.INFO(FONT): the current font's number, as fun_info's
+           (gui_font >> 4) + 1 - the same 1..16 FONT takes */
+        if (accept_op(")"))
+            return mkval("mm_font_no()", TY_I);
         t = nxt();
         if (t->kind != T_ID || strcmp(t->up, "ADDRESS") != 0)
             cv_err("MM.INFO(FONT %s ...) is not supported; translated "

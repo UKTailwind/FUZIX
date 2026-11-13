@@ -1,5 +1,5 @@
 ' What PicoMite programs ask before they start.  MM.VER is the firmware
-' version the translator follows (7.000055 for 7.00.00RC5), so a check
+' version the translator follows (7.000059 for 7.00.00RC9), so a check
 ' against 6.03.02b11 passes; MM.INFO$(LCDPANEL) names the mode, "MODE1"
 ' and on, or is "" with no display; PSRAM SIZE is what the firmware leaves
 ' for programs (5.5 MB of a PC3's 8 MB) and 0 with none.
