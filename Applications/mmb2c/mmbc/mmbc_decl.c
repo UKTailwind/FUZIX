@@ -1039,7 +1039,7 @@ void do_option(void)
             "DISK", "DISPLAY", "F1", "F5", "F6", "F7", "F8", "F9", "FAST",
             "GPS", "GUI", "HDMI", "HEARTBEAT", "KEYBOARD", "LCD", "LCD320",
             "LCDPANEL", "LIST", "LOCAL", "LOGGING", "MODBUFF", "MOUSE",
-            "PICO", "PIN", "PLATFORM", "POWER", "PRINTSCREEN", "PROFILING",
+            "PICO", "PIN", "PLATFORM", "POWER", "PROFILING",
             "PS2", "PSRAM", "RESET", "RTC", "SCREEN", "SDCARD", "SERIAL",
             "SYSTEM", "TELNET", "TFTP", "TOUCH", "TRACECACHE", "VCC",
             "VGA", "WEB", "WIFI", NULL
@@ -1052,6 +1052,36 @@ void do_option(void)
            it, and a warning on every one of them would be noise. */
         if (strcmp(name, "PICOMITE") == 0) {
             skip_statement();
+            return;
+        }
+        /* OPTION PRINTSCREEN ON | OFF and FORMAT BMP | PNG (PicoMite
+           cd8582c, 0684c45): while it is on, the Print Screen key saves
+           the screen and the program never sees the key (mm_prtscr in
+           mmb_runtime.c).  The key is looked for by the statement poll,
+           so ON and OFF bring mmb_int.h and its poll sites in. */
+        if (strcmp(name, "PRINTSCREEN") == 0) {
+            cv.i++;
+            if (accept_kw("FORMAT")) {
+                if (accept_kw("PNG")) {
+                    emit("mm_prtscr(3);");
+                } else if (accept_kw("BMP")) {
+                    emit("mm_prtscr(2);");
+                } else {
+                    cv_note("Invalid syntax");
+                    skip_statement();
+                }
+            } else if (accept_kw("ON")) {
+                cv.uses_interrupts = 1;
+                emit("mm_prtscr(1);");
+                emit("mmi_prtscr(1);");
+            } else if (accept_kw("OFF")) {
+                cv.uses_interrupts = 1;
+                emit("mm_prtscr(0);");
+                emit("mmi_prtscr(0);");
+            } else {
+                cv_note("Invalid syntax");
+                skip_statement();
+            }
             return;
         }
         /* OPTION MILLISECONDS adds .mmm to TIME$ there; here the clock

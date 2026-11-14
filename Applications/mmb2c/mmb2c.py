@@ -5867,7 +5867,7 @@ class Conv(object):
         'DISK', 'DISPLAY', 'F1', 'F5', 'F6', 'F7', 'F8', 'F9', 'FAST',
         'GPS', 'GUI', 'HDMI', 'HEARTBEAT', 'KEYBOARD', 'LCD', 'LCD320',
         'LCDPANEL', 'LIST', 'LOCAL', 'LOGGING', 'MODBUFF', 'MOUSE',
-        'PICO', 'PIN', 'PLATFORM', 'POWER', 'PRINTSCREEN', 'PROFILING',
+        'PICO', 'PIN', 'PLATFORM', 'POWER', 'PROFILING',
         'PS2', 'PSRAM', 'RESET', 'RTC', 'SCREEN', 'SDCARD', 'SERIAL',
         'SYSTEM', 'TELNET', 'TFTP', 'TOUCH', 'TRACECACHE', 'VCC',
         'VGA', 'WEB', 'WIFI',
@@ -6039,6 +6039,33 @@ class Conv(object):
         # it, and a warning on every one of them would be noise.
         if name == 'PICOMITE':
             self.skip_statement()
+            return
+        # OPTION PRINTSCREEN ON | OFF and FORMAT BMP | PNG (PicoMite
+        # cd8582c, 0684c45): while it is on, the Print Screen key saves
+        # the screen and the program never sees the key (mm_prtscr in
+        # mmb_runtime.c).  The key is looked for by the statement poll,
+        # so ON and OFF bring mmb_int.h and its poll sites in.
+        if name == 'PRINTSCREEN':
+            self.i += 1
+            if self.accept_kw('FORMAT'):
+                if self.accept_kw('PNG'):
+                    self.emit('mm_prtscr(3);')
+                elif self.accept_kw('BMP'):
+                    self.emit('mm_prtscr(2);')
+                else:
+                    self.note("Invalid syntax")
+                    self.skip_statement()
+            elif self.accept_kw('ON'):
+                self.uses_interrupts = True
+                self.emit('mm_prtscr(1);')
+                self.emit('mmi_prtscr(1);')
+            elif self.accept_kw('OFF'):
+                self.uses_interrupts = True
+                self.emit('mm_prtscr(0);')
+                self.emit('mmi_prtscr(0);')
+            else:
+                self.note("Invalid syntax")
+                self.skip_statement()
             return
         # OPTION MILLISECONDS adds .mmm to TIME$ there; here the clock
         # has whole seconds, which is a difference, so it says so.
@@ -7384,10 +7411,14 @@ class Conv(object):
         # command there since SAVE IMAGE compresses when it can)
         save_cimg = (up == 'SAVE' and self.is_kw('COMPRESSED', 1)
                      and self.is_kw('IMAGE', 2))
+        # SAVE PNG is saveimage -p (PicoMite ec6fd02: SAVE IMAGE's
+        # arguments, written as an 8-bit RGB PNG)
+        save_png = up == 'SAVE' and self.is_kw('PNG', 1)
         if (up == 'SYSTEM' or _loadprog is not None or save_cimg
-                or (up == 'SAVE' and self.is_kw('IMAGE', 1))):
+                or save_png or (up == 'SAVE' and self.is_kw('IMAGE', 1))):
             # SYSTEM prog$ [, arg ...]        run a program and wait
             # SAVE IMAGE f$ [, x, y, w, h]    both are programs
+            # SAVE PNG   f$ [, x, y, w, h]
             # LOAD IMAGE f$ [, x, y]
             # LOAD BMP   f$ [, x, y]          the reference's own synonym
             # LOAD JPG   f$ [, x, y [, mode [, xi, yi [, scale]]]]
@@ -7414,6 +7445,8 @@ class Conv(object):
             self.emit('mm_run_begin();')
             if prog is not None:
                 self.emit('mm_run_arg(%s);' % c_string_literal(prog))
+            if save_png:
+                self.emit('mm_run_arg(%s);' % c_string_literal('-p'))
             first = True
             while True:
                 if not first and not self.accept_op(','):

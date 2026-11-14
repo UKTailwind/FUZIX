@@ -1,5 +1,6 @@
-' OPTION PICOMITE is nothing (PicoMite 1615889); OPTION MILLISECONDS and
-' OPTION PRINTSCREEN are warned about and ignored.  TIME$ = n moves the
+' OPTION PICOMITE is nothing (PicoMite 1615889); OPTION MILLISECONDS is
+' warned about and ignored, and OPTION PRINTSCREEN FORMAT only says what
+' Print Screen saves (prtscr.bas).  TIME$ = n moves the
 ' time of day by n seconds and keeps the date, wrapping at midnight
 ' (cmd_time's numeric form, PicoMite 4a506b0).
 Option PicoMite

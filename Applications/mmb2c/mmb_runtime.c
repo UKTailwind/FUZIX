@@ -1817,6 +1817,54 @@ void mm_seek(MMINTEGER fnbr, MMINTEGER pos)
     fseek(mm_chan[fnbr].f, (long)(pos - 1), SEEK_SET);
 }
 
+/* ---- Print Screen in a running program -------------------------------
+ *
+ * OPTION PRINTSCREEN ON (PicoMite cd8582c, misc/FileIO.c): while the
+ * program runs, the Print Screen key (0x9D, keyboard_maps.h) saves the
+ * screen as SCREEN_yyyymmdd_hhmmss.BMP in the current directory - .PNG
+ * after OPTION PRINTSCREEN FORMAT PNG - by saveimage -s, and the
+ * program never sees the key.  Off until the program turns it on, as
+ * there, where RUN turns it off.  FORMAT is a saved option on a
+ * PicoMite; a program here has nothing to save it in, so it lasts the
+ * run, and the editor's Print Screen always writes a BMP.
+ *
+ * PicoMite takes the key where it arrives, in the console's interrupt,
+ * and saves where the program can stop for it.  There is no interrupt
+ * here, so the key is taken where this runtime reads the console -
+ * INKEY$, ON KEY's look and INPUT - and while it is on, the statement
+ * poll looks at the console every 5 ms (mm_prtscr_poll, from mmb_int.h).
+ * That is what makes a program that reads no keys at all answer it.  A
+ * Print Screen behind a key the program has not read waits for that key
+ * to be read.  Ctrl-\, PicoMite's other Print Screen key, is still the
+ * tty's QUIT here.
+ *
+ * The save raises nothing and leaves MM.ERRNO and MM.ERRMSG$ alone, as
+ * PicoMite's FileTry does: a full card must not stop a program that
+ * never asked for a file. */
+#define MM_PRTSCR 0x9D
+static int mm_ps_on, mm_ps_png, mm_ps_pending;
+static void mm_ps_run(char *const argv[]);    /* with mm_run_exec */
+
+/* OPTION PRINTSCREEN OFF (0), ON (1), FORMAT BMP (2), FORMAT PNG (3) */
+void mm_prtscr(MMINTEGER op)
+{
+    if (op == 0)
+        mm_ps_on = mm_ps_pending = 0;
+    else if (op == 1)
+        mm_ps_on = 1;
+    else
+        mm_ps_png = (op == 3);
+}
+
+static void mm_ps_save(void)
+{
+    static char *av_bmp[] = {"saveimage", "-s", NULL};
+    static char *av_png[] = {"saveimage", "-s", "-p", NULL};
+
+    mm_ps_pending = 0;
+    mm_ps_run(mm_ps_png ? av_png : av_bmp);
+}
+
 /* ---- reading --------------------------------------------------------
  * MMgetline's rules: for a file a '\r' is dropped, a '\n' ends the line
  * and end of file ends the line.                                      */
@@ -1946,6 +1994,12 @@ static void mm_readline(MMINTEGER fnbr, char *dst)
         if (c == EOF) break;
         if (c == '\r') continue;
         if (c == '\n') break;
+        /* the console's own editor has the line, so Print Screen can
+           only be kept out of it, and the screen saved once it ends */
+        if (c == MM_PRTSCR && fnbr == 0 && mm_ps_on) {
+            mm_ps_pending = 1;
+            continue;
+        }
         if (n < MM_STRLEN) dst[++n] = (char)c;
         else { mm_error("Line is too long"); break; }
     }
@@ -1953,6 +2007,8 @@ static void mm_readline(MMINTEGER fnbr, char *dst)
     dst[n + 1] = 0;
     if (fnbr == 0)
         mm_raw_resume();        /* only if a key reader had it */
+    if (fnbr == 0 && mm_ps_pending)
+        mm_ps_save();
 }
 
 char *mm_getline(MMINTEGER fnbr)
@@ -3800,6 +3856,21 @@ void mm_key_drop(void)
     mm_kfn--;
 }
 
+/* OPTION PRINTSCREEN ON's part of the statement poll (mmb_int.h, every
+ * MM_INT_CON_US): look at the console when nothing is waiting there -
+ * mm_inkey takes a Print Screen out as it reads - and save if one came.
+ * A key that is not Print Screen stays queued for the program, as ON
+ * KEY's look leaves one. */
+void mm_prtscr_poll(void)
+{
+    if (!mm_ps_on)
+        return;
+    if (!mm_ps_pending && !mm_kfn)
+        (void)mm_key_peek();
+    if (mm_ps_pending)
+        mm_ps_save();
+}
+
 char *mm_inkey(void)
 {
     char *t = mm_tmp();
@@ -3859,6 +3930,10 @@ char *mm_inkey(void)
             else
                 c = mm_esc_decode();
 #endif
+        }
+        if (c == MM_PRTSCR && mm_ps_on) {
+            mm_ps_pending = 1;          /* not a key: see mm_prtscr */
+            c = -1;
         }
         if (c >= 0) {
             t[0] = 1;
@@ -3926,6 +4001,11 @@ static int mm_getkey_wait(void)
 
         if (n == 1) {
             c = (int)b;
+            /* INPUT's wait is where PicoMite's MMgetline saves it */
+            if (c == MM_PRTSCR && mm_ps_on) {
+                mm_ps_save();
+                continue;
+            }
             break;
         }
         if (n < 0 && errno != EINTR)
@@ -4019,6 +4099,13 @@ MMINTEGER mm_run_exec(void)
     return -1;
 }
 
+/* Print Screen's save has nothing to run here either, and says nothing
+   (see mm_prtscr). */
+static void mm_ps_run(char *const argv[])
+{
+    (void)argv;
+}
+
 MMINTEGER mm_run_bg(void)
 {
     mm_error("running a program needs the native runtime");
@@ -4065,6 +4152,7 @@ MMINTEGER mm_play_stop(void)
 
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 /*
@@ -4340,6 +4428,38 @@ MMINTEGER mm_run_exec(void)
     }
     return 0;
 }
+
+/* Print Screen's save (mm_prtscr): mm_run_exec without the BASIC
+   errors, and with the child's output thrown away - a failure has
+   nowhere to go but over the program's own screen. */
+static void mm_ps_run(char *const argv[])
+{
+    int status;
+    pid_t pid;
+
+    fflush(stdout);
+    mm_gflush();
+#if defined(MM_PC3) || defined(__FUZIX__)
+    sync();
+#endif
+    pid = fork();
+    if (pid == 0) {
+        int fd = open("/dev/null", O_RDWR);
+
+        if (fd >= 0) {
+            dup2(fd, 1);
+            dup2(fd, 2);
+        }
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    if (pid > 0)
+        while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+            ;
+#if defined(MM_PC3) || defined(__FUZIX__)
+    sync();
+#endif
+}
 #else
 MMINTEGER mm_run_exec(void)
 {
@@ -4375,6 +4495,24 @@ MMINTEGER mm_run_exec(void)
         return -1;
     }
     return 0;
+}
+
+/* Print Screen's save: the POSIX one above says why it is quiet.
+   Windows gives no way to send the child's error stream elsewhere,
+   so only its output is thrown away. */
+static void mm_ps_run(char *const argv[])
+{
+    int status, pid, fd;
+
+    fflush(stdout);
+    mm_gflush();
+    fd = open("NUL", O_WRONLY);
+    pid = pc3w_spawn(argv[0], argv, -1, fd, 0, NULL);
+    if (fd >= 0)
+        close(fd);
+    if (pid >= 0)
+        while (pc3w_wait(pid, &status, 0) < 0)
+            ;
 }
 #endif
 

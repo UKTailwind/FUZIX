@@ -848,10 +848,14 @@ void statement_inner(void)
        there since SAVE IMAGE compresses when it can) */
     int save_cimg = strcmp(up, "SAVE") == 0 && is_kw("COMPRESSED", 1)
                     && is_kw("IMAGE", 2);
+    /* SAVE PNG is saveimage -p (PicoMite ec6fd02: SAVE IMAGE's
+       arguments, written as an 8-bit RGB PNG) */
+    int save_png = strcmp(up, "SAVE") == 0 && is_kw("PNG", 1);
     if (strcmp(up, "SYSTEM") == 0 || load_prog(up) != NULL || save_cimg
-        || (strcmp(up, "SAVE") == 0 && is_kw("IMAGE", 1))) {
+        || save_png || (strcmp(up, "SAVE") == 0 && is_kw("IMAGE", 1))) {
         /* SYSTEM prog$ [, arg ...]        run a program and wait
            SAVE IMAGE f$ [, x, y, w, h]    both are programs
+           SAVE PNG   f$ [, x, y, w, h]
            LOAD IMAGE f$ [, x, y]
            LOAD BMP   f$ [, x, y]          the reference's own synonym
            LOAD JPG   f$ [, x, y [, mode [, xi, yi [, scale]]]]
@@ -883,6 +887,8 @@ void statement_inner(void)
         emit("mm_run_begin();");
         if (prog != NULL)
             emit(sfmt("mm_run_arg(%s);", c_string_literal(prog)));
+        if (save_png)
+            emit(sfmt("mm_run_arg(%s);", c_string_literal("-p")));
         for (;;) {
             struct val v;
             if (!first && !accept_op(","))

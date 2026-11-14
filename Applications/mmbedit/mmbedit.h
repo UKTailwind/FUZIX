@@ -39,6 +39,7 @@ extern int edit_readonly;   /* mmbedit.c: the file cannot be saved where it is *
 #define K_F10       0x9A
 #define K_F11       0x9B
 #define K_F12       0x9C
+#define K_PRTSCR    0x9D            /* Print Screen (keyboard_maps.h) */
 
 /* Shift adds 0x20 throughout - MMBasic's own rule, so SHIFT_F3 is
  * 0xB3 and shifted cursor keys land in 0xA0..0xA9. */

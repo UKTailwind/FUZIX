@@ -121,6 +121,23 @@ MMG_FN void mm_int_arm(void)
 	__mm_int_armed++;
 }
 
+/*	OPTION PRINTSCREEN ON and OFF: the poll looks at the console for
+ *	Print Screen every MM_INT_CON_US while it is on (mm_prtscr in
+ *	mmb_runtime.c).  Armed once however often it is turned on. */
+static int mm_ps_armed;
+static long long mm_ps_next;		/* earliest us at which to look */
+
+MMG_FN void mmi_prtscr(int on)
+{
+	if (on && !mm_ps_armed) {
+		mm_ps_armed = 1;
+		__mm_int_armed++;
+	} else if (!on && mm_ps_armed) {
+		mm_ps_armed = 0;
+		__mm_int_armed--;
+	}
+}
+
 /*	How often something armed needs looking at, in microseconds, or 0
  *	when nothing does.  mmb_wait.h uses it to size the slices of a
  *	PAUSE: a program with SETTICK 1000 can sleep through most of the
@@ -137,7 +154,7 @@ MMG_FN long long mm_int_slice_us(void)
 		if (mm_tick[i].armed && mm_tick[i].active &&
 		    (s == 0 || mm_tick[i].period < s))
 			s = mm_tick[i].period;
-	if (mm_key_any_fn || mm_key_sel_fn)
+	if (mm_key_any_fn || mm_key_sel_fn || mm_ps_armed)
 		if (s == 0 || MM_INT_CON_US < s)
 			s = MM_INT_CON_US;
 	/*	A pin interrupt has no period of its own - MMBasic compares
@@ -503,6 +520,18 @@ MMG_FN void mm_int_poll(void)
 #ifdef MMB_PULSE_H
 	mmg_pulse_service();
 #endif
+
+	/*	OPTION PRINTSCREEN ON: also before the nesting gate, as
+	 *	PicoMite's check_interrupt saves the screen before its own -
+	 *	a handler's statements answer Print Screen too. */
+	if (mm_ps_armed) {
+		long long now = MMI_US();
+
+		if (now >= mm_ps_next) {
+			mm_ps_next = now + MM_INT_CON_US;
+			mm_prtscr_poll();
+		}
+	}
 
 	if (__mm_in_int)
 		return;

@@ -1776,10 +1776,24 @@ nothing for them:
 ```basic
 SAVE IMAGE "shot.bmp"                      ' the whole screen
 SAVE IMAGE "part.bmp", 160, 120, 320, 240  ' x, y, w, h
+SAVE PNG "shot"                            ' the same, as shot.png
 LOAD IMAGE "shot.bmp"                      ' at 0,0
 LOAD IMAGE "shot.bmp", 160, 120            ' at x,y
 LOAD IMAGE "shot"                          ' .bmp is added for you
 ```
+
+**`SAVE IMAGE` writes the smallest BMP that holds the picture**, as a
+PicoMite does (`SAVE COMPRESSED IMAGE` is the same command). The
+colours are counted first: 16 or fewer make a 4-bit file with a palette
+of just those colours and RLE compression, and up to 256 an 8-bit one.
+Every PC3 screen qualifies, so a whole `MODE 2` screen that was 230K is
+typically 3 or 4K, and `MODE 1`'s 900K about 7K — and `LOAD IMAGE`
+reads them back exactly. They are standard `BI_RLE4`/`BI_RLE8` files,
+byte for byte what a PicoMite writes for the same screen.
+
+**`SAVE PNG`** takes the same arguments and writes an 8-bit RGB PNG,
+adding `.png` to a name with no extension. It is usually smaller again,
+and `LOAD PNG` reads it back exactly.
 
 A name with **no extension** gets `.bmp`, as MMBasic's
 `AppendDefaultExtension` does, so a program written for a PicoMite
@@ -2733,9 +2747,27 @@ namespace can become a variable now.
 
 ## `OPTION` {#option}
 
-Eight `OPTION` statements are translated, and they mean what they mean
+Nine `OPTION` statements are translated, and they mean what they mean
 in MMBasic: `BASE`, `DEFAULT`, `EXPLICIT`, `ANGLE`, `CONSOLE`, `ESCAPE`,
-`UDP`/`TCP SERVER PORT`, and `SYMBOLS OFF`.  `OPTION SYMBOLS OFF` is a
+`UDP`/`TCP SERVER PORT`, `PRINTSCREEN` and `SYMBOLS OFF`.
+
+**`OPTION PRINTSCREEN ON` makes the Print Screen key save the screen
+while the program runs**, and the program never sees the key. The file
+is `SCREEN_yyyymmdd_hhmmss.BMP` in the current directory, with `_1`,
+`_2`… when two land in the same second. After `OPTION PRINTSCREEN
+FORMAT PNG` it is a `.PNG`, and `FORMAT BMP` goes back. It is off until
+the program turns it on, and `OFF` turns it off again. A save that fails
+(a full card) stops nothing and leaves `MM.ERRNO` alone.
+
+The key is looked for every 5 ms while the option is on: after a
+statement, in `PAUSE`, and wherever `INKEY$` or `INPUT` reads. A Print
+Screen typed behind a key the program has not read yet waits until that
+key is read. A serial terminal can send it too, as the byte `&H9D`.
+On a PicoMite `FORMAT` is a saved option; here it lasts only the run,
+because a program has nowhere to keep it. PicoMite's other Print Screen
+key, `Ctrl-\`, is still the Fuzix quit key here.
+
+`OPTION SYMBOLS OFF` is a
 V7 interpreter's switch for its symbol table and means nothing to a
 translated program, so at the top of a program it is accepted and does
 nothing; anywhere else it is the interpreter's "Must be at the top of
@@ -3508,6 +3540,13 @@ It is the editor from the firmware, with the same keys:
 | `F7` / `F8` | replace / replace again |
 | `F9` / `F10` | read a file in / write the selection out |
 | `F12` or `Ctrl-A` | beautify: re-indent and case the keywords |
+| `Print Screen` | save the screen as `SCREEN_yyyymmdd_hhmmss.BMP` in the current directory |
+
+**Print Screen saves the screen**, as it does in a PicoMite's editor,
+and says nothing either way. It is `saveimage -s` underneath. It works
+on the PC3's own keyboard, and from a serial terminal that can send the
+byte `&H9D`. A PC terminal has no such key, so pc3host's editor does
+not have it.
 
 **`F2` is "save and run", the way a compiled machine can be.** On a
 PicoMite `F2` handed the program straight back to the interpreter; here
@@ -4028,6 +4067,8 @@ console.
 ```
 # saveimage shot.bmp                     the whole screen
 # saveimage part.bmp 160 120 320 240     x y w h
+# saveimage -p shot                      as shot.png
+# saveimage -s                           Print Screen: SCREEN_yyyymmdd_hhmmss.BMP
 # loadimage shot.bmp                     at 0,0
 # loadimage tiger.bmp 0 0 0 64 0        x y mode ximage yimage
 # loadjpg photo.jpg                      at 0,0
@@ -4043,7 +4084,8 @@ The full argument lists, which are MMBasic's:
 
 | | |
 |---|---|
-| `saveimage` | `file.bmp [x y w h]` |
+| `saveimage` | `[-p] file.bmp [x y w h]` |
+| `saveimage -s` | `[-p] [dir]` |
 | `loadimage` | `file.bmp [x [y [mode [ximage [yimage]]]]]` |
 | `loadimage -s` | `file.bmp [xorigin [yorigin [width [height]]]]` |
 | `loadjpg` | `file.jpg [x [y [mode [ximage [yimage [scale]]]]]]` |
@@ -4051,8 +4093,13 @@ The full argument lists, which are MMBasic's:
 | `loadpng -s` | `file.png [transparent [cutoff]]` |
 
 `ximage`/`yimage` are the offset **into the picture**, so a large image
-can be cropped rather than scaled. `saveimage` writes a 24-bit BMP of
-any rectangle. `loadimage` is MMBasic's own BMP decoder and reads
+can be cropped rather than scaled. `saveimage` writes any rectangle as
+a BMP with a palette and RLE compression (a 24-bit one only for a
+picture of more than 256 colours, which nothing here draws), or with
+`-p` as a PNG. `-s` is Print Screen's save: the whole screen, named
+`SCREEN_yyyymmdd_hhmmss.BMP` (`.PNG` with `-p`) in *dir* or the current
+directory, with `_1`, `_2`… rather than overwriting a name already
+there. `loadimage` is MMBasic's own BMP decoder and reads
 1/4/8/16/24/32-bit files, `BI_BITFIELDS` and RLE4/RLE8, dithering only
 when asked.
 

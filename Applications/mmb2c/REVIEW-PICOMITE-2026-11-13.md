@@ -58,10 +58,64 @@ Every translator change goes into both mmb2c.py and mmbc, and cgate must stay by
   LP64, so the arena's base was never returned. It is now uint32_t, as
   in pico_ioctl.h.
 
+## Status (2026-11-14)
+
+**Done and how each was checked:**
+- **#16, RLE SAVE IMAGE.** saveimage ports SaveImageRLE, SavePalIndex and
+  SaveRleRow. It reads the screen twice, through BLITRDR, with each
+  pixel's colour cached by key: the index, or on the console the cell
+  and bit. That brings the console onto BLITRDR too, at 6400
+  GETPIXELs at most where it made 307,200.
+  - **Checks:** every MODE (1, 2 and pc3host's 3), whole and in parts,
+    and the console. Each RLE file decodes to the 24-bit file HEAD's
+    saveimage writes for the same screen, and is byte for byte a
+    Python model of SaveImageRLE. Pillow agrees. The C rle_row
+    matches the model on 20,000 random rows, RLE4 and RLE8.
+  - **Reloads:** LOAD IMAGE of each file gives the screen back exactly
+    (pc3host Linux and Windows, and the PC3).
+  - **Cross-machine:** the PC3's files are byte-identical to pc3host's
+    for the same screens.
+  - **pc3host's images gate:** re-blessed after its 16 pictures were
+    shown to decode to the old ones.
+  - **Sizes:** MODE 2 went from 230K to 3-4K, MODE 1 from 921K to about
+    7K, and the PC3's console with 16 colours of text from 921K to
+    17K.
+- **#18.**
+  - **SAVE PNG** is `saveimage -p`, PngEncoder.c ported. The PNGs decode
+    (our decoder and Pillow) to the 24-bit file's pixels, and LOAD PNG
+    gives the screen back. The savepng test is in pc3host's images
+    gate.
+  - **Print Screen:** `saveimage -s` writes SCREEN_yyyymmdd_hhmmss.BMP
+    (.PNG), with _1 to _99 when a name is taken.
+  - **mmbedit** (board only) takes 0x9D in inkey().
+  - **Programs:** OPTION PRINTSCREEN ON, OFF and FORMAT BMP/PNG are
+    translated (mm_prtscr, plus mm_prtscr_poll from the statement poll
+    every 5 ms while on). The key is taken in INKEY$, ON KEY's look and
+    INPUT.
+  - **Tests:** pc3host's e2e (Linux and Windows) presses Print Screen
+    with pc3key (now with PRINT_SCREEN) in a loop that reads no keys,
+    under INKEY$ and in a PAUSE. Each press saves the right picture and
+    never reaches the program; with the option off the key reads 157.
+    The FUZIX test prtscr checks that the option translates and runs.
+  - **On the PC3,** 0x9D was sent down the serial console. A program
+    behaved as on pc3host in all four phases. In mmbedit it saved the
+    editor's own screen (colours, cursor and function-key line) as a
+    7.7K RLE4 file. prtscr, optcfg, picocompat and draw3dhide pass
+    through the board's own cc.
+- **#21:** `aligned(4)` on the seven byte-array fonts. GCC had already
+  aligned all of them, and the kernel image is byte-identical to the
+  one on the board.
+
+**For PicoMite:** mmb2csub emits mm_prtscr, mm_prtscr_poll and
+mmi_prtscr for OPTION PRINTSCREEN ON/OFF/FORMAT, so user-tools/mmcsub.h
+needs them (stubs will do, since the interpreter has its own Print
+Screen). Until then, such a program does not link there. Before, the
+option was ignored with a warning.
+
 **Still open:**
-- The features: #16 (RLE SAVE IMAGE), #18 (SAVE PNG and Print Screen) and
-  #19 (Ctrl-\, waiting on the VQUIT decision).
-- #14 and #21.
+- #19 (Ctrl-\ as Print Screen's second key), waiting on the VQUIT
+  decision (10-21 #34).
+- #14.
 - The sprites section.
 - The 10-21 leftovers #12, #23-25 and #31.
 
@@ -89,12 +143,12 @@ Every translator change goes into both mmb2c.py and mmbc, and cgate must stay by
 | # | PicoMite | What changed | Ours | Change, size |
 |---|---|---|---|---|
 | 15 R **DONE** | 3687a42 | LOAD PNG accepts 8-bit RGB, grey and grey+alpha, which is what PicoMite's own SAVE PNG writes. | "Invalid format, must be RGBA8888 or indexed PNG" (K/utils/loadpng.c:336, upng.c ~1380-1420). | Expand RGB8, L8 and LA8 to RGBA8 as the indexed path does. **S** (~25 lines). Porting the streaming decoder (10-21 #31) would bring this in anyway. |
-| 16 r | 2abbb53 (+ cd36394, 9bdcae7) | SAVE IMAGE writes RLE4/RLE8 BMPs, with a palette of only the colours used. | Always 24-bit (K/utils/saveimage.c:186-192): 230 KB for MODE 2 and 921 KB for MODE 3. Every PC3 screen has 256 colours or fewer, and loadimage already reads RLE (loadimage.c:295-341). | Port SavePalIndex, SaveRleRow and SaveImageRLE (PicoMite misc/FileIO.c:3145-3313) over the band reader. **M**. Worth it for SD time and space. |
+| 16 R **DONE** | 2abbb53 (+ cd36394, 9bdcae7) | SAVE IMAGE writes RLE4/RLE8 BMPs, with a palette of only the colours used. | Always 24-bit (K/utils/saveimage.c:186-192): 230 KB for MODE 2 and 921 KB for MODE 3. Every PC3 screen has 256 colours or fewer, and loadimage already reads RLE (loadimage.c:295-341). | Port SavePalIndex, SaveRleRow and SaveImageRLE (PicoMite misc/FileIO.c:3145-3313) over the band reader. **M**. Worth it for SD time and space. |
 | 17 r **DONE** | (long-standing) | SAVE IMAGE adds `.bmp` when the name has no extension. | saveimage.c:173 uses the name as given, but loadimage adds `.bmp`, so `SAVE IMAGE "pic" : LOAD IMAGE "pic"` fails. | Copy `defext` into saveimage. **S** |
-| 18 r | ec6fd02, bf5c7c0, 0684c45 | SAVE PNG (graphics/PngEncoder.c, 292 lines). Print Screen names its file `SCREEN_yyyymmdd_hhmmss`. | Absent. Print Screen is still the 10-21 ADD item. | After rows 16-17: SAVE PNG as `saveimage -p` plus a translator branch (**M**), then Print Screen with the date-time name. |
+| 18 R **DONE** | ec6fd02, bf5c7c0, 0684c45 | SAVE PNG (graphics/PngEncoder.c, 292 lines). Print Screen names its file `SCREEN_yyyymmdd_hhmmss`. | Absent. Print Screen is still the 10-21 ADD item. | After rows 16-17: SAVE PNG as `saveimage -p` plus a translator branch (**M**), then Print Screen with the date-time name. |
 | 19 r | 5d0da8a | Ctrl-\ gives 0x1C from every keyboard; it is Print Screen's second key. | `kbd_map_code` applies Ctrl to letters only (K/kbd_decode.c:130-132). | Map Ctrl-\ to 0x1C (3 lines). This **must land with 10-21 #34** (VQUIT): until then Ctrl-\ is SIGQUIT and kills the program. **S** |
 | 20 r **DONE** 8a3035697, board and pc3host `editor-pgup` | d059604 | Editor: PgUp scrolls a full screen only when `edy >= VHeight`. | E:2702 has `edy >= VHeight - 1`, so PgUp at the end of a file one line short of whole screens blanks the top row. Mark mode (E:1272) is already right. | `VHeight - 1` → `VHeight`. **S**, no risk. |
-| 21 r | c6c912a | Every built-in font starts on a word boundary. | Ours are word-aligned by GCC's default (checked with nm), but nothing guarantees it, and our PEEK(WORD) raises an error on a misaligned address (M/mmb_peek.h:89-94). | `__attribute__((aligned(4)))` on K/fonts/*.h and console_font.h. **S**, insurance. |
+| 21 r **DONE** | c6c912a | Every built-in font starts on a word boundary. | Ours are word-aligned by GCC's default (checked with nm), but nothing guarantees it, and our PEEK(WORD) raises an error on a misaligned address (M/mmb_peek.h:89-94). | `__attribute__((aligned(4)))` on K/fonts/*.h and console_font.h. **S**, insurance. |
 
 ## BOARD: kernel and USB
 

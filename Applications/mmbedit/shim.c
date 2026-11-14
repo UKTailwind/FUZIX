@@ -398,12 +398,64 @@ static int decode_csi(void)
     }
 }
 
+#ifndef PC_HOST
+#include <sys/wait.h>
+
+/* Print Screen saves the screen, as it does in PicoMite's editor
+ * (Editor.c, ScreenShot in misc/FileIO.c): saveimage -s writes
+ * SCREEN_yyyymmdd_hhmmss.BMP into the current directory, and the key
+ * goes no further.  Nothing is printed either way, as there: an error
+ * has nowhere to go but over the text being edited.
+ *
+ * Taken here, under every key loop at once - editing, mark mode and the
+ * prompts all come through inkey().  The keyboard sends 0x9D for it
+ * (keyboard_maps.h), and so can a serial terminal.  Ctrl-\, PicoMite's
+ * other Print Screen key, is still the tty's QUIT here.
+ *
+ * The board only.  On a PC the editor is in a terminal, which has no
+ * Print Screen to send, and the window it would save is not where the
+ * editor is drawn.
+ *
+ * sync() either side, as mm_run_exec does around SAVE IMAGE: the fork
+ * swaps 200K of editor out to PSRAM. */
+static void prtscr(void)
+{
+    pid_t pid;
+    int st;
+
+    scr_flush();                    /* the screen as it is seen */
+    sync();
+    pid = fork();
+    if (pid == 0) {
+        static char *const av[] = {"saveimage", "-s", NULL};
+        int fd = open("/dev/null", O_RDWR);
+
+        if (fd >= 0) {
+            dup2(fd, 1);
+            dup2(fd, 2);
+        }
+        execv("/usr/bin/saveimage", av);
+        _exit(127);
+    }
+    if (pid > 0)
+        while (waitpid(pid, &st, 0) < 0 && errno == EINTR)
+            ;
+    sync();
+}
+#endif
+
 int inkey(void)
 {
     int c = readb();
 
     if (c < 0)
         return 0;                   /* nothing waiting */
+#ifndef PC_HOST
+    if (c == K_PRTSCR) {
+        prtscr();
+        return 0;                   /* not a key */
+    }
+#endif
 #ifdef PC_HOST
     /* A PC terminal's Backspace key sends 0x7F, which MMBasic's editor
      * takes as its DEL - forward delete - so both keys deleted forward.

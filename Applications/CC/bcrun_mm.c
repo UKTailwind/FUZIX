@@ -336,6 +336,9 @@ static void w_rand32(void)       { A = mm_rand32(); }
    does not want stays queued for INKEY$. */
 static void w_key_peek(void)     { A = mm_key_peek(); }
 static void w_key_drop(void)     { mm_key_drop(); A = 0; }
+/* OPTION PRINTSCREEN, and its part of the statement poll */
+static void w_prtscr(void)       { mm_prtscr(LL(0)); A = 0; }
+static void w_prtscr_poll(void)  { mm_prtscr_poll(); A = 0; }
 /* RTC GETREG/SETREG - one DS3231 register, through the kernel because
    /dev/i2c refuses the clock's own address. */
 static void w_rtcreg(void)       { A = mm_rtcreg(I(0), I(1), I(2)); }
@@ -704,6 +707,8 @@ static const struct mmwrap {
 	{ "mm_rand32",		w_rand32 },
 	{ "mm_key_peek",	w_key_peek },
 	{ "mm_key_drop",	w_key_drop },
+	{ "mm_prtscr",		w_prtscr },
+	{ "mm_prtscr_poll",	w_prtscr_poll },
 	{ "mm_rtcreg",	w_rtcreg },
 	{ "mm_i2c_open",	w_i2c_open },
 	{ "mm_i2c_close",	w_i2c_close },
