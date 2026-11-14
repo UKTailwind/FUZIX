@@ -336,6 +336,9 @@ static void w_rand32(void)       { A = mm_rand32(); }
    does not want stays queued for INKEY$. */
 static void w_key_peek(void)     { A = mm_key_peek(); }
 static void w_key_drop(void)     { mm_key_drop(); A = 0; }
+/* ON KEY k: arm or disarm it, and ask whether k has come */
+static void w_key_select(void)   { mm_key_select(LL(0)); A = 0; }
+static void w_key_hit(void)      { A = mm_key_hit(); }
 /* OPTION PRINTSCREEN, and its part of the statement poll */
 static void w_prtscr(void)       { mm_prtscr(LL(0)); A = 0; }
 static void w_prtscr_poll(void)  { mm_prtscr_poll(); A = 0; }
@@ -707,6 +710,8 @@ static const struct mmwrap {
 	{ "mm_rand32",		w_rand32 },
 	{ "mm_key_peek",	w_key_peek },
 	{ "mm_key_drop",	w_key_drop },
+	{ "mm_key_select",	w_key_select },
+	{ "mm_key_hit",		w_key_hit },
 	{ "mm_prtscr",		w_prtscr },
 	{ "mm_prtscr_poll",	w_prtscr_poll },
 	{ "mm_rtcreg",	w_rtcreg },

@@ -94,10 +94,12 @@ static int mm_ntick_armed;
  *	and EATS it.  That asymmetry is MMBasic's (PicoMite.c:932-935,
  *	where the console interrupt consumes the selected key and lets
  *	every other one through) and it is the whole point of the pair.
+ *	The runtime holds the selected code and takes it out as keys are
+ *	read in (mm_key_select, mm_key_hit), so a k typed before the ON
+ *	KEY is an ordinary key, as there (641d043).
  */
 static mm_int_fn mm_key_any_fn;
 static mm_int_fn mm_key_sel_fn;
-static int mm_key_sel;			/* the code the specific form wants */
 
 /*	Looking at the console is a SYSCALL - termios and a read - and a
  *	poll site runs after every statement, so checking each time would
@@ -490,8 +492,8 @@ MMG_FN void mmi_onkey_sel(MMINTEGER code, mm_int_fn fn)
 		mm_int_arm();
 	else if (!fn && mm_key_sel_fn)
 		__mm_int_armed--;
+	mm_key_select(fn ? code : 0);
 	mm_key_sel_fn = fn;
-	mm_key_sel = (int)code;
 }
 
 /*
@@ -542,30 +544,22 @@ MMG_FN void mm_int_poll(void)
 		long long now = MMI_US();
 
 		if (now >= mm_key_next) {
-			int c;
-
 			mm_key_next = now + MM_INT_CON_US;
-			c = (int)mm_key_peek();
-			if (c) {
-				if (mm_key_sel_fn && c == mm_key_sel) {
-					/*	The selected key is EATEN -
-					 *	it never reaches INKEY$,
-					 *	which is what tells the two
-					 *	forms apart. */
-					mm_key_drop();
-					mm_int_fire(mm_key_sel_fn);
-					return;
-				}
-				if (mm_key_any_fn) {
-					/*	Left where it is: the
-					 *	handler reads it with
-					 *	INKEY$, and if it does not,
-					 *	this fires again - which is
-					 *	MMBasic's behaviour, not an
-					 *	oversight. */
-					mm_int_fire(mm_key_any_fn);
-					return;
-				}
+			/*	The selected key was EATEN as it was read in
+			 *	(mm_key_arrive): it never reaches INKEY$,
+			 *	which is what tells the two forms apart, and
+			 *	only one that came while armed counts. */
+			if (mm_key_sel_fn && mm_key_hit()) {
+				mm_int_fire(mm_key_sel_fn);
+				return;
+			}
+			/*	Any other key is left where it is: the handler
+			 *	reads it with INKEY$, and if it does not, this
+			 *	fires again - which is MMBasic's behaviour, not
+			 *	an oversight. */
+			if (mm_key_any_fn && mm_key_peek()) {
+				mm_int_fire(mm_key_any_fn);
+				return;
 			}
 		}
 	}

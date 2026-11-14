@@ -25,6 +25,7 @@ Every translator change goes into both mmb2c.py and mmbc, and cgate must stay by
 | Item | Decision |
 |---|---|
 | PSRAM timing (K/psram.c) | **Make it correct**, using PicoMite's chip table (13b081e). AP Memory: 109 MHz, tCEM 8 us, tCPM 18 ns. At 378 MHz this gives divider 4 (94.5 MHz, where ours runs 126 MHz), deselect 7 (ours is 5) and rxdelay 5, so M1_TIMING = 0x61DE7504. **DONE** FUZIX 10ed2d176, read back on the board. |
+| Ctrl-\ as Print Screen's second key (row 19), 2026-11-14 | **No: Print Screen only.** Ctrl-\ stays the kernel's emergency break, which also settles 10-21 #34 (VQUIT): it keeps quitting. |
 | Olimex RP2350pc | **Support it, with PicoMite's detection** (225bff0). A 32 kHz clock on GP27 means a PC3. Otherwise PSRAM answering on GP47 means a PC2, and PSRAM on GP8 means the Olimex. **DONE** FUZIX 10ed2d176; boots on Peter's Olimex. |
 
 ## Fixed today
@@ -106,17 +107,33 @@ Every translator change goes into both mmb2c.py and mmbc, and cgate must stay by
   aligned all of them, and the kernel image is byte-identical to the
   one on the board.
 
-**For PicoMite:** mmb2csub emits mm_prtscr, mm_prtscr_poll and
-mmi_prtscr for OPTION PRINTSCREEN ON/OFF/FORMAT, so user-tools/mmcsub.h
-needs them (stubs will do, since the interpreter has its own Print
-Screen). Until then, such a program does not link there. Before, the
-option was ignored with a warning.
+- **#14, ON KEY k.** The runtime now does what the console ISR does
+  (mm_key_arrive): a key is looked at once, when it is first read from
+  the console. While ON KEY k is armed, k is taken there and marks the
+  handler due, and every other key is queued for INKEY$.
+  - **Arming** (mm_key_select) first reads everything already typed
+    into the queue unchecked, and forgets a pending k. Re-arming keeps
+    one, as 641d043 does.
+  - **The poll** (mm_key_hit) reads all that has come, so a k behind
+    an unread key fires. INKEY$ and INPUT can no longer take k
+    themselves; HEAD's INKEY$ could, and did in the test.
+  - **Print Screen's poll** reads the same way, so it no longer waits
+    behind an unread key.
+  - **The test:** pc3host's tests/e2e/onkeyarm.bas presses A before ON
+    KEY 97 is armed and again after. HEAD calls the handler for the
+    first A, at second 1, and INKEY$ takes the second. Now INKEY$ reads
+    the first at second 1 and the handler runs for the second at
+    second 2.
+- **#19, decided: Print Screen only** (Decisions above). Ctrl-\ stays
+  the emergency break, and with it 10-21 #34.
+
+**mmb2csub:** a SUB with OPTION PRINTSCREEN, or with ON KEY, now names
+runtime functions that user-tools/mmcsub.h does not have. By mmb2csub's
+own design that is a compile error naming the function, a refusal, so
+nothing is needed there.
 
 **Still open:**
-- #19 (Ctrl-\ as Print Screen's second key), waiting on the VQUIT
-  decision (10-21 #34).
-- #14.
-- The sprites section.
+- The sprites section (three items, below).
 - The 10-21 leftovers #12, #23-25 and #31.
 
 ## SHARED: translator and runtime
@@ -136,7 +153,7 @@ option was ignored with a warning.
 | 11 R **DONE** | 2abbb53 | SAVE COMPRESSED IMAGE is a synonym for SAVE IMAGE. | Syntax error (M/mmb2c.py:7304). | Accept it. **S** |
 | 12 R **DONE** | 147a93d, 81f75c1 | MM.INFO$(USBDRIVE) is new. MM.INFO$(SDCARD) and MM.INFO(FONT) already existed. | None of the three translates. | USBDRIVE → "Not Configured", SDCARD → "Ready", FONT → `mm_gfont`. **S** |
 | 13 r **DONE** | 0684c45 | OPTION PRINTSCREEN FORMAT. | Not in OPT_CONFIG, so a program carrying it does not translate. | Add it to OPT_CONFIG now (**S**). The behaviour comes with Print Screen (row 18). |
-| 14 r | 641d043 | ON KEY k counts only a key k that arrives while ON KEY is armed. | We peek the buffer on every poll (M/mmb_int.h:512-528), so a k typed before arming fires the handler. | **M**, low priority. |
+| 14 R **DONE** | 641d043 | ON KEY k counts only a key k that arrives while ON KEY is armed. | We peek the buffer on every poll (M/mmb_int.h:512-528), so a k typed before arming fires the handler. | **M**, low priority. |
 
 ## SHARED: utilities, keyboard, editor
 
@@ -146,7 +163,7 @@ option was ignored with a warning.
 | 16 R **DONE** | 2abbb53 (+ cd36394, 9bdcae7) | SAVE IMAGE writes RLE4/RLE8 BMPs, with a palette of only the colours used. | Always 24-bit (K/utils/saveimage.c:186-192): 230 KB for MODE 2 and 921 KB for MODE 3. Every PC3 screen has 256 colours or fewer, and loadimage already reads RLE (loadimage.c:295-341). | Port SavePalIndex, SaveRleRow and SaveImageRLE (PicoMite misc/FileIO.c:3145-3313) over the band reader. **M**. Worth it for SD time and space. |
 | 17 r **DONE** | (long-standing) | SAVE IMAGE adds `.bmp` when the name has no extension. | saveimage.c:173 uses the name as given, but loadimage adds `.bmp`, so `SAVE IMAGE "pic" : LOAD IMAGE "pic"` fails. | Copy `defext` into saveimage. **S** |
 | 18 R **DONE** | ec6fd02, bf5c7c0, 0684c45 | SAVE PNG (graphics/PngEncoder.c, 292 lines). Print Screen names its file `SCREEN_yyyymmdd_hhmmss`. | Absent. Print Screen is still the 10-21 ADD item. | After rows 16-17: SAVE PNG as `saveimage -p` plus a translator branch (**M**), then Print Screen with the date-time name. |
-| 19 r | 5d0da8a | Ctrl-\ gives 0x1C from every keyboard; it is Print Screen's second key. | `kbd_map_code` applies Ctrl to letters only (K/kbd_decode.c:130-132). | Map Ctrl-\ to 0x1C (3 lines). This **must land with 10-21 #34** (VQUIT): until then Ctrl-\ is SIGQUIT and kills the program. **S** |
+| 19 r **DECIDED: not done** | 5d0da8a | Ctrl-\ gives 0x1C from every keyboard; it is Print Screen's second key. | `kbd_map_code` applies Ctrl to letters only (K/kbd_decode.c:130-132). | Map Ctrl-\ to 0x1C (3 lines). This **must land with 10-21 #34** (VQUIT): until then Ctrl-\ is SIGQUIT and kills the program. **S** |
 | 20 r **DONE** 8a3035697, board and pc3host `editor-pgup` | d059604 | Editor: PgUp scrolls a full screen only when `edy >= VHeight`. | E:2702 has `edy >= VHeight - 1`, so PgUp at the end of a file one line short of whole screens blanks the top row. Mark mode (E:1272) is already right. | `VHeight - 1` → `VHeight`. **S**, no risk. |
 | 21 r **DONE** | c6c912a | Every built-in font starts on a word boundary. | Ours are word-aligned by GCC's default (checked with nm), but nothing guarantees it, and our PEEK(WORD) raises an error on a misaligned address (M/mmb_peek.h:89-94). | `__attribute__((aligned(4)))` on K/fonts/*.h and console_font.h. **S**, insurance. |
 
@@ -184,7 +201,8 @@ The 10-21 file's status marks were not kept up to date. Checked against `git log
   - **#26 DONE**: K/utils/loadimage.c:200 seeks past the whole header before reading BITFIELDS masks, so a V4/V5 BMP (GIMP's RGB565) gets its masks from the wrong place. Read them at 14+40.
   - **#32 DONE**: noise dwell is still `phinc >> 12` (K/sound.c:572).
   - **#33 DONE**: MODSAMPLE still refuses volume 0 (M/mmb_play.h:302).
-  - **#34**: Ctrl-\ still quits; see row 19.
+  - **#34 DECIDED, not done**: Ctrl-\ keeps quitting (the emergency
+    break), by the row 19 decision.
   - **#12** (JSON$ paths), **#23-24** (FRAMEBUFFER CREATE 2 / CLOSE, 1bpp MERGE), **#25** (BLIT w or h < 1 draws nothing), **#31** (LOAD PNG crop and new arguments): untouched since.
 
 ## Already matches (checked)

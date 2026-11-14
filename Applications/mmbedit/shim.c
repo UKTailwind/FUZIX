@@ -410,7 +410,8 @@ static int decode_csi(void)
  * Taken here, under every key loop at once - editing, mark mode and the
  * prompts all come through inkey().  The keyboard sends 0x9D for it
  * (keyboard_maps.h), and so can a serial terminal.  Ctrl-\, PicoMite's
- * other Print Screen key, is still the tty's QUIT here.
+ * other Print Screen key, is not one here: it stays the kernel's
+ * emergency break (Peter, 2026-11-14: Print Screen only).
  *
  * The board only.  On a PC the editor is in a terminal, which has no
  * Print Screen to send, and the window it would save is not where the

@@ -2576,11 +2576,15 @@ them** — this is MMBasic's design, not an accident of ours:
   handler fires again at the next statement, because the key is still
   there.
 * `ON KEY code, handler` fires only on that character code, and
-  **consumes** it. It never reaches `INKEY$`, so a key reserved for a
-  hot-key handler cannot also turn up in the program's ordinary input.
+  **consumes** it. It never reaches `INKEY$` or `INPUT`, so a key
+  reserved for a hot-key handler cannot also turn up in the program's
+  ordinary input. A key typed before the `ON KEY` doesn't count: it is
+  an ordinary key, and `INKEY$` reads it as one.
 
 The specific form is checked first, so with both armed the reserved key
 goes to its own handler and everything else goes to the general one.
+The reserved key is noticed even when it is typed behind keys the
+program hasn't read yet.
 
 Two things to know before relying on it:
 
@@ -2760,12 +2764,12 @@ the program turns it on, and `OFF` turns it off again. A save that fails
 (a full card) stops nothing and leaves `MM.ERRNO` alone.
 
 The key is looked for every 5 ms while the option is on: after a
-statement, in `PAUSE`, and wherever `INKEY$` or `INPUT` reads. A Print
-Screen typed behind a key the program has not read yet waits until that
-key is read. A serial terminal can send it too, as the byte `&H9D`.
-On a PicoMite `FORMAT` is a saved option; here it lasts only the run,
-because a program has nowhere to keep it. PicoMite's other Print Screen
-key, `Ctrl-\`, is still the Fuzix quit key here.
+statement, in `PAUSE`, and wherever `INKEY$` or `INPUT` reads. Keys
+typed around it stay in order for the program. A serial terminal can
+send it too, as the byte `&H9D`. On a PicoMite `FORMAT` is a saved
+option; here it lasts only the run, because a program has nowhere to
+keep it. PicoMite's other Print Screen key, `Ctrl-\`, is not one here:
+it stays the emergency break that stops a program (see "Escape routes").
 
 `OPTION SYMBOLS OFF` is a
 V7 interpreter's switch for its symbol table and means nothing to a

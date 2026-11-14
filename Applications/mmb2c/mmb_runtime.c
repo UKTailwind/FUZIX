@@ -1833,10 +1833,9 @@ void mm_seek(MMINTEGER fnbr, MMINTEGER pos)
  * here, so the key is taken where this runtime reads the console -
  * INKEY$, ON KEY's look and INPUT - and while it is on, the statement
  * poll looks at the console every 5 ms (mm_prtscr_poll, from mmb_int.h).
- * That is what makes a program that reads no keys at all answer it.  A
- * Print Screen behind a key the program has not read waits for that key
- * to be read.  Ctrl-\, PicoMite's other Print Screen key, is still the
- * tty's QUIT here.
+ * That is what makes a program that reads no keys at all answer it.
+ * Ctrl-\, PicoMite's other Print Screen key, is not one here: it stays
+ * the kernel's emergency break (Peter, 2026-11-14: Print Screen only).
  *
  * The save raises nothing and leaves MM.ERRNO and MM.ERRMSG$ alone, as
  * PicoMite's FileTry does: a full card must not stop a program that
@@ -3794,21 +3793,99 @@ static int mm_esc_decode(void)
 #endif
 
 /*
- * Decoded keys waiting to be read, in front of mm_kq's raw bytes.
+ * Decoded keys waiting to be read, in front of mm_kq's raw bytes: the
+ * program's keyboard buffer, which INKEY$ and INPUT read first.
  *
- * ON KEY's SPECIFIC form has to look at a key to know whether it is the
- * one - and MMBasic's console ISR consumes the selected key so it never
- * reaches the buffer, while everything else does reach it
- * (PicoMite.c:932-935).  There is no ISR here, so the poll decodes a key
- * and, when it does not match, leaves it HERE for INKEY$ to find.  That
- * is what keeps the two forms' promises: the selected key vanishes, any
- * other key is still there for the program.
+ * MMBasic's console ISR looks at each key ONCE, as it arrives
+ * (input/Keyboard.c): ON KEY k's k, while that is armed, is taken and
+ * marks the handler due (Keycomplete), and never reaches the buffer;
+ * every other key goes into the buffer and is never looked at again.
+ * There is no ISR here, so a key "arrives" when this runtime first reads
+ * it from the console - mm_key_arrive, below, which every reader goes
+ * through - and the same test is made there.  ON KEY's poll reads
+ * whatever has come into this queue, so k behind an unread key still
+ * fires, as it does there.
  *
- * Eight is generous: the poll never stacks them up, because it peeks at
- * what is already waiting rather than decoding another.
+ * Arming ON KEY k first reads everything already typed into this queue,
+ * unchecked (mm_key_select): those keys came before it, and on a PicoMite
+ * they are in the buffer, not counted (641d043).  Without that, a k typed
+ * before the ON KEY fired the handler as soon as it was armed.
+ *
+ * 64 rather than PicoMite's 256-byte ring: a key read in when the queue
+ * is full is not lost, it waits at the console.
  */
-static int mm_kfifo[8];
+#define MM_KFIFO 64
+static int mm_kfifo[MM_KFIFO];
 static int mm_kfn;
+static int mm_ksel;             /* ON KEY k's k while it is armed, else 0 */
+static int mm_khit;             /* k has come: the handler is due */
+
+#if !defined(_WIN32) || defined(PC_HOST)
+static int mm_key_console(void);
+#endif
+
+/* The next key from the console, taken as the ISR takes it: Print
+ * Screen under OPTION PRINTSCREEN and ON KEY's k are not keys and never
+ * reach the program.  -1 for none waiting. */
+static int mm_key_arrive(void)
+{
+#if !defined(_WIN32) || defined(PC_HOST)
+    int c;
+
+    for (;;) {
+        c = mm_key_console();
+        if (c < 0)
+            return -1;
+        if (c == MM_PRTSCR && mm_ps_on) {
+            mm_ps_pending = 1;          /* see mm_prtscr */
+            continue;
+        }
+        if (mm_ksel && c == mm_ksel) {
+            mm_khit = 1;
+            continue;
+        }
+        return c;
+    }
+#else
+    return _kbhit() ? (int)(unsigned char)_getch() : -1;
+#endif
+}
+
+/* Everything waiting at the console into the queue, as far as it goes. */
+static void mm_key_gather(void)
+{
+    int c;
+
+    while (mm_kfn < MM_KFIFO && (c = mm_key_arrive()) >= 0)
+        mm_kfifo[mm_kfn++] = c;
+}
+
+/* ON KEY k armed (k) or turned off (0) - cmd_on.  From off to on, what
+ * was typed before goes into the queue unchecked and a pending k is
+ * forgotten; re-arming keeps one, as PicoMite does (641d043). */
+void mm_key_select(MMINTEGER k)
+{
+    if (k && !mm_ksel) {
+        mm_khit = 0;
+        mm_key_gather();                /* mm_ksel is still 0 here */
+    }
+    mm_ksel = (int)k;
+    if (!k)
+        mm_khit = 0;
+}
+
+/* ON KEY k's test in the statement poll: read what has come since, and
+ * say whether k was among it.  The flag is cleared, as checkdetail-
+ * interrupts clears Keycomplete. */
+MMINTEGER mm_key_hit(void)
+{
+    mm_gflush();                /* as the peek it replaces: see mm_pause */
+    mm_key_gather();
+    if (!mm_khit)
+        return 0;
+    mm_khit = 0;
+    return 1;
+}
 
 /* The next decoded key without consuming it, or 0 for none.  Decodes one
  * from the console only when the queue is empty. */
@@ -3857,27 +3934,70 @@ void mm_key_drop(void)
 }
 
 /* OPTION PRINTSCREEN ON's part of the statement poll (mmb_int.h, every
- * MM_INT_CON_US): look at the console when nothing is waiting there -
- * mm_inkey takes a Print Screen out as it reads - and save if one came.
- * A key that is not Print Screen stays queued for the program, as ON
- * KEY's look leaves one. */
+ * MM_INT_CON_US): read in what has come - mm_key_arrive takes a Print
+ * Screen out as it reads - and save if one came.  Every other key is
+ * queued for the program, behind or in front of it as it was typed. */
 void mm_prtscr_poll(void)
 {
     if (!mm_ps_on)
         return;
-    if (!mm_ps_pending && !mm_kfn)
-        (void)mm_key_peek();
+    mm_key_gather();
     if (mm_ps_pending)
         mm_ps_save();
 }
 
+#if !defined(_WIN32) || defined(PC_HOST)
+/* One key from the console, decoded, or -1 for none waiting: the
+ * pushed-back bytes of a sequence the decoder did not know, then the
+ * terminal.  Read only through mm_key_arrive, which decides what is a
+ * key. */
+static int mm_key_console(void)
+{
+    struct termios raw;
+    int c, i;
+
+    if (mm_kqn) {                       /* an unrecognised sequence, byte by byte */
+        c = mm_kq[0];
+        for (i = 1; i < mm_kqn; i++)
+            mm_kq[i - 1] = mm_kq[i];
+        mm_kqn--;
+        return c;
+    }
+    if (!mm_raw_hold())
+        return -1;
+    c = mm_rd1();
+    if (c == 0x1b) {
+        /* Only now is it worth waiting: the rest of a sequence is
+         * already on its way, and 100ms is both long enough for a slow
+         * line and the gap that tells a bare ESC from the start of one.
+         * A program polling INKEY$ in a loop never reaches here unless
+         * a key was actually pressed. */
+        raw = mm_tty_raw;
+        raw.c_cc[VTIME] = 1;
+        if (tcsetattr(0, TCSANOW, &raw) == 0) {
+            c = mm_esc_decode();
+            tcsetattr(0, TCSANOW, &mm_tty_raw);
+        }
+#ifdef PC_HOST
+        /* No terminal to set the wait on, so the sequence came from the
+           window - and the server delivers one whole, so the rest is
+           already there to be read without waiting. */
+        else
+            c = mm_esc_decode();
+#endif
+    }
+    return c;
+}
+#endif
+
 char *mm_inkey(void)
 {
     char *t = mm_tmp();
+    int c;
 
     mm_gflush();                /* a read is a wait - see mm_pause */
-    /* Anything the ON KEY poll decoded and did not want comes back
-     * first, in order, ahead of the console itself. */
+    /* What the ON KEY poll read in and did not take comes back first,
+     * in order, ahead of the console itself. */
     if (mm_kfn) {
         int i;
         t[0] = 1;
@@ -3887,60 +4007,11 @@ char *mm_inkey(void)
         mm_kfn--;
         return t;
     }
-
-#if defined(_WIN32) && !defined(PC_HOST)
-    if (_kbhit()) {
+    c = mm_key_arrive();
+    if (c >= 0) {
         t[0] = 1;
-        t[1] = (char)_getch();
+        t[1] = (char)c;
     }
-#else
-    {
-        struct termios raw;
-        int c;
-
-        if (mm_kqn) {                   /* an unrecognised sequence, byte by byte */
-            int i;
-            t[0] = 1;
-            t[1] = (char)mm_kq[0];
-            for (i = 1; i < mm_kqn; i++)
-                mm_kq[i - 1] = mm_kq[i];
-            mm_kqn--;
-            return t;
-        }
-
-        if (!mm_raw_hold())
-            return t;
-        c = mm_rd1();
-        if (c == 0x1b) {
-            /* Only now is it worth waiting: the rest of a sequence is
-             * already on its way, and 100ms is both long enough for a
-             * slow line and the gap that tells a bare ESC from the
-             * start of one.  A program polling INKEY$ in a loop never
-             * reaches here unless a key was actually pressed. */
-            raw = mm_tty_raw;
-            raw.c_cc[VTIME] = 1;
-            if (tcsetattr(0, TCSANOW, &raw) == 0) {
-                c = mm_esc_decode();
-                tcsetattr(0, TCSANOW, &mm_tty_raw);
-            }
-#ifdef PC_HOST
-            /* No terminal to set the wait on, so the sequence came from
-               the window - and the server delivers one whole, so the
-               rest is already there to be read without waiting. */
-            else
-                c = mm_esc_decode();
-#endif
-        }
-        if (c == MM_PRTSCR && mm_ps_on) {
-            mm_ps_pending = 1;          /* not a key: see mm_prtscr */
-            c = -1;
-        }
-        if (c >= 0) {
-            t[0] = 1;
-            t[1] = (char)c;
-        }
-    }
-#endif
     return t;
 }
 
@@ -4021,6 +4092,12 @@ static int mm_getkey_wait(void)
      * up and nothing to put back. */
     if (c == 0x1b)
         c = mm_esc_decode();
+    /* ON KEY k's k is not a key here either: the ISR takes it in the
+       middle of an INPUT too, and the handler runs after (mm_key_arrive) */
+    if (mm_ksel && c == mm_ksel) {
+        mm_khit = 1;
+        return mm_getkey_wait();
+    }
     return c;
 }
 #endif

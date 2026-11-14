@@ -908,6 +908,11 @@ MMINTEGER mm_rand32(void);          /* the hardware RNG; 0 if unavailable */
  * there" and the specific form's "the key is eaten" both true. */
 MMINTEGER mm_key_peek(void);
 void mm_key_drop(void);
+/* ON KEY k: armed with k, or 0 for off; and whether k has come since the
+ * last asking.  k is taken where the console is read, as MMBasic's ISR
+ * takes it, and a k typed before arming is an ordinary key (641d043). */
+void mm_key_select(MMINTEGER k);
+MMINTEGER mm_key_hit(void);
 /* OPTION PRINTSCREEN: OFF (0), ON (1), FORMAT BMP (2), FORMAT PNG (3);
  * and its part of the statement poll, which takes a Print Screen from
  * the console and saves the screen (mmb_runtime.c says how). */
