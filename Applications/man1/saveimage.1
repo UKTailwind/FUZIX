@@ -3,8 +3,13 @@
 saveimage, loadimage \- save and restore the screen as a BMP
 .SH SYNOPSIS
 .B saveimage
+[\fB\-p\fR]
 .I file
 [\fIx y w h\fR]
+.br
+.B saveimage \-s
+[\fB\-p\fR]
+[\fIdir\fR]
 .br
 .B loadimage
 .I file
@@ -17,7 +22,39 @@ saveimage, loadimage \- save and restore the screen as a BMP
 .B saveimage
 writes the screen to
 .I file
-as a BMP.  With four numbers it writes only that rectangle.
+as a BMP.  With four numbers it writes only that rectangle.  The BMP is
+the one a PicoMite's SAVE IMAGE writes: with 16 colours or fewer a
+4-bit file with a palette of just those colours and RLE compression, up
+to 256 an 8-bit one, and only above that 24 bits a pixel.  Every PC3
+screen has 256 or fewer, so a whole screen is a few K.
+.B .bmp
+is added to a name with no extension.
+.PP
+With
+.BR \-p ,
+it writes an 8-bit RGB PNG instead, adding
+.B .png
+to a name with no extension: SAVE PNG.
+.PP
+With
+.BR \-s ,
+it is Print Screen's save: the whole screen, as
+.BI SCREEN_ yyyymmdd _ hhmmss .BMP
+(or
+.B .PNG
+with
+.BR \-p )
+in
+.I dir
+or the current directory, from the date and time as DATE$ and TIME$
+give them.  A name already taken gets
+.BR _1 ,
+.B _2
+and so on, up to
+.BR _99 ,
+rather than being overwritten.  Nothing is printed when it works.
+mmbedit runs it for the Print Screen key, and so does a BASIC program
+under OPTION PRINTSCREEN ON.
 .PP
 .B loadimage
 draws a BMP onto the screen with its top left corner at
@@ -55,6 +92,8 @@ colours are matched the same way whatever you pass.
 .nf
 # saveimage shot.bmp
 # saveimage part.bmp 160 120 320 240
+# saveimage -p shot
+# saveimage -s
 # loadimage shot.bmp
 # loadimage sheet.bmp 0 0 0 64 0
 # loadimage -s ship.bmp > ship.spr
