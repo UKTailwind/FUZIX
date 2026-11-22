@@ -230,11 +230,14 @@ Flashing does not touch the SD card.
 
 ## Writing the SD card
 
-Fuzix boots from a ready-made card image, `pc3-sd.img` (978 MB, about
-4.9 MB compressed for download). Write it to a card of **1 GB or
-larger** with any raw-image tool — Raspberry Pi Imager ("use custom
-image"), Win32DiskImager, balenaEtcher, or `dd` on Linux/macOS. **The
-whole card is overwritten.**
+Fuzix boots from a ready-made card image, downloaded as
+`pc3-sd-cc.img.gz` (about 8 MB compressed, 978 MB once expanded).
+Write it to a card of **1 GB or larger** with any raw-image tool —
+Raspberry Pi Imager ("use custom image"), Win32DiskImager,
+balenaEtcher, or `dd` on Linux/macOS. Raspberry Pi Imager and
+balenaEtcher take the `.gz` as it is; for Win32DiskImager or `dd`,
+decompress it to `pc3-sd-cc.img` first. **The whole card is
+overwritten.**
 
 The image lays the card out as three partitions:
 
@@ -4376,8 +4379,8 @@ assembler. The games in `/usr/games` are listed under
 installed, because Zork I is free to give away and comes with it; the
 players for the other Z-machine versions, and for Quill, Level 9,
 Taylormade and AdvSys games, are not, because the games they play are
-not. There is no network, so
-`ssh` cannot do anything useful. `man` is present and so are its
+not. `ssh` is a small shell, not a remote login client; what the
+network does offer is in [Networking](#networking). `man` is present and so are its
 pages, in `/usr/man/man1`.
 
 
@@ -4514,7 +4517,7 @@ places, so it is worth knowing where before a script surprises you:
 | GP40       | Analogue input (reserved; not read by ADVAL)         |
 | GP41–GP44  | Analogue inputs — `ADVAL(1)`–`ADVAL(4)`              |
 | GP45/GP46  | Analogue-capable, free                               |
-| GP23/24/25/29 | CYW43 wireless (PC3; unused by Fuzix)             |
+| GP23/24/25/29 | CYW43 Wi-Fi: REG_ON / DATA / CS / CLK (PC3 only; see [Networking](#networking)) |
 | GP47       | PSRAM chip select                                    |
 
 All spare header pins remain ordinary 3.3 V GPIO. Do not apply 5 V
