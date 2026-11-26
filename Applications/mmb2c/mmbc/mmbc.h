@@ -495,7 +495,6 @@ struct conv {
     /* FRAMEBUFFER LAYER with a transparent colour: the colour is
        run-time state (the firmware's transparentlow/high), kept in an
        emitted global that MERGE reads when it names no colour */
-    int uses_fbt;
     /* set in the scan pass: any ON ERROR at all pulls in the __mm_e
        state, the routine prologues and mm_err_bind */
     int uses_onerror;

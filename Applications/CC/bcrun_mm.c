@@ -524,10 +524,34 @@ static void w_map_reset(void){ mm_map_reset(); A = 0; }
 static void w_fb_create(void){ mm_fb_create(LL(0)); A = 0; }
 static void w_fb_close(void) { mm_fb_close(LL(0)); A = 0; }
 static void w_fb_merge(void) { mm_fb_merge(LL(0)); A = 0; }
+static void w_fb_merge2(void){ mm_fb_merge2(LL(0), LL(2)); A = 0; }
+static void w_fb_layer(void) { mm_fb_layer(LL(0), LL(2)); A = 0; }
 static void w_fb_write(void) { mm_fb_write(LL(0)); A = 0; }
 static void w_fb_cur(void)   { A = mm_fb_cur(); }
 static void w_fb_copy(void)  { mm_fb_copy(LL(0), LL(2), LL(4)); A = 0; }
 static void w_fb_wait(void)  { mm_fb_wait(); A = 0; }
+/* FRAMEBUFFER WARPH/WARPV, AFFINE, SPAN: each array is a pointer (one
+   slot) and its count (two), everything else MMINTEGER (two) */
+static void w_fb_warp(void)  { mm_fb_warp(LL(0), LL(2), LL(4), PI(6), LL(7),
+                                          PI(9), LL(10), LL(12), LL(14),
+                                          LL(16), LL(18), LL(20), LL(22),
+                                          LL(24));
+                               A = 0; }
+static void w_fb_affine(void){ mm_fb_affine(LL(0), LL(2), PI(4), LL(5),
+                                            PI(7), LL(8), PI(10), LL(11),
+                                            PI(13), LL(14), LL(16), LL(18),
+                                            LL(20), LL(22), LL(24), LL(26),
+                                            LL(28));
+                               A = 0; }
+static void w_blit_resize(void) { mm_blit_resize(LL(0), LL(2), LL(4), LL(6),
+                                                 LL(8), LL(10), LL(12),
+                                                 LL(14), LL(16), LL(18),
+                                                 LL(20));
+                                  A = 0; }
+static void w_fb_span(void)  { mm_fb_span(LL(0), LL(2), PI(4), LL(5), PI(7),
+                                          LL(8), LL(10), LL(12), LL(14),
+                                          LL(16), LL(18), LL(20));
+                               A = 0; }
 
 /* LONGSTRING is program-side now (mmb_lstring.h) except the two file
    forms, whose channel is bcrun's own stdio stream. */
@@ -808,7 +832,13 @@ static const struct mmwrap {
 	{ "mm_fb_cur",		w_fb_cur },
 	{ "mm_fb_copy",		w_fb_copy },
 	{ "mm_fb_merge",	w_fb_merge },
+	{ "mm_fb_merge2",	w_fb_merge2 },
+	{ "mm_fb_layer",	w_fb_layer },
 	{ "mm_fb_wait",		w_fb_wait },
+	{ "mm_fb_warp",		w_fb_warp },
+	{ "mm_fb_affine",	w_fb_affine },
+	{ "mm_fb_span",		w_fb_span },
+	{ "mm_blit_resize",	w_blit_resize },
 	{ "mm_ls_print",	w_ls_print },
 	{ "mm_ls_input",	w_ls_input },
 	{ "mm_error",		w_error },

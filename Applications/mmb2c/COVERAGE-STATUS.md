@@ -158,13 +158,13 @@ category 2, instead of a language inside the language.
 translated and says nothing about the 68 members. Read from MMBasic's `core/MATHS.c` and mmb2c's
 `MATHFUNCS`, `MATHARRAY` and `do_array_cmd`.
 
-**55 of 68 members translated.**
+**56 of 68 members translated.**
 
-### `MATH <subcommand>` - in-place, on arrays - 32 of 39
+### `MATH <subcommand>` - in-place, on arrays - 33 of 39
 
-**Translated:** `ADD`, `C_ADD`, `C_AND`, `C_DIV`, `C_MUL`, `C_MULT`, `C_OR`, `C_SUB`, `C_XOR`, `INSERT`, `M_INVERSE`, `M_MULT`, `M_PRINT`, `M_TRANSPOSE`, `POWER`, `Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`, `RANDOMIZE`, `SCALE`, `SET`, `SHIFT`, `SLICE`, `V_CROSS`, `V_MULT`, `V_NORMALISE`, `V_PRINT`, `V_ROTATE`, `WINDOW`
+**Translated:** `ADD`, `CLAMP`, `C_ADD`, `C_AND`, `C_DIV`, `C_MUL`, `C_MULT`, `C_OR`, `C_SUB`, `C_XOR`, `INSERT`, `M_INVERSE`, `M_MULT`, `M_PRINT`, `M_TRANSPOSE`, `POWER`, `Q_CREATE`, `Q_EULER`, `Q_INVERT`, `Q_MULT`, `Q_ROTATE`, `Q_VECTOR`, `RANDOMIZE`, `SCALE`, `SET`, `SHIFT`, `SLICE`, `V_CROSS`, `V_MULT`, `V_NORMALISE`, `V_PRINT`, `V_ROTATE`, `WINDOW`
 
-**Not translated:** `AES128`, `CLAMP`, `FFT`, `INTERPOLATE`, `PID`, `SENSORFUSION`, `SINC`
+**Not translated:** `AES128`, `FFT`, `INTERPOLATE`, `PID`, `SENSORFUSION`, `SINC`
 
 ### `MATH(<subfunction> ...)` - returns a value - 23 of 29
 

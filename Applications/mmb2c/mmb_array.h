@@ -201,6 +201,71 @@ MMG_FN void mm_arr_scale_f(const MMFLOAT *in, int n, MMFLOAT v, MMFLOAT *out,
     for (i = 0; i < n; i++) out[i] = in[i] * v;
 }
 
+/* ADD and SCALE between a float array and an integer one, either way:
+   MMBasic takes any mix (array_add, cmd_math SCALE).  Into integers each
+   result is rounded by FloatToInt64; into floats an integer element is
+   converted first.  A raster program makes its tables so: a sine table
+   in floats, scaled into the integer array WARPH reads. */
+MMG_FN void mm_arr_add_fi(const MMFLOAT *in, int n, MMFLOAT v,
+                          MMINTEGER *out, int no)
+{
+    int i;
+    if (n != no) MM_RAISE("Array size mismatch");
+    for (i = 0; i < n; i++) out[i] = mm_toint(v + in[i]);
+}
+
+MMG_FN void mm_arr_add_if(const MMINTEGER *in, int n, MMFLOAT v,
+                          MMFLOAT *out, int no)
+{
+    int i;
+    if (n != no) MM_RAISE("Array size mismatch");
+    for (i = 0; i < n; i++) out[i] = v + (MMFLOAT)in[i];
+}
+
+MMG_FN void mm_arr_scale_fi(const MMFLOAT *in, int n, MMFLOAT v,
+                            MMINTEGER *out, int no)
+{
+    int i;
+    if (n != no) MM_RAISE("Size mismatch");
+    for (i = 0; i < n; i++) out[i] = mm_toint(v * in[i]);
+}
+
+MMG_FN void mm_arr_scale_if(const MMINTEGER *in, int n, MMFLOAT v,
+                            MMFLOAT *out, int no)
+{
+    int i;
+    if (n != no) MM_RAISE("Size mismatch");
+    for (i = 0; i < n; i++) out[i] = v * (MMFLOAT)in[i];
+}
+
+/* MATH CLAMP in(), lo, hi, out() - every element limited to lo..hi, any
+   mix of integer and float arrays (cmd_math CLAMP).  ii and oi say
+   which are integer.  Integers into integers use the limits rounded to
+   integers; a float into an integer is limited, then rounded. */
+MMG_FN void mm_arr_clamp(const void *in, int ii, int n, MMFLOAT lo,
+                         MMFLOAT hi, void *out, int oi, int no)
+{
+    int i;
+    if (lo > hi) MM_RAISE("Low limit above high limit");
+    if (n != no) MM_RAISE("Size mismatch");
+    if (ii && oi) {
+        const MMINTEGER *a = (const MMINTEGER *)in;
+        MMINTEGER *b = (MMINTEGER *)out, ilo = mm_toint(lo), ihi = mm_toint(hi);
+        for (i = 0; i < n; i++)
+            b[i] = a[i] < ilo ? ilo : a[i] > ihi ? ihi : a[i];
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        MMFLOAT v = ii ? (MMFLOAT)((const MMINTEGER *)in)[i]
+                       : ((const MMFLOAT *)in)[i];
+        v = v < lo ? lo : v > hi ? hi : v;
+        if (oi)
+            ((MMINTEGER *)out)[i] = mm_toint(v);
+        else
+            ((MMFLOAT *)out)[i] = v;
+    }
+}
+
 /* ---- ARRAY SLICE / ARRAY INSERT: one strided copy serves both
  * directions and all three types.  `flat` is the one-dimensional
  * side's length and must equal n - MMBasic's "Size mismatch", made

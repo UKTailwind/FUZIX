@@ -741,12 +741,6 @@ void conv_write(FILE *f)
             fprintf(f, "    %d,\n", keys[j]->data_at);
         fprintf(f, "    0\n};\n");
     }
-    if (cv.uses_fbt) {
-        fprintf(f, "\n/* FRAMEBUFFER LAYER's transparent colour: the merge\n");
-        fprintf(f, " * default when MERGE names none (transparentlow/high\n");
-        fprintf(f, " * in the firmware) */\n");
-        fprintf(f, "static int __mm_fbt = 0;\n");
-    }
     if (cv.uses_onerror) {
         fprintf(f, "\n/* ---- ON ERROR state, read by the guards below ---- *\n");
         fprintf(f, " * [0] is the poison: an error has been recorded and the\n");
@@ -845,7 +839,9 @@ void conv_write(FILE *f)
                    "    if (c == 'N') return 0;\n"
                    "    if (c == 'F') return 1;\n"
                    "    if (c == 'L') return 2;\n"
-                   "    mm_error(\"expected N, F or L\");\n"
+                   "    if (c == '2') return 3;\n"
+                   "    if (c == 'T') return 4;\n"
+                   "    mm_error(\"expected N, F, L, 2 or T\");\n"
                    "    return 0;\n"
                    "}\n");
     fprintf(f, "\n/* ---- forward declarations ---- */\n");

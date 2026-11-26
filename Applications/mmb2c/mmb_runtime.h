@@ -637,9 +637,13 @@ void mm_gtext(MMINTEGER x, MMINTEGER y, MMINTEGER font, MMINTEGER scale,
  * is also given up automatically when the program ends - nothing leaks
  * if it never calls CLOSE. */
 /* which: 1 = the F buffer (FRAMEBUFFER CREATE), 2 = the layer
- * (FRAMEBUFFER LAYER).  Created and closed separately, as MMBasic
- * creates and closes them. */
+ * (FRAMEBUFFER LAYER), 3 = framebuffer 2 (CREATE 2), 4 = the top layer
+ * (LAYER TOP); 2 and T only where the kernel has them, which is
+ * pc3host's.  Created and closed separately, as MMBasic creates and
+ * closes them; mm_fb_close(0) is a bare CLOSE, every one of them. */
 void mm_fb_create(MMINTEGER which);
+/* LAYER and LAYER TOP, with the transparent index (0-15, 0 if none) */
+void mm_fb_layer(MMINTEGER which, MMINTEGER colour);
 void mm_fb_close(MMINTEGER which);
 void mm_fb_write(MMINTEGER which);
 /* Where drawing goes right now (0 N, 1 F, 2 L) - so a primitive that
@@ -648,9 +652,45 @@ MMINTEGER mm_fb_cur(void);
 /* wait: non-zero for MMBasic's ",B" - start at the top of the frame */
 void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait);
 void mm_fb_wait(void);
-/* MERGE: the layer over F onto the screen, skipping the transparent
- * index (0-15).  Neither source is changed. */
+/* MERGE: framebuffer 2 over F onto the screen if there is a 2, else the
+ * layer, skipping the transparent index (0-15).  Neither source is
+ * changed.  flags: 1 the colour was given, 2 the ",B".  mm_fb_merge is
+ * the call programs made before mm_fb_merge2, with the colour given. */
+void mm_fb_merge2(MMINTEGER colour, MMINTEGER flags);
 void mm_fb_merge(MMINTEGER colour);
+/* MMBasic V8's raster commands, FRAMEBUFFER WARPH / WARPV (vertical 0 /
+ * 1), AFFINE and SPAN, in the 16-colour modes.  Each array is its first
+ * element and its count; a NULL and -1 is an argument that was not an
+ * integer array, -2 one with more than one dimension, which raises
+ * MMBasic's error where MMBasic would.  Bit k of has: the k-th optional
+ * argument was given (WARP: step first phase edge transparent rows;
+ * AFFINE: step first left width edge transparent; SPAN: step first fill
+ * transparent outside).  base is OPTION BASE, for WARPH's row error. */
+void mm_fb_warp(MMINTEGER vertical, MMINTEGER src, MMINTEGER dst,
+                const MMINTEGER *off, MMINTEGER noff,
+                const MMINTEGER *rows, MMINTEGER nrows,
+                MMINTEGER step, MMINTEGER first, MMINTEGER phase,
+                MMINTEGER edge, MMINTEGER trans, MMINTEGER has,
+                MMINTEGER base);
+void mm_fb_affine(MMINTEGER src, MMINTEGER dst,
+                  const MMINTEGER *u, MMINTEGER nu,
+                  const MMINTEGER *v, MMINTEGER nv,
+                  const MMINTEGER *du, MMINTEGER ndu,
+                  const MMINTEGER *dv, MMINTEGER ndv,
+                  MMINTEGER step, MMINTEGER first, MMINTEGER left,
+                  MMINTEGER width, MMINTEGER edge, MMINTEGER trans,
+                  MMINTEGER has);
+void mm_fb_span(MMINTEGER src, MMINTEGER dst,
+                const MMINTEGER *lf, MMINTEGER nl,
+                const MMINTEGER *rt, MMINTEGER nr,
+                MMINTEGER step, MMINTEGER first, MMINTEGER fill,
+                MMINTEGER trans, MMINTEGER outside, MMINTEGER has);
+/* BLIT RESIZE src, dst, sx, sy, sw, sh, dx, dy, dw, dh [, t]: buffers as
+ * for FRAMEBUFFER, trans -1 when left out */
+void mm_blit_resize(MMINTEGER src, MMINTEGER dst, MMINTEGER sx,
+                    MMINTEGER sy, MMINTEGER sw, MMINTEGER sh, MMINTEGER dx,
+                    MMINTEGER dy, MMINTEGER dw, MMINTEGER dh,
+                    MMINTEGER trans);
 
 /* INKEY$ - the key that has been pressed, or "" if none has.  Does not
  * wait, and leaves the terminal as it found it, so INPUT still works

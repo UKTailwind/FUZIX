@@ -175,7 +175,9 @@ graphics — `MODE` · `CLS` · `COLOUR` · `PIXEL` (scalar and array forms,
 and the function) · `LINE` · `CIRCLE` · `BOX` · `RBOX` · `TRIANGLE`
 (drawing form; `SAVE`/`RESTORE` are refused) · `ARC` · `TEXT` · `FONT` ·
 `MAP` (`SET|RESET|MAXIMITE|GRAYSCALE`, `MAP(n)=` and the function) ·
-`FRAMEBUFFER CREATE|CLOSE|WRITE|COPY|WAIT` · `PRINT @(x,y)` ·
+`FRAMEBUFFER CREATE [2]|LAYER [TOP]|CLOSE|WRITE|COPY|MERGE|WAIT` and
+V8's `FRAMEBUFFER WARPH|WARPV|AFFINE|SPAN` with `BLIT RESIZE` (framebuffer
+2, the top layer and the raster commands on a PC only) · `PRINT @(x,y)` ·
 `MM.HRES` / `MM.VRES`; GPIO — `SETPIN pin, DIN|DOUT` · `PIN(n)=` ·
 `PIN(n)` (GPIO numbering, not connector pins); sound — `PLAY MP3` ·
 `PLAY VOLUME` · `PLAY STOP` (the decoder is a separate spawned process);

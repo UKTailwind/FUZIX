@@ -1,0 +1,36 @@
+the raster commands ran
+WARPH F, F: Same framebuffer
+step 0: 0 is invalid (valid is 1 to 240)
+a float array: Argument 3 must be an integer array
+a 2D array: Argument 3 must be a 1D integer point array
+WARPV with rows: Invalid syntax
+too many bands: Array has 241 elements, step 1 from row 0 fits 240
+rows: Row array has 9 elements, offset array has 10
+AFFINE: Array 2 has 9 elements, array 1 has 10
+AFFINE short: Invalid syntax
+SPAN: Right array has 9 elements, left array has 10
+SPAN outside 2: 2 is invalid (valid is 0 to 1)
+RESIZE off the screen: Number out of bounds
+RESIZE transparent 16: 16 is invalid (valid is -1 to 15)
+CREATE 2 again: Framebuffer 2 already exists
+LAYER TOP again: Framebuffer already exists
+T closed: Layer Top not created
+2 closed: Frame buffer 2 not created
+MERGE 16: Number out of bounds
+MERGE of the layer
+after CLOSE: Frame buffer not created
+after CLOSE: Layer not created
+RESIZE from F: Source buffer not created
+MODE 1: Not available in mode 1
+MODE 1 LAYER TOP: Invalid for this screen mode
+SCALE float to integer: 3 5-5 7
+ADD float to integer: 2 3-2 4
+SCALE integer to float: 0.5 1 1.5 2
+ADD integer to float: 1.5 2.5 3.5 4.5
+CLAMP float to integer: 1 3 0 3
+CLAMP integer: 2 2 3 3
+CLAMP integer to float: 1.5 2 2.5 2.5
+CLAMP float: 1 1-1 1
+CLAMP 3 to 1: Low limit above high limit
+CLAMP sizes: Size mismatch
+done

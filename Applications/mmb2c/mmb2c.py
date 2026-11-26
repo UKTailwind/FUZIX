@@ -1556,7 +1556,6 @@ class Conv(object):
         # FRAMEBUFFER LAYER with a transparent colour: the colour is
         # run-time state (the firmware's transparentlow/high), kept in
         # an emitted global that MERGE reads when it names no colour
-        self.uses_fbt = False
         # CALL by name: one dispatcher per distinct argument shape,
         # emitted after the routine bodies (see call_dispatch)
         self.call_disp = []
@@ -1817,17 +1816,61 @@ class Conv(object):
     # MERGE.  MMBasic's T and 2 name buffers this machine does not
     # have, so they are refused rather than quietly becoming one of
     # these three.
-    FB_BUFS = (('N', 0), ('F', 1), ('L', 2))
+    FB_BUFS = (('N', 0), ('F', 1), ('L', 2), ('2', 3), ('T', 4))
 
     def fb_buf(self):
         """Which framebuffer a FRAMEBUFFER argument names, as a C
         expression - a constant when it is written as a letter, and
         __mmb_fbsel() when the program works it out as it runs."""
+        t = self.peek()
+        if t is not None and t[0] == T_NUM and t[1] == '2' and t[2] == 'I':
+            # the second framebuffer: a number to the lexer
+            self.i += 1
+            return '3'
         e = self.kw_or_str(self.FB_BUFS, '__mmb_fbsel',
-                           "expected N, F or L")
+                           "expected N, F, L, 2 or T")
         if not e.isdigit():
             self.uses_fbsel = True
         return e
+
+    def warp_array(self):
+        """An integer array for FRAMEBUFFER WARPH, WARPV, AFFINE and SPAN,
+        as 'first element, count' - or 'NULL, -1' for an array that is
+        not integer and 'NULL, -2' for one of more dimensions, which the
+        runtime refuses in parseintegerarray's words when the line runs.
+        warp_array in mmbc_stmt.c."""
+        if not self.is_array_arg():
+            self.late("Invalid syntax")
+        s = self.arrayref(True)
+        if s.ty != TY_I:
+            return 'NULL, -1'
+        if not (s.is_param or s.dynamic) and len(s.dims) != 1:
+            return 'NULL, -2'
+        p, c = self.array_flat(s)
+        return '%s, %s' % (p, c)
+
+    def warp_opts(self, mx, arr):
+        """The optional arguments after the arrays, any of which may be
+        left empty (getcsargs' *argv[i] test): up to mx of them, the one
+        at arr (-1 for none) an array.  Returns (each as a C integer, '0'
+        for one left out; the array as warp_array gives it, 'NULL, 0'
+        without; has, bit k set for each given).  warp_opts in
+        mmbc_stmt.c."""
+        v = ['0'] * mx
+        av = 'NULL, 0'
+        has = 0
+        k = 0
+        while k < mx and self.accept_op(','):
+            if not (self.is_op(',') or self.stmt_end()):
+                has |= 1 << k
+                if k == arr:
+                    av = self.warp_array()
+                else:
+                    v[k] = self.as_int(self.expr())
+            k += 1
+        if not self.stmt_end():
+            self.late("Invalid syntax")
+        return v, av, has
 
     def stmt_end(self):
         # ELSE terminates a statement too, so that the PRINT in
@@ -7286,71 +7329,76 @@ class Conv(object):
             self.emit('mm_mode(%s);' % self.as_int(n))
             return
         if up == 'FRAMEBUFFER':
-            # FRAMEBUFFER CREATE | LAYER | CLOSE [F|L] | WRITE N|F|L |
-            #             COPY s, d [, B] | MERGE [c] | WAIT
+            # FRAMEBUFFER CREATE [2] | LAYER [TOP] [c] | CLOSE [F|L|2|T] |
+            #             WRITE N|F|L|2|T | COPY s, d [, B] |
+            #             MERGE [c] [, B] | WAIT | WARPH | WARPV | AFFINE | SPAN
             #
-            # MMBasic's Draw.c cmd_framebuffer.  Two off-screen buffers:
-            # F, and the LAYER, which is another framebuffer in every
-            # respect except that MERGE puts it OVER F on the way to the
-            # screen, skipping a transparent colour.
+            # MMBasic's cmd_framebuffer, the VGA and HDMI PicoMite's.  Its
+            # off-screen buffers: F and 2, and the layers L and T, which
+            # that firmware's scanout shows over the screen, T over L,
+            # each skipping its own transparent colour.  On the board L is
+            # an off-screen buffer and the screen shows nothing but N (its
+            # SRAM has no room for a scanout layer, PC3-LAYER-MERGE.md),
+            # and 2 and T are refused; pc3host has all four and shows L
+            # and T as the firmware does (display.h).
             #
-            # That is MMBasic's TFT model rather than its VGA/HDMI one,
-            # where the layer is composited at scanout instead.  The
-            # choice is argued in PC3-LAYER-MERGE.md and comes down to
-            # SRAM: a scanout-time layer must live where core1 can DMA
-            # it, which is 40K off every process forever.  A program
-            # written for a PicoMite driving an ILI9341 runs unchanged.
+            # MERGE puts 2 over F, as the firmware does - or, with no 2,
+            # the layer over F: MMBasic's TFT model, a PicoMite driving an
+            # ILI9341, which every PC3 program before 2 used.
             #
             # A mode change discards the buffers, both here and in the
             # kernel, so CREATE belongs after MODE - which is also
             # where MMBasic wants it, setmode() closing every buffer.
             self.i += 1
             if self.accept_kw('CREATE'):
-                self.emit('mm_fb_create(1);')
+                # CREATE 2: the 2 is a number to the lexer
+                t = self.peek()
+                if (t is not None and t[0] == T_NUM and t[1] == '2'
+                        and t[2] == 'I'):
+                    self.i += 1
+                    self.emit('mm_fb_create(3);')
+                else:
+                    self.emit('mm_fb_create(1);')
                 return
             if self.accept_kw('LAYER'):
-                # FRAMEBUFFER LAYER [transparent] - the optional colour
-                # (0-15, default 0) is the transparent index a MERGE
-                # uses when it names none.  The firmware keeps it in
-                # transparentlow/high (V5.08.00 Draw.c:7375-7381), so
-                # it is run-time state and lives in an emitted global,
-                # not in the translator.
+                # FRAMEBUFFER LAYER [TOP] [transparent] - the optional
+                # colour (0-15, default 0) is the layer's transparent
+                # index, which the runtime keeps: the live layer is drawn
+                # through it, and a MERGE of the layer that names none
+                # uses it (transparentlow/high in the firmware).
+                which = 4 if self.accept_kw('TOP') else 2
+                c = '0'
                 if not self.stmt_end():
-                    self.uses_fbt = True
-                    self.emit('__mm_fbt = (int)(%s);'
-                              % self.as_int(self.expr()))
-                self.emit('mm_fb_create(2);')
+                    c = self.as_int(self.expr())
+                self.emit('mm_fb_layer(%d, %s);' % (which, c))
                 return
             if self.accept_kw('CLOSE'):
-                # CLOSE L closes the layer, CLOSE or CLOSE F the other
-                which = 2 if self.accept_kw('L') else 1
-                if which == 1:
-                    self.accept_kw('F')
-                self.emit('mm_fb_close(%d);' % which)
+                # CLOSE F, L, 2 or T closes that one; a bare CLOSE (or one
+                # naming N) closes them all, as closeframebuffer('A') does
+                which = '0'
+                if not self.stmt_end():
+                    which = self.fb_buf()
+                self.emit('mm_fb_close(%s);' % which)
                 return
             if self.accept_kw('MERGE'):
-                # FRAMEBUFFER MERGE [colour] [, B] - the transparent
-                # index, 0 to 15, defaulting to 0 as MMBasic's does.
-                #
-                # MMBasic's second argument asks for the merge to run on
-                # the OTHER CORE so BASIC carries on (FrameBuffer.c:1071
-                # pushes it down the multicore FIFO).  Accepted and not
-                # acted on, and that is not a divergence: on a VGA
-                # display the reference ignores it too - FrameBuffer.c
-                # :1084 sets background = 0 for every DISPLAY_TYPE from
-                # VGA222 up, which is this machine's class.  So the
-                # merge happens in the syscall, exactly as it does
-                # there.  R and A name modes this display has no
-                # equivalent for and are refused rather than quietly
-                # taken as B.
-                c = '__mm_fbt' if self.uses_fbt else '0'
+                # FRAMEBUFFER MERGE [colour] [, B] - the transparent index,
+                # 0 to 15: with a 2, 0 when left out, and B waits for the
+                # frame as the firmware's does; with only the layer, the
+                # layer's own index, and always at the top of the frame
+                # (mm_fb_merge2).  R and A ask for the merge to run on the
+                # other core, which the VGA and HDMI firmware does not do
+                # either, and are refused rather than quietly taken as B.
+                c = '0'
+                flags = 0
                 if not self.stmt_end():
                     if not self.is_op(','):
                         c = self.as_int(self.expr())
+                        flags |= 1
                     if self.accept_op(','):
                         if not self.accept_kw('B'):
                             self.err('FRAMEBUFFER MERGE takes only B here')
-                self.emit('mm_fb_merge(%s);' % c)
+                        flags |= 2
+                self.emit('mm_fb_merge2(%s, %d);' % (c, flags))
                 return
             if self.accept_kw('WRITE'):
                 self.emit('mm_fb_write(%s);' % self.fb_buf())
@@ -7369,8 +7417,75 @@ class Conv(object):
             if self.accept_kw('WAIT'):
                 self.emit('mm_fb_wait();')
                 return
+            if self.is_kw('WARPH') or self.is_kw('WARPV'):
+                # FRAMEBUFFER WARPH from, to, xoff%() [, step] [, first]
+                #           [, phase] [, edge] [, transparent] [, rows%()]
+                # FRAMEBUFFER WARPV from, to, yoff%() [, step] [, first]
+                #           [, phase] [, edge] [, transparent]
+                #
+                # MMBasic V8's raster commands (the PicoMite's Warp.c):
+                # each row (WARPH) or column (WARPV) of one buffer copied
+                # to another, moved by its band's offset.  The arguments
+                # are checked when the line runs, in MMBasic's order, so
+                # a short or long list is a late "Invalid syntax" as
+                # getcsargs' count is there.
+                vert = 1 if self.is_kw('WARPV') else 0
+                self.i += 1
+                s = self.fb_buf()
+                if not self.accept_op(','):
+                    self.late("Invalid syntax")
+                d = self.fb_buf()
+                if not self.accept_op(','):
+                    self.late("Invalid syntax")
+                a = self.warp_array()
+                o, ra, has = self.warp_opts(5 if vert else 6,
+                                            -1 if vert else 5)
+                self.emit('mm_fb_warp(%d, %s, %s, %s, %s, %s, %s, %s, %s, '
+                          '%s, %d, %d);' % (vert, s, d, a, ra, o[0], o[1],
+                                            o[2], o[3], o[4], has,
+                                            self.opt_base))
+                return
+            if self.accept_kw('AFFINE'):
+                # FRAMEBUFFER AFFINE from, to, u%(), v%(), du%(), dv%()
+                #           [, step] [, first] [, left] [, width] [, edge]
+                #           [, transparent]
+                # each row read from the source along a straight line
+                s = self.fb_buf()
+                if not self.accept_op(','):
+                    self.late("Invalid syntax")
+                d = self.fb_buf()
+                a = []
+                for _k in range(4):
+                    if not self.accept_op(','):
+                        self.late("Invalid syntax")
+                    a.append(self.warp_array())
+                o, ra, has = self.warp_opts(6, -1)
+                self.emit('mm_fb_affine(%s, %s, %s, %s, %s, %s, %s, %s, %s, '
+                          '%s, %s, %s, %d);' % (s, d, a[0], a[1], a[2], a[3],
+                                                o[0], o[1], o[2], o[3], o[4],
+                                                o[5], has))
+                return
+            if self.accept_kw('SPAN'):
+                # FRAMEBUFFER SPAN from, to, left%(), right%() [, step]
+                #           [, first] [, fill] [, transparent] [, outside]
+                # each row copied only between its band's two columns
+                s = self.fb_buf()
+                if not self.accept_op(','):
+                    self.late("Invalid syntax")
+                d = self.fb_buf()
+                a = []
+                for _k in range(2):
+                    if not self.accept_op(','):
+                        self.late("Invalid syntax")
+                    a.append(self.warp_array())
+                o, ra, has = self.warp_opts(5, -1)
+                self.emit('mm_fb_span(%s, %s, %s, %s, %s, %s, %s, %s, %s, %d);'
+                          % (s, d, a[0], a[1], o[0], o[1], o[2], o[3], o[4],
+                             has))
+                return
             self.err("only FRAMEBUFFER CREATE, LAYER, CLOSE, WRITE, COPY, "
-                     "MERGE and WAIT are translated")
+                     "MERGE, WAIT, WARPH, WARPV, AFFINE and SPAN are "
+                     "translated")
         _loadprog = None
         if up in ('LOAD', 'SAVE') and self.is_kw('DATA', 1):
             # LOAD DATA f$, addr      every byte of the file into memory
@@ -7783,9 +7898,12 @@ class Conv(object):
             # BLIT LOAD / LOADBMP [#]n, f$ [, x [, y [, w [, h]]]]
             #                                   a BMP into a buffer
             #
-            # Not translated: RESIZE, and the LCD-only MERGE /
-            # RGB332-only MEMORY332, which do not apply to these screen
-            # modes at all.
+            # BLIT RESIZE s, d, sx, sy, sw, sh, dx, dy, dw, dh [, t]
+            #                                   a rectangle of N/F/L/2/T
+            #                                   stretched onto another
+            #
+            # Not translated: the LCD-only MERGE and RGB332-only
+            # MEMORY332, which do not apply to these screen modes at all.
             self.uses_blit = True
             if self.is_kw('READ', 1):
                 self.i += 2
@@ -7873,7 +7991,25 @@ class Conv(object):
                              args[0], args[1], args[2], args[3], args[4],
                              args[5], blank))
                 return
-            for kw in ('RESIZE', 'MERGE', 'MEMORY332'):
+            if self.is_kw('RESIZE', 1):
+                # the reference's cmd_blit RESIZE (Blit.c, V8.00.00b3):
+                # 19 or 21 arguments, the transparent colour -1 when
+                # left out; the kernel does the pixels (mm_blit_resize)
+                self.i += 2
+                src = self.fb_buf()
+                self.expect_op(',')
+                dst = self.fb_buf()
+                args = []
+                for _ in range(8):
+                    self.expect_op(',')
+                    args.append(self.as_int(self.expr()))
+                blank = '-1LL'
+                if self.accept_op(','):
+                    blank = self.as_int(self.expr())
+                self.emit('mm_blit_resize(%s, %s, %s, %s, %s, %s, %s, %s, '
+                          '%s, %s, %s);' % tuple([src, dst] + args + [blank]))
+                return
+            for kw in ('MERGE', 'MEMORY332'):
                 if self.is_kw(kw, 1):
                     self.err('BLIT %s is not translated' % kw)
             self.i += 1
@@ -10102,11 +10238,18 @@ class Conv(object):
             val = self.expr()
             self.expect_op(',')
             dst = self.arrayref()
-            if src.ty != dst.ty:
+            if src.ty != dst.ty and TY_S in (src.ty, dst.ty):
                 self.err("%s needs both arrays to be the same type" % op)
             sptr, scnt = self.array_flat(src)
             dptr, dcnt = self.array_flat(dst)
             self.uses_array = True
+            if src.ty != dst.ty:
+                # a float array into an integer one or the other way:
+                # MMBasic takes any mix (array_add, cmd_math SCALE)
+                self.emit('mm_arr_%s_%s(%s, %s, %s, %s, %s);'
+                          % (op.lower(), 'fi' if src.ty == TY_F else 'if',
+                             sptr, scnt, self.as_flt(val), dptr, dcnt))
+                return
             if src.ty == TY_S:
                 if op == 'SCALE':
                     self.err("SCALE does not apply to a string array")
@@ -10125,6 +10268,30 @@ class Conv(object):
                 conv = self.as_flt
             self.emit('%s(%s, %s, %s, %s, %s);'
                       % (fn, sptr, scnt, conv(val), dptr, dcnt))
+            return
+        if op == 'CLAMP':
+            # MATH CLAMP in(), lo, hi, out() - every element limited to
+            # lo..hi, any mix of integer and float (cmd_math CLAMP, MATH
+            # only).  The limits are evaluated before the out() array,
+            # as the reference's getnumber calls are.
+            if not is_math:
+                self.err("CLAMP is a MATH sub-command, not an ARRAY one")
+            src = self.arrayref()
+            self.expect_op(',')
+            lo = self.expr()
+            self.expect_op(',')
+            hi = self.expr()
+            self.expect_op(',')
+            dst = self.arrayref()
+            if TY_S in (src.ty, dst.ty):
+                self.err("CLAMP does not apply to a string array")
+            sptr, scnt = self.array_flat(src)
+            dptr, dcnt = self.array_flat(dst)
+            self.uses_array = True
+            self.emit('mm_arr_clamp(%s, %d, %s, %s, %s, %s, %d, %s);'
+                      % (sptr, 1 if src.ty == TY_I else 0, scnt,
+                         self.as_flt(lo), self.as_flt(hi), dptr,
+                         1 if dst.ty == TY_I else 0, dcnt))
             return
         if op == 'POWER':
             # MATH POWER a(), n, b()  - b(i) = a(i) ^ n
@@ -12961,11 +13128,6 @@ class Conv(object):
             for name, at in keys:
                 wr('    %d,\n' % at)
             wr('    0\n};\n')
-        if self.uses_fbt:
-            wr('\n/* FRAMEBUFFER LAYER\'s transparent colour: the merge\n')
-            wr(' * default when MERGE names none (transparentlow/high\n')
-            wr(' * in the firmware) */\n')
-            wr('static int __mm_fbt = 0;\n')
         if self.uses_onerror:
             wr('\n/* ---- ON ERROR state, read by the guards below ---- *\n')
             wr(' * [0] is the poison: an error has been recorded and the\n')
@@ -13035,7 +13197,9 @@ class Conv(object):
                '    if (c == \'N\') return 0;\n'
                '    if (c == \'F\') return 1;\n'
                '    if (c == \'L\') return 2;\n'
-               '    mm_error("expected N, F or L");\n'
+               '    if (c == \'2\') return 3;\n'
+               '    if (c == \'T\') return 4;\n'
+               '    mm_error("expected N, F, L, 2 or T");\n'
                '    return 0;\n'
                '}\n')
         wr('\n/* ---- forward declarations ---- */\n')

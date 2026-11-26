@@ -255,6 +255,54 @@ static int cmd_name_var(const char *up)
     return 1;
 }
 
+/* An integer array for FRAMEBUFFER WARPH, WARPV, AFFINE and SPAN, as
+ * "first element, count" - or "NULL, -1" for an array that is not
+ * integer and "NULL, -2" for one of more dimensions, which the runtime
+ * refuses in parseintegerarray's words when the line runs.  warp_array
+ * in the Python. */
+static const char *warp_array(void)
+{
+    struct sym *s;
+    struct flat f;
+
+    if (!is_array_arg())
+        cv_late("Invalid syntax");
+    s = arrayref(1);
+    if (s->ty != TY_I)
+        return "NULL, -1";
+    if (!(s->is_param || s->dynamic) && s->ndims != 1)
+        return "NULL, -2";
+    f = array_flat(s);
+    return sfmt("%s, %s", f.ptr, f.cnt);
+}
+
+/* The optional arguments after the arrays, any of which may be left
+ * empty (getcsargs' *argv[i] test): up to max of them, the one at arr
+ * (-1 for none) an array.  v[] gets each as a C integer, "0" for one
+ * left out, *av the array as warp_array gives it ("NULL, 0" without);
+ * the result has bit k set for each that was given.  warp_opts in the
+ * Python. */
+static int warp_opts(int max, int arr, const char **v, const char **av)
+{
+    int k, has = 0;
+
+    for (k = 0; k < max; k++)
+        v[k] = "0";
+    *av = "NULL, 0";
+    for (k = 0; k < max && accept_op(","); k++) {
+        if (is_op(",", 0) || stmt_end())
+            continue;
+        has |= 1 << k;
+        if (k == arr)
+            *av = warp_array();
+        else
+            v[k] = as_int(expr());
+    }
+    if (!stmt_end())
+        cv_late("Invalid syntax");
+    return has;
+}
+
 void statement_inner(void)
 {
     struct tok *t = peek(0);
@@ -711,79 +759,86 @@ void statement_inner(void)
         return;
     }
     if (strcmp(up, "FRAMEBUFFER") == 0) {
-        /* FRAMEBUFFER CREATE | LAYER | CLOSE [F|L] | WRITE N|F|L |
-                       COPY s, d [, B] | MERGE [c] | WAIT
+        /* FRAMEBUFFER CREATE [2] | LAYER [TOP] [c] | CLOSE [F|L|2|T] |
+                       WRITE N|F|L|2|T | COPY s, d [, B] |
+                       MERGE [c] [, B] | WAIT | WARPH | WARPV | AFFINE | SPAN
 
-           MMBasic's Draw.c cmd_framebuffer.  Two off-screen buffers: F,
-           and the LAYER, which is another framebuffer in every respect
-           except that MERGE puts it OVER F on the way to the screen,
-           skipping a transparent colour.
+           MMBasic's cmd_framebuffer, the VGA and HDMI PicoMite's.  Its
+           off-screen buffers: F and 2, and the layers L and T, which
+           that firmware's scanout shows over the screen, T over L, each
+           skipping its own transparent colour.  On the board L is an
+           off-screen buffer and the screen shows nothing but N (its SRAM
+           has no room for a scanout layer, PC3-LAYER-MERGE.md), and 2
+           and T are refused; pc3host has all four and shows L and T as
+           the firmware does (display.h).
 
-           That is MMBasic's TFT model rather than its VGA/HDMI one,
-           where the layer is composited at scanout instead.  The choice
-           is argued in PC3-LAYER-MERGE.md and comes down to SRAM: a
-           scanout-time layer must live where core1 can DMA it, which is
-           40K off every process forever.  A program written for a
-           PicoMite driving an ILI9341 runs unchanged.
+           MERGE puts 2 over F, as the firmware does - or, with no 2,
+           the layer over F: MMBasic's TFT model, a PicoMite driving an
+           ILI9341, which every PC3 program before 2 used.
 
            A mode change discards the buffers, both here and in the
            kernel, so CREATE belongs after MODE - which is also where
            MMBasic wants it, setmode() closing every buffer. */
         cv.i++;
         if (accept_kw("CREATE")) {
-            emit("mm_fb_create(1);");
+            /* CREATE 2: the 2 is a number to the lexer */
+            struct tok *t = peek(0);
+
+            if (t != NULL && t->kind == T_NUM && strcmp(t->text, "2") == 0
+                && strcmp(t->up, "I") == 0) {
+                cv.i++;
+                emit("mm_fb_create(3);");
+            } else
+                emit("mm_fb_create(1);");
             return;
         }
         if (accept_kw("LAYER")) {
-            /* FRAMEBUFFER LAYER [transparent] - the optional colour
-               (0-15, default 0) is the transparent index a MERGE uses
-               when it names none.  The firmware keeps it in
-               transparentlow/high (V5.08.00 Draw.c:7375-7381), so it
-               is run-time state and lives in an emitted global, not
-               in the translator. */
-            if (!stmt_end()) {
-                cv.uses_fbt = 1;
-                emit(sfmt("__mm_fbt = (int)(%s);", as_int(expr())));
-            }
-            emit("mm_fb_create(2);");
+            /* FRAMEBUFFER LAYER [TOP] [transparent] - the optional
+               colour (0-15, default 0) is the layer's transparent
+               index, which the runtime keeps: the live layer is drawn
+               through it, and a MERGE of the layer that names none uses
+               it (transparentlow/high in the firmware). */
+            int which = accept_kw("TOP") ? 4 : 2;
+            const char *c = "0";
+
+            if (!stmt_end())
+                c = as_int(expr());
+            emit(sfmt("mm_fb_layer(%d, %s);", which, c));
             return;
         }
         if (accept_kw("CLOSE")) {
-            /* CLOSE L closes the layer, CLOSE or CLOSE F the other */
-            int which = accept_kw("L") ? 2 : 1;
+            /* CLOSE F, L, 2 or T closes that one; a bare CLOSE (or one
+               naming N) closes them all, as closeframebuffer('A') does */
+            const char *which = "0";
 
-            if (which == 1)
-                accept_kw("F");
-            emit(sfmt("mm_fb_close(%d);", which));
+            if (!stmt_end())
+                which = fb_buf();
+            emit(sfmt("mm_fb_close(%s);", which));
             return;
         }
         if (accept_kw("MERGE")) {
-            /* FRAMEBUFFER MERGE [colour] - the transparent index, 0 to
-               15, defaulting to 0 as MMBasic's does. */
-            /* FRAMEBUFFER MERGE [colour] [, B] - the transparent
-               index, 0 to 15, defaulting to 0 as MMBasic's does.
-
-               MMBasic's second argument asks for the merge to run on
-               the OTHER CORE so BASIC carries on (FrameBuffer.c:1071
-               pushes it down the multicore FIFO).  Accepted and not
-               acted on, and that is not a divergence: on a VGA display
-               the reference ignores it too - FrameBuffer.c:1084 sets
-               background = 0 for every DISPLAY_TYPE from VGA222 up,
-               which is this machine's class.  So the merge happens in
-               the syscall, exactly as it does there.  R and A name
-               modes this display has no equivalent for and are refused
-               rather than quietly taken as B. */
-            const char *c = cv.uses_fbt ? "__mm_fbt" : "0";
+            /* FRAMEBUFFER MERGE [colour] [, B] - the transparent index,
+               0 to 15: with a 2, 0 when left out, and B waits for the
+               frame as the firmware's does; with only the layer, the
+               layer's own index, and always at the top of the frame
+               (mm_fb_merge2).  R and A ask for the merge to run on the
+               other core, which the VGA and HDMI firmware does not do
+               either, and are refused rather than quietly taken as B. */
+            const char *c = "0";
+            int flags = 0;
 
             if (!stmt_end()) {
-                if (!is_op(",", 0))
+                if (!is_op(",", 0)) {
                     c = as_int(expr());
+                    flags |= 1;
+                }
                 if (accept_op(",")) {
                     if (!accept_kw("B"))
                         cv_err("FRAMEBUFFER MERGE takes only B here");
+                    flags |= 2;
                 }
             }
-            emit(sfmt("mm_fb_merge(%s);", c));
+            emit(sfmt("mm_fb_merge2(%s, %d);", c, flags));
             return;
         }
         if (accept_kw("WRITE")) {
@@ -808,8 +863,81 @@ void statement_inner(void)
             emit("mm_fb_wait();");
             return;
         }
+        if (is_kw("WARPH", 0) || is_kw("WARPV", 0)) {
+            /* FRAMEBUFFER WARPH from, to, xoff%() [, step] [, first]
+                         [, phase] [, edge] [, transparent] [, rows%()]
+               FRAMEBUFFER WARPV from, to, yoff%() [, step] [, first]
+                         [, phase] [, edge] [, transparent]
+
+               MMBasic V8's raster commands (the PicoMite's Warp.c):
+               each row (WARPH) or column (WARPV) of one buffer copied
+               to another, moved by its band's offset.  The arguments
+               are checked when the line runs, in MMBasic's order, so a
+               short or long list is a late "Invalid syntax" as
+               getcsargs' count is there. */
+            int vert = is_kw("WARPV", 0), has;
+            const char *s, *d, *a, *ra, *o[6];
+
+            cv.i++;
+            s = fb_buf();
+            if (!accept_op(","))
+                cv_late("Invalid syntax");
+            d = fb_buf();
+            if (!accept_op(","))
+                cv_late("Invalid syntax");
+            a = warp_array();
+            has = warp_opts(vert ? 5 : 6, vert ? -1 : 5, o, &ra);
+            emit(sfmt("mm_fb_warp(%d, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                      "%d, %d);", vert, s, d, a, ra, o[0], o[1], o[2], o[3],
+                      o[4], has, cv.opt_base));
+            return;
+        }
+        if (accept_kw("AFFINE")) {
+            /* FRAMEBUFFER AFFINE from, to, u%(), v%(), du%(), dv%()
+                         [, step] [, first] [, left] [, width] [, edge]
+                         [, transparent]
+               each row read from the source along a straight line */
+            const char *s, *d, *a[4], *ra, *o[6];
+            int k, has;
+
+            s = fb_buf();
+            if (!accept_op(","))
+                cv_late("Invalid syntax");
+            d = fb_buf();
+            for (k = 0; k < 4; k++) {
+                if (!accept_op(","))
+                    cv_late("Invalid syntax");
+                a[k] = warp_array();
+            }
+            has = warp_opts(6, -1, o, &ra);
+            emit(sfmt("mm_fb_affine(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                      "%s, %s, %d);", s, d, a[0], a[1], a[2], a[3], o[0],
+                      o[1], o[2], o[3], o[4], o[5], has));
+            return;
+        }
+        if (accept_kw("SPAN")) {
+            /* FRAMEBUFFER SPAN from, to, left%(), right%() [, step]
+                       [, first] [, fill] [, transparent] [, outside]
+               each row copied only between its band's two columns */
+            const char *s, *d, *a[2], *ra, *o[6];
+            int k, has;
+
+            s = fb_buf();
+            if (!accept_op(","))
+                cv_late("Invalid syntax");
+            d = fb_buf();
+            for (k = 0; k < 2; k++) {
+                if (!accept_op(","))
+                    cv_late("Invalid syntax");
+                a[k] = warp_array();
+            }
+            has = warp_opts(5, -1, o, &ra);
+            emit(sfmt("mm_fb_span(%s, %s, %s, %s, %s, %s, %s, %s, %s, %d);",
+                      s, d, a[0], a[1], o[0], o[1], o[2], o[3], o[4], has));
+            return;
+        }
         cv_err("only FRAMEBUFFER CREATE, LAYER, CLOSE, WRITE, COPY, "
-               "MERGE and WAIT are translated");
+               "MERGE, WAIT, WARPH, WARPV, AFFINE and SPAN are translated");
     }
     if ((strcmp(up, "LOAD") == 0 || strcmp(up, "SAVE") == 0)
         && is_kw("DATA", 1)) {
@@ -1279,10 +1407,14 @@ void statement_inner(void)
            BLIT LOAD / LOADBMP [#]n, f$ [, x [, y [, w [, h]]]]
                                                a BMP into a buffer
 
-           Not translated: RESIZE, and the LCD-only MERGE / RGB332-only
-           MEMORY332, which do not apply to these screen modes at all. */
+           BLIT RESIZE s, d, sx, sy, sw, sh, dx, dy, dw, dh [, t]
+                                               a rectangle of N/F/L/2/T
+                                               stretched onto another
+
+           Not translated: the LCD-only MERGE and RGB332-only MEMORY332,
+           which do not apply to these screen modes at all. */
         static const char *const noblit[] = {
-            "RESIZE", "MERGE", "MEMORY332", NULL
+            "MERGE", "MEMORY332", NULL
         };
         int bi;
 
@@ -1383,6 +1515,29 @@ void statement_inner(void)
                       is_flash ? "flash" : "fb", src, dst,
                       args[0], args[1], args[2], args[3], args[4],
                       args[5], blank));
+            return;
+        }
+        if (is_kw("RESIZE", 1)) {
+            /* the reference's cmd_blit RESIZE (Blit.c, V8.00.00b3): 19
+               or 21 arguments, the transparent colour -1 when left
+               out; the kernel does the pixels (mm_blit_resize) */
+            const char *src, *dst, *args[8];
+            const char *blank = "-1LL";
+            int ai;
+
+            cv.i += 2;
+            src = fb_buf();
+            expect_op(",");
+            dst = fb_buf();
+            for (ai = 0; ai < 8; ai++) {
+                expect_op(",");
+                args[ai] = as_int(expr());
+            }
+            if (accept_op(","))
+                blank = as_int(expr());
+            emit(sfmt("mm_blit_resize(%s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                      "%s, %s);", src, dst, args[0], args[1], args[2],
+                      args[3], args[4], args[5], args[6], args[7], blank));
             return;
         }
         for (bi = 0; noblit[bi]; bi++)
@@ -5241,11 +5396,19 @@ static void do_array_cmd(int is_math)
         val = expr();
         expect_op(",");
         dst = arrayref(1);
-        if (src->ty != dst->ty)
+        if (src->ty != dst->ty && (src->ty == TY_S || dst->ty == TY_S))
             cv_err("%s needs both arrays to be the same type", op);
         sf = array_flat(src);
         df = array_flat(dst);
         cv.uses_array = 1;
+        if (src->ty != dst->ty) {
+            /* a float array into an integer one or the other way:
+               MMBasic takes any mix (array_add, cmd_math SCALE) */
+            emit(sfmt("mm_arr_%s_%s(%s, %s, %s, %s, %s);", lower(op),
+                      src->ty == TY_F ? "fi" : "if", sf.ptr, sf.cnt,
+                      as_flt(val), df.ptr, df.cnt));
+            return;
+        }
         if (src->ty == TY_S) {
             if (strcmp(op, "SCALE") == 0)
                 cv_err("SCALE does not apply to a string array");
@@ -5271,6 +5434,34 @@ static void do_array_cmd(int is_math)
             emit(sfmt("%s(%s, %s, %s, %s, %s);",
                       fn, sf.ptr, sf.cnt, cval, df.ptr, df.cnt));
         }
+        return;
+    }
+    if (strcmp(op, "CLAMP") == 0) {
+        /* MATH CLAMP in(), lo, hi, out() - every element limited to
+           lo..hi, any mix of integer and float (cmd_math CLAMP, MATH
+           only).  The limits are evaluated before the out() array, as
+           the reference's getnumber calls are. */
+        struct sym *src, *dst;
+        struct val lo, hi;
+        struct flat sf, df;
+
+        if (!is_math)
+            cv_err("CLAMP is a MATH sub-command, not an ARRAY one");
+        src = arrayref(1);
+        expect_op(",");
+        lo = expr();
+        expect_op(",");
+        hi = expr();
+        expect_op(",");
+        dst = arrayref(1);
+        if (src->ty == TY_S || dst->ty == TY_S)
+            cv_err("CLAMP does not apply to a string array");
+        sf = array_flat(src);
+        df = array_flat(dst);
+        cv.uses_array = 1;
+        emit(sfmt("mm_arr_clamp(%s, %d, %s, %s, %s, %s, %d, %s);",
+                  sf.ptr, src->ty == TY_I, sf.cnt, as_flt(lo), as_flt(hi),
+                  df.ptr, dst->ty == TY_I, df.cnt));
         return;
     }
     if (strcmp(op, "POWER") == 0) {

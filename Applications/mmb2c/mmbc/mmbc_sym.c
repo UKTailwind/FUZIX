@@ -264,17 +264,25 @@ const char *kw_or_str(const struct kwval *table, const char *rt,
 }
 
 /* Which framebuffer a FRAMEBUFFER argument names, as a C expression.
-   N is the screen, F the off-screen buffer and L the layer - which is
-   just a second off-screen buffer, and becomes a layer only in MERGE.
-   MMBasic's T and 2 name buffers this machine does not have, so they
-   are refused here rather than quietly becoming one of these three. */
+   N is the screen, F the off-screen buffer and L the layer; 2 and T are
+   the VGA and HDMI PicoMite's second framebuffer and top layer, which
+   the kernel has on a PC (display.h) and refuses on the board.  The 2 is
+   a number to the lexer, so it is looked for first. */
 const char *fb_buf(void)
 {
     static const struct kwval bufs[] = {
-        { "N", 0 }, { "F", 1 }, { "L", 2 }, { NULL, 0 }
+        { "N", 0 }, { "F", 1 }, { "L", 2 }, { "2", 3 }, { "T", 4 },
+        { NULL, 0 }
     };
-    const char *e = kw_or_str(bufs, "__mmb_fbsel", "expected N, F or L");
+    struct tok *t = peek(0);
+    const char *e;
 
+    if (t != NULL && t->kind == T_NUM && strcmp(t->text, "2") == 0
+        && strcmp(t->up, "I") == 0) {
+        cv.i += 1;
+        return "3";
+    }
+    e = kw_or_str(bufs, "__mmb_fbsel", "expected N, F, L, 2 or T");
     if (!(e[0] >= '0' && e[0] <= '9'))
         cv.uses_fbsel = 1;
     return e;

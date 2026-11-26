@@ -4110,7 +4110,8 @@ static int mm_getkey_wait(void)
  * setmode() opens with closeframebuffer('A') for exactly that reason,
  * and the kernel drops its side of the claim in display_gfx_mode();
  * this keeps the two in step, so a stale "already exists" cannot outlive
- * the buffer.
+ * the buffer - every buffer, F and the layers alike: the kernel drops
+ * them all.
  *
  * mm_fb_cls is called from mm_cls, just below. */
 static void mm_fb_forget(void);
@@ -5464,9 +5465,25 @@ void mm_map(MMINTEGER index, MMINTEGER rgb)
         mm_error("MAP needs a 16-colour mode");
 }
 
+#ifdef PC_HOST
+/*
+ * MMBasic's MAP SET and MAP RESET wait for the top of the frame, and so
+ * does the board's kernel (display_gfx_remap_apply); pc3d answers at
+ * once, since it cannot stop its other clients for a frame.  So on a PC
+ * the wait is here, as MERGE's is - in slices, with the program off the
+ * processor.  A program paced by MAP SET, as warp_demo.bas's scenes are,
+ * ran as fast as it could without it.
+ */
+static void mm_fb_vsync_wait(void);     /* with FRAMEBUFFER, at the end */
+#define mm_map_wait() mm_fb_vsync_wait()
+#else
+#define mm_map_wait() ((void)0)
+#endif
+
 void mm_map_set(void)
 {
     mm_pix_drain();             /* palette applied after the pixels it recolours */
+    mm_map_wait();
     if (mm_gfx_open() >= 0 &&
         mm_sys_ioctl(mm_gfx_fd, MM_GFX_MAPCTL, (void *)0L) < 0)
         mm_error("MAP needs a 16-colour mode");
@@ -5475,6 +5492,7 @@ void mm_map_set(void)
 void mm_map_reset(void)
 {
     mm_pix_drain();             /* as mm_map_set */
+    mm_map_wait();
     if (mm_gfx_open() >= 0 &&
         mm_sys_ioctl(mm_gfx_fd, MM_GFX_MAPCTL, (void *)1L) < 0)
         mm_error("MAP needs a 16-colour mode");
@@ -5891,8 +5909,12 @@ MMINTEGER mm_pixel_get(MMINTEGER x, MMINTEGER y)
      * two implementations of that is a silent divergence waiting to
      * happen. */
     mm_pix_drain();
+    /* MMBasic's colour for the pixel, not the screen's: in MODE 2 and 3
+     * fixed for each index whatever MAP has done, as ReadBuffer16's
+     * colours[] are (pico_ioctl.h, GFX_GETPIXEL_FIXED).  A kernel that
+     * does not know the flag takes only x and y. */
     r = mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_GETPIXEL,
-              (void *)(long)MM_GFX_PACK((int)x, (int)y));
+              (void *)(long)(MM_GFX_PACK((int)x, (int)y) | 0x01000000));
     return (r < 0) ? 0 : (MMINTEGER)r;  /* off-screen reads black */
 }
 
@@ -7214,14 +7236,50 @@ MMINTEGER mm_colour_index(MMINTEGER rgb)
 #define MM_FB_N 0
 #define MM_FB_F 1
 #define MM_FB_L 2                       /* the layer - MMBasic FRAMEBUFFER LAYER */
+#define MM_FB_2 3                       /* FRAMEBUFFER CREATE 2 */
+#define MM_FB_T 4                       /* FRAMEBUFFER LAYER TOP */
 
-/*	Two off-screen buffers now, created and closed separately as
- *	MMBasic creates and closes them: FRAMEBUFFER CREATE and CLOSE F for
- *	one, FRAMEBUFFER LAYER and CLOSE L for the other.  MERGE needs
- *	both, which is what MMBasic's own two NULL tests say. */
-static int mm_fb_made;                  /* CREATE done, CLOSE not yet */
-static int mm_fb_made_l;                /* LAYER done, CLOSE L not yet */
+/*	The off-screen buffers, created and closed separately as MMBasic
+ *	creates and closes them: F (CREATE) and L (LAYER) on every PC3, and
+ *	the VGA and HDMI PicoMite's 2 (CREATE 2) and T (LAYER TOP) where
+ *	the kernel has the memory for them, which is pc3host's.  There L
+ *	and T are shown live over the screen, as on that firmware, and
+ *	MERGE puts 2 over F; without a 2, MERGE puts L over F, MMBasic's
+ *	TFT model, and that L is merged rather than shown (display.h). */
+static unsigned char mm_fb_has[5];      /* [which]: created, not closed yet */
+static int mm_fb_lt;                    /* the layer's transparent index */
 static int mm_fb_wr = MM_FB_N;          /* where drawing goes now */
+
+/* What each buffer's absence is called: FRAMEBUFFER WRITE's and the
+ * raster commands' words */
+static const char *const mm_fb_absent[5] = {
+    "", "Frame buffer not created", "Layer not created",
+    "Frame buffer 2 not created", "Layer Top not created"
+};
+
+/* FRAMEBUFFER WARPH, WARPV, AFFINE and SPAN's one request.  Must match
+ * struct gfx_warp in pico_ioctl.h, which says what each field holds. */
+#define MM_GFXIOC_WARP 0x0045
+#define MM_WARP_H      0
+#define MM_WARP_V      1
+#define MM_WARP_AFFINE 2
+#define MM_WARP_SPAN   3
+#define MM_WARP_LEAVE  (-1)
+#define MM_WARP_WRAP   (-2)
+struct mm_gfx_warp {
+    unsigned char op, src, dst, outside;
+    unsigned short n, step;
+    int first, left, width, edge, trans;
+    const void *a[4];
+};
+
+/* BLIT RESIZE's.  Must match struct gfx_resize in pico_ioctl.h. */
+#define MM_GFXIOC_RESIZE 0x0046
+struct mm_gfx_resize {
+    unsigned char src, dst;
+    short trans;
+    int sx, sy, sw, sh, dx, dy, dw, dh;
+};
 
 #if defined(MM_FCC) || defined(__FUZIX__) || defined(MM_PC3)
 
@@ -7241,12 +7299,13 @@ static int mm_fb_wr = MM_FB_N;          /* where drawing goes now */
  * takes it back on exit, exec or a mode change.  So CREATE is a claim
  * that can fail - no PSRAM on this board, or another program has it -
  * which is why this one returns a value and the rest do not. */
-static int mm_fb_open_hw(int claim, int which)
+static int mm_fb_open_hw(int claim, int which, int tcol)
 {
     if (mm_gfx_open() < 0)
         return -1;
+    /* tcol: a layer's transparent index, for pc3host's live layers */
     return mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_FBOPEN,
-                 (void *)(long)((which << 8) | claim));
+                 (void *)(long)((tcol << 16) | (which << 8) | claim));
 }
 
 static void mm_fb_sel_hw(int which)
@@ -7291,13 +7350,14 @@ static void mm_fb_vsync_wait(void)
             return;
 }
 
-static int mm_fb_merge_hw(int colour)
+static int mm_fb_merge_hw(int colour, int wait)
 {
     if (mm_gfx_open() < 0)
         return -1;
     /* The kernel merge no longer waits: the wait is here, where the
        program can be taken off the processor while it happens. */
-    mm_fb_vsync_wait();
+    if (wait)
+        mm_fb_vsync_wait();
     return mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_MERGE, (void *)(long)colour);
 }
 
@@ -7319,25 +7379,72 @@ static void mm_fb_paint_hw(MMINTEGER rgb)
     mm_gfx_rect(0, 0, (int)gi.width - 1, (int)gi.height - 1);
 }
 
-/* CREATE hands back a blank buffer, as MMBasic's memset does.  The
- * layer is static here and outlives the program that used it, so
- * without this a new program would start with the last one's picture. */
-static void mm_fb_clear_hw(int which)
+/* The screen's bits a pixel, and its size: what WARPH and the rest check
+ * their arguments against.  0 when there is no display to draw on. */
+static int mm_fb_depth_hw(int *w, int *h)
 {
+    struct mm_gfx_info gi;
+
+    if (mm_gfx_open() < 0 || mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_INFO, &gi) < 0)
+        return 0;
+    *w = gi.width;
+    *h = gi.height;
+    return gi.bpp;
+}
+
+/* CREATE hands back a blank buffer, as MMBasic's memset does, and a
+ * layer is filled with its transparent index, as MMBasic fills it, so a
+ * new one hides nothing.  The buffers are static here and outlive the
+ * program that used them, so without this a new program would start
+ * with the last one's picture.  In a 16-colour mode index i is drawn by
+ * the colour whose RGB121 bits are i (display_gfx_map); a one-bit mode
+ * fills with 0, as MMBasic's MODE 1 does. */
+static void mm_fb_clear_hw(int which, int idx)
+{
+    int w, h;
+    MMINTEGER rgb = 0;
+
+    if (idx && mm_fb_depth_hw(&w, &h) == 4)
+        rgb = ((idx & 8) ? 0x800000 : 0) | (((idx >> 1) & 3) << 14) |
+              ((idx & 1) << 7);
     mm_fb_sel_hw(which);
-    mm_fb_paint_hw(0);
+    mm_fb_paint_hw(rgb);
     mm_fb_sel_hw(mm_fb_wr);             /* back where the program was */
+}
+
+/* 0 done; -1 with errno, ENOTTY from a kernel without the call */
+static int mm_fb_warp_hw(struct mm_gfx_warp *g)
+{
+    if (mm_gfx_open() < 0)
+        return 0;
+    return mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_WARP, g);
+}
+
+static int mm_fb_resize_hw(struct mm_gfx_resize *g)
+{
+    if (mm_gfx_open() < 0)
+        return 0;
+    return mm_sys_ioctl(mm_gfx_fd, MM_GFXIOC_RESIZE, g);
 }
 
 #else   /* host: the rules still apply, there is just nothing behind them */
 
-static int mm_fb_open_hw(int claim, int w) { (void)claim; (void)w; return 0; }
+static int mm_fb_open_hw(int claim, int w, int t) { (void)claim; (void)w; (void)t; return 0; }
 static void mm_fb_sel_hw(int which)     { (void)which; }
 static void mm_fb_copy_hw(int s, int d) { (void)s; (void)d; }
-static int mm_fb_merge_hw(int colour)   { (void)colour; return 0; }
+static int mm_fb_merge_hw(int c, int w) { (void)c; (void)w; return 0; }
 static void mm_fb_wait_hw(void)         {}
-static void mm_fb_clear_hw(int which)   { (void)which; }
+static void mm_fb_clear_hw(int w, int i) { (void)w; (void)i; }
 static void mm_fb_paint_hw(MMINTEGER c) { (void)c; }
+/* MODE 1 is one bit a pixel, MODE 2 and 3 four, as on the PC3 */
+static int mm_fb_depth_hw(int *w, int *h)
+{
+    *w = (int)mm_hres();
+    *h = (int)mm_vres();
+    return mm_host_mode == 1 ? 1 : 4;
+}
+static int mm_fb_warp_hw(struct mm_gfx_warp *g) { (void)g; return 0; }
+static int mm_fb_resize_hw(struct mm_gfx_resize *g) { (void)g; return 0; }
 
 #endif
 
@@ -7362,8 +7469,8 @@ MMINTEGER mm_writebuff(void)
     }
     mm_fb_direct = 1;
     mm_gflush();                        /* what was asked for is there */
-    return (MMINTEGER)(base + (mm_fb_wr == MM_FB_F ? pool
-                               : mm_fb_wr == MM_FB_L ? 2 * pool : 0));
+    /* the block is N, F, L, 2, T: MM_FB_N to MM_FB_T in order */
+    return (MMINTEGER)(base + (unsigned long)mm_fb_wr * pool);
 #else
     MM_RAISEV("MM.INFO(WRITEBUFF) is not available on this machine", 0);
 #endif
@@ -7407,59 +7514,103 @@ static int mm_fb_cls(MMINTEGER rgb)
  * near MODE).  Nothing to release: the kernel has already dropped it. */
 static void mm_fb_forget(void)
 {
-    mm_fb_made = 0;
+    memset(mm_fb_has, 0, sizeof mm_fb_has);     /* display_gfx_mode drops all */
     mm_fb_wr = MM_FB_N;
 }
 
-/*	which is MM_FB_F for FRAMEBUFFER CREATE and MM_FB_L for
- *	FRAMEBUFFER LAYER.  Two buffers, created independently, as
- *	MMBasic creates them - and each hands back a BLANK one, because
- *	both are static here and outlive the program that used them. */
-void mm_fb_create(MMINTEGER which)
+/*	One buffer, created as MMBasic creates it, and handed back blank -
+ *	a layer filled with its transparent index tcol, which is checked
+ *	here, after "already exists", as LAYER's getint is. */
+static void mm_fb_make(int which, MMINTEGER tcol)
 {
-    int *made = (which == MM_FB_L) ? &mm_fb_made_l : &mm_fb_made;
+    static const char *const exists[5] = {
+        "", "Framebuffer already exists", "Layer already exists",
+        "Framebuffer 2 already exists", "Framebuffer already exists"
+    };
+    static const char *const unavail[5] = {
+        "", "Framebuffer not available", "Layer not available",
+        "Framebuffer 2 not available", "Layer Top not available"
+    };
+    int w, h;
 
     mm_pix_drain();             /* a layer claim must not strand queued pixels */
-    if (*made) {
-        mm_error(which == MM_FB_L ? "Layer already exists"
-                                  : "Framebuffer already exists");
+    if (which < MM_FB_F || which > MM_FB_T)
+        MM_RAISE("Invalid syntax");
+    if (mm_fb_has[which]) {
+        mm_error(exists[which]);
         return;
     }
-    if (mm_fb_open_hw(1, (int)which) < 0) {
-        mm_error(which == MM_FB_L ? "Layer not available"
-                                  : "Framebuffer not available");
+    if (mm_range(tcol, 0, 15))
+        return;
+    /* no MODE 1 scanout shows a top layer (StandardError 40) */
+    if (which == MM_FB_T && mm_fb_depth_hw(&w, &h) == 1)
+        MM_RAISE("Invalid for this screen mode");
+    if (mm_fb_open_hw(1, which, (int)tcol) < 0) {
+        mm_error(unavail[which]);
         return;
     }
-    *made = 1;
-    mm_fb_clear_hw((int)which);
+    mm_fb_has[which] = 1;
+    if (which == MM_FB_L)
+        mm_fb_lt = (int)tcol;
+    mm_fb_clear_hw(which, (int)tcol);
+}
+
+/*	FRAMEBUFFER CREATE (MM_FB_F) and CREATE 2 (MM_FB_2).  A LAYER from
+ *	a program translated before LAYER had its own call comes here too,
+ *	with index 0 transparent. */
+void mm_fb_create(MMINTEGER which)
+{
+    mm_fb_make((int)which, 0);
+}
+
+/*	FRAMEBUFFER LAYER [colour] (MM_FB_L) and LAYER TOP [colour]
+ *	(MM_FB_T): colour is the transparent index, 0 when left out. */
+void mm_fb_layer(MMINTEGER which, MMINTEGER colour)
+{
+    if (which != MM_FB_L && which != MM_FB_T)
+        MM_RAISE("Invalid syntax");
+    mm_fb_make((int)which, colour);
 }
 
 /* Closing one that was never created is deliberately quiet - MMBasic's
  * closeframebuffer simply finds nothing to free - because a program
- * that tidies up unconditionally at the end is the normal shape. */
+ * that tidies up unconditionally at the end is the normal shape.
+ * which 0 is a bare FRAMEBUFFER CLOSE: every buffer, as closeframebuffer
+ * ('A') closes them. */
 void mm_fb_close(MMINTEGER which)
 {
+    int w;
+
     mm_pix_drain();             /* as mm_fb_create */
-    mm_fb_open_hw(0, (int)which);   /* drops the claim AND the selection */
-    if (which == MM_FB_L)
-        mm_fb_made_l = 0;
-    else
-        mm_fb_forget();
-    if (mm_fb_wr == (int)which)
-        mm_fb_wr = MM_FB_N;
+    for (w = MM_FB_F; w <= MM_FB_T; w++) {
+        if (which ? w != which : !mm_fb_has[w])
+            continue;
+        mm_fb_open_hw(0, w, 0);         /* drops the claim AND the selection */
+        mm_fb_has[w] = 0;
+        if (mm_fb_wr == w)
+            mm_fb_wr = MM_FB_N;
+    }
+}
+
+/* 1 if a FRAMEBUFFER argument names a buffer there is; else raises */
+static int mm_fb_there(MMINTEGER which)
+{
+    if (which < MM_FB_N || which > MM_FB_T) {
+        mm_error("Invalid syntax");
+        return 0;
+    }
+    if (which != MM_FB_N && !mm_fb_has[which]) {
+        mm_error(mm_fb_absent[which]);
+        return 0;
+    }
+    return 1;
 }
 
 void mm_fb_write(MMINTEGER which)
 {
     mm_pix_drain();             /* pixels land in the layer that was selected when they were queued */
-    if (which == MM_FB_F && !mm_fb_made) {
-        mm_error("Frame buffer not created");
+    if (!mm_fb_there(which))
         return;
-    }
-    if (which == MM_FB_L && !mm_fb_made_l) {
-        mm_error("Layer not created");
-        return;
-    }
     mm_fb_sel_hw((int)which);
     mm_fb_wr = (int)which;
 }
@@ -7474,21 +7625,22 @@ MMINTEGER mm_fb_cur(void)
 
 void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait)
 {
+    int w;
+
     mm_pix_drain();             /* a copy is a snapshot: what was drawn must be in it */
     if (src == dst) {
         mm_error("FRAMEBUFFER COPY source and destination are the same");
         return;
     }
-    /*	Either end may be the layer now, so what has to exist is
-     *	whatever this copy actually names. */
-    if ((src == MM_FB_F || dst == MM_FB_F) && !mm_fb_made) {
-        mm_error("Frame buffer not created");
+    /*	Either end may be any buffer, so what has to exist is whatever
+     *	this copy actually names - F first, as it always was. */
+    for (w = MM_FB_F; w <= MM_FB_T; w++)
+        if ((src == w || dst == w) && !mm_fb_has[w]) {
+            mm_error(mm_fb_absent[w]);
+            return;
+        }
+    if (!mm_fb_there(src) || !mm_fb_there(dst))
         return;
-    }
-    if ((src == MM_FB_L || dst == MM_FB_L) && !mm_fb_made_l) {
-        mm_error("Layer not created");
-        return;
-    }
     /*
      * ,B waits for vertical blanking, and ONLY when the destination is
      * the physical display.
@@ -7509,41 +7661,466 @@ void mm_fb_copy(MMINTEGER src, MMINTEGER dst, MMINTEGER wait)
 }
 
 /*
- *	FRAMEBUFFER MERGE [colour] - the layer over F, onto the screen,
- *	skipping the transparent index (0-15, default 0).
+ *	FRAMEBUFFER MERGE [colour] [, B] - one buffer over F, onto the
+ *	screen, skipping the transparent index (0-15).  flags: bit 0 the
+ *	colour was given, bit 1 the B.
  *
- *	MMBasic's TFT model exactly: neither source is touched, so a
- *	program can move something about in the layer and merge again
- *	without redrawing the background underneath it.
+ *	With a framebuffer 2 it is the VGA and HDMI PicoMite's MERGE: 2
+ *	over F, the colour 0 when left out and not looked at in MODE 1,
+ *	where the two are ORed, and a wait for the frame only with B.
  *
- *	The kernel does the compositing, and HOW depends on the depth of
- *	the mode: per nibble in MODE 2, where 4bpp packs two pixels to a
- *	byte, but per BIT in MODE 1, which is the one-bit console.  Keying
- *	nibbles there would read eight pixels as two 4-bit numbers and
- *	still draw a picture.  The range check below is MMBasic's 0-15
- *	whatever the mode, as MMBasic's is.
+ *	Without one it is MMBasic's TFT model: the layer over F, the
+ *	colour the layer's own when left out, and always at the top of the
+ *	frame.  Neither source is touched, so a program can move something
+ *	about in the layer and merge again without redrawing the background
+ *	underneath it.  The kernel does the compositing, and HOW depends on
+ *	the depth of the mode: per nibble in MODE 2, where 4bpp packs two
+ *	pixels to a byte, but per BIT in MODE 1, which is the one-bit
+ *	console.  The range check is MMBasic's 0-15 whatever the mode, as
+ *	MMBasic's is.
  */
-void mm_fb_merge(MMINTEGER colour)
+void mm_fb_merge2(MMINTEGER colour, MMINTEGER flags)
 {
+    int w, h;
+
     mm_pix_drain();             /* a merge is a snapshot, as a copy is */
+    if (mm_fb_has[MM_FB_2]) {
+        if (!mm_fb_has[MM_FB_F]) {
+            mm_error(mm_fb_absent[MM_FB_F]);
+            return;
+        }
+        if (!(flags & 1) || mm_fb_depth_hw(&w, &h) == 1)
+            colour = 0;
+        else if (mm_range(colour, 0, 15))
+            return;
+        if (mm_fb_merge_hw((int)colour, (flags & 2) != 0) < 0)
+            mm_error("Framebuffer merge failed");
+        return;
+    }
+    if (!(flags & 1))
+        colour = mm_fb_lt;
     if (colour < 0 || colour > 15) {
         mm_error("Number out of bounds");
         return;
     }
-    if (!mm_fb_made) {
-        mm_error("Frame buffer not created");
+    if (!mm_fb_has[MM_FB_F]) {
+        mm_error(mm_fb_absent[MM_FB_F]);
         return;
     }
-    if (!mm_fb_made_l) {
-        mm_error("Layer not created");
+    if (!mm_fb_has[MM_FB_L]) {
+        mm_error(mm_fb_absent[MM_FB_L]);
         return;
     }
-    if (mm_fb_merge_hw((int)colour) < 0)
+    if (mm_fb_merge_hw((int)colour, 1) < 0)
         mm_error("Framebuffer merge failed");
+}
+
+/* FRAMEBUFFER MERGE from a program translated before MERGE2: its colour
+ * was always given */
+void mm_fb_merge(MMINTEGER colour)
+{
+    mm_fb_merge2(colour, 1);
 }
 
 void mm_fb_wait(void)
 {
     mm_pix_drain();             /* a program that waits for blanking expects its drawing to be there */
     mm_fb_wait_hw();
+}
+
+/*
+ * FRAMEBUFFER WARPH, WARPV, AFFINE and SPAN - MMBasic V8's raster
+ * commands (the PicoMite's graphics/Warp.c, cmd_warp, cmd_affine and
+ * cmd_span):
+ *
+ *   WARPH  from, to, xoff%() [,step] [,first] [,phase] [,edge] [,transparent] [,rows%()]
+ *   WARPV  from, to, yoff%() [,step] [,first] [,phase] [,edge] [,transparent]
+ *   AFFINE from, to, u%(), v%(), du%(), dv%() [,step] [,first] [,left] [,width] [,edge] [,transparent]
+ *   SPAN   from, to, left%(), right%() [,step] [,first] [,fill] [,transparent] [,outside]
+ *
+ * The errors are MMBasic's, raised in its order: the mode, the two
+ * buffers, the arrays, then each optional argument as getint takes it.
+ * What the kernel is handed is already legal (pico_ioctl.h, struct
+ * gfx_warp), and the pixels are drawn there - display_warp.c, in pc3d
+ * on a PC.
+ *
+ * The translator passes each array as its first element and its count,
+ * or a NULL and -1 for one that is not an integer array, -2 for one with
+ * more than one dimension, so that the error comes when MMBasic's would.
+ * has's bit k says the k-th optional argument was given: a left-out one
+ * takes MMBasic's default.
+ */
+
+/* MMBasic's error() with % for each number */
+static void mm_fb_errf(const char *fmt, MMINTEGER a, MMINTEGER b,
+                       MMINTEGER c, MMINTEGER d)
+{
+    static char m[128];
+    MMINTEGER v[4];
+    char *p = m;
+    int k = 0;
+
+    v[0] = a, v[1] = b, v[2] = c, v[3] = d;
+    for (; *fmt && p < m + sizeof m - 24; fmt++)
+        if (*fmt == '%' && k < 4) {
+            mm_int_to_str(p, (long long)v[k++], 10);
+            p += strlen(p);
+        } else
+            *p++ = *fmt;
+    *p = 0;
+    mm_error(m);
+}
+
+/* parseintegerarray's refusal of argument argno; 1 when it raised */
+static int mm_fb_badarr(int argno, MMINTEGER cnt)
+{
+    if (cnt >= 0)
+        return 0;
+    mm_fb_errf(cnt == -1 ? "Argument % must be an integer array"
+                         : "Argument % must be a 1D integer point array",
+               argno, 0, 0, 0);
+    return 1;
+}
+
+/* The mode, first, as warp_depth is: 1 to go on with the screen's size
+ * in *w and *h, 0 when refused or there is no display to draw on. */
+static int mm_fb_rastermode(int *w, int *h)
+{
+    int bpp = mm_fb_depth_hw(w, h);
+
+    if (bpp == 0 || *w <= 0 || *h <= 0)
+        return 0;
+    if (bpp != 4) {
+        mm_error("Not available in mode 1");
+        return 0;
+    }
+    return 1;
+}
+
+/* An edge or fill colour, as getColour(p, 1) takes it: -1 or a colour.
+ * 1 when it raised. */
+static int mm_fb_colour(MMINTEGER c)
+{
+    return mm_range(c, -1, 0xFFFFFFF);
+}
+
+static void mm_fb_send(struct mm_gfx_warp *g, const char *what)
+{
+    static char m[64];
+
+    if (mm_fb_warp_hw(g) >= 0)
+        return;
+    strcpy(m, "FRAMEBUFFER ");
+    strcat(m, what);
+    strcat(m, errno == ENOTTY ? " is not available on this machine" : " failed");
+    mm_error(m);
+}
+
+/* The bands of n, step rows apart from first, that can reach rows 0 to
+ * h-1: the first in *b0, and how many.  AFFINE and SPAN take any array
+ * and any first; the kernel is sent only these. */
+static int mm_fb_onscreen(MMINTEGER n, MMINTEGER first, MMINTEGER step,
+                          int h, MMINTEGER *b0)
+{
+    MMINTEGER lo = first < 0 ? -first / step : 0, hi;
+
+    *b0 = 0;
+    if (first >= h)
+        return 0;
+    hi = (h - first + step - 1) / step;
+    if (hi > n)
+        hi = n;
+    *b0 = lo;
+    return hi > lo ? (int)(hi - lo) : 0;
+}
+
+#define MM_FB_WARP_FAR (1 << 24)        /* the PicoMite's WARP_FAR */
+
+void mm_fb_warp(MMINTEGER vertical, MMINTEGER src, MMINTEGER dst,
+                const MMINTEGER *off, MMINTEGER noff,
+                const MMINTEGER *rows, MMINTEGER nrows,
+                MMINTEGER step, MMINTEGER first, MMINTEGER phase,
+                MMINTEGER edge, MMINTEGER trans, MMINTEGER has,
+                MMINTEGER base)
+{
+    struct mm_gfx_warp g;
+    int w, h, bands, size, n, b, e, p, userows = (has & 32) != 0;
+    int *boff;
+
+    mm_pix_drain();             /* it reads what has been drawn */
+    if (!mm_fb_rastermode(&w, &h) || !mm_fb_there(src) || !mm_fb_there(dst))
+        return;
+    if (src == dst)
+        MM_RAISE("Same framebuffer");
+    if (mm_fb_badarr(3, noff))
+        return;
+    bands = vertical ? w : h;           /* the bands' dimension */
+    size = vertical ? h : w;            /* the offsets' */
+    n = (int)noff;
+    if (n < 1)
+        return;                         /* no array is empty: never */
+    if (!(has & 1))
+        step = 1;
+    else if (mm_range(step, 1, bands))
+        return;
+    if (!(has & 2))
+        first = 0;
+    else if (mm_range(first, 0, bands - 1))
+        return;
+    if (!(has & 4))
+        phase = 0;
+    if (!(has & 8))
+        edge = MM_WARP_WRAP;
+    else if (mm_fb_colour(edge))
+        return;
+    if (!(has & 16))
+        trans = -1;
+    else if (mm_range(trans, 0, 15))
+        return;
+    /* every element must start on the buffer */
+    if ((MMINTEGER)(n - 1) * step + first >= bands) {
+        mm_fb_errf(vertical ? "Array has % elements, step % from column % fits %"
+                            : "Array has % elements, step % from row % fits %",
+                   n, step, first, (bands - first + step - 1) / step);
+        return;
+    }
+    if (userows) {
+        if (mm_fb_badarr(9, nrows))
+            return;
+        if (nrows != n) {
+            mm_fb_errf("Row array has % elements, offset array has %", nrows, n, 0, 0);
+            return;
+        }
+        for (b = 0; b < n; b++)
+            if (rows[b] < -1 || rows[b] >= h) {
+                mm_fb_errf("Row array element % is %: rows are -1 to %",
+                           b + base, rows[b], h - 1, 0);
+                return;
+            }
+    }
+    /* band b takes element (b + phase) MOD n; an offset is reduced to 0
+     * to size-1 when wrapping and clamped to -size..size otherwise
+     * (anything further moves the whole band off) - warp_bands */
+    boff = (int *)malloc(sizeof(int) * (size_t)n * (userows ? 2 : 1));
+    if (boff == NULL)
+        MM_RAISE("Not enough memory");
+    p = (int)(phase % n);
+    if (p < 0)
+        p += n;
+    for (b = 0, e = p; b < n; b++, e = (e + 1 == n ? 0 : e + 1)) {
+        MMINTEGER o = off[e];
+
+        if (edge == MM_WARP_WRAP) {
+            o %= size;
+            if (o < 0)
+                o += size;
+        } else if (o > size)
+            o = size;
+        else if (o < -size)
+            o = -size;
+        boff[b] = (int)o;
+        if (userows)
+            boff[n + b] = (int)rows[e];
+    }
+    memset(&g, 0, sizeof g);
+    g.op = vertical ? MM_WARP_V : MM_WARP_H;
+    g.src = (unsigned char)src;
+    g.dst = (unsigned char)dst;
+    g.n = (unsigned short)n;
+    g.step = (unsigned short)step;
+    g.first = (int)first;
+    g.edge = (int)edge;
+    g.trans = (int)trans;
+    g.a[0] = boff;
+    g.a[1] = userows ? boff + n : NULL;
+    mm_fb_send(&g, vertical ? "WARPV" : "WARPH");
+    free(boff);
+}
+
+void mm_fb_affine(MMINTEGER src, MMINTEGER dst,
+                  const MMINTEGER *u, MMINTEGER nu,
+                  const MMINTEGER *v, MMINTEGER nv,
+                  const MMINTEGER *du, MMINTEGER ndu,
+                  const MMINTEGER *dv, MMINTEGER ndv,
+                  MMINTEGER step, MMINTEGER first, MMINTEGER left,
+                  MMINTEGER width, MMINTEGER edge, MMINTEGER trans,
+                  MMINTEGER has)
+{
+    struct mm_gfx_warp g;
+    MMINTEGER cnt[4], b0;
+    int w, h, i, n;
+
+    mm_pix_drain();
+    if (!mm_fb_rastermode(&w, &h) || !mm_fb_there(src) || !mm_fb_there(dst))
+        return;
+    if (src == dst)
+        MM_RAISE("Same framebuffer");
+    cnt[0] = nu, cnt[1] = nv, cnt[2] = ndu, cnt[3] = ndv;
+    for (i = 0; i < 4; i++) {           /* u, v, du, dv, as they are parsed */
+        if (mm_fb_badarr(3 + i, cnt[i]))
+            return;
+        if (i && cnt[i] != cnt[0]) {
+            mm_fb_errf("Array % has % elements, array 1 has %", i + 1, cnt[i], cnt[0], 0);
+            return;
+        }
+    }
+    if (!(has & 1))
+        step = 1;
+    else if (mm_range(step, 1, h))
+        return;
+    if (!(has & 2))
+        first = 0;
+    else if (mm_range(first, -MM_FB_WARP_FAR, MM_FB_WARP_FAR))
+        return;
+    if (!(has & 4))
+        left = 0;
+    else if (mm_range(left, -MM_FB_WARP_FAR, MM_FB_WARP_FAR))
+        return;
+    if (!(has & 8))
+        width = w;
+    else if (mm_range(width, 1, MM_FB_WARP_FAR))
+        return;
+    if (!(has & 16))
+        edge = MM_WARP_WRAP;
+    else if (mm_fb_colour(edge))
+        return;
+    if (!(has & 32))
+        trans = -1;
+    else if (mm_range(trans, 0, 15))
+        return;
+    n = mm_fb_onscreen(cnt[0], first, step, h, &b0);
+    if (n == 0)
+        return;
+    memset(&g, 0, sizeof g);
+    g.op = MM_WARP_AFFINE;
+    g.src = (unsigned char)src;
+    g.dst = (unsigned char)dst;
+    g.n = (unsigned short)n;
+    g.step = (unsigned short)step;
+    g.first = (int)(first + b0 * step);
+    g.left = (int)left;
+    g.width = (int)width;
+    g.edge = (int)edge;
+    g.trans = (int)trans;
+    g.a[0] = u + b0;
+    g.a[1] = v + b0;
+    g.a[2] = du + b0;
+    g.a[3] = dv + b0;
+    mm_fb_send(&g, "AFFINE");
+}
+
+void mm_fb_span(MMINTEGER src, MMINTEGER dst,
+                const MMINTEGER *lf, MMINTEGER nl,
+                const MMINTEGER *rt, MMINTEGER nr,
+                MMINTEGER step, MMINTEGER first, MMINTEGER fill,
+                MMINTEGER trans, MMINTEGER outside, MMINTEGER has)
+{
+    struct mm_gfx_warp g;
+    MMINTEGER b0;
+    int w, h, n;
+
+    mm_pix_drain();
+    if (!mm_fb_rastermode(&w, &h) || !mm_fb_there(src) || !mm_fb_there(dst))
+        return;
+    /* the source may be the destination: then only the fill is drawn */
+    if (mm_fb_badarr(3, nl) || mm_fb_badarr(4, nr))
+        return;
+    if (nr != nl) {
+        mm_fb_errf("Right array has % elements, left array has %", nr, nl, 0, 0);
+        return;
+    }
+    if (!(has & 1))
+        step = 1;
+    else if (mm_range(step, 1, h))
+        return;
+    if (!(has & 2))
+        first = 0;
+    else if (mm_range(first, -MM_FB_WARP_FAR, MM_FB_WARP_FAR))
+        return;
+    if (!(has & 4))
+        fill = -1;
+    else if (mm_fb_colour(fill))
+        return;
+    if (!(has & 8))
+        trans = -1;
+    else if (mm_range(trans, 0, 15))
+        return;
+    if (!(has & 16))
+        outside = 0;
+    else if (mm_range(outside, 0, 1))
+        return;
+    n = mm_fb_onscreen(nl, first, step, h, &b0);
+    if (n == 0)
+        return;
+    memset(&g, 0, sizeof g);
+    g.op = MM_WARP_SPAN;
+    g.src = (unsigned char)src;
+    g.dst = (unsigned char)dst;
+    g.outside = (unsigned char)outside;
+    g.n = (unsigned short)n;
+    g.step = (unsigned short)step;
+    g.first = (int)(first + b0 * step);
+    g.edge = (int)fill;
+    g.trans = (int)trans;
+    g.a[0] = lf + b0;
+    g.a[1] = rt + b0;
+    mm_fb_send(&g, "SPAN");
+}
+
+/*
+ * BLIT RESIZE src, dst, sx, sy, sw, sh, dx, dy, dw, dh [, transparent]
+ *
+ * The PicoMite's graphics/Blit.c, as fixed in V8.00.00b3: the source
+ * rectangle stretched or shrunk, nearest pixel, onto the destination's,
+ * which is cut to the buffer.  The checks are the reference's, in its
+ * order; trans is -1 when left out, as getint(-1, 15) allows anyway.
+ * The kernel does the pixels (display_warp.c), the 4-bit modes only.
+ */
+static MMINTEGER mm_resize_clamp(MMINTEGER v)   /* the reference's int */
+{
+    return v > (1 << 30) ? (1 << 30) : v < -(1 << 30) ? -(1 << 30) : v;
+}
+
+void mm_blit_resize(MMINTEGER src, MMINTEGER dst, MMINTEGER sx,
+                    MMINTEGER sy, MMINTEGER sw, MMINTEGER sh, MMINTEGER dx,
+                    MMINTEGER dy, MMINTEGER dw, MMINTEGER dh,
+                    MMINTEGER trans)
+{
+    struct mm_gfx_resize g;
+    static char m[64];
+    int w, h, bpp;
+
+    mm_pix_drain();             /* it reads what has been drawn */
+    if (src < MM_FB_N || src > MM_FB_T || dst < MM_FB_N || dst > MM_FB_T)
+        MM_RAISE("Invalid syntax");
+    bpp = mm_fb_depth_hw(&w, &h);
+    if (bpp == 0)
+        return;                         /* no display to draw on */
+    if (bpp != 4 && (src == MM_FB_N || dst == MM_FB_N))
+        MM_RAISE("N buffer requires RGB121 mode (MODE 2/3)");
+    if (src != MM_FB_N && !mm_fb_has[src])
+        MM_RAISE("Source buffer not created");
+    if (dst != MM_FB_N && !mm_fb_has[dst])
+        MM_RAISE("Destination buffer not created");
+    if (bpp != 4)
+        MM_RAISE("Invalid for this screen mode");
+    if (mm_range(trans, -1, 15))
+        return;
+    if (sw < 1 || sh < 1 || dw < 1 || dh < 1)
+        return;
+    if (sx < 0 || sy < 0 || sx + sw > w || sy + sh > h)
+        MM_RAISE("Number out of bounds");
+    memset(&g, 0, sizeof g);
+    g.src = (unsigned char)src;
+    g.dst = (unsigned char)dst;
+    g.trans = (short)trans;
+    g.sx = (int)sx, g.sy = (int)sy, g.sw = (int)sw, g.sh = (int)sh;
+    g.dx = (int)mm_resize_clamp(dx), g.dy = (int)mm_resize_clamp(dy);
+    g.dw = (int)mm_resize_clamp(dw), g.dh = (int)mm_resize_clamp(dh);
+    if (mm_fb_resize_hw(&g) < 0) {
+        strcpy(m, "BLIT RESIZE");
+        strcat(m, errno == ENOTTY ? " is not available on this machine"
+                                  : " failed");
+        mm_error(m);
+    }
 }

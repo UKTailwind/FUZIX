@@ -1163,6 +1163,12 @@ into an entry number. That rule is bit extraction — one bit of red, two
 of green, one of blue — and it does **not** depend on the palette, so
 remapping never moves where new drawing lands.
 
+`PIXEL(x, y)` takes no notice of remapping either: it gives a fixed
+colour for the entry the pixel holds, MMBasic's own — `&H004000` and
+`&H008000` for the two mid greens — so what a program drew reads back
+the same whatever the palette shows, even faded to black. `SAVE IMAGE`
+and `SAVE PNG` write the colours the screen shows.
+
 `MAP` needs a 16-colour mode; in `MODE 1` it is an error.
 
 ### `COLOUR MAP` — a whole array at once
@@ -1465,12 +1471,15 @@ LOOP WHILE INKEY$ = ""
 | | |
 |---|---|
 | `FRAMEBUFFER CREATE` | make the off-screen buffer, blank |
-| `FRAMEBUFFER LAYER` | make the layer, blank |
-| `FRAMEBUFFER WRITE N` \| `F` \| `L` | send drawing to the screen, the buffer, or the layer |
-| `FRAMEBUFFER COPY s, d [, B]` | `s` and `d` each `N`, `F` or `L`; `B` starts at the top of the frame |
-| `FRAMEBUFFER MERGE [colour]` | the layer over the buffer, onto the screen |
-| `FRAMEBUFFER CLOSE [F` \| `L]` | give one back |
+| `FRAMEBUFFER CREATE 2` | make framebuffer 2, blank (on a PC: see below) |
+| `FRAMEBUFFER LAYER [colour]` | make the layer, filled with its transparent colour (0 if none given) |
+| `FRAMEBUFFER LAYER TOP [colour]` | make the top layer, likewise (on a PC) |
+| `FRAMEBUFFER WRITE N` \| `F` \| `L` \| `2` \| `T` | send drawing to the screen, a buffer, or a layer |
+| `FRAMEBUFFER COPY s, d [, B]` | `s` and `d` each `N`, `F`, `L`, `2` or `T`; `B` starts at the top of the frame |
+| `FRAMEBUFFER MERGE [colour] [, B]` | framebuffer 2 over `F` onto the screen; with no 2, the layer over `F` |
+| `FRAMEBUFFER CLOSE [F` \| `L` \| `2` \| `T]` | give one back; `CLOSE` alone gives them all back |
 | `FRAMEBUFFER WAIT` | wait for the top of the frame |
+| `FRAMEBUFFER WARPH`, `WARPV`, `AFFINE`, `SPAN` | every row or column of one buffer moved, turned or cut on the way to another (on a PC: [below](#raster)) |
 
 Everything that draws follows `WRITE`, `CLS` included — so `CLS` while
 writing to `F` clears the buffer and leaves the picture on the screen
@@ -1587,6 +1596,57 @@ builder instead, continuously and without a command; that needs every
 buffer in the RAM the display DMAs from, which on this machine is 40K
 taken off every program forever, whether it uses a layer or not. The
 reasoning is written out in `PC3-LAYER-MERGE.md` in the source tree.
+
+### Framebuffer 2 and the live layers, on a PC
+
+A PC has the memory the board does not, so there — pc3host, on Linux
+and Windows — the VGA and HDMI PicoMite's buffers are all present, and
+work as they do on that firmware:
+
+- `FRAMEBUFFER CREATE 2` makes a second framebuffer, `2`.
+- `FRAMEBUFFER LAYER [colour]` and `LAYER TOP [colour]` make the layers
+  `L` and `T`, which are shown **live** over the screen, as the firmware's
+  scanout shows them: in `MODE 2` the top layer over the layer over `N`,
+  each skipping its own transparent colour; in `MODE 3` the layer over
+  `N`; in `MODE 1` the layer ORed into it. Nothing needs to be merged.
+  `PIXEL()` and `SAVE IMAGE` still read `N` alone, as there.
+- `FRAMEBUFFER MERGE [colour] [, B]` puts `2` over `F` onto the screen,
+  the colour (0 if left out) seen through; `B` waits for the top of the
+  frame first.
+
+A program that never makes a `2` and merges the layer is using the TFT
+model above, and it still works as it always has: its `MERGE` puts the
+layer over `F`, and from that `MERGE` on its layer is merged rather than
+shown live, so a sprite moving in the layer is not seen twice. The board
+refuses `CREATE 2` and `LAYER TOP` ("Framebuffer 2 not available",
+"Layer Top not available") and never shows a layer live.
+
+### Moving every row: `WARPH`, `WARPV`, `AFFINE` and `SPAN` {#raster}
+
+MMBasic V8's raster commands copy one buffer to another — any of `N`,
+`F`, `L`, `2` and `T` — and move, turn or cut each row or column on the
+way, each by its own entry in an integer array: a racing road, parallax,
+a ripple, a picture turned and zoomed, a floor in perspective, a torch
+in the dark. They are the PicoMite's, argument for argument and error
+for error:
+
+```basic
+FRAMEBUFFER WARPH from, to, xoff%() [,step] [,first] [,phase] [,edge] [,transparent] [,rows%()]
+FRAMEBUFFER WARPV from, to, yoff%() [,step] [,first] [,phase] [,edge] [,transparent]
+FRAMEBUFFER AFFINE from, to, u%(), v%(), du%(), dv%() [,step] [,first] [,left] [,width] [,edge] [,transparent]
+FRAMEBUFFER SPAN from, to, left%(), right%() [,step] [,first] [,fill] [,transparent] [,outside]
+```
+
+The PicoMite User Manual's entries and the Game Development Guide's
+sections on raster effects describe them, and the PicoMite's
+`Bas/warp_demo.bas` shows every one of them; it runs here unchanged in
+`MODE 2`. So do `BLIT RESIZE`, which its mosaic uses, and `MATH SCALE`,
+`MATH ADD` and `MATH CLAMP` from a float array into an integer one,
+which is how such a program makes its tables. They work in `MODE 2` and
+`MODE 3`; `MODE 1` is refused ("Not available in mode 1"). The pixels
+are moved by the display server on a PC; the board's kernel does not
+have them yet, and a program there is told "FRAMEBUFFER WARPH is not
+available on this machine".
 
 `INKEY$` returns the key that has been pressed, or `""` if none has,
 without waiting — which is how the loop above ends. It leaves the
