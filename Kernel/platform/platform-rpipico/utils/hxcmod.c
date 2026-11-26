@@ -1271,18 +1271,79 @@ int hxcmod_load(modcontext *modctx, void *mod_data, int mod_data_size)
 	return 0;
 }
 
-void hxcmod_playsoundeffect(modcontext *modctx, unsigned short sampnum, unsigned short seffectnum, unsigned char volume, unsigned int period)
+// MMBasic: PLAY MODSAMPLE's start (loop: LOOP), CHANGE and STOP, as the CMM2's (76c2869).
+// A looped effect plays to the end of the sample's own loop (repeat point + repeat length, when it has one longer than
+// the 2 bytes trackers use for none) and goes back to its repeat point; a sample without a loop is looped whole.
+// samppos's step is worked out here, not for each sample made (it was a division a sample).
+// MMBasic: pan, -100 (left) to 100 (right), sets each speaker's volume as a simple balance: the near side at the full
+// volume, the far side faded in proportion. The effects are mixed after the music's own stereo separation
+// (hxcmod_fillbuffer), so that a pan is exact.
+static void hxcmod_seffectbalance(seffect *e)
+{
+	e->lvol = e->pan > 0 ? (muchar)(e->volume * (100 - e->pan) / 100) : e->volume;
+	e->rvol = e->pan < 0 ? (muchar)(e->volume * (100 + e->pan) / 100) : e->volume;
+}
+
+void hxcmod_playsoundeffect(modcontext *modctx, unsigned short sampnum, unsigned short seffectnum, unsigned char volume, unsigned int period, int loop, int pan)
+{
+	seffect *effectptr;
+	mulong length, reppnt, replen;
+	effectptr = modctx->seffects + seffectnum;
+
+	effectptr->active = 0; // (made active last, with everything else in place)
+	length = GET_BGI_W(modctx->song.samples[sampnum].length) * 2;
+	effectptr->loop = 0;
+	effectptr->loopstart = 0;
+	if (loop && length > 0)
+	{
+		reppnt = GET_BGI_W(modctx->song.samples[sampnum].reppnt) * 2;
+		replen = GET_BGI_W(modctx->song.samples[sampnum].replen) * 2;
+		if (replen > 2 && reppnt < length)
+		{
+			if (reppnt + replen < length)
+				length = reppnt + replen; // (a loop past the end, as some files have: to the end)
+			effectptr->loopstart = reppnt;
+		}
+		effectptr->loop = 1;
+	}
+	effectptr->sampdata = modctx->sampledata[sampnum];
+	effectptr->length = length;
+	effectptr->sampnum = sampnum;
+	effectptr->samppos = 0;
+	effectptr->period = period;
+	effectptr->step = (modctx->sampleticksconst << 10) / period;
+	effectptr->volume = volume;
+	effectptr->pan = pan;
+	hxcmod_seffectbalance(effectptr);
+	effectptr->active = 1;
+}
+
+// MMBasic: a playing effect's volume (-1: kept), period (0: kept) and pan (HXCMOD_PAN_KEEP: kept) changed where it
+// is, not started again
+void hxcmod_changesoundeffect(modcontext *modctx, unsigned short seffectnum, int volume, unsigned int period, int pan)
 {
 	seffect *effectptr;
 	effectptr = modctx->seffects + seffectnum;
 
-	effectptr->active = 1;
-	effectptr->sampdata = modctx->sampledata[sampnum];
-	effectptr->length = GET_BGI_W(modctx->song.samples[sampnum].length) * 2;
-	effectptr->sampnum = sampnum;
-	effectptr->samppos = 0;
-	effectptr->period = period;
-	effectptr->volume = volume;
+	if (volume >= 0)
+		effectptr->volume = volume;
+	if (pan != HXCMOD_PAN_KEEP)
+		effectptr->pan = pan;
+	hxcmod_seffectbalance(effectptr);
+	if (period)
+	{
+		effectptr->period = period;
+		effectptr->step = (modctx->sampleticksconst << 10) / period;
+	}
+}
+
+// MMBasic: an effect stopped (-1: all of them)
+void hxcmod_stopsoundeffect(modcontext *modctx, int seffectnum)
+{
+	int i;
+	for (i = 0; i < NUMMAXSEFFECTS; i++)
+		if (seffectnum < 0 || i == seffectnum)
+			modctx->seffects[i].active = 0;
 }
 
 int hxcmod_effectplaying(modcontext *modctx, unsigned short seffectnum)
@@ -1301,6 +1362,8 @@ int hxcmod_fillbuffer(modcontext *modctx, msample *outbuffer, unsigned long nbsa
 	unsigned int state_remaining_steps;
 #ifndef HXCMOD_MONO_OUTPUT
 	int l, ll, tl;
+	int el, er; // MMBasic: the effects (PLAY MODSAMPLE), added after the stereo separation so that their pan is exact
+	int pel, per, tel; // MMBasic: their filter history, as ll and lr are the music's
 #endif
 	int r, lr, tr;
 
@@ -1329,6 +1392,8 @@ int hxcmod_fillbuffer(modcontext *modctx, msample *outbuffer, unsigned long nbsa
 
 #ifndef HXCMOD_MONO_OUTPUT
 			ll = modctx->last_l_sample;
+			pel = modctx->last_el_sample;
+			per = modctx->last_er_sample;
 #endif
 			lr = modctx->last_r_sample;
 
@@ -1365,7 +1430,20 @@ int hxcmod_fillbuffer(modcontext *modctx, msample *outbuffer, unsigned long nbsa
 							if (modctx->tablepos >= modctx->song.length)
 							{
 								if (noloop)
+								{
+									/* the module is over: the rest of this buffer would otherwise
+									   keep its previous fill and play again after the last note */
+									for (; i < nbsample; i++)
+									{
+#ifdef HXCMOD_MONO_OUTPUT
+										outbuffer[i] = 0;
+#else
+										outbuffer[(i * 2)] = 0;
+										outbuffer[(i * 2) + 1] = 0;
+#endif
+									}
 									return 1;
+								}
 								else
 									modctx->tablepos = 0;
 							}
@@ -1516,17 +1594,23 @@ int hxcmod_fillbuffer(modcontext *modctx, msample *outbuffer, unsigned long nbsa
 					}
 				}
 
+#ifndef HXCMOD_MONO_OUTPUT
+				el = er = 0;
+#endif
 				for (j = 0, seffectptr = modctx->seffects; j < modctx->number_of_seffects; j++, seffectptr++)
 				{
 					if (seffectptr->active)
 					{
-						seffectptr->samppos += ((modctx->sampleticksconst << 10) / seffectptr->period);
+						seffectptr->samppos += seffectptr->step;
 
 						if ((seffectptr->samppos >> 10) >= seffectptr->length)
 						{
-							seffectptr->active = 0;
+							if (seffectptr->loop) // MMBasic: LOOP, back to the repeat point
+								seffectptr->samppos = (seffectptr->loopstart << 10) + (seffectptr->samppos - (seffectptr->length << 10)) % ((seffectptr->length - seffectptr->loopstart) << 10);
+							else
+								seffectptr->active = 0;
 						}
-						else
+						if (seffectptr->active)
 						{
 							k = seffectptr->samppos >> 10;
 
@@ -1538,8 +1622,8 @@ int hxcmod_fillbuffer(modcontext *modctx, msample *outbuffer, unsigned long nbsa
 #else
 							if (seffectptr->sampdata != 0)
 							{
-								r += (seffectptr->sampdata[k] * seffectptr->volume);
-								l += (seffectptr->sampdata[k] * seffectptr->volume);
+								er += (seffectptr->sampdata[k] * seffectptr->rvol);
+								el += (seffectptr->sampdata[k] * seffectptr->lvol);
 							}
 #endif
 						}
@@ -1602,6 +1686,13 @@ int hxcmod_fillbuffer(modcontext *modctx, msample *outbuffer, unsigned long nbsa
 					// Filter
 					l = (l + ll) >> 1;
 					r = (r + lr) >> 1;
+					// MMBasic: the effects too, as when they were mixed in with the music
+					tel = el;
+					el = (el + pel) >> 1;
+					pel = tel;
+					tel = er;
+					er = (er + per) >> 1;
+					per = tel;
 				}
 
 				if (modctx->stereo_separation == 1)
@@ -1609,7 +1700,12 @@ int hxcmod_fillbuffer(modcontext *modctx, msample *outbuffer, unsigned long nbsa
 					// Left & Right Stereo panning
 					l = (l + (r >> 1));
 					r = (r + (l >> 1));
+					// MMBasic: the effects half as loud again, as this mixing made them when they went through it
+					el += el >> 1;
+					er += er >> 1;
 				}
+				l += el; // MMBasic: the effects, each speaker as its pan gives it
+				r += er;
 
 				// Level limitation
 				if (l > 32767)
@@ -1651,6 +1747,8 @@ int hxcmod_fillbuffer(modcontext *modctx, msample *outbuffer, unsigned long nbsa
 
 #ifndef HXCMOD_MONO_OUTPUT
 			modctx->last_l_sample = ll;
+			modctx->last_el_sample = pel;
+			modctx->last_er_sample = per;
 #endif
 			modctx->last_r_sample = lr;
 
@@ -1709,6 +1807,9 @@ void hxcmod_unload(modcontext *modctx)
 
 		modctx->last_r_sample = 0;
 		modctx->last_l_sample = 0;
+#ifndef HXCMOD_MONO_OUTPUT
+		modctx->last_el_sample = modctx->last_er_sample = 0;
+#endif
 	}
 }
 /*  @endcond */

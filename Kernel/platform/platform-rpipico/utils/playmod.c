@@ -9,7 +9,10 @@
  * MODFILE (mmb_play.h); PLAY MODSAMPLE arrives over the control FIFO
  * while the music plays and becomes hxcmod_playsoundeffect - one of
  * four effect slots pointed at a sample ALREADY IN THE FILE, mixed
- * into the ongoing render, music uninterrupted.  PLAY STOP is the
+ * into the ongoing render, music uninterrupted - and its CHANGE and
+ * STOP become hxcmod_changesoundeffect and hxcmod_stopsoundeffect
+ * (fx below).  hxcmod.c and .h are the PicoMite's third_party_mod
+ * copies, unchanged.  PLAY STOP is the
  * same SIGINT playmp3 catches.  With noloop the song plays once, the
  * ring drains, and exit hands the audio owner slot back - which is
  * how the BASIC side's completion interrupt sees the end.
@@ -117,6 +120,60 @@ static const short vol_gain[101] = {
 
 static int gain = 136;			/* volume 80 */
 
+/* PLAY MODSAMPLE, CHANGE and STOP, as the PicoMite's ModSampleCommand
+ * (Audio.c) calls hxcmod: a volume of 1-64 is hxcmod's 0-63, 0 and 1
+ * both 0; a rate is the period 3579545 / rate.  The program checked
+ * the ranges; they are checked again here only so that a bad record
+ * cannot index past hxcmod's tables.  With PLAYMOD_TRACE naming a
+ * file, each call is written to it as it is made - pc3host's e2e test
+ * reads it, as the sound itself cannot be compared. */
+static FILE *trace;
+
+static void fx(const struct mm_playmsg *m)
+{
+	int ch = m->b & ~MM_PLAY_LOOP, vol, per;
+
+	if (m->op == MM_PLAY_MODSTOP) {
+		if (ch > NUMMAXSEFFECTS)
+			return;
+		hxcmod_stopsoundeffect(&modctx, ch - 1);
+		if (trace) {
+			fprintf(trace, "stop %d\n", ch - 1);
+			fflush(trace);
+		}
+		return;
+	}
+	if (ch < 1 || ch > NUMMAXSEFFECTS || m->p1 < -1 || m->p1 > 64 ||
+	    (m->p2 != 0 && (m->p2 < 150 || m->p2 > 500000)))
+		return;
+	vol = m->p1 > 0 ? m->p1 - 1 : m->p1;
+	per = m->p2 ? 3579545 / m->p2 : 0;
+	if (m->op == MM_PLAY_MODSAMP) {
+		if (m->a < 1 || m->a > 31 || vol < 0 || per == 0 ||
+		    m->p3 < -100 || m->p3 > 100)
+			return;
+		hxcmod_playsoundeffect(&modctx, (unsigned short)(m->a - 1),
+				       (unsigned short)(ch - 1),
+				       (unsigned char)vol, (unsigned)per,
+				       (m->b & MM_PLAY_LOOP) != 0, m->p3);
+		if (trace)
+			fprintf(trace, "play %d %d %d %d %d %d\n", m->a - 1,
+				ch - 1, vol, per, (m->b & MM_PLAY_LOOP) != 0,
+				m->p3);
+	} else {
+		if (m->p3 != MM_PLAY_PANKEEP &&
+		    (m->p3 < -100 || m->p3 > 100))
+			return;
+		hxcmod_changesoundeffect(&modctx, (unsigned short)(ch - 1),
+					 vol, (unsigned)per, m->p3);
+		if (trace)
+			fprintf(trace, "change %d %d %d %d\n", ch - 1, vol,
+				per, m->p3);
+	}
+	if (trace)
+		fflush(trace);
+}
+
 int main(int argc, char *argv[])
 {
 	struct snd_pcm cfg;
@@ -211,6 +268,12 @@ int main(int argc, char *argv[])
 	}
 
 	signal(SIGINT, on_intr);
+	{
+		const char *tp = getenv("PLAYMOD_TRACE");
+
+		if (tp != NULL && *tp)
+			trace = fopen(tp, "w");
+	}
 
 	while (!stopping) {
 		if (ffd >= 0)
@@ -218,15 +281,10 @@ int main(int argc, char *argv[])
 			       (int)sizeof(m)) {
 				if (m.ver != MM_PLAYCTL_VER)
 					continue;
-				if (m.op == MM_PLAY_MODSAMP)
-					hxcmod_playsoundeffect(&modctx,
-					    (unsigned short)(m.a - 1),
-					    (unsigned short)(m.b - 1),
-					    /* 0-64 to hxcmod's 0-63, as
-					       the reference: 0 and 1 are
-					       both 0 */
-					    (unsigned char)(m.p1 ? m.p1 - 1 : 0),
-					    3579545 / 16000);
+				if (m.op == MM_PLAY_MODSAMP ||
+				    m.op == MM_PLAY_MODCHG ||
+				    m.op == MM_PLAY_MODSTOP)
+					fx(&m);
 				else if (m.op == MM_PLAY_VOLUME) {
 					int v = m.p1 > m.p2 ? m.p1 : m.p2;
 

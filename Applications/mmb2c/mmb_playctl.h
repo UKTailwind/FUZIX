@@ -20,7 +20,10 @@
  */
 
 #define MM_PLAYCTL_FIFO "/tmp/.playctl"
-#define MM_PLAYCTL_VER  1
+/* 2: PLAY MODSAMPLE's rate, pan and LOOP, and its CHANGE and STOP
+ * (V8.00.00b2) - a version 1 player would take the LOOP bit for a
+ * channel and write past its effect slots. */
+#define MM_PLAYCTL_VER  2
 
 /* One byte, 'S' or 'M', written by the daemon once it owns the PCM
  * stream and unlinked when it exits: how a program born AFTER the
@@ -40,9 +43,17 @@ struct mm_playmsg {
 				   p1=type, p2=freq mHz, p3=vol 0-25   */
 #define MM_PLAY_TONE	2	/* p1=left mHz, p2=right mHz,
 				   p3=duration in SAMPLES (-1 forever) */
-#define MM_PLAY_MODSAMP	3	/* a=sample 1-32, b=channel 1-4,
-				   p1=vol 1-64                         */
+#define MM_PLAY_MODSAMP	3	/* a=sample 1-31, b=channel 1-4, with
+				   MM_PLAY_LOOP for LOOP; p1=vol 0-64,
+				   p2=rate 150-500000, p3=pan -100-100 */
 #define MM_PLAY_VOLUME	4	/* p1=left 0-100, p2=right 0-100       */
+#define MM_PLAY_MODCHG	5	/* MODSAMPLE CHANGE: b=channel 1-4,
+				   p1=vol 0-64 or -1, p2=rate or 0,
+				   p3=pan or MM_PLAY_PANKEEP (kept)    */
+#define MM_PLAY_MODSTOP	6	/* MODSAMPLE STOP: b=channel 1-4, 0 all */
+
+#define MM_PLAY_LOOP	0x80	/* in MODSAMP's b */
+#define MM_PLAY_PANKEEP	1000	/* hxcmod's HXCMOD_PAN_KEEP */
 
 /* PLAY SOUND types - the reference's letters, as numbers */
 #define MM_SND_OFF	0

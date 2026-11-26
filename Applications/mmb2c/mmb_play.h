@@ -287,25 +287,71 @@ MMG_FN void mmp_modfile(const char *file, MMINTEGER has_int)
 	MM_RAISE("Could not play the MOD file");
 }
 
-/* PLAY MODSAMPLE sample, channel [, volume] - one record to the
- * RUNNING player: hxcmod points an effect slot at a sample already in
- * the file and mixes it over the music.  Nothing is loaded, nothing
- * pauses.  The reference requires a MOD to be playing, and so does
- * this - the owner check plus the kind is its CurrentlyPlaying ==
- * P_MOD. */
-MMG_FN void mmp_modsample(MMINTEGER s, MMINTEGER ch, MMINTEGER vol)
+/* PLAY MODSAMPLE sample, channel [, volume] [, rate] [, pan] [, LOOP] -
+ * one record to the RUNNING player: hxcmod points an effect slot at a
+ * sample already in the file and mixes it over the music.  Nothing is
+ * loaded, nothing pauses.  The reference requires a MOD to be playing,
+ * and so does this - the owner check plus the kind is its
+ * CurrentlyPlaying == P_MOD.  The ranges are ModSampleCommand's
+ * (Audio.c, V8.00.00b2): a MOD file has 31 samples, the rate is 150 to
+ * 500000 (16000 when left out), the pan -100 (left) to 100 (right).
+ * The translator passes the defaults for arguments left out. */
+MMG_FN void mmp_modsample(MMINTEGER s, MMINTEGER ch, MMINTEGER vol,
+			  MMINTEGER rate, MMINTEGER pan, MMINTEGER loop)
 {
-	if (s < 1 || s > 32)
+	if (s < 1 || s > 31)
 		MM_RAISE("Invalid sample number");
 	if (ch < 1 || ch > 4)
 		MM_RAISE("Invalid channel");
 	if (vol < 0 || vol > 64)	/* 0 is silent, as 1 (884269c) */
 		MM_RAISE("Invalid volume");
+	if (rate < 150 || rate > 500000)
+		MM_RAISE("Invalid sample rate");
+	if (pan < -100 || pan > 100)
+		MM_RAISE("Invalid pan");
 	mmp_adopt();
 	if (mm_play_owner() == 0 || mm_play_kind != MMP_KIND_MOD)
 		MM_RAISE("Samples play over MOD file");
-	if (mmp_send(MM_PLAY_MODSAMP, (int)s, (int)ch, (long)vol, 0, 0) < 0)
+	if (mmp_send(MM_PLAY_MODSAMP, (int)s,
+		     (int)ch | (loop ? MM_PLAY_LOOP : 0), (long)vol,
+		     (long)rate, (long)pan) < 0)
 		MM_RAISE("Samples play over MOD file");
+}
+
+/* PLAY MODSAMPLE CHANGE channel [, volume] [, rate] [, pan] - a playing
+ * sample's volume, rate or pan changed where it is; has says which were
+ * given (1 volume, 2 rate, 4 pan).  A channel that has ended is no
+ * matter, as on the firmware. */
+MMG_FN void mmp_modchange(MMINTEGER ch, MMINTEGER vol, MMINTEGER rate,
+			  MMINTEGER pan, MMINTEGER has)
+{
+	if (ch < 1 || ch > 4)
+		MM_RAISE("Invalid channel");
+	if ((has & 1) && (vol < 0 || vol > 64))
+		MM_RAISE("Invalid volume");
+	if ((has & 2) && (rate < 150 || rate > 500000))
+		MM_RAISE("Invalid sample rate");
+	if ((has & 4) && (pan < -100 || pan > 100))
+		MM_RAISE("Invalid pan");
+	mmp_adopt();
+	if (mm_play_owner() == 0 || mm_play_kind != MMP_KIND_MOD)
+		MM_RAISE("Samples play over MOD file");
+	if (mmp_send(MM_PLAY_MODCHG, 0, (int)ch, (long)(has & 1 ? vol : -1),
+		     (long)(has & 2 ? rate : 0),
+		     (long)(has & 4 ? pan : MM_PLAY_PANKEEP)) < 0)
+		MM_RAISE("Samples play over MOD file");
+}
+
+/* PLAY MODSAMPLE STOP [channel] - one channel, or all four (0).  With no
+ * MOD file playing nothing is, and there is no error. */
+MMG_FN void mmp_modstop(MMINTEGER ch)
+{
+	if (ch < 0 || ch > 4)
+		MM_RAISE("Invalid channel");
+	mmp_adopt();
+	if (mm_play_owner() == 0 || mm_play_kind != MMP_KIND_MOD)
+		return;
+	(void)mmp_send(MM_PLAY_MODSTOP, 0, (int)ch, 0, 0, 0);
 }
 
 /* PLAY BBC SOUND channel, amplitude, pitch, duration - the BBC Micro's

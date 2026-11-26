@@ -2106,17 +2106,39 @@ sound with it.
 PLAY MODFILE "/root/ptetris.mod"
 PAUSE 5000
 PLAY MODSAMPLE 3, 4             ' fire sample 3 on channel 4, over the music
+PLAY MODSAMPLE 10, 1, 40, 16000, -100, LOOP   ' an engine on the left, until stopped
+PLAY MODSAMPLE CHANGE 1, , 20000, 0           ' higher, and in the middle
+PLAY MODSAMPLE STOP 1
 PLAY STOP
 ```
 
 `PLAY MODFILE` plays ProTracker modules at 22 kHz through the hxcmod
 tracker, the whole file staged in PSRAM. Like MP3 it runs as its own
-program and does not wait. `PLAY MODSAMPLE n, ch [, vol]` asks the
-*running* player to mix one of the module's own samples over the
-music - MMBasic's game sound-effect trick - with nothing loaded and
-nothing interrupted. `vol` is 0 to 64, default 64; 0 and 1 are both
-the quietest, as on a PicoMite. With a completion interrupt the module plays
+program and does not wait. With a completion interrupt the module plays
 once; otherwise it loops until `PLAY STOP`.
+
+`PLAY MODSAMPLE n, ch [, vol] [, rate] [, pan] [, LOOP]` asks the
+*running* player to mix one of the module's own samples (1 to 31) over
+the music on effect channel 1 to 4 - MMBasic's game sound-effect trick -
+with nothing loaded and nothing interrupted. As on a PicoMite with
+V8.00.00b2:
+
+* `vol` is 0 to 64, default 64; 0 and 1 are both the quietest
+* `rate` is the sample's playback rate, 150 to 500000, default 16000
+* `pan` is -100 (left speaker only) to 100 (right only), default 0
+  (both at full volume); in between, the far speaker is turned down
+* `LOOP` plays the sample's own loop, or the whole sample if it has
+  none, over and over until stopped; it may end the list after any
+  argument from the channel on
+* any argument after the channel may be left empty to take its default
+
+`PLAY MODSAMPLE CHANGE ch [, vol] [, rate] [, pan]` changes a playing
+sample where it is, keeping what is left empty - a car going by is one
+looped sample with its rate, volume and pan changed every few
+milliseconds. `PLAY MODSAMPLE STOP [ch]` stops one channel, or all four;
+with no module playing it does nothing, without an error. A sample is
+heard about a tenth of a second after the statement, the depth of the
+player's queue.
 
 ## Pins: `SETPIN` and `PIN`
 

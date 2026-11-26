@@ -8219,18 +8219,50 @@ class Conv(object):
                     self.emit('mmp_modfile(%s, 0);' % v[0])
                 return
             if self.is_kw('MODSAMPLE', 1):
-                # PLAY MODSAMPLE sample, channel [, volume] - a
-                # request to the RUNNING player to mix a sample the
-                # file already holds over the music.
+                # PLAY MODSAMPLE sample, channel [, volume] [, rate]
+                # [, pan] [, LOOP] - a request to the RUNNING player to
+                # mix a sample the file already holds over the music;
+                # CHANGE channel [, volume] [, rate] [, pan] and STOP
+                # [channel], as V8.00.00b2's ModSampleCommand.  Any
+                # argument after the channel may be left empty, and
+                # LOOP may end the list after any of them.
                 self.uses_playd = True
                 self.i += 2
-                sm = self.as_int(self.expr())
-                self.expect_op(',')
+                if self.is_kw('STOP'):
+                    self.i += 1
+                    ch = '0LL'
+                    if not self.stmt_end():
+                        ch = self.as_int(self.expr())
+                    self.emit('mmp_modstop(%s);' % ch)
+                    return
+                change = self.is_kw('CHANGE')
+                if change:
+                    self.i += 1
+                else:
+                    sm = self.as_int(self.expr())
+                    self.expect_op(',')
                 ch = self.as_int(self.expr())
-                vol = '64LL'
-                if self.accept_op(','):
-                    vol = self.as_int(self.expr())
-                self.emit('mmp_modsample(%s, %s, %s);' % (sm, ch, vol))
+                v = ['64LL', '16000LL', '0LL']
+                has = 0
+                loop = 0
+                k = 0
+                while self.accept_op(','):
+                    if not change and self.is_kw('LOOP'):
+                        self.i += 1
+                        loop = 1
+                        break
+                    if k == 3:
+                        self.err('PLAY MODSAMPLE has too many arguments')
+                    if not (self.is_op(',') or self.stmt_end()):
+                        v[k] = self.as_int(self.expr())
+                        has |= 1 << k
+                    k += 1
+                if change:
+                    self.emit('mmp_modchange(%s, %s, %s, %s, %d);'
+                              % (ch, v[0], v[1], v[2], has))
+                else:
+                    self.emit('mmp_modsample(%s, %s, %s, %s, %s, %d);'
+                              % (sm, ch, v[0], v[1], v[2], loop))
                 return
             # MP3, WAV and FLAC are the same statement with a different
             # program behind it: each spawns a one-shot player that holds

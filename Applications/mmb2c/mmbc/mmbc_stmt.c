@@ -1793,20 +1793,55 @@ void statement_inner(void)
             return;
         }
         if (is_kw("MODSAMPLE", 1)) {
-            /* PLAY MODSAMPLE sample, channel [, volume] - a request
-               to the RUNNING player to mix a sample the file already
-               holds over the music. */
-            const char *sm, *ch;
-            const char *vol = "64LL";
+            /* PLAY MODSAMPLE sample, channel [, volume] [, rate]
+               [, pan] [, LOOP] - a request to the RUNNING player to
+               mix a sample the file already holds over the music;
+               CHANGE channel [, volume] [, rate] [, pan] and STOP
+               [channel], as V8.00.00b2's ModSampleCommand.  Any
+               argument after the channel may be left empty, and LOOP
+               may end the list after any of them. */
+            const char *sm = NULL, *ch;
+            const char *v[3] = { "64LL", "16000LL", "0LL" };
+            int change, has = 0, loop = 0, k = 0;
 
             cv.uses_playd = 1;
             cv.i += 2;
-            sm = as_int(expr());
-            expect_op(",");
+            if (is_kw("STOP", 0)) {
+                cv.i++;
+                ch = "0LL";
+                if (!stmt_end())
+                    ch = as_int(expr());
+                emit(sfmt("mmp_modstop(%s);", ch));
+                return;
+            }
+            change = is_kw("CHANGE", 0);
+            if (change) {
+                cv.i++;
+            } else {
+                sm = as_int(expr());
+                expect_op(",");
+            }
             ch = as_int(expr());
-            if (accept_op(","))
-                vol = as_int(expr());
-            emit(sfmt("mmp_modsample(%s, %s, %s);", sm, ch, vol));
+            while (accept_op(",")) {
+                if (!change && is_kw("LOOP", 0)) {
+                    cv.i++;
+                    loop = 1;
+                    break;
+                }
+                if (k == 3)
+                    cv_err("PLAY MODSAMPLE has too many arguments");
+                if (!(is_op(",", 0) || stmt_end())) {
+                    v[k] = as_int(expr());
+                    has |= 1 << k;
+                }
+                k++;
+            }
+            if (change)
+                emit(sfmt("mmp_modchange(%s, %s, %s, %s, %d);",
+                          ch, v[0], v[1], v[2], has));
+            else
+                emit(sfmt("mmp_modsample(%s, %s, %s, %s, %s, %d);",
+                          sm, ch, v[0], v[1], v[2], loop));
             return;
         }
         /* MP3, WAV and FLAC are the same statement with a different
