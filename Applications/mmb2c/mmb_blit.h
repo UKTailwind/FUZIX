@@ -920,8 +920,9 @@ MMG_FN void mmb_blit_fb(MMINTEGER src, MMINTEGER dst,
 	headless = mmb_geom(&stride, &bpp, &hres, &vres);
 	if (!headless && bpp != 4)
 		MM_RAISE("Not available in mode 1");
-	if (x1 < 0 || y1 < 0 || w < 1 || h < 1 ||
-	    x1 + w > hres || y1 + h > vres)
+	/* a width or height below 1 draws nothing, as blit121 does
+	 * (PicoMite 37e7af5 checks only the source's edges) */
+	if (x1 < 0 || y1 < 0 || x1 + w > hres || y1 + h > vres)
 		MM_RAISE("Invalid coordinates");
 	if (headless)
 		return;
@@ -994,8 +995,8 @@ MMG_FN void mmb_blit_flash(MMINTEGER n, MMINTEGER dst,
 	     ((unsigned long)s[6] << 16) | ((unsigned long)s[7] << 24);
 	if (hs > 3840 || vs > 2160)
 		MM_RAISE("Invalid Image");
-	if (x1 < 0 || y1 < 0 || w < 1 || h < 1 ||
-	    (unsigned long)(x1 + w) > hs || (unsigned long)(y1 + h) > vs)
+	/* a width or height below 1 draws nothing, as on the firmware */
+	if (x1 < 0 || y1 < 0 || x1 + w > (int)hs || y1 + h > (int)vs)
 		MM_RAISE("Invalid coordinates");
 	headless = mmb_geom(&stride, &bpp, &hres, &vres);
 	if (headless)

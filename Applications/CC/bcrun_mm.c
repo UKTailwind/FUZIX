@@ -252,6 +252,7 @@ static void w_str_i(void)    { A = mm_off(mm_str_i(LL(0), LL(2), LL(4), Ps(6)));
 static void w_hex(void)      { A = mm_off(mm_hex(LL(0), LL(2))); }
 static void w_oct(void)      { A = mm_off(mm_oct(LL(0), LL(2))); }
 static void w_bin(void)      { A = mm_off(mm_bin(LL(0), LL(2))); }
+static void w_base_s(void)   { A = mm_off(mm_base_s(LL(0), LL(2), LL(4))); }
 static void w_format(void)   { A = mm_off(mm_format(D(0), Ps(2))); }
 static void w_mid_assign(void) { mm_mid_assign(Ps(0), LL(1), LL(3), Ps(5)); A = 0; }
 /* BYTE()/TRIM$/FIELD$, BIT/BYTE/FLAG, BIN2STR$/STR2BIN, GOSUB and the
@@ -433,6 +434,7 @@ static void w_snd_cmd(void)   { A = mm_snd_cmd(LL(0), LL(2), LL(4),
 static void w_snd_stop(void)  { A = mm_snd_stop(); }
 static void w_bbc_sound(void) { A = mm_bbc_sound(LL(0), LL(2), LL(4), LL(6)); }
 static void w_bbc_env(void)   { A = mm_bbc_env(LL(0), LL(2)); }
+static void w_bbc_free(void)  { A = mm_bbc_free(LL(0)); }
 
 /* graphics - every argument and result is RGB888, as in MMBasic */
 static void w_pixel(void)    { mm_pixel(LL(0), LL(2), LL(4)); A = 0; }
@@ -687,6 +689,7 @@ static const struct mmwrap {
 	{ "mm_hex",		w_hex },
 	{ "mm_oct",		w_oct },
 	{ "mm_bin",		w_bin },
+	{ "mm_base_s",		w_base_s },
 	{ "mm_format",		w_format },
 	{ "mm_mid_assign",	w_mid_assign },
 	{ "mm_open",		w_open },
@@ -791,6 +794,7 @@ static const struct mmwrap {
 	{ "mm_snd_stop",	w_snd_stop },
 	{ "mm_bbc_sound",	w_bbc_sound },
 	{ "mm_bbc_env",		w_bbc_env },
+	{ "mm_bbc_free",		w_bbc_free },
 	{ "mm_pixel",		w_pixel },
 	{ "mm_pixel_get",	w_pixel_get },
 	{ "mm_cls",		w_cls },

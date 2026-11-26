@@ -31,6 +31,7 @@ static const struct builtin builtins[] = {
     { "TAB", 1, 1 }, { "TIMER", 0, 0 }, { "BIT", 2, 2 }, { "BYTE", 2, 2 },
     { "CHR$", 1, 1 }, { "LEFT$", 2, 2 }, { "RIGHT$", 2, 2 }, { "MID$", 2, 3 },
     { "STR$", 1, 4 }, { "HEX$", 1, 2 }, { "OCT$", 1, 2 }, { "BIN$", 1, 2 },
+    { "BASE$", 2, 3 },
     { "UCASE$", 1, 1 }, { "LCASE$", 1, 1 }, { "SPACE$", 1, 1 },
     { "STRING$", 2, 2 }, { "LTRIM$", 1, 1 }, { "RTRIM$", 1, 1 },
     { "FORMAT$", 1, 2 },
@@ -84,7 +85,7 @@ static const char *rawarg[] = {
 
 /* built-ins that return a string (and consume a scratch buffer) */
 static const char *strfuncs[] = {
-    "CHR$", "LEFT$", "RIGHT$", "MID$", "STR$", "HEX$", "OCT$",
+    "CHR$", "LEFT$", "RIGHT$", "MID$", "STR$", "HEX$", "OCT$", "BASE$",
     "BIN$", "UCASE$", "LCASE$", "SPACE$", "STRING$", "LTRIM$",
     "RTRIM$", "TAB", "FORMAT$", "TRIM$", "FIELD$", "DATE$",
     "TIME$", "DATETIME$", "DAY$", "BIN2STR$", "INPUT$", "DIR$",

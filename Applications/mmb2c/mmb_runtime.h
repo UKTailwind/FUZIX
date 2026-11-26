@@ -227,6 +227,7 @@ char *mm_str_i (MMINTEGER v, MMINTEGER m, MMINTEGER n, const char *pad);
 char *mm_hex   (MMINTEGER v, MMINTEGER width);
 char *mm_oct   (MMINTEGER v, MMINTEGER width);
 char *mm_bin   (MMINTEGER v, MMINTEGER width);
+char *mm_base_s(MMINTEGER base, MMINTEGER v, MMINTEGER width); /* BASE$ */
 
 /* BYTE(), TRIM$() and FIELD$() are in mmb_misc.h */
 char *mm_format(MMFLOAT val, const char *fmt);
@@ -380,6 +381,10 @@ MMINTEGER mm_snd_stop(void);
 MMINTEGER mm_bbc_sound(MMINTEGER chan, MMINTEGER amp, MMINTEGER pitch,
                        MMINTEGER dur);
 MMINTEGER mm_bbc_env(MMINTEGER lo, MMINTEGER hi);
+/* MM.INFO(BBC BUFFER [ch]): a queue's free note slots, -1 the fewest of
+ * the four; MM_BBC_QLEN is the kernel's SND_QLEN, the firmware's BBC_QLEN */
+#define MM_BBC_QLEN 16
+MMINTEGER mm_bbc_free(MMINTEGER chan);
 void mm_bbc_quiet(void);                 /* PLAY STOP: silence and flush */
 MMINTEGER mm_play_send(MMINTEGER op, MMINTEGER a, MMINTEGER b,
                        MMINTEGER p1, MMINTEGER p2, MMINTEGER p3);

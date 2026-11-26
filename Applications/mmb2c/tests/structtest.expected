@@ -170,11 +170,9 @@ TEST 72: Direct assignment with mixed types struct
 TEST 74: Chained assignment
   PASS: Chained struct assignment
 TEST 74A: Direct assignment from nested struct array member
-  FAIL: Expected key=15 filename=FILE15 position=1500
-    Got key= 0 filename= position= 0
+  PASS: Nested struct array element assignment
 TEST 74B: Direct assignment from nested struct array member (variable index)
-  FAIL: Expected key=17 filename=FILE17 position=1700
-    Got key= 0 filename= position= 0
+  PASS: Variable index nested struct array assignment
 TEST 75: Random access file with struct array
     Index 0: Expected id 500 got 0
     Index 0: Expected label 'Record500' got ''

@@ -1381,6 +1381,15 @@ char *mm_hex(MMINTEGER v, MMINTEGER w) { return mm_base(v, w, 16); }
 char *mm_oct(MMINTEGER v, MMINTEGER w) { return mm_base(v, w,  8); }
 char *mm_bin(MMINTEGER v, MMINTEGER w) { return mm_base(v, w,  2); }
 
+/* BASE$(base, n [, digits]) (PicoMite b2ded8c), fun_base: HEX$ in any
+ * base from 2 to 36 */
+char *mm_base_s(MMINTEGER base, MMINTEGER v, MMINTEGER w)
+{
+    if (base < 2 || base > 36)
+        MM_RAISEV("Number out of bounds", mm_base(v, w, 10));
+    return mm_base(v, w, (int)base);
+}
+
 /* ---- BYTE(), TRIM$(), FIELD$(): moved to mmb_misc.h ---------------- */
 
 /* ---- FORMAT$() -----------------------------------------------------
@@ -5094,6 +5103,36 @@ void mm_bbc_quiet(void)
         mm_sys_ioctl(mm_snd_fd, MM_SNDIOC_QUIET, 0);
 }
 
+/* MM.INFO(BBC BUFFER [channel]) (PicoMite 6f263f7, BBCSoundFree): how
+ * many more notes a channel's queue takes before PLAY BBC SOUND waits -
+ * the kernel's ADVAL(-5) to (-8) - or, for -1 (no channel), the fewest
+ * of the four.  Without a sound device the queues are empty, 16 free,
+ * as the firmware answers before its engine exists. */
+#define MM_PICOIOC_ADVAL 0x0009         /* pico_ioctl.h is the authority */
+
+MMINTEGER mm_bbc_free(MMINTEGER chan)
+{
+    int i, n, f, least = MM_BBC_QLEN;
+
+    if (chan < -1 || chan > 3)
+        MM_RAISEV("Number out of bounds", 0);
+    if (mm_snd_fd == -2)
+        mm_snd_fd = mm_sys_open();
+    if (mm_snd_fd < 0)
+        return MM_BBC_QLEN;
+    for (i = 0; i < 4; i++) {
+        if (chan >= 0 && i != chan)
+            continue;
+        n = -5 - i;
+        f = mm_sys_ioctl(mm_snd_fd, MM_PICOIOC_ADVAL, &n);
+        if (f < 0)
+            return MM_BBC_QLEN;
+        if (f < least)
+            least = f;
+    }
+    return least;
+}
+
 #else
 
 MMINTEGER mm_play_owner(void) { return 0; }
@@ -5128,6 +5167,13 @@ MMINTEGER mm_bbc_env(MMINTEGER lo, MMINTEGER hi)
 }
 
 void mm_bbc_quiet(void) { }
+
+MMINTEGER mm_bbc_free(MMINTEGER chan)
+{
+    if (chan < -1 || chan > 3)
+        MM_RAISEV("Number out of bounds", 0);
+    return MM_BBC_QLEN;
+}
 
 #endif
 

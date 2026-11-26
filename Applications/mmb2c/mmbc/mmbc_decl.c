@@ -1322,8 +1322,9 @@ void do_declare(const char *kw)
 {
     const char *scope;
     int is_static;
-    int group_ty = TY_NONE;
-    struct tok *t;
+    int group_ty = TY_NONE, gsfx;
+    const char *group_stype = NULL;
+    struct tok *t, *t1;
 
     if (strcmp(kw, "CONST") == 0) {
         do_const();
@@ -1334,12 +1335,34 @@ void do_declare(const char *kw)
         cv_err("%s is only valid inside a SUB or FUNCTION", kw);
     is_static = (strcmp(kw, "STATIC") == 0);
 
-    /* optional leading type applying to the whole list */
+    /* optional leading type applying to the whole list: INTEGER,
+       FLOAT, STRING or a TYPE's name, after an optional AS - cmd_dim
+       steps over an AS first, so DIM AS INTEGER a, b is DIM INTEGER
+       a, b (FUZIX #45), and CheckIfTypeSpecified takes a TYPE too */
     t = peek(0);
+    t1 = peek(1);
+    if (t != NULL && t->kind == T_ID && strcmp(t->up, "AS") == 0
+        && t1 != NULL && t1->kind == T_ID
+        && (strcmp(t1->up, "INTEGER") == 0 || strcmp(t1->up, "FLOAT") == 0
+            || strcmp(t1->up, "STRING") == 0
+            || types_get(split_suffix(t1->text, &gsfx)) != NULL)) {
+        cv.i += 1;
+        t = t1;
+        t1 = peek(1);
+    }
     if (t != NULL && t->kind == T_ID
         && (strcmp(t->up, "INTEGER") == 0 || strcmp(t->up, "FLOAT") == 0
             || strcmp(t->up, "STRING") == 0))
         group_ty = type_word();
+    else if (t != NULL && t->kind == T_ID
+             && types_get(split_suffix(t->text, &gsfx)) != NULL
+             && t1 != NULL && t1->kind == T_ID) {
+        cv.i += 1;
+        group_stype = split_suffix(t->text, &gsfx);
+        if (is_static)
+            cv_err("STATIC of a TYPE is not translated "
+                   "yet; use DIM or LOCAL");
+    }
 
     for (;;) {
         char *canon;
@@ -1382,6 +1405,12 @@ void do_declare(const char *kw)
             expect_op(")");
         }
         ty = (sfx != TY_NONE) ? sfx : group_ty;
+        stype = group_stype;
+        if (stype != NULL && sfx != TY_NONE)
+            cv_err("'%s' has a type suffix but is "
+                   "declared AS a TYPE", canon);
+        if (stype != NULL && is_kw("AS", 0))
+            cv_err("a type is given twice for '%s'", canon);
         if (accept_kw("AS")) {
             struct tok *w = peek(0);
             int wsfx;

@@ -95,6 +95,7 @@ BUILTINS = {
     'TAB': (1, 1), 'TIMER': (0, 0), 'BIT': (2, 2), 'BYTE': (2, 2),
     'CHR$': (1, 1), 'LEFT$': (2, 2), 'RIGHT$': (2, 2), 'MID$': (2, 3),
     'STR$': (1, 4), 'HEX$': (1, 2), 'OCT$': (1, 2), 'BIN$': (1, 2),
+    'BASE$': (2, 3),
     'UCASE$': (1, 1), 'LCASE$': (1, 1), 'SPACE$': (1, 1),
     'STRING$': (2, 2), 'LTRIM$': (1, 1), 'RTRIM$': (1, 1),
     'FORMAT$': (1, 2),
@@ -146,7 +147,7 @@ RAWARG = ('CHOICE', 'BOUND', 'TRIM$', 'DATETIME$', 'DAY$', 'EPOCH',
           'JSON$')
 
 # built-ins that return a string (and therefore consume a scratch buffer)
-STRFUNCS = ('CHR$', 'LEFT$', 'RIGHT$', 'MID$', 'STR$', 'HEX$', 'OCT$',
+STRFUNCS = ('CHR$', 'LEFT$', 'RIGHT$', 'MID$', 'STR$', 'HEX$', 'OCT$', 'BASE$',
             'BIN$', 'UCASE$', 'LCASE$', 'SPACE$', 'STRING$', 'LTRIM$',
             'RTRIM$', 'TAB', 'FORMAT$', 'TRIM$', 'FIELD$', 'DATE$',
             'TIME$', 'DATETIME$', 'DAY$', 'BIN2STR$', 'INPUT$', 'DIR$',
@@ -3775,6 +3776,11 @@ class Conv(object):
             cf = {'HEX$': 'mm_hex', 'OCT$': 'mm_oct', 'BIN$': 'mm_bin'}[up]
             w = n(1) if len(args) > 1 else '0'
             return ('%s(%s, %s)' % (cf, n(0), w), TY_S)
+        if up == 'BASE$':
+            # BASE$(base, n [, digits]) (PicoMite b2ded8c): HEX$ in
+            # any base from 2 to 36
+            w = n(2) if len(args) > 2 else '0'
+            return ('mm_base_s(%s, %s, %s)' % (n(0), n(1), w), TY_S)
         if up == 'UCASE$':
             return ('mm_ucase(%s)' % s(0), TY_S)
         if up == 'LCASE$':
@@ -5728,6 +5734,9 @@ class Conv(object):
         # C:, a USB flash drive (PicoMite 147a93d): the kernel has no
         # USB mass storage, the firmware's answer for a build without it
         'USBDRIVE':   (c_string_literal('Not Configured'), TY_S),
+        # 1 while a telnet client has the console (a WebMite's, 94c7a0f):
+        # the kernel has no telnet console
+        'TELNET':     ('0LL', TY_I),
     }
     # ... and the ones that take an expression after the keyword.
     MMINFO_ARG = {
@@ -5813,6 +5822,17 @@ class Conv(object):
             self.i += 1
             self.expect_op(')')
             return ('8LL', TY_I)
+        if two == 'BBC BUFFER':
+            # MM.INFO(BBC BUFFER [channel]) (PicoMite 6f263f7): the
+            # notes a PLAY BBC SOUND queue takes before it waits, or with
+            # no channel the fewest of the four - the kernel's ADVAL(-5)
+            # to (-8)
+            self.i += 1
+            ch = '-1LL'
+            if not self.is_op(')'):
+                ch = self.as_int(self.expr())
+            self.expect_op(')')
+            return ('mm_bbc_free(%s)' % ch, TY_I)
         if one == 'PIN':
             # MM.INFO(PIN n): the pin's function as the firmware names
             # it - mmg_pininfo, beside SETPIN in mmb_gpio.h
@@ -6150,12 +6170,32 @@ class Conv(object):
             self.err("%s is only valid inside a SUB or FUNCTION" % kw)
         static = (kw == 'STATIC')
 
-        # optional leading type applying to the whole list
+        # optional leading type applying to the whole list: INTEGER,
+        # FLOAT, STRING or a TYPE's name, after an optional AS - cmd_dim
+        # steps over an AS first, so DIM AS INTEGER a, b is DIM INTEGER
+        # a, b (FUZIX #45), and CheckIfTypeSpecified takes a TYPE too
         group_ty = None
+        group_stype = None
         t = self.peek()
+        t1 = self.peek(1)
+        if t is not None and t[0] == T_ID and t[2] == 'AS' \
+                and t1 is not None and t1[0] == T_ID \
+                and (t1[2] in ('INTEGER', 'FLOAT', 'STRING')
+                     or split_suffix(t1[1])[0] in self.types):
+            self.i += 1
+            t = t1
+            t1 = self.peek(1)
         if t is not None and t[0] == T_ID and t[2] in ('INTEGER', 'FLOAT',
                                                        'STRING'):
             group_ty = self.type_word()
+        elif t is not None and t[0] == T_ID \
+                and split_suffix(t[1])[0] in self.types \
+                and t1 is not None and t1[0] == T_ID:
+            self.i += 1
+            group_stype = split_suffix(t[1])[0]
+            if static:
+                self.err("STATIC of a TYPE is not translated "
+                         "yet; use DIM or LOCAL")
 
         while True:
             if self.mode == 'emit':
@@ -6189,7 +6229,12 @@ class Conv(object):
                         break
                 self.expect_op(')')
             ty = sfx if sfx is not None else group_ty
-            stype = None
+            stype = group_stype
+            if stype is not None and sfx is not None:
+                self.err("'%s' has a type suffix but is "
+                         "declared AS a TYPE" % canon)
+            if stype is not None and self.is_kw('AS'):
+                self.err("a type is given twice for '%s'" % canon)
             if self.accept_kw('AS'):
                 w = self.peek()
                 if w is not None and w[0] == T_ID \
@@ -11169,11 +11214,10 @@ class Conv(object):
             self.member_written(res[1])
             self.emit('mm_ssetm(%s, %d, %s);' % (res[1], res[2], v[0]))
             return
-        # a whole nested structure: the firmware memcpy's the OUTER
-        # type's size here and overruns - refused, not reproduced
-        self.err("assigning a whole structure into a member is not "
-                 "supported (the firmware overruns memory here); "
-                 "assign the member's own members instead")
+        # a whole nested structure: copied at the member's own TYPE,
+        # as the firmware has since 9749c83 (it memcpy'd the outer
+        # type's size before, and overran)
+        self.assign_struct(res[1], res[2])
 
     def assign_struct(self, target, tyname):
         """target = <struct lvalue> - whole-structure copy."""
@@ -11182,10 +11226,7 @@ class Conv(object):
         if not isinstance(ty, tuple):
             self.err("a structure can only be assigned a structure of "
                      "the same TYPE")
-        if ty[0] == 'TM':
-            self.err("assigning a whole structure from a nested member "
-                     "is not supported (the firmware over-reads "
-                     "memory here)")
+        # a nested member is read at its own TYPE too (9749c83)
         if ty[1] != tyname:
             self.err("structure types must match (TYPE '%s' vs '%s')"
                      % (tyname, ty[1]))

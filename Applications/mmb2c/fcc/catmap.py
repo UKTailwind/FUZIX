@@ -121,6 +121,11 @@ CAT = {
     # this is possible, but btstack, its flash and its RAM are a large
     # piece of work - wanted only on a steer.
     "Bluetooth": 3,
+    # SQLite, with the CMM2's SQL command and SQL( function, on the
+    # PicoMitePC3 since V8.00.00b3 (96ba215).  On pc3host it would be
+    # SQLite in bcrun; on the board, a helper program answering over a
+    # pipe, as loadimage is.  DECISION PENDING (the 11-26 review).
+    "SQL": 3, "SQL(": 3,
     # WS2812 and Bitstream sat here as the interrupts-off pair until
     # they SHIPPED on 2026-08-22 through PLAN-pioout's fixed PIO1
     # programs (NOTES[3] tells the story).  Their entries are gone
@@ -165,12 +170,12 @@ CAT = {
     # INTERPRETER-INTERNAL SPELLINGS.  MMBasic ran out of slots in its
     # function table, so it COMMENTED SOME OUT and made the tokeniser
     # rewrite them into one shared entry that takes a selector letter.
-    # All four sit inside Functions.c's "@cond ... excluded from the
+    # They sit inside Functions.c's "@cond ... excluded from the
     # documentation" block; a BASIC program never writes them.
+    # (base$( was one of them, under Hex$( Oct$( and Bin$(, until
+    # b2ded8c made BASE$(base, n [, digits]) a function of its own; it
+    # is translated, mm_base_s.)
     #
-    #   base$(b, n [, w])  <- Hex$( Oct$( Bin$(     "utility function
-    #                                               used by HEX$(),
-    #                                               OCT$() and BIN$()"
     #   SChange$(sel, ...) <- Left$( Right$( UCase$( LCase$(
     #   TopBottom(sel,...) <- Max( Min(
     #   ~(sel)             <- the flat MM.* reads (MM.HRES, MM.VRES,
@@ -182,7 +187,8 @@ CAT = {
     # wrapper spelling never reaches us.  What matters is the real
     # functions, and all of them are in: Hex$ Oct$ Bin$ Left$ Right$
     # UCase$ LCase$ Max Min, and 14 of the flat MM.* reads.
-    "base$(": 4, "SChange$(": 4, "TopBottom(": 4, "~(": 4,
+    #   EofLocLof(sel, #n) <- Eof( Loc( Lof(        (V8.00.00b2)
+    "SChange$(": 4, "TopBottom(": 4, "~(": 4, "EofLocLof(": 4,
 
     # ---- 5: not applicable to this machine -------------------------
     # Hardware the PC3 does not have, or a device the kernel owns.
@@ -197,6 +203,9 @@ CAT = {
     # is a standalone program, the shape loadjpg and loadpng already
     # take.  Not a gap in the language.
     "GPS(": 5, "Star": 5, "Astro": 5, "Location": 5,
+    # The PicoMitePC3's way to run C (96ab930, 1a12349 and the loader
+    # family): FUZIX runs C natively, through cc.
+    "User": 5, "User(": 5,
     "MsgBox(": 5, "CtrlVal(": 5, "Click(": 5, "Backlight": 5,
     # WEB sat here as "not applicable" until v0.20 shipped the whole
     # family through the kernel's own sockets - the judgement was about

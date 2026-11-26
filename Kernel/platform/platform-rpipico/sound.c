@@ -30,7 +30,12 @@
 #include "sound.h"
 #include "sound_priv.h"
 
-#define SND_QLEN  8             /* notes per channel queue */
+/* Notes per channel queue: 16, as the PicoMite's BBC_QLEN since its
+ * 6f263f7, which MM.INFO(BBC BUFFER) reports (ADVAL(-5) to -8 here).
+ * It must divide 256: qr and qw are uint8_t and fullness is
+ * (uint8_t)(qw - qr), so only a power of two stays right across their
+ * wrap. */
+#define SND_QLEN  16
 
 /* BBC pitch: phase increments for pitches 240-287 at 22050 Hz;
  * inc(p) = table[p % 48] >> (5 - p / 48). */

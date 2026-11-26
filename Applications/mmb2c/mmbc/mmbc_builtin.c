@@ -637,6 +637,15 @@ struct val emit_builtin(const char *up, struct val *args, int nargs)
 
         return mkval(sfmt("%s(%s, %s)", cf, a0, w), TY_S);
     }
+    if (strcmp(up, "BASE$") == 0) {
+        /* BASE$(base, n [, digits]) (PicoMite b2ded8c): HEX$ in any
+           base from 2 to 36 */
+        const char *w = (nargs > 2) ? n(2) : "0";
+        const char *a0 = n(0);
+        const char *a1 = n(1);
+
+        return mkval(sfmt("mm_base_s(%s, %s, %s)", a0, a1, w), TY_S);
+    }
     if (strcmp(up, "UCASE$") == 0)
         return mkval(sfmt("mm_ucase(%s)", s(0)), TY_S);
     if (strcmp(up, "LCASE$") == 0)
@@ -1565,6 +1574,9 @@ struct val builtin_raw(const char *up)
                no USB mass storage, the firmware's answer for a build
                without it */
             { "USBDRIVE", "\"\\016\" \"Not Configured\"", TY_S },
+            /* 1 while a telnet client has the console (a WebMite's,
+               94c7a0f): the kernel has no telnet console */
+            { "TELNET", "0LL", TY_I },
             { NULL, NULL, 0 }
         };
         static const struct { const char *kw, *call; } witharg[] = {
@@ -1616,6 +1628,19 @@ struct val builtin_raw(const char *up)
             (void)nxt();
             expect_op(")");
             return mkval("8LL", TY_I);
+        }
+        if (strcmp(two, "BBC BUFFER") == 0) {
+            /* MM.INFO(BBC BUFFER [channel]) (PicoMite 6f263f7): the
+               notes a PLAY BBC SOUND queue takes before it waits, or
+               with no channel the fewest of the four - the kernel's
+               ADVAL(-5) to (-8) */
+            const char *ch = "-1LL";
+
+            (void)nxt();
+            if (!is_op(")", 0))
+                ch = as_int(expr());
+            expect_op(")");
+            return mkval(sfmt("mm_bbc_free(%s)", ch), TY_I);
         }
         if (strcmp(t->up, "PIN") == 0) {
             /* MM.INFO(PIN n): the pin's function as the firmware names

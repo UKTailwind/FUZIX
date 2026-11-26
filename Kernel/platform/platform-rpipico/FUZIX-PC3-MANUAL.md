@@ -2056,9 +2056,12 @@ The BBC Micro's `SOUND` and `ENVELOPE`, as the PicoMite has them, on
 the same synthesiser BBC BASIC plays here. `SOUND` takes the channel
 word (`&HSFC`: sync, flush, channel), an amplitude of -15 to 0 or an
 envelope 1 to 16, a pitch of 0 to 255 and a duration in twentieths of a
-second (255 is for ever). A channel whose queue is full is waited out,
-as the BBC waited. `ENVELOPE` takes its fourteen numbers in the BBC's
-order. `PLAY STOP` silences it and empties the queues.
+second (255 is for ever). Each channel queues 16 notes, as on a
+PicoMite; one whose queue is full is waited out, as the BBC waited, and
+`MM.INFO(BBC BUFFER [channel])` says how many more a channel will take
+before that happens (with no channel, the fewest of the four).
+`ENVELOPE` takes its fourteen numbers in the BBC's order. `PLAY STOP`
+silences it and empties the queues.
 
 ### The synthesiser: `PLAY SOUND` and `PLAY TONE`
 
@@ -4713,32 +4716,32 @@ there.
 |   |   |   |   |
 |---|---|---|---|
 | `ABS` | `ACOS` | `ASC` | `ASIN` |
-| `ATAN2` | `ATN` | `BIN$` | `BIN2STR$` |
-| `BIT` | `BOUND` | `BYTE` | `CHOICE` |
-| `CHR$` | `CINT` | `COS` | `CWD$` |
-| `DATE$` | `DATETIME$` | `DAY$` | `DEG` |
-| `DIR$` | `DISTANCE` | `DRAW3D` | `EOF` |
-| `EPOCH` | `EXP` | `FIELD$` | `FIX` |
-| `FLAG` | `FORMAT$` | `HEX$` | `INKEY$` |
-| `INPUT$` | `INSTR` | `INT` | `JSON$` |
-| `KEYDOWN` | `LCASE$` | `LCOMPARE` | `LEFT$` |
-| `LEN` | `LGETBYTE` | `LGETSTR$` | `LINPUT` |
-| `LINSTR` | `LLEN` | `LOC` | `LOF` |
-| `LOG` | `LTRIM$` | `MAP` | `MATH` |
-| `MAX` | `MID$` | `MIN` | `MM.ADDRESS$` |
-| `MM.CMDLINE$` | `MM.DEVICE$` | `MM.ERRMSG$` | `MM.ERRNO` |
-| `MM.FONTHEIGHT` | `MM.FONTWIDTH` | `MM.HPOS` | `MM.HRES` |
-| `MM.I2C` | `MM.INFO` | `MM.INFO$` | `MM.MESSAGE$` |
-| `MM.ONEWIRE` | `MM.SPISPEED` | `MM.VER` | `MM.VPOS` |
-| `MM.VRES` | `OCT$` | `PEEK` | `PI` |
-| `PIN` | `PIXEL` | `PORT` | `POS` |
-| `PULSIN` | `RAD` | `RGB` | `RIGHT$` |
-| `RND` | `RTRIM$` | `SGN` | `SIN` |
-| `SPACE$` | `SPI` | `SPRITE` | `SQR` |
-| `STR$` | `STR2BIN` | `STRING$` | `STRUCT` |
-| `TAB` | `TAN` | `TEMPR` | `TILEMAP` |
-| `TIME$` | `TIMER` | `TRIM$` | `UCASE$` |
-| `VAL` |  |  |  |
+| `ATAN2` | `ATN` | `BASE$` | `BIN$` |
+| `BIN2STR$` | `BIT` | `BOUND` | `BYTE` |
+| `CHOICE` | `CHR$` | `CINT` | `COS` |
+| `CWD$` | `DATE$` | `DATETIME$` | `DAY$` |
+| `DEG` | `DIR$` | `DISTANCE` | `DRAW3D` |
+| `EOF` | `EPOCH` | `EXP` | `FIELD$` |
+| `FIX` | `FLAG` | `FORMAT$` | `HEX$` |
+| `INKEY$` | `INPUT$` | `INSTR` | `INT` |
+| `JSON$` | `KEYDOWN` | `LCASE$` | `LCOMPARE` |
+| `LEFT$` | `LEN` | `LGETBYTE` | `LGETSTR$` |
+| `LINPUT` | `LINSTR` | `LLEN` | `LOC` |
+| `LOF` | `LOG` | `LTRIM$` | `MAP` |
+| `MATH` | `MAX` | `MID$` | `MIN` |
+| `MM.ADDRESS$` | `MM.CMDLINE$` | `MM.DEVICE$` | `MM.ERRMSG$` |
+| `MM.ERRNO` | `MM.FONTHEIGHT` | `MM.FONTWIDTH` | `MM.HPOS` |
+| `MM.HRES` | `MM.I2C` | `MM.INFO` | `MM.INFO$` |
+| `MM.MESSAGE$` | `MM.ONEWIRE` | `MM.SPISPEED` | `MM.VER` |
+| `MM.VPOS` | `MM.VRES` | `OCT$` | `PEEK` |
+| `PI` | `PIN` | `PIXEL` | `PORT` |
+| `POS` | `PULSIN` | `RAD` | `RGB` |
+| `RIGHT$` | `RND` | `RTRIM$` | `SGN` |
+| `SIN` | `SPACE$` | `SPI` | `SPRITE` |
+| `SQR` | `STR$` | `STR2BIN` | `STRING$` |
+| `STRUCT` | `TAB` | `TAN` | `TEMPR` |
+| `TILEMAP` | `TIME$` | `TIMER` | `TRIM$` |
+| `UCASE$` | `VAL` |  |  |
 
 ## MATH() sub-functions
 
@@ -4991,8 +4994,9 @@ same number here and on a PicoMite. Members may be `INTEGER`, `INT`,
 member access works to the full nesting depth
 (`data(2).items(1).values(4)` included), structure variables, arrays,
 `LOCAL`s and by-reference parameters all work, whole structures
-assign with `=`, and `STRUCT COPY`, `STRUCT CLEAR` and `STRUCT SWAP`
-are in. `STRUCT(SIZEOF/OFFSET/TYPE)` fold to constants when the names
+assign with `=` (into and out of a nested member too, at the member's
+own TYPE, as the firmware has since V7), and `STRUCT COPY`,
+`STRUCT CLEAR` and `STRUCT SWAP` are in. `STRUCT(SIZEOF/OFFSET/TYPE)` fold to constants when the names
 are literal strings.
 
 Not translated (each says so rather than mistranslating):
@@ -5002,10 +5006,7 @@ parameters, initialisers on structure arrays, and a string member
 passed by reference to a routine that writes it, or that changes the
 member itself while it has it - under its own name, or through a
 structure parameter given the member's structure (one that does neither
-gets a copy, which is then exactly the member). Assigning a whole
-structure into or out of a *nested* member is refused deliberately:
-the interpreter copies the outer type's size there and overruns
-memory, and a clean error beats reproducing that.
+gets a copy, which is then exactly the member).
 
 ## Errors, and surviving them
 

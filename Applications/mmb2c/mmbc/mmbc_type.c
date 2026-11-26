@@ -726,11 +726,10 @@ void assign_member(struct mpres res)
                   v.code));
         return;
     }
-    /* a whole nested structure: the firmware memcpy's the OUTER
-     * type's size here and overruns - refused, not reproduced */
-    cv_err("assigning a whole structure into a member is not "
-           "supported (the firmware overruns memory here); "
-           "assign the member's own members instead");
+    /* a whole nested structure: copied at the member's own TYPE, as
+     * the firmware has since 9749c83 (it memcpy'd the outer type's
+     * size before, and overran) */
+    assign_struct(res.code, res.tyname);
 }
 
 /* target = <struct lvalue> - whole-structure copy. */
@@ -741,10 +740,7 @@ void assign_struct(const char *target, const char *tyname)
     if (v.ty != TY_T)
         cv_err("a structure can only be assigned a structure of "
                "the same TYPE");
-    if (v.tm)
-        cv_err("assigning a whole structure from a nested member "
-               "is not supported (the firmware over-reads "
-               "memory here)");
+    /* a nested member is read at its own TYPE too (9749c83) */
     if (strcmp(v.stype, tyname) != 0)
         cv_err("structure types must match (TYPE '%s' vs '%s')",
                tyname, v.stype);
