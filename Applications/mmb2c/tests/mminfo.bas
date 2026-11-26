@@ -2,14 +2,15 @@
 ' names, KEYDOWN() and the scope of CONST inside a SUB.
 '
 ' Everything printed here has to be the same on the host and on the
-' board, so the two answers that cannot be (PATH and CURRENT, which are
-' argv[0], and VERSION, which moves every release) are tested by shape
-' rather than printed.
+' board, so the answers that cannot be (PATH and CURRENT, which are
+' argv[0], VERSION, which moves every release, and DEVICE, which is
+' "PicoMitePC" under pc3host's bcrun and "Fuzix" elsewhere) are tested
+' by shape rather than printed.
 
 Option Explicit
 
 Print "-- what this machine is"
-Print "device   [" + MM.Device$ + "]"
+Print "device   "; MM.Device$ = "Fuzix" Or MM.Device$ = "PicoMitePC"
 Print "platform [" + MM.Info(Platform) + "]"
 Print "drive    [" + MM.Info$(Drive) + "]"
 ' MM.INFO$( is the same function as MM.INFO( - MMBasic overlays both

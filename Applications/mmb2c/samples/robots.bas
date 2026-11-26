@@ -10,11 +10,14 @@
   Const NES_PULSE! = 0.012 ' 12uS
   
   ' The Pico Computer 3 (MM.Device$ = "Fuzix") is the LCD model: an
-  ' explicit FrameBuffer Merge, no automatic layer overlay.
+  ' explicit FrameBuffer Merge, no automatic layer overlay.  On a PC
+  ' (MM.Device$ = "PicoMitePC") it is the VGA and HDMI model, the layer
+  ' shown live, as on those PicoMites; the keyboard driver is the same.
   Const LCD_DISPLAY = Mm.Device$ = "PicoMite" Or Mm.Device$ = "Fuzix"
   Const SC$ = Choice(LCD_DISPLAY, "f", "n")
+  Const ON_PC3 = Mm.Device$ = "Fuzix" Or Mm.Device$ = "PicoMitePC"
 
-  Dim CTRL_DRIVER$ = Choice(Mm.Device$ = "Fuzix", "ctrl_fuzix$", Choice(LCD_DISPLAY, "ctrl_gamemite$", "ctrl_none$"))
+  Dim CTRL_DRIVER$ = Choice(ON_PC3, "ctrl_fuzix$", Choice(LCD_DISPLAY, "ctrl_gamemite$", "ctrl_none$"))
   ' Uncomment one of these to override controller:
   ' CTRL_DRIVER$ = "ctrl_atari_a$"      ' Atari Joystick on PicoGAME port A
   ' CTRL_DRIVER$ = "ctrl_nes_a$"        ' NES gamepad on PicoGAME port A

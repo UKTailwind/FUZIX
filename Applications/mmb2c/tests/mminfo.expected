@@ -1,5 +1,5 @@
 -- what this machine is
-device   [Fuzix]
+device    1
 platform [PC3]
 drive    [A:]
 same      1

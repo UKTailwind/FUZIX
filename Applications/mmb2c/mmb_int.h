@@ -224,6 +224,27 @@ MMG_FN void mmi_mod_int(mm_int_fn fn)
  *	a file that will not open - would otherwise leave the handler
  *	armed for ever, so the claim phase gives up after two seconds and
  *	reports the sound as over, which by then it is. */
+/*	A serial port's interrupt (OPEN "port:baud,buffer,int,level" AS
+ *	#n): the handler runs while the bytes waiting have reached the
+ *	level, as check_interrupt's com1_interrupt does.  The port is the
+ *	runtime's (mm_com_ready); a port closed, or opened again with no
+ *	interrupt, answers -1 and is let go.  Looked at once a millisecond:
+ *	each look reads the port. */
+static mm_int_fn mm_com_fn[MM_MAXFILES + 1];
+static int mm_com_armed;
+static long long mm_com_next;
+
+MMG_FN void mmi_com_int(MMINTEGER fnbr, mm_int_fn fn)
+{
+	if (fnbr < 1 || fnbr > MM_MAXFILES)
+		return;
+	if (mm_com_fn[fnbr] == 0) {
+		__mm_int_armed++;
+		mm_com_armed++;
+	}
+	mm_com_fn[fnbr] = fn;
+}
+
 static mm_int_fn mm_play_fn;
 static unsigned char mm_play_watch;
 static long long mm_play_next, mm_play_claim_by;
@@ -586,6 +607,31 @@ MMG_FN void mm_int_poll(void)
 		return;
 	}
 #endif
+
+	/*	The serial ports: a handler runs while its port's bytes
+	 *	waiting have reached the level (check_interrupt's
+	 *	com1_interrupt to com6_interrupt), so it fires again if it
+	 *	leaves them there. */
+	if (mm_com_armed) {
+		long long now = MMI_US();
+
+		if (now >= mm_com_next) {
+			mm_com_next = now + 1000;
+			for (i = 1; i <= MM_MAXFILES; i++) {
+				if (!mm_com_fn[i])
+					continue;
+				v = (int)mm_com_ready(i);
+				if (v < 0) {
+					mm_com_fn[i] = 0;
+					mm_com_armed--;
+					__mm_int_armed--;
+				} else if (v > 0) {
+					mm_int_fire(mm_com_fn[i]);
+					return;
+				}
+			}
+		}
+	}
 
 	/*	The tone deadline - MMBasic's WAVcomplete, one comparison.
 	 *	Cleared before firing, as every one-shot here is. */

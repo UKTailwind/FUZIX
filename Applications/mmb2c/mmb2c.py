@@ -7174,6 +7174,13 @@ class Conv(object):
             self.i += 1
             self.do_fileword(up)
             return
+        if up == 'LIST' and self.is_kw('SERIAL', 1) and self.is_kw('PORTS', 2):
+            # LIST SERIAL PORTS (ours, Peter 26 Nov 2026): the ports this
+            # machine has, by the names OPEN takes - the other LISTs are
+            # the interpreter's and not translated
+            self.i += 3
+            self.emit('mm_list_serial();')
+            return
         if up == 'RENAME' or up == 'COPY':
             self.i += 1
             a = self.expr()
@@ -10806,11 +10813,34 @@ class Conv(object):
 
     # -- files ------------------------------------------------------------
     def do_open(self):
+        t0 = self.peek()
+        lit = t0[1] if (t0 is not None and t0[0] == T_STR
+                        and self.is_kw('AS', 1)) else None
         name = self.expr()
         if name[1] != TY_S:
             self.err("OPEN needs a file name string")
         if not self.accept_kw('FOR'):
-            self.err("serial ports (OPEN comspec$ AS #n) are not supported")
+            # OPEN comspec$ AS #n - a serial port (Serial.c SerialOpen):
+            # "port:baud,buffer,interrupt,level,options".  The interrupt
+            # is a SUB named inside the string, so it can be armed only
+            # when the string is written out here; the runtime refuses
+            # one in a spec it is given otherwise.
+            if not self.accept_kw('AS'):
+                self.err("OPEN comspec$ AS #n")
+            if self.is_kw('GPS'):
+                self.err("OPEN comspec$ AS GPS is not translated")
+            fn = self.channel()
+            handler = None
+            if lit is not None:
+                nm = com_interrupt(lit)
+                if nm:
+                    handler = self.handler_named(nm)
+            self.emit('mm_open_com(%s, %s, %d);'
+                      % (name[0], fn, 1 if lit is not None else 0))
+            if handler is not None:
+                self.uses_interrupts = True
+                self.emit('mmi_com_int(%s, %s);' % (fn, handler))
+            return
         t = self.nxt()
         if t[0] != T_ID or t[2] not in ('INPUT', 'OUTPUT', 'APPEND', 'RANDOM'):
             self.err("OPEN mode must be INPUT, OUTPUT, APPEND or RANDOM")
@@ -12421,6 +12451,21 @@ class Conv(object):
             return '-1'
         self.err("SETPIN's last argument is PULLUP or PULLDOWN")
 
+    def handler_named(self, name):
+        """int_handler's checks on a name given as text - a serial
+        port's interrupt, written inside its spec string."""
+        canon, _ = split_suffix(name)
+        r = self.routines.get(canon)
+        if r is None:
+            self.err("no SUB called '%s' to handle the interrupt" % name)
+        if r.is_func:
+            self.err("'%s' is a FUNCTION; an interrupt handler must be "
+                     "a SUB" % name)
+        if r.params:
+            self.err("interrupt handler '%s' must take no parameters"
+                     % name)
+        return r.cname
+
     def int_handler(self):
         """Resolve an interrupt target to the C function that is it.
 
@@ -13735,6 +13780,26 @@ def loader_directives(lines, inpath):
 
     walk(lines, False)
     return out, errs
+
+
+COM_OPTIONS = ('EVEN', 'ODD', 'INV', 'DE', 'OC', '9BIT', 'S2', '7BIT')
+
+
+def com_interrupt(spec):
+    """The interrupt a serial port's spec names, or None: its fields
+    after the port name, split at commas, the options taken off the end
+    as SerialOpen takes them (five rounds), the fourth field."""
+    k = spec.find(':')
+    if k < 0:
+        return None
+    f = [x.strip() for x in spec[k + 1:].split(',')]
+    for _ in range(5):
+        for o in COM_OPTIONS:
+            if f and ''.join(ascii_upper(c) for c in f[-1]) == o:
+                f.pop()
+    if len(f) >= 3 and f[2]:
+        return f[2]
+    return None
 
 
 def library_splice(lines, inpath):

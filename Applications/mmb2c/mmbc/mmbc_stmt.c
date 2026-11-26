@@ -521,6 +521,14 @@ void statement_inner(void)
         do_fileword(up);
         return;
     }
+    if (strcmp(up, "LIST") == 0 && is_kw("SERIAL", 1) && is_kw("PORTS", 2)) {
+        /* LIST SERIAL PORTS (ours, Peter 26 Nov 2026): the ports this
+           machine has, by the names OPEN takes - the other LISTs are the
+           interpreter's and not translated */
+        cv.i += 3;
+        emit("mm_list_serial();");
+        return;
+    }
     if (strcmp(up, "RENAME") == 0 || strcmp(up, "COPY") == 0) {
         struct val a, b;
         cv.i++;
@@ -4298,6 +4306,76 @@ static const char *setpin_pull(void)
 
    Returns NULL after cv_err, which does not return in the strict path
    but does in the lenient one. */
+/* int_handler's checks on a name given as text - a serial port's
+   interrupt, written inside its spec string */
+static const char *handler_named(const char *name)
+{
+    struct routine *r;
+    char *canon;
+    int ty;
+
+    canon = split_suffix(name, &ty);
+    r = routine_get(canon);
+    if (r == NULL) {
+        cv_err(sfmt("no SUB called '%s' to handle the interrupt", name));
+        return NULL;
+    }
+    if (r->is_func) {
+        cv_err(sfmt("'%s' is a FUNCTION; an interrupt handler must be "
+                    "a SUB", name));
+        return NULL;
+    }
+    if (r->nparams) {
+        cv_err(sfmt("interrupt handler '%s' must take no parameters",
+                    name));
+        return NULL;
+    }
+    return r->cname;
+}
+
+/* the interrupt a serial port's spec names, or NULL - mmb2c.py's
+   com_interrupt */
+static const char *com_interrupt(const char *spec)
+{
+    static const char *const opts[] = { "EVEN", "ODD", "INV", "DE", "OC",
+                                        "9BIT", "S2", "7BIT", NULL };
+    const char *f[32];
+    char *buf, *p, *e;
+    int nf = 0, r, o, k;
+
+    p = (char *)strchr(spec, ':');   /* only buf, a copy, is written */
+    if (p == NULL)
+        return NULL;
+    buf = sstr(p + 1);
+    p = buf;
+    for (;;) {
+        e = strchr(p, ',');
+        if (e)
+            *e = 0;
+        if (nf < 32)
+            f[nf++] = stripped(p);
+        if (!e)
+            break;
+        p = e + 1;
+    }
+    for (r = 0; r < 5; r++)
+        for (o = 0; opts[o]; o++) {
+            char *u;
+
+            if (!nf)
+                break;
+            u = sstr(f[nf - 1]);
+            for (k = 0; u[k]; k++)
+                if (u[k] >= 'a' && u[k] <= 'z')
+                    u[k] = (char)(u[k] - 32);
+            if (strcmp(u, opts[o]) == 0)
+                nf--;
+        }
+    if (nf >= 3 && f[2][0])
+        return f[2];
+    return NULL;
+}
+
 static const char *int_handler(void)
 {
     struct tok *t = nxt();
@@ -6051,6 +6129,9 @@ static void do_array_cmd(int is_math)
 
 static void do_open(void)
 {
+    struct tok *t0 = peek(0);
+    const char *lit = (t0 != NULL && t0->kind == T_STR && is_kw("AS", 1))
+                      ? pstr(t0->text) : NULL;
     struct val name = expr();
     struct tok *t;
     const char *mode;
@@ -6058,8 +6139,32 @@ static void do_open(void)
 
     if (name.ty != TY_S)
         cv_err("OPEN needs a file name string");
-    if (!accept_kw("FOR"))
-        cv_err("serial ports (OPEN comspec$ AS #n) are not supported");
+    if (!accept_kw("FOR")) {
+        /* OPEN comspec$ AS #n - a serial port (Serial.c SerialOpen):
+           "port:baud,buffer,interrupt,level,options".  The interrupt is
+           a SUB named inside the string, so it can be armed only when
+           the string is written out here; the runtime refuses one in a
+           spec it is given otherwise. */
+        const char *handler = NULL, *nm;
+
+        if (!accept_kw("AS"))
+            cv_err("OPEN comspec$ AS #n");
+        if (is_kw("GPS", 0))
+            cv_err("OPEN comspec$ AS GPS is not translated");
+        fn = channel();
+        if (lit != NULL) {
+            nm = com_interrupt(lit);
+            if (nm != NULL)
+                handler = handler_named(nm);
+        }
+        emit(sfmt("mm_open_com(%s, %s, %d);", name.code, fn,
+                  lit != NULL ? 1 : 0));
+        if (handler != NULL) {
+            cv.uses_interrupts = 1;
+            emit(sfmt("mmi_com_int(%s, %s);", fn, handler));
+        }
+        return;
+    }
     t = nxt();
     if (t->kind != T_ID || (strcmp(t->up, "INPUT") != 0
                             && strcmp(t->up, "OUTPUT") != 0

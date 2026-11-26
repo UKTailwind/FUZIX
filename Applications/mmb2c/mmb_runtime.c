@@ -73,6 +73,13 @@ int pc3_sys_ioctl(int fd, unsigned long code, void *arg);
 int pc3_rd1(void);              /* one byte from the terminal OR the window */
 int pc3_key_ready(void);        /* the window's keyboard, when there is no tty */
 unsigned long pc3_fb_map(int fd, unsigned long *pool);  /* MM.INFO(WRITEBUFF) */
+/* a PC's serial ports, as the OS names them (pc3host client/pc3com.c) */
+int pc3_com_open(const char *name, long baud, int bits, int parity, int stop);
+int pc3_com_read(int h, void *buf, int n);      /* never waits: 0 none */
+int pc3_com_write(int h, const void *buf, int n);
+int pc3_com_drain(int h);
+int pc3_com_close(int h);
+int pc3_com_list(char *buf, int size);  /* "name\tdescription\n" each */
 #define mm_sys_open()              pc3_sys_open()
 #define mm_sys_ioctl(fd, code, a)  pc3_sys_ioctl((fd), (code), (void *)(a))
 #else
@@ -1858,6 +1865,274 @@ static const char *mm_fname_in(const char *mmstr, int which)
 #define mm_fname(s)  mm_fname_in(s, 0)
 #define mm_fname2(s) mm_fname_in(s, 1)
 
+/* ================= serial ports =====================================
+ * OPEN "port:baud,buffer,interrupt,level,options" AS #n, as Serial.c's
+ * SerialOpen reads it.  On a PC the port is named as the OS names it -
+ * COM3 on Windows, /dev/ttyUSB0 on Linux - (Peter, 26 Nov 2026), and
+ * pc3host's client/pc3com.c opens it.  The board's UARTs are to come;
+ * there it is refused.
+ *
+ * As on the firmware: the received bytes wait in a buffer of the given
+ * size (1024 by default); LOC is how many, EOF is none, INPUT$ takes
+ * what there is without waiting, and LINE INPUT and INPUT wait for a
+ * line feed.  LOF is the free space of a 256-byte transmit buffer, all
+ * of it here, as writes go straight to the OS.  CLOSE waits for what
+ * was written to go.  The buffer is filled from the OS when it is
+ * looked at, and the OS keeps anything past its size, where the
+ * firmware's would drop the oldest. */
+#define MM_COM_TXBUF 256        /* TX_BUFFER_SIZE: an idle port's LOF */
+
+typedef struct {
+    int h;                      /* pc3_com_* handle */
+    int intr;                   /* the spec named an interrupt, armed */
+    unsigned char *rx;
+    int size, head, count, level;
+} MMCom;
+static MMCom mm_com[MM_MAXFILES + 1];
+
+static int mm_is_com(MMINTEGER fnbr)
+{
+    return fnbr >= 1 && fnbr <= MM_MAXFILES && mm_chan[fnbr].mode == MM_F_COM;
+}
+
+#ifdef PC_HOST
+static void mm_com_pump(MMCom *c)
+{
+    unsigned char tmp[256];
+    int want, n, i;
+
+    while (c->count < c->size) {
+        want = c->size - c->count;
+        if (want > (int)sizeof tmp)
+            want = (int)sizeof tmp;
+        n = pc3_com_read(c->h, tmp, want);
+        if (n <= 0)
+            break;
+        for (i = 0; i < n; i++)
+            c->rx[(c->head + c->count++) % c->size] = tmp[i];
+        if (n < want)
+            break;
+    }
+}
+
+static int mm_com_getc(MMINTEGER fnbr)
+{
+    MMCom *c = &mm_com[fnbr];
+    int v;
+
+    mm_com_pump(c);
+    if (c->count == 0)
+        return -1;
+    v = c->rx[c->head];
+    c->head = (c->head + 1) % c->size;
+    c->count--;
+    return v;
+}
+
+static void mm_com_putc(MMINTEGER fnbr, int ch)
+{
+    unsigned char b = (unsigned char)ch;
+
+    if (pc3_com_write(mm_com[fnbr].h, &b, 1) != 1)
+        mm_error("Serial port write failed");
+}
+
+static MMINTEGER mm_com_waiting(MMINTEGER fnbr)
+{
+    mm_com_pump(&mm_com[fnbr]);
+    return mm_com[fnbr].count;
+}
+
+static void mm_com_close(MMINTEGER fnbr)
+{
+    MMCom *c = &mm_com[fnbr];
+
+    pc3_com_drain(c->h);        /* what was written goes first */
+    pc3_com_close(c->h);
+    free(c->rx);
+    memset(c, 0, sizeof *c);
+}
+
+/* LINE INPUT's wait for the rest of a line */
+static void mm_com_idle(void)
+{
+    fflush(stdout);
+    usleep(1000);
+}
+#else
+static int mm_com_getc(MMINTEGER fnbr) { (void)fnbr; return -1; }
+static void mm_com_putc(MMINTEGER fnbr, int ch) { (void)fnbr; (void)ch; }
+static MMINTEGER mm_com_waiting(MMINTEGER fnbr) { (void)fnbr; return 0; }
+static void mm_com_close(MMINTEGER fnbr) { (void)fnbr; }
+static void mm_com_idle(void) { }
+#endif
+
+/* the spec's fields: what follows the port's name, split at commas,
+ * the options (EVEN, ODD, S2, 7BIT, INV ...) taken off the end first */
+static int mm_com_upeq(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++)
+        if ((*a >= 'a' && *a <= 'z' ? *a - 32 : *a) != *b)
+            return 0;
+    return *a == 0 && *b == 0;
+}
+
+void mm_open_com(const char *spec, MMINTEGER fnbr, MMINTEGER handled)
+{
+    char buf[MM_STRSZ], *f[24], *p, *e;
+    int nf = 0, i, k, bits = 8, parity = 0, stop = 1, size = 1024, level = 1;
+    long baud = 9600;
+
+    if (fnbr < 1 || fnbr > MM_MAXFILES) MM_RAISE("Invalid file number");
+    if (mm_chan[fnbr].mode != 0) MM_RAISE("File number is already open");
+    strcpy(buf, mm_cstr(spec));
+    p = strchr(buf, ':');
+    if (p == NULL)
+        MM_RAISE("COM specification");
+    *p++ = 0;
+    f[nf++] = buf;
+    for (;;) {                  /* the fields, blanks taken off */
+        e = strchr(p, ',');
+        if (e)
+            *e = 0;
+        while (*p == ' ')
+            p++;
+        for (k = (int)strlen(p); k > 0 && p[k - 1] == ' '; k--)
+            p[k - 1] = 0;
+        if (nf < 24)
+            f[nf++] = p;
+        if (!e)
+            break;
+        p = e + 1;
+    }
+    if (nf == 2 && f[1][0] == 0)
+        nf = 1;                 /* "COM1:" alone */
+    for (i = 0; i < 5; i++) {
+        if (nf > 1 && mm_com_upeq(f[nf - 1], "EVEN")) {
+            if (parity) MM_RAISE("Syntax");
+            parity = 1; nf--;
+        }
+        if (nf > 1 && mm_com_upeq(f[nf - 1], "ODD")) {
+            if (parity) MM_RAISE("Syntax");
+            parity = 2; nf--;
+        }
+        if (nf > 1 && mm_com_upeq(f[nf - 1], "INV"))
+            MM_RAISE("INV is not supported on a PC");
+        if (nf > 1 && mm_com_upeq(f[nf - 1], "DE"))
+            MM_RAISE("DE not Supported");
+        if (nf > 1 && mm_com_upeq(f[nf - 1], "OC"))
+            MM_RAISE("OC not Supported");
+        if (nf > 1 && mm_com_upeq(f[nf - 1], "9BIT"))
+            MM_RAISE("9BIT not Supported");
+        if (nf > 1 && mm_com_upeq(f[nf - 1], "S2")) {
+            stop = 2; nf--;
+        }
+        if (nf > 1 && mm_com_upeq(f[nf - 1], "7BIT")) {
+            bits = 7; nf--;
+        }
+    }
+    if (nf > 5)
+        MM_RAISE("COM specification");
+    if (nf > 1 && f[1][0]) {
+        baud = strtol(f[1], &e, 10);
+        if (*e || baud < 1)
+            MM_RAISE("COM specification");
+    }
+    if (nf > 2 && f[2][0]) {
+        size = (int)strtol(f[2], &e, 10);
+        if (*e || size < 1)
+            MM_RAISE("COM specification");
+    }
+    if (nf > 3 && f[3][0] && !handled)
+        MM_RAISE("A serial port's interrupt must be in a literal string");
+    if (nf > 4 && f[4][0]) {
+        level = (int)strtol(f[4], &e, 10);
+        if (*e || level < 1 || level > size)
+            MM_RAISE("COM specification");
+    }
+#ifdef PC_HOST
+    {
+        MMCom *c = &mm_com[fnbr];
+        int h = pc3_com_open(f[0], baud, bits, parity, stop);
+
+        if (h < 0) {
+            static char msg[MM_STRLEN + 32];
+
+            strcpy(msg, "Cannot open ");
+            strcat(msg, f[0]);
+            MM_RAISE(msg);
+        }
+        c->rx = (unsigned char *)malloc((size_t)size);
+        if (c->rx == NULL) {
+            pc3_com_close(h);
+            MM_RAISE("Not enough memory");
+        }
+        c->h = h;
+        c->size = size;
+        c->head = c->count = 0;
+        c->level = level;
+        c->intr = nf > 3 && f[3][0];
+        mm_chan[fnbr].f = NULL;
+        mm_chan[fnbr].mode = MM_F_COM;
+        mm_chan[fnbr].col = 1;
+    }
+#else
+    (void)bits; (void)parity; (void)stop; (void)baud; (void)level;
+    MM_RAISE("Serial ports are not available on this machine");
+#endif
+}
+
+#ifdef PC_HOST
+static void mm_list_put(const char *s)
+{
+    while (*s)
+        mm_putc((unsigned char)*s++);
+}
+#endif
+
+/* LIST SERIAL PORTS: a line for each port, its name as OPEN takes it
+ * and what the OS says it is.  The board's are to come. */
+void mm_list_serial(void)
+{
+#ifdef PC_HOST
+    static char buf[8192];
+    char *p, *e, *t;
+    int n = pc3_com_list(buf, (int)sizeof buf), k;
+
+    if (n <= 0) {
+        mm_list_put("No serial ports");
+        mm_pr_nl();
+        return;
+    }
+    for (p = buf; *p; p = e + 1) {
+        e = strchr(p, '\n');
+        if (e == NULL)
+            break;
+        *e = 0;
+        t = strchr(p, '\t');
+        if (t != NULL)
+            *t++ = 0;
+        mm_list_put(p);
+        if (t != NULL && *t) {
+            for (k = (int)strlen(p); k < 16; k++)
+                mm_list_put(" ");
+            mm_list_put(" ");
+            mm_list_put(t);
+        }
+        mm_pr_nl();
+    }
+#else
+    MM_RAISE("Serial ports are not available on this machine");
+#endif
+}
+
+MMINTEGER mm_com_ready(MMINTEGER fnbr)
+{
+    if (!mm_is_com(fnbr) || !mm_com[fnbr].intr)
+        return -1;
+    return mm_com_waiting(fnbr) >= mm_com[fnbr].level;
+}
+
 void mm_open(const char *fname, int mode, MMINTEGER fnbr)
 {
     const char *m;
@@ -1891,7 +2166,10 @@ void mm_close(MMINTEGER fnbr)
 {
     if (fnbr < 1 || fnbr > MM_MAXFILES) MM_RAISE("Invalid file number");
     if (mm_chan[fnbr].mode == 0) return;
-    fclose(mm_chan[fnbr].f);
+    if (mm_chan[fnbr].mode == MM_F_COM)
+        mm_com_close(fnbr);
+    else
+        fclose(mm_chan[fnbr].f);
     mm_chan[fnbr].f = NULL;
     mm_chan[fnbr].mode = 0;
 }
@@ -1920,6 +2198,12 @@ void mm_flush(MMINTEGER fnbr)
     if (fnbr == 0) return;              /* the console: nothing to do */
     if (fnbr < 1 || fnbr > MM_MAXFILES) MM_RAISE("Invalid file number");
     if (mm_chan[fnbr].mode == 0) MM_RAISE("File number is not open");
+#ifdef PC_HOST
+    if (mm_chan[fnbr].mode == MM_F_COM) {
+        pc3_com_drain(mm_com[fnbr].h);
+        return;
+    }
+#endif
     fflush(mm_chan[fnbr].f);
 #if !defined(_WIN32)
     fsync(fileno(mm_chan[fnbr].f));
@@ -1930,7 +2214,13 @@ void mm_close_all(void)
 {
     int i;
     for (i = 1; i <= MM_MAXFILES; i++)
-        if (mm_chan[i].mode) { fclose(mm_chan[i].f); mm_chan[i].mode = 0; }
+        if (mm_chan[i].mode) {
+            if (mm_chan[i].mode == MM_F_COM)
+                mm_com_close(i);
+            else
+                fclose(mm_chan[i].f);
+            mm_chan[i].mode = 0;
+        }
 }
 
 /* ---- PRINT, channel aware ------------------------------------------ */
@@ -1942,7 +2232,10 @@ static void mm_outc(MMINTEGER fnbr, int c)
     if (fnbr == 0) { mm_putc(c); return; }
     ch = mm_ch(fnbr, 1);
     if (!ch) return;
-    fputc(c, ch->f);
+    if (ch->mode == MM_F_COM)
+        mm_com_putc(fnbr, c);
+    else
+        fputc(c, ch->f);
     /* the file's own column, counted as the console's is */
     if (c == '\r' || c == '\n') ch->col = 1;
     else if (c == '\t')         ch->col = (((ch->col - 1) / 8) + 1) * 8 + 1;
@@ -2006,6 +2299,8 @@ MMINTEGER mm_eof(MMINTEGER fnbr)
     {
         MMChan *ch = mm_ch(fnbr, 0);
         if (!ch) return 0;
+        if (ch->mode == MM_F_COM)       /* nothing waiting */
+            return mm_com_waiting(fnbr) == 0;
         f = ch->f;
     }
 #ifdef MM_FCC
@@ -2031,6 +2326,8 @@ MMINTEGER mm_loc(MMINTEGER fnbr)
     if (fnbr == 0) return 0;
     if (fnbr < 1 || fnbr > MM_MAXFILES || mm_chan[fnbr].mode == 0)
         mm_error("File number is not open");
+    if (mm_chan[fnbr].mode == MM_F_COM)         /* the bytes waiting */
+        return mm_com_waiting(fnbr);
     return (MMINTEGER)ftell(mm_chan[fnbr].f) + 1;      /* 1 based */
 }
 
@@ -2041,6 +2338,8 @@ MMINTEGER mm_lof(MMINTEGER fnbr)
     if (fnbr == 0) return 0;
     if (fnbr < 1 || fnbr > MM_MAXFILES || mm_chan[fnbr].mode == 0)
         MM_RAISEV("File number is not open", 0);
+    if (mm_chan[fnbr].mode == MM_F_COM)         /* the free TX buffer */
+        return MM_COM_TXBUF;
     f = mm_chan[fnbr].f;
     fflush(f);
     here = ftell(f);
@@ -2054,6 +2353,8 @@ void mm_seek(MMINTEGER fnbr, MMINTEGER pos)
 {
     if (fnbr < 1 || fnbr > MM_MAXFILES || mm_chan[fnbr].mode == 0)
         MM_RAISE("File number is not open");
+    if (mm_chan[fnbr].mode == MM_F_COM)
+        MM_RAISE("Not a file");
     if (pos < 1) pos = 1;
     fflush(mm_chan[fnbr].f);
     fseek(mm_chan[fnbr].f, (long)(pos - 1), SEEK_SET);
@@ -2115,6 +2416,8 @@ static int mm_getc(MMINTEGER fnbr)
     MMChan *ch;
     if (fnbr == 0) return fgetc(stdin);
     ch = mm_ch(fnbr, 0);
+    if (ch && ch->mode == MM_F_COM)
+        return mm_com_getc(fnbr);       /* -1: nothing waiting */
     return ch ? fgetc(ch->f) : -1;
 }
 
@@ -2232,7 +2535,15 @@ static void mm_readline(MMINTEGER fnbr, char *dst)
     }
     for (;;) {
         c = mm_getc(fnbr);
+        if (c == EOF && mm_is_com(fnbr)) {
+            /* MMgetline on a serial port: nothing yet is not the end,
+               the line is, and a NUL is dropped */
+            mm_com_idle();
+            if (mm_poisoned()) break;
+            continue;
+        }
         if (c == EOF) break;
+        if (c == 0 && mm_is_com(fnbr)) continue;
         if (c == '\r') continue;
         if (c == '\n') break;
         /* the console's own editor has the line, so Print Screen can
@@ -2979,6 +3290,8 @@ void mm_ls_print(MMINTEGER fnbr, const MMINTEGER *a, int nl)
        scratch buffer per character */
     if (fnbr == 0) {
         for (i = 0; i < n; i++) mm_putc((unsigned char)p[i]);
+    } else if (mm_is_com(fnbr)) {
+        for (i = 0; i < n; i++) mm_outc(fnbr, (unsigned char)p[i]);
     } else {
         FILE *f = mm_ls_file(fnbr);
         if (!f) return;
@@ -2994,7 +3307,12 @@ MMINTEGER mm_ls_input(MMINTEGER *a, int cells, MMINTEGER fnbr, MMINTEGER n)
     if (n < 0) n = 0;
     if (n > MM_LS_CAP(cells))
         MM_RAISEV("Long string is too small for this operation", 0);
-    {
+    if (mm_is_com(fnbr)) {             /* what is waiting, up to n */
+        int c;
+
+        for (got = 0; got < n && (c = mm_com_getc(fnbr)) >= 0; got++)
+            MM_LS_DATA(a)[got] = (char)c;
+    } else {
         FILE *f = mm_ls_file(fnbr);
         if (!f) return 0;
         got = (MMINTEGER)fread(MM_LS_DATA(a), 1, (size_t)n, f);
@@ -3404,7 +3722,13 @@ MMFLOAT mm_ver(void) { return MM_VERSION; }
 
 static char mm_devbuf[MM_STRSZ];
 
-/* MM.DEVICE$ is "Fuzix" - the firmware, and nothing else.
+/* MM.DEVICE$ is "Fuzix" on the board and "PicoMitePC" on a PC (pc3host,
+ * PC_HOST), Peter's choice of 26 Nov 2026: a PC has the VGA and HDMI
+ * framebuffer model - framebuffers 2 and T, the layers shown live - so
+ * there the PicoMite paths a program picks by name work.  The board has
+ * the LCD model and keeps the answer that every such question is no.
+ *
+ * Before that, "Fuzix" - the firmware, and nothing else - on both.
  *
  * MMBasic answers with the build ("PicoMiteVGA", "PicoMiteHDMIUSB"), and
  * a program's whole use of it is to pick a path: Lazer-Cycle asks
@@ -3421,8 +3745,13 @@ static char *mm_dev_name(int n)
     char t[8];
 
     (void)n;
+#ifdef PC_HOST
+    (void)t;
+    mm_ssetc(mm_devbuf, "PicoMitePC");
+#else
     t[0] = 'F'; t[1] = 'u'; t[2] = 'z'; t[3] = 'i'; t[4] = 'x'; t[5] = 0;
     mm_ssetc(mm_devbuf, t);
+#endif
     return mm_devbuf;
 }
 

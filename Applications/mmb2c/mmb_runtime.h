@@ -258,6 +258,7 @@ char *mm_format(MMFLOAT val, const char *fmt);
 #define MM_F_OUTPUT 2
 #define MM_F_APPEND 3
 #define MM_F_RANDOM 4
+#define MM_F_COM    5   /* a serial port: OPEN "port:..." AS #n */
 
 void mm_open (const char *fname, int mode, MMINTEGER fnbr);
 void mm_close(MMINTEGER fnbr);
@@ -298,6 +299,15 @@ void mm_chdir (const char *path);
 char *mm_cwd  (void);
 char *mm_dir  (const char *spec, int type, int restart); /* DIR$()      */
 void mm_files (const char *spec);                        /* FILES       */
+/* OPEN "port:baud,buffer,interrupt,level,options" AS #n - a serial port
+ * (Serial.c SerialOpen).  handled: the translator read the spec (a
+ * literal) and has armed any interrupt it names.  mm_com_ready: -1 not
+ * an open port with an interrupt, 1 the bytes waiting have reached its
+ * level, 0 not - mmb_int.h's poll. */
+void mm_open_com(const char *spec, MMINTEGER fnbr, MMINTEGER handled);
+MMINTEGER mm_com_ready(MMINTEGER fnbr);
+void mm_list_serial(void);          /* LIST SERIAL PORTS */
+
 #define MM_DIR_FILE 0
 #define MM_DIR_DIR  1
 #define MM_DIR_ALL  2
@@ -1050,9 +1060,9 @@ char *mm_errmsg(void);              /* MM.ERRMSG$                      */
  * It was the Fuzix release (0.30), which read as a very old PicoMite;
  * the release is in the boot banner (decided 24 Oct 2026).  Move it
  * when mmb2c follows a newer firmware. */
-#define MM_VERSION 7.000059
+#define MM_VERSION 8.000003
 MMFLOAT mm_ver(void);               /* MM.VER                          */
-char *mm_device(void);              /* MM.DEVICE$ - "Fuzix"            */
+char *mm_device(void);              /* MM.DEVICE$ - "Fuzix", PicoMitePC */
 char *mm_cmdline(void);             /* MM.CMDLINE$                     */
 void mm_argv_bind(int argc, char **argv);
 
@@ -1061,7 +1071,7 @@ void mm_argv_bind(int argc, char **argv);
  * here; these are the ones a program running on a PC3 can use, and the
  * ones the Game*Mite corpus actually asks for.
  *
- * MM.DEVICE$ is the FIRMWARE ("Fuzix") and MM.INFO(PLATFORM) is the
+ * MM.DEVICE$ is the FIRMWARE ("Fuzix", "PicoMitePC" on a PC) and MM.INFO(PLATFORM) is the
  * BOARD ("PC3"), which is MMBasic's own division of the two.
  */
 int   mm_board_no(void);            /* 2 or 3, for PLATFORM            */

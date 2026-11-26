@@ -2765,28 +2765,30 @@ holds it, with everything the section above says about that.
 ## Asking the machine about itself: `MM.INFO` {#mm-info}
 
 ```basic
-PRINT MM.DEVICE$                  ' Fuzix
+PRINT MM.DEVICE$                  ' Fuzix   (PicoMitePC on a PC)
 PRINT MM.INFO(PLATFORM)           ' PC3   (or PC2)
 PRINT MM.INFO(VERSION)            ' same number as MM.VER
 ```
 
-**`MM.DEVICE$` is `"Fuzix"` — the firmware, and nothing else.** MMBasic
-answers with its build (`PicoMiteVGA`, `PicoMiteHDMIUSB`), and a
+**`MM.DEVICE$` is `"Fuzix"` on a PC3 and `"PicoMitePC"` on a PC.**
+MMBasic answers with its build (`PicoMiteVGA`, `PicoMiteHDMIUSB`), and a
 program's whole use of it is to pick a path: `IF INSTR(MM.DEVICE$,
-"PicoMite")`, `IF INSTR(MM.DEVICE$, "VGA")`. Every one of those
-questions has the answer "no" here, and one word says so cleanly enough
-to test with a plain comparison. **Which machine** it is has moved to
-`MM.INFO(PLATFORM)`, which is where MMBasic keeps it too — `DEVICE` is
-the firmware, `PLATFORM` is the board.
+"PicoMite")`, `IF INSTR(MM.DEVICE$, "VGA")`. On a PC3 every one of those
+questions has the answer "no", and one word says so cleanly enough to
+test with a plain comparison. A PC has the VGA and HDMI PicoMites'
+framebuffers - `2` and `T`, the layers shown live - so there it answers
+as a PicoMite, and a program's PicoMite paths run. **Which machine** it
+is has moved to `MM.INFO(PLATFORM)`, which is where MMBasic keeps it too
+— `DEVICE` is the firmware, `PLATFORM` is the board.
 
 `MM.INFO(...)` and `MM.INFO$(...)` are the same function, as in MMBasic:
 the sub-keyword decides the type, not the `$`.
 
 | sub-keyword | answer |
 |---|---|
-| `DEVICE` | `"Fuzix"` |
+| `DEVICE` | `"Fuzix"`, or `"PicoMitePC"` on a PC |
 | `PLATFORM` | `"PC3"` or `"PC2"` |
-| `VERSION` | as `MM.VER`: the PicoMite version the translator follows, 7.000059 for 7.00.00RC9 (the Fuzix release is in the boot banner) |
+| `VERSION` | as `MM.VER`: the PicoMite version the translator follows, 8.000003 for V8.00.00b3 (the Fuzix release is in the boot banner) |
 | `PATH` | the directory the running program was started from, ending in `/` |
 | `CURRENT` | the program's own file name |
 | `DRIVE` | always `"A:"` — see below |
@@ -3149,6 +3151,52 @@ is simply memory that this program can read.
 
 The whole program is 15 KB of BASIC and compiles to about 63 KB of
 bytecode.
+
+## Serial ports: `OPEN "port:..." AS #n` {#serial}
+
+```basic
+OPEN "COM3:115200" AS #1              ' Windows
+OPEN "/dev/ttyUSB0:115200" AS #1      ' Linux (or "ttyUSB0:115200")
+PRINT #1, "hello"
+LINE INPUT #1, a$
+```
+
+On a PC a program talks to a serial port as a PicoMite talks to `COM1`,
+with the port named as the operating system names it: `COM3` on
+Windows, `/dev/ttyUSB0` or `/dev/ttyACM0` on Linux, where a name with no
+slash is looked for in `/dev`. On Linux the user needs to be in the
+`dialout` group to open one.
+
+`LIST SERIAL PORTS` shows what there is, each port by the name `OPEN`
+takes and what the system says it is:
+
+```
+COM11            USB-SERIAL CH340
+COM45            STMicroelectronics STLink Virtual COM Port
+```
+
+The rest of the spec is the PicoMite's:
+
+```
+OPEN "port:baud, buffer, interrupt, level [, EVEN | ODD] [, S2] [, 7BIT]" AS #n
+```
+
+The baud rate is 9600 if left out, the receive buffer 1024 bytes, and
+`interrupt` a `SUB` run while the bytes waiting are at least `level` (1
+if left out). `EVEN` or `ODD` set the parity, `S2` two stop bits and
+`7BIT` seven data bits; there is no flow control. As on a PicoMite:
+`LOC(#n)` is how many bytes are waiting, `EOF(#n)` is true when none
+are, `INPUT$(n, #n)` takes up to n of them without waiting, `LINE INPUT`
+and `INPUT` wait for a line feed, `LOF(#n)` is the free space of the
+256-byte transmit buffer, and `CLOSE` waits for what was written to go.
+
+Differences: the interrupt has to be in a spec written as a string
+literal, because it is armed when the program is translated; `INV` is
+refused, as a PC's port cannot invert its signals; and on Linux the rate
+must be one the system has a name for (50 to 4000000 in the usual
+steps). Bytes beyond the buffer stay with the operating system rather
+than overwrite the oldest. On a PC3 itself serial ports are not there
+yet, and `OPEN` says so.
 
 ## Networking from BASIC: the WEB family {#web-family}
 

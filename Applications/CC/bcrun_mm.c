@@ -264,6 +264,9 @@ static void w_mid_assign(void) { mm_mid_assign(Ps(0), LL(1), LL(3), Ps(5)); A = 
 /* files */
 static void w_open(void)     { mm_open(Ps(0), I(1), LL(2)); A = 0; }
 static void w_close(void)    { mm_close(LL(0)); A = 0; }
+static void w_open_com(void) { mm_open_com(Ps(0), LL(1), LL(3)); A = 0; }
+static void w_com_ready(void) { A = mm_com_ready(LL(0)); }
+static void w_list_serial(void) { mm_list_serial(); A = 0; }
 static void w_flush(void)    { mm_flush(LL(0)); A = 0; }
 static void w_close_all(void){ mm_close_all(); A = 0; }
 static void w_fpr_s(void)    { mm_fpr_s(LL(0), Ps(2)); A = 0; }
@@ -694,6 +697,9 @@ static const struct mmwrap {
 	{ "mm_mid_assign",	w_mid_assign },
 	{ "mm_open",		w_open },
 	{ "mm_close",		w_close },
+	{ "mm_open_com",		w_open_com },
+	{ "mm_com_ready",		w_com_ready },
+	{ "mm_list_serial",	w_list_serial },
 	{ "mm_flush",		w_flush },
 	{ "mm_close_all",	w_close_all },
 	{ "mm_fpr_s",		w_fpr_s },
