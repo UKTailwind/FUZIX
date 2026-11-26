@@ -220,12 +220,14 @@ int main(int argc, char **argv)
 				"[x [y [mode [ximage [yimage [scale]]]]]]\n");
 		return 1;
 	}
-	if (argc > 2) xorg  = atoi(argv[2]);
-	if (argc > 3) yorg  = atoi(argv[3]);
+	/* An argument left out arrives as an empty string (MMBasic lets
+	   any optional one be blank), and keeps its default. */
+	if (argc > 2 && argv[2][0]) xorg  = atoi(argv[2]);
+	if (argc > 3 && argv[3][0]) yorg  = atoi(argv[3]);
 	/* argv[4] is the dither mode: parsed, not acted on - see above. */
-	if (argc > 5) xoff  = atoi(argv[5]);
-	if (argc > 6) yoff  = atoi(argv[6]);
-	if (argc > 7) scale = atoi(argv[7]);
+	if (argc > 5 && argv[5][0]) xoff  = atoi(argv[5]);
+	if (argc > 6 && argv[6][0]) yoff  = atoi(argv[6]);
+	if (argc > 7 && argv[7][0]) scale = atoi(argv[7]);
 	if (scale != 1 && scale != 2 && scale != 4 && scale != 8)
 		die("scale must be 1, 2, 4 or 8");
 	if (xoff < 0 || yoff < 0)

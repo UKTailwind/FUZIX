@@ -1021,6 +1021,13 @@ void statement_inner(void)
             struct val v;
             if (!first && !accept_op(","))
                 break;
+            if (!first && (is_op(",", 0) || stmt_end())) {
+                /* a blank argument, as MMBasic lets any optional one
+                   be: the program gets an empty string, which the
+                   loaders read as "the default" */
+                emit(sfmt("mm_run_arg(%s);", c_string_literal("")));
+                continue;
+            }
             v = expr();
             if (v.ty == TY_S)
                 emit(sfmt("mm_run_arg(%s);", v.code));
@@ -1049,27 +1056,34 @@ void statement_inner(void)
             return;
         }
         if (is_kw("LOADPNG", 1)) {
-            /* SPRITE LOADPNG [#]n, f$ [, transparent [, cutoff]]
+            /* SPRITE LOADPNG [#]n, f$ [, transparent [, cutoff
+                   [, x [, y [, w [, h]]]]]]
 
                The decoding is /usr/bin/loadpng's, in another process,
                and the sprite comes back down a pipe - see mms_loadpng.
                transparent carries MMBasic's sign trick (-n = substitute
                n for opaque black) and is passed through untouched;
                cutoff defaults to 30 here, not LOAD PNG's 20, as in the
-               reference. */
-            const char *n, *f, *t = "0LL", *c = "30LL";
+               reference.  x, y, w and h are the part of the image to
+               load (PicoMite 4d91e6c), as SPRITE LOADBMP's; any may be
+               left blank. */
+            const char *n, *f;
+            const char *opt[6] = { "0LL", "30LL", "0LL", "0LL", "-1LL",
+                                   "-1LL" };
+            int k = 0;
 
             cv.i += 2;
             accept_op("#");
             n = as_int(expr());
             expect_op(",");
             f = as_str(expr());
-            if (accept_op(",")) {
-                t = as_int(expr());
-                if (accept_op(","))
-                    c = as_int(expr());
+            while (k < 6 && accept_op(",")) {
+                if (!is_op(",", 0) && !stmt_end())
+                    opt[k] = as_int(expr());
+                k++;
             }
-            emit(sfmt("mms_loadpng(%s, %s, %s, %s);", n, f, t, c));
+            emit(sfmt("mms_loadpng(%s, %s, %s, %s, %s, %s, %s, %s);", n, f,
+                      opt[0], opt[1], opt[2], opt[3], opt[4], opt[5]));
             return;
         }
         if (is_kw("LOADBMP", 1)) {

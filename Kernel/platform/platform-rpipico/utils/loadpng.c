@@ -1,6 +1,6 @@
 /* loadpng - draw a PNG on the screen.
  *
- *   loadpng file.png [x [y [transparent [cutoff]]]]
+ *   loadpng file.png [x [y [transparent [cutoff [ximage [yimage]]]]]]
  *
  * MMBasic's LOAD PNG, as a program, on the same terms as loadimage and
  * loadjpg: the interpreter hands /usr/bin/loadpng an argv and waits.
@@ -35,9 +35,19 @@
  * quantiser - RGB121, bit 3 red, bits 2-1 green, bit 0 blue - which is
  * how MMBasic's RGB121map is built (MYRTLE, 0b0010, is RGB(0,64,0)).
  *
+ * CROPPING (PicoMite 4d91e6c).  The image from column ximage and row
+ * yimage is placed at x, y and cropped to the screen, as LOAD BMP and
+ * LOAD JPG crop; an offset outside the image is "Coordinates".  (It
+ * used to refuse a picture bigger than the screen with "Image too
+ * large".)  The firmware streams its decoder there so that a PLAY
+ * running in the interpreter is not starved; here the decoding is this
+ * process's and the sound is the kernel's, so the whole-image decode
+ * stays.  A name with no extension gets ".png".  Any argument may be
+ * empty, as MMBasic lets one be blank, and then takes its default.
+ *
  * ---- SPRITE MODE -----------------------------------------------------
  *
- *   loadpng -s file.png [transparent [cutoff]]
+ *   loadpng -s file.png [transparent [cutoff [x [y [w [h]]]]]]
  *
  * is MMBasic's SPRITE LOADPNG, and writes the decoded sprite to STDOUT
  * rather than to the screen, because the sprite belongs to the BASIC
@@ -57,7 +67,10 @@
  * the index to substitute for opaque BLACK" (so artwork whose black
  * would vanish against a black background can be remapped), with the
  * transparent index then 0.  cutoff defaults to 30 here, not 20 - the
- * reference uses a different default for the sprite form.
+ * reference uses a different default for the sprite form.  x, y, w and h
+ * are the part of the image to load, as SPRITE LOADBMP's (4d91e6c): w
+ * and h of -1 are the rest of it, and a part outside the image is
+ * "Coordinates".
  */
 
 #include <stdio.h>
@@ -240,24 +253,24 @@ static const unsigned char *png_row(const unsigned char *px, int w, int y)
  * sprite buffer.  Nothing is drawn and the display is never opened -
  * this runs happily with no graphics mode set.
  */
-static int sprite_out(const unsigned char *pic, int w, int h,
-		      int transparent, int remap, int cutoff)
+static int sprite_out(const unsigned char *pic, int w, int xo, int yo,
+		      int sw, int sh, int transparent, int remap, int cutoff)
 {
 	unsigned char hdr[4], *row;
 	const unsigned char *px;
 	int x, y;
 
-	hdr[0] = (unsigned char)(w & 0xFF);
-	hdr[1] = (unsigned char)((w >> 8) & 0xFF);
-	hdr[2] = (unsigned char)(h & 0xFF);
-	hdr[3] = (unsigned char)((h >> 8) & 0xFF);
+	hdr[0] = (unsigned char)(sw & 0xFF);
+	hdr[1] = (unsigned char)((sw >> 8) & 0xFF);
+	hdr[2] = (unsigned char)(sh & 0xFF);
+	hdr[3] = (unsigned char)((sh >> 8) & 0xFF);
 	if (write(1, hdr, 4) != 4)
 		die("cannot write the sprite");
 
-	row = (unsigned char *)GetMemory((unsigned long)w);
-	for (y = 0; y < h; y++) {
-		px = png_row(pic, w, y);
-		for (x = 0; x < w; x++, px += 4) {
+	row = (unsigned char *)GetMemory((unsigned long)(sw ? sw : 1));
+	for (y = 0; y < sh; y++) {
+		px = png_row(pic, w, yo + y) + (unsigned long)xo * 4;
+		for (x = 0; x < sw; x++, px += 4) {
 			unsigned char c;
 
 			if (px[3] > cutoff) {
@@ -273,10 +286,36 @@ static int sprite_out(const unsigned char *pic, int w, int h,
 				c = (unsigned char)transparent;
 			row[x] = c;
 		}
-		if (write(1, row, w) != w)
+		if (write(1, row, sw) != sw)
 			die("cannot write the sprite");
 	}
 	return 0;
+}
+
+/* An argument left out arrives as an empty string, because MMBasic lets
+   any optional one be blank - loadimage's arg(). */
+static int arg(int argc, char **argv, int n, int dflt)
+{
+	if (n >= argc || argv[n][0] == '\0')
+		return dflt;
+	return atoi(argv[n]);
+}
+
+/* AppendDefaultExtension: ".png" when the name has no extension */
+static char *png_name(const char *name)
+{
+	const char *p = name + strlen(name);
+	char *buf;
+
+	while (p > name && p[-1] != '/' && p[-1] != '\\')
+		if (*--p == '.')
+			return (char *)name;
+	buf = malloc(strlen(name) + 5);
+	if (buf == NULL)
+		return (char *)name;
+	strcpy(buf, name);
+	strcat(buf, ".png");
+	return buf;
 }
 
 /* ---- main ----------------------------------------------------------- */
@@ -287,6 +326,7 @@ int main(int argc, char **argv)
 	const unsigned char *px;
 	unsigned char *file;
 	int xorg = 0, yorg = 0, transparent = 0, cutoff = 20;
+	int xoff = 0, yoff = 0, sw = -1, sh = -1, ex, ey;
 	int w, h, x, y, fd, sprite = 0, remap = -1;
 	long size;
 	char **av = argv;
@@ -305,14 +345,19 @@ int main(int argc, char **argv)
 
 	if (ac < 2) {
 		fprintf(stderr, "usage: loadpng file.png "
-				"[x [y [transparent [cutoff]]]]\n"
+				"[x [y [transparent [cutoff [ximage [yimage]]]]]]\n"
 				"       loadpng -s file.png "
-				"[transparent [cutoff]]   (sprite, to stdout)\n");
+				"[transparent [cutoff [x [y [w [h]]]]]]   "
+				"(sprite, to stdout)\n");
 		return 1;
 	}
 	if (sprite) {
-		if (ac > 2) transparent = atoi(av[2]);
-		if (ac > 3) cutoff = atoi(av[3]);
+		transparent = arg(ac, av, 2, 0);
+		cutoff = arg(ac, av, 3, 30);
+		xoff = arg(ac, av, 4, 0);
+		yoff = arg(ac, av, 5, 0);
+		sw = arg(ac, av, 6, -1);
+		sh = arg(ac, av, 7, -1);
 		/* MMBasic's sign trick: -n means "substitute index n for
 		   opaque black", and the transparent index is then 0. */
 		if (transparent < 0) {
@@ -322,13 +367,17 @@ int main(int argc, char **argv)
 		if (transparent > 15 || remap > 15)
 			die("transparent colour must be -15 to 15");
 	} else {
-		if (ac > 2) xorg = atoi(av[2]);
-		if (ac > 3) yorg = atoi(av[3]);
-		if (ac > 4) transparent = atoi(av[4]);
-		if (ac > 5) cutoff = atoi(av[5]);
+		xorg = arg(ac, av, 2, 0);
+		yorg = arg(ac, av, 3, 0);
+		transparent = arg(ac, av, 4, 0);
+		cutoff = arg(ac, av, 5, 20);
+		xoff = arg(ac, av, 6, 0);
+		yoff = arg(ac, av, 7, 0);
 		if (transparent < -1 || transparent > 15)
 			die("transparent colour must be -1 to 15");
 	}
+	if (xoff < 0 || yoff < 0)
+		die("Coordinates");
 	if (cutoff < 1 || cutoff > 254)
 		die("cutoff must be 1 to 254");
 
@@ -343,7 +392,7 @@ int main(int argc, char **argv)
 	}
 
 	/* The file, whole, in the arena: upng wants it as one block. */
-	fd = open(av[1], O_RDONLY);
+	fd = open(png_name(av[1]), O_RDONLY);
 	if (fd < 0)
 		die("cannot open the file");
 	size = lseek(fd, 0L, 2);
@@ -370,11 +419,18 @@ int main(int argc, char **argv)
 		die("not a PNG, or a PNG this decoder cannot read");
 	w = (int)upng_get_width(upng);
 	h = (int)upng_get_height(upng);
-	/* The reference's own bound, and its wording.  A sprite is not
+	/* The part of the picture wanted must be in it.  A sprite is not
 	   bounded by the screen: it is a buffer, and may be shown
 	   anywhere or clipped when it is. */
-	if (!sprite && (w + xorg > gi.width || h + yorg > gi.height))
-		die("Image too large");
+	if (sprite) {
+		if (sw == -1)
+			sw = w - xoff;
+		if (sh == -1)
+			sh = h - yoff;
+		if (sw < 0 || sh < 0 || sw + xoff > w || sh + yoff > h)
+			die("Coordinates");
+	} else if (xoff >= w || yoff >= h)
+		die("Coordinates");
 	if (upng_decode(upng) != UPNG_EOK)
 		die("the PNG could not be decoded");
 	pxfmt = upng_get_format(upng);
@@ -386,19 +442,28 @@ int main(int argc, char **argv)
 		rgbarow = (unsigned char *)GetMemory((unsigned long)w * 4);
 
 	if (sprite)
-		return sprite_out(upng_get_buffer(upng), w, h, transparent,
-				  remap, cutoff);
-	for (y = 0; y < h; y++) {
-		int sy = yorg + y;
+		return sprite_out(upng_get_buffer(upng), w, xoff, yoff, sw, sh,
+				  transparent, remap, cutoff);
+	/* image pixel 0,0 would be at ex, ey; image column xoff and row
+	   yoff are at x, y, and what lands on the screen is drawn */
+	ex = xorg - xoff;
+	ey = yorg - yoff;
+	for (y = yoff; y < h; y++) {
+		int sy = ey + y;
 
-		if (sy < 0 || sy >= gi.height)
+		if (sy >= gi.height)
+			break;
+		if (sy < 0)
 			continue;
-		px = png_row(upng_get_buffer(upng), w, y);
-		for (x = 0; x < w; x++, px += 4) {
-			int sx = xorg + x;
+		px = png_row(upng_get_buffer(upng), w, y) +
+		     (unsigned long)xoff * 4;
+		for (x = xoff; x < w; x++, px += 4) {
+			int sx = ex + x;
 
-			if (sx < 0 || sx >= gi.width)
+			if (sx < 0)
 				continue;
+			if (sx >= gi.width)
+				break;
 			if (px[3] > cutoff)
 				plot(sx, sy, tocolour(px[0], px[1], px[2]));
 			else if (transparent >= 0)

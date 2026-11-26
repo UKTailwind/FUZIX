@@ -7577,7 +7577,7 @@ class Conv(object):
             # LOAD IMAGE f$ [, x, y]
             # LOAD BMP   f$ [, x, y]          the reference's own synonym
             # LOAD JPG   f$ [, x, y [, mode [, xi, yi [, scale]]]]
-            # LOAD PNG   f$ [, x, y [, transparent [, cutoff]]]
+            # LOAD PNG   f$ [, x, y [, transparent [, cutoff [, xi, yi]]]]
             #
             # An argv, not a command line: nothing to quote and no
             # shell in the middle.  MMBasic has no SYSTEM - it is
@@ -7606,6 +7606,12 @@ class Conv(object):
             while True:
                 if not first and not self.accept_op(','):
                     break
+                if not first and (self.is_op(',') or self.stmt_end()):
+                    # a blank argument, as MMBasic lets any optional one
+                    # be: the program gets an empty string, which the
+                    # loaders read as "the default"
+                    self.emit('mm_run_arg(%s);' % c_string_literal(''))
+                    continue
                 v = self.expr()
                 if v[1] == TY_S:
                     self.emit('mm_run_arg(%s);' % v[0])
@@ -7855,27 +7861,31 @@ class Conv(object):
                 self.emit('mmi_st_noint();')
                 return
             if self.is_kw('LOADPNG', 1):
-                # SPRITE LOADPNG [#]n, f$ [, transparent [, cutoff]]
+                # SPRITE LOADPNG [#]n, f$ [, transparent [, cutoff
+                #     [, x [, y [, w [, h]]]]]]
                 #
                 # The decoding is /usr/bin/loadpng's, in another
                 # process, and the sprite comes back down a pipe - see
                 # mms_loadpng.  transparent carries MMBasic's sign
                 # trick (-n = substitute n for opaque black) and is
                 # passed through untouched; cutoff defaults to 30 here,
-                # not LOAD PNG's 20, as in the reference.
+                # not LOAD PNG's 20, as in the reference.  x, y, w and h
+                # are the part of the image to load (PicoMite 4d91e6c),
+                # as SPRITE LOADBMP's; any may be left blank.
                 self.i += 2
                 self.accept_op('#')
                 n = self.as_int(self.expr())
                 self.expect_op(',')
                 f = self.as_str(self.expr())
-                t = '0LL'
-                c = '30LL'
-                if self.accept_op(','):
-                    t = self.as_int(self.expr())
-                    if self.accept_op(','):
-                        c = self.as_int(self.expr())
-                self.emit('mms_loadpng(%s, %s, %s, %s);'
-                          % (n, f, t, c))
+                opt = ['0LL', '30LL', '0LL', '0LL', '-1LL', '-1LL']
+                k = 0
+                while k < 6 and self.accept_op(','):
+                    if not self.is_op(',', 0) and not self.stmt_end():
+                        opt[k] = self.as_int(self.expr())
+                    k += 1
+                self.emit('mms_loadpng(%s, %s, %s, %s, %s, %s, %s, %s);'
+                          % (n, f, opt[0], opt[1], opt[2], opt[3], opt[4],
+                             opt[5]))
                 return
             if self.is_kw('LOADBMP', 1):
                 # SPRITE LOADBMP [#]n, f$ [, x [, y [, w [, h]]]]

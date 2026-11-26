@@ -1904,7 +1904,7 @@ still resident in memory.
 ### `LOAD PNG`
 
 ```
-LOAD PNG fname$ [,x] [,y] [,transparent] [,cutoff]
+LOAD PNG fname$ [,x] [,y] [,transparent] [,cutoff] [,ximage] [,yimage]
 ```
 
 MMBasic's own upng, as the `loadpng` program. It reads 8-bit RGBA,
@@ -1930,6 +1930,13 @@ LOAD PNG "apple.png"               ' a black box around it
 
 `cutoff` is the alpha value above which a pixel counts as opaque, 1 to
 254, default 20.
+
+A picture bigger than the screen is cropped to it, as `LOAD BMP` and
+`LOAD JPG` crop. `ximage` and `yimage` say which part is shown: the
+picture's column `ximage`, row `yimage` goes at `x`, `y`, and an offset
+outside the picture is refused with `Coordinates`. `.png` is added to a
+name with no extension, and any argument may be left blank to keep its
+default: `LOAD PNG "map", 0, 0, , , 200, 100`.
 
 Note that an *opaque* black pixel is drawn black whichever you choose —
 nothing can tell "background" from "black" once the alpha channel says
@@ -4182,8 +4189,8 @@ The full argument lists, which are MMBasic's:
 | `loadimage` | `file.bmp [x [y [mode [ximage [yimage]]]]]` |
 | `loadimage -s` | `file.bmp [xorigin [yorigin [width [height]]]]` |
 | `loadjpg` | `file.jpg [x [y [mode [ximage [yimage [scale]]]]]]` |
-| `loadpng` | `file.png [x [y [transparent [cutoff]]]]` |
-| `loadpng -s` | `file.png [transparent [cutoff]]` |
+| `loadpng` | `file.png [x [y [transparent [cutoff [ximage [yimage]]]]]]` |
+| `loadpng -s` | `file.png [transparent [cutoff [xorigin [yorigin [width [height]]]]]]` |
 
 `ximage`/`yimage` are the offset **into the picture**, so a large image
 can be cropped rather than scaled. `saveimage` writes any rectangle as
@@ -4215,10 +4222,11 @@ one colour index per byte. That is how `SPRITE LOADPNG` and `SPRITE
 LOADBMP` work, and it is also the way to convert artwork from the
 shell.
 
-`loadimage -s` takes a **window** rather than a position — `xorigin`,
-`yorigin`, `width`, `height`, all of the picture from that point by
-default — because that is what `SPRITE LOADBMP` takes, and cutting one
-tile out of a sheet is most of what it is for. A window that runs off
+`loadimage -s` and `loadpng -s` take a **window** rather than a
+position — `xorigin`, `yorigin`, `width`, `height`, all of the picture
+from that point by default — because that is what `SPRITE LOADBMP` and
+`SPRITE LOADPNG` take, and cutting one tile out of a sheet is most of
+what it is for. A window that runs off
 the picture is refused (`Coordinates`, the reference's own word) rather
 than quietly clipped.
 

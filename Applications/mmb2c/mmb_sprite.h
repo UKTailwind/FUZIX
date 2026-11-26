@@ -1376,7 +1376,7 @@ MMG_FN void mms_load(const char *file, MMINTEGER start, MMINTEGER mode)
 
 /* SPRITE LOADARRAY [#]n, w, h, array() - the array holds RGB888
  * colours; RGB121 is pure bit extraction, as the reference does. */
-/* ---- SPRITE LOADPNG #n, f$ [, transparent [, cutoff]] ---------------
+/* ---- SPRITE LOADPNG #n, f$ [, transparent [, cutoff [, x, y, w, h]]] -
  *
  *	The decoding happens in ANOTHER PROCESS - /usr/bin/loadpng with
  *	its -s flag - and the sprite comes back down a pipe.  upng has to
@@ -1393,10 +1393,13 @@ MMG_FN void mms_load(const char *file, MMINTEGER start, MMINTEGER mode)
  *	`transparent` carries MMBasic's sign trick, and it is passed
  *	through untouched: 0-15 is the index given to pixels below the
  *	cutoff, and -n means "substitute index n for opaque black".  The
- *	loader applies it; nothing here needs to know.
+ *	loader applies it; nothing here needs to know.  xo, yo, wi and hi
+ *	are the part of the image (PicoMite 4d91e6c), as mms_loadbmp's:
+ *	-1 for wi or hi is the rest of it, and the loader checks it.
  */
 MMG_FN void mms_loadpng(MMINTEGER bn, const char *file, MMINTEGER targ,
-			MMINTEGER cutoff)
+			MMINTEGER cutoff, MMINTEGER xo, MMINTEGER yo,
+			MMINTEGER wi, MMINTEGER hi)
 {
 	struct mmb_sprite *sb = mms_get(bn);
 	unsigned char hdr[4];
@@ -1410,6 +1413,8 @@ MMG_FN void mms_loadpng(MMINTEGER bn, const char *file, MMINTEGER targ,
 		MM_RAISE("Invalid transparent colour");
 	if (cutoff < 1 || cutoff > 254)
 		MM_RAISE("Invalid cutoff");
+	if (xo < 0 || yo < 0)
+		MM_RAISE("Coordinates");
 
 	mm_run_begin();
 	mm_run_arg("\007loadpng");
@@ -1417,6 +1422,10 @@ MMG_FN void mms_loadpng(MMINTEGER bn, const char *file, MMINTEGER targ,
 	mm_run_arg(file);
 	mm_run_arg_i(targ);
 	mm_run_arg_i(cutoff);
+	mm_run_arg_i(xo);
+	mm_run_arg_i(yo);
+	mm_run_arg_i(wi);
+	mm_run_arg_i(hi);
 	fd = mm_run_pipe();
 	if (fd < 0)
 		return;			/* mm_run_pipe raised it */
