@@ -3725,16 +3725,19 @@ static char mm_devbuf[MM_STRSZ];
 /* MM.DEVICE$ is "Fuzix" on the board and "PicoMitePC" on a PC (pc3host,
  * PC_HOST), Peter's choice of 26 Nov 2026: a PC has the VGA and HDMI
  * framebuffer model - framebuffers 2 and T, the layers shown live - so
- * there the PicoMite paths a program picks by name work.  The board has
- * the LCD model and keeps the answer that every such question is no.
+ * there a program's test for "PicoMite" in the name finds it and that
+ * path runs.  The board has the LCD model and keeps the answer that
+ * every such question is no.
  *
  * Before that, "Fuzix" - the firmware, and nothing else - on both.
  *
  * MMBasic answers with the build ("PicoMiteVGA", "PicoMiteHDMIUSB"), and
  * a program's whole use of it is to pick a path: Lazer-Cycle asks
  * InStr(Mm.Device$, "PicoMite"), Pico-Frog asks for "VGA" or "HDMI".
- * Every one of those questions has the answer "no" here, and one word
- * says so cleanly enough to test with a plain comparison.
+ * On the board every one of those questions has the answer "no", and
+ * one word says so cleanly enough to test with a plain comparison.  On
+ * a PC the first finds "PicoMite"; "VGA", "HDMI" and a plain
+ * = "PicoMite" (the LCD build's name) still answer no.
  *
  * WHICH machine it is has moved to MM.INFO(PLATFORM), which is where
  * MMBasic keeps it too - DEVICE is the firmware, PLATFORM is the board.
@@ -8058,10 +8061,11 @@ static int mm_fb_resize_hw(struct mm_gfx_resize *g) { (void)g; return 0; }
 
 /* MM.INFO(WRITEBUFF): where the picture being drawn is, as an address a
  * program can PEEK, POKE and MEMORY COPY - the firmware's WriteBuf.
- * pc3host maps pc3d's three buffers into the program (pc3_fb_map), N
- * then F then L, in this machine's packing, which for 4 bits a pixel
- * has the HIGH nibble the left pixel where a PicoMite has the low.
- * Nowhere else is the picture in a program's reach, and it says so. */
+ * pc3host maps pc3d's five buffers into the program (pc3_fb_map), N,
+ * F, L, 2 and T in that order, each in a PicoMite's own packing: at 4
+ * bits a pixel the LOW nibble is the left pixel, at 1 bit the leftmost
+ * is bit 0 (display_priv.h's PX4_ and PX1_ under PC_HOST).  Nowhere
+ * else is the picture in a program's reach, and it says so. */
 MMINTEGER mm_writebuff(void)
 {
 #ifdef PC_HOST

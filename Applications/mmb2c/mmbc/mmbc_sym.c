@@ -27,10 +27,11 @@ void errors_add_dedup(const char *msg)
     errors_add(msg);
 }
 
-/* self.err: raise MMError("line %d: %s") */
+/* self.err: raise MMError("line %d: %s").  As big as err_msg: MM.INFO's
+ * list of what is translated passed 400 characters. */
 void cv_err(const char *fmt, ...)
 {
-    char buf[400];
+    char buf[512];
     va_list ap;
 
     va_start(ap, fmt);

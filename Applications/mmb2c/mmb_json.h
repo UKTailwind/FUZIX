@@ -13,16 +13,18 @@
  *	  a strict recursive scan of the root value before walking;
  *	  trailing text after the root is ignored, as cJSON_Parse
  *	  ignores it;
- *	- INTERMEDIATE fields are case-sensitive, the FINAL field is
- *	  case-insensitive (GetObjectItemCaseSensitive vs
- *	  GetObjectItem, and the walk ALWAYS ends with a field lookup -
- *	  so a path ending in [n] looks up an empty field and yields
- *	  "", which the WebMite's own jsontest.bas documents);
+ *	- the path is V8's (Custom.c fun_json, 9749c83): keys separated
+ *	  by '.', each followed by any number of [n], in any order, so a
+ *	  path may start with [n] (a document that is an array) or end
+ *	  with one, which yields that element;
+ *	- the key that ENDS the path is case-insensitive, every other
+ *	  key case-sensitive, one followed by [n] included
+ *	  (GetObjectItem vs GetObjectItemCaseSensitive);
  *	- an [n] step takes the n'th CHILD, so it indexes an object's
  *	  members as happily as an array - cJSON_GetArrayItem's own
- *	  behaviour;
- *	- field names cap at 31 characters (field[32] there, minus the
- *	  overrun), indexes at 5 digits;
+ *	  behaviour; n is read as atoi reads it;
+ *	- a key over 63 characters, an index over 7, a [ with no ] or
+ *	  an empty [] is "Invalid JSON path";
  *	- number leaf: integral -> IntToStr, else FloatToStr(0, AUTO,
  *	  ' '); booleans are the words; a string leaf arrives with its
  *	  escapes DECODED (\uXXXX to UTF-8 included), capped at the

@@ -5902,8 +5902,9 @@ class Conv(object):
                  "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                  "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
                  "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, WRITEBUFF, "
-                 "LCDPANEL, SYSTEM I2C, SDCARD, USBDRIVE, IP ADDRESS, "
-                 "MAX CONNECTIONS, OPTION BASE, PIN n, PINNO, FILESIZE, "
+                 "LCDPANEL, SYSTEM I2C, SDCARD, USBDRIVE, TELNET, "
+                 "IP ADDRESS, MAX CONNECTIONS, BBC BUFFER [channel], "
+                 "OPTION BASE, PIN n, PINNO, FILESIZE, "
                  "EXISTS FILE, EXISTS DIR, FONT, FONT ADDRESS n and "
                  "FLASH ADDRESS n" % t[1])
 
@@ -7367,8 +7368,9 @@ class Conv(object):
             return
         if up == 'MODE':
             # MODE 1  640x480, one bit    MODE 2  320x240, 16 colours
-            # The PicoMite VGA numbering, which is also the first two
-            # HDMI modes; the runtime maps it onto the kernel's own.
+            # MODE 3  640x480, 16 colours, a PC's only
+            # The PicoMite VGA and HDMI numbering; the runtime maps it
+            # onto the kernel's own.
             self.i += 1
             n = self.expr()
             self.emit('mm_mode(%s);' % self.as_int(n))

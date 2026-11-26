@@ -758,8 +758,9 @@ void statement_inner(void)
     }
     if (strcmp(up, "MODE") == 0) {
         /* MODE 1  640x480, one bit    MODE 2  320x240, 16 colours
-           The PicoMite VGA numbering, which is also the first two
-           HDMI modes; the runtime maps it onto the kernel's own. */
+           MODE 3  640x480, 16 colours, a PC's only
+           The PicoMite VGA and HDMI numbering; the runtime maps it
+           onto the kernel's own. */
         struct val n;
         cv.i++;
         n = expr();

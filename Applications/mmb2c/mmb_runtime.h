@@ -438,10 +438,11 @@ void mm_mid_assign(char *dst, MMINTEGER start, MMINTEGER num, const char *repl);
  * path stays one call, rather than the caller fetching it first. */
 #define MM_CUR (-1)
 
-/* MODE n: 1 = 640x480 one bit, 2 = 320x240 sixteen colours.  The
- * PicoMite VGA numbering, which is also the first two HDMI modes - NOT
- * the kernel's own, where 0-5 are the BBC modes and the 320x240 screen
- * is 7.  The mapping is in mm_mode. */
+/* MODE n: 1 = 640x480 one bit, 2 = 320x240 sixteen colours, 3 =
+ * 640x480 sixteen colours (a PC's only; the board refuses it).  The
+ * PicoMite VGA and HDMI numbering - NOT the kernel's own, where 0-5 are
+ * the BBC modes, the 320x240 screen is 7 and the 640x480 one 8.  The
+ * mapping is in mm_mode. */
 void mm_mode(MMINTEGER n);
 /* COLOUR fg [, bg].  Pass MM_CUR as bg to leave the background alone.
  * The kernel holds one colour and knows nothing of a background; bg is

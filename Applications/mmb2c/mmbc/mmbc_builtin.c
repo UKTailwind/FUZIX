@@ -1711,8 +1711,9 @@ struct val builtin_raw(const char *up)
                    "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                    "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
                    "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, WRITEBUFF, "
-                   "LCDPANEL, SYSTEM I2C, SDCARD, USBDRIVE, IP ADDRESS, "
-                   "MAX CONNECTIONS, OPTION BASE, PIN n, PINNO, FILESIZE, "
+                   "LCDPANEL, SYSTEM I2C, SDCARD, USBDRIVE, TELNET, "
+                   "IP ADDRESS, MAX CONNECTIONS, BBC BUFFER [channel], "
+                   "OPTION BASE, PIN n, PINNO, FILESIZE, "
                    "EXISTS FILE, EXISTS DIR, FONT, FONT ADDRESS n and "
                    "FLASH ADDRESS n", t->text);
         /* MM.INFO(FONT): the current font's number, as fun_info's

@@ -34,12 +34,20 @@ present means Pico Computer 3, absent means Pico Computer 2. The
 practical difference is the SD card wiring, handled automatically; the
 boot banner names the detected board.
 
+**pc3host** is the same environment on a Linux or Windows PC: `mmbc`,
+`cc`, `bcrun`, `mmbedit`, the image tools and the players, with the
+display in a window. A translated program runs there unchanged. A PC
+has memory and ports the board does not, so a few things are there
+alone, each marked "on a PC" where it is described: `MODE 3`,
+framebuffer `2` and the live layers, the raster commands, and serial
+ports.
+
 Headline specification as configured here:
 
 * CPU at 378 MHz, which is what the video timings are cut from: the
   text console lands on 640x480 at exactly 60.0 Hz and the graphics
   modes on 1024x768 at 70.6 Hz
-* 340 KB of program RAM managed as 4 KB pages, with the 8 MB PSRAM
+* 336 KB of program RAM managed as 4 KB pages, with the 8 MB PSRAM
   behind it — up to 64 concurrent processes, and a single process may
   have about 292 KB of it. A swapped-out process is a PSRAM allocation
   the size of the process, not a slot on a device, so nothing is
@@ -273,7 +281,8 @@ copied. `mkcard.sh` decides the layout, and its `FAT_MB` and `ROOT_MB`
 settings are the only place the partition sizes are written down.
 
 Partition 1 ships unformatted: format it as **FAT or FAT32 (not
-exFAT)** in Windows before first use — see section 6. Partition 2 is
+exFAT)** in Windows before first use — see
+[The FAT partition](#fat). Partition 2 is
 Fuzix's own filesystem format; no desktop OS can mount it, which is
 why the FAT partition and the `fat` command exist.
 
@@ -515,7 +524,8 @@ SOUND &201,-15,53,20:SOUND &202,-15,69,20:SOUND &203,-15,81,20
 ```
 
 Channels 1–3 are square-wave tones, channel 0 is noise. Each channel
-queues up to 8 notes; `&1x` in the channel number flushes the queue.
+queues up to 16 notes, as on a PicoMite; `&1x` in the channel number
+flushes the queue.
 `&Sxx` holds the note until S *other* channels carry the same sync
 mark, so a three-note chord wants `&2xx` on each channel — `&1xx`
 releases in pairs, playing two notes and leaving the third waiting
@@ -704,7 +714,7 @@ precision, `sin` `cos` `tan` `asin` `acos` `atan` `atan2` `sinh`
 at machine speed whatever the calling code is.
 
 `malloc` takes its memory from the PSRAM, not from the program's own
-340 KB, so a C program can allocate far more than it could hold
+336 KB, so a C program can allocate far more than it could hold
 itself. It is asked for once when the program loads; set
 `BCRUN_HEAP` to a size in KB in the environment to change how much.
 
@@ -977,6 +987,21 @@ when the routine returns, so a recursive routine sees its own copy at
 every level. `STATIC` locals are unaffected — they are meant to outlive
 the call, so they stay where they were.
 
+`FORMAT$(n, fmt$)` is MMBasic's: one C-style specifier, `%f`, `%e` or
+`%g` (or their capitals), with the flags `-`, `+`, space, `#` and `0`, a
+width and a precision, and any text around it. The digits are exact, as
+PicoMite V8.00.00b3 makes them: the binary value is rounded once and a
+tie goes to the even digit, so `FORMAT$(0.125, "%.2f")` is `0.12` and
+`FORMAT$(0.375, "%.2f")` is `0.38`, as C's `printf` gives them. The
+precision is 4 when it is left out — `FORMAT$(1/3, "%f")` is `0.3333` —
+and one over 30 is taken as 30. Infinity and NaN print as `inf` and
+`nan` (`INF` and `NAN` with a capital letter), never padded with zeros.
+`STR$` and `PRINT` keep MMBasic's own formatting, good to about 15
+digits.
+
+`BASE$(base, n [, digits])` is `HEX$` in any base from 2 to 36:
+`BASE$(3, 10)` is `101`.
+
 The one thing to remember is that a translated program is a *program*,
 not an interactive session: there is no editor, no `RUN`, no immediate
 mode. You edit the `.bas` file, translate, compile and run — which is
@@ -1139,7 +1164,7 @@ MAP SET                        ' ... and apply, all at once
 |---|---|
 | `MAP(n) = colour` | set entry `n`, 0 to 15. **Nothing changes yet** |
 | `MAP SET` | apply the collected palette, during the frame blanking |
-| `MAP RESET` | back to the mode's own sixteen |
+| `MAP RESET` | back to the mode's own sixteen, also at the blanking |
 | `MAP MAXIMITE` | the original Colour Maximite's sixteen |
 | `MAP GRAYSCALE` | sixteen greys, 0 to 255 in steps of 17 (`GREYSCALE` too) |
 
@@ -1163,11 +1188,14 @@ into an entry number. That rule is bit extraction — one bit of red, two
 of green, one of blue — and it does **not** depend on the palette, so
 remapping never moves where new drawing lands.
 
-`PIXEL(x, y)` takes no notice of remapping either: it gives a fixed
-colour for the entry the pixel holds, MMBasic's own — `&H004000` and
-`&H008000` for the two mid greens — so what a program drew reads back
-the same whatever the palette shows, even faded to black. `SAVE IMAGE`
-and `SAVE PNG` write the colours the screen shows.
+On a PC, `PIXEL(x, y)` takes no notice of remapping either: in `MODE 2`
+and `MODE 3` it gives a fixed colour for the entry the pixel holds,
+MMBasic's own — `&H004000` and `&H008000` for the two mid greens — so
+what a program drew reads back the same whatever the palette shows,
+even faded to black. The board's kernel does not do this yet: there
+`PIXEL()` gives the colour the screen shows, through the palette as
+`MAP` left it. `SAVE IMAGE` and `SAVE PNG` write the colours the screen
+shows on both.
 
 `MAP` needs a 16-colour mode; in `MODE 1` it is an error.
 
@@ -1512,6 +1540,29 @@ somewhere near 4.4 ms against the 17 ms the display gives you, and
 with room for roughly three times as much drawing before one is
 dropped.
 
+`INKEY$` returns the key that has been pressed, or `""` if none has,
+without waiting — which is how the loop above ends. It leaves the
+terminal as it found it, so `INPUT` still works afterwards and a
+program stopped with Ctrl-C does not take the shell's echo with it.
+
+A cursor or function key reaches a terminal as an escape sequence of
+several bytes, and `INKEY$` reassembles it and gives back the single
+code MMBasic gives, so the PicoMite idiom works unchanged:
+
+```basic
+DO
+  k$ = INKEY$
+  IF k$ = CHR$(&H80) THEN PRINT "up"
+  IF k$ = CHR$(&H91) THEN PRINT "F1"
+LOOP UNTIL k$ = "q"
+```
+
+The codes are MMBasic's: `&H80`–`&H83` for up, down, left and right,
+`&H84` insert, `&H86` home, `&H87` end, `&H88`/`&H89` page up and
+down, `&H7F` delete, and `&H91`–`&H9C` for F1 to F12. A sequence it
+does not recognise comes back byte by byte behind its escape, so
+nothing is lost — and a bare `ESC` is still `CHR$(27)`.
+
 ### The layer
 
 `FRAMEBUFFER LAYER` makes a second off-screen buffer. It is the same
@@ -1648,28 +1699,15 @@ are moved by the display server on a PC; the board's kernel does not
 have them yet, and a program there is told "FRAMEBUFFER WARPH is not
 available on this machine".
 
-`INKEY$` returns the key that has been pressed, or `""` if none has,
-without waiting — which is how the loop above ends. It leaves the
-terminal as it found it, so `INPUT` still works afterwards and a
-program stopped with Ctrl-C does not take the shell's echo with it.
+    BLIT RESIZE from, to, sx, sy, sw, sh, dx, dy, dw, dh [, transparent]
 
-A cursor or function key reaches a terminal as an escape sequence of
-several bytes, and `INKEY$` reassembles it and gives back the single
-code MMBasic gives, so the PicoMite idiom works unchanged:
-
-```basic
-DO
-  k$ = INKEY$
-  IF k$ = CHR$(&H80) THEN PRINT "up"
-  IF k$ = CHR$(&H91) THEN PRINT "F1"
-LOOP UNTIL k$ = "q"
-```
-
-The codes are MMBasic's: `&H80`–`&H83` for up, down, left and right,
-`&H84` insert, `&H86` home, `&H87` end, `&H88`/`&H89` page up and
-down, `&H7F` delete, and `&H91`–`&H9C` for F1 to F12. A sequence it
-does not recognise comes back byte by byte behind its escape, so
-nothing is lost — and a bare `ESC` is still `CHR$(27)`.
+scales the `sw`×`sh` rectangle at `sx, sy` of one buffer onto the
+`dw`×`dh` rectangle at `dx, dy` of another, leaving out pixels of the
+`transparent` colour (0 to 15, -1 for none, the default). A source not
+inside the screen is "Number out of bounds"; a width or height below 1
+draws nothing. On the board it is "BLIT RESIZE is not available on this
+machine". `BLIT FRAMEBUFFER` and `BLIT FLASH` with a width or height
+below 1 draw nothing too, as on a PicoMite.
 
 ## Tiles and their sprites: `TILEMAP`
 
@@ -1714,7 +1752,7 @@ DATA 1, 1, 1, 1, 2, 0, 0, 0
 | `TILEMAP LOAD file$, id, slot, tw, th, tpr` | as `CREATE`, the map from a text file: its width and height, then the tile numbers row by row, separated by commas, spaces, tabs or line ends, `'` or `#` starting a comment; `.map` when the name has no extension. A bad file leaves the map as it was |
 | `TILEMAP ATTR label, id, n` | `n` attribute words from the `DATA` at `label`, one per tile TYPE — tile 1 first |
 | `TILEMAP SET id, col, row, tile` | change one cell (0-based column and row) |
-| `TILEMAP DRAW id, dest, vx, vy, sx, sy, vw, vh [, t]` | draw the tiles under the `vw`×`vh` window at world pixel `vx, vy`, with its corner at `sx, sy` on `N`, `F` or `L`; `t` is a colour index (0–15) to see through, -1 for none |
+| `TILEMAP DRAW id, dest, vx, vy, sx, sy, vw, vh [, t]` | draw the tiles under the `vw`×`vh` window at world pixel `vx, vy`, with its corner at `sx, sy` on `N`, `F`, `L`, `2` or `T`; `t` is a colour index (0–15) to see through, -1 for none |
 | `TILEMAP SCROLL id, dx, dy` | move the remembered viewport, clamped to the world |
 | `TILEMAP VIEW id, x, y` | set it outright |
 | `TILEMAP DESTROY id` | free one map; `TILEMAP CLOSE` frees them all, sprites too |
@@ -1758,10 +1796,10 @@ they surprise you:
   their attribute tables) reads as its value, as MMBasic's `READ`
   does — wherever in the program the `CONST` is declared.
 
-Every `TILEMAP` statement wants an RGB121 screen (`MODE 2`); in `MODE
-1` it says so, as MMBasic does. The map lives in memory as long as
-the program runs, and `TILEMAP CLOSE` at the end is manners rather
-than a necessity.
+Every `TILEMAP` statement wants an RGB121 screen (`MODE 2`, or `MODE 3`
+on a PC); in `MODE 1` it says so, as MMBasic does. The map lives in
+memory as long as the program runs, and `TILEMAP CLOSE` at the end is
+manners rather than a necessity.
 
 ### `FLASH LOAD IMAGE`
 
@@ -1776,6 +1814,44 @@ colours arrives as you drew it, and one made on the machine with `SAVE
 IMAGE` (which is how Breakout makes its bricks) round-trips exactly.
 The decoding is `loadimage`'s, in another process, so a program that
 never loads a picture carries none of it.
+
+## Sprites: `SPRITE` {#sprites}
+
+The `SPRITE` family is the PicoMite's `Sprite.c`, with the fixes that
+firmware made in October 2026 (its issues #64 to #93).
+
+    SPRITE LOADBMP [#]n, f$ [, x, y, w, h]
+    SPRITE LOADPNG [#]n, f$ [, transparent [, cutoff [, x, y, w, h]]]
+
+load a sprite from a picture, or from the `w`×`h` part of it at `x, y`,
+which is how one tile is cut from a sheet; any argument may be left
+blank, and a part outside the picture is `Coordinates`. Colour index 0
+is see-through in a sprite, which is why `transparent` defaults to 0:
+the picture's see-through pixels land on it. `SPRITE LOADPNG`'s
+`cutoff` is 30 by default where `LOAD PNG`'s is 20, as on a PicoMite. A
+load that fails leaves the sprite free for the next. What a program can
+see:
+
+* Each screen edge a sprite meets is a collision entry of its own —
+  `&HF1` left, `&HF2` top, `&HF4` right, `&HF8` bottom — so a sprite in
+  a corner has two, while there is room among its four.
+* `SPRITE SWAP` draws the new image over the background saved under the
+  old one, so nothing of the old shows where the new is transparent.
+* `SPRITE WRITE` stamps a copy and leaves the sprite where it was, its
+  saved background untouched.
+* A sprite shown turned (orientations 4 to 7) stays opaque on every
+  redraw, `SHOW SAFE` included, and `SHOW SAFE` of a sprite already
+  showing can change its layer.
+* `SPRITE COPY n, m, count` is "Invalid copy count" if the copies would
+  pass sprite 64; `SPRITE LOAD` may load sprite 64, refuses a width
+  over 255, and will not load over a copy or over a sprite that has
+  copies.
+* `SPRITE(B, n)` compares a showing sprite's opaque pixels with the
+  background saved under it: 0 if none of that background is opaque, 1
+  if some is, 2 if some lies inside the sprite's own shape.
+  `SPRITE(B, n, side)`, `side` 0 to 7, gives the extents that answer
+  found, as the PicoMite's sprite manual describes them. A sprite not
+  showing answers 0.
 
 ## Solid shapes in 3D: `DRAW3D`
 
@@ -1878,6 +1954,9 @@ The decoder is MMBasic's, so it reads 1, 4, 8, 16, 24 and 32-bit BMPs,
 RGB565), and RLE4/RLE8 compression. Dithering is *optional*, as
 in MMBasic — omit the mode and the image is mapped without it.
 
+Any argument may be left blank to keep its default, in every `LOAD`
+form: `LOAD IMAGE "pic", , , 4`.
+
 `LOAD BMP` is accepted as a synonym for `LOAD IMAGE`, as in the
 reference.
 
@@ -1919,8 +1998,8 @@ default will surprise you the first time.** As in the reference it
 defaults to **0**, which is the palette's black — so a PNG with a
 transparent surround lands on screen inside a black box. That is what a
 PicoMite does, and it is deliberate: the same default is what makes
-`SPRITE LOADPNG` work (see below). To let the screen show through
-instead, pass **-1**:
+`SPRITE LOADPNG` work (see [Sprites](#sprites)). To let the screen show
+through instead, pass **-1**:
 
 ```basic
 CLS RGB(255,255,255)
@@ -1944,11 +2023,12 @@ opaque. If a picture has an unwanted dark surround even with `-1`, the
 file has an opaque background rather than an alpha one.
 
 `LOAD PNG` needs the PSRAM arena and says so if a kernel cannot provide
-one. PNG cannot be decoded a piece at a time — its filters refer to the
-row above and its compressed stream is one window over the whole image —
-so the entire picture is inflated before any of it can be drawn: about
-300 KB for a full screen, twice the whole process pool. The reference
-has the same constraint and offers `LOAD PNG` only on RP2350 for it.
+one. PNG's filters refer to the row above and its compressed stream is
+one window over the whole image, so `loadpng` inflates the entire
+picture before drawing any of it: about 300 KB for a full `MODE 2`
+screen. The PicoMite now decodes a piece at a time, so that its own
+`PLAY` is not starved; here the decoder is a process of its own and the
+sound is the kernel's, so the whole-image decode stays.
 
 ## Music: `PLAY MP3`, `PLAY WAV`, `PLAY FLAC`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE` {#music}
 
@@ -2770,16 +2850,18 @@ PRINT MM.INFO(PLATFORM)           ' PC3   (or PC2)
 PRINT MM.INFO(VERSION)            ' same number as MM.VER
 ```
 
-**`MM.DEVICE$` is `"Fuzix"` on a PC3 and `"PicoMitePC"` on a PC.**
+**`MM.DEVICE$` is `"Fuzix"` on the board and `"PicoMitePC"` on a PC.**
 MMBasic answers with its build (`PicoMiteVGA`, `PicoMiteHDMIUSB`), and a
 program's whole use of it is to pick a path: `IF INSTR(MM.DEVICE$,
-"PicoMite")`, `IF INSTR(MM.DEVICE$, "VGA")`. On a PC3 every one of those
-questions has the answer "no", and one word says so cleanly enough to
-test with a plain comparison. A PC has the VGA and HDMI PicoMites'
-framebuffers - `2` and `T`, the layers shown live - so there it answers
-as a PicoMite, and a program's PicoMite paths run. **Which machine** it
-is has moved to `MM.INFO(PLATFORM)`, which is where MMBasic keeps it too
-— `DEVICE` is the firmware, `PLATFORM` is the board.
+"PicoMite")`, `IF INSTR(MM.DEVICE$, "VGA")`. On the board every one of
+those questions has the answer "no", and one word says so cleanly
+enough to test with a plain comparison. A PC has the VGA and HDMI
+PicoMites' framebuffers — `2` and `T`, and the layers shown live — so
+there a test for `"PicoMite"` in the name finds it and that path runs;
+a test for `"VGA"` or `"HDMI"`, or a plain comparison with `"PicoMite"`
+(the LCD build's name), still answers no. **Which machine** it is has
+moved to `MM.INFO(PLATFORM)`, which is where MMBasic keeps it too —
+`DEVICE` is the firmware, `PLATFORM` is the board.
 
 `MM.INFO(...)` and `MM.INFO$(...)` are the same function, as in MMBasic:
 the sub-keyword decides the type, not the `$`.
@@ -2787,7 +2869,7 @@ the sub-keyword decides the type, not the `$`.
 | sub-keyword | answer |
 |---|---|
 | `DEVICE` | `"Fuzix"`, or `"PicoMitePC"` on a PC |
-| `PLATFORM` | `"PC3"` or `"PC2"` |
+| `PLATFORM` | `"PC3"` or `"PC2"`; `"RP2350PC"` on an Olimex RP2350pc; `"PC3"` on a PC |
 | `VERSION` | as `MM.VER`: the PicoMite version the translator follows, 8.000003 for V8.00.00b3 (the Fuzix release is in the boot banner) |
 | `PATH` | the directory the running program was started from, ending in `/` |
 | `CURRENT` | the program's own file name |
@@ -2805,10 +2887,18 @@ the sub-keyword decides the type, not the `$`.
 | `FLAGS` | all sixty-four scratch bits |
 | `FONT ADDRESS n`, `FLASH ADDRESS n` | as before; image slots 1 to 8, the PicoMite's three flash slots and its five RAM slots |
 | `LCDPANEL` | the mode, `"MODE1"` to `"MODE3"`, as a VGA or HDMI PicoMite names it; `""` with no display |
-| `PSRAM SIZE` | 8388608 on a PC3 (8 MB), 0 with no PSRAM |
+| `PSRAM SIZE` | 8388608 (8 MB) on a PC3 and on a PC, 0 with no PSRAM |
 | `HEAP` | the bytes arrays and strings have left, counted as the firmware's `FreeSpaceOnHeap` counts its own |
 | `DISK SIZE`, `FREE SPACE` | the current drive's size and its free bytes |
-| `WRITEBUFF` | on a PC, the address of the framebuffer `FRAMEBUFFER WRITE` chose — `N`, `F` or `L` — for `PEEK`, `POKE` and `MEMORY COPY`; a PC3 has no address to give and stops the program saying so |
+| `WRITEBUFF` | on a PC, the address of the framebuffer `FRAMEBUFFER WRITE` chose — `N`, `F`, `L`, `2` or `T` — for `PEEK`, `POKE` and `MEMORY COPY`; a PC3 has no address to give and stops the program saying so |
+| `FONT` | the current font's number, 1 to 16 |
+| `UPTIME` | seconds since the machine started, as a float |
+| `SDCARD` | `"Ready"`: the card is the root filesystem |
+| `USBDRIVE` | `"Not Configured"`: there is no USB drive |
+| `TELNET` | 0: there is no telnet console |
+| `BBC BUFFER [ch]` | how many more notes `PLAY BBC SOUND` channel `ch` (0 to 3) takes before it waits; with none given, the fewest of the four |
+| `IP ADDRESS` | the machine's address, `"0.0.0.0"` when it has not joined a network |
+| `MAX CONNECTIONS` | 8, the server's connections — see [the WEB family](#web-family) |
 
 **The bytes at `WRITEBUFF` are a PicoMite's.** In `MODE 2` a row is
 160 bytes, two pixels a byte, each pixel an RGB121 colour, the LEFT
@@ -2899,7 +2989,10 @@ translated program computes and prints exactly the same with or without
 them. Any other `OPTION`, including `OPTION COUNT` and `OPTION TAB`, is
 **refused by name, and fatally**: an `OPTION` changes how the rest of
 the program behaves, so quietly dropping the line would leave a program
-that translates and then answers differently.
+that translates and then answers differently. Two are special:
+`OPTION PICOMITE`, which Colour Maximite 2 programs carry, does nothing
+and says nothing, and `OPTION MILLISECONDS` is ignored with a warning
+that `TIME$` keeps whole seconds here.
 
 ## Pin names: `GP8` {#gp-names}
 
@@ -2925,14 +3018,14 @@ now neither.
 
 ## Timers and the deliberate divergence
 
-The 100 ms figure above is the one **deliberate divergence** from MMBasic, and
-it is in your favour. MMBasic counts milliseconds in an interrupt and
-fires when the count is *greater than* the period, so a `SETTICK 100`
-there actually runs at 101 ms and a 16 ms game timer at 17 ms — about
-6% slow. This keeps a microsecond deadline instead of a millisecond
-counter and fires at the period you asked for. Nothing else about the
-behaviour differs; if you are porting a program whose timing was tuned
-against a PicoMite, it will run very slightly faster here.
+`SETTICK` keeps to its period where MMBasic does not — a **deliberate
+divergence**, and it is in your favour. MMBasic counts milliseconds in
+an interrupt and fires when the count is *greater than* the period, so
+a `SETTICK 100` there actually runs at 101 ms and a 16 ms game timer at
+17 ms — about 6% slow. This keeps a microsecond deadline instead of a
+millisecond counter and fires at the period you asked for. Nothing else
+about the behaviour differs; if you are porting a program whose timing
+was tuned against a PicoMite, it will run very slightly faster here.
 
 **`PAUSE` gives the CPU up rather than spinning**, so a waiting program
 does not hold the machine against everything else on it. The fraction
@@ -2942,15 +3035,13 @@ that matters more than it sounds, because a program that arms a
 `SETTICK` usually has a main loop of little but `PAUSE`, and a handler
 in such a loop would otherwise never run at all.
 
-Every read and write is a call into the kernel — comparable to drawing
-one pixel, which is over a microsecond. That is ample for a switch or
-an LED and nowhere near enough to bit-bang a protocol; write that in C,
-or use the hardware that already exists for it.
-
 ## Practical notes
 
-* One `.bas` file per program, because `cc` compiles one file per
-  program. `Sub`s and `Function`s all live in that file.
+* One program per `.bas` file, because `cc` compiles one file per
+  program — but the file can bring others in before it is translated:
+  `#INCLUDE "file"` puts a `.inc` file's lines in its place, and
+  `LIBRARY LOAD`, as the first statement, adds a library's `SUB`s and
+  `FUNCTION`s (Appendix C).
 * The C file is a normal file — you can keep it, edit it, or hand it
   to `cc` on another day.
 * `mmbc` and `cc` each need a little room. On a machine with other
@@ -3187,16 +3278,23 @@ if left out). `EVEN` or `ODD` set the parity, `S2` two stop bits and
 `7BIT` seven data bits; there is no flow control. As on a PicoMite:
 `LOC(#n)` is how many bytes are waiting, `EOF(#n)` is true when none
 are, `INPUT$(n, #n)` takes up to n of them without waiting, `LINE INPUT`
-and `INPUT` wait for a line feed, `LOF(#n)` is the free space of the
-256-byte transmit buffer, and `CLOSE` waits for what was written to go.
+and `INPUT` wait for a line feed, and `CLOSE` waits for what was
+written to go. `LOF(#n)` is 256, the PicoMite's transmit buffer, always
+empty here because what is written goes straight to the operating
+system.
 
 Differences: the interrupt has to be in a spec written as a string
 literal, because it is armed when the program is translated; `INV` is
-refused, as a PC's port cannot invert its signals; and on Linux the rate
-must be one the system has a name for (50 to 4000000 in the usual
-steps). Bytes beyond the buffer stay with the operating system rather
-than overwrite the oldest. On a PC3 itself serial ports are not there
-yet, and `OPEN` says so.
+refused, as a PC's port cannot invert its signals, and so are `DE`, `OC`
+and `9BIT`; and on Linux the rate must be one the system has a name for
+(50 to 4000000 in the usual steps). Bytes beyond the buffer stay with
+the operating system rather than overwrite the oldest. `LIST SERIAL
+PORTS` says "No serial ports" when there are none.
+
+On the board a translated program cannot open a port this way yet:
+`OPEN` and `LIST SERIAL PORTS` stop with "Serial ports are not
+available on this machine". (The GP0/GP1 port is `/dev/tty2`, which BBC
+BASIC and the shell use.)
 
 ## Networking from BASIC: the WEB family {#web-family}
 
@@ -3337,12 +3435,18 @@ and is read at *translate* time too, so translate in its directory.
     v$ = Json$(b(), "sys.sunrise")
     v$ = Json$(b(), "list[0].main.temp")
 
-The WebMite's own dotted-path walker, to the letter: intermediate
-names are case-sensitive and the final one is not, `[n]` selects the
-n-th child, numbers come back formatted as MMBasic formats them,
-`null` and a missing name are `""`, and asking for an object rather
-than a value is the one error. Structural validation happens first,
-so `Invalid JSON data` means the document, not the path.
+The PicoMite V8 walker: keys separated by `.`, each followed by any
+number of `[n]`, in any order, so a path may start with `[n]` (a
+document that is an array) or end with one (`list[0]` is that element).
+The key that ends the path is matched regardless of case and every
+other key exactly, one followed by `[n]` included. `[n]` is the n-th
+child, from 0, of an array or an object; numbers come back formatted as
+MMBasic formats them, and `null` and a missing name are `""`. Three
+things are errors: a document that does not parse (`Invalid JSON
+data`, checked first, so it means the document and not the path); a
+key over 63 characters, an index over 7, or a `[` with no `]` (`Invalid
+JSON path`); and asking for an object rather than a value (`Not an
+item`).
 
 ### The clock, a ping, and email
 
@@ -3356,6 +3460,8 @@ arguments: a float offset in hours (-12 to 14, half-hour zones
 included) applied to the clock, because MMBasic's clock is local
 time. An unanswered `WEB PING` is not an error — `ping` reports
 `recv 0` and carries on; only a name that will not resolve raises.
+`TIME$ = n`, with a number rather than a string, moves the clock by `n`
+seconds and keeps the date, as on a PicoMite.
 
 Email is SMTP written with the client statements, and the recipe
 that works in 2026 is Gmail with an App Password: turn on 2-Step
@@ -3769,7 +3875,7 @@ since the beginning under its own name, `levee`, which still works:
 are likely to write on the machine. Levee's own default is 4 KB — it
 was written for 8-bit micros, where that was a fair share of the
 machine — and this port raises it, since a process here may have most
-of a 340 KB pool to itself.
+of a 336 KB pool to itself.
 
 Open something larger than the buffer and Levee says `[overflow]` on
 the status line and holds the file **read-only**: you can look and
@@ -3782,7 +3888,7 @@ line joins the following line onto it.
 
 \newpage
 
-# The FAT partition and the `fat` command
+# The FAT partition and the `fat` command {#fat}
 
 Partition 1 of the SD card is ordinary FAT, readable and writable by
 any PC — this is how files travel to Fuzix, because nothing else can
@@ -3927,8 +4033,6 @@ anything before `begin` and after `end`, and decode it on the PC.
 
 Whatever you use, the check at the end is the same: `sum` the file on
 both machines and compare. On the board, `sum FILE`.
-
-\newpage
 
 \newpage
 
@@ -4260,9 +4364,9 @@ screen show through instead. `cutoff` is the alpha above which a pixel
 counts as opaque.
 
 `loadjpg` decodes a block at a time, so its memory does not grow with
-the picture. `loadpng` cannot work that way — PNG filters refer to the
-row above and the whole image must be inflated first — so it takes the
-big buffers from the PSRAM arena and costs the process pool nothing.
+the picture. `loadpng` does not work that way — it inflates the whole
+image first, because PNG filters refer to the row above — so it takes
+the big buffers from the PSRAM arena and costs the process pool nothing.
 
 The `-s` form of either loader needs no graphics mode at all: it writes
 the decoded sprite to standard output as two 16-bit sizes followed by
@@ -4329,7 +4433,7 @@ Each of these has a chapter of its own; this is the summary.
 | | |
 |---|---|
 | `cc` | `[-o out] [-v] [-k] [-Ldir] file.c \| file.bas` |
-| `mmbc` | `source.bas [-o out.c] [--report] [--strict] [--fcc]` |
+| `mmbc` | `source.bas [-o out.c] [--report] [--strict] [--fcc] [--gcc]` |
 | `bcdump` | `file.bc` |
 
 `cc prog.bas` is the whole build in one command: it runs `mmbc` first
@@ -4552,12 +4656,11 @@ Key devices:
 | `/dev/tty1` | The console (HDMI + USB keyboard + serial mirror) |
 | `/dev/tty2` | The GP0/GP1 serial port                          |
 | `/dev/hda1`–`hda15` | SD card partitions (root is `hda2`)      |
-| `/dev/hdb`  | The PSRAM disc, used for swap                    |
 | `/dev/rtc`  | The DS3231 clock (`setdate` reads and sets it)   |
 | `/dev/sys`  | Platform control (graphics, sound, ADVAL ioctls) |
 
 `/etc/rc` runs at boot: filesystem check, clock from the DS3231,
-keyboard layout. Edit it with any of the editors below.
+keyboard layout. Edit it with any of the editors above.
 
 There is no swap device to enable. The PSRAM is not a block device
 any more: the kernel takes an allocation the size of the process
@@ -4692,8 +4795,8 @@ doing.
 Coverage grows with each release, and it will never be complete.
 MMBasic is a large language whose statements reach deep into one
 particular firmware, and a translator that emits portable C cannot
-follow all of it. Anything not listed here is reported by name, with
-its line number, and the translation continues - so you find out at
+follow all of it. Anything not listed here is reported, with its line
+number, and the translation continues - so you find out at
 translate time, not at run time.  (The errors of the language itself -
 a label that is not there, a name too long, a `FUNCTION` used as a
 command - are the other way round: they happen when the line runs, as
@@ -4717,28 +4820,31 @@ they do on a PicoMite.)
 | `FRAMEBUFFER` | `FUNCTION` | `GOSUB` | `GOTO` |
 | `GUI` | `I2C` | `I2C2` | `IF` |
 | `INC` | `INPUT` | `KILL` | `LET` |
-| `LIBRARY` | `LINE` | `LMID` | `LOAD` |
-| `LOCAL` | `LONGSTRING` | `LOOP` | `MAP` |
-| `MATH` | `MEMORY` | `MKDIR` | `MODE` |
-| `NEXT` | `ON` | `ONEWIRE` | `OPEN` |
-| `OPTION` | `PAUSE` | `PIN` | `PIXEL` |
-| `PLAY` | `POKE` | `POLYGON` | `PORT` |
-| `PRINT` | `PULSE` | `PWM` | `RANDOMIZE` |
-| `RBOX` | `READ` | `REDIM` | `RENAME` |
-| `RESOLUTION` | `RESTORE` | `RETURN` | `RMDIR` |
-| `RTC` | `SAVE` | `SEEK` | `SELECT` |
-| `SERVO` | `SETPIN` | `SETTICK` | `SORT` |
-| `SPI` | `SPRITE` | `STATIC` | `STRUCT` |
-| `SUB` | `SYSTEM` | `TEMPR` | `TEXT` |
-| `TILEMAP` | `TIME$` | `TIMER` | `TRIANGLE` |
-| `TYPE` | `WATCHDOG` | `WEB` | `WEND` |
-| `WHILE` | `WS2812` |  |  |
+| `LIBRARY` | `LINE` | `LIST` | `LMID` |
+| `LOAD` | `LOCAL` | `LONGSTRING` | `LOOP` |
+| `MAP` | `MATH` | `MEMORY` | `MKDIR` |
+| `MODE` | `NEXT` | `ON` | `ONEWIRE` |
+| `OPEN` | `OPTION` | `PAUSE` | `PIN` |
+| `PIXEL` | `PLAY` | `POKE` | `POLYGON` |
+| `PORT` | `PRINT` | `PULSE` | `PWM` |
+| `RANDOMIZE` | `RBOX` | `READ` | `REDIM` |
+| `RENAME` | `RESOLUTION` | `RESTORE` | `RETURN` |
+| `RMDIR` | `RTC` | `SAVE` | `SEEK` |
+| `SELECT` | `SERVO` | `SETPIN` | `SETTICK` |
+| `SORT` | `SPI` | `SPRITE` | `STATIC` |
+| `STRUCT` | `SUB` | `SYSTEM` | `TEMPR` |
+| `TEXT` | `TILEMAP` | `TIME$` | `TIMER` |
+| `TRIANGLE` | `TYPE` | `WATCHDOG` | `WEB` |
+| `WEND` | `WHILE` | `WS2812` |  |
 
-Assignment needs no keyword (`LET` is accepted). Statement separators,
-line numbers and labels, `REM` and `'` comments all work as expected.
-So do `/* ... */` blocks, by the PicoMite manual's rule: `/*` and `*/`
-must be the first thing on their lines (a line number may come first),
-with a space or the end of the line after them, and cannot be used
+Assignment needs no keyword (`LET` is accepted), and a variable may
+have a command's name, as in `font = 3`, when `=` follows it.
+`RESTORE` takes a label, a line number, or an expression giving
+either: a string names a label and a number a line. Statement
+separators, line numbers and labels, `REM` and `'` comments all work as
+expected. So do `/* ... */` blocks, by the PicoMite manual's rule: `/*`
+and `*/` must be the first thing on their lines (a line number may come
+first), with a space or the end of the line after them, and cannot be used
 inside a `SUB` or `FUNCTION`. Anything after `*/` on its line is comment
 too. A `/*` or `*/` that breaks the rule stops the translation with a
 message naming the line. Lines starting with `#` are taken as CMM2 RUN's loader takes
@@ -4810,7 +4916,8 @@ there.
 
 ## MATH() sub-functions
 
-Scalar: `ATAN3`, `COSH`, `LOG10`, `SINH`, `TANH`
+Scalar: `ATAN3`, `COSH`, `LOG10`, `SINH`, `TANH`, and `RAND`, which takes
+no argument and draws from the generator `MATH RANDOMIZE` seeds
 
 Whole-array (one number out of an array): `MAX`, `MEAN`, `MEDIAN`, `MIN`, `SD`, `SUM`
 
@@ -4891,7 +4998,7 @@ a side-by-side will differ here and nowhere else.
 ## MATH sub-commands
 
 `MATH` is also a statement, and that is a different and much longer list
-in the interpreter. Thirty-two of it are translated. The element-by-
+in the interpreter. Thirty-three of it are translated. The element-by-
 element ones are what most programs use it for:
 
 | | |
@@ -4906,14 +5013,20 @@ element ones are what most programs use it for:
 | `MATH INSERT a(), i, , k, b()` | copy `b()` back into that line |
 | `MATH C_ADD a(), b(), c()` | `c() = a() + b()`, element by element |
 | `MATH WINDOW a(), lo, hi, b() [, min, max]` | rescale `a()` onto `lo`..`hi` |
+| `MATH CLAMP a(), lo, hi, b()` | every element of `a()` limited to `lo`..`hi`; any mix of integer and float arrays |
 
 `C_SUB`, `C_MUL`, `C_MULT`, `C_DIV`, `C_AND`, `C_OR` and `C_XOR` are the
 same shape as `C_ADD` — the `C_` is for component, not complex — and all
 eight need the three arrays to be the same type and the same length.
 
 `SET`, `ADD`, `SLICE` and `INSERT` take integer, float or string arrays;
-`SCALE` and `POWER` are numeric only, as they are there, and `SHIFT` is
-integers only. `ARRAY` is accepted as a spelling of `MATH` for `SET`,
+`SCALE`, `POWER` and `CLAMP` are numeric only, as they are there, and
+`SHIFT` is integers only. `ADD`, `SCALE` and `CLAMP` may also go from a
+float array into an integer one or the other way, as MMBasic allows; a
+float landing in an integer array is rounded, as everywhere else.
+`CLAMP` with `lo` above `hi` is "Low limit above high limit".
+
+`ARRAY` is accepted as a spelling of `MATH` for `SET`,
 `ADD`, `SLICE` and `INSERT`, and `ARRAY SLICE` and `ARRAY INSERT` are
 the spellings the manual uses — the interpreter runs both through the
 same two functions. **It is not a spelling of the rest**: `ARRAY SCALE`
@@ -5007,12 +5120,11 @@ on both sides. A length that does not match is
 `Size mismatch between slice and target array`, as in the interpreter.
 
 One difference to know about: MMBasic converts between integer and float
-arrays here, and this does not — both arrays must be the same type, the
-same rule `ARRAY ADD` already follows.
+arrays here, and this does not — both arrays must be the same type.
 
 The rest are not translated, and each says so by name rather than being
-mistaken for something else: of the statements, `AES128`, `CLAMP`,
-`FFT`, `INTERPOLATE`, `PID`, `SENSORFUSION` and `SINC`, and of the
+mistaken for something else: of the statements, `AES128`, `FFT`,
+`INTERPOLATE`, `PID`, `SENSORFUSION` and `SINC`, and of the
 functions `MATH(CHI`, `CHI_P`, `CORREL`, `INVERSE`, `PHASE` and `PID`.
 `COVERAGE-STATUS.md` beside the translator counts them member by
 member, from the interpreter's own tables.
@@ -5037,6 +5149,11 @@ to the dimensions MMBasic allows. `DIM`, `LOCAL`, `STATIC`, `CONST`,
 `OPTION BASE`, `SUB` and `FUNCTION` with by-reference arguments, and
 the usual control flow.
 
+`DIM`, `LOCAL` and `STATIC` also take the type before the names,
+`DIM AS INTEGER a, b` being `DIM INTEGER a, b`, and the name of a `TYPE`
+in the type's place makes each name a structure of it, with or without
+`AS`: `DIM AS pt a, b`, `DIM pt a, b`.
+
 **`DIM s$(n) LENGTH m` sets the SPACING of the elements**, not just a
 cap on each. The firmware places element `k` at `base + k * (m + 1)`,
 and a program is entitled to that: PETSCII Robots keeps its 128x64
@@ -5049,7 +5166,8 @@ for you; the one visible consequence is that such an array cannot be
 passed whole to a `SUB` or to `SORT`, because the runtime's array
 helpers step at the full string size. Index it instead, or leave the
 `LENGTH` off. On a *scalar* `LENGTH` is still only a cap, since a
-scalar's layout cannot differ.
+scalar's layout cannot differ. `m` may be a `CONST` or any constant
+expression.
 
 **Structures** (MMBasic's `TYPE ... END TYPE`, documented in full in
 the PicoMite structures manual) are translated with the firmware's
@@ -5330,8 +5448,9 @@ correctly; if a transfer matters, check the CRC the device gives you.
 
 ## Not covered
 
-The editor, `RUN`, `LIST`, `EDIT` and the rest of the immediate-mode
-environment, which will never apply: a translated program is compiled
+The editor, `RUN`, `EDIT`, `LIST` (all but `LIST SERIAL PORTS`, which
+is this machine's own) and the rest of the immediate-mode environment,
+which will never apply: a translated program is compiled
 and run rather than typed at a prompt. (`mmbedit` provides the editing
 they existed for.) The remaining hardware statements are the subject
 of current work.
@@ -5339,10 +5458,12 @@ of current work.
 Of the graphics, `MODE`, `COLOUR`, `PIXEL` (including the array form),
 `LINE`, `CIRCLE`, `BOX`, `RBOX`, `TRIANGLE` (its drawing form —
 `SAVE`/`RESTORE` need the interpreter's blit buffers), `ARC`, `RGB()`,
-`FRAMEBUFFER` (including `LAYER` and `MERGE`), `PRINT @`, `TEXT`,
-`FONT`, `CLS [colour]` and `MAP` (statement and function) are done, and
-since v0.15 so are `BLIT` — including the flash slots it reads and
-writes — and the `SPRITE` family with its two-axis `SCROLL`. The
+`FRAMEBUFFER` (including `LAYER` and `MERGE` — and on a PC framebuffer
+`2`, `LAYER TOP`, the live layers, `WARPH`, `WARPV`, `AFFINE`, `SPAN`
+and `BLIT RESIZE`), `PRINT @`, `TEXT`, `FONT`, `CLS [colour]` and `MAP`
+(statement and function) are done, and since v0.15 so are `BLIT` —
+including the flash slots it reads and writes — and the `SPRITE` family
+with its two-axis `SCROLL`, and now `SPRITE(B)`. The
 picture loaders are all there: `SPRITE LOADARRAY`, `SPRITE LOADPNG`,
 and `SPRITE LOADBMP` with `BLIT LOAD`/`LOADBMP` and their window
 arguments, which cut one tile out of a sheet. `TEXT`
@@ -5412,12 +5533,18 @@ program ends however it ends. `OPTION VCC` is not supported, so `AIN`
 always scales by 3.3 V.
 
 Of the sound, `PLAY MP3`, `PLAY WAV`, `PLAY FLAC`, `PLAY VOLUME`,
-`PLAY STOP`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE` and
-`PLAY MODSAMPLE` are done — `MIDI`, `LOAD SOUND` and the user-defined
-`U` waveform are not. `PLAY VOLUME`'s two levels reach `SOUND` and
-`TONE` apart, and the file players as the louder. All of them take the completion
+`PLAY STOP`, `PLAY SOUND`, `PLAY TONE`, `PLAY MODFILE`, `PLAY MODSAMPLE`
+with `CHANGE` and `STOP`, and `PLAY BBC SOUND` and `PLAY BBC ENVELOPE`
+are done. `MIDI`, `LOAD SOUND`, the user-defined `U` waveform,
+`PLAY NEXT` and `PLAY PREVIOUS` are not, and `PLAY MP3`, `WAV` or `FLAC`
+given a directory does not play what is in it: the player fails in the
+background. `PLAY VOLUME`'s two levels reach `SOUND` and `TONE` apart,
+and the file players as the louder. All of them take the completion
 interrupt MMBasic allows on them, though `PLAY STOP` reports about a
 second late where MMBasic reports at once.
+
+`SQL` and `SQL(`, the PicoMitePC3's SQLite, are left out; such a line
+is reported as one the translator could not read.
 
 Of the statements that reach *into* something rather than replacing
 it, `MID$(s$,n,m) =`, `LMID(a(),start[,num]) =`, `BIT(v,n) =`,
@@ -5442,8 +5569,7 @@ filesystem, so it costs more than MMBasic's per-file version; channel
 
 In a graphics mode a program's `PRINT` now draws the characters into
 whatever is being drawn on, as MMBasic does, so text goes into the
-framebuffer with everything else. What is still missing is
-`OPTION CONSOLE`, to say whether a program's output should go to the
-screen, the serial port, or both.
+framebuffer with everything else, and `OPTION CONSOLE` says whether a
+program's output goes to the screen, the serial port, both or neither.
 
 \newpage
