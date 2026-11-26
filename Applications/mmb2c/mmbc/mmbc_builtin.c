@@ -1304,12 +1304,12 @@ struct val builtin_raw(const char *up)
            mmb_sprite.h.  The letters become the reference's own t
            codes; V and D return floats (a bearing in radians and a
            centre distance), everything else integers.  SPRITE(B...)
-           is the bounds-analysis machinery and is not translated. */
+           is the background collision, mms_spriteb. */
         static const struct { const char *nm; int code; } sels[] = {
             { "W", 1 }, { "H", 2 }, { "X", 3 }, { "Y", 4 },
             { "L", 5 }, { "C", 6 }, { "V", 7 }, { "T", 8 },
             { "E", 9 }, { "D", 10 }, { "A", 11 }, { "N", 12 },
-            { "S", 13 }, { NULL, 0 }
+            { "S", 13 }, { "B", 14 }, { NULL, 0 }
         };
         const char *n;
         int sel = 0, si;
@@ -1356,11 +1356,8 @@ struct val builtin_raw(const char *up)
                 sel = sels[si].code;
                 break;
             }
-        if (sel == 0) {
-            if (is_kw("B", 0))
-                cv_err("SPRITE(B ...) is not translated");
+        if (sel == 0)
             cv_err("SPRITE() wants a selector letter");
-        }
         if (sel == 13) {
             /* SPRITE(S) - the sprite that triggered the last collision
                interrupt.  An argument is accepted and ignored, because

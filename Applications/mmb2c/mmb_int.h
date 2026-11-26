@@ -287,6 +287,7 @@ MMG_FN void mmi_sprite_int(mm_int_fn fn)
 	if (mm_sprcoll_fn == 0)
 		__mm_int_armed++;
 	mm_sprcoll_fn = fn;
+	mms_coll_int = 1;
 }
 
 MMG_FN void mmi_sprite_noint(void)
@@ -295,6 +296,7 @@ MMG_FN void mmi_sprite_noint(void)
 		mm_sprcoll_fn = 0;
 		__mm_int_armed--;
 	}
+	mms_coll_int = 0;
 }
 
 MMG_FN void mmi_st_int(mm_int_fn fn)

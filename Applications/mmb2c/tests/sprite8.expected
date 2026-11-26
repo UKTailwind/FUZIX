@@ -1,0 +1,11 @@
+edges: 2 241 242
+move: 2 4 5 5 4 0
+copy: 1
+Copies still open
+Copies still open
+closed
+swap: Copies still open
+safe: 2 0 2 1 11
+load: 2 2
+Can't read into a copy
+Copies exist

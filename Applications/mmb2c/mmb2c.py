@@ -4239,8 +4239,8 @@ class Conv(object):
             # SPRITE(selector, ...) - Sprite.c fun_sprite, engine in
             # mmb_sprite.h.  The letters become the reference's own t
             # codes; V and D return floats (a bearing in radians and a
-            # centre distance), everything else integers.  SPRITE(B...)
-            # is the bounds-analysis machinery and is not translated.
+            # centre distance), everything else integers.  SPRITE(B, n
+            # [, side]) is the background collision, mms_spriteb.
             self.uses_sprite = True
             self.uses_blit = True
             self.expect_op('(')
@@ -4273,14 +4273,12 @@ class Conv(object):
             for nm, code in (('W', 1), ('H', 2), ('X', 3), ('Y', 4),
                              ('L', 5), ('C', 6), ('V', 7), ('T', 8),
                              ('E', 9), ('D', 10), ('A', 11), ('N', 12),
-                             ('S', 13)):
+                             ('S', 13), ('B', 14)):
                 if self.is_kw(nm):
                     self.i += 1
                     sel = code
                     break
             if sel is None:
-                if self.is_kw('B'):
-                    self.err('SPRITE(B ...) is not translated')
                 self.err('SPRITE() wants a selector letter')
             if sel == 13:
                 # SPRITE(S) - the sprite that triggered the last

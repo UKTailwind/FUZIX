@@ -13,8 +13,7 @@
  *	edge-triggered lastcollisions masks, next_x/next_y, master/copy
  *	sharing, and every error string and argument range the reference
  *	checks.  SPRITE SCROLL is Phase 4 of PLAN-games.md (it needs the
- *	kernel's SCROLL2); SPRITE(B...) bounds analysis, LOADPNG and
- *	LOADBMP are deferred - honest errors, never wrong pictures.
+ *	kernel's SCROLL2).  SPRITE(B), LOADPNG and LOADBMP are in.
  *
  *	Divergences, recorded in PLAN-games.md: a sprite image is one
  *	native index per byte, not packed nibbles (double the reference's
@@ -53,6 +52,11 @@ struct mmb_sprite {
 	signed char mymaster;	/* -1 = master, else the master's number */
 	unsigned char rot, active, edges, alloc;
 	unsigned char coll[MMS_MAXCOLL + 1];
+	/* SPRITE(B): the image's opaque extent - left and right of each
+	 * row, top and bottom of each column, one block, made the first
+	 * time it is asked for - and the last answer's eight sides */
+	short *bnd;
+	short bgc[8];
 };
 
 /* index 0 is the reference's spritebuff[0]: the background pseudo
@@ -64,8 +68,10 @@ static unsigned char mms_layer_n[MMS_MAXLAYER + 1];
 static unsigned char mms_transparent;	/* SPRITE SET TRANSPARENT, 0-15 */
 static unsigned char mms_any;		/* any sprite ever defined */
 
-/* the interrupt-scan flags, MMBasic's CollisionFound machinery */
-static unsigned char mms_coll_found, mms_st_found;
+/* the interrupt-scan flags, MMBasic's CollisionFound machinery;
+ * mms_coll_int is COLLISIONInterrupt != NULL, kept by mmb_int.h's
+ * mmi_sprite_int and mmi_sprite_noint (which come after this file) */
+static unsigned char mms_coll_found, mms_st_found, mms_coll_int;
 static short mms_which = -1;		/* sprite_which_collided */
 static short mms_hit_st = -1, mms_st_which = -1;
 
@@ -176,12 +182,21 @@ MMG_FN void mms_show_px(int bnbr, int x1, int y1, int mode)
 	int w = sb->w, h = sb->h;
 
 	mode &= 7;
+	/* orientations 4-7 draw every pixel, the transparent colour too,
+	 * and the flag stays with the sprite (rot bit 2), so every redraw
+	 * honours it (PicoMite #90) */
+	if (sb->rot & 4)
+		fullmode |= 8;
 	if (sb->img == NULL)
 		return;
 	if (!(mode == 0 || (mode & 4)) && sb->active && !headless)
 		mms_hide_px(sb);
-	sb->x = (short)x1;
-	sb->y = (short)y1;
+	/* WRITE (mode 4) draws a copy: a sprite showing keeps its place and
+	 * its saved background (#90) */
+	if (!(mode & 4)) {
+		sb->x = (short)x1;
+		sb->y = (short)y1;
+	}
 	if (headless) {
 		if (!(mode & 4))
 			sb->active = 1;
@@ -200,7 +215,7 @@ MMG_FN void mms_show_px(int bnbr, int x1, int y1, int mode)
 		if (mms_clip(x1, y1, w, h, hres, vres, &cx, &cw, &cy, &ch))
 			mmb_win_open(cy, ch, cx, cw, stride, bpp);
 	}
-	if (mode != 2) {
+	if (mode != 2 && !(mode & 4)) {
 		for (i = 0; i < h; i++) {
 			int y = y1 + i, x0 = x1, ww = w, s0 = 0;
 
@@ -244,8 +259,15 @@ MMG_FN void mms_show_px(int bnbr, int x1, int y1, int mode)
 					mmb_rowpx[j] = irow[sc];
 				}
 			} else {
-				if (mmb_row_get(y, x0, ww, stride, bpp,
-						mmb_rowpx) < 0)
+				/* SWAP (mode 2) draws over the background
+				 * stored under the old image, so none of the
+				 * old one stays where the new is transparent
+				 * (#89); everything else over the screen */
+				if (mode == 2)
+					memcpy(mmb_rowpx, sb->store +
+					       (size_t)i * w + s0, (size_t)ww);
+				else if (mmb_row_get(y, x0, ww, stride, bpp,
+						     mmb_rowpx) < 0)
 					continue;
 				for (j = 0; j < ww; j++) {
 					int sc = s0 + j;
@@ -268,56 +290,31 @@ MMG_FN void mms_show_px(int bnbr, int x1, int y1, int mode)
 
 /* ---- collisions, verbatim ------------------------------------------- */
 
+/* an edge of the screen as a collision - 0xF1 left, 0xF2 top, 0xF4
+ * right, 0xF8 bottom, each an entry of its own - while there is room:
+ * an edge left out is reported by a later move, as its bit in edges
+ * stays clear (PicoMite #91's edgecollision) */
+MMG_FN void mms_edge(struct mmb_sprite *sb, int *n, int out, int bit)
+{
+	if (!out)
+		sb->edges &= (unsigned char)~bit;
+	else if (!(sb->edges & bit) && *n < MMS_MAXCOLL) {
+		sb->edges |= (unsigned char)bit;
+		sb->coll[(*n)++] = (unsigned char)(0xF0 | bit);
+	}
+}
+
 MMG_FN void mms_checklimits(int bnbr, int *n)
 {
 	struct mmb_sprite *sb = &mms[bnbr];
 	int hres = (int)mm_hres(), vres = (int)mm_vres();
 
-	sb->coll[*n] = 0;
-	if (sb->x < 0) {
-		if (!(sb->edges & 1)) {
-			sb->edges |= 1;
-			sb->coll[*n] = 0xF1;
-			(*n)++;
-		}
-	} else
-		sb->edges &= (unsigned char)~1;
-	if (sb->y < 0) {
-		if (!(sb->edges & 2)) {
-			sb->edges |= 2;
-			if (sb->coll[*n] & 0xF0)
-				sb->coll[*n] |= 0xF2;
-			else {
-				sb->coll[*n] = 0xF2;
-				(*n)++;
-			}
-		}
-	} else
-		sb->edges &= (unsigned char)~2;
-	if (sb->x + sb->w > hres) {
-		if (!(sb->edges & 4)) {
-			sb->edges |= 4;
-			if (sb->coll[*n] & 0xF0)
-				sb->coll[*n] |= 0xF4;
-			else {
-				sb->coll[*n] = 0xF4;
-				(*n)++;
-			}
-		}
-	} else
-		sb->edges &= (unsigned char)~4;
-	if (sb->y + sb->h > vres) {
-		if (!(sb->edges & 8)) {
-			sb->edges |= 8;
-			if (sb->coll[*n] & 0xF0)
-				sb->coll[*n] |= 0xF8;
-			else {
-				sb->coll[*n] = 0xF8;
-				(*n)++;
-			}
-		}
-	} else
-		sb->edges &= (unsigned char)~8;
+	if (*n <= MMS_MAXCOLL)
+		sb->coll[*n] = 0;
+	mms_edge(sb, n, sb->x < 0, 1);
+	mms_edge(sb, n, sb->y < 0, 2);
+	mms_edge(sb, n, sb->x + sb->w > hres, 4);
+	mms_edge(sb, n, sb->y + sb->h > vres, 8);
 }
 
 MMG_FN void mms_check_st(int bnbr, int *n)
@@ -341,152 +338,94 @@ MMG_FN void mms_check_st(int bnbr, int *n)
 	}
 }
 
-/* One overlap test and its edge-triggered bookkeeping, factored out
- * because the reference writes it inline three times and the Fuzix
- * cc2 has a per-function node pool the unfactored transcription
- * overflowed ("Too many nodes").  `both` says whether the partner's
- * mask moves too - the background sweep does not touch it. */
-MMG_FN void mms_pair(int b, int k, int *n, int both)
+/* may sprites k and kk collide: both showing, and on the same layer or
+ * either on layer 0, which meets every layer (#88's SpritesMeet); and do
+ * their rectangles overlap, touching counting (SpritesOverlap).  Small
+ * functions, for the Fuzix cc2's per-function node pool. */
+MMG_FN int mms_meet(int k, int kk)
 {
-	struct mmb_sprite *sb = &mms[b];
-	struct mmb_sprite *sk = &mms[k];
-	MMINTEGER mask = (MMINTEGER)1 << (k - 1);
-	MMINTEGER mymask = (MMINTEGER)1 << (b - 1);
+	struct mmb_sprite *a = &mms[k], *b = &mms[kk];
 
-	if (!(sk->x + sk->w < sb->x || sk->x > sb->x + sb->w ||
-	      sk->y + sk->h < sb->y || sk->y > sb->y + sb->h)) {
-		if (*n < MMS_MAXCOLL && !(sb->lastcoll & mask))
-			sb->coll[(*n)++] = (unsigned char)k;
-		sb->lastcoll |= mask;
-		if (both)
-			sk->lastcoll |= mymask;
-	} else {
-		sb->lastcoll &= ~mask;
-		if (both)
-			sk->lastcoll &= ~mymask;
-	}
+	return kk != k && b->alloc && b->active &&
+	       (a->layer == 0 || b->layer == 0 || a->layer == b->layer);
 }
 
-/* One sprite's share of the background sweep; returns its collision
- * count.  Its own function to keep each expression tree inside cc2's
- * per-function node pool. */
-MMG_FN int mms_bg_one(int k)
+MMG_FN int mms_overlap(int k, int kk)
 {
-	struct mmb_sprite *sk = &mms[k];
-	int kk, jj = 1, n = 1, peers;
+	struct mmb_sprite *a = &mms[k], *b = &mms[kk];
 
-	memset(sk->coll, 0, MMS_MAXCOLL);
-	peers = mms_layer_n[(int)sk->layer] + mms_layer_n[0];
-	if (peers > 1)
-		for (kk = 1; kk <= MMS_MAX; kk++) {
-			struct mmb_sprite *skk = &mms[kk];
+	return !(b->x + b->w < a->x || b->x > a->x + a->w ||
+		 b->y + b->h < a->y || b->y > a->y + a->h);
+}
 
-			if (!skk->alloc || kk == k)
-				continue;
-			if (jj == peers)
-				break;
-			if (skk->layer == sk->layer || skk->layer == 0) {
-				jj++;
-				mms_pair(k, kk, &n, 0);
-			}
+/* SpriteCollisions: sprite k's collisions that have begun into its list
+ * from coll[1] - its lastcoll bit kk - 1 is kept while one lasts, so
+ * that it is reported once - then the screen edges and static objects
+ * it has reached.  Returns the number of entries + 1.  both: k's bit in
+ * each other sprite's mask too (a sprite that moved alone: the meeting
+ * is not news to the other either). */
+MMG_FN int mms_sprite_coll(int k, int both)
+{
+	struct mmb_sprite *sb = &mms[k];
+	MMINTEGER mine = (MMINTEGER)1 << (k - 1);
+	int kk, n = 1;
+
+	memset(sb->coll, 0, sizeof(sb->coll));
+	for (kk = 1; kk <= MMS_MAX; kk++) {
+		struct mmb_sprite *sk = &mms[kk];
+		MMINTEGER bit = (MMINTEGER)1 << (kk - 1);
+
+		if (kk == k || !sk->alloc)
+			continue;
+		if (mms_meet(k, kk) && mms_overlap(k, kk)) {
+			if (n < MMS_MAXCOLL && !(sb->lastcoll & bit))
+				sb->coll[n++] = (unsigned char)kk;
+			sb->lastcoll |= bit;
+			if (both)
+				sk->lastcoll |= mine;
+		} else {
+			sb->lastcoll &= ~bit;
+			if (both)
+				sk->lastcoll &= ~mine;
 		}
+	}
 	mms_checklimits(k, &n);
 	mms_check_st(k, &n);
+	if (n > 1)
+		sb->coll[0] = (unsigned char)(n - 1);
 	return n;
 }
 
-/* the background sweep: every active sprite re-checked after the whole
- * scene moved (SPRITE MOVE / RESTORE / SCROLL) */
-MMG_FN void mms_coll_bg(void)
+/* ProcessCollisions (PicoMite #88): after sprite bnbr has been shown,
+ * or (bnbr 0) after MOVE, SCROLL or RESTORE has moved everything.  After
+ * a whole-scene check the sprites that collided are mms[0]'s list.  The
+ * found flag stays set until its interrupt has run (mmb_int.h clears
+ * it), and is cleared here only when no SPRITE INTERRUPT is set. */
+MMG_FN void mms_collisions(int bnbr)
 {
-	int k, j = 0, bcol = 1, n;
+	int k, bcol = 1;
 
-	for (k = 1; k <= MMS_MAX; k++) {
-		struct mmb_sprite *sk = &mms[k];
-
-		if (!sk->alloc)
-			continue;
-		if (j == mms_inuse)
-			break;
-		if (!sk->active)
-			continue;
-		j++;
-		n = mms_bg_one(k);
-		if (n > 1 && n < MMS_MAXCOLL && bcol < MMS_MAXCOLL) {
-			mms[0].coll[bcol] = (unsigned char)k;
-			bcol++;
-			sk->coll[0] = (unsigned char)(n - 1);
+	if (!mms_coll_int)
+		mms_coll_found = 0;
+	mms_which = -1;
+	memset(mms[0].coll, 0, sizeof(mms[0].coll));
+	if (bnbr != 0) {
+		if (mms_sprite_coll(bnbr, 1) > 1) {
+			mms_coll_found = 1;
+			mms_which = (short)bnbr;
 		}
+		return;
+	}
+	for (k = 1; k <= MMS_MAX; k++) {
+		if (!mms[k].alloc || !mms[k].active)
+			continue;
+		if (mms_sprite_coll(k, 0) > 1 && bcol < MMS_MAXCOLL)
+			mms[0].coll[bcol++] = (unsigned char)k;
 	}
 	if (bcol > 1) {
 		mms_coll_found = 1;
 		mms_which = 0;
 		mms[0].coll[0] = (unsigned char)(bcol - 1);
-	}
-}
-
-MMG_FN void mms_collisions(int bnbr)
-{
-	int k, j = 1, n = 1;
-	MMINTEGER mask;
-	struct mmb_sprite *sb = &mms[bnbr];
-
-	mms_coll_found = 0;
-	mms_which = -1;
-	memset(mms[0].coll, 0, MMS_MAXCOLL);
-	if (bnbr == 0) {
-		mms_coll_bg();
-		return;
-	}
-	memset(sb->coll, 0, MMS_MAXCOLL);
-	if (sb->layer != 0) {
-		if (mms_layer_n[(int)sb->layer] + mms_layer_n[0] > 1)
-			for (k = 1; k <= MMS_MAX; k++) {
-				struct mmb_sprite *sk = &mms[k];
-
-				if (!sk->alloc)
-					continue;
-				mask = (MMINTEGER)1 << (k - 1);
-				if (!sk->active) {
-					sb->lastcoll &= ~mask;
-					continue;
-				}
-				if (k == bnbr)
-					continue;
-				if (j == mms_layer_n[(int)sb->layer] +
-					 mms_layer_n[0])
-					break;
-				if (sk->layer == sb->layer ||
-				    sk->layer == 0) {
-					j++;
-					mms_pair(bnbr, k, &n, 1);
-				}
-			}
-	} else {
-		for (k = 1; k <= MMS_MAX; k++) {
-			struct mmb_sprite *sk = &mms[k];
-
-			if (!sk->alloc)
-				continue;
-			if (j == mms_inuse)
-				break;
-			if (k == bnbr)
-				continue;
-			mask = (MMINTEGER)1 << (k - 1);
-			if (!sk->active) {
-				sb->lastcoll &= ~mask;
-				continue;
-			} else
-				j++;
-			mms_pair(bnbr, k, &n, 1);
-		}
-	}
-	mms_checklimits(bnbr, &n);
-	mms_check_st(bnbr, &n);
-	if (n > 1) {
-		mms_coll_found = 1;
-		mms_which = (short)bnbr;
-		sb->coll[0] = (unsigned char)(n - 1);
 	}
 }
 
@@ -506,6 +445,8 @@ MMG_FN void mms_alloc(int bnbr, int w, int h)
 	sb->img = (unsigned char *)malloc((size_t)w * h * 2);
 	if (sb->img == NULL)
 		MM_RAISE("Not enough memory");
+	sb->bnd = NULL;
+	memset(sb->bgc, 0, sizeof(sb->bgc));
 	sb->store = sb->img + (size_t)w * h;
 	memset(sb->img, 0, (size_t)w * h * 2);
 	sb->w = (short)w;
@@ -524,6 +465,19 @@ MMG_FN void mms_alloc(int bnbr, int w, int h)
 	sb->alloc = 1;
 	mms[0].alloc = 1;
 	mms_any = 1;
+}
+
+/* the buffers of a sprite whose image did not arrive, given back: a
+ * failed decode leaves no buffer in use (PicoMite #93, 4d91e6c) */
+MMG_FN void mms_unalloc(struct mmb_sprite *sb)
+{
+	free(sb->bnd);
+	sb->bnd = NULL;
+	free(sb->img);
+	sb->img = NULL;
+	sb->store = NULL;
+	sb->w = 0;
+	sb->h = 0;
 }
 
 MMG_FN int mms_sumlayer(void)
@@ -676,14 +630,21 @@ MMG_FN void mms_show(MMINTEGER bn, MMINTEGER xi, MMINTEGER yi,
 		MM_RAISE("Invalid syntax");
 	x1 = (int)xi;
 	y1 = (int)yi;
-	sb->rot = (unsigned char)flags;
-	if (sb->rot > 3) {
-		mode |= 8;
-		sb->rot &= 3;
-	}
+	sb->rot = (unsigned char)flags;	/* 4-7 opaque: mms_show_px */
 	if (safe) {
 		if (sb->active) {
-			if (ontop) {
+			/* a new layer: within layers 1 to 4, one list, the
+			 * sprite keeps its place; to or from layer 0, the
+			 * other list, it goes on top, as with ontop (#90) */
+			int old = sb->layer;
+
+			if (!ontop && layer != old && old != 0 && layer != 0) {
+				mms_layer_n[old]--;
+				mms_layer_n[layer]++;
+				sb->layer = (signed char)layer;
+			}
+			if (ontop || (layer != old &&
+				      (old == 0 || layer == 0))) {
 				mms_hidesafe((int)bn);
 				sb->layer = (signed char)layer;
 				mms_layer_n[layer]++;
@@ -872,11 +833,16 @@ MMG_FN void mms_write(MMINTEGER bn, MMINTEGER xi, MMINTEGER yi,
 		MM_RAISE("Invalid sprite coordinates");
 	if (flags < 0 || flags > 7)
 		MM_RAISE("Invalid sprite flags");
-	sb->rot = (unsigned char)flags;
-	if ((sb->rot & 4) == 0)
-		mode |= 8;
-	sb->rot &= 3;
-	mms_show_px((int)bn, (int)xi, (int)yi, mode);
+	/* WRITE's orientations 0-3 draw every pixel and 4-7 (the default)
+	 * leave the transparent ones, the other way round from SHOW's; a
+	 * sprite showing keeps its own orientation (#90) */
+	{
+		unsigned char keep = sb->rot;
+
+		sb->rot = (unsigned char)((flags & 3) | ((flags & 4) ? 0 : 4));
+		mms_show_px((int)bn, (int)xi, (int)yi, mode);
+		sb->rot = keep;
+	}
 }
 
 MMG_FN void mms_read(MMINTEGER bn, MMINTEGER xi, MMINTEGER yi,
@@ -931,7 +897,7 @@ MMG_FN void mms_copy(MMINTEGER bn, MMINTEGER first, MMINTEGER count)
 		MM_RAISE("Buffer not in use");
 	if (first < 1 || first > MMS_MAX)
 		MM_RAISE("Invalid sprite number");
-	if (count < 1 || count > MMS_MAX - 1)
+	if (count < 1 || count > MMS_MAX + 1 - first)	/* the last is 64 */
 		MM_RAISE("Invalid copy count");
 	for (c1 = (int)first, n1 = (int)count; n1; n1--, c1++) {
 		if (c1 > MMS_MAX)
@@ -947,6 +913,8 @@ MMG_FN void mms_copy(MMINTEGER bn, MMINTEGER first, MMINTEGER count)
 		cp->img = sb->img;
 		cp->w = sb->w;
 		cp->h = sb->h;
+		cp->bnd = NULL;
+		memset(cp->bgc, 0, sizeof(cp->bgc));
 		cp->store = (unsigned char *)malloc((size_t)sb->w * sb->h);
 		if (cp->store == NULL)
 			MM_RAISE("Not enough memory");
@@ -961,7 +929,7 @@ MMG_FN void mms_copy(MMINTEGER bn, MMINTEGER first, MMINTEGER count)
 		cp->rot = 0;
 		cp->active = 0;
 		cp->alloc = 1;
-		sb->master |= (MMINTEGER)1 << c1;
+		sb->master++;	/* its copies, counted (#91) */
 		sb->lastcoll = 0;
 	}
 	mms_any = 1;
@@ -972,8 +940,6 @@ MMG_FN void mms_swap(MMINTEGER bn, MMINTEGER rn, MMINTEGER flags)
 {
 	struct mmb_sprite *sb = mms_get(bn);
 	struct mmb_sprite *rb;
-	MMINTEGER master;
-	signed char mymaster;
 	int mode = 2;
 
 	if (sb == NULL)
@@ -993,11 +959,8 @@ MMG_FN void mms_swap(MMINTEGER bn, MMINTEGER rn, MMINTEGER flags)
 		MM_RAISE("Size mismatch");
 	if (flags < 0 || flags > 7)
 		MM_RAISE("Invalid sprite flags");
-	master = rb->master;
-	mymaster = rb->mymaster;
-	rb->master = sb->master;
-	rb->mymaster = sb->mymaster;
-	/* The new sprite inherits the old one's saved background.  The
+	/* master and mymaster describe each sprite's own image, which SWAP
+	 * does not exchange (#89).  The new sprite inherits the old one's saved background.  The
 	 * reference aliases the store POINTER; copying the bytes gives
 	 * the same picture without two sprites owning one block (the
 	 * master's img and store are one allocation here). */
@@ -1010,8 +973,6 @@ MMG_FN void mms_swap(MMINTEGER bn, MMINTEGER rn, MMINTEGER flags)
 		mms_lifo_swap(mms_zlifo, mms_zp, (int)bn, (int)rn);
 	else
 		mms_lifo_swap(mms_lifo, mms_lp, (int)bn, (int)rn);
-	sb->master = master;
-	sb->mymaster = mymaster;
 	sb->x = MMS_INACTIVE;
 	sb->y = MMS_INACTIVE;
 	sb->layer = -1;
@@ -1019,11 +980,7 @@ MMG_FN void mms_swap(MMINTEGER bn, MMINTEGER rn, MMINTEGER flags)
 	sb->ny = MMS_INACTIVE;
 	sb->active = 0;
 	sb->lastcoll = 0;
-	rb->rot = (unsigned char)flags;
-	if (rb->rot > 3) {
-		mode |= 8;
-		rb->rot &= 3;
-	}
+	rb->rot = (unsigned char)flags;	/* 4-7 opaque: mms_show_px */
 	mms_show_px((int)rn, rb->x, rb->y, mode);
 	mms_sanity();
 }
@@ -1049,10 +1006,13 @@ MMG_FN void mms_close(MMINTEGER bn)
 		mms_layer_n[(int)sb->layer]--;
 		mms_inuse--;
 	}
+	free(sb->bnd);
+	sb->bnd = NULL;
 	if (sb->mymaster == -1)
 		free(sb->img);	/* img and store are one block */
 	else {
-		mms[(int)sb->mymaster].master &= ~((MMINTEGER)1 << (int)bn);
+		if (mms[(int)sb->mymaster].master > 0)
+			mms[(int)sb->mymaster].master--;	/* one copy fewer */
 		free(sb->store);	/* a copy owns only its store */
 	}
 	sb->img = NULL;
@@ -1082,6 +1042,8 @@ MMG_FN void mms_close_all(void)
 			continue;
 		if (sb->active)
 			mms_unshow(i);
+		free(sb->bnd);
+		sb->bnd = NULL;
 		if (sb->mymaster == -1)
 			free(sb->img);
 		else
@@ -1324,13 +1286,14 @@ MMG_FN void mms_load(const char *file, MMINTEGER start, MMINTEGER mode)
 		   for a missing or zero one is a SQUARE sprite. */
 		height = (got >= 3) ? v[2] : 0;
 	}
-	if (width < 1 || number < 1) {
+	if (height == 0)
+		height = width;
+	/* a line of the file is at most 255 characters (#91) */
+	if (width < 1 || width > 255 || height < 1 || number < 1) {
 		fclose(f);
 		MM_RAISE("Invalid sprite file");
 	}
-	if (height == 0)
-		height = width;
-	if (number + start > MMS_MAX) {
+	if (number + start - 1 > MMS_MAX) {	/* the last is 64 (#64) */
 		fclose(f);
 		MM_RAISE("Maximum of 64 sprites");
 	}
@@ -1343,9 +1306,20 @@ MMG_FN void mms_load(const char *file, MMINTEGER start, MMINTEGER mode)
 				fclose(f);
 				return;
 			}
-		} else if (!(sb->w == width && sb->h == height)) {
-			fclose(f);
-			MM_RAISE("Existing buffer is incorrect size");
+		} else {
+			/* an existing sprite, as SPRITE READ (#64) */
+			if (sb->mymaster != -1) {
+				fclose(f);
+				MM_RAISE("Can't read into a copy");
+			}
+			if (sb->master > 0) {
+				fclose(f);
+				MM_RAISE("Copies exist");
+			}
+			if (!(sb->w == width && sb->h == height)) {
+				fclose(f);
+				MM_RAISE("Existing buffer is incorrect size");
+			}
 		}
 		for (lc = 0; lc < height; lc++) {
 			do {
@@ -1468,10 +1442,14 @@ MMG_FN void mms_loadpng(MMINTEGER bn, const char *file, MMINTEGER targ,
 			break;
 		got += n;
 	}
-	if (mm_run_pipe_close(fd) < 0)
+	if (mm_run_pipe_close(fd) < 0) {
+		mms_unalloc(sb);
 		return;			/* a failed decoder is an error */
-	if (got < w * h)
+	}
+	if (got < w * h) {
+		mms_unalloc(sb);
 		MM_RAISE("The PNG could not be decoded");
+	}
 }
 
 /* ---- SPRITE LOADBMP #n, f$ [, x [, y [, w [, h]]]] ------------------
@@ -1550,10 +1528,14 @@ MMG_FN void mms_loadbmp(MMINTEGER bn, const char *file, MMINTEGER xo,
 			break;
 		got += n;
 	}
-	if (mm_run_pipe_close(fd) < 0)
+	if (mm_run_pipe_close(fd) < 0) {
+		mms_unalloc(sb);
 		return;			/* a failed decoder is an error */
-	if (got < w * h)
+	}
+	if (got < w * h) {
+		mms_unalloc(sb);
 		MM_RAISE("The BMP could not be decoded");
+	}
 }
 
 MMG_FN void mms_loadarray(MMINTEGER bn, MMINTEGER wi, MMINTEGER hi,
@@ -1587,6 +1569,117 @@ MMG_FN void mms_loadarray(MMINTEGER bn, MMINTEGER wi, MMINTEGER hi,
  * radians and pixels, through the float one.  The letters become the
  * reference's t codes in the translator. */
 
+/* getspritebounds: for each row the first and last opaque column, for
+ * each column the first and last opaque row, from the image as it is
+ * and the transparent colour as it is when first asked for (the
+ * reference keeps them from then on, and so does this) */
+MMG_FN short *mms_bounds(struct mmb_sprite *sb)
+{
+	int w = sb->w, h = sb->h, x, y;
+	short *b;
+
+	if (sb->bnd != NULL)
+		return sb->bnd;
+	b = (short *)malloc(sizeof(short) * (size_t)(h + h + w + w));
+	if (b == NULL)
+		MM_RAISEV("Not enough memory", (short *)0);
+	for (x = 0; x < w; x++) {
+		b[h + h + x] = 0x7FFF;		/* top */
+		b[h + h + w + x] = -1;		/* bottom */
+	}
+	for (y = 0; y < h; y++) {
+		b[y] = (short)w;		/* left */
+		b[h + y] = -1;			/* right */
+		for (x = 0; x < w; x++) {
+			if (sb->img[(size_t)y * w + x] == mms_transparent)
+				continue;
+			if (b[y] == w)
+				b[y] = (short)x;
+			b[h + y] = (short)x;
+			b[h + h + w + x] = (short)y;
+			if (b[h + h + x] == 0x7FFF)
+				b[h + h + x] = (short)y;
+		}
+	}
+	sb->bnd = b;
+	return b;
+}
+
+/* one opaque background pixel at px, py against the bounds: the
+ * sides' penetration, and 2 when it is inside the sprite's shape */
+MMG_FN int mms_bpixel(struct mmb_sprite *sb, const short *b, int px, int py)
+{
+	int w = sb->w, h = sb->h, ret = 1;
+	int bx = (sb->rot & 1) ? w - 1 - px : px;
+	int by = (sb->rot & 2) ? h - 1 - py : py;
+	short *g = sb->bgc;
+
+	if (px > g[0]) g[0] = (short)px;
+	if (px < g[1]) g[1] = (short)px;
+	if (py > g[2]) g[2] = (short)py;
+	if (py < g[3]) g[3] = (short)py;
+	if (bx >= b[by] && bx <= b[h + by]) {
+		if (bx - b[by] > g[4]) { g[4] = (short)(bx - b[by]); ret = 2; }
+		if (b[h + by] - bx > g[5]) { g[5] = (short)(b[h + by] - bx); ret = 2; }
+	}
+	if (by >= b[h + h + bx] && by <= b[h + h + w + bx]) {
+		if (by - b[h + h + bx] > g[6]) { g[6] = (short)(by - b[h + h + bx]); ret = 2; }
+		if (b[h + h + w + bx] - by > g[7]) { g[7] = (short)(b[h + h + w + bx] - by); ret = 2; }
+	}
+	return ret;
+}
+
+/* SPRITE(B, n) - fun_sprite's t 14: the sprite's opaque pixels against
+ * the background stored under it.  0 none of the background is opaque,
+ * 1 some is, 2 some is inside the sprite's shape; the eight sides are
+ * SPRITE(B, n, side).  A sprite not showing answers 0 and zeroes them
+ * (PicoMite #92). */
+MMG_FN MMINTEGER mms_spriteb(int bnbr)
+{
+	struct mmb_sprite *sb = &mms[bnbr];
+	short *g = sb->bgc, *b;
+	int sw = sb->w, sh = sb->h, px, py, r, iret = 0;
+
+	if (!(sb->alloc && sb->active)) {
+		memset(g, 0, sizeof(sb->bgc));
+		return 0;
+	}
+	b = mms_bounds(sb);
+	if (b == NULL)
+		return 0;
+	g[0] = -1; g[1] = 0x7FFF; g[2] = -1; g[3] = 0x7FFF;
+	g[4] = g[5] = g[6] = g[7] = -1;
+	for (py = 0; py < sh; py++)
+		for (px = 0; px < sw; px++) {
+			if (sb->store[(size_t)py * sw + px] == mms_transparent)
+				continue;
+			r = mms_bpixel(sb, b, px, py);
+			if (r > iret)
+				iret = r;
+		}
+	g[0] = (short)(g[0] == -1 ? 0 : g[0] + 1);
+	g[1] = (short)(g[1] == 0x7FFF ? 0 : sw - g[1]);
+	g[2] = (short)(g[2] == -1 ? 0 : g[2] + 1);
+	g[3] = (short)(g[3] == 0x7FFF ? 0 : sh - g[3]);
+	for (r = 4; r < 8; r++)
+		g[r] = (short)(g[r] == -1 ? 0 : g[r] + 1);
+	if (g[0] == sw) g[0] = 0;
+	if (g[1] == sw) g[1] = 0;
+	if (g[2] == sh) g[2] = 0;
+	if (g[3] == sh) g[3] = 0;
+	if (g[4] != 0 && g[5] != 0) {
+		if (g[4] < g[5]) g[5] = 0;
+		else if (g[4] > g[5]) g[4] = 0;
+		else g[4] = g[5] = 0;	/* both: a top or bottom hit */
+	}
+	if (g[6] != 0 && g[7] != 0) {
+		if (g[6] < g[7]) g[7] = 0;
+		else if (g[6] > g[7]) g[6] = 0;
+		else g[6] = g[7] = 0;	/* both: a left or right hit */
+	}
+	return iret;
+}
+
 MMG_FN MMINTEGER mms_fun(int t, MMINTEGER bni, MMINTEGER third, int nargs)
 {
 	int bnbr = (int)bni, w = -1, h = -1;
@@ -1603,6 +1696,15 @@ MMG_FN MMINTEGER mms_fun(int t, MMINTEGER bni, MMINTEGER third, int nargs)
 	}
 	if (t == 13)		/* S */
 		return mms_which;
+	if (t == 14) {		/* B, n [, side] */
+		if (bni < 1 || bni > MMS_MAX)
+			MM_RAISEV("Invalid sprite number", 0);
+		if (nargs < 2)
+			return mms_spriteb((int)bni);
+		if (third < 0 || third > 7)
+			MM_RAISEV("Invalid side", 0);
+		return mms[bni].bgc[third];
+	}
 	if (bnbr < 0 || bnbr > MMS_MAX)
 		MM_RAISEV("Invalid sprite number", 0);
 	sb = &mms[bnbr];
