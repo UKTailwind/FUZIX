@@ -1383,47 +1383,256 @@ char *mm_bin(MMINTEGER v, MMINTEGER w) { return mm_base(v, w,  2); }
 
 /* ---- BYTE(), TRIM$(), FIELD$(): moved to mmb_misc.h ---------------- */
 
-/* ---- FORMAT$() ----------------------------------------------------- */
-/* mirrors format_float() in core/MM_Misc.c: exactly one specifier,
- * rendered through the same FloatToStr so the digits agree.           */
+/* ---- FORMAT$() -----------------------------------------------------
+ * format_float() in the PicoMite's core/MM_Misc.c, as V8.00.00b3 has it
+ * (ffb1727): exactly one specifier, and the digits what C's printf
+ * makes - exact, rounded half to even on the binary value, to any
+ * precision - where the firmware's FloatToStr, which this used, is
+ * exact to about 15 digits and rounds a tie up (0.125 at two places
+ * was 0.13; printf and b3 say 0.12).  "inf" and "nan" as C has them.
+ * The default precision stays the manual's 4, not C's 6.  STR$ and
+ * PRINT keep FloatToStr (mm_float_to_str), as the firmware does.     */
 
-static int mm_decexp(double av)
-{
-    int X = (int)floor(log10(av));
-    double p10 = pow(10.0, (double)X);
-    if (av < p10) X--;
-    else if (av >= p10 * 10.0) X++;
-    return X;
-}
+/* The firmware does it with newlib's big numbers, which this C library
+ * does not have, so a small one of our own: an unsigned integer in
+ * 32-bit limbs, least significant first, n of them in use.  The widest
+ * FORMAT$ makes is about 1080 bits (10^324 against 2^1074 for the
+ * smallest double, ten times that and doubled in the digit loop), so 40
+ * limbs leave room; a sum that would pass them is cut, which no double
+ * reaches.  Static, three of them: 492 bytes. */
+#define MM_BN_W 40
+typedef struct { int n; unsigned int w[MM_BN_W]; } mm_bn;
 
-static void mm_striptz(char *s)
+static void mm_bn_set(mm_bn *a, unsigned long long v)
 {
-    char *dot = strchr(s, '.');
-    char *e;
-    if (!dot) return;
-    e = s + strlen(s);
-    while (e > dot + 1 && e[-1] == '0') e--;
-    if (e == dot + 1) e--;
-    *e = 0;
-}
-
-static void mm_fmt_exp(char *num, double val, int mantdec, int trimz)
-{
-    double av = fabs(val);
-    int X = (av == 0.0) ? 0 : mm_decexp(av);
-    double mant = (av == 0.0) ? 0.0 : val / pow(10.0, (double)X);
-    char *d;
-    mm_float_to_str(num, mant, 0, mantdec, ' ');
-    d = (num[0] == '-') ? num + 1 : num;
-    if (d[0] == '1' && d[1] == '0') {
-        X++;
-        mant = val / pow(10.0, (double)X);
-        mm_float_to_str(num, mant, 0, mantdec, ' ');
+    a->n = 0;
+    while (v) {
+        a->w[a->n++] = (unsigned int)v;
+        v >>= 32;
     }
-    if (trimz) mm_striptz(num);
-    num += strlen(num);
-    *num++ = 'e';
-    mm_int_to_str_pad(num, X, '0', -3, 10);
+}
+
+static void mm_bn_mul(mm_bn *a, unsigned int m)        /* a *= m */
+{
+    unsigned long long t;
+    unsigned int c = 0;
+    int i;
+
+    for (i = 0; i < a->n; i++) {
+        t = (unsigned long long)a->w[i] * m + c;
+        a->w[i] = (unsigned int)t;
+        c = (unsigned int)(t >> 32);
+    }
+    if (c && a->n < MM_BN_W)
+        a->w[a->n++] = c;
+}
+
+static void mm_bn_shl(mm_bn *a, int k)                 /* a <<= k */
+{
+    int ws = k >> 5, bs = k & 31, i;
+
+    if (a->n == 0)
+        return;
+    if (bs) {
+        unsigned int c = 0;
+
+        for (i = 0; i < a->n; i++) {
+            unsigned int v = a->w[i];
+
+            a->w[i] = (v << bs) | c;
+            c = v >> (32 - bs);
+        }
+        if (c && a->n < MM_BN_W)
+            a->w[a->n++] = c;
+    }
+    if (ws) {
+        if (a->n + ws > MM_BN_W)
+            ws = MM_BN_W - a->n;
+        memmove(a->w + ws, a->w, (size_t)a->n * sizeof a->w[0]);
+        memset(a->w, 0, (size_t)ws * sizeof a->w[0]);
+        a->n += ws;
+    }
+}
+
+static void mm_bn_pow5(mm_bn *a, int k)                /* a *= 5^k */
+{
+    unsigned int p = 1;
+
+    for (; k >= 13; k -= 13)
+        mm_bn_mul(a, 1220703125u);                     /* 5^13 */
+    while (k--)
+        p *= 5;
+    mm_bn_mul(a, p);
+}
+
+static int mm_bn_cmp(const mm_bn *a, const mm_bn *b)
+{
+    int i;
+
+    if (a->n != b->n)
+        return a->n < b->n ? -1 : 1;
+    for (i = a->n - 1; i >= 0; i--)
+        if (a->w[i] != b->w[i])
+            return a->w[i] < b->w[i] ? -1 : 1;
+    return 0;
+}
+
+static void mm_bn_sub(mm_bn *a, const mm_bn *b)        /* a -= b, a >= b */
+{
+    unsigned long long t;
+    unsigned int borrow = 0;
+    int i;
+
+    for (i = 0; i < a->n; i++) {
+        t = (unsigned long long)a->w[i] - (i < b->n ? b->w[i] : 0) - borrow;
+        a->w[i] = (unsigned int)t;
+        borrow = (unsigned int)(t >> 63);
+    }
+    while (a->n && a->w[a->n - 1] == 0)
+        a->n--;
+}
+
+/* The decimal digits of |val| as C's printf makes them, format_digits
+ * in the firmware: the value is M * 2^E exactly, made r / s in [1, 10)
+ * by 10^X, and each digit taken by subtracting s.  mode 2: ndig
+ * significant digits; mode 3: ndig after the point.  Trailing zeros
+ * are left out; the count is returned, *decpt is where the point goes
+ * (9999 for an infinity or a NaN: D is then "I" or "N"), *neg the
+ * sign.  D holds 80. */
+static int mm_fmt_digits(char *D, double val, int mode, int ndig, int *decpt,
+                         int *neg)
+{
+    static mm_bn r, s, t;
+    union { double d; unsigned long long u; } b;
+    unsigned long long m;
+    int e, X, S, i, n, c;
+
+    b.d = val;
+    *neg = (int)(b.u >> 63);
+    b.u &= ~(1ULL << 63);
+    e = (int)((b.u >> 52) & 0x7FF);
+    m = b.u & ((1ULL << 52) - 1);
+    if (e == 0x7FF) {
+        D[0] = m ? 'N' : 'I';
+        *decpt = 9999;
+        return 1;
+    }
+    if (e == 0 && m == 0) {
+        D[0] = '0';
+        *decpt = 1;
+        return 1;
+    }
+    if (e) {
+        m |= 1ULL << 52;
+        e -= 1075;
+    } else
+        e = -1074;                                     /* a subnormal */
+    mm_bn_set(&r, m);                                  /* val = r * 2^e */
+    mm_bn_set(&s, 1);
+    if (e > 0)
+        mm_bn_shl(&r, e);
+    else if (e < 0)
+        mm_bn_shl(&s, -e);
+    X = (int)floor(log10(b.d));                        /* (an estimate: put right below) */
+    if (X > 0) {
+        mm_bn_pow5(&s, X);
+        mm_bn_shl(&s, X);
+    } else if (X < 0) {
+        mm_bn_pow5(&r, -X);
+        mm_bn_shl(&r, -X);
+    }
+    if (mm_bn_cmp(&r, &s) < 0) {                       /* r / s below 1 */
+        X--;
+        mm_bn_mul(&r, 10);
+    }
+    t = s;
+    mm_bn_mul(&t, 10);
+    if (mm_bn_cmp(&r, &t) >= 0) {                      /* r / s 10 or more */
+        X++;
+        s = t;
+    }
+    S = mode == 2 ? ndig : X + 1 + ndig;               /* the digits wanted */
+    if (S > 79)
+        S = 79;
+    n = 0;
+    if (S <= 0) {
+        /* %f of a value below its last decimal: 0, or 1 in that decimal
+         * if more than half of it */
+        c = -1;
+        if (S == 0) {
+            t = s;
+            mm_bn_mul(&t, 5);
+            c = mm_bn_cmp(&r, &t);
+        }
+        if (c > 0) {
+            D[n++] = '1';
+            X++;
+        } else
+            X = -ndig - 1;
+    } else {
+        for (i = 0; i < S; i++) {
+            int d = 0;
+
+            while (mm_bn_cmp(&r, &s) >= 0) {
+                mm_bn_sub(&r, &s);
+                d++;
+            }
+            D[n++] = (char)('0' + d);
+            if (i < S - 1)
+                mm_bn_mul(&r, 10);
+        }
+        /* the rest against half of the last digit: up, or to even on a tie */
+        mm_bn_shl(&r, 1);
+        c = mm_bn_cmp(&r, &s);
+        if (c > 0 || (c == 0 && (D[n - 1] & 1))) {
+            for (i = n - 1; i >= 0 && D[i] == '9'; i--)
+                D[i] = '0';
+            if (i >= 0)
+                D[i]++;
+            else {                                     /* 99..9 became 100..0 */
+                D[0] = '1';
+                X++;
+            }
+        }
+    }
+    while (n > 1 && D[n - 1] == '0')
+        n--;
+    D[n] = 0;
+    *decpt = X + 1;
+    return n;
+}
+
+/* D's n digits as d.ddd and an exponent X ("e+05": a sign and two
+ * digits at least), with dec decimals, zeros added */
+static char *mm_fmt_e(char *o, const char *D, int n, int X, int dec)
+{
+    int i;
+
+    *o++ = D[0];
+    if (dec > 0)
+        *o++ = '.';
+    for (i = 1; i <= dec; i++)
+        *o++ = i < n ? D[i] : '0';
+    *o++ = 'e';
+    mm_int_to_str_pad(o, X, '0', -3, 10);
+    return o + strlen(o);
+}
+
+/* D's n digits with the point decpt digits in, and dec decimals: zeros
+ * added before and after as needed */
+static void mm_fmt_fixed(char *o, const char *D, int n, int decpt, int dec)
+{
+    int i;
+
+    if (decpt <= 0)
+        *o++ = '0';
+    for (i = 0; i < decpt; i++)
+        *o++ = i < n ? D[i] : '0';
+    if (dec > 0)
+        *o++ = '.';
+    for (i = decpt; i < decpt + dec; i++)
+        *o++ = (i >= 0 && i < n) ? D[i] : '0';
+    *o = 0;
 }
 
 char *mm_format(MMFLOAT val, const char *fmtstr)
@@ -1436,7 +1645,7 @@ char *mm_format(MMFLOAT val, const char *fmtstr)
        refused below */
     char flagbuf[8], num[96], body[104], out[2 * (MM_STRLEN + 1)];
     char *o = out;
-    int nf = 0, width = 0, prec = 4, type, upper, bl, pad;
+    int nf = 0, width = 0, prec = 4, type, upper, bl, pad, finite = 1;
     size_t pre;
     char *t;
 
@@ -1466,24 +1675,48 @@ char *mm_format(MMFLOAT val, const char *fmtstr)
     if (prec > 30) prec = 30;
     if (width > 250) width = 250;
 
-    if (type == 'e' || type == 'E') {
-        mm_fmt_exp(num, val, prec, 0);
-    } else if (type == 'g' || type == 'G') {
-        int P = prec ? prec : 1;
-        double av = fabs(val);
-        int X = (av == 0.0) ? 0 : mm_decexp(av);
-        if (X >= -4 && X < P) {
-            int dec = P - 1 - X;
-            if (dec < 0) dec = 0;
-            mm_float_to_str(num, val, 0, dec, ' ');
-            mm_striptz(num);
-        } else {
-            mm_fmt_exp(num, val, P - 1, 1);
-        }
-    } else {
-        mm_float_to_str(num, val, 0, prec, ' ');
+    /* the number itself, '-' for a negative and nothing for a positive:
+     * the flags and the width are applied after */
+    {
+        char D[80], *d = num;
+        int n, decpt, neg, alt = strchr(flagbuf, '#') != NULL;
+        int P = prec ? prec : 1;                       /* %g: significant digits */
+
+        if (type == 'e' || type == 'E')
+            n = mm_fmt_digits(D, val, 2, prec + 1, &decpt, &neg);
+        else if (type == 'g' || type == 'G')
+            n = mm_fmt_digits(D, val, 2, P, &decpt, &neg);
+        else
+            n = mm_fmt_digits(D, val, 3, prec, &decpt, &neg);
+        if (neg)
+            *d++ = '-';
+        if (decpt == 9999) {                           /* never zero-padded */
+            strcpy(d, D[0] == 'N' ? "nan" : "inf");
+            finite = 0;
+        } else if (type == 'e' || type == 'E')
+            mm_fmt_e(d, D, n, decpt - 1, prec);
+        else if (type == 'g' || type == 'G') {
+            /* exponential below 1e-4 or from 10^P, else fixed; trailing
+             * zeros left out unless the # flag */
+            int X = decpt - 1;
+
+            if (X < -4 || X >= P)
+                mm_fmt_e(d, D, n, X, alt ? P - 1 : n - 1);
+            else
+                mm_fmt_fixed(d, D, n, decpt, alt ? P - 1 - X
+                                                 : (n > decpt ? n - decpt : 0));
+        } else if (decpt + prec < 76)                  /* the firmware's num[80] - 4 */
+            mm_fmt_fixed(d, D, n, decpt, prec);
+        else                                           /* more digits than that holds: */
+            mm_float_to_str(num, val, 0, prec, ' ');   /* FloatToStr, as the firmware */
     }
-    if (upper) { char *z; for (z = num; *z; z++) if (*z == 'e') *z = 'E'; }
+    if (upper) {
+        char *z;
+
+        for (z = num; *z; z++)
+            if (*z >= 'a' && *z <= 'z')
+                *z -= 'a' - 'A';
+    }
 
     {
         char esign = 0;
@@ -1496,7 +1729,7 @@ char *mm_format(MMFLOAT val, const char *fmtstr)
     bl = (int)strlen(body);
     pad = width - bl;
     if (pad > 0 && strchr(flagbuf, '-') == NULL) {
-        if (strchr(flagbuf, '0')) {
+        if (strchr(flagbuf, '0') && finite) {
             int sgn = (body[0] == '+' || body[0] == '-' || body[0] == ' ') ? 1 : 0;
             memcpy(o, body, (size_t)sgn);
             memset(o + sgn, '0', (size_t)pad);
