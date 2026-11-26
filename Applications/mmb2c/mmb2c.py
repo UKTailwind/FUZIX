@@ -4876,12 +4876,11 @@ class Conv(object):
             # for itself, so none of them is BASIC.  #COMMENT START to
             # #COMMENT END makes the lines between comments, an MMDEBUG
             # statement is one unless #MMDEBUG ON, and a '#' line it does
-            # not know is dropped.  #DEFINE, #INCLUDE and #MMDEBUG ON are
-            # refused: commented out as statements, their substitutions
-            # and files vanished and the code inside a #COMMENT was
-            # compiled, with rc 0.  (Plain LOAD and RUN have no '#' lines
-            # at all - "Invalid character" - so a program with them is
-            # one for that loader.)
+            # not know is dropped.  #INCLUDE and #DEFINE have been done
+            # already (loader_directives), and their lines go too.
+            # #MMDEBUG ON is refused.  (Plain LOAD and RUN have no '#'
+            # lines at all - "Invalid character" - so a program with them
+            # is one for that loader.)
             sq = loader_squash(self.lines[i])
             if ignore and not sq.startswith('#COMMENT END'):
                 self.lines[i] = ''
@@ -4892,8 +4891,7 @@ class Conv(object):
                 # only DEFINE is a checkstring, which steps over a blank
                 wd = w[1:] if w[:1] == ' ' else w
                 if wd.startswith('DEFINE') and not loader_namechar(wd[6:7]):
-                    self.errors.append("line %d: #DEFINE is not translated"
-                                       % self.lineno)
+                    pass
                 elif w.startswith('COMMENT END'):
                     ignore = False
                 elif w.startswith('COMMENT START'):
@@ -4904,9 +4902,6 @@ class Conv(object):
                                        "translated" % self.lineno)
                 elif w.startswith('MMDEBUG OFF'):
                     debugoff = True
-                elif w.startswith('INCLUDE'):
-                    self.errors.append("line %d: #INCLUDE is not "
-                                       "translated" % self.lineno)
                 self.lines[i] = ''
                 i += 1
                 continue
@@ -13510,6 +13505,230 @@ def read_source(inpath):
     return io.StringIO(out.decode('ascii'), newline=None).readlines()
 
 
+LOADER_MAXDEFINES = 16          # the firmware's MAXDEFINES
+LOADER_DEFLEN = 32              # sizeof(dlist[0].from) and .to
+
+
+def loader_collapse(s):
+    """The CMM2 loader's blanks (FileIO.c FileLoadCMM2Program): none at
+    the start, and outside quotes one blank after a blank or a colon
+    where there were several, or none after a colon."""
+    out = []
+    i = 0
+    n = len(s)
+    q = False
+    while i < n and s[i] == ' ':
+        i += 1
+    while i < n:
+        c = s[i]
+        if c == '"':
+            q = not q
+        out.append(c)
+        i += 1
+        if not q and c in ' :':
+            while i < n and s[i] == ' ':
+                i += 1
+    return ''.join(out)
+
+
+def loader_nameend(c):
+    """isnameend: a name character, or a type suffix ('' the end)."""
+    return c != '' and (loader_namechar(c) or c in '$!%')
+
+
+def loader_replace(line, needle, repl):
+    """STR_REPLACE (MMBasic.c) as the loader's massage() calls it: every
+    occurrence of needle, matched regardless of case and only as a whole
+    word - not after a name character, not before a name character or a
+    type suffix - becomes repl, except in quotes and in the comment after
+    a '.  A line that is a REM statement is left alone, and an occurrence
+    that is not a whole word is kept as it is."""
+    k = 0
+    while k < len(line) and line[k] == ' ':
+        k += 1
+    if line[k:k + 3].upper() == 'REM' and \
+            not loader_namechar(ascii_upper(line[k + 3:k + 4])):
+        return line
+    vis = []
+    comment = ''
+    q = False
+    for idx, c in enumerate(line):
+        if c == '"':
+            q = not q
+            vis.append(c)
+            continue
+        if not q and c == "'":
+            comment = line[idx:]
+            break
+        # a quoted character is hidden from the search, as the firmware
+        # hides it by setting its top bit
+        vis.append(chr(ord(c) | 0x80) if q else c)
+    t = ''.join(vis)
+    tu = ''.join(ascii_upper(c) for c in t)
+    n = len(needle)
+    out = []
+    pos = 0
+    while True:
+        at = tu.find(needle, pos)
+        if at < 0:
+            out.append(t[pos:])
+            break
+        out.append(t[pos:at])
+        if (at == 0 or not loader_namechar(tu[at - 1])) and \
+                not loader_nameend(tu[at + n:at + n + 1]):
+            out.append(repl)
+        else:
+            out.append(t[at:at + n])
+        pos = at + n
+    return ''.join(chr(ord(c) & 0x7F) for c in ''.join(out)) + comment
+
+
+def loader_strings(rest, count):
+    """count string literals separated by commas, and nothing after them
+    but blanks or a ' comment: their contents, or None."""
+    got = []
+    i = 0
+    n = len(rest)
+    for k in range(count):
+        while i < n and rest[i] == ' ':
+            i += 1
+        if k:
+            if i >= n or rest[i] != ',':
+                return None
+            i += 1
+            while i < n and rest[i] == ' ':
+                i += 1
+        if i >= n or rest[i] != '"':
+            return None
+        j = rest.find('"', i + 1)
+        if j < 0:
+            return None
+        got.append(rest[i + 1:j])
+        i = j + 1
+    while i < n and rest[i] == ' ':
+        i += 1
+    if i < n and rest[i] != "'":
+        return None
+    return got
+
+
+def loader_directives(lines, inpath):
+    """#INCLUDE and #DEFINE, as the CMM2 loader has them (FileIO.c
+    FileLoadCMM2Program and importfile), before any pass sees the lines.
+
+    #INCLUDE "file" puts the file's lines in place of the statement - the
+    #INCLUDE line stays, and pass_fonts blanks it as it blanks every '#'
+    line.  The name gets ".inc" when it has no extension and must then end
+    in .inc; a name not from the root is beside the program.  An included
+    file cannot include another.
+
+    #DEFINE "from", "to" changes every later line, in this file and in
+    those it includes after it: each from, as a whole word in any case
+    and not in quotes or a comment, becomes to in capitals - the
+    firmware's massage(), the latest #DEFINE first.  The firmware matches
+    on the line with its blanks collapsed, so that is what is matched
+    here; a line no #DEFINE changes is left exactly as it was.
+
+    Inside #COMMENT START ... #COMMENT END neither does anything.  The
+    arguments are string literals here (the firmware evaluates them).
+    Returns (lines, errors)."""
+    cut = max(inpath.rfind('/'), inpath.rfind('\\'))
+    here = inpath[:cut + 1]
+    defs = []
+    out = []
+    errs = []
+
+    def directive(ln, inc):
+        sq = loader_squash(ln)
+        if not sq.startswith('#'):
+            return False
+        w = sq[1:]
+        wd = w[1:] if w[:1] == ' ' else w
+        if wd.startswith('DEFINE') and not loader_namechar(wd[6:7]):
+            raw = ln.strip()
+            k = raw.upper().find('DEFINE') + 6
+            got = loader_strings(raw[k:], 2)
+            if got is None:
+                errs.append("line %d: #DEFINE wants two strings"
+                            % (len(out) + 1))
+            elif len(defs) >= LOADER_MAXDEFINES:
+                errs.append("line %d: Too many #DEFINE statements"
+                            % (len(out) + 1))
+            elif len(got[0]) >= LOADER_DEFLEN or \
+                    len(got[1]) >= LOADER_DEFLEN:
+                errs.append("line %d: #DEFINE string too long"
+                            % (len(out) + 1))
+            elif got[0] != '':
+                defs.append((''.join(ascii_upper(c) for c in got[0]),
+                             ''.join(ascii_upper(c) for c in got[1])))
+            return True
+        if not w.startswith('INCLUDE'):
+            return True
+        if inc:
+            errs.append("line %d: Can't import from an import"
+                        % (len(out) + 1))
+            return True
+        raw = ln.strip()
+        got = loader_strings(raw[raw.upper().find('INCLUDE') + 7:], 1)
+        if got is None:
+            errs.append("line %d: #INCLUDE wants a file name in quotes"
+                        % (len(out) + 1))
+            return True
+        name = got[0]
+        last = max(name.rfind('/'), name.rfind('\\'))
+        if '.' not in name[last + 1:]:
+            name += '.inc'
+        if name[-4:].lower() != '.inc':
+            errs.append("line %d: #INCLUDE: must be a .inc file"
+                        % (len(out) + 1))
+            return True
+        if name[1:2] == ':':
+            errs.append("line %d: #INCLUDE with a drive is not translated"
+                        % (len(out) + 1))
+            return True
+        if name[:1] not in ('/', '\\'):
+            name = here + name
+        try:
+            inc_lines = read_source(name)
+        except (OSError, IOError):
+            errs.append("line %d: #INCLUDE: cannot read %s"
+                        % (len(out) + 1, name))
+            return True
+        if inc_lines and not inc_lines[-1].endswith('\n'):
+            inc_lines[-1] += '\n'
+        out.append(ln)
+        walk(inc_lines, True)
+        return None
+
+    def walk(src, inc):
+        ignore = False
+        for ln in src:
+            sq = loader_squash(ln)
+            if ignore:
+                if sq.startswith('#COMMENT END'):
+                    ignore = False
+                out.append(ln)
+                continue
+            if sq.startswith('#COMMENT START'):
+                ignore = True
+            d = directive(ln, inc)
+            if d is None:
+                continue        # the #INCLUDE, and the file after it
+            if d or not defs:
+                out.append(ln)
+                continue
+            nl = '\n' if ln.endswith('\n') else ''
+            body = ln[:len(ln) - len(nl)]
+            flat = loader_collapse(body)
+            new = flat
+            for frm, to in reversed(defs):
+                new = loader_replace(new, frm, to)
+            out.append(new + nl if new != flat else ln)
+
+    walk(lines, False)
+    return out, errs
+
+
 def library_splice(lines, inpath):
     """LIBRARY LOAD file$ [, file$ ...] [, O] [, RAM] - MM_Misc.c's
     cmd_library: the files' source becomes the program's library, whose
@@ -13597,12 +13816,14 @@ def library_splice(lines, inpath):
 
 def convert(inpath, outpath=None, report=False, lenient=True, fcc=False):
     lines = read_source(inpath)
+    lines, direrrs = loader_directives(lines, inpath)
     lines, nprog, liberr = library_splice(lines, inpath)
 
     conv = Conv(lines, inpath)
     # the library's lines, after the program's, are walked first
     conv.order = list(range(nprog, len(lines))) + list(range(nprog))
     conv.nprog = nprog
+    conv.errors.extend(direrrs)
     if liberr is not None:
         conv.errors.append(liberr)
     conv.lenient = lenient

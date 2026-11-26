@@ -360,10 +360,9 @@ void pass_fonts(void)
          * takes every line that starts with '#' for itself, so none of
          * them is BASIC.  #COMMENT START to #COMMENT END makes the lines
          * between comments, an MMDEBUG statement is one unless #MMDEBUG
-         * ON, and a '#' line it does not know is dropped.  #DEFINE,
-         * #INCLUDE and #MMDEBUG ON are refused: commented out as
-         * statements, their substitutions and files vanished and the
-         * code inside a #COMMENT was compiled, with rc 0.  (Plain LOAD
+         * ON, and a '#' line it does not know is dropped.  #INCLUDE and
+         * #DEFINE have been done already (loader_directives, mmbc_main.c),
+         * and their lines go too.  #MMDEBUG ON is refused.  (Plain LOAD
          * and RUN have no '#' lines at all - "Invalid character" - so a
          * program with them is one for that loader.) */
         sq = loader_squash(src_lines[i]);
@@ -378,8 +377,7 @@ void pass_fonts(void)
             const char *wd = w[0] == ' ' ? w + 1 : w;
 
             if (strncmp(wd, "DEFINE", 6) == 0 && !loader_namechar(wd[6]))
-                errors_add(sfmt("line %d: #DEFINE is not translated",
-                                i + 1));
+                ;
             else if (strncmp(w, "COMMENT END", 11) == 0)
                 ignore = 0;
             else if (strncmp(w, "COMMENT START", 13) == 0)
@@ -390,9 +388,6 @@ void pass_fonts(void)
                                 i + 1));
             } else if (strncmp(w, "MMDEBUG OFF", 11) == 0)
                 debugoff = 1;
-            else if (strncmp(w, "INCLUDE", 7) == 0)
-                errors_add(sfmt("line %d: #INCLUDE is not translated",
-                                i + 1));
             src_lines[i] = pstr("");
             i++;
             continue;

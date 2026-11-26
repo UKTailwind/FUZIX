@@ -4687,8 +4687,16 @@ inside a `SUB` or `FUNCTION`. Anything after `*/` on its line is comment
 too. A `/*` or `*/` that breaks the rule stops the translation with a
 message naming the line. Lines starting with `#` are taken as CMM2 RUN's loader takes
 them: `#COMMENT START` to `#COMMENT END` is comment, `MMDEBUG`
-statements are dropped under the default `#MMDEBUG OFF`, and `#DEFINE`,
-`#INCLUDE` and `#MMDEBUG ON` are refused by name.
+statements are dropped under the default `#MMDEBUG OFF`, and
+`#MMDEBUG ON` is refused by name. `#INCLUDE "file"` puts the file's
+lines in its place: `.inc` is added to a name with no extension, the
+name must end in `.inc`, a name not starting at the root is beside the
+program, and an included file cannot include another.
+`#DEFINE "from", "to"` changes every later line, an included file's
+too: `from` as a whole word in any case, outside quotes and comments,
+becomes `to` in capitals, the latest `#DEFINE` first, up to 16 of them
+of up to 31 characters each. Their arguments are written as quoted
+strings here.
 
 `LIBRARY LOAD` is taken as the program's first statement — comments,
 blank lines and `OPTION`s may come before it — which is how PicoMite

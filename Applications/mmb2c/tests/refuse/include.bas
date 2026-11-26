@@ -1,5 +1,5 @@
-' REFUSE: #INCLUDE is not translated
-' The loader reads an #INCLUDE file in at that line (FileIO.c); dropped
-' as a statement it could not parse, the file's SUBs were simply missing.
+' REFUSE: #INCLUDE: cannot read
+' An #INCLUDE whose file is not there stops the translation, as the
+' loader stops with "Could not find the file" (FileIO.c importfile).
 #INCLUDE "lib.inc"
 Print "after"

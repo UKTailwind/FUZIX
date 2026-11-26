@@ -438,9 +438,10 @@ structure parameter given the member's structure, are refused with
 messages; everything else in `TYPE-SPEC.md` is in.
 
 Anything not recognised produces an error naming the line and the
-construct, rather than silently wrong C.  `#DEFINE` and `#INCLUDE` are
-refused the same way; the other `#` lines (`#COMMENT START/END`, `#MMDEBUG
-OFF`) are handled as CMM2 RUN's loader handles them.  `/* ... */` blocks
+construct, rather than silently wrong C.  The `#` lines (`#INCLUDE`,
+`#DEFINE`, `#COMMENT START/END`, `#MMDEBUG OFF`) are handled as CMM2
+RUN's loader handles them, `#INCLUDE` and `#DEFINE` before any pass sees
+the program (loader_directives); `#MMDEBUG ON` is refused.  `/* ... */` blocks
 follow the manual's rule: `/*` and `*/` are the first thing on their
 lines with a space or the end of the line after them, never inside a SUB
 or FUNCTION, and everything after a `*/` is comment.  A `/*` or `*/` that
