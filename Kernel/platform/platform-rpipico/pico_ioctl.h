@@ -261,10 +261,15 @@ struct gfx_info {
 #define GFXIOC_PIXEL  0x000F
 #define GFX_PIXEL_PACK(x, y) (((x) & 0x3FF) | (((y) & 0x1FF) << 10))
 
-/* Read one pixel back: data = packed x,y as above; returns the mode's
- * colour index, or -1 off-screen.  Used by MMBasic's PIXEL() function,
- * which returns RGB888 - the caller maps the index back. */
+/* Read one pixel back: data = packed x,y as above; returns its colour
+ * as RGB888, or -1 off-screen.  The colour the screen shows, through
+ * the live palette (display_gfx_getpixel), which SAVE IMAGE writes.
+ * With GFX_GETPIXEL_FIXED in data, the colour MMBasic's PIXEL() reads
+ * instead: in MODE 7 and 8 a fixed colour for each index, whatever MAP
+ * has done (display_gfx_pixel_read).  pc3d honours the flag; the
+ * board's kernel takes only x and y, and reads as without it. */
 #define GFXIOC_GETPIXEL 0x0011
+#define GFX_GETPIXEL_FIXED 0x01000000
 
 /* A filled rectangle in the current colour, which is also how lines
  * arrive (x1 == x2 or y1 == y2).  One call for the whole span, so the
@@ -620,6 +625,63 @@ struct gfx_scroll2 {
 	int32_t fill;		/* RGB888, or -1 leave, or -2 wrap */
 };
 #define GFXIOC_SCROLL2 0x0035
+
+/*
+ * MMBasic V8's raster commands - FRAMEBUFFER WARPH, WARPV, AFFINE and
+ * SPAN - one buffer to another (display_warp.c says what each does).
+ * src and dst are DISP_FB_N, F or L; the caller must hold F or L, as for
+ * GFXIOC_FBCOPY2.  The 4-bit modes only: -1/EINVAL in a 1-bit one.
+ *
+ * The runtime has raised MMBasic's errors before this is made, and sends
+ * only what is legal, already in the form the core takes:
+ *
+ *   WARPH   a[0] int32 offsets, in band order (the phase applied) and
+ *           reduced: 0 to size-1 when edge is GFX_WARP_WRAP, else
+ *           -size to size; a[1] int32 source rows, -1 to h-1, or NULL
+ *   WARPV   a[0], as WARPH's; a[1] NULL
+ *   AFFINE  a[0] to a[3] int64 u, v, du, dv, in 1/65536 pixel
+ *   SPAN    a[0] and a[1] int64 left and right columns
+ *
+ * n elements each.  edge is an RGB888 colour, GFX_WARP_LEAVE, or (not for
+ * SPAN, where it is the fill) GFX_WARP_WRAP.  trans is the 4-bit pixel
+ * value that is not copied, or -1.  Anything out of range is refused
+ * whole, with nothing drawn.
+ */
+struct gfx_warp {
+	uint8_t op;		/* GFX_WARPH, GFX_WARPV, GFX_AFFINE, GFX_SPAN */
+	uint8_t src, dst;	/* DISP_FB_N, DISP_FB_F or DISP_FB_L */
+	uint8_t outside;	/* SPAN: copy outside each span, not inside */
+	uint16_t n;		/* bands: the elements in every array */
+	uint16_t step;		/* rows in a band (WARPV: columns) */
+	int32_t first;		/* the first band's first row (WARPV: column) */
+	int32_t left, width;	/* AFFINE's window: its first column and width */
+	int32_t edge;		/* RGB888, GFX_WARP_LEAVE or GFX_WARP_WRAP */
+	int32_t trans;		/* 0-15, or -1 */
+	const void *a[4];	/* the arrays, as above */
+};
+#define GFX_WARPH	0
+#define GFX_WARPV	1
+#define GFX_AFFINE	2
+#define GFX_SPAN	3
+#define GFX_WARP_LEAVE	(-1)
+#define GFX_WARP_WRAP	(-2)
+#define GFXIOC_WARP 0x0045
+
+/*
+ * MMBasic's BLIT RESIZE: the rectangle sw x sh at (sx, sy) of one buffer
+ * stretched or shrunk, nearest pixel, onto dw x dh at (dx, dy) of
+ * another or the same (display_warp.c).  The source rectangle must be
+ * on the buffer and the destination is cut to it; nothing to do if a
+ * size is below 1.  A pixel of value trans (0-15) is not copied; -1 for
+ * none.  The 4-bit modes only.
+ */
+struct gfx_resize {
+	uint8_t src, dst;	/* DISP_FB_N, F, L, 2 or T */
+	int16_t trans;		/* 0-15, or -1 */
+	int32_t sx, sy, sw, sh;
+	int32_t dx, dy, dw, dh;
+};
+#define GFXIOC_RESIZE 0x0046
 
 /* Block until the top of vertical blanking - MMBasic's FRAMEBUFFER WAIT,
  * and what FRAMEBUFFER COPY ...,B does first.  No argument.  Bounded: if

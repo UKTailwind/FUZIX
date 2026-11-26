@@ -93,6 +93,30 @@ int display_fb3_ok(void);
 #define DISP_FB_N	0		/* the screen, always present */
 #define DISP_FB_F	1		/* FRAMEBUFFER CREATE */
 #define DISP_FB_L	2		/* FRAMEBUFFER LAYER */
+#define DISP_FB_2	3		/* FRAMEBUFFER CREATE 2 (PC only) */
+#define DISP_FB_T	4		/* FRAMEBUFFER LAYER TOP (PC only) */
+
+#ifdef PC_HOST
+/*
+ * pc3host has the VGA and HDMI PicoMite's buffers as well: framebuffer
+ * 2, and the top layer T.  And there L and T are shown as those builds'
+ * scanout shows them, continuously: T over L over the screen in MODE 2
+ * (each with its own transparent index), L over it in MODE 3, L ORed
+ * into it in MODE 1 - pc3d's present.c, at every frame.  MERGE puts 2
+ * over F, as there.  A program that has no 2 and MERGEs the layer is
+ * using the model described above, and from that MERGE on its L is
+ * merged and not shown live, so a program written for either model runs
+ * as it was written.  The board has the memory for neither.
+ */
+#define DISP_FB_COUNT	5		/* N F L 2 T, in the shared block */
+#define disp_fb4	(disp_fbs + 3 * DISP_FB_POOL)	/* 2 */
+#define disp_fb5	(disp_fbs + 4 * DISP_FB_POOL)	/* T */
+/* LAYER and LAYER TOP's transparent index, 0-15, after the claim */
+void display_fb_transparent(struct p_tab *who, int which, int colour);
+/* The layers to show over the screen now: L and T and their transparent
+ * indexes, each NULL when it is not shown.  For present.c. */
+void display_fb_live(const uint8_t **l, int *lt, const uint8_t **t, int *tt);
+#endif
 
 /* claim (1) or give up (0) one of the off-screen buffers.  0 ok, -1 no
  * PSRAM on this board, -2 another process holds them. */
@@ -111,6 +135,17 @@ int display_fb_copy(struct p_tab *who, int src, int dst);
  * (0-15).  Neither source is modified.  -1 unless the caller holds
  * both. */
 int display_fb_merge(struct p_tab *who, int colour);
+/* One whole buffer, DISP_FB_N/F/L, by the rule display_fb_copy keeps:
+ * the screen to anyone, F or L only to their holder.  NULL otherwise. */
+uint8_t *display_fb_buffer(struct p_tab *who, int which);
+/* FRAMEBUFFER WARPH, WARPV, AFFINE and SPAN (display_warp.c): one
+ * GFXIOC_WARP request, its arrays readable where it points.  0 done, -1
+ * refused with nothing drawn. */
+struct gfx_warp;
+int display_gfx_warp(struct p_tab *who, const struct gfx_warp *g);
+/* BLIT RESIZE (display_warp.c), GFXIOC_RESIZE: 0 done, -1 refused */
+struct gfx_resize;
+int display_gfx_resize(struct p_tab *who, const struct gfx_resize *g);
 /* Where the drawing primitives are currently pointed. */
 uint8_t *display_fb_target(void);
 /* Block until the top of vertical blanking (bounded: if the scanout has
@@ -151,6 +186,9 @@ int display_gfx_rect(int x1, int y1, int x2, int y2, int c);
 void display_gfx_colour(uint32_t rgb888);
 int display_gfx_curcol(void);
 int display_gfx_getpixel(int x, int y);
+/* MMBasic's PIXEL(): in MODE 7 and 8 a fixed colour for each index,
+ * whatever MAP has done; otherwise as display_gfx_getpixel */
+int display_gfx_pixel_read(int x, int y);
 
 /* RGB888 -> the live mode's own colour, without setting the current one.
  * Bitmap takes an explicit foreground and background, so it needs both

@@ -47,16 +47,25 @@
  * little SRAM left, which is the same fact - seen from the other side -
  * that made a scanout-time layer impossible.
  *
- *   bit 0  F exists      bits 4-5  the selected target, DISP_FB_N/F/L
- *   bit 1  layer exists
+ *   bit 0  F exists      bits 4-6  the selected target, DISP_FB_N/F/L
+ *   bit 1  layer exists            (and on a PC 2 and T: display.h)
+ *   bit 2  2 exists (PC)
+ *   bit 3  T exists (PC)
  */
 #define FBS_HAVE_F	0x01
 #define FBS_HAVE_L	0x02
+#define FBS_HAVE_2	0x04
+#define FBS_HAVE_T	0x08
+#define FBS_HAVE_ALL	0x0F
 #define FBS_SEL_SHIFT	4
-#define FBS_SEL_MASK	0x30
+#define FBS_SEL_MASK	0x70
 
 static struct p_tab *fb_owner;          /* NULL = both buffers are free */
 static uint8_t fb_state;
+#ifdef PC_HOST
+static uint8_t fb_lt, fb_tt;            /* L's and T's transparent indexes */
+static uint8_t fb_l_merged;             /* L has been MERGEd: not shown live */
+#endif
 #ifdef PC_HOST
 /* pc3host makes its framebuffers at start-up, not at link time, so the
  * first mode change - pc3d sets the console's before anything draws -
@@ -66,9 +75,23 @@ static uint8_t *gfx_draw;
 static uint8_t *gfx_draw = disp_fb;
 #endif
 
+/* The state bit an off-screen buffer has, 0 for none (and for N) */
+static uint8_t fb_bit(int which)
+{
+    switch (which) {
+    case DISP_FB_F: return FBS_HAVE_F;
+    case DISP_FB_L: return FBS_HAVE_L;
+#ifdef PC_HOST
+    case DISP_FB_2: return FBS_HAVE_2;
+    case DISP_FB_T: return FBS_HAVE_T;
+#endif
+    }
+    return 0;
+}
+
 static int fb_have(int which)
 {
-    return fb_state & (which == DISP_FB_L ? FBS_HAVE_L : FBS_HAVE_F);
+    return fb_state & fb_bit(which);
 }
 
 static int fb_selected(void)
@@ -85,11 +108,19 @@ static void fb_set_sel(int which)
 /* The buffer a target names, or NULL if the owner has not created it. */
 static uint8_t *fb_buf(int which)
 {
-    if (which == DISP_FB_F)
-        return fb_have(DISP_FB_F) ? disp_fb2 : NULL;
-    if (which == DISP_FB_L)
-        return fb_have(DISP_FB_L) ? disp_fb3 : NULL;
-    return disp_fb;
+    if (which == DISP_FB_N)
+        return disp_fb;
+    if (!fb_have(which))
+        return NULL;
+    switch (which) {
+    case DISP_FB_F: return disp_fb2;
+    case DISP_FB_L: return disp_fb3;
+#ifdef PC_HOST
+    case DISP_FB_2: return disp_fb4;
+    case DISP_FB_T: return disp_fb5;
+#endif
+    }
+    return NULL;
 }
 
 /*
@@ -131,30 +162,60 @@ uint8_t *display_fb_target(void)
  */
 int display_fb_open(struct p_tab *who, int claim, int which)
 {
-    if (which != DISP_FB_F && which != DISP_FB_L)
+    uint8_t bit = fb_bit(which);
+
+    if (!bit)
         return -1;
     if (!claim) {
-        /* Closing one buffer leaves the other; the process only stops
-         * being the owner when it has neither.  MMBasic's CLOSE F and
+        /* Closing one buffer leaves the others; the process only stops
+         * being the owner when it has none.  MMBasic's CLOSE F and
          * CLOSE L are separate for the same reason. */
         if (fb_owner != who)
             return 0;
-        fb_state &= (uint8_t)~(which == DISP_FB_L ? FBS_HAVE_L : FBS_HAVE_F);
+        fb_state &= (uint8_t)~bit;
         if (fb_selected() == which)
             fb_set_sel(DISP_FB_N);
-        if (!(fb_state & (FBS_HAVE_F | FBS_HAVE_L)))
+        if (!(fb_state & FBS_HAVE_ALL))
             fb_owner = NULL;
         display_fb_enter(who);
         return 0;
     }
-    if (which == DISP_FB_F ? !display_fb2_ok() : !display_fb3_ok())
+    if ((which == DISP_FB_F && !display_fb2_ok()) ||
+        (which == DISP_FB_L && !display_fb3_ok()))
         return -1;
     if (fb_owner && fb_owner != who)
         return -2;
     fb_owner = who;
-    fb_state |= (uint8_t)(which == DISP_FB_L ? FBS_HAVE_L : FBS_HAVE_F);
+    fb_state |= bit;
+#ifdef PC_HOST
+    /* a new layer is shown live, with index 0 transparent until told */
+    if (which == DISP_FB_L)
+        fb_lt = 0, fb_l_merged = 0;
+    if (which == DISP_FB_T)
+        fb_tt = 0;
+#endif
     return 0;
 }
+
+#ifdef PC_HOST
+void display_fb_transparent(struct p_tab *who, int which, int colour)
+{
+    if (fb_owner != who)
+        return;
+    if (which == DISP_FB_L)
+        fb_lt = (uint8_t)(colour & 15);
+    else if (which == DISP_FB_T)
+        fb_tt = (uint8_t)(colour & 15);
+}
+
+void display_fb_live(const uint8_t **l, int *lt, const uint8_t **t, int *tt)
+{
+    *l = (fb_have(DISP_FB_L) && !fb_l_merged) ? disp_fb3 : NULL;
+    *t = fb_have(DISP_FB_T) ? disp_fb5 : NULL;
+    *lt = fb_lt;
+    *tt = fb_tt;
+}
+#endif
 
 void display_fb_release(struct p_tab *who)
 {
@@ -207,6 +268,16 @@ int display_fb_copy(struct p_tab *who, int src, int dst)
         n = DISP_FB_POOL;
     memcpy(d, s, (unsigned)n);
     return 0;
+}
+
+/* A whole buffer for display_warp.c, by display_fb_copy's rule: the
+ * screen to anyone, an off-screen buffer only to the process that
+ * created it. */
+uint8_t *display_fb_buffer(struct p_tab *who, int which)
+{
+    if (which != DISP_FB_N && (!fb_bit(which) || fb_owner != who))
+        return NULL;
+    return fb_buf(which);
 }
 
 /*
@@ -265,11 +336,28 @@ int display_fb_merge(struct p_tab *who, int colour)
      *	two pixels to a byte.  Keying nibbles in a 1bpp mode would treat
      *	eight pixels as two four-bit numbers and produce nonsense, which
      *	is what the first version of this did. */
+    if (fb_owner != who || !fb_have(DISP_FB_F))
+        return -1;
+#ifdef PC_HOST
+    /* The VGA and HDMI MERGE: framebuffer 2 over F, the layers left to
+     * be shown live.  In a one-bit mode the two are ORed whatever the
+     * colour, as that firmware's MODE 1 does. */
+    if (fb_have(DISP_FB_2)) {
+        l = disp_fb4;
+        if (bpp == 1)
+            colour = 0;
+    } else
+#endif
+    {
+        if (!fb_have(DISP_FB_L))
+            return -1;
+        l = disp_fb3;
+#ifdef PC_HOST
+        fb_l_merged = 1;        /* the TFT model: L is merged, not live */
+#endif
+    }
     if (colour < 0 || colour > (bpp == 1 ? 1 : 15))
         return -1;
-    if (fb_owner != who || !fb_have(DISP_FB_F) || !fb_have(DISP_FB_L))
-        return -1;
-    l = disp_fb3;
     if (n <= 0 || n > DISP_FB_POOL)
         n = DISP_FB_POOL;
     hi = (uint8_t)(colour << 4);
@@ -788,7 +876,10 @@ static uint32_t rgb332_to_888(uint8_t c)
 
 /* Read one pixel back AS RGB888 - MMBasic's PIXEL() function returns a
  * colour, not an index, and the conversion belongs in the primitive
- * for the same reason the forward one does.  -1 off-screen. */
+ * for the same reason the forward one does.  -1 off-screen.  This is
+ * the colour the screen SHOWS, through the live palette, which is what
+ * SAVE IMAGE writes (saveimage); MMBasic's PIXEL() is
+ * display_gfx_pixel_read, below. */
 int display_gfx_getpixel(int x, int y)
 {
     enum gexp ex = gfx_exp;
@@ -815,6 +906,39 @@ int display_gfx_getpixel(int x, int y)
         return (int)rgb332_to_888(c);
     }
     return PX1_GET(v, x) ? 0xFFFFFF : 0x000000;
+}
+
+/*
+ * What MMBasic's PIXEL() reads in its MODE 2 and 3, this machine's
+ * MODE 7 and 8: a FIXED colour for each index, the firmware's colours[]
+ * (graphics/Draw.c, read by RGB121.c's ReadBuffer16), whatever MAP has
+ * done to the palette.  Drawing is fixed the same way (display_gfx_map),
+ * so PIXEL(x, y) after PIXEL x, y, c reads the same whatever the screen
+ * shows.  Reading through the live palette instead, a program that
+ * faded it to black before looking at its picture - warp_demo.bas
+ * colouring its logo - found every pixel black.  The mid greens are the
+ * firmware's 0x40 and 0x80, where RGB332's three bits of green give
+ * 0x48 and 0xB6.  Every other mode reads as display_gfx_getpixel.
+ * GFXIOC_GETPIXEL with GFX_GETPIXEL_FIXED.
+ */
+static const uint32_t rgb121_read[16] = {
+    0x000000, 0x0000FF, 0x004000, 0x0040FF,
+    0x008000, 0x0080FF, 0x00FF00, 0x00FFFF,
+    0xFF0000, 0xFF00FF, 0xFF4000, 0xFF40FF,
+    0xFF8000, 0xFF80FF, 0xFFFF00, 0xFFFFFF
+};
+
+int display_gfx_pixel_read(int x, int y)
+{
+    enum gexp ex = gfx_exp;
+    uint8_t v;
+
+    if (!IS_RGB121(ex))
+        return display_gfx_getpixel(x, y);
+    if (x < 0 || y < 0 || x >= gfx_width(ex) || y >= gfx_rows)
+        return -1;
+    v = gfx_draw[y * gfx_stride + (x >> 1)];
+    return (int)rgb121_read[(x & 1) ? PX4_ODD_GET(v) : PX4_EVEN_GET(v)];
 }
 
 /* One pixel.  Kept tight - no swapping, no clipping loop - because this
