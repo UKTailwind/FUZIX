@@ -9827,6 +9827,7 @@ class Conv(object):
 
     def do_tilemap(self):
         # TILEMAP CREATE label, id, slot, tw, th, tpr, cols, rows
+        # TILEMAP LOAD file$, id, slot, tw, th, tpr
         # TILEMAP ATTR label, id, n
         # TILEMAP DESTROY id
         # TILEMAP SET id, col, row, tile
@@ -9859,6 +9860,18 @@ class Conv(object):
             a = self.int_args(7)
             self.emit('mmt_create(%d, %s, %s, %s, %s, %s, %s, %s);'
                       % (at, a[0], a[1], a[2], a[3], a[4], a[5], a[6]))
+            return
+        if self.is_kw('LOAD', 1):
+            # TILEMAP LOAD file$, id, slot, tw, th, tpr (PicoMite
+            # dba7552): CREATE with the map from a text file
+            self.i += 2
+            v = self.expr()
+            if v[1] != TY_S:
+                self.err('TILEMAP LOAD wants a file name')
+            self.expect_op(',')
+            a = self.int_args(5)
+            self.emit('mmt_load(%s, %s, %s, %s, %s, %s);'
+                      % (v[0], a[0], a[1], a[2], a[3], a[4]))
             return
         if self.is_kw('ATTR', 1):
             self.i += 2

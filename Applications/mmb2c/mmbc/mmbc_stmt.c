@@ -4785,6 +4785,7 @@ void do_draw3d(void)
 void do_tilemap(void)
 {
     /* TILEMAP CREATE label, id, slot, tw, th, tpr, cols, rows
+       TILEMAP LOAD file$, id, slot, tw, th, tpr
        TILEMAP ATTR label, id, n
        TILEMAP DESTROY id
        TILEMAP SET id, col, row, tile
@@ -4821,6 +4822,21 @@ void do_tilemap(void)
         int_args(a, 7);
         emit(sfmt("mmt_create(%d, %s, %s, %s, %s, %s, %s, %s);",
                   at, a[0], a[1], a[2], a[3], a[4], a[5], a[6]));
+        return;
+    }
+    if (is_kw("LOAD", 1)) {
+        /* TILEMAP LOAD file$, id, slot, tw, th, tpr (PicoMite
+           dba7552): CREATE with the map from a text file */
+        struct val v;
+
+        cv.i += 2;
+        v = expr();
+        if (v.ty != TY_S)
+            cv_err("TILEMAP LOAD wants a file name");
+        expect_op(",");
+        int_args(a, 5);
+        emit(sfmt("mmt_load(%s, %s, %s, %s, %s, %s);",
+                  v.code, a[0], a[1], a[2], a[3], a[4]));
         return;
     }
     if (is_kw("ATTR", 1)) {

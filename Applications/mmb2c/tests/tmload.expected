@@ -1,0 +1,9 @@
+ 4 3
+ 1 2 3 4 5 6 7 8 9 10 11 12
+ 0
+Tilemap file must start with width and height (1-10000)
+Tilemap file must start with width and height (1-10000)
+Not enough data in tilemap file (need 12, found 3)
+Invalid character in tilemap file
+Value out of range in tilemap file
+ 4 12

@@ -67,6 +67,7 @@
  *	graphics/RGB121.c blit121 :33 for the clip and the two paths.
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -247,6 +248,47 @@ MMG_FN void mmt_free(struct mmb_tilemap *tm)
 
 /* ---- TILEMAP CREATE label, id, slot, tw, th, tpr, cols, rows ---------- */
 
+/* tilemap_flash_image: the tileset in the slot, its width and height
+ * from the header (two little-endian uint32); NULL after the error */
+MMG_FN unsigned char *mmt_image(MMINTEGER slot, unsigned long *fw,
+				unsigned long *fh)
+{
+	unsigned char *s = mmf_addr(slot);
+
+	if (s == 0)
+		return 0;
+	*fw = (unsigned long)s[0] | ((unsigned long)s[1] << 8) |
+	      ((unsigned long)s[2] << 16) | ((unsigned long)s[3] << 24);
+	*fh = (unsigned long)s[4] | ((unsigned long)s[5] << 8) |
+	      ((unsigned long)s[6] << 16) | ((unsigned long)s[7] << 24);
+	if (*fw < 1 || *fw > 3840 || *fh < 1 || *fh > 2160) {
+		mmt_err_n("Invalid flash image in slot ", slot, "");
+		return 0;
+	}
+	return s;
+}
+
+/* tilemap_install: a map that has been read, into a released map */
+MMG_FN void mmt_install(struct mmb_tilemap *tm, unsigned char *s,
+			MMINTEGER slot, unsigned long fw, unsigned long fh,
+			MMINTEGER tw, MMINTEGER th, MMINTEGER tpr,
+			MMINTEGER cols, MMINTEGER rows, unsigned short *map)
+{
+	tm->map = map;
+	tm->px = s + 8;
+	tm->lim = (unsigned long)mmf_size[slot - 1] - 8;
+	tm->fw = (int)fw;
+	tm->fh = (int)fh;
+	tm->tw = (int)tw;
+	tm->th = (int)th;
+	tm->tpr = (int)tpr;
+	tm->cols = (int)cols;
+	tm->rows = (int)rows;
+	tm->vx = 0;
+	tm->vy = 0;
+	tm->active = 1;
+}
+
 MMG_FN void mmt_create(int at, MMINTEGER id, MMINTEGER slot, MMINTEGER tw,
 		       MMINTEGER th, MMINTEGER tpr, MMINTEGER cols,
 		       MMINTEGER rows)
@@ -262,35 +304,157 @@ MMG_FN void mmt_create(int at, MMINTEGER id, MMINTEGER slot, MMINTEGER tw,
 	    || mmt_range(tpr, 1, 1024) || mmt_range(cols, 1, 10000)
 	    || mmt_range(rows, 1, 10000))
 		return;
-	s = mmf_addr(slot);
+	s = mmt_image(slot, &fw, &fh);
 	if (s == 0)
 		return;
-	/* the slot's header: width and height, two little-endian uint32 */
-	fw = (unsigned long)s[0] | ((unsigned long)s[1] << 8) |
-	     ((unsigned long)s[2] << 16) | ((unsigned long)s[3] << 24);
-	fh = (unsigned long)s[4] | ((unsigned long)s[5] << 8) |
-	     ((unsigned long)s[6] << 16) | ((unsigned long)s[7] << 24);
-	if (fw < 1 || fw > 3840 || fh < 1 || fh > 2160) {
-		mmt_err_n("Invalid flash image in slot ", slot, "");
-		return;
-	}
 	tm = &mmt[id - 1];
 	mmt_free(tm);			/* re-creating frees the old one */
 	tm->map = mmt_read_data(at, (int)(cols * rows));
 	if (tm->map == 0)
 		return;
-	tm->px = s + 8;
-	tm->lim = (unsigned long)mmf_size[slot - 1] - 8;
-	tm->fw = (int)fw;
-	tm->fh = (int)fh;
-	tm->tw = (int)tw;
-	tm->th = (int)th;
-	tm->tpr = (int)tpr;
-	tm->cols = (int)cols;
-	tm->rows = (int)rows;
-	tm->vx = 0;
-	tm->vy = 0;
-	tm->active = 1;
+	mmt_install(tm, s, slot, fw, fh, tw, th, tpr, cols, rows, tm->map);
+}
+
+/* ---- TILEMAP LOAD file$, id, slot, tw, th, tpr (PicoMite dba7552) -----
+ *
+ *	As CREATE, but the map comes from a text file: the width and the
+ *	height first, then width * height tile numbers, row by row,
+ *	separated by commas, spaces, tabs or line ends, with ' or # starting
+ *	a comment to the end of the line.  A name with no extension gets
+ *	".map".  The map the slot held is replaced only once the whole file
+ *	has been read, so a bad file leaves it as it was. */
+
+/* a separator and a comment's start, as TILEMAP_FILE_SEP and _REM.
+ * Functions, not macros: the PC3's cc takes a '#' in a macro body for
+ * the stringising operator, even inside a character constant. */
+MMG_FN int mmt_sep(int c)
+{
+	return c == ' ' || c == ',' || c == '\t' || c == '\r' ||
+	       c == '\n' || c == 0 || c == 0x1a;
+}
+
+MMG_FN int mmt_rem(int c)
+{
+	return c == '\'' || c == '#';
+}
+
+/* tilemap_file_value: 1 with the value, 0 at the end of the file, -1 on
+ * a character that is neither a digit nor a separator, -2 above 65535 */
+MMG_FN int mmt_fvalue(FILE *f, int *value)
+{
+	int c, v;
+
+	for (;;) {
+		c = getc(f);
+		if (c == EOF)
+			return 0;
+		if (mmt_rem(c)) {
+			while ((c = getc(f)) != EOF && c != '\n')
+				;
+			continue;
+		}
+		if (mmt_sep(c))
+			continue;
+		if (c >= '0' && c <= '9')
+			break;
+		return -1;
+	}
+	v = 0;
+	for (;;) {
+		v = v * 10 + (c - '0');
+		if (v > 65535)
+			return -2;
+		c = getc(f);
+		if (c == EOF)
+			break;
+		if (c >= '0' && c <= '9')
+			continue;
+		if (mmt_rem(c)) {
+			while ((c = getc(f)) != EOF && c != '\n')
+				;
+			break;
+		}
+		if (mmt_sep(c))
+			break;
+		return -1;
+	}
+	*value = v;
+	return 1;
+}
+
+MMG_FN void mmt_load(const char *file, MMINTEGER id, MMINTEGER slot,
+		     MMINTEGER tw, MMINTEGER th, MMINTEGER tpr)
+{
+	char name[MM_STRSZ + 8];
+	struct mmb_tilemap *tm;
+	unsigned short *map;
+	unsigned char *s;
+	unsigned long fw, fh;
+	int cols = 0, rows = 0, count, idx = 0, v = 0, r, k;
+	FILE *f;
+
+	if (mmt_mode())
+		return;
+	if (mmt_range(id, 1, MMT_MAX) || mmt_range(slot, 1, MMF_SLOTS)
+	    || mmt_range(tw, 1, 256) || mmt_range(th, 1, 256)
+	    || mmt_range(tpr, 1, 1024))
+		return;
+	s = mmt_image(slot, &fw, &fh);
+	if (s == 0)
+		return;
+	/* AppendDefaultExtension: ".map" unless the last name has a dot */
+	strcpy(name, mm_cstr(file));
+	for (k = (int)strlen(name); k > 0; k--)
+		if (name[k - 1] == '/' || name[k - 1] == '\\' ||
+		    name[k - 1] == '.')
+			break;
+	if (k == 0 || name[k - 1] != '.')
+		strcat(name, ".map");
+	f = fopen(name, "rb");
+	if (f == NULL) {
+		mm_error("Could not find the file");
+		return;
+	}
+	r = mmt_fvalue(f, &cols);
+	if (r == 1)
+		r = mmt_fvalue(f, &rows);
+	if (r != 1 || cols < 1 || cols > 10000 || rows < 1 || rows > 10000) {
+		fclose(f);
+		if (r == -1)
+			mm_error("Invalid character in tilemap file");
+		else
+			mm_error("Tilemap file must start with width and "
+				 "height (1-10000)");
+		return;
+	}
+	count = cols * rows;
+	map = (unsigned short *)malloc((size_t)count * sizeof(unsigned short));
+	if (map == 0) {
+		fclose(f);
+		mm_error("Not enough memory");
+		return;
+	}
+	while (idx < count) {
+		r = mmt_fvalue(f, &v);
+		if (r != 1)
+			break;
+		map[idx++] = (unsigned short)v;
+	}
+	fclose(f);
+	if (r < 0 || idx < count) {
+		free(map);
+		if (r == -1)
+			mm_error("Invalid character in tilemap file");
+		else if (r == -2)
+			mm_error("Value out of range in tilemap file");
+		else
+			mmt_err_nn("Not enough data in tilemap file (need ",
+				   count, ", found ", idx, ")");
+		return;
+	}
+	tm = &mmt[id - 1];
+	mmt_free(tm);
+	mmt_install(tm, s, slot, fw, fh, tw, th, tpr, cols, rows, map);
 }
 
 /* ---- TILEMAP ATTR label, id, n ---------------------------------------- */

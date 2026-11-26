@@ -301,7 +301,7 @@ MMG_FN long mmj_child(long i, int idx)
 
 MMG_FN char *mm_json(const MMINTEGER *a, int cells, const char *path)
 {
-	char field[32], num[6], vb[40];
+	char field[64], num[8], vb[40];
 	char *out = mm_tmp();
 	long cur, e;
 	long slen = a[0];
@@ -324,72 +324,69 @@ MMG_FN char *mm_json(const MMINTEGER *a, int cells, const char *path)
 		return out;
 	}
 
-	/*	the reference's state machine, verbatim
-	 *	(Custom.c:3098-3133): fields resolve case-sensitively as
-	 *	the path is read, indexes through the n'th child, and the
-	 *	loop ALWAYS finishes with one case-insensitive lookup of
-	 *	whatever is left in field - the empty string included. */
+	/*	the path, as V8's walker (Custom.c fun_json, 9749c83): keys
+	 *	separated by '.', each followed by any number of [index], in
+	 *	any order, so a path may start with an index (a document that
+	 *	is an array) or end with one.  A key is matched exactly except
+	 *	the last, which is matched regardless of case; an index is
+	 *	atoi's, the n'th child of an array or an object.  A key longer
+	 *	than 63 characters or an index longer than 7 is "Invalid JSON
+	 *	path", and so is a [ with no ] or an empty [].  Once a step
+	 *	finds nothing the rest of the path is not read. */
 	pl = mm_slen(path);
-	field[0] = 0;
-	for (pi = 1; pi <= pl; pi++) {
-		c = path[pi];
-		if (c == '[') {
-			mode = 1;
-			field[fp] = 0;
-			if (alive) {
-				e = mmj_objfind(cur, field, 1);
-				if (e < 0)
-					alive = 0;
-				else
-					cur = e;
-			}
-			fp = 0;
-			continue;
-		}
-		if (c == ']') {
-			num[np] = 0;
-			k = 0;
-			for (np = 0; num[np]; np++)
-				k = k * 10 + (num[np] - '0');
+	pi = 1;
+	while (pi <= pl && alive) {
+		if (path[pi] == '[') {
 			np = 0;
-			if (alive) {
-				e = mmj_child(cur, k);
-				if (e < 0)
-					alive = 0;
-				else
-					cur = e;
-			}
-			continue;
-		}
-		if (c == '.') {
-			if (mode == 0) {
-				field[fp] = 0;
-				if (alive) {
-					e = mmj_objfind(cur, field, 1);
-					if (e < 0)
-						alive = 0;
-					else
-						cur = e;
+			pi++;
+			while (pi <= pl && path[pi] != ']') {
+				if (np >= (int)sizeof(num) - 1) {
+					mm_error("Invalid JSON path");
+					return out;
 				}
-				fp = 0;
-			} else
-				mode = 0;
+				num[np++] = path[pi++];
+			}
+			if (pi > pl || np == 0) {
+				mm_error("Invalid JSON path");
+				return out;
+			}
+			num[np] = 0;
+			pi++;
+			/* atoi: spaces, a sign, digits up to the first other */
+			k = 0;
+			np = 0;
+			while (num[np] == ' ' || (num[np] >= '\t' && num[np] <= '\r'))
+				np++;
+			mode = num[np] == '-';
+			if (num[np] == '-' || num[np] == '+')
+				np++;
+			for (; num[np] >= '0' && num[np] <= '9'; np++)
+				k = k * 10 + (num[np] - '0');
+			e = mode && k ? -1 : mmj_child(cur, k);
+			if (e < 0)
+				alive = 0;
+			else
+				cur = e;
 			continue;
 		}
-		if (mode == 0) {
-			if (fp < (int)sizeof(field) - 1)
-				field[fp++] = c;
-		} else if (np < (int)sizeof(num) - 1 &&
-			   c >= '0' && c <= '9')
-			num[np++] = c;
-	}
-	field[fp] = 0;
-	if (alive) {
-		e = mmj_objfind(cur, field, 0);
-		if (e < 0)
-			alive = 0;
-		else
-			cur = e;
+		if (path[pi] == '.')
+			pi++;			/* the separator before a key */
+		fp = 0;
+		while (pi <= pl && path[pi] != '.' && path[pi] != '[') {
+			if (fp >= (int)sizeof(field) - 1) {
+				mm_error("Invalid JSON path");
+				return out;
+			}
+			field[fp++] = path[pi++];
+		}
+		field[fp] = 0;
+		if (fp) {
+			e = mmj_objfind(cur, field, pi <= pl);
+			if (e < 0)
+				alive = 0;
+			else
+				cur = e;
+		}
 	}
 
 	if (!alive) {

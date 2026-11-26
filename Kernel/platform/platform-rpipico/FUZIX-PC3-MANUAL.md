@@ -1711,6 +1711,7 @@ DATA 1, 1, 1, 1, 2, 0, 0, 0
 | | |
 |---|---|
 | `TILEMAP CREATE label, id, slot, tw, th, tpr, cols, rows` | map `id` (1–4) from the `DATA` at `label`: `cols`×`rows` tile numbers, row by row; tiles `tw`×`th` pixels, `tpr` of them across the image in `slot` |
+| `TILEMAP LOAD file$, id, slot, tw, th, tpr` | as `CREATE`, the map from a text file: its width and height, then the tile numbers row by row, separated by commas, spaces, tabs or line ends, `'` or `#` starting a comment; `.map` when the name has no extension. A bad file leaves the map as it was |
 | `TILEMAP ATTR label, id, n` | `n` attribute words from the `DATA` at `label`, one per tile TYPE — tile 1 first |
 | `TILEMAP SET id, col, row, tile` | change one cell (0-based column and row) |
 | `TILEMAP DRAW id, dest, vx, vy, sx, sy, vw, vh [, t]` | draw the tiles under the `vw`×`vh` window at world pixel `vx, vy`, with its corner at `sx, sy` on `N`, `F` or `L`; `t` is a colour index (0–15) to see through, -1 for none |
