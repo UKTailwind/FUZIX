@@ -118,8 +118,19 @@ MMG_FN void mm_wait(MMFLOAT ms)
 #endif
 		if (slice > left)
 			slice = left;
+#ifdef MM_THREADS
+		/*	With threads a slice can end early - an interrupt of this
+		 *	thread's came due while another ran - and the pause owes
+		 *	what is left of it.  A clock that did not move (the CPU
+		 *	time above) still counts the slice, or it would never end. */
+		t = MMW_US();
+		mm_pause((MMFLOAT)slice / 1000.0);
+		t = MMW_US() - t;
+		togo -= (t > 0 && t < slice) ? t : slice;
+#else
 		mm_pause((MMFLOAT)slice / 1000.0);
 		togo -= slice;
+#endif
 	}
 }
 

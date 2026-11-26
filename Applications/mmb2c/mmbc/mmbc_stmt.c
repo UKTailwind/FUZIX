@@ -32,6 +32,10 @@ static void do_spi(void);
 static void do_on_key(void);
 static const char *int_target(void);
 static void do_longstring(void);
+static void thread_solo(void);
+static void thread_limit(const char **has, const char **ms);
+static void do_thread(void);
+static void thread_start(void);
 static const char *gosub_key(void);
 static void do_gosub(void);
 static void emit_gosub(const char *canon, const char *disp);
@@ -590,11 +594,13 @@ void statement_inner(void)
     }
     if (strcmp(up, "ERASE") == 0) {
         cv.i++;
+        thread_solo();
         do_erase();
         return;
     }
     if (strcmp(up, "REDIM") == 0) {
         cv.i++;
+        thread_solo();
         do_redim();
         return;
     }
@@ -715,6 +721,7 @@ void statement_inner(void)
     }
     if (strcmp(up, "CLEAR") == 0) {
         cv.i++;
+        thread_solo();
         cv_warn("CLEAR zeroes every global; static storage cannot be "
                 "handed back the way the interpreter does");
         emit("__mmb_clear();");
@@ -3026,6 +3033,11 @@ void statement_inner(void)
         }
         return;
     }
+    if (strcmp(up, "THREAD") == 0) {
+        cv.i++;
+        do_thread();
+        return;
+    }
     if (strcmp(up, "PAUSE") == 0) {
         struct val v;
         cv.i++;
@@ -4532,6 +4544,268 @@ static void do_longstring(void)
     }
 
     cv_err("LONGSTRING %s is not supported", t->text);
+}
+
+/* -- THREAD (MMBasic V8's threads) ------------------------------------
+ *
+ * The runtime is mmb_thread.c and the program's half mmb_thread.h;
+ * PLAN-threads.md is the design.  A program that names THREAD gets the
+ * poll sites (where the threads take turns) and the serviced waits, as
+ * one that arms an interrupt does. */
+
+/* ERASE, REDIM and CLEAR: refused while a thread runs, which may hold
+   the address of the data in the middle of a statement. */
+static void thread_solo(void)
+{
+    if (cv.uses_threads)
+        emit("mm_thr_solo();");
+}
+
+/* THREAD LOCK's and THREAD WAIT's time limit: (given, ms). */
+static void thread_limit(const char **has, const char **ms)
+{
+    if (accept_op(",")) {
+        *has = "1";
+        *ms = as_flt(expr());
+        return;
+    }
+    *has = "0";
+    *ms = "0.0";
+}
+
+static void do_thread(void)
+{
+    static const struct { const char *kw, *fn; } bare[] = {
+        { "YIELD", "mm_thr_yield" }, { "EXIT", "mm_thr_exit" },
+        { "HOLD", "mm_thr_hold" },
+        { "RELEASE", "mm_thr_release" },
+        { "LIST", "mm_thr_list" },
+        { NULL, NULL }
+    };
+    static const struct { const char *kw, *fn; } one[] = {
+        { "STOP", "mm_thr_stop" }, { "PAUSE", "mm_thr_pause" },
+        { "RESUME", "mm_thr_resume" },
+        { "SLICE", "mm_thr_slice" },
+        { "UNLOCK", "mm_thr_unlock" },
+        { NULL, NULL }
+    };
+    const char *k, *has, *ms;
+    int j;
+
+    cv.uses_threads = 1;
+    cv.uses_interrupts = 1;
+    cv.uses_wait = 1;
+    if (accept_kw("START")) {
+        thread_start();
+        return;
+    }
+    for (j = 0; bare[j].kw != NULL; j++)
+        if (accept_kw(bare[j].kw)) {
+            emit(sfmt("%s();", bare[j].fn));
+            return;
+        }
+    for (j = 0; one[j].kw != NULL; j++)
+        if (accept_kw(one[j].kw)) {
+            emit(sfmt("%s(%s);", one[j].fn, as_int(expr())));
+            return;
+        }
+    if (accept_kw("PRIORITY")) {
+        const char *n, *pr;
+
+        n = as_int(expr());
+        expect_op(",");
+        pr = as_int(expr());
+        emit(sfmt("mm_thr_priority(%s, %s);", n, pr));
+        return;
+    }
+    if (accept_kw("SIZE")) {
+        /* THREAD SIZE kb [, locals [, nest]], any of them blank.  The
+           Python's list is unbounded and refused past three once it is
+           read; the fourth and on are evaluated here too, so an error
+           in one of them is still the one reported, and only not kept. */
+        const char *vals[3];
+        const char *v;
+        int nvals = 0, given = 0;
+
+        for (;;) {
+            if (is_op(",", 0) || stmt_end())
+                v = "-1LL";
+            else {
+                v = as_int(expr());
+                given = 1;
+            }
+            if (nvals < 3)
+                vals[nvals] = v;
+            nvals++;
+            if (!accept_op(","))
+                break;
+        }
+        if (!given || nvals > 3)
+            cv_err("syntax error");
+        while (nvals < 3)
+            vals[nvals++] = "-1LL";
+        emit(sfmt("mm_thr_size(%s, %s, %s);", vals[0], vals[1], vals[2]));
+        return;
+    }
+    if (accept_kw("LOCK")) {
+        k = as_int(expr());
+        thread_limit(&has, &ms);
+        emit(sfmt("mmth_lock(%s, %s, %s);", k, has, ms));
+        return;
+    }
+    if (accept_kw("WAIT")) {
+        const char *kind = "MM_THR_THREAD";
+
+        if (accept_kw("FLAG")) {
+            kind = "MM_THR_FLAG";
+            cv.uses_misc = 1;           /* FLAG()'s word */
+        }
+        k = as_int(expr());
+        thread_limit(&has, &ms);
+        emit(sfmt("(void)mmth_wait(%s, %s, %s, %s);", kind, k, has, ms));
+        return;
+    }
+    cv_err("syntax error");
+}
+
+/* THREAD START n [SIZE kb] [LOCALS m] [NEST d] [PRIORITY p],
+   sub [, argument ...].  The arguments are evaluated here and handed to
+   the runtime by value; the thread's entry, written after the routines,
+   takes them back and calls the SUB as a call statement would.  A global
+   array goes by reference, named in the entry itself. */
+static void thread_start(void)
+{
+    /* the Python's opt dict, by word: NULL is a word not given */
+    static const char *const optw[] = {
+        "SIZE", "LOCALS", "NEST", "PRIORITY", NULL
+    };
+    /* static, not on the stack: two lists are 2K or more, and this
+       cannot be re-entered - a THREAD START is a statement */
+    static struct arglist args, ent;
+    struct arg spare;
+    const char *opt[4];
+    const char *pre[MAXARGS];
+    const char *n, *w, *canon, *text, *name;
+    struct tok *t;
+    struct routine *r;
+    int nargs = 0, npre = 0, v = 0, sfx, k, o;
+
+    for (o = 0; o < 4; o++)
+        opt[o] = NULL;
+    n = as_int(expr());
+    while (!is_op(",", 0)) {
+        t = peek(0);
+        w = (t != NULL && t->kind == T_ID) ? t->up : NULL;
+        o = 4;
+        if (w != NULL)
+            for (o = 0; optw[o] != NULL; o++)
+                if (strcmp(w, optw[o]) == 0)
+                    break;
+        if (o == 4 || opt[o] != NULL)
+            cv_err("syntax error");
+        cv.i += 1;
+        opt[o] = as_int(expr());
+    }
+    expect_op(",");
+    t = nxt();
+    if (t->kind != T_ID)
+        cv_err("expected the name of a SUB");
+    canon = split_suffix(t->text, &sfx);
+    r = routine_get(canon);
+    if (r == NULL || r->is_func || sfx != TY_NONE)
+        cv_late("%s is not a SUB", upper(t->text));
+    /* Python's list is unbounded: past MAXARGS an argument is still
+       read, into the spare, and counted - it is refused below either
+       way, as it is there */
+    while (accept_op(",")) {
+        struct arg *a = nargs < MAXARGS ? &args.a[nargs] : &spare;
+
+        if (is_op(",", 0) || stmt_end()) {
+            a->kind = ARG_NONE;
+            a->s = NULL;
+            a->v.code = NULL;
+            a->v.ty = TY_NONE;
+            a->v.stype = NULL;
+            a->v.tm = 0;
+        } else
+            arg_item(a);
+        nargs++;
+    }
+    args.n = nargs < MAXARGS ? nargs : MAXARGS;
+    if (nargs > 16)
+        cv_late("Too many arguments for a thread");
+    if (nargs > r->nparams)
+        cv_err("too many arguments to '%s'", r->name);
+    if (r->nparams > MAXARGS)
+        mm_error("line %d: too many arguments", cv.lineno);
+    ent.n = r->nparams;
+    for (k = 0; k < r->nparams; k++) {
+        struct sym *p = r->params[k];
+        struct arg *a = (k < args.n) ? &args.a[k] : NULL;
+        struct arg *e = &ent.a[k];
+        struct val val;
+
+        e->kind = ARG_NONE;
+        e->s = NULL;
+        e->v.code = NULL;
+        e->v.ty = TY_NONE;
+        e->v.stype = NULL;
+        e->v.tm = 0;
+        if (a == NULL || a->kind == ARG_NONE)
+            continue;
+        if (p->stype != NULL
+            || ((a->kind == ARG_VAR || a->kind == ARG_ELEM)
+                && a->s->stype != NULL))
+            cv_late("Invalid argument for a thread");
+        if (p->is_array) {
+            if (a->kind != ARG_ARRAY)
+                cv_err("'%s' expects a whole array here", r->name);
+            if (a->s->is_param || strcmp(a->s->declared_in, "") != 0)
+                cv_late("Only a global array can be passed to a thread");
+            *e = *a;
+            continue;
+        }
+        if (a->kind == ARG_ARRAY)
+            cv_err("unexpected array argument");
+        if (a->kind == ARG_VAR) {
+            val.code = a->s->acc;
+            val.ty = a->s->ty;
+            val.stype = NULL;
+            val.tm = 0;
+        } else
+            val = a->v;
+        e->kind = ARG_VAL;
+        if (p->ty == TY_S) {
+            pre[npre++] = sfmt("mm_thr_args(%s);", as_str(val));
+            e->v.code = sfmt("mm_thr_gets(%d)", v);
+            e->v.ty = TY_S;
+        } else if (p->ty == TY_I) {
+            pre[npre++] = sfmt("mm_thr_argi(%s);", as_int(val));
+            e->v.code = sfmt("mm_thr_geti(%d)", v);
+            e->v.ty = TY_I;
+        } else {
+            pre[npre++] = sfmt("mm_thr_argf(%s);", as_flt(val));
+            e->v.code = sfmt("mm_thr_getf(%d)", v);
+            e->v.ty = TY_F;
+        }
+        v++;
+    }
+    text = emit_call(r, &ent).code;
+    name = sfmt("__mm_thr_%d", cv.nthr_entries);
+    if (cv.mode == M_EMIT) {
+        GROW(cv.thr_entries, cv.nthr_entries, cv.cthr_entries);
+        cv.thr_entries[cv.nthr_entries].name = pstr(name);
+        cv.thr_entries[cv.nthr_entries].call = pstr(text);
+        cv.nthr_entries++;
+    }
+    emit(sfmt("mm_thr_new(%s, %s, %s);", n,
+              opt[0] ? opt[0] : "-1LL", opt[3] ? opt[3] : "-1LL"));
+    if (opt[1] != NULL || opt[2] != NULL)
+        emit(sfmt("mm_thr_size(-1LL, %s, %s);",
+                  opt[1] ? opt[1] : "-1LL", opt[2] ? opt[2] : "-1LL"));
+    for (k = 0; k < npre; k++)
+        emit(pre[k]);
+    emit(sfmt("mmth_go(%s);", name));
 }
 
 /* -- GOSUB / RETURN -------------------------------------------------- */

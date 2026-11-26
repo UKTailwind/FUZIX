@@ -414,6 +414,9 @@ void conv_write(FILE *f)
     for (k = 0; k < cv.nwarnings; k++)
         fprintf(f, " * warning: %s\n", cv.warnings[k]);
     fprintf(f, " */\n\n");
+    if (cv.uses_threads)
+        /* ahead of every header: mmb_int.h's poll takes the turns */
+        fprintf(f, "#define MM_THREADS 1\n");
     fprintf(f, "#include \"mmb_runtime.h\"\n");
     /* The geometry primitives are static functions in headers, so they
        land in the program rather than in bcrun - one header per
@@ -562,6 +565,10 @@ void conv_write(FILE *f)
         cv.uses_wait = 1;
     if (cv.uses_wait)
         fprintf(f, "#include \"mmb_wait.h\"\n");
+    /* After mmb_wait.h, mmb_int.h, mmb_data.h and mmb_misc.h, which it
+       finds by their include guards. */
+    if (cv.uses_threads)
+        fprintf(f, "#include \"mmb_thread.h\"\n");
     /* AFTER mmb_wait.h, and that ordering is load-bearing: TEMPR uses
        the serviced wait when the program has one, which it detects by
        that header's guard. */
@@ -852,6 +859,8 @@ void conv_write(FILE *f)
         fprintf(f, "%s;\n", signature(routine_get(names[k])));
     for (k = 0; k < cv.ncalld; k++)
         fprintf(f, "%s;\n", calld_head(&cv.calld[k]));
+    for (k = 0; k < cv.nthr_entries; k++)
+        fprintf(f, "static void %s(void);\n", cv.thr_entries[k].name);
     if (cv.uses_clear) {
         fprintf(f, "\nstatic void __mmb_clear(void)\n{\n");
         names = global_names_sorted(&n);
@@ -937,6 +946,12 @@ void conv_write(FILE *f)
             fprintf(f, "}\n");
         }
     }
+    if (cv.nthr_entries) {
+        fprintf(f, "\n/* ---- THREAD START: each one's entry ---- */\n");
+        for (k = 0; k < cv.nthr_entries; k++)
+            fprintf(f, "\nstatic void %s(void)\n{\n    %s;\n}\n",
+                    cv.thr_entries[k].name, cv.thr_entries[k].call);
+    }
     fprintf(f, "\n/* ---- main program ---- */\n");
     /* MAIN TAKES NO ARGUMENTS IN THE FCC BUILD.
      *
@@ -984,6 +999,8 @@ void conv_write(FILE *f)
                     data_has_kind(0) ? "__mmb_data_i" : "0",
                     data_has_s() ? "__mmb_data_s" : "0", cv.ndata);
     }
+    if (cv.uses_threads)
+        fprintf(f, "    mmth_init();\n");
     for (k = 0; k < cv.out_main.n; k++)
         fprintf(f, "%s\n", cv.out_main.lines[k]);
     /* running off the end is an END too, and runs SUB MM.END (8a9e3b6);

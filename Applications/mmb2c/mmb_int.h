@@ -149,13 +149,25 @@ MMG_FN void mmi_prtscr(int on)
  *	20 ms tick into a 100 ms one). */
 MMG_FN long long mm_int_slice_us(void)
 {
-	long long s = 0;
+	long long s = 0, now = 0, d;
 	int i;
 
+	/*	A tick asks for the time until it is DUE, not for its period:
+	 *	a wait cut into periods from wherever it began wakes out of
+	 *	step with the deadlines, up to a period late, and where each
+	 *	sleep overruns a little (Windows, by half a millisecond) the
+	 *	lateness grows tick by tick.  Woken at the deadline, the poll
+	 *	after the sleep finds the tick due and runs it then. */
+	if (mm_ntick_armed)
+		now = MMI_US();
 	for (i = 0; i < MM_INT_NTICK; i++)
-		if (mm_tick[i].armed && mm_tick[i].active &&
-		    (s == 0 || mm_tick[i].period < s))
-			s = mm_tick[i].period;
+		if (mm_tick[i].armed && mm_tick[i].active) {
+			d = mm_tick[i].due - now;
+			if (d < 1)
+				d = 1;
+			if (s == 0 || d < s)
+				s = d;
+		}
 	if (mm_key_any_fn || mm_key_sel_fn || mm_ps_armed)
 		if (s == 0 || MM_INT_CON_US < s)
 			s = MM_INT_CON_US;
@@ -174,6 +186,84 @@ MMG_FN long long mm_int_slice_us(void)
  *	this is what makes them no-ops. */
 static int __mm_in_int;
 
+#ifdef MM_THREADS
+/*	THREAD (mmb_thread.h): the runtime is asked every MMTH_EVERY
+ *	statements whether this thread's turn is up - a clock read each
+ *	time would cost more than the statements - and is told when an
+ *	interrupt routine runs, as no other thread may run meanwhile. */
+#define MMTH_EVERY	16
+static int mmth_count;
+
+/*	An interrupt belongs to the thread that set it up, and its routine
+ *	runs there (the manual's "Interrupts and Threads").  Whichever
+ *	thread's poll finds it due, the routine is queued for its owner,
+ *	and the owner runs next to take it.  mmth_me is the running
+ *	thread, kept up to date by the runtime at every switch
+ *	(mm_thr_idword).  Only routines set up by a thread other than the
+ *	main program are listed: the rest are the main program's, and so
+ *	are a thread's once it has ended. */
+static int mmth_me;
+#define MMTH_NOWN	64
+static mm_int_fn mmth_ofn[MMTH_NOWN];
+static unsigned char mmth_oth[MMTH_NOWN];
+static int mmth_nown;
+#define MMTH_QN		8
+static mm_int_fn mmth_q[MM_THR_MAX + 1][MMTH_QN];
+static unsigned char mmth_qn[MM_THR_MAX + 1];
+
+MMG_FN void mmth_own(mm_int_fn fn)
+{
+	int i;
+
+	if (fn == 0)
+		return;
+	for (i = 0; i < mmth_nown; i++)
+		if (mmth_ofn[i] == fn) {
+			mmth_oth[i] = (unsigned char)mmth_me;
+			return;
+		}
+	if (mmth_me == 0)
+		return;
+	if (mmth_nown >= MMTH_NOWN) {
+		mm_error("Too many interrupt routines set up in threads");
+		return;
+	}
+	mmth_ofn[mmth_nown] = fn;
+	mmth_oth[mmth_nown++] = (unsigned char)mmth_me;
+}
+
+MMG_FN int mmth_owner(mm_int_fn fn)
+{
+	int i, o = 0;
+
+	for (i = 0; i < mmth_nown; i++)
+		if (mmth_ofn[i] == fn) {
+			o = mmth_oth[i];
+			break;
+		}
+	if (o != 0 && mm_thr_state(o) == 0)
+		o = 0;			/* its thread has ended */
+	return o;
+}
+
+/*	Due while another thread runs: kept for its owner, once. */
+MMG_FN void mmth_post(int o, mm_int_fn fn)
+{
+	int i;
+
+	for (i = 0; i < mmth_qn[o]; i++)
+		if (mmth_q[o][i] == fn)
+			return;
+	if (mmth_qn[o] < MMTH_QN)
+		mmth_q[o][mmth_qn[o]++] = fn;
+	mm_thr_wake(o);
+}
+
+#define MMTH_OWN(fn)	mmth_own(fn)
+#else
+#define MMTH_OWN(fn)	((void)0)
+#endif
+
 /*	PLAY TONE's completion interrupt.  No IPC anywhere: mmb_play.h
  *	computed the duration, so the deadline sits in mm_tone_end and
  *	the poll compares the clock against it.  Guarded like the sprite
@@ -183,6 +273,7 @@ static mm_int_fn mm_tone_fn;
 
 MMG_FN void mmi_tone_int(mm_int_fn fn)
 {
+	MMTH_OWN(fn);
 	if (mm_tone_fn == 0)
 		__mm_int_armed++;
 	mm_tone_fn = fn;
@@ -198,6 +289,7 @@ static long long mm_mod_next;		/* earliest us at which to ask */
 
 MMG_FN void mmi_mod_int(mm_int_fn fn)
 {
+	MMTH_OWN(fn);
 	if (mm_mod_fn == 0)
 		__mm_int_armed++;
 	mm_mod_fn = fn;
@@ -236,6 +328,7 @@ static long long mm_com_next;
 
 MMG_FN void mmi_com_int(MMINTEGER fnbr, mm_int_fn fn)
 {
+	MMTH_OWN(fn);
 	if (fnbr < 1 || fnbr > MM_MAXFILES)
 		return;
 	if (mm_com_fn[fnbr] == 0) {
@@ -251,6 +344,7 @@ static long long mm_play_next, mm_play_claim_by;
 
 MMG_FN void mmi_play_int(mm_int_fn fn)
 {
+	MMTH_OWN(fn);
 	if (mm_play_fn == 0)
 		__mm_int_armed++;
 	mm_play_fn = fn;
@@ -267,6 +361,7 @@ static mm_int_fn mm_udp_fn;
 
 MMG_FN void mmi_udp_int(mm_int_fn fn)
 {
+	MMTH_OWN(fn);
 	if (fn) {
 		if (mm_udp_fn == 0)
 			__mm_int_armed++;
@@ -284,6 +379,7 @@ static mm_int_fn mm_webs_fn;
 
 MMG_FN void mmi_webs_int(mm_int_fn fn)
 {
+	MMTH_OWN(fn);
 	if (fn) {
 		if (mm_webs_fn == 0)
 			__mm_int_armed++;
@@ -305,6 +401,7 @@ static mm_int_fn mm_sprcoll_fn, mm_sprst_fn;
 
 MMG_FN void mmi_sprite_int(mm_int_fn fn)
 {
+	MMTH_OWN(fn);
 	if (mm_sprcoll_fn == 0)
 		__mm_int_armed++;
 	mm_sprcoll_fn = fn;
@@ -322,6 +419,7 @@ MMG_FN void mmi_sprite_noint(void)
 
 MMG_FN void mmi_st_int(mm_int_fn fn)
 {
+	MMTH_OWN(fn);
 	if (mm_sprst_fn == 0)
 		__mm_int_armed++;
 	mm_sprst_fn = fn;
@@ -360,10 +458,24 @@ static unsigned mm_int_fired;
 
 MMG_FN void mm_int_fire(mm_int_fn fn)
 {
+#ifdef MM_THREADS
+	int o = mmth_owner(fn);
+
+	if (o != mmth_me) {
+		mmth_post(o, fn);
+		return;
+	}
+#endif
 	mm_int_err_push();
 	__mm_in_int = 1;
 	mm_int_fired++;
+#ifdef MM_THREADS
+	mm_thr_inint(1);
 	fn();
+	mm_thr_inint(0);
+#else
+	fn();
+#endif
 	__mm_in_int = 0;
 	mm_int_err_pop();
 }
@@ -383,6 +495,8 @@ MMG_FN void mmi_setpin_int(MMINTEGER pin, MMINTEGER edge, mm_int_fn fn,
 			   MMINTEGER pull)
 {
 	int i;
+
+	MMTH_OWN(fn);
 
 	mmg_setpin(pin, edge, pull);	/* claims, configures, records mode */
 	if (mmg_mode[pin] != (unsigned char)edge)
@@ -435,6 +549,8 @@ MMG_FN void mmi_setpin_off(MMINTEGER pin)
 MMG_FN void mmi_settick(MMINTEGER ms, mm_int_fn fn, MMINTEGER id)
 {
 	int i = (int)id - 1;
+
+	MMTH_OWN(fn);
 
 	/* the reference's getints, in its order: the tick number, then the
 	   period (MM_Misc.c cmd_settick; ed4ddbc).  A negative period was
@@ -492,6 +608,7 @@ MMG_FN void mmi_settick_pause(MMINTEGER id, MMINTEGER on)
 /*	ON KEY handler   /   ON KEY 0   (off) */
 MMG_FN void mmi_onkey_any(mm_int_fn fn)
 {
+	MMTH_OWN(fn);
 	if (fn && !mm_key_any_fn)
 		mm_int_arm();
 	else if (!fn && mm_key_any_fn)
@@ -505,6 +622,7 @@ MMG_FN void mmi_onkey_any(mm_int_fn fn)
  *	turning it off. */
 MMG_FN void mmi_onkey_sel(MMINTEGER code, mm_int_fn fn)
 {
+	MMTH_OWN(fn);
 	if (code < 0 || code > 255) {
 		mm_error("Invalid key code");
 		return;
@@ -560,6 +678,24 @@ MMG_FN void mm_int_poll(void)
 
 	if (__mm_in_int)
 		return;
+
+#ifdef MM_THREADS
+	if (++mmth_count >= MMTH_EVERY) {
+		mmth_count = 0;
+		mm_thr_poll();
+	}
+	/*	A routine of this thread's that came due while another ran. */
+	if (mmth_qn[mmth_me]) {
+		mm_int_fn q = mmth_q[mmth_me][0];
+		int k;
+
+		for (k = 1; k < mmth_qn[mmth_me]; k++)
+			mmth_q[mmth_me][k - 1] = mmth_q[mmth_me][k];
+		mmth_qn[mmth_me]--;
+		mm_int_fire(q);
+		return;
+	}
+#endif
 
 	/*	Keys FIRST, and the specific form before the any-key one -
 	 *	checkdetailinterrupts' order (MM_Misc.c:9892-9903). */

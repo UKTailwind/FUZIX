@@ -1,0 +1,5 @@
+
+Error in thread 3: this thread has failed
+Main program: waiting for thread 3, priority 2
+Thread 1: in PAUSE
+Thread 3: running

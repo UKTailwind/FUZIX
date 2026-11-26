@@ -117,9 +117,9 @@ static const char *fwcommands[] = {
     "RESOLUTION", "RESTORE", "RETURN", "RMDIR", "RTC", "RUN", "SAVE",
     "SEEK", "SERVO", "SET", "SETPIN", "SETTICK", "SLEW", "SORT", "SPI",
     "SPI2", "SPRITE", "STAR", "STATIC", "STEPPER", "STRUCT", "SUB", "SYNC",
-    "TEXT", "TILE", "TILEMAP", "TIMER", "TMC22XX", "TRACE", "TRIANGLE",
-    "TURTLE", "TYPE", "VAR", "WAIT", "WATCHDOG", "WEB", "WHILE", "WII",
-    "WS2812", "XMODEM", "YMODEM", "ZMODEM",
+    "TEXT", "THREAD", "TILE", "TILEMAP", "TIMER", "TMC22XX", "TRACE",
+    "TRIANGLE", "TURTLE", "TYPE", "VAR", "WAIT", "WATCHDOG", "WEB", "WHILE",
+    "WII", "WS2812", "XMODEM", "YMODEM", "ZMODEM",
     NULL
 };
 

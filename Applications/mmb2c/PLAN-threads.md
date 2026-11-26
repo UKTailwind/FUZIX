@@ -207,3 +207,57 @@ Peter, 26 November 2026.
 | D3 | `LOCALS` and `NEST`? | Accepted and ignored, so that firmware programs translate unchanged |
 | D4 | The board's slices? | Counted in statements with the clock read every N, for a first build |
 | D5 | The error message? | `Error in thread n: message`, as we have no line numbers |
+
+## Progress
+
+### 26 November: Stages 0 to 3 on Linux and Windows
+
+Built as designed above, with these particulars.
+
+- **The runtime**: `mmb_thread.c`, included at the end of `mmb_runtime.c`.
+  The switch is `swapcontext` on Linux and Fibers on Windows; anywhere
+  else (the board, fcc's own compile of the runtime) the THREAD calls are
+  stubs and `THREAD START` says "Threads are not available on this
+  machine yet".  bcrun swaps its VM registers (`A`, `pc`, `sp`,
+  `stack_floor`) and gives each thread a VM stack from the VM heap
+  (`bcrun_mm.c`, `mmx_vm_*`).
+- **The program's half**: `mmb_thread.h` (the DATA pointer, GOSUB's
+  returns and FLAG()'s word bound per thread; the waits, sliced as PAUSE
+  is), and `mmb_int.h` under `MM_THREADS` (the turn asked for every 16
+  statements; an interrupt owned by the thread that set it up, queued for
+  it and run there).
+- **Per thread**, besides the plan's list: the LOCAL frames (the native
+  build's arena is the main program's alone; a thread's frames are listed
+  with it, so STOP and EXIT give them back), and the screen: colours,
+  font, the graphics cursor, PRINT @'s mode and FRAMEBUFFER WRITE, which
+  a new thread takes from its starter and MODE gives to all.
+- **The clock**: the scheduler has its own monotonic one.  The runtime's
+  is the PC3's, a round trip to the device server under bcrun on a PC.
+- **The rotation** keeps its own place: a thread whose PAUSE has ended
+  goes first without moving it on, or a program that PAUSEs in a loop
+  beside a busy thread hands every turn to that thread (found by the
+  firmware's tprio).
+- **Waits that let the others run**: PAUSE, the THREAD waits, INPUT and
+  LINE INPUT at the console (poll on the descriptor, glibc's and msvcrt's
+  stdio buffers looked at first) and on a serial port.  Not yet: the
+  frame waits, PLAY's, the network's.
+- **A wait with a SETTICK armed sleeps until the tick is due**, not for
+  its period (`mm_int_slice_us`): slices cut from where the wait began
+  drifted against the deadlines, by half a millisecond a sleep on Windows.
+  This applies to every program, threads or not.
+- **Windows** sleeps on a high-resolution waitable timer: Sleep's 15.6 ms
+  tick made a 2 ms PAUSE take 15.6.
+- **MM.INFO(FCOLOUR) and (BCOLOUR)**, which the firmware's tscreen reads,
+  were not translated before.
+
+Tests: the firmware's own `Bas/threads`, through mmb2c.py, fcc and
+pc3host's bcrun: every one whose subject a PC has passes, apart from
+EXECUTE, EVAL and MM.INFO(VARCNT) (not translated) and THREAD LIST's line
+numbers.  Fifteen of them are `tests/thr*.bas`, with `thread8.bas`,
+`threadin.bas` and `threrr8.bas` of ours; pc3host's e2e runs `threads.bas`
+(INPUT with the line given 0.3 s late) on Linux and Windows.
+
+To do: the board (a Thumb switch, the statement-counted slice, the sizes
+measured); the frame, PLAY and network waits; the poll's cost with a
+thread running (an empty loop runs at a quarter of its speed under
+bcrun: the call to `mm_int_poll` every statement).

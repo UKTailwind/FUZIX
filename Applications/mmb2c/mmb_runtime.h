@@ -1119,6 +1119,50 @@ MMINTEGER *mm_isink(void);
 void mm_end  (void);                /* the END statement               */
 MMFLOAT mm_timer(void);             /* ms since TIMER=, with fraction  */
 
+/* ---- THREAD (MMBasic V8's threads; mmb_thread.c) ------------------
+ * THREAD START n ..., sub, args is mm_thr_new, an mm_thr_arg* for each
+ * argument by value, then mm_thr_go with the entry the translator
+ * writes for the SUB, which takes them back with mm_thr_get*.
+ * mm_thr_block is every wait (mmb_thread.h slices it); the kinds: */
+#define MM_THR_MAX     16
+#define MM_THR_SLEEP   0
+#define MM_THR_LOCK    1
+#define MM_THR_THREAD  2
+#define MM_THR_FLAG    3
+#define MM_THR_IO      4        /* the runtime's own: input, no interrupts */
+void      mm_thr_bind(void *p, MMINTEGER n);
+void      mm_thr_flagword(MMINTEGER *p);
+void      mm_thr_idword(int *p);
+void      mm_thr_wake(MMINTEGER n);
+void      mm_thr_inint(MMINTEGER on);
+void      mm_thr_new(MMINTEGER n, MMINTEGER kb, MMINTEGER prio);
+void      mm_thr_argi(MMINTEGER v);
+void      mm_thr_argf(MMFLOAT v);
+void      mm_thr_args(const char *s);
+void      mm_thr_go(void (*entry)(void));
+MMINTEGER mm_thr_geti(MMINTEGER k);
+MMFLOAT   mm_thr_getf(MMINTEGER k);
+char     *mm_thr_gets(MMINTEGER k);
+void      mm_thr_poll(void);
+void      mm_thr_yield(void);
+void      mm_thr_exit(void);
+void      mm_thr_stop(MMINTEGER n);
+void      mm_thr_pause(MMINTEGER n);
+void      mm_thr_resume(MMINTEGER n);
+void      mm_thr_slice(MMINTEGER ms);
+void      mm_thr_priority(MMINTEGER n, MMINTEGER p);
+void      mm_thr_size(MMINTEGER kb, MMINTEGER locals, MMINTEGER nest);
+void      mm_thr_unlock(MMINTEGER k);
+void      mm_thr_lock_timeout(MMINTEGER k);
+void      mm_thr_hold(void);
+void      mm_thr_release(void);
+MMINTEGER mm_thr_block(MMINTEGER kind, MMINTEGER arg, MMINTEGER us);
+void      mm_thr_solo(void);
+MMINTEGER mm_thr_id(void);
+MMINTEGER mm_thr_state(MMINTEGER n);
+MMINTEGER mm_thr_lockowner(MMINTEGER k);
+void      mm_thr_list(void);
+
 #ifdef __cplusplus
 }
 #endif

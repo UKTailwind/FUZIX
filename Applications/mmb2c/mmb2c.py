@@ -196,8 +196,8 @@ FW_COMMANDS = frozenset((
     'RESOLUTION', 'RESTORE', 'RETURN', 'RMDIR', 'RTC', 'RUN', 'SAVE',
     'SEEK', 'SERVO', 'SET', 'SETPIN', 'SETTICK', 'SLEW', 'SORT', 'SPI',
     'SPI2', 'SPRITE', 'STAR', 'STATIC', 'STEPPER', 'STRUCT', 'SUB', 'SYNC',
-    'TEXT', 'TILE', 'TILEMAP', 'TIMER', 'TMC22XX', 'TRACE', 'TRIANGLE',
-    'TURTLE', 'TYPE', 'VAR', 'WAIT', 'WATCHDOG', 'WEB', 'WHILE', 'WII',
+    'TEXT', 'THREAD', 'TILE', 'TILEMAP', 'TIMER', 'TMC22XX', 'TRACE',
+    'TRIANGLE', 'TURTLE', 'TYPE', 'VAR', 'WAIT', 'WATCHDOG', 'WEB', 'WHILE', 'WII',
     'WS2812', 'XMODEM', 'YMODEM', 'ZMODEM'
 ))
 
@@ -1593,6 +1593,10 @@ class Conv(object):
         # the statements before it, so the poll sites are emitted for
         # the whole program or none of it
         self.uses_interrupts = False
+        # THREAD (mmb_thread.h): the poll sites, the serviced waits and
+        # each THREAD START's entry, written after the routines
+        self.uses_threads = False
+        self.thr_entries = []
         self.uses_cmdline = False       # MM.CMDLINE$: main takes argv
         # depth of single-line IF bodies being emitted: END SUB means
         # "return now" in there, not "the routine ends here"
@@ -5686,6 +5690,12 @@ class Conv(object):
         'FONTWIDTH':  ('mm_fontwidth()', TY_I),
         'HPOS':       ('mm_hpos()', TY_I),
         'VPOS':       ('mm_vpos()', TY_I),
+        # COLOUR's ink and paper (MM_Misc.c fun_info: gui_fcolour and
+        # gui_bcolour), in either spelling
+        'FCOLOUR':    ('mm_fg()', TY_I),
+        'FCOLOR':     ('mm_fg()', TY_I),
+        'BCOLOUR':    ('mm_bg()', TY_I),
+        'BCOLOR':     ('mm_bg()', TY_I),
         'DEVICE':     ('mm_device()', TY_S),
         'PLATFORM':   ('mm_platform()', TY_S),
         'PATH':       ('mm_path()', TY_S),
@@ -5826,6 +5836,20 @@ class Conv(object):
                 ch = self.as_int(self.expr())
             self.expect_op(')')
             return ('mm_bbc_free(%s)' % ch, TY_I)
+        if one == 'THREAD':
+            # MM.INFO(THREAD) the running thread (0 the main program),
+            # MM.INFO(THREAD n) its state, MM.INFO(THREAD LOCK k) the
+            # thread that has lock k - mmb_thread.c
+            if two == 'THREAD LOCK':
+                self.i += 1
+                k = self.as_int(self.expr())
+                self.expect_op(')')
+                return ('mm_thr_lockowner(%s)' % k, TY_I)
+            if self.accept_op(')'):
+                return ('mm_thr_id()', TY_I)
+            n = self.as_int(self.expr())
+            self.expect_op(')')
+            return ('mm_thr_state(%s)' % n, TY_I)
         if one == 'PIN':
             # MM.INFO(PIN n): the pin's function as the firmware names
             # it - mmg_pininfo, beside SETPIN in mmb_gpio.h
@@ -5901,9 +5925,10 @@ class Conv(object):
         self.err("MM.INFO(%s ...) is not supported; translated are "
                  "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                  "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
-                 "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, WRITEBUFF, "
+                 "VPOS, FCOLOUR, BCOLOUR, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, WRITEBUFF, "
                  "LCDPANEL, SYSTEM I2C, SDCARD, USBDRIVE, TELNET, "
                  "IP ADDRESS, MAX CONNECTIONS, BBC BUFFER [channel], "
+                 "THREAD [n | LOCK k], "
                  "OPTION BASE, PIN n, PINNO, FILESIZE, "
                  "EXISTS FILE, EXISTS DIR, FONT, FONT ADDRESS n and "
                  "FLASH ADDRESS n" % t[1])
@@ -7231,10 +7256,12 @@ class Conv(object):
             return
         if up == 'ERASE':
             self.i += 1
+            self.thread_solo()
             self.do_erase()
             return
         if up == 'REDIM':
             self.i += 1
+            self.thread_solo()
             self.do_redim()
             return
         if up == 'MEMORY':
@@ -7331,6 +7358,7 @@ class Conv(object):
             return
         if up == 'CLEAR':
             self.i += 1
+            self.thread_solo()
             self.warn("CLEAR zeroes every global; static storage cannot be "
                       "handed back the way the interpreter does")
             self.emit('__mmb_clear();')
@@ -9281,6 +9309,10 @@ class Conv(object):
                           % (self.as_int(x1), self.as_int(y1),
                              self.as_int(x2), self.as_int(y2), wid, col))
             return
+        if up == 'THREAD':
+            self.i += 1
+            self.do_thread()
+            return
         if up == 'PAUSE':
             # mm_wait, not mm_pause, for a program with an interrupt or
             # a PULSE to service: it is the same wait cut into slices
@@ -9605,6 +9637,168 @@ class Conv(object):
             return
 
         self.err("LONGSTRING %s is not supported" % t[1])
+
+    # -- THREAD (MMBasic V8's threads) ----------------------------------
+    #
+    # The runtime is mmb_thread.c and the program's half mmb_thread.h;
+    # PLAN-threads.md is the design.  A program that names THREAD gets
+    # the poll sites (where the threads take turns) and the serviced
+    # waits, as one that arms an interrupt does.
+    def thread_solo(self):
+        """ERASE, REDIM and CLEAR: refused while a thread runs, which may
+        hold the address of the data in the middle of a statement."""
+        if self.uses_threads:
+            self.emit('mm_thr_solo();')
+
+    def thread_limit(self):
+        """THREAD LOCK's and THREAD WAIT's time limit: (given, ms)."""
+        if self.accept_op(','):
+            return ('1', self.as_flt(self.expr()))
+        return ('0', '0.0')
+
+    def do_thread(self):
+        self.uses_threads = True
+        self.uses_interrupts = True
+        self.uses_wait = True
+        if self.accept_kw('START'):
+            self.thread_start()
+            return
+        for kw, fn in (('YIELD', 'mm_thr_yield'), ('EXIT', 'mm_thr_exit'),
+                       ('HOLD', 'mm_thr_hold'),
+                       ('RELEASE', 'mm_thr_release'),
+                       ('LIST', 'mm_thr_list')):
+            if self.accept_kw(kw):
+                self.emit('%s();' % fn)
+                return
+        for kw, fn in (('STOP', 'mm_thr_stop'), ('PAUSE', 'mm_thr_pause'),
+                       ('RESUME', 'mm_thr_resume'),
+                       ('SLICE', 'mm_thr_slice'),
+                       ('UNLOCK', 'mm_thr_unlock')):
+            if self.accept_kw(kw):
+                self.emit('%s(%s);' % (fn, self.as_int(self.expr())))
+                return
+        if self.accept_kw('PRIORITY'):
+            n = self.as_int(self.expr())
+            self.expect_op(',')
+            pr = self.as_int(self.expr())
+            self.emit('mm_thr_priority(%s, %s);' % (n, pr))
+            return
+        if self.accept_kw('SIZE'):
+            # THREAD SIZE kb [, locals [, nest]], any of them blank
+            vals = []
+            given = False
+            while True:
+                if self.is_op(',') or self.stmt_end():
+                    vals.append('-1LL')
+                else:
+                    vals.append(self.as_int(self.expr()))
+                    given = True
+                if not self.accept_op(','):
+                    break
+            if not given or len(vals) > 3:
+                self.err("syntax error")
+            while len(vals) < 3:
+                vals.append('-1LL')
+            self.emit('mm_thr_size(%s);' % ', '.join(vals))
+            return
+        if self.accept_kw('LOCK'):
+            k = self.as_int(self.expr())
+            has, ms = self.thread_limit()
+            self.emit('mmth_lock(%s, %s, %s);' % (k, has, ms))
+            return
+        if self.accept_kw('WAIT'):
+            kind = 'MM_THR_THREAD'
+            if self.accept_kw('FLAG'):
+                kind = 'MM_THR_FLAG'
+                self.uses_misc = True       # FLAG()'s word
+            k = self.as_int(self.expr())
+            has, ms = self.thread_limit()
+            self.emit('(void)mmth_wait(%s, %s, %s, %s);'
+                      % (kind, k, has, ms))
+            return
+        self.err("syntax error")
+
+    def thread_start(self):
+        """THREAD START n [SIZE kb] [LOCALS m] [NEST d] [PRIORITY p],
+        sub [, argument ...].  The arguments are evaluated here and
+        handed to the runtime by value; the thread's entry, written after
+        the routines, takes them back and calls the SUB as a call
+        statement would.  A global array goes by reference, named in the
+        entry itself."""
+        n = self.as_int(self.expr())
+        opt = {}
+        while not self.is_op(','):
+            t = self.peek()
+            w = t[2] if t is not None and t[0] == T_ID else None
+            if w not in ('SIZE', 'LOCALS', 'NEST', 'PRIORITY') or w in opt:
+                self.err("syntax error")
+            self.i += 1
+            opt[w] = self.as_int(self.expr())
+        self.expect_op(',')
+        t = self.nxt()
+        if t[0] != T_ID:
+            self.err("expected the name of a SUB")
+        canon, sfx = split_suffix(t[1])
+        r = self.routines.get(canon)
+        if r is None or r.is_func or sfx is not None:
+            self.late("%s is not a SUB" % t[1].upper())
+        args = []
+        while self.accept_op(','):
+            if self.is_op(',') or self.stmt_end():
+                args.append(None)
+            else:
+                args.append(self.arg_item())
+        if len(args) > 16:
+            self.late("Too many arguments for a thread")
+        if len(args) > len(r.params):
+            self.err("too many arguments to '%s'" % r.name)
+        pre = []
+        ent = []
+        v = 0
+        for k, p in enumerate(r.params):
+            a = args[k] if k < len(args) else None
+            if a is None:
+                ent.append(None)
+                continue
+            if p.stype is not None or (a[0] in ('var', 'elem')
+                                       and a[1].stype is not None):
+                self.late("Invalid argument for a thread")
+            if p.is_array:
+                if a[0] != 'array':
+                    self.err("'%s' expects a whole array here" % r.name)
+                if a[1].is_param or a[1].declared_in != '':
+                    self.late("Only a global array can be passed to a "
+                              "thread")
+                ent.append(a)
+                continue
+            if a[0] == 'array':
+                self.err("unexpected array argument")
+            if a[0] == 'var':
+                val = (a[1].acc, a[1].ty)
+            else:
+                val = a[2]
+            if p.ty == TY_S:
+                pre.append('mm_thr_args(%s);' % self.as_str(val))
+                ent.append(('val', None, ('mm_thr_gets(%d)' % v, TY_S)))
+            elif p.ty == TY_I:
+                pre.append('mm_thr_argi(%s);' % self.as_int(val))
+                ent.append(('val', None, ('mm_thr_geti(%d)' % v, TY_I)))
+            else:
+                pre.append('mm_thr_argf(%s);' % self.as_flt(val))
+                ent.append(('val', None, ('mm_thr_getf(%d)' % v, TY_F)))
+            v += 1
+        text, _ = self.emit_call(r, ent)
+        name = '__mm_thr_%d' % len(self.thr_entries)
+        if self.mode == 'emit':
+            self.thr_entries.append((name, text))
+        self.emit('mm_thr_new(%s, %s, %s);'
+                  % (n, opt.get('SIZE', '-1LL'), opt.get('PRIORITY', '-1LL')))
+        if 'LOCALS' in opt or 'NEST' in opt:
+            self.emit('mm_thr_size(-1LL, %s, %s);'
+                      % (opt.get('LOCALS', '-1LL'), opt.get('NEST', '-1LL')))
+        for ln in pre:
+            self.emit(ln)
+        self.emit('mmth_go(%s);' % name)
 
     # -- GOSUB / RETURN ------------------------------------------------------
     def gosub_key(self):
@@ -12980,6 +13174,9 @@ class Conv(object):
         for w in self.warnings:
             wr(' * warning: ' + w + '\n')
         wr(' */\n\n')
+        if self.uses_threads:
+            # ahead of every header: mmb_int.h's poll takes the turns
+            wr('#define MM_THREADS 1\n')
         wr('#include "mmb_runtime.h"\n')
         # The geometry primitives are static functions in headers, so
         # they land in the program rather than in bcrun - one header
@@ -13129,6 +13326,10 @@ class Conv(object):
             self.uses_wait = True
         if self.uses_wait:
             wr('#include "mmb_wait.h"\n')
+        # After mmb_wait.h, mmb_int.h, mmb_data.h and mmb_misc.h, which
+        # it finds by their include guards.
+        if self.uses_threads:
+            wr('#include "mmb_thread.h"\n')
         # AFTER mmb_wait.h, and that ordering is load-bearing: TEMPR
         # uses the serviced wait when the program has one, which it
         # detects by that header's guard.
@@ -13347,6 +13548,8 @@ class Conv(object):
             wr(self.signature(self.routines[nm]) + ';\n')
         for d in self.call_disp:
             wr(self.calld_head(d) + ';\n')
+        for nm, _ in self.thr_entries:
+            wr('static void %s(void);\n' % nm)
         if self.uses_clear:
             wr('\nstatic void __mmb_clear(void)\n{\n')
             names = list(self.globals.keys())
@@ -13410,6 +13613,10 @@ class Conv(object):
                 elif d['is_func']:
                     wr('    return 0;\n')
                 wr('}\n')
+        if self.thr_entries:
+            wr('\n/* ---- THREAD START: each one\'s entry ---- */\n')
+            for nm, call in self.thr_entries:
+                wr('\nstatic void %s(void)\n{\n    %s;\n}\n' % (nm, call))
         wr('\n/* ---- main program ---- */\n')
         # MAIN TAKES NO ARGUMENTS IN THE FCC BUILD.
         #
@@ -13454,6 +13661,8 @@ class Conv(object):
                   '__mmb_data_i' if self.data_has_i else '0',
                   '__mmb_data_s' if self.data_has_s else '0',
                   len(self.data)))
+        if self.uses_threads:
+            wr('    mmth_init();\n')
         for ln in self.out_main:
             wr(ln + '\n')
         # running off the end is an END too, and runs SUB MM.END

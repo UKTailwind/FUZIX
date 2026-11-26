@@ -516,6 +516,12 @@ struct conv {
        statements before it, so the poll sites are emitted for the whole
        program or none of it */
     int uses_interrupts;
+    /* THREAD (mmb_thread.h): the poll sites, the serviced waits and
+       each THREAD START's entry, written after the routines - the
+       entry's name (__mm_thr_N) and the call it makes */
+    int uses_threads;
+    struct thrent { const char *name, *call; } *thr_entries;
+    int nthr_entries, cthr_entries;
     int uses_pwm;
     int uses_i2c;
     int uses_i2c0;

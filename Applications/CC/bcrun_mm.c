@@ -109,6 +109,92 @@ static long long time_us64(void)
 #define fabs(x)      ((mfns[15].f1)(x))
 #define fmod(x, y)   ((mfns[18].f2)((x), (y)))
 
+/*
+ *	THREAD (mmb_thread.c): what the runtime needs of the VM to give a
+ *	thread a VM stack of its own beside its C stack.  The VM's
+ *	registers belong to the thread that runs, so they are swapped with
+ *	the rest of its state; a thread's pool, by-ref slots, arguments and
+ *	VM stack come from the VM's heap, where the program can address
+ *	them; and its first run enters its SUB as a call site would, on
+ *	its own VM stack, under a bc_exec of its own.
+ */
+#define MMX_HOST_VM 1
+struct mmx_vmregs {
+	int64_t A;
+	unsigned long pc, sp, floor;
+};
+
+static void *mmx_vm_alloc(unsigned long n)
+{
+	long a = lib_malloc(n);
+
+	return a ? (void *)vptr((unsigned long)a) : NULL;
+}
+
+static void mmx_vm_free(void *p)
+{
+	lib_free((unsigned long)(uintptr_t)p);
+}
+
+static void mmx_vm_save(struct mmx_vmregs *r)
+{
+	r->A = A;
+	r->pc = pc;
+	r->sp = sp;
+	r->floor = stack_floor;
+}
+
+static void mmx_vm_load(const struct mmx_vmregs *r)
+{
+	A = r->A;
+	pc = r->pc;
+	sp = r->sp;
+	stack_floor = r->floor;
+	native_set_floor(r->floor);
+}
+
+/* As run() starts the main program's: 4 below an 8-aligned top. */
+static void mmx_vm_init(struct mmx_vmregs *r, char *base, unsigned long size)
+{
+	unsigned long b = (unsigned long)(uintptr_t)base;
+
+	r->A = 0;
+	r->pc = 0;
+	r->floor = b;
+	r->sp = ((b + size) & ~7UL) - 4;
+}
+
+static void mmx_vm_enter(void (*entry)(void), char *base, unsigned long size)
+{
+	unsigned long target = (unsigned long)(uintptr_t)entry;
+	unsigned long b = (unsigned long)(uintptr_t)base;
+
+	sp = ((b + size) & ~7UL) - 4;
+	stack_floor = b;
+	native_set_floor(b);
+	/* call_target's dispatch, run to the end */
+	if (target < h.h_code && code[target] == BC_NATIVE) {
+		unsigned long alias = code[target + 1] |
+		    ((unsigned long)code[target + 2] << 8) |
+		    ((unsigned long)code[target + 3] << 16) |
+		    ((unsigned long)code[target + 4] << 24);
+#if defined(__arm__) || defined(__thumb__)
+		if (!force_bytecode || alias == 0xFFFFFFFFUL) {
+			push(0xFFFFFFFEUL);
+			A = native_enter(target);
+			return;
+		}
+#else
+		if (alias == 0xFFFFFFFFUL) {
+			native_enter(target);	/* faults with the message */
+			return;
+		}
+#endif
+		target = alias;
+	}
+	bc_exec(target);
+}
+
 #define MM_HOSTED 1
 #include "mmb_runtime.c"
 
@@ -267,6 +353,43 @@ static void w_close(void)    { mm_close(LL(0)); A = 0; }
 static void w_open_com(void) { mm_open_com(Ps(0), LL(1), LL(3)); A = 0; }
 static void w_com_ready(void) { A = mm_com_ready(LL(0)); }
 static void w_list_serial(void) { mm_list_serial(); A = 0; }
+/* THREAD (mmb_thread.c).  An entry is a code address, as a call site's. */
+static void w_thr_bind(void)   { mm_thr_bind(Pa(0), LL(1)); A = 0; }
+static void w_thr_flagword(void) { mm_thr_flagword(PI(0)); A = 0; }
+static void w_thr_idword(void) { mm_thr_idword((int *)(void *)Pa(0)); A = 0; }
+static void w_thr_wake(void)   { mm_thr_wake(LL(0)); A = 0; }
+static void w_thr_inint(void)  { mm_thr_inint(LL(0)); A = 0; }
+static void w_thr_new(void)    { mm_thr_new(LL(0), LL(2), LL(4)); A = 0; }
+static void w_thr_argi(void)   { mm_thr_argi(LL(0)); A = 0; }
+static void w_thr_argf(void)   { mm_thr_argf(D(0)); A = 0; }
+static void w_thr_args(void)   { mm_thr_args(Ps(0)); A = 0; }
+static void w_thr_go(void)
+{
+	mm_thr_go((void (*)(void))(uintptr_t)(uint32_t)arg(0));
+	A = 0;
+}
+static void w_thr_geti(void)   { A = mm_thr_geti(LL(0)); }
+static void w_thr_getf(void)   { A = dput(mm_thr_getf(LL(0))); }
+static void w_thr_gets(void)   { A = mm_off(mm_thr_gets(LL(0))); }
+static void w_thr_poll(void)   { mm_thr_poll(); A = 0; }
+static void w_thr_yield(void)  { mm_thr_yield(); A = 0; }
+static void w_thr_exit(void)   { mm_thr_exit(); A = 0; }
+static void w_thr_stop(void)   { mm_thr_stop(LL(0)); A = 0; }
+static void w_thr_pause(void)  { mm_thr_pause(LL(0)); A = 0; }
+static void w_thr_resume(void) { mm_thr_resume(LL(0)); A = 0; }
+static void w_thr_slice(void)  { mm_thr_slice(LL(0)); A = 0; }
+static void w_thr_priority(void) { mm_thr_priority(LL(0), LL(2)); A = 0; }
+static void w_thr_size(void)   { mm_thr_size(LL(0), LL(2), LL(4)); A = 0; }
+static void w_thr_unlock(void) { mm_thr_unlock(LL(0)); A = 0; }
+static void w_thr_lock_timeout(void) { mm_thr_lock_timeout(LL(0)); A = 0; }
+static void w_thr_hold(void)   { mm_thr_hold(); A = 0; }
+static void w_thr_release(void) { mm_thr_release(); A = 0; }
+static void w_thr_block(void)  { A = mm_thr_block(LL(0), LL(2), LL(4)); }
+static void w_thr_solo(void)   { mm_thr_solo(); A = 0; }
+static void w_thr_id(void)     { A = mm_thr_id(); }
+static void w_thr_state(void)  { A = mm_thr_state(LL(0)); }
+static void w_thr_lockowner(void) { A = mm_thr_lockowner(LL(0)); }
+static void w_thr_list(void)   { mm_thr_list(); A = 0; }
 static void w_flush(void)    { mm_flush(LL(0)); A = 0; }
 static void w_close_all(void){ mm_close_all(); A = 0; }
 static void w_fpr_s(void)    { mm_fpr_s(LL(0), Ps(2)); A = 0; }
@@ -596,9 +719,10 @@ static void w_lheap(void)
 	unsigned long n = (unsigned long)(uint32_t)arg(0);
 
 	A = lib_malloc(n);
-	if (A)
+	if (A) {
 		memset(vptr(A), 0, n);
-	else
+		mmx_lf_push(vptr(A));	/* a THREAD's, listed with it */
+	} else
 		mm_error("out of memory for LOCAL arrays and strings");
 }
 
@@ -607,6 +731,7 @@ static void w_writebuff(void) { A = mm_writebuff(); }
 
 static void w_lfree(void)
 {
+	mmx_lf_pop(vptr((unsigned long)(uint32_t)arg(0)));
 	lib_free((unsigned long)(uint32_t)arg(0));
 	A = 0;
 }
@@ -700,6 +825,38 @@ static const struct mmwrap {
 	{ "mm_open_com",		w_open_com },
 	{ "mm_com_ready",		w_com_ready },
 	{ "mm_list_serial",	w_list_serial },
+	{ "mm_thr_bind",	w_thr_bind },
+	{ "mm_thr_flagword",	w_thr_flagword },
+	{ "mm_thr_idword",	w_thr_idword },
+	{ "mm_thr_wake",	w_thr_wake },
+	{ "mm_thr_inint",	w_thr_inint },
+	{ "mm_thr_new",		w_thr_new },
+	{ "mm_thr_argi",	w_thr_argi },
+	{ "mm_thr_argf",	w_thr_argf },
+	{ "mm_thr_args",	w_thr_args },
+	{ "mm_thr_go",		w_thr_go },
+	{ "mm_thr_geti",	w_thr_geti },
+	{ "mm_thr_getf",	w_thr_getf },
+	{ "mm_thr_gets",	w_thr_gets },
+	{ "mm_thr_poll",	w_thr_poll },
+	{ "mm_thr_yield",	w_thr_yield },
+	{ "mm_thr_exit",	w_thr_exit },
+	{ "mm_thr_stop",	w_thr_stop },
+	{ "mm_thr_pause",	w_thr_pause },
+	{ "mm_thr_resume",	w_thr_resume },
+	{ "mm_thr_slice",	w_thr_slice },
+	{ "mm_thr_priority",	w_thr_priority },
+	{ "mm_thr_size",	w_thr_size },
+	{ "mm_thr_unlock",	w_thr_unlock },
+	{ "mm_thr_lock_timeout", w_thr_lock_timeout },
+	{ "mm_thr_hold",	w_thr_hold },
+	{ "mm_thr_release",	w_thr_release },
+	{ "mm_thr_block",	w_thr_block },
+	{ "mm_thr_solo",	w_thr_solo },
+	{ "mm_thr_id",		w_thr_id },
+	{ "mm_thr_state",	w_thr_state },
+	{ "mm_thr_lockowner",	w_thr_lockowner },
+	{ "mm_thr_list",	w_thr_list },
 	{ "mm_flush",		w_flush },
 	{ "mm_close_all",	w_close_all },
 	{ "mm_fpr_s",		w_fpr_s },

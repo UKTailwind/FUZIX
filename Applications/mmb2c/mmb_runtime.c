@@ -34,6 +34,14 @@
 #include <signal.h>     /* the console must be given back on a signal too */
 #endif
 
+/* THREAD: each thread's own C stack, switched by ucontext on Linux
+ * (mmb_thread.c, which says why).  Not under fcc's own compile of the
+ * runtime, which has no ucontext whatever its preprocessor says. */
+#if defined(__linux__) && !defined(__FUZIX__) \
+    && (!defined(MM_FCC) || defined(MM_HOSTED))
+#include <ucontext.h>
+#endif
+
 /*
  * THE ONE DOOR TO /dev/sys.
  *
@@ -95,6 +103,21 @@ int pc3_com_list(char *buf, int size);  /* "name\tdescription\n" each */
  */
 static int *mm_est;     /* [0] poison, [1] skip count, [2] FUNCTION depth,
                            [3] the depth the count is used up at        */
+
+/* THREAD (mmb_thread.c, at the end of this file): the running thread,
+ * 0 the main program - an error names it - and the two places the rest
+ * of the runtime asks it something. */
+static int mmx_cur;
+static int mmx_pausing(MMFLOAT ms);
+static int mmx_in_thread(void);
+static void mmx_lf_push(void *p);
+static void mmx_lf_pop(void *p);
+static void mmx_mode_all(void);
+static void mmx_stopped(void);
+static int mmx_io_wait(int fd, MMINTEGER us);
+#ifdef PC_HOST
+static int mmx_io_pause(MMINTEGER us);  /* the serial ports' */
+#endif
 
 /* "an error has been recorded and this statement is being abandoned" */
 static int mm_poisoned(void)
@@ -171,7 +194,10 @@ static void mm_tb_hex(unsigned long v)
 static char   (*mm_pool)[MM_STRSZ];
 static unsigned mm_pool_top = 0;
 #else
-static char     mm_pool[MM_TMPN][MM_STRSZ];
+/* A pointer as under bcrun: a THREAD has a pool of its own, and the
+ * switch points this at it (mmb_thread.c). */
+static char     mm_pool_main[MM_TMPN][MM_STRSZ];
+static char   (*mm_pool)[MM_STRSZ] = mm_pool_main;
 static unsigned mm_pool_top = 0;
 #endif
 
@@ -209,7 +235,8 @@ void mm_hosted_bind(char *pool, void *byref)
     mm_pool_top = mm_byref_top = 0;
 }
 #else
-static union mm_byref_u mm_byref_pool[MM_BYREFN];
+static union mm_byref_u mm_byref_main[MM_BYREFN];
+static union mm_byref_u *mm_byref_pool = mm_byref_main;
 static unsigned mm_byref_top = 0;
 #endif
 
@@ -1957,7 +1984,8 @@ static void mm_com_close(MMINTEGER fnbr)
 static void mm_com_idle(void)
 {
     fflush(stdout);
-    usleep(1000);
+    if (!mmx_io_pause(1000))    /* THREAD: the others run meanwhile */
+        usleep(1000);
 }
 #else
 static int mm_com_getc(MMINTEGER fnbr) { (void)fnbr; return -1; }
@@ -2532,6 +2560,16 @@ static void mm_readline(MMINTEGER fnbr, char *dst)
          * the duration and let its editor do the work, which is what a
          * program that never claimed the screen wants. */
         mm_raw_release();
+        /* THREAD: the other threads run until the line comes - unless
+         * stdio holds some of it already, which poll cannot see, and
+         * which only the C library can say: glibc's and msvcrt's */
+#if defined(__GLIBC__)
+        if (stdin->_IO_read_ptr >= stdin->_IO_read_end)
+            (void)mmx_io_wait(0, -1);
+#elif defined(_WIN32) && defined(__MINGW32__) && !defined(_UCRT)
+        if (stdin->_cnt <= 0)
+            (void)mmx_io_wait(0, -1);
+#endif
     }
     for (;;) {
         c = mm_getc(fnbr);
@@ -3147,6 +3185,8 @@ static void mm_pause_raw(MMFLOAT ms);
 void mm_pause(MMFLOAT ms)
 {
     mm_gflush();
+    if (ms >= 0 && mmx_pausing(ms))     /* THREAD: the others run meanwhile */
+        return;
     mm_pause_raw(ms);
 }
 
@@ -3880,7 +3920,11 @@ void mm_fatal(const char *msg)
     mm_gflush();
     fflush(stdout);
     mm_raw_release();           /* the shell gets its terminal back */
-    fprintf(stderr, "\r\nError: %s\r\n", msg);
+    if (mmx_cur)
+        fprintf(stderr, "\r\nError in thread %d: %s\r\n", mmx_cur, msg);
+    else
+        fprintf(stderr, "\r\nError: %s\r\n", msg);
+    mmx_stopped();              /* where each THREAD was */
     exit(1);
 }
 
@@ -3905,7 +3949,11 @@ void mm_error(const char *msg)
     mm_gflush();
     fflush(stdout);
     mm_raw_release();           /* the shell gets its terminal back */
-    fprintf(stderr, "\r\nError: %s\r\n", msg);
+    if (mmx_cur)
+        fprintf(stderr, "\r\nError in thread %d: %s\r\n", mmx_cur, msg);
+    else
+        fprintf(stderr, "\r\nError: %s\r\n", msg);
+    mmx_stopped();              /* where each THREAD was */
     exit(1);
 }
 
@@ -4638,10 +4686,18 @@ static int mm_getkey_wait(void)
      */
     for (;;) {
         unsigned char b;
+        int n;
+
+        /* THREAD: the other threads run while nobody types; the blink's
+         * tenth of a second is the longest it waits before it looks */
+        if (mmx_io_wait(0, 100000) == 0) {
+            mm_curs_show((int)((mm_us_now() / 1000) % 1000) <= 650);
+            continue;
+        }
 #ifdef _WIN32
-        int n = pc3w_read(0, &b, 1);    /* the console, VMIN/VTIME honoured */
+        n = pc3w_read(0, &b, 1);        /* the console, VMIN/VTIME honoured */
 #else
-        int n = (int)read(0, &b, 1);
+        n = (int)read(0, &b, 1);
 #endif
 
         if (n == 1) {
@@ -4996,6 +5052,8 @@ MMINTEGER mm_run_exec(void)
     int status = 0;
     pid_t pid;
 
+    if (mmx_in_thread())
+        return -1;
     if (mm_run_nargs == 0) {
         mm_error("no program named");
         return -1;
@@ -5118,6 +5176,8 @@ MMINTEGER mm_run_exec(void)
     int status = 0;
     int pid;
 
+    if (mmx_in_thread())
+        return -1;
     if (mm_run_nargs == 0) {
         mm_error("no program named");
         return -1;
@@ -5673,7 +5733,10 @@ void *mm_lheap(unsigned long n)
     unsigned long need = ((n ? n : 1ul) + 7ul) & ~7ul;
     void *p;
 
-    if (need <= (unsigned long)MM_LARENA - mm_ltop) {
+    /* the main program's alone: frames are a stack, and a THREAD's
+       would interleave with them - a thread's come from the heap and
+       are listed with it (mmb_thread.c) */
+    if (mmx_cur == 0 && need <= (unsigned long)MM_LARENA - mm_ltop) {
         p = mm_lpool.b + mm_ltop;
         mm_ltop += need;
         memset(p, 0, (size_t)(n ? n : (unsigned long)1));
@@ -5684,6 +5747,7 @@ void *mm_lheap(unsigned long n)
         mm_fatal("out of memory for LOCAL arrays and strings");
     else
         memset(p, 0, n ? n : (unsigned long)1);
+    mmx_lf_push(p);
     return p;
 }
 
@@ -5693,6 +5757,7 @@ void mm_lfree(void *p)
         mm_ltop = (unsigned long)((char *)p - mm_lpool.b);
         return;
     }
+    mmx_lf_pop(p);
     free(p);
 }
 
@@ -6505,6 +6570,7 @@ void mm_mode(MMINTEGER n)
      * from the glyph engine above.  Back in MODE 1 the console IS the
      * screen again, and the mirror follows the SCREEN bit as before. */
     mm_con_mirror(mm_gon ? 0 : (mm_console_opt & 2));
+    mmx_mode_all();             /* every THREAD has the new mode's */
 }
 
 /* mm_pixel is with the batch machinery below: it is an append now. */
@@ -7703,6 +7769,7 @@ void mm_mode(MMINTEGER n)
     }
     mm_host_mode = n;
     mm_fb_forget();
+    mmx_mode_all();             /* every THREAD has the new mode's */
 }
 
 MMINTEGER mm_hres(void) { return mm_host_mode == 2 ? 320 : 640; }
@@ -8736,3 +8803,6 @@ void mm_blit_resize(MMINTEGER src, MMINTEGER dst, MMINTEGER sx,
         mm_error(m);
     }
 }
+
+/* ================= THREAD ========================================== */
+#include "mmb_thread.c"

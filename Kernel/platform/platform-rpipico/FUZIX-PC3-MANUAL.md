@@ -2883,6 +2883,7 @@ the sub-keyword decides the type, not the `$`.
 | `SYSTEM I2C` | `"I2C"`: the bus the clock and the QWIIC socket share |
 | `FONTHEIGHT`, `FONTWIDTH` | the current font's cell **times the current scale** |
 | `HPOS`, `VPOS` | the graphics text cursor |
+| `FCOLOUR`, `BCOLOUR` | `COLOUR`'s ink and paper (also spelt `FCOLOR`, `BCOLOR`) |
 | `ERRNO`, `ERRMSG` | as `MM.ERRNO` and `MM.ERRMSG$` |
 | `FLAGS` | all sixty-four scratch bits |
 | `FONT ADDRESS n`, `FLASH ADDRESS n` | as before; image slots 1 to 8, the PicoMite's three flash slots and its five RAM slots |
@@ -2899,6 +2900,9 @@ the sub-keyword decides the type, not the `$`.
 | `BBC BUFFER [ch]` | how many more notes `PLAY BBC SOUND` channel `ch` (0 to 3) takes before it waits; with none given, the fewest of the four |
 | `IP ADDRESS` | the machine's address, `"0.0.0.0"` when it has not joined a network |
 | `MAX CONNECTIONS` | 8, the server's connections — see [the WEB family](#web-family) |
+| `THREAD` | the thread that runs it, 0 in the main program — see [Threads](#threads) |
+| `THREAD n` | thread `n`: 0 not running, 1 running or ready, 2 in a `PAUSE`, 3 paused, 4 waiting |
+| `THREAD LOCK k` | the thread that has lock `k` (0 the main program), -1 if it is free |
 
 **The bytes at `WRITEBUFF` are a PicoMite's.** In `MODE 2` a row is
 160 bytes, two pixels a byte, each pixel an RGB121 colour, the LEFT
@@ -3034,6 +3038,71 @@ it cannot sleep through is bounded at 99 ms however long the pause.
 that matters more than it sounds, because a program that arms a
 `SETTICK` usually has a main loop of little but `PAUSE`, and a handler
 in such a loop would otherwise never run at all.
+
+## Threads: `THREAD` {#threads}
+
+```basic
+SUB Heart
+  DO
+    INC beats
+    PAUSE 500                   ' the other threads run meanwhile
+  LOOP
+END SUB
+
+THREAD START 1, Heart
+DO
+  TEXT 0, 0, STR$(beats)
+LOOP UNTIL INKEY$ <> ""
+```
+
+On a PC a program can run parts of itself as threads, as MMBasic V8
+does on the Colour Maximite 2 and the PicoMite: `THREAD START n, sub
+[, argument ...]` runs a `SUB` beside the main program, and the threads
+take turns. The *MMBasic Threads User Manual* is the reference, and
+everything in it holds here, except as listed below: one thread runs
+at a time; the switch to another comes only between two statements, so
+a statement is never split; a thread's `PAUSE`, its `INPUT` and its
+`THREAD` waits let the others run; a thread has its own `LOCAL`s,
+loops, `ON ERROR` and `MM.ERRNO`, `DATA` pointer, colours, font, print
+position and `FRAMEBUFFER WRITE`; an interrupt runs in the thread that
+set it up. All of `THREAD` is there: `START` (with `SIZE`, `LOCALS`,
+`NEST` and `PRIORITY`), `EXIT`, `STOP`, `YIELD`, `PAUSE`, `RESUME`,
+`SLICE`, `PRIORITY`, `SIZE`, `LOCK`, `UNLOCK`, `HOLD`, `RELEASE`,
+`WAIT n`, `WAIT FLAG f` and `LIST`, and `MM.INFO(THREAD ...)`.
+
+On a PC3 itself threads are not there yet, and `THREAD START` says so:
+"Threads are not available on this machine yet".
+
+Where a translated program differs:
+
+* **Threads 1 to 16**, as on a Colour Maximite 2 (a PicoMite has 1 to
+  8).
+* **`LOCALS` and `NEST` change nothing**, though their ranges are
+  checked: a translated program's local variables, loops and calls
+  have no table of their own to size. `SIZE` is the least the thread's
+  stack may be, in K; it is 64K unless `SIZE` asks for more.
+* **No line numbers.** A translated program does not know them, so an
+  error names the thread instead — `Error in thread 3: Index out of
+  bounds` — and the list of where each thread was, which follows it,
+  and `THREAD LIST` say what each thread was doing without a line.
+* **Waits that hold every thread.** `PAUSE`, `INPUT` and `LINE INPUT`
+  (at the keyboard and on a serial port) and the `THREAD` waits let the
+  other threads run. The frame waits (`FRAMEBUFFER WAIT`, and
+  `FRAMEBUFFER COPY` with `B`), `PLAY` waiting for room, the `WEB`
+  commands and file transfers hold every thread until they end, as any
+  long statement does.
+* **The console has one cursor.** A thread's print position is its own
+  for drawing (`MM.INFO(HPOS)` and `VPOS`, `TEXT`, and `PRINT` on a
+  graphics screen), but two threads `PRINT`ing to the text console
+  share its cursor, as two threads share a PicoMite's serial console.
+* **A turn is about a millisecond.** A thread is asked whether its
+  turn is over every sixteen statements, so a turn can run a few
+  statements past its time.
+
+`ERASE`, `REDIM` and `CLEAR` are refused while a thread runs ("Not
+allowed while a thread is running"), and `RUN` and `CHAIN` in a thread
+("Not allowed in a thread"), as on the firmware. A program that starts
+no thread runs as fast as it did before threads existed.
 
 ## Practical notes
 
@@ -4833,9 +4902,9 @@ they do on a PicoMite.)
 | `SELECT` | `SERVO` | `SETPIN` | `SETTICK` |
 | `SORT` | `SPI` | `SPRITE` | `STATIC` |
 | `STRUCT` | `SUB` | `SYSTEM` | `TEMPR` |
-| `TEXT` | `TILEMAP` | `TIME$` | `TIMER` |
-| `TRIANGLE` | `TYPE` | `WATCHDOG` | `WEB` |
-| `WEND` | `WHILE` | `WS2812` |  |
+| `TEXT` | `THREAD` | `TILEMAP` | `TIME$` |
+| `TIMER` | `TRIANGLE` | `TYPE` | `WATCHDOG` |
+| `WEB` | `WEND` | `WHILE` | `WS2812` |
 
 Assignment needs no keyword (`LET` is accepted), and a variable may
 have a command's name, as in `font = 3`, when `=` follows it.

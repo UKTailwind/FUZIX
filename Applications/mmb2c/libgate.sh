@@ -52,6 +52,8 @@ grep -ho '{ "[A-Za-z_0-9.]*"' "$CC/bcrun.c" "$CC/bcrun_mm.c" |
 
 # One translation unit naming every header.
 {
+	# a program with threads: mmb_int.h's THREAD paths are compiled too
+	echo '#define MM_THREADS 1'
 	echo '#include "mmb_runtime.h"'
 	for h in "$M"/mmb_*.h; do
 		b=$(basename "$h")

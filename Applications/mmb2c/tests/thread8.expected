@@ -1,0 +1,28 @@
+ok  the main program is thread 0
+ok  no thread is 0
+ok  the main program is 1
+ok  every option taken: it runs
+ok  a thread in a FUNCTION ran
+ok  a running thread is 1
+ok  a thread in PAUSE is 2
+ok  paused, it does not run
+ok  and is 3
+ok  resumed, it runs
+ok  stopped inside a FUNCTION with LOCAL strings
+ok  stopped in PAUSE
+ok  THREAD EXIT from three calls down
+ok  a global array by name, and a string by value
+ok  a SUB's own array is refused
+ok  a FUNCTION is not a SUB
+ok  17 is refused
+ok  SIZE 4 is refused
+ok  RESUME of a thread not running
+ok  EXIT in the main program
+ok  UNLOCK of a lock not held
+ok  RELEASE with no HOLD
+ok  LOCK of a lock this thread has
+ok  MM.INFO(THREAD LOCK) of it
+ok  and free
+ok  ERASE while a thread runs
+No threads
+thread8: 26 of 26 passed

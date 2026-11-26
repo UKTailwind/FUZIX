@@ -1527,6 +1527,12 @@ struct val builtin_raw(const char *up)
             { "FONTWIDTH",  "mm_fontwidth()", TY_I },
             { "HPOS",       "mm_hpos()", TY_I },
             { "VPOS",       "mm_vpos()", TY_I },
+            /* COLOUR's ink and paper (MM_Misc.c fun_info: gui_fcolour
+               and gui_bcolour), in either spelling */
+            { "FCOLOUR",    "mm_fg()", TY_I },
+            { "FCOLOR",     "mm_fg()", TY_I },
+            { "BCOLOUR",    "mm_bg()", TY_I },
+            { "BCOLOR",     "mm_bg()", TY_I },
             { "DEVICE",     "mm_device()", TY_S },
             { "PLATFORM",   "mm_platform()", TY_S },
             { "PATH",       "mm_path()", TY_S },
@@ -1639,6 +1645,24 @@ struct val builtin_raw(const char *up)
             expect_op(")");
             return mkval(sfmt("mm_bbc_free(%s)", ch), TY_I);
         }
+        if (strcmp(t->up, "THREAD") == 0) {
+            /* MM.INFO(THREAD) the running thread (0 the main program),
+               MM.INFO(THREAD n) its state, MM.INFO(THREAD LOCK k) the
+               thread that has lock k - mmb_thread.c */
+            const char *n;
+
+            if (strcmp(two, "THREAD LOCK") == 0) {
+                (void)nxt();
+                n = as_int(expr());
+                expect_op(")");
+                return mkval(sfmt("mm_thr_lockowner(%s)", n), TY_I);
+            }
+            if (accept_op(")"))
+                return mkval("mm_thr_id()", TY_I);
+            n = as_int(expr());
+            expect_op(")");
+            return mkval(sfmt("mm_thr_state(%s)", n), TY_I);
+        }
         if (strcmp(t->up, "PIN") == 0) {
             /* MM.INFO(PIN n): the pin's function as the firmware names
                it - mmg_pininfo, beside SETPIN in mmb_gpio.h */
@@ -1710,9 +1734,10 @@ struct val builtin_raw(const char *up)
             cv_err("MM.INFO(%s ...) is not supported; translated are "
                    "DEVICE, PLATFORM, PATH, CURRENT, DRIVE, VERSION, "
                    "ERRNO, ERRMSG, FLAGS, FONTHEIGHT, FONTWIDTH, HPOS, "
-                   "VPOS, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, WRITEBUFF, "
+                   "VPOS, FCOLOUR, BCOLOUR, UPTIME, DISK SIZE, FREE SPACE, PSRAM SIZE, HEAP, WRITEBUFF, "
                    "LCDPANEL, SYSTEM I2C, SDCARD, USBDRIVE, TELNET, "
                    "IP ADDRESS, MAX CONNECTIONS, BBC BUFFER [channel], "
+                   "THREAD [n | LOCK k], "
                    "OPTION BASE, PIN n, PINNO, FILESIZE, "
                    "EXISTS FILE, EXISTS DIR, FONT, FONT ADDRESS n and "
                    "FLASH ADDRESS n", t->text);
