@@ -1059,13 +1059,19 @@ CIRCLE 160, 120, 60, , , RGB(WHITE), RGB(BLUE)
 PIXEL 10, 10, RGB(RED)
 ```
 
-Two modes are available, chosen to match the VGA builds of MMBasic and
-the first two HDMI modes:
+Three modes are available, chosen to match the VGA builds of MMBasic and
+the first three HDMI modes. The third is on a PC only:
 
 | `MODE` | Resolution | Colours |
 |--------|------------|---------|
 | `MODE 1` | 640×480 | monochrome |
 | `MODE 2` | 320×240 | 16, from MMBasic's RGB121 set |
+| `MODE 3` | 640×480 | 16, as `MODE 2`; on a PC only |
+
+`MODE 3`'s framebuffer is 150 KB, more memory than the board's kernel
+has, so only pc3host's display has the mode. On the board, `MODE 3`
+stops the program with "MODE 3 is not available on this machine"
+rather than letting it draw on in the mode it was in.
 
 `RESOLUTION 640`, or `640x480`, with or without a speed, is `MODE 1`:
 an HDMI PicoMite rebuilds its picture for the resolution and then sets
@@ -1074,11 +1080,11 @@ refresh rate, which a program cannot see. Any other resolution is
 refused when the program is translated.
 
 **That table is the whole difference between them.** Everything else
-behaves identically in the two modes — console output, `PRINT`, `PRINT
+behaves identically in the three modes — console output, `PRINT`, `PRINT
 @`, `TEXT`, `INPUT` and its echo — and identically to a PicoMite with
 `OPTION LCDPANEL CONSOLE`, subject to `OPTION CONSOLE`.
 
-In both, a `MODE` statement means the program has taken the screen:
+In each, a `MODE` statement means the program has taken the screen:
 `PRINT` draws glyphs at `MM.INFO(HPOS)`/`VPOS` — MMBasic's `CurrentX`
 and `CurrentY`, the same pen `TEXT` and `PRINT @` move — and the
 kernel's own console stops painting on the display until the program
